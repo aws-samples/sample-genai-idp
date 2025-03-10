@@ -1,0 +1,65 @@
+{
+    "output_bucket": "idp-nova-1-outputbucket-w8dthg53lbgm",
+    "OCRResult": {
+        "metadata": {
+            "input_bucket": "idp-nova-1-inputbucket-vmmndczrqce8",
+            "object_key": "rvl_cdip_package/sample01.pdf",
+            "working_bucket": "idp-nova-1-outputbucket-gmiokrbd7g5a",
+            "working_prefix": "rvl_cdip_package/sample01.pdf",
+            "num_pages": 10
+        },
+        "pages": {
+            "1": {
+                "rawTextUri": "s3://idp-nova-1-outputbucket-gmiokrbd7g5a/rvl_cdip_package/sample01.pdf/textract_document_text_raw/page_0001.json",
+                "parsedTextUri": "s3://idp-nova-1-outputbucket-gmiokrbd7g5a/rvl_cdip_package/sample01.pdf/textract_document_text_parsed/page_0001.json",
+                "imageUri": "s3://idp-nova-1-outputbucket-gmiokrbd7g5a/rvl_cdip_package/sample01.pdf/images/page_0001.jpg"
+            },
+            "2": {
+                "rawTextUri": "s3://idp-nova-1-outputbucket-gmiokrbd7g5a/rvl_cdip_package/sample01.pdf/textract_document_text_raw/page_0002.json",
+                "parsedTextUri": "s3://idp-nova-1-outputbucket-gmiokrbd7g5a/rvl_cdip_package/sample01.pdf/textract_document_text_parsed/page_0002.json",
+                "imageUri": "s3://idp-nova-1-outputbucket-gmiokrbd7g5a/rvl_cdip_package/sample01.pdf/images/page_0002.jpg"
+            },
+            "3": {
+                "rawTextUri": "s3://idp-nova-1-outputbucket-gmiokrbd7g5a/rvl_cdip_package/sample01.pdf/textract_document_text_raw/page_0003.json",
+                "parsedTextUri": "s3://idp-nova-1-outputbucket-gmiokrbd7g5a/rvl_cdip_package/sample01.pdf/textract_document_text_parsed/page_0003.json",
+                "imageUri": "s3://idp-nova-1-outputbucket-gmiokrbd7g5a/rvl_cdip_package/sample01.pdf/images/page_0003.jpg"
+            },
+            "4": {
+                "rawTextUri": "s3://idp-nova-1-outputbucket-gmiokrbd7g5a/rvl_cdip_package/sample01.pdf/textract_document_text_raw/page_0004.json",
+                "parsedTextUri": "s3://idp-nova-1-outputbucket-gmiokrbd7g5a/rvl_cdip_package/sample01.pdf/textract_document_text_parsed/page_0004.json",
+                "imageUri": "s3://idp-nova-1-outputbucket-gmiokrbd7g5a/rvl_cdip_package/sample01.pdf/images/page_0004.jpg"
+            },
+            "5": {
+                "rawTextUri": "s3://idp-nova-1-outputbucket-gmiokrbd7g5a/rvl_cdip_package/sample01.pdf/textract_document_text_raw/page_0005.json",
+                "parsedTextUri": "s3://idp-nova-1-outputbucket-gmiokrbd7g5a/rvl_cdip_package/sample01.pdf/textract_document_text_parsed/page_0005.json",
+                "imageUri": "s3://idp-nova-1-outputbucket-gmiokrbd7g5a/rvl_cdip_package/sample01.pdf/images/page_0005.jpg"
+            },
+            "6": {
+                "rawTextUri": "s3://idp-nova-1-outputbucket-gmiokrbd7g5a/rvl_cdip_package/sample01.pdf/textract_document_text_raw/page_0006.json",
+                "parsedTextUri": "s3://idp-nova-1-outputbucket-gmiokrbd7g5a/rvl_cdip_package/sample01.pdf/textract_document_text_parsed/page_0006.json",
+                "imageUri": "s3://idp-nova-1-outputbucket-gmiokrbd7g5a/rvl_cdip_package/sample01.pdf/images/page_0006.jpg"
+            },
+            "7": {
+                "rawTextUri": "s3://idp-nova-1-outputbucket-gmiokrbd7g5a/rvl_cdip_package/sample01.pdf/textract_document_text_raw/page_0007.json",
+                "parsedTextUri": "s3://idp-nova-1-outputbucket-gmiokrbd7g5a/rvl_cdip_package/sample01.pdf/textract_document_text_parsed/page_0007.json",
+                "imageUri": "s3://idp-nova-1-outputbucket-gmiokrbd7g5a/rvl_cdip_package/sample01.pdf/images/page_0007.jpg"
+            },
+            "8": {
+                "rawTextUri": "s3://idp-nova-1-outputbucket-gmiokrbd7g5a/rvl_cdip_package/sample01.pdf/textract_document_text_raw/page_0008.json",
+                "parsedTextUri": "s3://idp-nova-1-outputbucket-gmiokrbd7g5a/rvl_cdip_package/sample01.pdf/textract_document_text_parsed/page_0008.json",
+                "imageUri": "s3://idp-nova-1-outputbucket-gmiokrbd7g5a/rvl_cdip_package/sample01.pdf/images/page_0008.jpg"
+            },
+            "9": {
+                "rawTextUri": "s3://idp-nova-1-outputbucket-gmiokrbd7g5a/rvl_cdip_package/sample01.pdf/textract_document_text_raw/page_0009.json",
+                "parsedTextUri": "s3://idp-nova-1-outputbucket-gmiokrbd7g5a/rvl_cdip_package/sample01.pdf/textract_document_text_parsed/page_0009.json",
+                "imageUri": "s3://idp-nova-1-outputbucket-gmiokrbd7g5a/rvl_cdip_package/sample01.pdf/images/page_0009.jpg"
+            },
+            "10": {
+                "rawTextUri": "s3://idp-nova-1-outputbucket-gmiokrbd7g5a/rvl_cdip_package/sample01.pdf/textract_document_text_raw/page_0010.json",
+                "parsedTextUri": "s3://idp-nova-1-outputbucket-gmiokrbd7g5a/rvl_cdip_package/sample01.pdf/textract_document_text_parsed/page_0010.json",
+                "imageUri": "s3://idp-nova-1-outputbucket-gmiokrbd7g5a/rvl_cdip_package/sample01.pdf/images/page_0010.jpg"
+            }
+        }
+    },
+    "execution_arn": "arn:aws:states:us-west-2:912625584728:execution:IDP-Nova-1-DocumentProcessingWorkflow:abc930ba-584f-42d7-b1c5-404da15d0eb0"
+}

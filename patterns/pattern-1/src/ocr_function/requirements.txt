@@ -1,0 +1,2 @@
+amazon-textract-textractor
+PyMuPDF

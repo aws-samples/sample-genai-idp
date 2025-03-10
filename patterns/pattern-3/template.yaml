@@ -1,0 +1,529 @@
+# Copyright © Amazon.com and Affiliates: This deliverable is considered Developed Content as defined in the AWS Service Terms and the SOW between the parties.
+
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: AWS GenAI IDP Accelerator - resources for IDP Pattern 3 (BDA)
+
+Parameters:
+
+  StackName:
+    Type: String
+
+  InputBucket:
+    Type: String
+
+  WorkingBucket:
+    Type: String
+
+  OutputBucket:
+    Type: String
+
+  TrackingTable:
+    Type: String
+
+  CustomerManagedEncryptionKeyArn:
+    Type: String
+
+  LogRetentionDays:
+    Type: Number
+  
+  ExecutionTimeThresholdMs:
+    Type: Number
+    Default: 30000
+
+  BDAProjectArn:
+    Type: String
+    Default: ''
+    Description: Bedrock Data Automation (BDA) project ARN
+
+  UpdateConfigurationFunctionArn:
+    Type: String
+
+  ConfigurationTable:
+    Type: String
+
+
+Resources:
+
+  # JSON Schema which defines the structure of the pattern configuration settings
+  # used by the UI to allow the configuration to be inspected and customized.
+  # For BDA, this is a no-op, since project configuration is contained in BDA project settings.
+  UpdateSchemaConfig:
+    Type: AWS::CloudFormation::CustomResource
+    Properties:
+      ServiceToken: !Ref UpdateConfigurationFunctionArn
+      Schema:
+        type: object
+        required:
+          - info
+        properties:
+          info:
+            type: string
+            description: Description of the configuration section
+    UpdateReplacePolicy: Delete
+    DeletionPolicy: Delete
+
+  UpdateDefaultConfig:
+    Type: AWS::CloudFormation::CustomResource
+    Properties:
+      ServiceToken: !Ref UpdateConfigurationFunctionArn
+      Default:
+        Info: !Sub "Processing configuration in BDA project: ${BDAProjectArn}"
+
+  DocumentProcessingStateMachine:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      Name: !Sub "${StackName}-DocumentProcessingWorkflow"
+      DefinitionUri: statemachine/workflow.asl.json
+      DefinitionSubstitutions:
+        InvokeBDALambdaArn: !GetAtt InvokeBDAFunction.Arn
+        ProcessResultsLambdaArn: !GetAtt ProcessResultsFunction.Arn
+        OutputBucket: !Ref OutputBucket
+        WorkingBucket: !Ref WorkingBucket
+        BDAProjectArn: !Ref BDAProjectArn
+      Logging:
+        Level: ALL
+        IncludeExecutionData: true
+        Destinations:
+          - CloudWatchLogsLogGroup: !GetAtt StateMachineLogGroup.Arn
+      Policies:
+        - LambdaInvokePolicy:
+            FunctionName: !Ref InvokeBDAFunction
+        - LambdaInvokePolicy:
+            FunctionName: !Ref ProcessResultsFunction
+        - CloudWatchLogsFullAccess
+
+  StateMachineLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+      LogGroupName: !Sub "/aws/vendedlogs/states/${AWS::StackName}/workflow"  # required prefix
+      RetentionInDays: !Ref LogRetentionDays
+
+  InvokeBDAFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W11
+            reason: "Cloudwatch does not support resource-level permissions"
+          - id: W89
+            reason: "This Lambda function does not require VPC access as it only interacts with AWS services via AWS APIs"
+          - id: W92
+            reason: "Function does not require concurrent execution limits as it is designed to scale based on demand"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for this function as StepFunctions will handle retries"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only configuration values like feature flags and non-sensitive settings"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
+    Properties:
+      CodeUri: src/bda_invoke_function/
+      Handler: index.handler
+      Runtime: python3.12
+      Timeout: 900
+      MemorySize: 4096
+      Environment:
+        Variables:
+          TRACKING_TABLE: !Ref TrackingTable
+          METRIC_NAMESPACE: !Ref StackName
+          MAX_WORKERS: 20
+      LoggingConfig:
+        LogGroup: !Ref InvokeBDAFunctionLogGroup
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - S3ReadPolicy:
+            BucketName: !Ref InputBucket
+        - S3CrudPolicy:
+            BucketName: !Ref WorkingBucket
+        - S3CrudPolicy:
+            BucketName: !Ref OutputBucket
+        - DynamoDBCrudPolicy:
+           TableName: !Ref TrackingTable
+        - Statement:
+          - Effect: Allow
+            Action: cloudwatch:PutMetricData
+            Resource: '*'
+          - Effect: Allow
+            Action:
+              - kms:Encrypt
+              - kms:Decrypt
+              - kms:ReEncrypt*
+              - kms:GenerateDataKey*
+              - kms:DescribeKey
+            Resource: !Ref CustomerManagedEncryptionKeyArn
+          - Effect: Allow
+            Action: bedrock:InvokeDataAutomationAsync
+            Resource: 
+              - !Ref BDAProjectArn
+              - !Sub "arn:aws:bedrock:us-east-1:${AWS::AccountId}:data-automation-profile/us.data-automation-v1"
+              - !Sub "arn:aws:bedrock:us-east-2:${AWS::AccountId}:data-automation-profile/us.data-automation-v1"
+              - !Sub "arn:aws:bedrock:us-west-1:${AWS::AccountId}:data-automation-profile/us.data-automation-v1"
+              - !Sub "arn:aws:bedrock:us-west-2:${AWS::AccountId}:data-automation-profile/us.data-automation-v1"
+  
+  InvokeBDAFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+      LogGroupName: !Sub "/${AWS::StackName}/lambda/InvokeBDAFunction"
+      RetentionInDays: !Ref LogRetentionDays
+  
+  ProcessResultsFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W11
+            reason: "Cloudwatch does not support resource-level permissions"
+          - id: W89
+            reason: "This Lambda function does not require VPC access as it only interacts with AWS services via AWS APIs"
+          - id: W92
+            reason: "Function does not require concurrent execution limits as it is designed to scale based on demand"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for this function as StepFunctions will handle retries"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only configuration values like feature flags and non-sensitive settings"    
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
+    Properties:
+      CodeUri: src/processresults_function/
+      Handler: index.handler
+      Runtime: python3.12
+      Timeout: 900
+      MemorySize: 4096
+      Environment:
+        Variables:
+          METRIC_NAMESPACE: !Ref StackName
+      LoggingConfig:
+        LogGroup: !Ref ProcessResultsFunctionLogGroup
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - S3ReadPolicy:
+            BucketName: !Ref InputBucket
+        - S3CrudPolicy:
+            BucketName: !Ref WorkingBucket
+        - S3CrudPolicy:
+            BucketName: !Ref OutputBucket
+        - Statement:
+          - Effect: Allow
+            Action: cloudwatch:PutMetricData
+            Resource: '*'
+          - Effect: Allow
+            Action:
+              - kms:Encrypt
+              - kms:Decrypt
+              - kms:ReEncrypt*
+              - kms:GenerateDataKey*
+              - kms:DescribeKey
+            Resource: !Ref CustomerManagedEncryptionKeyArn
+
+  
+  ProcessResultsFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+      LogGroupName: !Sub "/${AWS::StackName}/lambda/ProcessResultsFunction"
+      RetentionInDays: !Ref LogRetentionDays
+
+  BDACompletionFunctionDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      KmsMasterKeyId: !Ref CustomerManagedEncryptionKeyArn
+      VisibilityTimeout: 30
+      MessageRetentionPeriod: 345600 # 4 days
+
+  BDACompletionFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W11
+            reason: "Cloudwatch does not support resource-level permissions"
+          - id: W89
+            reason: "This Lambda function does not require VPC access as it only interacts with AWS services via AWS APIs"
+          - id: W92
+            reason: "Function does not require concurrent execution limits as it is designed to scale based on demand"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only configuration values like feature flags and non-sensitive settings"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
+    Properties:
+      CodeUri: src/bda_completion_function/
+      Handler: index.handler
+      Runtime: python3.12
+      Timeout: 900
+      MemorySize: 4096
+      Environment:
+        Variables:
+          TRACKING_TABLE: !Ref TrackingTable
+          METRIC_NAMESPACE: !Ref StackName
+      DeadLetterQueue:
+       Type: SQS
+       TargetArn: !GetAtt BDACompletionFunctionDLQ.Arn
+      LoggingConfig:
+        LogGroup: !Ref BDACompletionFunctionLogGroup
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - DynamoDBReadPolicy:
+           TableName: !Ref TrackingTable
+        - Statement:
+          - Effect: Allow
+            Action: cloudwatch:PutMetricData
+            Resource: '*'
+          - Effect: Allow
+            Action: 
+              - states:SendTaskSuccess
+              - states:SendTaskFailure
+            Resource: !GetAtt DocumentProcessingStateMachine.Arn
+          - Effect: Allow
+            Action:
+              - kms:Encrypt
+              - kms:Decrypt
+              - kms:ReEncrypt*
+              - kms:GenerateDataKey*
+              - kms:DescribeKey
+            Resource: !Ref CustomerManagedEncryptionKeyArn
+
+  
+  BDACompletionFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+      LogGroupName: !Sub "/${AWS::StackName}/lambda/BDACompletionFunction"
+      RetentionInDays: !Ref LogRetentionDays
+
+  BDAEventRule:
+    Type: AWS::Events::Rule
+    Properties:
+      EventPattern:
+        source:
+          - aws.bedrock
+        detail-type:
+          - Bedrock Data Automation Job Succeeded
+          - Bedrock Data Automation Job Failed With Client Error
+          - Bedrock Data Automation Job Failed With Service Error
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt BDACompletionFunction.Arn
+          Id: BDACompletionFunction
+          RetryPolicy:
+            MaximumRetryAttempts: 3
+
+  BDAEventPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref BDACompletionFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt BDAEventRule.Arn
+
+
+  Dashboard:
+    Type: AWS::CloudWatch::Dashboard
+    Properties:
+      DashboardName: !Sub "${AWS::StackName}-${AWS::Region}-Pattern1-Subset"
+      DashboardBody: !Sub |
+        {
+          "widgets": [
+
+            {
+              "type": "metric",
+              "x": 0,
+              "y": 0,
+              "width": 8,
+              "height": 6,
+              "properties": {
+                "metrics": [
+                  [{"expression": "m1/PERIOD(m1)*60", "label": "Total per Minute"}],
+                  [{"expression": "m2/PERIOD(m2)*60", "label": "Succeeded per Minute"}],
+                  [{"expression": "m3/PERIOD(m3)*60", "label": "Failed per Minute"}],
+                  ["${StackName}", "BDARequestsTotal", {"id": "m1", "stat": "Sum", "visible": false}],
+                  [".", "BDARequestsSucceeded", {"id": "m2", "stat": "Sum", "visible": false}],
+                  [".", "BDARequestsFailed", {"id": "m3", "stat": "Sum", "visible": false}]
+                ],
+                "region": "${AWS::Region}",
+                "title": "BDA API Request Status (per Minute)",
+                "view": "timeSeries",
+                "period": 60,
+                "yAxis": {
+                  "left": {
+                    "label": "Count per Minute"
+                  }
+                }
+              }
+            },
+            {
+              "type": "metric",
+              "x": 8,
+              "y": 0,
+              "width": 8,
+              "height": 6,
+              "properties": {
+                "metrics": [
+                  [{"expression": "m1/PERIOD(m1)*60", "label": "Throttles per Minute"}],
+                  [{"expression": "m2/PERIOD(m2)*60", "label": "Retry Success per Minute"}],
+                  [{"expression": "m3/PERIOD(m3)*60", "label": "Max Retries Exceeded per Minute"}],
+                  ["${StackName}", "BDARequestsThrottles", {"id": "m1", "stat": "Sum", "visible": false}],
+                  [".", "BDARequestsRetrySuccess", {"id": "m2", "stat": "Sum", "visible": false}],
+                  [".", "BDARequestsMaxRetriesExceeded", {"id": "m3", "stat": "Sum", "visible": false}]
+                ],
+                "region": "${AWS::Region}",
+                "title": "BDA API Request Retries (per Minute)",
+                "view": "timeSeries",
+                "period": 60,
+                "yAxis": {
+                  "left": {
+                    "label": "Count per Minute"
+                  }
+                }
+              }
+            },
+            {
+              "type": "metric",
+              "x": 16,
+              "y": 0,
+              "width": 8,
+              "height": 6,
+              "properties": {
+                "metrics": [
+                  [{"expression": "m1/PERIOD(m1)*60", "label": "Total per Minute"}],
+                  [{"expression": "m2/PERIOD(m2)*60", "label": "Succeeded per Minute"}],
+                  [{"expression": "m3/PERIOD(m3)*60", "label": "Failed per Minute"}],
+                  ["${StackName}", "BDAJobsTotal", {"id": "m1", "stat": "Sum", "visible": false}],
+                  [".", "BDAJobsSucceeded", {"id": "m2", "stat": "Sum", "visible": false}],
+                  [".", "BDAJobsFailed", {"id": "m3", "stat": "Sum", "visible": false}]
+                ],
+                "region": "${AWS::Region}",
+                "title": "BDA Job Executions (per Minute)",
+                "view": "timeSeries",
+                "period": 60,
+                "yAxis": {
+                  "left": {
+                    "label": "Count per Minute"
+                  }
+                }
+              }
+            },
+            {
+              "type": "metric",
+              "x": 0,
+              "y": 6,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "metrics": [
+                  ["AWS/Lambda", "Duration", "FunctionName", "${ProcessResultsFunction}"]
+                ],
+                "region": "${AWS::Region}",
+                "title": "ProcessResults Function Duration",
+                "period": 300,
+                "annotations": {
+                  "horizontal": [{
+                    "value": ${ExecutionTimeThresholdMs},
+                    "label": "Threshold (${ExecutionTimeThresholdMs}ms)",
+                    "color": "#ff0000"
+                  }]
+                },
+                "stat": "Average",
+                "view": "timeSeries"
+              }
+            },
+            {
+              "type": "metric",
+              "x": 16,
+              "y": 6,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "metrics": [
+                  ["AWS/Lambda", "Duration", "FunctionName", "${InvokeBDAFunction}"]
+                ],
+                "region": "${AWS::Region}",
+                "title": "InvokeBDAFunction Function Duration",
+                "period": 300,
+                "annotations": {
+                  "horizontal": [{
+                    "value": ${ExecutionTimeThresholdMs},
+                    "label": "Threshold (${ExecutionTimeThresholdMs}ms)",
+                    "color": "#ff0000"
+                  }]
+                },
+                "stat": "Average",
+                "view": "timeSeries"
+              }
+            },
+            {
+              "type": "log",
+              "x": 0,
+              "y": 12,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "query": "SOURCE '${InvokeBDAFunctionLogGroup}' | filter @type = \"REPORT\" | fields @timestamp, @logStream, @billedDuration, @maxMemoryUsed/1024/1024 as memoryUsedMB | filter @billedDuration > ${ExecutionTimeThresholdMs} | sort by @billedDuration desc | limit 20",
+                "region": "${AWS::Region}",
+                "title": "InvokeBDA Lambda Long Running Invocations",
+                "view": "table"
+              }
+            },
+            {
+              "type": "log",
+              "x": 12,
+              "y": 12,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "query": "SOURCE '${InvokeBDAFunctionLogGroup}' | fields @timestamp, @logStream, @message | filter @message like /ERROR/ or @message like /Task timed out/ | parse @message /RequestId: (?<requestId>[^ ]*)/ | sort @timestamp desc | limit 20",
+                "region": "${AWS::Region}",
+                "title": "InvokeBDA Lambda Errors",
+                "view": "table"
+              }
+            },
+            {
+              "type": "log",
+              "x": 0,
+              "y": 18,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "query": "SOURCE '${ProcessResultsFunctionLogGroup}' | filter @type = \"REPORT\" | fields @timestamp, @logStream, @billedDuration, @maxMemoryUsed/1024/1024 as memoryUsedMB | filter @billedDuration > ${ExecutionTimeThresholdMs} | sort by @billedDuration desc | limit 20",
+                "region": "${AWS::Region}",
+                "title": "ProcessResults Lambda Long Running Invocations",
+                "view": "table"
+              }
+            },
+            {
+              "type": "log",
+              "x": 12,
+              "y": 18,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "query": "SOURCE '${ProcessResultsFunctionLogGroup}' | fields @timestamp, @logStream, @message | filter @message like /ERROR/ or @message like /Task timed out/ | parse @message /RequestId: (?<requestId>[^ ]*)/ | sort @timestamp desc | limit 20",
+                "region": "${AWS::Region}",
+                "title": "ProcessResults Lambda Errors",
+                "view": "table"
+              }
+            }
+
+          ]
+        }
+
+Outputs:
+
+  # Outputs required by main template
+
+  StateMachineName:
+    Description: Step Functions State machine Name
+    Value: !GetAtt DocumentProcessingStateMachine.Name
+
+  StateMachineArn:
+    Description: Step Functions State machine ARN
+    Value: !GetAtt DocumentProcessingStateMachine.Arn
+  
+  StateMachineLogGroup:
+    Description: Step Functions State machine LogGroup
+    Value: !Ref StateMachineLogGroup
+
+  DashboardName:
+    Description: Name of the Pattern 3 (BDA) CloudWatch Dashboard
+    Value: !Ref Dashboard
+
+  DashboardArn:
+    Description: ARN of the Pattern 3 (BDA) CloudWatch Dashboard
+    Value: !Sub "arn:aws:cloudwatch::${AWS::AccountId}:dashboard/${Dashboard}"
+

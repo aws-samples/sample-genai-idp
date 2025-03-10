@@ -1,0 +1,122 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: 'AWS GenAI IDP Accelerator - Sample BDA lending package project'
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: genaiidp-sample-lending-project
+    Description: Name of the Bedrock Data Automation project
+  
+  ProjectDescription:
+    Type: String
+    Default: 'GenAI IDP Sample project for processing lending package documents'
+    Description: Description of the Bedrock Data Automation project
+
+Resources:
+
+  # IAM role for Lambda function
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: BedrockDataAutomationAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - bedrock:CreateDataAutomationProject
+                  - bedrock:GetDataAutomationProject
+                  - bedrock:UpdateDataAutomationProject
+                  - bedrock:DeleteDataAutomationProject
+                  - bedrock:ListDataAutomationProjects
+                  - bedrock:CreateBlueprint
+                  - bedrock:GetBlueprint
+                  - bedrock:UpdateBlueprint
+                  - bedrock:DeleteBlueprint
+                  - bedrock:ListBlueprints
+                  - bedrock:AddBlueprintToProject
+                Resource: '*'
+
+  # Lambda function for creating and managing BDA project
+  BDAProjectLambda:
+    Type: AWS::Serverless::Function
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: "This Lambda function does not require VPC access as it only interacts with AWS services via AWS APIs"
+          - id: W92
+            reason: "Function does not require concurrent execution limits as it is designed to scale based on demand"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for this function as StepFunctions will handle retries"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
+    Properties:
+      CodeUri: src/bda_project_lambda/
+      Handler: index.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Runtime: python3.12
+      Timeout: 300
+      MemorySize: 256
+
+  # Custom resource to create BDA project
+  BDAProject:
+    Type: Custom::BDAProject
+    Properties:
+      ServiceToken: !GetAtt BDAProjectLambda.Arn
+      ProjectName: !Ref ProjectName
+      ProjectDescription: !Ref ProjectDescription
+      CustomHomeApplicationBlueprint: true
+      BlueprintNames:
+        - Bank-Statement
+        - Payslip
+        - US-Driver-License
+        - US-Bank-Check
+        - W2-Form
+        # - Form-W9
+        # - US-Passport
+        # - US-Medical-Insurance-Card
+        # - Canada-Driver-License
+        # - Covid-Vaccination-Card
+        # - Form-1098
+        # - Receipt
+        # - Invoice
+        # - Electricity-Bill
+        # - Form-940
+        # - Form-1005
+        # - Form-1040
+        # - US-Marriage-Certificate
+        # - Form-941
+        # - Form-1099-INT
+        # - Form-1040-Schedule-C
+        # - Water-And-Sewer-Bill
+        # - Dental-Insurance-Card
+        # - Property_Tax_Statement
+        # - US-College-ID
+        # - US-Vehicle-Title-Document
+        # - Demographic-Addendum
+        # - Form-1099-MISC
+        # - Prescription-Label
+        # - Cable-Bill
+        # - Credit-Card-Statement
+        # - Death-Certificate
+        # - Workers-Compensation-Form
+
+Outputs:
+  ProjectArn:
+    Description: ARN of the created Bedrock Data Automation project
+    Value: !GetAtt BDAProject.projectArn
+   
+  BlueprintArns:
+    Description: ARNs of the blueprints added to the project
+    Value: !Join [", ", !GetAtt BDAProject.blueprintArns]

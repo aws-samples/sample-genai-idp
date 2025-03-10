@@ -1,0 +1,209 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'CodePipeline for deployment automation'
+
+Parameters:
+  PipelineName:
+    Type: String
+    Description: 'Name of the CodePipeline'
+    Default: idp-sdlc-deploy-pipeline
+
+  BucketName:
+    Type: String
+    Description: 'Name of the S3 bucket containing the deployment assets'
+    Default: idp-sdlc-source-code-YOUR_AWS_ACCOUNT-YOUR_REGION
+  
+  FileKey:
+    Type: String
+    Description: 'S3 key of the deployment asset file'
+    Default: deploy/code.zip
+    
+  CodeBuildRoleArn:
+    Type: String
+    Description: 'Optional ARN of an existing IAM role for CodeBuild. If not provided, a new role will be created.'
+    Default: ''
+
+Conditions:
+  CreateCodeBuildRole: !Equals [!Ref CodeBuildRoleArn, '']
+
+Resources:
+  CodePipelineRole:
+      Type: 'AWS::IAM::Role'
+      Properties:
+        AssumeRolePolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Principal:
+                Service: codepipeline.amazonaws.com
+              Action: 'sts:AssumeRole'
+        Policies:
+          - PolicyName: CodePipelinePolicy
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - 's3:GetObject'
+                    - 's3:GetObjectVersion'
+                    - 's3:GetBucketVersioning'
+                    - 's3:ListBucket'
+                    - 's3:PutObject'
+                  Resource:
+                    - !Sub 'arn:aws:s3:::${BucketName}/*'
+                    - !Sub 'arn:aws:s3:::${ArtifactBucket}/*'
+                    - !Sub 'arn:aws:s3:::${BucketName}'
+                    - !Sub 'arn:aws:s3:::${ArtifactBucket}'
+                - Effect: Allow
+                  Action:
+                    - 'codebuild:BatchGetBuilds'
+                    - 'codebuild:StartBuild'
+                  Resource: !GetAtt IdkInstallCodeBuild.Arn
+
+  CodeBuildRole:
+    Type: 'AWS::IAM::Role'
+    Condition: CreateCodeBuildRole
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codebuild.amazonaws.com
+            Action: 'sts:AssumeRole'
+      # TODO: Adjust these rights as appropriate >>>
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/ReadOnlyAccess'
+      # <<< TODO: Adjust these rights as appropriate
+      Policies:
+        - PolicyName: CodeBuildPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'ec2:DescribeAvailabilityZones'
+                  - 'ec2:DescribeVpcs'
+                  - 'ec2:DescribeSubnets'
+                  - 'ec2:DescribeSecurityGroups'
+                  - 'sts:AssumeRole'
+                Resource: '*'
+
+  ArtifactBucket:
+    Type: 'AWS::S3::Bucket'
+    Properties:
+      VersioningConfiguration:
+        Status: Enabled
+
+  IdkInstallCodeBuild:
+    Type: 'AWS::CodeBuild::Project'
+    Properties:
+      Name: app-sdlc
+      ServiceRole: !If [CreateCodeBuildRole, !GetAtt CodeBuildRole.Arn, !Ref CodeBuildRoleArn]
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/standard:7.0
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: |
+          version: 0.2
+          phases:
+            install:
+              runtime-versions:
+                python: 3.12
+              commands:
+                - n 22 && node --version || { echo "Node setup failed"; exit 1; }
+                - npm install -g aws-cdk || { echo "CDK installation failed"; exit 1; }
+                - curl -sSL https://install.python-poetry.org | python3 - || { echo "Poetry installation failed"; exit 1; }
+                - export PATH="/root/.local/bin:$PATH"
+                - cd ./scripts/sdlc/idp-cli  # This command won't cause exit on failure
+                - poetry install || { echo "Poetry dependencies installation failed"; exit 1; }
+            build:
+              commands:
+                - export IDP_CFN_PREFIX=$(make cfn-prefix) || { echo "CFN prefix generation failed"; exit 1; }
+                - make install -e IDP_CFN_PREFIX=$IDP_CFN_PREFIX || echo "Install step failed but continuing"
+                - make smoketest -e IDP_CFN_PREFIX=$IDP_CFN_PREFIX || echo "Smoke tests failed but continuing"
+                - make uninstall -e IDP_CFN_PREFIX=$IDP_CFN_PREFIX || echo "Uninstall step failed but continuing"
+
+  DeploymentPipeline:
+    Type: 'AWS::CodePipeline::Pipeline'
+    Properties:
+      Name: !Ref PipelineName
+      RoleArn: !GetAtt CodePipelineRole.Arn
+      ArtifactStore:
+        Type: S3
+        Location: !Ref ArtifactBucket
+      Stages:
+        - Name: Source
+          Actions:
+            - Name: SourceAction
+              ActionTypeId:
+                Category: Source
+                Owner: AWS
+                Provider: S3
+                Version: '1'
+              Configuration:
+                S3Bucket: !Ref BucketName
+                S3ObjectKey: !Ref FileKey
+              OutputArtifacts:
+                - Name: SourceOutput
+              RunOrder: 1
+        - Name: Build
+          Actions:
+            - Name: BuildAction
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: '1'
+              Configuration:
+                ProjectName: !Ref IdkInstallCodeBuild
+              InputArtifacts:
+                - Name: SourceOutput
+              OutputArtifacts:
+                - Name: BuildOutput
+              RunOrder: 1
+
+  CodeBuildRoleS3Policy:
+    Type: 'AWS::IAM::Policy'
+    Condition: CreateCodeBuildRole
+    Properties:
+      PolicyName: CodeBuildS3Access
+      Roles: 
+        - !Ref CodeBuildRole
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - 's3:GetObject'
+              - 's3:GetObjectVersion'
+              - 's3:PutObject'
+            Resource: 
+              - !Sub 'arn:aws:s3:::${BucketName}/*'
+              - !Sub 'arn:aws:s3:::${ArtifactBucket}/*'
+          - Effect: Allow
+            Action:
+              - 's3:ListBucket'
+            Resource: 
+              - !Sub 'arn:aws:s3:::${BucketName}'
+              - !Sub 'arn:aws:s3:::${ArtifactBucket}'
+
+  CodeBuildLogsPolicy:
+    Type: 'AWS::IAM::Policy'
+    Condition: CreateCodeBuildRole
+    Properties:
+      PolicyName: CodeBuildLogs
+      Roles: 
+        - !Ref CodeBuildRole
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - 'logs:CreateLogGroup'
+              - 'logs:CreateLogStream'
+              - 'logs:PutLogEvents'
+            Resource: '*'

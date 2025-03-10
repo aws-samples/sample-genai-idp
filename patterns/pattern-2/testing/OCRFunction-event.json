@@ -1,0 +1,13 @@
+{
+  "input": {
+    "detail": {
+      "bucket": {
+        "name": "<INPUT>"
+      },
+      "object": {
+        "key": "<PATH_TO_PDF_FILE>"
+      }
+    }
+  },
+  "output_bucket": "<OUTPUT_BUCKET>"
+}

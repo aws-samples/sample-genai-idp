@@ -1,0 +1,79 @@
+{
+    "Comment": "Data Automation Async Workflow",
+    "StartAt": "InvokeDataAutomation",
+    "States": {
+      "InvokeDataAutomation": {
+        "Type": "Task",
+        "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+        "Parameters": {
+          "FunctionName": "${InvokeBDALambdaArn}",
+          "Payload": {
+            "taskToken.$": "$$.Task.Token",
+            "execution_arn.$": "$$.Execution.Id",
+            "output_bucket": "${OutputBucket}",
+            "working_bucket": "${WorkingBucket}",
+            "BDAProjectArn": "${BDAProjectArn}",
+            "input.$": "$"
+          }
+        },
+        "ResultPath": "$.BDAResponse",
+        "Retry": [
+          {
+            "ErrorEquals": [
+              "Lambda.ServiceException",
+              "Lambda.SdkClientException",
+              "Lambda.TooManyRequestsException",
+              "ServiceQuotaExceededException",
+              "ThrottlingException",
+              "ProvisionedThroughputExceededException",
+              "RequestLimitExceeded"
+            ],
+            "IntervalSeconds": 2,
+            "MaxAttempts": 10,
+            "BackoffRate": 2
+          }
+        ],
+        "Next": "ProcessResults",
+        "Catch": [
+            {
+              "ErrorEquals": [
+                "States.ALL"
+              ],
+              "Next": "FailState"
+            }
+          ]        
+      },
+      "ProcessResults": {
+        "Type": "Task",
+        "Resource": "${ProcessResultsLambdaArn}",
+        "Parameters": {
+          "execution_arn.$": "$$.Execution.Id",
+          "output_bucket": "${OutputBucket}",
+          "BDAResponse.$": "$.BDAResponse"
+        },
+        "Retry": [
+            {
+                "ErrorEquals": [
+                    "Lambda.ServiceException",
+                    "Lambda.AWSLambdaException",
+                    "Lambda.SdkClientException",
+                    "Lambda.TooManyRequestsException",
+                    "ServiceQuotaExceededException",
+                    "ThrottlingException",
+                    "ProvisionedThroughputExceededException",
+                    "RequestLimitExceeded"
+                ],
+                "IntervalSeconds": 2,
+                "MaxAttempts": 10,
+                "BackoffRate": 2
+            }
+        ],
+        "End": true
+      },
+      "FailState": {
+        "Type": "Fail",
+        "Cause": "Data Automation Job Failed",
+        "Error": "JobFailedException"
+      }
+    }
+  }

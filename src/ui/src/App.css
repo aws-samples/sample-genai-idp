@@ -1,0 +1,17 @@
+/*  Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+    SPDX-License-Identifier: Apache-2.0 */
+
+:root {
+    --amplify-primary-color: #ababab;
+    --amplify-primary-tint: #3f6060;
+    --amplify-primary-shade: #2dba89;
+    --amplify-background-color: #fafafa;
+    --amplify-text-xxs: 0.75rem;
+    --amplify-text-xs: 0.81rem;
+    --amplify-text-sm: 1.2rem;
+    --amplify-text-md: 1.5rem;
+    --amplify-text-md-sub: 1.7rem;
+    --amplify-text-lg: 1.5rem;
+    --amplify-text-xl: 2rem;
+    --amplify-text-xxl: 2.5rem;
+}

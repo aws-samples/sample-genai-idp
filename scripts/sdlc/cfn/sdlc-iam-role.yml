@@ -1,0 +1,104 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'CloudFormation template to create Limited IAM Policy and SDLC Role with PowerUser access. TODO: Refine this role to be least privilege'
+
+Parameters:
+  BuilderRoleName:
+    Type: String
+    Default: idp-sdlc-role
+    Description: Name for the Builder Role
+
+Resources:
+  LimitedIAMAccessPolicy:
+    Type: 'AWS::IAM::ManagedPolicy'
+    Properties:
+      Description: 'Policy for limited IAM access'
+      ManagedPolicyName: 'LimitedIAMAccess'
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: LimitedIAMaccess
+            Effect: Allow
+            Action:
+              - iam:CreateInstanceProfile
+              - iam:List*
+              - iam:Untag*
+              - iam:Tag*
+              - iam:RemoveRoleFromInstanceProfile
+              - iam:DeletePolicy
+              - iam:CreateRole
+              - iam:AttachRolePolicy
+              - iam:PutRolePolicy
+              - iam:AddRoleToInstanceProfile
+              - iam:PassRole
+              - iam:Get*
+              - iam:DetachRolePolicy
+              - iam:DeleteRolePolicy
+              - iam:CreatePolicyVersion
+              - iam:DeleteInstanceProfile
+              - iam:DeleteRole
+              - iam:UpdateRoleDescription
+              - iam:CreatePolicy
+              - iam:CreateServiceLinkedRole
+              - iam:UpdateRole
+              - iam:DeleteServiceLinkedRole
+              - iam:DeletePolicyVersion
+              - iam:SetDefaultPolicyVersion
+              - iam:AttachUserPolicy
+              - iam:DetachUserPolicy
+              - iam:PutUserPolicy
+              - iam:DeleteUserPolicy
+              - iam:AddUserToGroup
+              - iam:AttachGroupPolicy
+              - iam:CreateGroup
+              - iam:DeleteGroup
+              - iam:DeleteGroupPolicy
+              - iam:DetachGroupPolicy
+              - iam:GetGroup
+              - iam:GetGroupPolicy
+              - iam:ListAttachedGroupPolicies
+              - iam:ListGroupPolicies
+              - iam:ListGroups
+              - iam:ListGroupsForUser
+              - iam:PutGroupPolicy
+              - iam:RemoveUserFromGroup
+              - iam:UpdateGroup
+              - iam:GenerateServiceLastAccessedDetails
+              - iam:UpdateAssumeRolePolicy
+              - iam:UpdateAccessKey
+            Resource: '*'
+
+  BuilderRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      RoleName: !Ref BuilderRoleName
+      Description: 'Role for application builders with PowerUser and Limited IAM access'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: 
+                - ec2.amazonaws.com
+                - codebuild.amazonaws.com
+                - cloudformation.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - !Ref LimitedIAMAccessPolicy
+        - 'arn:aws:iam::aws:policy/PowerUserAccess'
+      Tags:
+        - Key: Purpose
+          Value: ApplicationBuilder
+
+Outputs:
+  LimitedIAMPolicyArn:
+    Description: 'ARN of the created Limited IAM policy'
+    Value: !Ref LimitedIAMAccessPolicy
+
+  BuilderRoleArn:
+    Description: 'ARN of the created Builder Role'
+    Value: !GetAtt BuilderRole.Arn
+
+  BuilderRoleName:
+    Description: 'Name of the created Builder Role'
+    Value: !Ref BuilderRole

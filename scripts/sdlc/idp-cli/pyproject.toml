@@ -1,0 +1,30 @@
+[project]
+name = "idp-cli"
+version = "0.1.0"
+description = ""
+authors = [
+    {name = "Vincil Bishop",email = "vincilb@amazon.com"}
+]
+readme = "README.md"
+requires-python = ">=3.10,<=3.14"
+dependencies = [
+    "python-dotenv (>=1.0.1,<2.0.0)",
+    "boto3 (>=1.37.1,<2.0.0)",
+    "typer (>=0.15.1,<0.16.0)",
+    "loguru (>=0.7.3,<0.8.0)",
+    "python-slugify (>=8.0.4,<9.0.0)",
+    "pytest (>=8.3.4,<9.0.0)"
+]
+
+[tool.poetry]
+packages = [{include = "idp_cli", from = "src"}]
+
+[tool.poetry.scripts]
+idpcli = "idp_cli.cli.main:app"
+
+[tool.poetry.group.dev.dependencies]
+ipykernel = "^6.29.5"
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"

@@ -1,0 +1,954 @@
+# Copyright © Amazon.com and Affiliates: This deliverable is considered Developed Content as defined in the AWS Service Terms and the SOW between the parties.
+
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: AWS GenAI IDP Accelerator - resources for IDP Pattern 1
+
+Parameters:
+
+  StackName:
+    Type: String
+
+  InputBucket:
+    Type: String
+
+  OutputBucket:
+    Type: String
+
+  CustomerManagedEncryptionKeyArn:
+    Type: String
+
+  LogRetentionDays:
+    Type: Number
+  
+  ExecutionTimeThresholdMs:
+    Type: Number
+    Default: 30000
+
+  UDOPModelArtifactPath:
+    Type: String
+    AllowedPattern: "^(|s3://.*)$"
+
+  ExtractionModel:
+    Type: String
+    Default: 'us.anthropic.claude-3-5-sonnet-20241022-v2:0'
+
+  UpdateConfigurationFunctionArn:
+    Type: String
+  
+  ConfigurationTable:
+    Type: String
+
+
+Resources:
+
+  SAGEMAKERCLASSIFIERSTACK:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      # yamllint disable rule:line-length
+      TemplateURL: ./sagemaker_classifier_endpoint.yaml
+      Parameters:
+        StackName: !Ref StackName
+        UDOPModelArtifactPath: !Ref UDOPModelArtifactPath
+        S3Bucket: !Ref OutputBucket
+        CustomerManagedEncryptionKeyArn: !Ref CustomerManagedEncryptionKeyArn
+
+  # JSON Schema which defines the structure of the pattern configuration settings
+  # used by the UI to allow the configuration to be inspected and customized.
+  UpdateSchemaConfig:
+    Type: AWS::CloudFormation::CustomResource
+    Properties:
+      ServiceToken: !Ref UpdateConfigurationFunctionArn
+      Schema:
+        type: object
+        required:
+          - info
+          - extraction
+        properties:
+          info:
+            type: string
+            description: Description of the configuration section
+          extraction:
+            type: object
+            required:
+              - model
+              - temperature
+              - top_k
+              - system_prompt
+              - task_prompt
+            properties:
+              model:
+                type: string
+                description: Model identifier
+              temperature:
+                type: number
+                minimum: 0
+                maximum: 1
+                description: Sampling temperature
+              top_k:
+                type: integer
+                minimum: 1
+                description: Top K parameter for sampling
+              system_prompt:
+                type: string
+                description: System prompt
+              task_prompt:
+                type: string
+                description: Task prompt - include parameters {DOCUMENT_CLASS} and {DOCUMENT_TEXT}
+    UpdateReplacePolicy: Delete
+    DeletionPolicy: Delete
+
+  UpdateDefaultConfig:
+    Type: AWS::CloudFormation::CustomResource
+    Properties:
+      ServiceToken: !Ref UpdateConfigurationFunctionArn
+      Default:
+        info: Default inference settings for extraction
+        extraction:
+          model: !Ref ExtractionModel
+          temperature: 0
+          top_k: 200
+          system_prompt: |
+            You are a document assistant. Respond only with JSON. Never make up data, only provide data found in the document being provided.
+          task_prompt: |
+            <background>
+            You are an expert in business document analysis and information extraction. You can understand and extract key information from various types of business documents including letters, memos, financial documents, scientific papers, news articles, advertisements, emails, forms, handwritten notes, invoices, purchase orders, questionnaires, resumes, scientific publications, and specifications.
+            A business document serves multiple purposes:
+            Communication of information between parties
+            Record keeping of business transactions or decisions
+            Legal documentation of agreements or requirements
+            Historical archival of business activities
+            Reference material for future use
+            Each document type has its own structure, purpose, and key information elements that need to be extracted.
+            </background>
+            <document_class>
+            {DOCUMENT_CLASS}
+            </document_class>
+            <document_ocr_data>
+            {DOCUMENT_TEXT}
+            </document_ocr_data>
+            <task>
+            Your task is to take the unstructured text provided and convert it into a well-organized table format using JSON. Identify the main entities, attributes, or categories mentioned in the text based on the document class and use them as keys in the JSON object. Then, extract the relevant information from the text and populate the corresponding values in the JSON object. 
+            Guidelines:
+            Ensure that the data is accurately represented and properly formatted within the JSON structure
+            Include double quotes around all keys and values
+            Do not make up data - only extract information explicitly found in the document
+            Do not use /n for new lines, use a space instead
+            If a field is not found or if unsure, return null
+            All dates should be in MM/DD/YYYY format
+            Do not perform calculations or summations unless totals are explicitly given
+            If an alias is not found in the document, return null
+            Here are the attributes you should extract based on the document class:
+            <attributes>
+            {
+                "document_class_attributes": {
+                    "letter": {
+                    "sender_name": ["from", "sender", "authored by", "written by"],
+                    "sender_address": ["address", "location", "from address"],
+                    "recipient_name": ["to", "recipient", "addressee"],
+                    "recipient_address": ["to address", "delivery address"],
+                    "date": ["date", "written on", "dated"],
+                    "subject": ["subject", "re:", "regarding"],
+                    "letter_type": ["type", "category"],
+                    "signature": ["signed by", "signature"],
+                    "cc": ["cc", "carbon copy", "copy to"],
+                    "reference_number": ["ref", "reference", "our ref"]
+                    },
+                    "form": {
+                    "form_type": ["form name", "document type", "form category"],
+                    "form_id": ["form number", "id", "reference number"],
+                    "submission_date": ["date", "submitted on", "filed on"],
+                    "submitter_name": ["name", "submitted by", "filed by"],
+                    "submitter_id": ["id number", "identification", "reference"],
+                    "approval_status": ["status", "approved", "pending"],
+                    "processed_by": ["processor", "handled by", "approved by"],
+                    "processing_date": ["processed on", "completion date"],
+                    "department": ["dept", "department", "division"],
+                    "comments": ["notes", "remarks", "comments"]
+                    },
+                    "invoice": {
+                    "invoice_number": ["invoice no", "invoice #", "bill number"],
+                    "invoice_date": ["date", "invoice date", "billing date"],
+                    "due_date": ["due date", "payment due", "payable by"],
+                    "vendor_name": ["vendor", "seller", "supplier"],
+                    "vendor_address": ["address", "location", "business address"],
+                    "customer_name": ["customer", "buyer", "bill to"],
+                    "customer_address": ["billing address", "ship to"],
+                    "items": ["description", "item details", "products"],
+                    "quantities": ["qty", "quantity", "amount"],
+                    "unit_prices": ["price", "rate", "unit cost"],
+                    "subtotal": ["subtotal", "net amount"],
+                    "tax": ["tax", "vat", "gst"],
+                    "total_amount": ["total", "grand total", "amount due"],
+                    "payment_terms": ["terms", "payment terms", "conditions"],
+                    "po_number": ["po", "purchase order", "order reference"]
+                    },
+                    "resume": {
+                    "full_name": ["name", "applicant name"],
+                    "contact_info": ["contact", "phone", "email", "address"],
+                    "objective": ["objective", "summary", "profile"],
+                    "education": ["education", "academic background", "qualifications"],
+                    "experience": ["experience", "work history", "employment"],
+                    "skills": ["skills", "competencies", "expertise"],
+                    "certifications": ["certifications", "certificates", "credentials"],
+                    "languages": ["languages", "language proficiency"],
+                    "references": ["references", "referees"],
+                    "achievements": ["achievements", "accomplishments", "awards"]
+                    },
+                    "scientific_publication": {
+                    "title": ["title", "paper title", "article title"],
+                    "authors": ["authors", "contributors", "researchers"],
+                    "abstract": ["abstract", "summary"],
+                    "keywords": ["keywords", "key terms"],
+                    "publication_date": ["published", "publication date"],
+                    "journal_name": ["journal", "publication"],
+                    "volume": ["volume", "vol"],
+                    "issue": ["issue", "no"],
+                    "pages": ["pages", "pp"],
+                    "doi": ["doi", "digital object identifier"],
+                    "funding": ["funding", "grants", "financial support"],
+                    "corresponding_author": ["corresponding author", "contact author"],
+                    "institutions": ["affiliations", "institutions"]
+                    },
+                    "memo": {
+                    "memo_date": ["date", "memo date"],
+                    "from": ["from", "sender", "author"],
+                    "to": ["to", "recipient", "addressee"],
+                    "subject": ["subject", "re:", "regarding"],
+                    "memo_type": ["type", "category"],
+                    "priority": ["priority", "urgency"],
+                    "distribution_list": ["distribution", "cc", "copy"],
+                    "reference_number": ["reference", "ref no"],
+                    "department": ["department", "dept", "division"],
+                    "action_required": ["action", "response needed", "next steps"]
+                    },
+                    "advertisement": {
+                    "product_name": ["product", "item", "service"],
+                    "brand": ["brand", "company", "manufacturer"],
+                    "price": ["price", "cost", "special offer"],
+                    "promotion_details": ["promotion", "offer", "deal"],
+                    "validity_period": ["valid until", "offer ends", "expires"],
+                    "contact_info": ["contact", "call", "visit"],
+                    "features": ["features", "benefits", "highlights"],
+                    "terms_conditions": ["terms", "conditions", "restrictions"],
+                    "call_to_action": ["call now", "visit today", "order now"],
+                    "disclaimer": ["disclaimer", "terms apply", "conditions apply"]
+                    },
+                    "email": {
+                    "from_address": ["from", "sender", "sent by"],
+                    "to_address": ["to", "recipient", "sent to"],
+                    "cc_address": ["cc", "carbon copy"],
+                    "bcc_address": ["bcc", "blind copy"],
+                    "subject": ["subject", "re:", "regarding"],
+                    "date_sent": ["date", "sent on", "received"],
+                    "attachments": ["attached", "attachment", "enclosed"],
+                    "priority": ["priority", "importance"],
+                    "thread_id": ["thread", "conversation"],
+                    "message_id": ["message id", "email id"]
+                    },
+                    "questionnaire": {
+                    "form_title": ["title", "survey name", "questionnaire name"],
+                    "respondent_info": ["respondent", "participant", "name"],
+                    "submission_date": ["date", "completed on", "submitted"],
+                    "section_headers": ["section", "part", "segment"],
+                    "question_types": ["type", "question format", "response format"],
+                    "response_options": ["options", "choices", "answers"],
+                    "required_fields": ["required", "mandatory", "must answer"],
+                    "instructions": ["instructions", "directions", "guidelines"],
+                    "survey_id": ["survey id", "reference number", "form id"],
+                    "completion_status": ["status", "completion", "progress"]
+                    },
+                    "specification": {
+                    "product_name": ["product", "item", "model"],
+                    "version": ["version", "revision", "release"],
+                    "technical_details": ["specifications", "tech specs", "details"],
+                    "requirements": ["requirements", "prerequisites", "needed"],
+                    "compatibility": ["compatible with", "works with", "supports"],
+                    "dimensions": ["dimensions", "size", "measurements"],
+                    "materials": ["materials", "composition", "made from"],
+                    "standards": ["standards", "certifications", "compliance"],
+                    "revision_history": ["revisions", "changes", "updates"],
+                    "approval_info": ["approved by", "certified by", "validated"]
+                    },
+                    "generic": {
+                    "document_type": ["type", "category", "class"],
+                    "document_date": ["date", "created on", "issued on"],
+                    "document_id": ["id", "reference", "number"],
+                    "title": ["title", "heading", "subject"],
+                    "author": ["author", "creator", "sender"],
+                    "recipient": ["recipient", "to", "addressee"],
+                    "content_summary": ["summary", "abstract", "overview"],
+                    "status": ["status", "state", "condition"],
+                    "department": ["department", "dept", "division"],
+                    "comments": ["notes", "remarks", "comments"]
+                    }
+                }
+            }
+            </attributes>
+            </task>
+    UpdateReplacePolicy: Delete
+    DeletionPolicy: Delete
+
+  OCRFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W11
+            reason: "Textract DetectDocumentText API and CloudWatch APIs do not support resource-level permissions"
+          - id: W89
+            reason: "This Lambda function does not require VPC access as it only interacts with AWS services via AWS APIs"
+          - id: W92
+            reason: "Function does not require concurrent execution limits as it is designed to scale based on demand"
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for this function as StepFunctions will handle retries"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only configuration values like feature flags and non-sensitive settings"
+    Properties:
+      CodeUri: src/ocr_function/
+      Handler: index.handler
+      Runtime: python3.12
+      Timeout: 900
+      MemorySize: 4096
+      Environment:
+        Variables:
+          METRIC_NAMESPACE: !Ref StackName
+          MAX_WORKERS: 20
+          CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
+      LoggingConfig:
+        LogGroup: !Ref OCRFunctionLogGroup
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - S3CrudPolicy:
+            BucketName: !Ref OutputBucket
+        - S3ReadPolicy:
+            BucketName: !Ref InputBucket
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ConfigurationTable
+        - Statement:
+          - Effect: Allow
+            Action: cloudwatch:PutMetricData
+            Resource: '*'
+          - Effect: Allow
+            Action:
+              - kms:Encrypt
+              - kms:Decrypt
+              - kms:ReEncrypt*
+              - kms:GenerateDataKey*
+              - kms:DescribeKey
+            Resource: !Ref CustomerManagedEncryptionKeyArn
+          # Textract APIs require '*' as they don't support resource-level permissions
+          - Effect: Allow
+            Action: textract:DetectDocumentText
+            Resource: '*'
+
+  
+  OCRFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+      LogGroupName: !Sub "/${AWS::StackName}/lambda/OCRFunction"
+      RetentionInDays: !Ref LogRetentionDays
+
+  ClassificationFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W11
+            reason: "Textract DetectDocumentText API and CloudWatch APIs do not support resource-level permissions"
+          - id: W89
+            reason: "This Lambda function does not require VPC access as it only interacts with AWS services via AWS APIs"
+          - id: W92
+            reason: "Function does not require concurrent execution limits as it is designed to scale based on demand"
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for this function as StepFunctions will handle retries"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only configuration values like feature flags and non-sensitive settings"
+    Properties:
+      CodeUri: src/classification_function/
+      Handler: index.handler
+      Runtime: python3.12
+      Timeout: 900
+      MemorySize: 4096
+      Environment:
+        Variables:
+          METRIC_NAMESPACE: !Ref StackName
+          MAX_WORKERS: 20
+          SAGEMAKER_ENDPOINT_NAME: !GetAtt SAGEMAKERCLASSIFIERSTACK.Outputs.EndpointName
+          CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
+      LoggingConfig:
+        LogGroup: !Ref ClassificationFunctionLogGroup
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - S3CrudPolicy:
+            BucketName: !Ref OutputBucket
+        - S3ReadPolicy:
+            BucketName: !Ref InputBucket
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ConfigurationTable
+        - Statement:
+          - Effect: Allow
+            Action: cloudwatch:PutMetricData
+            Resource: '*'
+          - Effect: Allow
+            Action:
+              - kms:Encrypt
+              - kms:Decrypt
+              - kms:ReEncrypt*
+              - kms:GenerateDataKey*
+              - kms:DescribeKey
+            Resource: !Ref CustomerManagedEncryptionKeyArn
+          - Effect: Allow
+            Action: sagemaker:InvokeEndpoint
+            Resource: !GetAtt SAGEMAKERCLASSIFIERSTACK.Outputs.EndpointArn
+  
+  ClassificationFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+      LogGroupName: !Sub "/${AWS::StackName}/lambda/ClassificationFunction"
+      RetentionInDays: !Ref LogRetentionDays
+  
+  ExtractionFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W11
+            reason: "Cloudwatch does not support resource-level permissions"
+          - id: W89
+            reason: "This Lambda function does not require VPC access as it only interacts with AWS services via AWS APIs"
+          - id: W92
+            reason: "Function does not require concurrent execution limits as it is designed to scale based on demand"
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for this function as StepFunctions will handle retries"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only configuration values like feature flags and non-sensitive settings"
+    Properties:
+      CodeUri: src/extraction_function/
+      Handler: index.handler
+      Runtime: python3.12
+      Timeout: 900
+      MemorySize: 512
+      Environment:
+        Variables:
+          METRIC_NAMESPACE: !Ref StackName
+          CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
+      LoggingConfig:
+        LogGroup: !Ref ExtractionFunctionLogGroup
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - S3CrudPolicy:
+            BucketName: !Ref OutputBucket
+        - S3ReadPolicy:
+            BucketName: !Ref InputBucket
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ConfigurationTable
+        - Statement:
+          - Effect: Allow
+            Action: cloudwatch:PutMetricData
+            Resource: '*'
+          - Effect: Allow
+            Action:
+              - kms:Encrypt
+              - kms:Decrypt
+              - kms:ReEncrypt*
+              - kms:GenerateDataKey*
+              - kms:DescribeKey
+            Resource: !Ref CustomerManagedEncryptionKeyArn
+          - Effect: Allow
+            Action: bedrock:InvokeModel
+            Resource: 
+                - !Sub "arn:aws:bedrock:*::foundation-model/*"
+                - !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
+
+  ExtractionFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+      LogGroupName: !Sub "/${AWS::StackName}/lambda/ExtractionFunction"
+      RetentionInDays: !Ref LogRetentionDays
+
+  ProcessResultsFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W11
+            reason: "Cloudwatch does not support resource-level permissions"
+          - id: W89
+            reason: "This Lambda function does not require VPC access as it only interacts with AWS services via AWS APIs"
+          - id: W92
+            reason: "Function does not require concurrent execution limits as it is designed to scale based on demand"
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for this function as StepFunctions will handle retries"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only configuration values like feature flags and non-sensitive settings"
+    Properties:
+      CodeUri: src/processresults_function/
+      Handler: index.handler
+      Runtime: python3.12
+      Timeout: 900
+      MemorySize: 4096
+      Environment:
+        Variables:
+          METRIC_NAMESPACE: !Ref StackName
+      LoggingConfig:
+        LogGroup: !Ref ProcessResultsFunctionLogGroup
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - S3ReadPolicy:
+            BucketName: !Ref InputBucket
+        - S3CrudPolicy:
+            BucketName: !Ref OutputBucket
+        - Statement:
+          - Effect: Allow
+            Action: cloudwatch:PutMetricData
+            Resource: '*'
+          - Effect: Allow
+            Action:
+              - kms:Encrypt
+              - kms:Decrypt
+              - kms:ReEncrypt*
+              - kms:GenerateDataKey*
+              - kms:DescribeKey
+            Resource: !Ref CustomerManagedEncryptionKeyArn
+
+  
+  ProcessResultsFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+      LogGroupName: !Sub "/${AWS::StackName}/lambda/ProcessResultsFunction"
+      RetentionInDays: !Ref LogRetentionDays
+
+  DocumentProcessingStateMachine:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      Name: !Sub "${StackName}-DocumentProcessingWorkflow"
+      DefinitionUri: statemachine/workflow.asl.json
+      DefinitionSubstitutions:
+        OCRFunctionArn: !GetAtt OCRFunction.Arn
+        ClassificationFunctionArn: !GetAtt ClassificationFunction.Arn
+        ExtractionFunctionArn: !GetAtt ExtractionFunction.Arn
+        ProcessResultsLambdaArn: !GetAtt ProcessResultsFunction.Arn
+        OutputBucket: !Ref OutputBucket
+      Logging:
+        Level: ALL
+        IncludeExecutionData: true
+        Destinations:
+          - CloudWatchLogsLogGroup: !GetAtt StateMachineLogGroup.Arn
+      Policies:
+        - LambdaInvokePolicy:
+            FunctionName: !Ref OCRFunction
+        - LambdaInvokePolicy:
+            FunctionName: !Ref ClassificationFunction
+        - LambdaInvokePolicy:
+            FunctionName: !Ref ExtractionFunction
+        - LambdaInvokePolicy:
+            FunctionName: !Ref ProcessResultsFunction
+        - CloudWatchLogsFullAccess
+
+  StateMachineLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+      LogGroupName: !Sub "/aws/vendedlogs/states/${AWS::StackName}/workflow"  # required prefix
+      RetentionInDays: !Ref LogRetentionDays
+
+  Dashboard:
+    Type: AWS::CloudWatch::Dashboard
+    Properties:
+      DashboardName: !Sub "${AWS::StackName}-${AWS::Region}-Pattern1-Subset"
+      DashboardBody: !Sub |
+        {
+          "widgets": [
+            {
+              "type": "metric",
+              "x": 0,
+              "y": 0,
+              "width": 8,
+              "height": 6,
+              "properties": {
+                "metrics": [
+                  [{"expression": "m1/PERIOD(m1)*60", "label": "Documents per Minute"}],
+                  ["${StackName}", "InputDocuments", {"id": "m1", "stat": "Sum", "visible": false}]
+                ],
+                "region": "${AWS::Region}",
+                "title": "Input Documents (per Minute)",
+                "view": "timeSeries",
+                "period": 60,
+                "yAxis": {
+                  "left": {
+                    "label": "Count per Minute"
+                  }
+                }
+              }
+            },
+            {
+              "type": "metric",
+              "x": 8,
+              "y": 0,
+              "width": 8,
+              "height": 6,
+              "properties": {
+                "metrics": [
+                  [{"expression": "m1/PERIOD(m1)*60", "label": "Pages per Minute"}],
+                  ["${StackName}", "InputDocumentPages", {"id": "m1", "stat": "Sum", "visible": false}]
+                ],
+                "region": "${AWS::Region}",
+                "title": "Input Document Pages (per Minute)",
+                "view": "timeSeries",
+                "period": 60,
+                "yAxis": {
+                  "left": {
+                    "label": "Count per Minute"
+                  }
+                }
+              }
+            },
+            {
+              "type": "metric",
+              "x": 16,
+              "y": 0,
+              "width": 8,
+              "height": 6,
+              "properties": {
+                "metrics": [],
+                "region": "${AWS::Region}",
+                "title": "Blank",
+                "view": "timeSeries",
+                "period": 60,
+                "yAxis": {
+                  "left": {
+                    "label": "N/A"
+                  }
+                }
+              }
+            },
+            {
+              "type": "metric",
+              "x": 0,
+              "y": 6,
+              "width": 8,
+              "height": 6,
+              "properties": {
+                "metrics": [
+                  [{"expression": "m1/PERIOD(m1)*60", "label": "Tokens per Minute"}],
+                  ["${StackName}", "InputTokens", {"id": "m1", "stat": "Sum", "visible": false}]
+                ],
+                "region": "${AWS::Region}",
+                "title": "Input Tokens (per Minute)",
+                "view": "timeSeries",
+                "period": 60,
+                "yAxis": {
+                  "left": {
+                    "label": "Count per Minute"
+                  }
+                }
+              }
+            },
+            {
+              "type": "metric",
+              "x": 8,
+              "y": 6,
+              "width": 8,
+              "height": 6,
+              "properties": {
+                "metrics": [
+                  [{"expression": "m1/PERIOD(m1)*60", "label": "Tokens per Minute"}],
+                  ["${StackName}", "OutputTokens", {"id": "m1", "stat": "Sum", "visible": false}]
+                ],
+                "region": "${AWS::Region}",
+                "title": "Output Tokens (per Minute)",
+                "view": "timeSeries",
+                "period": 60,
+                "yAxis": {
+                  "left": {
+                    "label": "Count per Minute"
+                  }
+                }
+              }
+            },
+            {
+              "type": "metric",
+              "x": 16,
+              "y": 6,
+              "width": 8,
+              "height": 6,
+              "properties": {
+                "metrics": [
+                  [{"expression": "m1/PERIOD(m1)*60", "label": "Tokens per Minute"}],
+                  ["${StackName}", "TotalTokens", {"id": "m1", "stat": "Sum", "visible": false}]
+                ],
+                "region": "${AWS::Region}",
+                "title": "Total Tokens (per Minute)",
+                "view": "timeSeries",
+                "period": 60,
+                "yAxis": {
+                  "left": {
+                    "label": "Count per Minute"
+                  }
+                }
+              }
+            },
+            {
+              "type": "metric",
+              "x": 0,
+              "y": 12,
+              "width": 8,
+              "height": 6,
+              "properties": {
+                "metrics": [
+                  [{"expression": "m1/PERIOD(m1)*60", "label": "Total per Minute"}],
+                  [{"expression": "m2/PERIOD(m2)*60", "label": "Succeeded per Minute"}],
+                  [{"expression": "m3/PERIOD(m3)*60", "label": "Failed per Minute"}],
+                  ["${StackName}", "BedrockRequestsTotal", {"id": "m1", "stat": "Sum", "visible": false}],
+                  [".", "BedrockRequestsSucceeded", {"id": "m2", "stat": "Sum", "visible": false}],
+                  [".", "BedrockRequestsFailed", {"id": "m3", "stat": "Sum", "visible": false}]
+                ],
+                "region": "${AWS::Region}",
+                "title": "Bedrock Request Status (per Minute)",
+                "view": "timeSeries",
+                "period": 60,
+                "yAxis": {
+                  "left": {
+                    "label": "Count per Minute"
+                  }
+                }
+              }
+            },
+            {
+              "type": "metric",
+              "x": 8,
+              "y": 12,
+              "width": 8,
+              "height": 6,
+              "properties": {
+                "metrics": [
+                  [{"expression": "m1/PERIOD(m1)*60", "label": "Throttles per Minute"}],
+                  [{"expression": "m2/PERIOD(m2)*60", "label": "Retry Success per Minute"}],
+                  [{"expression": "m3/PERIOD(m3)*60", "label": "Max Retries Exceeded per Minute"}],
+                  ["${StackName}", "BedrockThrottles", {"id": "m1", "stat": "Sum", "visible": false}],
+                  [".", "BedrockRetrySuccess", {"id": "m2", "stat": "Sum", "visible": false}],
+                  [".", "BedrockMaxRetriesExceeded", {"id": "m3", "stat": "Sum", "visible": false}]
+                ],
+                "region": "${AWS::Region}",
+                "title": "Bedrock Retries (per Minute)",
+                "view": "timeSeries",
+                "period": 60,
+                "yAxis": {
+                  "left": {
+                    "label": "Count per Minute"
+                  }
+                }
+              }
+            },
+            {
+              "type": "metric",
+              "x": 16,
+              "y": 12,
+              "width": 8,
+              "height": 6,
+              "properties": {
+                "metrics": [
+                  ["${StackName}", "BedrockRequestLatency", {"stat": "Average"}],
+                  [".", "BedrockRequestLatency", {"stat": "p90"}],
+                  [".", "BedrockRequestLatency", {"stat": "Maximum"}],
+                  [".", "BedrockTotalLatency", {"stat": "Average"}],
+                  [".", "BedrockTotalLatency", {"stat": "p90"}],
+                  [".", "BedrockTotalLatency", {"stat": "Maximum"}]
+                ],
+                "region": "${AWS::Region}",
+                "title": "Bedrock Latency - per request, and total (including backoff/retries)",
+                "period": 300,
+                "view": "timeSeries",
+                "stacked": false,
+                "annotations": {
+                  "horizontal": [{
+                    "value": ${ExecutionTimeThresholdMs},
+                    "label": "Threshold (${ExecutionTimeThresholdMs}ms)",
+                    "color": "#ff0000"
+                  }]
+                }
+              }
+            },
+            {
+              "type": "metric",
+              "x": 0,
+              "y": 18,
+              "width": 8,
+              "height": 6,
+              "properties": {
+                "metrics": [
+                  ["AWS/Lambda", "Duration", "FunctionName", "${OCRFunction}"]
+                ],
+                "region": "${AWS::Region}",
+                "title": "OCR Function Duration",
+                "period": 300,
+                "annotations": {
+                  "horizontal": [{
+                    "value": ${ExecutionTimeThresholdMs},
+                    "label": "Threshold (${ExecutionTimeThresholdMs}ms)",
+                    "color": "#ff0000"
+                  }]
+                },
+                "stat": "Average",
+                "view": "timeSeries"
+              }
+            },
+            {
+              "type": "metric",
+              "x": 8,
+              "y": 18,
+              "width": 8,
+              "height": 6,
+              "properties": {
+                "metrics": [
+                  ["AWS/Lambda", "Duration", "FunctionName", "${ClassificationFunction}"]
+                ],
+                "region": "${AWS::Region}",
+                "title": "Classification Function Duration",
+                "period": 300,
+                "annotations": {
+                  "horizontal": [{
+                    "value": ${ExecutionTimeThresholdMs},
+                    "label": "Threshold (${ExecutionTimeThresholdMs}ms)",
+                    "color": "#ff0000"
+                  }]
+                },
+                "stat": "Average",
+                "view": "timeSeries"
+              }
+            },
+            {
+              "type": "metric",
+              "x": 16,
+              "y": 18,
+              "width": 8,
+              "height": 6,
+              "properties": {
+                "metrics": [
+                  ["AWS/Lambda", "Duration", "FunctionName", "${ExtractionFunction}"]
+                ],
+                "region": "${AWS::Region}",
+                "title": "Extraction Function Duration",
+                "period": 300,
+                "annotations": {
+                  "horizontal": [{
+                    "value": ${ExecutionTimeThresholdMs},
+                    "label": "Threshold (${ExecutionTimeThresholdMs}ms)",
+                    "color": "#ff0000"
+                  }]
+                },
+                "stat": "Average",
+                "view": "timeSeries"
+              }
+            },
+            {
+              "type": "log",
+              "x": 0,
+              "y": 24,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "query": "SOURCE '${OCRFunctionLogGroup}' | filter @type = \"REPORT\" | fields @timestamp, @logStream, @billedDuration, @maxMemoryUsed/1024/1024 as memoryUsedMB | filter @billedDuration > ${ExecutionTimeThresholdMs} | sort by @billedDuration desc | limit 20",
+                "region": "${AWS::Region}",
+                "title": "OCR Lambda Long Running Invocations",
+                "view": "table"
+              }
+            },
+            {
+              "type": "log",
+              "x": 12,
+              "y": 24,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "query": "SOURCE '${OCRFunctionLogGroup}' | fields @timestamp, @logStream, @message | filter @message like /ERROR/ or @message like /Task timed out/ | parse @message /RequestId: (?<requestId>[^ ]*)/ | sort @timestamp desc | limit 20",
+                "region": "${AWS::Region}",
+                "title": "OCR Lambda Errors",
+                "view": "table"
+              }
+            },
+            {
+              "type": "log",
+              "x": 0,
+              "y": 30,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "query": "SOURCE '${ClassificationFunctionLogGroup}' | filter @type = \"REPORT\" | fields @timestamp, @logStream, @billedDuration, @maxMemoryUsed/1024/1024 as memoryUsedMB | filter @billedDuration > ${ExecutionTimeThresholdMs} | sort by @billedDuration desc | limit 20",
+                "region": "${AWS::Region}",
+                "title": "Classification Lambda Long Running Invocations",
+                "view": "table"
+              }
+            },
+            {
+              "type": "log",
+              "x": 12,
+              "y": 30,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "query": "SOURCE '${ClassificationFunctionLogGroup}' | fields @timestamp, @logStream, @message | filter @message like /ERROR/ or @message like /Task timed out/ | parse @message /RequestId: (?<requestId>[^ ]*)/ | sort @timestamp desc | limit 20",
+                "region": "${AWS::Region}",
+                "title": "Classification Lambda Errors",
+                "view": "table"
+              }
+            },
+            {
+              "type": "log",
+              "x": 0,
+              "y": 36,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "query": "SOURCE '${ExtractionFunctionLogGroup}' | filter @type = \"REPORT\" | fields @timestamp, @logStream, @billedDuration, @maxMemoryUsed/1024/1024 as memoryUsedMB | filter @billedDuration > ${ExecutionTimeThresholdMs} | sort by @billedDuration desc | limit 20",
+                "region": "${AWS::Region}",
+                "title": "Extraction Lambda Long Running Invocations",
+                "view": "table"
+              }
+            },
+            {
+              "type": "log",
+              "x": 12,
+              "y": 36,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "query": "SOURCE '${ExtractionFunctionLogGroup}' | fields @timestamp, @logStream, @message | filter @message like /ERROR/ or @message like /Task timed out/ | parse @message /RequestId: (?<requestId>[^ ]*)/ | sort @timestamp desc | limit 20",
+                "region": "${AWS::Region}",
+                "title": "Extraction Lambda Errors",
+                "view": "table"
+              }
+            }
+
+          ]
+        }
+
+Outputs:
+
+  # Outputs required by main template
+
+  StateMachineName:
+    Description: Step Functions State machine Name
+    Value: !GetAtt DocumentProcessingStateMachine.Name
+
+  StateMachineArn:
+    Description: Step Functions State machine ARN
+    Value: !GetAtt DocumentProcessingStateMachine.Arn
+  
+  StateMachineLogGroup:
+    Description: Step Functions State machine LogGroup
+    Value: !Ref StateMachineLogGroup
+
+  DashboardName:
+    Description: Name of the Pattern 1 CloudWatch Dashboard
+    Value: !Ref Dashboard
+
+  DashboardArn:
+    Description: ARN of the Pattern 1 CloudWatch Dashboard
+    Value: !Sub "arn:aws:cloudwatch::${AWS::AccountId}:dashboard/${Dashboard}"
+

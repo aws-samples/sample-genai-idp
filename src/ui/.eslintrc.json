@@ -1,0 +1,61 @@
+{
+  "env": {
+    "browser": true,
+    "es2021": true,
+    "jest/globals": true
+  },
+  "root": true,
+  "extends": ["plugin:react/recommended", "airbnb", "plugin:prettier/recommended"],
+  "parserOptions": {
+    "ecmaFeatures": {
+      "jsx": true
+    },
+    "ecmaVersion": 12,
+    "sourceType": "module"
+  },
+  "plugins": ["react", "prettier", "eslint-plugin-jest", "import"],
+  "rules": {
+    "no-console": "off",
+    "no-alert": "off",
+    "max-len": ["error", { "code": 120, "ignoreUrls": true, "ignoreTemplateLiterals": true }],
+    "linebreak-style": ["error", "unix"],
+    "react/jsx-filename-extension": [
+      "warn",
+      {
+        "extensions": [".js", ".jsx"]
+      }
+    ],
+    "prettier/prettier": [
+      "error",
+      {
+        "printWidth": 120,
+        "singleQuote": true,
+        "trailingComma": "all"
+      }
+    ],
+    "object-curly-newline": [
+      "error",
+      {
+        "consistent": true
+      }
+    ],
+    "react/jsx-wrap-multilines": [
+      "off",
+      {
+        "prop": "parens-new-line"
+      }
+    ],
+    "react/function-component-definition": [
+      "error",
+      {
+        "namedComponents": "arrow-function"
+      }
+    ],
+    "import/no-unresolved": [
+      "error",
+      {
+        "ignore": ["\\.css$"]
+      }
+    ]
+  }
+}
