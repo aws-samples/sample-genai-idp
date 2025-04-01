@@ -1,129 +1,79 @@
 {
-    "StartAt": "OCRStep",
+    "Comment": "Data Automation Async Workflow",
+    "StartAt": "InvokeDataAutomation",
     "States": {
-        "OCRStep": {
-            "Type": "Task",
-            "Resource": "${OCRFunctionArn}",
-            "Parameters": {
-                "execution_arn.$": "$$.Execution.Id",
-                "output_bucket": "${OutputBucket}",
-                "input.$": "$"
-            },
-            "ResultPath": "$.OCRResult",
-            "Retry": [
-                {
-                    "ErrorEquals": [
-                        "Lambda.ServiceException",
-                        "Lambda.AWSLambdaException",
-                        "Lambda.SdkClientException",
-                        "Lambda.TooManyRequestsException",
-                        "ServiceQuotaExceededException",
-                        "ThrottlingException",
-                        "ProvisionedThroughputExceededException",
-                        "RequestLimitExceeded"
-                    ],
-                    "IntervalSeconds": 2,
-                    "MaxAttempts": 2,
-                    "BackoffRate": 2
-                }
-            ],
-            "Next": "ClassificationStep"
+      "InvokeDataAutomation": {
+        "Type": "Task",
+        "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+        "Parameters": {
+          "FunctionName": "${InvokeBDALambdaArn}",
+          "Payload": {
+            "taskToken.$": "$$.Task.Token",
+            "execution_arn.$": "$$.Execution.Id",
+            "output_bucket": "${OutputBucket}",
+            "working_bucket": "${WorkingBucket}",
+            "BDAProjectArn": "${BDAProjectArn}",
+            "input.$": "$"
+          }
         },
-        "ClassificationStep": {
-            "Type": "Task",
-            "Resource": "${ClassificationFunctionArn}",
-            "Parameters": {
-                "execution_arn.$": "$$.Execution.Id",
-                "output_bucket": "${OutputBucket}",
-                "OCRResult.$": "$.OCRResult"
-            },
-            "ResultPath": "$.ClassificationResult",
-            "Retry": [
-                {
-                    "ErrorEquals": [
-                        "Lambda.ServiceException",
-                        "Lambda.AWSLambdaException",
-                        "Lambda.SdkClientException",
-                        "Lambda.TooManyRequestsException",
-                        "ServiceQuotaExceededException",
-                        "ThrottlingException",
-                        "ProvisionedThroughputExceededException",
-                        "RequestLimitExceeded"
-                    ],
-                    "IntervalSeconds": 2,
-                    "MaxAttempts": 10,
-                    "BackoffRate": 2
-                }
+        "ResultPath": "$.BDAResponse",
+        "Retry": [
+          {
+            "ErrorEquals": [
+              "Lambda.ServiceException",
+              "Lambda.SdkClientException",
+              "Lambda.TooManyRequestsException",
+              "ServiceQuotaExceededException",
+              "ThrottlingException",
+              "ProvisionedThroughputExceededException",
+              "RequestLimitExceeded"
             ],
-            "Next": "ProcessPageGroups"
+            "IntervalSeconds": 2,
+            "MaxAttempts": 10,
+            "BackoffRate": 2
+          }
+        ],
+        "Next": "ProcessResults",
+        "Catch": [
+            {
+              "ErrorEquals": [
+                "States.ALL"
+              ],
+              "Next": "FailState"
+            }
+          ]        
+      },
+      "ProcessResults": {
+        "Type": "Task",
+        "Resource": "${ProcessResultsLambdaArn}",
+        "Parameters": {
+          "execution_arn.$": "$$.Execution.Id",
+          "output_bucket": "${OutputBucket}",
+          "BDAResponse.$": "$.BDAResponse"
         },
-        "ProcessPageGroups": {
-            "Type": "Map",
-            "ItemsPath": "$.ClassificationResult.sections",
-            "ItemSelector": {
-                "execution_arn.$": "$$.Execution.Id",
-                "output_bucket": "${OutputBucket}",
-                "metadata.$": "$.ClassificationResult.metadata",
-                "section.$": "$$.Map.Item.Value"
-            },
-            "MaxConcurrency": 10,
-            "Iterator": {
-                "StartAt": "ExtractionStep",
-                "States": {
-                    "ExtractionStep": {
-                        "Type": "Task",
-                        "Resource": "${ExtractionFunctionArn}",
-                        "Retry": [
-                            {
-                                "ErrorEquals": [
-                                    "Lambda.ServiceException",
-                                    "Lambda.AWSLambdaException",
-                                    "Lambda.SdkClientException",
-                                    "Lambda.TooManyRequestsException",
-                                    "ServiceQuotaExceededException",
-                                    "ThrottlingException",
-                                    "ProvisionedThroughputExceededException",
-                                    "RequestLimitExceeded"
-                                ],
-                                "IntervalSeconds": 2,
-                                "MaxAttempts": 10,
-                                "BackoffRate": 2
-                            }
-                        ],
-                        "End": true
-                    }
-                }
-            },
-            "ResultPath": "$.ExtractionResults",
-            "Next": "ProcessResultsStep"
-        },
-        "ProcessResultsStep": {
-            "Type": "Task",
-            "Resource": "${ProcessResultsLambdaArn}",
-            "Parameters": {
-                "execution_arn.$": "$$.Execution.Id",
-                "output_bucket": "${OutputBucket}",
-                "metadata.$": "$.ClassificationResult.metadata",
-                "extraction_results.$": "$.ExtractionResults"
-            },
-            "Retry": [
-                {
-                    "ErrorEquals": [
-                        "Lambda.ServiceException",
-                        "Lambda.AWSLambdaException",
-                        "Lambda.SdkClientException",
-                        "Lambda.TooManyRequestsException",
-                        "ServiceQuotaExceededException",
-                        "ThrottlingException",
-                        "ProvisionedThroughputExceededException",
-                        "RequestLimitExceeded"
-                    ],
-                    "IntervalSeconds": 2,
-                    "MaxAttempts": 10,
-                    "BackoffRate": 2
-                }
-            ],
-            "End": true
-        }
+        "Retry": [
+            {
+                "ErrorEquals": [
+                    "Lambda.ServiceException",
+                    "Lambda.AWSLambdaException",
+                    "Lambda.SdkClientException",
+                    "Lambda.TooManyRequestsException",
+                    "ServiceQuotaExceededException",
+                    "ThrottlingException",
+                    "ProvisionedThroughputExceededException",
+                    "RequestLimitExceeded"
+                ],
+                "IntervalSeconds": 2,
+                "MaxAttempts": 10,
+                "BackoffRate": 2
+            }
+        ],
+        "End": true
+      },
+      "FailState": {
+        "Type": "Fail",
+        "Cause": "Data Automation Job Failed",
+        "Error": "JobFailedException"
+      }
     }
-}
+  }

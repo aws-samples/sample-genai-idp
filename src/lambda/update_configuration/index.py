@@ -83,13 +83,12 @@ def handler(event: Dict[str, Any], context: Any) -> None:
             }, physical_id)
             
         elif request_type == 'Delete':
-            # Delete all configurations
-            delete_configuration('Schema')
-            delete_configuration('Default')
-            delete_configuration('Custom')
-            
+            # Do nothing on delete - preserve any existing configuration otherwise 
+            # data is lost during custom resource replacement (cleanup step), e.g. 
+            # if nested stack name or resource name is changed
+            logger.info("Delete - no op...")            
             cfnresponse.send(event, context, cfnresponse.SUCCESS, {
-                'Message': 'Successfully deleted configurations'
+                'Message': 'Sucess (delete = no-op)'
             }, physical_id)
             
     except Exception as e:

@@ -2,7 +2,7 @@
 
 AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
-Description: AWS GenAI IDP Accelerator (uksb-r8evguc4p9) (v0.2.9)
+Description: AWS GenAI IDP Accelerator (uksb-r8evguc4p9) (v0.2.14)
 
 Parameters:
 
@@ -30,29 +30,22 @@ Parameters:
   # Pattern selection
   IDPPattern:
     Type: String
-    Default: Pattern1 - Packet processing with Textract, SageMaker(UDOP), and Bedrock
+    Default: Pattern1 - Packet or Media processing with Bedrock Data Automation (BDA)
     AllowedValues:
-      - Pattern1 - Packet processing with Textract, SageMaker(UDOP), and Bedrock
+      - Pattern1 - Packet or Media processing with Bedrock Data Automation (BDA)
       - Pattern2 - Packet processing with Textract and Bedrock
-      - Pattern3 - Packet or Media processing with Bedrock Data Automation (BDA)
+      - Pattern3 - Packet processing with Textract, SageMaker(UDOP), and Bedrock
     Description: >-
       Built-in IDP workflow patterns - see README for pattern descriptions.
 
   # Pattern 1 Parameters
 
-  Pattern1UDOPModelArtifactPath:
+  Pattern1BDAProjectArn:
     Type: String
     Default: ""
-    AllowedPattern: "^(|s3://.*)$"
-    Description: For Pattern1, provide S3 path to the UDOP model.tar.gz file (e.g., s3://bucket-name/path/to/model.tar.gz)
+    AllowedPattern: "^(|^arn:aws:bedrock:[a-z0-9-]+:.+:data-automation-project/.+)$"
+    Description: For Pattern3, provide a Bedrock Data Automation (BDA) project ARN, or leave blank to create a sample project for processing the sample lending package.
 
-  Pattern1ExtractionModel:
-    Type: String
-    Default: "us.anthropic.claude-3-5-sonnet-20241022-v2:0"
-    AllowedValues:
-      - "us.anthropic.claude-3-5-sonnet-20241022-v2:0"
-      - "us.amazon.nova-pro-v1:0"
-    Description: Model to use for Extraction
 
   # Pattern 2 Parameters
 
@@ -86,11 +79,19 @@ Parameters:
 
   # Pattern 3 Parameters
 
-  Pattern3BDAProjectArn:
+  Pattern3UDOPModelArtifactPath:
     Type: String
     Default: ""
-    AllowedPattern: "^(|^arn:aws:bedrock:[a-z0-9-]+:.+:data-automation-project/.+)$"
-    Description: For Pattern3, provide a Bedrock Data Automation (BDA) project ARN, or leave blank to create a sample project for processing the sample lending package.
+    AllowedPattern: "^(|s3://.*)$"
+    Description: For Pattern1, provide S3 path to the UDOP model.tar.gz file (e.g., s3://bucket-name/path/to/model.tar.gz)
+
+  Pattern3ExtractionModel:
+    Type: String
+    Default: "us.anthropic.claude-3-5-sonnet-20241022-v2:0"
+    AllowedValues:
+      - "us.anthropic.claude-3-5-sonnet-20241022-v2:0"
+      - "us.amazon.nova-pro-v1:0"
+    Description: Model to use for Extraction
 
   # Optional - Post processing Lambda hook
   PostProcessingLambdaHookFunctionArn:
@@ -247,14 +248,14 @@ Parameters:
 Rules:
   # Pattern 1 rules
 
-  Pattern1UDOPModelArtifactPath:
+  Pattern3UDOPModelArtifactPath:
     RuleCondition:
       !Equals [
         !Ref IDPPattern,
-        "Pattern1 - Packet processing with Textract, SageMaker(UDOP), and Bedrock",
+        "Pattern3 - Packet processing with Textract, SageMaker(UDOP), and Bedrock",
       ]
     Assertions:
-      - Assert: !Not [!Equals [!Ref Pattern1UDOPModelArtifactPath, ""]]
+      - Assert: !Not [!Equals [!Ref Pattern3UDOPModelArtifactPath, ""]]
         AssertDescription: UDOP Model Artifact Path is required when IDPPattern is 'Pattern1'
 
   # Pattern 2 rules
@@ -286,7 +287,7 @@ Conditions:
   IsPattern1:
     !Equals [
       !Ref IDPPattern,
-      "Pattern1 - Packet processing with Textract, SageMaker(UDOP), and Bedrock",
+      "Pattern1 - Packet or Media processing with Bedrock Data Automation (BDA)",
     ]
   IsPattern2:
     !Equals [
@@ -296,12 +297,12 @@ Conditions:
   IsPattern3:
     !Equals [
       !Ref IDPPattern,
-      "Pattern3 - Packet or Media processing with Bedrock Data Automation (BDA)",
+      "Pattern3 - Packet processing with Textract, SageMaker(UDOP), and Bedrock",
     ]
   ShouldCreateBDASampleProject: 
     !And [
-      !Condition IsPattern3,
-      !Equals [!Ref Pattern3BDAProjectArn, ""]
+      !Condition IsPattern1,
+      !Equals [!Ref Pattern1BDAProjectArn, ""]
     ]
 
   # General rules
@@ -331,8 +332,7 @@ Metadata:
       - Label:
           default: "Pattern 1 Configuration"
         Parameters:
-          - Pattern1UDOPModelArtifactPath
-          - Pattern1ExtractionModel
+          - Pattern1BDAProjectArn
       - Label:
           default: "Pattern 2 Configuration"
         Parameters:
@@ -343,7 +343,8 @@ Metadata:
       - Label:
           default: "Pattern 3 Configuration"
         Parameters:
-          - Pattern3BDAProjectArn
+          - Pattern3UDOPModelArtifactPath
+          - Pattern3ExtractionModel
       - Label:
           default: "Post Processing Configuration"
         Parameters:
@@ -377,9 +378,9 @@ Metadata:
         default: "Allowed Sign Up Email Domain"
       IDPPattern:
         default: "Prefdefined Document Processing Pattern"
-      Pattern1UDOPModelArtifactPath:
+      Pattern3UDOPModelArtifactPath:
         default: "Pattern1 - UDOP Model Artifact Path"
-      Pattern1ExtractionModel:
+      Pattern3ExtractionModel:
         default: "Pattern1 - Extraction Model"
       Pattern2ExtractionModel:
         default: "Pattern1 - Extraction Model"
@@ -387,8 +388,8 @@ Metadata:
         default: "Pattern2 - Custom Classification Model ARN"
       Pattern2CustomExtractionModelARN:
         default: "Pattern2 - Custom Extraction Model ARN"
-      Pattern3BDAProjectArn:
-        default: "Pattern3 - Packet or Media processing with Bedrock Data Automation (BDA) Project ARN"
+      Pattern1BDAProjectArn:
+        default: "Pattern1 - Packet or Media processing with Bedrock Data Automation (BDA) Project ARN"
       PostProcessingLambdaHookFunctionArn:
         default: "Post Processing Lambda Hook Function ARN"
       EvaluationBaselineBucketName:
@@ -456,12 +457,16 @@ Resources:
       Parameters:
         StackName: !Ref AWS::StackName
         InputBucket: !Ref InputBucket
+        WorkingBucket: !Ref WorkingBucket
         OutputBucket: !Ref OutputBucket
+        TrackingTable: !Ref TrackingTable
         CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
         LogRetentionDays: !Ref LogRetentionDays
         ExecutionTimeThresholdMs: !Ref ExecutionTimeThresholdMs
-        UDOPModelArtifactPath: !Ref Pattern1UDOPModelArtifactPath
-        ExtractionModel: !Ref Pattern1ExtractionModel
+        BDAProjectArn: !If
+          - ShouldCreateBDASampleProject
+          - !GetAtt BDASAMPLEPROJECT.Outputs.ProjectArn
+          - !Ref Pattern1BDAProjectArn
         UpdateConfigurationFunctionArn: !GetAtt UpdateConfigurationFunction.Arn
         ConfigurationTable: !Ref ConfigurationTable
 
@@ -493,16 +498,12 @@ Resources:
       Parameters:
         StackName: !Ref AWS::StackName
         InputBucket: !Ref InputBucket
-        WorkingBucket: !Ref WorkingBucket
         OutputBucket: !Ref OutputBucket
-        TrackingTable: !Ref TrackingTable
         CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
         LogRetentionDays: !Ref LogRetentionDays
         ExecutionTimeThresholdMs: !Ref ExecutionTimeThresholdMs
-        BDAProjectArn: !If
-          - ShouldCreateBDASampleProject
-          - !GetAtt BDASAMPLEPROJECT.Outputs.ProjectArn
-          - !Ref Pattern3BDAProjectArn
+        UDOPModelArtifactPath: !Ref Pattern3UDOPModelArtifactPath
+        ExtractionModel: !Ref Pattern3ExtractionModel
         UpdateConfigurationFunctionArn: !GetAtt UpdateConfigurationFunction.Arn
         ConfigurationTable: !Ref ConfigurationTable
 
@@ -1324,12 +1325,12 @@ Resources:
       Environment:
         Variables:
           STATE_MACHINE_ARN: !If
-            - IsPattern1
-            - !GetAtt PATTERN1STACK.Outputs.StateMachineArn
+            - IsPattern3
+            - !GetAtt PATTERN3STACK.Outputs.StateMachineArn
             - !If
               - IsPattern2
               - !GetAtt PATTERN2STACK.Outputs.StateMachineArn
-              - !GetAtt PATTERN3STACK.Outputs.StateMachineArn
+              - !GetAtt PATTERN1STACK.Outputs.StateMachineArn
           APPSYNC_API_URL: !GetAtt GraphQLApi.GraphQLUrl
           CONCURRENCY_TABLE: !Ref ConcurrencyTable
           MAX_CONCURRENT: !Ref MaxConcurrentWorkflows
@@ -1338,12 +1339,12 @@ Resources:
             QueueName: !GetAtt DocumentQueue.QueueName
         - StepFunctionsExecutionPolicy:
             StateMachineName: !If
-              - IsPattern1
-              - !GetAtt PATTERN1STACK.Outputs.StateMachineName
+              - IsPattern3
+              - !GetAtt PATTERN3STACK.Outputs.StateMachineName
               - !If
                 - IsPattern2
                 - !GetAtt PATTERN2STACK.Outputs.StateMachineName
-                - !GetAtt PATTERN3STACK.Outputs.StateMachineName
+                - !GetAtt PATTERN1STACK.Outputs.StateMachineName
         - DynamoDBCrudPolicy:
             TableName: !Ref TrackingTable
         - DynamoDBCrudPolicy:
@@ -1477,12 +1478,12 @@ Resources:
         detail:
           stateMachineArn:
             - !If
-              - IsPattern1
-              - !GetAtt PATTERN1STACK.Outputs.StateMachineArn
+              - IsPattern3
+              - !GetAtt PATTERN3STACK.Outputs.StateMachineArn
               - !If
                 - IsPattern2
                 - !GetAtt PATTERN2STACK.Outputs.StateMachineArn
-                - !GetAtt PATTERN3STACK.Outputs.StateMachineArn
+                - !GetAtt PATTERN1STACK.Outputs.StateMachineArn
           status:
             - FAILED
             - TIMED_OUT
@@ -1518,12 +1519,12 @@ Resources:
         detail:
           stateMachineArn:
             - !If
-              - IsPattern1
-              - !GetAtt PATTERN1STACK.Outputs.StateMachineArn
+              - IsPattern3
+              - !GetAtt PATTERN3STACK.Outputs.StateMachineArn
               - !If
                 - IsPattern2
                 - !GetAtt PATTERN2STACK.Outputs.StateMachineArn
-                - !GetAtt PATTERN3STACK.Outputs.StateMachineArn
+                - !GetAtt PATTERN1STACK.Outputs.StateMachineArn
           status:
             - SUCCEEDED
       State: ENABLED
@@ -1640,12 +1641,12 @@ Resources:
         detail:
           stateMachineArn:
             - !If
-              - IsPattern1
-              - !GetAtt PATTERN1STACK.Outputs.StateMachineArn
+              - IsPattern3
+              - !GetAtt PATTERN3STACK.Outputs.StateMachineArn
               - !If
                 - IsPattern2
                 - !GetAtt PATTERN2STACK.Outputs.StateMachineArn
-                - !GetAtt PATTERN3STACK.Outputs.StateMachineArn
+                - !GetAtt PATTERN1STACK.Outputs.StateMachineArn
           status:
             - SUCCEEDED
       State: ENABLED
@@ -1694,12 +1695,12 @@ Resources:
       Dimensions:
         - Name: StateMachineArn
           Value: !If
-            - IsPattern1
-            - !GetAtt PATTERN1STACK.Outputs.StateMachineArn
+            - IsPattern3
+            - !GetAtt PATTERN3STACK.Outputs.StateMachineArn
             - !If
               - IsPattern2
               - !GetAtt PATTERN2STACK.Outputs.StateMachineArn
-              - !GetAtt PATTERN3STACK.Outputs.StateMachineArn
+              - !GetAtt PATTERN1STACK.Outputs.StateMachineArn
       AlarmActions:
         - !Ref AlertsTopic
 
@@ -1717,12 +1718,12 @@ Resources:
       Dimensions:
         - Name: StateMachineArn
           Value: !If
-            - IsPattern1
-            - !GetAtt PATTERN1STACK.Outputs.StateMachineArn
+            - IsPattern3
+            - !GetAtt PATTERN3STACK.Outputs.StateMachineArn
             - !If
               - IsPattern2
               - !GetAtt PATTERN2STACK.Outputs.StateMachineArn
-              - !GetAtt PATTERN3STACK.Outputs.StateMachineArn
+              - !GetAtt PATTERN1STACK.Outputs.StateMachineArn
       AlarmActions:
         - !Ref AlertsTopic
 
@@ -2098,19 +2099,19 @@ Resources:
             ]
           }
         - StateMachineArn: !If
-            - IsPattern1
-            - !GetAtt PATTERN1STACK.Outputs.StateMachineArn
+            - IsPattern3
+            - !GetAtt PATTERN3STACK.Outputs.StateMachineArn
             - !If
               - IsPattern2
               - !GetAtt PATTERN2STACK.Outputs.StateMachineArn
-              - !GetAtt PATTERN3STACK.Outputs.StateMachineArn
+              - !GetAtt PATTERN1STACK.Outputs.StateMachineArn
           StateMachineLogGroup: !If
-            - IsPattern1
-            - !GetAtt PATTERN1STACK.Outputs.StateMachineLogGroup
+            - IsPattern3
+            - !GetAtt PATTERN3STACK.Outputs.StateMachineLogGroup
             - !If
               - IsPattern2
               - !GetAtt PATTERN2STACK.Outputs.StateMachineLogGroup
-              - !GetAtt PATTERN3STACK.Outputs.StateMachineLogGroup
+              - !GetAtt PATTERN1STACK.Outputs.StateMachineLogGroup
 
   DashboardMergerFunction:
     Type: AWS::Serverless::Function
@@ -2153,12 +2154,12 @@ Resources:
       ServiceToken: !GetAtt DashboardMergerFunction.Arn
       Dashboard1Name: !Ref MainTemplateSubsetDashboard
       Dashboard2Name: !If
-        - IsPattern1
-        - !GetAtt PATTERN1STACK.Outputs.DashboardName
+        - IsPattern3
+        - !GetAtt PATTERN3STACK.Outputs.DashboardName
         - !If
           - IsPattern2
           - !GetAtt PATTERN2STACK.Outputs.DashboardName
-          - !GetAtt PATTERN3STACK.Outputs.DashboardName
+          - !GetAtt PATTERN1STACK.Outputs.DashboardName
       MergedDashboardName: !Sub "${AWS::StackName}-${AWS::Region}"
       ChangeToForceUpdate: <HASH_TOKEN> # Source code hash set by publish script
 
@@ -2201,12 +2202,12 @@ Resources:
                 - !Sub
                   - "arn:aws:states:${AWS::Region}:${AWS::AccountId}:execution:${StateMachineName}*"
                   - StateMachineName: !If
-                      - IsPattern1
-                      - !GetAtt PATTERN1STACK.Outputs.StateMachineName
+                      - IsPattern3
+                      - !GetAtt PATTERN3STACK.Outputs.StateMachineName
                       - !If
                         - IsPattern2
                         - !GetAtt PATTERN2STACK.Outputs.StateMachineName
-                        - !GetAtt PATTERN3STACK.Outputs.StateMachineName
+                        - !GetAtt PATTERN1STACK.Outputs.StateMachineName
             - Effect: Allow
               Action:
                 - kms:Encrypt
@@ -3744,23 +3745,23 @@ Outputs:
   StateMachineArn:
     Description: Step Functions State machine ARN
     Value: !If
-      - IsPattern1
-      - !GetAtt PATTERN1STACK.Outputs.StateMachineArn
+      - IsPattern3
+      - !GetAtt PATTERN3STACK.Outputs.StateMachineArn
       - !If
         - IsPattern2
         - !GetAtt PATTERN2STACK.Outputs.StateMachineArn
-        - !GetAtt PATTERN3STACK.Outputs.StateMachineArn
+        - !GetAtt PATTERN1STACK.Outputs.StateMachineArn
   StateMachineConsoleURL:
     Description: Step Functions State machine console URL
     Value: !Sub
       - https://${AWS::Region}.console.aws.amazon.com/states/home?region=${AWS::Region}#/statemachines/view/${StateMachineArn}
       - StateMachineArn: !If
-          - IsPattern1
-          - !GetAtt PATTERN1STACK.Outputs.StateMachineArn
+          - IsPattern3
+          - !GetAtt PATTERN3STACK.Outputs.StateMachineArn
           - !If
             - IsPattern2
             - !GetAtt PATTERN2STACK.Outputs.StateMachineArn
-            - !GetAtt PATTERN3STACK.Outputs.StateMachineArn
+            - !GetAtt PATTERN1STACK.Outputs.StateMachineArn
 
   CWDashboardConsoleName:
     Description: Name of the merged CloudWatch dashboard

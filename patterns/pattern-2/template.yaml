@@ -59,15 +59,55 @@ Resources:
       Schema:
         type: object
         required:
-          - info
+          - notes
+          - classes
           - classification
           - extraction
         properties:
-          info:
+          notes:
+            order: 1
             type: string
-            description: Description of the configuration section
+            description: Notes
+          classes:
+            order: 2
+            type: array
+            sectionLabel: Class definitions
+            listLabel: Classes
+            itemLabel: Class
+            columns: 2
+            items:
+              type: object
+              required:
+                - name
+                - description
+                - attributes
+              properties:
+                name:
+                  type: string
+                  description: Class name
+                description:
+                  type: string
+                  description: Class description
+                attributes:
+                  type: array
+                  listLabel: Attributes
+                  itemLabel: Attribute
+                  items:
+                    type: object
+                    required:
+                      - name
+                      - description
+                    properties:
+                      name:
+                        type: string
+                        description: Attribute name
+                      description:
+                        type: string
+                        description: Attribute description
           classification:
+            order: 3
             type: object
+            sectionLabel: Classification Inference
             required:
               - model
               - temperature
@@ -92,9 +132,12 @@ Resources:
                 description: System prompt
               task_prompt:
                 type: string
-                description: Task prompt - include parameter {DOCUMENT_TEXT}
+                description: Task prompt - include parameters {DOCUMENT_TEXT} (replaced by the OCR output), and {CLASS_NAMES_AND_DESCRIPTIONS} (replaced with the class names and descriptions for all specified classes)
           extraction:
+            order: 4
             type: object
+            format: section
+            sectionLabel: Extraction Inference
             required:
               - model
               - temperature
@@ -119,7 +162,39 @@ Resources:
                 description: System prompt
               task_prompt:
                 type: string
-                description: Task prompt - include parameters {DOCUMENT_CLASS} and {DOCUMENT_TEXT}
+                description: Task prompt - supports parameters {DOCUMENT_CLASS} (replaced with the detected class label), {ATTRIBUTE_NAMES_AND_DESCRIPTIONS} (replaced with the attribute names and descriptions for the detected class), and {DOCUMENT_TEXT} (replaced by the OCR output). 
+          pricing:
+            order: 5
+            type: array
+            sectionLabel: Pricing (Estimates only - check https://aws.amazon.com/bedrock/pricing/ & https://aws.amazon.com/textract/pricing/)
+            listLabel: Services
+            itemLabel: Service/API
+            columns: 2
+            items:
+              type: object
+              required:
+                - name
+                - units
+              properties:
+                name:
+                  type: string
+                  description: Service/API
+                units:
+                  type: array
+                  listLabel: Metered unit pricing
+                  itemLabel: Metered Unit price
+                  items:
+                    type: object
+                    required:
+                      - name
+                      - price
+                    properties:
+                      name:
+                        type: string
+                        description: Metered unit name
+                      price:
+                        type: number
+                        description: Estimated cost/unit
     UpdateReplacePolicy: Delete
     DeletionPolicy: Delete
 
@@ -128,7 +203,287 @@ Resources:
     Properties:
       ServiceToken: !Ref UpdateConfigurationFunctionArn
       Default:
-        info: Default inference settings for classification and extraction
+        notes: Default inference settings for classification and extraction
+        classes:
+          - name: letter
+            description: A formal written message that is typically sent from one person to another
+            attributes:
+              - name: sender_name
+                description: The name of the person or entity who wrote or sent the letter. Look for text following or near terms like 'from', 'sender', 'authored by', 'written by', or at the end of the letter before a signature.
+              - name: sender_address
+                description: The physical address of the sender, typically appearing at the top of the letter. May be labeled as 'address', 'location', or 'from address'.
+              - name: recipient_name
+                description: The name of the person or entity receiving the letter. Look for this after 'to', 'recipient', 'addressee', or at the beginning of the letter.
+              - name: recipient_address
+                description: The physical address where the letter is to be delivered. Often labeled as 'to address' or 'delivery address', typically appearing below the recipient name.
+              - name: date
+                description: The date when the letter was written. Look for a standalone date or text following phrases like 'written on' or 'dated'.
+              - name: subject
+                description: The topic or main point of the letter. Often preceded by 'subject', 'RE:', or 'regarding'.
+              - name: letter_type
+                description: The category or classification of the letter, such as 'complaint', 'inquiry', 'invitation', etc. May be indicated by 'type' or 'category'.
+              - name: signature
+                description: The handwritten name or mark of the sender at the end of the letter. May follow terms like 'signed by' or simply appear at the bottom of the document.
+              - name: cc
+                description: Names of people who receive a copy of the letter in addition to the main recipient. Often preceded by 'cc', 'carbon copy', or 'copy to'.
+              - name: reference_number
+                description: An identifying number or code associated with the letter. Look for labels like 'ref', 'reference', or 'our ref'.
+
+          - name: form
+            description: A document with blank spaces for filling in information
+            attributes:
+              - name: form_type
+                description: The category or purpose of the form, such as 'application', 'registration', 'request', etc. May be identified by 'form name', 'document type', or 'form category'.
+              - name: form_id
+                description: The unique identifier for the form, typically a number or alphanumeric code. Often labeled as 'form number', 'id', or 'reference number'.
+              - name: submission_date
+                description: The date when the form was submitted or filed. Look for text near 'date', 'submitted on', or 'filed on'.
+              - name: submitter_name
+                description: The name of the person who submitted the form. May be labeled as 'name', 'submitted by', or 'filed by'.
+              - name: submitter_id
+                description: An identification number for the person submitting the form, such as social security number, employee ID, etc. Often labeled as 'id number', 'identification', or 'reference'.
+              - name: approval_status
+                description: The current state of approval for the form, such as 'approved', 'pending', 'rejected', etc. Look for terms like 'status', 'approved', or 'pending'.
+              - name: processed_by
+                description: The name of the person or department that processed the form. May be indicated by 'processor', 'handled by', or 'approved by'.
+              - name: processing_date
+                description: The date when the form was processed or completed. Look for labels like 'processed on' or 'completion date'.
+              - name: department
+                description: The organizational unit responsible for the form. Often abbreviated as 'dept' or may appear as 'department' or 'division'.
+              - name: comments
+                description: Additional notes or remarks about the form. Look for sections labeled 'notes', 'remarks', or 'comments'.
+
+          - name: invoice
+            description: A commercial document issued by a seller to a buyer relating to a sale
+            attributes:
+              - name: invoice_number
+                description: The unique identifier for the invoice. Look for 'invoice no', 'invoice #', or 'bill number', typically near the top of the document.
+              - name: invoice_date
+                description: The date when the invoice was issued. May be labeled as 'date', 'invoice date', or 'billing date'.
+              - name: due_date
+                description: The deadline by which payment must be made. Look for 'due date', 'payment due', or 'payable by'.
+              - name: vendor_name
+                description: The name of the business providing goods or services. May be labeled as 'vendor', 'seller', 'supplier', or simply appear prominently at the top of the invoice.
+              - name: vendor_address
+                description: The physical location of the vendor. Look for 'address', 'location', or 'business address', typically near the vendor name.
+              - name: customer_name
+                description: The name of the person or entity being billed. Often preceded by 'customer', 'buyer', or 'bill to'.
+              - name: customer_address
+                description: The address where the invoice is sent or goods are delivered. May be labeled as 'billing address' or 'ship to'.
+              - name: items
+                description: Descriptions of the products or services provided. Look for a section with 'description', 'item details', or 'products', usually in a table format.
+              - name: quantities
+                description: The number of each item provided. Often abbreviated as 'qty' or may appear as 'quantity' or 'amount' in a table column.
+              - name: unit_prices
+                description: The cost per unit of each item. May be labeled as 'price', 'rate', or 'unit cost'.
+              - name: subtotal
+                description: The sum of all items before tax and other charges. Look for 'subtotal' or 'net amount', typically found toward the bottom of the invoice.
+              - name: tax
+                description: The amount of tax charged on the invoice. May be labeled as 'tax', 'VAT', or 'GST', usually appearing after the subtotal.
+              - name: total_amount
+                description: The final amount to be paid including all charges. Look for 'total', 'grand total', or 'amount due', typically the last figure on the invoice.
+              - name: payment_terms
+                description: The conditions under which payment should be made, such as '30 days', 'COD', etc. Often labeled as 'terms', 'payment terms', or 'conditions'.
+              - name: po_number
+                description: The purchase order reference number. May be abbreviated as 'PO' or appear as 'purchase order' or 'order reference'.
+
+          - name: resume
+            description: A document summarizing a person's background, skills, and qualifications
+            attributes:
+              - name: full_name
+                description: The complete name of the job applicant, typically appearing prominently at the top of the resume. May be simply labeled as 'name' or 'applicant name'.
+              - name: contact_info
+                description: The phone number, email, and address of the applicant. Look for a section with 'contact', 'phone', 'email', or 'address', usually near the top of the resume.
+              - name: objective
+                description: A statement outlining the applicant's career goals. May be labeled as 'objective', 'summary', or 'profile', typically appearing early in the resume.
+              - name: education
+                description: The academic history and qualifications of the applicant. Look for a section with 'education', 'academic background', or 'qualifications'.
+              - name: experience
+                description: The work history and previous roles of the applicant. Often labeled as 'experience', 'work history', or 'employment'.
+              - name: skills
+                description: The abilities and competencies of the applicant. Look for a section titled 'skills', 'competencies', or 'expertise'.
+              - name: certifications
+                description: Professional credentials and qualifications. May be labeled as 'certifications', 'certificates', or 'credentials'.
+              - name: languages
+                description: Languages known and level of proficiency. Often appears in a section labeled 'languages' or 'language proficiency'.
+              - name: references
+                description: People who can vouch for the applicant's abilities. Look for 'references' or 'referees', typically at the end of the resume.
+              - name: achievements
+                description: Notable accomplishments and recognition. May be labeled as 'achievements', 'accomplishments', or 'awards'.
+
+          - name: scientific_publication
+            description: A formally published document presenting scientific research findings
+            attributes:
+              - name: title
+                description: The name of the scientific paper, typically appearing prominently at the beginning. May be labeled as 'title', 'paper title', or 'article title'.
+              - name: authors
+                description: The researchers who conducted the study and wrote the paper. Look for names after 'authors', 'contributors', or 'researchers', usually following the title.
+              - name: abstract
+                description: A brief summary of the paper's content. Often labeled as 'abstract' or 'summary', appearing before the main text.
+              - name: keywords
+                description: Terms that represent the core topics of the paper. Look for a list labeled 'keywords' or 'key terms', typically after the abstract.
+              - name: publication_date
+                description: The date when the paper was published. May be preceded by 'published' or labeled as 'publication date'.
+              - name: journal_name
+                description: The name of the journal where the paper was published. Look for text following 'journal' or 'publication'.
+              - name: volume
+                description: The volume number of the journal. Often abbreviated as 'vol' or may appear as 'volume'.
+              - name: issue
+                description: The issue number of the journal. May be labeled as 'issue' or abbreviated as 'no'.
+              - name: pages
+                description: The page range of the paper in the journal. Often abbreviated as 'pp' or may appear as 'pages'.
+              - name: doi
+                description: The Digital Object Identifier for the paper, a unique alphanumeric string. Look for 'DOI' or 'digital object identifier'.
+              - name: funding
+                description: Financial support received for the research. May be indicated by 'funding', 'grants', or 'financial support'.
+              - name: corresponding_author
+                description: The author responsible for communication regarding the paper. Look for 'corresponding author' or 'contact author'.
+              - name: institutions
+                description: The organizations with which the authors are affiliated. May be labeled as 'affiliations' or 'institutions'.
+
+          - name: memo
+            description: A brief written message used for internal communication within an organization
+            attributes:
+              - name: memo_date
+                description: The date when the memo was written. Look for 'date' or 'memo date', typically near the top of the document.
+              - name: from
+                description: The person or department that wrote the memo. May be labeled as 'from', 'sender', or 'author'.
+              - name: to
+                description: The intended recipient of the memo. Look for text after 'to', 'recipient', or 'addressee'.
+              - name: subject
+                description: The topic of the memo. Often preceded by 'subject', 'RE:', or 'regarding'.
+              - name: memo_type
+                description: The category or classification of the memo, such as 'informational', 'directive', etc. May be indicated by 'type' or 'category'.
+              - name: priority
+                description: The urgency level of the memo, such as 'urgent', 'high', 'normal', etc. Look for 'priority' or 'urgency'.
+              - name: distribution_list
+                description: Additional people who receive copies of the memo. May be labeled as 'distribution', 'cc', or 'copy'.
+              - name: reference_number
+                description: An identifying number or code for the memo. Look for 'reference' or 'ref no'.
+              - name: department
+                description: The organizational unit issuing the memo. Often abbreviated as 'dept' or may appear as 'department' or 'division'.
+              - name: action_required
+                description: Steps that should be taken in response to the memo. Look for 'action', 'response needed', or 'next steps'.
+
+          - name: advertisement
+            description: A public notice promoting a product, service, or event
+            attributes:
+              - name: product_name
+                description: The name of the item or service being advertised. Look for prominently displayed text that could be a 'product', 'item', or 'service' name.
+              - name: brand
+                description: The company or manufacturer of the product. May be indicated by a logo or text labeled as 'brand', 'company', or 'manufacturer'.
+              - name: price
+                description: The cost of the product or service. Look for currency symbols or numbers followed by terms like 'price', 'cost', or 'special offer'.
+              - name: promotion_details
+                description: Information about special deals or discounts. May be introduced with 'promotion', 'offer', or 'deal'.
+              - name: validity_period
+                description: The timeframe during which the offer is valid. Look for phrases like 'valid until', 'offer ends', or 'expires'.
+              - name: contact_info
+                description: How to reach the advertiser. May include phone numbers, websites, or addresses following 'contact', 'call', or 'visit'.
+              - name: features
+                description: Notable qualities or benefits of the product. Often listed under 'features', 'benefits', or 'highlights'.
+              - name: terms_conditions
+                description: Legal constraints or limitations of the offer. Look for fine print labeled as 'terms', 'conditions', or 'restrictions'.
+              - name: call_to_action
+                description: What the advertisement encourages the reader to do. Often appears as imperative phrases like 'call now', 'visit today', or 'order now'.
+              - name: disclaimer
+                description: Legal statements limiting liability or making clarifications. Usually appears as fine print introduced by 'disclaimer' or phrases like 'terms apply' or 'conditions apply'.
+
+          - name: email
+            description: An electronic message sent from one person to another over a computer network
+            attributes:
+              - name: from_address
+                description: The email address of the sender. Look for text following 'from', 'sender', or 'sent by', typically at the beginning of the email header.
+              - name: to_address
+                description: The email address of the primary recipient. May be labeled as 'to', 'recipient', or 'sent to'.
+              - name: cc_address
+                description: Email addresses of additional recipients who receive copies. Look for 'cc' or 'carbon copy' followed by one or more email addresses.
+              - name: bcc_address
+                description: Email addresses of hidden recipients. May be labeled as 'bcc' or 'blind copy'.
+              - name: subject
+                description: The topic of the email. Often preceded by 'subject', 'RE:', or 'regarding'.
+              - name: date_sent
+                description: The date and time when the email was sent. Look for 'date', 'sent on', or 'received', typically in the email header.
+              - name: attachments
+                description: Files included with the email. May be indicated by 'attached', 'attachment', or 'enclosed', often with icons or file names.
+              - name: priority
+                description: The urgency level of the email, such as 'high', 'normal', etc. Look for 'priority' or 'importance'.
+              - name: thread_id
+                description: An identifier for the email conversation. May be labeled as 'thread' or 'conversation', typically not visible to regular users.
+              - name: message_id
+                description: A unique identifier for the specific email. Look for 'message id' or 'email id', usually hidden in the email metadata.
+
+          - name: questionnaire
+            description: A set of written questions designed to collect information from respondents
+            attributes:
+              - name: form_title
+                description: The name or title of the questionnaire. Look for prominently displayed text at the beginning that could be a 'title', 'survey name', or 'questionnaire name'.
+              - name: respondent_info
+                description: Information about the person completing the questionnaire. May include fields labeled 'respondent', 'participant', or 'name'.
+              - name: submission_date
+                description: The date when the questionnaire was completed. Look for 'date', 'completed on', or 'submitted'.
+              - name: section_headers
+                description: Titles for different segments of the questionnaire. Often appear as bold or larger text introducing a new 'section', 'part', or 'segment'.
+              - name: question_types
+                description: The format of questions (multiple choice, free text, etc.). May be indicated by 'type', 'question format', or 'response format'.
+              - name: response_options
+                description: Possible answers for multiple-choice questions. Look for checkboxes, radio buttons, or dropdown menus with 'options', 'choices', or 'answers'.
+              - name: required_fields
+                description: Questions that must be answered to complete the questionnaire. Often marked with an asterisk (*) or explicitly labeled as 'required', 'mandatory', or 'must answer'.
+              - name: instructions
+                description: Guidance on how to complete the questionnaire. Look for text introduced by 'instructions', 'directions', or 'guidelines'.
+              - name: survey_id
+                description: A unique identifier for the questionnaire. May be labeled as 'survey id', 'reference number', or 'form id'.
+              - name: completion_status
+                description: Whether the questionnaire has been fully completed. Look for indicators of 'status', 'completion', or 'progress', often shown as a percentage or progress bar.
+
+          - name: specification
+            description: A detailed description of technical requirements or characteristics
+            attributes:
+              - name: product_name
+                description: The name of the item being specified. Look for text labeled as 'product', 'item', or 'model', typically appearing prominently at the beginning.
+              - name: version
+                description: The iteration or release number. May be indicated by 'version', 'revision', or 'release', often followed by a number or code.
+              - name: technical_details
+                description: Specific characteristics and capabilities. Look for sections labeled 'specifications', 'tech specs', or 'details', often presented in a detailed list.
+              - name: requirements
+                description: Necessary conditions or resources. May be introduced with 'requirements', 'prerequisites', or 'needed'.
+              - name: compatibility
+                description: What the product can work with. Look for text following 'compatible with', 'works with', or 'supports'.
+              - name: dimensions
+                description: Physical measurements of the product. Often labeled as 'dimensions', 'size', or 'measurements', usually including length, width, height, etc.
+              - name: materials
+                description: What the product is made from. May be indicated by 'materials', 'composition', or phrases like 'made from'.
+              - name: standards
+                description: Industry guidelines or certifications met. Look for references to 'standards', 'certifications', or 'compliance'.
+              - name: revision_history
+                description: Record of changes to the specification. Often labeled as 'revisions', 'changes', or 'updates', typically in a table format.
+              - name: approval_info
+                description: Details about who has validated the specification. May be indicated by phrases like 'approved by', 'certified by', or 'validated'.
+
+          - name: generic
+            description: A general document type that doesn't fit into other specific categories
+            attributes:
+              - name: document_type
+                description: The classification or category of the document. Look for terms like 'type', 'category', or 'class' that indicate what kind of document this is.
+              - name: document_date
+                description: The date when the document was created. May be labeled as 'date', 'created on', or 'issued on'.
+              - name: document_id
+                description: A unique identifier for the document. Look for 'id', 'reference', or 'number', typically appearing near the top of the document.
+              - name: title
+                description: The name or heading of the document. Often appears prominently at the beginning, may be labeled as 'title', 'heading', or 'subject'.
+              - name: author
+                description: The person who created the document. Look for 'author', 'creator', or 'sender'.
+              - name: recipient
+                description: The person for whom the document is intended. May be indicated by 'recipient', 'to', or 'addressee'.
+              - name: content_summary
+                description: A brief description of the document's contents. Look for 'summary', 'abstract', or 'overview', typically appearing early in the document.
+              - name: status
+                description: The current state of the document, such as 'draft', 'final', 'pending', etc. May be labeled as 'status', 'state', or 'condition'.
+              - name: department
+                description: The organizational unit associated with the document. Often abbreviated as 'dept' or may appear as 'department' or 'division'.
+              - name: comments
+                description: Additional notes or remarks about the document. Look for sections labeled 'notes', 'remarks', or 'comments'.
         classification:
           model: !Ref ClassificationModel
           temperature: 0
@@ -146,22 +501,7 @@ Resources:
           task_prompt: |
             Classify this document into exactly one of these RVL-CDIP categories:
 
-            letter
-            form
-            email
-            handwritten
-            advertisement
-            scientific_report
-            scientific_publication
-            specification
-            file_folder
-            news_article
-            budget
-            invoice
-            presentation
-            questionnaire
-            resume
-            memo
+            {CLASS_NAMES_AND_DESCRIPTIONS}
 
             Respond only with a JSON object containing the class label. For example: {{"class": "letter"}}
 
@@ -176,23 +516,16 @@ Resources:
             You are a document assistant. Respond only with JSON. Never make up data, only provide data found in the document being provided.
           task_prompt: |
             <background>
-            You are an expert in business document analysis and information extraction. You can understand and extract key information from various types of business documents including letters, memos, financial documents, scientific papers, news articles, advertisements, emails, forms, handwritten notes, invoices, purchase orders, questionnaires, resumes, scientific publications, and specifications.
-            A business document serves multiple purposes:
-            Communication of information between parties
-            Record keeping of business transactions or decisions
-            Legal documentation of agreements or requirements
-            Historical archival of business activities
-            Reference material for future use
-            Each document type has its own structure, purpose, and key information elements that need to be extracted.
+            You are an expert in business document analysis and information extraction. 
+            You can understand and extract key information from business documents classified as type 
+            {DOCUMENT_CLASS}.
             </background>
-            <document_class>
-            {DOCUMENT_CLASS}
-            </document_class>
             <document_ocr_data>
             {DOCUMENT_TEXT}
             </document_ocr_data>
             <task>
-            Your task is to take the unstructured text provided and convert it into a well-organized table format using JSON. Identify the main entities, attributes, or categories mentioned in the text based on the document class and use them as keys in the JSON object. Then, extract the relevant information from the text and populate the corresponding values in the JSON object. 
+            Your task is to take the unstructured text provided and convert it into a well-organized table format using JSON. Identify the main entities, attributes, or categories mentioned in the attributes list below and use them as keys in the JSON object. 
+            Then, extract the relevant information from the text and populate the corresponding values in the JSON object. 
             Guidelines:
             Ensure that the data is accurately represented and properly formatted within the JSON structure
             Include double quotes around all keys and values
@@ -202,154 +535,28 @@ Resources:
             All dates should be in MM/DD/YYYY format
             Do not perform calculations or summations unless totals are explicitly given
             If an alias is not found in the document, return null
-            Here are the attributes you should extract based on the document class:
+            Here are the attributes you should extract:
             <attributes>
-            {
-                "document_class_attributes": {
-                    "letter": {
-                    "sender_name": ["from", "sender", "authored by", "written by"],
-                    "sender_address": ["address", "location", "from address"],
-                    "recipient_name": ["to", "recipient", "addressee"],
-                    "recipient_address": ["to address", "delivery address"],
-                    "date": ["date", "written on", "dated"],
-                    "subject": ["subject", "re:", "regarding"],
-                    "letter_type": ["type", "category"],
-                    "signature": ["signed by", "signature"],
-                    "cc": ["cc", "carbon copy", "copy to"],
-                    "reference_number": ["ref", "reference", "our ref"]
-                    },
-                    "form": {
-                    "form_type": ["form name", "document type", "form category"],
-                    "form_id": ["form number", "id", "reference number"],
-                    "submission_date": ["date", "submitted on", "filed on"],
-                    "submitter_name": ["name", "submitted by", "filed by"],
-                    "submitter_id": ["id number", "identification", "reference"],
-                    "approval_status": ["status", "approved", "pending"],
-                    "processed_by": ["processor", "handled by", "approved by"],
-                    "processing_date": ["processed on", "completion date"],
-                    "department": ["dept", "department", "division"],
-                    "comments": ["notes", "remarks", "comments"]
-                    },
-                    "invoice": {
-                    "invoice_number": ["invoice no", "invoice #", "bill number"],
-                    "invoice_date": ["date", "invoice date", "billing date"],
-                    "due_date": ["due date", "payment due", "payable by"],
-                    "vendor_name": ["vendor", "seller", "supplier"],
-                    "vendor_address": ["address", "location", "business address"],
-                    "customer_name": ["customer", "buyer", "bill to"],
-                    "customer_address": ["billing address", "ship to"],
-                    "items": ["description", "item details", "products"],
-                    "quantities": ["qty", "quantity", "amount"],
-                    "unit_prices": ["price", "rate", "unit cost"],
-                    "subtotal": ["subtotal", "net amount"],
-                    "tax": ["tax", "vat", "gst"],
-                    "total_amount": ["total", "grand total", "amount due"],
-                    "payment_terms": ["terms", "payment terms", "conditions"],
-                    "po_number": ["po", "purchase order", "order reference"]
-                    },
-                    "resume": {
-                    "full_name": ["name", "applicant name"],
-                    "contact_info": ["contact", "phone", "email", "address"],
-                    "objective": ["objective", "summary", "profile"],
-                    "education": ["education", "academic background", "qualifications"],
-                    "experience": ["experience", "work history", "employment"],
-                    "skills": ["skills", "competencies", "expertise"],
-                    "certifications": ["certifications", "certificates", "credentials"],
-                    "languages": ["languages", "language proficiency"],
-                    "references": ["references", "referees"],
-                    "achievements": ["achievements", "accomplishments", "awards"]
-                    },
-                    "scientific_publication": {
-                    "title": ["title", "paper title", "article title"],
-                    "authors": ["authors", "contributors", "researchers"],
-                    "abstract": ["abstract", "summary"],
-                    "keywords": ["keywords", "key terms"],
-                    "publication_date": ["published", "publication date"],
-                    "journal_name": ["journal", "publication"],
-                    "volume": ["volume", "vol"],
-                    "issue": ["issue", "no"],
-                    "pages": ["pages", "pp"],
-                    "doi": ["doi", "digital object identifier"],
-                    "funding": ["funding", "grants", "financial support"],
-                    "corresponding_author": ["corresponding author", "contact author"],
-                    "institutions": ["affiliations", "institutions"]
-                    },
-                    "memo": {
-                    "memo_date": ["date", "memo date"],
-                    "from": ["from", "sender", "author"],
-                    "to": ["to", "recipient", "addressee"],
-                    "subject": ["subject", "re:", "regarding"],
-                    "memo_type": ["type", "category"],
-                    "priority": ["priority", "urgency"],
-                    "distribution_list": ["distribution", "cc", "copy"],
-                    "reference_number": ["reference", "ref no"],
-                    "department": ["department", "dept", "division"],
-                    "action_required": ["action", "response needed", "next steps"]
-                    },
-                    "advertisement": {
-                    "product_name": ["product", "item", "service"],
-                    "brand": ["brand", "company", "manufacturer"],
-                    "price": ["price", "cost", "special offer"],
-                    "promotion_details": ["promotion", "offer", "deal"],
-                    "validity_period": ["valid until", "offer ends", "expires"],
-                    "contact_info": ["contact", "call", "visit"],
-                    "features": ["features", "benefits", "highlights"],
-                    "terms_conditions": ["terms", "conditions", "restrictions"],
-                    "call_to_action": ["call now", "visit today", "order now"],
-                    "disclaimer": ["disclaimer", "terms apply", "conditions apply"]
-                    },
-                    "email": {
-                    "from_address": ["from", "sender", "sent by"],
-                    "to_address": ["to", "recipient", "sent to"],
-                    "cc_address": ["cc", "carbon copy"],
-                    "bcc_address": ["bcc", "blind copy"],
-                    "subject": ["subject", "re:", "regarding"],
-                    "date_sent": ["date", "sent on", "received"],
-                    "attachments": ["attached", "attachment", "enclosed"],
-                    "priority": ["priority", "importance"],
-                    "thread_id": ["thread", "conversation"],
-                    "message_id": ["message id", "email id"]
-                    },
-                    "questionnaire": {
-                    "form_title": ["title", "survey name", "questionnaire name"],
-                    "respondent_info": ["respondent", "participant", "name"],
-                    "submission_date": ["date", "completed on", "submitted"],
-                    "section_headers": ["section", "part", "segment"],
-                    "question_types": ["type", "question format", "response format"],
-                    "response_options": ["options", "choices", "answers"],
-                    "required_fields": ["required", "mandatory", "must answer"],
-                    "instructions": ["instructions", "directions", "guidelines"],
-                    "survey_id": ["survey id", "reference number", "form id"],
-                    "completion_status": ["status", "completion", "progress"]
-                    },
-                    "specification": {
-                    "product_name": ["product", "item", "model"],
-                    "version": ["version", "revision", "release"],
-                    "technical_details": ["specifications", "tech specs", "details"],
-                    "requirements": ["requirements", "prerequisites", "needed"],
-                    "compatibility": ["compatible with", "works with", "supports"],
-                    "dimensions": ["dimensions", "size", "measurements"],
-                    "materials": ["materials", "composition", "made from"],
-                    "standards": ["standards", "certifications", "compliance"],
-                    "revision_history": ["revisions", "changes", "updates"],
-                    "approval_info": ["approved by", "certified by", "validated"]
-                    },
-                    "generic": {
-                    "document_type": ["type", "category", "class"],
-                    "document_date": ["date", "created on", "issued on"],
-                    "document_id": ["id", "reference", "number"],
-                    "title": ["title", "heading", "subject"],
-                    "author": ["author", "creator", "sender"],
-                    "recipient": ["recipient", "to", "addressee"],
-                    "content_summary": ["summary", "abstract", "overview"],
-                    "status": ["status", "state", "condition"],
-                    "department": ["department", "dept", "division"],
-                    "comments": ["notes", "remarks", "comments"]
-                    }
-                }
-            }
+            {ATTRIBUTE_NAMES_AND_DESCRIPTIONS}
             </attributes>
             </task>
+        pricing:
+          - name: textract/detect_document_text
+            units:
+              - name: pages
+                price: 0.0015
+          - name: bedrock/us.amazon.nova-pro-v1:0
+            units:
+              - name: inputTokens
+                price: 0.0000008
+              - name: outputTokens
+                price: 0.0000032
+          - name: bedrock/us.anthropic.claude-3-5-sonnet-20241022-v2:0
+            units:
+              - name: inputTokens
+                price: 0.000003
+              - name: outputTokens
+                price: 0.000015
     UpdateReplacePolicy: Delete
     DeletionPolicy: Delete
 
@@ -590,7 +797,7 @@ Resources:
   DocumentProcessingStateMachine:
     Type: AWS::Serverless::StateMachine
     Properties:
-      Name: !Sub "${StackName}-DocumentProcessingWorkflow"
+      Name: !Sub "${AWS::StackName}-DocumentProcessingWorkflow"
       DefinitionUri: statemachine/workflow.asl.json
       DefinitionSubstitutions:
         OCRFunctionArn: !GetAtt OCRFunction.Arn

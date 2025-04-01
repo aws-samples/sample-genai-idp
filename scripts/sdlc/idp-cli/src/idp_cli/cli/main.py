@@ -102,7 +102,7 @@ def monitor_pipeline(
     pipeline_name: str = typer.Option(..., "--pipeline-name", help="Name of the CodePipeline to monitor"),
     initial_wait: int = typer.Option(10, "--initial-wait", help="Initial wait time in seconds before monitoring"),
     poll_interval: int = typer.Option(30, "--poll-interval", help="Time in seconds between status checks"),
-    max_wait: int = typer.Option(60, "--max-wait", help="Maximum wait time in minutes")
+    max_wait: int = typer.Option(90, "--max-wait", help="Maximum wait time in minutes")
 ):
     """
     Monitor a CodePipeline execution until completion
@@ -118,7 +118,19 @@ def monitor_pipeline(
         )
         
         typer.echo("Pipeline execution completed successfully!")
+
     except Exception as e:
         logger.exception(f"Error monitoring pipeline: {str(e)}")
         typer.echo(f"Pipeline monitoring failed: {str(e)}", err=True)
-        sys.exit(1)
+        try:
+            log_messages = CodePipelineUtil.get_stage_logs(
+                pipeline_name=pipeline_name,
+                stage_name="Build"
+            )
+            typer.echo(f"---\nCodebuild logs:")
+            for message in log_messages:
+                typer.echo(message)
+        except Exception as e:
+            typer.echo(f"Codebuild logs failed: {str(e)}", err=True)
+        finally:
+            sys.exit(1)

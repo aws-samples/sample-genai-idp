@@ -104,15 +104,25 @@ def classify_single_page(page_id, page_data):
     text_content = get_text_content(page_data['parsedTextUri'])
     image_content = get_image_content(page_data['imageUri'])
 
+    classes_config = CONFIG["classes"]
+
+    # create a list of classes and descriptions,eg
+    #  letter   [ A formal written message that is typically sent from one person to another ]
+    #  form     [ A document with blank spaces for filling in information ]
+    CLASS_NAMES_AND_DESCRIPTIONS = '\n'.join([f"{class_obj.get('name', None)}  \t[ {class_obj.get('description', None)} ]" for class_obj in classes_config])
+
     classification_config = CONFIG["classification"]
     model_id = classification_config["model"]
     temperature = float(classification_config["temperature"])
     top_k = float(classification_config["top_k"])
     system_prompt = [{"text": classification_config["system_prompt"]}]
-    prompt_template = classification_config["task_prompt"].replace("{DOCUMENT_TEXT}", "%(DOCUMENT_TEXT)s")
+    logger.info(f"System prompt: {system_prompt}")
+    prompt_template = classification_config["task_prompt"].replace("{DOCUMENT_TEXT}", "%(DOCUMENT_TEXT)s").replace("{CLASS_NAMES_AND_DESCRIPTIONS}", "%(CLASS_NAMES_AND_DESCRIPTIONS)s")
     task_prompt = prompt_template % {
+        "CLASS_NAMES_AND_DESCRIPTIONS": CLASS_NAMES_AND_DESCRIPTIONS,
         "DOCUMENT_TEXT": text_content
     }
+    logger.info(f"Task prompt: {task_prompt}")
     content = [{"text": task_prompt}]
 
     inference_config = {"temperature": temperature}
@@ -166,6 +176,14 @@ def classify_single_page(page_id, page_data):
                 put_metric('OutputTokens', output_tokens)
                 put_metric('TotalTokens', total_tokens)
             
+            # Metering
+            usage = response.get('usage', {})
+            metering = {
+                f"bedrock/{model_id}": {
+                    **usage
+                }
+            }
+            
             # Return classification results along with page data
             classification_json = response['output']['message']['content'][0].get("text")
             final_classification = json.loads(classification_json).get("class", "Unknown")
@@ -173,6 +191,7 @@ def classify_single_page(page_id, page_data):
             return {
                 'page_id': page_id,
                 'class': final_classification,
+                'metering': metering,
                 **page_data
             }
             
@@ -181,7 +200,7 @@ def classify_single_page(page_id, page_data):
             error_message = e.response['Error']['Message']
             
             if error_code in ['ThrottlingException', 'ServiceQuotaExceededException',
-                            'RequestLimitExceeded', 'TooManyRequestsException']:
+                            'RequestLimitExceeded', 'TooManyRequestsException', 'ServiceUnavailableException']:
                 retry_count += 1
                 put_metric('BedrockThrottles', 1)
                 
@@ -266,6 +285,7 @@ def classify_pages_concurrently(pages):
     """Classify multiple pages concurrently using a thread pool"""
     all_results = []
     futures = []
+    metering = {}
     
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
         for page_num, page_data in pages.items():
@@ -275,15 +295,46 @@ def classify_pages_concurrently(pages):
         for future in as_completed(futures):
             try:
                 result = future.result()
+                page_metering = result.pop("metering", {})
                 all_results.append(result)
+                
+                # Merge metering
+                for service_api, metrics in page_metering.items():
+                    for unit, value in metrics.items():
+                        if service_api not in metering:
+                            metering[service_api] = {}
+                        metering[service_api][unit] = metering[service_api].get(unit, 0) + value
             except Exception as e:
                 logger.error(f"Error in concurrent classification: {str(e)}")
                 raise
     
-    return all_results
+    return all_results, metering
 
 def handler(event, context):
-    """Lambda handler function"""
+    """
+    Input event containing page level OCR and image data from OCR step:
+    {
+        "execution_arn": <ARN>,
+        "output_bucket": <BUCKET>,
+        "OCRResult": {
+            "metadata": {
+                "input_bucket": <BUCKET>,
+                "object_key": <KEY>,
+                "output_bucket": <BUCKET>,
+                "output_prefix": <PREFIX>,
+                "num_pages": <NUMBER OF PAGES IN ORIGINAL INPUT DOC>,
+                "metering: {"<service_api>": {"<unit>": <value>}}
+            }
+        },
+        "pages": {
+            <ID>: {
+                        "rawTextUri": <S3_URI>,
+                        "parsedTextUri": <S3_URI>,
+                        "imageUri": <S3_URI>
+            }
+        }
+    }
+    """
     logger.info(f"Event: {json.dumps(event)}")
     logger.info(f"Config: {json.dumps(CONFIG)}")  
     
@@ -298,16 +349,31 @@ def handler(event, context):
     total_pages = len(pages)
     put_metric('BedrockRequestsTotal', total_pages)
     
-    all_results = classify_pages_concurrently(pages)
+    all_results, classification_metering = classify_pages_concurrently(pages)
     
     t1 = time.time()
     logger.info(f"Time taken for classification: {t1-t0:.2f} seconds")
 
     sections = group_consecutive_pages(all_results)
     
+    # Merge incoming metering with classification metering
+    incoming_metering = metadata.pop("metering", {})
+    merged_metering = classification_metering.copy()  # Start with classification metering
+    
+    # Merge with incoming metering data
+    for service_api, metrics in incoming_metering.items():
+        if isinstance(metrics, dict):
+            for unit, value in metrics.items():
+                if service_api not in merged_metering:
+                    merged_metering[service_api] = {}
+                merged_metering[service_api][unit] = merged_metering[service_api].get(unit, 0) + value
+        else:
+            logger.warning(f"Unexpected metering data format for {service_api}: {metrics}")
+    logger.info(f"Merged metering data: {json.dumps(merged_metering)}")
+    metadata["metering"] = merged_metering
     response = {
         "metadata": metadata,
-        "sections": sections
+        "sections": sections,
     }
 
     return response

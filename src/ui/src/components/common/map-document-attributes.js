@@ -17,6 +17,7 @@ const mapDocumentsAttributes = (documents) => {
       Sections: sections,
       Pages: pages,
       PageCount: pageCount,
+      Metering: meteringJson,
       EvaluationReportUri: evaluationReportUri,
       ListPK: listPK,
       ListSK: listSK,
@@ -32,6 +33,16 @@ const mapDocumentsAttributes = (documents) => {
       return `${Math.floor(duration / 60000)}:${String(Math.floor((duration / 1000) % 60)).padStart(2, '0')}`;
     };
 
+    // Parse metering data if available
+    let metering = null;
+    if (meteringJson) {
+      try {
+        metering = JSON.parse(meteringJson);
+      } catch (error) {
+        console.error('Error parsing metering data:', error);
+      }
+    }
+
     const mapping = {
       objectKey,
       objectStatus,
@@ -45,6 +56,7 @@ const mapDocumentsAttributes = (documents) => {
       sections,
       pages,
       pageCount,
+      metering,
       evaluationReportUri,
       listPK,
       listSK,

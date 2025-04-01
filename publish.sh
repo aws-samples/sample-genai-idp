@@ -204,7 +204,7 @@ fi
 echo "OUTPUTS"
 echo Template URL: $TEMPLATE_URL
 echo CF Launch URL: https://${REGION}.console.aws.amazon.com/cloudformation/home?region=${REGION}#/stacks/create/review?templateURL=${TEMPLATE_URL}\&stackName=IDP
-echo CLI Deploy: aws cloudformation deploy --region $REGION --template-file .aws-sam/${MAIN_TEMPLATE} --s3-bucket ${BUCKET} --s3-prefix ${PREFIX_AND_VERSION} --capabilities CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND --parameter-overrides IDPPattern="Pattern3 - Packet or Media processing with Bedrock Data Automation (BDA)" Pattern3BDAProjectArn="<your-bda=project-arn" AdminEmail="your-email-address" "<other params>" --stack-name "<your-stack-name>"
+echo CLI Deploy: aws cloudformation deploy --region $REGION --template-file .aws-sam/${MAIN_TEMPLATE} --s3-bucket ${BUCKET} --s3-prefix ${PREFIX_AND_VERSION} --capabilities CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND --parameter-overrides IDPPattern="Pattern1 - Packet or Media processing with Bedrock Data Automation (BDA)" Pattern1BDAProjectArn="<your-bda=project-arn" AdminEmail="your-email-address" "<other params>" --stack-name "<your-stack-name>"
 echo Done
 exit 0
 

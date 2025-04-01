@@ -1,1 +1,2 @@
 requests
+./lib/appsync_helper_pkg  # appsync_helper package

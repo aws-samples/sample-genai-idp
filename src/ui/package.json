@@ -25,6 +25,7 @@
     "aws-amplify": "^5.3.11",
     "axios": "^0.29.0",
     "graphql-tag": "^2.12.6",
+    "js-yaml": "^4.1.0",
     "prop-types": "^15.8.1",
     "react": "^17.0.2",
     "react-dom": "^17.0.2",

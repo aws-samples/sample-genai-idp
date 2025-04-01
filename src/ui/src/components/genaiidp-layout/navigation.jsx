@@ -4,14 +4,20 @@ import { React } from 'react';
 import { Route, Switch, useLocation } from 'react-router-dom';
 import { SideNavigation } from '@awsui/components-react';
 
-import { DOCUMENTS_PATH, DOCUMENTS_KB_QUERY_PATH, DEFAULT_PATH, UPLOAD_DOCUMENT_PATH } from '../../routes/constants';
+import {
+  DOCUMENTS_PATH,
+  DOCUMENTS_KB_QUERY_PATH,
+  DEFAULT_PATH,
+  UPLOAD_DOCUMENT_PATH,
+  CONFIGURATION_PATH,
+} from '../../routes/constants';
 
 export const documentsNavHeader = { text: 'Tools', href: `#${DEFAULT_PATH}` };
 export const documentsNavItems = [
   { type: 'link', text: 'Document List', href: `#${DOCUMENTS_PATH}` },
   { type: 'link', text: 'Document KB', href: `#${DOCUMENTS_KB_QUERY_PATH}` },
   { type: 'link', text: 'Upload Document(s)', href: `#${UPLOAD_DOCUMENT_PATH}` },
-  { type: 'link', text: 'View/Edit Configuration', href: `#${DOCUMENTS_PATH}/config` },
+  { type: 'link', text: 'View/Edit Configuration', href: `#${CONFIGURATION_PATH}` },
   {
     type: 'section',
     text: 'Resources',
@@ -47,7 +53,11 @@ const Navigation = ({
   const location = useLocation();
   const path = location.pathname;
   let activeHref = `#${DEFAULT_PATH}`;
-  if (path.includes(DOCUMENTS_KB_QUERY_PATH)) {
+
+  // Determine active link based on current path, most specific routes first
+  if (path.includes(CONFIGURATION_PATH)) {
+    activeHref = `#${CONFIGURATION_PATH}`;
+  } else if (path.includes(DOCUMENTS_KB_QUERY_PATH)) {
     activeHref = `#${DOCUMENTS_KB_QUERY_PATH}`;
   } else if (path.includes(UPLOAD_DOCUMENT_PATH)) {
     activeHref = `#${UPLOAD_DOCUMENT_PATH}`;

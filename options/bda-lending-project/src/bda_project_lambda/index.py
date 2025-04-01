@@ -113,167 +113,239 @@ def create_or_update_custom_blueprint(project_name):
     blueprint_schema = """{
         "$schema": "http://json-schema.org/draft-07/schema#",
         "description": "default",
-        "documentClass": "homeowners-insurance-application",
+        "class": "default",
         "type": "object",
         "definitions": {
-            "Applicant": {
+            "PRIMARY_APPLICANT": {
                 "type": "object",
                 "properties": {
-                    "name": {
+                    "Name": {
                         "type": "string",
-                        "inferenceType": "extractive",
-                        "description": "The applicant name"
+                        "inferenceType": "explicit",
+                        "instruction": "The name of the primary applicant"
                     },
-                    "date_of_birth": {
+                    "Date of Birth": {
                         "type": "string",
-                        "inferenceType": "extractive",
-                        "description": "The applicant date of birth"
+                        "inferenceType": "explicit",
+                        "instruction": "The date of birth of the primary applicant"
                     },
-                    "gender": {
+                    "Gender": {
                         "type": "string",
-                        "inferenceType": "extractive",
-                        "description": "The applicant gender"
+                        "inferenceType": "explicit",
+                        "instruction": "The gender of the primary applicant"
                     },
-                    "marital_status": {
+                    "Marital Status": {
                         "type": "string",
-                        "inferenceType": "extractive",
-                        "description": "The applicant marital status"
+                        "inferenceType": "explicit",
+                        "instruction": "The marital status of the primary applicant"
                     },
-                    "education_level": {
+                    "Education Level": {
                         "type": "string",
-                        "inferenceType": "extractive",
-                        "description": "The applicant education level"
+                        "inferenceType": "explicit",
+                        "instruction": "The education level of the primary applicant"
                     },
-                    "existing_policy": {
+                    "Existing Esurance Policy": {
                         "type": "string",
-                        "inferenceType": "extractive",
-                        "description": "Existing policy details if any"
+                        "inferenceType": "explicit",
+                        "instruction": "The existing Esurance policy number of the primary applicant"
                     },
-                    "drivers_license": {
+                    "Drivers License Number": {
                         "type": "string",
-                        "inferenceType": "extractive",
-                        "description": "Drivers license details"
+                        "inferenceType": "explicit",
+                        "instruction": "The drivers license number of the primary applicant"
                     },
-                    "dl_state": {
+                    "DL State": {
                         "type": "string",
-                        "inferenceType": "extractive",
-                        "description": "Drivers license state"
+                        "inferenceType": "explicit",
+                        "instruction": "The state that issued the drivers license of the primary applicant"
                     },
-                    "current_auto_insurer": {
+                    "Currently Insured Auto": {
                         "type": "string",
-                        "inferenceType": "extractive",
-                        "description": "Current auto insurance details"
+                        "inferenceType": "explicit",
+                        "instruction": "The current auto insurance company of the primary applicant"
                     },
-                    "time_with_current_insurer": {
+                    "Length of Time with Current Auto Carrier": {
                         "type": "string",
-                        "inferenceType": "extractive",
-                        "description": "Time with current auto insurer"
+                        "inferenceType": "explicit",
+                        "instruction": "The length of time the primary applicant has been with their current auto insurance carrier"
                     },
-                    "time_with_prior_insurer": {
+                    "Length of Time with Prior Auto Carrier": {
                         "type": "string",
-                        "inferenceType": "extractive",
-                        "description": "Time with prior auto insurer"
+                        "inferenceType": "explicit",
+                        "instruction": "The length of time the primary applicant was with their prior auto insurance carrier"
+                    },
+                    "Years with Prior Property Company": {
+                        "type": "string",
+                        "inferenceType": "explicit",
+                        "instruction": "The number of years the primary applicant was with their prior property insurance company"
+                    },
+                    "Type of Current Property Policy": {
+                        "type": "string",
+                        "inferenceType": "explicit",
+                        "instruction": "The type of current property insurance policy the primary applicant has"
                     }
                 }
             },
-            "primary_applicant": {
+            "CO_APPLICANT": {
                 "type": "object",
                 "properties": {
-                    "name": {
+                    "Name": {
                         "type": "string",
-                        "inferenceType": "extractive",
-                        "description": "The applicant name"
+                        "inferenceType": "explicit",
+                        "instruction": "The name of the co-applicant"
                     },
-                    "date_of_birth": {
+                    "Date of Birth": {
                         "type": "string",
-                        "inferenceType": "extractive",
-                        "description": "The applicant date of birth"
+                        "inferenceType": "explicit",
+                        "instruction": "The date of birth of the co-applicant"
                     },
-                    "gender": {
+                    "Gender": {
                         "type": "string",
-                        "inferenceType": "extractive",
-                        "description": "The applicant gender"
+                        "inferenceType": "explicit",
+                        "instruction": "The gender of the co-applicant"
                     },
-                    "marital_status": {
+                    "Marital Status": {
                         "type": "string",
-                        "inferenceType": "extractive",
-                        "description": "The applicant marital status"
+                        "inferenceType": "explicit",
+                        "instruction": "The marital status of the co-applicant"
                     },
-                    "education_level": {
+                    "Education Level": {
                         "type": "string",
-                        "inferenceType": "extractive",
-                        "description": "The applicant education level"
+                        "inferenceType": "explicit",
+                        "instruction": "The education level of the co-applicant"
                     },
-                    "existing_policy": {
+                    "Relationship to Primary Applicant": {
                         "type": "string",
-                        "inferenceType": "extractive",
-                        "description": "Existing policy details if any"
+                        "inferenceType": "explicit",
+                        "instruction": "The relationship of the co-applicant to the primary applicant"
                     },
-                    "drivers_license": {
+                    "Drivers License Number": {
                         "type": "string",
-                        "inferenceType": "extractive",
-                        "description": "Drivers license details"
+                        "inferenceType": "explicit",
+                        "instruction": "The drivers license number of the co-applicant"
                     },
-                    "dl_state": {
+                    "DL State": {
                         "type": "string",
-                        "inferenceType": "extractive",
-                        "description": "Drivers license state"
+                        "inferenceType": "explicit",
+                        "instruction": "The state that issued the drivers license of the co-applicant"
                     },
-                    "current_auto_insurer": {
+                    "Currently Insured- Auto": {
                         "type": "string",
-                        "inferenceType": "extractive",
-                        "description": "Current auto insurance details"
+                        "inferenceType": "explicit",
+                        "instruction": "The current auto insurance company of the co-applicant"
                     },
-                    "time_with_current_insurer": {
+                    "Length of Time with Current Auto Carrier": {
                         "type": "string",
-                        "inferenceType": "extractive",
-                        "description": "Time with current auto insurer"
+                        "inferenceType": "explicit",
+                        "instruction": "The length of time the co-applicant has been with their current auto insurance carrier"
                     },
-                    "time_with_prior_insurer": {
+                    "Length of Time with Prior Auto Carrier": {
                         "type": "string",
-                        "inferenceType": "extractive",
-                        "description": "Time with prior auto insurer"
+                        "inferenceType": "explicit",
+                        "instruction": "The length of time the co-applicant was with their prior auto insurance carrier"
+                    }
+                }
+            },
+            "AUTO_CLAIMS_ACCIDENTS_VIOLATIONS": {
+                "type": "object",
+                "properties": {
+                    "Number of Auto Accidents": {
+                        "type": "string",
+                        "inferenceType": "explicit",
+                        "instruction": "The number of auto accidents for all applicants"
+                    },
+                    "At-Fault": {
+                        "type": "string",
+                        "inferenceType": "explicit",
+                        "instruction": "The number of at-fault auto accidents for all applicants"
+                    },
+                    "Not-at-Fault": {
+                        "type": "string",
+                        "inferenceType": "explicit",
+                        "instruction": "The number of not-at-fault auto accidents for all applicants"
+                    },
+                    "Number of Violations": {
+                        "type": "string",
+                        "inferenceType": "explicit",
+                        "instruction": "The number of violations for all applicants"
+                    },
+                    "Major": {
+                        "type": "string",
+                        "inferenceType": "explicit",
+                        "instruction": "The number of major violations for all applicants"
+                    },
+                    "Minor": {
+                        "type": "string",
+                        "inferenceType": "explicit",
+                        "instruction": "The number of minor violations for all applicants"
+                    },
+                    "Number of Comp Claims": {
+                        "type": "string",
+                        "inferenceType": "explicit",
+                        "instruction": "The number of comprehensive claims for all applicants"
                     }
                 }
             }
         },
         "properties": {
-            "named_insured": {
+            "Named Insured(s) and Mailing Address": {
                 "type": "string",
-                "inferenceType": "extractive",
-                "description": "The named insured(s) and their mailing address extracted from the first section"
+                "inferenceType": "explicit",
+                "instruction": "The name and mailing address of the named insured(s)"
             },
-            "insurance_company": {
+            "Insurance Company": {
                 "type": "string",
-                "inferenceType": "extractive",
-                "description": "The insurance company name and address extracted from the second section"
+                "inferenceType": "explicit",
+                "instruction": "The name and address of the insurance company"
             },
-            "primary_email": {
+            "Primary Email": {
                 "type": "string",
-                "inferenceType": "extractive",
-                "description": "The primary email extracted from the third section"
+                "inferenceType": "explicit",
+                "instruction": "The primary email address of the insured"
             },
-            "primary_phone": {
+            "Primary Phone #": {
                 "type": "string",
-                "inferenceType": "extractive",
-                "description": "The primary phone number extracted from the third section"
+                "inferenceType": "explicit",
+                "instruction": "The primary phone number of the insured"
             },
-            "alternate_phone": {
+            "Alternate Phone #": {
                 "type": "string",
-                "inferenceType": "extractive",
-                "description": "The alternate phone number extracted from the third section"
+                "inferenceType": "explicit",
+                "instruction": "The alternate phone number of the insured"
             },
-            "insured_property": {
+            "Insured Property": {
                 "type": "string",
-                "inferenceType": "extractive",
-                "description": "The insured property address extracted from the fourth section"
+                "inferenceType": "explicit",
+                "instruction": "The address of the insured property"
             },
-            "primary_applicant": {
-                "type": "array",
-                "description": "The primary applicant information table",
-                "items": {
-                    "$ref": "#/definitions/primary_applicant"
-                }
+            "Primary Applicant Information": {
+                "$ref": "#/definitions/PRIMARY_APPLICANT"
+            },
+            "Co-Applicant Information": {
+                "$ref": "#/definitions/CO_APPLICANT"
+            },
+            "Policy Number": {
+                "type": "string",
+                "inferenceType": "explicit",
+                "instruction": "The policy number"
+            },
+            "Purchase Date and Time": {
+                "type": "string",
+                "inferenceType": "explicit",
+                "instruction": "The date and time the policy was purchased"
+            },
+            "Effective Date": {
+                "type": "string",
+                "inferenceType": "explicit",
+                "instruction": "The effective date of the policy"
+            },
+            "Expiration Date": {
+                "type": "string",
+                "inferenceType": "explicit",
+                "instruction": "The expiration date of the policy"
+            },
+            "Auto Claims, Accidents, and Violations": {
+                "$ref": "#/definitions/AUTO_CLAIMS_ACCIDENTS_VIOLATIONS"
             }
         }
     }"""
@@ -407,7 +479,7 @@ def get_project_config(project_description, all_blueprint_configs, project_name=
                     "state": "ENABLED",
                     "types": [
                         "VIDEO_SUMMARY",
-                        "SCENE_SUMMARY"
+                        "CHAPTER_SUMMARY"
                     ]
                 }
             },

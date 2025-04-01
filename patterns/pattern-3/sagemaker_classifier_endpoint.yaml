@@ -1,0 +1,176 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'CloudFormation template to deploy a SageMaker inference endpoint for UDOP model'
+
+Parameters:
+
+  StackName:
+    Type: String
+
+  S3Bucket:
+    Type: String
+
+  CustomerManagedEncryptionKeyArn:
+    Type: String
+
+  UDOPModelArtifactPath:
+    Type: String
+    AllowedPattern: "^s3://.*$"
+    Description: S3 path to the model.tar.gz file (e.g., s3://bucket-name/path/to/model.tar.gz)
+
+  InstanceType:
+    Type: String
+    Default: ml.g5.2xlarge
+    AllowedValues:
+      - ml.g4dn.2xlarge
+      - ml.g5.2xlarge
+      - ml.g5.4xlarge
+      - ml.g5.8xlarge
+      - ml.g5.16xlarge
+    Description: The ML instance type to use for the endpoint
+
+  MinInstanceCount:
+    Type: Number
+    Description: Minimum number of instances for auto-scaling
+    Default: 1
+    MinValue: 1
+
+  MaxInstanceCount:
+    Type: Number
+    Description: Maximum number of instances for auto-scaling
+    Default: 4
+    MinValue: 1
+
+  TargetInvocationsPerInstance:
+    Type: Number
+    Description: Target number of invocations per instance for auto-scaling
+    Default: 20
+    MinValue: 1
+
+  ScaleInCooldownSeconds:
+    Type: Number
+    Description: Cool-down period (in seconds) after scaling in
+    Default: 300
+    MinValue: 0
+
+  ScaleOutCooldownSeconds:
+    Type: Number
+    Description: Cool-down period (in seconds) after scaling out
+    Default: 60
+    MinValue: 0
+
+Resources:
+  UDOPExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - sagemaker.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSageMakerFullAccess
+      Policies:
+        - PolicyName: S3ModelAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:ListBucket
+                Resource:
+                  - !Join 
+                    - ''
+                    - - 'arn:aws:s3:::'
+                      - !Select [2, !Split ["/", !Ref UDOPModelArtifactPath]]
+                  - !Join 
+                    - ''
+                    - - 'arn:aws:s3:::'
+                      - !Select [2, !Split ["/", !Ref UDOPModelArtifactPath]]
+                      - '/*'
+                  - !Sub 'arn:aws:s3:::${S3Bucket}'
+                  - !Sub 'arn:aws:s3:::${S3Bucket}/*'
+              - Effect: Allow
+                Action:
+                  - kms:Encrypt
+                  - kms:Decrypt
+                  - kms:ReEncrypt*
+                  - kms:GenerateDataKey*
+                  - kms:DescribeKey
+                Resource: !Ref CustomerManagedEncryptionKeyArn
+
+  UDOPModel:
+    Type: AWS::SageMaker::Model
+    # checkov:skip=CKV_AWS_370: "Container requires network access to S3"
+    Properties:
+      ExecutionRoleArn: !GetAtt UDOPExecutionRole.Arn
+      PrimaryContainer:
+        Image: !Sub 763104351884.dkr.ecr.${AWS::Region}.amazonaws.com/pytorch-inference:2.1.0-gpu-py310
+        ModelDataUrl: !Ref UDOPModelArtifactPath
+        Environment:
+          SAGEMAKER_PROGRAM: inference.py
+          SAGEMAKER_SUBMIT_DIRECTORY: /opt/ml/model/code
+          SAGEMAKER_CONTAINER_LOG_LEVEL: 20
+          SAGEMAKER_REGION: !Ref AWS::Region
+
+  UDOPEndpointConfig:
+    Type: AWS::SageMaker::EndpointConfig
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W1200
+            reason: "KMS key fails deployment - not supported for NVMe instance storage."
+    Properties:
+      ProductionVariants:
+        - InitialInstanceCount: 1
+          InstanceType: !Ref InstanceType
+          ModelName: !GetAtt UDOPModel.ModelName
+          VariantName: AllTraffic
+          InitialVariantWeight: 1.0
+
+  UDOPEndpoint:
+    Type: AWS::SageMaker::Endpoint
+    Properties:
+      EndpointConfigName: !GetAtt UDOPEndpointConfig.EndpointConfigName
+      EndpointName: !Sub '${StackName}-SageMaker-Endpoint'
+
+  ScalingTarget:
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+    DependsOn: UDOPEndpoint
+    Properties:
+      MaxCapacity: !Ref MaxInstanceCount
+      MinCapacity: !Ref MinInstanceCount
+      ResourceId: !Sub endpoint/${UDOPEndpoint.EndpointName}/variant/AllTraffic
+      RoleARN: !Sub arn:aws:iam::${AWS::AccountId}:role/aws-service-role/sagemaker.application-autoscaling.amazonaws.com/AWSServiceRoleForApplicationAutoScaling_SageMakerEndpoint
+      ScalableDimension: sagemaker:variant:DesiredInstanceCount
+      ServiceNamespace: sagemaker
+
+  ScalingPolicy:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Properties:
+      PolicyName: !Sub ${AWS::StackName}-endpoint-scaling
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref ScalingTarget
+      TargetTrackingScalingPolicyConfiguration:
+        TargetValue: !Ref TargetInvocationsPerInstance
+        ScaleInCooldown: !Ref ScaleInCooldownSeconds
+        ScaleOutCooldown: !Ref ScaleOutCooldownSeconds
+        PredefinedMetricSpecification:
+          PredefinedMetricType: SageMakerVariantInvocationsPerInstance
+
+Outputs:
+  EndpointName:
+    Description: Name of the created SageMaker endpoint
+    Value: !GetAtt UDOPEndpoint.EndpointName
+
+  EndpointArn:
+    Description: ARN of the created SageMaker endpoint
+    Value: !Ref UDOPEndpoint
+
+  ModelName:
+    Description: Name of the created SageMaker model
+    Value: !GetAtt UDOPModel.ModelName

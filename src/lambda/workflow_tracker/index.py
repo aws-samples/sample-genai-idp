@@ -30,12 +30,19 @@ def update_document_completion(object_key: str, workflow_status: str, output_dat
     pageCount = 0
     sections = []
     pages = []
-    # Get sections and pages data if workflow succeeded
+    metering = None
+    
+    # Get sections, pages, and metering data if workflow succeeded
     if workflow_status == 'SUCCEEDED':
         sections = output_data.get("Sections",[])
         pages = output_data.get("Pages",[])
         pageCount = output_data.get("PageCount",0)
-
+        metering = output_data.get("Metering")
+        
+        # Convert metering to JSON string if it exists
+        if metering:
+            metering = json.dumps(metering)
+            logger.info(f"Metering data captured: {metering}")
     
     update_input = {
         'input': {
@@ -48,6 +55,10 @@ def update_document_completion(object_key: str, workflow_status: str, output_dat
             'Pages': pages
         }
     }
+    
+    # Add metering data if available
+    if metering:
+        update_input['input']['Metering'] = metering
     
     logger.info(f"Updating document via AppSync: {update_input}")
     result = appsync.execute_mutation(UPDATE_DOCUMENT, update_input)

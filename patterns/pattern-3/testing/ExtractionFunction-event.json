@@ -1,0 +1,26 @@
+{
+    "output_bucket": <BUCKET>,
+    "metadata": {
+        "input_bucket": <BUCKET>,
+        "object_key": <KEY>,
+        "output_bucket": <BUCKET>,
+        "output_prefix": <PREFIX>,
+        "num_pages": <NUMBER OF PAGES IN ORIGINAL INPUT DOC>
+    },
+    "execution_arn": <ARN>,
+    "section": {
+        "id": <ID>,
+        "class": <TYPE or CLASS>,
+        "pages": [
+            {
+                "page_id": <NUM>,
+                "classification": <TYPE or CLASS>,
+                "paths": {
+                    "rawTextUri": <S3_URI>,
+                    "parsedTextUri": <S3_URI>,
+                    "ImageUri": <S3_URI>
+                }
+            }
+        ]
+    }
+}
