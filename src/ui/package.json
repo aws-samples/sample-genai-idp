@@ -23,7 +23,7 @@
     "@testing-library/react": "^12.1.5",
     "@testing-library/user-event": "^13.5.0",
     "aws-amplify": "^5.3.11",
-    "axios": "^0.29.0",
+    "axios": "^1.8.4",
     "graphql-tag": "^2.12.6",
     "js-yaml": "^4.1.0",
     "prop-types": "^15.8.1",
