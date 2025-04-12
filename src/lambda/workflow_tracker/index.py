@@ -7,6 +7,7 @@ from appsync_helper import AppSyncClient, UPDATE_DOCUMENT, AppSyncError
 import requests
 from botocore.exceptions import ClientError
 from typing import Dict, Any, Optional, List
+from idp_common.models import Document, Status
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -22,7 +23,7 @@ concurrency_table = dynamodb.Table(os.environ['CONCURRENCY_TABLE'])
 COUNTER_ID = 'workflow_counter'
 
 
-def update_document_completion(object_key: str, workflow_status: str, output_data: str) -> Dict[str, Any]:
+def update_document_completion(object_key: str, workflow_status: str, output_data: Dict[str, Any]) -> Dict[str, Any]:
     """
     Update document completion status via AppSync
     """
@@ -33,11 +34,48 @@ def update_document_completion(object_key: str, workflow_status: str, output_dat
     metering = None
     
     # Get sections, pages, and metering data if workflow succeeded
-    if workflow_status == 'SUCCEEDED':
-        sections = output_data.get("Sections",[])
-        pages = output_data.get("Pages",[])
-        pageCount = output_data.get("PageCount",0)
-        metering = output_data.get("Metering")
+    if workflow_status == 'SUCCEEDED' and output_data:
+        try:
+            # Get the processed document from the output data
+            processed_result = output_data.get("ProcessedResult", {})
+            
+            if "document" in processed_result:
+                # Get document from the final processing step
+                document = Document.from_dict(processed_result.get("document", {}))
+                
+                if document.status == Status.PROCESSED:
+                    # Extract data for AppSync update
+                    pageCount = document.num_pages
+                    
+                    # Convert sections to format expected by AppSync
+                    for section in document.sections:
+                        sections.append({
+                            "Id": section.section_id,
+                            "PageIds": section.page_ids,
+                            "Class": section.classification,
+                            "OutputJSONUri": section.extraction_result_uri
+                        })
+                    
+                    # Convert pages to format expected by AppSync
+                    for page_id, page in document.pages.items():
+                        pages.append({
+                            "Id": page.page_id,
+                            "Class": page.classification,
+                            "TextUri": page.parsed_text_uri,
+                            "ImageUri": page.image_uri
+                        })
+                    
+                    # Get metering data
+                    metering = document.metering
+                    
+                    logger.info(f"Successfully extracted data from Document object with {len(document.sections)} sections and {len(document.pages)} pages")
+                else:
+                    logger.warning(f"Document not in PROCESSED state: {document.status}")
+            else:
+                logger.warning("No document found in ProcessedResult")
+                
+        except Exception as e:
+            logger.warning(f"Could not extract document data: {e}")
         
         # Convert metering to JSON string if it exists
         if metering:
@@ -162,9 +200,24 @@ def handler(event, context):
         # Extract data from event
         input_data = json.loads(event['detail']['input'])
         output_data = None
+        
         if event['detail'].get('output'):
             output_data = json.loads(event['detail']['output'])
-        object_key = input_data['detail']['object']['key']
+        
+        # Get object key - try from document first if available
+        try:
+            if "document" in input_data:
+                object_key = input_data["document"]["input_key"]
+            elif "detail" in input_data and "object" in input_data["detail"]:
+                # Fallback to original format if document not available
+                object_key = input_data['detail']['object']['key']
+            else:
+                raise ValueError("Unable to find object key in input")
+        except (KeyError, TypeError) as e:
+            logger.error(f"Error extracting object_key from input: {e}")
+            logger.error(f"Input data structure: {input_data}")
+            raise
+            
         workflow_status = event['detail']['status']
         
         # Update document completion status

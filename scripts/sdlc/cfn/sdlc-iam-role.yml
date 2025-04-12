@@ -10,6 +10,18 @@ Parameters:
 Resources:
   LimitedIAMAccessPolicy:
     Type: 'AWS::IAM::ManagedPolicy'
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: F40
+            reason: "This policy is for SDLC role that needs to provision IAM resources during deployment"
+          - id: W13
+            reason: "This policy is specifically for provisioning IDP resources with controlled scope"
+          - id: W28
+            reason: "Explicit name required for cross-stack references and predictable resource naming"
+    # checkov:skip=CKV_AWS_107: "This policy is required for SDLC role to provision IAM resources"
+    # checkov:skip=CKV_AWS_109: "This policy needs permissions management capabilities for SDLC deployment"
+    # checkov:skip=CKV_AWS_110: "This policy requires privilege escalation capabilities for SDLC deployment"
     Properties:
       Description: 'Policy for limited IAM access'
       ManagedPolicyName: 'LimitedIAMAccess'
@@ -69,6 +81,13 @@ Resources:
 
   BuilderRole:
     Type: 'AWS::IAM::Role'
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W44
+            reason: "PowerUserAccess is required for this SDLC role to perform necessary deployment operations"
+          - id: W28
+            reason: "Explicit name required for cross-stack references and predictable resource naming"
     Properties:
       RoleName: !Ref BuilderRoleName
       Description: 'Role for application builders with PowerUser and Limited IAM access'

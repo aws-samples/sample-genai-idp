@@ -2,6 +2,7 @@
 build.toml
 model.tar.gz
 .checksum
+.checksums/
 .vscode/
 .DS_Store
 dist/

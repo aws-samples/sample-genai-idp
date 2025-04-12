@@ -3,9 +3,11 @@ import os
 import boto3
 import logging
 import time
+import random
 from appsync_helper import AppSyncClient, UPDATE_DOCUMENT
 from typing import Dict, List, Any
 from botocore.exceptions import ClientError
+from idp_common.models import Document, ProcessingStage
 
 
 # Configure logging

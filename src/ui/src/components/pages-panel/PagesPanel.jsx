@@ -4,7 +4,7 @@ import { Box, Container, SpaceBetween, Table } from '@awsui/components-react';
 import { Logger } from 'aws-amplify';
 import useAppContext from '../../contexts/app';
 import generateS3PresignedUrl from '../common/generate-s3-presigned-url';
-import FileViewer from '../document-viewer/JSONViewer';
+import MarkdownJsonViewer from '../document-viewer/MarkdownJsonViewer';
 
 const logger = new Logger('PagesPanel');
 
@@ -40,7 +40,7 @@ const ThumbnailCell = ({ imageUrl }) => (
 
 const ActionsCell = ({ item }) =>
   item.TextUri ? (
-    <FileViewer fileUri={item.TextUri} fileType="json" buttonText="View/Edit Data" />
+    <MarkdownJsonViewer fileUri={item.TextUri} fileType="text" buttonText="View/Edit Data" />
   ) : (
     <Box color="text-status-inactive">No text available</Box>
   );

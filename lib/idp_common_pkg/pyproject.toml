@@ -1,0 +1,58 @@
+[build-system]
+requires = ["setuptools>=42", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "idp_common"
+version = "0.3.0"
+description = "Common utilities for GenAI IDP Accelerator patterns"
+authors = [
+    {name = "AWS", email = "noreply@amazon.com"}
+]
+requires-python = ">=3.8"
+dependencies = [
+    "boto3>=1.37.29",  # Core dependency for AWS services
+]
+readme = "README.md"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+
+# Optional dependencies for each component
+[project.optional-dependencies]
+# Core utilities only - minimal dependencies
+core = []
+
+# Image handling dependencies
+image = [
+    "Pillow>=11.1.0",
+]
+
+# OCR module dependencies
+ocr = [
+    "Pillow>=11.1.0",
+    "PyMuPDF>=1.25.5",
+    "amazon-textract-textractor>=1.9.1"
+]
+
+# Classification module dependencies
+classification = [
+    "Pillow>=11.1.0",  # For image handling
+]
+
+# Extraction module dependencies
+extraction = [
+    "Pillow>=11.1.0",  # For image handling
+]
+
+# Full package with all dependencies
+all = [
+    "Pillow>=11.1.0",
+    "PyMuPDF>=1.25.5",
+    "amazon-textract-textractor>=1.9.1",
+]
+
+[project.urls]
+"Homepage" = "https://github.com/aws-samples/genaiic-idp-accelerator"

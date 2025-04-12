@@ -1,141 +1,73 @@
 import json
 import logging
-import boto3
 import datetime
 import os
 from urllib.parse import urlparse
+from idp_common import s3, utils
+from idp_common.models import Document, Page, Section, Status
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
-s3_client = boto3.client('s3')
 
 def handler(event, context):
     """
     Consolidates the results from multiple extraction steps into a single output.
     
-    Expected event structure:
-        {
-            "output_bucket": "idp-udop-3-outputbucket-zzuuzg2qi52q",
-            "metadata": {
-                "input_bucket": <BUCKET>,
-                "object_key": <KEY>,
-                "output_bucket": <BUCKET>,
-                "output_prefix": <PREFIX>,
-                "num_pages": <NUMBER OF PAGES IN ORIGINAL INPUT DOC>
-                "metering: {"<service_api>": {"<unit>": <value>}}
-            },
-            "extraction_results": [
-                {
-                "section": {
-                    "id": <ID>,
-                    "class": <CLASS>,
-                    "page_ids": [<PAGEID>, ...],
-                    "extracted_entities": "{...}",
-                    "outputJSONUri": <S3_URI>,
-                },
-                "pages": [
-                    {
-                    "page_id": <NUM>,
-                    "class": <TYPE or CLASS>,
-                    "rawTextUri": <S3_URI>,
-                    "parsedTextUri": <S3_URI>,
-                    "imageUri": <S3_URI>
-                    }
-                ],
-                "metering: {"<service_api>": {"<unit>": <value>}},
-                ...
-            ]
-        }
-
-    The Output must observe the structure below.. it is consumed by the GenAIIDP parent stack workflow tracker to update job status/UI etc: 
-        {
-            'Sections': [
-                {
-                    "Id": <ID>,
-                    "PageIds": [<PAGEID>, ...],
-                    "Class": <CLASS>,
-                    "OutputJSONUri": <S3_URI>
-                }
-            ],
-            'Pages': [
-                "Id": <ID>,
-                "Class": <CLASS>,
-                "RawTextUri": <S3_URI>,
-                "ParsedTextUri": <S3_URI>,
-                "ImageUri": <S3_URI>
-            ],
-            'PageCount': <NUMBER OF PAGES IN ORIGINAL INPUT DOC>,
-            'Metering': {"<service>": {"<api>": {"<unit>": <value>}}}
-        }
+    Args:
+        event: Contains the document metadata and extraction results array
+        context: Lambda context
+        
+    Returns:
+        Dict containing the fully processed document
     """
     logger.info(f"Processing event: {json.dumps(event)}")
-
-    sections=[]
-    for result in event.get("extraction_results"):
-        section = result.get("section")
-        output_json_uri = section.get("outputJSONUri")
-        class_type = section.get("class")
-        
-        # Create metadata file for each OutputJSONUri
-        if output_json_uri:
-            create_metadata_file(output_json_uri, class_type, 'section')
-            
-        sections.append({
-            "Id": section.get("id"),
-            "PageIds": section.get("page_ids"),
-            "Class": class_type,
-            "OutputJSONUri": output_json_uri
-        })
-
-    pages=[]
-    for result in event.get("extraction_results"):
-        for page in result.get("pages"):
-            text_uri = page.get("rawTextUri")
-            class_type = page.get("class")
-            
-            # Create metadata file for each TextUri
-            if text_uri:
-                create_metadata_file(text_uri, class_type, 'page')
-                
-            pages.append({
-                "Id": page.get("page_id"),
-                "Class": class_type,
-                "TextUri": text_uri,
-                "ImageUri": page.get("imageUri")
-            })
     
-    # merge extraction metering into overall metering
-    metering = event.get("metadata",{}).get("metering",{})
-    for result in event.get("extraction_results"):
-        result_metering = result.get("metering", {})
-        for service_api, metrics in result_metering.items():
-            if isinstance(metrics, dict):
-                for unit, value in metrics.items():
-                    if service_api not in metering:
-                        metering[service_api] = {}
-                    metering[service_api][unit] = metering[service_api].get(unit, 0) + value
-            else:
-                logger.error(f"Unexpected metering data format for {service_api}: {metrics}")
-
-
-
-    statemachine_output = {
-        "Sections": sections,
-        "Pages": pages,
-        "PageCount": event.get("metadata").get("num_pages"),
-        "Metering": metering
+    # Get the base document from the original classification result
+    document = Document.from_dict(event.get("ClassificationResult", {}).get("document", {}))
+    extraction_results = event.get("ExtractionResults", [])
+    
+    # Update document status
+    document.status = Status.PROCESSED
+    document.completion_time = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    
+    # Clear sections list to rebuild from extraction results
+    document.sections = []
+    
+    # Combine all section results
+    for result in extraction_results:
+        # Get section document from extraction result
+        if "document" in result:
+            section_document = Document.from_dict(result.get("document", {}))
+            section_id = result.get("section_id")
+            
+            # Add section to document if present
+            if section_document.sections:
+                section = section_document.sections[0]
+                document.sections.append(section)
+                
+                # Create metadata file for section output
+                if section.extraction_result_uri:
+                    create_metadata_file(section.extraction_result_uri, section.classification, 'section')
+            
+            # Add metering from section processing
+            document.metering = utils.merge_metering_data(document.metering, section_document.metering)
+    
+    # Create metadata files for pages
+    for page_id, page in document.pages.items():
+        if page.raw_text_uri:
+            create_metadata_file(page.raw_text_uri, page.classification, 'page')
+    
+    # Return the completed document
+    response = {
+        "document": document.to_dict()
     }
-
-    return statemachine_output
+    
+    logger.info(f"Response: {json.dumps(response, default=str)}")
+    return response
 
 def create_metadata_file(file_uri, class_type, file_type=None):
     """
     Creates a metadata file alongside the given URI file with the same name plus '.metadata.json'
-    
-    Args:
-        file_uri (str): The S3 URI of the file
-        class_type (str): The class type to include in the metadata
-        file_type (str, optional): Type of file ('section' or 'page')
     """
     try:
         # Parse the S3 URI to get bucket and key
@@ -162,15 +94,9 @@ def create_metadata_file(file_uri, class_type, file_type=None):
             }
         }
         
-        # Upload metadata file to S3
-        s3_client.put_object(
-            Bucket=bucket,
-            Key=metadata_key,
-            Body=json.dumps(metadata_content, indent=2),
-            ContentType='application/json'
-        )
+        # Upload metadata file to S3 using common library
+        s3.write_content(metadata_content, bucket, metadata_key, content_type='application/json')
         
         logger.info(f"Created metadata file at s3://{bucket}/{metadata_key}")
     except Exception as e:
         logger.error(f"Error creating metadata file for {file_uri}: {str(e)}")
-        

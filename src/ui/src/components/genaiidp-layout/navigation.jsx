@@ -3,6 +3,7 @@
 import { React } from 'react';
 import { Route, Switch, useLocation } from 'react-router-dom';
 import { SideNavigation } from '@awsui/components-react';
+import useSettingsContext from '../../contexts/settings';
 
 import {
   DOCUMENTS_PATH,
@@ -53,6 +54,7 @@ const Navigation = ({
   const location = useLocation();
   const path = location.pathname;
   let activeHref = `#${DEFAULT_PATH}`;
+  const { settings } = useSettingsContext() || {};
 
   // Determine active link based on current path, most specific routes first
   if (path.includes(CONFIGURATION_PATH)) {
@@ -64,11 +66,50 @@ const Navigation = ({
   } else if (path.includes(DOCUMENTS_PATH)) {
     activeHref = `#${DOCUMENTS_PATH}`;
   }
+
+  // Create a copy of the items array to add the deployment info
+  const navigationItems = [...(items || documentsNavItems)];
+
+  // Add deployment info section if version, stack name, or build datetime is available
+  if (settings?.Version || settings?.StackName || settings?.BuildDateTime) {
+    const deploymentInfoItems = [];
+
+    if (settings?.StackName) {
+      deploymentInfoItems.push({
+        type: 'link',
+        text: `Stack Name: ${settings.StackName}`,
+        href: '#',
+      });
+    }
+
+    if (settings?.Version) {
+      deploymentInfoItems.push({
+        type: 'link',
+        text: `Version: ${settings.Version}`,
+        href: '#',
+      });
+    }
+
+    if (settings?.BuildDateTime) {
+      deploymentInfoItems.push({
+        type: 'link',
+        text: `Build: ${settings.BuildDateTime}`,
+        href: '#',
+      });
+    }
+
+    navigationItems.push({
+      type: 'section',
+      text: 'Deployment Info',
+      items: deploymentInfoItems,
+    });
+  }
+
   return (
     <Switch>
       <Route path={DOCUMENTS_PATH}>
         <SideNavigation
-          items={items || documentsNavItems}
+          items={navigationItems}
           header={header || documentsNavHeader}
           activeHref={activeHref}
           onFollow={onFollowHandler}

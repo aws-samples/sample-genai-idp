@@ -10,10 +10,9 @@
           "Payload": {
             "taskToken.$": "$$.Task.Token",
             "execution_arn.$": "$$.Execution.Id",
-            "output_bucket": "${OutputBucket}",
             "working_bucket": "${WorkingBucket}",
             "BDAProjectArn": "${BDAProjectArn}",
-            "input.$": "$"
+            "document.$": "$.document"
           }
         },
         "ResultPath": "$.BDAResponse",
@@ -33,7 +32,7 @@
             "BackoffRate": 2
           }
         ],
-        "Next": "ProcessResults",
+        "Next": "ProcessResultsStep",
         "Catch": [
             {
               "ErrorEquals": [
@@ -43,7 +42,7 @@
             }
           ]        
       },
-      "ProcessResults": {
+      "ProcessResultsStep": {
         "Type": "Task",
         "Resource": "${ProcessResultsLambdaArn}",
         "Parameters": {
@@ -51,6 +50,7 @@
           "output_bucket": "${OutputBucket}",
           "BDAResponse.$": "$.BDAResponse"
         },
+        "ResultPath": "$.ProcessedResult",
         "Retry": [
             {
                 "ErrorEquals": [

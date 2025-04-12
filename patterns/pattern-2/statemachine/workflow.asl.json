@@ -6,8 +6,7 @@
             "Resource": "${OCRFunctionArn}",
             "Parameters": {
                 "execution_arn.$": "$$.Execution.Id",
-                "output_bucket": "${OutputBucket}",
-                "input.$": "$"
+                "document.$": "$.document"
             },
             "ResultPath": "$.OCRResult",
             "Retry": [
@@ -34,7 +33,6 @@
             "Resource": "${ClassificationFunctionArn}",
             "Parameters": {
                 "execution_arn.$": "$$.Execution.Id",
-                "output_bucket": "${OutputBucket}",
                 "OCRResult.$": "$.OCRResult"
             },
             "ResultPath": "$.ClassificationResult",
@@ -55,15 +53,14 @@
                     "BackoffRate": 2
                 }
             ],
-            "Next": "ProcessPageGroups"
+            "Next": "ProcessSections"
         },
-        "ProcessPageGroups": {
+        "ProcessSections": {
             "Type": "Map",
-            "ItemsPath": "$.ClassificationResult.sections",
+            "ItemsPath": "$.ClassificationResult.document.sections",
             "ItemSelector": {
                 "execution_arn.$": "$$.Execution.Id",
-                "output_bucket": "${OutputBucket}",
-                "metadata.$": "$.ClassificationResult.metadata",
+                "document.$": "$.ClassificationResult.document",
                 "section.$": "$$.Map.Item.Value"
             },
             "MaxConcurrency": 10,
@@ -102,10 +99,10 @@
             "Resource": "${ProcessResultsLambdaArn}",
             "Parameters": {
                 "execution_arn.$": "$$.Execution.Id",
-                "output_bucket": "${OutputBucket}",
-                "metadata.$": "$.ClassificationResult.metadata",
-                "extraction_results.$": "$.ExtractionResults"
+                "ClassificationResult.$": "$.ClassificationResult",
+                "ExtractionResults.$": "$.ExtractionResults"
             },
+            "ResultPath": "$.ProcessedResult",
             "Retry": [
                 {
                     "ErrorEquals": [

@@ -61,5 +61,5 @@
             }
         }
     },
-    "execution_arn": "arn:aws:states:us-west-2:912625584728:execution:IDP-Nova-1-DocumentProcessingWorkflow:abc930ba-584f-42d7-b1c5-404da15d0eb0"
+    "execution_arn": "arn:aws:states:us-west-2:<ACCOUNTID>:execution:IDP-Nova-1-DocumentProcessingWorkflow:abc930ba-584f-42d7-b1c5-404da15d0eb0"
 }

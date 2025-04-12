@@ -112,8 +112,8 @@ def create_or_update_custom_blueprint(project_name):
     blueprint_name = f'{project_name}-homeowners-insurance-application'
     blueprint_schema = """{
         "$schema": "http://json-schema.org/draft-07/schema#",
-        "description": "default",
-        "class": "default",
+        "description": "This is a Homeowners Insurance Application form.",
+        "class": "Homeowners-Insurance-Application",
         "type": "object",
         "definitions": {
             "PRIMARY_APPLICANT": {

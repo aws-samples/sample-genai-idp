@@ -8,58 +8,121 @@
 # Stop the publish process on failures
 set -e
 
-# Check parameters
-USAGE="$0 <cfn_bucket_basename> <cfn_prefix> <region> [public]"
-BUCKET_BASENAME=$1
-[ -z "$BUCKET_BASENAME" ] && echo "Cfn bucket name is a required parameter. Usage $USAGE" && exit 1
-PREFIX=$2
-[ -z "$PREFIX" ] && echo "Prefix is a required parameter. Usage $USAGE" && exit 1
-REGION=$3
-[ -z "$REGION" ] && echo "Region is a required parameter. Usage $USAGE" && exit 1
-export AWS_DEFAULT_REGION=$REGION
-ACL=$4
-if [ "$ACL" == "public" ]; then
-  echo "Published S3 artifacts will be acessible by public (read-only)"
-  PUBLIC=true
-else
-  echo "Published S3 artifacts will NOT be acessible by public."
-  PUBLIC=false
-fi
+# Show commands being executed for debugging
+#set -x
 
-# Check local environment
-check_command() {
-    local cmd=$1
-    if ! [ -x "$(command -v $cmd)" ]; then
-        echo "Error: $cmd is required but not installed" >&2
-        return 1
-    fi
-    return 0
+############################################################
+# Configuration and Environment Check Functions
+############################################################
+
+# Print usage information
+function print_usage() {
+  echo "Usage: $0 <cfn_bucket_basename> <cfn_prefix> <region> [public]"
+  echo "  <cfn_bucket_basename>: Base name for the CloudFormation artifacts bucket"
+  echo "  <cfn_prefix>: S3 prefix for artifacts"
+  echo "  <region>: AWS region for deployment"
+  echo "  [public]: Optional. If 'public', artifacts will be made publicly readable"
 }
-commands=("aws" "sam" "sha256sum")
-for cmd in "${commands[@]}"; do
-    check_command "$cmd" || exit 1
-done
 
-# Set paths
-# Remove trailing slash from prefix if needed, and append VERSION
-VERSION=$(cat ./VERSION)
-[[ "${PREFIX}" == */ ]] && PREFIX="${PREFIX%?}"
-PREFIX_AND_VERSION=${PREFIX}/${VERSION}
-# Append region to bucket basename
-BUCKET=${BUCKET_BASENAME}-${REGION}
+# Check and validate input parameters
+function check_parameters() {
+  # Check required parameters
+  if [[ -z "$BUCKET_BASENAME" ]]; then
+    echo "Cfn bucket name is a required parameter."
+    print_usage
+    exit 1
+  fi
+  
+  if [[ -z "$PREFIX" ]]; then
+    echo "Prefix is a required parameter."
+    print_usage
+    exit 1
+  fi
+  
+  if [[ -z "$REGION" ]]; then
+    echo "Region is a required parameter."
+    print_usage
+    exit 1
+  fi
+  
+  # Set environment variables and derived values
+  export AWS_DEFAULT_REGION=$REGION
+  
+  # Remove trailing slash from prefix if needed
+  [[ "${PREFIX}" == */ ]] && PREFIX="${PREFIX%?}"
+  
+  # Append version to prefix
+  VERSION=$(cat ./VERSION)
+  PREFIX_AND_VERSION=${PREFIX}/${VERSION}
+  
+  # Append region to bucket basename
+  BUCKET=${BUCKET_BASENAME}-${REGION}
+  
+  # Set UDOP model path based on region
+  if [[ "$REGION" == "us-east-1" ]]; then
+    PUBLIC_SAMPLE_UDOP_MODEL="s3://bobs-artifacts-us-east-1/udop-finetuning/rvl-cdip/model.tar.gz"
+  elif [[ "$REGION" == "us-west-2" ]]; then
+    PUBLIC_SAMPLE_UDOP_MODEL="s3://bobs-artifacts-us-west-2/udop-finetuning/rvl-cdip/model.tar.gz"
+  else
+    PUBLIC_SAMPLE_UDOP_MODEL=""
+  fi
+  
+  # Set public flag
+  if [[ "$ACL" == "public" ]]; then
+    echo "Published S3 artifacts will be accessible by public (read-only)"
+    PUBLIC=true
+  else
+    echo "Published S3 artifacts will NOT be accessible by public."
+    PUBLIC=false
+  fi
+}
 
-# Create artifacts bucket if it doesn't already exist
-if [ -x $(aws s3api list-buckets --query 'Buckets[].Name' | grep "\"$BUCKET\"") ]; then
-  echo "Creating s3 bucket: $BUCKET"
-  aws s3 mb s3://${BUCKET} || exit 1
-  aws s3api put-bucket-versioning --bucket ${BUCKET} --versioning-configuration Status=Enabled || exit 1
-else
-  echo "Using existing bucket: $BUCKET"
-fi
+# Check for required commands
+function check_prerequisites() {
+  local commands=("aws" "sam" "sha256sum")
+  for cmd in "${commands[@]}"; do
+    if ! [ -x "$(command -v $cmd)" ]; then
+      echo "Error: $cmd is required but not installed" >&2
+      return 1
+    fi
+  done
+  
+  # Check SAM version
+  local sam_version=$(sam --version | awk '{print $4}')
+  local min_sam_version="1.129.0"
+  if [[ $(echo -e "$min_sam_version\n$sam_version" | sort -V | tail -n1) == $min_sam_version && $min_sam_version != $sam_version ]]; then
+    echo "Error: sam version >= $min_sam_version is not installed and required. (Installed version is $sam_version)" >&2
+    echo 'Install: https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/manage-sam-cli-versions.html' >&2
+    exit 1
+  fi
+  
+  # Set platform-specific commands
+  if [[ $(uname -m) == "x86_64" ]]; then
+    USE_CONTAINER_FLAG=""
+    STAT_CMD="stat --format='%Y'"
+  else
+    USE_CONTAINER_FLAG=""
+    STAT_CMD="stat -f %m"
+  fi
+}
 
+# Create bucket if necessary
+function setup_artifacts_bucket() {
+  # Check if bucket exists using a reliable approach
+  if ! aws s3api head-bucket --bucket "${BUCKET}" 2>/dev/null; then
+    echo "Creating s3 bucket: $BUCKET"
+    aws s3 mb s3://${BUCKET} || exit 1
+    aws s3api put-bucket-versioning --bucket ${BUCKET} --versioning-configuration Status=Enabled || exit 1
+  else
+    echo "Using existing bucket: $BUCKET"
+  fi
+}
 
-# Functions to check if any source files have been changed
+############################################################
+# Checksum and Change Detection Functions
+############################################################
 
+# Calculate SHA-256 hash for a directory, excluding certain paths
 function calculate_hash() {
   local directory_path=$1
   local HASH=$(
@@ -72,139 +135,332 @@ function calculate_hash() {
   )
   echo $HASH
 }
-haschanged() {
+
+############################################################
+# Checksum Helper Functions
+############################################################
+
+# Calculate directory checksum
+function get_dir_checksum() {
   local dir=$1
-  local checksum_file="${dir}/.checksum"
-  # Compute current checksum of the directory's modification times excluding specified directories, and the publish target S3 location.
-  dir_checksum=$(find "$dir" -type d \( -name "python" -o -name "node_modules" -o -name "build" -o -name ".aws-sam" \) -prune -o -type f ! -name ".checksum" -exec stat --format='%Y' {} \; | sha256sum | awk '{ print $1 }')
-  combined_string="$BUCKET $PREFIX_AND_VERSION $REGION $dir_checksum"
-  current_checksum=$(echo -n "$combined_string" | sha256sum | awk '{ print $1 }')
-  # Check if the checksum file exists and read the previous checksum
+  local dir_checksum=$(find "$dir" -type d \( -name "python" -o -name "node_modules" -o -name "build" -o -name ".aws-sam" \) -prune -o -type f ! -name ".checksum" -exec $STAT_CMD {} \; | sha256sum | awk '{ print $1 }')
+  local combined_string="$BUCKET $PREFIX_AND_VERSION $REGION $dir_checksum"
+  echo -n "$combined_string" | sha256sum | awk '{ print $1 }'
+}
+
+# Calculate file checksum
+function get_file_checksum() {
+  local file=$1
+  local file_checksum=$(sha256sum "$file" | awk '{ print $1 }')
+  local file_mtime=$($STAT_CMD "$file")
+  local combined_string="$BUCKET $PREFIX_AND_VERSION $REGION $file_checksum $file_mtime"
+  echo -n "$combined_string" | sha256sum | awk '{ print $1 }'
+}
+
+# Get checksum file path for a directory or file
+function get_checksum_file() {
+  local path=$1
+  
+  if [ -d "$path" ]; then
+    # For directories, store in the directory itself
+    echo "${path}/.checksum"
+  else
+    # For files, store in a .checksums directory in the parent directory
+    local parent_dir=$(dirname "$path")
+    local base_filename=$(basename "$path")
+    # Create checksums directory if it doesn't exist
+    mkdir -p "${parent_dir}/.checksums" 2>/dev/null || true
+    echo "${parent_dir}/.checksums/${base_filename}.checksum"
+  fi
+}
+
+# Set checksum for a directory
+function set_dir_checksum() {
+  local dir=$1
+  local checksum_file=$(get_checksum_file "$dir")
+  local checksum=$(get_dir_checksum "$dir")
+  echo "$checksum" > "$checksum_file"
+}
+
+# Set checksum for a file
+function set_file_checksum() {
+  local file=$1
+  local checksum_file=$(get_checksum_file "$file")
+  local checksum=$(get_file_checksum "$file")
+  echo "$checksum" > "$checksum_file"
+}
+
+# Check if a path's checksum has changed
+function has_checksum_changed() {
+  local path=$1
+  local checksum_file=$(get_checksum_file "$path")
+  
+  # Calculate current checksum
+  if [ -d "$path" ]; then
+    local current_checksum=$(get_dir_checksum "$path")
+  else
+    local current_checksum=$(get_file_checksum "$path")
+  fi
+  
+  # Get previous checksum if it exists
   if [ -f "$checksum_file" ]; then
-      previous_checksum=$(cat "$checksum_file")
+    local previous_checksum=$(cat "$checksum_file")
   else
-      previous_checksum=""
+    local previous_checksum=""
   fi
-  if [ "$current_checksum" != "$previous_checksum" ]; then
-      return 0  # True, the directory has changed
+  
+  # Compare checksums
+  if [[ "$current_checksum" != "$previous_checksum" ]]; then
+    return 0  # True, the checksum has changed
   else
-      return 1  # False, the directory has not changed
+    return 1  # False, the checksum hasn't changed
   fi
 }
-update_checksum() {
+
+############################################################
+# Main Checksum Functions
+############################################################
+
+# Check if any of the provided paths need to be rebuilt
+function needs_rebuild() {
+  # Always check lib directory first
+  if has_checksum_changed "./lib"; then
+    echo "Library files in ./lib have changed. All patterns will be rebuilt."
+    return 0  # True, force rebuild
+  fi
+  
+  # Check each provided path for changes
+  for path in "$@"; do
+    if [ -e "$path" ] && has_checksum_changed "$path"; then
+      echo "Changes detected in $path, rebuild required."
+      return 0  # True, at least one path has changed
+    fi
+  done
+  
+  return 1  # False, no changes detected
+}
+
+# Update checksums for one or more paths (directories or files)
+function set_checksum() {
+  for path in "$@"; do
+    if [ -e "$path" ]; then
+      if [ -d "$path" ]; then
+        set_dir_checksum "$path"
+      else
+        set_file_checksum "$path"
+      fi
+    fi
+  done
+}
+
+############################################################
+# Build and Package Functions
+############################################################
+
+# Build and package a template directory
+function build_and_package_template() {
   local dir=$1
-  local checksum_file="${dir}/.checksum"
-  # Compute current checksum of the directory's modification times excluding specified directories, and the publish target S3 location.
-  dir_checksum=$(find "$dir" -type d \( -name "python" -o -name "node_modules" -o -name "build" -o -name ".aws-sam" \) -prune -o -type f ! -name ".checksum" -exec stat --format='%Y' {} \; | sha256sum | awk '{ print $1 }')
-  combined_string="$BUCKET $PREFIX_AND_VERSION $REGION $dir_checksum"
-  current_checksum=$(echo -n "$combined_string" | sha256sum | awk '{ print $1 }')
-  # Save the current checksum
-  echo "$current_checksum" > "$checksum_file"
-}
-
-####################################
-# Package and publish the artifacts
-####################################
-is_x86_64() {
-  [[ $(uname -m) == "x86_64" ]]
-}
-if is_x86_64; then
-  USE_CONTAINER_FLAG=""
-else
-  echo "Run SAM build with container on Mac..."
-  USE_CONTAINER_FLAG="--use-container "
-fi
-
-# Build nested templates
-for dir in patterns/* options/*; do
-  if haschanged $dir; then
-    pushd $dir
+  
+  if needs_rebuild "$dir"; then
     echo "BUILDING $dir" 
+    pushd $dir
+    
+    # Build the template
     sam build $USE_CONTAINER_FLAG --template-file template.yaml
-    echo "PACKAGING $dir"
+    
+    # Package the template
     sam package \
-        --template-file .aws-sam/build/template.yaml \
-        --output-template-file .aws-sam/packaged.yaml \
-        --s3-bucket ${BUCKET} \
-        --s3-prefix ${PREFIX_AND_VERSION}
-    echo "DONE $dir"
+      --template-file .aws-sam/build/template.yaml \
+      --output-template-file .aws-sam/packaged.yaml \
+      --s3-bucket ${BUCKET} \
+      --s3-prefix ${PREFIX_AND_VERSION}
+    
     popd
-    update_checksum $dir
+    echo "DONE $dir"
+    
+    # Update the checksum
+    set_checksum "$dir"
   else
     echo "SKIPPING $dir (unchanged)"
   fi
+}
+
+# Build and package web UI
+function build_web_ui() {
+  local dir="src/ui"
+  echo "Computing hash of ui folder contents"
+  local UIHASH=$(calculate_hash "$dir")
+  local WEBUI_ZIPFILE="src-${UIHASH}.zip"
+  local PREV_WEBUI_ZIPFILE=""
+  
+  # Check if previous zipfile name exists and load it
+  if [ -f "/tmp/webui_zipfile.txt" ]; then
+    PREV_WEBUI_ZIPFILE=$(cat /tmp/webui_zipfile.txt)
+  fi
+  
+  # Force rebuild if zipfile name changed (even if directory content unchanged)
+  if [ "$WEBUI_ZIPFILE" != "$PREV_WEBUI_ZIPFILE" ]; then
+    echo "WebUI zipfile name changed from $PREV_WEBUI_ZIPFILE to $WEBUI_ZIPFILE, forcing rebuild"
+    local force_rebuild=true
+  else
+    local force_rebuild=false
+  fi
+  
+  if needs_rebuild "$dir" || [ "$force_rebuild" = true ]; then
+    echo "PACKAGING $dir"
+    pushd $dir
+    
+    # Create output directory
+    mkdir -p .aws-sam
+    
+    # Zip source excluding specified directories and files
+    echo "Zipping source to .aws-sam/${WEBUI_ZIPFILE}"
+    zip -r .aws-sam/$WEBUI_ZIPFILE . \
+      -x ".env" \
+      -x ".aws-sam/*" \
+      -x "build/*" \
+      -x "node_modules/*"
+    
+    # Upload to S3
+    echo "Upload source to S3"
+    local WEBUIUI_SRC_S3_LOCATION="${BUCKET}/${PREFIX_AND_VERSION}/${WEBUI_ZIPFILE}"
+    aws s3 cp .aws-sam/$WEBUI_ZIPFILE s3://${WEBUIUI_SRC_S3_LOCATION}
+    
+    popd
+    # Update the checksum
+    set_checksum "$dir"
+  else
+    echo "SKIPPING $dir (unchanged)"
+  fi
+  
+  # Write the zipfile name to a file for use in the main template
+  echo "$WEBUI_ZIPFILE" > /tmp/webui_zipfile.txt
+}
+
+# Build and package main template
+function build_main_template() {
+  local webui_zipfile=$1
+
+  echo "BUILDING main" 
+  if needs_rebuild "./src" "./options" "./patterns" "template.yaml"; then
+    sam build $USE_CONTAINER_FLAG --template-file template.yaml
+    echo "PACKAGING main" 
+    sam package \
+      --template-file .aws-sam/build/template.yaml \
+      --output-template-file .aws-sam/packaged.yaml \
+      --s3-bucket ${BUCKET} \
+      --s3-prefix ${PREFIX_AND_VERSION}
+    # Update the checksums
+    set_checksum "./src" "./options" "./patterns" "template.yaml"
+  else
+    echo "SKIPPING sam packaging (no changes detected)"
+  fi
+  
+  local HASH=$(calculate_hash ".")
+  local BUILD_DATE_TIME=$(date -u +"%Y-%m-%d %H:%M:%S")
+  
+  echo "Inline edit main template to replace:"
+  echo "   <VERSION> with: $VERSION"
+  echo "   <BUILD_DATE_TIME> with: $BUILD_DATE_TIME"
+  echo "   <PUBLIC_SAMPLE_UDOP_MODEL> with: $PUBLIC_SAMPLE_UDOP_MODEL"
+  echo "   <ARTIFACT_BUCKET_TOKEN> with bucket name: $BUCKET"
+  echo "   <ARTIFACT_PREFIX_TOKEN> with prefix: $PREFIX_AND_VERSION"
+  echo "   <WEBUI_ZIPFILE_TOKEN> with filename: $webui_zipfile"
+  echo "   <HASH_TOKEN> with: $HASH"
+  
+  # Use a more reliable approach for multiple sed replacements
+  sed -e "s|<VERSION>|$VERSION|g" \
+      -e "s|<BUILD_DATE_TIME>|$BUILD_DATE_TIME|g" \
+      -e "s|<PUBLIC_SAMPLE_UDOP_MODEL>|$PUBLIC_SAMPLE_UDOP_MODEL|g" \
+      -e "s|<ARTIFACT_BUCKET_TOKEN>|$BUCKET|g" \
+      -e "s|<ARTIFACT_PREFIX_TOKEN>|$PREFIX_AND_VERSION|g" \
+      -e "s|<WEBUI_ZIPFILE_TOKEN>|$webui_zipfile|g" \
+      -e "s|<HASH_TOKEN>|$HASH|g" \
+      .aws-sam/packaged.yaml > .aws-sam/${MAIN_TEMPLATE}
+  
+  # Upload and validate main template
+  aws s3 cp .aws-sam/${MAIN_TEMPLATE} s3://${BUCKET}/${PREFIX}/${MAIN_TEMPLATE} || exit 1
+  local TEMPLATE_URL="https://s3.${REGION}.amazonaws.com/${BUCKET}/${PREFIX}/${MAIN_TEMPLATE}"
+  
+  echo "Validating template: $TEMPLATE_URL"
+  aws cloudformation validate-template --template-url $TEMPLATE_URL > /dev/null || exit 1
+  
+  # Write the template URL to a file
+  echo "$TEMPLATE_URL" > /tmp/template_url.txt
+}
+
+# Set public ACLs if specified
+function set_public_acls() {
+  if [[ "$PUBLIC" != "true" ]]; then
+    return 0
+  fi
+  echo "Setting public read ACLs on published artifacts"
+  local files=$(aws s3api list-objects --bucket ${BUCKET} --prefix ${PREFIX_AND_VERSION} --query "(Contents)[].[Key]" --output text)
+  local c=$(echo $files | wc -w)
+  local counter=0
+  
+  for file in $files; do
+    aws s3api put-object-acl --acl public-read --bucket ${BUCKET} --key $file
+    counter=$((counter + 1))
+    echo -ne "Progress: $counter/$c files processed\r"
+  done
+  
+  # Also set ACL for the main template
+  aws s3api put-object-acl --acl public-read --bucket ${BUCKET} --key ${PREFIX}/${MAIN_TEMPLATE}
+  echo ""
+  echo "Done with ACLs."
+}
+
+# Print output information
+function print_outputs() {
+  local template_url=$1
+  
+  echo "OUTPUTS"
+  echo "Template URL: $template_url"
+  echo "1-Click Launch URL: https://${REGION}.console.aws.amazon.com/cloudformation/home?region=${REGION}#/stacks/create/review?templateURL=${template_url}&stackName=IDP"
+  # Disable CLI Deploy output - most people are better served using CF Launch URL to deploy
+  # echo "CLI Deploy: aws cloudformation deploy --region $REGION --template-file .aws-sam/${MAIN_TEMPLATE} --s3-bucket ${BUCKET} --s3-prefix ${PREFIX_AND_VERSION} --capabilities CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND --parameter-overrides IDPPattern=\"Pattern1 - Packet or Media processing with Bedrock Data Automation (BDA)\" Pattern1BDAProjectArn=\"<your-bda-project-arn>\" AdminEmail=\"your-email-address\" \"<other params>\" --stack-name \"<your-stack-name>\""
+}
+
+############################################################
+# Main Script
+############################################################
+
+# Process input arguments
+BUCKET_BASENAME=$1
+PREFIX=$2
+REGION=$3
+ACL=$4
+MAIN_TEMPLATE="idp-main.yaml"
+
+# Initialize and validate environment
+check_parameters
+check_prerequisites
+setup_artifacts_bucket
+
+# Build nested templates
+for dir in patterns/* options/*; do
+  build_and_package_template "$dir"
 done
 
-# Build Web UI source code bundle
-dir=src/ui
-echo "Computing hash of ui folder contents"
-UIHASH=$(calculate_hash $dir)
-WEBUI_ZIPFILE=src-${UIHASH}.zip
-echo "PACKAGING $dir"
-pushd $dir
-mkdir -p .aws-sam
-echo "Zipping source to .aws-sam/${WEBUI_ZIPFILE}"
-# Create zip file excluding specified directories and files
-zip -r .aws-sam/$WEBUI_ZIPFILE . \
-    -x ".env" \
-    -x ".aws-sam/*" \
-    -x "build/*" \
-    -x "node_modules/*"
-echo "Upload source to S3"
-WEBUIUI_SRC_S3_LOCATION=${BUCKET}/${PREFIX_AND_VERSION}/${WEBUI_ZIPFILE}
-aws s3 cp .aws-sam/$WEBUI_ZIPFILE s3://${WEBUIUI_SRC_S3_LOCATION}
-popd
+# Build and package WebUI
+build_web_ui
+WEBUI_ZIPFILE=$(cat /tmp/webui_zipfile.txt)
+echo "WebUI zipfile: $WEBUI_ZIPFILE"
 
+# Build main template
+build_main_template "$WEBUI_ZIPFILE"
+TEMPLATE_URL=$(cat /tmp/template_url.txt)
 
-# build main template
-MAIN_TEMPLATE=idp-main.yaml
-echo "BUILDING main" 
-sam build $USE_CONTAINER_FLAG --template-file template.yaml
-echo "PACKAGING main" 
-sam package \
- --template-file .aws-sam/build/template.yaml \
- --output-template-file .aws-sam/packaged.yaml \
- --s3-bucket ${BUCKET} \
- --s3-prefix ${PREFIX_AND_VERSION}
+# Update the lib checksum after successful build
+set_checksum "./lib"
+echo "Updated lib checksum file to track changes in the library directories"
 
-HASH=$(calculate_hash ".")
-echo "Inline edit main template to replace "
-echo "   <ARTIFACT_BUCKET_TOKEN> with bucket name: $BUCKET"
-echo "   <ARTIFACT_PREFIX_TOKEN> with prefix: $PREFIX_AND_VERSION"
-echo "   <WEBUI_ZIPFILE_TOKEN> with filename: $WEBUI_ZIPFILE"
-echo "   <HASH_TOKEN> with: $HASH"
-cat .aws-sam/packaged.yaml |
-sed -e "s%<ARTIFACT_BUCKET_TOKEN>%$BUCKET%g" | 
-sed -e "s%<ARTIFACT_PREFIX_TOKEN>%$PREFIX_AND_VERSION%g" |
-sed -e "s%<WEBUI_ZIPFILE_TOKEN>%$WEBUI_ZIPFILE%g" |
-sed -e "s%<HASH_TOKEN>%$HASH%g" > .aws-sam/${MAIN_TEMPLATE}
+# Set public ACLs if requested
+set_public_acls
 
-# upload main template
-aws s3 cp .aws-sam/${MAIN_TEMPLATE} s3://${BUCKET}/${PREFIX}/${MAIN_TEMPLATE} || exit 1
-TEMPLATE_URL="https://s3.${REGION}.amazonaws.com/${BUCKET}/${PREFIX}/${MAIN_TEMPLATE}"
-echo "Validating template: $TEMPLATE_URL"
-aws cloudformation validate-template --template-url $TEMPLATE_URL > /dev/null || exit 1
+# Print output information
+print_outputs "$TEMPLATE_URL"
 
-if $PUBLIC; then
-echo "Setting public read ACLs on published artifacts"
-files=$(aws s3api list-objects --bucket ${BUCKET} --prefix ${PREFIX_AND_VERSION} --query "(Contents)[].[Key]" --output text)
-c=$(echo $files | wc -w)
-counter=0
-for file in $files
-  do
-  aws s3api put-object-acl --acl public-read --bucket ${BUCKET} --key $file
-  counter=$((counter + 1))
-  echo -ne "Progress: $counter/$c files processed\r"
-  done
-aws s3api put-object-acl --acl public-read --bucket ${BUCKET} --key ${PREFIX}/${MAIN_TEMPLATE}
-echo ""
-echo "Done with ACLs."
-fi
-
-echo "OUTPUTS"
-echo Template URL: $TEMPLATE_URL
-echo CF Launch URL: https://${REGION}.console.aws.amazon.com/cloudformation/home?region=${REGION}#/stacks/create/review?templateURL=${TEMPLATE_URL}\&stackName=IDP
-echo CLI Deploy: aws cloudformation deploy --region $REGION --template-file .aws-sam/${MAIN_TEMPLATE} --s3-bucket ${BUCKET} --s3-prefix ${PREFIX_AND_VERSION} --capabilities CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND --parameter-overrides IDPPattern="Pattern1 - Packet or Media processing with Bedrock Data Automation (BDA)" Pattern1BDAProjectArn="<your-bda=project-arn" AdminEmail="your-email-address" "<other params>" --stack-name "<your-stack-name>"
-echo Done
+echo "Done"
 exit 0
-

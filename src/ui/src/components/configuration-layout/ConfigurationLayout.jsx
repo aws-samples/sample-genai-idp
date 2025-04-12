@@ -9,6 +9,7 @@ import {
   Spinner,
   Form,
   SegmentedControl,
+  Modal,
 } from '@awsui/components-react';
 import Editor from '@monaco-editor/react';
 // eslint-disable-next-line import/no-extraneous-dependencies
@@ -37,6 +38,7 @@ const ConfigurationLayout = () => {
   const [saveError, setSaveError] = useState(null);
   const [validationErrors, setValidationErrors] = useState([]);
   const [viewMode, setViewMode] = useState('form'); // Form view as default
+  const [showResetModal, setShowResetModal] = useState(false);
 
   const editorRef = useRef(null);
 
@@ -717,6 +719,33 @@ const ConfigurationLayout = () => {
     }
   };
 
+  const handleResetAllToDefault = async () => {
+    setIsSaving(true);
+    setSaveSuccess(false);
+    setSaveError(null);
+
+    try {
+      // Reset custom configuration to an empty object
+      const success = await updateConfiguration({});
+
+      if (success) {
+        setSaveSuccess(true);
+        setShowResetModal(false);
+        // Force a refresh of the configuration to ensure UI is in sync with backend
+        setTimeout(() => {
+          fetchConfiguration();
+        }, 1000);
+      } else {
+        setSaveError('Failed to reset configuration. Please try again.');
+      }
+    } catch (err) {
+      console.error('Reset error:', err);
+      setSaveError(`Error: ${err.message}`);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   if (loading) {
     return (
       <Container header={<Header variant="h2">Configuration</Header>}>
@@ -755,110 +784,114 @@ const ConfigurationLayout = () => {
   }
 
   return (
-    <Container
-      header={
-        <Header
-          variant="h2"
-          actions={
+    <>
+      <Modal
+        visible={showResetModal}
+        onDismiss={() => setShowResetModal(false)}
+        header="Reset All to Default"
+        footer={
+          <Box float="right">
             <SpaceBetween direction="horizontal" size="xs">
-              <SegmentedControl
-                selectedId={viewMode}
-                onChange={({ detail }) => setViewMode(detail.selectedId)}
-                options={[
-                  { id: 'form', text: 'Form View' },
-                  { id: 'json', text: 'JSON View' },
-                  { id: 'yaml', text: 'YAML View' },
-                ]}
-              />
-              {viewMode === 'json' && (
-                <Button onClick={formatJson} iconName="file-text">
-                  Format JSON
-                </Button>
-              )}
-              {viewMode === 'yaml' && (
-                <Button onClick={formatYaml} iconName="file-text">
-                  Format YAML
-                </Button>
-              )}
-              <Button variant="primary" onClick={handleSave} loading={isSaving}>
-                Save changes
+              <Button variant="link" onClick={() => setShowResetModal(false)}>
+                Cancel
+              </Button>
+              <Button variant="primary" onClick={handleResetAllToDefault} loading={isSaving}>
+                Reset
               </Button>
             </SpaceBetween>
-          }
-        >
-          Configuration
-        </Header>
-      }
-    >
-      <Form>
-        {saveSuccess && (
-          <Alert
-            type="success"
-            dismissible
-            onDismiss={() => setSaveSuccess(false)}
-            header="Configuration saved successfully"
+          </Box>
+        }
+      >
+        <Box variant="span">
+          Are you sure you want to reset all configuration settings to default values? This action cannot be undone.
+        </Box>
+      </Modal>
+
+      <Container
+        header={
+          <Header
+            variant="h2"
+            actions={
+              <SpaceBetween direction="horizontal" size="xs">
+                <SegmentedControl
+                  selectedId={viewMode}
+                  onChange={({ detail }) => setViewMode(detail.selectedId)}
+                  options={[
+                    { id: 'form', text: 'Form View' },
+                    { id: 'json', text: 'JSON View' },
+                    { id: 'yaml', text: 'YAML View' },
+                  ]}
+                />
+                {viewMode === 'json' && (
+                  <Button onClick={formatJson} iconName="file-text">
+                    Format JSON
+                  </Button>
+                )}
+                {viewMode === 'yaml' && (
+                  <Button onClick={formatYaml} iconName="file-text">
+                    Format YAML
+                  </Button>
+                )}
+                <Button variant="normal" onClick={() => setShowResetModal(true)}>
+                  Restore default (All)
+                </Button>
+                <Button variant="primary" onClick={handleSave} loading={isSaving}>
+                  Save changes
+                </Button>
+              </SpaceBetween>
+            }
           >
-            Your configuration changes have been saved.
-          </Alert>
-        )}
-
-        {saveError && (
-          <Alert type="error" dismissible onDismiss={() => setSaveError(null)} header="Error saving configuration">
-            {saveError}
-          </Alert>
-        )}
-
-        {validationErrors.length > 0 && (
-          <Alert type="warning" header="Validation errors">
-            <ul>
-              {validationErrors.map((e, index) => (
-                // eslint-disable-next-line react/no-array-index-key
-                <li key={index}>{e.message}</li>
-              ))}
-            </ul>
-          </Alert>
-        )}
-
-        <Box padding="s">
-          {viewMode === 'form' && (
-            <FormView
-              schema={schema}
-              formValues={formValues}
-              defaultConfig={defaultConfig}
-              isCustomized={isCustomized}
-              onResetToDefault={resetToDefault}
-              onChange={handleFormChange}
-            />
+            Configuration
+          </Header>
+        }
+      >
+        <Form>
+          {saveSuccess && (
+            <Alert
+              type="success"
+              dismissible
+              onDismiss={() => setSaveSuccess(false)}
+              header="Configuration saved successfully"
+            >
+              Your configuration changes have been saved.
+            </Alert>
           )}
 
-          {viewMode === 'json' && (
-            <Editor
-              height="70vh"
-              defaultLanguage="json"
-              value={jsonContent}
-              onChange={handleJsonEditorChange}
-              onMount={handleEditorDidMount}
-              options={{
-                minimap: { enabled: false },
-                formatOnPaste: true,
-                formatOnType: true,
-                automaticLayout: true,
-                scrollBeyondLastLine: false,
-                folding: true,
-                lineNumbers: 'on',
-                renderLineHighlight: 'all',
-                tabSize: 2,
-              }}
-            />
+          {saveError && (
+            <Alert type="error" dismissible onDismiss={() => setSaveError(null)} header="Error saving configuration">
+              {saveError}
+            </Alert>
           )}
 
-          {viewMode === 'yaml' && (
-            <Box>
+          {validationErrors.length > 0 && (
+            <Alert type="warning" header="Validation errors">
+              <ul>
+                {validationErrors.map((e, index) => (
+                  // eslint-disable-next-line react/no-array-index-key
+                  <li key={index}>{e.message}</li>
+                ))}
+              </ul>
+            </Alert>
+          )}
+
+          <Box padding="s">
+            {viewMode === 'form' && (
+              <FormView
+                schema={schema}
+                formValues={formValues}
+                defaultConfig={defaultConfig}
+                isCustomized={isCustomized}
+                onResetToDefault={resetToDefault}
+                onChange={handleFormChange}
+              />
+            )}
+
+            {viewMode === 'json' && (
               <Editor
                 height="70vh"
-                defaultLanguage="yaml"
-                value={yamlContent}
-                onChange={handleYamlEditorChange}
+                defaultLanguage="json"
+                value={jsonContent}
+                onChange={handleJsonEditorChange}
                 onMount={handleEditorDidMount}
                 options={{
                   minimap: { enabled: false },
@@ -872,11 +905,34 @@ const ConfigurationLayout = () => {
                   tabSize: 2,
                 }}
               />
-            </Box>
-          )}
-        </Box>
-      </Form>
-    </Container>
+            )}
+
+            {viewMode === 'yaml' && (
+              <Box>
+                <Editor
+                  height="70vh"
+                  defaultLanguage="yaml"
+                  value={yamlContent}
+                  onChange={handleYamlEditorChange}
+                  onMount={handleEditorDidMount}
+                  options={{
+                    minimap: { enabled: false },
+                    formatOnPaste: true,
+                    formatOnType: true,
+                    automaticLayout: true,
+                    scrollBeyondLastLine: false,
+                    folding: true,
+                    lineNumbers: 'on',
+                    renderLineHighlight: 'all',
+                    tabSize: 2,
+                  }}
+                />
+              </Box>
+            )}
+          </Box>
+        </Form>
+      </Container>
+    </>
   );
 };
 

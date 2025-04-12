@@ -3,6 +3,7 @@ import json
 import logging
 import boto3
 import os
+from idp_common import metrics
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -10,26 +11,8 @@ logger.setLevel(logging.INFO)
 dynamodb = boto3.resource('dynamodb')
 stepfunctions = boto3.client('stepfunctions')
 tracking_table = dynamodb.Table(os.environ['TRACKING_TABLE'])
-cloudwatch_client = boto3.client('cloudwatch')
 
 METRIC_NAMESPACE = os.environ['METRIC_NAMESPACE']
-
-def put_metric(name, value, unit='Count', dimensions=None):
-    dimensions = dimensions or []
-    logger.info(f"Publishing metric {name}: {value}")
-    try:
-        cloudwatch_client.put_metric_data(
-            Namespace=f'{METRIC_NAMESPACE}',
-            MetricData=[{
-                'MetricName': name,
-                'Value': value,
-                'Unit': unit,
-                'Dimensions': dimensions
-            }]
-        )
-    except Exception as e:
-        logger.error(f"Error publishing metric {name}: {e}")
-
 
 def get_task_token(object_key: str) -> str:
     try:
@@ -53,8 +36,10 @@ def get_task_token(object_key: str) -> str:
         logger.error(f"Error retrieving tracking record: {e}")
         raise
 
+# Using metrics.put_metric directly
+
 def send_task_response(task_token, job_status, job_detail):
-    put_metric('BDAJobsTotal', 1)
+    metrics.put_metric('BDAJobsTotal', 1)
     try:
         if job_status == 'SUCCESS':
             logger.info(f"Sending task success for token: {task_token}")
@@ -65,7 +50,7 @@ def send_task_response(task_token, job_status, job_detail):
                     'job_detail': job_detail
                 })
             )
-            put_metric('BDAJobsSucceeded', 1)
+            metrics.put_metric('BDAJobsSucceeded', 1)
         else:
             logger.info(f"Sending task failure for token: {task_token}")
             stepfunctions.send_task_failure(
@@ -73,7 +58,7 @@ def send_task_response(task_token, job_status, job_detail):
                 error='JobExecutionError',
                 cause=job_detail.get('error_message') or 'Job execution failed'
             )
-            put_metric('BDAJobsFailed', 1)
+            metrics.put_metric('BDAJobsFailed', 1)
     except Exception as e:
         logger.error(f"Error sending task response: {e}")
         raise
@@ -96,10 +81,12 @@ def handler(event, context):
         # Send appropriate response to Step Functions
         send_task_response(task_token, job_status, detail)
         
-        return {
+        response = {
             'statusCode': 200,
             'body': 'Task response sent successfully'
         }
+        logger.info(f"Response: {json.dumps(response, default=str)}")
+        return response
         
     except Exception as e:
         logger.error(f"Error processing event: {e}")

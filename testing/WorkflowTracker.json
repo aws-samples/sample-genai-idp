@@ -3,20 +3,20 @@
     "id": "f5bbca29-a2a2-48c0-38b0-0deeb126a2f7",
     "detail-type": "Step Functions Execution Status Change",
     "source": "aws.states",
-    "account": "912625584728",
+    "account": "<ACCOUNTID>",
     "time": "2025-02-03T18:28:01Z",
     "region": "us-west-2",
     "resources": [
-        "arn:aws:states:us-west-2:912625584728:execution:IDP-WebUI2-DocumentProcessingWorkflow:b10ac609-4730-4b39-854b-cd2042a2525e"
+        "arn:aws:states:us-west-2:<ACCOUNTID>:execution:IDP-WebUI2-DocumentProcessingWorkflow:b10ac609-4730-4b39-854b-cd2042a2525e"
     ],
     "detail": {
-        "executionArn": "arn:aws:states:us-west-2:912625584728:execution:IDP-WebUI2-DocumentProcessingWorkflow:b10ac609-4730-4b39-854b-cd2042a2525e",
-        "stateMachineArn": "arn:aws:states:us-west-2:912625584728:stateMachine:IDP-WebUI2-DocumentProcessingWorkflow",
+        "executionArn": "arn:aws:states:us-west-2:<ACCOUNTID>:execution:IDP-WebUI2-DocumentProcessingWorkflow:b10ac609-4730-4b39-854b-cd2042a2525e",
+        "stateMachineArn": "arn:aws:states:us-west-2:<ACCOUNTID>:stateMachine:IDP-WebUI2-DocumentProcessingWorkflow",
         "name": "b10ac609-4730-4b39-854b-cd2042a2525e",
         "status": "SUCCEEDED",
         "startDate": 1738607202385,
         "stopDate": 1738607281193,
-        "input": "{\"version\": \"0\", \"id\": \"3c70b816-1b36-83d2-0bb5-9741ae7ff46f\", \"detail-type\": \"Object Created\", \"source\": \"aws.s3\", \"account\": \"912625584728\", \"time\": \"2025-02-03T18:26:17Z\", \"region\": \"us-west-2\", \"resources\": [\"arn:aws:s3:::idp-webui2-inputbucket-dp3t4zemh03p\"], \"detail\": {\"version\": \"0\", \"bucket\": {\"name\": \"idp-webui2-inputbucket-dp3t4zemh03p\"}, \"object\": {\"key\": \"lending/lending_package_10.pdf\", \"size\": 2517873, \"etag\": \"b3aba707625804ae0be2fa9dda88ca45\", \"version-id\": \"Jt7iCi1K4oiUTkKIDr1NcP9Ln9decAa8\", \"sequencer\": \"0067A10A4884842480\"}, \"request-id\": \"5TJTSZEYKGJZCVBA\", \"requester\": \"912625584728\", \"source-ip-address\": \"34.202.115.108\", \"reason\": \"PutObject\"}}",
+        "input": "{\"version\": \"0\", \"id\": \"3c70b816-1b36-83d2-0bb5-9741ae7ff46f\", \"detail-type\": \"Object Created\", \"source\": \"aws.s3\", \"account\": \"<ACCOUNTID>\", \"time\": \"2025-02-03T18:26:17Z\", \"region\": \"us-west-2\", \"resources\": [\"arn:aws:s3:::idp-webui2-inputbucket-dp3t4zemh03p\"], \"detail\": {\"version\": \"0\", \"bucket\": {\"name\": \"idp-webui2-inputbucket-dp3t4zemh03p\"}, \"object\": {\"key\": \"lending/lending_package_10.pdf\", \"size\": 2517873, \"etag\": \"b3aba707625804ae0be2fa9dda88ca45\", \"version-id\": \"Jt7iCi1K4oiUTkKIDr1NcP9Ln9decAa8\", \"sequencer\": \"0067A10A4884842480\"}, \"request-id\": \"5TJTSZEYKGJZCVBA\", \"requester\": \"<ACCOUNTID>\", \"source-ip-address\": \"34.202.115.108\", \"reason\": \"PutObject\"}}",
         "output": "{\"message\": \"Files copied successfully\", \"source_bucket\": \"idp-webui2-outputbucket-vff9xqcrtkoa\", \"destination_bucket\": \"idp-webui2-outputbucket-wrdcmjuuvuoz\", \"input_file\": \"lending/lending_package_10.pdf\", \"files_copied\": 13}",
         "stateMachineVersionArn": null,
         "stateMachineAliasArn": null,

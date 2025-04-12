@@ -26,7 +26,7 @@ class InstallService():
         self.cfn_bucket_basename = f"{self.cfn_prefix}-{self.account_id}"
         self.region = os.environ.get('AWS_REGION', 'us-east-1')
         self.s3_bucket = f"{self.cfn_prefix}-{self.account_id}-{self.region}"
-        self.stack_name = f"{self.cfn_prefix}-Stack"
+        self.stack_name = f"{self.cfn_prefix}"
 
         
 

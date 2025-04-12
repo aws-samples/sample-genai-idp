@@ -2,12 +2,11 @@
 
 AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
-Description: AWS GenAI IDP Accelerator (uksb-r8evguc4p9) (v0.2.14)
+Description: AWS GenAI IDP Accelerator (uksb-r8evguc4p9) (v<VERSION>)
 
 Parameters:
 
   # Authorization params
-
   AdminEmail:
     Type: String
     Description: >-
@@ -51,19 +50,35 @@ Parameters:
 
   Pattern2ClassificationModel:
     Type: String
-    Default: "us.amazon.nova-pro-v1:0"
+    Default: "us.anthropic.claude-3-7-sonnet-20250219-v1:0"
     AllowedValues:
-      - "us.anthropic.claude-3-5-sonnet-20241022-v2:0"
+      - "us.amazon.nova-lite-v1:0"
       - "us.amazon.nova-pro-v1:0"
+      - "us.anthropic.claude-3-haiku-20240307-v1:0"
+      - "us.anthropic.claude-3-5-sonnet-20241022-v2:0"
+      - "us.anthropic.claude-3-7-sonnet-20250219-v1:0"
+      - "us.meta.llama3-2-1b-instruct-v1:0"
+      - "us.meta.llama3-2-3b-instruct-v1:0"
+      - "us.meta.llama3-2-90b-instruct-v1:0"
+      - "us.meta.llama3-3-70b-instruct-v1:0"
+      - "us.deepseek.r1-v1:0"
       - "Custom Fine Tuned Classification Model - NOT YET SUPPORTED"
     Description: Model to use for Classification
 
   Pattern2ExtractionModel:
     Type: String
-    Default: "us.amazon.nova-pro-v1:0"
+    Default: "us.anthropic.claude-3-7-sonnet-20250219-v1:0"
     AllowedValues:
-      - "us.anthropic.claude-3-5-sonnet-20241022-v2:0"
+      - "us.amazon.nova-lite-v1:0"
       - "us.amazon.nova-pro-v1:0"
+      - "us.anthropic.claude-3-haiku-20240307-v1:0"
+      - "us.anthropic.claude-3-5-sonnet-20241022-v2:0"
+      - "us.anthropic.claude-3-7-sonnet-20250219-v1:0"
+      - "us.meta.llama3-2-1b-instruct-v1:0"
+      - "us.meta.llama3-2-3b-instruct-v1:0"
+      - "us.meta.llama3-2-90b-instruct-v1:0"
+      - "us.meta.llama3-3-70b-instruct-v1:0"
+      - "us.deepseek.r1-v1:0"
       - "Custom Fine Tuned Extraction Model - NOT YET SUPPORTED"
     Description: Model to use for Extraction
 
@@ -81,16 +96,24 @@ Parameters:
 
   Pattern3UDOPModelArtifactPath:
     Type: String
-    Default: ""
+    Default: "<PUBLIC_SAMPLE_UDOP_MODEL>"
     AllowedPattern: "^(|s3://.*)$"
     Description: For Pattern1, provide S3 path to the UDOP model.tar.gz file (e.g., s3://bucket-name/path/to/model.tar.gz)
 
   Pattern3ExtractionModel:
     Type: String
-    Default: "us.anthropic.claude-3-5-sonnet-20241022-v2:0"
+    Default: "us.anthropic.claude-3-7-sonnet-20250219-v1:0"
     AllowedValues:
-      - "us.anthropic.claude-3-5-sonnet-20241022-v2:0"
+      - "us.amazon.nova-lite-v1:0"
       - "us.amazon.nova-pro-v1:0"
+      - "us.anthropic.claude-3-haiku-20240307-v1:0"
+      - "us.anthropic.claude-3-5-sonnet-20241022-v2:0"
+      - "us.anthropic.claude-3-7-sonnet-20250219-v1:0"
+      - "us.meta.llama3-2-1b-instruct-v1:0"
+      - "us.meta.llama3-2-3b-instruct-v1:0"
+      - "us.meta.llama3-2-90b-instruct-v1:0"
+      - "us.meta.llama3-3-70b-instruct-v1:0"
+      - "us.deepseek.r1-v1:0"
     Description: Model to use for Extraction
 
   # Optional - Post processing Lambda hook
@@ -135,10 +158,18 @@ Parameters:
 
   EvaluationModelId:
     Type: String
-    Default: "us.amazon.nova-pro-v1:0"
+    Default: "us.anthropic.claude-3-7-sonnet-20250219-v1:0"
     AllowedValues:
-      - "us.anthropic.claude-3-5-sonnet-20241022-v2:0"
+      - "us.amazon.nova-lite-v1:0"
       - "us.amazon.nova-pro-v1:0"
+      - "us.anthropic.claude-3-haiku-20240307-v1:0"
+      - "us.anthropic.claude-3-5-sonnet-20241022-v2:0"
+      - "us.anthropic.claude-3-7-sonnet-20250219-v1:0"
+      - "us.meta.llama3-2-1b-instruct-v1:0"
+      - "us.meta.llama3-2-3b-instruct-v1:0"
+      - "us.meta.llama3-2-90b-instruct-v1:0"
+      - "us.meta.llama3-3-70b-instruct-v1:0"
+      - "us.deepseek.r1-v1:0"
     Description: Model to use for Evaluation
 
   # Optional Knowledge Base Configuration
@@ -154,8 +185,15 @@ Parameters:
     Type: String
     Default: "us.amazon.nova-pro-v1:0"
     AllowedValues:
-      - "us.anthropic.claude-3-5-sonnet-20241022-v2:0"
+      - "us.amazon.nova-lite-v1:0"
       - "us.amazon.nova-pro-v1:0"
+      - "us.anthropic.claude-3-haiku-20240307-v1:0"
+      - "us.anthropic.claude-3-5-sonnet-20241022-v2:0"
+      - "us.anthropic.claude-3-7-sonnet-20250219-v1:0"
+      - "us.meta.llama3-2-1b-instruct-v1:0"
+      - "us.meta.llama3-2-3b-instruct-v1:0"
+      - "us.meta.llama3-2-90b-instruct-v1:0"
+      - "us.meta.llama3-3-70b-instruct-v1:0"
     Description: Model to use for optional Document Knowledge Base
 
   # General Configuration
@@ -355,10 +393,12 @@ Metadata:
           - EvaluationBaselineBucketName
           - EvaluationPattern
           - EvaluationAutoEnabled
+          - EvaluationModelId
       - Label:
           default: "Document Knowledge Base Configuration"
         Parameters:
           - DocumentKnowledgeBase
+          - KnowledgeBaseModelId
       - Label:
           default: "General Configuration"
         Parameters:
@@ -378,18 +418,20 @@ Metadata:
         default: "Allowed Sign Up Email Domain"
       IDPPattern:
         default: "Prefdefined Document Processing Pattern"
-      Pattern3UDOPModelArtifactPath:
-        default: "Pattern1 - UDOP Model Artifact Path"
-      Pattern3ExtractionModel:
-        default: "Pattern1 - Extraction Model"
+      Pattern1BDAProjectArn:
+        default: "Pattern1 - Packet or Media processing with Bedrock Data Automation (BDA) Project ARN"
+      Pattern2ClassificationModel:
+        default: "Pattern2 - Classification Model"
       Pattern2ExtractionModel:
-        default: "Pattern1 - Extraction Model"
+        default: "Pattern2 - Extraction Model"
       Pattern2CustomClassificationModelARN:
         default: "Pattern2 - Custom Classification Model ARN"
       Pattern2CustomExtractionModelARN:
         default: "Pattern2 - Custom Extraction Model ARN"
-      Pattern1BDAProjectArn:
-        default: "Pattern1 - Packet or Media processing with Bedrock Data Automation (BDA) Project ARN"
+      Pattern3UDOPModelArtifactPath:
+        default: "Pattern3 - UDOP Model Artifact Path"
+      Pattern3ExtractionModel:
+        default: "Pattern3 - Extraction Model"
       PostProcessingLambdaHookFunctionArn:
         default: "Post Processing Lambda Hook Function ARN"
       EvaluationBaselineBucketName:
@@ -398,8 +440,12 @@ Metadata:
         default: "Evaluation Pattern"
       EvaluationAutoEnabled:
         default: "Evaluation Auto Enabled"
+      EvaluationModelId:
+        default: "Evaluation Model Id"
       DocumentKnowledgeBase:
         default: "Document Knowledge Base Configuration"
+      KnowledgeBaseModelId:
+        default: "Knowledge Base Model Id"
       MaxConcurrentWorkflows:
         default: "Maximum Concurrent Workflows"
       DataRetentionInDays:
@@ -419,11 +465,68 @@ Metadata:
 
 Resources:
 
+  # Custom resource to enforce max length of StackName - prevent downstream failures
+  StacknameCheckFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Function does not require VPC access as it has no network access
+          - id: W92
+            reason: Reserved concurrency not required
+    # checkov:skip=CKV_AWS_116: "DLQ not required for Cfn Custom Resource function"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
+    Properties:
+      Handler: index.handler
+      Runtime: python3.12
+      InlineCode: |
+        import cfnresponse
+        import time
+        import json
+        def handler(event, context):
+            print(json.dumps(event))
+            input = event['ResourceProperties'].get('InputString', '')
+            max_length = int(event['ResourceProperties'].get('MaxLength', 0))
+            status = cfnresponse.SUCCESS
+            reason = f"Stack Name Length under {max_length} - OK"
+            if event['RequestType'] == "Create":
+              if len(input) > max_length:
+                status = cfnresponse.FAILED
+                reason = f"Stack Name ({input}) length ({len(input)}) too long - max length {max_length} - FAILED"
+            else:
+              print(f"Request type is {event['RequestType']} - skipping")
+            cfnresponse.send(event, context, status, {}, reason=reason)
+      LoggingConfig:
+        LogGroup:
+          Ref: StacknameCheckFunctionLogGroup
+
+  StacknameCheckFunctionLogGroup:
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W84
+            reason: "LogGroup does not require KMS Key Id, since it's only logging checks on stack name length"
+    # checkov:skip=CKV_AWS_158: "LogGroup does not require KMS Key Id, since it's only logging checks on stack name length"
+    Type: AWS::Logs::LogGroup
+    Properties:
+      RetentionInDays: !Ref LogRetentionDays
+
+  IsStacknameLengthOK:
+    Type: Custom::StacknameCheck
+    Properties:
+      ServiceToken: !GetAtt StacknameCheckFunction.Arn
+      InputString: !Ref "AWS::StackName"
+      MaxLength: 25
+
   ##########################################################################
   # Nested stack for selected options
   ##########################################################################
 
   BDASAMPLEPROJECT:
+    DependsOn:
+      - IsStacknameLengthOK
     Type: AWS::CloudFormation::Stack
     Condition: ShouldCreateBDASampleProject
     Properties:
@@ -433,6 +536,8 @@ Resources:
         ProjectDescription: !Sub '${AWS::StackName}-BDA-Lending-Sample-Project'
 
   DOCUMENTBEDROCKKB:
+    DependsOn:
+      - IsStacknameLengthOK
     Type: AWS::CloudFormation::Stack
     Condition: ShouldCreateDocumentKnowledgeBase
     Properties:
@@ -449,6 +554,8 @@ Resources:
   ##########################################################################
 
   PATTERN1STACK:
+    DependsOn:
+      - IsStacknameLengthOK
     Type: AWS::CloudFormation::Stack
     Condition: IsPattern1
     Properties:
@@ -471,6 +578,8 @@ Resources:
         ConfigurationTable: !Ref ConfigurationTable
 
   PATTERN2STACK:
+    DependsOn:
+      - IsStacknameLengthOK
     Type: AWS::CloudFormation::Stack
     Condition: IsPattern2
     Properties:
@@ -490,6 +599,8 @@ Resources:
         ConfigurationTable: !Ref ConfigurationTable
 
   PATTERN3STACK:
+    DependsOn:
+      - IsStacknameLengthOK
     Type: AWS::CloudFormation::Stack
     Condition: IsPattern3
     Properties:
@@ -512,6 +623,8 @@ Resources:
   ##########################################################################
 
   CustomerManagedEncryptionKey:
+    DependsOn:
+      - IsStacknameLengthOK
     Type: AWS::KMS::Key
     Properties:
       Description: KMS key for DynamoDB encryption
@@ -571,6 +684,8 @@ Resources:
   ##########################################################################
 
   LoggingBucket:
+    DependsOn:
+      - IsStacknameLengthOK
     Type: AWS::S3::Bucket
     Metadata:
       cfn_nag:
@@ -1098,6 +1213,8 @@ Resources:
   # Initialise SettingsParameter as empty (so it never gets replaced)
   # and use Custom Resource UpdateSettingsFunction to add/update values
   SettingsParameter:
+    DependsOn:
+      - IsStacknameLengthOK
     Type: AWS::SSM::Parameter
     Properties:
       Type: String
@@ -1105,6 +1222,8 @@ Resources:
       Value: "{}"
 
   UpdateSettingsFunction:
+    DependsOn:
+      - IsStacknameLengthOK
     Type: AWS::Serverless::Function
     Metadata:
       cfn_nag:
@@ -1144,6 +1263,9 @@ Resources:
       ServiceToken: !GetAtt UpdateSettingsFunction.Arn
       SettingsName: !Ref SettingsParameter
       SettingsKeyValuePairs:
+        StackName: !Sub "${AWS::StackName}"
+        Version: <VERSION>
+        BuildDateTime: <BUILD_DATE_TIME>
         InputBucket: !Ref InputBucket
         OutputBucket: !Ref OutputBucket
         EvaluationBaselineBucket: !Ref EvaluationBaselineBucket
@@ -1265,6 +1387,7 @@ Resources:
           QUEUE_URL: !Ref DocumentQueue
           APPSYNC_API_URL: !GetAtt GraphQLApi.GraphQLUrl
           DATA_RETENTION_IN_DAYS: !Ref DataRetentionInDays
+          OUTPUT_BUCKET: !Ref OutputBucket
       Policies:
         - SQSSendMessagePolicy:
             QueueName: !GetAtt DocumentQueue.QueueName
@@ -1672,14 +1795,9 @@ Resources:
 
   AlertsTopic:
     Type: AWS::SNS::Topic
-    Metadata:
-      cfn_nag:
-        rules_to_suppress:
-          - id: W47
-            reason: "KMS encryption not required for basic notification alerts"
-    # checkov:skip=CKV_AWS_26: "KMS encryption not required for basic notification alerts"
     Properties:
       DisplayName: Workflow Alerts
+      KmsMasterKeyId: !Ref CustomerManagedEncryptionKey
 
   WorkflowErrorsAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -2114,6 +2232,8 @@ Resources:
               - !GetAtt PATTERN1STACK.Outputs.StateMachineLogGroup
 
   DashboardMergerFunction:
+    DependsOn:
+      - IsStacknameLengthOK
     Type: AWS::Serverless::Function
     Metadata:
       cfn_nag:
@@ -2312,6 +2432,8 @@ Resources:
       UserPoolId: !Ref UserPool
 
   GetDomainLambda:
+    DependsOn:
+      - IsStacknameLengthOK
     Type: AWS::Serverless::Function
     Metadata:
       cfn_nag:
@@ -2472,6 +2594,8 @@ Resources:
       UserPoolId: !Ref UserPool
 
   CognitoUserPoolEmailDomainVerifyFunction:
+    DependsOn:
+      - IsStacknameLengthOK
     Type: AWS::Serverless::Function
     Metadata:
       cfn_nag:
@@ -2560,6 +2684,8 @@ Resources:
       RetentionInDays: !Ref LogRetentionDays
 
   AppSyncCwlRole:
+    DependsOn:
+      - IsStacknameLengthOK
     Type: AWS::IAM::Role
     Properties:
       ManagedPolicyArns:
@@ -2642,6 +2768,11 @@ Resources:
 
   AppSyncServiceRole:
     Type: AWS::IAM::Role
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W76
+            reason: "Suppressing W76: SPCM for IAM policy document is higher than 25"
     Properties:
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
@@ -2683,69 +2814,77 @@ Resources:
                   - !GetAtt ConfigurationResolverFunction.Arn
                   - !GetAtt UploadResolverFunction.Arn
                   - !GetAtt CopyToBaselineResolverFunction.Arn
+                  - !GetAtt CreateDocumentResolverFunction.Arn
                   - !GetAtt DeleteDocumentResolverFunction.Arn
                   - !GetAtt QueryKnowledgeBaseResolverFunction.Arn
 
+  # Lambda function for Create Document resolver
+  CreateDocumentResolverFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: "Function does not require VPC access as it only interacts with AWS services via APIs"
+          - id: W92
+            reason: "Function does not require reserved concurrency as it scales based on demand"
+          - id: W12
+            reason: "Lambda requires CloudWatch logs permissions"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for AppSync resolver function"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only configuration values like feature flags and non-sensitive settings"
+    Properties:
+      Handler: index.handler
+      Runtime: python3.12
+      CodeUri: ./src/lambda/create_document_resolver
+      Description: Lambda function to create document tracking via GraphQL API
+      MemorySize: 512
+      Timeout: 60
+      Environment:
+        Variables:
+          TRACKING_TABLE_NAME: !Ref TrackingTable
+      LoggingConfig:
+        LogGroup: !Ref CreateDocumentResolverFunctionLogGroup
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref TrackingTable
+        - Statement:
+            - Effect: Allow
+              Action:
+                - kms:Encrypt
+                - kms:Decrypt
+                - kms:ReEncrypt*
+                - kms:GenerateDataKey*
+                - kms:DescribeKey
+              Resource: !GetAtt CustomerManagedEncryptionKey.Arn
+
+  CreateDocumentResolverFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      KmsKeyId: !GetAtt CustomerManagedEncryptionKey.Arn
+      RetentionInDays: !Ref LogRetentionDays
+
+  # Create Document resolver configuration
   CreateDocumentResolver:
     Type: AWS::AppSync::Resolver
     Properties:
       ApiId: !GetAtt GraphQLApi.ApiId
       TypeName: Mutation
       FieldName: createDocument
-      DataSourceName: !GetAtt TrackingTableDataSource.Name
-      # This resolver creates two items in the table
-      # - the doc item (PK = doc#<ObjectKey>) - containing all doc attributes
-      # - the list item (PK = list#<date>#s<shardid>) - which associates a time shard to the doc identified by the SK value
-      #    - this is used to list documents without resorting to DynamoDB scans 
-      # Because we use !Sub to substitute TrackingTable, we must escape other occurences of ${x} like ${!x}
-      RequestMappingTemplate: !Sub |
-        #set( $PK = "doc#${!ctx.args.input.ObjectKey}" )
+      DataSourceName: !GetAtt CreateDocumentDataSource.Name
 
-        #set( $shardsInDay = 6 )
-        #set( $shardDivider = 24 / $shardsInDay )
-        #set( $Integer = 0 )
-        #set( $now = $ctx.args.input.QueuedTime )
-        #set( $date = $now.substring(0, 10) )
-        #set( $hourString = $now.substring(11, 13) )
-        #set( $hour = $Integer.parseInt($hourString) )
-        #set( $hourShard = $hour / $shardDivider )
-        #set( $shardPad = $date.format("%02d", $hourShard) )
-        #set( $listPk = "list#${!date}#s#${!shardPad}" )
-        #set( $listSk = "ts#${!now}#id#${!ctx.args.input.ObjectKey}" )
-
-        {
-          "version" : "2018-05-29",
-          "operation" : "TransactWriteItems",
-          "transactItems": [
-            {
-              "table": "${TrackingTable}",
-              "operation": "PutItem",
-              "key" : {
-                "PK": $util.dynamodb.toDynamoDBJson($PK),
-                "SK": $util.dynamodb.toDynamoDBJson("none"),
-              },
-              "attributeValues": $util.dynamodb.toMapValuesJson($ctx.args.input),
-            },
-            {
-              "table": "${TrackingTable}",
-              "operation": "PutItem",
-              "key" : {
-                "PK": $util.dynamodb.toDynamoDBJson($listPk),
-                "SK": $util.dynamodb.toDynamoDBJson($listSk),
-              },
-              "attributeValues": {
-                "ObjectKey": $util.dynamodb.toDynamoDBJson($ctx.args.input.ObjectKey),
-                "QueuedTime": $util.dynamodb.toDynamoDBJson($ctx.args.input.QueuedTime),
-                "ExpiresAfter": $util.dynamodb.toDynamoDBJson($ctx.args.input.ExpiresAfter),
-              },
-            },
-          ],
-        }
-      ResponseMappingTemplate: |
-        #if($ctx.error)
-          $util.error($ctx.error.message, $ctx.error.type)
-        #end
-        $util.toJson({"ObjectKey": $ctx.args.input.ObjectKey})
+  # Data source for Create Document resolver
+  CreateDocumentDataSource:
+    Type: AWS::AppSync::DataSource
+    Properties:
+      ApiId: !GetAtt GraphQLApi.ApiId
+      Name: CreateDocumentDataSource
+      Description: Lambda function for creating document tracking records
+      Type: AWS_LAMBDA
+      ServiceRoleArn: !GetAtt AppSyncServiceRole.Arn
+      LambdaConfig:
+        LambdaFunctionArn: !GetAtt CreateDocumentResolverFunction.Arn
 
   UpdateDocumentResolver:
     Type: AWS::AppSync::Resolver

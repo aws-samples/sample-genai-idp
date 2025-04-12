@@ -1,1 +1,1 @@
-boto3==1.26.0
+../../lib/idp_common_pkg[core]  # core utilities only

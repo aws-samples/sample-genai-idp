@@ -10,6 +10,14 @@ Parameters:
 Resources:
   IdkInitialInstallAsset:
     Type: 'AWS::S3::Bucket'
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W51
+            reason: "This is a temporary bucket for initial deployment artifacts, bucket policy not required for this use case"
+          - id: W35
+            reason: "This is a deployment artifact bucket, access logging not required for this temporary resource"
+    # checkov:skip=CKV_AWS_18: "This is a temporary deployment artifact bucket, access logging not required"
     Properties:
       BucketName: !Ref BucketName
       VersioningConfiguration:

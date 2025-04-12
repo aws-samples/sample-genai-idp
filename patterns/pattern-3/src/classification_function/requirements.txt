@@ -1,1 +1,1 @@
-boto3
+../../lib/idp_common_pkg[classification]  # classification module with dependencies

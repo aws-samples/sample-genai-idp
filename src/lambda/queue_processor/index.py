@@ -4,9 +4,9 @@ import os
 from datetime import datetime, timezone
 from botocore.exceptions import ClientError
 import logging
-from appsync_helper import AppSyncClient, UPDATE_DOCUMENT, AppSyncError
-import requests
-from typing import Dict, Any, List, Tuple
+from appsync_helper import AppSyncClient, UPDATE_DOCUMENT
+from typing import Dict, Any, Tuple
+from idp_common.models import Document, Status
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -59,12 +59,12 @@ def update_counter(increment: bool = True) -> bool:
         logger.error(f"Error updating counter: {e}")
         raise
 
-def start_workflow(body: Dict[str, Any]) -> Dict[str, Any]:
+def start_workflow(document: Document) -> Dict[str, Any]:
     """
     Start Step Functions workflow
     
     Args:
-        body: The workflow input
+        document: The Document object to process
         
     Returns:
         Dict containing execution details
@@ -72,20 +72,29 @@ def start_workflow(body: Dict[str, Any]) -> Dict[str, Any]:
     Raises:
         ClientError: If Step Functions operation fails
     """
+    # Update document status and timing
+    document.status = Status.STARTED
+    document.start_time = datetime.now(timezone.utc).isoformat()
+    
+    event = {
+        "document": document.to_dict()  # Pass the full document as the input
+    }
+
+    logger.info(f"Starting workflow for document with event: {event}")
     execution = sfn.start_execution(
         stateMachineArn=state_machine_arn,
-        input=json.dumps(body)
+        input=json.dumps(event)
     )
+    
     logger.info(f"Workflow started: {execution['executionArn']}")
     return execution
 
-def update_document_status(object_key: str, execution_arn: str) -> Dict[str, Any]:
+def update_document_status(document: Document) -> Dict[str, Any]:
     """
     Update document status via AppSync
     
     Args:
-        object_key: The document key
-        execution_arn: The Step Functions execution ARN
+        document: The Document object to update
         
     Returns:
         The updated document data
@@ -95,10 +104,10 @@ def update_document_status(object_key: str, execution_arn: str) -> Dict[str, Any
     """
     update_input = {
         'input': {
-            'ObjectKey': object_key,
-            'ObjectStatus': 'STARTED',
-            'WorkflowExecutionArn': execution_arn,
-            'WorkflowStartTime': datetime.now(timezone.utc).isoformat()
+            'ObjectKey': document.input_key,
+            'ObjectStatus': document.status.value,
+            'WorkflowExecutionArn': document.workflow_execution_arn,
+            'WorkflowStartTime': document.start_time
         }
     }
     
@@ -122,8 +131,9 @@ def process_message(record: Dict[str, Any]) -> Tuple[bool, str]:
     message_id = record['messageId']
     
     try:
-        body = json.loads(message)
-        object_key = body['detail']['object']['key']
+        # Deserialize the Document object from the message
+        document = Document.from_json(message)
+        object_key = document.input_key
         logger.info(f"Processing message {message_id} for object {object_key}")
         
         # Try to increment counter
@@ -132,12 +142,12 @@ def process_message(record: Dict[str, Any]) -> Tuple[bool, str]:
             return False, message_id
         
         try:
-            # Start workflow
-            execution = start_workflow(body)
+            # Start workflow with the document
+            execution = start_workflow(document)
             
-            # Update document
-            document = update_document_status(object_key, execution['executionArn'])
-            logger.info(f"Document updated: {document}")
+            # Update document status in database
+            updated_doc = update_document_status(document)
+            logger.info(f"Document updated: {updated_doc}")
             
             return True, message_id
             

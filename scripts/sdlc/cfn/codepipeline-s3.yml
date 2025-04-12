@@ -62,6 +62,13 @@ Resources:
   CodeBuildRole:
     Type: 'AWS::IAM::Role'
     Condition: CreateCodeBuildRole
+    # checkov:skip=CKV_AWS_111: "This role requires specific permissions for CodeBuild deployment operations"
+    # checkov:skip=CKV_AWS_107: "This role requires access to resources for deployment operations"
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W11
+            reason: "Required for EC2 resource discovery during deployment"
     Properties:
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
@@ -90,12 +97,32 @@ Resources:
 
   ArtifactBucket:
     Type: 'AWS::S3::Bucket'
+    # checkov:skip=CKV_AWS_18: "This is a temporary deployment artifact bucket; access logging not required"
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W51
+            reason: "CodePipeline manages access to this bucket; explicit bucket policy not required"
+          - id: W35
+            reason: "This is a temporary deployment artifact bucket; access logging not required"
+          - id: W41
+            reason: "Using default SSE encryption which is applied automatically by S3"
     Properties:
       VersioningConfiguration:
         Status: Enabled
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
 
   IdkInstallCodeBuild:
     Type: 'AWS::CodeBuild::Project'
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W32
+            reason: "Using default AWS managed KMS key for this deployment pipeline"
     Properties:
       Name: app-sdlc
       ServiceRole: !If [CreateCodeBuildRole, !GetAtt CodeBuildRole.Arn, !Ref CodeBuildRoleArn]
@@ -194,6 +221,12 @@ Resources:
   CodeBuildLogsPolicy:
     Type: 'AWS::IAM::Policy'
     Condition: CreateCodeBuildRole
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W12
+            reason: "Logs policy requires * resource to create log groups dynamically"
+    # checkov:skip=CKV_AWS_111: "CloudWatch Logs policies require write access for log creation"
     Properties:
       PolicyName: CodeBuildLogs
       Roles: 

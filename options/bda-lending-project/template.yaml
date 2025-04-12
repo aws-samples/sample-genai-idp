@@ -18,6 +18,11 @@ Resources:
   # IAM role for Lambda function
   LambdaExecutionRole:
     Type: AWS::IAM::Role
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W11
+            reason: "Role requires * resource access for bedrock models, and automation projects / blueprints"
     Properties:
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
@@ -111,7 +116,7 @@ Resources:
         # - Credit-Card-Statement
         # - Death-Certificate
         # - Workers-Compensation-Form
-      Version: 03-21-2025
+      Version: 04-04-2025
 
 Outputs:
   ProjectArn:

@@ -249,17 +249,17 @@ Example attribute definition:
 
 ## Testing
 
-Use the provided test events:
+Modify and use the provided test events and env files:
 
 ```bash
 # Test OCR function
-sam local invoke OCRFunction -e testing/events/ocr-event.json
+sam local invoke OCRFunction --env-vars testing/env.json -e testing/events/ocr-event.json
 
 # Test classification
-sam local invoke ClassificationFunction -e testing/events/classification-event.json
+sam local invoke ClassificationFunction --env-vars testing/env.json -e testing/events/classification-event.json
 
 # Test extraction
-sam local invoke ExtractionFunction -e testing/events/extraction-event.json
+sam local invoke ExtractionFunction --env-vars testing/env.json -e testing/events/extraction-event.json
 ```
 
 ## Best Practices

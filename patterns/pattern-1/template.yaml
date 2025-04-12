@@ -107,6 +107,10 @@ Resources:
             units:
               - name: pages
                 price: 0.040
+          - name: bda/documents-standard
+            units:
+              - name: pages
+                price: 0.010
 
   DocumentProcessingStateMachine:
     Type: AWS::Serverless::StateMachine

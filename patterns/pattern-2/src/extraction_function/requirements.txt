@@ -1,3 +1,1 @@
-boto3
-pillow
-../../lib/get_config_pkg  # get_config package
+../../lib/idp_common_pkg[extraction]  # extraction module with dependencies

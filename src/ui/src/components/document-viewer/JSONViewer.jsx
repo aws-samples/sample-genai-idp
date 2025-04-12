@@ -296,7 +296,7 @@ const TextEditorView = ({ fileContent, onChange, isReadOnly, fileType }) => {
 const FileEditorView = ({ fileContent, onChange, isReadOnly = true, fileType = 'text' }) => {
   const [isValid, setIsValid] = useState(true);
   const [jsonData, setJsonData] = useState(null);
-  const [viewMode, setViewMode] = useState('form');
+  const [viewMode, setViewMode] = useState(fileType === 'markdown' ? 'markdown' : 'form');
 
   useEffect(() => {
     if (fileType === 'json') {

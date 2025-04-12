@@ -9,14 +9,14 @@ SDLC_SOURCE_CODE_BUCKET?=idp-sdlc-source-code-$(IDP_ACCOUNT_ID)-$(AWS_REGION)
 IDP_TEST_FILE?=../../../samples/rvl_cdip_package.pdf
 IDP_VERIFY_STRING?="WESTERN DARK FIRED TOBACCO GROWERS"
 IDP_CFN_PREFIX?=idp-dev
-IDP_STACK_NAME?=$(IDP_CFN_PREFIX)-Stack
+IDP_STACK_NAME?=$(IDP_CFN_PREFIX)
 IDP_PIPELINE_NAME?=idp-sdlc-deploy-pipeline
 
 test:
 	poetry run pytest -s --log-cli-level=DEBUG
 
 cfn-prefix:
-	@ echo "idp-$(shell date +%Y%m%d-%H%M-%S)"
+	@ echo "idp-$(shell date +%y%m%d-%H%M-%S)"
 
 install:
 	poetry run idpcli install \

@@ -3,50 +3,29 @@ import boto3
 import os
 import logging
 import time
-import random
 from datetime import datetime, timezone, timedelta
 from typing import Dict, Any
 from botocore.exceptions import ClientError
+from idp_common import metrics, utils
+from idp_common.models import Document
+
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
-# TODO - consider minimizing retries in lambda / maximize in Step Functions for cost efficiency.
-MAX_RETRIES = 8 # avoid 900sec Lambda time out. 
+# Retry configuration
+MAX_RETRIES = 8
 INITIAL_BACKOFF = 2  # seconds
 MAX_BACKOFF = 300   # 5 minutes
 
-METRIC_NAMESPACE = os.environ['METRIC_NAMESPACE']
-
 # Initialize client
 bda_client = boto3.client('bedrock-data-automation-runtime')
-cloudwatch_client = boto3.client('cloudwatch')
 dynamodb = boto3.resource('dynamodb')
 tracking_table = dynamodb.Table(os.environ['TRACKING_TABLE'])
 
-def put_metric(name, value, unit='Count', dimensions=None):
-    dimensions = dimensions or []
-    logger.info(f"Publishing metric {name}: {value}")
-    try:
-        cloudwatch_client.put_metric_data(
-            Namespace=f'{METRIC_NAMESPACE}',
-            MetricData=[{
-                'MetricName': name,
-                'Value': value,
-                'Unit': unit,
-                'Dimensions': dimensions
-            }]
-        )
-    except Exception as e:
-        logger.error(f"Error publishing metric {name}: {e}")
-
-def calculate_backoff(attempt: int) -> float:
-    backoff = min(MAX_BACKOFF, INITIAL_BACKOFF * (2 ** attempt))
-    jitter = random.uniform(0, 0.1 * backoff) # nosec B311
-    return backoff + jitter
 
 def build_s3_uri(bucket: str, key: str) -> str:
-    return f"s3://{bucket}/{key}"
+    return utils.build_s3_uri(bucket, key)
 
 def build_payload(input_s3_uri: str, output_s3_uri: str, data_project_arn: str) -> Dict[str, Any]:
     region = os.environ.get('AWS_REGION', 'us-east-1')
@@ -76,7 +55,7 @@ def invoke_data_automation(payload: Dict[str, Any]) -> Dict[str, Any]:
     last_exception = None
     request_start_time = time.time()
 
-    put_metric('BDARequestsTotal', 1)
+    metrics.put_metric('BDARequestsTotal', 1)
 
     while retry_count < MAX_RETRIES:
         try:
@@ -89,14 +68,14 @@ def invoke_data_automation(payload: Dict[str, Any]) -> Dict[str, Any]:
             logger.info(f"BDA API request successful after {retry_count + 1} attempts. "
                        f"Duration: {duration:.2f}s")
 
-            put_metric('BDARequestsSucceeded', 1)
-            put_metric('BDARequestsLatency', duration * 1000, 'Milliseconds')
+            metrics.put_metric('BDARequestsSucceeded', 1)
+            metrics.put_metric('BDARequestsLatency', duration * 1000, 'Milliseconds')
             
             if retry_count > 0:
-                put_metric('BDARequestsRetrySuccess', 1)
+                metrics.put_metric('BDARequestsRetrySuccess', 1)
 
             total_duration = time.time() - request_start_time
-            put_metric('BDARequestsTotalLatency', total_duration * 1000, 'Milliseconds')
+            metrics.put_metric('BDARequestsTotalLatency', total_duration * 1000, 'Milliseconds')
 
             return response
 
@@ -114,31 +93,31 @@ def invoke_data_automation(payload: Dict[str, Any]) -> Dict[str, Any]:
             
             if error_code in retryable_errors:
                 retry_count += 1
-                put_metric('BDARequestsThrottles', 1)
+                metrics.put_metric('BDARequestsThrottles', 1)
                 
                 if retry_count == MAX_RETRIES:
                     logger.error(f"Max retries ({MAX_RETRIES}) exceeded. Last error: {error_message}")
-                    put_metric('BDARequestsFailed', 1)
-                    put_metric('BDARequestsMaxRetriesExceeded', 1)
+                    metrics.put_metric('BDARequestsFailed', 1)
+                    metrics.put_metric('BDARequestsMaxRetriesExceeded', 1)
                     raise
                 
-                backoff = calculate_backoff(retry_count)
+                backoff = utils.calculate_backoff(retry_count, INITIAL_BACKOFF, MAX_BACKOFF)
                 logger.warning(f"BDA API throttling occurred (attempt {retry_count}/{MAX_RETRIES}). "
                              f"Error: {error_message}. "
                              f"Backing off for {backoff:.2f}s")
                 
-                time.sleep(backoff) # semgrep-ignore: arbitrary-sleep - Intentional delay backoff/retry. Duration is algorithmic and not user-controlled.
+                time.sleep(backoff)  # semgrep-ignore: arbitrary-sleep - Intentional delay backoff/retry. Duration is algorithmic and not user-controlled.
                 last_exception = e
             else:
                 logger.error(f"Non-retryable BDA API error: {error_code} - {error_message}")
-                put_metric('BDARequestsFailed', 1)
-                put_metric('BDARequestsNonRetryableErrors', 1)
+                metrics.put_metric('BDARequestsFailed', 1)
+                metrics.put_metric('BDARequestsNonRetryableErrors', 1)
                 raise
 
         except Exception as e:
             logger.error(f"Unexpected error invoking BDA API: {str(e)}", exc_info=True)
-            put_metric('BDARequestsFailed', 1)
-            put_metric('BDARequestsUnexpectedErrors', 1)
+            metrics.put_metric('BDARequestsFailed', 1)
+            metrics.put_metric('BDARequestsUnexpectedErrors', 1)
             raise
         
     if last_exception:
@@ -146,7 +125,6 @@ def invoke_data_automation(payload: Dict[str, Any]) -> Dict[str, Any]:
     
 def track_task_token(object_key: str, task_token: str) -> None:
     try:
-
         # Record in DynamoDB
         tracking_item = {
             'PK': f"tasktoken#{object_key}",
@@ -165,9 +143,11 @@ def track_task_token(object_key: str, task_token: str) -> None:
 def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     try:
         logger.info(f"Received event: {json.dumps(event)}")
-        
-        input_bucket = event['input']['detail']['bucket']['name']
-        object_key = event['input']['detail']['object']['key']
+
+        # Get document from event
+        document = Document.from_dict(event["document"])
+        input_bucket = document.input_bucket
+        object_key = document.input_key
         working_bucket = event['working_bucket']
         data_project_arn = event['BDAProjectArn']
         task_token = event['taskToken']
@@ -188,7 +168,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             },
             "bda_response": bda_response
         }
-        logger.info(f"API invocation successful. Response: {json.dumps(bda_response)}")
+        logger.info(f"API invocation successful. Response: {json.dumps(bda_response, default=str)}")
         return response
 
     except Exception as e:

@@ -242,14 +242,16 @@ Navigate into the project root directory and, in a bash shell, run:
 
 **This completes the preparation stage of the installation process. The process now proceeds to the Cloudformation stack installation stage.**
   
-When completed, it displays the CloudFormation templates S3 URLs, 1-click URLs for launching the stack creation in CloudFormation console, and a command to deploy from the CLI:
+When completed, it displays the CloudFormation templates S3 URL, and a 1-click URLs for launching the stack creation in CloudFormation console:
 ```
 OUTPUTS
-Template URL: https://s3.us-east-1.amazonaws.com/bobs-artifacts-us-east-1/transflo-idp/packaged.yaml
-CF Launch URL: https://us-east-1.console.aws.amazon.com/cloudformation/home?region=us-east-1#/stacks/create/review?templateURL=https://s3.us-east-1.amazonaws.com/bobs-artifacts-us-east-1/transflo-idp/packaged.yaml&stackName=IDP
-CLI Deploy: aws cloudformation deploy --region us-east-1 --template-file /tmp/1132557/packaged.yaml --capabilities CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND --stack-name <your_stack_name>>
+Template URL: https://s3.<region>.amazonaws.com/<cfn_bucket_basename>-<region>/<cfn_prefix>/packaged.yaml
+1-Click Launch URL: https://<region>.console.aws.amazon.com/cloudformation/home?region=<region>#/stacks/create/review?templateURL=https://s3.<region>.amazonaws.com/<cfn_bucket_basename>-<region>/<cfn_prefix>/packaged.yaml&stackName=IDP
 Done
 ```
+
+** Recommended: Deploy using AWS CloudFormation console.**  
+For your first time deployment, log in to your AWS account and then use the `1-Click Launch URL` to create a new stack with CloudFormation. It's easier to inspect the available parameter options using the console initially. The CLI option below is better suited for scripted / automated deployments, and requires that you already know the right parameter values to use.
 
 ```bash
 # To install from the CLI the `CLI Deploy` command will be similar to the following:
@@ -267,7 +269,7 @@ aws cloudformation deploy \
 * `<the-pattern-name-here>` should be one of the valid pattern names encased in quotes. (Each pattern may have their own required parameter overrides, see README documentation for details.)
   * `Pattern3 - Packet processing with Textract, SageMaker(UDOP), and Bedrock`
   * `Pattern2 - Packet processing with Textract and Bedrock`
-    * (This is a great pattern to start with to try out the solution because it has not further dependencies.)
+    * (This is a great pattern to start with to try out the solution because it has no further dependencies.)
   * `Pattern1 - Packet or Media processing with Bedrock Data Automation (BDA)`
 
 After you have deployed the stack, check the Outputs tab to inspect names and links to the dashboards, buckets, workflows and other solution resources.

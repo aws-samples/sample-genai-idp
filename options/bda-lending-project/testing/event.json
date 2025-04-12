@@ -5,7 +5,7 @@
     "StackId": "XXX",
     "RequestId": "5b5ff50a-10f1-4d7c-a47b-570bdd3a37c0",
     "LogicalResourceId": "BDAProject",
-    "PhysicalResourceId": "arn:aws:bedrock:us-west-2:912625584728:data-automation-project/bc7a292bff6c",
+    "PhysicalResourceId": "arn:aws:bedrock:us-west-2:<ACCOUNTID>:data-automation-project/bc7a292bff6c",
     "ResourceType": "Custom::BDAProject",
     "ResourceProperties": {
         "ServiceToken": "XXX",
