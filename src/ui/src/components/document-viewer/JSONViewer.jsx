@@ -421,9 +421,16 @@ const JSONViewer = ({ fileUri, fileType = 'text', buttonText = 'View File' }) =>
         variables: { s3Uri: fileUri },
       });
 
-      const fetchedContent = response.data.getFileContents;
+      // Handle the updated response structure
+      const result = response.data.getFileContents;
+      const fetchedContent = result.content;
+      logger.debug('Received content type:', result.contentType);
+      logger.debug('Binary content?', result.isBinary);
+      if (result.isBinary === true) {
+        setError('This file contains binary content that cannot be viewed in the JSON viewer.');
+        return;
+      }
       logger.debug('Received content:', `${fetchedContent.substring(0, 100)}...`);
-
       setFileContent(fetchedContent);
     } catch (err) {
       logger.error('Error fetching content:', err);

@@ -10,7 +10,7 @@ import json
 import logging
 import os
 import boto3
-from typing import List, Dict, Any, Optional, Union, Set
+from typing import List, Dict, Any, Optional, Union, Set, Tuple
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from botocore.exceptions import ClientError
 import time
@@ -37,6 +37,10 @@ class ClassificationService:
     INITIAL_BACKOFF = 2  # seconds
     MAX_BACKOFF = 300    # 5 minutes
 
+    # Classification method options
+    MULTIMODAL_PAGE_LEVEL = "multimodalPageLevelClassification"
+    TEXTBASED_HOLISTIC = "textbasedHolisticClassification"
+    
     def __init__(
         self,
         region: str = None,
@@ -70,14 +74,30 @@ class ClassificationService:
             # Get model_id from config for logging
             model_id = self.config.get("model_id") or self.config.get("classification", {}).get("model")
             if not model_id:
-                logger.warning("No model ID specified in configuration, will use default from Bedrock client")
+                raise ValueError("No model ID specified in configuration for Bedrock")
+            self.bedrock_model = model_id
             logger.info(f"Initialized classification service with Bedrock backend using model {model_id}")
         else:  # sagemaker
             endpoint_name = self.config.get("sagemaker_endpoint_name") or os.environ.get("SAGEMAKER_ENDPOINT_NAME")
             if not endpoint_name:
-                logger.warning("No SageMaker endpoint name specified in configuration or environment")
+                raise ValueError("No SageMaker endpoint name specified in configuration or environment")
             self.sm_client = boto3.client('sagemaker-runtime', region_name=self.region)
+            self.sagemaker_endpoint = endpoint_name
             logger.info(f"Initialized classification service with SageMaker backend using endpoint {endpoint_name}")
+        
+        # Get classification method from config
+        classification_config = self.config.get("classification", {})
+        self.classification_method = classification_config.get("classificationMethod", self.MULTIMODAL_PAGE_LEVEL)
+        
+        # Log classification method 
+        if self.classification_method == self.TEXTBASED_HOLISTIC:
+            logger.info("Using textbased holistic packet classification method")
+        else:
+            # Default to multimodal page-level classification if value is invalid
+            if self.classification_method != self.MULTIMODAL_PAGE_LEVEL:
+                logger.warning(f"Invalid classification method '{self.classification_method}', falling back to '{self.MULTIMODAL_PAGE_LEVEL}'")
+                self.classification_method = self.MULTIMODAL_PAGE_LEVEL
+            logger.info("Using multimodal page-level classification method")
 
     def _load_document_types(self) -> List[DocumentType]:
         """Load document types from configuration."""
@@ -101,18 +121,65 @@ class ClassificationService:
         
         return doc_types
 
-    def _format_document_types(self) -> str:
-        """Format document types for the prompt."""
+    def _format_classes_list(self) -> str:
+        """Format document classes as a simple list for the prompt."""
         return "\n".join([
             f"{doc_type.type_name}  \t[ {doc_type.description} ]" 
             for doc_type in self.document_types
         ])
+        
+    def _get_classification_config(self) -> Dict[str, Any]:
+        """
+        Get and validate the classification configuration.
+        
+        Returns:
+            Dict with validated classification configuration parameters
+            
+        Raises:
+            ValueError: If required configuration values are missing
+        """
+        classification_config = self.config.get("classification", {})
+        config = {
+            "model_id": self.bedrock_model,
+            "temperature": float(classification_config.get("temperature", 0)),
+            "top_k": float(classification_config.get("top_k", 0.5)),
+        }
+        
+        # Validate system prompt
+        system_prompt = classification_config.get("system_prompt")
+        if not system_prompt:
+            raise ValueError("No system_prompt found in classification configuration")
+        config["system_prompt"] = system_prompt
+        
+        # Validate task prompt
+        task_prompt = classification_config.get("task_prompt")
+        if not task_prompt:
+            raise ValueError("No task_prompt found in classification configuration")
+        config["task_prompt"] = task_prompt
+        
+        return config
+        
+    def _prepare_prompt_from_template(self, prompt_template: str, substitutions: Dict[str, str], required_placeholders: List[str] = None) -> str:
+        """
+        Prepare prompt from template by replacing placeholders with values.
+        
+        Args:
+            prompt_template: The prompt template with placeholders
+            substitutions: Dictionary of placeholder values
+            required_placeholders: List of placeholder names that must be present in the template
+            
+        Returns:
+            String with placeholders replaced by values
+            
+        Raises:
+            ValueError: If a required placeholder is missing from the template
+        """
+        from idp_common.bedrock import format_prompt
+        return format_prompt(prompt_template, substitutions, required_placeholders)
 
     def classify_page_bedrock(
         self,
         page_id: str,
-        text_content: str = None,
-        image_content: Optional[bytes] = None,
         text_uri: Optional[str] = None,
         image_uri: Optional[str] = None,
         raw_text_uri: Optional[str] = None
@@ -122,8 +189,6 @@ class ClassificationService:
         
         Args:
             page_id: ID of the page
-            text_content: Text content of the page
-            image_content: Image content as bytes
             text_uri: URI of the text content
             image_uri: URI of the image content
             raw_text_uri: URI of the raw text content
@@ -131,16 +196,20 @@ class ClassificationService:
         Returns:
             PageClassification: Classification result for the page
         """
-        # Load text content from URI if not provided
-        if text_content is None and text_uri:
+        # Initialize content variables
+        text_content = None
+        image_content = None
+        
+        # Load text content from URI
+        if text_uri:
             try:
                 text_content = s3.get_text_content(text_uri)
             except Exception as e:
                 logger.warning(f"Failed to load text content from {text_uri}: {e}")
                 # Continue without text content
         
-        # Load image content from URI if not provided
-        if image_content is None and image_uri:
+        # Load image content from URI
+        if image_uri:
             try:
                 image_content = s3.get_binary_content(image_uri)
             except Exception as e:
@@ -151,46 +220,26 @@ class ClassificationService:
         if not text_content and not image_content:
             logger.warning(f"No content available for page {page_id}")
             # Return unclassified result
-            return PageClassification(
+            return self._create_unclassified_result(
                 page_id=page_id,
-                classification=DocumentClassification(
-                    doc_type="unclassified",
-                    confidence=0.0,
-                    metadata={"error": "No content available for classification"}
-                ),
                 image_uri=image_uri,
                 text_uri=text_uri,
-                raw_text_uri=raw_text_uri
+                raw_text_uri=raw_text_uri,
+                error_message="No content available for classification"
             )
         
         # Get classification configuration
-        classification_config = self.config.get("classification", {})
-        model_id = self.config.get("model_id") or classification_config.get("model")
-        temperature = float(classification_config.get("temperature", 0))
-        top_k = float(classification_config.get("top_k", 0.5))
-        system_prompt = classification_config.get("system_prompt", "")
+        config = self._get_classification_config()
         
-        # Prepare prompt
-        prompt_template = classification_config.get("task_prompt", "")
-        if "{DOCUMENT_TEXT}" in prompt_template and "{CLASS_NAMES_AND_DESCRIPTIONS}" in prompt_template:
-            prompt_template = prompt_template.replace("{DOCUMENT_TEXT}", "%(DOCUMENT_TEXT)s").replace("{CLASS_NAMES_AND_DESCRIPTIONS}", "%(CLASS_NAMES_AND_DESCRIPTIONS)s")
-            task_prompt = prompt_template % {
-                "CLASS_NAMES_AND_DESCRIPTIONS": self._format_document_types(),
-                "DOCUMENT_TEXT": text_content or ""
-            }
-        else:
-            # Default prompt if template not found
-            logger.warning("No task_prompt template found in configuration, using default")
-            task_prompt = f"""
-            Classify the following document into one of these types:
-            
-            {self._format_document_types()}
-            
-            Document text:
-            {text_content or ""}
-            
-            Respond with a JSON object with a single field "class" containing the document type.
-            """
+        # Use common function to prepare prompt with required placeholder validation
+        task_prompt = self._prepare_prompt_from_template(
+            config["task_prompt"], 
+            {
+                "DOCUMENT_TEXT": text_content or "",
+                "CLASS_NAMES_AND_DESCRIPTIONS": self._format_classes_list()
+            },
+            required_placeholders=["DOCUMENT_TEXT", "CLASS_NAMES_AND_DESCRIPTIONS"]
+        )
         
         content = [{"text": task_prompt}]
         
@@ -203,14 +252,11 @@ class ClassificationService:
         
         t0 = time.time()
         
-        # Invoke Bedrock with the common library
+        # Invoke Bedrock model
         try:
-            response_with_metering = bedrock.invoke_model(
-                model_id=model_id,
-                system_prompt=system_prompt,
+            response_with_metering = self._invoke_bedrock_model(
                 content=content,
-                temperature=temperature,
-                top_k=top_k
+                config=config
             )
             
             t1 = time.time()
@@ -260,16 +306,12 @@ class ClassificationService:
         except Exception as e:
             logger.error(f"Error classifying page {page_id}: {str(e)}")
             # Return unclassified result with error
-            return PageClassification(
+            return self._create_unclassified_result(
                 page_id=page_id,
-                classification=DocumentClassification(
-                    doc_type="unclassified",
-                    confidence=0.0,
-                    metadata={"error": str(e)}
-                ),
                 image_uri=image_uri,
                 text_uri=text_uri,
-                raw_text_uri=raw_text_uri
+                raw_text_uri=raw_text_uri,
+                error_message=str(e)
             )
 
     def classify_page_sagemaker(
@@ -294,33 +336,16 @@ class ClassificationService:
         # Verify we have the required URIs
         if not image_uri or not raw_text_uri:
             logger.warning(f"Missing required URIs for page {page_id}")
-            return PageClassification(
+            return self._create_unclassified_result(
                 page_id=page_id,
-                classification=DocumentClassification(
-                    doc_type="unclassified",
-                    confidence=0.0,
-                    metadata={"error": "Missing required image_uri or raw_text_uri"}
-                ),
                 image_uri=image_uri,
                 text_uri=text_uri,
-                raw_text_uri=raw_text_uri
+                raw_text_uri=raw_text_uri,
+                error_message="Missing required image_uri or raw_text_uri"
             )
         
-        # Get endpoint name from config or environment
-        endpoint_name = self.config.get("sagemaker_endpoint_name") or os.environ.get("SAGEMAKER_ENDPOINT_NAME")
-        if not endpoint_name:
-            logger.error("No SageMaker endpoint name specified in configuration or environment")
-            return PageClassification(
-                page_id=page_id,
-                classification=DocumentClassification(
-                    doc_type="unclassified",
-                    confidence=0.0,
-                    metadata={"error": "No SageMaker endpoint configured"}
-                ),
-                image_uri=image_uri,
-                text_uri=text_uri,
-                raw_text_uri=raw_text_uri
-            )
+        # Use the stored endpoint name 
+        endpoint_name = self.sagemaker_endpoint
         
         # Prepare payload
         payload = {
@@ -408,50 +433,36 @@ class ClassificationService:
                         f"{error_code} - {error_message}"
                     )
                     # Return unclassified with error
-                    return PageClassification(
+                    return self._create_unclassified_result(
                         page_id=page_id,
-                        classification=DocumentClassification(
-                            doc_type="unclassified",
-                            confidence=0.0,
-                            metadata={"error": f"{error_code}: {error_message}"}
-                        ),
                         image_uri=image_uri,
                         text_uri=text_uri,
-                        raw_text_uri=raw_text_uri
+                        raw_text_uri=raw_text_uri,
+                        error_message=f"{error_code}: {error_message}"
                     )
             except Exception as e:
                 logger.error(f"Unexpected error classifying page {page_id}: {str(e)}")
                 # Return unclassified with error
-                return PageClassification(
+                return self._create_unclassified_result(
                     page_id=page_id,
-                    classification=DocumentClassification(
-                        doc_type="unclassified",
-                        confidence=0.0,
-                        metadata={"error": str(e)}
-                    ),
                     image_uri=image_uri,
                     text_uri=text_uri,
-                    raw_text_uri=raw_text_uri
+                    raw_text_uri=raw_text_uri,
+                    error_message=str(e)
                 )
         
         # If we've reached here after max retries, return error
-        return PageClassification(
+        return self._create_unclassified_result(
             page_id=page_id,
-            classification=DocumentClassification(
-                doc_type="unclassified",
-                confidence=0.0,
-                metadata={"error": "Max retries exceeded for SageMaker classification"}
-            ),
             image_uri=image_uri,
             text_uri=text_uri,
-            raw_text_uri=raw_text_uri
+            raw_text_uri=raw_text_uri,
+            error_message="Max retries exceeded for SageMaker classification"
         )
 
     def classify_page(
         self,
         page_id: str,
-        text_content: str = None,
-        image_content: Optional[bytes] = None,
         text_uri: Optional[str] = None,
         image_uri: Optional[str] = None,
         raw_text_uri: Optional[str] = None
@@ -462,8 +473,6 @@ class ClassificationService:
         
         Args:
             page_id: ID of the page
-            text_content: Text content of the page
-            image_content: Image content as bytes
             text_uri: URI of the text content
             image_uri: URI of the image content
             raw_text_uri: URI of the raw text content
@@ -474,8 +483,6 @@ class ClassificationService:
         if self.backend == "bedrock":
             return self.classify_page_bedrock(
                 page_id=page_id,
-                text_content=text_content,
-                image_content=image_content,
                 text_uri=text_uri,
                 image_uri=image_uri,
                 raw_text_uri=raw_text_uri
@@ -488,6 +495,62 @@ class ClassificationService:
                 text_uri=text_uri
             )
 
+    def _invoke_bedrock_model(
+        self,
+        content: List[Dict[str, Any]],
+        config: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Invoke Bedrock model with standard parameters.
+        
+        Args:
+            content: Content to send to the model
+            config: Configuration with model parameters
+            
+        Returns:
+            Dictionary with response and metering data
+        """
+        return bedrock.invoke_model(
+            model_id=config["model_id"],
+            system_prompt=config["system_prompt"],
+            content=content,
+            temperature=config["temperature"],
+            top_k=config["top_k"]
+        )
+        
+    def _create_unclassified_result(
+        self, 
+        page_id: str, 
+        image_uri: Optional[str] = None,
+        text_uri: Optional[str] = None,
+        raw_text_uri: Optional[str] = None,
+        error_message: str = "Unknown error"
+    ) -> PageClassification:
+        """
+        Create a standard unclassified result with error information.
+        
+        Args:
+            page_id: ID of the page
+            image_uri: Optional URI of the image
+            text_uri: Optional URI of the text content
+            raw_text_uri: Optional URI of the raw text
+            error_message: Error message to include in metadata
+            
+        Returns:
+            PageClassification with unclassified result
+        """
+        return PageClassification(
+            page_id=page_id,
+            classification=DocumentClassification(
+                doc_type="unclassified",
+                confidence=0.0,
+                metadata={"error": error_message}
+            ),
+            image_uri=image_uri,
+            text_uri=text_uri,
+            raw_text_uri=raw_text_uri
+        )
+    
     def _extract_json(self, text: str) -> str:
         """Extract JSON string from text."""
         # Check for code block format
@@ -539,7 +602,13 @@ class ClassificationService:
     def classify_document(self, document: Document) -> Document:
         """
         Classify a document's pages and update the Document object with sections.
-        Uses the configured backend (Bedrock or SageMaker).
+        Uses the configured backend (Bedrock or SageMaker) and classification method.
+        
+        The classification method is determined by the 'classificationMethod' setting:
+        - multimodalPageLevelClassification (default): Uses page-by-page classification
+          that can leverage both text and image content
+        - textbasedHolisticClassification: Processes the entire document as a packet
+          to identify document segments across pages, using a holistic approach
         
         Args:
             document: Document object to classify and update
@@ -549,12 +618,20 @@ class ClassificationService:
         """
         if not document.pages:
             logger.warning("Document has no pages to classify")
-            document.status = Status.FAILED
-            document.errors.append("Document has no pages to classify")
-            return document
-            
+            return self._update_document_status(
+                document, 
+                success=False, 
+                error_message="Document has no pages to classify"
+            )
+        
+        # Use the appropriate classification method based on configuration
+        if self.classification_method == self.TEXTBASED_HOLISTIC:
+            logger.info(f"Classifying document with {len(document.pages)} pages using holistic packet method")
+            return self.holistic_classify_document(document)
+        
+        # Default to page-by-page classification
         t0 = time.time()
-        logger.info(f"Classifying document with {len(document.pages)} pages using {self.backend} backend")
+        logger.info(f"Classifying document with {len(document.pages)} pages using page-by-page method with {self.backend} backend")
         
         try:
             # Process pages concurrently
@@ -609,11 +686,7 @@ class ClassificationService:
             
             # Group pages into sections only if we have results
             document.sections = []
-            try:
-                sorted_results = sorted(all_page_results, key=lambda x: int(x.page_id))
-            except (ValueError, TypeError) as e:
-                logger.warning(f"Unable to sort page IDs as integers, using string sort: {e}")
-                sorted_results = sorted(all_page_results, key=lambda x: x.page_id)
+            sorted_results = self._sort_page_results(all_page_results)
             
             if sorted_results:
                 current_group = 1
@@ -625,11 +698,10 @@ class ClassificationService:
                         current_pages.append(result)
                     else:
                         # Create a new section with the current group of pages
-                        section = Section(
+                        section = self._create_section(
                             section_id=str(current_group),
-                            classification=current_type,
-                            confidence=1.0,
-                            page_ids=[p.page_id for p in current_pages]
+                            doc_type=current_type,
+                            pages=[p.page_id for p in current_pages]
                         )
                         document.sections.append(section)
                         
@@ -639,22 +711,15 @@ class ClassificationService:
                         current_pages = [result]
                 
                 # Add the final section
-                section = Section(
+                section = self._create_section(
                     section_id=str(current_group),
-                    classification=current_type,
-                    confidence=1.0,
-                    page_ids=[p.page_id for p in current_pages]
+                    doc_type=current_type,
+                    pages=[p.page_id for p in current_pages]
                 )
                 document.sections.append(section)
             
-            # Update document status based on errors
-            if document.errors:
-                logger.warning(f"Document classified with {len(document.errors)} errors")
-                # We still set status to CLASSIFIED even with errors since we have some results
-                document.status = Status.CLASSIFIED
-            else:
-                document.status = Status.CLASSIFIED
-            
+            # Update document status and metering
+            document = self._update_document_status(document)
             document.metering = utils.merge_metering_data(document.metering, combined_metering)
             
             t1 = time.time()
@@ -662,9 +727,7 @@ class ClassificationService:
         
         except Exception as e:
             error_msg = f"Error classifying document: {str(e)}"
-            logger.error(error_msg)
-            document.errors.append(error_msg)
-            document.status = Status.FAILED
+            document = self._update_document_status(document, success=False, error_message=error_msg)
         
         return document
         
@@ -714,6 +777,61 @@ class ClassificationService:
             sections=sections
         )
 
+    def _sort_page_results(self, results: List[PageClassification]) -> List[PageClassification]:
+        """
+        Sort page results by page ID, trying numeric sort first, falling back to string sort.
+        
+        Args:
+            results: List of page classification results
+            
+        Returns:
+            Sorted list of page classification results
+        """
+        try:
+            return sorted(results, key=lambda x: int(x.page_id))
+        except (ValueError, TypeError):
+            logger.warning("Unable to sort page IDs as integers, using string sort")
+            return sorted(results, key=lambda x: x.page_id)
+    
+    def _create_section(
+        self,
+        section_id: str,
+        doc_type: str,
+        pages: List,
+        confidence: float = 1.0
+    ) -> Union[DocumentSection, Section]:
+        """
+        Create a document section based on the input type.
+        
+        Args:
+            section_id: ID for the section
+            doc_type: Document type for the section
+            pages: List of pages (either PageClassification or page_ids)
+            confidence: Confidence score for the classification
+            
+        Returns:
+            Either DocumentSection or Section depending on the input pages type
+        """
+        # Check if we're dealing with page IDs (strings) or PageClassification objects
+        if pages and isinstance(pages[0], str):
+            # Create a Section with page_ids
+            return Section(
+                section_id=section_id,
+                classification=doc_type,
+                confidence=confidence,
+                page_ids=pages
+            )
+        else:
+            # Create a DocumentSection with PageClassification objects
+            return DocumentSection(
+                section_id=section_id,
+                classification=DocumentClassification(
+                    doc_type=doc_type,
+                    confidence=confidence
+                ),
+                pages=pages
+            )
+    
     def _group_consecutive_pages(self, results: List[PageClassification]) -> List[DocumentSection]:
         """
         Group consecutive pages with the same classification into sections.
@@ -724,12 +842,7 @@ class ClassificationService:
         Returns:
             List of document sections
         """
-        try:
-            sorted_results = sorted(results, key=lambda x: int(x.page_id))
-        except (ValueError, TypeError):
-            logger.warning("Unable to sort page IDs as integers, using string sort")
-            sorted_results = sorted(results, key=lambda x: x.page_id)
-            
+        sorted_results = self._sort_page_results(results)
         sections = []
         
         if not sorted_results:
@@ -743,12 +856,10 @@ class ClassificationService:
             if result.classification.doc_type == current_type:
                 current_pages.append(result)
             else:
-                sections.append(DocumentSection(
+                # Create a section with the current group
+                sections.append(self._create_section(
                     section_id=str(current_group),
-                    classification=DocumentClassification(
-                        doc_type=current_type,
-                        confidence=1.0  # Default confidence
-                    ),
+                    doc_type=current_type,
                     pages=current_pages
                 ))
                 current_group += 1
@@ -756,13 +867,218 @@ class ClassificationService:
                 current_pages = [result]
         
         # Add the last section
-        sections.append(DocumentSection(
+        sections.append(self._create_section(
             section_id=str(current_group),
-            classification=DocumentClassification(
-                doc_type=current_type,
-                confidence=1.0  # Default confidence
-            ),
+            doc_type=current_type,
             pages=current_pages
         ))
         
         return sections
+        
+    def _format_classes_and_descriptions(self) -> str:
+        """Format document classes and descriptions as a markdown table for classification."""
+        # Convert list of DocumentType to list of dicts for markdown table formatting
+        classes_dicts = [
+            {"type": dt.type_name, "description": dt.description} 
+            for dt in self.document_types
+        ]
+        
+        # Create markdown table
+        header = "| type | description |\n| --- | --- |\n"
+        rows = "\n".join([
+            f"| {class_dict['type']} | {class_dict['description']} |" 
+            for class_dict in classes_dicts
+        ])
+        
+        return header + rows
+    
+    def _update_document_status(self, document: Document, success: bool = True, error_message: Optional[str] = None) -> Document:
+        """
+        Update document status based on processing results.
+        
+        Args:
+            document: Document to update
+            success: Whether processing was successful
+            error_message: Optional error message to add
+            
+        Returns:
+            Updated document with appropriate status
+        """
+        if error_message and error_message not in document.errors:
+            document.errors.append(error_message)
+            
+        if not success:
+            document.status = Status.FAILED
+            if error_message:
+                logger.error(error_message)
+        else:
+            # Set status to CLASSIFIED even with non-fatal errors
+            document.status = Status.CLASSIFIED
+            if document.errors:
+                logger.warning(f"Document classified with {len(document.errors)} errors")
+                
+        return document
+    
+    def _format_pages(self, document: Document) -> Dict[str, str]:
+        """
+        Format document pages as text.
+        
+        Args:
+            document: Document object with pages
+            
+        Returns:
+            Dictionary mapping page_id to text content
+        """
+        pages_content = {}
+        
+        for page_id, page in document.pages.items():
+            # Fetch page text content from S3 if available
+            if page.parsed_text_uri:
+                try:
+                    pages_content[page_id] = s3.get_text_content(page.parsed_text_uri)
+                except Exception as e:
+                    logger.warning(f"Failed to load text content from {page.parsed_text_uri}: {e}")
+                    # Continue with empty content
+                    pages_content[page_id] = f"[Error loading page {page_id} content]"
+            else:
+                # Page has no text content
+                pages_content[page_id] = f"[No text content for page {page_id}]"
+        
+        return pages_content
+        
+    def holistic_classify_document(self, document: Document) -> Document:
+        """
+        Classify a document using holistic packet classification.
+        
+        This method uses an LLM to analyze the entire document and identify page ranges 
+        that belong to specific document types. Unlike page-by-page classification,
+        this method can handle documents where individual pages might not be clearly
+        classifiable on their own.
+        
+        Args:
+            document: Document object to classify
+            
+        Returns:
+            Document: Updated Document object with classifications and sections
+        """
+        if not document.pages:
+            logger.warning("Document has no pages to classify with holistic method")
+            return self._update_document_status(
+                document, 
+                success=False, 
+                error_message="Document has no pages to classify"
+            )
+            
+        t0 = time.time()
+        logger.info(f"Classifying document with {len(document.pages)} pages using holistic packet method")
+        
+        try:
+            # Format document pages as text
+            pages_content = self._format_pages(document)
+            
+            # Get classification configuration
+            config = self._get_classification_config()
+
+            # Prepare paged document text
+            doc_text = ""
+            for page_id, page_text in sorted(pages_content.items(), key=lambda x: int(x[0]) if x[0].isdigit() else float('inf')):
+                doc_text += f"<page-number>{page_id}</page-number>\n{page_text}\n\n"
+            
+            # Prepare document classes and descriptions as a table
+            classes_table = self._format_classes_and_descriptions()
+            
+            # Prepare prompt using common function
+            prepared_prompt = self._prepare_prompt_from_template(
+                config["task_prompt"],
+                {
+                    "DOCUMENT_TEXT": doc_text,
+                    "CLASS_NAMES_AND_DESCRIPTIONS": classes_table
+                },
+                required_placeholders=["DOCUMENT_TEXT", "CLASS_NAMES_AND_DESCRIPTIONS"]
+            )
+            
+            # Invoke Bedrock to get the holistic classification
+            logger.info(f"Invoking Bedrock for holistic packet classification")
+            
+            response_with_metering = self._invoke_bedrock_model(
+                content=[{"text": prepared_prompt}],
+                config=config
+            )
+            
+            t1 = time.time()
+            logger.info(f"Time taken for holistic classification: {t1-t0:.2f} seconds")
+            
+            response = response_with_metering["response"]
+            metering = response_with_metering["metering"]
+            
+            # Extract classification result
+            classification_text = response['output']['message']['content'][0].get("text", "")
+            
+            # Try to extract JSON from the response
+            try:
+                classification_json = self._extract_json(classification_text)
+                classification_data = json.loads(classification_json)
+                segments = classification_data.get("segments", [])
+                
+                if not segments:
+                    raise ValueError("No segments found in the classification result")
+                
+                # Update the document with sections based on the segments
+                document.sections = []
+                for i, segment in enumerate(segments):
+                    # Validate segment data
+                    if not all(k in segment for k in ["ordinal_start_page", "ordinal_end_page", "type"]):
+                        logger.warning(f"Segment {i} is missing required fields")
+                        continue
+                    
+                    # Normalize page IDs (convert from 1-based to actual page IDs in the document)
+                    start_page = segment["ordinal_start_page"]
+                    end_page = segment["ordinal_end_page"]
+                    doc_type = segment["type"]
+                    
+                    # Check if the doc_type is valid
+                    if doc_type not in self.valid_doc_types:
+                        logger.warning(f"Unknown document type '{doc_type}', using anyway")
+                    
+                    # Find corresponding page IDs
+                    page_ids = []
+                    try:
+                        for page_idx in range(start_page, end_page + 1):
+                            page_id = str(page_idx)
+                            if page_id in document.pages:
+                                page_ids.append(page_id)
+                                # Update page classification
+                                document.pages[page_id].classification = doc_type
+                                document.pages[page_id].confidence = 1.0
+                    except Exception as e:
+                        logger.error(f"Error processing segment {i}: {e}")
+                        continue
+                    
+                    if not page_ids:
+                        logger.warning(f"No valid pages found for segment {i}")
+                        continue
+                    
+                    # Create and add the section
+                    section = Section(
+                        section_id=str(i+1),
+                        classification=doc_type,
+                        confidence=1.0,
+                        page_ids=page_ids
+                    )
+                    document.sections.append(section)
+                
+                # Update document metering and status
+                document.metering = utils.merge_metering_data(document.metering, metering)
+                document = self._update_document_status(document)
+                
+                logger.info(f"Document classified with {len(document.sections)} sections using holistic method")
+                
+            except Exception as e:
+                error_msg = f"Error parsing holistic classification result: {str(e)}"
+                document = self._update_document_status(document, success=False, error_message=error_msg)
+        
+        except Exception as e:
+            error_msg = f"Error in holistic classification: {str(e)}"
+            document = self._update_document_status(document, success=False, error_message=error_msg)
+        
+        return document

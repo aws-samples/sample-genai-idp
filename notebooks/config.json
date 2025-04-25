@@ -1,0 +1,180 @@
+{
+  "classes": [
+    {
+      "name": "letter",
+      "description": "A formal written message that is typically sent from one person to another",
+      "attributes": [
+        {
+          "name": "sender_name",
+          "description": "The name of the person or entity who wrote or sent the letter. Look for text following or near terms like 'from', 'sender', 'authored by', 'written by', or at the end of the letter before a signature."
+        },
+        {
+          "name": "sender_address",
+          "description": "The physical address of the sender, typically appearing at the top of the letter. May be labeled as 'address', 'location', or 'from address'."
+        }
+      ]
+    },
+    {
+      "name": "form",
+      "description": "A document with blank spaces for filling in information",
+      "attributes": [
+        {
+          "name": "form_type",
+          "description": "The category or purpose of the form, such as 'application', 'registration', 'request', etc. May be identified by 'form name', 'document type', or 'form category'."
+        },
+        {
+          "name": "form_id",
+          "description": "The unique identifier for the form, typically a number or alphanumeric code. Often labeled as 'form number', 'id', or 'reference number'."
+        }
+      ]
+    },
+    {
+      "name": "invoice",
+      "description": "A commercial document issued by a seller to a buyer relating to a sale",
+      "attributes": [
+        {
+          "name": "invoice_number",
+          "description": "The unique identifier for the invoice. Look for 'invoice no', 'invoice #', or 'bill number', typically near the top of the document."
+        },
+        {
+          "name": "invoice_date",
+          "description": "The date when the invoice was issued. May be labeled as 'date', 'invoice date', or 'billing date'."
+        }
+      ]
+    },
+    {
+      "name": "resume",
+      "description": "A document summarizing a person's background, skills, and qualifications",
+      "attributes": [
+        {
+          "name": "full_name",
+          "description": "The complete name of the job applicant, typically appearing prominently at the top of the resume. May be simply labeled as 'name' or 'applicant name'."
+        },
+        {
+          "name": "contact_info",
+          "description": "The phone number, email, and address of the applicant. Look for a section with 'contact', 'phone', 'email', or 'address', usually near the top of the resume."
+        }
+      ]
+    },
+    {
+      "name": "scientific_publication",
+      "description": "A formally published document presenting scientific research findings",
+      "attributes": [
+        {
+          "name": "title",
+          "description": "The name of the scientific paper, typically appearing prominently at the beginning. May be labeled as 'title', 'paper title', or 'article title'."
+        },
+        {
+          "name": "authors",
+          "description": "The researchers who conducted the study and wrote the paper. Look for names after 'authors', 'contributors', or 'researchers', usually following the title."
+        }
+      ]
+    },
+    {
+      "name": "memo",
+      "description": "A brief written message used for internal communication within an organization",
+      "attributes": [
+        {
+          "name": "memo_date",
+          "description": "The date when the memo was written. Look for 'date' or 'memo date', typically near the top of the document."
+        },
+        {
+          "name": "from",
+          "description": "The person or department that wrote the memo. May be labeled as 'from', 'sender', or 'author'."
+        }
+      ]
+    },
+    {
+      "name": "advertisement",
+      "description": "A public notice promoting a product, service, or event",
+      "attributes": [
+        {
+          "name": "product_name",
+          "description": "The name of the item or service being advertised. Look for prominently displayed text that could be a 'product', 'item', or 'service' name."
+        },
+        {
+          "name": "brand",
+          "description": "The company or manufacturer of the product. May be indicated by a logo or text labeled as 'brand', 'company', or 'manufacturer'."
+        }
+      ]
+    },
+    {
+      "name": "email",
+      "description": "An electronic message sent from one person to another over a computer network",
+      "attributes": [
+        {
+          "name": "from_address",
+          "description": "The email address of the sender. Look for text following 'from', 'sender', or 'sent by', typically at the beginning of the email header."
+        },
+        {
+          "name": "to_address",
+          "description": "The email address of the primary recipient. May be labeled as 'to', 'recipient', or 'sent to'."
+        }
+      ]
+    },
+    {
+      "name": "questionnaire",
+      "description": "A set of written questions designed to collect information from respondents",
+      "attributes": [
+        {
+          "name": "form_title",
+          "description": "The name or title of the questionnaire. Look for prominently displayed text at the beginning that could be a 'title', 'survey name', or 'questionnaire name'."
+        },
+        {
+          "name": "respondent_info",
+          "description": "Information about the person completing the questionnaire. May include fields labeled 'respondent', 'participant', or 'name'."
+        }
+      ]
+    },
+    {
+      "name": "specification",
+      "description": "A detailed description of technical requirements or characteristics",
+      "attributes": [
+        {
+          "name": "product_name",
+          "description": "The name of the item being specified. Look for text labeled as 'product', 'item', or 'model', typically appearing prominently at the beginning."
+        },
+        {
+          "name": "version",
+          "description": "The iteration or release number. May be indicated by 'version', 'revision', or 'release', often followed by a number or code."
+        }
+      ]
+    },
+    {
+      "name": "generic",
+      "description": "A general document type that doesn't fit into other specific categories",
+      "attributes": [
+        {
+          "name": "document_type",
+          "description": "The classification or category of the document. Look for terms like 'type', 'category', or 'class' that indicate what kind of document this is."
+        },
+        {
+          "name": "document_date",
+          "description": "The date when the document was created. May be labeled as 'date', 'created on', or 'issued on'."
+        }
+      ]
+    }
+  ],
+  "classification": {
+    "temperature": "0",
+    "model": "us.amazon.nova-pro-v1:0",
+    "classificationMethod": "textbasedHolisticClassification",
+    "system_prompt": "You are a document classification expert who can analyze and classify multiple documents and their page boundaries within a document package from various domains. Your task is to determine the document type based on its content and structure, using the provided document type definitions. Your output must be valid JSON according to the requested format.",
+    "top_k": "200",
+    "task_prompt": "The <document-text> XML tags contains the text separated into pages from the document package. Each page will begin with a <page-number> XML tag indicating the one based page ordinal of the page text to follow.\n<document-text>\n{DOCUMENT_TEXT}\n</document-text>\n\nThe <document-types> XML tags contain a markdown table of known doc types for detection.\n<document-types>\n{CLASS_NAMES_AND_DESCRIPTIONS}\n</document-types>\n\n<guidance>\nGuidance for terminology found in the instructions.\n    * ordinal_start_page: The one based beginning page of a document segment within the document package.\n    * ordinal_end_page: The one based ending page of a document segment within the document package.\n    * document_type: The document type code detected for a document segment.\n    * Distinct documents of the same type may be adjacent to each other in the packet. Be sure to separate them into different document segments and don't combine them.\n</guidance>\n\n<document-splitting-guidance>\nWhen deciding whether pages belong to the same document segment:\n- Content continuity: Pages with continuing paragraphs, numbered sections, or ongoing narratives likely belong to the same document.\n- Visual/formatting consistency: Similar layouts, headers, footers, and styling suggest pages belong together.\n- Logical completion: A document typically has a beginning, middle, and end structure.\n- Document boundaries: Look for clear indicators of a new document such as new title pages, cover sheets, or significantly different subject matter.\n- Content similarity: Pages discussing the same topic or subject likely belong to the same document.\n\nPages should be grouped together when they represent a coherent, continuous document, even if they span multiple pages. Split documents only when there is clear evidence that a new, distinct document begins.\n</document-splitting-guidance>\n\nCRITICAL: You must ONLY use document types explicitly listed in the <document-types> section. Do not create, invent, or use any document type not found in this list. If a document doesn't clearly match any listed type, assign it to the most similar listed type or \"other\" if that option is provided.\n\nFollow these steps when classifying documents within the document package:\n1. Examine the document package as a whole, and identify page ranges that are likely to belong to one of the <document-types>.\n2. Match each page range with an identified document type from the provided list ONLY.\n3. Identify documents of the same type, that are not the same document but are adjacent to each other in the packet.\n4. Separate unique documents of the same type adjacent to each other in the packet into distinct document segments. Important: Do not combine distinct documents of the same type into a single document segment.\n5. For each identified document type, note the ordinal_start_page and ordinal_end_page.\n6. Compile the classified documents into a list with their respective ordinal_start_page and ordinal_end_page.\n7. Before finalizing, verify that each document type in your response exactly matches one from the <document-types> list.\n\nReturn your response as valid JSON according to this format:\n```json\n{\n    \"segments\": [\n                      {\n                        \"ordinal_start_page\": 1,\n                        \"ordinal_end_page\": 2,\n                        \"type\": \"the first type of document detected\"\n                      },\n                      {\n                        \"ordinal_start_page\": 3,\n                        \"ordinal_end_page\": 4,\n                        \"type\": \"the second type of document detected\"\n                      }\n                    ]\n}\n```"
+  },
+  "extraction": {
+    "temperature": "0",
+    "model": "us.amazon.nova-pro-v1:0",
+    "system_prompt": "You are a document assistant. Respond only with JSON. Never make up data, only provide data found in the document being provided.\n",
+    "top_k": "200",
+    "task_prompt": "<background>\nYou are an expert in business document analysis and information extraction. \nYou can understand and extract key information from business documents classified as type \n{DOCUMENT_CLASS}.\n</background>\n<document_ocr_data>\n{DOCUMENT_TEXT}\n</document_ocr_data>\n<task>\nYour task is to take the unstructured text provided and convert it into a well-organized table format using JSON. Identify the main entities, attributes, or categories mentioned in the attributes list below and use them as keys in the JSON object. \nThen, extract the relevant information from the text and populate the corresponding values in the JSON object. \nGuidelines:\nEnsure that the data is accurately represented and properly formatted within the JSON structure\nInclude double quotes around all keys and values\nDo not make up data - only extract information explicitly found in the document\nDo not use /n for new lines, use a space instead\nIf a field is not found or if unsure, return null\nAll dates should be in MM/DD/YYYY format\nDo not perform calculations or summations unless totals are explicitly given\nIf an alias is not found in the document, return null\nHere are the attributes you should extract:\n<attributes>\n{ATTRIBUTE_NAMES_AND_DESCRIPTIONS}\n</attributes>\n</task>\n"
+  },
+  "summarization": {
+    "temperature": "0.0",
+    "model": "us.amazon.nova-pro-v1:0",
+    "top_k": "200",
+    "system_prompt": "You are a document summarization expert who can analyze and summarize documents from various domains including medical, financial, legal, and general business documents. Your task is to create a summary that captures the key information, main points, and important details from the document. Your output must be in valid JSON format. \nSummarization Style: Balanced\\nCreate a balanced summary that provides a moderate level of detail. Include the main points and key supporting information, while maintaining the document's overall structure. Aim for a comprehensive yet concise summary.\n Your output MUST be in valid JSON format with markdown content. You MUST strictly adhere to the output format specified in the instructions.",
+    "task_prompt": "Analyze the provided document and create a comprehensive summary.\n\n<document>\n{DOCUMENT_TEXT}\n</document>\n\nCRITICAL INSTRUCTION: You MUST return your response as valid JSON with the EXACT structure shown at the end of these instructions. Do not include any explanations, notes, or text outside of the JSON structure.\n\nCreate a summary that captures the essential information from the document. Your summary should:\n1. Extract key information, main points, and important details\n2. Maintain the original document's organizational structure where appropriate\n3. Preserve important facts, figures, dates, and entities\n4. Reduce the length while retaining all critical information\n5. Use markdown formatting for better readability (headings, lists, emphasis, etc.)\n6. Cite all relevant facts from the source document using the format [Cite-X, Page-Y] where X is a sequential citation number and Y is the page number\n7. For each citation, include a hover-enabled reference using HTML span tags with title attributes that contain the exact text snippet from which the fact is derived\n   Example: <span title=\"Original text from document: The company reported $10M in revenue\" class=\"citation\">[Cite-1, Page-3]</span>\n\n Output Format:\n You MUST return ONLY valid JSON with the following structure and nothing else:\n```json\n{\n  \"summary\": \"A comprehensive summary in markdown format with citations and hover functionality\"\n}\n```\n\nDo not include any text, explanations, or notes outside of this JSON structure. The JSON must be properly formatted and parseable."
+  }
+}

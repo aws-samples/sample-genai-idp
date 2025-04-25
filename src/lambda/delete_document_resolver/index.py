@@ -6,7 +6,8 @@ from typing import List
 
 # Configure logging
 logger = logging.getLogger()
-logger.setLevel(logging.INFO)
+logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
+# Get LOG_LEVEL from environment variable with INFO as default
 
 dynamodb = boto3.resource('dynamodb')
 s3 = boto3.client('s3')

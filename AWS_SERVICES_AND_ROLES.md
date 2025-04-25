@@ -23,6 +23,7 @@ This document outlines the AWS services used by the GenAI Intelligent Document P
 | Service | Usage | Deployment | Runtime |
 |---------|-------|------------|---------|
 | **Amazon Bedrock** | Provides foundation models for document understanding | ✓ | ✓ |
+| **Amazon Bedrock Guardrails** | Enforces content safety, information security, and model usage policies | ✓ | ✓ |
 | **Amazon Textract** | Extracts text and data from documents (OCR) | | ✓ |
 | **Amazon SageMaker** | Hosts custom ML models for document classification (UDOP) | ✓ | ✓ |
 | **Amazon Bedrock Knowledge Base** | Enables semantic document querying (optional) | ✓ | ✓ |
@@ -98,11 +99,13 @@ The solution creates various IAM roles to run different components of the system
 * **Classification Role**:
   * `sagemaker:InvokeEndpoint` (Pattern 3)
   * `bedrock:InvokeModel` (Patterns 2 & 3)
+  * `bedrock:ApplyGuardrail` (when Guardrails configured)
   * `s3:GetObject`, `s3:PutObject`
   * `logs:*`
 
 * **Extraction Role**:
   * `bedrock:InvokeModel`
+  * `bedrock:ApplyGuardrail` (when Guardrails configured)
   * `s3:GetObject`, `s3:PutObject`
   * `logs:*`
 
@@ -125,6 +128,7 @@ The solution creates various IAM roles to run different components of the system
 
 * **Knowledge Base Query Role**:
   * `bedrock:InvokeModel`
+  * `bedrock:ApplyGuardrail` (when Guardrails configured)
   * `opensearch:ESHttpGet`, `opensearch:ESHttpPost`
   * `logs:*`
 
@@ -146,6 +150,7 @@ For high-volume document processing, consider requesting quota increases for:
 |---------|-------------------|----------------|
 | Amazon Bedrock | On-demand InvokeModel tokens per minute | Varies by model |
 | Amazon Bedrock | On-demand InvokeModel requests per minute | Varies by model |
+| Amazon Bedrock | ApplyGuardrail requests per minute | Varies by region |
 | Amazon Textract | DetectDocumentText transactions per second | 3-5 TPS |
 | Amazon SageMaker | Number of endpoints per region | 2-10 endpoints |
 | AWS Lambda | Concurrent executions | 1,000 executions |
@@ -177,7 +182,13 @@ When deploying this solution, consider the following security best practices:
    * Regularly audit and rotate credentials
    * Enable CloudTrail logging for all API actions
 
-5. **Data Protection**:
+5. **Content Safety & Control**:
+   * Configure Bedrock Guardrails with appropriate topic filters
+   * Set up content blocking for sensitive information
+   * Implement trace logging for guardrail activations
+   * Use different guardrail configurations for different environments (dev/test/prod)
+
+6. **Data Protection**:
    * Implement lifecycle policies for S3 objects
    * Configure appropriate retention policies for logs and data
    * Consider data residency requirements when selecting regions

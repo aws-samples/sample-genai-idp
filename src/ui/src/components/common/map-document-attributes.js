@@ -19,6 +19,8 @@ const mapDocumentsAttributes = (documents) => {
       PageCount: pageCount,
       Metering: meteringJson,
       EvaluationReportUri: evaluationReportUri,
+      EvaluationStatus: evaluationStatus,
+      SummaryReportUri: summaryReportUri,
       ListPK: listPK,
       ListSK: listSK,
     } = item;
@@ -58,6 +60,8 @@ const mapDocumentsAttributes = (documents) => {
       pageCount,
       metering,
       evaluationReportUri,
+      evaluationStatus,
+      summaryReportUri,
       listPK,
       listSK,
     };

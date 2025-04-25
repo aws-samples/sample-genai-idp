@@ -35,8 +35,19 @@ def get_text_content(s3_uri: str) -> str:
         bucket, key = parse_s3_uri(s3_uri)
         s3 = get_s3_client()
         response = s3.get_object(Bucket=bucket, Key=key)
-        content = json.loads(response['Body'].read().decode('utf-8'))
-        return content.get('text', '')
+        content_str = response['Body'].read().decode('utf-8')
+        
+        # Check if the content is JSON or plain text
+        if s3_uri.endswith('.json'):
+            try:
+                content = json.loads(content_str)
+                return content.get('text', content_str)
+            except json.JSONDecodeError:
+                logger.warning(f"File has .json extension but content is not valid JSON: {s3_uri}")
+                return content_str
+        else:
+            # For non-JSON files (like .md), return the content directly
+            return content_str
     except Exception as e:
         logger.error(f"Error reading text from {s3_uri}: {e}")
         raise

@@ -336,6 +336,8 @@ const FormView = ({ schema, formValues, defaultConfig, isCustomized, onResetToDe
   const [activeAddModal, setActiveAddModal] = useState(null); // Path of the list currently showing add modal
   const [newItemName, setNewItemName] = useState('');
   const [nameError, setNameError] = useState('');
+  // For handling dropdown selection in modal
+  const [showNameAsDropdown, setShowNameAsDropdown] = useState(false);
 
   // Component-level function to add a new item with a name
   const addNewItem = (path, name) => {
@@ -484,12 +486,25 @@ const FormView = ({ schema, formValues, defaultConfig, isCustomized, onResetToDe
     // Check if this is a top-level object (path is empty)
     const isTopLevel = path === '';
 
+    // Sort properties by their order attribute if present
+    const getSortedObjectProperties = (properties) => {
+      const entries = Object.entries(properties);
+      // Add an order property if not present (default to 999)
+      const withOrder = entries.map(([propKey, propSchema]) => ({
+        propKey,
+        propSchema,
+        order: propSchema.order !== undefined ? parseInt(propSchema.order, 10) : 999,
+      }));
+      // Sort by order
+      return withOrder.sort((a, b) => a.order - b.order);
+    };
+
     // For top-level objects with sectionLabel, we shouldn't add a container here
     // as it's already being added in renderTopLevelProperty
     if (property.sectionLabel && isTopLevel) {
       return (
         <SpaceBetween size="s">
-          {Object.entries(property.properties).map(([propKey, propSchema]) => {
+          {getSortedObjectProperties(property.properties).map(({ propKey, propSchema }) => {
             return <Box key={propKey}>{renderField(propKey, propSchema, fullPath)}</Box>;
           })}
         </SpaceBetween>
@@ -502,7 +517,7 @@ const FormView = ({ schema, formValues, defaultConfig, isCustomized, onResetToDe
       return (
         <Container header={<Header variant="h3">{sectionTitle}</Header>}>
           <SpaceBetween size="s">
-            {Object.entries(property.properties).map(([propKey, propSchema]) => {
+            {getSortedObjectProperties(property.properties).map(({ propKey, propSchema }) => {
               return <Box key={propKey}>{renderField(propKey, propSchema, fullPath)}</Box>;
             })}
           </SpaceBetween>
@@ -514,7 +529,7 @@ const FormView = ({ schema, formValues, defaultConfig, isCustomized, onResetToDe
     return (
       <Box padding="s">
         <SpaceBetween size="xs">
-          {Object.entries(property.properties).map(([propKey, propSchema]) => {
+          {getSortedObjectProperties(property.properties).map(({ propKey, propSchema }) => {
             const nestedPropSchema =
               propSchema.type === 'list' || propSchema.type === 'array'
                 ? { ...propSchema, nestLevel: nestLevel + 1 }
@@ -684,7 +699,8 @@ const FormView = ({ schema, formValues, defaultConfig, isCustomized, onResetToDe
                           .map(([propKey, prop]) => ({
                             propKey,
                             prop,
-                            order: prop.order || 999,
+                            // Use the specific order if provided, otherwise default to 999
+                            order: prop.order !== undefined ? parseInt(prop.order, 10) : 999,
                           }))
                           .sort((a, b) => a.order - b.order);
 
@@ -817,6 +833,16 @@ const FormView = ({ schema, formValues, defaultConfig, isCustomized, onResetToDe
                 setActiveAddModal(path);
                 setNewItemName('');
                 setNameError('');
+
+                // Check if name field has enum property for dropdown
+                const propertyDefinition = getPropertyFromPath(path);
+                const hasEnumForName = propertyDefinition?.items?.properties?.name?.enum !== undefined;
+                setShowNameAsDropdown(hasEnumForName);
+
+                // If it's a dropdown with enum values, set the default value to the first option
+                if (hasEnumForName && propertyDefinition.items.properties.name.enum.length > 0) {
+                  setNewItemName(propertyDefinition.items.properties.name.enum[0]);
+                }
               }}
             >
               Add {itemLabel}
@@ -836,6 +862,28 @@ const FormView = ({ schema, formValues, defaultConfig, isCustomized, onResetToDe
   }
 
   function renderInputField(key, property, value, path) {
+    // Check if this field depends on another field's value
+    if (property.dependsOn) {
+      const dependencyField = property.dependsOn.field;
+      const dependencyValues = Array.isArray(property.dependsOn.values)
+        ? property.dependsOn.values
+        : [property.dependsOn.value];
+
+      // Get the parent path (directory containing the current field)
+      const parentPath = path.substring(0, path.lastIndexOf('.'));
+
+      // Get the full path to the dependency field
+      const dependencyPath = parentPath.length > 0 ? `${parentPath}.${dependencyField}` : dependencyField;
+
+      // Get the current value of the dependency field
+      const dependencyValue = getValueAtPath(formValues, dependencyPath);
+
+      // If dependency value doesn't match any required values, hide this field
+      if (dependencyValue === undefined || !dependencyValues.includes(dependencyValue)) {
+        return null; // Don't render this field
+      }
+    }
+
     let input;
 
     // Add debug info
@@ -985,7 +1033,8 @@ const FormView = ({ schema, formValues, defaultConfig, isCustomized, onResetToDe
     const withOrder = entries.map(([key, prop]) => ({
       key,
       property: prop,
-      order: prop.order ? parseInt(prop.order, 10) : 999,
+      // Use the specific order if provided, otherwise default to 999
+      order: prop.order !== undefined ? parseInt(prop.order, 10) : 999,
     }));
 
     // Sort by order
@@ -1051,19 +1100,50 @@ const FormView = ({ schema, formValues, defaultConfig, isCustomized, onResetToDe
           </Box>
         }
       >
-        <FormField label="Name" description="Enter a unique name for this item" errorText={nameError}>
-          <Input
-            value={newItemName}
-            onChange={({ detail }) => {
-              setNewItemName(detail.value);
-              if (detail.value.trim()) {
-                setNameError('');
-              }
-            }}
-            placeholder="Enter name"
-            autoFocus
-          />
-        </FormField>
+        {activeAddModal && (
+          <FormField
+            label="Name"
+            description={
+              getPropertyFromPath(activeAddModal)?.items?.properties?.name?.description ||
+              'Enter a unique name for this item'
+            }
+            errorText={nameError}
+          >
+            {showNameAsDropdown ? (
+              // Dropdown select for enum values
+              <Select
+                selectedOption={{
+                  value: newItemName || '',
+                  label: newItemName || '',
+                }}
+                onChange={({ detail }) => {
+                  setNewItemName(detail.selectedOption.value);
+                  setNameError('');
+                }}
+                options={
+                  getPropertyFromPath(activeAddModal)?.items?.properties?.name?.enum?.map((opt) => ({
+                    value: opt,
+                    label: opt,
+                  })) || []
+                }
+                autoFocus
+              />
+            ) : (
+              // Text input for regular string values
+              <Input
+                value={newItemName}
+                onChange={({ detail }) => {
+                  setNewItemName(detail.value);
+                  if (detail.value.trim()) {
+                    setNameError('');
+                  }
+                }}
+                placeholder="Enter name"
+                autoFocus
+              />
+            )}
+          </FormField>
+        )}
       </Modal>
     </Box>
   );

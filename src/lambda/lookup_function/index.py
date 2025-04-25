@@ -7,7 +7,8 @@ from datetime import datetime, timezone
 import logging
 
 logger = logging.getLogger()
-logger.setLevel(logging.INFO)
+logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
+# Get LOG_LEVEL from environment variable with INFO as default
 
 def calculate_durations(timestamps):
     try:

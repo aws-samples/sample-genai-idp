@@ -29,7 +29,7 @@ This pattern implements an intelligent document processing workflow that uses UD
 
 See [Fine-Tuning Models on SageMaker](./fine-tune-sm-udop-classification/README.md) 
 
-Once you have trained the model, deploy the GenAIIDP stack for Pattern1 using the path for your new fine tuned model.
+Once you have trained the model, deploy the GenAIIDP stack for Pattern-3 using the path for your new fine tuned model.
 
 
 ## Architecture Overview
@@ -111,23 +111,22 @@ Each step includes comprehensive retry logic for handling transient errors:
 - **Input**: Individual section from Classification output
 - **Output**:
   ```json
-    {
-        "section": {
-            "id": <ID>,
-            "class": <CLASS>,
-            "page_ids": [<PAGEID>, ...],
-            "outputJSONUri": <S3_URI>,
-        },
-        "pages": [
-            {
-                "Id": <ID>,
-                "Class": <CLASS>,
-                "RawTextUri": <S3_URI>,
-                "ParsedTextUri": <S3_URI>,
-                "ImageUri": <S3_URI>
-            }
-        ]
-    }
+  {
+    "section": {
+      "id": "<ID>",
+      "class": "<CLASS>",
+      "page_ids": ["<PAGEID>", "..."],
+      "outputJSONUri": "<S3_URI>"
+    },
+    "pages": [
+      {
+        "Id": "<ID>",
+        "Class": "<CLASS>",
+        "TextUri": "<S3_URI>",
+        "ImageUri": "<S3_URI>"
+      }
+    ]
+  }
   ```
 
 #### ProcessResults Function
@@ -136,25 +135,26 @@ Each step includes comprehensive retry logic for handling transient errors:
 - **Input**: Extraction output from each section extraction
 - **Output**: Consumed by the GenAIIDP parent stack workflow tracker to update job status/UI etc
   ```json
-        {
-            'Sections': [
-                {
-                    "Id": <ID>,
-                    "PageIds": [<PAGEID>, ...],
-                    "Class": <CLASS>,
-                    "OutputJSONUri": <S3_URI>
-                }
-            ],
-            'Pages': [
-                "Id": <ID>,
-                "Class": <CLASS>,
-                "RawTextUri": <S3_URI>,
-                "ParsedTextUri": <S3_URI>,
-                "ImageUri": <S3_URI>
-            ],
-            'PageCount': <NUMBER OF PAGES IN ORIGINAL INPUT DOC>
-        }
-```
+  {
+    "Sections": [
+      {
+        "Id": "<ID>",
+        "PageIds": ["<PAGEID>", "..."],
+        "Class": "<CLASS>",
+        "OutputJSONUri": "<S3_URI>"
+      }
+    ],
+    "Pages": [
+      {
+        "Id": "<ID>",
+        "Class": "<CLASS>",
+        "TextUri": "<S3_URI>",
+        "ImageUri": "<S3_URI>"
+      }
+    ],
+    "PageCount": "<TOTAL_PAGES>"
+  }
+  ```
 
 ### UDOP Model on SageMaker
 
@@ -170,23 +170,27 @@ To create a new UDOP model fine tuned for your data, see [Fine tuning a UDOP mod
 
 ### Monitoring and Metrics
 
-The pattern includes a dedicated CloudWatch dashboard with:
+The pattern includes a comprehensive CloudWatch dashboard with:
 
 #### Performance Metrics
-- Document and page counts
+- Document and page throughput (per minute)
 - Token usage (input/output/total)
-- Bedrock request statistics
-- Processing latencies
+- Bedrock request statistics and latency
+- SageMaker endpoint invocation metrics
+- Processing latencies by function
 
 #### Error Tracking
-- Lambda function errors
-- Long-running invocations
+- Lambda function errors with detailed logs
+- Long-running invocations with duration metrics
 - Classification/extraction failures
+- API throttling and retry metrics
+- SageMaker endpoint errors
 
 #### Lambda Function Metrics
-- Duration
-- Memory usage
-- Error rates
+- Duration (average, p90, maximum)
+- Memory usage and utilization
+- Error rates and exception counts
+- Concurrent execution metrics
 
 ### Template Outputs
 
@@ -214,7 +218,7 @@ The system uses a combination of prompt engineering and predefined attributes to
 
 ### Extraction Prompts
 
-The main extraction prompts are defined in `src/bedrock_function/prompt_catalog.py`. An AI generated sample is provided, with the structure below:
+The extraction prompts are defined in the template configuration. The structure is similar to the one shown below:
 
 ```python
 DEFAULT_SYSTEM_PROMPT = "You are a document assistant. Respond only with JSON..."
@@ -226,74 +230,93 @@ You are an expert in business document analysis and information extraction. You 
 ```
 To modify the extraction behavior:
 
-1. Edit the `DEFAULT_SYSTEM_PROMPT` to change the AI assistant's basic behavior
-1. Customize the BASELINE_PROMPT to:
-- Provide domain expertise for your document types
-- Add specific instructions for handling edge cases
-- Modify output formatting requirements
+1. Modify the configuration settings in the template.yaml file or through the UI configuration
+2. Edit the `system_prompt` to change the AI assistant's basic behavior
+3. Customize the `task_prompt` to:
+   - Provide domain expertise for your document types
+   - Add specific instructions for handling edge cases
+   - Modify output formatting requirements
 
 
 ### Extraction Attributes
-Attributes to be extracted are defined in `src/extraction_function/attributes.json`. An AI generated sample is provided, with the structure below:
+Attributes to be extracted are defined in the template configuration's `classes` section. The structure is similar to the example below:
 
 Example attribute definition:
-```json
-    {
-        "document_class_attributes": {
-            "letter": {
-                "sender_name": ["from", "sender", "authored by", "written by"],
-                "sender_address": ["address", "location", "from address"],
-                "recipient_name": ["to", "recipient", "addressee"],
-                "recipient_address": ["to address", "delivery address"],
-                "date": ["date", "written on", "dated"],
-                "subject": ["subject", "re:", "regarding"],
-                "letter_type": ["type", "category"],
-                "signature": ["signed by", "signature"],
-                "cc": ["cc", "carbon copy", "copy to"],
-                "reference_number": ["ref", "reference", "our ref"]
-            },
-            "form": {
-                "form_type": ["form name", "document type", "form category"],
-                "form_id": ["form number", "id", "reference number"],
-                "submission_date": ["date", "submitted on", "filed on"],
-                "submitter_name": ["name", "submitted by", "filed by"],
-                "submitter_id": ["id number", "identification", "reference"],
-                "approval_status": ["status", "approved", "pending"],
-                "processed_by": ["processor", "handled by", "approved by"],
-                "processing_date": ["processed on", "completion date"],
-                "department": ["dept", "department", "division"],
-                "comments": ["notes", "remarks", "comments"]
-            }
-        }
-    }
+```yaml
+classes:
+  - name: letter
+    description: A formal written message that is typically sent from one person to another
+    attributes:
+      - name: sender_name
+        description: The name of the person or entity who wrote or sent the letter. Look for text following or near terms like 'from', 'sender', 'authored by', 'written by', or at the end of the letter before a signature.
+      - name: sender_address
+        description: The physical address of the sender, typically appearing at the top of the letter. May be labeled as 'address', 'location', or 'from address'.
+      - name: recipient_name
+        description: The name of the person or entity receiving the letter. Look for this after 'to', 'recipient', 'addressee', or at the beginning of the letter.
+      - name: recipient_address
+        description: The physical address where the letter is to be delivered. Often labeled as 'to address' or 'delivery address', typically appearing below the recipient name.
+  - name: form
+    description: A document with blank spaces for filling in information
+    attributes:
+      - name: form_type
+        description: The category or purpose of the form, such as 'application', 'registration', 'request', etc. May be identified by 'form name', 'document type', or 'form category'.
+      - name: form_id
+        description: The unique identifier for the form, typically a number or alphanumeric code. Often labeled as 'form number', 'id', or 'reference number'.
 ```
+
 To customize attributes:
-1. Add, remove, or modify attributes in attributes.json
-2. For each attribute, provide clear descriptions and comprehensive aliases
-3. Deploy the updated function to apply changes
+1. Modify the `classes` section in the template configuration
+2. For each attribute, provide a clear name and detailed description
+3. The configuration can be updated through the UI after deployment
 
-Note: Changes to prompts or attributes require redeployment of the Bedrock Lambda function.
+Note: Changes to the configuration are applied immediately without requiring function redeployment.
 
 
-## Local Testing
+## Testing
 
-Use the provided test events in `testing/`:
+Use the provided test events in the `testing/` directory:
 
 ```bash
 # Test OCR function
-sam local invoke OCRFunction -e testing/OCRFunction-event.json
+sam local invoke OCRFunction --env-vars testing/env.json -e testing/OCRFunction-event.json
 
 # Test classification
-sam local invoke ClassificationFunction -e testing/ClassificationFunction-event.json
+sam local invoke ClassificationFunction --env-vars testing/env.json -e testing/ClassificationFunctionEvent.json
 
 # Test extraction
-sam local invoke ExtractionFunction -e testing/ExtractionFunction-event.json
+sam local invoke ExtractionFunction --env-vars testing/env.json -e testing/ExtractionFunction-event.json
 ```
+
+Note that for proper testing of the classification function, you'll need access to a running SageMaker endpoint with the UDOP model deployed.
 
 ## Best Practices
 
-1. **Retry Handling**: All functions implement exponential backoff with jitter
-2. **Metrics**: Comprehensive CloudWatch metrics for monitoring
-3. **Error Tracking**: Detailed error logging with context
-4. **Resource Management**: Efficient handling of memory and connections
-5. **Security**: KMS encryption and least privilege IAM roles
+1. **SageMaker Endpoint Management**:
+   - Configure appropriate instance type based on model size and throughput requirements
+   - Enable auto-scaling for cost optimization during varying loads
+   - Monitor endpoint performance metrics for potential bottlenecks
+
+2. **Retry Handling**:
+   - All functions implement exponential backoff with jitter
+   - Configure appropriate retry limits for different types of failures
+   - Handle SageMaker endpoint throttling differently from transient failures
+
+3. **Performance Optimization**:
+   - Pre-warm the SageMaker endpoint with sample requests during initialization
+   - Configure appropriate memory for Lambda functions based on document size
+   - Use efficient image preprocessing and data handling techniques
+
+4. **Monitoring**:
+   - Set up CloudWatch alarms for critical metrics
+   - Use detailed logging with correlation IDs for request tracking
+   - Monitor token usage and cost metrics for GenAI components
+
+5. **Security**:
+   - Use KMS encryption for data at rest and in transit
+   - Implement least privilege IAM roles for all components
+   - Protect SageMaker endpoints with appropriate security groups
+
+6. **Error Handling**:
+   - Implement graceful degradation strategies
+   - Provide clear error messages with actionable information
+   - Track error rates by category for targeted improvements

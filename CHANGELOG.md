@@ -1,5 +1,63 @@
 # Changelog
 
+## [Unreleased]
+
+## [0.2.20]
+### Added
+- Added document summarization functionality
+  - New summarization service with default model set to Claude 3 Haiku
+  - New summarization function added to all patterns
+  - Added end-to-end document summarization notebook example
+- Integration of AppSync helper package into idp_common_pkg
+- Enhanced the Hungarian evaluation method with configurable comparators
+  - Added support for EXACT, FUZZY, and NUMERIC comparators for Hungarian method
+  - Implemented a flexible comparator pattern similar to GenAIDP
+  - Added dynamic UI form fields based on evaluation method selection
+- Added Bedrock Guardrail integration
+  - New parameters BedrockGuardrailId and BedrockGuardrailVersion for optional guardrail configuration
+  - Support for applying guardrails in Bedrock model invocations (except classification)
+  - Added guardrail functionality to Knowledge Base queries
+  - Enhanced security and content safety for model interactions
+- Improved performance with parallelized operations
+  - Enhanced EvaluationService with multi-threaded processing for faster evaluation
+    - Parallel processing of document sections using ThreadPoolExecutor
+    - Intelligent attribute evaluation parallelization with LLM-specific optimizations
+    - Dynamic batch sizing based on workload for optimal resource utilization
+  - Reimplemented Copy to Baseline functionality with asynchronous processing
+    - Asynchronous Lambda invocation pattern for processing large document collections
+    - EvaluationStatus-based progress tracking and UI integration
+    - Batch-based S3 object copying for improved efficiency
+    - File operation batching with optimal batch size calculation
+  
+### Changed
+- Refactored code for better maintainability
+- Updated UI components to support markdown table viewing
+- Set default evaluation model to Claude 3 Haiku
+- Improved AppSync timeout handling for long-running file copy operations
+- Added security headers to UI application per security requirements
+- Disabled GraphQL introspection for AppSync API to enhance security
+- Added LogLevel parameter to main stack (default WARN level)
+- Various bug fixes and improvements
+
+## [0.2.19]
+- Added enhanced EvaluationService with smart attribute discovery and evaluation
+  - Automatically discovers and evaluates attributes not defined in configuration
+  - Applies default semantic evaluation to unconfigured attributes using LLM method
+  - Handles all attribute cases: in both expected/actual, only in expected, only in actual
+  - Added new demo notebook examples showing smart attribute discovery in action
+- Added SEMANTIC evaluation method using embedding-based comparison
+
+
+## [0.2.18]
+- Improved error handling in service classes
+- Support for enum config schema and corresponding picklist in UI. Used for Textract feature selection.
+- Removed LLM model choices preserving only multi-modal modals that support multiple image attachments
+- Added support for textbased holistic packet classification in Pattern 2
+- New holistic classification method in ClassifierService for multi-document packet processing
+- Added new example notebook "e2e-holistic-packet-classification.ipynb" demonstrating the holistic classification approach
+- Updated Pattern 2 template with parameter for ClassificationMethod selection (multimodalPageLevelClassification or textbasedHolisticClassification)
+- Enhanced documentation and READMEs with information about classification methods
+- Reorganized main README.md structure for improved navigation and readability
 
 ## [0.2.17]
 

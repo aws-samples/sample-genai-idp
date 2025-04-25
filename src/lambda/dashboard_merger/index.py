@@ -1,12 +1,14 @@
 import json
 import boto3
 import cfnresponse
+import os
 import logging
 from botocore.exceptions import ClientError
 from typing import Dict, Any, Optional, List, Tuple
 
 logger = logging.getLogger()
-logger.setLevel(logging.INFO)
+logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
+# Get LOG_LEVEL from environment variable with INFO as default
 
 cloudwatch = boto3.client('cloudwatch')
 

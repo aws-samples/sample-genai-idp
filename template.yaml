@@ -4,6 +4,19 @@ AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
 Description: AWS GenAI IDP Accelerator (uksb-r8evguc4p9) (v<VERSION>)
 
+Mappings:
+  LogLevelMap:
+    DEBUG:
+      FieldLogLevel: ALL
+    INFO:
+      FieldLogLevel: ALL
+    WARN:
+      FieldLogLevel: ERROR
+    ERROR:
+      FieldLogLevel: ERROR
+    CRITICAL:
+      FieldLogLevel: ERROR
+
 Parameters:
 
   # Authorization params
@@ -45,6 +58,18 @@ Parameters:
     AllowedPattern: "^(|^arn:aws:bedrock:[a-z0-9-]+:.+:data-automation-project/.+)$"
     Description: For Pattern3, provide a Bedrock Data Automation (BDA) project ARN, or leave blank to create a sample project for processing the sample lending package.
 
+  Pattern1SummarizationModel:
+    Type: String
+    Default: "us.anthropic.claude-3-7-sonnet-20250219-v1:0"
+    AllowedValues:
+      - "DISABLED"
+      - "us.amazon.nova-lite-v1:0"
+      - "us.amazon.nova-pro-v1:0"
+      - "us.anthropic.claude-3-haiku-20240307-v1:0"
+      - "us.anthropic.claude-3-5-haiku-20241022-v1:0"
+      - "us.anthropic.claude-3-5-sonnet-20241022-v2:0"
+      - "us.anthropic.claude-3-7-sonnet-20250219-v1:0"
+    Description: Model to use for document summarization, or DISABLED to skip summarization. Model access MUST be enabled in Amazon Bedrock.
 
   # Pattern 2 Parameters
 
@@ -57,13 +82,16 @@ Parameters:
       - "us.anthropic.claude-3-haiku-20240307-v1:0"
       - "us.anthropic.claude-3-5-sonnet-20241022-v2:0"
       - "us.anthropic.claude-3-7-sonnet-20250219-v1:0"
-      - "us.meta.llama3-2-1b-instruct-v1:0"
-      - "us.meta.llama3-2-3b-instruct-v1:0"
-      - "us.meta.llama3-2-90b-instruct-v1:0"
-      - "us.meta.llama3-3-70b-instruct-v1:0"
-      - "us.deepseek.r1-v1:0"
       - "Custom Fine Tuned Classification Model - NOT YET SUPPORTED"
-    Description: Model to use for Classification
+    Description: Model to use for Classification. Model access MUST be enabled in Amazon Bedrock.
+
+  Pattern2ClassificationMethod:
+    Type: String
+    Default: "multimodalPageLevelClassification"
+    AllowedValues:
+      - "multimodalPageLevelClassification"
+      - "textbasedHolisticClassification"
+    Description: Method to use for Classification.
 
   Pattern2ExtractionModel:
     Type: String
@@ -74,13 +102,21 @@ Parameters:
       - "us.anthropic.claude-3-haiku-20240307-v1:0"
       - "us.anthropic.claude-3-5-sonnet-20241022-v2:0"
       - "us.anthropic.claude-3-7-sonnet-20250219-v1:0"
-      - "us.meta.llama3-2-1b-instruct-v1:0"
-      - "us.meta.llama3-2-3b-instruct-v1:0"
-      - "us.meta.llama3-2-90b-instruct-v1:0"
-      - "us.meta.llama3-3-70b-instruct-v1:0"
-      - "us.deepseek.r1-v1:0"
       - "Custom Fine Tuned Extraction Model - NOT YET SUPPORTED"
-    Description: Model to use for Extraction
+    Description: Model to use for Extraction. Model access MUST be enabled in Amazon Bedrock.
+
+  Pattern2SummarizationModel:
+    Type: String
+    Default: "us.anthropic.claude-3-7-sonnet-20250219-v1:0"
+    AllowedValues:
+      - "DISABLED"
+      - "us.amazon.nova-lite-v1:0"
+      - "us.amazon.nova-pro-v1:0"
+      - "us.anthropic.claude-3-haiku-20240307-v1:0"
+      - "us.anthropic.claude-3-5-haiku-20241022-v1:0"
+      - "us.anthropic.claude-3-5-sonnet-20241022-v2:0"
+      - "us.anthropic.claude-3-7-sonnet-20250219-v1:0"
+    Description: Model to use for document summarization, or DISABLED to skip summarization. Model access MUST be enabled in Amazon Bedrock.
 
   Pattern2CustomClassificationModelARN:
     Type: String
@@ -109,12 +145,20 @@ Parameters:
       - "us.anthropic.claude-3-haiku-20240307-v1:0"
       - "us.anthropic.claude-3-5-sonnet-20241022-v2:0"
       - "us.anthropic.claude-3-7-sonnet-20250219-v1:0"
-      - "us.meta.llama3-2-1b-instruct-v1:0"
-      - "us.meta.llama3-2-3b-instruct-v1:0"
-      - "us.meta.llama3-2-90b-instruct-v1:0"
-      - "us.meta.llama3-3-70b-instruct-v1:0"
-      - "us.deepseek.r1-v1:0"
-    Description: Model to use for Extraction
+    Description: Model to use for Extraction. Model access MUST be enabled in Amazon Bedrock.
+
+  Pattern3SummarizationModel:
+    Type: String
+    Default: "us.anthropic.claude-3-7-sonnet-20250219-v1:0"
+    AllowedValues:
+      - "DISABLED"
+      - "us.amazon.nova-lite-v1:0"
+      - "us.amazon.nova-pro-v1:0"
+      - "us.anthropic.claude-3-haiku-20240307-v1:0"
+      - "us.anthropic.claude-3-5-haiku-20241022-v1:0"
+      - "us.anthropic.claude-3-5-sonnet-20241022-v2:0"
+      - "us.anthropic.claude-3-7-sonnet-20250219-v1:0"
+    Description: Model to use for document summarization, or DISABLED to skip summarization. Model access MUST be enabled in Amazon Bedrock.
 
   # Optional - Post processing Lambda hook
   PostProcessingLambdaHookFunctionArn:
@@ -136,15 +180,6 @@ Parameters:
       different patterns and prompts. 
       Leave blank to automatically create an empty bucket where you can (optionally) place your validated baseline data later.
 
-  EvaluationPattern:
-    Type: String
-    Default: LLM as a judge
-    AllowedValues:
-      - LLM as a judge
-    Description: >-
-      Method used to evaluate the processing pattern outputs. 
-      Currently, only the option 'LLM as a judge' is available.
-
   EvaluationAutoEnabled:
     Type: String
     Default: true
@@ -156,21 +191,18 @@ Parameters:
       Set to true during test cycles to evaluate and compare accuracy for different patterns and prompts for each document.
       If false, evaluation is not automatically attempted for each processed document. Set to false when deployed in production.
 
-  EvaluationModelId:
+  EvaluationLLMModelId:
     Type: String
-    Default: "us.anthropic.claude-3-7-sonnet-20250219-v1:0"
+    Default: "us.anthropic.claude-3-haiku-20240307-v1:0"
     AllowedValues:
       - "us.amazon.nova-lite-v1:0"
       - "us.amazon.nova-pro-v1:0"
       - "us.anthropic.claude-3-haiku-20240307-v1:0"
+      - "us.anthropic.claude-3-5-haiku-20241022-v1:0"
       - "us.anthropic.claude-3-5-sonnet-20241022-v2:0"
       - "us.anthropic.claude-3-7-sonnet-20250219-v1:0"
-      - "us.meta.llama3-2-1b-instruct-v1:0"
-      - "us.meta.llama3-2-3b-instruct-v1:0"
-      - "us.meta.llama3-2-90b-instruct-v1:0"
-      - "us.meta.llama3-3-70b-instruct-v1:0"
-      - "us.deepseek.r1-v1:0"
-    Description: Model to use for Evaluation
+    Description: Model to use for LLM-based Evaluation. Model access MUST be enabled in Amazon Bedrock.
+
 
   # Optional Knowledge Base Configuration
   DocumentKnowledgeBase:
@@ -179,7 +211,7 @@ Parameters:
     AllowedValues:
       - "DISABLED"
       - "BEDROCK_KNOWLEDGE_BASE (Create)"
-    Description: Use document processing results as knowledge base content
+    Description: Use document processing results as knowledge base content. Model access for amazon.titan-embed-text-v2:0 MUST be enabled in Amazon Bedrock.
 
   KnowledgeBaseModelId:
     Type: String
@@ -188,13 +220,25 @@ Parameters:
       - "us.amazon.nova-lite-v1:0"
       - "us.amazon.nova-pro-v1:0"
       - "us.anthropic.claude-3-haiku-20240307-v1:0"
+      - "us.anthropic.claude-3-5-haiku-20241022-v1:0"
       - "us.anthropic.claude-3-5-sonnet-20241022-v2:0"
       - "us.anthropic.claude-3-7-sonnet-20250219-v1:0"
-      - "us.meta.llama3-2-1b-instruct-v1:0"
-      - "us.meta.llama3-2-3b-instruct-v1:0"
-      - "us.meta.llama3-2-90b-instruct-v1:0"
-      - "us.meta.llama3-3-70b-instruct-v1:0"
-    Description: Model to use for optional Document Knowledge Base
+    Description: Model to use for optional Document Knowledge Base. Model access MUST be enabled in Amazon Bedrock.
+
+  # Optional Bedrock Guardrail Configuration
+  BedrockGuardrailId:
+    Type: String
+    Default: ""
+    AllowedPattern: "^(|[a-z0-9]+)$"
+    Description: >
+      Optionally provide the *Id* (not name) of an *existing* Bedrock Guardrail (looks like: wxyz3ab12x34) to be used for all Bedrock and Bedrock Knowledge Base interactions.
+
+  BedrockGuardrailVersion:
+    Type: String
+    Default: "DRAFT"
+    AllowedPattern: "^(|(([1-9][0-9]{0,7})|(DRAFT)))$"
+    Description: >
+      If you provided a Bedrock Guardrail Id above, provide the corresponding Guardrail version here (e.g. DRAFT|1|2|...).
 
   # General Configuration
   MaxConcurrentWorkflows:
@@ -220,6 +264,17 @@ Parameters:
     Default: 30000
     Description: Maximum acceptable execution time in milliseconds before alerting (default 30000 = 30 seconds)
     MinValue: 1000
+
+  # Logging configuration
+  LogLevel:
+    Type: String
+    Default: WARN
+    AllowedValues:
+      - DEBUG
+      - INFO
+      - WARN
+      - ERROR
+    Description: Default logging level for all logs
 
   LogRetentionDays:
     Type: Number
@@ -342,6 +397,7 @@ Conditions:
       !Condition IsPattern1,
       !Equals [!Ref Pattern1BDAProjectArn, ""]
     ]
+  HasGuardrailConfig: !And [!Not [!Equals [!Ref BedrockGuardrailId, ""]], !Not [!Equals [!Ref BedrockGuardrailVersion, ""]]]
 
   # General rules
   ShouldAllowSignUpEmailDomain:
@@ -371,11 +427,14 @@ Metadata:
           default: "Pattern 1 Configuration"
         Parameters:
           - Pattern1BDAProjectArn
+          - Pattern1SummarizationModel
       - Label:
           default: "Pattern 2 Configuration"
         Parameters:
           - Pattern2ClassificationModel
+          - Pattern2ClassificationMethod
           - Pattern2ExtractionModel
+          - Pattern2SummarizationModel
           - Pattern2CustomClassificationModelARN
           - Pattern2CustomExtractionModelARN
       - Label:
@@ -383,6 +442,7 @@ Metadata:
         Parameters:
           - Pattern3UDOPModelArtifactPath
           - Pattern3ExtractionModel
+          - Pattern3SummarizationModel
       - Label:
           default: "Post Processing Configuration"
         Parameters:
@@ -391,14 +451,18 @@ Metadata:
           default: "Evaluation Configuration"
         Parameters:
           - EvaluationBaselineBucketName
-          - EvaluationPattern
           - EvaluationAutoEnabled
-          - EvaluationModelId
+          - EvaluationLLMModelId
       - Label:
           default: "Document Knowledge Base Configuration"
         Parameters:
           - DocumentKnowledgeBase
           - KnowledgeBaseModelId
+      - Label:
+          default: "Bedrock Guardrail Configuration"
+        Parameters:
+          - BedrockGuardrailId
+          - BedrockGuardrailVersion
       - Label:
           default: "General Configuration"
         Parameters:
@@ -406,6 +470,7 @@ Metadata:
           - DataRetentionInDays
           - ErrorThreshold
           - ExecutionTimeThresholdMs
+          - LogLevel
           - LogRetentionDays
           - CloudFrontPriceClass
           - CloudFrontAllowedGeos
@@ -417,13 +482,19 @@ Metadata:
       AllowedSignUpEmailDomain:
         default: "Allowed Sign Up Email Domain"
       IDPPattern:
-        default: "Prefdefined Document Processing Pattern"
+        default: "Document Processing Pattern"
       Pattern1BDAProjectArn:
         default: "Pattern1 - Packet or Media processing with Bedrock Data Automation (BDA) Project ARN"
+      Pattern1SummarizationModel:
+        default: "Pattern1 - Summarization Model"
       Pattern2ClassificationModel:
         default: "Pattern2 - Classification Model"
+      Pattern2ClassificationMethod:
+        default: "Pattern2 - Classification Method"
       Pattern2ExtractionModel:
         default: "Pattern2 - Extraction Model"
+      Pattern2SummarizationModel:
+        default: "Pattern2 - Summarization Model"
       Pattern2CustomClassificationModelARN:
         default: "Pattern2 - Custom Classification Model ARN"
       Pattern2CustomExtractionModelARN:
@@ -432,20 +503,24 @@ Metadata:
         default: "Pattern3 - UDOP Model Artifact Path"
       Pattern3ExtractionModel:
         default: "Pattern3 - Extraction Model"
+      Pattern3SummarizationModel:
+        default: "Pattern3 - Summarization Model"
       PostProcessingLambdaHookFunctionArn:
         default: "Post Processing Lambda Hook Function ARN"
       EvaluationBaselineBucketName:
         default: "Evaluation Baseline Bucket Name"
-      EvaluationPattern:
-        default: "Evaluation Pattern"
       EvaluationAutoEnabled:
         default: "Evaluation Auto Enabled"
-      EvaluationModelId:
-        default: "Evaluation Model Id"
+      EvaluationLLMModelId:
+        default: "Evaluation LLM Model Id"
       DocumentKnowledgeBase:
         default: "Document Knowledge Base Configuration"
       KnowledgeBaseModelId:
         default: "Knowledge Base Model Id"
+      BedrockGuardrailId:
+        default: "Bedrock Guardrail Id"
+      BedrockGuardrailVersion:
+        default: "Bedrock Guardrail Version"
       MaxConcurrentWorkflows:
         default: "Maximum Concurrent Workflows"
       DataRetentionInDays:
@@ -454,6 +529,8 @@ Metadata:
         default: "Error Alert Threshold"
       ExecutionTimeThresholdMs:
         default: "Execution Time Threshold (ms)"
+      LogLevel:
+        default: "Logging Level"
       LogRetentionDays:
         default: "Log Retention Period (days)"
       CloudFrontPriceClass:
@@ -498,6 +575,9 @@ Resources:
             else:
               print(f"Request type is {event['RequestType']} - skipping")
             cfnresponse.send(event, context, status, {}, reason=reason)
+      Environment:
+        Variables:
+          LOG_LEVEL: INFO
       LoggingConfig:
         LogGroup:
           Ref: StacknameCheckFunctionLogGroup
@@ -534,6 +614,7 @@ Resources:
       Parameters:
         ProjectName: !Sub '${AWS::StackName}-BDA-Lending-Sample-Project'
         ProjectDescription: !Sub '${AWS::StackName}-BDA-Lending-Sample-Project'
+        LogLevel: !Ref LogLevel
 
   DOCUMENTBEDROCKKB:
     DependsOn:
@@ -548,6 +629,7 @@ Resources:
         pS3SyncScheduleExpression: "cron(0/30 * ? * * *)"  # default is to sync documents every 30 minutes
         pCustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
         pChunkingStrategy: 'No chunking'
+        LogLevel: !Ref LogLevel
 
   ##########################################################################
   # Nested stack for selected pattern
@@ -569,13 +651,18 @@ Resources:
         TrackingTable: !Ref TrackingTable
         CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
         LogRetentionDays: !Ref LogRetentionDays
+        LogLevel: !Ref LogLevel
         ExecutionTimeThresholdMs: !Ref ExecutionTimeThresholdMs
+        BedrockGuardrailId: !Ref BedrockGuardrailId
+        BedrockGuardrailVersion: !Ref BedrockGuardrailVersion
         BDAProjectArn: !If
           - ShouldCreateBDASampleProject
           - !GetAtt BDASAMPLEPROJECT.Outputs.ProjectArn
           - !Ref Pattern1BDAProjectArn
+        SummarizationModel: !Ref Pattern1SummarizationModel
         UpdateConfigurationFunctionArn: !GetAtt UpdateConfigurationFunction.Arn
         ConfigurationTable: !Ref ConfigurationTable
+        EvaluationLLMModelId: !Ref EvaluationLLMModelId
 
   PATTERN2STACK:
     DependsOn:
@@ -590,13 +677,19 @@ Resources:
         OutputBucket: !Ref OutputBucket
         CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
         LogRetentionDays: !Ref LogRetentionDays
+        LogLevel: !Ref LogLevel
         ExecutionTimeThresholdMs: !Ref ExecutionTimeThresholdMs
+        BedrockGuardrailId: !Ref BedrockGuardrailId
+        BedrockGuardrailVersion: !Ref BedrockGuardrailVersion
         ClassificationModel: !Ref Pattern2ClassificationModel
+        ClassificationMethod: !Ref Pattern2ClassificationMethod
         ExtractionModel: !Ref Pattern2ExtractionModel
         CustomClassificationModelARN: !Ref Pattern2CustomClassificationModelARN
         CustomExtractionModelARN: !Ref Pattern2CustomExtractionModelARN
+        SummarizationModel: !Ref Pattern2SummarizationModel
         UpdateConfigurationFunctionArn: !GetAtt UpdateConfigurationFunction.Arn
         ConfigurationTable: !Ref ConfigurationTable
+        EvaluationLLMModelId: !Ref EvaluationLLMModelId
 
   PATTERN3STACK:
     DependsOn:
@@ -612,11 +705,16 @@ Resources:
         OutputBucket: !Ref OutputBucket
         CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
         LogRetentionDays: !Ref LogRetentionDays
+        LogLevel: !Ref LogLevel
         ExecutionTimeThresholdMs: !Ref ExecutionTimeThresholdMs
+        BedrockGuardrailId: !Ref BedrockGuardrailId
+        BedrockGuardrailVersion: !Ref BedrockGuardrailVersion
         UDOPModelArtifactPath: !Ref Pattern3UDOPModelArtifactPath
         ExtractionModel: !Ref Pattern3ExtractionModel
+        SummarizationModel: !Ref Pattern3SummarizationModel
         UpdateConfigurationFunctionArn: !GetAtt UpdateConfigurationFunction.Arn
         ConfigurationTable: !Ref ConfigurationTable
+        EvaluationLLMModelId: !Ref EvaluationLLMModelId
 
   ##########################################################################
   # Encryption key
@@ -1113,6 +1211,7 @@ Resources:
       CodeUri: src/lambda/initialize_counter
       Environment:
         Variables:
+          LOG_LEVEL: !Ref LogLevel
           CONCURRENCY_TABLE: !Ref ConcurrencyTable
       Policies:
         - DynamoDBCrudPolicy:
@@ -1178,6 +1277,7 @@ Resources:
       CodeUri: src/lambda/update_configuration
       Environment:
         Variables:
+          LOG_LEVEL: !Ref LogLevel
           CONFIGURATION_TABLE_NAME:
             Ref: ConfigurationTable
       LoggingConfig:
@@ -1384,6 +1484,7 @@ Resources:
         LogGroup: !Ref QueueSenderLogGroup
       Environment:
         Variables:
+          LOG_LEVEL: !Ref LogLevel
           QUEUE_URL: !Ref DocumentQueue
           APPSYNC_API_URL: !GetAtt GraphQLApi.GraphQLUrl
           DATA_RETENTION_IN_DAYS: !Ref DataRetentionInDays
@@ -1447,6 +1548,7 @@ Resources:
         LogGroup: !Ref QueueProcessorLogGroup
       Environment:
         Variables:
+          LOG_LEVEL: !Ref LogLevel
           STATE_MACHINE_ARN: !If
             - IsPattern3
             - !GetAtt PATTERN3STACK.Outputs.StateMachineArn
@@ -1556,6 +1658,7 @@ Resources:
         LogGroup: !Ref WorkflowTrackerLogGroup
       Environment:
         Variables:
+          LOG_LEVEL: !Ref LogLevel
           CONCURRENCY_TABLE: !Ref ConcurrencyTable
           METRIC_NAMESPACE: !Ref AWS::StackName
           APPSYNC_API_URL: !GetAtt GraphQLApi.GraphQLUrl
@@ -1695,7 +1798,7 @@ Resources:
       CodeUri: src/lambda/evaluation_function/
       Handler: index.handler
       Runtime: python3.12
-      Timeout: 30
+      Timeout: 900
       DeadLetterQueue:
         Type: SQS
         TargetArn: !GetAtt EvaluationFunctionDLQ.Arn
@@ -1703,7 +1806,7 @@ Resources:
         LogGroup: !Ref EvaluationFunctionLogGroup
       Environment:
         Variables:
-          EVALUATION_MODEL_ID: !Ref EvaluationModelId
+          LOG_LEVEL: !Ref LogLevel
           METRIC_NAMESPACE: !Ref AWS::StackName
           APPSYNC_API_URL: !GetAtt GraphQLApi.GraphQLUrl
           PROCESSING_OUTPUT_BUCKET: !Ref OutputBucket
@@ -1712,9 +1815,12 @@ Resources:
             - ShouldCreateEvaluationBaselineBucket
             - !Ref EvaluationBaselineBucket
             - !Ref EvaluationBaselineBucketName
+          CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref TrackingTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref ConfigurationTable
         - S3ReadPolicy:
             BucketName: !If
             - ShouldCreateEvaluationBaselineBucket
@@ -2256,6 +2362,7 @@ Resources:
       MemorySize: 128
       Environment:
         Variables:
+          LOG_LEVEL: !Ref LogLevel
           STACK_NAME: !Ref AWS::StackName
       Policies:
         - Version: "2012-10-17"
@@ -2309,6 +2416,7 @@ Resources:
         LogGroup: !Ref LookupFunctionLogGroup
       Environment:
         Variables:
+          LOG_LEVEL: !Ref LogLevel
           TRACKING_TABLE: !Ref TrackingTable
       Policies:
         - DynamoDBReadPolicy:
@@ -2369,8 +2477,13 @@ Resources:
             <p>Welcome to the AWS GenAIIDP Solution! Your temporary password is: <strong>{####}</strong></p>
             <p>When the CloudFormation stack is COMPLETE, use the link below to log in and set your permanent password.
             <p>     https://${CloudFrontDistribution.DomainName}/
+            <p>
+            <p>If you have not previously done so, you must request access to the following Amazon Bedrock models: Amazon: Titan Text Embeddings V2, Amazon: Nova models, Anthropic: Claude 3 and 3.x models. (https://docs.aws.amazon.com/bedrock/latest/userguide/model-access.html)
+            <p>
             <p>Thanks,</p>
-            <p>GenAIIDP Team</p>
+            <p>AWS GenAIIDP Team</p>
+            <p>
+            <p><em>Stack: ${AWS::StackName}, v<VERSION>, <BUILD_DATE_TIME></em>
       AutoVerifiedAttributes:
         - email
       EmailConfiguration:
@@ -2616,6 +2729,7 @@ Resources:
       Timeout: 10
       Environment:
         Variables:
+          LOG_LEVEL: !Ref LogLevel
           ALLOWED_SIGNUP_EMAIL_DOMAINS: !Ref AllowedSignUpEmailDomain
       InlineCode: |
         import os
@@ -2674,7 +2788,9 @@ Resources:
       LogConfig:
         CloudWatchLogsRoleArn: !GetAtt AppSyncCwlRole.Arn
         ExcludeVerboseContent: false
-        FieldLogLevel: ALL
+        FieldLogLevel: !FindInMap [LogLevelMap, !Ref LogLevel, FieldLogLevel]
+      # Disable introspection for security purposes
+      IntrospectionConfig: DISABLED
 
   GraphQLApiLogGroup:
     Type: AWS::Logs::LogGroup
@@ -2711,6 +2827,67 @@ Resources:
       Scope: REGIONAL
       IPAddressVersion: IPV4
       Addresses: [!Ref WAFAllowedIPv4Ranges]
+      
+  WAFLambdaServiceIPSet:
+    Type: AWS::WAFv2::IPSet
+    Condition: IsWafEnabled
+    Properties:
+      Name: !Sub ${AWS::StackName}-lambda-service-ips
+      Description: IP ranges used by AWS Lambda service
+      Scope: REGIONAL
+      IPAddressVersion: IPV4
+      Addresses: ["0.0.0.0/32"] # Placeholder - will be updated by IPSetUpdaterFunction
+      
+  IPSetUpdaterFunction:
+    Type: AWS::Serverless::Function
+    Condition: IsWafEnabled
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: "Function does not require VPC access as it only interacts with AWS services via APIs"
+          - id: W92
+            reason: "Function does not require reserved concurrency as it scales based on demand"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for Cfn Custom Resource function"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data
+    Properties:
+      CodeUri: ./src/lambda/ipset_updater
+      Handler: index.lambda_handler
+      Runtime: python3.12
+      Timeout: 300
+      MemorySize: 256
+      Environment:
+        Variables:
+          LOG_LEVEL: !Ref LogLevel
+          IPSET_NAME: !Sub ${AWS::StackName}-lambda-service-ips
+      Policies:
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action:
+                - wafv2:GetIPSet
+                - wafv2:UpdateIPSet
+              Resource: !GetAtt WAFLambdaServiceIPSet.Arn
+            - Effect: Allow
+              Action:
+                - wafv2:ListIPSets
+              Resource: !Sub "arn:${AWS::Partition}:wafv2:${AWS::Region}:${AWS::AccountId}:regional/ipset/*"
+      Events:
+        Schedule:
+          Type: Schedule
+          Properties:
+            Schedule: rate(1 day)
+            Description: Update Lambda IP ranges daily
+            Enabled: true
+            
+  IPSetUpdaterCustomResource:
+    Type: Custom::IPSetUpdater
+    Condition: IsWafEnabled
+    Properties:
+      ServiceToken: !GetAtt IPSetUpdaterFunction.Arn
+      UpdateTime: <BUILD_DATE_TIME> # To force an update when stack is updated
 
   WAFWebACL:
     Type: AWS::WAFv2::WebACL
@@ -2722,13 +2899,22 @@ Resources:
       DefaultAction:
         Block: {}
       Rules:
-        - Name: AllowListedIPs
+        - Name: AllowLambdaServiceIPs
           Priority: 1
           Statement:
-            OrStatement:
-              Statements:
-                - IPSetReferenceStatement:
-                    Arn: !GetAtt WAFIPV4Set.Arn
+            IPSetReferenceStatement:
+              Arn: !GetAtt WAFLambdaServiceIPSet.Arn
+          Action:
+            Allow: {}
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: AllowLambdaServiceIPsRule
+        - Name: AllowListedIPs
+          Priority: 2
+          Statement:
+            IPSetReferenceStatement:
+              Arn: !GetAtt WAFIPV4Set.Arn
           Action:
             Allow: {}
           VisibilityConfig:
@@ -2843,6 +3029,7 @@ Resources:
       Timeout: 60
       Environment:
         Variables:
+          LOG_LEVEL: !Ref LogLevel
           TRACKING_TABLE_NAME: !Ref TrackingTable
       LoggingConfig:
         LogGroup: !Ref CreateDocumentResolverFunctionLogGroup
@@ -3176,6 +3363,7 @@ Resources:
         Timeout: 60
         Environment:
           Variables:
+            LOG_LEVEL: !Ref LogLevel
             CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
         LoggingConfig:
           LogGroup: !Ref ConfigurationResolverFunctionLogGroup
@@ -3251,11 +3439,13 @@ Resources:
       Timeout: 300
       Environment:
         Variables:
+          LOG_LEVEL: !Ref LogLevel
           OUTPUT_BUCKET: !Ref OutputBucket
           EVALUATION_BASELINE_BUCKET: !If
             - ShouldCreateEvaluationBaselineBucket
             - !Ref EvaluationBaselineBucket
             - !Ref EvaluationBaselineBucketName
+          APPSYNC_API_URL: !GetAtt GraphQLApi.GraphQLUrl
       LoggingConfig:
         LogGroup: !Ref CopyToBaselineResolverFunctionLogGroup
       Policies:
@@ -3275,6 +3465,19 @@ Resources:
                 - kms:GenerateDataKey*
                 - kms:DescribeKey
               Resource: !GetAtt CustomerManagedEncryptionKey.Arn
+        # Allow the function to invoke itself asynchronously
+        - Statement:
+            - Effect: Allow
+              Action:
+                - lambda:InvokeFunction
+              Resource: !Sub "arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:${AWS::StackName}-CopyToBaselineResolverFunction-*"
+        # Allow AppSync access for document updates
+        - Statement:
+            - Effect: Allow
+              Action:
+                - appsync:GraphQL
+              Resource:
+                - !Sub "${GraphQLApi.Arn}/types/Mutation/*"
 
   CopyToBaselineResolverFunctionLogGroup:
     Type: AWS::Logs::LogGroup
@@ -3326,6 +3529,7 @@ Resources:
       Timeout: 60
       Environment:
         Variables:
+          LOG_LEVEL: !Ref LogLevel
           TRACKING_TABLE_NAME: !Ref TrackingTable
           INPUT_BUCKET: !Ref InputBucket
           OUTPUT_BUCKET: !Ref OutputBucket
@@ -3398,6 +3602,7 @@ Resources:
       Timeout: 60
       Environment:
         Variables:
+          LOG_LEVEL: !Ref LogLevel
           INPUT_BUCKET: !Ref InputBucket
       LoggingConfig:
         LogGroup: !Ref UploadResolverFunctionLogGroup
@@ -3474,6 +3679,7 @@ Resources:
       Timeout: 60
       Environment:
         Variables:
+          LOG_LEVEL: !Ref LogLevel
           KB_ID: !If
             - ShouldUseDocumentKnowledgeBase
             - !GetAtt DOCUMENTBEDROCKKB.Outputs.KnowledgeBaseID
@@ -3481,6 +3687,7 @@ Resources:
           KB_ACCOUNT_ID: !Ref AWS::AccountId
           KB_REGION: !Ref AWS::Region
           MODEL_ID: !Ref KnowledgeBaseModelId
+          GUARDRAIL_ID_AND_VERSION: !If [HasGuardrailConfig, !Sub "${BedrockGuardrailId}:${BedrockGuardrailVersion}", ""]
       LoggingConfig:
         LogGroup: !Ref QueryKnowledgeBaseResolverFunctionLogGroup
       Policies:
@@ -3504,6 +3711,14 @@ Resources:
               - "bedrock:GetInferenceProfile"
             Resource:
               - !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
+          - !If
+            - HasGuardrailConfig
+            - Effect: Allow
+              Action:
+                - "bedrock:ApplyGuardrail"
+              Resource:
+                - !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:guardrail/${BedrockGuardrailId}"
+            - !Ref AWS::NoValue
           - Effect: Allow
             Action:
               - kms:Encrypt
@@ -3549,6 +3764,31 @@ Resources:
       CloudFrontOriginAccessIdentityConfig:
         Comment: !Sub "${AWS::StackName} CloudFront OAI for ${WebUIBucket}"
 
+  # Define a custom response headers policy for security headers
+  SecurityHeadersPolicy:
+    Type: AWS::CloudFront::ResponseHeadersPolicy
+    Properties:
+      ResponseHeadersPolicyConfig:
+        Name: !Sub "${AWS::StackName}-security-headers-policy"
+        Comment: "Security headers policy"
+        SecurityHeadersConfig:
+          ContentSecurityPolicy:
+            Override: true
+            ContentSecurityPolicy: "script-src 'self' 'unsafe-inline' 'unsafe-eval' https:; object-src 'self' blob: data: https:; base-uri 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline' https:; connect-src 'self' https: wss://*.amazonaws.com wss://*.appsync-realtime-api.*.amazonaws.com wss://*.execute-api.*.amazonaws.com ws://localhost:*;"
+          StrictTransportSecurity:
+            Override: true
+            AccessControlMaxAgeSec: 31536000
+            IncludeSubdomains: true
+            Preload: false
+          ContentTypeOptions:
+            Override: true
+          FrameOptions:
+            Override: true
+            FrameOption: SAMEORIGIN
+          ReferrerPolicy:
+            Override: true
+            ReferrerPolicy: strict-origin-when-cross-origin
+  
   CloudFrontDistribution:
     Type: AWS::CloudFront::Distribution
     Metadata:
@@ -3592,6 +3832,7 @@ Resources:
           DefaultTTL: 600
           MinTTL: 300
           MaxTTL: 900
+          ResponseHeadersPolicyId: !Ref SecurityHeadersPolicy
         DefaultRootObject: index.html
         Enabled: true
         HttpVersion: http2

@@ -1,0 +1,66 @@
+# Any publicly available image
+image: public.ecr.aws/docker/library/python:3.13-bookworm
+
+# Change pip's cache directory to be inside the project directory since we can
+# only cache local items.
+# variables:
+#   PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+
+# https://pip.pypa.io/en/stable/topics/caching/
+# cache:
+#   paths:
+#     - .cache/pip
+
+stages:
+  - integration_test
+
+integration_test:
+  stage: integration_test
+  variables:
+    # In order to run tests in another account, add a AWS_CREDS_TARGET_ROLE variable to the Gitlab pipeline variables.
+    AWS_CREDS_TARGET_ROLE: ${AWS_CREDS_TARGET_ROLE:-"arn:aws:iam::715841340161:role/idp-sdlc-GitLab"}
+    AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-"us-east-1"}
+    IDP_ACCOUNT_ID: ${IDP_ACCOUNT_ID:-"715841340161"}
+  
+  # Add rules to only run on develop branch
+  rules:
+    - if: $CI_COMMIT_BRANCH == "develop"
+      when: always
+    - if: $CI_COMMIT_BRANCH =~ /^feature\/.*/
+      when: manual
+    - if: $CI_COMMIT_BRANCH =~ /^fix\/.*/
+      when: manual
+    - if: $CI_COMMIT_BRANCH =~ /^hotfix\/.*/
+      when: manual
+    - if: $CI_COMMIT_BRANCH =~ /^release\/.*/
+      when: manual
+
+  before_script:
+    - python --version
+    - apt-get update -y
+    - apt-get install zip unzip curl make -y
+    
+    # Git submodules
+    # TODO: Uncomment these when gitlab ci runner repo auth is resolved
+    - make submodule -C scripts/sdlc/idp-cli CI_JOB_TOKEN=$CI_JOB_TOKEN
+    - git submodule init
+    - git submodule update
+    
+    # Install Poetry
+    - curl -sSL https://install.python-poetry.org | python3 -
+    - export PATH="/root/.local/bin:$PATH"
+    - poetry --version
+
+    
+    # Install AWS CLI
+    - curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+    - unzip awscliv2.zip
+    - ./aws/install
+
+  script:
+    - aws --version
+    - aws sts get-caller-identity --no-cli-pager
+    - cd ./scripts/sdlc/idp-cli
+    - poetry install
+    - make put
+    - make wait

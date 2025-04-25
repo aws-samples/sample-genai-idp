@@ -7,7 +7,8 @@ from typing import Dict, Any
 import cfnresponse
 
 logger = logging.getLogger()
-logger.setLevel(logging.INFO)
+logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
+# Get LOG_LEVEL from environment variable with INFO as default
 
 dynamodb = boto3.resource('dynamodb')
 table = dynamodb.Table(os.environ['CONFIGURATION_TABLE_NAME'])

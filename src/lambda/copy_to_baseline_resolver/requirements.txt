@@ -1,0 +1,2 @@
+# Requirements for copy_to_baseline_resolver Lambda
+./lib/idp_common_pkg[appsync]  # idp_common package with Document model and AppSync integration

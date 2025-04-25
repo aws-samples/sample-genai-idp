@@ -3,6 +3,12 @@ import os
 import boto3
 import re
 import urllib.parse
+import logging
+
+# Configure logging
+logger = logging.getLogger()
+logger.setLevel(logging.getLevelName(os.environ.get("LOG_LEVEL", "INFO")))
+# Get LOG_LEVEL from environment variable with INFO as default
 
 print("Boto3 version: ", boto3.__version__)
 
@@ -11,6 +17,7 @@ KB_ACCOUNT_ID = os.environ.get("KB_ACCOUNT_ID")
 KB_REGION = os.environ.get("KB_REGION") or os.environ["AWS_REGION"]
 MODEL_ID = os.environ.get("MODEL_ID")
 MODEL_ARN = f"arn:aws:bedrock:{KB_REGION}:{KB_ACCOUNT_ID}:inference-profile/{MODEL_ID}"
+GUARDRAIL_ENV = os.environ.get("GUARDRAIL_ID_AND_VERSION", "")
 
 KB_CLIENT = boto3.client(
     service_name="bedrock-agent-runtime",
@@ -30,17 +37,35 @@ def get_kb_response(query, sessionId):
             'type': 'KNOWLEDGE_BASE'
         }
     }
+    
+    # Apply Bedrock Guardrail if configured
+    if GUARDRAIL_ENV:
+        try:
+            guardrail_id, guardrail_version = GUARDRAIL_ENV.split(":")
+            if guardrail_id and guardrail_version:
+                if "generationConfiguration" not in input["retrieveAndGenerateConfiguration"]["knowledgeBaseConfiguration"]:
+                    input["retrieveAndGenerateConfiguration"]["knowledgeBaseConfiguration"]["generationConfiguration"] = {}
+                
+                input["retrieveAndGenerateConfiguration"]["knowledgeBaseConfiguration"]["generationConfiguration"]["guardrailConfiguration"] = {
+                    "guardrailId": guardrail_id,
+                    "guardrailVersion": guardrail_version
+                }
+                logger.debug(f"Using Bedrock Guardrail ID: {guardrail_id}, Version: {guardrail_version}")
+        except ValueError:
+            logger.warning(f"Invalid GUARDRAIL_ID_AND_VERSION format: {GUARDRAIL_ENV}. Expected format: 'id:version'")
+    
     if sessionId:
         input["sessionId"] = sessionId
-    print("Amazon Bedrock KB Request: ", input)
+    
+    logger.info("Amazon Bedrock KB Request: %s", json.dumps(input))
     try:
         resp = KB_CLIENT.retrieve_and_generate(**input)
     except Exception as e:
-        print("Amazon Bedrock KB Exception: ", e)
+        logger.error("Amazon Bedrock KB Exception: %s", e)
         resp = {
             "systemMessage": "Amazon Bedrock KB Error: " + str(e)
         }
-    print("Amazon Bedrock KB Response: ", json.dumps(resp))
+    logger.debug("Amazon Bedrock KB Response: %s", json.dumps(resp))
     return resp
 
 def extract_document_id(s3_uri):

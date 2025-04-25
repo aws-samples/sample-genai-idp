@@ -1,6 +1,7 @@
 # Copyright © Amazon.com and Affiliates: This deliverable is considered Developed Content as defined in the AWS Service Terms and the SOW between the parties.
 import json
 import io
+import os
 import logging
 import datetime
 import fitz  # PyMuPDF
@@ -13,7 +14,8 @@ from idp_common import metrics
 from idp_common.models import Document, Page, Section, Status
 
 logger = logging.getLogger()
-logger.setLevel(logging.INFO)
+logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
+# Get LOG_LEVEL from environment variable with INFO as default
 
 # Use the common S3 client
 s3_client = get_s3_client()
@@ -338,8 +340,8 @@ def process_bda_pages(output_bucket, object_key, document):
             )
             document.pages[page_id] = page
             
-            # Create metadata file for the raw text URI
-            create_metadata_file(raw_text_uri, doc_class, 'page')
+            # Create metadata file for the parsed text URI
+            create_metadata_file(parsed_result_uri, doc_class, 'page')
         
         # Update document page count
         document.num_pages = len(document.pages)

@@ -5,6 +5,17 @@ Description: >
 
 Parameters:
 
+  LogLevel:
+    Type: String
+    Default: INFO
+    AllowedValues:
+      - DEBUG
+      - INFO
+      - WARN
+      - ERROR
+      - CRITICAL
+    Description: Default logging level for Lambda functions
+
   pCustomerManagedEncryptionKeyArn:
     Type: String
     Description: Enter the ARN of the customer managed key.
@@ -237,12 +248,23 @@ Resources:
       InlineCode: |
         import cfnresponse
         import time
+        import os
+        import logging
+        
+        # Get logging level from environment variable with INFO as default
+        log_level = os.environ.get('LOG_LEVEL', 'INFO')
+        logger = logging.getLogger()
+        logger.setLevel(getattr(logging, log_level))
+        
         def handler(event, context):
-            print(event)  
+            logger.info(event)  
             output = event['ResourceProperties'].get('InputString', '').lower()
             output = output[:32]
             responseData = {'OutputString': output}                                            
             cfnresponse.send(event, context, cfnresponse.SUCCESS, responseData)
+      Environment:
+        Variables:
+          LOG_LEVEL: !Ref LogLevel
 
   AdjustedStackName:
     Type: Custom::GetLowercase
@@ -271,12 +293,23 @@ Resources:
       InlineCode: |
         import cfnresponse
         import time
+        import os
+        import logging
+        
+        # Get logging level from environment variable with INFO as default
+        log_level = os.environ.get('LOG_LEVEL', 'INFO')
+        logger = logging.getLogger()
+        logger.setLevel(getattr(logging, log_level))
+        
         def handler(event, context):
-          print(event)
+          logger.info(event)
           urls = event['ResourceProperties'].get('WebCrawlerURLs', '').split(',')
           seedUrls = [{'Url': url.strip()} for url in urls]
           responseData = {'SeedUrls': seedUrls}
           cfnresponse.send(event, context, cfnresponse.SUCCESS, responseData)
+      Environment:
+        Variables:
+          LOG_LEVEL: !Ref LogLevel
 
   GetSeedUrls:
     Type: Custom::GetSeedUrls
@@ -439,7 +472,7 @@ Resources:
         Variables:
           POWERTOOLS_SERVICE_NAME: InfraSetupLambda
           POWERTOOLS_METRICS_NAMESPACE: InfraSetupLambda-NameSpace
-          POWERTOOLS_LOG_LEVEL: INFO
+          POWERTOOLS_LOG_LEVEL: !Ref LogLevel
 
   InvokeCreateOSSIndexLambdaFunction:
     Type: Custom::InvokeCreateOSSIndexLambdaFunction
@@ -706,6 +739,9 @@ Resources:
       Timeout: 600
       MemorySize: 128
       Code: ./src/start_ingestion_job_custom_resource
+      Environment:
+        Variables:
+          LOG_LEVEL: !Ref LogLevel
 
   StartWebIngestionJob:
     Type: AWS::CloudFormation::CustomResource

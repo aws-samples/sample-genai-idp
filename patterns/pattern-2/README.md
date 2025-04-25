@@ -28,7 +28,9 @@ This pattern implements an intelligent document processing workflow that uses Am
 
 The workflow consists of three main processing steps:
 1. OCR processing using Amazon Textract
-2. Page classification and grouping using Claude via Amazon Bedrock
+2. Document classification using Claude via Amazon Bedrock (with two available methods):
+   - Page-level classification: Classifies individual pages and groups them
+   - Holistic packet classification: Analyzes multi-document packets to identify document boundaries
 3. Field extraction using Claude via Amazon Bedrock
 
 ### State Machine Workflow
@@ -87,8 +89,11 @@ Each step includes comprehensive retry logic for handling transient errors:
   ```
 
 #### Classification Function
-- **Purpose**: Classifies pages using Claude via Bedrock and segments into sections
+- **Purpose**: Classifies pages or document packets using Claude via Bedrock and segments into sections
 - **Key Features**:
+  - Two classification methods:
+    - Page-level classification (multimodalPageLevelClassification)
+    - Holistic packet classification (textbasedHolisticClassification)
   - RVL-CDIP dataset categories for classification
   - Concurrent page processing
   - Automatic image resizing and optimization
@@ -188,6 +193,7 @@ The pattern exports these outputs to the parent stack:
 Key configurable parameters:
 
 - `ClassificationModel`: Bedrock model ID for classification
+- `ClassificationMethod`: Classification methodology to use (options: 'multimodalPageLevelClassification' or 'textbasedHolisticClassification')
 - `ExtractionModel`: Bedrock model ID for extraction
 - `MaxConcurrentWorkflows`: Workflow concurrency limit
 - `LogRetentionDays`: CloudWatch log retention period
@@ -195,11 +201,24 @@ Key configurable parameters:
 
 ## Customizing Classification
 
-The classification system uses RVL-CDIP dataset categories and can be customized through prompts in `src/classification_function/prompt_catalog.py`:
+The pattern supports two different classification methods:
+
+1. **Page-Level Classification (multimodalPageLevelClassification)**: This is the default method that classifies each page independently based on its visual layout and textual content. It outputs a simple JSON format with a single class label per page.
+
+2. **Holistic Packet Classification (textbasedHolisticClassification)**: This method examines the document as a whole to identify boundaries between different document types within a multi-document packet. It can detect logical document boundaries and identifies document types in the context of the whole document. This is especially useful for packets where individual pages may not be clearly classifiable on their own. It outputs a JSON format that identifies document segments with start and end page numbers.
+
+You can select which method to use by setting the `ClassificationMethod` parameter when deploying the stack.
+
+The classification system uses RVL-CDIP dataset categories and can be customized through the configuration settings in the template.yaml file. The default prompts are defined in the template:
 
 ```python
+# For multimodalPageLevelClassification
 SYSTEM_PROMPT = """You are a document classification system..."""
-CLASSIFICATION_PROMPT = """Classify this document into exactly one of these RVL-CDIP categories..."""
+CLASSIFICATION_PROMPT = """Classify this document into exactly one of these categories..."""
+
+# For textbasedHolisticClassification
+SYSTEM_PROMPT = """You are a document classification expert who can analyze and classify multiple documents..."""
+CLASSIFICATION_PROMPT = """The <document-text> XML tags contains the text separated into pages from the document package..."""
 ```
 
 Available categories:
@@ -222,29 +241,30 @@ Available categories:
 
 ## Customizing Extraction
 
-The extraction system can be customized through:
+The extraction system can be customized through the configuration settings in the template.yaml file:
 
-1. **Attribute Definitions** (`src/extraction_function/attributes.json`):
-   - Define attributes per document class
-   - Specify aliases and descriptions
-   - Configure validation rules
+1. **Attribute Definitions**: 
+   - Define attributes per document class in the `classes` section
+   - Specify descriptions for each attribute
+   - Configure the format and structure
 
-2. **Extraction Prompts** (`src/extraction_function/prompt_catalog.py`):
-   - Customize system behavior
-   - Add domain expertise
-   - Modify output formatting
+2. **Extraction Prompts**:
+   - Customize system behavior through the `system_prompt`
+   - Add domain expertise and guidance in the `task_prompt`
+   - Modify output formatting requirements
 
-Example attribute definition:
-```json
-{
-  "document_class_attributes": {
-    "invoice": {
-      "invoice_number": ["invoice no", "invoice #"],
-      "invoice_date": ["date", "invoice date"],
-      "total_amount": ["total", "grand total"]
-    }
-  }
-}
+Example attribute definition from the template:
+```yaml
+classes:
+  - name: invoice
+    description: A commercial document issued by a seller to a buyer relating to a sale
+    attributes:
+      - name: invoice_number
+        description: The unique identifier for the invoice. Look for 'invoice no', 'invoice #', or 'bill number', typically near the top of the document.
+      - name: invoice_date
+        description: The date when the invoice was issued. May be labeled as 'date', 'invoice date', or 'billing date'.
+      - name: total_amount
+        description: The final amount to be paid including all charges. Look for 'total', 'grand total', or 'amount due', typically the last figure on the invoice.
 ```
 
 ## Testing
@@ -253,13 +273,13 @@ Modify and use the provided test events and env files:
 
 ```bash
 # Test OCR function
-sam local invoke OCRFunction --env-vars testing/env.json -e testing/events/ocr-event.json
+sam local invoke OCRFunction --env-vars testing/env.json -e testing/OCRFunction-event.json
 
 # Test classification
-sam local invoke ClassificationFunction --env-vars testing/env.json -e testing/events/classification-event.json
+sam local invoke ClassificationFunction --env-vars testing/env.json -e testing/ClassificationFunctionEvent.json
 
 # Test extraction
-sam local invoke ExtractionFunction --env-vars testing/env.json -e testing/events/extraction-event.json
+sam local invoke ExtractionFunction --env-vars testing/env.json -e testing/ExtractionFunction-event.json
 ```
 
 ## Best Practices

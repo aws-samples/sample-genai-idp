@@ -6,7 +6,8 @@ import os
 
 # Initialize logging
 logger = logging.getLogger()
-logger.setLevel(logging.INFO)
+logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
+# Get LOG_LEVEL from environment variable with INFO as default
 
 # DynamoDB resource
 dynamodb = boto3.resource('dynamodb')

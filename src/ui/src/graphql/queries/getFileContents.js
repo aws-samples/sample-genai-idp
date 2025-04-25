@@ -4,6 +4,10 @@ import gql from 'graphql-tag';
 
 export default gql`
   query GetFileContents($s3Uri: String!) {
-    getFileContents(s3Uri: $s3Uri)
+    getFileContents(s3Uri: $s3Uri) {
+      content
+      contentType
+      size
+    }
   }
 `;

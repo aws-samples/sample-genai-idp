@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "idp_common"
-version = "0.3.0"
+version = "0.2.19"
 description = "Common utilities for GenAI IDP Accelerator patterns"
 authors = [
     {name = "AWS", email = "noreply@amazon.com"}
@@ -34,7 +34,7 @@ image = [
 ocr = [
     "Pillow>=11.1.0",
     "PyMuPDF>=1.25.5",
-    "amazon-textract-textractor>=1.9.1"
+    "amazon-textract-textractor>=1.9.2"
 ]
 
 # Classification module dependencies
@@ -47,11 +47,25 @@ extraction = [
     "Pillow>=11.1.0",  # For image handling
 ]
 
+# Evaluation module dependencies
+evaluation = [
+    "munkres>=1.1.4",  # For Hungarian algorithm
+    "numpy>=1.24.0",   # For numeric operations
+]
+
+# Appsync module dependencies
+appsync = [
+    "requests>=2.32.3",
+]
+
 # Full package with all dependencies
 all = [
     "Pillow>=11.1.0",
     "PyMuPDF>=1.25.5",
     "amazon-textract-textractor>=1.9.1",
+    "munkres>=1.1.4",
+    "numpy>=1.24.0",
+    "requests>=2.32.3",
 ]
 
 [project.urls]

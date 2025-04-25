@@ -45,7 +45,7 @@ def put_metric(name: str, value: float, unit: str = 'Count',
     
     # Use thread lock to ensure thread safety when publishing metrics
     with _metric_lock:
-        logger.info(f"Publishing metric {name}: {value}")
+        logger.debug(f"Publishing metric {name}: {value}")
         try:
             cloudwatch = get_cloudwatch_client()
             cloudwatch.put_metric_data(
@@ -118,6 +118,6 @@ def create_client_performance_metrics(name: str, duration_ms: float,
                 Namespace=namespace,
                 MetricData=metric_data
             )
-            logger.info(f"Published {len(metric_data)} metrics for {name}")
+            logger.debug(f"Published {len(metric_data)} metrics for {name}")
         except Exception as e:
             logger.error(f"Error publishing performance metrics for {name}: {e}")

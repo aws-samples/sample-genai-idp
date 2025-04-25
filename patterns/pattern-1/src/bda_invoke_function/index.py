@@ -11,7 +11,8 @@ from idp_common.models import Document
 
 
 logger = logging.getLogger()
-logger.setLevel(logging.INFO)
+logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
+# Get LOG_LEVEL from environment variable with INFO as default
 
 # Retry configuration
 MAX_RETRIES = 8

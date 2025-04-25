@@ -5,7 +5,8 @@ from botocore.exceptions import ClientError
 import logging
 
 logger = logging.getLogger()
-logger.setLevel(logging.INFO)
+logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
+# Get LOG_LEVEL from environment variable with INFO as default
 
 # Get the DynamoDB table name from the environment variable
 CONFIGURATION_TABLE_NAME = os.environ['CONFIGURATION_TABLE_NAME']

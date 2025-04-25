@@ -15,9 +15,14 @@ class Status(Enum):
     """Document processing status."""
     QUEUED = "QUEUED"           # Initial state when document is added to queue
     STARTED = "STARTED"         # Step function workflow has started
+    OCR_STARTED = "OCR_RUNNING"  # OCR processing started
     OCR_COMPLETED = "OCR_COMPLETED"  # OCR processing completed
+    CLASSIFYING = "CLASSIFYING" # Document classification started
     CLASSIFIED = "CLASSIFIED"   # Document classification completed
+    EXTRACTING = "EXTRACTING"   # Information extraction started
     EXTRACTED = "EXTRACTED"     # Information extraction completed
+    SUMMARIZING = "SUMMARIZING" # Document summarization started
+    SUMMARIZED = "SUMMARIZED"   # Document summarization completed
     PROCESSED = "PROCESSED"     # All processing completed
     FAILED = "FAILED"           # Processing failed
     EVALUATED = "EVALUATED"     # Document has been evaluated against baseline
@@ -87,6 +92,7 @@ class Document:
     
     # Processing state and timing
     status: Status = Status.QUEUED
+    initial_event_time: Optional[str] = None
     queued_time: Optional[str] = None
     start_time: Optional[str] = None
     completion_time: Optional[str] = None
@@ -96,10 +102,14 @@ class Document:
     num_pages: int = 0
     pages: Dict[str, Page] = field(default_factory=dict)
     sections: List[Section] = field(default_factory=list)
+    summary_report_uri: Optional[str] = None
     
     # Processing metadata
     metering: Dict[str, Any] = field(default_factory=dict)
+    evaluation_status: Optional[str] = None
     evaluation_report_uri: Optional[str] = None
+    evaluation_result: Any = None  # Holds the DocumentEvaluationResult object
+    summarization_result: Any = None  # Holds the DocumentSummarizationResult object
     errors: List[str] = field(default_factory=list)
     
     def to_dict(self) -> Dict[str, Any]:
@@ -111,14 +121,18 @@ class Document:
             "input_key": self.input_key,
             "output_bucket": self.output_bucket,
             "status": self.status.value,
+            "initial_event_time": self.initial_event_time,
             "queued_time": self.queued_time,
             "start_time": self.start_time,
             "completion_time": self.completion_time,
             "workflow_execution_arn": self.workflow_execution_arn,
             "num_pages": self.num_pages,
+            "summary_report_uri": self.summary_report_uri,
+            "evaluation_status": self.evaluation_status,
             "evaluation_report_uri": self.evaluation_report_uri,
             "errors": self.errors,
-            "metering": self.metering
+            "metering": self.metering,
+            # We don't include evaluation_result or summarization_result in the dict since they're objects
         }
         
         # Convert pages
@@ -160,11 +174,14 @@ class Document:
             input_key=data.get('input_key'),
             output_bucket=data.get('output_bucket'),
             num_pages=data.get('num_pages', 0),
+            initial_event_time=data.get('initial_event_time'),
             queued_time=data.get('queued_time'),
             start_time=data.get('start_time'),
             completion_time=data.get('completion_time'),
             workflow_execution_arn=data.get('workflow_execution_arn'),
+            evaluation_status=data.get('evaluation_status'),
             evaluation_report_uri=data.get('evaluation_report_uri'),
+            summary_report_uri=data.get('summary_report_uri'),
             metering=data.get('metering', {}),
             errors=data.get('errors', [])
         )
@@ -210,12 +227,14 @@ class Document:
         """Create a Document from an S3 event."""
         input_bucket = event.get("detail", {}).get("bucket", {}).get("name", "")
         input_key = event.get("detail", {}).get("object", {}).get("key", "")
+        initial_event_time = event.get("time", "")
         
         return cls(
             id=input_key,
             input_bucket=input_bucket,
             input_key=input_key,
             output_bucket=output_bucket,
+            initial_event_time=initial_event_time,
             status=Status.QUEUED
         )
     
@@ -228,3 +247,146 @@ class Document:
         """Create a Document from a JSON string."""
         data = json.loads(json_str)
         return cls.from_dict(data)
+    
+    @classmethod
+    def from_s3(cls, bucket: str, input_key: str) -> 'Document':
+        """
+        Create a Document from baseline results stored in S3.
+        
+        This method loads page and section result.json files from the specified 
+        S3 bucket with the given input_key prefix.
+        
+        Args:
+            bucket: The S3 bucket containing baseline results
+            input_key: The document key (used as prefix for finding baseline files)
+            
+        Returns:
+            A Document instance populated with data from baseline files
+        """
+        from idp_common.s3 import get_json_content
+        from idp_common.utils import build_s3_uri
+        import boto3
+        import logging
+        
+        logger = logging.getLogger(__name__)
+        s3_client = boto3.client('s3')
+        
+        # Create a basic document structure
+        document = cls(
+            id=input_key,
+            input_key=input_key,
+            output_bucket=bucket,
+            status=Status.PROCESSED
+        )
+        
+        # List all objects with the given prefix to find pages and sections
+        prefix = f"{input_key}/"
+        logger.info(f"Listing objects in {bucket} with prefix {prefix}")
+        
+        try:
+            # List pages first
+            pages_prefix = f"{prefix}pages/"
+            paginator = s3_client.get_paginator('list_objects_v2')
+            page_dirs = set()
+            
+            # Find all page directories
+            for page in paginator.paginate(Bucket=bucket, Prefix=pages_prefix, Delimiter='/'):
+                for prefix_item in page.get('CommonPrefixes', []):
+                    page_dir = prefix_item.get('Prefix')
+                    page_id = page_dir.split('/')[-2]  # Extract page ID from path
+                    page_dirs.add((page_id, page_dir))
+            
+            # Process each page directory
+            for page_id, page_dir in page_dirs:
+                result_key = f"{page_dir}result.json"
+                
+                try:
+                    # Check if result.json exists
+                    s3_client.head_object(Bucket=bucket, Key=result_key)
+                    
+                    # Load page data from result.json
+                    result_uri = build_s3_uri(bucket, result_key)
+                    page_data = get_json_content(result_uri)
+                    
+                    # Create image and raw text URIs
+                    image_uri = build_s3_uri(bucket, f"{page_dir}image.jpg")
+                    raw_text_uri = build_s3_uri(bucket, f"{page_dir}rawText.json")
+                    
+                    # Add page to document
+                    document.pages[page_id] = Page(
+                        page_id=page_id,
+                        image_uri=image_uri,
+                        raw_text_uri=raw_text_uri,
+                        parsed_text_uri=result_uri,
+                        classification=page_data.get('classification'),
+                        confidence=page_data.get('confidence', 1.0),
+                        tables=page_data.get('tables', []),
+                        forms=page_data.get('forms', {})
+                    )
+                    
+                except Exception as e:
+                    logger.warning(f"Error loading page {page_id}: {str(e)}")
+            
+            # Update document with number of pages
+            document.num_pages = len(document.pages)
+            
+            # Now list sections
+            sections_prefix = f"{prefix}sections/"
+            section_dirs = set()
+            
+            # Find all section directories
+            for section_page in paginator.paginate(Bucket=bucket, Prefix=sections_prefix, Delimiter='/'):
+                for prefix_item in section_page.get('CommonPrefixes', []):
+                    section_dir = prefix_item.get('Prefix')
+                    section_id = section_dir.split('/')[-2]  # Extract section ID from path
+                    section_dirs.add((section_id, section_dir))
+            
+            # Process each section directory
+            for section_id, section_dir in section_dirs:
+                result_key = f"{section_dir}result.json"
+                
+                try:
+                    # Check if result.json exists
+                    s3_client.head_object(Bucket=bucket, Key=result_key)
+                    
+                    # Load section data from result.json
+                    result_uri = build_s3_uri(bucket, result_key)
+                    section_data = get_json_content(result_uri)
+                    
+                    # Get section attributes if they exist in the result
+                    attributes = section_data.get('attributes', section_data)
+                    
+                    # Determine page IDs for this section based on classification
+                    # If not available in section_data, we'll try to infer from page classifications
+                    section_classification = section_data.get('classification')
+                    page_ids = section_data.get('page_ids', [])
+                    
+                    # If page_ids not found in section data, try to infer from pages
+                    if not page_ids and section_classification:
+                        for page_id, page in document.pages.items():
+                            if page.classification == section_classification:
+                                page_ids.append(page_id)
+                    
+                    # If section_id is numeric, match it to page_id
+                    if not page_ids and section_id.isdigit():
+                        if section_id in document.pages:
+                            page_ids = [section_id]
+                    
+                    # Add section to document
+                    document.sections.append(Section(
+                        section_id=section_id,
+                        classification=section_classification,
+                        confidence=section_data.get('confidence', 1.0),
+                        page_ids=page_ids,
+                        extraction_result_uri=result_uri,
+                        attributes=attributes
+                    ))
+                    
+                except Exception as e:
+                    logger.warning(f"Error loading section {section_id}: {str(e)}")
+            
+            return document
+            
+        except Exception as e:
+            logger.error(f"Error building document from S3: {str(e)}")
+            raise

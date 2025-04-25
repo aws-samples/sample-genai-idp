@@ -7,7 +7,8 @@ from idp_common import s3, utils
 from idp_common.models import Document, Page, Section, Status
 
 logger = logging.getLogger()
-logger.setLevel(logging.INFO)
+logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
+# Get LOG_LEVEL from environment variable with INFO as default
 
 def handler(event, context):
     """

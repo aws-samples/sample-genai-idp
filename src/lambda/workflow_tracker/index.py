@@ -3,131 +3,102 @@ import json
 import os
 from datetime import datetime, timezone
 import logging
-from appsync_helper import AppSyncClient, UPDATE_DOCUMENT, AppSyncError
-import requests
+from idp_common.models import Document, Status, Page, Section
+from idp_common.appsync import DocumentAppSyncService
 from botocore.exceptions import ClientError
-from typing import Dict, Any, Optional, List
-from idp_common.models import Document, Status
+from typing import Dict, Any, Optional
 
 logger = logging.getLogger()
-logger.setLevel(logging.INFO)
+logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
+# Get LOG_LEVEL from environment variable with INFO as default
 
 METRIC_NAMESPACE = os.environ['METRIC_NAMESPACE']
-OUTPUT_BUCKET = os.environ['OUTPUT_BUCKET']
 
 dynamodb = boto3.resource('dynamodb')
 cloudwatch = boto3.client('cloudwatch')
 s3 = boto3.client('s3')
-appsync = AppSyncClient()
+appsync_service = DocumentAppSyncService()
 concurrency_table = dynamodb.Table(os.environ['CONCURRENCY_TABLE'])
 COUNTER_ID = 'workflow_counter'
 
 
-def update_document_completion(object_key: str, workflow_status: str, output_data: Dict[str, Any]) -> Dict[str, Any]:
+def update_document_completion(object_key: str, workflow_status: str, output_data: Dict[str, Any]) -> Document:
     """
     Update document completion status via AppSync
+    
+    Args:
+        object_key: The document object key (ID)
+        workflow_status: The final workflow status (SUCCEEDED or FAILED)
+        output_data: The output data from the workflow execution
+        
+    Returns:
+        The updated Document object
     """
-    completionTime = datetime.now(timezone.utc).isoformat()
-    pageCount = 0
-    sections = []
-    pages = []
-    metering = None
+    # Create a document with basic properties
+    document = Document(
+        id=object_key,
+        input_key=object_key,
+        status=Status.PROCESSED if workflow_status == 'SUCCEEDED' else Status.FAILED,
+        completion_time=datetime.now(timezone.utc).isoformat()
+    )
     
     # Get sections, pages, and metering data if workflow succeeded
     if workflow_status == 'SUCCEEDED' and output_data:
         try:
-            # Get the processed document from the output data
-            processed_result = output_data.get("ProcessedResult", {})
+            # Get the processed document from the output data 
+            workflow_result = output_data.get("Result", {})
             
-            if "document" in processed_result:
-                # Get document from the final processing step
-                document = Document.from_dict(processed_result.get("document", {}))
+            if "document" in workflow_result:
+                # Get document from the final processing step - this contains all data
+                processed_doc = Document.from_dict(workflow_result.get("document", {}))
                 
-                if document.status == Status.PROCESSED:
-                    # Extract data for AppSync update
-                    pageCount = document.num_pages
-                    
-                    # Convert sections to format expected by AppSync
-                    for section in document.sections:
-                        sections.append({
-                            "Id": section.section_id,
-                            "PageIds": section.page_ids,
-                            "Class": section.classification,
-                            "OutputJSONUri": section.extraction_result_uri
-                        })
-                    
-                    # Convert pages to format expected by AppSync
-                    for page_id, page in document.pages.items():
-                        pages.append({
-                            "Id": page.page_id,
-                            "Class": page.classification,
-                            "TextUri": page.parsed_text_uri,
-                            "ImageUri": page.image_uri
-                        })
-                    
-                    # Get metering data
-                    metering = document.metering
-                    
-                    logger.info(f"Successfully extracted data from Document object with {len(document.sections)} sections and {len(document.pages)} pages")
-                else:
-                    logger.warning(f"Document not in PROCESSED state: {document.status}")
+                # Copy data from processed document to our update document
+                document.num_pages = processed_doc.num_pages
+                document.pages = processed_doc.pages
+                document.sections = processed_doc.sections
+                document.metering = processed_doc.metering
+                document.summary_report_uri = processed_doc.summary_report_uri
             else:
-                logger.warning("No document found in ProcessedResult")
+                logger.warning("No document found in Result")
                 
         except Exception as e:
             logger.warning(f"Could not extract document data: {e}")
-        
-        # Convert metering to JSON string if it exists
-        if metering:
-            metering = json.dumps(metering)
-            logger.info(f"Metering data captured: {metering}")
     
-    update_input = {
-        'input': {
-            'ObjectKey': object_key,
-            'ObjectStatus': 'COMPLETED' if workflow_status == 'SUCCEEDED' else 'FAILED',
-            'CompletionTime': completionTime,
-            'WorkflowStatus': workflow_status,
-            'PageCount': pageCount,
-            'Sections': sections,
-            'Pages': pages
-        }
-    }
+    # Update document in AppSync
+    logger.info(f"Updating document via AppSync: {document.to_json()}")
+    updated_doc = appsync_service.update_document(document)
     
-    # Add metering data if available
-    if metering:
-        update_input['input']['Metering'] = metering
-    
-    logger.info(f"Updating document via AppSync: {update_input}")
-    result = appsync.execute_mutation(UPDATE_DOCUMENT, update_input)
-    return result['updateDocument']
+    return updated_doc
 
 
-def put_latency_metrics(item: Dict[str, Any]) -> None:
+def put_latency_metrics(document: Document) -> None:
     """
     Publish latency metrics to CloudWatch
     
     Args:
-        item: Document data containing timestamps
+        document: Document object containing timestamps
         
     Raises:
         ValueError: If required timestamps are missing
         ClientError: If CloudWatch operation fails
     """
     try:
-        # Validate required timestamps
-        required_timestamps = ['InitialEventTime', 'QueuedTime', 'WorkflowStartTime']
-        missing = [ts for ts in required_timestamps if not item.get(ts)]
-        if missing:
+        # Check required timestamps
+        if not document.queued_time or not document.start_time:
+            missing = []
+            if not document.queued_time:
+                missing.append("queued_time")
+            if not document.start_time:
+                missing.append("start_time")
             raise ValueError(f"Missing required timestamps: {', '.join(missing)}")
 
         now = datetime.now(timezone.utc)
-        initial_time = datetime.fromisoformat(item['InitialEventTime'])
-        QueuedTime = datetime.fromisoformat(item['QueuedTime'])
-        WorkflowStartTime = datetime.fromisoformat(item['WorkflowStartTime'])
+        initial_time = datetime.fromisoformat(document.start_time)
+        queued_time = datetime.fromisoformat(document.queued_time)
+        workflow_start_time = datetime.fromisoformat(document.start_time)
         
-        queue_latency = (WorkflowStartTime - QueuedTime).total_seconds() * 1000
-        workflow_latency = (now - WorkflowStartTime).total_seconds() * 1000
+        queue_latency = (workflow_start_time - queued_time).total_seconds() * 1000
+        workflow_latency = (now - workflow_start_time).total_seconds() * 1000
         total_latency = (now - initial_time).total_seconds() * 1000
         
         logger.info(
@@ -204,13 +175,10 @@ def handler(event, context):
         if event['detail'].get('output'):
             output_data = json.loads(event['detail']['output'])
         
-        # Get object key - try from document first if available
+        # Get object key from document
         try:
             if "document" in input_data:
                 object_key = input_data["document"]["input_key"]
-            elif "detail" in input_data and "object" in input_data["detail"]:
-                # Fallback to original format if document not available
-                object_key = input_data['detail']['object']['key']
             else:
                 raise ValueError("Unable to find object key in input")
         except (KeyError, TypeError) as e:
@@ -245,7 +213,7 @@ def handler(event, context):
             'body': {
                 'object_key': object_key,
                 'workflow_status': workflow_status,
-                'completionTime': updated_doc['CompletionTime'],
+                'completion_time': updated_doc.completion_time,
                 'counter_value': counter_value
             }
         }

@@ -20,6 +20,8 @@ type Document implements DynamoDbBase @aws_cognito_user_pools @aws_iam {
   Pages: [Page]
   Metering: AWSJSON
   EvaluationReportUri: String
+  EvaluationStatus: String
+  SummaryReportUri: String
   ExpiresAfter: AWSTimestamp
 }
 
@@ -87,6 +89,8 @@ input UpdateDocumentInput {
   Pages: [PageInput]
   Metering: AWSJSON
   EvaluationReportUri: String
+  EvaluationStatus: String
+  SummaryReportUri: String
 }
 
 input SectionInput {
@@ -108,6 +112,13 @@ type CopyToBaselineResponse @aws_cognito_user_pools {
   message: String
 }
 
+type FileContentsResponse @aws_cognito_user_pools @aws_iam {
+  content: String!
+  contentType: String!
+  size: Int!
+  isBinary: Boolean
+}
+
 type Mutation  {
   createDocument(input: CreateDocumentInput!): CreateDocumentOutput @aws_iam
   updateDocument(input: UpdateDocumentInput!): Document @aws_iam
@@ -122,7 +133,7 @@ type Query @aws_cognito_user_pools @aws_iam {
   listDocuments(startDateTime: AWSDateTime, endDateTime: AWSDateTime): DocumentList
   listDocumentsDateHour(date: AWSDate, hour: Int): DocumentList
   listDocumentsDateShard(date: AWSDate, shard: Int): DocumentList 
-  getFileContents(s3Uri: String!): String
+  getFileContents(s3Uri: String!): FileContentsResponse
   getConfiguration: ConfigurationResponse
   queryKnowledgeBase(input: String!, sessionId: String): String
 }

@@ -12,6 +12,17 @@ Parameters:
     Type: String
     Default: 'GenAI IDP Sample project for processing lending package documents'
     Description: Description of the Bedrock Data Automation project
+    
+  LogLevel:
+    Type: String
+    Default: INFO
+    AllowedValues:
+      - DEBUG
+      - INFO
+      - WARN
+      - ERROR
+      - CRITICAL
+    Description: Default logging level for Lambda functions
 
 Resources:
 
@@ -66,6 +77,7 @@ Resources:
     # checkov:skip=CKV_AWS_116: "DLQ not required for this function as StepFunctions will handle retries"
     # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
     # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only configuration values"
     Properties:
       CodeUri: src/bda_project_lambda/
       Handler: index.handler
@@ -73,6 +85,9 @@ Resources:
       Runtime: python3.12
       Timeout: 300
       MemorySize: 256
+      Environment:
+        Variables:
+          LOG_LEVEL: !Ref LogLevel
 
   # Custom resource to create BDA project
   BDAProject:

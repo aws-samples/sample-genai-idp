@@ -179,19 +179,8 @@ class ExtractionService:
             
             # Prepare prompt
             prompt_template = extraction_config.get("task_prompt", "")
-            if "{DOCUMENT_TEXT}" in prompt_template and "{ATTRIBUTE_NAMES_AND_DESCRIPTIONS}" in prompt_template and "{DOCUMENT_CLASS}" in prompt_template:
-                prompt_template = (
-                    prompt_template
-                    .replace("{DOCUMENT_TEXT}", "%(DOCUMENT_TEXT)s")
-                    .replace("{DOCUMENT_CLASS}", "%(DOCUMENT_CLASS)s")
-                    .replace("{ATTRIBUTE_NAMES_AND_DESCRIPTIONS}", "%(ATTRIBUTE_NAMES_AND_DESCRIPTIONS)s")
-                )
-                task_prompt = prompt_template % {
-                    "DOCUMENT_TEXT": document_text,
-                    "DOCUMENT_CLASS": class_label,
-                    "ATTRIBUTE_NAMES_AND_DESCRIPTIONS": attribute_descriptions
-                }
-            else:
+            
+            if not prompt_template:
                 # Default prompt if template not found
                 task_prompt = f"""
                 Extract the following fields from this {class_label} document:
@@ -203,6 +192,33 @@ class ExtractionService:
                 
                 Respond with a JSON object containing each field name and its extracted value.
                 """
+            else:
+                # Use the common format_prompt function from bedrock
+                from idp_common.bedrock import format_prompt
+                
+                try:
+                    task_prompt = format_prompt(
+                        prompt_template,
+                        {
+                            "DOCUMENT_TEXT": document_text,
+                            "DOCUMENT_CLASS": class_label,
+                            "ATTRIBUTE_NAMES_AND_DESCRIPTIONS": attribute_descriptions
+                        },
+                        required_placeholders=["DOCUMENT_TEXT", "DOCUMENT_CLASS", "ATTRIBUTE_NAMES_AND_DESCRIPTIONS"]
+                    )
+                except ValueError as e:
+                    logger.warning(f"Error formatting prompt template: {str(e)}. Using default prompt.")
+                    # Fall back to default prompt if template validation fails
+                    task_prompt = f"""
+                    Extract the following fields from this {class_label} document:
+                    
+                    {attribute_descriptions}
+                    
+                    Document text:
+                    {document_text}
+                    
+                    Respond with a JSON object containing each field name and its extracted value.
+                    """
             
             content = [{"text": task_prompt}]
             

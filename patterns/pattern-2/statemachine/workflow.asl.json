@@ -102,7 +102,7 @@
                 "ClassificationResult.$": "$.ClassificationResult",
                 "ExtractionResults.$": "$.ExtractionResults"
             },
-            "ResultPath": "$.ProcessedResult",
+            "ResultPath": "$.Result",
             "Retry": [
                 {
                     "ErrorEquals": [
@@ -120,6 +120,48 @@
                     "BackoffRate": 2
                 }
             ],
+            "Next": "SummarizationChoice"
+        },
+        "SummarizationChoice": {
+            "Type": "Choice",
+            "QueryLanguage": "JSONata",
+            "Choices": [
+                {
+                    "Condition": "{% ${IsSummarizationEnabled} = true %}",
+                    "Next": "SummarizationStep"
+                }
+            ],
+            "Default": "WorkflowComplete"
+        },
+        "SummarizationStep": {
+            "Type": "Task",
+            "Resource": "${SummarizationLambdaArn}",
+            "Parameters": {
+                "execution_arn.$": "$$.Execution.Id",
+                "document.$": "$.Result.document"
+            },
+            "ResultPath": "$.Result",
+            "Retry": [
+                {
+                    "ErrorEquals": [
+                        "Lambda.ServiceException",
+                        "Lambda.AWSLambdaException",
+                        "Lambda.SdkClientException",
+                        "Lambda.TooManyRequestsException",
+                        "ServiceQuotaExceededException",
+                        "ThrottlingException",
+                        "ProvisionedThroughputExceededException",
+                        "RequestLimitExceeded"
+                    ],
+                    "IntervalSeconds": 2,
+                    "MaxAttempts": 10,
+                    "BackoffRate": 2
+                }
+            ],
+            "Next": "WorkflowComplete"
+        },
+        "WorkflowComplete": {
+            "Type": "Pass",
             "End": true
         }
     }

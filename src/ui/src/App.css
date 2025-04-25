@@ -15,3 +15,40 @@
     --amplify-text-xl: 2rem;
     --amplify-text-xxl: 2.5rem;
 }
+
+/* Markdown table styles */
+.markdown-viewer table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 16px 0;
+    font-size: 14px;
+}
+
+.markdown-viewer thead {
+    background-color: #f1f1f1;
+}
+
+.markdown-viewer th {
+    font-weight: bold;
+    text-align: left;
+}
+
+.markdown-viewer th,
+.markdown-viewer td {
+    padding: 8px 12px;
+    border: 1px solid #ddd;
+}
+
+.markdown-viewer tr:nth-child(even) {
+    background-color: #f9f9f9;
+}
+
+/* Center align cells with emoji */
+.markdown-viewer td:has(span) {
+    text-align: center;
+}
+
+/* Ensure tables take up appropriate space */
+.markdown-viewer .prose {
+    max-width: 100%;
+}

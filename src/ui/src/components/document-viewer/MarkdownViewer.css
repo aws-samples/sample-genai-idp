@@ -1,0 +1,172 @@
+/* Evaluation Report Viewer Styles */
+.markdown-viewer {
+  padding: 24px;
+  background-color: white;
+  overflow-y: auto;
+  max-height: 800px;
+  position: relative;
+}
+
+/* Tools container for download/print buttons */
+.tools-container {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  justify-content: flex-end;
+  z-index: 10;
+  background-color: rgba(255, 255, 255, 0.8);
+  border-radius: 4px;
+  padding: 4px;
+}
+
+/* Table container for proper scrolling */
+.table-container {
+  overflow-x: auto;
+}
+
+/* Base table styles - ALL tables start with this */
+.markdown-viewer table {
+  border-collapse: collapse;
+  margin: 16px 0;
+  font-size: 14px;
+  /* Keep tables as narrow as their content requires */
+  width: auto !important;
+  display: inline-table !important;
+}
+
+/* Table headers */
+.markdown-viewer table thead {
+  background-color: #f1f1f1;
+}
+
+.markdown-viewer table th {
+  font-weight: bold;
+  text-align: left;
+}
+
+/* Table cells */
+.markdown-viewer table th,
+.markdown-viewer table td {
+  padding: 8px 12px;
+  border: 1px solid #ddd;
+  white-space: normal;
+}
+
+/* Alternate row colors */
+.markdown-viewer table tr:nth-child(even) {
+  background-color: #f9f9f9;
+}
+
+/* Status column (1st column) */
+.markdown-viewer table td:first-child {
+  text-align: center;
+  white-space: nowrap;
+  min-width: 60px;
+}
+
+/* Attribute name column (2nd column) */
+.markdown-viewer table td:nth-child(2) {
+  white-space: nowrap;
+  min-width: 120px;
+}
+
+/* Value columns (3rd, 4th columns) - expected/actual values */
+.markdown-viewer table td:nth-child(3),
+.markdown-viewer table td:nth-child(4) {
+  min-width: 150px;
+  white-space: normal;
+}
+
+/* Score column (5th column) */
+.markdown-viewer table td:nth-child(5) {
+  text-align: center;
+  white-space: nowrap;
+  min-width: 80px;
+}
+
+/* Method column (6th column) */
+.markdown-viewer table td:nth-child(6) {
+  white-space: nowrap;
+  min-width: 100px;
+}
+
+/* Reason column (7th column) */
+.markdown-viewer table td:nth-child(7) {
+  white-space: normal;
+  min-width: 150px;
+}
+
+/* Special treatment for the attributes tables (7 columns, wider) */
+/* Check for a 7th column as a proxy for the attributes table */
+.markdown-viewer table th:nth-child(7) ~ th,
+.markdown-viewer table td:nth-child(7) ~ td {
+  /* If 7th+ column exists, it's a wide attributes table */
+  width: 100px;
+}
+
+.markdown-viewer table th:nth-child(7),
+.markdown-viewer table td:nth-child(7) {
+  /* If 7th column exists, parent table gets different treatment */
+  min-width: 150px;
+}
+
+/* Extra-compact styling for metrics tables (typically 3 columns) */
+.markdown-viewer h3:first-of-type + table {
+  max-width: 400px !important;
+}
+
+/* Headers */
+.markdown-viewer h1 {
+  font-size: 24px;
+  font-weight: bold;
+  margin-bottom: 16px;
+}
+
+.markdown-viewer h2 {
+  font-size: 20px;
+  font-weight: bold;
+  margin-bottom: 12px;
+  margin-top: 24px;
+}
+
+.markdown-viewer h3 {
+  font-size: 18px;
+  font-weight: bold;
+  margin-bottom: 8px;
+  margin-top: 16px;
+}
+
+/* Lists */
+.markdown-viewer ul {
+  list-style-type: disc;
+  margin-left: 16px;
+  margin-bottom: 16px;
+}
+
+.markdown-viewer ol {
+  list-style-type: decimal;
+  margin-left: 16px;
+  margin-bottom: 16px;
+}
+
+/* Paragraphs */
+.markdown-viewer p {
+  margin-bottom: 16px;
+}
+
+/* Code */
+.markdown-viewer code {
+  background-color: #f5f5f5;
+  padding: 2px 4px;
+  border-radius: 3px;
+  font-family: monospace;
+}
+
+.markdown-viewer pre {
+  background-color: #f5f5f5;
+  padding: 16px;
+  border-radius: 3px;
+  overflow-x: auto;
+  margin-bottom: 16px;
+}

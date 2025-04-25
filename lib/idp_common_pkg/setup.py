@@ -21,7 +21,7 @@ extras_require = {
     "ocr": [
         "Pillow>=11.1.0",
         "PyMuPDF>=1.25.5",
-        "amazon-textract-textractor>=1.9.1",
+        "amazon-textract-textractor>=1.9.2",
     ],
     
     # Classification module dependencies
@@ -33,18 +33,24 @@ extras_require = {
     "extraction": [
         "Pillow>=11.1.0",  # For image handling
     ],
+
+    # Appsync module dependencies
+    "appsync": [
+        "requests>=2.32.3",
+    ],
     
     # Full package with all dependencies
     "all": [
         "Pillow>=11.1.0",
         "PyMuPDF>=1.25.5",
         "amazon-textract-textractor>=1.9.1",
+        "requests>=2.32.3",
     ],
 }
 
 setup(
     name="idp_common",
-    version="0.3.0",
+    version="0.2.19",
     packages=find_packages(),
     include_package_data=True,
     python_requires=">=3.8",

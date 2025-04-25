@@ -1,6 +1,13 @@
 import boto3
 import json
 import cfnresponse
+import os
+import logging
+
+# Get logging level from environment variable with INFO as default
+log_level = os.environ.get('LOG_LEVEL', 'INFO')
+logger = logging.getLogger()
+logger.setLevel(getattr(logging, log_level))
 
 CLIENT = boto3.client('bedrock-agent')
 
@@ -15,15 +22,15 @@ def start_ingestion_job(knowledgeBaseId, dataSourceId):
     try:
         response = CLIENT.start_ingestion_job(knowledgeBaseId=knowledgeBaseId,
                                               dataSourceId=dataSourceId, description="Autostart by CloudFormation")
-        print(f"start_ingestion_job response: {response}")
+        logger.info(f"start_ingestion_job response: {response}")
     except Exception as e:
-        print(
+        logger.warning(
             f"WARN: start_ingestion_job failed.. Retry manually from bedrock console: {e}")
         pass
 
 
 def lambda_handler(event, context):
-    print("Event: ", json.dumps(event))
+    logger.info(f"Event: {json.dumps(event)}")
     status = cfnresponse.SUCCESS
     physicalResourceId = event.get('PhysicalResourceId', None)
     responseData = {}
@@ -32,7 +39,7 @@ def lambda_handler(event, context):
     create_update_args.pop('ServiceToken', None)
     if event['RequestType'] == 'Create' or event['RequestType'] == 'Update':
         try:
-            print(f"Start datasource args: {json.dumps(create_update_args)}")
+            logger.info(f"Start datasource args: {json.dumps(create_update_args)}")
             knowledgeBaseId = event['ResourceProperties']['knowledgeBaseId']
             dataSourceId = event['ResourceProperties']['dataSourceId']
             physicalResourceId = f"{knowledgeBaseId}/{dataSourceId}"
@@ -41,7 +48,7 @@ def lambda_handler(event, context):
             status = cfnresponse.FAILED
             reason = f"Exception - {e}"
     else:  # Delete
-        print("Delete no op")
-    print(f"Status: {status}, Reason: {reason}")
+        logger.info("Delete no op")
+    logger.info(f"Status: {status}, Reason: {reason}")
     cfnresponse.send(event, context, status, responseData,
                      physicalResourceId, reason=reason)

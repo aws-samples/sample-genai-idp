@@ -2,7 +2,7 @@
 
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
-Description: AWS GenAI IDP Accelerator - resources for IDP Pattern 3 (BDA)
+Description: AWS GenAI IDP Accelerator - resources for IDP Pattern 1 (BDA)
 
 Parameters:
 
@@ -27,6 +27,17 @@ Parameters:
   LogRetentionDays:
     Type: Number
   
+  LogLevel:
+    Type: String
+    Default: WARN
+    AllowedValues:
+      - DEBUG
+      - INFO
+      - WARN
+      - ERROR
+      - CRITICAL
+    Description: Default logging level for all Lambda functions
+  
   ExecutionTimeThresholdMs:
     Type: Number
     Default: 30000
@@ -36,12 +47,36 @@ Parameters:
     Default: ''
     Description: Bedrock Data Automation (BDA) project ARN
 
+  SummarizationModel:
+    Type: String
+    Default: 'DISABLED'
+    Description: Model to use for document summarization, or DISABLED to skip summarization
+
   UpdateConfigurationFunctionArn:
     Type: String
 
   ConfigurationTable:
     Type: String
+    
+  EvaluationLLMModelId:
+    Type: String
+    Default: 'us.anthropic.claude-3-5-sonnet-20241022-v2:0'
+    Description: Model to use for LLM-based Evaluation
+    
+  BedrockGuardrailId:
+    Type: String
+    Default: ""
+    Description: "Optionally provide the Id (not name) of an existing Bedrock Guardrail to be used for Bedrock interactions"
+    
+  BedrockGuardrailVersion:
+    Type: String
+    Default: ""
+    Description: "If you provided a Bedrock Guardrail Id above, provide the corresponding Guardrail version here"
 
+
+Conditions:
+  IsSummarizationEnabled: !Not [!Equals [!Ref SummarizationModel, "DISABLED"]]
+  HasGuardrailConfig: !And [!Not [!Equals [!Ref BedrockGuardrailId, ""]], !Not [!Equals [!Ref BedrockGuardrailVersion, ""]]]
 
 Resources:
 
@@ -61,6 +96,129 @@ Resources:
             order: 1
             type: string
             description: Notes
+          classes:
+            order: 2
+            type: array
+            sectionLabel: Class definitions
+            listLabel: Classes
+            itemLabel: Class
+            columns: 2
+            items:
+              type: object
+              required:
+                - name
+                - description
+                - attributes
+              properties:
+                name:
+                  type: string
+                  description: Class name
+                description:
+                  type: string
+                  description: Class description
+                attributes:
+                  type: array
+                  listLabel: Attributes
+                  itemLabel: Attribute
+                  items:
+                    type: object
+                    required:
+                      - name
+                      - description
+                    properties:
+                    properties:
+                      name:
+                        type: string
+                        description: Attribute name
+                        order: 0
+                      description:
+                        type: string
+                        description: Attribute description
+                        order: 1
+                      # Group these fields in a new row with columns for side-by-side display
+                      evaluation_method:
+                        type: string
+                        description: Evaluation Method
+                        enum: ["", "LLM", "SEMANTIC", "FUZZY", "HUNGARIAN", "NUMERIC_EXACT", "EXACT"]
+                        order: 2
+                      hungarian_comparator:
+                        type: string
+                        description: "Comparator type for HUNGARIAN method"
+                        enum: ["EXACT", "FUZZY", "NUMERIC"]
+                        order: 3
+                        dependsOn: {
+                          field: "evaluation_method",
+                          value: "HUNGARIAN"
+                        }
+                      evaluation_threshold:
+                        type: number
+                        description: Evaluation Threshold - used for SEMANTIC, FUZZY, and HUNGARIAN methods
+                        minimum: 0
+                        maximum: 1
+                        order: 4
+                        dependsOn: {
+                          field: "evaluation_method",
+                          values: ["SEMANTIC", "FUZZY", "HUNGARIAN"]
+                        }
+                    # This controls the layout of the form fields inside each attribute item
+                    columns: 2
+          evaluation:
+            order: 3
+            type: object
+            sectionLabel: Evaluation Inference
+            properties:
+              llm_method:
+                type: object
+                properties:
+                  model:
+                    type: string
+                    description: Bedrock model ID
+                    order: 1
+                  temperature:
+                    type: number
+                    description: Sampling temperature
+                    order: 2
+                  top_k:
+                    type: number
+                    description: Sampling Top K
+                    order: 3
+                  system_prompt:
+                    type: string
+                    format: textarea
+                    description: System prompt for LLM evaluation
+                    order: 4
+                  task_prompt:
+                    type: string
+                    format: textarea
+                    description: Task prompt for LLM evaluation - supports parameters {DOCUMENT_CLASS}, {ATTRIBUTE_NAME}, {ATTRIBUTE_DESCRIPTION}, {EXPECTED_VALUE} and {ACTUAL_VALUE}
+                    order: 5
+          summarization:
+            order: 4
+            type: object
+            sectionLabel: Summarization Inference
+            properties:
+              model:
+                type: string
+                description: Bedrock model ID
+                order: 1
+              temperature:
+                type: number
+                description: Sampling temperature
+                order: 2
+              top_k:
+                type: number
+                description: Sampling Top K
+                order: 3
+              system_prompt:
+                type: string
+                format: textarea
+                description: System prompt
+                order: 4
+              task_prompt:
+                type: string
+                format: textarea
+                description: Task prompt - supports parameter {DOCUMENT_TEXT}
+                order: 5
           pricing:
             order: 5
             type: array
@@ -102,6 +260,68 @@ Resources:
       ServiceToken: !Ref UpdateConfigurationFunctionArn
       Default:
         notes: !Sub "Processing configuration in BDA project: ${BDAProjectArn}"
+        evaluation:
+          llm_method:
+            model: !Ref EvaluationLLMModelId
+            temperature: 0.0
+            top_k: 250
+            system_prompt: |
+              You are an evaluator that helps determine if the predicted and expected values match for document attribute extraction. You will consider the context and meaning rather than just exact string matching.
+            task_prompt: |
+              I need to evaluate attribute extraction for a document of class: {DOCUMENT_CLASS}.
+              
+              For the attribute named "{ATTRIBUTE_NAME}" described as "{ATTRIBUTE_DESCRIPTION}":
+              - Expected value: {EXPECTED_VALUE}
+              - Actual value: {ACTUAL_VALUE}
+              
+              Do these values match in meaning, taking into account formatting differences, word order, abbreviations, and semantic equivalence?
+              Provide your assessment as a JSON with three fields:
+              - "match": boolean (true if they match, false if not)
+              - "score": number between 0 and 1 representing the confidence/similarity score
+              - "reason": brief explanation of your decision
+              
+              Respond ONLY with the JSON and nothing else. Here's the exact format:
+              {
+                "match": true or false,
+                "score": 0.0 to 1.0,
+                "reason": "Your explanation here"
+              }
+        summarization:
+          model: !Ref SummarizationModel
+          temperature: 0.0
+          top_k: 250
+          system_prompt: |
+            You are a document summarization expert who can analyze and summarize documents from various domains including medical, financial, legal, and general business documents. Your task is to create a summary that captures the key information, main points, and important details from the document. Your output must be in valid JSON format. \nSummarization Style: Balanced\\nCreate a balanced summary that provides a moderate level of detail. Include the main points and key supporting information, while maintaining the document's overall structure. Aim for a comprehensive yet concise summary.\n Your output MUST be in valid JSON format with markdown content. You MUST strictly adhere to the output format specified in the instructions.
+          task_prompt: |
+            Analyze the provided document and create a comprehensive summary.
+
+            <document>
+            {DOCUMENT_TEXT}
+            </document>
+
+            CRITICAL INSTRUCTION: You MUST return your response as valid JSON with the EXACT structure shown at the end of these instructions. Do not include any explanations, notes, or text outside of the JSON structure.
+
+            Create a summary that captures the essential information from the document. Your summary should:
+            1. Extract key information, main points, and important details
+            2. Maintain the original document's organizational structure where appropriate
+            3. Preserve important facts, figures, dates, and entities
+            4. Reduce the length while retaining all critical information
+            5. Use markdown formatting for better readability (headings, lists, emphasis, etc.)
+            6. Cite all relevant facts from the source document using the format [Cite-X, Page-Y] where X is a sequential citation number and Y is the page number
+            7. For each citation, include a hover-enabled reference using HTML span tags with title attributes that contain the exact text snippet from which the fact is derived
+              Example: <span title="Original text from document: The company reported \$10M in revenue" class="citation">[Cite-1, Page-3]</span>
+
+            Output Format:
+
+            You MUST return ONLY valid JSON with the following structure and nothing else. 
+            Do not include any text, explanations, or notes outside of this JSON structure. 
+            The JSON must be properly formatted and parseable.
+            Here's the exact format:
+            ```json
+            {
+              "summary": "A comprehensive summary in markdown format with citations and hover functionality"
+            }
+            ```
         pricing:
           - name: bda/documents-custom
             units:
@@ -111,6 +331,54 @@ Resources:
             units:
               - name: pages
                 price: 0.010
+          - name: bedrock/us.amazon.nova-lite-v1:0
+            units:
+              - name: inputTokens
+                price: 0.00000006
+              - name: outputTokens
+                price: 0.00000024
+          - name: bedrock/us.amazon.nova-pro-v1:0
+            units:
+              - name: inputTokens
+                price: 0.0000008
+              - name: outputTokens
+                price: 0.0000032
+          - name: bedrock/us.anthropic.claude-3-haiku-20240307-v1:0
+            units:
+              - name: inputTokens
+                price: 0.00000025
+              - name: outputTokens
+                price: 0.00000125
+          - name: bedrock/us.anthropic.claude-3-5-haiku-20241022-v1:0
+            units:
+              - name: inputTokens
+                price: 0.0000008
+              - name: outputTokens
+                price: 0.000004
+              - name: cacheReadInputTokens
+                price: 0.00000008
+              - name: cacheWriteInputTokens
+                price: 0.000001
+          - name: bedrock/us.anthropic.claude-3-5-sonnet-20241022-v2:0
+            units:
+              - name: inputTokens
+                price: 0.000003
+              - name: outputTokens
+                price: 0.000015
+              - name: cacheReadInputTokens
+                price: 0.0000003
+              - name: cacheWriteInputTokens
+                price: 0.00000375
+          - name: bedrock/us.anthropic.claude-3-7-sonnet-20250219-v1:0
+            units:
+              - name: inputTokens
+                price: 0.000003
+              - name: outputTokens
+                price: 0.000015
+              - name: cacheReadInputTokens
+                price: 0.0000003
+              - name: cacheWriteInputTokens
+                price: 0.00000375
 
   DocumentProcessingStateMachine:
     Type: AWS::Serverless::StateMachine
@@ -120,6 +388,8 @@ Resources:
       DefinitionSubstitutions:
         InvokeBDALambdaArn: !GetAtt InvokeBDAFunction.Arn
         ProcessResultsLambdaArn: !GetAtt ProcessResultsFunction.Arn
+        IsSummarizationEnabled: !If [IsSummarizationEnabled, "true", "false"]
+        SummarizationLambdaArn: !GetAtt SummarizationFunction.Arn
         OutputBucket: !Ref OutputBucket
         WorkingBucket: !Ref WorkingBucket
         BDAProjectArn: !Ref BDAProjectArn
@@ -133,6 +403,8 @@ Resources:
             FunctionName: !Ref InvokeBDAFunction
         - LambdaInvokePolicy:
             FunctionName: !Ref ProcessResultsFunction
+        - LambdaInvokePolicy:
+            FunctionName: !Ref SummarizationFunction
         - CloudWatchLogsFullAccess
 
   StateMachineLogGroup:
@@ -168,6 +440,7 @@ Resources:
           TRACKING_TABLE: !Ref TrackingTable
           METRIC_NAMESPACE: !Ref StackName
           MAX_WORKERS: 20
+          LOG_LEVEL: !Ref LogLevel
       LoggingConfig:
         LogGroup: !Ref InvokeBDAFunctionLogGroup
       Policies:
@@ -232,6 +505,7 @@ Resources:
       Environment:
         Variables:
           METRIC_NAMESPACE: !Ref StackName
+          LOG_LEVEL: !Ref LogLevel
       LoggingConfig:
         LogGroup: !Ref ProcessResultsFunctionLogGroup
       Policies:
@@ -261,6 +535,74 @@ Resources:
     Properties:
       KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
       LogGroupName: !Sub "/${AWS::StackName}/lambda/ProcessResultsFunction"
+      RetentionInDays: !Ref LogRetentionDays
+
+  SummarizationFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W11
+            reason: "Cloudwatch does not support resource-level permissions"
+          - id: W89
+            reason: "This Lambda function does not require VPC access as it only interacts with AWS services via AWS APIs"
+          - id: W92
+            reason: "Function does not require concurrent execution limits as it is designed to scale based on demand"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for this function as StepFunctions will handle retries"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only configuration values like feature flags and non-sensitive settings"    
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
+    Properties:
+      CodeUri: src/summarization_function/
+      Handler: index.handler
+      Runtime: python3.12
+      Timeout: 900
+      MemorySize: 4096
+      Environment:
+        Variables:
+          METRIC_NAMESPACE: !Ref StackName
+          CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
+          GUARDRAIL_ID_AND_VERSION: !If [HasGuardrailConfig, !Sub "${BedrockGuardrailId}:${BedrockGuardrailVersion}", ""]
+          LOG_LEVEL: !Ref LogLevel
+      LoggingConfig:
+        LogGroup: !Ref SummarizationFunctionLogGroup
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - S3ReadPolicy:
+            BucketName: !Ref InputBucket
+        - S3CrudPolicy:
+            BucketName: !Ref OutputBucket
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ConfigurationTable
+        - Statement:
+          - Effect: Allow
+            Action: cloudwatch:PutMetricData
+            Resource: '*'
+          - Effect: Allow
+            Action:
+              - kms:Encrypt
+              - kms:Decrypt
+              - kms:ReEncrypt*
+              - kms:GenerateDataKey*
+              - kms:DescribeKey
+            Resource: !Ref CustomerManagedEncryptionKeyArn
+          - Effect: Allow
+            Action: bedrock:InvokeModel
+            Resource: 
+                - !Sub "arn:aws:bedrock:*::foundation-model/*"
+                - !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
+          - !If
+            - HasGuardrailConfig
+            - Effect: Allow
+              Action: bedrock:ApplyGuardrail
+              Resource: !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:guardrail/${BedrockGuardrailId}"
+            - !Ref AWS::NoValue
+
+  SummarizationFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+      LogGroupName: !Sub "/${AWS::StackName}/lambda/SummarizationFunction"
       RetentionInDays: !Ref LogRetentionDays
 
   BDACompletionFunctionDLQ:
@@ -294,6 +636,7 @@ Resources:
         Variables:
           TRACKING_TABLE: !Ref TrackingTable
           METRIC_NAMESPACE: !Ref StackName
+          LOG_LEVEL: !Ref LogLevel
       DeadLetterQueue:
        Type: SQS
        TargetArn: !GetAtt BDACompletionFunctionDLQ.Arn
@@ -540,6 +883,43 @@ Resources:
                 "title": "ProcessResults Lambda Errors",
                 "view": "table"
               }
+            },
+            {
+              "type": "metric",
+              "x": 0,
+              "y": 24,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "metrics": [
+                  ["AWS/Lambda", "Duration", "FunctionName", "${SummarizationFunction}"]
+                ],
+                "region": "${AWS::Region}",
+                "title": "Summarization Function Duration",
+                "period": 300,
+                "annotations": {
+                  "horizontal": [{
+                    "value": ${ExecutionTimeThresholdMs},
+                    "label": "Threshold (${ExecutionTimeThresholdMs}ms)",
+                    "color": "#ff0000"
+                  }]
+                },
+                "stat": "Average",
+                "view": "timeSeries"
+              }
+            },
+            {
+              "type": "log",
+              "x": 12,
+              "y": 24,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "query": "SOURCE '${SummarizationFunctionLogGroup}' | fields @timestamp, @logStream, @message | filter @message like /ERROR/ or @message like /Task timed out/ | parse @message /RequestId: (?<requestId>[^ ]*)/ | sort @timestamp desc | limit 20",
+                "region": "${AWS::Region}",
+                "title": "Summarization Lambda Errors",
+                "view": "table"
+              }
             }
 
           ]
@@ -562,10 +942,10 @@ Outputs:
     Value: !Ref StateMachineLogGroup
 
   DashboardName:
-    Description: Name of the Pattern 3 (BDA) CloudWatch Dashboard
+    Description: Name of the Pattern 1 (BDA) CloudWatch Dashboard
     Value: !Ref Dashboard
 
   DashboardArn:
-    Description: ARN of the Pattern 3 (BDA) CloudWatch Dashboard
+    Description: ARN of the Pattern 1 (BDA) CloudWatch Dashboard
     Value: !Sub "arn:aws:cloudwatch::${AWS::AccountId}:dashboard/${Dashboard}"
 

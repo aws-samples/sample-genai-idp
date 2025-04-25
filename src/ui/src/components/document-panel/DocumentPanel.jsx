@@ -159,31 +159,18 @@ const MeteringTable = ({ meteringData, preCalculatedTotals }) => {
   );
 };
 
-// Helper function to calculate total costs
-const calculateTotalCosts = (meteringData, documentItem) => {
+// Helper function to calculate total costs using pricing data
+const calculateTotalCosts = (meteringData, documentItem, pricingData) => {
   if (!meteringData) return { totalCost: 0, costPerPage: 0 };
 
-  const { mergedConfig } = useConfiguration();
   let totalCost = 0;
 
-  if (mergedConfig && mergedConfig.pricing) {
-    const pricingLookup = {};
-    mergedConfig.pricing.forEach((item) => {
-      if (item.name && item.units) {
-        pricingLookup[item.name] = {};
-        item.units.forEach((unitItem) => {
-          if (unitItem.name && unitItem.price !== undefined) {
-            pricingLookup[item.name][unitItem.name] = Number(unitItem.price);
-          }
-        });
-      }
-    });
-
+  if (pricingData) {
     Object.entries(meteringData).forEach(([serviceApi, metrics]) => {
       Object.entries(metrics).forEach(([unit, value]) => {
         const numericValue = Number(value);
-        if (pricingLookup[serviceApi] && pricingLookup[serviceApi][unit] !== undefined) {
-          const unitPrice = Number(pricingLookup[serviceApi][unit]);
+        if (pricingData[serviceApi] && pricingData[serviceApi][unit] !== undefined) {
+          const unitPrice = Number(pricingData[serviceApi][unit]);
           if (!Number.isNaN(unitPrice)) {
             totalCost += numericValue * unitPrice;
           }
@@ -201,9 +188,29 @@ const calculateTotalCosts = (meteringData, documentItem) => {
 // Expandable section containing the metering table
 const MeteringExpandableSection = ({ meteringData, documentItem }) => {
   const [expanded, setExpanded] = useState(false);
+  const { mergedConfig } = useConfiguration();
+  const [pricingData, setPricingData] = useState(null);
+
+  // Convert pricing data to lookup format
+  useEffect(() => {
+    if (mergedConfig && mergedConfig.pricing) {
+      const pricingLookup = {};
+      mergedConfig.pricing.forEach((item) => {
+        if (item.name && item.units) {
+          pricingLookup[item.name] = {};
+          item.units.forEach((unitItem) => {
+            if (unitItem.name && unitItem.price !== undefined) {
+              pricingLookup[item.name][unitItem.name] = Number(unitItem.price);
+            }
+          });
+        }
+      });
+      setPricingData(pricingLookup);
+    }
+  }, [mergedConfig]);
 
   // Calculate the cost per page for the header
-  const { totalCost, costPerPage } = calculateTotalCosts(meteringData, documentItem);
+  const { totalCost, costPerPage } = calculateTotalCosts(meteringData, documentItem, pricingData);
 
   return (
     <Box margin={{ top: 'l', bottom: 'm' }}>
@@ -232,7 +239,7 @@ const MeteringExpandableSection = ({ meteringData, documentItem }) => {
 const DocumentAttributes = ({ item }) => {
   return (
     <Container>
-      <ColumnLayout columns={6} variant="text-grid">
+      <ColumnLayout columns={7} variant="text-grid">
         <SpaceBetween size="xs">
           <div>
             <Box margin={{ bottom: 'xxxs' }} color="text-label">
@@ -286,6 +293,24 @@ const DocumentAttributes = ({ item }) => {
             <div>{item.pageCount || 0}</div>
           </div>
         </SpaceBetween>
+
+        <SpaceBetween size="xs">
+          <div>
+            <Box margin={{ bottom: 'xxxs' }} color="text-label">
+              <strong>Evaluation</strong>
+            </Box>
+            <div>{item.evaluationStatus || 'N/A'}</div>
+          </div>
+        </SpaceBetween>
+
+        <SpaceBetween size="xs">
+          <div>
+            <Box margin={{ bottom: 'xxxs' }} color="text-label">
+              <strong>Summary</strong>
+            </Box>
+            <div>{item.summaryReportUri ? 'Available' : 'N/A'}</div>
+          </div>
+        </SpaceBetween>
       </ColumnLayout>
     </Container>
   );
@@ -326,7 +351,11 @@ export const DocumentPanel = ({ item, setToolsOpen, getDocumentDetailsFromIds, o
           )}
         </SpaceBetween>
       </Container>
-      <DocumentViewers objectKey={item.objectKey} evaluationReportUri={item.evaluationReportUri} />
+      <DocumentViewers
+        objectKey={item.objectKey}
+        evaluationReportUri={item.evaluationReportUri}
+        summaryReportUri={item.summaryReportUri}
+      />
       <SectionsPanel sections={item.sections} />
       <PagesPanel pages={item.pages} />
     </SpaceBetween>

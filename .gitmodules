@@ -1,0 +1,3 @@
+[submodule "lib/GenAIDP"]
+	path = lib/GenAIDP
+	url = git@ssh.gitlab.aws.dev:genaiic-reusable-assets/engagement-artifacts/GenAIDP.git

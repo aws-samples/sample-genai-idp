@@ -3,7 +3,7 @@ import json
 import os
 import time
 import logging
-from typing import Dict, Any, List, Optional, Union
+from typing import Dict, Any, List, Optional, Union, Tuple
 from botocore.exceptions import ClientError
 from ..utils import calculate_backoff
 from ..metrics import put_metric
@@ -34,12 +34,37 @@ def get_bedrock_client():
         _bedrock_client = boto3.client('bedrock-runtime', region_name=region)
     return _bedrock_client
 
+def get_guardrail_config() -> Optional[Dict[str, str]]:
+    """
+    Get guardrail configuration from environment if available
+    
+    Returns:
+        Optional guardrail configuration dict with id and version
+    """
+    guardrail_env = os.environ.get("GUARDRAIL_ID_AND_VERSION", "")
+    if not guardrail_env:
+        return None
+        
+    try:
+        guardrail_id, guardrail_version = guardrail_env.split(":")
+        if guardrail_id and guardrail_version:
+            logger.debug(f"Using Bedrock Guardrail ID: {guardrail_id}, Version: {guardrail_version}")
+            return {
+                "guardrailIdentifier": guardrail_id,
+                "guardrailVersion": guardrail_version,
+                "trace": "enabled"  # Enable tracing for guardrail violations
+            }
+    except ValueError:
+        logger.warning(f"Invalid GUARDRAIL_ID_AND_VERSION format: {guardrail_env}. Expected format: 'id:version'")
+        
+    return None
+
 def invoke_model(
     model_id: str,
     system_prompt: Union[str, List[Dict[str, str]]],
     content: List[Dict[str, Any]],
-    temperature: float = 0.0,
-    top_k: Optional[float] = None,
+    temperature: Union[float, str] = 0.0,
+    top_k: Optional[Union[float, str]] = None,
     max_retries: int = MAX_RETRIES
 ) -> Dict[str, Any]:
     """
@@ -49,8 +74,8 @@ def invoke_model(
         model_id: The Bedrock model ID (e.g., 'anthropic.claude-3-sonnet-20240229-v1:0')
         system_prompt: The system prompt as string or list of content objects
         content: The content for the user message (can include text and images)
-        temperature: The temperature parameter for model inference
-        top_k: Optional top_k parameter for Anthropic models
+        temperature: The temperature parameter for model inference (float or string that can be converted to float)
+        top_k: Optional top_k parameter for Anthropic models (float or string that can be converted to float)
         max_retries: Maximum number of retry attempts
         
     Returns:
@@ -77,13 +102,33 @@ def invoke_model(
     }
     messages = [message]
     
+    # Convert temperature to float if it's a string
+    if isinstance(temperature, str):
+        try:
+            temperature = float(temperature)
+        except ValueError:
+            logger.warning(f"Failed to convert temperature value '{temperature}' to float. Using default 0.0")
+            temperature = 0.0
+    
     inference_config = {"temperature": temperature}
     
     # Add additional model fields if needed
+    additional_model_fields = None
     if "anthropic" in model_id.lower() and top_k is not None:
-        additional_model_fields = {"top_k": top_k}
-    else:
-        additional_model_fields = None
+        # Convert top_k to float if it's a string
+        if isinstance(top_k, str):
+            try:
+                top_k = float(top_k)
+            except ValueError:
+                logger.warning(f"Failed to convert top_k value '{top_k}' to float. Not using top_k.")
+                # Skip adding top_k if conversion fails
+            else:
+                additional_model_fields = {"top_k": top_k}
+        else:
+            additional_model_fields = {"top_k": top_k}
+    
+    # Get guardrail configuration if available
+    guardrail_config = get_guardrail_config()
     
     while retry_count < max_retries:
         try:
@@ -92,25 +137,37 @@ def invoke_model(
             
             # Log detailed request parameters
             logger.info(f"Bedrock request attempt {retry_count + 1}/{max_retries}:")
-            logger.info(f"  - model: {model_id}")
-            logger.info(f"  - inferenceConfig: {inference_config}")
-            logger.info(f"  - system: {formatted_system_prompt}")
-            logger.info(f"  - messages: {sanitized_messages}")
-            logger.info(f"  - additionalModelRequestFields: {additional_model_fields}")
+            logger.debug(f"  - model: {model_id}")
+            logger.debug(f"  - inferenceConfig: {inference_config}")
+            logger.debug(f"  - system: {formatted_system_prompt}")
+            logger.debug(f"  - messages: {sanitized_messages}")
+            logger.debug(f"  - additionalModelRequestFields: {additional_model_fields}")
+            
+            # Log guardrail usage if configured
+            if guardrail_config:
+                logger.debug(f"  - guardrailConfig: {guardrail_config}")
             
             attempt_start_time = time.time()
-            response = bedrock_client.converse(
-                modelId=model_id,
-                messages=messages,
-                system=formatted_system_prompt,
-                inferenceConfig=inference_config,
-                additionalModelRequestFields=additional_model_fields
-            )
+            
+            # Build converse parameters
+            converse_params = {
+                "modelId": model_id,
+                "messages": messages,
+                "system": formatted_system_prompt,
+                "inferenceConfig": inference_config,
+                "additionalModelRequestFields": additional_model_fields
+            }
+            
+            # Add guardrail config if available
+            if guardrail_config:
+                converse_params["guardrailConfig"] = guardrail_config
+            
+            response = bedrock_client.converse(**converse_params)
             duration = time.time() - attempt_start_time
             
             # Log response details, but sanitize large content
             sanitized_response = _sanitize_response_for_logging(response)
-            logger.info(f"Bedrock request successful after {retry_count + 1} attempts. Duration: {duration:.2f}s")
+            logger.debug(f"Bedrock request successful after {retry_count + 1} attempts. Duration: {duration:.2f}s")
             logger.info(f"Response: {sanitized_response}")
             
             # Track successful requests and latency
@@ -153,7 +210,8 @@ def invoke_model(
                 'ServiceQuotaExceededException', 
                 'RequestLimitExceeded', 
                 'TooManyRequestsException', 
-                'ServiceUnavailableException'
+                'ServiceUnavailableException',
+                'ModelErrorException'
             ]
             
             if error_code in retryable_errors:
@@ -273,3 +331,151 @@ def extract_text_from_response(response: Dict[str, Any]) -> str:
     """
     response_obj = response.get("response", response)
     return response_obj['output']['message']['content'][0].get("text", "")
+
+def generate_embedding(text: str, model_id: str = "amazon.titan-embed-text-v1") -> List[float]:
+    """
+    Generate an embedding vector for the given text using Amazon Bedrock
+    
+    Args:
+        text: The text to generate embeddings for
+        model_id: The embedding model ID to use (default: amazon.titan-embed-text-v1)
+        
+    Returns:
+        List of floats representing the embedding vector
+    """
+    if not text or not isinstance(text, str):
+        # Return an empty vector for empty input
+        return []
+        
+    bedrock_client = get_bedrock_client()
+    retry_count = 0
+    last_exception = None
+    max_retries = MAX_RETRIES
+    
+    # Track total embedding requests
+    put_metric('BedrockEmbeddingRequestsTotal', 1)
+    
+    # Normalize whitespace and prepare the input text
+    normalized_text = " ".join(text.split())
+    
+    # Prepare the request body based on the model
+    if "amazon.titan-embed" in model_id:
+        request_body = json.dumps({
+            "inputText": normalized_text
+        })
+    else:
+        # Default format for other models
+        request_body = json.dumps({
+            "text": normalized_text
+        })
+    
+    while retry_count < max_retries:
+        try:
+            logger.info(f"Bedrock embedding request attempt {retry_count + 1}/{max_retries}:")
+            logger.debug(f"  - model: {model_id}")
+            logger.debug(f"  - input text length: {len(normalized_text)} characters")
+            
+            attempt_start_time = time.time()
+            response = bedrock_client.invoke_model(
+                modelId=model_id,
+                contentType="application/json",
+                accept="application/json",
+                body=request_body
+            )
+            duration = time.time() - attempt_start_time
+            
+            # Extract the embedding vector from response
+            response_body = json.loads(response["body"].read())
+            
+            # Handle different response formats based on the model
+            if "amazon.titan-embed" in model_id:
+                embedding = response_body.get("embedding", [])
+            else:
+                # Default extraction format
+                embedding = response_body.get("embedding", [])
+            
+            # Track successful requests and latency
+            put_metric('BedrockEmbeddingRequestsSucceeded', 1)
+            put_metric('BedrockEmbeddingRequestLatency', duration * 1000, 'Milliseconds')
+            
+            logger.debug(f"Generated embedding with {len(embedding)} dimensions")
+            return embedding
+            
+        except ClientError as e:
+            error_code = e.response['Error']['Code']
+            error_message = e.response['Error']['Message']
+            
+            retryable_errors = [
+                'ThrottlingException', 
+                'ServiceQuotaExceededException', 
+                'RequestLimitExceeded', 
+                'TooManyRequestsException', 
+                'ServiceUnavailableException'
+            ]
+            
+            if error_code in retryable_errors:
+                retry_count += 1
+                put_metric('BedrockEmbeddingThrottles', 1)
+                
+                if retry_count == max_retries:
+                    logger.error(f"Max retries ({max_retries}) exceeded for embedding. Last error: {error_message}")
+                    put_metric('BedrockEmbeddingRequestsFailed', 1)
+                    put_metric('BedrockEmbeddingMaxRetriesExceeded', 1)
+                    raise
+                
+                backoff = calculate_backoff(retry_count)
+                logger.warning(f"Bedrock throttling occurred (attempt {retry_count}/{max_retries}). "
+                            f"Error: {error_message}. "
+                            f"Backing off for {backoff:.2f}s")
+                
+                time.sleep(backoff)
+                last_exception = e
+            else:
+                logger.error(f"Non-retryable Bedrock error for embedding: {error_code} - {error_message}")
+                put_metric('BedrockEmbeddingRequestsFailed', 1)
+                put_metric('BedrockEmbeddingNonRetryableErrors', 1)
+                raise
+    
+        except Exception as e:
+            logger.error(f"Unexpected error generating embedding: {str(e)}", exc_info=True)
+            put_metric('BedrockEmbeddingRequestsFailed', 1)
+            put_metric('BedrockEmbeddingUnexpectedErrors', 1)
+            raise
+    
+    if last_exception:
+        raise last_exception
+    
+    # Should never reach here, but return empty embedding if it does
+    return []
+
+
+def format_prompt(prompt_template: str, substitutions: Dict[str, str], required_placeholders: List[str] = None) -> str:
+    """
+    Prepare prompt from template by replacing placeholders with values.
+    
+    Args:
+        prompt_template: The prompt template with placeholders in {PLACEHOLDER} format
+        substitutions: Dictionary of placeholder values
+        required_placeholders: List of placeholder names that must be present in the template
+        
+    Returns:
+        String with placeholders replaced by values
+        
+    Raises:
+        ValueError: If a required placeholder is missing from the template
+    """
+    # Validate required placeholders if specified
+    if required_placeholders:
+        missing_placeholders = [p for p in required_placeholders if f"{{{p}}}" not in prompt_template]
+        if missing_placeholders:
+            raise ValueError(f"Prompt template must contain the following placeholders: {', '.join([f'{{{p}}}' for p in missing_placeholders])}")
+    
+    # Check if template uses {PLACEHOLDER} format and convert to %(PLACEHOLDER)s for secure replacement
+    if any(f"{{{key}}}" in prompt_template for key in substitutions):
+        for key in substitutions:
+            placeholder = f"{{{key}}}"
+            if placeholder in prompt_template:
+                prompt_template = prompt_template.replace(placeholder, f"%({key})s")
+                
+    # Apply substitutions using % operator which is safer than .format()
+    return prompt_template % substitutions

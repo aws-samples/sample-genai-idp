@@ -4,16 +4,17 @@ import os
 from datetime import datetime, timezone
 from botocore.exceptions import ClientError
 import logging
-from appsync_helper import AppSyncClient, UPDATE_DOCUMENT
 from typing import Dict, Any, Tuple
 from idp_common.models import Document, Status
+from idp_common.appsync import DocumentAppSyncService
 
 logger = logging.getLogger()
-logger.setLevel(logging.INFO)
+logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
+# Get LOG_LEVEL from environment variable with INFO as default
 
 sfn = boto3.client('stepfunctions')
 dynamodb = boto3.resource('dynamodb')
-appsync = AppSyncClient()
+appsync_service = DocumentAppSyncService()
 concurrency_table = dynamodb.Table(os.environ['CONCURRENCY_TABLE'])
 state_machine_arn = os.environ['STATE_MACHINE_ARN']
 MAX_CONCURRENT = int(os.environ.get('MAX_CONCURRENT', '5'))
@@ -81,39 +82,24 @@ def start_workflow(document: Document) -> Dict[str, Any]:
     }
 
     logger.info(f"Starting workflow for document with event: {event}")
-    execution = sfn.start_execution(
-        stateMachineArn=state_machine_arn,
-        input=json.dumps(event)
-    )
     
-    logger.info(f"Workflow started: {execution['executionArn']}")
-    return execution
-
-def update_document_status(document: Document) -> Dict[str, Any]:
-    """
-    Update document status via AppSync
-    
-    Args:
-        document: The Document object to update
+    try:
+        execution = sfn.start_execution(
+            stateMachineArn=state_machine_arn,
+            input=json.dumps(event)
+        )
         
-    Returns:
-        The updated document data
+        # Set workflow execution ARN and start_time in the document
+        document.workflow_execution_arn = execution.get('executionArn', '')
+        document.start_time = datetime.now(timezone.utc).isoformat()
         
-    Raises:
-        AppSyncError: If the GraphQL operation fails
-    """
-    update_input = {
-        'input': {
-            'ObjectKey': document.input_key,
-            'ObjectStatus': document.status.value,
-            'WorkflowExecutionArn': document.workflow_execution_arn,
-            'WorkflowStartTime': document.start_time
-        }
-    }
-    
-    logger.info(f"Updating document via AppSync: {update_input}")
-    result = appsync.execute_mutation(UPDATE_DOCUMENT, update_input)
-    return result['updateDocument']
+        logger.info(f"Workflow started: {execution.get('executionArn', '')}")
+        return execution
+    except Exception as e:
+        logger.error(f"Error starting workflow: {str(e)}")
+        # Ensure we have a default workflow_execution_arn to avoid None errors
+        document.workflow_execution_arn = document.workflow_execution_arn or ''
+        raise
 
 def process_message(record: Dict[str, Any]) -> Tuple[bool, str]:
     """
@@ -145,8 +131,8 @@ def process_message(record: Dict[str, Any]) -> Tuple[bool, str]:
             # Start workflow with the document
             execution = start_workflow(document)
             
-            # Update document status in database
-            updated_doc = update_document_status(document)
+            # Update document status in AppSync
+            updated_doc = appsync_service.update_document(document)
             logger.info(f"Document updated: {updated_doc}")
             
             return True, message_id

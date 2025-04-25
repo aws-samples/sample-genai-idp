@@ -5,16 +5,17 @@ import os
 import json
 from datetime import datetime, timezone, timedelta
 import logging
-from appsync_helper import AppSyncClient, CREATE_DOCUMENT
 from idp_common.models import Document, Status
+from idp_common.appsync import DocumentAppSyncService
 
 # Configure logging
 logger = logging.getLogger()
-logger.setLevel(logging.INFO)
+logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
+# Get LOG_LEVEL from environment variable with INFO as default
 
 # Initialize clients
 sqs = boto3.client('sqs')
-appsync = AppSyncClient()
+appsync_service = DocumentAppSyncService()
 queue_url = os.environ['QUEUE_URL']
 retentionDays = int(os.environ['DATA_RETENTION_IN_DAYS'])
 
@@ -37,26 +38,14 @@ def handler(event, context):
     document.queued_time = current_time
     
     # Calculate expiry date
-    expiresAfter = int((datetime.now(timezone.utc) + timedelta(days=retentionDays)).timestamp())
+    expires_after = int((datetime.now(timezone.utc) + timedelta(days=retentionDays)).timestamp())
 
-    # Create document in DynamoDB via AppSync mutation
-    create_input = {
-        'input': {
-            'ObjectKey': object_key,
-            'ObjectStatus': document.status.value,
-            'QueuedTime': document.queued_time,
-            'InitialEventTime': event['time'],
-            'ExpiresAfter': expiresAfter
-        }
-    }
+    # Create document in DynamoDB via AppSync
+    logger.info(f"Creating document via AppSync: {document.input_key}")
     
-    logger.info(f"Creating document via AppSync: {create_input}")
-    result = appsync.execute_mutation(CREATE_DOCUMENT, create_input)
-    logger.info(f"AppSync response: {result}")
-    
-    # Add document ID if returned from AppSync
-    if 'id' in result.get('createDocument', {}):
-        document.id = result['createDocument']['id']
+    # Create document in AppSync with TTL
+    created_key = appsync_service.create_document(document, expires_after=expires_after)
+    logger.info(f"Document created with key: {created_key}")
     
     # Send serialized document to SQS queue
     doc_json = document.to_json()

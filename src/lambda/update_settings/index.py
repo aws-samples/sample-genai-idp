@@ -1,11 +1,13 @@
 import boto3
 import cfnresponse
 import json
+import os
 import logging
 
 # Initialize logging
 logger = logging.getLogger()
-logger.setLevel(logging.INFO)
+logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
+# Get LOG_LEVEL from environment variable with INFO as default
 
 # SSM client
 ssm = boto3.client('ssm')

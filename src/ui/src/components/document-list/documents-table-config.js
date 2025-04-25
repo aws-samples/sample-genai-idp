@@ -49,6 +49,13 @@ export const COLUMN_DEFINITIONS_MAIN = [
     sortingField: 'duration',
     width: 150,
   },
+  {
+    id: 'evaluationStatus',
+    header: 'Evaluation',
+    cell: (item) => item.evaluationStatus || 'N/A',
+    sortingField: 'evaluationStatus',
+    width: 150,
+  },
 ];
 
 export const DEFAULT_SORT_COLUMN = COLUMN_DEFINITIONS_MAIN[2];
@@ -74,11 +81,19 @@ const VISIBLE_CONTENT_OPTIONS = [
       { id: 'initialEventTime', label: 'Submitted' },
       { id: 'completionTime', label: 'Completed' },
       { id: 'duration', label: 'Duration' },
+      { id: 'evaluationStatus', label: 'Evaluation' },
     ],
   },
 ];
 
-const VISIBLE_CONTENT = ['objectKey', 'objectStatus', 'initialEventTime', 'completionTime', 'duration'];
+const VISIBLE_CONTENT = [
+  'objectKey',
+  'objectStatus',
+  'initialEventTime',
+  'completionTime',
+  'duration',
+  'evaluationStatus',
+];
 
 export const DEFAULT_PREFERENCES = {
   pageSize: PAGE_SIZE_OPTIONS[0].value,
