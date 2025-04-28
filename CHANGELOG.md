@@ -25,7 +25,7 @@
     - Batch-based S3 object copying for improved efficiency
     - File operation batching with optimal batch size calculation
 - Fine-grained document status tracking for UI real-time progress updates
-  - Added status transitions (QUEUED → STARTED → RUNNING → OCR, CLASSIFYING, EXTRACTING, POSTPROCESSING, SUMMARIZING, COMPLETE)
+  - Added status transitions (QUEUED → STARTED → RUNNING → OCR → CLASSIFYING → EXTRACTING → POSTPROCESSING → SUMMARIZING → COMPLETE)
 - Default OCR configuration now includes LAYOUT, TABLES, SIGNATURE, and markdown generation now supports tables (via textractor[pandas])
 - Added document reprocessing capability to the UI - New "Reprocess" button with confirmation dialog
   
