@@ -126,6 +126,7 @@ type Mutation  {
   updateConfiguration(customConfig: AWSJSON!): Boolean @aws_cognito_user_pools
   uploadDocument(fileName: String!, contentType: String, prefix: String, bucket: String): PresignedUrlResponse! @aws_cognito_user_pools
   copyToBaseline(objectKey: String!): CopyToBaselineResponse! @aws_cognito_user_pools
+  reprocessDocument(objectKeys: [String!]!): Boolean! @aws_cognito_user_pools
 }
 
 type Query @aws_cognito_user_pools @aws_iam {

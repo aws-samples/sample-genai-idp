@@ -151,7 +151,13 @@ const TIME_PERIOD_DROPDOWN_ITEMS = Object.keys(TIME_PERIOD_DROPDOWN_CONFIG).map(
 // local storage key to persist the last periods to load
 export const PERIODS_TO_LOAD_STORAGE_KEY = 'periodsToLoad';
 
-export const DocumentsCommonHeader = ({ resourceName = 'Documents', selectedItems = [], onDelete, ...props }) => {
+export const DocumentsCommonHeader = ({
+  resourceName = 'Documents',
+  selectedItems = [],
+  onDelete,
+  onReprocess,
+  ...props
+}) => {
   const onPeriodToLoadChange = ({ detail }) => {
     const { id } = detail;
     const shardCount = TIME_PERIOD_DROPDOWN_CONFIG[id].count;
@@ -185,6 +191,11 @@ export const DocumentsCommonHeader = ({ resourceName = 'Documents', selectedItem
             loading={props.loading}
             onClick={() => props.downloadToExcel()}
           />
+          {onReprocess && (
+            <Button iconName="arrow-right" variant="normal" disabled={!hasSelectedItems} onClick={onReprocess}>
+              Reprocess
+            </Button>
+          )}
           {onDelete && <Button iconName="remove" variant="normal" disabled={!hasSelectedItems} onClick={onDelete} />}
         </SpaceBetween>
       }

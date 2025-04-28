@@ -12,6 +12,8 @@ from idp_common.s3 import get_s3_client, write_content
 from idp_common.utils import build_s3_uri
 from idp_common import metrics
 from idp_common.models import Document, Page, Section, Status
+from idp_common.appsync.service import DocumentAppSyncService
+
 
 logger = logging.getLogger()
 logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
@@ -140,17 +142,30 @@ def create_pdf_page_images(bda_result_bucket, output_bucket, object_key):
         logger.error(f"Error creating page images: {str(e)}")
         raise
 
-def process_bda_sections(output_bucket, object_key, document):
+def process_bda_sections(bda_result_bucket, bda_result_prefix, output_bucket, object_key, document):
     """
     Process BDA sections and build sections for the Document object
+    
+    Args:
+        bda_result_bucket (str): The BDA result bucket
+        bda_result_prefix (str): The BDA result prefix
+        output_bucket (str): The output bucket
+        object_key (str): The object key
+        document (Document): The document object to update
+    
+    Returns:
+        Document: The updated document
     """
-    custom_output_prefix = f"{object_key}/sections/"
+    # Source path for BDA custom output files
+    bda_custom_output_prefix = f"{bda_result_prefix}/custom_output/"
+    # Target path for section files
+    sections_output_prefix = f"{object_key}/sections/"
     
     try:
-        # List all section folders
+        # List all section folders in the BDA result bucket
         response = s3_client.list_objects_v2(
-            Bucket=output_bucket,
-            Prefix=custom_output_prefix,
+            Bucket=bda_result_bucket,
+            Prefix=bda_custom_output_prefix,
             Delimiter='/'
         )
         
@@ -162,9 +177,32 @@ def process_bda_sections(output_bucket, object_key, document):
                 
             # Extract section ID from path
             section_id = section_path.rstrip('/').split('/')[-1]
+            target_section_path = f"{sections_output_prefix}{section_id}/"
+            
+            # List all files in the section folder
+            section_files = s3_client.list_objects_v2(
+                Bucket=bda_result_bucket,
+                Prefix=section_path
+            )
+            
+            # Copy each file to the output bucket
+            for file_obj in section_files.get('Contents', []):
+                src_key = file_obj['Key']
+                file_name = src_key.split('/')[-1]
+                target_key = f"{target_section_path}{file_name}"
+                
+                # Copy the file
+                s3_client.copy_object(
+                    CopySource={'Bucket': bda_result_bucket, 'Key': src_key},
+                    Bucket=output_bucket,
+                    Key=target_key,
+                    ContentType='application/json' if file_name.endswith('.json') else 'application/octet-stream',
+                    MetadataDirective='REPLACE'
+                )
+                logger.info(f"Copied {src_key} to {target_key}")
             
             # Get the result.json file
-            result_path = f"{section_path}result.json"
+            result_path = f"{target_section_path}result.json"
             try:
                 result_obj = s3_client.get_object(
                     Bucket=output_bucket,
@@ -231,11 +269,87 @@ def extract_markdown_from_json(raw_json):
         return '\n\n---\n\nPAGE BREAK\n\n---\n\n'.join(markdown_texts)
     return ""
 
-def process_bda_pages(output_bucket, object_key, document):
+def extract_page_from_multipage_json(raw_json, page_index):
+    """
+    Extract a single page from a multi-page result JSON
+    
+    Args:
+        raw_json (dict): The BDA result JSON
+        page_index (int): The page index to extract
+        
+    Returns:
+        dict: A new result JSON with only the specified page
+    """
+    # Create a copy of the JSON with just metadata
+    single_page_json = {
+        "metadata": raw_json.get("metadata", {})
+    }
+    
+    # Update metadata to reflect single page
+    if "metadata" in single_page_json:
+        single_page_json["metadata"]["start_page_index"] = page_index
+        single_page_json["metadata"]["end_page_index"] = page_index
+        single_page_json["metadata"]["number_of_pages"] = 1
+    
+    # Include document level info
+    if "document" in raw_json:
+        single_page_json["document"] = raw_json["document"]
+    
+    # Add the single page from the pages array
+    single_page_json["pages"] = []
+    if "pages" in raw_json:
+        for page in raw_json["pages"]:
+            if page.get("page_index") == page_index:
+                single_page_json["pages"].append(page)
+                break
+    
+    # Filter elements for only this page
+    single_page_json["elements"] = []
+    if "elements" in raw_json:
+        for element in raw_json["elements"]:
+            page_indices = element.get("page_indices", [])
+            if page_index in page_indices:
+                # Create a copy of the element with only this page
+                element_copy = element.copy()
+                element_copy["page_indices"] = [page_index]
+                single_page_json["elements"].append(element_copy)
+    
+    return single_page_json
+
+def extract_markdown_from_single_page_json(raw_json):
+    """
+    Extract markdown content from a single page BDA result JSON
+    
+    Args:
+        raw_json (dict): The BDA result JSON
+    
+    Returns:
+        str: Markdown text for the page
+    """
+    if "pages" in raw_json and len(raw_json["pages"]) > 0:
+        page = raw_json["pages"][0]
+        if "representation" in page and "markdown" in page["representation"]:
+            return page["representation"]["markdown"]
+    return ""
+
+def process_bda_pages(bda_result_bucket, bda_result_prefix, output_bucket, object_key, document):
     """
     Process BDA page outputs and build pages for the Document object
+    
+    Args:
+        bda_result_bucket (str): The BDA result bucket
+        bda_result_prefix (str): The BDA result prefix
+        output_bucket (str): The output bucket
+        object_key (str): The object key
+        document (Document): The document object to update
+    
+    Returns:
+        Document: The updated document
     """
-    custom_output_prefix = f"{object_key}/pages/"
+    # Source path for standard output result.json files
+    standard_output_prefix = f"{bda_result_prefix}/standard_output/"
+    # Target path for page files
+    pages_output_prefix = f"{object_key}/pages/"
     
     # Create a mapping of page_id to class from sections
     page_to_class_map = {}
@@ -245,103 +359,111 @@ def process_bda_pages(output_bucket, object_key, document):
             page_to_class_map[page_id] = section_class
     
     try:
-        # List all objects under the prefix
+        # List all objects in the standard output directory
         response = s3_client.list_objects_v2(
-            Bucket=output_bucket,
-            Prefix=custom_output_prefix
+            Bucket=bda_result_bucket,
+            Prefix=standard_output_prefix
         )
         
-        # Create a set of all available object keys for faster lookup
-        available_objects = {obj['Key'] for obj in response.get('Contents', [])}
-        
-        # List all page folders
-        folder_response = s3_client.list_objects_v2(
-            Bucket=output_bucket,
-            Prefix=custom_output_prefix,
-            Delimiter='/'
-        )
-        
-        # Process each page folder
-        for prefix in folder_response.get('CommonPrefixes', []):
-            page_path = prefix.get('Prefix')
-            if not page_path:
+        # Process all standard_output result.json files which may contain multiple pages
+        for obj in response.get('Contents', []):
+            obj_key = obj['Key']
+            
+            # Only process result.json files
+            if not obj_key.endswith('result.json'):
                 continue
                 
-            # Extract page ID from path
-            page_id = page_path.rstrip('/').split('/')[-1]
-            
-            # Define paths for result.json and image.jpg
-            result_path = f"{page_path}result.json"
-            image_path = f"{page_path}image.jpg"
-            
-            # Check if both files exist
-            if result_path not in available_objects:
-                logger.warning(f"result.json not found for page {page_id}")
-                continue
-                
-            image_uri = None
-            if image_path in available_objects:
-                image_uri = build_s3_uri(output_bucket, image_path)
-            else:
-                logger.warning(f"image.jpg not found for page {page_id}")
-            
-            # Get the class from the section mapping
-            doc_class = page_to_class_map.get(page_id, '')
-            
-            # Create S3 URIs using the utility function
-            raw_text_uri = build_s3_uri(output_bucket, result_path)
-            
-            # Create parsedResult.json with extracted markdown
             try:
-                # Get the raw JSON result
+                # Get the raw JSON result from the BDA result bucket
                 result_obj = s3_client.get_object(
-                    Bucket=output_bucket,
-                    Key=result_path
+                    Bucket=bda_result_bucket,
+                    Key=obj_key
                 )
                 raw_json = json.loads(result_obj['Body'].read().decode('utf-8'))
                 
-                # Extract markdown content
-                markdown_text = extract_markdown_from_json(raw_json)
-                
-                # Create parsedResult.json
-                parsed_result = {
-                    "text": markdown_text
-                }
-                
-                # Write parsedResult.json to S3
-                parsed_result_path = f"{page_path}parsedResult.json"
-                write_content(
-                    parsed_result,
-                    output_bucket,
-                    parsed_result_path,
-                    content_type='application/json'
-                )
-                
-                # Create S3 URI for parsed result
-                parsed_result_uri = build_s3_uri(output_bucket, parsed_result_path)
-                
-                logger.info(f"Created parsedResult.json for page {page_id}")
-                
-                # Create metadata file for the parsed result URI
-                create_metadata_file(parsed_result_uri, doc_class, 'page')
+                # Check if this contains pages
+                if 'pages' in raw_json and len(raw_json['pages']) > 0:
+                    # Process each page in the multi-page result
+                    for page in raw_json['pages']:
+                        page_index = page.get('page_index')
+                        if page_index is None:
+                            logger.warning(f"Page in {obj_key} has no page_index")
+                            continue
+                            
+                        page_id = str(page_index)
+                        
+                        # Extract a single page result.json for this page
+                        single_page_json = extract_page_from_multipage_json(raw_json, page_index)
+                        
+                        # Determine page directory path in output bucket
+                        page_path = f"{pages_output_prefix}{page_id}/"
+                        page_result_path = f"{page_path}result.json"
+                        
+                        # Write the single page result.json to the page directory
+                        write_content(
+                            single_page_json,
+                            output_bucket,
+                            page_result_path,
+                            content_type='application/json'
+                        )
+                        
+                        # Create raw text URI
+                        raw_text_uri = build_s3_uri(output_bucket, page_result_path)
+                        
+                        # Define image path
+                        image_path = f"{page_path}image.jpg"
+                        
+                        # Check if image exists
+                        try:
+                            s3_client.head_object(Bucket=output_bucket, Key=image_path)
+                            image_uri = build_s3_uri(output_bucket, image_path)
+                        except ClientError:
+                            image_uri = None
+                            logger.warning(f"image.jpg not found for page {page_id}")
+                        
+                        # Get the class from the section mapping
+                        doc_class = page_to_class_map.get(page_id, '')
+                        
+                        # Extract markdown content for this page
+                        markdown_text = extract_markdown_from_single_page_json(single_page_json)
+                        
+                        # Create parsedResult.json
+                        parsed_result = {
+                            "text": markdown_text
+                        }
+                        
+                        # Write parsedResult.json to S3
+                        parsed_result_path = f"{page_path}parsedResult.json"
+                        write_content(
+                            parsed_result,
+                            output_bucket,
+                            parsed_result_path,
+                            content_type='application/json'
+                        )
+                        
+                        # Create S3 URI for parsed result
+                        parsed_result_uri = build_s3_uri(output_bucket, parsed_result_path)
+                        
+                        logger.info(f"Created parsedResult.json for page {page_id}")
+                        
+                        # Create metadata file for the parsed result URI
+                        create_metadata_file(parsed_result_uri, doc_class, 'page')
+                        
+                        # Create Page object and add to document
+                        page = Page(
+                            page_id=page_id,
+                            image_uri=image_uri,
+                            raw_text_uri=raw_text_uri,
+                            parsed_text_uri=parsed_result_uri,
+                            classification=doc_class
+                        )
+                        document.pages[page_id] = page
+                        
+                    logger.info(f"Processed multi-page result file {obj_key}")
                 
             except Exception as e:
-                logger.error(f"Failed to create parsedResult.json for page {page_id}: {str(e)}")
-                document.errors.append(f"Failed to create parsedResult.json for page {page_id}: {str(e)}")
-                parsed_result_uri = None
-            
-            # Create Page object and add to document
-            page = Page(
-                page_id=page_id,
-                image_uri=image_uri,
-                raw_text_uri=raw_text_uri,
-                parsed_text_uri=parsed_result_uri,
-                classification=doc_class
-            )
-            document.pages[page_id] = page
-            
-            # Create metadata file for the parsed text URI
-            create_metadata_file(parsed_result_uri, doc_class, 'page')
+                logger.error(f"Error processing result file {obj_key}: {str(e)}")
+                document.errors.append(f"Error processing result file {obj_key}: {str(e)}")
         
         # Update document page count
         document.num_pages = len(document.pages)
@@ -383,27 +505,14 @@ def handler(event, context):
         input_bucket=input_bucket,
         input_key=object_key,
         output_bucket=output_bucket,
-        status=Status.PROCESSED,
-        completion_time=datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        status=Status.POSTPROCESSING,
         workflow_execution_arn=event.get("execution_arn")
     )
 
-    # Copy BDA output to output bucket
-    # custom_output (sections)
-    count1 = copy_s3_objects(
-        bda_result_bucket,
-        f"{bda_result_prefix}/custom_output",
-        output_bucket,
-        f"{object_key}/sections"
-    )
-    # standard_output (pages)
-    count2 = copy_s3_objects(
-        bda_result_bucket,
-        f"{bda_result_prefix}/standard_output",
-        output_bucket,
-        f"{object_key}/pages"
-    )
-    logger.info(f"Successfully copied {count1+count2} files")
+    # Update document status
+    appsync_service = DocumentAppSyncService()
+    logger.info(f"Updating document status to {document.status}")
+    appsync_service.update_document(document)
    
     # Create page images
     try:
@@ -414,8 +523,8 @@ def handler(event, context):
         document.errors.append(f"Error creating page images: {str(e)}")
 
     # Process sections and pages from BDA output
-    document = process_bda_sections(output_bucket, object_key, document)
-    document = process_bda_pages(output_bucket, object_key, document)
+    document = process_bda_sections(bda_result_bucket, bda_result_prefix, output_bucket, object_key, document)
+    document = process_bda_pages(bda_result_bucket, bda_result_prefix, output_bucket, object_key, document)
 
     # Calculate metrics
     page_ids_in_sections = set()

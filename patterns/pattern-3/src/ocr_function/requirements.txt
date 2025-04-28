@@ -1,1 +1,1 @@
-../../lib/idp_common_pkg[ocr]  # OCR module with dependencies
+../../lib/idp_common_pkg[ocr,appsync]  # OCR module and AppSync with dependencies

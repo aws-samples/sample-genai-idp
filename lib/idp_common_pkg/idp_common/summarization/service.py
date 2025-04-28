@@ -647,8 +647,6 @@ class SummarizationService:
             if error_message:
                 logger.error(error_message)
         else:
-            # Set status to SUMMARIZED even with non-fatal errors
-            document.status = Status.SUMMARIZED
             if document.errors:
                 logger.warning(f"Document summarized with {len(document.errors)} errors")
                 

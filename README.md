@@ -685,6 +685,10 @@ The Web UI includes a dedicated Configuration page that allows you to view and m
      - Model selection
      - Temperature and other sampling parameters
      - System and task prompts
+   - **Summarization**: Settings for section summarization, including:
+     - Model selection
+     - Temperature and other sampling parameters
+     - System and task prompts
    - **Pricing**: Cost estimation settings for different services
 
 The configuration changes are stored in DynamoDB and applied to all new document processing jobs without requiring stack redeployment. This allows for rapid experimentation with different prompt strategies, document class definitions, and model parameters.

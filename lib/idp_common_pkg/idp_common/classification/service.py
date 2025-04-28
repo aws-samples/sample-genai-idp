@@ -912,8 +912,6 @@ class ClassificationService:
             if error_message:
                 logger.error(error_message)
         else:
-            # Set status to CLASSIFIED even with non-fatal errors
-            document.status = Status.CLASSIFIED
             if document.errors:
                 logger.warning(f"Document classified with {len(document.errors)} errors")
                 

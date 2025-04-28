@@ -74,7 +74,7 @@ def start_workflow(document: Document) -> Dict[str, Any]:
         ClientError: If Step Functions operation fails
     """
     # Update document status and timing
-    document.status = Status.STARTED
+    document.status = Status.RUNNING
     document.start_time = datetime.now(timezone.utc).isoformat()
     
     event = {

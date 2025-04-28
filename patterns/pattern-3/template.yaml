@@ -50,6 +50,14 @@ Parameters:
   ConfigurationTable:
     Type: String
     
+  AppSyncApiUrl:
+    Type: String
+    Description: The AppSync API URL for status updates
+    
+  AppSyncApiArn:
+    Type: String
+    Description: The AppSync API ARN for IAM permissions
+    
   EvaluationLLMModelId:
     Type: String
     Default: 'us.anthropic.claude-3-5-sonnet-20241022-v2:0'
@@ -330,6 +338,8 @@ Resources:
         ocr:
           features:
             - name: LAYOUT
+            - name: TABLES
+            - name: SIGNATURES
         classes:
           - name: letter
             description: A formal written message that is typically sent from one person to another
@@ -809,6 +819,7 @@ Resources:
           MAX_WORKERS: 20
           CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
           LOG_LEVEL: !Ref LogLevel
+          APPSYNC_API_URL: !Ref AppSyncApiUrl
       LoggingConfig:
         LogGroup: !Ref OCRFunctionLogGroup
       Policies:
@@ -837,6 +848,12 @@ Resources:
               - textract:DetectDocumentText
               - textract:AnalyzeDocument
             Resource: '*'
+          # AppSync permissions for updating document status
+          - Effect: Allow
+            Action:
+              - appsync:GraphQL
+            Resource: 
+              - !Sub "${AppSyncApiArn}/types/Mutation/*"
 
   
   OCRFunctionLogGroup:
@@ -873,6 +890,7 @@ Resources:
           MAX_WORKERS: 20
           SAGEMAKER_ENDPOINT_NAME: !GetAtt SAGEMAKERCLASSIFIERSTACK.Outputs.EndpointName
           CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
+          APPSYNC_API_URL: !Ref AppSyncApiUrl
           GUARDRAIL_ID_AND_VERSION: !If [HasGuardrailConfig, !Sub "${BedrockGuardrailId}:${BedrockGuardrailVersion}", ""]
           LOG_LEVEL: !Ref LogLevel
       LoggingConfig:
@@ -900,6 +918,12 @@ Resources:
           - Effect: Allow
             Action: sagemaker:InvokeEndpoint
             Resource: !GetAtt SAGEMAKERCLASSIFIERSTACK.Outputs.EndpointArn
+          # AppSync permissions for updating document status
+          - Effect: Allow
+            Action:
+              - appsync:GraphQL
+            Resource: 
+              - !Sub "${AppSyncApiArn}/types/Mutation/*"
           - !If
             - HasGuardrailConfig
             - Effect: Allow
@@ -941,6 +965,7 @@ Resources:
           CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
           GUARDRAIL_ID_AND_VERSION: !If [HasGuardrailConfig, !Sub "${BedrockGuardrailId}:${BedrockGuardrailVersion}", ""]
           LOG_LEVEL: !Ref LogLevel
+          APPSYNC_API_URL: !Ref AppSyncApiUrl
       LoggingConfig:
         LogGroup: !Ref ExtractionFunctionLogGroup
       Policies:
@@ -968,6 +993,12 @@ Resources:
             Resource: 
                 - !Sub "arn:aws:bedrock:*::foundation-model/*"
                 - !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
+          # AppSync permissions for updating document status
+          - Effect: Allow
+            Action:
+              - appsync:GraphQL
+            Resource: 
+              - !Sub "${AppSyncApiArn}/types/Mutation/*"
           - !If
             - HasGuardrailConfig
             - Effect: Allow
@@ -1007,6 +1038,7 @@ Resources:
         Variables:
           METRIC_NAMESPACE: !Ref StackName
           LOG_LEVEL: !Ref LogLevel
+          APPSYNC_API_URL: !Ref AppSyncApiUrl
       LoggingConfig:
         LogGroup: !Ref ProcessResultsFunctionLogGroup
       Policies:
@@ -1027,6 +1059,12 @@ Resources:
               - kms:GenerateDataKey*
               - kms:DescribeKey
             Resource: !Ref CustomerManagedEncryptionKeyArn
+          # AppSync permissions for updating document status
+          - Effect: Allow
+            Action:
+              - appsync:GraphQL
+            Resource: 
+              - !Sub "${AppSyncApiArn}/types/Mutation/*"
 
   
   ProcessResultsFunctionLogGroup:
@@ -1063,6 +1101,7 @@ Resources:
           CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
           GUARDRAIL_ID_AND_VERSION: !If [HasGuardrailConfig, !Sub "${BedrockGuardrailId}:${BedrockGuardrailVersion}", ""]
           LOG_LEVEL: !Ref LogLevel
+          APPSYNC_API_URL: !Ref AppSyncApiUrl
       LoggingConfig:
         LogGroup: !Ref SummarizationFunctionLogGroup
       Policies:
@@ -1090,6 +1129,12 @@ Resources:
             Resource: 
                 - !Sub "arn:aws:bedrock:*::foundation-model/*"
                 - !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
+          # AppSync permissions for updating document status
+          - Effect: Allow
+            Action:
+              - appsync:GraphQL
+            Resource: 
+              - !Sub "${AppSyncApiArn}/types/Mutation/*"
           - !If
             - HasGuardrailConfig
             - Effect: Allow

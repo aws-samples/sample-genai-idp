@@ -700,7 +700,7 @@ IMPORTANT: Respond ONLY with a valid JSON object and nothing else. Here's the ex
                 
                 # Update document with evaluation report URI
                 actual_document.evaluation_report_uri = f"s3://{output_bucket}/{report_key}"
-                actual_document.status = Status.EVALUATED
+                actual_document.status = Status.COMPLETED
                 
                 logger.info(f"Evaluation complete for document {actual_document.id} in {execution_time:.2f} seconds")
             

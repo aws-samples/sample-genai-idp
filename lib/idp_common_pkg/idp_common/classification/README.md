@@ -170,11 +170,7 @@ from idp_common.models import Document, Status
 def handler(event, context):
     # Extract document from event
     document = Document.from_dict(event["OCRResult"]["document"])
-    
-    # Verify document status
-    if document.status != Status.OCR_COMPLETED:
-        raise ValueError(f"Document is not in OCR_COMPLETED stage")
-    
+       
     # Initialize classification service
     config = get_config()
     service = classification.ClassificationService(config=config) 
@@ -198,10 +194,6 @@ import os
 def handler(event, context):
     # Extract document from event
     document = Document.from_dict(event["OCRResult"]["document"])
-    
-    # Verify document status
-    if document.status != Status.OCR_COMPLETED:
-        raise ValueError(f"Document is not in OCR_COMPLETED stage")
     
     # Configure SageMaker endpoint
     config = get_config() or {}

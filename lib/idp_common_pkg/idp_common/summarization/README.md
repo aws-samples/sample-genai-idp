@@ -200,7 +200,6 @@ The Summarization Service integrates with the IDP pipeline by:
 8. Updating the document with:
    - `summarization_result`: Complete result object with summary, timing, and URI
    - `summary_report_uri`: S3 URI to the markdown report (only when `store_results=True`)
-9. Setting the document status to `Status.SUMMARIZED`
 
 ### Flexible Structure Handling
 

@@ -13,6 +13,7 @@ import { paginationLabels } from '../common/labels';
 import useLocalStorage from '../common/local-storage';
 import { exportToExcel } from '../common/download-func';
 import DeleteDocumentModal from '../common/DeleteDocumentModal';
+import ReprocessDocumentModal from '../common/ReprocessDocumentModal';
 
 import {
   DocumentsPreferences,
@@ -33,6 +34,7 @@ const logger = new Logger('DocumentList');
 const DocumentList = () => {
   const [documentList, setDocumentList] = useState([]);
   const [isDeleteModalVisible, setIsDeleteModalVisible] = useState(false);
+  const [isReprocessModalVisible, setIsReprocessModalVisible] = useState(false);
   const { settings } = useSettingsContext();
 
   const {
@@ -45,6 +47,7 @@ const DocumentList = () => {
     periodsToLoad,
     getDocumentDetailsFromIds,
     deleteDocuments,
+    reprocessDocuments,
   } = useDocumentsContext();
 
   const [preferences, setPreferences] = useLocalStorage('documents-list-preferences', DEFAULT_PREFERENCES);
@@ -93,6 +96,20 @@ const DocumentList = () => {
     actions.setSelectedItems([]);
   };
 
+  const handleReprocessConfirm = async () => {
+    const objectKeys = collectionProps.selectedItems.map((item) => item.objectKey);
+    logger.debug('Reprocessing documents', objectKeys);
+
+    const result = await reprocessDocuments(objectKeys);
+    logger.debug('Reprocess result', result);
+
+    // Close the modal
+    setIsReprocessModalVisible(false);
+
+    // Clear selection after reprocessing
+    actions.setSelectedItems([]);
+  };
+
   /* eslint-disable react/jsx-props-no-spreading */
   return (
     <>
@@ -111,6 +128,7 @@ const DocumentList = () => {
             setPeriodsToLoad={setPeriodsToLoad}
             getDocumentDetailsFromIds={getDocumentDetailsFromIds}
             downloadToExcel={() => exportToExcel(documentList, 'Document-List')}
+            onReprocess={() => setIsReprocessModalVisible(true)}
             onDelete={() => setIsDeleteModalVisible(true)}
             // eslint-disable-next-line max-len, prettier/prettier
           />
@@ -141,6 +159,13 @@ const DocumentList = () => {
         visible={isDeleteModalVisible}
         onDismiss={() => setIsDeleteModalVisible(false)}
         onConfirm={handleDeleteConfirm}
+        selectedItems={collectionProps.selectedItems}
+      />
+
+      <ReprocessDocumentModal
+        visible={isReprocessModalVisible}
+        onDismiss={() => setIsReprocessModalVisible(false)}
+        onConfirm={handleReprocessConfirm}
         selectedItems={collectionProps.selectedItems}
       />
     </>

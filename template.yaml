@@ -662,11 +662,14 @@ Resources:
         SummarizationModel: !Ref Pattern1SummarizationModel
         UpdateConfigurationFunctionArn: !GetAtt UpdateConfigurationFunction.Arn
         ConfigurationTable: !Ref ConfigurationTable
+        AppSyncApiUrl: !GetAtt GraphQLApi.GraphQLUrl
+        AppSyncApiArn: !GetAtt GraphQLApi.Arn
         EvaluationLLMModelId: !Ref EvaluationLLMModelId
 
   PATTERN2STACK:
     DependsOn:
       - IsStacknameLengthOK
+      - GraphQLApi
     Type: AWS::CloudFormation::Stack
     Condition: IsPattern2
     Properties:
@@ -688,6 +691,8 @@ Resources:
         CustomExtractionModelARN: !Ref Pattern2CustomExtractionModelARN
         SummarizationModel: !Ref Pattern2SummarizationModel
         UpdateConfigurationFunctionArn: !GetAtt UpdateConfigurationFunction.Arn
+        AppSyncApiUrl: !GetAtt GraphQLApi.GraphQLUrl
+        AppSyncApiArn: !GetAtt GraphQLApi.Arn
         ConfigurationTable: !Ref ConfigurationTable
         EvaluationLLMModelId: !Ref EvaluationLLMModelId
 
@@ -713,6 +718,8 @@ Resources:
         ExtractionModel: !Ref Pattern3ExtractionModel
         SummarizationModel: !Ref Pattern3SummarizationModel
         UpdateConfigurationFunctionArn: !GetAtt UpdateConfigurationFunction.Arn
+        AppSyncApiUrl: !GetAtt GraphQLApi.GraphQLUrl
+        AppSyncApiArn: !GetAtt GraphQLApi.Arn
         ConfigurationTable: !Ref ConfigurationTable
         EvaluationLLMModelId: !Ref EvaluationLLMModelId
 
@@ -1594,7 +1601,11 @@ Resources:
           Properties:
             Queue: !GetAtt DocumentQueue.Arn
             BatchSize: 50 # Process up to 50 messages at once
-            MaximumBatchingWindowInSeconds: 1 # Wait max 1 second to fill batch
+            # Per https://docs.aws.amazon.com/lambda/latest/dg/with-sqs.html
+            # If you're using a batch window and your SQS queue contains very low traffic, 
+            # Lambda might wait for up to 20 seconds before invoking your function. 
+            # This is true even if you set a batch window lower than 20 seconds.
+            MaximumBatchingWindowInSeconds: 1  # Minimize delay (see above caveat)
             FunctionResponseTypes:
               - ReportBatchItemFailures
 
@@ -3003,6 +3014,7 @@ Resources:
                   - !GetAtt CreateDocumentResolverFunction.Arn
                   - !GetAtt DeleteDocumentResolverFunction.Arn
                   - !GetAtt QueryKnowledgeBaseResolverFunction.Arn
+                  - !GetAtt ReprocessDocumentResolverFunction.Arn
 
   # Lambda function for Create Document resolver
   CreateDocumentResolverFunction:
@@ -3577,6 +3589,73 @@ Resources:
       DataSourceName: !GetAtt DeleteDocumentDataSource.Name
       TypeName: Mutation
       FieldName: deleteDocument
+      
+  ReprocessDocumentResolverFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: "Function does not require VPC access as it only interacts with AWS services via APIs"
+          - id: W92
+            reason: "Function does not require reserved concurrency as it scales based on demand"
+          - id: W12
+            reason: "Lambda requires CloudWatch logs permissions"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for AppSync resolver function"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only configuration values like feature flags and non-sensitive settings"
+    Properties:
+      Handler: index.handler
+      Runtime: python3.12
+      CodeUri: ./src/lambda/reprocess_document_resolver
+      Description: Lambda function to reprocess documents via GraphQL API
+      MemorySize: 512
+      Timeout: 60
+      Environment:
+        Variables:
+          LOG_LEVEL: !Ref LogLevel
+          INPUT_BUCKET: !Ref InputBucket
+      LoggingConfig:
+        LogGroup: !Ref ReprocessDocumentResolverFunctionLogGroup
+      Policies:
+        - S3CrudPolicy:
+            BucketName: !Ref InputBucket
+        - Statement:
+            - Effect: Allow
+              Action:
+                - kms:Encrypt
+                - kms:Decrypt
+                - kms:ReEncrypt*
+                - kms:GenerateDataKey*
+                - kms:DescribeKey
+              Resource: !GetAtt CustomerManagedEncryptionKey.Arn
+
+  ReprocessDocumentResolverFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      KmsKeyId: !GetAtt CustomerManagedEncryptionKey.Arn
+      RetentionInDays: !Ref LogRetentionDays
+
+  ReprocessDocumentDataSource:
+    Type: AWS::AppSync::DataSource
+    Properties:
+      ApiId: !GetAtt GraphQLApi.ApiId
+      Name: ReprocessDocumentDataSource
+      Description: Lambda function for reprocessing documents
+      Type: AWS_LAMBDA
+      ServiceRoleArn: !GetAtt AppSyncServiceRole.Arn
+      LambdaConfig:
+        LambdaFunctionArn: !GetAtt ReprocessDocumentResolverFunction.Arn
+
+  ReprocessDocumentResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: GraphQLSchema
+    Properties:
+      ApiId: !GetAtt GraphQLApi.ApiId
+      DataSourceName: !GetAtt ReprocessDocumentDataSource.Name
+      TypeName: Mutation
+      FieldName: reprocessDocument
 
   UploadResolverFunction:
     Type: AWS::Serverless::Function

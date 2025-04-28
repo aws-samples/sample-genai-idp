@@ -2,6 +2,7 @@
 
 ## [Unreleased]
 
+
 ## [0.2.20]
 ### Added
 - Added document summarization functionality
@@ -28,6 +29,14 @@
     - EvaluationStatus-based progress tracking and UI integration
     - Batch-based S3 object copying for improved efficiency
     - File operation batching with optimal batch size calculation
+- Fine-grained document status tracking for UI real-time progress updates
+  - Added status transitions (QUEUED → STARTED → RUNNING → COMPLETE) for all patterns
+- Fixed multi-page standard output BDA processing in Pattern 1
+  - Refactored ProcessResults function to correctly handle multi-page result.json files
+- Default OCR configuration now includes LAYOUT, TABLES, SIGNATURE, and markdown generation now supports tables (via textractor[pandas])
+- Added document reprocessing capability to the UI
+  - Implemented reprocess button with confirmation dialog
+  - Added backend API for document reprocessing
   
 ### Changed
 - Refactored code for better maintainability

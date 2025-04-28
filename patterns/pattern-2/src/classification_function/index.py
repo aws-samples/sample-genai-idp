@@ -10,6 +10,7 @@ import time
 
 from idp_common import classification, metrics, get_config
 from idp_common.models import Document, Status
+from idp_common.appsync.service import DocumentAppSyncService
 
 # Configuration
 CONFIG = get_config()
@@ -31,11 +32,17 @@ def handler(event, context):
     # Extract document from the OCR result
     document = Document.from_dict(event["OCRResult"]["document"])
     
-    if document.status != Status.OCR_COMPLETED:
-        raise ValueError(f"Document is not in OCR_COMPLETED stage, current status: {document.status}")
+    # Update document status to CLASSIFYING
+    document.status = Status.CLASSIFYING
+    appsync_service = DocumentAppSyncService()
+    logger.info(f"Updating document status to {document.status}")
+    appsync_service.update_document(document)
     
     if not document.pages:
-        raise ValueError("Document has no pages to classify")
+        error_message = "Document has no pages to classify"
+        logger.error(error_message)
+        document.status = Status.FAILED
+        document.errors.append(error_message)
     
     t0 = time.time()
     
@@ -57,6 +64,8 @@ def handler(event, context):
     if document.status == Status.FAILED:
         error_message = f"Classification failed for document {document.id}"
         logger.error(error_message)
+        # Update document status in AppSync before raising exception
+        appsync_service.update_document(document)
         raise Exception(error_message)
     
     t1 = time.time()

@@ -72,6 +72,14 @@ Parameters:
     Type: String
     Default: ""
     Description: "If you provided a Bedrock Guardrail Id above, provide the corresponding Guardrail version here"
+    
+  AppSyncApiUrl:
+    Type: String
+    Description: "URL of the AppSync GraphQL API for document status updates"
+    
+  AppSyncApiArn:
+    Type: String
+    Description: "ARN of the AppSync GraphQL API for document status updates"
 
 
 Conditions:
@@ -506,6 +514,7 @@ Resources:
         Variables:
           METRIC_NAMESPACE: !Ref StackName
           LOG_LEVEL: !Ref LogLevel
+          APPSYNC_API_URL: !Ref AppSyncApiUrl
       LoggingConfig:
         LogGroup: !Ref ProcessResultsFunctionLogGroup
       Policies:
@@ -528,6 +537,12 @@ Resources:
               - kms:GenerateDataKey*
               - kms:DescribeKey
             Resource: !Ref CustomerManagedEncryptionKeyArn
+          # AppSync permissions for updating document status
+          - Effect: Allow
+            Action:
+              - appsync:GraphQL
+            Resource: 
+              - !Sub "${AppSyncApiArn}/types/Mutation/*"
 
   
   ProcessResultsFunctionLogGroup:
@@ -564,6 +579,7 @@ Resources:
           CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
           GUARDRAIL_ID_AND_VERSION: !If [HasGuardrailConfig, !Sub "${BedrockGuardrailId}:${BedrockGuardrailVersion}", ""]
           LOG_LEVEL: !Ref LogLevel
+          APPSYNC_API_URL: !Ref AppSyncApiUrl
       LoggingConfig:
         LogGroup: !Ref SummarizationFunctionLogGroup
       Policies:
@@ -586,6 +602,12 @@ Resources:
               - kms:GenerateDataKey*
               - kms:DescribeKey
             Resource: !Ref CustomerManagedEncryptionKeyArn
+          # AppSync permissions for updating document status
+          - Effect: Allow
+            Action:
+              - appsync:GraphQL
+            Resource: 
+              - !Sub "${AppSyncApiArn}/types/Mutation/*"
           - Effect: Allow
             Action: bedrock:InvokeModel
             Resource: 

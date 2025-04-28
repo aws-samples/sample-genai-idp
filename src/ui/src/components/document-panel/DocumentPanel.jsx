@@ -316,7 +316,7 @@ const DocumentAttributes = ({ item }) => {
   );
 };
 
-export const DocumentPanel = ({ item, setToolsOpen, getDocumentDetailsFromIds, onDelete }) => {
+export const DocumentPanel = ({ item, setToolsOpen, getDocumentDetailsFromIds, onDelete, onReprocess }) => {
   logger.debug('DocumentPanel item', item);
 
   return (
@@ -326,11 +326,18 @@ export const DocumentPanel = ({ item, setToolsOpen, getDocumentDetailsFromIds, o
           <Header
             variant="h2"
             actions={
-              onDelete && (
-                <Button iconName="remove" variant="normal" onClick={onDelete}>
-                  Delete
-                </Button>
-              )
+              <SpaceBetween direction="horizontal" size="xs">
+                {onReprocess && (
+                  <Button iconName="arrow-right" variant="normal" onClick={onReprocess}>
+                    Reprocess
+                  </Button>
+                )}
+                {onDelete && (
+                  <Button iconName="remove" variant="normal" onClick={onDelete}>
+                    Delete
+                  </Button>
+                )}
+              </SpaceBetween>
             }
           >
             Document Details

@@ -10,6 +10,7 @@ import time
 
 from idp_common import get_config, ocr
 from idp_common.models import Document, Status
+from idp_common.appsync.service import DocumentAppSyncService
 
 # Configuration
 CONFIG = get_config()
@@ -32,6 +33,12 @@ def handler(event, context):
     # Get document from event
     document = Document.from_dict(event["document"])
     
+    # Update document status to OCR and update in AppSync
+    document.status = Status.OCR
+    appsync_service = DocumentAppSyncService()
+    logger.info(f"Updating document status to {document.status}")
+    appsync_service.update_document(document)
+    
     t0 = time.time()
     
     # Initialize the OCR service
@@ -50,6 +57,8 @@ def handler(event, context):
     if document.status == Status.FAILED:
         error_message = f"OCR processing failed for document {document.id}"
         logger.error(error_message)
+        # Update status in AppSync before raising exception
+        appsync_service.update_document(document)
         raise Exception(error_message)
     
     t1 = time.time()

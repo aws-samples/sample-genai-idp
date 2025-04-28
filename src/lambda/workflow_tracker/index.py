@@ -38,7 +38,7 @@ def update_document_completion(object_key: str, workflow_status: str, output_dat
     document = Document(
         id=object_key,
         input_key=object_key,
-        status=Status.PROCESSED if workflow_status == 'SUCCEEDED' else Status.FAILED,
+        status=Status.COMPLETED if workflow_status == 'SUCCEEDED' else Status.FAILED,
         completion_time=datetime.now(timezone.utc).isoformat()
     )
     

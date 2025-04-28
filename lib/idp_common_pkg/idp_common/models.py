@@ -14,19 +14,14 @@ from typing import Dict, List, Any, Optional
 class Status(Enum):
     """Document processing status."""
     QUEUED = "QUEUED"           # Initial state when document is added to queue
-    STARTED = "STARTED"         # Step function workflow has started
-    OCR_STARTED = "OCR_RUNNING"  # OCR processing started
-    OCR_COMPLETED = "OCR_COMPLETED"  # OCR processing completed
-    CLASSIFYING = "CLASSIFYING" # Document classification started
-    CLASSIFIED = "CLASSIFIED"   # Document classification completed
-    EXTRACTING = "EXTRACTING"   # Information extraction started
-    EXTRACTED = "EXTRACTED"     # Information extraction completed
-    SUMMARIZING = "SUMMARIZING" # Document summarization started
-    SUMMARIZED = "SUMMARIZED"   # Document summarization completed
-    PROCESSED = "PROCESSED"     # All processing completed
+    RUNNING = "RUNNING"         # Step function workflow has started
+    OCR = "OCR"                 # OCR processing
+    CLASSIFYING = "CLASSIFYING" # Document classification
+    EXTRACTING = "EXTRACTING"   # Information extraction 
+    POSTPROCESSING = "POSTPROCESSING" # Document summarization
+    SUMMARIZING = "SUMMARIZING" # Document summarization
+    COMPLETED = "COMPLETED"     # All processing completed
     FAILED = "FAILED"           # Processing failed
-    EVALUATED = "EVALUATED"     # Document has been evaluated against baseline
-
 
 @dataclass
 class Page:
@@ -276,7 +271,7 @@ class Document:
             id=input_key,
             input_key=input_key,
             output_bucket=bucket,
-            status=Status.PROCESSED
+            status=Status.COMPLETED
         )
         
         # List all objects with the given prefix to find pages and sections

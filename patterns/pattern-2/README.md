@@ -214,11 +214,11 @@ The classification system uses RVL-CDIP dataset categories and can be customized
 ```python
 # For multimodalPageLevelClassification
 SYSTEM_PROMPT = """You are a document classification system..."""
-CLASSIFICATION_PROMPT = """Classify this document into exactly one of these categories..."""
+CLASSIFYING_PROMPT = """Classify this document into exactly one of these categories..."""
 
 # For textbasedHolisticClassification
 SYSTEM_PROMPT = """You are a document classification expert who can analyze and classify multiple documents..."""
-CLASSIFICATION_PROMPT = """The <document-text> XML tags contains the text separated into pages from the document package..."""
+CLASSIFYING_PROMPT = """The <document-text> XML tags contains the text separated into pages from the document package..."""
 ```
 
 Available categories:

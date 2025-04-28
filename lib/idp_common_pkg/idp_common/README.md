@@ -118,14 +118,14 @@ The document processing status is represented by the `Status` enum:
 class Status(Enum):
     """Document processing status."""
     QUEUED = "QUEUED"           # Initial state when document is added to queue
-    STARTED = "STARTED"         # Step function workflow has started
-    OCR_COMPLETED = "OCR_COMPLETED"  # OCR processing completed
-    CLASSIFIED = "CLASSIFIED"   # Document classification completed
-    EXTRACTED = "EXTRACTED"     # Information extraction completed
-    SUMMARIZED = "SUMMARIZED"   # Document summarization completed
-    PROCESSED = "PROCESSED"     # All processing completed
+    RUNNING = "RUNNING"         # Step function workflow has started
+    OCR = "OCR"                 # OCR processing
+    CLASSIFYING = "CLASSIFYING" # Document classification
+    EXTRACTING = "EXTRACTING"   # Information extraction 
+    POSTPROCESSING = "POSTPROCESSING" # Document summarization
+    SUMMARIZING = "SUMMARIZING" # Document summarization
+    COMPLETED = "COMPLETED"     # All processing completed
     FAILED = "FAILED"           # Processing failed
-    EVALUATED = "EVALUATED"     # Document has been evaluated against baseline
 ```
 
 ## Common Class Operations
@@ -204,7 +204,7 @@ document = Document(
     input_bucket="input-bucket",
     input_key="invoices/invoice-123.pdf",
     output_bucket="output-bucket",
-    status=Status.STARTED
+    status=Status.RUNNING
 )
 
 # Add pages
@@ -238,8 +238,6 @@ document.sections.append(Section(
     extraction_result_uri="s3://output-bucket/invoices/invoice-123.pdf/sections/1/result.json"
 ))
 
-# Update status
-document.status = Status.CLASSIFIED
 ```
 
 ## Example: Loading a Document from Baseline for Evaluation
@@ -414,7 +412,7 @@ ttl = appsync_service.calculate_ttl(days=90)
 object_key = appsync_service.create_document(document, expires_after=ttl)
 
 # Later, update the document
-document.status = Status.PROCESSED
+document.status = Status.COMPLETED
 document.num_pages = 5
 updated_document = appsync_service.update_document(document)
 ```

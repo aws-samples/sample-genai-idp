@@ -1,1 +1,1 @@
-../../lib/idp_common_pkg[extraction]  # extraction module with dependencies
+../../lib/idp_common_pkg[extraction,appsync]  # extraction module and AppSync with dependencies

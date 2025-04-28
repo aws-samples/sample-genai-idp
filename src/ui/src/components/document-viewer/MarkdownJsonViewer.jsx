@@ -61,8 +61,12 @@ const TextEditorView = ({ fileContent, onChange, isReadOnly, fileType }) => {
       <div style={{ height: EDITOR_DEFAULT_HEIGHT, position: 'relative', overflow: 'hidden', width: '100%' }}>
         <Editor
           height="100%"
-          defaultLanguage={fileType}
-          value={fileContent}
+          defaultLanguage={fileType === 'json' ? 'json' : fileType}
+          value={
+            fileType === 'json' && typeof fileContent === 'string'
+              ? JSON.stringify(JSON.parse(fileContent), null, 2)
+              : fileContent
+          }
           onChange={onChange}
           onMount={handleEditorDidMount}
           options={{
@@ -78,6 +82,8 @@ const TextEditorView = ({ fileContent, onChange, isReadOnly, fileType }) => {
               vertical: 'visible',
               horizontal: 'visible',
             },
+            formatOnPaste: true,
+            formatOnType: true,
           }}
           theme="vs-light"
           loading={<Box padding="s">Loading editor...</Box>}
@@ -169,7 +175,7 @@ const FileEditorView = ({ fileContent, onChange, isReadOnly = true, fileType = '
           fileContent={typeof fileContent === 'string' ? fileContent : JSON.stringify(jsonData, null, 2)}
           onChange={handleTextEditorChange}
           isReadOnly={isReadOnly}
-          fileType={fileType}
+          fileType="json"
         />
       )}
     </Box>

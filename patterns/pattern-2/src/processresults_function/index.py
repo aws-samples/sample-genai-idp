@@ -3,8 +3,10 @@ import logging
 import datetime
 import os
 from urllib.parse import urlparse
+
 from idp_common import s3, utils
 from idp_common.models import Document, Page, Section, Status
+from idp_common.appsync.service import DocumentAppSyncService
 
 logger = logging.getLogger()
 logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
@@ -27,9 +29,11 @@ def handler(event, context):
     document = Document.from_dict(event.get("ClassificationResult", {}).get("document", {}))
     extraction_results = event.get("ExtractionResults", [])
     
-    # Update document status
-    document.status = Status.PROCESSED
-    document.completion_time = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    # Update document status to POSTPROCESSING
+    document.status = Status.POSTPROCESSING
+    appsync_service = DocumentAppSyncService()
+    logger.info(f"Updating document status to {document.status}")
+    appsync_service.update_document(document)
     
     # Clear sections list to rebuild from extraction results
     document.sections = []
@@ -57,6 +61,10 @@ def handler(event, context):
     for page_id, page in document.pages.items():
         if page.raw_text_uri:
             create_metadata_file(page.raw_text_uri, page.classification, 'page')
+        
+    # Update final status in AppSync
+    logger.info(f"Updating document status to {document.status}")
+    appsync_service.update_document(document)
     
     # Return the completed document
     response = {

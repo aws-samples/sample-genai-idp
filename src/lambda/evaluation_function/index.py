@@ -34,7 +34,7 @@ appsync_service = DocumentAppSyncService()
 
 # Define evaluation status constants
 class EvaluationStatus(Enum):
-    STARTED = "STARTED"
+    RUNNING = "RUNNING"
     COMPLETED = "COMPLETED"
     FAILED = "FAILED"
     NO_BASELINE = "NO_BASELINE"
@@ -53,7 +53,7 @@ def update_document_evaluation_status(document: Document, status: EvaluationStat
     Raises:
         AppSyncError: If the GraphQL operation fails
     """
-    document.status = Status.PROCESSED
+    document.status = Status.COMPLETED
     document.evaluation_status = status.value
     logger.info(f"Updating document via AppSync: {document.input_key} with status: {status.value}")
     return appsync_service.update_document(document)
@@ -166,8 +166,8 @@ def handler(event, context):
         # Extract document from event
         actual_document = extract_document_from_event(event)
         
-        # Update document status to STARTED
-        update_document_evaluation_status(actual_document, EvaluationStatus.STARTED)
+        # Update document status to RUNNING
+        update_document_evaluation_status(actual_document, EvaluationStatus.RUNNING)
         
         # Load baseline document
         expected_document = load_baseline_document(actual_document.input_key)

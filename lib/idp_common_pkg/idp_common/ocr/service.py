@@ -166,10 +166,7 @@ class OcrService:
             # Replace the original pages dictionary with the sorted one
             document.pages = sorted_pages
             
-            # If no errors occurred, mark as completed
-            if not document.errors:
-                document.status = Status.OCR_COMPLETED
-            else:
+            if document.errors:
                 document.status = Status.FAILED
                 
         except Exception as e:

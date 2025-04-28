@@ -4,8 +4,10 @@ import os
 import json
 import time
 import logging
+
 from idp_common import metrics, get_config, extraction
 from idp_common.models import Document, Section, Status
+from idp_common.appsync.service import DocumentAppSyncService
 
 CONFIG = get_config()
 
@@ -30,6 +32,12 @@ def handler(event, context):
     
     # Get the section ID for later use
     section_id = section.section_id
+    
+    # Update document status to EXTRACTING
+    full_document.status = Status.EXTRACTING
+    appsync_service = DocumentAppSyncService()
+    logger.info(f"Updating document status to {full_document.status}")
+    appsync_service.update_document(full_document)
        
     # Create a section-specific document by modifying the original document
     section_document = full_document
@@ -63,10 +71,11 @@ def handler(event, context):
     if section_document.status == Status.FAILED:
         error_message = f"Extraction failed for document {section_document.id}, section {section_id}"
         logger.error(error_message)
+        # Update status in AppSync before raising exception
+        full_document.status = Status.FAILED
+        full_document.errors.append(error_message)
+        appsync_service.update_document(full_document)
         raise Exception(error_message)
-    
-    # Set the status to EXTRACTED
-    section_document.status = Status.EXTRACTED
     
     # Return section extraction result with the document
     # The state machine will later combine all section results

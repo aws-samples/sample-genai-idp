@@ -35,7 +35,7 @@ object_key = appsync_service.create_document(document, expires_after=ttl)
 print(f"Created document with key: {object_key}")
 
 # Update document status
-document.status = Status.PROCESSED
+document.status = Status.COMPLETED
 document.num_pages = 5
 updated_document = appsync_service.update_document(document)
 ```

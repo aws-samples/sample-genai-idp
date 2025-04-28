@@ -9,6 +9,7 @@ import useSettingsContext from '../../contexts/settings';
 
 import mapDocumentsAttributes from '../common/map-document-attributes';
 import DeleteDocumentModal from '../common/DeleteDocumentModal';
+import ReprocessDocumentModal from '../common/ReprocessDocumentModal';
 import { DOCUMENTS_PATH } from '../../routes/constants';
 
 import '@awsui/global-styles/index.css';
@@ -30,11 +31,13 @@ const DocumentDetails = () => {
     logger.debug('Error decoding objectKey, using as is', e);
   }
 
-  const { documents, getDocumentDetailsFromIds, setToolsOpen, deleteDocuments } = useDocumentsContext();
+  const { documents, getDocumentDetailsFromIds, setToolsOpen, deleteDocuments, reprocessDocuments } =
+    useDocumentsContext();
   const { settings } = useSettingsContext();
 
   const [document, setDocument] = useState(null);
   const [isDeleteModalVisible, setIsDeleteModalVisible] = useState(false);
+  const [isReprocessModalVisible, setIsReprocessModalVisible] = useState(false);
 
   const sendInitDocumentRequests = async () => {
     const response = await getDocumentDetailsFromIds([objectKey]);
@@ -94,6 +97,20 @@ const DocumentDetails = () => {
     setIsDeleteModalVisible(true);
   };
 
+  // Function to show reprocess modal
+  const handleReprocessClick = () => {
+    setIsReprocessModalVisible(true);
+  };
+
+  // Function to handle reprocess confirmation
+  const handleReprocessConfirm = async () => {
+    logger.debug('Reprocessing document', objectKey);
+    const result = await reprocessDocuments([objectKey]);
+    logger.debug('Reprocess result', result);
+    // Close the modal
+    setIsReprocessModalVisible(false);
+  };
+
   return (
     <>
       {document && (
@@ -102,6 +119,7 @@ const DocumentDetails = () => {
           setToolsOpen={setToolsOpen}
           getDocumentDetailsFromIds={getDocumentDetailsFromIds}
           onDelete={handleDeleteClick}
+          onReprocess={handleReprocessClick}
         />
       )}
 
@@ -109,6 +127,13 @@ const DocumentDetails = () => {
         visible={isDeleteModalVisible}
         onDismiss={() => setIsDeleteModalVisible(false)}
         onConfirm={handleDeleteConfirm}
+        selectedItems={document ? [document] : []}
+      />
+
+      <ReprocessDocumentModal
+        visible={isReprocessModalVisible}
+        onDismiss={() => setIsReprocessModalVisible(false)}
+        onConfirm={handleReprocessConfirm}
         selectedItems={document ? [document] : []}
       />
     </>

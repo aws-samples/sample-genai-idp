@@ -9,6 +9,7 @@ import listDocumentsDateShard from '../graphql/queries/listDocumentsDateShard';
 import listDocumentsDateHour from '../graphql/queries/listDocumentsDateHour';
 import getDocument from '../graphql/queries/getDocument';
 import deleteDocument from '../graphql/queries/deleteDocument';
+import reprocessDocument from '../graphql/queries/reprocessDocument';
 
 import onCreateDocument from '../graphql/queries/onCreateDocument';
 import onUpdateDocument from '../graphql/queries/onUpdateDocument';
@@ -259,6 +260,21 @@ const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2
     }
   };
 
+  const reprocessDocuments = async (objectKeys) => {
+    try {
+      logger.debug('Reprocessing documents', objectKeys);
+      const result = await API.graphql(graphqlOperation(reprocessDocument, { objectKeys }));
+      logger.debug('Reprocess documents result', result);
+      // Refresh the document list after reprocessing
+      setIsDocumentsListLoading(true);
+      return result.data.reprocessDocument;
+    } catch (error) {
+      setErrorMessage('Failed to reprocess document(s) - please try again later');
+      logger.error('Error reprocessing documents', error);
+      return false;
+    }
+  };
+
   return {
     documents,
     isDocumentsListLoading,
@@ -267,6 +283,7 @@ const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2
     setPeriodsToLoad,
     periodsToLoad,
     deleteDocuments,
+    reprocessDocuments,
   };
 };
 
