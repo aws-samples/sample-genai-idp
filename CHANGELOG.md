@@ -9,11 +9,6 @@
   - New summarization service with default model set to Claude 3 Haiku
   - New summarization function added to all patterns
   - Added end-to-end document summarization notebook example
-- Integration of AppSync helper package into idp_common_pkg
-- Enhanced the Hungarian evaluation method with configurable comparators
-  - Added support for EXACT, FUZZY, and NUMERIC comparators for Hungarian method
-  - Implemented a flexible comparator pattern similar to GenAIDP
-  - Added dynamic UI form fields based on evaluation method selection
 - Added Bedrock Guardrail integration
   - New parameters BedrockGuardrailId and BedrockGuardrailVersion for optional guardrail configuration
   - Support for applying guardrails in Bedrock model invocations (except classification)
@@ -30,13 +25,9 @@
     - Batch-based S3 object copying for improved efficiency
     - File operation batching with optimal batch size calculation
 - Fine-grained document status tracking for UI real-time progress updates
-  - Added status transitions (QUEUED → STARTED → RUNNING → COMPLETE) for all patterns
-- Fixed multi-page standard output BDA processing in Pattern 1
-  - Refactored ProcessResults function to correctly handle multi-page result.json files
+  - Added status transitions (QUEUED → STARTED → RUNNING → OCR, CLASSIFYING, EXTRACTING, POSTPROCESSING, SUMMARIZING, COMPLETE)
 - Default OCR configuration now includes LAYOUT, TABLES, SIGNATURE, and markdown generation now supports tables (via textractor[pandas])
-- Added document reprocessing capability to the UI
-  - Implemented reprocess button with confirmation dialog
-  - Added backend API for document reprocessing
+- Added document reprocessing capability to the UI - New "Reprocess" button with confirmation dialog
   
 ### Changed
 - Refactored code for better maintainability
@@ -46,7 +37,11 @@
 - Added security headers to UI application per security requirements
 - Disabled GraphQL introspection for AppSync API to enhance security
 - Added LogLevel parameter to main stack (default WARN level)
+- Integration of AppSync helper package into idp_common_pkg
 - Various bug fixes and improvements
+- Enhanced the Hungarian evaluation method with configurable comparators
+- Added dynamic UI form fields based on evaluation method selection
+- Fixed multi-page standard output BDA processing in Pattern 1
 
 ## [0.2.19]
 - Added enhanced EvaluationService with smart attribute discovery and evaluation
