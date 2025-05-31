@@ -543,40 +543,41 @@ Resources:
                 target_bucket = event['ResourceProperties']['TargetBucket']
                 target_prefix = event['ResourceProperties'].get('TargetPrefix', '')
                 
+                file_list = event['ResourceProperties'].get('FileList', [])
+                
                 s3_client = boto3.client('s3')
                 
                 if event['RequestType'] == 'Create' or event['RequestType'] == 'Update':
-                    # List all objects in the source bucket with the given prefix
-                    paginator = s3_client.get_paginator('list_objects_v2')
-                    pages = paginator.paginate(Bucket=source_bucket, Prefix=source_prefix)
-                    
+                    # Copy files explicitly from the provided list
                     copied_count = 0
-                    for page in pages:
-                        if 'Contents' in page:
-                            for obj in page['Contents']:
-                                source_key = obj['Key']
-                                # Remove the source prefix and add to target bucket with target prefix
-                                relative_key = source_key[len(source_prefix):].lstrip('/')
-                                
-                                # Skip if this is just the prefix directory
-                                if not relative_key:
-                                    continue
-                                
-                                # Construct target key with optional target prefix
-                                if target_prefix:
-                                    target_key = f"{target_prefix}/{relative_key}"
-                                else:
-                                    target_key = relative_key
-                                
-                                logger.info(f"Copying {source_bucket}/{source_key} to {target_bucket}/{target_key}")
-                                
-                                copy_source = {'Bucket': source_bucket, 'Key': source_key}
-                                s3_client.copy_object(
-                                    CopySource=copy_source,
-                                    Bucket=target_bucket,
-                                    Key=target_key
-                                )
-                                copied_count += 1
+                    
+                    for relative_file_path in file_list:
+                        # Skip empty entries
+                        if not relative_file_path.strip():
+                            continue
+                            
+                        # Construct source key
+                        source_key = f"{source_prefix}/{relative_file_path}"
+                        
+                        # Construct target key with optional target prefix
+                        if target_prefix:
+                            target_key = f"{target_prefix}/{relative_file_path}"
+                        else:
+                            target_key = relative_file_path
+                        
+                        logger.info(f"Copying {source_bucket}/{source_key} to {target_bucket}/{target_key}")
+                        
+                        try:
+                            copy_source = {'Bucket': source_bucket, 'Key': source_key}
+                            s3_client.copy_object(
+                                CopySource=copy_source,
+                                Bucket=target_bucket,
+                                Key=target_key
+                            )
+                            copied_count += 1
+                        except Exception as copy_error:
+                            logger.warning(f"Failed to copy {source_key}: {str(copy_error)}")
+                            # Continue with other files instead of failing the entire operation
                     
                     logger.info(f"Successfully copied {copied_count} configuration files")
                     cfnresponse.send(event, context, cfnresponse.SUCCESS, {
@@ -633,6 +634,7 @@ Resources:
       TargetBucket: !Ref ConfigurationBucket
       TargetPrefix: "config_library"
       ConfigLibraryHash: "<CONFIG_LIBRARY_HASH_TOKEN>"
+      FileList: <CONFIG_FILES_LIST_TOKEN>
 
   ##########################################################################
   # Nested stack for selected options

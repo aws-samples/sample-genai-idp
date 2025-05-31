@@ -1,6 +1,7 @@
 # Gen AI Intelligent Document Processing (GenAIIDP)
 
-Copyright © Amazon.com and Affiliates: This deliverable is considered Developed Content as defined in the AWS Service Terms and the SOW between the parties
+Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+SPDX-License-Identifier: MIT-0
 
 ## Table of Contents
 
@@ -9,7 +10,7 @@ Copyright © Amazon.com and Affiliates: This deliverable is considered Developed
 - [Architecture Overview](#architecture-overview)
 - [Quick Start](#quick-start)
   - [Processing Your First Document](#processing-your-first-document)
-  - [Updating an Existing Deployment](#updating-an-existing-deployment)
+- [Updating an Existing Deployment](#updating-an-existing-deployment)
 - [Detailed Documentation](#detailed-documentation)
   - [Core Documentation](#core-documentation)
   - [Processing Patterns](#processing-patterns)
@@ -83,7 +84,7 @@ After deployment, you can quickly process a document and view results:
 
 See the [Deployment Guide](./docs/deployment.md#testing-the-solution) for more detailed testing instructions.
 
-### Updating an Existing Deployment
+## Updating an Existing Deployment
 
 To update an existing GenAIIDP stack to a new version:
 

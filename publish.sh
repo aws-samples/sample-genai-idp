@@ -289,6 +289,27 @@ function build_and_package_template() {
   fi
 }
 
+# Generate list of configuration files for explicit copying
+function generate_config_file_list() {
+  local config_dir="config_library"
+  local file_list=""
+  
+  # Find all files in config_library, excluding .checksum files
+  while IFS= read -r -d '' file; do
+    # Get relative path from config_library directory
+    relative_path="${file#$config_dir/}"
+    # Skip .checksum files
+    if [[ "$relative_path" != ".checksum" && "$relative_path" != *"/.checksum" ]]; then
+      if [[ -n "$file_list" ]]; then
+        file_list="$file_list,"
+      fi
+      file_list="$file_list\"$relative_path\""
+    fi
+  done < <(find "$config_dir" -type f -print0)
+  
+  echo "[$file_list]"
+}
+
 # Upload configuration library to S3
 function upload_config_library() {
   local config_dir="config_library"
@@ -386,8 +407,8 @@ function build_main_template() {
   local BUILD_DATE_TIME=$(date -u +"%Y-%m-%d %H:%M:%S")
   local CONFIG_LIBRARY_HASH=$(calculate_hash "config_library")
   
-  # Define configuration S3 base path
-  local CONFIG_BASE_PATH="s3://${BUCKET}/${PREFIX_AND_VERSION}/config_library"
+  # Generate configuration file list for explicit copying
+  local CONFIG_FILE_LIST=$(generate_config_file_list)
   
   echo "Inline edit main template to replace:"
   echo "   <VERSION> with: $VERSION"
@@ -397,8 +418,8 @@ function build_main_template() {
   echo "   <ARTIFACT_PREFIX_TOKEN> with prefix: $PREFIX_AND_VERSION"
   echo "   <WEBUI_ZIPFILE_TOKEN> with filename: $webui_zipfile"
   echo "   <HASH_TOKEN> with: $HASH"
-  echo "   <CONFIG_BASE_PATH_TOKEN> with: $CONFIG_BASE_PATH"
   echo "   <CONFIG_LIBRARY_HASH_TOKEN> with: $CONFIG_LIBRARY_HASH"
+  echo "   <CONFIG_FILES_LIST_TOKEN> with file list: $CONFIG_FILE_LIST"
   
   # Use a more reliable approach for multiple sed replacements
   sed -e "s|<VERSION>|$VERSION|g" \
@@ -408,8 +429,8 @@ function build_main_template() {
       -e "s|<ARTIFACT_PREFIX_TOKEN>|$PREFIX_AND_VERSION|g" \
       -e "s|<WEBUI_ZIPFILE_TOKEN>|$webui_zipfile|g" \
       -e "s|<HASH_TOKEN>|$HASH|g" \
-      -e "s|<CONFIG_BASE_PATH_TOKEN>|$CONFIG_BASE_PATH|g" \
       -e "s|<CONFIG_LIBRARY_HASH_TOKEN>|$CONFIG_LIBRARY_HASH|g" \
+      -e "s|<CONFIG_FILES_LIST_TOKEN>|$CONFIG_FILE_LIST|g" \
       .aws-sam/packaged.yaml > .aws-sam/${MAIN_TEMPLATE}
   
   # Upload and validate main template
