@@ -72,7 +72,7 @@ After deployment, you can quickly process a document and view results:
 
 2. **Use Sample Documents**:
    - For Pattern 1 (BDA): Use `samples/lending_package.pdf`
-   - For Patterns 2 and 3: Use `samples/insurance_package.pdf` 
+   - For Patterns 2 and 3: Use `samples/rvl_cdip_package.pdf` 
 
 3. **Monitor Processing**:
    - **Via Web UI**: Track document status on the dashboard
