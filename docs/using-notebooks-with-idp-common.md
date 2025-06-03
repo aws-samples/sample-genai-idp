@@ -25,7 +25,7 @@ This guide provides detailed instructions on how to use existing notebooks and c
   - [Document Classification](#document-classification)
   - [Information Extraction](#information-extraction)
   - [Evaluation](#evaluation)
-  - [Business Document Analysis (BDA)](#business-document-analysis-bda)
+  - [Bedrock Data Automation (BDA)](#business-document-analysis-bda)
 - [Tips and Troubleshooting](#tips-and-troubleshooting)
 - [Advanced Topics](#advanced-topics)
   - [Working with Custom Models](#working-with-custom-models)
@@ -121,7 +121,7 @@ The IDP Accelerator provides several example notebooks:
 | `test_few_shot_extraction.ipynb` | Demonstrates few-shot learning for information extraction |
 | `bedrock_client_test.ipynb` | Test notebook for the Bedrock client |
 | `bedrock_client_cachepoint_test.ipynb` | Test notebook for the Bedrock client with caching functionality |
-| `bda/kie-bda-happy-path.ipynb` | Example using Business Document Analysis (BDA) for key information extraction |
+| `bda/kie-bda-happy-path.ipynb` | Example using Bedrock Data Automation (BDA) for key information extraction |
 
 ### Running Example Notebooks
 
@@ -475,9 +475,9 @@ print(f"Evaluation report: {document.evaluation_report_uri}")
 print(f"Overall metrics: {document.evaluation_result.overall_metrics}")
 ```
 
-### Business Document Analysis (BDA)
+### Bedrock Data Automation (BDA)
 
-The IDP Common Library provides integration with Amazon Textract's Business Document Analysis (BDA) capabilities, which offers built-in extraction for common business document types like invoices, receipts, and more.
+The IDP Common Library provides integration with Amazon Bedrock Data Automation (BDA) capabilities, which offers built-in extraction for common business document types like invoices, receipts, and more.
 
 Example for using BDA for key information extraction:
 

@@ -493,6 +493,9 @@ check_parameters
 check_prerequisites
 setup_artifacts_bucket
 
+echo "Delete temp files in ./lib"
+rm -fr ./lib/build ./lib/idp_common_pkg/idp_common.egg-info
+
 # Build nested templates
 for dir in patterns/* options/*; do
   build_and_package_template "$dir"

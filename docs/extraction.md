@@ -72,6 +72,160 @@ extraction:
 
 The extraction service parses the JSON response and makes it available for downstream processing.
 
+## Image Placement with {DOCUMENT_IMAGE} Placeholder
+
+The extraction service supports precise control over where document images are positioned within your extraction prompts using the `{DOCUMENT_IMAGE}` placeholder. This feature allows you to specify exactly where images should appear in your prompt template, enabling better multimodal extraction by strategically positioning visual content relative to text instructions.
+
+### How {DOCUMENT_IMAGE} Works
+
+**Without Placeholder (Default Behavior):**
+```yaml
+extraction:
+  task_prompt: |
+    Extract the following fields from this {DOCUMENT_CLASS} document:
+    
+    {ATTRIBUTE_NAMES_AND_DESCRIPTIONS}
+    
+    Document text:
+    {DOCUMENT_TEXT}
+    
+    Respond with valid JSON.
+```
+Images are automatically appended after the text content.
+
+**With Placeholder (Controlled Placement):**
+```yaml
+extraction:
+  task_prompt: |
+    Extract the following fields from this {DOCUMENT_CLASS} document:
+    
+    {ATTRIBUTE_NAMES_AND_DESCRIPTIONS}
+    
+    Examine this document image:
+    {DOCUMENT_IMAGE}
+    
+    Text content:
+    {DOCUMENT_TEXT}
+    
+    Respond with valid JSON containing the extracted values.
+```
+Images are inserted exactly where `{DOCUMENT_IMAGE}` appears in the prompt.
+
+### Usage Examples
+
+**Visual-First Extraction:**
+```yaml
+task_prompt: |
+  You are extracting data from a {DOCUMENT_CLASS}. Here are the fields to find:
+  {ATTRIBUTE_NAMES_AND_DESCRIPTIONS}
+  
+  First, examine the document layout and visual structure:
+  {DOCUMENT_IMAGE}
+  
+  Now analyze the extracted text:
+  {DOCUMENT_TEXT}
+  
+  Extract the requested fields as JSON:
+```
+
+**Image for Context and Verification:**
+```yaml
+task_prompt: |
+  Extract these fields from a {DOCUMENT_CLASS}:
+  {ATTRIBUTE_NAMES_AND_DESCRIPTIONS}
+  
+  Document text (may contain OCR errors):
+  {DOCUMENT_TEXT}
+  
+  Use this image to verify and correct any unclear information:
+  {DOCUMENT_IMAGE}
+  
+  Extracted data (JSON format):
+```
+
+**Mixed Content Analysis:**
+```yaml
+task_prompt: |
+  You are processing a {DOCUMENT_CLASS} that may contain both text and visual elements like tables, stamps, or signatures.
+  
+  Target fields: {ATTRIBUTE_NAMES_AND_DESCRIPTIONS}
+  
+  Document image (shows full layout):
+  {DOCUMENT_IMAGE}
+  
+  Extracted text (may miss visual-only elements):
+  {DOCUMENT_TEXT}
+  
+  Extract all available information as JSON:
+```
+
+### Integration with Few-Shot Examples
+
+The `{DOCUMENT_IMAGE}` placeholder works seamlessly with few-shot examples:
+
+```yaml
+extraction:
+  task_prompt: |
+    Extract fields from {DOCUMENT_CLASS} documents. Here are examples:
+    
+    {FEW_SHOT_EXAMPLES}
+    
+    Now process this new document:
+    
+    Visual layout:
+    {DOCUMENT_IMAGE}
+    
+    Text content:
+    {DOCUMENT_TEXT}
+    
+    Fields to extract: {ATTRIBUTE_NAMES_AND_DESCRIPTIONS}
+    
+    JSON response:
+```
+
+### Benefits for Extraction
+
+- **🎯 Enhanced Accuracy**: Visual context helps identify field locations and correct OCR errors
+- **📊 Table and Form Handling**: Better extraction from structured layouts like tables and forms
+- **✍️ Handwritten Content**: Improved handling of signatures, handwritten notes, and annotations
+- **🖼️ Visual-Only Elements**: Extract information from stamps, logos, checkboxes, and visual indicators
+- **🔍 Verification**: Use images to verify and correct text extraction results
+- **📱 Layout Understanding**: Better comprehension of document structure and field relationships
+
+### Multi-Page Document Handling
+
+For documents with multiple pages, the system provides robust image management:
+
+- **Automatic Pagination**: Images are processed in page order
+- **Bedrock Compliance**: Maximum 20 images per request (automatically enforced)
+- **Smart Truncation**: Excess images are dropped with warning logs
+- **Performance Optimization**: Large image sets are efficiently handled
+
+```yaml
+# Example configuration for multi-page invoices
+extraction:
+  task_prompt: |
+    Extract data from this multi-page {DOCUMENT_CLASS}:
+    
+    {ATTRIBUTE_NAMES_AND_DESCRIPTIONS}
+    
+    Document pages (up to 20 images):
+    {DOCUMENT_IMAGE}
+    
+    Combined text from all pages:
+    {DOCUMENT_TEXT}
+    
+    Return JSON with extracted fields:
+```
+
+### Best Practices for Image Placement
+
+1. **Place Images Before Complex Instructions**: Show the document before giving detailed extraction rules
+2. **Use Images for Verification**: Position images after text to help verify and correct extractions
+3. **Leverage Visual Context**: Use images when extracting from tables, forms, or structured layouts
+4. **Handle OCR Limitations**: Use images to fill gaps where OCR may miss visual-only content
+5. **Consider Document Types**: Different document types benefit from different image placement strategies
+
 ## Using CachePoint for Extraction
 
 CachePoint is a feature of select Bedrock models that caches partial computations to improve performance and reduce costs. When used with extraction, it provides:

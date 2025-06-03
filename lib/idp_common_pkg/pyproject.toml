@@ -7,7 +7,7 @@ where = ["."]
 
 [project]
 name = "idp_common"
-version = "0.2.21"
+version = "0.3.1"
 description = "Common utilities for GenAI IDP Accelerator patterns"
 authors = [
     {name = "AWS", email = "noreply@amazon.com"}

@@ -48,7 +48,7 @@ extras_require = {
 
 setup(
     name="idp_common",
-    version="0.2.21",
+    version="0.3.1",
     packages=find_packages(),
     include_package_data=True,
     python_requires=">=3.8",

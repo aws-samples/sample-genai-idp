@@ -104,47 +104,83 @@ class ExtractionService:
 
         return format_prompt(prompt_template, substitutions, required_placeholders)
 
-    def _build_content_with_few_shot_examples(
+    def _build_content_with_or_without_image_placeholder(
         self,
-        task_prompt_template: str,
+        prompt_template: str,
         document_text: str,
         class_label: str,
         attribute_descriptions: str,
+        image_content: Any = None,
     ) -> List[Dict[str, Any]]:
         """
-        Build content array with few-shot examples inserted at the FEW_SHOT_EXAMPLES placeholder.
+        Build content array, automatically deciding whether to use image placeholder processing.
 
         Args:
-            task_prompt_template: The task prompt template containing {FEW_SHOT_EXAMPLES}
+            prompt_template: The prompt template that may contain {DOCUMENT_IMAGE}
             document_text: The document text content
             class_label: The document class label
             attribute_descriptions: Formatted attribute names and descriptions
+            image_content: Optional image content to insert
 
         Returns:
             List of content items with text and image content properly ordered
         """
-        # Split the task prompt at the FEW_SHOT_EXAMPLES placeholder
-        parts = task_prompt_template.split("{FEW_SHOT_EXAMPLES}")
+        if "{DOCUMENT_IMAGE}" in prompt_template:
+            return self._build_content_with_image_placeholder(
+                prompt_template,
+                document_text,
+                class_label,
+                attribute_descriptions,
+                image_content,
+            )
+        else:
+            return self._build_content_without_image_placeholder(
+                prompt_template,
+                document_text,
+                class_label,
+                attribute_descriptions,
+                image_content,
+            )
+
+    def _build_content_with_image_placeholder(
+        self,
+        prompt_template: str,
+        document_text: str,
+        class_label: str,
+        attribute_descriptions: str,
+        image_content: Any = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Build content array with image inserted at DOCUMENT_IMAGE placeholder if present.
+
+        Args:
+            prompt_template: The prompt template that may contain {DOCUMENT_IMAGE}
+            document_text: The document text content
+            class_label: The document class label
+            attribute_descriptions: Formatted attribute names and descriptions
+            image_content: Optional image content to insert
+
+        Returns:
+            List of content items with text and image content properly ordered
+        """
+        # Split the prompt at the DOCUMENT_IMAGE placeholder
+        parts = prompt_template.split("{DOCUMENT_IMAGE}")
 
         if len(parts) != 2:
-            # Fallback to regular prompt processing if placeholder not found or malformed
-            task_prompt = self._prepare_prompt_from_template(
-                task_prompt_template,
-                {
-                    "DOCUMENT_TEXT": document_text,
-                    "DOCUMENT_CLASS": class_label,
-                    "ATTRIBUTE_NAMES_AND_DESCRIPTIONS": attribute_descriptions,
-                },
-                required_placeholders=[
-                    "DOCUMENT_TEXT",
-                    "DOCUMENT_CLASS",
-                    "ATTRIBUTE_NAMES_AND_DESCRIPTIONS",
-                ],
+            logger.warning(
+                "Invalid DOCUMENT_IMAGE placeholder usage, falling back to standard processing"
             )
-            return [{"text": task_prompt}]
+            # Fallback to standard processing
+            return self._build_content_without_image_placeholder(
+                prompt_template,
+                document_text,
+                class_label,
+                attribute_descriptions,
+                image_content,
+            )
 
-        # Replace other placeholders in the prompt parts
-        before_examples = self._prepare_prompt_from_template(
+        # Process the parts before and after the image placeholder
+        before_image = self._prepare_prompt_from_template(
             parts[0],
             {
                 "DOCUMENT_TEXT": document_text,
@@ -154,7 +190,7 @@ class ExtractionService:
             required_placeholders=[],  # Don't enforce required placeholders for partial templates
         )
 
-        after_examples = self._prepare_prompt_from_template(
+        after_image = self._prepare_prompt_from_template(
             parts[1],
             {
                 "DOCUMENT_TEXT": document_text,
@@ -164,20 +200,165 @@ class ExtractionService:
             required_placeholders=[],  # Don't enforce required placeholders for partial templates
         )
 
+        # Build content array with image in the middle
+        content = []
+
+        # Add the part before the image
+        if before_image.strip():
+            content.append({"text": before_image})
+
+        # Add the image if available
+        if image_content:
+            if isinstance(image_content, list):
+                # Multiple images (limit to 20 as per Bedrock constraints)
+                if len(image_content) > 20:
+                    logger.warning(
+                        f"Found {len(image_content)} images, truncating to 20 due to Bedrock constraints. "
+                        f"{len(image_content) - 20} images will be dropped."
+                    )
+                for img in image_content[:20]:
+                    content.append(image.prepare_bedrock_image_attachment(img))
+            else:
+                # Single image
+                content.append(image.prepare_bedrock_image_attachment(image_content))
+
+        # Add the part after the image
+        if after_image.strip():
+            content.append({"text": after_image})
+
+        return content
+
+    def _build_content_without_image_placeholder(
+        self,
+        prompt_template: str,
+        document_text: str,
+        class_label: str,
+        attribute_descriptions: str,
+        image_content: Any = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Build content array without DOCUMENT_IMAGE placeholder (standard processing).
+
+        Args:
+            prompt_template: The prompt template
+            document_text: The document text content
+            class_label: The document class label
+            attribute_descriptions: Formatted attribute names and descriptions
+            image_content: Optional image content to append at the end
+
+        Returns:
+            List of content items with text and image content
+        """
+        # Prepare the full prompt
+        task_prompt = self._prepare_prompt_from_template(
+            prompt_template,
+            {
+                "DOCUMENT_TEXT": document_text,
+                "DOCUMENT_CLASS": class_label,
+                "ATTRIBUTE_NAMES_AND_DESCRIPTIONS": attribute_descriptions,
+            },
+            required_placeholders=[],
+        )
+
+        content = [{"text": task_prompt}]
+
+        # Add image at the end if available
+        if image_content:
+            if isinstance(image_content, list):
+                # Multiple images (limit to 20 as per Bedrock constraints)
+                if len(image_content) > 20:
+                    logger.warning(
+                        f"Found {len(image_content)} images, truncating to 20 due to Bedrock constraints. "
+                        f"{len(image_content) - 20} images will be dropped."
+                    )
+                for img in image_content[:20]:
+                    content.append(image.prepare_bedrock_image_attachment(img))
+            else:
+                # Single image
+                content.append(image.prepare_bedrock_image_attachment(image_content))
+
+        return content
+
+    def _build_content_with_few_shot_examples(
+        self,
+        task_prompt_template: str,
+        document_text: str,
+        class_label: str,
+        attribute_descriptions: str,
+        image_content: Any = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Build content array with few-shot examples inserted at the FEW_SHOT_EXAMPLES placeholder.
+        Also supports DOCUMENT_IMAGE placeholder for image positioning.
+
+        Args:
+            task_prompt_template: The task prompt template containing {FEW_SHOT_EXAMPLES}
+            document_text: The document text content
+            class_label: The document class label
+            attribute_descriptions: Formatted attribute names and descriptions
+            image_content: Optional image content to insert
+
+        Returns:
+            List of content items with text and image content properly ordered
+        """
+        # Split the task prompt at the FEW_SHOT_EXAMPLES placeholder
+        parts = task_prompt_template.split("{FEW_SHOT_EXAMPLES}")
+
+        if len(parts) != 2:
+            # Fallback to regular prompt processing if placeholder not found or malformed
+            return self._build_content_with_or_without_image_placeholder(
+                task_prompt_template,
+                document_text,
+                class_label,
+                attribute_descriptions,
+                image_content,
+            )
+
+        # Process each part using the unified function
+        before_examples_content = self._build_content_with_or_without_image_placeholder(
+            parts[0], document_text, class_label, attribute_descriptions, image_content
+        )
+
+        # Only pass image_content if it wasn't already used in the first part
+        image_for_second_part = (
+            None if "{DOCUMENT_IMAGE}" in parts[0] else image_content
+        )
+        after_examples_content = self._build_content_with_or_without_image_placeholder(
+            parts[1],
+            document_text,
+            class_label,
+            attribute_descriptions,
+            image_for_second_part,
+        )
+
         # Build content array
         content = []
 
-        # Add the part before examples
-        if before_examples.strip():
-            content.append({"text": before_examples})
+        # Add the part before examples (may include image if DOCUMENT_IMAGE was in the first part)
+        content.extend(before_examples_content)
 
         # Add few-shot examples from config for this specific class
         examples_content = self._build_few_shot_examples_content(class_label)
         content.extend(examples_content)
 
-        # Add the part after examples
-        if after_examples.strip():
-            content.append({"text": after_examples})
+        # Add the part after examples (may include image if DOCUMENT_IMAGE was in the second part)
+        content.extend(after_examples_content)
+
+        # If no DOCUMENT_IMAGE placeholder was found in either part and we have image content,
+        # append it at the end (fallback behavior)
+        if image_content and "{DOCUMENT_IMAGE}" not in task_prompt_template:
+            if isinstance(image_content, list):
+                # Multiple images (limit to 20 as per Bedrock constraints)
+                if len(image_content) > 20:
+                    logger.warning(
+                        f"Found {len(image_content)} images, truncating to 20 due to Bedrock constraints. "
+                        f"{len(image_content) - 20} images will be dropped."
+                    )
+                for img in image_content[:20]:
+                    content.append(image.prepare_bedrock_image_attachment(img))
+            else:
+                # Single image
+                content.append(image.prepare_bedrock_image_attachment(image_content))
 
         return content
 
@@ -454,6 +635,15 @@ class ExtractionService:
                 Respond with a JSON object containing each field name and its extracted value.
                 """
                 content = [{"text": task_prompt}]
+
+                # Add image attachments to the content (limit to 20 images as per Bedrock constraints)
+                if page_images:
+                    logger.info(
+                        f"Attaching images to prompt, for {len(page_images)} pages."
+                    )
+                    # Limit to 20 images as per Bedrock constraints
+                    for img in page_images[:20]:
+                        content.append(image.prepare_bedrock_image_attachment(img))
             else:
                 # Check if task prompt contains FEW_SHOT_EXAMPLES placeholder
                 if "{FEW_SHOT_EXAMPLES}" in prompt_template:
@@ -462,26 +652,18 @@ class ExtractionService:
                         document_text,
                         class_label,
                         attribute_descriptions,
+                        page_images,  # Pass images to the content builder
                     )
                 else:
-                    # Use the common format_prompt function from bedrock
-                    from idp_common.bedrock import format_prompt
-
+                    # Use the unified content builder for DOCUMENT_IMAGE placeholder support
                     try:
-                        task_prompt = format_prompt(
+                        content = self._build_content_with_or_without_image_placeholder(
                             prompt_template,
-                            {
-                                "DOCUMENT_TEXT": document_text,
-                                "DOCUMENT_CLASS": class_label,
-                                "ATTRIBUTE_NAMES_AND_DESCRIPTIONS": attribute_descriptions,
-                            },
-                            required_placeholders=[
-                                "DOCUMENT_TEXT",
-                                "DOCUMENT_CLASS",
-                                "ATTRIBUTE_NAMES_AND_DESCRIPTIONS",
-                            ],
+                            document_text,
+                            class_label,
+                            attribute_descriptions,
+                            page_images,  # Pass images to the content builder
                         )
-                        content = [{"text": task_prompt}]
                     except ValueError as e:
                         logger.warning(
                             f"Error formatting prompt template: {str(e)}. Using default prompt."
@@ -499,14 +681,16 @@ class ExtractionService:
                         """
                         content = [{"text": task_prompt}]
 
-            # Add image attachments to the content (limit to 20 images as per Bedrock constraints)
-            if page_images:
-                logger.info(
-                    f"Attaching images to prompt, for {len(page_images)} pages."
-                )
-                # Limit to 20 images as per Bedrock constraints
-                for img in page_images[:20]:
-                    content.append(image.prepare_bedrock_image_attachment(img))
+                        # Add image attachments for fallback case
+                        if page_images:
+                            logger.info(
+                                f"Attaching images to prompt, for {len(page_images)} pages."
+                            )
+                            # Limit to 20 images as per Bedrock constraints
+                            for img in page_images[:20]:
+                                content.append(
+                                    image.prepare_bedrock_image_attachment(img)
+                                )
 
             logger.info(
                 f"Extracting fields for {class_label} document, section {section_id}"

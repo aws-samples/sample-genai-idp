@@ -612,6 +612,21 @@ classes:
     description: >-
       A bank statement document containing account information, transactions,
       and financial details
+    attributes:
+      - name: account_holder_name
+        description: >-
+          The name of the account holder.
+      - name: account_name
+        description: >-
+          The name or type of the bank account.
+      - name: account_number
+        description: >-
+          The unique identifier for the bank account. Look for text following
+          'account number', 'account id', or 'account identifier'.
+      - name: transactions
+        description: >-
+          The list of transactions on the account. Look for text following
+          'transactions', 'transaction history', or 'transaction details'.
     examples:
       - classPrompt: Here are example images for each page of a 3 page 'bank-statement '
         name: BankStatement1
@@ -657,22 +672,32 @@ classification:
     {CLASS_NAMES_AND_DESCRIPTIONS}
 
 
-    Respond only with a JSON object containing the class label. For example:
-    {{"class": "letter"}}
-
-    <few_shot_examples>
+    <few_shot_examples> 
 
     {FEW_SHOT_EXAMPLES}
 
     </few_shot_examples>
 
+
     <<CACHEPOINT>>
 
-    <document_ocr_data>
 
-    {DOCUMENT_TEXT}
+    <document_ocr_data> 
+
+    {DOCUMENT_TEXT} 
 
     </document_ocr_data>
+
+
+    <document_image> 
+
+    {DOCUMENT_IMAGE} 
+
+    </document_image>
+
+
+    Respond only with a JSON object containing the class label. For example:
+    {{"class": "letter"}}
 extraction:
   model: us.amazon.nova-pro-v1:0
   temperature: '0.0'
@@ -685,45 +710,49 @@ extraction:
   task_prompt: >
     <background>
 
-    You are an expert in business document analysis and information extraction. 
+    You are an expert in document analysis and information extraction. 
+    You can understand and extract key information from documents classified as type 
 
-    You can understand and extract key information from business documents. 
+    {DOCUMENT_CLASS}.
+
+    </background>
+
 
     <task>
 
-    Your task is to take the unstructured text provided and convert it into a
+    Your task is to take the unstructured text provided and convert it into a well-organized table format using JSON. Identify the main entities, attributes, or categories mentioned in the attributes list below and use them as keys in the JSON object. 
+    Then, extract the relevant information from the text and populate the corresponding values in the JSON object.
 
-    well-organized table format using JSON. Identify the main entities,
+    </task>
 
-    attributes, or categories mentioned in the attributes list below and use
 
-    them as keys in the JSON object. 
-
-    Then, extract the relevant information from the text and populate the
-
-    corresponding values in the JSON object. 
+    <extraction-guidelines>
 
     Guidelines:
+        1. Ensure that the data is accurately represented and properly formatted within
+        the JSON structure
+        2. Include double quotes around all keys and values
+        3. Do not make up data - only extract information explicitly found in the
+        document
+        4. Do not use /n for new lines, use a space instead
+        5. If a field is not found or if unsure, return null
+        6. All dates should be in MM/DD/YYYY format
+        7. Do not perform calculations or summations unless totals are explicitly given
+        8. If an alias is not found in the document, return null
+        9. Guidelines for checkboxes:
+         9.A. CAREFULLY examine each checkbox, radio button, and selection field:
+            - Look for marks like ✓, ✗, x, filled circles (●), darkened areas, or handwritten checks indicating selection
+            - For checkboxes and multi-select fields, ONLY INCLUDE options that show clear visual evidence of selection
+            - DO NOT list options that have no visible selection mark
+         9.B. For ambiguous or overlapping tick marks:
+            - If a mark overlaps between two or more checkboxes, determine which option contains the majority of the mark
+            - Consider a checkbox selected if the mark is primarily inside the check box or over the option text
+            - When a mark touches multiple options, analyze which option was most likely intended based on position and density. For handwritten checks, the mark typically flows from the selected checkbox outward.
+            - Carefully analyze visual cues and contextual hints. Think from a human perspective, anticipate natural tendencies, and apply thoughtful reasoning to make the best possible judgment.
+        10. Think step by step first and then answer.
 
-    Ensure that the data is accurately represented and properly formatted within
-    the JSON structure
+    </extraction-guidelines>
 
-    Include double quotes around all keys and values
-
-    Do not make up data - only extract information explicitly found in the
-    document
-
-    Do not use /n for new lines, use a space instead
-
-    If a field is not found or if unsure, return null
-
-    All dates should be in MM/DD/YYYY format
-
-    Do not perform calculations or summations unless totals are explicitly given
-
-    If an alias is not found in the document, return null
-
-    Here are the attributes you should extract:
 
     <attributes>
 
@@ -731,25 +760,36 @@ extraction:
 
     </attributes>
 
-    <few_shot_examples>
 
-    {FEW_SHOT_EXAMPLES}
+    <<CACHEPOINT>>
 
-    </few_shot_examples>
 
-    </task>
-
-    </background>
-
-    <<CACHEPOINT>>  
-
-    The document tpe is {DOCUMENT_CLASS}. Here is the document content:
-
-    <document_ocr_data>
+    <document-text>
 
     {DOCUMENT_TEXT}
 
-    </document_ocr_data>
+    </document-text>
+  
+
+    <document_image>
+
+    {DOCUMENT_IMAGE}
+
+    </document_image>
+
+
+    <final-instructions>
+
+    Extract key information from the document and return a JSON object with the following key steps:
+    1. Carefully analyze the document text to identify the requested attributes
+    2. Extract only information explicitly found in the document - never make up data
+    3. Format all dates as MM/DD/YYYY and replace newlines with spaces
+    4. For checkboxes, only include options with clear visual selection marks
+    5. Use null for any fields not found in the document
+    6. Ensure the output is properly formatted JSON with quoted keys and values
+    7. Think step by step before finalizing your answer
+
+    </final-instructions>
 pricing:
   - name: textract/detect_document_text
     units:

@@ -293,8 +293,9 @@ Using few shot examples provides several advantages:
 
 ### Integration with Template Prompts
 
-The few shot examples are automatically integrated into the classification and extraction prompts using the `{FEW_SHOT_EXAMPLES}` placeholder:
+The few shot examples are automatically integrated into the classification and extraction prompts using the `{FEW_SHOT_EXAMPLES}` placeholder. You can also use the `{DOCUMENT_IMAGE}` placeholder for precise image positioning:
 
+**Standard Template with Text Only:**
 ```python
 # In classification task_prompt
 task_prompt: |
@@ -317,10 +318,67 @@ task_prompt: |
   {FEW_SHOT_EXAMPLES}
   </few_shot_examples>
   
+  
   <document_ocr_data>
   {DOCUMENT_TEXT}
   </document_ocr_data>
 ```
+
+**Enhanced Template with Image Placement:**
+```python
+# In classification task_prompt with image positioning
+task_prompt: |
+  Classify this document into exactly one of these categories:
+  {CLASS_NAMES_AND_DESCRIPTIONS}
+  
+  <few_shot_examples>
+  {FEW_SHOT_EXAMPLES}
+  </few_shot_examples>
+  
+  Now examine this new document:
+  {DOCUMENT_IMAGE}
+  
+  <document_ocr_data>
+  {DOCUMENT_TEXT}
+  </document_ocr_data>
+  
+  Classification:
+
+# In extraction task_prompt with image positioning
+task_prompt: |
+  Extract attributes from this {DOCUMENT_CLASS} document:
+  {ATTRIBUTE_NAMES_AND_DESCRIPTIONS}
+  
+  <few_shot_examples>
+  {FEW_SHOT_EXAMPLES}
+  </few_shot_examples>
+  
+  Analyze this document image:
+  {DOCUMENT_IMAGE}
+  
+  <document_ocr_data>
+  {DOCUMENT_TEXT}
+  </document_ocr_data>
+  
+  Extract as JSON:
+```
+
+### Available Template Placeholders
+
+Pattern 2 supports several placeholders for building dynamic prompts:
+
+- **`{CLASS_NAMES_AND_DESCRIPTIONS}`**: List of document classes and their descriptions
+- **`{FEW_SHOT_EXAMPLES}`**: Examples from the configuration (class-specific for extraction, all classes for classification)
+- **`{DOCUMENT_TEXT}`**: OCR-extracted text content from the document
+- **`{DOCUMENT_IMAGE}`**: Document image(s) positioned at specific locations in the prompt
+- **`{DOCUMENT_CLASS}`**: The classified document type (used in extraction prompts)
+- **`{ATTRIBUTE_NAMES_AND_DESCRIPTIONS}`**: List of attributes to extract with their descriptions
+
+**Image Placement Benefits:**
+- **Visual Context**: Position images where they provide maximum context for the task
+- **Multimodal Understanding**: Help models correlate visual and textual information effectively
+- **Flexible Design**: Create prompts that flow naturally between different content types
+- **Enhanced Accuracy**: Strategic image placement can improve both classification and extraction performance
 
 ### Using Few Shot Examples
 

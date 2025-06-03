@@ -277,7 +277,7 @@ Resources:
                 order: 7
               task_prompt:
                 type: string
-                description: Task prompt - include placeholders {CLASS_NAMES_AND_DESCRIPTIONS} (replaced with the class names and descriptions for all specified classes), {FEW_SHOT_EXAMPLES} (replaced by classPrompt and image data from examples in class definitions), {DOCUMENT_TEXT} (replaced by the OCR output). Optionally use <<CACHEPOINT>> to separate static and dynamic elements of prompt for Bedrock prompt caching.
+                description: Task prompt - include placeholders {CLASS_NAMES_AND_DESCRIPTIONS} (replaced with the class names and descriptions for all specified classes), {FEW_SHOT_EXAMPLES} (replaced by classPrompt and image data from examples in class definitions), {DOCUMENT_TEXT} (replaced by the OCR output), and for multi-modal classification {DOCUMENT_IMAGE} (replaced by the page image attachment). Optionally use <<CACHEPOINT>> to separate static and dynamic elements of prompt for Bedrock prompt caching.
                 order: 8
           extraction:
             order: 4
@@ -323,7 +323,7 @@ Resources:
                 order: 6
               task_prompt:
                 type: string
-                description: Task prompt - supports placeholders {DOCUMENT_CLASS} (replaced with the detected class label), {ATTRIBUTE_NAMES_AND_DESCRIPTIONS} (replaced with the attribute names and descriptions for the detected class), {FEW_SHOT_EXAMPLES} (replaced by classPrompt and image data from examples in class definitions), and {DOCUMENT_TEXT} (replaced by the OCR output). Optionally use <<CACHEPOINT>> to separate static and dynamic elements of prompt for Bedrock prompt caching.
+                description: Task prompt - supports placeholders {DOCUMENT_CLASS} (replaced with the detected class label), {ATTRIBUTE_NAMES_AND_DESCRIPTIONS} (replaced with the attribute names and descriptions for the detected class), {FEW_SHOT_EXAMPLES} (replaced by classPrompt and image data from examples in class definitions), {DOCUMENT_TEXT} (replaced by the OCR output), and {DOCUMENT_IMAGE} (replaced by the page image attachments for each page). Optionally use <<CACHEPOINT>> to separate static and dynamic elements of prompt for Bedrock prompt caching.
                 order: 7
           evaluation:
             order: 5

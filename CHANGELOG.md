@@ -5,6 +5,23 @@ SPDX-License-Identifier: MIT-0
 
 ## [Unreleased]
 
+## [0.3.1]
+
+### Added
+
+- **{DOCUMENT_IMAGE} Placeholder Support in Pattern-2**
+  - Added new `{DOCUMENT_IMAGE}` placeholder for precise image positioning in classification and extraction prompts
+  - Enables strategic placement of document images within prompt templates for enhanced multimodal understanding
+  - Supports both single images and multi-page documents (up to 20 images per Bedrock constraints)
+  - Full backward compatibility - existing prompts without placeholder continue to work unchanged
+  - Seamless integration with existing `{FEW_SHOT_EXAMPLES}` functionality
+  - Added warning logging when image limits are exceeded to help with debugging
+  - Enhanced documentation across classification.md, extraction.md, few-shot-examples.md, and pattern-2.md
+
+### Fixed
+- When encountering excessive Bedrock throttling, service returned 'unclassified' instead of retrying, when using multi-modal page level classification method.
+- Minor documentation issues.
+
 ## [0.3.0]
 
 ### Added

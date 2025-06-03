@@ -11,7 +11,7 @@ The solution supports multiple classification approaches that vary by pattern:
 
 ### Pattern 1: BDA-Based Classification
 
-- Classification is performed by the BDA (Business Document Analysis) project configuration
+- Classification is performed by the BDA (Bedrock Data Automation) project configuration
 - Uses BDA blueprints to define classification rules
 - Not configurable inside the GenAIIDP solution itself
 - Configuration happens at the BDA project level
@@ -196,6 +196,103 @@ You can define custom document classes through the Web UI configuration:
    - Display name (human-readable name)
    - Detailed description (to guide the classification model)
 5. Save changes
+
+## Image Placement with {DOCUMENT_IMAGE} Placeholder
+
+Pattern 2 supports precise control over where document images are positioned within your classification prompts using the `{DOCUMENT_IMAGE}` placeholder. This feature allows you to specify exactly where images should appear in your prompt template, rather than having them automatically appended at the end.
+
+### How {DOCUMENT_IMAGE} Works
+
+**Without Placeholder (Default Behavior):**
+```yaml
+classification:
+  task_prompt: |
+    Analyze this document:
+    
+    {DOCUMENT_TEXT}
+    
+    Classify it as one of: {CLASS_NAMES_AND_DESCRIPTIONS}
+```
+Images are automatically appended after the text content.
+
+**With Placeholder (Controlled Placement):**
+```yaml
+classification:
+  task_prompt: |
+    Analyze this document:
+    
+    {DOCUMENT_IMAGE}
+    
+    Text content: {DOCUMENT_TEXT}
+    
+    Classify it as one of: {CLASS_NAMES_AND_DESCRIPTIONS}
+```
+Images are inserted exactly where `{DOCUMENT_IMAGE}` appears in the prompt.
+
+### Usage Examples
+
+**Image Before Text Analysis:**
+```yaml
+task_prompt: |
+  Look at this document image first:
+  
+  {DOCUMENT_IMAGE}
+  
+  Now read the extracted text:
+  {DOCUMENT_TEXT}
+  
+  Based on both the visual layout and text content, classify this document as one of:
+  {CLASS_NAMES_AND_DESCRIPTIONS}
+```
+
+**Image in the Middle for Context:**
+```yaml
+task_prompt: |
+  You are classifying business documents. Here are the possible types:
+  {CLASS_NAMES_AND_DESCRIPTIONS}
+  
+  Examine this document image:
+  {DOCUMENT_IMAGE}
+  
+  Additional text content extracted from the document:
+  {DOCUMENT_TEXT}
+  
+  Classification:
+```
+
+### Integration with Few-Shot Examples
+
+The `{DOCUMENT_IMAGE}` placeholder works seamlessly with few-shot examples:
+
+```yaml
+classification:
+  task_prompt: |
+    Here are examples of each document type:
+    {FEW_SHOT_EXAMPLES}
+    
+    Now classify this new document:
+    {DOCUMENT_IMAGE}
+    
+    Text: {DOCUMENT_TEXT}
+    
+    Classification: {CLASS_NAMES_AND_DESCRIPTIONS}
+```
+
+### Benefits
+
+- **🎯 Contextual Placement**: Position images where they provide maximum context
+- **📱 Better Multimodal Understanding**: Help models correlate visual and textual information
+- **🔄 Flexible Prompt Design**: Create prompts that flow naturally between different content types
+- **⚡ Improved Performance**: Strategic image placement can improve classification accuracy
+- **🔒 Backward Compatible**: Existing prompts without the placeholder continue to work unchanged
+
+### Multi-Page Documents
+
+For documents with multiple pages, the system automatically handles image limits:
+
+- **Bedrock Limit**: Maximum 20 images per request (automatically enforced)
+- **Warning Logging**: System logs warnings when images are truncated due to limits
+- **Smart Handling**: Images are processed in page order, with excess images automatically dropped
 
 ## Setting Up Few Shot Examples in Pattern 2
 

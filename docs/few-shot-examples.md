@@ -337,8 +337,9 @@ classes:
 
 ### Step 4: Update Task Prompts with Cache Points
 
-Ensure your classification and extraction task prompts include the `{FEW_SHOT_EXAMPLES}` placeholder and use `<<CACHEPOINT>>` for optimal performance:
+Ensure your classification and extraction task prompts include the `{FEW_SHOT_EXAMPLES}` placeholder and use `<<CACHEPOINT>>` for optimal performance. You can also use the `{DOCUMENT_IMAGE}` placeholder for precise image positioning:
 
+**Standard Few-Shot Configuration:**
 ```yaml
 classification:
   task_prompt: |
@@ -370,6 +371,49 @@ extraction:
     
     Document content:
     {DOCUMENT_TEXT}
+```
+
+**Enhanced Configuration with Image Placement:**
+```yaml
+classification:
+  task_prompt: |
+    Classify this document into exactly one of these categories:
+    
+    {CLASS_NAMES_AND_DESCRIPTIONS}
+    
+    <few_shot_examples>
+    {FEW_SHOT_EXAMPLES}
+    </few_shot_examples>
+    
+    <<CACHEPOINT>>
+    
+    Now examine this new document:
+    {DOCUMENT_IMAGE}
+    
+    Document text:
+    {DOCUMENT_TEXT}
+    
+    Classification:
+
+extraction:
+  task_prompt: |
+    Extract the following attributes from this {DOCUMENT_CLASS} document:
+    
+    {ATTRIBUTE_NAMES_AND_DESCRIPTIONS}
+    
+    <few_shot_examples>
+    {FEW_SHOT_EXAMPLES}
+    </few_shot_examples>
+    
+    <<CACHEPOINT>>
+    
+    Analyze this document:
+    {DOCUMENT_IMAGE}
+    
+    Text content:
+    {DOCUMENT_TEXT}
+    
+    Extract as JSON:
 ```
 
 **Important**: The `<<CACHEPOINT>>` delimiter separates the static portion of your prompt (classes, few-shot examples) from the dynamic portion (document content). This enables Bedrock prompt caching, significantly reducing costs when processing multiple documents with the same configuration.

@@ -441,17 +441,25 @@ extraction:
   top_k: '5'
   task_prompt: >-
     <background>
+    
     You are an expert in document analysis and information extraction. 
     You can understand and extract key information from documents classified as type 
+
     {DOCUMENT_CLASS}.
+
     </background>
 
+
     <task>
+
     Your task is to take the unstructured text provided and convert it into a well-organized table format using JSON. Identify the main entities, attributes, or categories mentioned in the attributes list below and use them as keys in the JSON object. 
-    Then, extract the relevant information from the text and populate the corresponding values in the JSON object. 
+    Then, extract the relevant information from the text and populate the corresponding values in the JSON object.
+
     </task>
 
+
     <extraction-guidelines>
+
     Guidelines:
         1. Ensure that the data is accurately represented and properly formatted within
         the JSON structure
@@ -474,19 +482,36 @@ extraction:
             - When a mark touches multiple options, analyze which option was most likely intended based on position and density. For handwritten checks, the mark typically flows from the selected checkbox outward.
             - Carefully analyze visual cues and contextual hints. Think from a human perspective, anticipate natural tendencies, and apply thoughtful reasoning to make the best possible judgment.
         10. Think step by step first and then answer.
+
     </extraction-guidelines>
 
+
     <attributes>
+
     {ATTRIBUTE_NAMES_AND_DESCRIPTIONS}
+
     </attributes>
+
 
     <<CACHEPOINT>>
 
+
     <document-text>
+
     {DOCUMENT_TEXT}
+
     </document-text>
+  
+
+    <document_image>
+
+    {DOCUMENT_IMAGE}
+
+    </document_image>
+
 
     <final-instructions>
+
     Extract key information from the document and return a JSON object with the following key steps:
     1. Carefully analyze the document text to identify the requested attributes
     2. Extract only information explicitly found in the document - never make up data
@@ -495,6 +520,7 @@ extraction:
     5. Use null for any fields not found in the document
     6. Ensure the output is properly formatted JSON with quoted keys and values
     7. Think step by step before finalizing your answer
+
     </final-instructions>
   temperature: '0.0'
   model: us.amazon.nova-pro-v1:0

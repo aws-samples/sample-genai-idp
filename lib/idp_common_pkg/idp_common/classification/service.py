@@ -20,7 +20,7 @@ from typing import Any, Dict, List, Optional, Set, Union
 import boto3
 from botocore.exceptions import ClientError
 
-from idp_common import bedrock, s3, utils
+from idp_common import bedrock, image, s3, utils
 from idp_common.classification.models import (
     ClassificationResult,
     DocumentClassification,
@@ -215,19 +215,172 @@ class ClassificationService:
 
         return format_prompt(prompt_template, substitutions, required_placeholders)
 
-    def _build_content_with_few_shot_examples(
+    def _build_content_with_or_without_image_placeholder(
+        self,
+        prompt_template: str,
+        document_text: str,
+        class_names_and_descriptions: str,
+        image_content: Optional[bytes] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Build content array, automatically deciding whether to use image placeholder processing.
+
+        Args:
+            prompt_template: The prompt template that may contain {DOCUMENT_IMAGE}
+            document_text: The document text content
+            class_names_and_descriptions: Formatted class names and descriptions
+            image_content: Optional image content to insert
+
+        Returns:
+            List of content items with text and image content properly ordered
+        """
+        if "{DOCUMENT_IMAGE}" in prompt_template:
+            return self._build_content_with_image_placeholder(
+                prompt_template,
+                document_text,
+                class_names_and_descriptions,
+                image_content,
+            )
+        else:
+            return self._build_content_without_image_placeholder(
+                prompt_template,
+                document_text,
+                class_names_and_descriptions,
+                image_content,
+            )
+
+    def _build_content_with_image_placeholder(
+        self,
+        prompt_template: str,
+        document_text: str,
+        class_names_and_descriptions: str,
+        image_content: Optional[bytes] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Build content array with image inserted at DOCUMENT_IMAGE placeholder if present.
+
+        Args:
+            prompt_template: The prompt template that may contain {DOCUMENT_IMAGE}
+            document_text: The document text content
+            class_names_and_descriptions: Formatted class names and descriptions
+            image_content: Optional image content to insert
+
+        Returns:
+            List of content items with text and image content properly ordered
+        """
+        # Check if DOCUMENT_IMAGE placeholder is present
+        if "{DOCUMENT_IMAGE}" in prompt_template:
+            # Split the prompt at the DOCUMENT_IMAGE placeholder
+            parts = prompt_template.split("{DOCUMENT_IMAGE}")
+
+            if len(parts) != 2:
+                logger.warning(
+                    "Invalid DOCUMENT_IMAGE placeholder usage, falling back to standard processing"
+                )
+                # Fallback to standard processing
+                return self._build_content_without_image_placeholder(
+                    prompt_template,
+                    document_text,
+                    class_names_and_descriptions,
+                    image_content,
+                )
+
+            # Process the parts before and after the image placeholder
+            before_image = self._prepare_prompt_from_template(
+                parts[0],
+                {
+                    "DOCUMENT_TEXT": document_text,
+                    "CLASS_NAMES_AND_DESCRIPTIONS": class_names_and_descriptions,
+                },
+                required_placeholders=[],
+            )
+
+            after_image = self._prepare_prompt_from_template(
+                parts[1],
+                {
+                    "DOCUMENT_TEXT": document_text,
+                    "CLASS_NAMES_AND_DESCRIPTIONS": class_names_and_descriptions,
+                },
+                required_placeholders=[],
+            )
+
+            # Build content array with image in the middle
+            content = []
+
+            # Add the part before the image
+            if before_image.strip():
+                content.append({"text": before_image})
+
+            # Add the image if available
+            if image_content:
+                content.append(image.prepare_bedrock_image_attachment(image_content))
+
+            # Add the part after the image
+            if after_image.strip():
+                content.append({"text": after_image})
+
+            return content
+        else:
+            # No DOCUMENT_IMAGE placeholder, use standard processing
+            return self._build_content_without_image_placeholder(
+                prompt_template,
+                document_text,
+                class_names_and_descriptions,
+                image_content,
+            )
+
+    def _build_content_without_image_placeholder(
+        self,
+        prompt_template: str,
+        document_text: str,
+        class_names_and_descriptions: str,
+        image_content: Optional[bytes] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Build content array without DOCUMENT_IMAGE placeholder (standard processing).
+
+        Args:
+            prompt_template: The prompt template
+            document_text: The document text content
+            class_names_and_descriptions: Formatted class names and descriptions
+            image_content: Optional image content to append at the end
+
+        Returns:
+            List of content items with text and image content
+        """
+        # Prepare the full prompt
+        task_prompt = self._prepare_prompt_from_template(
+            prompt_template,
+            {
+                "DOCUMENT_TEXT": document_text,
+                "CLASS_NAMES_AND_DESCRIPTIONS": class_names_and_descriptions,
+            },
+            required_placeholders=[],
+        )
+
+        content = [{"text": task_prompt}]
+
+        # Add image at the end if available
+        if image_content:
+            content.append(image.prepare_bedrock_image_attachment(image_content))
+
+        return content
+
+    def _build_content(
         self,
         task_prompt_template: str,
         document_text: str,
         class_names_and_descriptions: str,
+        image_content: Optional[bytes] = None,
     ) -> List[Dict[str, Any]]:
         """
-        Build content array with few-shot examples inserted at the FEW_SHOT_EXAMPLES placeholder.
+        Build content array with support for optional FEW_SHOT_EXAMPLES and DOCUMENT_IMAGE placeholders.
 
         Args:
-            task_prompt_template: The task prompt template containing {FEW_SHOT_EXAMPLES}
+            task_prompt_template: The task prompt template that may contain placeholders
             document_text: The document text content
             class_names_and_descriptions: Formatted class names and descriptions
+            image_content: Optional image content to insert
 
         Returns:
             List of content items with text and image content properly ordered
@@ -237,49 +390,38 @@ class ClassificationService:
 
         if len(parts) != 2:
             # Fallback to regular prompt processing if placeholder not found or malformed
-            task_prompt = self._prepare_prompt_from_template(
+            return self._build_content_with_or_without_image_placeholder(
                 task_prompt_template,
-                {
-                    "DOCUMENT_TEXT": document_text,
-                    "CLASS_NAMES_AND_DESCRIPTIONS": class_names_and_descriptions,
-                },
-                required_placeholders=["DOCUMENT_TEXT", "CLASS_NAMES_AND_DESCRIPTIONS"],
+                document_text,
+                class_names_and_descriptions,
+                image_content,
             )
-            return [{"text": task_prompt}]
 
-        # Replace other placeholders in the prompt parts
-        before_examples = self._prepare_prompt_from_template(
-            parts[0],
-            {
-                "DOCUMENT_TEXT": document_text,
-                "CLASS_NAMES_AND_DESCRIPTIONS": class_names_and_descriptions,
-            },
-            required_placeholders=[],  # Don't enforce required placeholders for partial templates
+        # Process both parts
+        before_examples_content = self._build_content_with_or_without_image_placeholder(
+            parts[0], document_text, class_names_and_descriptions, image_content
         )
-
-        after_examples = self._prepare_prompt_from_template(
-            parts[1],
-            {
-                "DOCUMENT_TEXT": document_text,
-                "CLASS_NAMES_AND_DESCRIPTIONS": class_names_and_descriptions,
-            },
-            required_placeholders=[],  # Don't enforce required placeholders for partial templates
+        after_examples_content = self._build_content_with_or_without_image_placeholder(
+            parts[1], document_text, class_names_and_descriptions, image_content
         )
 
         # Build content array
         content = []
 
         # Add the part before examples
-        if before_examples.strip():
-            content.append({"text": before_examples})
+        content.extend(before_examples_content)
 
         # Add few-shot examples from config
         examples_content = self._build_few_shot_examples_content()
         content.extend(examples_content)
 
         # Add the part after examples
-        if after_examples.strip():
-            content.append({"text": after_examples})
+        content.extend(after_examples_content)
+
+        # If no DOCUMENT_IMAGE placeholder was found in either part and we have image content,
+        # append it at the end (fallback behavior)
+        if image_content and "{DOCUMENT_IMAGE}" not in task_prompt_template:
+            content.append(image.prepare_bedrock_image_attachment(image_content))
 
         return content
 
@@ -469,28 +611,13 @@ class ClassificationService:
         # Get classification configuration
         config = self._get_classification_config()
 
-        # Check if task prompt contains FEW_SHOT_EXAMPLES placeholder
-        if "{FEW_SHOT_EXAMPLES}" in config["task_prompt"]:
-            content = self._build_content_with_few_shot_examples(
-                config["task_prompt"], text_content or "", self._format_classes_list()
-            )
-        else:
-            # Use common function to prepare prompt with required placeholder validation
-            task_prompt = self._prepare_prompt_from_template(
-                config["task_prompt"],
-                {
-                    "DOCUMENT_TEXT": text_content or "",
-                    "CLASS_NAMES_AND_DESCRIPTIONS": self._format_classes_list(),
-                },
-                required_placeholders=["DOCUMENT_TEXT", "CLASS_NAMES_AND_DESCRIPTIONS"],
-            )
-            content = [{"text": task_prompt}]
-
-        # Add image if available
-        if image_content:
-            from idp_common import image
-
-            content.append(image.prepare_bedrock_image_attachment(image_content))
+        # Build content with support for placeholders
+        content = self._build_content(
+            config["task_prompt"],
+            text_content or "",
+            self._format_classes_list(),
+            image_content,
+        )
 
         logger.info(f"Classifying page {page_id} with Bedrock")
 
@@ -940,11 +1067,12 @@ class ClassificationService:
                         logger.error(error_msg)
                         with errors_lock:
                             document.errors.append(error_msg)
-
                         # Mark page as unclassified on error
                         if page_id in document.pages:
                             document.pages[page_id].classification = "unclassified"
                             document.pages[page_id].confidence = 0.0
+                        # raise exception to enable client retries
+                        raise
 
             # Group pages into sections only if we have results
             document.sections = []
@@ -996,6 +1124,8 @@ class ClassificationService:
             document = self._update_document_status(
                 document, success=False, error_message=error_msg
             )
+            # raise exception to enable client retries
+            raise
 
         return document
 
@@ -1278,7 +1408,7 @@ class ClassificationService:
                     "DOCUMENT_TEXT": doc_text,
                     "CLASS_NAMES_AND_DESCRIPTIONS": classes_table,
                 },
-                required_placeholders=["DOCUMENT_TEXT", "CLASS_NAMES_AND_DESCRIPTIONS"],
+                required_placeholders=[],
             )
 
             # Invoke Bedrock to get the holistic classification
