@@ -109,6 +109,7 @@ class Document:
 
     # Processing metadata
     metering: Dict[str, Any] = field(default_factory=dict)
+    metadata: Dict[str, Any] = field(default_factory=dict)
     evaluation_status: Optional[str] = None
     evaluation_report_uri: Optional[str] = None
     evaluation_result: Any = None  # Holds the DocumentEvaluationResult object

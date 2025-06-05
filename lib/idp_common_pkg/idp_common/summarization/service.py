@@ -221,6 +221,7 @@ class SummarizationService:
             top_k=config["top_k"],
             top_p=config["top_p"],
             max_tokens=config["max_tokens"],
+            context="Summarization",
         )
 
     def _create_error_summary(self, error_message: str) -> DocumentSummary:

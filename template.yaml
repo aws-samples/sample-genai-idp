@@ -719,6 +719,7 @@ Resources:
         InputBucket: !Ref InputBucket
         ConfigurationBucket: !Ref ConfigurationBucket
         OutputBucket: !Ref OutputBucket
+        TrackingTable: !Ref TrackingTable
         CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
         LogRetentionDays: !Ref LogRetentionDays
         LogLevel: !Ref LogLevel
@@ -749,6 +750,7 @@ Resources:
         InputBucket: !Ref InputBucket
         ConfigurationBucket: !Ref ConfigurationBucket
         OutputBucket: !Ref OutputBucket
+        TrackingTable: !Ref TrackingTable
         CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
         LogRetentionDays: !Ref LogRetentionDays
         LogLevel: !Ref LogLevel
@@ -3605,7 +3607,7 @@ Resources:
             - Effect: Allow
               Action:
                 - lambda:InvokeFunction
-              Resource: !Sub "arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:${AWS::StackName}-CopyToBaselineResolverFunction-*"
+              Resource: !Sub "arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:${AWS::StackName}-CopyToBaseline*"
         # Allow AppSync access for document updates
         - Statement:
             - Effect: Allow

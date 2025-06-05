@@ -74,7 +74,7 @@ classes:
               "signature": "Will E. Clark",
               "cc": null,
               "reference_number": "TNJB 0008497"
-        imagePath: config_library/pattern-2/few_shot_example/example-images/letter1.jpg
+        imagePath: config_library/pattern-2/few_shot_example_with_multimodal_page_classification/example-images/letter1.jpg
       - classPrompt: This is an example of the class 'letter'
         name: Letter2
         attributesPrompt: |-
@@ -89,7 +89,7 @@ classes:
               "signature": "Bill",
               "cc": null,
               "reference_number": null
-        imagePath: config_library/pattern-2/few_shot_example/example-images/letter2.png
+        imagePath: config_library/pattern-2/few_shot_example_with_multimodal_page_classification/example-images/letter2.png
   - name: form
     description: >-
       A structured document with labeled fields, checkboxes, or blanks requiring
@@ -464,7 +464,7 @@ classes:
               "priority": null,
               "thread_id": null,
               "message_id": null
-        imagePath: config_library/pattern-2/few_shot_example/example-images/email1.jpg
+        imagePath: config_library/pattern-2/few_shot_example_with_multimodal_page_classification/example-images/email1.jpg
   - name: questionnaire
     description: >-
       A survey instrument containing numbered questions with multiple choice,
@@ -636,7 +636,7 @@ classes:
               "account_name": ["Checking", "Savings"],
               "account_number": ["003525801543","352580154336"],
               "transactions": [{"Date": "2/6/2020", "Description": "Food Purchase - AnyCompany Restaurant - 1194989245", "Amount": "-171"}]
-        imagePath: config_library/pattern-2/few_shot_example/example-images/bank-statement-pages/
+        imagePath: config_library/pattern-2/few_shot_example_with_multimodal_page_classification/example-images/bank-statement-pages/
 
 classification:
   classificationMethod: multimodalPageLevelClassification
@@ -672,11 +672,11 @@ classification:
     {CLASS_NAMES_AND_DESCRIPTIONS}
 
 
-    <few_shot_examples> 
+    <few_shot_example_with_multimodal_page_classifications> 
 
-    {FEW_SHOT_EXAMPLES}
+    {few_shot_example_with_multimodal_page_classificationS}
 
-    </few_shot_examples>
+    </few_shot_example_with_multimodal_page_classifications>
 
 
     <<CACHEPOINT>>

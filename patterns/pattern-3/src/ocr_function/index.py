@@ -37,6 +37,7 @@ def handler(event, context):
     
     # Update document status to OCR and update in AppSync
     document.status = Status.OCR
+    document.workflow_execution_arn = event.get("execution_arn")
     appsync_service = DocumentAppSyncService()
     logger.info(f"Updating document status to {document.status}")
     appsync_service.update_document(document)

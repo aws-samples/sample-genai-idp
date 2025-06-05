@@ -78,7 +78,8 @@ class BedrockClient:
         top_k: Optional[Union[float, str]] = None,
         top_p: Optional[Union[float, str]] = None,
         max_tokens: Optional[Union[int, str]] = None,
-        max_retries: Optional[int] = None
+        max_retries: Optional[int] = None,
+        context: str = "Unspecified"
     ) -> Dict[str, Any]:
         """
         Make the instance callable with the same signature as the original function.
@@ -109,7 +110,8 @@ class BedrockClient:
             top_k=top_k,
             top_p=top_p,
             max_tokens=max_tokens,
-            max_retries=effective_max_retries
+            max_retries=effective_max_retries,
+            context=context
         )
     
     def _preprocess_content_for_cachepoint(self, content: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -177,7 +179,8 @@ class BedrockClient:
         top_k: Optional[Union[float, str]] = 5,
         top_p: Optional[Union[float, str]] = 0.1,
         max_tokens: Optional[Union[int, str]] = None,
-        max_retries: Optional[int] = None
+        max_retries: Optional[int] = None,
+        context: str = "Unspecified"
     ) -> Dict[str, Any]:
         """
         Invoke a Bedrock model with retry logic.
@@ -335,7 +338,8 @@ class BedrockClient:
             converse_params=converse_params,
             retry_count=0,
             max_retries=effective_max_retries,
-            request_start_time=request_start_time
+            request_start_time=request_start_time,
+            context=context
         )
         
         return result
@@ -346,7 +350,8 @@ class BedrockClient:
         retry_count: int,
         max_retries: int,
         request_start_time: float,
-        last_exception: Exception = None
+        last_exception: Exception = None,
+        context: str = "Unspecified"
     ) -> Dict[str, Any]:
         """
         Recursive helper method to handle retries for Bedrock invocation.
@@ -424,7 +429,7 @@ class BedrockClient:
             response_with_metering = {
                 "response": response,
                 "metering": {
-                    f"bedrock/{converse_params['modelId']}": {
+                    f"{context}/bedrock/{converse_params['modelId']}": {
                         **usage
                     }
                 }
@@ -470,7 +475,8 @@ class BedrockClient:
                     retry_count=retry_count + 1,
                     max_retries=max_retries,
                     request_start_time=request_start_time,
-                    last_exception=e
+                    last_exception=e,
+                    context=context
                 )
             else:
                 logger.error(f"Non-retryable Bedrock error: {error_code} - {error_message}")
@@ -838,6 +844,7 @@ Args:
     top_p: Optional top_p parameter (float or string)
     max_tokens: Optional max_tokens parameter (int or string)
     max_retries: Optional override for the instance's max_retries setting
+    context: Context prefix for metering key (default: "Unspecified")
     
 Returns:
     Bedrock response object with metering information

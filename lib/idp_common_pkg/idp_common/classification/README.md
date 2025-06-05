@@ -16,6 +16,7 @@ This module provides document classification capabilities for the IDP Accelerato
 - Structured data models for results
 - Grouping of pages into sections by classification
 - Comprehensive error handling and retry mechanisms
+- **DynamoDB caching for resilient page-level classification**
 
 ## Usage Example
 
@@ -225,6 +226,136 @@ def handler(event, context):
 - `DocumentSection`: A section of consecutive pages with the same classification
 - `ClassificationResult`: Overall result of a classification operation
 - `Document`: Core document data model used throughout the IDP pipeline
+
+## DynamoDB Caching for Resilient Classification
+
+The classification service now supports optional DynamoDB caching to improve efficiency and resilience when processing documents with multiple pages. This feature addresses throttling scenarios where some pages succeed while others fail, avoiding the need to reclassify already successful pages on retry.
+
+### How It Works
+
+1. **Cache Check**: Before processing, the service checks for cached classification results for the document
+2. **Selective Processing**: Only pages without cached results are classified
+3. **Exception-Safe Caching**: Successful page results are cached even when other pages fail
+4. **Retry Efficiency**: Subsequent retries only process previously failed pages
+
+### Configuration
+
+#### Via Constructor Parameter
+```python
+from idp_common import classification, get_config
+
+config = get_config()
+service = classification.ClassificationService(
+    region="us-east-1",
+    config=config,
+    backend="bedrock",
+    cache_table="classification-cache-table"  # Enable caching
+)
+```
+
+#### Via Environment Variable
+```bash
+export CLASSIFICATION_CACHE_TABLE=classification-cache-table
+```
+
+```python
+# Cache table will be automatically detected from environment
+service = classification.ClassificationService(
+    region="us-east-1",
+    config=config,
+    backend="bedrock"
+)
+```
+
+### DynamoDB Table Schema
+
+The cache uses the following DynamoDB table structure:
+
+- **Primary Key (PK)**: `classcache#{document_id}#{workflow_execution_arn}`
+- **Sort Key (SK)**: `none`
+- **Attributes**:
+  - `page_classifications` (String): JSON-encoded successful page results
+  - `cached_at` (String): Unix timestamp of cache creation
+  - `document_id` (String): Document identifier
+  - `workflow_execution_arn` (String): Workflow execution ARN
+  - `ExpiresAfter` (Number): TTL attribute for automatic cleanup (24 hours)
+
+#### Example DynamoDB Item
+```json
+{
+  "PK": "classcache#doc-123#arn:aws:states:us-east-1:123456789012:execution:MyWorkflow:abc-123",
+  "SK": "none",
+  "page_classifications": "{\"1\":{\"doc_type\":\"invoice\",\"confidence\":1.0,\"metadata\":{\"metering\":{...}},\"image_uri\":\"s3://...\",\"text_uri\":\"s3://...\",\"raw_text_uri\":\"s3://...\"},\"2\":{...}}",
+  "cached_at": "1672531200",
+  "document_id": "doc-123",
+  "workflow_execution_arn": "arn:aws:states:us-east-1:123456789012:execution:MyWorkflow:abc-123",
+  "ExpiresAfter": 1672617600
+}
+```
+
+### Benefits
+
+- **Cost Reduction**: Avoids redundant API calls to Bedrock/SageMaker for already-classified pages
+- **Improved Resilience**: Handles partial failures gracefully during concurrent processing
+- **Faster Retries**: Subsequent attempts only process failed pages, not the entire document
+- **Automatic Cleanup**: TTL ensures cache entries don't accumulate indefinitely
+- **Thread Safety**: Safe for concurrent page processing within the same document
+
+### Example: Resilient Processing Flow
+
+```python
+from idp_common import classification, get_config
+from idp_common.models import Document
+
+config = get_config()
+service = classification.ClassificationService(
+    region="us-east-1",
+    config=config,
+    backend="bedrock",
+    cache_table="classification-cache-table"
+)
+
+# Create document with 5 pages
+document = Document(
+    id="doc-123",
+    workflow_execution_arn="arn:aws:states:us-east-1:123456789012:execution:MyWorkflow:abc-123",
+    pages={
+        "1": {...},
+        "2": {...},
+        "3": {...},
+        "4": {...},
+        "5": {...}
+    }
+)
+
+try:
+    # First attempt: pages 1,2,4 succeed, pages 3,5 fail due to throttling
+    document = service.classify_document(document)
+except Exception as e:
+    # Pages 1,2,4 are cached automatically before exception is raised
+    print(f"Classification failed: {e}")
+
+try:
+    # Retry: only pages 3,5 are processed (1,2,4 loaded from cache)
+    document = service.classify_document(document)
+    print("Document classified successfully on retry")
+except Exception as e:
+    print(f"Retry failed: {e}")
+```
+
+### Cache Lifecycle
+
+1. **Creation**: Cache entries are created when `classify_document()` completes successfully or encounters exceptions
+2. **Retrieval**: Cache is checked at the start of each `classify_document()` call
+3. **Update**: Cache entries are updated with new successful results from each processing attempt
+4. **Expiration**: Entries automatically expire after 24 hours via DynamoDB TTL
+
+### Important Notes
+
+- Caching only applies to the `classify_document()` method, not individual `classify_page()` calls
+- Cache entries are scoped to specific document and workflow execution combinations
+- Only successful page classifications (without errors in metadata) are cached
+- The cache is transparent - existing code continues to work without modifications
 
 ## Backend Options
 

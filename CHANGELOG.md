@@ -5,6 +5,26 @@ SPDX-License-Identifier: MIT-0
 
 ## [Unreleased]
 
+## [0.3.2]
+
+### Added
+
+- **Cost Estimator UI Feature for Context Grouping and Subtotals**
+  - Added context grouping functionality to organize cost estimates by logical categories (e.g. OCR, Classification, etc.)
+  - Implemented subtotal calculations for better cost breakdown visualization
+
+- **DynamoDB Caching for Resilient Classification**
+  - Added optional DynamoDB caching to the multimodal page-level classification service to improve efficiency and resilience
+  - Cache successful page classification results to avoid redundant processing during retries when some pages fail due to throttling
+  - Exception-safe caching preserves successful work even when individual threads or the overall process fails
+  - Configurable via `cache_table` parameter or `CLASSIFICATION_CACHE_TABLE` environment variable
+  - Cache entries scoped to document ID and workflow execution ARN with automatic TTL cleanup (24 hours)
+  - Significant cost reduction and improved retry performance for large multi-page documents
+
+### Fixed
+- "Use as Evaluation Baseline" incorrectly sets document status back to QUEUED. It should remain as COMPLETED.
+
+
 ## [0.3.1]
 
 ### Added

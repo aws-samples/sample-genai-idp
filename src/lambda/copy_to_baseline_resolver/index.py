@@ -238,7 +238,8 @@ def update_document_copy_status(object_key, evaluation_status=None):
         # Create a minimal document for update
         document = Document(
             id=object_key,
-            input_key=object_key
+            input_key=object_key,
+            status=Status.COMPLETED
         )
         logger.info(f"Created document object with ID: {object_key}")
         

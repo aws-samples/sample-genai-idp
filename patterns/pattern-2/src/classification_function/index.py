@@ -37,6 +37,7 @@ def handler(event, context):
     
     # Update document status to CLASSIFYING
     document.status = Status.CLASSIFYING
+    document.workflow_execution_arn = event.get("execution_arn")
     appsync_service = DocumentAppSyncService()
     logger.info(f"Updating document status to {document.status}")
     appsync_service.update_document(document)
@@ -53,23 +54,48 @@ def handler(event, context):
     total_pages = len(document.pages)
     metrics.put_metric('BedrockRequestsTotal', total_pages)
     
-    # Initialize classification service
+    # Initialize classification service with DynamoDB caching
+    cache_table = os.environ.get('TRACKING_TABLE')
     service = classification.ClassificationService(
         region=region,
         max_workers=MAX_WORKERS,
-        config=config
+        config=config,
+        cache_table=cache_table
     )
     
     # Classify the document - the service will update the Document directly
     document = service.classify_document(document)
     
-    # Check if document processing failed
-    if document.status == Status.FAILED:
+    # Check if document processing failed or has pages that failed to classify
+    failed_page_exceptions = None
+    primary_exception = None
+    
+    # Check for failed page exceptions in metadata
+    if document.metadata and "failed_page_exceptions" in document.metadata:
+        failed_page_exceptions = document.metadata["failed_page_exceptions"]
+        primary_exception = document.metadata.get("primary_exception")
+        
+        # Log details about failed pages
+        logger.error(f"Document {document.id} has {len(failed_page_exceptions)} pages that failed to classify:")
+        for page_id, exc_info in failed_page_exceptions.items():
+            logger.error(f"  Page {page_id}: {exc_info['exception_type']} - {exc_info['exception_message']}")
+    
+    # Check if document processing completely failed or has critical page failures
+    if document.status == Status.FAILED or failed_page_exceptions:
         error_message = f"Classification failed for document {document.id}"
+        if failed_page_exceptions:
+            error_message += f" - {len(failed_page_exceptions)} pages failed to classify"
+        
         logger.error(error_message)
         # Update document status in AppSync before raising exception
         appsync_service.update_document(document)
-        raise Exception(error_message)
+        
+        # Raise the original exception type if available, otherwise raise generic exception
+        if primary_exception:
+            logger.error(f"Re-raising original exception: {type(primary_exception).__name__}")
+            raise primary_exception
+        else:
+            raise Exception(error_message)
     
     t1 = time.time()
     logger.info(f"Time taken for classification: {t1-t0:.2f} seconds")

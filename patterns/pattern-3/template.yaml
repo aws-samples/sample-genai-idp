@@ -20,6 +20,9 @@ Parameters:
   OutputBucket:
     Type: String
 
+  TrackingTable:
+    Type: String
+
   CustomerManagedEncryptionKeyArn:
     Type: String
 
@@ -468,6 +471,7 @@ Resources:
         Variables:
           METRIC_NAMESPACE: !Ref StackName
           MAX_WORKERS: 20
+          TRACKING_TABLE: !Ref TrackingTable
           SAGEMAKER_ENDPOINT_NAME: !GetAtt SAGEMAKERCLASSIFIERSTACK.Outputs.EndpointName
           CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
           APPSYNC_API_URL: !Ref AppSyncApiUrl
@@ -481,6 +485,8 @@ Resources:
             BucketName: !Ref OutputBucket
         - S3ReadPolicy:
             BucketName: !Ref InputBucket
+        - DynamoDBCrudPolicy:
+            TableName: !Ref TrackingTable
         - S3ReadPolicy:
             BucketName: !Ref ConfigurationBucket
         - DynamoDBCrudPolicy:

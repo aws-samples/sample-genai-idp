@@ -22,12 +22,27 @@ import useConfiguration from '../../hooks/use-configuration';
 
 const logger = new Logger('DocumentPanel');
 
-// Format the cost cell content based on whether it's a total row
-const formatCostCell = (item) => {
-  if (item.isTotal) {
-    return <Box fontWeight="bold">{`${item.note}: ${item.cost}`}</Box>;
+// Helper function to parse serviceApi key into context and service
+const parseServiceApiKey = (serviceApiKey) => {
+  const parts = serviceApiKey.split('/');
+  if (parts.length >= 3) {
+    const context = parts[0];
+    const serviceApi = parts.slice(1).join('/');
+    return { context, serviceApi };
   }
-  return item.cost;
+  // Fallback for keys that don't follow the new format (less than 3 parts) - set context to ''
+  return { context: '', serviceApi: serviceApiKey };
+};
+
+// Helper function to format cost cells
+const formatCostCell = (rowItem) => {
+  if (rowItem.isTotal) {
+    return <Box fontWeight="bold">{`${rowItem.note}: ${rowItem.cost}`}</Box>;
+  }
+  if (rowItem.isSubtotal) {
+    return <Box fontWeight="bold" color="text-body-secondary">{`${rowItem.note}: ${rowItem.cost}`}</Box>;
+  }
+  return rowItem.cost;
 };
 
 // Component to display metering information in a table
@@ -65,15 +80,18 @@ const MeteringTable = ({ meteringData, preCalculatedTotals }) => {
     return <Box>Loading pricing data...</Box>;
   }
 
-  // Transform metering data into table rows
-  const tableItems = [];
+  // Transform metering data into table rows with context parsing
+  const rawTableItems = [];
+  const contextTotals = {};
   let totalCost = 0;
 
-  Object.entries(meteringData).forEach(([serviceApi, metrics]) => {
+  Object.entries(meteringData).forEach(([originalServiceApiKey, metrics]) => {
+    const { context, serviceApi } = parseServiceApiKey(originalServiceApiKey);
+
     Object.entries(metrics).forEach(([unit, value]) => {
       const numericValue = Number(value);
 
-      // Look up the unit price from the pricing data
+      // Look up the unit price from the pricing data using the parsed serviceApi
       let unitPrice = null;
       let unitPriceDisplayValue = 'None';
       let cost = 0;
@@ -83,6 +101,13 @@ const MeteringTable = ({ meteringData, preCalculatedTotals }) => {
           unitPriceDisplayValue = `$${unitPrice}`;
           cost = numericValue * unitPrice;
           totalCost += cost;
+
+          // Track context totals
+          if (!contextTotals[context]) {
+            contextTotals[context] = 0;
+          }
+          contextTotals[context] += cost;
+
           logger.debug(`Found price for ${serviceApi}/${unit}: ${unitPriceDisplayValue}`);
         } else {
           logger.warn(`Invalid price for ${serviceApi}/${unit}, using None`);
@@ -91,34 +116,96 @@ const MeteringTable = ({ meteringData, preCalculatedTotals }) => {
         logger.debug(`No price found for ${serviceApi}/${unit}, using None`);
       }
 
-      tableItems.push({
+      rawTableItems.push({
+        context,
         serviceApi,
         unit,
         value: String(numericValue),
         unitCost: unitPriceDisplayValue,
         cost: unitPrice !== null ? `$${cost.toFixed(4)}` : 'N/A',
+        costValue: cost,
         isTotal: false,
+        isSubtotal: false,
       });
+    });
+  });
+
+  // Group items by context and add subtotals
+  const tableItems = [];
+  const contextGroups = {};
+
+  // Group raw items by context
+  rawTableItems.forEach((item) => {
+    if (!contextGroups[item.context]) {
+      contextGroups[item.context] = [];
+    }
+    contextGroups[item.context].push(item);
+  });
+
+  // Sort contexts in specific order: OCR, Classification, Extraction, Summarization
+  const contextOrder = ['BDAProject', 'OCR', 'Classification', 'Extraction', 'Summarization'];
+  const sortedContexts = Object.keys(contextGroups).sort((a, b) => {
+    const aIndex = contextOrder.indexOf(a);
+    const bIndex = contextOrder.indexOf(b);
+
+    // If both contexts are in the predefined order, sort by their position
+    if (aIndex !== -1 && bIndex !== -1) {
+      return aIndex - bIndex;
+    }
+
+    // If only one context is in the predefined order, it comes first
+    if (aIndex !== -1) return -1;
+    if (bIndex !== -1) return 1;
+
+    // If neither context is in the predefined order, sort alphabetically
+    return a.localeCompare(b);
+  });
+
+  sortedContexts.forEach((context) => {
+    // Add all items for this context
+    tableItems.push(...contextGroups[context]);
+
+    // Add subtotal row for this context
+    const contextTotal = contextTotals[context] || 0;
+    tableItems.push({
+      context: '',
+      serviceApi: '',
+      unit: '',
+      value: '',
+      unitCost: '',
+      cost: `$${contextTotal.toFixed(4)}`,
+      costValue: contextTotal,
+      isTotal: false,
+      isSubtotal: true,
+      note: `${context} Subtotal`,
     });
   });
 
   // Use preCalculatedTotals if provided, otherwise calculate locally
   const finalTotalCost = preCalculatedTotals ? preCalculatedTotals.totalCost : totalCost;
 
-  // Add total row
+  // Add overall total row
   tableItems.push({
+    context: '',
     serviceApi: '',
     unit: '',
     value: '',
     unitCost: '',
     cost: `$${finalTotalCost.toFixed(4)}`,
+    costValue: finalTotalCost,
     isTotal: true,
+    isSubtotal: false,
     note: 'Total',
   });
 
   return (
     <Table
       columnDefinitions={[
+        {
+          id: 'context',
+          header: 'Context',
+          cell: (rowItem) => rowItem.context,
+        },
         {
           id: 'serviceApi',
           header: 'Service/Api',
@@ -169,7 +256,10 @@ const calculateTotalCosts = (meteringData, documentItem, pricingData) => {
   let totalCost = 0;
 
   if (pricingData) {
-    Object.entries(meteringData).forEach(([serviceApi, metrics]) => {
+    Object.entries(meteringData).forEach(([originalServiceApiKey, metrics]) => {
+      // Parse the serviceApi key to remove context prefix
+      const { serviceApi } = parseServiceApiKey(originalServiceApiKey);
+
       Object.entries(metrics).forEach(([unit, value]) => {
         const numericValue = Number(value);
         if (pricingData[serviceApi] && pricingData[serviceApi][unit] !== undefined) {

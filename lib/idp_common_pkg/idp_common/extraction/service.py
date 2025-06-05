@@ -708,6 +708,7 @@ class ExtractionService:
                 top_k=top_k,
                 top_p=top_p,
                 max_tokens=max_tokens,
+                context="Extraction",
             )
 
             total_duration = time.time() - request_start_time

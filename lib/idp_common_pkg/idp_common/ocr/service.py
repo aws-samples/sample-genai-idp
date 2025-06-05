@@ -284,7 +284,7 @@ class OcrService:
         # Extract metering data
         feature_combo = self._feature_combo()
         metering = {
-            f"textract/{self._get_api_name()}{feature_combo}": {
+            f"OCR/textract/{self._get_api_name()}{feature_combo}": {
                 "pages": textract_result["DocumentMetadata"]["Pages"]
             }
         }
