@@ -96,6 +96,8 @@ Parameters:
 Conditions:
   IsSummarizationEnabled: !Equals [!Ref IsSummarizationEnabled, "true"]
   HasGuardrailConfig: !And [!Not [!Equals [!Ref BedrockGuardrailId, ""]], !Not [!Equals [!Ref BedrockGuardrailVersion, ""]]]
+  HasCustomClassificationModelARN : !Not [!Equals [!Ref CustomClassificationModelARN , ""]]
+  HasCustomExtractionModelARN : !Not [!Equals [!Ref CustomExtractionModelARN , ""]]
 
 
 Resources:
@@ -248,7 +250,19 @@ Resources:
               model:
                 type: string
                 description: Model identifier
-                enum: ["us.amazon.nova-lite-v1:0", "us.amazon.nova-pro-v1:0", "us.amazon.nova-premier-v1:0", "us.anthropic.claude-3-haiku-20240307-v1:0", "us.anthropic.claude-3-5-sonnet-20241022-v2:0", "us.anthropic.claude-3-7-sonnet-20250219-v1:0", "us.anthropic.claude-sonnet-4-20250514-v1:0", "us.anthropic.claude-opus-4-20250514-v1:0"]
+                enum: 
+                  - !If 
+                    - HasCustomClassificationModelARN 
+                    - !Ref CustomClassificationModelARN
+                    - !Ref AWS::NoValue
+                  - "us.amazon.nova-lite-v1:0"
+                  - "us.amazon.nova-pro-v1:0"
+                  - "us.amazon.nova-premier-v1:0"
+                  - "us.anthropic.claude-3-haiku-20240307-v1:0"
+                  - "us.anthropic.claude-3-5-sonnet-20241022-v2:0"
+                  - "us.anthropic.claude-3-7-sonnet-20250219-v1:0"
+                  - "us.anthropic.claude-sonnet-4-20250514-v1:0"
+                  - "us.anthropic.claude-opus-4-20250514-v1:0"
                 order: 1
               classificationMethod:
                 type: string
@@ -299,7 +313,19 @@ Resources:
               model:
                 type: string
                 description: Model identifier
-                enum: ["us.amazon.nova-lite-v1:0", "us.amazon.nova-pro-v1:0", "us.amazon.nova-premier-v1:0", "us.anthropic.claude-3-haiku-20240307-v1:0", "us.anthropic.claude-3-5-sonnet-20241022-v2:0", "us.anthropic.claude-3-7-sonnet-20250219-v1:0", "us.anthropic.claude-sonnet-4-20250514-v1:0", "us.anthropic.claude-opus-4-20250514-v1:0"]
+                enum: 
+                  - !If 
+                    - HasCustomExtractionModelARN
+                    - !Ref CustomExtractionModelARN
+                    - !Ref AWS::NoValue
+                  - "us.amazon.nova-lite-v1:0"
+                  - "us.amazon.nova-pro-v1:0"
+                  - "us.amazon.nova-premier-v1:0"
+                  - "us.anthropic.claude-3-haiku-20240307-v1:0"
+                  - "us.anthropic.claude-3-5-sonnet-20241022-v2:0"
+                  - "us.anthropic.claude-3-7-sonnet-20250219-v1:0"
+                  - "us.anthropic.claude-sonnet-4-20250514-v1:0"
+                  - "us.anthropic.claude-opus-4-20250514-v1:0"
                 order: 1
               temperature:
                 type: number
@@ -446,6 +472,8 @@ Resources:
       ServiceToken: !Ref UpdateConfigurationFunctionArn
       Default: !Ref ConfigurationDefaultS3Uri
       ConfigLibraryHash: !Ref ConfigLibraryHash
+      CustomClassificationModelARN: !Ref CustomClassificationModelARN
+      CustomExtractionModelARN: !Ref CustomExtractionModelARN
 
   OCRFunction:
     Type: AWS::Serverless::Function

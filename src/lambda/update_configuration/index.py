@@ -126,6 +126,21 @@ def handler(event: Dict[str, Any], context: Any) -> None:
             # Update Default configuration
             if 'Default' in properties:
                 resolved_default = resolve_content(properties['Default'])
+                
+                # Apply custom model ARNs if provided
+                if isinstance(resolved_default, dict):
+                    # Replace classification model if CustomClassificationModelARN is provided and not empty
+                    if 'CustomClassificationModelARN' in properties and properties['CustomClassificationModelARN'].strip():
+                        if 'classification' in resolved_default:
+                            resolved_default['classification']['model'] = properties['CustomClassificationModelARN']
+                            logger.info(f"Updated classification model to: {properties['CustomClassificationModelARN']}")
+                    
+                    # Replace extraction model if CustomExtractionModelARN is provided and not empty
+                    if 'CustomExtractionModelARN' in properties and properties['CustomExtractionModelARN'].strip():
+                        if 'extraction' in resolved_default:
+                            resolved_default['extraction']['model'] = properties['CustomExtractionModelARN']
+                            logger.info(f"Updated extraction model to: {properties['CustomExtractionModelARN']}")
+                
                 update_configuration('Default', resolved_default)
             
             # Update Custom configuration if provided and not empty
