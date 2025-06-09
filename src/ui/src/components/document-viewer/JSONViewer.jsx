@@ -17,6 +17,7 @@ import { API, Logger } from 'aws-amplify';
 import { Editor } from '@monaco-editor/react';
 import getFileContents from '../../graphql/queries/getFileContents';
 import uploadDocument from '../../graphql/queries/uploadDocument';
+import { getFieldHighlightInfo, getFieldConfidenceInfo } from '../common/confidence-alerts-utils';
 // Lazy load VisualEditorModal for better performance
 const VisualEditorModal = React.lazy(() => import('./VisualEditorModal'));
 
@@ -25,7 +26,7 @@ const logger = new Logger('FileEditor');
 const EDITOR_DEFAULT_HEIGHT = '600px';
 
 // A simplified form-based JSON editor
-const FormEditorView = ({ jsonData, onChange, isReadOnly }) => {
+const FormEditorView = ({ jsonData, onChange, isReadOnly, sectionData }) => {
   // Render primitive values like strings, numbers, booleans, null
   function renderPrimitiveValue(value, onChangeValue, fieldPath) {
     if (value === null || value === undefined) {
@@ -123,11 +124,35 @@ const FormEditorView = ({ jsonData, onChange, isReadOnly }) => {
   // Render a key-value pair with the key on the left
   function renderKeyValuePair(key, value, onChangeValue, parentPath = '') {
     const currentPath = parentPath ? `${parentPath}.${key}` : key;
+
+    // Get confidence information from explainability data (for all fields)
+    const explainabilityInfo = jsonData?.explainability_info;
+    const confidenceInfo = getFieldConfidenceInfo(key, explainabilityInfo);
+
+    // Check if this field should be highlighted due to low confidence (legacy alert-based highlighting)
+    const confidenceThresholdAlerts = sectionData?.ConfidenceThresholdAlerts || [];
+    const highlightInfo = getFieldHighlightInfo(key, value, confidenceThresholdAlerts);
+
+    const boxStyle =
+      highlightInfo.shouldHighlight || confidenceInfo.shouldHighlight
+        ? { backgroundColor: '#ffeaa7', border: '2px solid #e17055' }
+        : {};
+
     return (
-      <Box padding="xxxs" borderBottom="divider-light">
+      <Box padding="xxxs" borderBottom="divider-light" style={boxStyle}>
         <Box display="flex" alignItems="center">
           <Box width="30%" padding="xxxs" fontWeight="bold" fontSize="body-s">
             {key}:
+            {confidenceInfo.hasConfidenceInfo && (
+              <Box
+                fontSize="body-s"
+                padding={{ top: 'xxxs' }}
+                color={confidenceInfo.isAboveThreshold ? 'text-status-success' : 'text-status-error'}
+              >
+                Confidence: {(confidenceInfo.confidence * 100).toFixed(1)}% / Threshold:{' '}
+                {(confidenceInfo.confidenceThreshold * 100).toFixed(1)}%
+              </Box>
+            )}
           </Box>
           <Box width="70%">
             {renderJsonValue(
@@ -468,7 +493,12 @@ const FileEditorView = ({ fileContent, onChange, isReadOnly = true, fileType = '
 
       {isValid && fileType === 'json' ? (
         viewMode === 'form' ? (
-          <FormEditorView jsonData={jsonData} onChange={handleFormChange} isReadOnly={isReadOnly} />
+          <FormEditorView
+            jsonData={jsonData}
+            onChange={handleFormChange}
+            isReadOnly={isReadOnly}
+            sectionData={memoizedSectionData}
+          />
         ) : (
           <TextEditorView
             fileContent={typeof fileContent === 'string' ? fileContent : JSON.stringify(jsonData, null, 2)}

@@ -573,7 +573,6 @@ class AssessmentService:
 
             # Update the existing extraction result with enhanced assessment data
             extraction_data["explainability_info"] = [enhanced_assessment_data]
-            extraction_data["confidence_threshold_alerts"] = confidence_threshold_alerts
             extraction_data["metadata"] = extraction_data.get("metadata", {})
             extraction_data["metadata"]["assessment_time_seconds"] = total_duration
             extraction_data["metadata"]["assessment_parsing_succeeded"] = (
