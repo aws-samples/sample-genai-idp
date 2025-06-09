@@ -152,4 +152,4 @@ def handler(event: Dict[str, Any], context: Any) -> None:
         physical_id = generate_physical_id(event['StackId'], event['LogicalResourceId'])
         cfnresponse.send(event, context, cfnresponse.FAILED, {
             'Error': str(e)
-        }, physical_id)
+        }, physical_id, reason=str(e))
