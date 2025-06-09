@@ -105,6 +105,13 @@ input SectionInput {
   PageIds: [ Int ]
   Class: String
   OutputJSONUri: String
+  ConfidenceThresholdAlerts: [ConfidenceThresholdAlertInput]
+}
+
+input ConfidenceThresholdAlertInput {
+  attributeName: String
+  confidence: Float
+  confidenceThreshold: Float
 }
 
 input PageInput {

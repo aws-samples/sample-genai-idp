@@ -143,6 +143,19 @@ class DocumentAppSyncService:
                     "Class": section.classification,
                     "OutputJSONUri": section.extraction_result_uri or "",
                 }
+
+                # Convert confidence threshold alerts
+                if section.confidence_threshold_alerts:
+                    alerts_data = []
+                    for alert in section.confidence_threshold_alerts:
+                        alert_data = {
+                            "attributeName": alert.get("attribute_name"),
+                            "confidence": alert.get("confidence"),
+                            "confidenceThreshold": alert.get("confidence_threshold"),
+                        }
+                        alerts_data.append(alert_data)
+                    section_data["ConfidenceThresholdAlerts"] = alerts_data
+
                 sections_data.append(section_data)
 
             if sections_data:
