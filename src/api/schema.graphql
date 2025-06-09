@@ -30,6 +30,13 @@ type Section @aws_cognito_user_pools @aws_iam {
   PageIds: [ Int ]
   Class: String
   OutputJSONUri: String
+  ConfidenceThresholdAlerts: [ConfidenceThresholdAlert]
+}
+
+type ConfidenceThresholdAlert @aws_cognito_user_pools @aws_iam {
+  attributeName: String
+  confidence: Float
+  confidenceThreshold: Float
 }
 
 type Page @aws_cognito_user_pools @aws_iam {

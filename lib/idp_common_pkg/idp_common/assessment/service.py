@@ -534,8 +534,46 @@ class AssessmentService:
                     }
                 parsing_succeeded = False  # Mark that parsing failed
 
-            # Update the existing extraction result with assessment data
-            extraction_data["explainability_info"] = [assessment_data]
+            # Get confidence thresholds
+            default_confidence_threshold = assessment_config.get(
+                "default_confidence_threshold", 0.9
+            )
+
+            # Enhance assessment data with confidence thresholds and create confidence threshold alerts
+            enhanced_assessment_data = {}
+            confidence_threshold_alerts = []
+
+            for attr_name, attr_assessment in assessment_data.items():
+                # Get the attribute config to check for per-attribute confidence threshold
+                attr_threshold = default_confidence_threshold
+                for attr in attributes:
+                    if attr.get("name") == attr_name:
+                        attr_threshold = attr.get(
+                            "confidence_threshold", default_confidence_threshold
+                        )
+                        break
+                attr_threshold = float(attr_threshold)
+
+                # Add confidence_threshold to the assessment data
+                enhanced_assessment_data[attr_name] = {
+                    **attr_assessment,
+                    "confidence_threshold": attr_threshold,
+                }
+
+                # Check if confidence is below threshold and create alert
+                confidence = attr_assessment.get("confidence", 0.0)
+                if confidence < attr_threshold:
+                    confidence_threshold_alerts.append(
+                        {
+                            "attribute_name": attr_name,
+                            "confidence": confidence,
+                            "confidence_threshold": attr_threshold,
+                        }
+                    )
+
+            # Update the existing extraction result with enhanced assessment data
+            extraction_data["explainability_info"] = [enhanced_assessment_data]
+            extraction_data["confidence_threshold_alerts"] = confidence_threshold_alerts
             extraction_data["metadata"] = extraction_data.get("metadata", {})
             extraction_data["metadata"]["assessment_time_seconds"] = total_duration
             extraction_data["metadata"]["assessment_parsing_succeeded"] = (
@@ -547,6 +585,14 @@ class AssessmentService:
             s3.write_content(
                 extraction_data, bucket, key, content_type="application/json"
             )
+
+            # Update the section in the document with confidence threshold alerts
+            for doc_section in document.sections:
+                if doc_section.section_id == section_id:
+                    doc_section.confidence_threshold_alerts = (
+                        confidence_threshold_alerts
+                    )
+                    break
 
             # Update document with metering data
             document.metering = utils.merge_metering_data(
