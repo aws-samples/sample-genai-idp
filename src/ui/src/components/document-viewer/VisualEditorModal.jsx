@@ -20,6 +20,7 @@ import {
 import { Logger } from 'aws-amplify';
 import generateS3PresignedUrl from '../common/generate-s3-presigned-url';
 import useAppContext from '../../contexts/app';
+import { getFieldConfidenceInfo } from '../common/confidence-alerts-utils';
 
 const logger = new Logger('VisualEditorModal');
 
@@ -169,7 +170,10 @@ const FormFieldRenderer = memo(({
     fieldType = 'null';
   }
 
-  // Create label with confidence score if available
+  // Get confidence information from explainability data (for all fields)  
+  const confidenceInfo = getFieldConfidenceInfo(fieldKey, explainabilityInfo);
+  
+  // Create label with confidence score if available (legacy support)
   const label = confidence !== undefined ? `${fieldKey} (${(confidence * 100).toFixed(1)}%)` : fieldKey;
 
   // Handle field focus - pass geometry info if available
@@ -283,7 +287,21 @@ const FormFieldRenderer = memo(({
           tabIndex={0}
           style={{ cursor: geometry ? 'pointer' : 'default' }}
         >
-          <FormField label={label}>
+          <FormField label={
+            <Box>
+              {fieldKey}:
+              {confidenceInfo.hasConfidenceInfo && (
+                <Box
+                  fontSize="body-s"
+                  padding={{ top: 'xxxs' }}
+                  color={confidenceInfo.isAboveThreshold ? 'text-status-success' : 'text-status-error'}
+                >
+                  Confidence: {(confidenceInfo.confidence * 100).toFixed(1)}% / Threshold:{' '}
+                  {(confidenceInfo.confidenceThreshold * 100).toFixed(1)}%
+                </Box>
+              )}
+            </Box>
+          }>
             <Input
               value={value || ''}
               disabled={isReadOnly}
@@ -325,7 +343,21 @@ const FormFieldRenderer = memo(({
           tabIndex={0}
           style={{ cursor: geometry ? 'pointer' : 'default' }}
         >
-          <FormField label={label}>
+          <FormField label={
+            <Box>
+              {fieldKey}:
+              {confidenceInfo.hasConfidenceInfo && (
+                <Box
+                  fontSize="body-s"
+                  padding={{ top: 'xxxs' }}
+                  color={confidenceInfo.isAboveThreshold ? 'text-status-success' : 'text-status-error'}
+                >
+                  Confidence: {(confidenceInfo.confidence * 100).toFixed(1)}% / Threshold:{' '}
+                  {(confidenceInfo.confidenceThreshold * 100).toFixed(1)}%
+                </Box>
+              )}
+            </Box>
+          }>
             <Input
               type="number"
               value={String(value)}
@@ -357,7 +389,21 @@ const FormFieldRenderer = memo(({
           tabIndex={0}
           style={{ cursor: geometry ? 'pointer' : 'default' }}
         >
-          <FormField label={label}>
+          <FormField label={
+            <Box>
+              {fieldKey}:
+              {confidenceInfo.hasConfidenceInfo && (
+                <Box
+                  fontSize="body-s"
+                  padding={{ top: 'xxxs' }}
+                  color={confidenceInfo.isAboveThreshold ? 'text-status-success' : 'text-status-error'}
+                >
+                  Confidence: {(confidenceInfo.confidence * 100).toFixed(1)}% / Threshold:{' '}
+                  {(confidenceInfo.confidenceThreshold * 100).toFixed(1)}%
+                </Box>
+              )}
+            </Box>
+          }>
             <Checkbox
               checked={Boolean(value)}
               disabled={isReadOnly}
@@ -549,7 +595,21 @@ const FormFieldRenderer = memo(({
           tabIndex={0}
           style={{ cursor: geometry ? 'pointer' : 'default' }}
         >
-          <FormField label={label}>
+          <FormField label={
+            <Box>
+              {fieldKey}:
+              {confidenceInfo.hasConfidenceInfo && (
+                <Box
+                  fontSize="body-s"
+                  padding={{ top: 'xxxs' }}
+                  color={confidenceInfo.isAboveThreshold ? 'text-status-success' : 'text-status-error'}
+                >
+                  Confidence: {(confidenceInfo.confidence * 100).toFixed(1)}% / Threshold:{' '}
+                  {(confidenceInfo.confidenceThreshold * 100).toFixed(1)}%
+                </Box>
+              )}
+            </Box>
+          }>
             <Input
               value={String(value)}
               disabled={isReadOnly}
