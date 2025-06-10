@@ -12,6 +12,7 @@ import concurrent.futures
 import logging
 import os
 import time
+import traceback
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -115,12 +116,18 @@ IMPORTANT: Respond ONLY with a valid JSON object and nothing else. Here's the ex
                         eval_method = EvaluationMethod(method_str.upper())
                     except ValueError:
                         logger.warning(
-                            f"Unknown evaluation method: {method_str}, using LLM"
+                            f"Unknown evaluation method for '{class_name}' -> '{attr_config['name']}': '{method_str}' (using LLM)"
                         )
+                        method_str = "LLM"
 
                     # Get threshold if applicable
-                    if "evaluation_threshold" in attr_config:
-                        threshold = float(attr_config["evaluation_threshold"])
+                    try:
+                        if "evaluation_threshold" in attr_config:
+                            threshold = float(attr_config["evaluation_threshold"])
+                    except ValueError:
+                        logger.warning(
+                            f"Invalid evaluation threshold for '{class_name}' -> '{attr_config['name']}': '{attr_config['evaluation_threshold']}' (using default)"
+                        )
 
                     # Get comparator type for Hungarian method
                     if eval_method == EvaluationMethod.HUNGARIAN:
@@ -186,8 +193,10 @@ IMPORTANT: Respond ONLY with a valid JSON object and nothing else. Here's the ex
                                 )
 
             return extraction_results, confidence_scores
-        except Exception as e:
-            logger.error(f"Error loading extraction results from {uri}: {str(e)}")
+        except Exception:
+            logger.error(
+                f"Error loading extraction results from {uri}: {traceback.format_exc()}"
+            )
             return {}, {}
 
     def _count_classifications(
@@ -519,9 +528,9 @@ IMPORTANT: Respond ONLY with a valid JSON object and nothing else. Here's the ex
                 fp1 += metrics["fp1"]
                 fp2 += metrics["fp2"]
 
-            except Exception as e:
+            except Exception:
                 logger.error(
-                    f"Error evaluating attribute {task['attr_name']}: {str(e)}"
+                    f"Error evaluating attribute {task['attr_name']}: {traceback.format_exc()}"
                 )
 
         # Then, process slow parallel tasks with ThreadPoolExecutor if there are any
@@ -580,9 +589,9 @@ IMPORTANT: Respond ONLY with a valid JSON object and nothing else. Here's the ex
                         fp1 += metrics["fp1"]
                         fp2 += metrics["fp2"]
 
-                    except Exception as e:
+                    except Exception:
                         logger.error(
-                            f"Error evaluating attribute {attr_name}: {str(e)}"
+                            f"Error evaluating attribute {attr_name}: {traceback.format_exc()}"
                         )
 
         # Sort attribute results by name for consistent output
@@ -768,7 +777,9 @@ IMPORTANT: Respond ONLY with a valid JSON object and nothing else. Here's the ex
                         total_fp2 += metrics["fp2"]
 
                     except Exception as e:
-                        logger.error(f"Error evaluating section {section_id}: {str(e)}")
+                        logger.error(
+                            f"Error evaluating section {section_id}: {traceback.format_exc()}"
+                        )
                         actual_document.errors.append(
                             f"Error evaluating section {section_id}: {str(e)}"
                         )
@@ -837,6 +848,6 @@ IMPORTANT: Respond ONLY with a valid JSON object and nothing else. Here's the ex
             return actual_document
 
         except Exception as e:
-            logger.error(f"Error evaluating document: {str(e)}")
+            logger.error(f"Error evaluating document: {traceback.format_exc()}")
             actual_document.errors.append(f"Evaluation error: {str(e)}")
             return actual_document

@@ -87,7 +87,7 @@ class InstallService():
 
     def publish(self):
         # Add logic to run this command:
-        # ./publish.sh <cfn_bucket_basename> <cfn_prefix> <region e.g. us-east-1>
+        # sh ./publish.sh <cfn_bucket_basename> <cfn_prefix> <region e.g. us-east-1>
 
         # Check Docker availability
         docker_available = self.check_docker_availability()
@@ -101,13 +101,13 @@ class InstallService():
             working_dir = self.cwd if self.cwd else os.getcwd()
             abs_working_dir = os.path.abspath(working_dir)
             logger.debug(f"Publishing from directory: {abs_working_dir}")
-            logger.debug(f"Running publish command: ./publish.sh {self.cfn_bucket_basename} {self.cfn_prefix} {self.region}")
+            logger.debug(f"Running publish command: sh ./publish.sh {self.cfn_bucket_basename} {self.cfn_prefix} {self.region}")
             
             # Set up environment variables for the subprocess
             env_vars = os.environ.copy()
 
             process = subprocess.run(
-                ['./publish.sh', self.cfn_bucket_basename, self.cfn_prefix, self.region],
+                ['sh','./publish.sh', self.cfn_bucket_basename, self.cfn_prefix, self.region],
                 check=True,
                 text=True,
                 stdout=subprocess.PIPE,
