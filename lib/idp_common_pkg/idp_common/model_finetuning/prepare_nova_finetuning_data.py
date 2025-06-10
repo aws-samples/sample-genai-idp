@@ -37,10 +37,7 @@ import logging
 import os
 import random
 import shutil
-import tempfile
-import time
 import uuid
-from functools import partial
 from typing import Dict, List, Optional, Tuple
 
 import boto3
@@ -54,7 +51,9 @@ from tqdm import tqdm
 load_dotenv()
 
 # Configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
+)
 logger = logging.getLogger(__name__)
 
 # Set random seed for reproducibility
@@ -64,7 +63,7 @@ np.random.seed(42)
 # Default label mapping for RVL-CDIP dataset
 DEFAULT_LABEL_MAPPING = {
     0: "advertissement",
-    1: "budget", 
+    1: "budget",
     2: "email",
     3: "file_folder",
     4: "form",
@@ -78,7 +77,7 @@ DEFAULT_LABEL_MAPPING = {
     12: "resume",
     13: "scientific_publication",
     14: "scientific_report",
-    15: "specification"
+    15: "specification",
 }
 
 # Default system and task prompts for document classification
@@ -124,36 +123,41 @@ where document_type_name is one of the document types listed in the <document-ty
 
 class NovaDataPreparationService:
     """Service for preparing Nova fine-tuning datasets."""
-    
+
     def __init__(self, bucket_name: str, region: str = "us-east-1"):
         """
         Initialize the data preparation service.
-        
+
         Args:
             bucket_name: S3 bucket name for storing data
             region: AWS region
         """
         self.bucket_name = bucket_name
         self.region = region
-        self.s3_client = boto3.client('s3', region_name=region)
-        self.sts_client = boto3.client('sts', region_name=region)
-        
-        # Get AWS account ID
-        self.account_id = self.sts_client.get_caller_identity().get('Account')
-        
-        logger.info(f"Initialized Nova data preparation service for bucket: {bucket_name}")
+        self.s3_client = boto3.client("s3", region_name=region)
+        self.sts_client = boto3.client("sts", region_name=region)
 
-    def load_dataset(self, dataset_name: Optional[str] = None, 
-                    local_path: Optional[str] = None, 
-                    split: str = "train") -> Dataset:
+        # Get AWS account ID
+        self.account_id = self.sts_client.get_caller_identity().get("Account")
+
+        logger.info(
+            f"Initialized Nova data preparation service for bucket: {bucket_name}"
+        )
+
+    def load_dataset(
+        self,
+        dataset_name: Optional[str] = None,
+        local_path: Optional[str] = None,
+        split: str = "train",
+    ) -> Dataset:
         """
         Load dataset from Hugging Face or local path.
-        
+
         Args:
             dataset_name: Hugging Face dataset name (e.g., "chainyo/rvl-cdip")
             local_path: Path to local dataset
             split: Dataset split to use
-            
+
         Returns:
             Loaded dataset
         """
@@ -165,64 +169,80 @@ class NovaDataPreparationService:
             ds = Dataset.load_from_disk(local_path)
         else:
             raise ValueError("Either dataset_name or local_path must be provided")
-            
+
         logger.info(f"Dataset loaded with {len(ds)} samples")
         return ds
 
-    def sample_data_by_label(self, dataset: Dataset, samples_per_label: int, 
-                           label_mapping: Optional[Dict[int, str]] = None) -> List[Dict]:
+    def sample_data_by_label(
+        self,
+        dataset: Dataset,
+        samples_per_label: int,
+        label_mapping: Optional[Dict[int, str]] = None,
+    ) -> List[Dict]:
         """
         Sample data by label with parallel processing.
-        
+
         Args:
             dataset: Input dataset
             samples_per_label: Number of samples per label
             label_mapping: Mapping from label indices to names
-            
+
         Returns:
             List of sampled data
         """
         if label_mapping is None:
             label_mapping = DEFAULT_LABEL_MAPPING
-            
+
         # Get unique labels
         unique_labels = np.unique(dataset["label"])
         logger.info(f"Found {len(unique_labels)} unique labels: {unique_labels}")
-        
+
         sampled_data = []
-        
+
         def process_label(label: int) -> Tuple[List[Dict], str]:
             """Process a single label and return sampled data."""
             label_name = label_mapping.get(label, f"class_{label}")
             result_samples = []
-            
+
             # Get indices for this label
-            indices = [i for i, sample_label in enumerate(dataset["label"]) if sample_label == label]
-            
+            indices = [
+                i
+                for i, sample_label in enumerate(dataset["label"])
+                if sample_label == label
+            ]
+
             if len(indices) <= samples_per_label:
                 sampled_indices = indices
-                message = f"Label {label} ({label_name}): Using all {len(indices)} samples"
+                message = (
+                    f"Label {label} ({label_name}): Using all {len(indices)} samples"
+                )
             else:
-                sampled_indices = np.random.choice(indices, samples_per_label, replace=False)
+                sampled_indices = np.random.choice(
+                    indices, samples_per_label, replace=False
+                )
                 sampled_indices = [int(idx) for idx in sampled_indices]
                 message = f"Label {label} ({label_name}): Sampled {samples_per_label} out of {len(indices)} samples"
-            
+
             # Get the actual samples
             for idx in sampled_indices:
                 result_samples.append(dataset[idx])
-                
+
             return result_samples, message
-        
+
         # Process labels in parallel
         max_workers = min(16, os.cpu_count())
         logger.info(f"Using {max_workers} workers for parallel sampling")
-        
+
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-            future_to_label = {executor.submit(process_label, label): label 
-                             for label in unique_labels}
-            
-            for future in tqdm(concurrent.futures.as_completed(future_to_label), 
-                             total=len(future_to_label), desc="Sampling labels"):
+            future_to_label = {
+                executor.submit(process_label, label): label for label in unique_labels
+            }
+
+            for future in tqdm(
+                concurrent.futures.as_completed(future_to_label),
+                total=len(future_to_label),
+                desc="Sampling labels",
+            ):
                 label = future_to_label[future]
                 try:
                     samples, message = future.result()
@@ -230,65 +250,77 @@ class NovaDataPreparationService:
                     logger.info(message)
                 except Exception as e:
                     logger.error(f"Error processing label {label}: {e}")
-        
+
         logger.info(f"Total sampled data: {len(sampled_data)}")
         return sampled_data
 
-    def save_and_upload_image(self, image: Image.Image, label: int, index: int, 
-                            directory: str, label_mapping: Dict[int, str]) -> str:
+    def save_and_upload_image(
+        self,
+        image: Image.Image,
+        label: int,
+        index: int,
+        directory: str,
+        label_mapping: Dict[int, str],
+    ) -> str:
         """
         Save image locally and upload to S3.
-        
+
         Args:
             image: PIL Image object
             label: Label index
             index: Sample index
             directory: S3 directory prefix
             label_mapping: Label mapping dictionary
-            
+
         Returns:
             S3 URI of uploaded image
         """
         # Generate unique filename
         label_name = label_mapping.get(label, f"class_{label}")
         filename = f"{label_name}_{index}_{uuid.uuid4()}.png"
-        filename = filename.replace(' ', '_')
-        
+        filename = filename.replace(" ", "_")
+
         # Create temp directory if it doesn't exist
         os.makedirs("temp_images", exist_ok=True)
-        
+
         local_path = os.path.join("temp_images", filename)
         s3_path = f"{directory}/images/{filename}"
-        
+
         # Save image locally as PNG
         image.save(local_path, format="PNG")
-        
+
         # Upload to S3
         self.s3_client.upload_file(local_path, self.bucket_name, s3_path)
-        
+
         # Remove local file
         os.remove(local_path)
-        
+
         return f"s3://{self.bucket_name}/{s3_path}"
 
-    def create_jsonl_record(self, sample: Dict, s3_uri: str, label_mapping: Dict[int, str],
-                          system_prompt: str, task_prompt_template: str) -> Dict:
+    def create_jsonl_record(
+        self,
+        sample: Dict,
+        s3_uri: str,
+        label_mapping: Dict[int, str],
+        system_prompt: str,
+        task_prompt_template: str,
+    ) -> Dict:
         """
         Create a JSONL record in Bedrock format.
-        
+
         Args:
             sample: Dataset sample
             s3_uri: S3 URI of the image
             label_mapping: Label mapping dictionary
             system_prompt: System prompt text
             task_prompt_template: Task prompt template
-            
+
         Returns:
             JSONL record dictionary
         """
         label = sample["label"]
         mapped_label = label_mapping.get(label, f"class_{label}")
-        
+
         return {
             "schemaVersion": "bedrock-conversation-2024",
             "system": [{"text": system_prompt}],
@@ -303,121 +335,141 @@ class NovaDataPreparationService:
                                 "source": {
                                     "s3Location": {
                                         "uri": s3_uri,
-                                        "bucketOwner": self.account_id
+                                        "bucketOwner": self.account_id,
                                     }
-                                }
+                                },
                             }
-                        }
-                    ]
+                        },
+                    ],
                 },
                 {
                     "role": "assistant",
-                    "content": [{
-                        "text": f'```json\n{{"type": "{mapped_label}"}}\n```'
-                    }]
-                }
-            ]
+                    "content": [
+                        {"text": f'```json\n{{"type": "{mapped_label}"}}\n```'}
+                    ],
+                },
+            ],
         }
 
-    def process_samples(self, sampled_data: List[Dict], directory: str,
-                       label_mapping: Dict[int, str], system_prompt: str,
-                       task_prompt_template: str) -> List[Dict]:
+    def process_samples(
+        self,
+        sampled_data: List[Dict],
+        directory: str,
+        label_mapping: Dict[int, str],
+        system_prompt: str,
+        task_prompt_template: str,
+    ) -> List[Dict]:
         """
         Process samples in parallel: upload images and create JSONL records.
-        
+
         Args:
             sampled_data: List of sampled data
             directory: S3 directory prefix
             label_mapping: Label mapping dictionary
             system_prompt: System prompt text
             task_prompt_template: Task prompt template
-            
+
         Returns:
             List of JSONL records
         """
+
         def process_single_sample(sample_and_index: Tuple[Dict, int]) -> Dict:
             """Process a single sample."""
             sample, index = sample_and_index
-            
+
             # Save and upload image
             s3_uri = self.save_and_upload_image(
                 sample["image"], sample["label"], index, directory, label_mapping
             )
-            
+
             # Create JSONL record
             return self.create_jsonl_record(
                 sample, s3_uri, label_mapping, system_prompt, task_prompt_template
             )
-        
+
         # Process samples in parallel
         max_workers = min(32, os.cpu_count() * 2)
         logger.info(f"Using {max_workers} workers for parallel processing")
-        
+
         jsonl_records = []
         sample_indices = list(enumerate(sampled_data))
-        
+
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-            future_to_idx = {executor.submit(process_single_sample, sample_info): i 
-                           for i, sample_info in enumerate(sample_indices)}
-            
-            for future in tqdm(concurrent.futures.as_completed(future_to_idx), 
-                             total=len(future_to_idx), desc="Processing samples"):
+            future_to_idx = {
+                executor.submit(process_single_sample, sample_info): i
+                for i, sample_info in enumerate(sample_indices)
+            }
+
+            for future in tqdm(
+                concurrent.futures.as_completed(future_to_idx),
+                total=len(future_to_idx),
+                desc="Processing samples",
+            ):
                 try:
                     record = future.result()
                     jsonl_records.append(record)
                 except Exception as e:
                     idx = future_to_idx[future]
                     logger.error(f"Error processing sample {idx}: {e}")
-        
+
         return jsonl_records
 
-    def split_and_save_data(self, jsonl_records: List[Dict], directory: str,
-                          validation_split: float = 0.1) -> Tuple[int, int]:
+    def split_and_save_data(
+        self, jsonl_records: List[Dict], directory: str, validation_split: float = 0.1
+    ) -> Tuple[int, int]:
         """
         Split data and save JSONL files to S3.
-        
+
         Args:
             jsonl_records: List of JSONL records
             directory: S3 directory prefix
             validation_split: Validation split ratio
-            
+
         Returns:
             Tuple of (train_count, validation_count)
         """
         # Shuffle data
         random.shuffle(jsonl_records)
-        
+
         # Split data
         split_idx = int(len(jsonl_records) * (1 - validation_split))
         train_records = jsonl_records[:split_idx]
         validation_records = jsonl_records[split_idx:]
-        
+
         logger.info(f"Training records: {len(train_records)}")
         logger.info(f"Validation records: {len(validation_records)}")
-        
+
         # Save files locally
         train_path = "train.jsonl"
         validation_path = "validation.jsonl"
-        
+
         with open(train_path, "w") as f:
             for record in train_records:
                 f.write(json.dumps(record) + "\n")
-        
+
         with open(validation_path, "w") as f:
             for record in validation_records:
                 f.write(json.dumps(record) + "\n")
-        
+
         # Upload to S3
-        self.s3_client.upload_file(train_path, self.bucket_name, f"{directory}/train.jsonl")
-        self.s3_client.upload_file(validation_path, self.bucket_name, f"{directory}/validation.jsonl")
-        
-        logger.info(f"Train JSONL uploaded to s3://{self.bucket_name}/{directory}/train.jsonl")
-        logger.info(f"Validation JSONL uploaded to s3://{self.bucket_name}/{directory}/validation.jsonl")
-        
+        self.s3_client.upload_file(
+            train_path, self.bucket_name, f"{directory}/train.jsonl"
+        )
+        self.s3_client.upload_file(
+            validation_path, self.bucket_name, f"{directory}/validation.jsonl"
+        )
+
+        logger.info(
+            f"Train JSONL uploaded to s3://{self.bucket_name}/{directory}/train.jsonl"
+        )
+        logger.info(
+            f"Validation JSONL uploaded to s3://{self.bucket_name}/{directory}/validation.jsonl"
+        )
+
         # Clean up local files
         os.remove(train_path)
         os.remove(validation_path)
-        
+
         return len(train_records), len(validation_records)
 
     def cleanup_temp_files(self):
@@ -442,104 +494,136 @@ Examples:
   
   # Use local dataset
   python prepare_nova_finetuning_data.py --bucket-name my-bucket --local-dataset /path/to/data --samples-per-label 75
-        """
+        """,
     )
-    
+
     # Required arguments
-    parser.add_argument("--bucket-name", required=True, 
-                       help="S3 bucket name for storing prepared data")
-    
+    parser.add_argument(
+        "--bucket-name", required=True, help="S3 bucket name for storing prepared data"
+    )
+
     # Optional arguments
-    parser.add_argument("--directory", default="nova-finetuning-data",
-                       help="S3 directory prefix (default: nova-finetuning-data)")
-    parser.add_argument("--samples-per-label", type=int, default=100,
-                       help="Number of samples per label (default: 100)")
-    parser.add_argument("--dataset", default="chainyo/rvl-cdip",
-                       help="Hugging Face dataset name (default: chainyo/rvl-cdip)")
-    parser.add_argument("--local-dataset", 
-                       help="Path to local dataset (overrides --dataset)")
-    parser.add_argument("--split", default="train",
-                       help="Dataset split to use (default: train)")
-    parser.add_argument("--validation-split", type=float, default=0.1,
-                       help="Validation split ratio (default: 0.1)")
-    parser.add_argument("--region", default="us-east-1",
-                       help="AWS region (default: us-east-1)")
-    parser.add_argument("--label-mapping-file",
-                       help="JSON file with custom label mapping")
-    parser.add_argument("--system-prompt-file",
-                       help="Text file with custom system prompt")
-    parser.add_argument("--task-prompt-file", 
-                       help="Text file with custom task prompt template")
-    
+    parser.add_argument(
+        "--directory",
+        default="nova-finetuning-data",
+        help="S3 directory prefix (default: nova-finetuning-data)",
+    )
+    parser.add_argument(
+        "--samples-per-label",
+        type=int,
+        default=100,
+        help="Number of samples per label (default: 100)",
+    )
+    parser.add_argument(
+        "--dataset",
+        default="chainyo/rvl-cdip",
+        help="Hugging Face dataset name (default: chainyo/rvl-cdip)",
+    )
+    parser.add_argument(
+        "--local-dataset", help="Path to local dataset (overrides --dataset)"
+    )
+    parser.add_argument(
+        "--split", default="train", help="Dataset split to use (default: train)"
+    )
+    parser.add_argument(
+        "--validation-split",
+        type=float,
+        default=0.1,
+        help="Validation split ratio (default: 0.1)",
+    )
+    parser.add_argument(
+        "--region", default="us-east-1", help="AWS region (default: us-east-1)"
+    )
+    parser.add_argument(
+        "--label-mapping-file", help="JSON file with custom label mapping"
+    )
+    parser.add_argument(
+        "--system-prompt-file", help="Text file with custom system prompt"
+    )
+    parser.add_argument(
+        "--task-prompt-file", help="Text file with custom task prompt template"
+    )
+
     args = parser.parse_args()
-    
+
     # Load custom configurations if provided
     label_mapping = DEFAULT_LABEL_MAPPING
     if args.label_mapping_file:
-        with open(args.label_mapping_file, 'r') as f:
+        with open(args.label_mapping_file, "r") as f:
             custom_mapping = json.load(f)
             # Convert string keys to integers
             label_mapping = {int(k): v for k, v in custom_mapping.items()}
         logger.info(f"Loaded custom label mapping from {args.label_mapping_file}")
-    
+
     system_prompt = DEFAULT_SYSTEM_PROMPT
     if args.system_prompt_file:
-        with open(args.system_prompt_file, 'r') as f:
+        with open(args.system_prompt_file, "r") as f:
             system_prompt = f.read().strip()
         logger.info(f"Loaded custom system prompt from {args.system_prompt_file}")
-    
+
     task_prompt_template = DEFAULT_TASK_PROMPT_TEMPLATE
     if args.task_prompt_file:
-        with open(args.task_prompt_file, 'r') as f:
+        with open(args.task_prompt_file, "r") as f:
             task_prompt_template = f.read().strip()
         logger.info(f"Loaded custom task prompt from {args.task_prompt_file}")
-    
+
     try:
         # Initialize service
         service = NovaDataPreparationService(args.bucket_name, args.region)
-        
+
         # Load dataset
         dataset = service.load_dataset(
             dataset_name=None if args.local_dataset else args.dataset,
             local_path=args.local_dataset,
-            split=args.split
+            split=args.split,
         )
-        
+
         # Sample data by label
         sampled_data = service.sample_data_by_label(
             dataset, args.samples_per_label, label_mapping
         )
-        
+
         if not sampled_data:
-            logger.error("No data was sampled. Please check your dataset and parameters.")
+            logger.error(
+                "No data was sampled. Please check your dataset and parameters."
+            )
             return 1
-        
+
         # Process samples (upload images and create JSONL records)
-        logger.info("Processing samples: uploading images and creating JSONL records...")
-        jsonl_records = service.process_samples(
-            sampled_data, args.directory, label_mapping, 
-            system_prompt, task_prompt_template
+        logger.info(
+            "Processing samples: uploading images and creating JSONL records..."
         )
-        
+        jsonl_records = service.process_samples(
+            sampled_data,
+            args.directory,
+            label_mapping,
+            system_prompt,
+            task_prompt_template,
+        )
+
         # Split and save data
         train_count, val_count = service.split_and_save_data(
             jsonl_records, args.directory, args.validation_split
         )
-        
+
         # Clean up
         service.cleanup_temp_files()
-        
+
         # Summary
         logger.info("Dataset preparation completed successfully!")
         logger.info(f"Total samples processed: {len(jsonl_records)}")
         logger.info(f"Training samples: {train_count}")
         logger.info(f"Validation samples: {val_count}")
         logger.info(f"Data uploaded to: s3://{args.bucket_name}/{args.directory}/")
-        logger.info(f"Training data: s3://{args.bucket_name}/{args.directory}/train.jsonl")
-        logger.info(f"Validation data: s3://{args.bucket_name}/{args.directory}/validation.jsonl")
-        
+        logger.info(
+            f"Training data: s3://{args.bucket_name}/{args.directory}/train.jsonl"
+        )
+        logger.info(
+            f"Validation data: s3://{args.bucket_name}/{args.directory}/validation.jsonl"
+        )
+
         return 0
-        
+
     except Exception as e:
         logger.error(f"Error during data preparation: {e}")
         return 1
