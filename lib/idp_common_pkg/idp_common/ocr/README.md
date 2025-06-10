@@ -17,6 +17,7 @@ The OCR service is designed to process PDF documents and extract text using AWS 
 - Direct integration with the Document data model
 - Automatic S3 retrieval of input documents
 - S3 storage of intermediate and final results
+- **Text confidence data generation** for efficient assessment prompts
 - Metering data collection for usage tracking
 - Comprehensive error handling
 - Rich markdown output for tables and forms when using enhanced features
@@ -53,6 +54,66 @@ print(f"Processed {processed_document.num_pages} pages")
 for page_id, page in processed_document.pages.items():
     print(f"Page {page_id}: Image at {page.image_uri}")
     print(f"Page {page_id}: Text and Markdown at {page.parsed_text_uri}")
+    print(f"Page {page_id}: Text confidence data at {page.text_confidence_uri}")
+```
+
+## Text Confidence Data
+
+The OCR service automatically generates optimized text confidence data for each page, which is specifically designed for LLM assessment prompts. This feature dramatically reduces token usage while preserving all information needed for confidence evaluation.
+
+### Generated Files per Page
+
+For each page, the OCR service creates:
+
+- **`image.jpg`** - Page image in JPEG format
+- **`rawText.json`** - Complete Textract response (full metadata, geometric data, relationships)
+- **`result.json`** - Parsed markdown text content for human readability
+- **`textConfidence.json`** - **NEW** - Condensed text confidence data for assessment prompts
+
+### Text Confidence Data Format
+
+The condensed format includes only essential information:
+
+```json
+{
+  "page_count": 1,
+  "text_blocks": [
+    {
+      "text": "WESTERN DARK FIRED TOBACCO GROWERS' ASSOCIATION",
+      "confidence": 99.35,
+      "type": "PRINTED"
+    },
+    {
+      "text": "206 Maple Street",
+      "confidence": 91.41,
+      "type": "PRINTED"
+    }
+  ]
+}
+```
+
+### Benefits
+
+- **80-90% token reduction** compared to raw Textract output
+- **Preserved assessment data**: Text content, OCR confidence scores, text type (PRINTED/HANDWRITING)
+- **Removed overhead**: Geometric data, relationships, block IDs, and verbose metadata
+- **Cost efficiency**: Significantly reduced LLM inference costs for assessment workflows
+- **Automated generation**: Created during initial OCR processing, not repeatedly during assessment
+
+### Usage in Assessment Prompts
+
+Assessment services can reference this data using the `{OCR_TEXT_CONFIDENCE}` placeholder in prompt templates:
+
+```python
+task_prompt = """
+Assess the extraction confidence for this document.
+
+Text Confidence Data:
+{OCR_TEXT_CONFIDENCE}
+
+Extraction Results:
+{EXTRACTION_RESULTS}
+"""
 ```
 
 ## Lambda Integration Example

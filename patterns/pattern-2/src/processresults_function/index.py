@@ -44,11 +44,12 @@ def handler(event, context):
     
     # Combine all section results
     for result in extraction_results:
-        # Get section document from extraction result
-        if "document" in result:
+        # Get section document from assessment result (if populated) 
+        # or extraction result if assessment is disabled
+        section_document = Document.from_dict(result.get("AssessmentResult", {}).get("document", {}))
+        if not section_document:
             section_document = Document.from_dict(result.get("document", {}))
-            section_id = result.get("section_id")
-            
+        if section_document:       
             # Add section to document if present
             if section_document.sections:
                 section = section_document.sections[0]

@@ -170,6 +170,9 @@ class TestOcrService:
             assert result.pages["1"].parsed_text_uri.startswith(
                 "s3://output-bucket/test-document.pdf/pages/1/result.json"
             )
+            assert result.pages["1"].text_confidence_uri.startswith(
+                "s3://output-bucket/test-document.pdf/pages/1/textConfidence.json"
+            )
             assert len(result.errors) == 0
 
             # Verify S3 client was called
@@ -177,8 +180,8 @@ class TestOcrService:
                 Bucket="input-bucket", Key="test-document.pdf"
             )
 
-            # Verify write_content was called for each page (image, raw text, parsed text)
-            assert mock_write_content.call_count == 6  # 3 files per page, 2 pages
+            # Verify write_content was called for each page (image, raw text, parsed text, text confidence)
+            assert mock_write_content.call_count == 8  # 4 files per page, 2 pages
 
     @patch("fitz.open")
     def test_process_document_s3_error(self, mock_fitz_open, service, sample_document):
@@ -220,6 +223,7 @@ class TestOcrService:
                         "image_uri": "s3://uri",
                         "raw_text_uri": "s3://uri",
                         "parsed_text_uri": "s3://uri",
+                        "text_confidence_uri": "s3://uri",
                     },
                     {},
                 ),  # Second page succeeds
@@ -317,10 +321,14 @@ class TestOcrService:
                 result["parsed_text_uri"]
                 == "s3://output-bucket/test-document.pdf/pages/1/result.json"
             )
+            assert (
+                result["text_confidence_uri"]
+                == "s3://output-bucket/test-document.pdf/pages/1/textConfidence.json"
+            )
 
             # Verify metering data
-            assert "textract/detect_document_text" in metering
-            assert metering["textract/detect_document_text"]["pages"] == 1
+            assert "OCR/textract/detect_document_text" in metering
+            assert metering["OCR/textract/detect_document_text"]["pages"] == 1
 
             # Verify Textract client was called with detect_document_text
             service.textract_client.detect_document_text.assert_called_once()
@@ -363,10 +371,14 @@ class TestOcrService:
                 result["parsed_text_uri"]
                 == "s3://output-bucket/test-document.pdf/pages/1/result.json"
             )
+            assert (
+                result["text_confidence_uri"]
+                == "s3://output-bucket/test-document.pdf/pages/1/textConfidence.json"
+            )
 
             # Verify metering data
-            assert "textract/analyze_document-Tables+Forms" in metering
-            assert metering["textract/analyze_document-Tables+Forms"]["pages"] == 1
+            assert "OCR/textract/analyze_document-Tables+Forms" in metering
+            assert metering["OCR/textract/analyze_document-Tables+Forms"]["pages"] == 1
 
             # Verify Textract client was called with analyze_document
             service.textract_client.analyze_document.assert_called_once_with(

@@ -399,6 +399,15 @@ const DocumentAttributes = ({ item }) => {
         <SpaceBetween size="xs">
           <div>
             <Box margin={{ bottom: 'xxxs' }} color="text-label">
+              <strong>Confidence Alerts</strong>
+            </Box>
+            <div>{item.confidenceAlertCount || 0}</div>
+          </div>
+        </SpaceBetween>
+
+        <SpaceBetween size="xs">
+          <div>
+            <Box margin={{ bottom: 'xxxs' }} color="text-label">
               <strong>Summary</strong>
             </Box>
             <div>{item.summaryReportUri ? 'Available' : 'N/A'}</div>

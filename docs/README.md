@@ -12,6 +12,7 @@ This folder contains detailed documentation on various aspects of the GenAI Inte
 - [Web UI](./web-ui.md) - Web interface features and usage
 - [Knowledge Base](./knowledge-base.md) - Document knowledge base query feature
 - [Evaluation Framework](./evaluation.md) - Accuracy assessment system
+- [Assessment Feature](./assessment.md) - Extraction confidence evaluation using LLMs
 - [Configuration](./configuration.md) - Configuration and customization options
 - [Classification](./classification.md) - Customizing document classification
 - [Extraction](./extraction.md) - Customizing information extraction

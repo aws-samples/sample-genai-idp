@@ -17,6 +17,7 @@ import { API, Logger } from 'aws-amplify';
 import { Editor } from '@monaco-editor/react';
 import getFileContents from '../../graphql/queries/getFileContents';
 import uploadDocument from '../../graphql/queries/uploadDocument';
+import { getFieldHighlightInfo, getFieldConfidenceInfo } from '../common/confidence-alerts-utils';
 // Lazy load VisualEditorModal for better performance
 const VisualEditorModal = React.lazy(() => import('./VisualEditorModal'));
 
@@ -25,9 +26,9 @@ const logger = new Logger('FileEditor');
 const EDITOR_DEFAULT_HEIGHT = '600px';
 
 // A simplified form-based JSON editor
-const FormEditorView = ({ jsonData, onChange, isReadOnly }) => {
+const FormEditorView = ({ jsonData, onChange, isReadOnly, sectionData }) => {
   // Render primitive values like strings, numbers, booleans, null
-  function renderPrimitiveValue(value, onChangeValue) {
+  function renderPrimitiveValue(value, onChangeValue, fieldPath) {
     if (value === null || value === undefined) {
       return (
         <FormField>
@@ -50,6 +51,63 @@ const FormEditorView = ({ jsonData, onChange, isReadOnly }) => {
       );
     }
 
+    // Handle numeric values with proper input configuration
+    if (typeof value === 'number') {
+      const fieldPathString = Array.isArray(fieldPath) ? fieldPath.join('.') : fieldPath || '';
+      const isConfidenceField =
+        fieldPathString &&
+        (fieldPathString.includes('confidence') ||
+          fieldPathString.includes('Confidence') ||
+          fieldPathString.endsWith('_confidence') ||
+          fieldPathString.endsWith('_Confidence'));
+
+      const inputProps = {
+        value: String(value),
+        disabled: isReadOnly,
+        type: 'number',
+        step: isConfidenceField ? '0.01' : 'any',
+        onChange: ({ detail }) => {
+          if (isReadOnly) return;
+
+          const newValue = detail.value;
+          const parsed = Number(newValue);
+          if (!Number.isNaN(parsed)) {
+            // For confidence fields, clamp between 0 and 1
+            if (isConfidenceField) {
+              const clampedValue = Math.max(0, Math.min(1, parsed));
+              onChangeValue(clampedValue);
+            } else {
+              onChangeValue(parsed);
+            }
+          } else if (newValue === '') {
+            // Allow empty value for editing
+            onChangeValue(0);
+          }
+        },
+      };
+
+      // Add min/max for confidence fields
+      if (isConfidenceField) {
+        inputProps.min = '0';
+        inputProps.max = '1';
+      }
+
+      return (
+        <FormField>
+          <Input
+            value={inputProps.value}
+            disabled={inputProps.disabled}
+            type={inputProps.type}
+            step={inputProps.step}
+            min={inputProps.min}
+            max={inputProps.max}
+            onChange={inputProps.onChange}
+          />
+        </FormField>
+      );
+    }
+
+    // Handle string values
     return (
       <FormField>
         <Input
@@ -57,17 +115,7 @@ const FormEditorView = ({ jsonData, onChange, isReadOnly }) => {
           disabled={isReadOnly}
           onChange={({ detail }) => {
             if (isReadOnly) return;
-
-            const newValue = detail.value;
-            // Try to convert back to number if it was a number
-            if (typeof value === 'number') {
-              const parsed = Number(newValue);
-              if (!Number.isNaN(parsed)) {
-                onChangeValue(parsed);
-                return;
-              }
-            }
-            onChangeValue(newValue);
+            onChangeValue(detail.value);
           }}
         />
       </FormField>
@@ -75,18 +123,73 @@ const FormEditorView = ({ jsonData, onChange, isReadOnly }) => {
   }
 
   // Render a key-value pair with the key on the left
-  function renderKeyValuePair(key, value, onChangeValue) {
+  function renderKeyValuePair(key, value, onChangeValue, parentPath = [], isArrayIndex = false) {
+    // For array indices, the key is like "[0]", so we extract the index
+    const cleanKey = key.replace(/[[\]]/g, '');
+    const currentPath = isArrayIndex ? [...parentPath, parseInt(cleanKey, 10)] : [...parentPath, cleanKey];
+
+    // Get confidence information from explainability data (for all fields)
+    const explainabilityInfo = jsonData?.explainability_info;
+    // For array items, we don't look for confidence of the index itself, but pass the current path
+    // For regular fields, we look for confidence of the field name using the parent path
+
+    // Filter out structural keys from the path for explainability lookup
+    // We need to remove top-level keys like 'inference_result', 'explainability_info', etc.
+    const structuralKeys = ['inference_result', 'inferenceResult', 'explainability_info'];
+    const filteredParentPath = parentPath.filter(
+      (pathSegment) => !structuralKeys.includes(pathSegment) && typeof pathSegment !== 'undefined',
+    );
+
+    const confidenceInfo = isArrayIndex
+      ? { hasConfidenceInfo: false } // Array indices don't have confidence, their contents do
+      : getFieldConfidenceInfo(cleanKey, explainabilityInfo, filteredParentPath);
+
+    // Check if this field should be highlighted due to low confidence (legacy alert-based highlighting)
+    const confidenceThresholdAlerts = sectionData?.ConfidenceThresholdAlerts || [];
+    const highlightInfo = getFieldHighlightInfo(key, value, confidenceThresholdAlerts);
+
+    const boxStyle =
+      highlightInfo.shouldHighlight || confidenceInfo.shouldHighlight
+        ? { backgroundColor: '#ffeaa7', border: '2px solid #e17055' }
+        : {};
+
     return (
-      <Box padding="xxxs" borderBottom="divider-light">
+      <Box padding="xxxs" borderBottom="divider-light" style={boxStyle}>
         <Box display="flex" alignItems="center">
           <Box width="30%" padding="xxxs" fontWeight="bold" fontSize="body-s">
             {key}:
+            {confidenceInfo.hasConfidenceInfo && (
+              <Box
+                fontSize="body-s"
+                padding={{ top: 'xxxs' }}
+                color={
+                  confidenceInfo.displayMode === 'with-threshold'
+                    ? confidenceInfo.isAboveThreshold
+                      ? 'text-status-success'
+                      : 'text-status-error'
+                    : undefined
+                }
+                style={
+                  confidenceInfo.displayMode === 'confidence-only' ? { color: confidenceInfo.textColor } : undefined
+                }
+              >
+                {confidenceInfo.displayMode === 'with-threshold'
+                  ? `Confidence: ${(confidenceInfo.confidence * 100).toFixed(1)}% / Threshold: ${(
+                      confidenceInfo.confidenceThreshold * 100
+                    ).toFixed(1)}%`
+                  : `Confidence: ${(confidenceInfo.confidence * 100).toFixed(1)}%`}
+              </Box>
+            )}
           </Box>
           <Box width="70%">
-            {renderJsonValue(value, (newValue) => {
-              if (isReadOnly) return;
-              onChangeValue(newValue);
-            })}
+            {renderJsonValue(
+              value,
+              (newValue) => {
+                if (isReadOnly) return;
+                onChangeValue(newValue);
+              },
+              currentPath,
+            )}
           </Box>
         </Box>
       </Box>
@@ -94,7 +197,7 @@ const FormEditorView = ({ jsonData, onChange, isReadOnly }) => {
   }
 
   // The main recursive renderer for JSON values
-  function renderJsonValue(value, onChangeValue) {
+  function renderJsonValue(value, onChangeValue, fieldPath = []) {
     // Handle primitive values
     if (
       value === null ||
@@ -103,7 +206,7 @@ const FormEditorView = ({ jsonData, onChange, isReadOnly }) => {
       typeof value === 'number' ||
       typeof value === 'string'
     ) {
-      return renderPrimitiveValue(value, onChangeValue);
+      return renderPrimitiveValue(value, onChangeValue, fieldPath);
     }
 
     // Handle arrays
@@ -123,11 +226,17 @@ const FormEditorView = ({ jsonData, onChange, isReadOnly }) => {
                     : `array-item-${index}`;
                 return (
                   <Box key={itemKey}>
-                    {renderKeyValuePair(`[${index}]`, item, (newValue) => {
-                      const newArray = [...value];
-                      newArray[index] = newValue;
-                      onChangeValue(newArray);
-                    })}
+                    {renderKeyValuePair(
+                      `[${index}]`,
+                      item,
+                      (newValue) => {
+                        const newArray = [...value];
+                        newArray[index] = newValue;
+                        onChangeValue(newArray);
+                      },
+                      fieldPath,
+                      true, // isArrayIndex
+                    )}
                   </Box>
                 );
               })}
@@ -155,11 +264,17 @@ const FormEditorView = ({ jsonData, onChange, isReadOnly }) => {
           <SpaceBetween size="xxxs">
             {Object.entries(value).map(([key, propValue]) => (
               <Box key={`prop-${key}`}>
-                {renderKeyValuePair(key, propValue, (newValue) => {
-                  const newObj = { ...value };
-                  newObj[key] = newValue;
-                  onChangeValue(newObj);
-                })}
+                {renderKeyValuePair(
+                  key,
+                  propValue,
+                  (newValue) => {
+                    const newObj = { ...value };
+                    newObj[key] = newValue;
+                    onChangeValue(newObj);
+                  },
+                  fieldPath,
+                  false, // isArrayIndex
+                )}
               </Box>
             ))}
             {!isReadOnly && (
@@ -211,7 +326,7 @@ const FormEditorView = ({ jsonData, onChange, isReadOnly }) => {
       }}
     >
       {jsonData ? (
-        renderJsonValue(jsonData, handleChange)
+        renderJsonValue(jsonData, handleChange, [])
       ) : (
         <Box textAlign="center" padding="l">
           No valid JSON data to display
@@ -407,7 +522,12 @@ const FileEditorView = ({ fileContent, onChange, isReadOnly = true, fileType = '
 
       {isValid && fileType === 'json' ? (
         viewMode === 'form' ? (
-          <FormEditorView jsonData={jsonData} onChange={handleFormChange} isReadOnly={isReadOnly} />
+          <FormEditorView
+            jsonData={jsonData}
+            onChange={handleFormChange}
+            isReadOnly={isReadOnly}
+            sectionData={memoizedSectionData}
+          />
         ) : (
           <TextEditorView
             fileContent={typeof fileContent === 'string' ? fileContent : JSON.stringify(jsonData, null, 2)}

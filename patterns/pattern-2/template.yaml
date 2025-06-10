@@ -75,6 +75,14 @@ Parameters:
       - 'false'
     Description: Enable or disable document summarization functionality
     
+  IsAssessmentEnabled:
+    Type: String
+    Default: 'false'
+    AllowedValues:
+      - 'true'
+      - 'false'
+    Description: Enable or disable extraction confidence assessment functionality
+    
   BedrockGuardrailId:
     Type: String
     Default: ""
@@ -95,6 +103,7 @@ Parameters:
 
 Conditions:
   IsSummarizationEnabled: !Equals [!Ref IsSummarizationEnabled, "true"]
+  IsAssessmentEnabled: !Equals [!Ref IsAssessmentEnabled, "true"]
   HasGuardrailConfig: !And [!Not [!Equals [!Ref BedrockGuardrailId, ""]], !Not [!Equals [!Ref BedrockGuardrailVersion, ""]]]
   HasCustomClassificationModelARN : !Not [!Equals [!Ref CustomClassificationModelARN , ""]]
   HasCustomExtractionModelARN : !Not [!Equals [!Ref CustomExtractionModelARN , ""]]
@@ -232,6 +241,12 @@ Resources:
                           field: "evaluation_method",
                           values: ["SEMANTIC", "FUZZY", "HUNGARIAN_FUZZY"]
                         }
+                      confidence_threshold:
+                        type: number
+                        description: Confidence threshold for this specific attribute (0.0 to 1.0). If not set, the default confidence threshold from assessment section will be used.
+                        minimum: 0
+                        maximum: 1
+                        order: 5
                     # This controls the layout of the form fields inside each attribute item
                     columns: 2
           classification:
@@ -354,8 +369,86 @@ Resources:
                 type: string
                 description: Task prompt - supports placeholders {DOCUMENT_CLASS} (replaced with the detected class label), {ATTRIBUTE_NAMES_AND_DESCRIPTIONS} (replaced with the attribute names and descriptions for the detected class), {FEW_SHOT_EXAMPLES} (replaced by classPrompt and image data from examples in class definitions), {DOCUMENT_TEXT} (replaced by the OCR output), and {DOCUMENT_IMAGE} (replaced by the page image attachments for each page). Optionally use <<CACHEPOINT>> to separate static and dynamic elements of prompt for Bedrock prompt caching.
                 order: 7
-          evaluation:
+          assessment:
             order: 5
+            type: object
+            sectionLabel: Assessment Inference
+            properties:
+              default_confidence_threshold:
+                type: number
+                description: Default confidence threshold for all attributes (0.0 to 1.0). If an attribute doesn't have its own threshold, this default will be used for confidence threshold alerts.
+                minimum: 0
+                maximum: 1
+                order: 1
+              model:
+                type: string
+                description: Bedrock model ID
+                enum: ["us.amazon.nova-lite-v1:0", "us.amazon.nova-pro-v1:0", "us.amazon.nova-premier-v1:0", "us.anthropic.claude-3-haiku-20240307-v1:0", "us.anthropic.claude-3-5-sonnet-20241022-v2:0", "us.anthropic.claude-3-7-sonnet-20250219-v1:0", "us.anthropic.claude-sonnet-4-20250514-v1:0", "us.anthropic.claude-opus-4-20250514-v1:0"]
+                order: 2
+              temperature:
+                type: number
+                description: Sampling temperature
+                order: 3
+              top_k:
+                type: number
+                description: Sampling Top K
+                order: 4
+              top_p:
+                type: number
+                description: Sampling Top P
+                order: 5
+              max_tokens:
+                type: number
+                description: Max tokens
+                order: 6
+              system_prompt:
+                type: string
+                format: textarea
+                description: System prompt
+                order: 7
+              task_prompt:
+                type: string
+                format: textarea
+                description: Task prompt - supports placeholders {DOCUMENT_TEXT} (markdown text), {OCR_TEXT_CONFIDENCE} (OCR text blocks with confidence), {DOCUMENT_CLASS}, {ATTRIBUTE_NAMES_AND_DESCRIPTIONS}, {EXTRACTION_RESULTS} and {DOCUMENT_IMAGE}. Use <<CACHEPOINT>> to separate static and dynamic elements of prompt for Bedrock prompt caching.
+                order: 8
+          summarization:
+            order: 6
+            type: object
+            sectionLabel: Summarization Inference
+            properties:
+              model:
+                type: string
+                description: Bedrock model ID
+                enum: ["us.amazon.nova-lite-v1:0", "us.amazon.nova-pro-v1:0", "us.amazon.nova-premier-v1:0", "us.anthropic.claude-3-haiku-20240307-v1:0", "us.anthropic.claude-3-5-sonnet-20241022-v2:0", "us.anthropic.claude-3-7-sonnet-20250219-v1:0", "us.anthropic.claude-sonnet-4-20250514-v1:0", "us.anthropic.claude-opus-4-20250514-v1:0"]
+                order: 1
+              temperature:
+                type: number
+                description: Sampling temperature
+                order: 2
+              top_k:
+                type: number
+                description: Sampling Top K
+                order: 3
+              top_p:
+                type: number
+                description: Sampling Top P
+                order: 4
+              max_tokens:
+                type: number
+                description: Max tokens
+                order: 5
+              system_prompt:
+                type: string
+                format: textarea
+                description: System prompt
+                order: 6
+              task_prompt:
+                type: string
+                format: textarea
+                description: Task prompt - supports parameter {DOCUMENT_TEXT}. Optionally use <<CACHEPOINT>> to separate static and dynamic elements of prompt for Bedrock prompt caching.
+                order: 7
+          evaluation:
+            order: 7
             type: object
             sectionLabel: Evaluation Inference
             properties:
@@ -395,44 +488,8 @@ Resources:
                     format: textarea
                     description: Task prompt for LLM evaluation - supports placeholders {DOCUMENT_CLASS}, {ATTRIBUTE_NAME}, {ATTRIBUTE_DESCRIPTION}, {EXPECTED_VALUE} and {ACTUAL_VALUE}
                     order: 7
-          summarization:
-            order: 6
-            type: object
-            sectionLabel: Summarization Inference
-            properties:
-              model:
-                type: string
-                description: Bedrock model ID
-                enum: ["us.amazon.nova-lite-v1:0", "us.amazon.nova-pro-v1:0", "us.amazon.nova-premier-v1:0", "us.anthropic.claude-3-haiku-20240307-v1:0", "us.anthropic.claude-3-5-sonnet-20241022-v2:0", "us.anthropic.claude-3-7-sonnet-20250219-v1:0", "us.anthropic.claude-sonnet-4-20250514-v1:0", "us.anthropic.claude-opus-4-20250514-v1:0"]
-                order: 1
-              temperature:
-                type: number
-                description: Sampling temperature
-                order: 2
-              top_k:
-                type: number
-                description: Sampling Top K
-                order: 3
-              top_p:
-                type: number
-                description: Sampling Top P
-                order: 4
-              max_tokens:
-                type: number
-                description: Max tokens
-                order: 5
-              system_prompt:
-                type: string
-                format: textarea
-                description: System prompt
-                order: 6
-              task_prompt:
-                type: string
-                format: textarea
-                description: Task prompt - supports parameter {DOCUMENT_TEXT}. Optionally use <<CACHEPOINT>> to separate static and dynamic elements of prompt for Bedrock prompt caching.
-                order: 7
           pricing:
-            order: 7
+            order: 8
             type: array
             sectionLabel: Pricing (Estimates only - check https://aws.amazon.com/bedrock/pricing/ & https://aws.amazon.com/textract/pricing/)
             listLabel: Services
@@ -707,6 +764,83 @@ Resources:
       LogGroupName: !Sub "/${AWS::StackName}/lambda/ExtractionFunction"
       RetentionInDays: !Ref LogRetentionDays
 
+  AssessmentFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: "This Lambda function does not require VPC access as it only interacts with AWS services via AWS APIs"
+          - id: W92
+            reason: "Function does not require concurrent execution limits as it is designed to scale based on demand"
+          - id: W11
+            reason: "Cloudwatch does not support resource-level permissions, and Bedrock should support any enabled Bedrock model_id or inference profile"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for this function as StepFunctions will handle retries"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only configuration values like feature flags and non-sensitive settings"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
+    Properties:
+      CodeUri: src/assessment_function/
+      Handler: index.handler
+      Runtime: python3.12
+      Timeout: 900
+      MemorySize: 512
+      Environment:
+        Variables:
+          METRIC_NAMESPACE: !Ref StackName
+          CONFIGURATION_BUCKET: !Ref ConfigurationBucket
+          CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
+          LOG_LEVEL: !Ref LogLevel
+          APPSYNC_API_URL: !Ref AppSyncApiUrl
+      LoggingConfig:
+        LogGroup: !Ref AssessmentFunctionLogGroup
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - S3CrudPolicy:
+            BucketName: !Ref OutputBucket
+        - S3ReadPolicy:
+            BucketName: !Ref InputBucket
+        - S3ReadPolicy:
+            BucketName: !Ref ConfigurationBucket
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ConfigurationTable
+        - Statement:
+          - Effect: Allow
+            Action: cloudwatch:PutMetricData
+            Resource: '*'
+          - Effect: Allow
+            Action:
+              - kms:Encrypt
+              - kms:Decrypt
+              - kms:ReEncrypt*
+              - kms:GenerateDataKey*
+              - kms:DescribeKey
+            Resource: !Ref CustomerManagedEncryptionKeyArn
+          # AppSync permissions for updating document status
+          - Effect: Allow
+            Action:
+              - appsync:GraphQL
+            Resource: 
+              - !Sub "${AppSyncApiArn}/types/Mutation/*"
+          - Effect: Allow
+            Action: bedrock:InvokeModel
+            Resource: 
+                - !Sub "arn:aws:bedrock:*::foundation-model/*"
+                - !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
+          - !If
+            - HasGuardrailConfig
+            - Effect: Allow
+              Action: bedrock:ApplyGuardrail
+              Resource: !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:guardrail/${BedrockGuardrailId}"
+            - !Ref AWS::NoValue
+
+  AssessmentFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+      LogGroupName: !Sub "/${AWS::StackName}/lambda/AssessmentFunction"
+      RetentionInDays: !Ref LogRetentionDays
+
   ProcessResultsFunction:
     Type: AWS::Serverless::Function
     Metadata:
@@ -851,9 +985,11 @@ Resources:
         OCRFunctionArn: !GetAtt OCRFunction.Arn
         ClassificationFunctionArn: !GetAtt ClassificationFunction.Arn
         ExtractionFunctionArn: !GetAtt ExtractionFunction.Arn
+        AssessmentFunctionArn: !GetAtt AssessmentFunction.Arn
         ProcessResultsLambdaArn: !GetAtt ProcessResultsFunction.Arn
         SummarizationLambdaArn: !GetAtt SummarizationFunction.Arn
         IsSummarizationEnabled: !If [IsSummarizationEnabled, "true", "false"]
+        IsAssessmentEnabled: !If [IsAssessmentEnabled, "true", "false"]
         OutputBucket: !Ref OutputBucket
       Logging:
         Level: ALL
@@ -867,6 +1003,8 @@ Resources:
             FunctionName: !Ref ClassificationFunction
         - LambdaInvokePolicy:
             FunctionName: !Ref ExtractionFunction
+        - LambdaInvokePolicy:
+            FunctionName: !Ref AssessmentFunction
         - LambdaInvokePolicy:
             FunctionName: !Ref ProcessResultsFunction
         - LambdaInvokePolicy:

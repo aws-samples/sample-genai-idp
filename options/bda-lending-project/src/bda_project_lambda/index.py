@@ -41,12 +41,13 @@ def handler(event, context):
             cfnresponse.send(event, context, cfnresponse.SUCCESS, {}, physical_id)
         
         else:
-            logger.error(f"Unknown request type: {request_type}")
-            cfnresponse.send(event, context, cfnresponse.FAILED, {}, physical_id)
+            msg = f"Unknown request type: {request_type}"
+            logger.error(msg)
+            cfnresponse.send(event, context, cfnresponse.FAILED, {}, physical_id, reason=msg)
     
     except Exception as e:
         logger.error(f"Error: {str(e)}")
-        cfnresponse.send(event, context, cfnresponse.FAILED, {"Error": str(e)}, physical_id)
+        cfnresponse.send(event, context, cfnresponse.FAILED, {"Error": str(e)}, physical_id, reason=str(e))
 
 def get_filtered_public_blueprints(blueprint_names=None):
     """Retrieve all public blueprints (resourceOwner=SERVICE)

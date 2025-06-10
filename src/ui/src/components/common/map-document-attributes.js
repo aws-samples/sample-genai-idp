@@ -1,6 +1,8 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { getDocumentConfidenceAlertCount } from './confidence-alerts-utils';
+
 /* Maps document attributes from API to a format that can be used in tables and panel */
 // eslint-disable-next-line arrow-body-style
 const mapDocumentsAttributes = (documents) => {
@@ -45,6 +47,9 @@ const mapDocumentsAttributes = (documents) => {
       }
     }
 
+    // Calculate confidence alert count
+    const confidenceAlertCount = getDocumentConfidenceAlertCount(sections);
+
     const mapping = {
       objectKey,
       objectStatus,
@@ -62,6 +67,7 @@ const mapDocumentsAttributes = (documents) => {
       evaluationReportUri,
       evaluationStatus,
       summaryReportUri,
+      confidenceAlertCount,
       listPK,
       listSK,
     };

@@ -41,6 +41,44 @@ The framework supports multiple comparison methods:
   - **NUMERIC**: Numeric comparison after normalizing currency symbols and formats
 - **LLM-Powered Analysis (LLM)**: Uses AI to determine functional equivalence of extracted data with detailed explanations
 
+## Assessment Confidence Integration
+
+The evaluation framework automatically integrates with the assessment feature to provide enhanced quality insights. When documents have been processed with assessment enabled, the evaluation reports include confidence scores alongside traditional accuracy metrics.
+
+### Confidence Score Display
+
+The evaluation framework automatically extracts confidence scores from the `explainability_info` section of assessment results and displays them in both JSON and Markdown evaluation reports:
+
+- **Expected Confidence**: Confidence score for baseline/ground truth data (if assessed)
+- **Actual Confidence**: Confidence score for extraction results being evaluated
+
+### Enhanced Evaluation Reports
+
+When confidence data is available, evaluation reports include additional columns:
+
+```
+| Status | Attribute | Expected | Actual | Expected Confidence | Actual Confidence | Score | Method | Reason |
+| :----: | --------- | -------- | ------ | :-----------------: | :---------------: | ----- | ------ | ------ |
+| ✅ | invoice_number | INV-2024-001 | INV-2024-001 | 0.95 | 0.92 | 1.00 | EXACT | Exact match |
+| ❌ | vendor_name | ABC Corp | XYZ Inc | 0.88 | 0.75 | 0.00 | EXACT | Values do not match |
+```
+
+### Quality Analysis Benefits
+
+The combination of evaluation accuracy and confidence scores provides deeper insights:
+
+1. **Baseline Quality Assessment**: Low expected confidence may indicate questionable ground truth data that needs review
+2. **Extraction Quality Assessment**: Low actual confidence highlights extraction results requiring human verification
+3. **Quality Prioritization**: Focus improvement efforts on attributes with both low confidence and low accuracy
+4. **Pattern Identification**: Analyze relationships between confidence levels and evaluation outcomes
+
+### Backward Compatibility
+
+The confidence integration is fully backward compatible:
+- Evaluation reports without assessment data show "N/A" in confidence columns
+- All existing evaluation workflows continue to function unchanged
+- No additional configuration required to enable confidence display
+
 ## Configuration
 
 Set the following parameters during stack deployment:
@@ -200,6 +238,125 @@ The evaluation also tracks different evaluation statuses:
 - **BASELINE_AVAILABLE**: Document is available in the baseline
 - **BASELINE_ERROR**: Error occurred during the baseline copy operation
 
+## Aggregate Evaluation Analytics and Reporting
+
+The solution includes a comprehensive analytics system that stores evaluation metrics in a structured database for advanced reporting and trend analysis.
+
+### ReportingDatabase Overview
+
+The evaluation framework automatically saves detailed metrics to an AWS Glue database (available from CloudFormation stack outputs as `ReportingDatabase`) containing three main tables:
+
+#### 1. document_evaluations
+Stores document-level metrics including:
+- Document ID, input key, evaluation date
+- Overall accuracy, precision, recall, F1 score
+- False alarm rate, false discovery rate
+- Execution time performance metrics
+
+#### 2. section_evaluations  
+Stores section-level metrics including:
+- Document ID, section ID, section type
+- Section-specific accuracy, precision, recall, F1 score
+- Section classification performance
+- Evaluation timestamps
+
+#### 3. attribute_evaluations
+Stores detailed attribute-level metrics including:
+- Document ID, section context, attribute name
+- Expected vs actual values, match results
+- Individual attribute scores and evaluation methods
+- Detailed reasoning for matches/mismatches
+
+### Querying with Amazon Athena
+
+All evaluation data is partitioned by date and document for efficient querying:
+
+```sql
+-- Example: Find documents with low accuracy in the last 7 days
+SELECT document_id, accuracy, evaluation_date 
+FROM "your-database-name".document_evaluations 
+WHERE evaluation_date >= current_date - interval '7' day 
+  AND accuracy < 0.8
+ORDER BY accuracy ASC;
+
+-- Example: Analyze attribute-level performance trends
+SELECT attribute_name, 
+       COUNT(*) as total_evaluations,
+       AVG(CASE WHEN matched THEN 1.0 ELSE 0.0 END) as match_rate,
+       AVG(score) as avg_score
+FROM "your-database-name".attribute_evaluations 
+WHERE evaluation_date >= current_date - interval '30' day
+GROUP BY attribute_name
+ORDER BY match_rate ASC;
+
+-- Example: Section type performance analysis
+SELECT section_type,
+       COUNT(*) as total_sections,
+       AVG(accuracy) as avg_accuracy,
+       AVG(f1_score) as avg_f1_score
+FROM "your-database-name".section_evaluations
+GROUP BY section_type
+ORDER BY avg_accuracy DESC;
+```
+
+### Analytics Notebook
+
+The solution includes a comprehensive Jupyter notebook (`notebooks/evaluation_reporting_analytics.ipynb`) that provides:
+
+- **Automated Data Loading**: Connects to Athena and automatically loads partitions for all evaluation tables
+- **Table Testing**: Validates connectivity and shows content summaries for document, section, and attribute evaluation tables
+- **Multi-level Analysis**: Document, section, and attribute-level performance insights with detailed breakdowns
+- **Visual Analytics**: Rich charts and graphs showing accuracy trends, problem areas, and performance distributions
+- **Problem Identification**: Automatically flags low-performing documents, sections, and attributes requiring attention
+- **Trend Analysis**: Historical accuracy tracking showing improvement/regression patterns over time
+- **Configurable Filters**: Dynamic filtering by date ranges, document name patterns, and accuracy thresholds
+- **Method Comparison**: Analysis of different evaluation methods and their effectiveness
+- **Processing Time Analysis**: Correlation between execution time and accuracy performance
+
+#### Key Analytics Features:
+
+1. **Comprehensive Dashboard**: Interactive summary report with health indicators and top issues
+2. **Problem Detection Reports**: 
+   - Documents with lowest accuracy scores
+   - Section types with poor performance 
+   - Attributes with low match rates and common failure reasons
+3. **Accuracy Trend Analysis**: Track same documents over time to identify improvement/regression patterns
+4. **Processing Performance**: Analyze correlation between processing time and accuracy
+5. **Method Effectiveness**: Compare different evaluation methods' performance and coverage
+6. **Export Capabilities**: Save analysis results to CSV files for further analysis or reporting
+
+#### Using the Analytics Notebook:
+
+1. **Configuration**: Set your ReportingDatabase name, AWS region, and S3 output location for Athena
+2. **Filter Setup**: Configure date range, document name filters, and accuracy thresholds
+3. **Automated Analysis**: Run partition loading, table testing, and comprehensive reporting
+4. **Interactive Updates**: Use `update_filters()` function to dynamically change parameters and re-run analyses
+5. **Visual Insights**: Review generated charts and visualizations for patterns and trends
+6. **Export Results**: Optional CSV export for stakeholder reporting and further analysis
+
+#### Sample Analytics Use Cases:
+
+- **Quality Monitoring**: Weekly accuracy assessments across all document types
+- **Performance Tuning**: Identify which attributes or sections need prompt improvements
+- **Trend Tracking**: Monitor if recent changes improved or degraded accuracy
+- **Method Optimization**: Compare evaluation methods to select the most effective approach
+- **Problem Prioritization**: Focus improvement efforts on consistently problematic areas
+
+### Data Retention and Partitioning
+
+- Evaluation data is automatically partitioned by year/month/day/document for efficient querying
+- Data retention follows the stack's `DataRetentionInDays` parameter
+- Partitions are automatically loaded when using the analytics notebook
+- Historical data enables long-term trend analysis and accuracy monitoring
+
+### Best Practices for Analytics
+
+1. **Regular Monitoring**: Use the analytics notebook weekly to identify accuracy trends
+2. **Threshold Tuning**: Adjust accuracy thresholds based on your use case requirements
+3. **Pattern Recognition**: Look for patterns in low-performing document types or sections
+4. **Comparative Analysis**: Compare performance across different prompt configurations
+5. **Automated Alerts**: Set up CloudWatch alarms based on accuracy metrics stored in the database
+
 ## Troubleshooting Evaluation Issues
 
 Common issues and resolutions:
@@ -218,3 +375,9 @@ Common issues and resolutions:
    - Review document quality and OCR results
    - Examine prompt configurations for classification and extraction
    - Check for processing errors in the workflow execution
+
+4. **Analytics Database Issues**
+   - Ensure the ReportingDatabase is accessible from your AWS account
+   - Check that evaluation results are being written to the reporting bucket
+   - Verify Athena permissions for querying Glue tables
+   - Use "MSCK REPAIR TABLE" in Athena to refresh partitions if needed

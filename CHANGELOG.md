@@ -5,6 +5,38 @@ SPDX-License-Identifier: MIT-0
 
 ## [Unreleased]
 
+## [0.3.3]
+
+### Added
+
+- **Assessment Feature for Extraction Confidence Evaluation (EXPERIMENTAL)**
+  - Added new assessment service that evaluates extraction confidence using LLMs to analyze extraction results against source documents
+  - Multi-modal assessment capability combining text analysis with document images for comprehensive confidence scoring
+  - UI integration with explainability_info display showing per-attribute confidence scores, thresholds, and explanations
+  - Optional deployment controlled by `IsAssessmentEnabled` parameter (defaults to false)
+  - Added e2e-example-with-assessment.ipynb notebook for testing assessment workflow
+
+- **Enhanced Evaluation Framework with Confidence Integration**
+  - Added expected_confidence and actual_confidence fields to evaluation reports for quality analysis
+  - Automatic extraction and display of confidence scores from assessment explainability_info
+  - Enhanced JSON and Markdown evaluation reports with confidence columns
+  - Backward compatible integration - shows "N/A" when confidence data unavailable
+
+- **Evaluation Analytics Database and Reporting System**
+  - Added comprehensive ReportingDatabase (AWS Glue) with structured evaluation metrics storage
+  - Three-tier analytics tables: document_evaluations, section_evaluations, and attribute_evaluations
+  - Automatic partitioning by date and document for efficient querying with Amazon Athena
+  - Detailed metrics tracking including accuracy, precision, recall, F1 score, execution time, and evaluation methods
+  - Added evaluation_reporting_analytics.ipynb notebook for comprehensive performance analysis and visualization
+  - Multi-level analytics with document, section, and attribute-level insights
+  - Visual dashboards showing accuracy distributions, performance trends, and problematic patterns
+  - Configurable filters for date ranges, document types, and evaluation thresholds
+  - Integration with existing evaluation framework - metrics automatically saved to database
+  - ReportingDatabase output added to CloudFormation template for easy reference
+
+### Fixed
+- Fixed build failure related to pandas and numpy dependency conflicts in the idp_common_pkg package
+
 ## [0.3.2]
 
 ### Added

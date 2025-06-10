@@ -49,11 +49,11 @@ def handler(event, context):
     except ClientError as e:
         logger.error(f"Error in DynamoDB operation: {e}")
         # Send a failure response to CloudFormation
-        cfnresponse.send(event, context, cfnresponse.FAILED, {"Error": str(e)})
+        cfnresponse.send(event, context, cfnresponse.FAILED, {"Error": str(e)}, reason=str(e))
         raise
 
     except Exception as e:
         logger.error(f"Unexpected error: {e}")
         # Send a failure response to CloudFormation
-        cfnresponse.send(event, context, cfnresponse.FAILED, {"Error": str(e)})
+        cfnresponse.send(event, context, cfnresponse.FAILED, {"Error": str(e)}, reason=str(e))
         raise

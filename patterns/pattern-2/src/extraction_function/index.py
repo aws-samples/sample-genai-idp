@@ -25,6 +25,7 @@ def handler(event, context):
     Process a single section of a document for information extraction
     """
     logger.info(f"Event: {json.dumps(event)}")
+
     # Load configuration
     config = get_config()
     logger.info(f"Config: {json.dumps(config)}")
@@ -75,10 +76,6 @@ def handler(event, context):
     if section_document.status == Status.FAILED:
         error_message = f"Extraction failed for document {section_document.id}, section {section_id}"
         logger.error(error_message)
-        # Update status in AppSync before raising exception
-        full_document.status = Status.FAILED
-        full_document.errors.append(error_message)
-        appsync_service.update_document(full_document)
         raise Exception(error_message)
     
     # Return section extraction result with the document

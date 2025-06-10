@@ -15,8 +15,16 @@ import time
 import logging
 import copy
 import random
+import socket
 from typing import Dict, Any, List, Optional, Union, Tuple
-from botocore.exceptions import ClientError
+from botocore.exceptions import ClientError, ReadTimeoutError, ConnectTimeoutError, EndpointConnectionError
+from urllib3.exceptions import ReadTimeoutError as Urllib3ReadTimeoutError
+try:
+    from requests.exceptions import ReadTimeout as RequestsReadTimeout, ConnectTimeout as RequestsConnectTimeout
+except ImportError:
+    # Fallback if requests is not available
+    RequestsReadTimeout = Exception
+    RequestsConnectTimeout = Exception
 
 logger = logging.getLogger(__name__)
 
@@ -447,7 +455,11 @@ class BedrockClient:
                 'RequestLimitExceeded', 
                 'TooManyRequestsException', 
                 'ServiceUnavailableException',
-                'ModelErrorException'
+                'ModelErrorException',
+                'RequestTimeout',
+                'ReadTimeout',
+                'TimeoutError',
+                'RequestTimeoutException'
             ]
             
             if error_code in retryable_errors:
@@ -631,7 +643,11 @@ class BedrockClient:
                 'ServiceQuotaExceededException', 
                 'RequestLimitExceeded', 
                 'TooManyRequestsException', 
-                'ServiceUnavailableException'
+                'ServiceUnavailableException',
+                'RequestTimeout',
+                'ReadTimeout',
+                'TimeoutError',
+                'RequestTimeoutException'
             ]
             
             if error_code in retryable_errors:

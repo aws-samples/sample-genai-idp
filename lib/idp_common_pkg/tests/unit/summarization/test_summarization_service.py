@@ -271,6 +271,7 @@ class TestSummarizationService:
             top_k=config["top_k"],
             top_p=config["top_p"],
             max_tokens=config["max_tokens"],
+            context="Summarization",
         )
 
         # Verify result

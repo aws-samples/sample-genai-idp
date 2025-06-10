@@ -5,11 +5,13 @@
 import React from 'react';
 import { Box, Container, SpaceBetween, Table } from '@awsui/components-react';
 import FileViewer from '../document-viewer/JSONViewer';
+import { getSectionConfidenceAlertCount } from '../common/confidence-alerts-utils';
 
 // Cell renderer components
 const IdCell = ({ item }) => <span>{item.Id}</span>;
 const ClassCell = ({ item }) => <span>{item.Class}</span>;
 const PageIdsCell = ({ item }) => <span>{item.PageIds.join(', ')}</span>;
+const ConfidenceAlertsCell = ({ item }) => <span>{getSectionConfidenceAlertCount(item)}</span>;
 const ActionsCell = ({ item, pages, documentItem }) => (
   <FileViewer
     fileUri={item.OutputJSONUri}
@@ -45,6 +47,14 @@ const createColumnDefinitions = (pages, documentItem) => [
     cell: (item) => <PageIdsCell item={item} />,
     minWidth: 120,
     width: 120,
+    isResizable: true,
+  },
+  {
+    id: 'confidenceAlerts',
+    header: 'Confidence Alerts',
+    cell: (item) => <ConfidenceAlertsCell item={item} />,
+    minWidth: 140,
+    width: 140,
     isResizable: true,
   },
   {

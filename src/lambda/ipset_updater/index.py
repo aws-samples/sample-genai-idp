@@ -88,7 +88,7 @@ def lambda_handler(event, context):
         # Send failure response for CloudFormation custom resource
         if 'ResponseURL' in event:
             response_data['Message'] = f"Error updating IPSet: {str(e)}"
-            cfnresponse.send(event, context, cfnresponse.FAILED, response_data, physical_id)
+            cfnresponse.send(event, context, cfnresponse.FAILED, response_data, physical_id, reason=str(e))
             
         return {
             'statusCode': 500,

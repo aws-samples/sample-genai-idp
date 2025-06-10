@@ -143,6 +143,19 @@ class DocumentAppSyncService:
                     "Class": section.classification,
                     "OutputJSONUri": section.extraction_result_uri or "",
                 }
+
+                # Convert confidence threshold alerts
+                if section.confidence_threshold_alerts:
+                    alerts_data = []
+                    for alert in section.confidence_threshold_alerts:
+                        alert_data = {
+                            "attributeName": alert.get("attribute_name"),
+                            "confidence": alert.get("confidence"),
+                            "confidenceThreshold": alert.get("confidence_threshold"),
+                        }
+                        alerts_data.append(alert_data)
+                    section_data["ConfidenceThresholdAlerts"] = alerts_data
+
                 sections_data.append(section_data)
 
             if sections_data:
@@ -225,12 +238,28 @@ class DocumentAppSyncService:
                 # Convert page IDs to strings
                 page_ids = [str(page_id) for page_id in section_data.get("PageIds", [])]
 
+                # Convert confidence threshold alerts
+                confidence_threshold_alerts = []
+                alerts_data = section_data.get("ConfidenceThresholdAlerts", [])
+                if alerts_data:
+                    for alert in alerts_data:
+                        confidence_threshold_alerts.append(
+                            {
+                                "attribute_name": alert.get("attributeName"),
+                                "confidence": alert.get("confidence"),
+                                "confidence_threshold": alert.get(
+                                    "confidenceThreshold"
+                                ),
+                            }
+                        )
+
                 doc.sections.append(
                     Section(
                         section_id=section_data.get("Id", ""),
                         classification=section_data.get("Class", ""),
                         page_ids=page_ids,
                         extraction_result_uri=section_data.get("OutputJSONUri"),
+                        confidence_threshold_alerts=confidence_threshold_alerts,
                     )
                 )
 

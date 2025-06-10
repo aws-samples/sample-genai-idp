@@ -181,8 +181,14 @@ class TestEvaluationService:
             }
         }
 
-        result = service._load_extraction_results("s3://bucket/path")
-        assert result == {"invoice_number": "INV-123", "invoice_date": "2023-05-08"}
+        extraction_results, confidence_scores = service._load_extraction_results(
+            "s3://bucket/path"
+        )
+        assert extraction_results == {
+            "invoice_number": "INV-123",
+            "invoice_date": "2023-05-08",
+        }
+        assert confidence_scores == {}
 
         # Test without wrapper
         mock_get_json_content.return_value = {
@@ -190,13 +196,22 @@ class TestEvaluationService:
             "invoice_date": "2023-05-08",
         }
 
-        result = service._load_extraction_results("s3://bucket/path")
-        assert result == {"invoice_number": "INV-123", "invoice_date": "2023-05-08"}
+        extraction_results, confidence_scores = service._load_extraction_results(
+            "s3://bucket/path"
+        )
+        assert extraction_results == {
+            "invoice_number": "INV-123",
+            "invoice_date": "2023-05-08",
+        }
+        assert confidence_scores == {}
 
         # Test with error
         mock_get_json_content.side_effect = Exception("S3 error")
-        result = service._load_extraction_results("s3://bucket/path")
-        assert result == {}
+        extraction_results, confidence_scores = service._load_extraction_results(
+            "s3://bucket/path"
+        )
+        assert extraction_results == {}
+        assert confidence_scores == {}
 
     def test_count_classifications_both_empty(self, service):
         """Test counting classifications when both values are empty."""

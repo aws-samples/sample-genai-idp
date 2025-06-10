@@ -35,6 +35,7 @@ A scalable, serverless solution for automated document processing and informatio
 - **Comprehensive Monitoring**: Rich CloudWatch dashboard with detailed metrics and logs
 - **Web User Interface**: Modern UI for inspecting document workflow status and results
 - **AI-Powered Evaluation**: Framework to assess accuracy against baseline data
+- **Extraction Confidence Assessment**: LLM-powered assessment of extraction confidence with multimodal document analysis
 - **Document Knowledge Base Query**: Ask questions about your processed documents
 
 ## Architecture Overview
@@ -110,11 +111,12 @@ For detailed deployment and testing instructions, see the [Deployment Guide](./d
 - [Architecture](./docs/architecture.md) - Detailed component architecture and data flow
 - [Deployment](./docs/deployment.md) - Build, publish, deploy, and test instructions
 - [Web UI](./docs/web-ui.md) - Web interface features and usage
-- [Knowledge Base](./docs/knowledge-base.md) - Document knowledge base query feature
-- [Evaluation Framework](./docs/evaluation.md) - Accuracy assessment system
 - [Configuration](./docs/configuration.md) - Configuration and customization options
 - [Classification](./docs/classification.md) - Customizing document classification
 - [Extraction](./docs/extraction.md) - Customizing information extraction
+- [Assessment](./docs/assessment.md) - Extraction confidence evaluation using LLMs
+- [Evaluation Framework](./docs/evaluation.md) - Accuracy assessment system with analytics database and reporting
+- [Knowledge Base](./docs/knowledge-base.md) - Document knowledge base query feature
 - [Monitoring](./docs/monitoring.md) - Monitoring and logging capabilities
 - [Troubleshooting](./docs/troubleshooting.md) - Troubleshooting and performance guides
 

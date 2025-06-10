@@ -35,6 +35,11 @@ mutation UpdateDocument($input: UpdateDocumentInput!) {
             PageIds
             Class
             OutputJSONUri
+            ConfidenceThresholdAlerts {
+                attributeName
+                confidence
+                confidenceThreshold
+            }
         }
         Pages {
             Id
