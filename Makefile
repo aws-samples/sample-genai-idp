@@ -6,6 +6,13 @@ GREEN := \033[0;32m
 YELLOW := \033[1;33m
 NC := \033[0m  # No Color
 
+# Default target - run both lint and test
+all: lint test
+
+# Run tests in idp_common_pkg directory
+test:
+	$(MAKE) -C lib/idp_common_pkg test
+
 # Run both linting and formatting in one command
 lint: ruff-lint format
 
