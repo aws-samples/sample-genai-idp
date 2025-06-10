@@ -672,6 +672,10 @@ Resources:
             Resource: 
                 - !Sub "arn:aws:bedrock:*::foundation-model/*"
                 - !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
+                - !If 
+                  - HasCustomClassificationModelARN
+                  - !Ref CustomClassificationModelARN
+                  - !Ref AWS::NoValue
           - !If
             - HasGuardrailConfig
             - Effect: Allow
@@ -750,6 +754,10 @@ Resources:
             Resource: 
                 - !Sub "arn:aws:bedrock:*::foundation-model/*"
                 - !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
+                - !If 
+                  - HasCustomExtractionModelARN
+                  - !Ref CustomExtractionModelARN
+                  - !Ref AWS::NoValue
           - !If
             - HasGuardrailConfig
             - Effect: Allow
