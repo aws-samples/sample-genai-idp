@@ -204,4 +204,4 @@ def handler(event: Dict[str, Any], context: Any) -> None:
         # Pass the physical resource ID even in case of failure
         cfnresponse.send(event, context, cfnresponse.FAILED, {
             'Error': str(e)
-        }, physicalResourceId=props.get('MergedDashboardName', 'INVALID'))
+        }, physicalResourceId=props.get('MergedDashboardName', 'INVALID'), reason=str(e))

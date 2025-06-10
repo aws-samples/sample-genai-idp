@@ -13,10 +13,13 @@ classes:
     attributes:
       - name: sender_name
         description: The name of the person or entity who wrote or sent the letter. Look for text following or near terms like 'from', 'sender', 'authored by', 'written by', or at the end of the letter before a signature.
+        confidence_threshold: '0.85'
       - name: sender_address
         description: The physical address of the sender, typically appearing at the top of the letter. May be labeled as 'address', 'location', or 'from address'.
+        confidence_threshold: '0.8'
       - name: recipient_name
         description: The name of the person or entity receiving the letter. Look for this after 'to', 'recipient', 'addressee', or at the beginning of the letter.
+        confidence_threshold: '0.9'
       - name: recipient_address
         description: The physical address where the letter is to be delivered. Often labeled as 'to address' or 'delivery address', typically appearing below the recipient name.
       - name: date
@@ -588,6 +591,7 @@ summarization:
   system_prompt: >-
     You are a document summarization expert who can analyze and summarize documents from various domains including medical, financial, legal, and general business documents. Your task is to create a summary that captures the key information, main points, and important details from the document. Your output must be in valid JSON format. \nSummarization Style: Balanced\\nCreate a balanced summary that provides a moderate level of detail. Include the main points and key supporting information, while maintaining the document's overall structure. Aim for a comprehensive yet concise summary.\n Your output MUST be in valid JSON format with markdown content. You MUST strictly adhere to the output format specified in the instructions.
 assessment:
+  default_confidence_threshold: '0.9'
   top_p: '0.1'
   max_tokens: '4096'
   top_k: '5'

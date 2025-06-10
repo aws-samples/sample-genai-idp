@@ -54,6 +54,7 @@ class Section:
     page_ids: List[str] = field(default_factory=list)
     extraction_result_uri: Optional[str] = None
     attributes: Optional[Dict[str, Any]] = None
+    confidence_threshold_alerts: List[Dict[str, Any]] = field(default_factory=list)
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "Section":
@@ -68,6 +69,7 @@ class Section:
             page_ids=data.get("page_ids", []),
             extraction_result_uri=data.get("extraction_result_uri"),
             attributes=data.get("attributes"),
+            confidence_threshold_alerts=data.get("confidence_threshold_alerts", []),
         )
 
     def to_dict(self) -> Dict[str, Any]:
@@ -79,6 +81,7 @@ class Section:
             "page_ids": self.page_ids,
             "extraction_result_uri": self.extraction_result_uri,
             "attributes": self.attributes,
+            "confidence_threshold_alerts": self.confidence_threshold_alerts,
         }
 
 
@@ -165,6 +168,7 @@ class Document:
                 "confidence": section.confidence,
                 "page_ids": section.page_ids,
                 "extraction_result_uri": section.extraction_result_uri,
+                "confidence_threshold_alerts": section.confidence_threshold_alerts,
             }
             if section.attributes:
                 section_dict["attributes"] = section.attributes
@@ -227,6 +231,9 @@ class Document:
                     page_ids=section_data.get("page_ids", []),
                     extraction_result_uri=section_data.get("extraction_result_uri"),
                     attributes=section_data.get("attributes"),
+                    confidence_threshold_alerts=section_data.get(
+                        "confidence_threshold_alerts", []
+                    ),
                 )
             )
 

@@ -12,7 +12,7 @@ SPDX-License-Identifier: MIT-0
 - **Assessment Feature for Extraction Confidence Evaluation (EXPERIMENTAL)**
   - Added new assessment service that evaluates extraction confidence using LLMs to analyze extraction results against source documents
   - Multi-modal assessment capability combining text analysis with document images for comprehensive confidence scoring
-  - UI integration with explainability_info display showing per-attribute confidence scores and explanations
+  - UI integration with explainability_info display showing per-attribute confidence scores, thresholds, and explanations
   - Optional deployment controlled by `IsAssessmentEnabled` parameter (defaults to false)
   - Added e2e-example-with-assessment.ipynb notebook for testing assessment workflow
 
