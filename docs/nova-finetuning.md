@@ -115,6 +115,7 @@ python prepare_nova_finetuning_data.py \
 ```
 
 **Using a custom dataset:**
+It should have the similar structure of [RVL-CDIP](https://huggingface.co/datasets/chainyo/rvl-cdip)
 ```bash
 python prepare_nova_finetuning_data.py \
     --bucket-name my-bucket \
