@@ -13,6 +13,8 @@ The Assessment feature provides automated confidence evaluation of document extr
 - **Per-Attribute Scoring**: Provides individual confidence scores and explanations for each extracted attribute
 - **Token-Optimized Processing**: Uses condensed text confidence data for 80-90% token reduction compared to full OCR results
 - **UI Integration**: Seamlessly displays assessment results in the web interface with explainability information
+- **Confidence Threshold Support**: Configurable global and per-attribute confidence thresholds with color-coded visual indicators
+- **Enhanced Visual Feedback**: Real-time confidence assessment with green/red/black color coding in all data viewing interfaces
 - **Optional Deployment**: Controlled by `IsAssessmentEnabled` parameter (defaults to false for cost optimization)
 - **Flexible Image Usage**: Images only processed when explicitly requested via `{DOCUMENT_IMAGE}` placeholder
 
@@ -174,11 +176,161 @@ Assessment results are appended to extraction results in the `explainability_inf
 }
 ```
 
+## Confidence Thresholds
+
+### Overview
+
+The assessment feature supports flexible confidence threshold configuration to help users identify extraction results that may require review. Thresholds can be set globally or per-attribute, with the UI providing immediate visual feedback through color-coded displays.
+
+### Configuration Options
+
+#### Global Thresholds
+Set system-wide confidence requirements for all attributes:
+
+```json
+{
+  "inference_result": {
+    "YTDNetPay": "75000",
+    "PayPeriodStartDate": "2024-01-01"
+  },
+  "explainability_info": [
+    {
+      "global_confidence_threshold": 0.85,
+      "YTDNetPay": {
+        "confidence": 0.92,
+        "confidence_reason": "Clear match found in document"
+      },
+      "PayPeriodStartDate": {
+        "confidence": 0.75,
+        "confidence_reason": "Moderate OCR confidence"
+      }
+    }
+  ]
+}
+```
+
+#### Per-Attribute Thresholds
+Override global settings for specific fields requiring different confidence levels:
+
+```json
+{
+  "explainability_info": [
+    {
+      "YTDNetPay": {
+        "confidence": 0.92,
+        "confidence_threshold": 0.95,
+        "confidence_reason": "Financial data requires high confidence"
+      },
+      "PayPeriodStartDate": {
+        "confidence": 0.75,
+        "confidence_threshold": 0.70,
+        "confidence_reason": "Date fields can accept moderate confidence"
+      }
+    }
+  ]
+}
+```
+
+#### Mixed Configuration
+Combine global defaults with attribute-specific overrides:
+
+```json
+{
+  "explainability_info": [
+    {
+      "global_confidence_threshold": 0.80,
+      "CriticalField": {
+        "confidence": 0.85,
+        "confidence_threshold": 0.95,
+        "confidence_reason": "Override: higher threshold for critical data"
+      },
+      "StandardField": {
+        "confidence": 0.82,
+        "confidence_reason": "Uses global threshold of 0.80"
+      }
+    }
+  ]
+}
+```
+
+### Assessment Prompt Integration
+
+Include threshold guidance in your assessment prompts to ensure consistent confidence evaluation:
+
+```yaml
+assessment:
+  task_prompt: |
+    Assess extraction confidence using these thresholds as guidance:
+    - Financial data (amounts, taxes): 0.90+ confidence required
+    - Personal information (names, addresses): 0.85+ confidence required  
+    - Dates and standard fields: 0.75+ confidence acceptable
+    
+    Provide confidence scores between 0.0 and 1.0 with explanatory reasoning:
+    {
+      "attribute_name": {
+        "confidence": 0.85,
+        "confidence_threshold": 0.90,
+        "confidence_reason": "Explanation of confidence assessment"
+      }
+    }
+```
+
 ## UI Integration
 
-Assessment results automatically appear in the web interface:
+Assessment results automatically appear in the web interface with enhanced visual indicators:
 
-1. **Visual Editor Modal**: Confidence scores and explanations display alongside extraction results
+### Visual Feedback System
+
+The UI provides immediate confidence feedback through color-coded displays:
+
+#### Color Coding
+- 🟢 **Green**: Confidence meets or exceeds threshold (high confidence)
+- 🔴 **Red**: Confidence falls below threshold (requires review)
+- ⚫ **Black**: Confidence available but no threshold for comparison
+
+#### Display Modes
+
+**1. With Threshold (Color-Coded)**
+```
+YTDNetPay: 75000
+Confidence: 92.0% / Threshold: 95.0% [RED - Below Threshold]
+
+PayPeriodStartDate: 2024-01-01  
+Confidence: 85.0% / Threshold: 70.0% [GREEN - Above Threshold]
+```
+
+**2. Confidence Only (Black Text)**
+```
+EmployeeName: John Smith
+Confidence: 88.5% [BLACK - No Threshold Set]
+```
+
+**3. No Display**
+When neither confidence nor threshold data is available, no confidence indicator is shown.
+
+### Interface Coverage
+
+**1. Form View (JSONViewer)**
+- Color-coded confidence display in the editable form interface
+- Supports nested data structures (arrays, objects)
+- Real-time visual feedback during data editing
+
+**2. Visual Editor Modal**
+- Same confidence indicators in the document image overlay editor
+- Visual connection between form fields and document bounding boxes
+- Confidence display for deeply nested extraction results
+
+**3. Nested Data Support**
+Confidence indicators work with complex document structures:
+```
+FederalTaxes[0]:
+  ├── YTD: 2111.2 [Confidence: 67.6% / Threshold: 85.0% - RED]
+  └── Period: 40.6 [Confidence: 75.8% - BLACK]
+
+StateTaxes[0]:
+  ├── YTD: 438.36 [Confidence: 84.4% / Threshold: 80.0% - GREEN]
+  └── Period: 8.43 [Confidence: 83.2% / Threshold: 80.0% - GREEN]
+```
 
 ## Cost Optimization
 
@@ -191,14 +343,6 @@ The assessment feature implements several cost optimization techniques:
 3. **Optional Deployment**: Assessment infrastructure only deployed when `IsAssessmentEnabled=true`
 4. **Efficient Prompting**: Optimized prompt templates minimize token usage while maintaining accuracy
 
-### Expected Costs
-
-Cost factors for assessment processing:
-
-- **Text-Only Assessment**: ~500-1,000 tokens per page
-- **Multimodal Assessment**: ~1,500-2,500 tokens per page (including image processing)
-- **Model Choice**: Claude 3.5 Sonnet recommended for balanced cost/performance
-- **Processing Time**: ~2-5 seconds per document section
 
 ## Testing and Validation
 
@@ -252,11 +396,19 @@ ValueError: "Assessment prompt template formatting failed: missing required plac
 - **Claude 3 Haiku**: Consider for high-volume, cost-sensitive scenarios
 - **Temperature 0**: Use deterministic output for consistent confidence scoring
 
-### 4. Integration Patterns
+### 4. Confidence Threshold Configuration
 
-- **Conditional Logic**: Implement business rules based on confidence scores
-- **Human Review**: Route low-confidence extractions for manual review
+- **Risk-Based Thresholds**: Set higher thresholds (0.90+) for critical financial or personal data
+- **Field-Specific Requirements**: Use per-attribute thresholds for different data types
+- **Global Defaults**: Establish reasonable global thresholds (0.75-0.85) as baselines
+- **Incremental Tuning**: Start with conservative thresholds and adjust based on accuracy analysis
+
+### 5. Integration Patterns
+
+- **Conditional Logic**: Implement business rules based on confidence scores and thresholds
+- **Human Review**: Route low-confidence extractions (below threshold) for manual review
 - **Quality Metrics**: Track confidence distributions to identify improvement opportunities
+- **Visual Feedback**: Leverage color-coded UI indicators for immediate quality assessment
 
 ## Troubleshooting
 
@@ -281,6 +433,12 @@ ValueError: "Assessment prompt template formatting failed: missing required plac
    - Monitor token usage in CloudWatch logs
    - Consider text-only assessment without images
    - Optimize prompt templates to reduce unnecessary context
+
+5. **Confidence Threshold Issues**
+   - Verify `confidence_threshold` values are between 0.0 and 1.0
+   - Check explainability_info structure includes threshold data
+   - Ensure UI displays match expected color coding (green/red/black)
+   - Validate nested data confidence display for complex structures
 
 ### Monitoring
 
