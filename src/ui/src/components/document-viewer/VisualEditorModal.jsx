@@ -170,8 +170,29 @@ const FormFieldRenderer = memo(({
     fieldType = 'null';
   }
 
-  // Get confidence information from explainability data (for all fields)  
-  const confidenceInfo = getFieldConfidenceInfo(fieldKey, explainabilityInfo);
+  // Get confidence information from explainability data (for all fields)
+  // Filter out structural keys from the path for explainability lookup
+  // We need to remove top-level keys like 'inference_result', 'explainability_info', etc.
+  const structuralKeys = ['inference_result', 'inferenceResult', 'explainability_info'];
+  let filteredPath = path.filter(
+    (pathSegment) => !structuralKeys.includes(pathSegment) && typeof pathSegment !== 'undefined',
+  );
+  
+  // Remove the field name itself from the path if it's the last element
+  // The path should point to the parent container, not include the field name
+  if (filteredPath.length > 0 && filteredPath[filteredPath.length - 1] === fieldKey) {
+    filteredPath = filteredPath.slice(0, -1);
+  }
+  
+  const confidenceInfo = getFieldConfidenceInfo(fieldKey, explainabilityInfo, filteredPath);
+
+  // Debug logging for VisualEditorModal
+  if (fieldKey === 'YTD' || fieldKey === 'Period') {
+    console.log(
+      `VisualEditorModal Debug - Field: ${fieldKey}, OriginalPath: ${JSON.stringify(path)}, FilteredPath: ${JSON.stringify(filteredPath)}, ConfidenceInfo:`,
+      confidenceInfo,
+    );
+  }
   
   // Create label with confidence score if available (legacy support)
   const label = confidence !== undefined ? `${fieldKey} (${(confidence * 100).toFixed(1)}%)` : fieldKey;
@@ -294,10 +315,12 @@ const FormFieldRenderer = memo(({
                 <Box
                   fontSize="body-s"
                   padding={{ top: 'xxxs' }}
-                  color={confidenceInfo.isAboveThreshold ? 'text-status-success' : 'text-status-error'}
+                  style={{ color: confidenceInfo.textColor }}
                 >
-                  Confidence: {(confidenceInfo.confidence * 100).toFixed(1)}% / Threshold:{' '}
-                  {(confidenceInfo.confidenceThreshold * 100).toFixed(1)}%
+                  {confidenceInfo.displayMode === 'with-threshold' 
+                    ? `Confidence: ${(confidenceInfo.confidence * 100).toFixed(1)}% / Threshold: ${(confidenceInfo.confidenceThreshold * 100).toFixed(1)}%`
+                    : `Confidence: ${(confidenceInfo.confidence * 100).toFixed(1)}%`
+                  }
                 </Box>
               )}
             </Box>
@@ -350,10 +373,12 @@ const FormFieldRenderer = memo(({
                 <Box
                   fontSize="body-s"
                   padding={{ top: 'xxxs' }}
-                  color={confidenceInfo.isAboveThreshold ? 'text-status-success' : 'text-status-error'}
+                  style={{ color: confidenceInfo.textColor }}
                 >
-                  Confidence: {(confidenceInfo.confidence * 100).toFixed(1)}% / Threshold:{' '}
-                  {(confidenceInfo.confidenceThreshold * 100).toFixed(1)}%
+                  {confidenceInfo.displayMode === 'with-threshold' 
+                    ? `Confidence: ${(confidenceInfo.confidence * 100).toFixed(1)}% / Threshold: ${(confidenceInfo.confidenceThreshold * 100).toFixed(1)}%`
+                    : `Confidence: ${(confidenceInfo.confidence * 100).toFixed(1)}%`
+                  }
                 </Box>
               )}
             </Box>
@@ -396,10 +421,12 @@ const FormFieldRenderer = memo(({
                 <Box
                   fontSize="body-s"
                   padding={{ top: 'xxxs' }}
-                  color={confidenceInfo.isAboveThreshold ? 'text-status-success' : 'text-status-error'}
+                  style={{ color: confidenceInfo.textColor }}
                 >
-                  Confidence: {(confidenceInfo.confidence * 100).toFixed(1)}% / Threshold:{' '}
-                  {(confidenceInfo.confidenceThreshold * 100).toFixed(1)}%
+                  {confidenceInfo.displayMode === 'with-threshold' 
+                    ? `Confidence: ${(confidenceInfo.confidence * 100).toFixed(1)}% / Threshold: ${(confidenceInfo.confidenceThreshold * 100).toFixed(1)}%`
+                    : `Confidence: ${(confidenceInfo.confidence * 100).toFixed(1)}%`
+                  }
                 </Box>
               )}
             </Box>
@@ -602,10 +629,12 @@ const FormFieldRenderer = memo(({
                 <Box
                   fontSize="body-s"
                   padding={{ top: 'xxxs' }}
-                  color={confidenceInfo.isAboveThreshold ? 'text-status-success' : 'text-status-error'}
+                  style={{ color: confidenceInfo.textColor }}
                 >
-                  Confidence: {(confidenceInfo.confidence * 100).toFixed(1)}% / Threshold:{' '}
-                  {(confidenceInfo.confidenceThreshold * 100).toFixed(1)}%
+                  {confidenceInfo.displayMode === 'with-threshold' 
+                    ? `Confidence: ${(confidenceInfo.confidence * 100).toFixed(1)}% / Threshold: ${(confidenceInfo.confidenceThreshold * 100).toFixed(1)}%`
+                    : `Confidence: ${(confidenceInfo.confidence * 100).toFixed(1)}%`
+                  }
                 </Box>
               )}
             </Box>
@@ -1352,6 +1381,7 @@ const VisualEditorModal = ({ visible, onDismiss, jsonData, onChange, isReadOnly,
                     isReadOnly={isReadOnly}
                     onFieldFocus={handleFieldFocus}
                     onFieldDoubleClick={handleFieldDoubleClick}
+                    path={[]}
                     explainabilityInfo={jsonData?.explainability_info}
                   />
                 ) : (

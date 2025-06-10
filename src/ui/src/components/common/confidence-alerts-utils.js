@@ -65,9 +65,10 @@ export const getFieldHighlightInfo = (fieldName, fieldConfidence, confidenceThre
  * Get confidence information for a field from explainability data
  * @param {string} fieldName - Name of the field
  * @param {Object} explainabilityInfo - Explainability info object containing confidence data for all fields
+ * @param {Array} path - Optional path array for nested fields (e.g., ['FederalTaxes', 0, 'YTD'])
  * @returns {Object} Object with confidence info and display properties
  */
-export const getFieldConfidenceInfo = (fieldName, explainabilityInfo) => {
+export const getFieldConfidenceInfo = (fieldName, explainabilityInfo, path = []) => {
   if (!explainabilityInfo || !fieldName) {
     return { hasConfidenceInfo: false };
   }
@@ -79,7 +80,36 @@ export const getFieldConfidenceInfo = (fieldName, explainabilityInfo) => {
     return { hasConfidenceInfo: false };
   }
 
-  const fieldData = explainabilityData[fieldName];
+  // Navigate to the nested location in explainabilityData using the path
+  let currentExplainabilityData = explainabilityData;
+
+  // Traverse the path to find the nested explainability data
+  // eslint-disable-next-line no-restricted-syntax
+  for (const pathSegment of path) {
+    if (currentExplainabilityData && typeof currentExplainabilityData === 'object') {
+      if (Array.isArray(currentExplainabilityData)) {
+        // Handle array indices
+        const index = parseInt(pathSegment, 10);
+        if (!Number.isNaN(index) && index >= 0 && index < currentExplainabilityData.length) {
+          currentExplainabilityData = currentExplainabilityData[index];
+        } else {
+          return { hasConfidenceInfo: false };
+        }
+      } else {
+        // Handle object properties
+        currentExplainabilityData = currentExplainabilityData[pathSegment];
+      }
+    } else {
+      return { hasConfidenceInfo: false };
+    }
+  }
+
+  // Now look for the field in the current explainability data location
+  if (!currentExplainabilityData || typeof currentExplainabilityData !== 'object') {
+    return { hasConfidenceInfo: false };
+  }
+
+  const fieldData = currentExplainabilityData[fieldName];
   if (!fieldData || typeof fieldData !== 'object') {
     return { hasConfidenceInfo: false };
   }
@@ -87,20 +117,43 @@ export const getFieldConfidenceInfo = (fieldName, explainabilityInfo) => {
   const { confidence } = fieldData;
   const confidenceThreshold = fieldData.confidence_threshold;
 
-  if (typeof confidence !== 'number' || typeof confidenceThreshold !== 'number') {
+  // Check if we have confidence data
+  const hasConfidence = typeof confidence === 'number';
+  const hasThreshold = typeof confidenceThreshold === 'number';
+
+  if (!hasConfidence) {
     return { hasConfidenceInfo: false };
   }
 
-  const isAboveThreshold = confidence >= confidenceThreshold;
+  // Case 1: Both confidence and threshold available
+  if (hasConfidence && hasThreshold) {
+    const isAboveThreshold = confidence >= confidenceThreshold;
+    return {
+      hasConfidenceInfo: true,
+      confidence,
+      confidenceThreshold,
+      isAboveThreshold,
+      shouldHighlight: !isAboveThreshold,
+      textColor: isAboveThreshold ? '#16794d' : '#d13313', // Green for good, red for poor
+      displayMode: 'with-threshold',
+    };
+  }
 
-  return {
-    hasConfidenceInfo: true,
-    confidence,
-    confidenceThreshold,
-    isAboveThreshold,
-    shouldHighlight: !isAboveThreshold,
-    textColor: isAboveThreshold ? '#16794d' : '#d13313', // Green for good, red for poor
-  };
+  // Case 2: Only confidence available (no threshold)
+  if (hasConfidence && !hasThreshold) {
+    return {
+      hasConfidenceInfo: true,
+      confidence,
+      confidenceThreshold: undefined,
+      isAboveThreshold: undefined,
+      shouldHighlight: false,
+      textColor: '#000000', // Black font when no threshold to compare
+      displayMode: 'confidence-only',
+    };
+  }
+
+  // Case 3: Neither available (handled by the hasConfidence check above)
+  return { hasConfidenceInfo: false };
 };
 
 /**
