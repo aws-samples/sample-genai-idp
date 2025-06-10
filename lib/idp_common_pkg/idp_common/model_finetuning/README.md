@@ -1,411 +1,530 @@
 # Model Fine-tuning Service
 
-This module provides a service for fine-tuning language models using Amazon Bedrock and creating provisioned throughput for the fine-tuned models.
+This module provides the `ModelFinetuningService` class for fine-tuning language models using Amazon Bedrock and creating provisioned throughput for the fine-tuned models.
 
-## Features
+## ModelFinetuningService Class
 
-- Fine-tune language models (currently supports Amazon Nova models: Nova Lite, Nova Micro)
-- Support for both separate validation data and automatic data splitting
-- Configurable hyperparameters for fine-tuning
-- Create and manage provisioned throughput for fine-tuned models
-- Monitor job status and provisioning status
-- Extensible architecture for supporting additional model types in the future
+The `ModelFinetuningService` class is the core service for managing Nova model fine-tuning workflows programmatically.
 
-## Self-Contained Notebooks
-- [Dataset Preparation Notebook](../../../../notebooks/finetuning_dataset_prep.ipynb)
-- [Fine-tuning Service Demo Notebook](../../../../notebooks/finetuning_model_service_demo.ipynb)
-- [Model Evaluation Notebook](../../../../notebooks/finetuning_model_document_classification_evaluation.ipynb)
+### Initialization
 
-## Dataset Preparation for Fine-tuning
+```python
+from idp_common.model_finetuning import ModelFinetuningService
 
-Before starting the fine-tuning process, you'll need to prepare your dataset in the required format. For document classification tasks, you can follow these steps:
+# Initialize with default settings
+service = ModelFinetuningService(region="us-east-1")
 
-1. **Collect and sample your data**: Select representative examples for each class you want to recognize
-2. **Convert images to appropriate format**: Save as PNG for highest quality
-3. **Upload images to S3**: Organize by class for better management
-4. **Create JSONL files**: Format your data according to Bedrock requirements
-
-The training and validation data should be in JSONL format, with each line containing a JSON object with the following structure:
-
-```json
-{
-  "schemaVersion": "bedrock-conversation-2024",
-  "system": [{
-    "text": "You are a document classification expert who can analyze and identify document types from images. Your task is to determine the document type based on its visual appearance, layout, and content, using the provided document type definitions. Your output must be valid JSON according to the requested format."
-  }],
-  "messages": [
-    {
-      "role": "user",
-      "content": [
-        {
-          "text": "The <document-types> XML tags contain a markdown table of known document types for detection..."
+# Initialize with custom configuration
+config = {
+    "model_finetuning": {
+        "base_models": {
+            "nova_lite": "arn:aws:bedrock:us-east-1::foundation-model/amazon.nova-lite-v1:0:300k",
+            "nova_micro": "arn:aws:bedrock:us-east-1::foundation-model/amazon.nova-micro-v1:0:128k"
         },
-        {
-          "image": {
-            "format": "png",
-            "source": {
-              "s3Location": {
-                "uri": "s3://bucket-name/path/to/image.png",
-                "bucketOwner": "123456789012"
-              }
+        "hyperparameters": {
+            "default": {
+                "epochCount": "2",
+                "learningRate": "0.00001",
+                "batchSize": "1"
             }
-          }
         }
-      ]
-    },
-    {
-      "role": "assistant",
-      "content": [{
-        "text": "```json\n{\"type\": \"invoice\"}\n```"
-      }]
     }
-  ]
 }
+service = ModelFinetuningService(region="us-east-1", config=config)
 ```
 
-For detailed examples and implementation, refer to the [Dataset Preparation Notebook](../../../../notebooks/finetuning_dataset_prep.ipynb).
+### Constructor Parameters
 
-## Creating and Monitoring Fine-tuning Jobs
+- `region` (str, optional): AWS region for Bedrock service. Defaults to value from config or `AWS_REGION` environment variable.
+- `config` (Dict[str, Any], optional): Configuration dictionary containing model and hyperparameter settings.
 
-### Initializing the Service
+## Fine-tuning Job Management
 
-```python
-from idp_common.model_finetuning import ModelFinetuningService, FinetuningJobConfig, ProvisionedThroughputConfig
+### create_finetuning_job()
 
-# Initialize the service
-finetuning_service = ModelFinetuningService(
-    region="us-east-1",
-    config={
-        "model_finetuning": {
-            "base_models": {
-                "nova_lite": "arn:aws:bedrock:us-east-1::foundation-model/amazon.nova-lite-v1:0:300k",
-                "nova_micro": "arn:aws:bedrock:us-east-1::foundation-model/amazon.nova-micro-v1:0:128k"
-            },
-            "hyperparameters": {
-                "default": {
-                    "epochCount": "2",
-                    "learningRate": "0.00001",
-                    "batchSize": "1"
-                }
-            }
-        }
-    }
-)
-```
-
-### Setting Up IAM Role for Fine-tuning
-
-Before creating a fine-tuning job, you need to set up an IAM role with appropriate permissions for Amazon Bedrock and S3:
+Creates a fine-tuning job for a model.
 
 ```python
-def create_or_update_model_customization_role(role_name_base="IDPModelCustomizationRole"):
-    """
-    Creates or updates an IAM role with permissions to access S3 buckets
-    for use with Amazon Bedrock fine-tuning.
-    
-    Args:
-        role_name_base: The base name for the IAM role
-        
-    Returns:
-        The ARN of the IAM role
-    """
-    # Initialize the IAM client
-    iam_client = boto3.client('iam', region_name=region)
-    
-    # Add region suffix to role name for regional isolation
-    region_suffix = region.replace('-', '')
-    role_name = f"{role_name_base}{region_suffix}"
-    
-    # Define the trust policy - allows Bedrock service to assume this role
-    trust_policy = {
-        "Version": "2012-10-17",
-        "Statement": [
-            {
-                "Effect": "Allow",
-                "Principal": {
-                    "Service": "bedrock.amazonaws.com"
-                },
-                "Action": "sts:AssumeRole"
-            }
-        ]
-    }
-    
-    # Define the S3 access policy
-    s3_policy = {
-        "Version": "2012-10-17",
-        "Statement": [
-            {
-                "Effect": "Allow",
-                "Action": [
-                    "s3:GetObject",
-                    "s3:PutObject",
-                    "s3:ListBucket"
-                ],
-                "Resource": [
-                    "arn:aws:s3:::*",
-                    "arn:aws:s3:::*/*"
-                ]
-            }
-        ]
-    }
-    
-    # Implementation details for creating/updating the role...
-    # Return the role ARN
-```
+from idp_common.model_finetuning import FinetuningJobConfig
 
-### Creating a Fine-tuning Job with Separate Validation Data
-
-```python
-# Create fine-tuning job configuration
+# Create job configuration
 job_config = FinetuningJobConfig(
     base_model="arn:aws:bedrock:us-east-1::foundation-model/amazon.nova-lite-v1:0:300k",
     training_data_uri="s3://bucket/training.jsonl",
-    validation_data_uri="s3://bucket/validation.jsonl",
+    validation_data_uri="s3://bucket/validation.jsonl",  # Optional
     output_uri="s3://bucket/output/",
     role_arn="arn:aws:iam::123456789012:role/BedrockFinetuningRole",
-    job_name="model-finetuning-job",
-    model_name="finetuned-model",
+    job_name="my-finetuning-job",
+    model_name="my-finetuned-model",
     hyperparameters={
         "epochCount": "2",
         "learningRate": "0.00001",
         "batchSize": "1"
     },
-    model_type="nova"  # Specify the model type
-)
-
-# Create fine-tuning job
-job_result = finetuning_service.create_finetuning_job(job_config)
-print(f"Created fine-tuning job: {job_result.job_arn}")
-```
-
-### Creating a Fine-tuning Job with Automatic Data Splitting
-
-```python
-# Create fine-tuning job configuration with automatic data splitting
-job_config_auto_split = FinetuningJobConfig(
-    base_model="arn:aws:bedrock:us-east-1::foundation-model/amazon.nova-lite-v1:0:300k",
-    training_data_uri="s3://bucket/training.jsonl",  # Only provide training data
-    output_uri="s3://bucket/output/",
-    role_arn="arn:aws:iam::123456789012:role/BedrockFinetuningRole",
-    job_name="model-finetuning-job-auto-split",
-    model_name="finetuned-model-auto-split",
-    hyperparameters={
-        "epochCount": "2",
-        "learningRate": "0.00001",
-        "batchSize": "1"
-    },
-    validation_split=0.2,  # Specify validation split ratio
+    validation_split=0.2,  # Used if validation_data_uri not provided
     model_type="nova"
 )
 
-# Create fine-tuning job
-job_result_auto_split = finetuning_service.create_finetuning_job(job_config_auto_split)
+# Create the job
+result = service.create_finetuning_job(job_config)
+print(f"Job ARN: {result.job_arn}")
 ```
 
-### Monitoring Job Status
+**Parameters:**
+- `config` (Union[FinetuningJobConfig, Dict[str, Any]]): Job configuration object or dictionary
+
+**Returns:**
+- `FinetuningJobResult`: Object containing job details including ARN, name, and status
+
+### get_job_status()
+
+Retrieves the current status of a fine-tuning job.
 
 ```python
-# Check job status
-status = finetuning_service.get_job_status(job_result.job_arn, model_type="nova")
-print(f"Job status: {status.status}")
+status = service.get_job_status(job_arn, model_type="nova")
+print(f"Status: {status.status.value}")
+print(f"Model ID: {status.model_id}")
+```
 
-# Wait for job completion
-final_status = finetuning_service.wait_for_job_completion(
-    job_result.job_arn,
+**Parameters:**
+- `job_identifier` (str): Job ARN or job name
+- `model_type` (str): Type of model being fine-tuned (default: "nova")
+
+**Returns:**
+- `FinetuningJobResult`: Job result with current status
+
+### wait_for_job_completion()
+
+Waits for a fine-tuning job to complete with polling.
+
+```python
+final_status = service.wait_for_job_completion(
+    job_arn,
     model_type="nova",
-    polling_interval=60,
-    max_wait_time=3600  # 1 hour
+    polling_interval=60,  # Check every 60 seconds
+    max_wait_time=3600   # Maximum 1 hour
 )
-print(f"Job completed with status: {final_status.status}")
-print(f"Model ID: {final_status.model_id}")
+print(f"Final status: {final_status.status.value}")
 ```
 
-For more details and examples, refer to the [Fine-tuning Service Demo Notebook](../../../../notebooks/finetuning_model_service_demo.ipynb).
+**Parameters:**
+- `job_identifier` (str): Job ARN or job name
+- `model_type` (str): Type of model being fine-tuned (default: "nova")
+- `polling_interval` (int): Time in seconds between status checks (default: 60)
+- `max_wait_time` (Optional[int]): Maximum time to wait in seconds
 
-## Creating Provisioned Throughput
+**Returns:**
+- `FinetuningJobResult`: Final job status
 
-After your fine-tuning job completes successfully, you can create provisioned throughput for your model:
+## Provisioned Throughput Management
+
+### create_provisioned_throughput()
+
+Creates provisioned throughput for a fine-tuned model.
 
 ```python
-# Get the output model ARN from the job
-client = boto3.client("bedrock")
-job = client.get_model_customization_job(jobIdentifier=job_result.job_arn)
+from idp_common.model_finetuning import ProvisionedThroughputConfig
 
 # Create provisioned throughput configuration
 throughput_config = ProvisionedThroughputConfig(
-    model_id=job["outputModelArn"],
-    provisioned_model_name=f"{model_name}-provisioned",
+    model_id="arn:aws:bedrock:us-east-1:123456789012:custom-model/...",
+    provisioned_model_name="my-provisioned-model",
     model_units=1,
     model_type="nova"
 )
 
 # Create provisioned throughput
-throughput_result = finetuning_service.create_provisioned_throughput(throughput_config)
-print(f"Created provisioned throughput: {throughput_result.provisioned_model_id}")
+result = service.create_provisioned_throughput(throughput_config)
+print(f"Provisioned Model ARN: {result.provisioned_model_arn}")
+```
 
-# Wait for provisioning to complete
-final_throughput_status = finetuning_service.wait_for_provisioning_completion(
-    throughput_result.provisioned_model_arn,
+**Parameters:**
+- `config` (Union[ProvisionedThroughputConfig, Dict[str, Any]]): Provisioned throughput configuration
+
+**Returns:**
+- `ProvisionedThroughputResult`: Result with provisioned model details
+
+### get_provisioned_throughput_status()
+
+Gets the status of provisioned throughput.
+
+```python
+status = service.get_provisioned_throughput_status(provisioned_model_id, model_type="nova")
+print(f"Status: {status.status}")
+```
+
+**Parameters:**
+- `provisioned_model_id` (str): Provisioned model ID
+- `model_type` (str): Type of model (default: "nova")
+
+**Returns:**
+- `ProvisionedThroughputResult`: Current provisioning status
+
+### wait_for_provisioning_completion()
+
+Waits for provisioned throughput to be ready.
+
+```python
+final_status = service.wait_for_provisioning_completion(
+    provisioned_model_id,
     model_type="nova",
-    polling_interval=5,
-    max_wait_time=1800  # 30 minutes
+    polling_interval=60,
+    max_wait_time=1800
 )
-print(f"Provisioning completed with status: {final_throughput_status.status}")
 ```
 
-You can track the provisioning status with:
+**Parameters:**
+- `provisioned_model_id` (str): Provisioned model ID
+- `model_type` (str): Type of model (default: "nova")
+- `polling_interval` (int): Time in seconds between status checks (default: 60)
+- `max_wait_time` (Optional[int]): Maximum time to wait in seconds
+
+**Returns:**
+- `ProvisionedThroughputResult`: Final provisioning status
+
+### delete_provisioned_throughput()
+
+Deletes provisioned throughput to avoid ongoing costs.
 
 ```python
-status_provisioning = client.get_provisioned_model_throughput(provisionedModelId=throughput_result.provisioned_model_arn)['status']
-
-import time
-while status_provisioning == 'Creating':
-    time.sleep(60)
-    status_provisioning = client.get_provisioned_model_throughput(provisionedModelId=throughput_result.provisioned_model_arn)['status']
-    print(status_provisioning)
+response = service.delete_provisioned_throughput(provisioned_model_id, model_type="nova")
 ```
 
-See the [Fine-tuning Service Demo Notebook](../../../../notebooks/finetuning_model_service_demo.ipynb) for complete implementation details.
+**Parameters:**
+- `provisioned_model_id` (str): Provisioned model ID
+- `model_type` (str): Type of model (default: "nova")
 
-## Model Evaluation
+**Returns:**
+- `Dict[str, Any]`: Response from delete operation
 
-After fine-tuning your model and creating provisioned throughput, it's important to evaluate its performance. Here's how to evaluate a fine-tuned document classification model:
+## Configuration Options
 
-### Setting Up the Evaluation
+### Model Configuration
 
 ```python
-# Define models to compare
-MODELS = {
-    "nova_lite": {
-        "id": "us.amazon.nova-lite-v1:0",
-        "provider": "amazon"
-    },
-    "ft_nova_lite": {
-        "id": "arn:aws:bedrock:us-east-1:123456789012:provisioned-model/your-provisioned-model-id",
-        "provider": "amazon"
+config = {
+    "model_finetuning": {
+        "base_models": {
+            "nova_lite": "arn:aws:bedrock:us-east-1::foundation-model/amazon.nova-lite-v1:0:300k",
+            "nova_micro": "arn:aws:bedrock:us-east-1::foundation-model/amazon.nova-micro-v1:0:128k"
+        },
+        "hyperparameters": {
+            "default": {
+                "epochCount": "2",
+                "learningRate": "0.00001", 
+                "batchSize": "1"
+            },
+            "custom": {
+                "epochCount": "3",
+                "learningRate": "0.0001",
+                "batchSize": "1"
+            }
+        }
     }
 }
-
-# Define label mapping for your task
-label_mapping = {
-    0: "advertissement",
-    1: "budget",
-    2: "email",
-    # ... other labels
-}
 ```
 
-### Running Evaluation
+### Hyperparameter Validation
+
+The service automatically validates hyperparameters for Nova models:
+
+- **epochCount**: Must be between 1 and 5
+- **learningRate**: Must be between 1e-6 and 1e-4
+- **batchSize**: Must be >= 1
+
+## Error Handling
+
+The service provides comprehensive error handling:
+
+### Validation Errors
 
 ```python
-# Function to evaluate a model on test samples
-def evaluate_model(model_info, samples, model_name, max_workers=4):
-    results = []
-    
-    # Process samples with the model
-    for sample in samples:
-        true_label = sample["label"]
-        true_label_name = label_mapping[true_label]
-        
-        # Invoke model
-        response = invoke_model(sample["image"], model_info["id"], model_info["provider"])
-        status, prediction = parse_response(response, model_info["provider"])
-        
-        # Store result
-        results.append({
-            "true_label": true_label,
-            "true_label_name": true_label_name,
-            "prediction": prediction,
-            "status": status,
-            "correct": prediction == true_label_name
-        })
-    
-    return results
-
-# Calculate metrics
-def calculate_metrics(results):
-    y_true = [result["true_label_name"] for result in results]
-    y_pred = [result["prediction"] for result in results]
-    
-    accuracy = accuracy_score(y_true, y_pred)
-    f1 = f1_score(y_true, y_pred, average="weighted")
-    recall = recall_score(y_true, y_pred, average="weighted")
-    
-    # Create confusion matrix
-    labels = list(set(y_true))
-    cm = confusion_matrix(y_true, y_pred, labels=labels)
-    
-    return {
-        "accuracy": accuracy,
-        "f1": f1,
-        "recall": recall,
-        "confusion_matrix": cm.tolist(),
-        "labels": labels
-    }
+try:
+    result = service.create_finetuning_job(job_config)
+except ValueError as e:
+    print(f"Configuration error: {e}")
 ```
 
-### Visualizing Results
+Common validation errors:
+- Missing required parameters (`base_model`, `role_arn`, `training_data_uri`)
+- Invalid hyperparameter ranges
+- Malformed S3 URIs
+
+### AWS Service Errors
 
 ```python
-# Plot confusion matrix
-def plot_confusion_matrix(cm, labels, title):
-    plt.figure(figsize=(10, 8))
-    sns.heatmap(cm, annot=True, fmt="d", cmap="Blues", xticklabels=labels, yticklabels=labels)
-    plt.title(title)
-    plt.ylabel("True Label")
-    plt.xlabel("Predicted Label")
-    plt.xticks(rotation=90)
-    plt.tight_layout()
-    plt.show()
+from botocore.exceptions import ClientError
 
-# Compare models with bar chart
-def plot_model_comparison(all_metrics):
-    metrics = ['Accuracy', 'F1 Score', 'Recall']
-    model_names = list(all_metrics.keys())
-    
-    # Set up the figure
-    fig, ax = plt.subplots(figsize=(12, 8))
-    
-    # Plot bars for each model
-    # ... plotting implementation ...
+try:
+    result = service.create_finetuning_job(job_config)
+except ClientError as e:
+    error_code = e.response['Error']['Code']
+    if error_code == 'ValidationException':
+        print("Invalid request parameters")
+    elif error_code == 'ResourceNotFoundException':
+        print("Specified resource not found")
+    elif error_code == 'ThrottlingException':
+        print("Request was throttled")
 ```
 
-For comprehensive evaluation examples, see the [Model Evaluation Notebook](../../../../notebooks/finetuning_model_document_classification_evaluation.ipynb).
+## Supported Model Types
 
-## Cleanup Resources
+Currently supported model types:
 
-To avoid unnecessary costs, you should clean up your provisioned resources when they're no longer needed:
+- **`nova`**: Amazon Nova models (Nova Lite, Nova Micro)
+
+The service is designed to be extensible for additional model types:
 
 ```python
-# Delete provisioned throughput
-response = finetuning_service.delete_provisioned_throughput(
-    throughput_result.provisioned_model_arn,
+# Extension point for new model types
+def _create_custom_job_params(self, config, data_uris):
+    """Create job parameters for custom model type."""
+    # Implementation for new model type
+    pass
+```
+
+## Data Processing Features
+
+### Automatic Data Splitting
+
+When `validation_data_uri` is not provided, the service automatically:
+
+1. Downloads training data from S3
+2. Shuffles the data with a fixed seed (42) for reproducibility
+3. Splits data based on `validation_split` ratio
+4. Uploads the split validation data back to S3
+5. Updates training data with the remaining samples
+
+### S3 URI Parsing
+
+The service includes utility methods for S3 operations:
+
+```python
+# Internal method for S3 URI parsing
+bucket, key = service._parse_s3_uri("s3://my-bucket/path/to/file.jsonl")
+```
+
+## Example Usage Patterns
+
+### Basic Fine-tuning Workflow
+
+```python
+from idp_common.model_finetuning import (
+    ModelFinetuningService, 
+    FinetuningJobConfig,
+    ProvisionedThroughputConfig
+)
+
+# Initialize service
+service = ModelFinetuningService(region="us-east-1")
+
+# Create fine-tuning job
+job_config = FinetuningJobConfig(
+    base_model="arn:aws:bedrock:us-east-1::foundation-model/amazon.nova-lite-v1:0:300k",
+    training_data_uri="s3://my-bucket/train.jsonl",
+    output_uri="s3://my-bucket/output/",
+    role_arn="arn:aws:iam::123456789012:role/BedrockRole",
+    job_name="document-classifier",
     model_type="nova"
 )
-print(f"Deleted provisioned throughput: {throughput_result.provisioned_model_id}")
+
+# Create and monitor job
+job_result = service.create_finetuning_job(job_config)
+final_result = service.wait_for_job_completion(job_result.job_arn)
+
+# Create provisioned throughput
+if final_result.model_id:
+    throughput_config = ProvisionedThroughputConfig(
+        model_id=final_result.model_id,
+        provisioned_model_name="my-classifier-provisioned",
+        model_units=1,
+        model_type="nova"
+    )
+    
+    throughput_result = service.create_provisioned_throughput(throughput_config)
+    service.wait_for_provisioning_completion(throughput_result.provisioned_model_arn)
 ```
 
-See the [Fine-tuning Service Demo Notebook](../../../../notebooks/finetuning_model_service_demo.ipynb) for complete cleanup procedures.
+### Configuration-Driven Workflow
+
+```python
+# Load configuration from external source
+import yaml
+
+with open('finetuning_config.yaml', 'r') as f:
+    config = yaml.safe_load(f)
+
+service = ModelFinetuningService(config=config)
+
+# Use default hyperparameters from config
+job_config = FinetuningJobConfig(
+    base_model=config['model_finetuning']['base_models']['nova_lite'],
+    training_data_uri="s3://my-bucket/train.jsonl",
+    # hyperparameters will use defaults from config
+    model_type="nova"
+)
+```
+
+## CLI Usage Examples
+
+The following Python scripts provide command-line interfaces for end-to-end Nova fine-tuning workflows:
+
+### Dataset Preparation
+
+**Basic dataset preparation:**
+```bash
+python prepare_nova_finetuning_data.py \
+    --bucket-name my-finetuning-bucket \
+    --samples-per-label 100
+```
+
+**With custom dataset and prompts:**
+```bash
+python prepare_nova_finetuning_data.py \
+    --bucket-name my-bucket \
+    --directory rvl-cdip-sampled \
+    --samples-per-label 100 \
+    --dataset chainyo/rvl-cdip \
+    --system-prompt-file custom_system.txt \
+    --task-prompt-file custom_task.txt
+```
+
+### Fine-tuning Job Creation
+
+**Create job with automatic IAM role creation:**
+```bash
+python create_finetuning_job.py \
+    --training-data-uri s3://my-bucket/data/train.jsonl \
+    --output-uri s3://my-bucket/output/ \
+    --job-name my-finetuning-job \
+    --create-role
+```
+
+**Create job with custom hyperparameters:**
+```bash
+python create_finetuning_job.py \
+    --training-data-uri s3://my-bucket/data/train.jsonl \
+    --validation-data-uri s3://my-bucket/data/validation.jsonl \
+    --output-uri s3://my-bucket/output/ \
+    --job-name custom-job \
+    --create-role \
+    --epoch-count 3 \
+    --learning-rate 0.0001 \
+    --batch-size 1
+```
+
+**Monitor job status:**
+```bash
+python create_finetuning_job.py \
+    --status-only \
+    --job-arn arn:aws:bedrock:us-east-1:123456789012:model-customization-job/job-id
+```
+
+### Provisioned Throughput Management
+
+**Create provisioned throughput from job details:**
+```bash
+python create_provisioned_throughput.py \
+    --job-details-file finetuning_job_20241201_120000.json \
+    --provisioned-model-name my-provisioned-model \
+    --model-units 1
+```
+
+**Create from model ID:**
+```bash
+python create_provisioned_throughput.py \
+    --model-id arn:aws:bedrock:us-east-1:123456789012:custom-model/... \
+    --provisioned-model-name my-provisioned-model \
+    --model-units 2
+```
+
+**List all provisioned models:**
+```bash
+python create_provisioned_throughput.py --list-models
+```
+
+**Delete provisioned throughput:**
+```bash
+python create_provisioned_throughput.py \
+    --delete \
+    --provisioned-model-arn arn:aws:bedrock:us-east-1:123456789012:provisioned-model/...
+```
+
+### Model Inference and Evaluation
+
+**Single image inference with base model:**
+```bash
+python inference_example.py \
+    --model-id us.amazon.nova-lite-v1:0 \
+    --image-path document.png
+```
+
+**Batch inference with fine-tuned model:**
+```bash
+python inference_example.py \
+    --provisioned-model-arn arn:aws:bedrock:us-east-1:123456789012:provisioned-model/... \
+    --image-directory /path/to/images/ \
+    --output-file results.json
+```
+
+**Inference with custom parameters:**
+```bash
+python inference_example.py \
+    --model-id us.amazon.nova-lite-v1:0 \
+    --image-path document.png \
+    --temperature 0.1 \
+    --top-k 10 \
+    --max-tokens 500 \
+    --verbose
+```
+
+**Model comparison with ground truth evaluation:**
+```bash
+python inference_example.py \
+    --provisioned-model-arn arn:aws:bedrock:us-east-1:123456789012:provisioned-model/... \
+    --image-directory /path/to/images/ \
+    --compare-with-base \
+    --ground-truth-file labels.json \
+    --output-file comparison.json
+```
+
+### Complete Workflow Example
+
+```bash
+# 1. Prepare dataset
+python prepare_nova_finetuning_data.py --bucket-name my-bucket --samples-per-label 100
+
+# 2. Create fine-tuning job  
+python create_finetuning_job.py --training-data-uri s3://my-bucket/train.jsonl --job-name my-job --create-role
+
+# 3. Create provisioned throughput
+python create_provisioned_throughput.py --job-details-file job.json --provisioned-model-name my-model --model-units 1
+
+# 4. Run inference
+python inference_example.py --provisioned-model-arn <arn> --image-directory /path/to/images --output-file results.json
+
+# 5. Clean up
+python create_provisioned_throughput.py --delete --provisioned-model-arn <arn>
+```
 
 ## Requirements
 
 - AWS credentials with appropriate permissions for Amazon Bedrock and S3
 - IAM role with permissions for Amazon Bedrock fine-tuning
-- Training and validation data in JSONL format
+- Training data in JSONL format according to Bedrock conversation schema
 - S3 buckets for input and output data
 
-## Supported Model Types
+## Related Resources
 
-Currently, the service supports the following model types:
+For end-to-end workflows, dataset preparation, and comprehensive examples, see:
 
-- `nova`: Amazon Nova models (Nova Lite, Nova Micro)
-
-The service is designed to be extensible, allowing for the addition of other model types in the future.
-
-## References
-
-- [Amazon Bedrock Fine-tuning Documentation](https://docs.aws.amazon.com/bedrock/latest/userguide/custom-models.html)
-- [Amazon Nova Documentation](https://docs.aws.amazon.com/nova/latest/userguide/customize-fine-tune.html)
-- [Dataset Preparation Notebook](../../../../notebooks/finetuning_dataset_prep.ipynb)
-- [Fine-tuning Service Demo Notebook](../../../../notebooks/finetuning_model_service_demo.ipynb)
-- [Model Evaluation Notebook](../../../../notebooks/finetuning_model_document_classification_evaluation.ipynb)
+- **[Nova Fine-tuning Documentation](../../../../docs/nova-finetuning.md)**: Complete guide with CLI scripts and workflows
+- **Python Scripts**:
+  - `prepare_nova_finetuning_data.py`: Dataset preparation
+  - `create_finetuning_job.py`: Job creation and monitoring
+  - `create_provisioned_throughput.py`: Provisioned throughput management
+  - `inference_example.py`: Model inference and evaluation
+- **Notebooks**:
+  - [Dataset Preparation Notebook](../../../../notebooks/finetuning_dataset_prep.ipynb)
+  - [Fine-tuning Service Demo Notebook](../../../../notebooks/finetuning_model_service_demo.ipynb)
+  - [Model Evaluation Notebook](../../../../notebooks/finetuning_model_document_classification_evaluation.ipynb)
