@@ -82,12 +82,12 @@ Parameters:
   Pattern2CustomClassificationModelARN:
     Type: String
     Default: ""
-    Description: (NOT YET SUPPORTED) Specify Custom Fine Tuned Classification Model ARN. Leave blank to use pretrained model specified in the selected configuration.
+    Description: Specify Custom Fine Tuned Classification Model ARN. Leave blank to use pretrained model specified in the selected configuration.
 
   Pattern2CustomExtractionModelARN:
     Type: String
     Default: ""
-    Description: (NOT YET SUPPORTED) Specify Custom Fine Tuned Extraction Model ARN. Leave blank to use pretrained model specified in the selected configuration.
+    Description: Specify Custom Fine Tuned Extraction Model ARN. Leave blank to use pretrained model specified in the selected configuration.
 
   # Pattern 3 Parameters
 
@@ -307,8 +307,6 @@ Rules:
     Assertions:
       - Assert: !Not [!Equals [!Ref Pattern3UDOPModelArtifactPath, ""]]
         AssertDescription: UDOP Model Artifact Path is required when IDPPattern is 'Pattern1'
-
-  # Pattern 2 rules - Custom model validation now handled in pattern templates
 
 Conditions:
   IsPattern1:
