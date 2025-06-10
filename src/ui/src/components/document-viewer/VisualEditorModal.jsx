@@ -186,14 +186,19 @@ const FormFieldRenderer = memo(({
   
   const confidenceInfo = getFieldConfidenceInfo(fieldKey, explainabilityInfo, filteredPath);
 
-  // Debug logging for VisualEditorModal
-  if (fieldKey === 'YTD' || fieldKey === 'Period') {
-    console.log(
-      `VisualEditorModal Debug - Field: ${fieldKey}, OriginalPath: ${JSON.stringify(path)}, FilteredPath: ${JSON.stringify(filteredPath)}, ConfidenceInfo:`,
-      confidenceInfo,
-    );
+  // Determine color and style for confidence display
+  let confidenceColor;
+  let confidenceStyle;
+  if (confidenceInfo.hasConfidenceInfo) {
+    if (confidenceInfo.displayMode === 'with-threshold') {
+      confidenceColor = confidenceInfo.isAboveThreshold ? 'text-status-success' : 'text-status-error';
+      confidenceStyle = undefined;
+    } else {
+      confidenceColor = undefined;
+      confidenceStyle = { color: confidenceInfo.textColor };
+    }
   }
-  
+
   // Create label with confidence score if available (legacy support)
   const label = confidence !== undefined ? `${fieldKey} (${(confidence * 100).toFixed(1)}%)` : fieldKey;
 
@@ -315,7 +320,8 @@ const FormFieldRenderer = memo(({
                 <Box
                   fontSize="body-s"
                   padding={{ top: 'xxxs' }}
-                  style={{ color: confidenceInfo.textColor }}
+                  color={confidenceColor}
+                  style={confidenceStyle}
                 >
                   {confidenceInfo.displayMode === 'with-threshold' 
                     ? `Confidence: ${(confidenceInfo.confidence * 100).toFixed(1)}% / Threshold: ${(confidenceInfo.confidenceThreshold * 100).toFixed(1)}%`
@@ -373,7 +379,8 @@ const FormFieldRenderer = memo(({
                 <Box
                   fontSize="body-s"
                   padding={{ top: 'xxxs' }}
-                  style={{ color: confidenceInfo.textColor }}
+                  color={confidenceColor}
+                  style={confidenceStyle}
                 >
                   {confidenceInfo.displayMode === 'with-threshold' 
                     ? `Confidence: ${(confidenceInfo.confidence * 100).toFixed(1)}% / Threshold: ${(confidenceInfo.confidenceThreshold * 100).toFixed(1)}%`
@@ -421,7 +428,8 @@ const FormFieldRenderer = memo(({
                 <Box
                   fontSize="body-s"
                   padding={{ top: 'xxxs' }}
-                  style={{ color: confidenceInfo.textColor }}
+                  color={confidenceColor}
+                  style={confidenceStyle}
                 >
                   {confidenceInfo.displayMode === 'with-threshold' 
                     ? `Confidence: ${(confidenceInfo.confidence * 100).toFixed(1)}% / Threshold: ${(confidenceInfo.confidenceThreshold * 100).toFixed(1)}%`
@@ -629,7 +637,8 @@ const FormFieldRenderer = memo(({
                 <Box
                   fontSize="body-s"
                   padding={{ top: 'xxxs' }}
-                  style={{ color: confidenceInfo.textColor }}
+                  color={confidenceColor}
+                  style={confidenceStyle}
                 >
                   {confidenceInfo.displayMode === 'with-threshold' 
                     ? `Confidence: ${(confidenceInfo.confidence * 100).toFixed(1)}% / Threshold: ${(confidenceInfo.confidenceThreshold * 100).toFixed(1)}%`
