@@ -1267,7 +1267,7 @@ Resources:
         Description: "Table for document-level evaluation metrics"
         TableType: "EXTERNAL_TABLE"
         Parameters: {
-          "classification": "json",
+          "classification": "parquet",
           "typeOfData": "file"
         }
         StorageDescriptor:
@@ -1277,10 +1277,10 @@ Resources:
                 - ShouldCreateReportingBucket
                 - !Ref ReportingBucket
                 - !Ref ReportingBucketName
-          InputFormat: "org.apache.hadoop.mapred.TextInputFormat"
-          OutputFormat: "org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat"
+          InputFormat: "org.apache.hadoop.hive.ql.io.parquet.MapredParquetInputFormat"
+          OutputFormat: "org.apache.hadoop.hive.ql.io.parquet.MapredParquetOutputFormat"
           SerdeInfo:
-            SerializationLibrary: "org.apache.hadoop.hive.serde2.JsonSerDe"
+            SerializationLibrary: "org.apache.hadoop.hive.ql.io.parquet.serde.ParquetHiveSerDe"
           Columns:
             - Name: document_id
               Type: string
@@ -1323,7 +1323,7 @@ Resources:
         Description: "Table for section-level evaluation metrics"
         TableType: "EXTERNAL_TABLE"
         Parameters: {
-          "classification": "json",
+          "classification": "parquet",
           "typeOfData": "file"
         }
         StorageDescriptor:
@@ -1333,10 +1333,10 @@ Resources:
                 - ShouldCreateReportingBucket
                 - !Ref ReportingBucket
                 - !Ref ReportingBucketName
-          InputFormat: "org.apache.hadoop.mapred.TextInputFormat"
-          OutputFormat: "org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat"
+          InputFormat: "org.apache.hadoop.hive.ql.io.parquet.MapredParquetInputFormat"
+          OutputFormat: "org.apache.hadoop.hive.ql.io.parquet.MapredParquetOutputFormat"
           SerdeInfo:
-            SerializationLibrary: "org.apache.hadoop.hive.serde2.JsonSerDe"
+            SerializationLibrary: "org.apache.hadoop.hive.ql.io.parquet.serde.ParquetHiveSerDe"
           Columns:
             - Name: document_id
               Type: string
@@ -1379,7 +1379,7 @@ Resources:
         Description: "Table for attribute-level evaluation metrics"
         TableType: "EXTERNAL_TABLE"
         Parameters: {
-          "classification": "json",
+          "classification": "parquet",
           "typeOfData": "file"
         }
         StorageDescriptor:
@@ -1389,10 +1389,10 @@ Resources:
                 - ShouldCreateReportingBucket
                 - !Ref ReportingBucket
                 - !Ref ReportingBucketName
-          InputFormat: "org.apache.hadoop.mapred.TextInputFormat"
-          OutputFormat: "org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat"
+          InputFormat: "org.apache.hadoop.hive.ql.io.parquet.MapredParquetInputFormat"
+          OutputFormat: "org.apache.hadoop.hive.ql.io.parquet.MapredParquetOutputFormat"
           SerdeInfo:
-            SerializationLibrary: "org.openx.data.jsonserde.JsonSerDe"
+            SerializationLibrary: "org.apache.hadoop.hive.ql.io.parquet.serde.ParquetHiveSerDe"
           Columns:
             - Name: document_id
               Type: string
@@ -1413,6 +1413,10 @@ Resources:
             - Name: reason
               Type: string
             - Name: evaluation_method
+              Type: string
+            - Name: expected_confidence
+              Type: string
+            - Name: actual_confidence
               Type: string
             - Name: evaluation_date
               Type: timestamp
