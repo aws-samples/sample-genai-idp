@@ -1,28 +1,131 @@
 """
-Module for saving evaluation results to the reporting bucket in JSON format.
+Module for saving evaluation results to the reporting bucket in Parquet format.
 """
 
 import boto3
 import datetime
+import io
 import json
 import logging
 import re
-from typing import Dict, Any, List, Optional
+from typing import Dict, List, Any
+import pyarrow as pa
+import pyarrow.parquet as pq
 
 # Configure logging
 logger = logging.getLogger(__name__)
 
+def _serialize_value(value: Any) -> str:
+    """
+    Serialize complex values for Parquet storage as strings.
+    
+    Args:
+        value: The value to serialize
+        
+    Returns:
+        Serialized value as string, or None if input is None
+    """
+    if value is None:
+        return None
+    elif isinstance(value, str):
+        return value
+    elif isinstance(value, (int, float, bool)):
+        # Convert numeric/boolean values to strings
+        return str(value)
+    elif isinstance(value, (list, dict)):
+        # Convert complex types to JSON strings
+        return json.dumps(value)
+    else:
+        # Convert other types to string
+        return str(value)
+
+def _save_records_as_parquet(records: List[Dict], s3_bucket: str, s3_key: str, s3_client, schema: pa.Schema) -> None:
+    """
+    Save a list of records as a Parquet file to S3 with explicit schema.
+    
+    Args:
+        records: List of dictionaries to save
+        s3_bucket: S3 bucket name
+        s3_key: S3 key path
+        s3_client: Boto3 S3 client
+        schema: PyArrow schema for the table
+    """
+    if not records:
+        logger.warning("No records to save")
+        return
+        
+    # Create PyArrow table from records with explicit schema
+    table = pa.Table.from_pylist(records, schema=schema)
+    
+    # Create in-memory buffer
+    buffer = io.BytesIO()
+    
+    # Write parquet data to buffer
+    pq.write_table(table, buffer, compression='snappy')
+    
+    # Upload to S3
+    buffer.seek(0)
+    s3_client.put_object(
+        Bucket=s3_bucket,
+        Key=s3_key,
+        Body=buffer.getvalue(),
+        ContentType='application/octet-stream'
+    )
+    logger.info(f"Saved {len(records)} records as Parquet to s3://{s3_bucket}/{s3_key}")
+
 def save_evaluation_to_reporting_bucket(document, reporting_bucket: str) -> None:
     """
-    Save evaluation results to the reporting bucket in JSON format in three tables:
+    Save evaluation results to the reporting bucket in Parquet format in three tables:
     1. Document level metrics
-    2. Section level metrics
+    2. Section level metrics  
     3. Attribute level metrics
     
     Args:
         document: Document with evaluation results
         reporting_bucket: S3 bucket for reporting data
     """
+    # Define schemas for each table to ensure type compatibility
+    document_schema = pa.schema([
+        ('document_id', pa.string()),
+        ('input_key', pa.string()),
+        ('evaluation_date', pa.timestamp('ms')),
+        ('accuracy', pa.float64()),
+        ('precision', pa.float64()),
+        ('recall', pa.float64()),
+        ('f1_score', pa.float64()),
+        ('false_alarm_rate', pa.float64()),
+        ('false_discovery_rate', pa.float64()),
+        ('execution_time', pa.float64())
+    ])
+    
+    section_schema = pa.schema([
+        ('document_id', pa.string()),
+        ('section_id', pa.string()),
+        ('section_type', pa.string()),
+        ('accuracy', pa.float64()),
+        ('precision', pa.float64()),
+        ('recall', pa.float64()),
+        ('f1_score', pa.float64()),
+        ('false_alarm_rate', pa.float64()),
+        ('false_discovery_rate', pa.float64()),
+        ('evaluation_date', pa.timestamp('ms'))
+    ])
+    
+    attribute_schema = pa.schema([
+        ('document_id', pa.string()),
+        ('section_id', pa.string()),
+        ('section_type', pa.string()),
+        ('attribute_name', pa.string()),
+        ('expected', pa.string()),
+        ('actual', pa.string()),
+        ('matched', pa.bool_()),
+        ('score', pa.float64()),
+        ('reason', pa.string()),
+        ('evaluation_method', pa.string()),
+        ('expected_confidence', pa.string()),
+        ('actual_confidence', pa.string()),
+        ('evaluation_date', pa.timestamp('ms'))
+    ])
     logger.info(f"Writing evaluation results to ReportingBucket s3://{reporting_bucket}/evaluation_metrics/document_metrics")
     try:
         if not document.evaluation_result:
@@ -42,7 +145,7 @@ def save_evaluation_to_reporting_bucket(document, reporting_bucket: str) -> None
         document_record = {
             'document_id': document.id,
             'input_key': document.input_key,
-            'evaluation_date': now.isoformat(),
+            'evaluation_date': now,  # Use datetime object directly
             'accuracy': eval_result.overall_metrics.get('accuracy', 0.0),
             'precision': eval_result.overall_metrics.get('precision', 0.0),
             'recall': eval_result.overall_metrics.get('recall', 0.0),
@@ -52,15 +155,9 @@ def save_evaluation_to_reporting_bucket(document, reporting_bucket: str) -> None
             'execution_time': eval_result.execution_time,
         }
         
-        # Save document metrics in JSON Lines format
-        doc_key = f"evaluation_metrics/document_metrics/year={year}/month={month}/day={day}/document={escaped_doc_id}/results.jsonl"
-        s3_client.put_object(
-            Bucket=reporting_bucket,
-            Key=doc_key,
-            Body=json.dumps(document_record),
-            ContentType='application/x-ndjson'
-        )
-        logger.info(f"Saved document metrics to s3://{reporting_bucket}/{doc_key}")
+        # Save document metrics in Parquet format
+        doc_key = f"evaluation_metrics/document_metrics/year={year}/month={month}/day={day}/document={escaped_doc_id}/results.parquet"
+        _save_records_as_parquet([document_record], reporting_bucket, doc_key, s3_client, document_schema)
         
         # 2. Section level metrics
         section_records = []
@@ -85,7 +182,7 @@ def save_evaluation_to_reporting_bucket(document, reporting_bucket: str) -> None
                 'f1_score': section_result.metrics.get('f1_score', 0.0),
                 'false_alarm_rate': section_result.metrics.get('false_alarm_rate', 0.0),
                 'false_discovery_rate': section_result.metrics.get('false_discovery_rate', 0.0),
-                'evaluation_date': now.isoformat(),
+                'evaluation_date': now,  # Use datetime object directly
             }
             section_records.append(section_record)
             
@@ -106,16 +203,16 @@ def save_evaluation_to_reporting_bucket(document, reporting_bucket: str) -> None
                         'document_id': document.id,
                         'section_id': section_id,
                         'section_type': section_type,
-                        'attribute_name': getattr(attr, 'name', ''),
-                        'expected': getattr(attr, 'expected', ''),
-                        'actual': getattr(attr, 'actual', ''),
+                        'attribute_name': _serialize_value(getattr(attr, 'name', '')),
+                        'expected': _serialize_value(getattr(attr, 'expected', '')),
+                        'actual': _serialize_value(getattr(attr, 'actual', '')),
                         'matched': getattr(attr, 'matched', False),
                         'score': getattr(attr, 'score', 0.0),
-                        'reason': getattr(attr, 'reason', ''),
-                        'evaluation_method': getattr(attr, 'evaluation_method', ''),
-                        'expected_confidence': getattr(attr, 'expected_confidence', None),
-                        'actual_confidence': getattr(attr, 'actual_confidence', None),
-                        'evaluation_date': now.isoformat(),
+                        'reason': _serialize_value(getattr(attr, 'reason', '')),
+                        'evaluation_method': _serialize_value(getattr(attr, 'evaluation_method', '')),
+                        'expected_confidence': _serialize_value(getattr(attr, 'expected_confidence', None)),
+                        'actual_confidence': _serialize_value(getattr(attr, 'actual_confidence', None)),
+                        'evaluation_date': now,  # Use datetime object directly
                     }
                     attribute_records.append(attribute_record)
                     logger.debug(f"Added attribute record for attribute_name={getattr(attr, 'name', '')}")
@@ -123,31 +220,17 @@ def save_evaluation_to_reporting_bucket(document, reporting_bucket: str) -> None
         # Log counts
         logger.info(f"Collected {len(section_records)} section records and {len(attribute_records)} attribute records")
         
-        # Save section metrics in JSON Lines format
+        # Save section metrics in Parquet format
         if section_records:
-            section_key = f"evaluation_metrics/section_metrics/year={year}/month={month}/day={day}/document={escaped_doc_id}/results.jsonl"
-            section_lines = '\n'.join(json.dumps(record) for record in section_records)
-            s3_client.put_object(
-                Bucket=reporting_bucket,
-                Key=section_key,
-                Body=section_lines,
-                ContentType='application/x-ndjson'
-            )
-            logger.info(f"Saved {len(section_records)} section metrics to s3://{reporting_bucket}/{section_key}")
+            section_key = f"evaluation_metrics/section_metrics/year={year}/month={month}/day={day}/document={escaped_doc_id}/results.parquet"
+            _save_records_as_parquet(section_records, reporting_bucket, section_key, s3_client, section_schema)
         else:
             logger.warning("No section records to save")
         
-        # Save attribute metrics in JSON Lines format
+        # Save attribute metrics in Parquet format
         if attribute_records:
-            attr_key = f"evaluation_metrics/attribute_metrics/year={year}/month={month}/day={day}/document={escaped_doc_id}/results.jsonl"
-            attribute_lines = '\n'.join(json.dumps(record) for record in attribute_records)
-            s3_client.put_object(
-                Bucket=reporting_bucket,
-                Key=attr_key,
-                Body=attribute_lines,
-                ContentType='application/x-ndjson'
-            )
-            logger.info(f"Saved {len(attribute_records)} attribute metrics to s3://{reporting_bucket}/{attr_key}")
+            attr_key = f"evaluation_metrics/attribute_metrics/year={year}/month={month}/day={day}/document={escaped_doc_id}/results.parquet"
+            _save_records_as_parquet(attribute_records, reporting_bucket, attr_key, s3_client, attribute_schema)
         else:
             logger.warning("No attribute records to save")
         
