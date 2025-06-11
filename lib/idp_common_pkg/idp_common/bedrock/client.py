@@ -450,47 +450,10 @@ class BedrockClient:
             
             return response_with_metering
             
-        # except ClientError as e:
-        except ReadTimeoutError as e
-            error_code = "ReadTimeoutError"
-            error_message = str(e)
-
-            self._put_metric('BedrockThrottles', 1)
-            
-            # Check if we've reached max retries
-            if retry_count >= max_retries:
-                logger.error(f"Max retries ({max_retries}) exceeded. Last error: {error_message}")
-                self._put_metric('BedrockRequestsFailed', 1)
-                self._put_metric('BedrockMaxRetriesExceeded', 1)
-                raise
-            
-            # Calculate backoff time
-            backoff = self._calculate_backoff(retry_count)
-            logger.warning(f"Bedrock throttling occurred (attempt {retry_count + 1}/{max_retries}). "
-                            f"Error: {error_message}. "
-                            f"Backing off for {backoff:.2f}s")
-            
-            # Sleep for backoff period
-            time.sleep(backoff)
-            
-            # Recursive call with incremented retry count
-            return self._invoke_with_retry(
-                converse_params=converse_params,
-                retry_count=retry_count + 1,
-                max_retries=max_retries,
-                request_start_time=request_start_time,
-                last_exception=e,
-                context=context
-            )
         except Exception as e:
-            # logger.error(f"Unexpected error invoking Bedrock: {str(e)}", exc_info=True)
-            self._put_metric('BedrockRequestsFailed', 1)
-            self._put_metric('BedrockUnexpectedErrors', 1)
-
-            # error_code = type(e)
             error_code = e.response['Error']['Code']
             error_message = e.response['Error']['Message']
-    
+            
             retryable_errors = [
                 'ThrottlingException', 
                 'ServiceQuotaExceededException', 
@@ -537,6 +500,7 @@ class BedrockClient:
                 self._put_metric('BedrockRequestsFailed', 1)
                 self._put_metric('BedrockNonRetryableErrors', 1)
                 raise
+
     
     def get_guardrail_config(self) -> Optional[Dict[str, str]]:
         """
