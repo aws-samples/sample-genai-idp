@@ -1,3 +1,3 @@
-PyMuPDF
+PyMuPDF==1.25.5
 boto3
 ../../lib/idp_common_pkg[core,appsync]  # core utilities and AppSync with dependencies

@@ -43,7 +43,7 @@ image = [
 # OCR module dependencies
 ocr = [
     "Pillow>=11.1.0",
-    "PyMuPDF>=1.25.5",
+    "PyMuPDF==1.25.5",
     "amazon-textract-textractor[pandas]>=1.9.2",
     "numpy>=1.24.0,<2.0.0",
     "pandas>=1.5.0,<2.3.0"
@@ -86,7 +86,7 @@ test = [
 # Full package with all dependencies
 all = [
     "Pillow>=11.1.0",
-    "PyMuPDF>=1.25.5",
+    "PyMuPDF==1.25.5",
     "amazon-textract-textractor[pandas]>=1.9.2",
     "munkres>=1.1.4",
     "numpy>=1.24.0,<2.0.0",
