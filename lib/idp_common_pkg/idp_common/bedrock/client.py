@@ -17,6 +17,7 @@ import copy
 import random
 import socket
 from typing import Dict, Any, List, Optional, Union, Tuple
+from botocore.config import Config
 from botocore.exceptions import ClientError, ReadTimeoutError, ConnectTimeoutError, EndpointConnectionError
 from urllib3.exceptions import ReadTimeoutError as Urllib3ReadTimeoutError
 try:
@@ -73,8 +74,12 @@ class BedrockClient:
     @property
     def client(self):
         """Lazy-loaded Bedrock client."""
+        config = Config(
+            connect_timeout=10,
+            read_timeout=120
+            )
         if self._client is None:
-            self._client = boto3.client('bedrock-runtime', region_name=self.region)
+            self._client = boto3.client('bedrock-runtime', region_name=self.region, config=config)
         return self._client
     
     def __call__(
@@ -445,7 +450,7 @@ class BedrockClient:
             
             return response_with_metering
             
-        except ClientError as e:
+        except Exception as e:
             error_code = e.response['Error']['Code']
             error_message = e.response['Error']['Message']
             
@@ -495,12 +500,7 @@ class BedrockClient:
                 self._put_metric('BedrockRequestsFailed', 1)
                 self._put_metric('BedrockNonRetryableErrors', 1)
                 raise
-        
-        except Exception as e:
-            logger.error(f"Unexpected error invoking Bedrock: {str(e)}", exc_info=True)
-            self._put_metric('BedrockRequestsFailed', 1)
-            self._put_metric('BedrockUnexpectedErrors', 1)
-            raise
+
     
     def get_guardrail_config(self) -> Optional[Dict[str, str]]:
         """

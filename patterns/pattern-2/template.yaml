@@ -246,7 +246,7 @@ Resources:
                         description: Confidence threshold for this specific attribute (0.0 to 1.0). If not set, the default confidence threshold from assessment section will be used.
                         minimum: 0
                         maximum: 1
-                        order: 5
+                        order: 6
                     # This controls the layout of the form fields inside each attribute item
                     columns: 2
           classification:
