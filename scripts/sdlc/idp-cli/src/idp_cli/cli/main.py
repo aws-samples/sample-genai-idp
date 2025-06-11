@@ -74,7 +74,7 @@ def uninstall(
 def smoketest(
     stack_name: str = typer.Option("idp-Stack", "--stack-name", help="Name of the deployed stack to test"),
     file_path: str = typer.Option("../../../samples/lending_package.pdf", "--file-path", help="Path to the test file"),
-    verify_string: str = typer.Option("475 ANY AVENUE ANYTOWN, USA", "--verify-string", help="String to verify in the processed output")
+    verify_string: str = typer.Option("BIGTOWN, MA, 02801", "--verify-string", help="String to verify in the processed output")
 ):
     """
     Run a smoke test on the deployed IDP Accelerator
