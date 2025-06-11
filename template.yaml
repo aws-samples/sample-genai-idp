@@ -1412,9 +1412,7 @@ Resources:
               Type: string
             - Name: evaluation_method
               Type: string
-            - Name: expected_confidence
-              Type: string
-            - Name: actual_confidence
+            - Name: confidence
               Type: string
             - Name: evaluation_date
               Type: timestamp

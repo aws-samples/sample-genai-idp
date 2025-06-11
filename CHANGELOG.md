@@ -40,7 +40,7 @@ SPDX-License-Identifier: MIT-0
   - Added e2e-example-with-assessment.ipynb notebook for testing assessment workflow
 
 - **Enhanced Evaluation Framework with Confidence Integration**
-  - Added expected_confidence and actual_confidence fields to evaluation reports for quality analysis
+  - Added confidence fields to evaluation reports for quality analysis
   - Automatic extraction and display of confidence scores from assessment explainability_info
   - Enhanced JSON and Markdown evaluation reports with confidence columns
   - Backward compatible integration - shows "N/A" when confidence data unavailable
