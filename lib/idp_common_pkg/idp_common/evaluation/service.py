@@ -627,6 +627,9 @@ IMPORTANT: Respond ONLY with a valid JSON object and nothing else. Here's the ex
             return None, {}
 
         actual_results, confidence_scores = self._load_extraction_results(actual_uri)
+        expected_results, expected_confidence_scores = self._load_extraction_results(
+            expected_uri
+        )
 
         # Evaluate section
         section_result = self.evaluate_section(
