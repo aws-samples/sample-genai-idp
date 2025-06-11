@@ -395,8 +395,7 @@ IMPORTANT: Respond ONLY with a valid JSON object and nothing else. Here's the ex
         section: Section,
         expected_results: Dict[str, Any],
         actual_results: Dict[str, Any],
-        expected_confidence_scores: Dict[str, float] = None,
-        actual_confidence_scores: Dict[str, float] = None,
+        confidence_scores: Dict[str, float] = None,
     ) -> SectionEvaluationResult:
         """
         Evaluate extraction results for a document section.
@@ -405,8 +404,7 @@ IMPORTANT: Respond ONLY with a valid JSON object and nothing else. Here's the ex
             section: Document section
             expected_results: Expected extraction results
             actual_results: Actual extraction results
-            expected_confidence_scores: Confidence scores for expected values from assessment
-            actual_confidence_scores: Confidence scores for actual values from assessment
+            confidence_scores: Confidence scores for actual values from assessment
 
         Returns:
             Evaluation results for the section
@@ -508,12 +506,8 @@ IMPORTANT: Respond ONLY with a valid JSON object and nothing else. Here's the ex
                 )
 
                 # Set confidence scores if available
-                if expected_confidence_scores:
-                    attribute_result.expected_confidence = (
-                        expected_confidence_scores.get(task["attr_name"])
-                    )
-                if actual_confidence_scores:
-                    attribute_result.actual_confidence = actual_confidence_scores.get(
+                if confidence_scores:
+                    attribute_result.confidence = confidence_scores.get(
                         task["attr_name"]
                     )
 
@@ -569,13 +563,9 @@ IMPORTANT: Respond ONLY with a valid JSON object and nothing else. Here's the ex
                             None,
                         )
                         if task:
-                            if expected_confidence_scores:
-                                attribute_result.expected_confidence = (
-                                    expected_confidence_scores.get(task["attr_name"])
-                                )
-                            if actual_confidence_scores:
-                                attribute_result.actual_confidence = (
-                                    actual_confidence_scores.get(task["attr_name"])
+                            if confidence_scores:
+                                attribute_result.confidence = confidence_scores.get(
+                                    task["attr_name"]
                                 )
 
                         # Add to attribute results
@@ -636,20 +626,14 @@ IMPORTANT: Respond ONLY with a valid JSON object and nothing else. Here's the ex
             # Return empty result
             return None, {}
 
-        actual_results, actual_confidence_scores = self._load_extraction_results(
-            actual_uri
-        )
-        expected_results, expected_confidence_scores = self._load_extraction_results(
-            expected_uri
-        )
+        actual_results, confidence_scores = self._load_extraction_results(actual_uri)
 
         # Evaluate section
         section_result = self.evaluate_section(
             section=actual_section,
             expected_results=expected_results,
             actual_results=actual_results,
-            expected_confidence_scores=expected_confidence_scores,
-            actual_confidence_scores=actual_confidence_scores,
+            confidence_scores=confidence_scores,
         )
 
         # Count matches and mismatches in the attributes

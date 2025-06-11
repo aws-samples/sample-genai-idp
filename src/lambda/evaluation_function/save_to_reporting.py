@@ -122,8 +122,7 @@ def save_evaluation_to_reporting_bucket(document, reporting_bucket: str) -> None
         ('score', pa.float64()),
         ('reason', pa.string()),
         ('evaluation_method', pa.string()),
-        ('expected_confidence', pa.string()),
-        ('actual_confidence', pa.string()),
+        ('confidence', pa.string()),
         ('evaluation_date', pa.timestamp('ms'))
     ])
     logger.info(f"Writing evaluation results to ReportingBucket s3://{reporting_bucket}/evaluation_metrics/document_metrics")
@@ -210,8 +209,7 @@ def save_evaluation_to_reporting_bucket(document, reporting_bucket: str) -> None
                         'score': getattr(attr, 'score', 0.0),
                         'reason': _serialize_value(getattr(attr, 'reason', '')),
                         'evaluation_method': _serialize_value(getattr(attr, 'evaluation_method', '')),
-                        'expected_confidence': _serialize_value(getattr(attr, 'expected_confidence', None)),
-                        'actual_confidence': _serialize_value(getattr(attr, 'actual_confidence', None)),
+                        'confidence': _serialize_value(getattr(attr, 'confidence', None)),
                         'evaluation_date': now,  # Use datetime object directly
                     }
                     attribute_records.append(attribute_record)
