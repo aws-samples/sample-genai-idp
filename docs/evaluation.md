@@ -49,26 +49,24 @@ The evaluation framework automatically integrates with the assessment feature to
 
 The evaluation framework automatically extracts confidence scores from the `explainability_info` section of assessment results and displays them in both JSON and Markdown evaluation reports:
 
-- **Expected Confidence**: Confidence score for baseline/ground truth data (if assessed)
-- **Actual Confidence**: Confidence score for extraction results being evaluated
+- **Confidence**: Confidence score for extraction results being evaluated
 
 ### Enhanced Evaluation Reports
 
 When confidence data is available, evaluation reports include additional columns:
 
 ```
-| Status | Attribute | Expected | Actual | Expected Confidence | Actual Confidence | Score | Method | Reason |
-| :----: | --------- | -------- | ------ | :-----------------: | :---------------: | ----- | ------ | ------ |
-| ✅ | invoice_number | INV-2024-001 | INV-2024-001 | 0.95 | 0.92 | 1.00 | EXACT | Exact match |
-| ❌ | vendor_name | ABC Corp | XYZ Inc | 0.88 | 0.75 | 0.00 | EXACT | Values do not match |
+| Status | Attribute | Expected | Actual | Confidence | Score | Method | Reason |
+| :----: | --------- | -------- | ------ | :---------------: | ----- | ------ | ------ |
+| ✅ | invoice_number | INV-2024-001 | INV-2024-001 | 0.92 | 1.00 | EXACT | Exact match |
+| ❌ | vendor_name | ABC Corp | XYZ Inc | 0.75 | 0.00 | EXACT | Values do not match |
 ```
 
 ### Quality Analysis Benefits
 
 The combination of evaluation accuracy and confidence scores provides deeper insights:
 
-1. **Baseline Quality Assessment**: Low expected confidence may indicate questionable ground truth data that needs review
-2. **Extraction Quality Assessment**: Low actual confidence highlights extraction results requiring human verification
+2. **Extraction Quality Assessment**: Low confidence highlights extraction results requiring human verification
 3. **Quality Prioritization**: Focus improvement efforts on attributes with both low confidence and low accuracy
 4. **Pattern Identification**: Analyze relationships between confidence levels and evaluation outcomes
 

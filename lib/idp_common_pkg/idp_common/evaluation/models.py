@@ -48,10 +48,7 @@ class AttributeEvaluationResult:
     evaluation_method: str = "EXACT"
     evaluation_threshold: Optional[float] = None
     comparator_type: Optional[str] = None  # Used for HUNGARIAN methods
-    expected_confidence: Optional[float] = (
-        None  # Confidence score from assessment for expected values
-    )
-    actual_confidence: Optional[float] = (
+    confidence: Optional[float] = (
         None  # Confidence score from assessment for actual values
     )
 
@@ -104,8 +101,7 @@ class DocumentEvaluationResult:
                             "evaluation_method": ar.evaluation_method,
                             "evaluation_threshold": ar.evaluation_threshold,
                             "comparator_type": ar.comparator_type,
-                            "expected_confidence": ar.expected_confidence,
-                            "actual_confidence": ar.actual_confidence,
+                            "confidence": ar.confidence,
                         }
                         for ar in sr.attributes
                     ],
@@ -243,8 +239,8 @@ class DocumentEvaluationResult:
 
             # Attribute results
             sections.append("### Attributes")
-            attr_table = "| Status | Attribute | Expected | Actual | Expected Confidence | Actual Confidence | Score | Method | Reason |\n"
-            attr_table += "| :----: | --------- | -------- | ------ | :-----------------: | :---------------: | ----- | ------ | ------ |\n"
+            attr_table = "| Status | Attribute | Expected | Actual | Confidence | Score | Method | Reason |\n"
+            attr_table += "| :----: | --------- | -------- | ------ | :---------------: | ----- | ------ | ------ |\n"
             for ar in sr.attributes:
                 expected = str(ar.expected).replace("\n", " ")
                 actual = str(ar.actual).replace("\n", " ")
@@ -287,18 +283,11 @@ class DocumentEvaluationResult:
                     status_symbol = "❌"
 
                 # Format confidence values
-                expected_confidence_str = (
-                    f"{ar.expected_confidence:.2f}"
-                    if ar.expected_confidence is not None
-                    else "N/A"
-                )
-                actual_confidence_str = (
-                    f"{ar.actual_confidence:.2f}"
-                    if ar.actual_confidence is not None
-                    else "N/A"
+                confidence_str = (
+                    f"{ar.confidence:.2f}" if ar.confidence is not None else "N/A"
                 )
 
-                attr_table += f"| {status_symbol} | {ar.name} | {expected} | {actual} | {expected_confidence_str} | {actual_confidence_str} | {ar.score:.2f} | {method_display} | {reason} |\n"
+                attr_table += f"| {status_symbol} | {ar.name} | {expected} | {actual} | {confidence_str} | {ar.score:.2f} | {method_display} | {reason} |\n"
             sections.append(attr_table)
             sections.append("")
 

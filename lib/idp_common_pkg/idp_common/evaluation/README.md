@@ -21,7 +21,7 @@ The Evaluation Service component provides functionality to evaluate document ext
   - Applies default comparison method (LLM) for unconfigured attributes with clear indication
 - **Assessment Confidence Integration**:
   - Automatically extracts and displays confidence scores from assessment results
-  - Shows expected confidence (baseline/ground truth confidence) and actual confidence (extraction confidence)
+  - Shows confidence (extraction confidence)
   - Integrates with explainability_info from the assessment feature
   - Provides insights into data quality for both baseline and extraction results
 - Calculates key metrics including:
@@ -260,8 +260,7 @@ The evaluation service automatically integrates with the assessment feature to d
 
 ### Confidence Score Types
 
-- **Expected Confidence**: Confidence score for the baseline/ground truth data (if assessed)
-- **Actual Confidence**: Confidence score for the extraction results being evaluated
+- **Confidence**: Confidence score for the extraction results being evaluated
 
 ### Enhanced Report Format
 
@@ -275,8 +274,7 @@ The evaluation service automatically integrates with the assessment feature to d
       "actual": "INV-2024-001",
       "matched": true,
       "score": 1.0,
-      "expected_confidence": 0.95,
-      "actual_confidence": 0.92,
+      "confidence": 0.92,
       "evaluation_method": "EXACT"
     }
   ]
@@ -285,20 +283,19 @@ The evaluation service automatically integrates with the assessment feature to d
 
 #### Markdown Table with Confidence
 ```
-| Status | Attribute | Expected | Actual | Expected Confidence | Actual Confidence | Score | Method | Reason |
-| :----: | --------- | -------- | ------ | :-----------------: | :---------------: | ----- | ------ | ------ |
-| ✅ | invoice_number | INV-2024-001 | INV-2024-001 | 0.95 | 0.92 | 1.00 | EXACT | Exact match |
-| ❌ | vendor_name | ABC Corp | XYZ Inc | 0.88 | 0.75 | 0.00 | EXACT | Values do not match |
+| Status | Attribute | Expected | Actual | Confidence | Score | Method | Reason |
+| :----: | --------- | -------- | ------ | :---------------: | ----- | ------ | ------ |
+| ✅ | invoice_number | INV-2024-001 | INV-2024-001 | 0.92 | 1.00 | EXACT | Exact match |
+| ❌ | vendor_name | ABC Corp | XYZ Inc | 0.75 | 0.00 | EXACT | Values do not match |
 ```
 
 ### Quality Analysis Benefits
 
 Confidence scores provide additional insights for evaluation analysis:
 
-1. **Baseline Quality Assessment**: Low expected confidence may indicate questionable ground truth data
-2. **Extraction Quality Assessment**: Low actual confidence highlights extraction results needing review
-3. **Confidence-Accuracy Correlation**: Compare confidence levels with evaluation accuracy to identify patterns
-4. **Quality Prioritization**: Focus improvement efforts on low-confidence, low-accuracy results
+1. **Extraction Quality Assessment**: Low confidence highlights extraction results needing review
+2. **Confidence-Accuracy Correlation**: Compare confidence levels with evaluation accuracy to identify patterns
+3. **Quality Prioritization**: Focus improvement efforts on low-confidence, low-accuracy results
 
 ### Backward Compatibility
 
