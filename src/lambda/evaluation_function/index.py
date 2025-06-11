@@ -120,7 +120,7 @@ def load_baseline_document(document_key: str) -> Optional[Document]:
         )
         
         # Check if the expected document has meaningful data
-        if not expected_document.pages or not expected_document.sections:
+        if not expected_document.sections:
             logger.warning(f"No baseline data found for {document_key} in {BASELINE_BUCKET} (empty document)")
             return None
             
