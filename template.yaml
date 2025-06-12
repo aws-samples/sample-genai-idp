@@ -384,12 +384,11 @@ Metadata:
           default: "Evaluation"
         Parameters:
           - EvaluationBaselineBucketName
-          - ReportingBucketName
           - EvaluationAutoEnabled
       - Label:
           default: "Reporting"
         Parameters:
-          - ReportingBucketName:
+          - ReportingBucketName
       - Label:
           default: "Document Knowledge Base"
         Parameters:
