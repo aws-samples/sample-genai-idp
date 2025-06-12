@@ -218,8 +218,8 @@ Parameters:
 
   ExecutionTimeThresholdMs:
     Type: Number
-    Default: 30000
-    Description: Maximum acceptable execution time in milliseconds before alerting (default 30000 = 30 seconds)
+    Default: 300000
+    Description: Maximum acceptable execution time in milliseconds before alerting (default 300000 = 300 seconds)
     MinValue: 1000
 
   # Logging configuration
@@ -387,6 +387,10 @@ Metadata:
           - ReportingBucketName
           - EvaluationAutoEnabled
       - Label:
+          default: "Reporting"
+        Parameters:
+          - ReportingBucketName:
+      - Label:
           default: "Document Knowledge Base"
         Parameters:
           - DocumentKnowledgeBase
@@ -438,10 +442,10 @@ Metadata:
         default: "Post Processing Lambda Hook Function ARN"
       EvaluationBaselineBucketName:
         default: "Evaluation Baseline Bucket Name"
-      ReportingBucketName:
-        default: "Reporting Bucket Name"
       EvaluationAutoEnabled:
         default: "Evaluation Auto Enabled"
+      ReportingBucketName:
+        default: "Reporting Bucket Name"
       IsSummarizationEnabled:
         default: "Summarization Enabled"
       IsAssessmentEnabled:
