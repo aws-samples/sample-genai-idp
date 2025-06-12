@@ -3,6 +3,7 @@
 """CodeBuild Starter Lambda Function"""
 import logging
 from os import getenv
+import json
 
 import boto3
 from botocore.config import Config as BotoCoreConfig
@@ -96,4 +97,5 @@ def delete_no_op(event, _):
 
 def handler(event, context):
     """Lambda Handler"""
+    LOGGER.info("Received event: %s", json.dumps(event))
     HELPER(event, context)
