@@ -2729,20 +2729,7 @@ Resources:
                 "properties": {
                   "query": "SOURCE '${EvaluationFunctionLogGroup}' | fields @timestamp, @logStream, @message | filter @message like /ERROR/ | sort @timestamp desc | limit 20",
                   "region": "${AWS::Region}",
-                  "title": "Workflow Tracker Lambda Errors",
-                  "view": "table"
-                }
-              },
-              {
-                "type": "log",
-                "x": 0,
-                "y": 30,
-                "width": 12,
-                "height": 6,
-                "properties": {
-                  "query": "SOURCE '${LookupFunctionLogGroup}' | fields @timestamp, @logStream, @message | filter @message like /ERROR/ | sort @timestamp desc | limit 20",
-                  "region": "${AWS::Region}",
-                  "title": "Lookup Lambda Errors",
+                  "title": "Evaluation Tracker Lambda Errors",
                   "view": "table"
                 }
               }
