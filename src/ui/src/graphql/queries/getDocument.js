@@ -19,6 +19,11 @@ export default gql`
         PageIds
         Class
         OutputJSONUri
+        ConfidenceThresholdAlerts {
+          attributeName
+          confidence
+          confidenceThreshold
+        }
       }
       Pages {
         Id

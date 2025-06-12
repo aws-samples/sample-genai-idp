@@ -90,6 +90,50 @@
                                 "BackoffRate": 2
                             }
                         ],
+                        "Next": "AssessmentChoice"
+                    },
+                    "AssessmentChoice": {
+                        "Type": "Choice",
+                        "QueryLanguage": "JSONata",
+                        "Choices": [
+                            {
+                                "Condition": "{% ${IsAssessmentEnabled} = true %}",
+                                "Next": "AssessmentStep"
+                            }
+                        ],
+                        "Default": "SectionComplete"
+                    },
+                    "AssessmentStep": {
+                        "Type": "Task",
+                        "Resource": "${AssessmentFunctionArn}",
+                        "Parameters": {
+                            "execution_arn.$": "$$.Execution.Id",
+                            "document.$": "$.document",
+                            "section_id.$": "$.section_id"
+                        },
+                        "ResultPath": "$.AssessmentResult",
+                        "Retry": [
+                            {
+                                "ErrorEquals": [
+                                    "Sandbox.Timedout",
+                                    "Lambda.ServiceException",
+                                    "Lambda.AWSLambdaException",
+                                    "Lambda.SdkClientException",
+                                    "Lambda.TooManyRequestsException",
+                                    "ServiceQuotaExceededException",
+                                    "ThrottlingException",
+                                    "ProvisionedThroughputExceededException",
+                                    "RequestLimitExceeded"
+                                ],
+                                "IntervalSeconds": 2,
+                                "MaxAttempts": 10,
+                                "BackoffRate": 2
+                            }
+                        ],
+                        "Next": "SectionComplete"
+                    },
+                    "SectionComplete": {
+                        "Type": "Pass",
                         "End": true
                     }
                 }

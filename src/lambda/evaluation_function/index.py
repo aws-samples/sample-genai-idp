@@ -12,13 +12,16 @@ import json
 import os
 import logging
 import time
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from enum import Enum
 
 # Import IDP common packages
 from idp_common.models import Document, Status
 from idp_common import get_config, evaluation
 from idp_common.appsync import DocumentAppSyncService
+
+# Import local modules
+from save_to_reporting import save_evaluation_to_reporting_bucket
 
 # Configure logging
 logger = logging.getLogger()
@@ -29,6 +32,7 @@ logging.getLogger('idp_common.bedrock.client').setLevel(os.environ.get("BEDROCK_
 # Get bucket names from environment variables
 METRIC_NAMESPACE = os.environ.get('METRIC_NAMESPACE', 'GENAIDP')
 BASELINE_BUCKET = os.environ['BASELINE_BUCKET']
+REPORTING_BUCKET = os.environ['REPORTING_BUCKET']
 
 # Configuration will be loaded in handler function
 
@@ -116,7 +120,7 @@ def load_baseline_document(document_key: str) -> Optional[Document]:
         )
         
         # Check if the expected document has meaningful data
-        if not expected_document.pages or not expected_document.sections:
+        if not expected_document.sections:
             logger.warning(f"No baseline data found for {document_key} in {BASELINE_BUCKET} (empty document)")
             return None
             
@@ -127,6 +131,8 @@ def load_baseline_document(document_key: str) -> Optional[Document]:
     except Exception as e:
         logger.error(f"Error loading baseline document: {str(e)}")
         raise ValueError(f"Failed to load baseline document: {str(e)}")
+
+
 
 def create_response(status_code: int, message: str, additional_data: Dict[str, Any] = None) -> Dict[str, Any]:
     """
@@ -203,6 +209,9 @@ def handler(event, context):
             update_document_evaluation_status(evaluated_document, EvaluationStatus.FAILED)
             return create_response(500, 'Evaluation failed', {'error': error_msg})
        
+        # Save evaluation results to reporting bucket for analytics
+        save_evaluation_to_reporting_bucket(evaluated_document, REPORTING_BUCKET)
+        
         # Update document evaluation status to COMPLETED
         update_document_evaluation_status(evaluated_document, EvaluationStatus.COMPLETED)
         logger.info("Evaluation process completed successfully")

@@ -25,17 +25,19 @@ This pattern implements an intelligent document processing workflow that uses Am
 - [Customizing Classification](#customizing-classification)
 - [Few Shot Example Feature](#few-shot-example-feature)
 - [Customizing Extraction](#customizing-extraction)
+- [Assessment Feature](#assessment-feature)
 - [Testing](#testing)
 - [Best Practices](#best-practices)
 
 ## Architecture Overview
 
-The workflow consists of three main processing steps:
+The workflow consists of three main processing steps with an optional assessment step:
 1. OCR processing using Amazon Textract
 2. Document classification using Claude via Amazon Bedrock (with two available methods):
    - Page-level classification: Classifies individual pages and groups them
    - Holistic packet classification: Analyzes multi-document packets to identify document boundaries
 3. Field extraction using Claude via Amazon Bedrock
+4. **Assessment** (optional): Confidence evaluation of extraction results using LLMs
 
 ### State Machine Workflow
 
@@ -427,6 +429,169 @@ classes:
       - name: total_amount
         description: The final amount to be paid including all charges. Look for 'total', 'grand total', or 'amount due', typically the last figure on the invoice.
 ```
+
+## Assessment Feature
+
+Pattern 2 includes an optional assessment feature that evaluates the confidence of extraction results using LLMs. This feature provides automated quality assurance by analyzing extraction outputs against source documents.
+
+### Overview
+
+The assessment feature runs after successful extraction and provides:
+- **Confidence Scores**: Per-attribute confidence ratings (0.0-1.0)
+- **Explanatory Reasoning**: Human-readable explanations for each confidence score
+- **UI Integration**: Automatic display in the web interface visual editor
+- **Cost Optimization**: Optional deployment and efficient token usage
+
+### Enabling Assessment
+
+Assessment is controlled by the `IsAssessmentEnabled` deployment parameter:
+
+```bash
+# Deploy with assessment enabled
+aws cloudformation deploy \
+  --template-file template.yaml \
+  --parameter-overrides IsAssessmentEnabled=true
+```
+
+When enabled, the assessment step is conditionally added to the state machine workflow:
+
+```
+OCRStep → ClassificationStep → ProcessPageGroups (Map State):
+  ExtractSection → AssessSection (if enabled)
+```
+
+### Configuration
+
+Add an assessment section to your configuration YAML:
+
+```yaml
+assessment:
+  model: "anthropic.claude-3-5-sonnet-20241022-v2:0"
+  temperature: 0
+  top_k: 5
+  top_p: 0.1
+  max_tokens: 4096
+  system_prompt: |
+    You are an expert document analyst specializing in assessing extraction confidence.
+    Analyze extraction results against source documents and provide confidence scores.
+  task_prompt: |
+    Assess the confidence of these extraction results:
+    
+    Document Class: {DOCUMENT_CLASS}
+    Extraction Results: {EXTRACTION_RESULTS}
+    Attribute Definitions: {ATTRIBUTE_NAMES_AND_DESCRIPTIONS}
+    
+    Source Document Text:
+    {DOCUMENT_TEXT}
+    
+    OCR Confidence Data:
+    {OCR_TEXT_CONFIDENCE}
+    
+    Provide confidence assessment as JSON:
+    {
+      "attribute_name": {
+        "confidence": 0.85,
+        "confidence_reason": "Clear text match with high OCR confidence"
+      }
+    }
+```
+
+### Assessment Placeholders
+
+Assessment prompts support all extraction placeholders plus assessment-specific ones:
+
+| Placeholder | Description |
+|-------------|-------------|
+| `{EXTRACTION_RESULTS}` | JSON string of extraction results to assess |
+| `{OCR_TEXT_CONFIDENCE}` | Condensed OCR confidence data (80-90% token reduction) |
+| `{DOCUMENT_IMAGE}` | **Optional** - Document images at specified position |
+| `{DOCUMENT_CLASS}` | The classified document type |
+| `{ATTRIBUTE_NAMES_AND_DESCRIPTIONS}` | List of attributes being assessed |
+| `{DOCUMENT_TEXT}` | Full document text from OCR |
+
+### Multimodal Assessment
+
+Use the `{DOCUMENT_IMAGE}` placeholder for visual assessment:
+
+```yaml
+task_prompt: |
+  Assess extraction confidence by analyzing both text and visual content:
+  
+  Document Text: {DOCUMENT_TEXT}
+  
+  {DOCUMENT_IMAGE}
+  
+  Review the above document image and assess these extractions:
+  {EXTRACTION_RESULTS}
+  
+  Provide confidence scores based on visual and textual evidence.
+```
+
+**Important**: Images are only processed when the `{DOCUMENT_IMAGE}` placeholder is explicitly present.
+
+### Output Integration
+
+Assessment results are automatically integrated into extraction outputs:
+
+```json
+{
+  "inference_result": {
+    "invoice_number": "INV-2024-001",
+    "total_amount": "$1,250.00"
+  },
+  "explainability_info": [
+    {
+      "invoice_number": {
+        "success": true,
+        "confidence": 0.92,
+        "type": "string",
+        "value": "INV-2024-001"
+      },
+      "total_amount": {
+        "confidence": 0.88,
+        "type": "string", 
+        "value": "$1,250.00"
+      }
+    }
+  ],
+  "metadata": {
+    "assessment_time_seconds": 2.34,
+    "assessment_parsing_succeeded": true
+  }
+}
+```
+
+### Cost Optimization
+
+Assessment implements several cost-saving techniques:
+
+1. **Optional Deployment**: Only deploys resources when `IsAssessmentEnabled=true`
+2. **Text Confidence Data**: Uses condensed OCR data for 80-90% token reduction
+3. **Conditional Images**: Images only processed with explicit `{DOCUMENT_IMAGE}` placeholder
+4. **Efficient Prompting**: Optimized templates minimize unnecessary tokens
+
+### Expected Costs
+
+- **Text-Only Assessment**: ~500-1,000 tokens per page
+- **Multimodal Assessment**: ~1,500-2,500 tokens per page
+- **Processing Time**: ~2-5 seconds per document section
+- **Recommended Model**: Claude 3.5 Sonnet for balanced cost/performance
+
+### Testing Assessment
+
+Use the provided assessment notebook:
+
+```bash
+jupyter notebook notebooks/e2e-example-with-assessment.ipynb
+```
+
+The notebook demonstrates:
+- End-to-end workflow with assessment enabled
+- Confidence score interpretation
+- Cost and performance analysis
+- Integration with existing extraction results
+
+For detailed information about the assessment feature, see the [Assessment Documentation](./assessment.md).
 
 ## Testing
 

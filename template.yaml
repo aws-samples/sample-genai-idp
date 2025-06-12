@@ -4,7 +4,7 @@
 
 AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
-Description: AWS GenAI IDP Accelerator (uksb-r8evguc4p9) (v<VERSION>)
+Description: AWS GenAI IDP Accelerator (uksb-r8evguc4p9) (SO9027) (v<VERSION>)
 
 Mappings:
   AppSyncLogLevelMap:
@@ -82,12 +82,12 @@ Parameters:
   Pattern2CustomClassificationModelARN:
     Type: String
     Default: ""
-    Description: (NOT YET SUPPORTED) Specify Custom Fine Tuned Classification Model ARN. Leave blank to use pretrained model specified in the selected configuration.
+    Description: Specify Custom Fine Tuned Classification Model ARN. Leave blank to use pretrained model specified in the selected configuration.
 
   Pattern2CustomExtractionModelARN:
     Type: String
     Default: ""
-    Description: (NOT YET SUPPORTED) Specify Custom Fine Tuned Extraction Model ARN. Leave blank to use pretrained model specified in the selected configuration.
+    Description: Specify Custom Fine Tuned Extraction Model ARN. Leave blank to use pretrained model specified in the selected configuration.
 
   # Pattern 3 Parameters
 
@@ -114,6 +114,13 @@ Parameters:
       Provide the name of an existing bucket here. Hint: you can use the Output bucket of another GenAIIDP stack to compare the outputs from 
       different patterns and prompts. 
       Leave blank to automatically create an empty bucket where you can (optionally) place your validated baseline data later.
+      
+  ReportingBucketName:
+    Type: String
+    Default: ""
+    Description: >-
+      (Optional) Existing bucket used for storing evaluation results in JSON format for analytics.
+      Provide the name of an existing bucket here or leave blank to automatically create a new bucket.
 
   EvaluationAutoEnabled:
     Type: String
@@ -134,6 +141,15 @@ Parameters:
       - true
       - false
     Description: Enable or disable document summarization functionality across all patterns.
+
+  # Assessment
+  IsAssessmentEnabled:
+    Type: String
+    Default: true
+    AllowedValues:
+      - true
+      - false
+    Description: Enable or disable extraction confidence assessment functionality (except pattern-1 BDA, which always includes confidence scores).
 
   # Optional Knowledge Base Configuration
   DocumentKnowledgeBase:
@@ -292,8 +308,6 @@ Rules:
       - Assert: !Not [!Equals [!Ref Pattern3UDOPModelArtifactPath, ""]]
         AssertDescription: UDOP Model Artifact Path is required when IDPPattern is 'Pattern1'
 
-  # Pattern 2 rules - Custom model validation now handled in pattern templates
-
 Conditions:
   IsPattern1:
     !Equals [
@@ -323,6 +337,7 @@ Conditions:
   ShouldEnableGeoRestriction: !Not [!Equals [!Ref CloudFrontAllowedGeos, ""]]
   ShouldEnablePostProcessingLambdaHook: !Not [!Equals [!Ref PostProcessingLambdaHookFunctionArn, ""]]
   ShouldCreateEvaluationBaselineBucket: !Equals [!Ref EvaluationBaselineBucketName, '']
+  ShouldCreateReportingBucket: !Equals [!Ref ReportingBucketName, '']
   IsEvaluationAutoEnabled: !Equals [!Ref EvaluationAutoEnabled, 'true']
   IsWafEnabled: !Not [!Equals [!Ref WAFAllowedIPv4Ranges, "0.0.0.0/0"]]
   ShouldCreateDocumentKnowledgeBase: !Equals [!Ref DocumentKnowledgeBase, "BEDROCK_KNOWLEDGE_BASE (Create)"]
@@ -362,9 +377,14 @@ Metadata:
         Parameters:
           - IsSummarizationEnabled
       - Label:
+          default: "Assessment / Confidence Scoring"
+        Parameters:
+          - IsAssessmentEnabled
+      - Label:
           default: "Evaluation"
         Parameters:
           - EvaluationBaselineBucketName
+          - ReportingBucketName
           - EvaluationAutoEnabled
       - Label:
           default: "Document Knowledge Base"
@@ -418,10 +438,14 @@ Metadata:
         default: "Post Processing Lambda Hook Function ARN"
       EvaluationBaselineBucketName:
         default: "Evaluation Baseline Bucket Name"
+      ReportingBucketName:
+        default: "Reporting Bucket Name"
       EvaluationAutoEnabled:
         default: "Evaluation Auto Enabled"
       IsSummarizationEnabled:
         default: "Summarization Enabled"
+      IsAssessmentEnabled:
+        default: "Assessment / Confidence Scoring Enabled"
       DocumentKnowledgeBase:
         default: "Document Knowledge Base Configuration"
       KnowledgeBaseModelId:
@@ -729,6 +753,7 @@ Resources:
         CustomClassificationModelARN: !Ref Pattern2CustomClassificationModelARN
         CustomExtractionModelARN: !Ref Pattern2CustomExtractionModelARN
         IsSummarizationEnabled: !Ref IsSummarizationEnabled
+        IsAssessmentEnabled: !Ref IsAssessmentEnabled
         UpdateConfigurationFunctionArn: !GetAtt UpdateConfigurationFunction.Arn
         AppSyncApiUrl: !GetAtt GraphQLApi.GraphQLUrl
         AppSyncApiArn: !GetAtt GraphQLApi.Arn
@@ -975,7 +1000,7 @@ Resources:
 
   ConfigurationBucket:
     Type: AWS::S3::Bucket
-    DeletionPolicy: RetainExceptOnCreate
+    DeletionPolicy: Retain
     Properties:
       NotificationConfiguration:
         EventBridgeConfiguration:
@@ -1149,6 +1174,258 @@ Resources:
             Condition:
               Bool:
                 'aws:SecureTransport': false
+                
+  ReportingBucket:
+    Type: AWS::S3::Bucket
+    Condition: ShouldCreateReportingBucket
+    DeletionPolicy: RetainExceptOnCreate
+    Properties:
+      CorsConfiguration:
+        CorsRules:
+          - AllowedHeaders:
+              - "Content-Type"
+              - "x-amz-content-sha256"
+              - "x-amz-date"
+              - "Authorization"
+              - "x-amz-security-token"
+            AllowedMethods:
+              - PUT
+              - POST
+            AllowedOrigins:
+              - !Sub "https://${CloudFrontDistribution.DomainName}"
+              # For local development only
+              - "http://localhost:3000"
+            ExposedHeaders:
+              - "ETag"
+              - "x-amz-server-side-encryption"
+            MaxAge: 3000
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: aws:kms
+              KMSMasterKeyID: !Ref CustomerManagedEncryptionKey
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: Enabled
+      LoggingConfiguration:
+        DestinationBucketName: !Ref LoggingBucket
+        LogFilePrefix: reporting-bucket-logs/
+      LifecycleConfiguration:
+        Rules:
+          - Id: DeleteAfterNDays
+            Status: Enabled
+            ExpirationInDays: !Ref DataRetentionInDays
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 1
+
+  ReportingBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Condition: ShouldCreateReportingBucket
+    Properties:
+      Bucket: !Ref ReportingBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: EnforceSSLOnly
+            Effect: Deny
+            Principal: '*'
+            Action: 's3:*'
+            Resource: 
+              - !Sub "${ReportingBucket.Arn}/*"
+              - !Sub "${ReportingBucket.Arn}"
+            Condition:
+              Bool:
+                'aws:SecureTransport': false
+
+  GetLowercase:
+    Type: Custom::GetLowercase
+    Properties:
+      ServiceToken: !GetAtt GetDomainLambda.Arn
+      InputString: !Ref AWS::StackName
+
+  ReportingDatabase:
+    Type: AWS::Glue::Database
+    Properties:
+      CatalogId: !Ref AWS::AccountId
+      DatabaseInput:
+        Name: !Sub "${GetLowercase.Lowercase}-reporting-db"
+        Description: "Database for evaluation results"
+
+  DocumentEvaluationsTable:
+    Type: AWS::Glue::Table
+    Properties:
+      CatalogId: !Ref AWS::AccountId
+      DatabaseName: !Ref ReportingDatabase
+      TableInput:
+        Name: "document_evaluations"
+        Description: "Table for document-level evaluation metrics"
+        TableType: "EXTERNAL_TABLE"
+        Parameters: {
+          "classification": "parquet",
+          "typeOfData": "file"
+        }
+        StorageDescriptor:
+          Location: !Sub 
+            - "s3://${Bucket}/evaluation_metrics/document_metrics/"
+            - Bucket: !If
+                - ShouldCreateReportingBucket
+                - !Ref ReportingBucket
+                - !Ref ReportingBucketName
+          InputFormat: "org.apache.hadoop.hive.ql.io.parquet.MapredParquetInputFormat"
+          OutputFormat: "org.apache.hadoop.hive.ql.io.parquet.MapredParquetOutputFormat"
+          SerdeInfo:
+            SerializationLibrary: "org.apache.hadoop.hive.ql.io.parquet.serde.ParquetHiveSerDe"
+          Columns:
+            - Name: document_id
+              Type: string
+            - Name: input_key
+              Type: string
+            - Name: evaluation_date
+              Type: timestamp
+            - Name: accuracy
+              Type: double
+            - Name: precision
+              Type: double
+            - Name: recall
+              Type: double
+            - Name: f1_score
+              Type: double
+            - Name: false_alarm_rate
+              Type: double
+            - Name: false_discovery_rate
+              Type: double
+            - Name: execution_time
+              Type: double
+          Compressed: true
+        PartitionKeys:
+          - Name: year
+            Type: string
+          - Name: month
+            Type: string
+          - Name: day
+            Type: string
+          - Name: document
+            Type: string
+
+  SectionEvaluationsTable:
+    Type: AWS::Glue::Table
+    Properties:
+      CatalogId: !Ref AWS::AccountId
+      DatabaseName: !Ref ReportingDatabase
+      TableInput:
+        Name: "section_evaluations"
+        Description: "Table for section-level evaluation metrics"
+        TableType: "EXTERNAL_TABLE"
+        Parameters: {
+          "classification": "parquet",
+          "typeOfData": "file"
+        }
+        StorageDescriptor:
+          Location: !Sub 
+            - "s3://${Bucket}/evaluation_metrics/section_metrics/"
+            - Bucket: !If
+                - ShouldCreateReportingBucket
+                - !Ref ReportingBucket
+                - !Ref ReportingBucketName
+          InputFormat: "org.apache.hadoop.hive.ql.io.parquet.MapredParquetInputFormat"
+          OutputFormat: "org.apache.hadoop.hive.ql.io.parquet.MapredParquetOutputFormat"
+          SerdeInfo:
+            SerializationLibrary: "org.apache.hadoop.hive.ql.io.parquet.serde.ParquetHiveSerDe"
+          Columns:
+            - Name: document_id
+              Type: string
+            - Name: section_id
+              Type: string
+            - Name: section_type
+              Type: string
+            - Name: accuracy
+              Type: double
+            - Name: precision
+              Type: double
+            - Name: recall
+              Type: double
+            - Name: f1_score
+              Type: double
+            - Name: false_alarm_rate
+              Type: double
+            - Name: false_discovery_rate
+              Type: double
+            - Name: evaluation_date
+              Type: timestamp
+          Compressed: true
+        PartitionKeys:
+          - Name: year
+            Type: string
+          - Name: month
+            Type: string
+          - Name: day
+            Type: string
+          - Name: document
+            Type: string
+
+  AttributeEvaluationsTable:
+    Type: AWS::Glue::Table
+    Properties:
+      CatalogId: !Ref AWS::AccountId
+      DatabaseName: !Ref ReportingDatabase
+      TableInput:
+        Name: "attribute_evaluations"
+        Description: "Table for attribute-level evaluation metrics"
+        TableType: "EXTERNAL_TABLE"
+        Parameters: {
+          "classification": "parquet",
+          "typeOfData": "file"
+        }
+        StorageDescriptor:
+          Location: !Sub 
+            - "s3://${Bucket}/evaluation_metrics/attribute_metrics/"
+            - Bucket: !If
+                - ShouldCreateReportingBucket
+                - !Ref ReportingBucket
+                - !Ref ReportingBucketName
+          InputFormat: "org.apache.hadoop.hive.ql.io.parquet.MapredParquetInputFormat"
+          OutputFormat: "org.apache.hadoop.hive.ql.io.parquet.MapredParquetOutputFormat"
+          SerdeInfo:
+            SerializationLibrary: "org.apache.hadoop.hive.ql.io.parquet.serde.ParquetHiveSerDe"
+          Columns:
+            - Name: document_id
+              Type: string
+            - Name: section_id
+              Type: string
+            - Name: section_type
+              Type: string
+            - Name: attribute_name
+              Type: string
+            - Name: expected
+              Type: string
+            - Name: actual
+              Type: string
+            - Name: matched
+              Type: boolean
+            - Name: score
+              Type: double
+            - Name: reason
+              Type: string
+            - Name: evaluation_method
+              Type: string
+            - Name: confidence
+              Type: string
+            - Name: evaluation_date
+              Type: timestamp
+          Compressed: true
+        PartitionKeys:
+          - Name: year
+            Type: string
+          - Name: month
+            Type: string
+          - Name: day
+            Type: string
+          - Name: document
+            Type: string
 
   EvaluationBaselineBucket:
     Type: AWS::S3::Bucket
@@ -1496,6 +1773,10 @@ Resources:
         InputBucket: !Ref InputBucket
         ConfigurationBucket: !Ref ConfigurationBucket
         OutputBucket: !Ref OutputBucket
+        ReportingBucket: !If
+          - ShouldCreateReportingBucket
+          - !Ref ReportingBucket
+          - !Ref ReportingBucketName
         EvaluationBaselineBucket: !Ref EvaluationBaselineBucket
         ShouldUseDocumentKnowledgeBase: !If
           - ShouldUseDocumentKnowledgeBase
@@ -1943,6 +2224,10 @@ Resources:
           APPSYNC_API_URL: !GetAtt GraphQLApi.GraphQLUrl
           PROCESSING_OUTPUT_BUCKET: !Ref OutputBucket
           EVALUATION_OUTPUT_BUCKET: !Ref OutputBucket
+          REPORTING_BUCKET: !If
+            - ShouldCreateReportingBucket
+            - !Ref ReportingBucket
+            - !Ref ReportingBucketName
           BASELINE_BUCKET: !If
             - ShouldCreateEvaluationBaselineBucket
             - !Ref EvaluationBaselineBucket
@@ -1960,6 +2245,11 @@ Resources:
             - !Ref EvaluationBaselineBucketName
         - S3CrudPolicy:
             BucketName: !Ref OutputBucket
+        - S3CrudPolicy:
+            BucketName: !If
+              - ShouldCreateReportingBucket
+              - !Ref ReportingBucket
+              - !Ref ReportingBucketName
         - Statement:
             - Effect: Allow
               Action:
@@ -2702,9 +2992,12 @@ Resources:
         import cfnresponse
         import time
         def handler(event, context):                                                    
-            output = event['ResourceProperties'].get('InputString', '').lower()
-            output = f"{output}-{time.time_ns()}" # make unique
-            responseData = {'OutputString': output}                                            
+            lowercase = event['ResourceProperties'].get('InputString', '').lower()
+            lowercaseWithTimestamp = f"{lowercase}-{time.time_ns()}" # make unique
+            responseData = {
+              'Lowercase': lowercase, 
+              'OutputString': lowercaseWithTimestamp, # don't change key - avoid UserPool update errors
+            }                                            
             cfnresponse.send(event, context, cfnresponse.SUCCESS, responseData)
 
   GetDomainLambdaLogGroup:
@@ -2713,6 +3006,7 @@ Resources:
       KmsKeyId: !GetAtt CustomerManagedEncryptionKey.Arn
       RetentionInDays: !Ref LogRetentionDays
 
+  # Preserve CR name - avoid forcing UserPoolDomain update.
   GetDomain:
     Type: Custom::GetDomain
     Properties:
@@ -4192,7 +4486,7 @@ Resources:
               - "true"
           - Name: REACT_APP_CLOUDFRONT_DOMAIN
             Value: !Sub "https://${CloudFrontDistribution.DomainName}/"
-      TimeoutInMinutes: 10
+      TimeoutInMinutes: 30
 
   StartUICodeBuildExecutionRole:
     Type: AWS::IAM::Role
@@ -4314,6 +4608,20 @@ Outputs:
   S3OutputBucketConsoleURL:
     Description: Output S3 bucket console URL
     Value: !Sub https://s3.console.aws.amazon.com/s3/buckets/${OutputBucket}
+  S3ReportingBucketName:
+    Description: Reporting S3 bucket name
+    Value: !If
+      - ShouldCreateReportingBucket
+      - !Ref ReportingBucket
+      - !Ref ReportingBucketName
+  S3ReportingBucketConsoleURL:
+    Description: Reporting S3 bucket console URL
+    Value: !Sub
+      - https://s3.console.aws.amazon.com/s3/buckets/${Bucket}
+      - Bucket: !If
+          - ShouldCreateReportingBucket
+          - !Ref ReportingBucket
+          - !Ref ReportingBucketName
   S3EvaluationBaselineBucketName:
     Description: Evaluation Baseline S3 bucket name
     Value: !If
@@ -4397,3 +4705,6 @@ Outputs:
       REACT_APP_APPSYNC_GRAPHQL_URL=${GraphQLApi.GraphQLUrl}
       REACT_APP_AWS_REGION=${AWS::Region}
       REACT_APP_SETTINGS_PARAMETER=${SettingsParameter}
+  ReportingDatabase:
+    Description: AWS Glue database containing evaluation metrics tables (document_evaluations, section_evaluations, attribute_evaluations) that can be queried with Amazon Athena for analytics and reporting
+    Value: !Ref ReportingDatabase

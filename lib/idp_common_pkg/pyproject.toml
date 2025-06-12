@@ -7,7 +7,7 @@ where = ["."]
 
 [project]
 name = "idp_common"
-version = "0.3.2"
+version = "0.3.3"
 description = "Common utilities for GenAI IDP Accelerator patterns"
 authors = [
     {name = "AWS", email = "noreply@amazon.com"}
@@ -43,8 +43,10 @@ image = [
 # OCR module dependencies
 ocr = [
     "Pillow>=11.1.0",
-    "PyMuPDF>=1.25.5",
-    "amazon-textract-textractor[pandas]>=1.9.2"
+    "PyMuPDF==1.25.5",
+    "amazon-textract-textractor[pandas]>=1.9.2",
+    "numpy>=1.24.0,<2.0.0",
+    "pandas>=1.5.0,<2.3.0"
 ]
 
 # Classification module dependencies
@@ -57,10 +59,15 @@ extraction = [
     "Pillow>=11.1.0",  # For image handling
 ]
 
+# Assessment module dependencies
+assessment = [
+    "Pillow>=11.1.0",  # For image handling
+]
+
 # Evaluation module dependencies
 evaluation = [
     "munkres>=1.1.4",  # For Hungarian algorithm
-    "numpy>=1.24.0",   # For numeric operations
+    "numpy>=1.24.0,<2.0.0",   # For numeric operations
 ]
 
 # Appsync module dependencies
@@ -79,10 +86,11 @@ test = [
 # Full package with all dependencies
 all = [
     "Pillow>=11.1.0",
-    "PyMuPDF>=1.25.5",
+    "PyMuPDF==1.25.5",
     "amazon-textract-textractor[pandas]>=1.9.2",
     "munkres>=1.1.4",
-    "numpy>=1.24.0",
+    "numpy>=1.24.0,<2.0.0",
+    "pandas>=1.5.0,<2.3.0",
     "requests>=2.32.3",
 ]
 

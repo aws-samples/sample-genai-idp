@@ -308,7 +308,7 @@ class TestClassificationService:
             assert result.classification.doc_type == "invoice"
             assert result.classification.confidence == 1.0
             assert (
-                "sagemaker/invoke_endpoint"
+                "Classification/sagemaker/invoke_endpoint"
                 in result.classification.metadata["metering"]
             )
 

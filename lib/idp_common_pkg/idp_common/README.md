@@ -95,11 +95,18 @@ class Page:
     image_uri: Optional[str] = None
     raw_text_uri: Optional[str] = None
     parsed_text_uri: Optional[str] = None
+    text_confidence_uri: Optional[str] = None
     classification: Optional[str] = None
     confidence: float = 0.0
     tables: List[Dict[str, Any]] = field(default_factory=list)
     forms: Dict[str, str] = field(default_factory=dict)
 ```
+
+**Key URIs:**
+- `image_uri`: S3 URI to the page image (JPG format)
+- `raw_text_uri`: S3 URI to the raw Textract response (full JSON with all metadata)
+- `parsed_text_uri`: S3 URI to the parsed text content (markdown format)
+- `text_confidence_uri`: S3 URI to condensed text confidence data (optimized for assessment prompts)
 
 ### Section
 

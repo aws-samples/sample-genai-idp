@@ -145,6 +145,7 @@ class OcrService:
                             image_uri=ocr_result["image_uri"],
                             raw_text_uri=ocr_result["raw_text_uri"],
                             parsed_text_uri=ocr_result["parsed_text_uri"],
+                            text_confidence_uri=ocr_result["text_confidence_uri"],
                         )
 
                         # Merge metering data
@@ -298,6 +299,16 @@ class OcrService:
             content_type="application/json",
         )
 
+        # Generate and store text confidence data for efficient assessment
+        text_confidence_data = self._generate_text_confidence_data(textract_result)
+        text_confidence_key = f"{prefix}/pages/{page_id}/textConfidence.json"
+        s3.write_content(
+            text_confidence_data,
+            output_bucket,
+            text_confidence_key,
+            content_type="application/json",
+        )
+
         # Parse and store text content with markdown
         parsed_result = self._parse_textract_response(textract_result, page_id)
         parsed_text_key = f"{prefix}/pages/{page_id}/result.json"
@@ -315,6 +326,7 @@ class OcrService:
         result = {
             "raw_text_uri": f"s3://{output_bucket}/{raw_text_key}",
             "parsed_text_uri": f"s3://{output_bucket}/{parsed_text_key}",
+            "text_confidence_uri": f"s3://{output_bucket}/{text_confidence_key}",
             "image_uri": f"s3://{output_bucket}/{image_key}",
         }
 
@@ -378,6 +390,49 @@ class OcrService:
             if isinstance(self.enhanced_features, list) and self.enhanced_features
             else "detect_document_text"
         )
+
+    def _generate_text_confidence_data(
+        self, raw_ocr_data: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Generate text confidence data from raw OCR to reduce token usage while preserving essential information.
+
+        This method transforms verbose Textract output into a minimal format containing:
+        - Essential text content (LINE blocks only)
+        - OCR confidence scores
+        - Text type (PRINTED/HANDWRITING)
+        - Page count
+
+        Removes geometric data, relationships, block IDs, and other verbose metadata
+        that aren't needed for assessment purposes.
+
+        Args:
+            raw_ocr_data: Raw Textract API response
+
+        Returns:
+            Text confidence data with ~80-90% token reduction
+        """
+        text_confidence_data = {
+            "page_count": raw_ocr_data.get("DocumentMetadata", {}).get("Pages", 1),
+            "text_blocks": [],
+        }
+
+        blocks = raw_ocr_data.get("Blocks", [])
+
+        for block in blocks:
+            if block.get("BlockType") == "LINE" and block.get("Text"):
+                text_block = {
+                    "text": block.get("Text", ""),
+                    "confidence": block.get("Confidence"),
+                }
+
+                # Include text type if available (PRINTED vs HANDWRITING)
+                if "TextType" in block:
+                    text_block["type"] = block["TextType"]
+
+                text_confidence_data["text_blocks"].append(text_block)
+
+        return text_confidence_data
 
     def _parse_textract_response(
         self, response: Dict[str, Any], page_id: int = None

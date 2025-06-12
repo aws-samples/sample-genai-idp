@@ -68,6 +68,10 @@ unfixable = []
 # Allow unused variables when underscore-prefixed.
 dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
 
+[lint.per-file-ignores]
+# Let's ignore some annoying rules in notebooks
+"notebooks/*" = ["F401"]
+
 [format]
 # Like Black, use double quotes for strings.
 quote-style = "double"

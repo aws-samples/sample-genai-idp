@@ -21,6 +21,7 @@ def __getattr__(name):
         "classification",
         "extraction",
         "evaluation",
+        "assessment",
         "models",
     ]:
         if name not in _submodules:
@@ -51,6 +52,7 @@ __all__ = [
     "classification",
     "extraction",
     "evaluation",
+    "assessment",
     "models",
     "get_config",
     "Document",

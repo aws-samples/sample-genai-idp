@@ -5,6 +5,64 @@ SPDX-License-Identifier: MIT-0
 
 ## [Unreleased]
 
+## [0.3.3]
+
+### Added
+
+- **Amazon Nova Model Fine-tuning Support**
+  - Added comprehensive `ModelFinetuningService` class for managing Nova model fine-tuning workflows
+  - Support for fine-tuning Amazon Nova models (Nova Lite, Nova Pro) using Amazon Bedrock
+  - Complete end-to-end workflow including dataset preparation, job creation, provisioned throughput management, and inference
+  - CLI tools for fine-tuning workflow:
+    - `prepare_nova_finetuning_data.py` - Dataset preparation from RVL-CDIP or custom datasets
+    - `create_finetuning_job.py` - Fine-tuning job creation with automatic IAM role setup
+    - `create_provisioned_throughput.py` - Provisioned throughput management for fine-tuned models
+    - `inference_example.py` - Model inference and evaluation with comparison capabilities
+  - CloudFormation integration with new parameters:
+    - `CustomClassificationModelARN` - Support for custom fine-tuned classification models in Pattern-2
+    - `CustomExtractionModelARN` - Support for custom fine-tuned extraction models in Pattern-2
+  - Automatic integration of fine-tuned models in classification and extraction model selection dropdowns
+  - Comprehensive documentation in `docs/nova-finetuning.md` with step-by-step instructions
+  - Example notebooks:
+    - `finetuning_dataset_prep.ipynb` - Interactive dataset preparation
+    - `finetuning_model_service_demo.ipynb` - Service usage demonstration
+    - `finetuning_model_document_classification_evaluation.ipynb` - Model evaluation
+  - Built-in support for Bedrock fine-tuning format with multi-modal capabilities
+  - Data splitting and validation set creation
+  - Cost optimization features including provisioned throughput deletion
+  - Performance metrics and accuracy evaluation tools
+
+- **Assessment Feature for Extraction Confidence Evaluation (EXPERIMENTAL)**
+  - Added new assessment service that evaluates extraction confidence using LLMs to analyze extraction results against source documents
+  - Multi-modal assessment capability combining text analysis with document images for comprehensive confidence scoring
+  - UI integration with explainability_info display showing per-attribute confidence scores, thresholds, and explanations
+  - Optional deployment controlled by `IsAssessmentEnabled` parameter (defaults to false)
+  - Added e2e-example-with-assessment.ipynb notebook for testing assessment workflow
+
+- **Enhanced Evaluation Framework with Confidence Integration**
+  - Added confidence fields to evaluation reports for quality analysis
+  - Automatic extraction and display of confidence scores from assessment explainability_info
+  - Enhanced JSON and Markdown evaluation reports with confidence columns
+  - Backward compatible integration - shows "N/A" when confidence data unavailable
+
+- **Evaluation Analytics Database and Reporting System**
+  - Added comprehensive ReportingDatabase (AWS Glue) with structured evaluation metrics storage
+  - Three-tier analytics tables: document_evaluations, section_evaluations, and attribute_evaluations
+  - Automatic partitioning by date and document for efficient querying with Amazon Athena
+  - Detailed metrics tracking including accuracy, precision, recall, F1 score, execution time, and evaluation methods
+  - Added evaluation_reporting_analytics.ipynb notebook for comprehensive performance analysis and visualization
+  - Multi-level analytics with document, section, and attribute-level insights
+  - Visual dashboards showing accuracy distributions, performance trends, and problematic patterns
+  - Configurable filters for date ranges, document types, and evaluation thresholds
+  - Integration with existing evaluation framework - metrics automatically saved to database
+  - ReportingDatabase output added to CloudFormation template for easy reference
+
+### Fixed
+- Fixed build failure related to pandas, numpy, and PyMuPDF dependency conflicts in the idp_common_pkg package
+- Fixed deployment failure caused by CodeBuild project timeout, by raising TimeoutInMinutes property
+- Added missing cached token metrics to CloudWatch dashboards
+- Added Bedrock model access prerequisite to README and deployment doc.
+
 ## [0.3.2]
 
 ### Added

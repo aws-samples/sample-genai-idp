@@ -35,6 +35,7 @@ A scalable, serverless solution for automated document processing and informatio
 - **Comprehensive Monitoring**: Rich CloudWatch dashboard with detailed metrics and logs
 - **Web User Interface**: Modern UI for inspecting document workflow status and results
 - **AI-Powered Evaluation**: Framework to assess accuracy against baseline data
+- **Extraction Confidence Assessment**: LLM-powered assessment of extraction confidence with multimodal document analysis
 - **Document Knowledge Base Query**: Ask questions about your processed documents
 
 ## Architecture Overview
@@ -71,8 +72,8 @@ After deployment, you can quickly process a document and view results:
    - **Via S3**: Upload directly to the S3 input bucket (find the bucket URL in CloudFormation stack Outputs)
 
 2. **Use Sample Documents**:
-   - For Pattern 1 (BDA): Use `samples/lending_package.pdf`
-   - For Patterns 2 and 3: Use `samples/rvl_cdip_package.pdf` 
+   - For Pattern 1 (BDA): Use [samples/lending_package.pdf](./samples/lending_package.pdf)
+   - For Patterns 2 and 3: Use [samples/rvl_cdip_package.pdf](./samples/rvl_cdip_package.pdf) 
 
 3. **Monitor Processing**:
    - **Via Web UI**: Track document status on the dashboard
@@ -83,6 +84,10 @@ After deployment, you can quickly process a document and view results:
    - **Via S3**: Check the output bucket for structured JSON files with extracted data
 
 See the [Deployment Guide](./docs/deployment.md#testing-the-solution) for more detailed testing instructions.
+
+IMPORTANT: If you have not previously done so, you must [request access](https://docs.aws.amazon.com/bedrock/latest/userguide/model-access.html) to the following Amazon Bedrock models:
+- Amazon: All Nova models, plus Titan Text Embeddings V2
+- Anthropic: Claude 3.x models, Claude 4.x models
 
 ## Updating an Existing Deployment
 
@@ -110,11 +115,12 @@ For detailed deployment and testing instructions, see the [Deployment Guide](./d
 - [Architecture](./docs/architecture.md) - Detailed component architecture and data flow
 - [Deployment](./docs/deployment.md) - Build, publish, deploy, and test instructions
 - [Web UI](./docs/web-ui.md) - Web interface features and usage
-- [Knowledge Base](./docs/knowledge-base.md) - Document knowledge base query feature
-- [Evaluation Framework](./docs/evaluation.md) - Accuracy assessment system
 - [Configuration](./docs/configuration.md) - Configuration and customization options
 - [Classification](./docs/classification.md) - Customizing document classification
 - [Extraction](./docs/extraction.md) - Customizing information extraction
+- [Assessment](./docs/assessment.md) - Extraction confidence evaluation using LLMs
+- [Evaluation Framework](./docs/evaluation.md) - Accuracy assessment system with analytics database and reporting
+- [Knowledge Base](./docs/knowledge-base.md) - Document knowledge base query feature
 - [Monitoring](./docs/monitoring.md) - Monitoring and logging capabilities
 - [Troubleshooting](./docs/troubleshooting.md) - Troubleshooting and performance guides
 

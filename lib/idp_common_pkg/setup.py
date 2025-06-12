@@ -33,6 +33,14 @@ extras_require = {
     "extraction": [
         "Pillow>=11.1.0",  # For image handling
     ],
+    # Assessment module dependencies
+    "assessment": [
+        "Pillow>=11.1.0",  # For image handling
+    ],
+    # Evaluation module dependencies
+    "evaluation": [
+        "Pillow>=11.1.0",  # For image handling
+    ],
     # Appsync module dependencies
     "appsync": [
         "requests>=2.32.3",
@@ -48,7 +56,7 @@ extras_require = {
 
 setup(
     name="idp_common",
-    version="0.3.2",
+    version="0.3.3",
     packages=find_packages(),
     include_package_data=True,
     python_requires=">=3.8",
