@@ -765,6 +765,157 @@ Resources:
               }
             },
             {
+              "type": "metric",
+              "x": 0,
+              "y": 6,
+              "width": 8,
+              "height": 6,
+              "properties": {
+                "metrics": [
+                  [{"expression": "m1/PERIOD(m1)*60", "label": "Tokens per Minute (TPM)"}],
+                  [{"expression": "m2/PERIOD(m1)*60", "label": "Cache Read TPM"}],
+                  [{"expression": "m3/PERIOD(m1)*60", "label": "Cache Write TPM"}],
+                  ["${StackName}", "InputTokens", {"id": "m1", "stat": "Sum", "visible": false}],
+                  [".", "CacheReadInputTokens", {"id": "m2", "stat": "Sum", "visible": false}],
+                  [".", "CacheWriteInputTokens", {"id": "m3", "stat": "Sum", "visible": false}]
+                ],
+                "region": "${AWS::Region}",
+                "title": "Input Tokens (per Minute)",
+                "view": "timeSeries",
+                "period": 60,
+                "yAxis": {
+                  "left": {
+                    "label": "Count per Minute"
+                  }
+                }
+              }
+            },
+            {
+              "type": "metric",
+              "x": 8,
+              "y": 6,
+              "width": 8,
+              "height": 6,
+              "properties": {
+                "metrics": [
+                  [{"expression": "m1/PERIOD(m1)*60", "label": "Tokens per Minute (TPM)"}],
+                  ["${StackName}", "OutputTokens", {"id": "m1", "stat": "Sum", "visible": false}]
+                ],
+                "region": "${AWS::Region}",
+                "title": "Output Tokens (per Minute)",
+                "view": "timeSeries",
+                "period": 60,
+                "yAxis": {
+                  "left": {
+                    "label": "Count per Minute"
+                  }
+                }
+              }
+            },
+            {
+              "type": "metric",
+              "x": 16,
+              "y": 6,
+              "width": 8,
+              "height": 6,
+              "properties": {
+                "metrics": [
+                  [{"expression": "m1/PERIOD(m1)*60", "label": "Tokens per Minute"}],
+                  ["${StackName}", "TotalTokens", {"id": "m1", "stat": "Sum", "visible": false}]
+                ],
+                "region": "${AWS::Region}",
+                "title": "Total Tokens (per Minute)",
+                "view": "timeSeries",
+                "period": 60,
+                "yAxis": {
+                  "left": {
+                    "label": "Count per Minute"
+                  }
+                }
+              }
+            },
+            {
+              "type": "metric",
+              "x": 0,
+              "y": 12,
+              "width": 8,
+              "height": 6,
+              "properties": {
+                "metrics": [
+                  [{"expression": "m1/PERIOD(m1)*60", "label": "Total per Minute"}],
+                  [{"expression": "m2/PERIOD(m2)*60", "label": "Succeeded per Minute"}],
+                  [{"expression": "m3/PERIOD(m3)*60", "label": "Failed per Minute"}],
+                  ["${StackName}", "BedrockRequestsTotal", {"id": "m1", "stat": "Sum", "visible": false}],
+                  [".", "BedrockRequestsSucceeded", {"id": "m2", "stat": "Sum", "visible": false}],
+                  [".", "BedrockRequestsFailed", {"id": "m3", "stat": "Sum", "visible": false}]
+                ],
+                "region": "${AWS::Region}",
+                "title": "Bedrock Request Status (per Minute)",
+                "view": "timeSeries",
+                "period": 60,
+                "yAxis": {
+                  "left": {
+                    "label": "Count per Minute"
+                  }
+                }
+              }
+            },
+            {
+              "type": "metric",
+              "x": 8,
+              "y": 12,
+              "width": 8,
+              "height": 6,
+              "properties": {
+                "metrics": [
+                  [{"expression": "m1/PERIOD(m1)*60", "label": "Throttles per Minute"}],
+                  [{"expression": "m2/PERIOD(m2)*60", "label": "Retry Success per Minute"}],
+                  [{"expression": "m3/PERIOD(m3)*60", "label": "Max Retries Exceeded per Minute"}],
+                  ["${StackName}", "BedrockThrottles", {"id": "m1", "stat": "Sum", "visible": false}],
+                  [".", "BedrockRetrySuccess", {"id": "m2", "stat": "Sum", "visible": false}],
+                  [".", "BedrockMaxRetriesExceeded", {"id": "m3", "stat": "Sum", "visible": false}]
+                ],
+                "region": "${AWS::Region}",
+                "title": "Bedrock Retries (per Minute)",
+                "view": "timeSeries",
+                "period": 60,
+                "yAxis": {
+                  "left": {
+                    "label": "Count per Minute"
+                  }
+                }
+              }
+            },
+            {
+              "type": "metric",
+              "x": 16,
+              "y": 12,
+              "width": 8,
+              "height": 6,
+              "properties": {
+                "metrics": [
+                  ["${StackName}", "BedrockRequestLatency", {"stat": "Average"}],
+                  [".", "BedrockRequestLatency", {"stat": "p90"}],
+                  [".", "BedrockRequestLatency", {"stat": "Maximum"}],
+                  [".", "BedrockTotalLatency", {"stat": "Average"}],
+                  [".", "BedrockTotalLatency", {"stat": "p90"}],
+                  [".", "BedrockTotalLatency", {"stat": "Maximum"}]
+                ],
+                "region": "${AWS::Region}",
+                "title": "Bedrock Latency - per request, and total (including backoff/retries)",
+                "period": 300,
+                "view": "timeSeries",
+                "stacked": false,
+                "annotations": {
+                  "horizontal": [{
+                    "value": ${ExecutionTimeThresholdMs},
+                    "label": "Threshold (${ExecutionTimeThresholdMs}ms)",
+                    "color": "#ff0000"
+                  }]
+                }
+              }
+            },
+            {
               "type": "log",
               "x": 0,
               "y": 12,
@@ -842,8 +993,21 @@ Resources:
             },
             {
               "type": "log",
+              "x": 0,
+              "y": 30,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "query": "SOURCE '${SummarizationFunctionLogGroup}' | filter @type = \"REPORT\" | fields @timestamp, @logStream, @billedDuration, @maxMemoryUsed/1024/1024 as memoryUsedMB | filter @billedDuration > ${ExecutionTimeThresholdMs} | sort by @billedDuration desc | limit 20",
+                "region": "${AWS::Region}",
+                "title": "Summarization Lambda Long Running Invocations",
+                "view": "table"
+              }
+            },
+            {
+              "type": "log",
               "x": 12,
-              "y": 24,
+              "y": 30,
               "width": 12,
               "height": 6,
               "properties": {

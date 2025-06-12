@@ -780,7 +780,7 @@ Resources:
   Dashboard:
     Type: AWS::CloudWatch::Dashboard
     Properties:
-      DashboardName: !Sub "${AWS::StackName}-${AWS::Region}-Pattern3-Subset"
+      DashboardName: !Sub "${AWS::StackName}-${AWS::Region}-Pattern2-Subset"
       DashboardBody: !Sub |
         {
           "widgets": [
@@ -855,8 +855,12 @@ Resources:
               "height": 6,
               "properties": {
                 "metrics": [
-                  [{"expression": "m1/PERIOD(m1)*60", "label": "Tokens per Minute"}],
-                  ["${StackName}", "InputTokens", {"id": "m1", "stat": "Sum", "visible": false}]
+                  [{"expression": "m1/PERIOD(m1)*60", "label": "Tokens per Minute (TPM)"}],
+                  [{"expression": "m2/PERIOD(m1)*60", "label": "Cache Read TPM"}],
+                  [{"expression": "m3/PERIOD(m1)*60", "label": "Cache Write TPM"}],
+                  ["${StackName}", "InputTokens", {"id": "m1", "stat": "Sum", "visible": false}],
+                  [".", "CacheReadInputTokens", {"id": "m2", "stat": "Sum", "visible": false}],
+                  [".", "CacheWriteInputTokens", {"id": "m3", "stat": "Sum", "visible": false}]
                 ],
                 "region": "${AWS::Region}",
                 "title": "Input Tokens (per Minute)",
@@ -877,7 +881,7 @@ Resources:
               "height": 6,
               "properties": {
                 "metrics": [
-                  [{"expression": "m1/PERIOD(m1)*60", "label": "Tokens per Minute"}],
+                  [{"expression": "m1/PERIOD(m1)*60", "label": "Tokens per Minute (TPM)"}],
                   ["${StackName}", "OutputTokens", {"id": "m1", "stat": "Sum", "visible": false}]
                 ],
                 "region": "${AWS::Region}",
@@ -1067,6 +1071,30 @@ Resources:
               }
             },
             {
+              "type": "metric",
+              "x": 8,
+              "y": 24,
+              "width": 8,
+              "height": 6,
+              "properties": {
+                "metrics": [
+                  ["AWS/Lambda", "Duration", "FunctionName", "${SummarizationFunction}"]
+                ],
+                "region": "${AWS::Region}",
+                "title": "Summarization Function Duration",
+                "period": 300,
+                "annotations": {
+                  "horizontal": [{
+                    "value": ${ExecutionTimeThresholdMs},
+                    "label": "Threshold (${ExecutionTimeThresholdMs}ms)",
+                    "color": "#ff0000"
+                  }]
+                },
+                "stat": "Average",
+                "view": "timeSeries"
+              }
+            },
+            {
               "type": "log",
               "x": 0,
               "y": 24,
@@ -1145,33 +1173,22 @@ Resources:
               }
             },
             {
-              "type": "metric",
+              "type": "log",
               "x": 0,
-              "y": 42,
+              "y": 48,
               "width": 12,
               "height": 6,
               "properties": {
-                "metrics": [
-                  ["AWS/Lambda", "Duration", "FunctionName", "${SummarizationFunction}"]
-                ],
+                "query": "SOURCE '${SummarizationFunctionLogGroup}' | filter @type = \"REPORT\" | fields @timestamp, @logStream, @billedDuration, @maxMemoryUsed/1024/1024 as memoryUsedMB | filter @billedDuration > ${ExecutionTimeThresholdMs} | sort by @billedDuration desc | limit 20",
                 "region": "${AWS::Region}",
-                "title": "Summarization Function Duration",
-                "period": 300,
-                "annotations": {
-                  "horizontal": [{
-                    "value": ${ExecutionTimeThresholdMs},
-                    "label": "Threshold (${ExecutionTimeThresholdMs}ms)",
-                    "color": "#ff0000"
-                  }]
-                },
-                "stat": "Average",
-                "view": "timeSeries"
+                "title": "Summarization Lambda Long Running Invocations",
+                "view": "table"
               }
             },
             {
               "type": "log",
               "x": 12,
-              "y": 42,
+              "y": 48,
               "width": 12,
               "height": 6,
               "properties": {
@@ -1181,7 +1198,6 @@ Resources:
                 "view": "table"
               }
             }
-
           ]
         }
 

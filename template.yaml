@@ -119,7 +119,7 @@ Parameters:
     Type: String
     Default: ""
     Description: >-
-      (Optional) Existing bucket used for storing evaluation results in JSON format for analytics.
+      (Optional) Existing bucket used for analytics. (Currently used for evaluation analytics)
       Provide the name of an existing bucket here or leave blank to automatically create a new bucket.
 
   EvaluationAutoEnabled:
@@ -218,8 +218,8 @@ Parameters:
 
   ExecutionTimeThresholdMs:
     Type: Number
-    Default: 30000
-    Description: Maximum acceptable execution time in milliseconds before alerting (default 30000 = 30 seconds)
+    Default: 300000
+    Description: Maximum acceptable execution time in milliseconds before alerting (default 300000 = 300 seconds)
     MinValue: 1000
 
   # Logging configuration
@@ -384,8 +384,11 @@ Metadata:
           default: "Evaluation"
         Parameters:
           - EvaluationBaselineBucketName
-          - ReportingBucketName
           - EvaluationAutoEnabled
+      - Label:
+          default: "Reporting"
+        Parameters:
+          - ReportingBucketName
       - Label:
           default: "Document Knowledge Base"
         Parameters:
@@ -438,10 +441,10 @@ Metadata:
         default: "Post Processing Lambda Hook Function ARN"
       EvaluationBaselineBucketName:
         default: "Evaluation Baseline Bucket Name"
-      ReportingBucketName:
-        default: "Reporting Bucket Name"
       EvaluationAutoEnabled:
         default: "Evaluation Auto Enabled"
+      ReportingBucketName:
+        default: "Reporting Bucket Name"
       IsSummarizationEnabled:
         default: "Summarization Enabled"
       IsAssessmentEnabled:
@@ -2725,20 +2728,7 @@ Resources:
                 "properties": {
                   "query": "SOURCE '${EvaluationFunctionLogGroup}' | fields @timestamp, @logStream, @message | filter @message like /ERROR/ | sort @timestamp desc | limit 20",
                   "region": "${AWS::Region}",
-                  "title": "Workflow Tracker Lambda Errors",
-                  "view": "table"
-                }
-              },
-              {
-                "type": "log",
-                "x": 0,
-                "y": 30,
-                "width": 12,
-                "height": 6,
-                "properties": {
-                  "query": "SOURCE '${LookupFunctionLogGroup}' | fields @timestamp, @logStream, @message | filter @message like /ERROR/ | sort @timestamp desc | limit 20",
-                  "region": "${AWS::Region}",
-                  "title": "Lookup Lambda Errors",
+                  "title": "Evaluation Tracker Lambda Errors",
                   "view": "table"
                 }
               }
