@@ -58,7 +58,10 @@ SPDX-License-Identifier: MIT-0
   - ReportingDatabase output added to CloudFormation template for easy reference
 
 ### Fixed
-- Fixed build failure related to pandas and numpy dependency conflicts in the idp_common_pkg package
+- Fixed build failure related to pandas, numpy, and PyMuPDF dependency conflicts in the idp_common_pkg package
+- Fixed deployment failure caused by CodeBuild project timeout, by raising TimeoutInMinutes property
+- Added missing cached token metrics to CloudWatch dashboards
+- Added Bedrock model access prerequisite to README and deployment doc.
 
 ## [0.3.2]
 
