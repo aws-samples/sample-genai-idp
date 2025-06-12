@@ -119,7 +119,7 @@ Parameters:
     Type: String
     Default: ""
     Description: >-
-      (Optional) Existing bucket used for storing evaluation results in JSON format for analytics.
+      (Optional) Existing bucket used for analytics. (Currently used for evaluation analytics)
       Provide the name of an existing bucket here or leave blank to automatically create a new bucket.
 
   EvaluationAutoEnabled:
