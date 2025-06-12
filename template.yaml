@@ -4486,7 +4486,7 @@ Resources:
               - "true"
           - Name: REACT_APP_CLOUDFRONT_DOMAIN
             Value: !Sub "https://${CloudFrontDistribution.DomainName}/"
-      TimeoutInMinutes: 10
+      TimeoutInMinutes: 30
 
   StartUICodeBuildExecutionRole:
     Type: AWS::IAM::Role
