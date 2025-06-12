@@ -1345,7 +1345,7 @@ Resources:
             },
             {
               "type": "metric",
-              "x": 0,
+              "x": 8,
               "y": 24,
               "width": 8,
               "height": 6,
