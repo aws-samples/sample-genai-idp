@@ -1443,8 +1443,47 @@ Resources:
             },
             {
               "type": "log",
+              "x": 0,
+              "y": 42,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "query": "SOURCE '${AssessmentFunctionLogGroup}' | filter @type = \"REPORT\" | fields @timestamp, @logStream, @billedDuration, @maxMemoryUsed/1024/1024 as memoryUsedMB | filter @billedDuration > ${ExecutionTimeThresholdMs} | sort by @billedDuration desc | limit 20",
+                "region": "${AWS::Region}",
+                "title": "Assessment Lambda Long Running Invocations",
+                "view": "table"
+              }
+            },
+            {
+              "type": "log",
               "x": 12,
               "y": 42,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "query": "SOURCE '${AssessmentFunctionLogGroup}' | fields @timestamp, @logStream, @message | filter @message like /ERROR/ or @message like /Task timed out/ | parse @message /RequestId: (?<requestId>[^ ]*)/ | sort @timestamp desc | limit 20",
+                "region": "${AWS::Region}",
+                "title": "Assessment Lambda Errors",
+                "view": "table"
+              }
+            },
+            {
+              "type": "log",
+              "x": 0,
+              "y": 48,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "query": "SOURCE '${SummarizationFunctionLogGroup}' | filter @type = \"REPORT\" | fields @timestamp, @logStream, @billedDuration, @maxMemoryUsed/1024/1024 as memoryUsedMB | filter @billedDuration > ${ExecutionTimeThresholdMs} | sort by @billedDuration desc | limit 20",
+                "region": "${AWS::Region}",
+                "title": "Summarization Lambda Long Running Invocations",
+                "view": "table"
+              }
+            },
+            {
+              "type": "log",
+              "x": 12,
+              "y": 48,
               "width": 12,
               "height": 6,
               "properties": {
@@ -1454,7 +1493,6 @@ Resources:
                 "view": "table"
               }
             }
-
           ]
         }
 
