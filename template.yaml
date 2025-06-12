@@ -1000,7 +1000,7 @@ Resources:
 
   ConfigurationBucket:
     Type: AWS::S3::Bucket
-    DeletionPolicy: RetainExceptOnCreate
+    DeletionPolicy: Retain
     Properties:
       NotificationConfiguration:
         EventBridgeConfiguration:
