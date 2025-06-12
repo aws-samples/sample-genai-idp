@@ -39,3 +39,11 @@ lint-cicd:
 		exit 1; \
 	fi
 	@echo "$(GREEN)All code quality checks passed!$(NC)"
+
+# A convenience Makefile target that runs 
+commit: lint test
+	$(info Generating commit message...)
+	export COMMIT_MESSAGE="$(shell q chat --no-interactive --trust-all-tools "Understand pending local git change and changes to be committed, then infer a commit message. Return this commit message only" | tail -n 1 | sed 's/\x1b\[[0-9;]*m//g')" && \
+	git add . && \
+	git commit -am "$${COMMIT_MESSAGE}" && \
+	git push
