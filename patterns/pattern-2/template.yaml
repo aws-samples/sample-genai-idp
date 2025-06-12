@@ -1104,8 +1104,12 @@ Resources:
               "height": 6,
               "properties": {
                 "metrics": [
-                  [{"expression": "m1/PERIOD(m1)*60", "label": "Tokens per Minute"}],
-                  ["${StackName}", "InputTokens", {"id": "m1", "stat": "Sum", "visible": false}]
+                  [{"expression": "m1/PERIOD(m1)*60", "label": "Tokens per Minute (TPM)"}],
+                  [{"expression": "m2/PERIOD(m1)*60", "label": "Cache Read TPM"}],
+                  [{"expression": "m3/PERIOD(m1)*60", "label": "Cache Write TPM"}],
+                  ["${StackName}", "InputTokens", {"id": "m1", "stat": "Sum", "visible": false}],
+                  [".", "CacheReadInputTokens", {"id": "m2", "stat": "Sum", "visible": false}],
+                  [".", "CacheWriteInputTokens", {"id": "m3", "stat": "Sum", "visible": false}]
                 ],
                 "region": "${AWS::Region}",
                 "title": "Input Tokens (per Minute)",
@@ -1126,7 +1130,7 @@ Resources:
               "height": 6,
               "properties": {
                 "metrics": [
-                  [{"expression": "m1/PERIOD(m1)*60", "label": "Tokens per Minute"}],
+                  [{"expression": "m1/PERIOD(m1)*60", "label": "Tokens per Minute (TPM)"}],
                   ["${StackName}", "OutputTokens", {"id": "m1", "stat": "Sum", "visible": false}]
                 ],
                 "region": "${AWS::Region}",
