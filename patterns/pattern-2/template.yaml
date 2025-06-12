@@ -1316,6 +1316,54 @@ Resources:
               }
             },
             {
+              "type": "metric",
+              "x": 0,
+              "y": 24,
+              "width": 8,
+              "height": 6,
+              "properties": {
+                "metrics": [
+                  ["AWS/Lambda", "Duration", "FunctionName", "${AssessmentFunction}"]
+                ],
+                "region": "${AWS::Region}",
+                "title": "Assessment Function Duration",
+                "period": 300,
+                "annotations": {
+                  "horizontal": [{
+                    "value": ${ExecutionTimeThresholdMs},
+                    "label": "Threshold (${ExecutionTimeThresholdMs}ms)",
+                    "color": "#ff0000"
+                  }]
+                },
+                "stat": "Average",
+                "view": "timeSeries"
+              }
+            },
+            {
+              "type": "metric",
+              "x": 0,
+              "y": 24,
+              "width": 8,
+              "height": 6,
+              "properties": {
+                "metrics": [
+                  ["AWS/Lambda", "Duration", "FunctionName", "${SummarizationFunction}"]
+                ],
+                "region": "${AWS::Region}",
+                "title": "Summarization Function Duration",
+                "period": 300,
+                "annotations": {
+                  "horizontal": [{
+                    "value": ${ExecutionTimeThresholdMs},
+                    "label": "Threshold (${ExecutionTimeThresholdMs}ms)",
+                    "color": "#ff0000"
+                  }]
+                },
+                "stat": "Average",
+                "view": "timeSeries"
+              }
+            },
+            {
               "type": "log",
               "x": 0,
               "y": 24,
@@ -1391,30 +1439,6 @@ Resources:
                 "region": "${AWS::Region}",
                 "title": "Extraction Lambda Errors",
                 "view": "table"
-              }
-            },
-            {
-              "type": "metric",
-              "x": 0,
-              "y": 42,
-              "width": 12,
-              "height": 6,
-              "properties": {
-                "metrics": [
-                  ["AWS/Lambda", "Duration", "FunctionName", "${SummarizationFunction}"]
-                ],
-                "region": "${AWS::Region}",
-                "title": "Summarization Function Duration",
-                "period": 300,
-                "annotations": {
-                  "horizontal": [{
-                    "value": ${ExecutionTimeThresholdMs},
-                    "label": "Threshold (${ExecutionTimeThresholdMs}ms)",
-                    "color": "#ff0000"
-                  }]
-                },
-                "stat": "Average",
-                "view": "timeSeries"
               }
             },
             {
