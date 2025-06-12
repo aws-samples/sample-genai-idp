@@ -72,8 +72,8 @@ After deployment, you can quickly process a document and view results:
    - **Via S3**: Upload directly to the S3 input bucket (find the bucket URL in CloudFormation stack Outputs)
 
 2. **Use Sample Documents**:
-   - For Pattern 1 (BDA): Use `samples/lending_package.pdf`
-   - For Patterns 2 and 3: Use `samples/rvl_cdip_package.pdf` 
+   - For Pattern 1 (BDA): Use [samples/lending_package.pdf](./samples/lending_package.pdf)
+   - For Patterns 2 and 3: Use [samples/rvl_cdip_package.pdf](./samples/rvl_cdip_package.pdf) 
 
 3. **Monitor Processing**:
    - **Via Web UI**: Track document status on the dashboard
@@ -84,6 +84,10 @@ After deployment, you can quickly process a document and view results:
    - **Via S3**: Check the output bucket for structured JSON files with extracted data
 
 See the [Deployment Guide](./docs/deployment.md#testing-the-solution) for more detailed testing instructions.
+
+IMPORTANT: If you have not previously done so, you must [request access](https://docs.aws.amazon.com/bedrock/latest/userguide/model-access.html) to the following Amazon Bedrock models:
+- Amazon: All Nova models, plus Titan Text Embeddings V2
+- Anthropic: Claude 3.x models, Claude 4.x models
 
 ## Updating an Existing Deployment
 

@@ -7,6 +7,10 @@ This guide covers how to deploy, build, publish, and test the GenAI Intelligent 
 
 ## Deployment Options
 
+**IMPORTANT PREREQUISITE:** If you have not previously done so, you must [request access](https://docs.aws.amazon.com/bedrock/latest/userguide/model-access.html) to the following Amazon Bedrock models:
+- Amazon: All Nova models, plus Titan Text Embeddings V2
+- Anthropic: Claude 3.x models, Claude 4.x models
+
 There are two ways to deploy the GenAIIDP solution:
 
 1. [Quick Start with Pre-built Assets](#option-1-deploy-with-pre-built-assets)
@@ -140,8 +144,8 @@ To update an existing GenAIIDP deployment to a new version:
 1. Open the `S3InputBucketConsoleURL` and `S3OutputBucketConsoleURL` from the stack Outputs tab
 2. Open the `StateMachineConsoleURL` from the stack Outputs tab
 3. Upload a PDF form to the Input bucket (sample files are in the `./samples` folder):
-   - For Pattern-1 BDA default project: use `samples/lending_package.pdf`
-   - For Patterns 2 and 3 default configurations: use `samples/rvl_cdip_package.pdf`
+   - For Pattern-1 BDA default project: use [samples/lending_package.pdf](../samples/lending_package.pdf)
+   - For Patterns 2 and 3 default configurations: use [samples/rvl_cdip_package.pdf](../samples/rvl_cdip_package.pdf)
 4. Monitor the Step Functions execution to observe the workflow
 5. When complete, check the Output bucket for the structured JSON file with extracted fields
 
