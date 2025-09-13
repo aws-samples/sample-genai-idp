@@ -136,8 +136,7 @@ class TestBdaBlueprintService:
             mock_boto_client.return_value = mock_bedrock_client
 
             service = BdaBlueprintService(
-                dataAutomationProjectArn="arn:aws:bedrock:us-west-2:123456789012:project/test-project",
-                region="us-west-2",
+                dataAutomationProjectArn="arn:aws:bedrock:us-west-2:123456789012:project/test-project"
             )
 
             # Store mocks for access in tests
@@ -164,41 +163,20 @@ class TestBdaBlueprintService:
             ),
         ):
             service = BdaBlueprintService(
-                dataAutomationProjectArn="arn:aws:bedrock:us-west-2:123456789012:project/test-project",
-                region="us-west-2",
+                dataAutomationProjectArn="arn:aws:bedrock:us-west-2:123456789012:project/test-project"
             )
 
             assert (
                 service.dataAutomationProjectArn
                 == "arn:aws:bedrock:us-west-2:123456789012:project/test-project"
             )
-            assert service.region == "us-west-2"
             assert service.configuration_table_name == "test-config-table"
 
             # Verify boto3 client was called for BDABlueprintCreator
-            mock_boto_client.assert_called_with(
-                service_name="bedrock-data-automation", region_name="us-west-2"
-            )
+            mock_boto_client.assert_called_with(service_name="bedrock-data-automation")
 
             # Verify DynamoDB table was set up
             mock_dynamodb.assert_called_once_with("dynamodb")
-
-    def test_init_with_default_region(self):
-        """Test initialization with default region from environment."""
-        with (
-            patch("boto3.resource"),
-            patch("boto3.client"),
-            patch.dict(
-                "os.environ",
-                {"AWS_REGION": "us-east-1", "CONFIGURATION_TABLE_NAME": "test-table"},
-            ),
-        ):
-            service = BdaBlueprintService(
-                dataAutomationProjectArn="arn:aws:bedrock:us-west-2:123456789012:project/test-project",
-                region=None,  # Explicitly pass None to trigger environment lookup
-            )
-
-            assert service.region == "us-east-1"
 
     def test_stringify_values(self, service):
         """Test the _stringify_values method."""

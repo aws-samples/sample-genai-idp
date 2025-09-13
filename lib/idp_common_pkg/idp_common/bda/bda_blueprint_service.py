@@ -16,14 +16,9 @@ logger = logging.getLogger(__name__)
 
 
 class BdaBlueprintService:
-    def __init__(
-        self,
-        dataAutomationProjectArn: Optional[str] = None,
-        region: Optional[str] = "us-west-2",
-    ):
+    def __init__(self, dataAutomationProjectArn: Optional[str] = None):
         self.dataAutomationProjectArn = dataAutomationProjectArn
-        self.region = region or os.environ.get("AWS_REGION", "us-east-1")
-        self.blueprint_creator = BDABlueprintCreator(region_name=self.region)
+        self.blueprint_creator = BDABlueprintCreator()
         self.configuration_table_name = os.environ.get("CONFIGURATION_TABLE_NAME", "")
         dynamodb = boto3.resource("dynamodb")
         self.configuration_table = dynamodb.Table(self.configuration_table_name)

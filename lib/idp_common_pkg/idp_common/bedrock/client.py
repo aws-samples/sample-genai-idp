@@ -39,9 +39,9 @@ DEFAULT_MAX_BACKOFF = 300    # 5 minutes
 CACHEPOINT_SUPPORTED_MODELS = [
     "us.anthropic.claude-3-5-haiku-20241022-v1:0",
     "us.anthropic.claude-3-7-sonnet-20250219-v1:0",
-    "anthropic.claude-opus-4-1-20250805-v1:0",
-    "anthropic.claude-opus-4-20250514-v1:0",
-    "anthropic.claude-sonnet-4-20250514-v1:0",
+    "us.anthropic.claude-opus-4-1-20250805-v1:0",
+    "us.anthropic.claude-opus-4-20250514-v1:0",
+    "us.anthropic.claude-sonnet-4-20250514-v1:0",
     "us.anthropic.claude-sonnet-4-20250514-v1:0:1m",
     "us.amazon.nova-lite-v1:0",
     "us.amazon.nova-pro-v1:0"

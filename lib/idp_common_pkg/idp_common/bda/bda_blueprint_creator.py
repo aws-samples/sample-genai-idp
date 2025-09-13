@@ -12,11 +12,9 @@ logger = logging.getLogger(__name__)
 
 
 class BDABlueprintCreator:
-    def __init__(self, region_name="us-west-2"):
+    def __init__(self):
         """Initialize Bedrock client."""
-        self.bedrock_client = boto3.client(
-            service_name="bedrock-data-automation", region_name=region_name
-        )
+        self.bedrock_client = boto3.client(service_name="bedrock-data-automation")
 
     def update_data_automation_project(self, projectArn: str, blueprint):
         """
@@ -209,7 +207,6 @@ class BDABlueprintCreator:
         Args:
             document_type (str): Type of document
             blueprint_name (str): Name for the blueprint
-            region (str): AWS region
             labels (list, optional): List of labels for the document
 
         Returns:
