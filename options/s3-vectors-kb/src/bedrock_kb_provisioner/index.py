@@ -60,7 +60,8 @@ def provision_s3_vector_resources_and_knowledge_base(
     aws_region = os.environ.get('AWS_REGION')
     aws_account_id = os.environ.get('AWS_ACCOUNT_ID')
     vector_bucket_arn = f"arn:aws:s3vectors:{aws_region}:{aws_account_id}:bucket/{vector_bucket_name}"
-    index_arn = f"arn:aws:s3vectors:{aws_region}:{aws_account_id}:index/{vector_bucket_name}/{vector_index_name}"
+    # Fix ARN format based on error: Expected ARN resource-id form: bucket/<bucket-name>/index/<index-name>
+    index_arn = f"arn:aws:s3vectors:{aws_region}:{aws_account_id}:bucket/{vector_bucket_name}/index/{vector_index_name}"
     
     try:
         # Try to create the Knowledge Base using the correct template structure
