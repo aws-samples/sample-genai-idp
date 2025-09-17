@@ -119,6 +119,7 @@ Resources:
           LOG_LEVEL: !Ref pLogLevel
           STACK_NAME: !Ref pStackName
           KMS_KEY_ARN: !Ref pCustomerManagedEncryptionKeyArn
+          AWS_ACCOUNT_ID: !Ref AWS::AccountId
       Policies:
         - Statement:
             - Effect: Allow
@@ -127,6 +128,12 @@ Resources:
                 - s3vectors:CreateIndex
                 - s3vectors:ListVectorBuckets
                 - s3vectors:DescribeVectorBucket
+              Resource: "*"
+            - Effect: Allow
+              Action:
+                - bedrock:CreateKnowledgeBase
+                - bedrock:ListKnowledgeBases
+                - bedrock:GetKnowledgeBase
               Resource: "*"
             - Effect: Allow
               Action:
@@ -140,12 +147,17 @@ Resources:
 
   S3VectorsProvisioner:
     Type: AWS::CloudFormation::CustomResource
+    DependsOn: KnowledgeBaseServiceRole
     Properties:
       ServiceToken: !GetAtt S3VectorsProvisionerFunction.Arn
       VectorBucketName: !Sub "${pStackName}-kb-s3vectors"
       VectorIndexName: !Ref VectorIndexName
       VectorDimension: 1024  # Default dimension - Bedrock KB will manage actual dimensions
       DistanceMetric: !Ref VectorSimilarityMeasure
+      KnowledgeBaseName: !Sub "${pStackName}-kb"
+      KnowledgeBaseDescription: !Sub "Bedrock Knowledge Base with S3 Vectors backend for ${pStackName}"
+      EmbeddingModelArn: !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/${EmbeddingModelId}"
+      KnowledgeBaseRoleArn: !GetAtt KnowledgeBaseServiceRole.Arn
 
   # IAM Role for Bedrock Knowledge Base
   KnowledgeBaseServiceRole:
@@ -209,25 +221,6 @@ Resources:
                   Resource: !Ref pCustomerManagedEncryptionKeyArn
           - !Ref "AWS::NoValue"
 
-  # Bedrock Knowledge Base
-  KnowledgeBase:
-    Type: AWS::Bedrock::KnowledgeBase
-    DependsOn: S3VectorsProvisioner
-    Properties:
-      Description: !Sub "Bedrock Knowledge Base with S3 Vectors backend for ${pStackName}"
-      KnowledgeBaseConfiguration:
-        Type: VECTOR
-        VectorKnowledgeBaseConfiguration:
-          EmbeddingModelArn: !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/${EmbeddingModelId}"
-      Name: !Sub "${pStackName}-kb"
-      RoleArn: !GetAtt KnowledgeBaseServiceRole.Arn
-      StorageConfiguration:
-        Type: S3_VECTORS
-        S3VectorsConfiguration:
-          VectorBucketArn: !Sub "arn:${AWS::Partition}:s3vectors:${AWS::Region}:${AWS::AccountId}:bucket/${pStackName}-kb-s3vectors"
-          IndexArn: !Sub "arn:${AWS::Partition}:s3vectors:${AWS::Region}:${AWS::AccountId}:index/${pStackName}-kb-s3vectors/${VectorIndexName}"
-          IndexName: !Ref VectorIndexName
-
   # Data Source for Knowledge Base
   S3DataSource:
     Type: AWS::Bedrock::DataSource
@@ -242,7 +235,7 @@ Resources:
             - !Split [",", !Ref pInputDocumentUploadFolderPrefix]
             - !Ref AWS::NoValue
       Description: !Sub "S3 Data Source for ${pStackName} Knowledge Base"
-      KnowledgeBaseId: !Ref KnowledgeBase
+      KnowledgeBaseId: !GetAtt S3VectorsProvisioner.KnowledgeBaseId
       Name: !Sub "${pStackName}-s3-datasource"
       VectorIngestionConfiguration:
         ChunkingConfiguration:
@@ -280,14 +273,14 @@ Resources:
       Environment:
         Variables:
           LOG_LEVEL: !Ref pLogLevel
-          KNOWLEDGE_BASE_ID: !Ref KnowledgeBase
+          KNOWLEDGE_BASE_ID: !GetAtt S3VectorsProvisioner.KnowledgeBaseId
           DATA_SOURCE_ID: !GetAtt S3DataSource.DataSourceId
       Policies:
         - Statement:
             - Effect: Allow
               Action:
                 - bedrock:StartIngestionJob
-              Resource: !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:knowledge-base/${KnowledgeBase}"
+              Resource: !GetAtt S3VectorsProvisioner.KnowledgeBaseArn
 
   # Start initial ingestion job
   StartIngestionJobFunction:
@@ -334,13 +327,13 @@ Resources:
             - Effect: Allow
               Action:
                 - bedrock:StartIngestionJob
-              Resource: !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:knowledge-base/${KnowledgeBase}"
+              Resource: !GetAtt S3VectorsProvisioner.KnowledgeBaseArn
 
   StartInitialIngestionJob:
     Type: AWS::CloudFormation::CustomResource
     Properties:
       ServiceToken: !GetAtt StartIngestionJobFunction.Arn
-      knowledgeBaseId: !Ref KnowledgeBase
+      knowledgeBaseId: !GetAtt S3VectorsProvisioner.KnowledgeBaseId
       dataSourceId: !GetAtt S3DataSource.DataSourceId
 
   # Scheduler for periodic ingestion
@@ -413,13 +406,13 @@ Resources:
 Outputs:
   KnowledgeBaseId:
     Description: 'ID of the Bedrock Knowledge Base'
-    Value: !Ref KnowledgeBase
+    Value: !GetAtt S3VectorsProvisioner.KnowledgeBaseId
     Export:
       Name: !Sub "${AWS::StackName}-KnowledgeBaseId"
 
   KnowledgeBaseArn:
     Description: 'ARN of the Bedrock Knowledge Base'
-    Value: !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:knowledge-base/${KnowledgeBase}"
+    Value: !GetAtt S3VectorsProvisioner.KnowledgeBaseArn
     Export:
       Name: !Sub "${AWS::StackName}-KnowledgeBaseArn"
 
