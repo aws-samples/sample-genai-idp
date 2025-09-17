@@ -2,6 +2,7 @@ import os
 import json
 import logging
 import cfnresponse
+import boto3
 from typing import Dict, Any
 from idp_common.s3vectors.client import S3VectorsClient
 
@@ -53,7 +54,6 @@ def provision_s3_vector_resources_and_knowledge_base(
     )
     
     # Step 2: Create Bedrock Knowledge Base using boto3
-    import boto3
     bedrock_client = boto3.client('bedrock-agent')
     
     # Construct S3 vectors ARNs
