@@ -381,7 +381,6 @@ const ConfigurationLayout = () => {
     if (isS3VectorsEnabled) return schema;
     if (!schema.properties || !schema.properties.s3Vectors) return schema;
     const gated = { ...schema, properties: { ...schema.properties } };
-    console.log(`GATED CONST: ${gated}`);
     delete gated.properties.s3Vectors;
     return gated;
   }, [schema, isS3VectorsEnabled]);

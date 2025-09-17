@@ -1050,7 +1050,7 @@ Resources:
       - IsStacknameLengthOK
     Type: AWS::KMS::Key
     Properties:
-      Description: KMS key for DynamoDB encryption
+      Description: KMS key for application resource encryption # <-- Updated Description
       EnableKeyRotation: true
       KeyPolicy:
         Version: "2012-10-17"
@@ -1094,6 +1094,23 @@ Resources:
               - kms:GenerateDataKey*
               - kms:DescribeKey
             Resource: "*"
+            
+          # --- S3 Vectors Policy Added ---
+          - Sid: AllowS3VectorsServicePrincipal
+            Effect: Allow
+            Principal:
+              Service: indexing.s3vectors.amazonaws.com
+            Action: kms:Decrypt
+            Resource: "*"
+            Condition:
+              ArnLike:
+                aws:SourceArn: !Sub "arn:aws:s3vectors:${AWS::Region}:${AWS::AccountId}:bucket/*"
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+              ForAnyValue:StringEquals:
+                kms:EncryptionContextKeys: 
+                  - "aws:s3vectors:arn"
+                  - "aws:s3vectors:resource-id"
 
   CustomerManagedEncryptionKeyAlias:
     Type: AWS::KMS::Alias

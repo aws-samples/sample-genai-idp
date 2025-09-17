@@ -132,6 +132,7 @@ all = [
     "PyYAML==6.0.1",
     "rich==13.7.1",
     "setuptools==70.1.1",
+    "cfnresponse",
     # "s3fs==2023.12.2" - - disabled till we fix package dependencies
 ]
 

@@ -40,12 +40,10 @@ When deploying the solution, you configure the knowledge base backend through th
 | Parameter | Values | Description |
 |-----------|--------|-------------|
 | `DocumentKnowledgeBase` | `OpenSearch` \| `S3 Vectors` \| `Disabled` | Selects knowledge base backend or disables it entirely |
-| `KnowledgeBaseModelId` | Model ARN | Foundational model for knowledge base chat (when enabled) |
-| `DocumentAnalysisAgentModelId` | Model ARN | Model for document analytics queries (only for OpenSearch) |
+| `KnowledgeBaseModelId` | Model ARN | Foundational model for knowledge base chat  |
+| `DocumentAnalysisAgentModelId` | Model ARN | Model for document analytics queries  |
 
 #### S3 Vectors Specific Parameters
-
-These parameters only appear when S3 Vectors is selected:
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
@@ -53,19 +51,6 @@ These parameters only appear when S3 Vectors is selected:
 | `KnowledgeBaseEmbeddingModelId` | `amazon.titan-embed-text-v2:0` | Embedding model for vectorization |
 | `KnowledgeBaseVectorIndexName` | `idp-vectors-index` | Name for the vector index |
 | `S3VectorsIngestionScheduleExpression` | `rate(30 minutes)` | Automated ingestion frequency |
-
-## S3 Vectors Configuration
-
-### Embedding Models and Dimensions
-
-The S3 Vectors backend supports multiple embedding models with automatic dimension configuration:
-
-| Embedding Model | Dimensions | Use Case |
-|-----------------|------------|----------|
-| `amazon.titan-embed-text-v1:0` | 1536 | General purpose, English |
-| `amazon.titan-embed-text-v2:0` | 1024 | Improved efficiency, multilingual |
-| `cohere.embed-english-v3` | 1024 | High-quality English embeddings |
-| `cohere.embed-multilingual-v3` | 1024 | Multilingual support |
 
 ### Vector Similarity Measures
 

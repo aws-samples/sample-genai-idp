@@ -34,15 +34,26 @@ class S3VectorsClient:
             return error.response.get('Error', {}).get('Code') == 'ConflictException'
         return False
 
-    def create_bucket(self, vector_bucket_name: str) -> None:
+    def create_bucket(self, vector_bucket_name: str, kms_key_arn: str = None) -> None:
         """
         Idempotently creates an S3 Vector bucket.
 
         Args:
             vector_bucket_name: The name for the vector bucket.
+            kms_key_arn: Optional KMS key ARN for encryption.
         """
         try:
-            self.s3vectors.create_vector_bucket(vectorBucketName=vector_bucket_name)
+            if kms_key_arn:
+                self.s3vectors.create_vector_bucket(
+                    vectorBucketName=vector_bucket_name,
+                    encryptionConfiguration={
+                        'sseType': 'aws:kms',
+                        'kmsKeyArn': kms_key_arn
+                    }
+                )
+            else:
+                self.s3vectors.create_vector_bucket(vectorBucketName=vector_bucket_name)
+          
             logger.info(f"Vector bucket '{vector_bucket_name}' created.")
         except Exception as e:
             if self._is_already_exists_error(e):

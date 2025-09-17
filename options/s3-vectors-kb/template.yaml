@@ -87,7 +87,7 @@ Resources:
   CrossRegionKnowledgeBaseModelId:
     Type: AWS::SSM::Parameter
     Properties:
-      Name: CrossRegionKnowledgeBaseModelId
+      Name: !Sub "${AWS::StackName}-CrossRegionKnowledgeBaseModelId"
       Type: String
       Value: !Join
         - "."
@@ -116,6 +116,7 @@ Resources:
         Variables:
           LOG_LEVEL: !Ref pLogLevel
           STACK_NAME: !Ref pStackName
+          KMS_KEY_ARN: !Ref pCustomerManagedEncryptionKeyArn
       Policies:
         - Statement:
             - Effect: Allow
@@ -146,7 +147,6 @@ Resources:
         - !Select [0, !Split [":0", !Ref EmbeddingModelId]]
         - Dimension
       DistanceMetric: !Ref VectorSimilarityMeasure
-
 
   S3VectorsQueryFunction:
     Type: AWS::Serverless::Function
@@ -204,6 +204,15 @@ Resources:
               Action:
                 - cloudwatch:PutMetricData
               Resource: "*"
+            - Effect: Allow
+              Action:
+                - kms:Encrypt
+                - kms:Decrypt
+                - kms:ReEncrypt*
+                - kms:GenerateDataKey*
+                - kms:DescribeKey
+                - kms:CreateGrant
+              Resource: !Ref pCustomerManagedEncryptionKeyArn
 
   S3VectorsIngestionFunction:
     Type: AWS::Serverless::Function

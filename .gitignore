@@ -24,3 +24,4 @@ notebooks/examples/data
 .dsr/
 *tmp-dev-assets*
 template-old.yaml
+agents.json
