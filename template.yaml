@@ -244,7 +244,7 @@ Parameters:
       - "Disable"
     Description: |
       Use processed documents as knowledge base content. Bedrock Knowledge Base offers two backends: 
-      OpenSearch ($11/day, real-time analytics, faster queries), S3 Vectors (on-demand, slower, free at rest), or Disable to turn off knowledge base functionality.
+      OpenSearch ($11/day, real-time analytics, faster queries), S3 Vectors (Bedrock-managed, cost-effective, good performance), or Disable to turn off knowledge base functionality.
 
   KnowledgeBaseModelId:
     Type: String
@@ -6113,31 +6113,19 @@ Resources:
       Environment:
         Variables:
           LOG_LEVEL: !Ref LogLevel
-          KB_TYPE: !If
-            - IsKnowledgeBaseDisabled
-            - "DISABLED"
-            - !If
-              - ShouldUseS3VectorsKnowledgeBase
-              - "S3_VECTORS"
-              - "BEDROCK"
+          # Note: KB_TYPE removed - both OpenSearch and S3 vectors now use Bedrock KB APIs
           KB_ID: !If
             - ShouldUseDocumentKnowledgeBase
             - !GetAtt DOCUMENTBEDROCKKB.Outputs.KnowledgeBaseID
-            - ""
+            - !If
+              - ShouldUseS3VectorsKnowledgeBase
+              - !GetAtt DOCUMENTS3VECTORSKB.Outputs.KnowledgeBaseId
+              - ""
           KB_ACCOUNT_ID: !Ref AWS::AccountId
           KB_REGION: !Ref AWS::Region
           MODEL_ID: !Ref KnowledgeBaseModelId
           GUARDRAIL_ID_AND_VERSION: !If [HasGuardrailConfig, !Sub "${BedrockGuardrailId}:${BedrockGuardrailVersion}", ""]
-          # S3 Vectors specific environment variables
-          S3_VECTORS_BUCKET_NAME: !If
-            - ShouldUseS3VectorsKnowledgeBase
-            - !Sub "${GetLowercase.Lowercase}-s3vectors"
-            - ""
-          S3_VECTORS_INDEX_NAME: !If
-            - ShouldUseS3VectorsKnowledgeBase
-            - !Ref KnowledgeBaseVectorIndexName
-            - ""
-          S3_VECTORS_SESSION_TABLE: !If
+          # Note: S3 vectors specific environment variables removed - now handled by Bedrock KB
             - ShouldUseS3VectorsKnowledgeBase
             - !Ref S3VectorsCatalogTable
             - ""
@@ -6145,10 +6133,7 @@ Resources:
             - ShouldUseS3VectorsKnowledgeBase
             - !GetAtt DOCUMENTS3VECTORSKB.Outputs.EmbeddingModelId
             - ""
-          S3_VECTORS_QUERY_FUNCTION_NAME: !If
-            - ShouldUseS3VectorsKnowledgeBase
-            - !GetAtt DOCUMENTS3VECTORSKB.Outputs.S3VectorsQueryFunctionArn
-            - ""
+          # Note: S3 vectors now uses Bedrock KB APIs directly, no separate query function needed
       LoggingConfig:
         LogGroup: !Ref QueryKnowledgeBaseResolverFunctionLogGroup
       Policies:
@@ -6165,8 +6150,9 @@ Resources:
             - ShouldUseS3VectorsKnowledgeBase
             - Effect: Allow
               Action:
-                - lambda:InvokeFunction
-              Resource: !GetAtt DOCUMENTS3VECTORSKB.Outputs.S3VectorsQueryFunctionArn
+                - bedrock:Retrieve
+                - bedrock:RetrieveAndGenerate
+              Resource: !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:knowledge-base/${DOCUMENTS3VECTORSKB.Outputs.KnowledgeBaseId}"
             - !Ref AWS::NoValue
           - !If
             - IsKnowledgeBaseDisabled

@@ -1,2 +1,0 @@
-cfnresponse
-../../lib/idp_common_pkg

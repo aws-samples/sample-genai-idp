@@ -28,7 +28,9 @@ import useSettingsContext from '../../contexts/settings';
 const ConfigurationLayout = () => {
   const { settings } = useSettingsContext() || {};
   const parseBool = (v) => (typeof v === 'boolean' ? v : v === 'true');
-  const isS3VectorsEnabled = parseBool(settings?.ShouldUseS3VectorsKnowledgeBase ?? 'true');
+  
+  //  Setting isS3VectorsEnabled to False for now in anticipation of Filterable Keys inclusion in BKB Schema
+  const isS3VectorsEnabled = false //parseBool(settings?.ShouldUseS3VectorsKnowledgeBase ?? 'true');
 
   const {
     schema,

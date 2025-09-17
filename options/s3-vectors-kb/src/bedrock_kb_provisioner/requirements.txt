@@ -1,0 +1,2 @@
+boto3
+../../idp_common_pkg

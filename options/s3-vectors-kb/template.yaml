@@ -1,14 +1,14 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
-Description: 'S3 Vectors Knowledge Base Infrastructure for GenAI IDP Accelerator'
+Description: 'Bedrock Knowledge Base with S3 Vectors Backend for GenAI IDP Accelerator'
 
 Parameters:
   pS3VectorsCatalogTableName:
     Type: String
-    Description: 'Name of the DynamoDB catalog table used for S3 Vectors (status, vectors, sessions, history)'
+    Description: 'Name of the DynamoDB catalog table used for session management'
   pS3VectorsCatalogTableArn:
     Type: String
-    Description: 'ARN of the DynamoDB catalog table used for S3 Vectors'
+    Description: 'ARN of the DynamoDB catalog table used for session management'
   pStackName:
     Type: String
     Description: 'Name of the parent CloudFormation stack'
@@ -51,26 +51,49 @@ Parameters:
     Description: Cross-region LLM model ID (with region prefix for cross-region access)
   VectorIndexName:
     Type: String
-    Description: 'Name for the S3 vector index (auto-generated if empty)'
-    Default: 'default-index'
-  VectorSimilarityMeasure:
-    Type: String
-    Default: 'cosine'
+    Description: 'Name for the S3 vector index'
+    Default: 'bedrock-kb-s3vectors-index'
   EmbeddingModelId:
     Type: String
-    Default: 'amazon.titan-embed-text-v2'
-  MaxVectorsPerBatch:
-    Type: Number
-    Default: 100
-  S3VectorsIngestionScheduleExpression:
+    Default: 'amazon.titan-embed-text-v2:0'
+  pKnowledgeBaseBucketName:
     Type: String
-    Default: "cron(0/30 * ? * * *)"
+    Default: ""
+    Description: 'S3 bucket name for knowledge base data source (will be created if empty)'
+  pInputDocumentUploadFolderPrefix:
+    Type: String
+    Default: ""
+    Description: 'S3 prefix for source documents'
+  pChunkingStrategy:
+    Type: String
+    AllowedValues:
+      - Default chunking
+      - Fixed-size chunking
+      - No chunking
+    Default: Fixed-size chunking
+    Description: 'Chunking strategy for document processing'
+  pMaxTokens:
+    Type: Number
+    MinValue: 20
+    MaxValue: 8192
+    Default: 300
+    Description: 'Maximum tokens per chunk for fixed-size chunking'
+  pOverlapPercentage:
+    Type: Number
+    MinValue: 1
+    MaxValue: 99
+    Default: 15
+    Description: 'Overlap percentage between chunks'
+  pSyncScheduleExpression:
+    Type: String
+    Default: "cron(0 0 * * ? *)"
+    Description: 'Schedule for data source synchronization'
 
 Mappings:
   EmbeddingModelDimensions:
     amazon.titan-embed-text-v1:
       Dimension: 1536
-    amazon.titan-embed-text-v2:
+    amazon.titan-embed-text-v2:0:
       Dimension: 1024
     cohere.embed-english-v3:
       Dimension: 1024
@@ -81,37 +104,52 @@ Conditions:
   pHasPermissionsBoundary: !Not [!Equals [!Ref pPermissionsBoundaryArn, ""]]
   pHasGuardrailConfig: !And [!Not [!Equals [!Ref pGuardrailId, ""]], !Not [!Equals [!Ref pGuardrailVersion, ""]]]
   pHasCustomerManagedEncryptionKey: !Not [!Equals [!Ref pCustomerManagedEncryptionKeyArn, ""]]
+  pCreateKnowledgeBaseBucket: !Equals [!Ref pKnowledgeBaseBucketName, ""]
+  pHasInputDocumentUploadFolderPrefix: !Not [!Equals [!Ref pInputDocumentUploadFolderPrefix, ""]]
+  pIsChunkingStrategyFixed: !Equals [!Ref pChunkingStrategy, "Fixed-size chunking"]
+  pIsChunkingStrategyDefault: !Equals [!Ref pChunkingStrategy, "Default chunking"]
+  pIsChunkingStrategyFixedOrDefault: !Or [!Condition pIsChunkingStrategyFixed, !Condition pIsChunkingStrategyDefault]
 
 Resources:
 
-  CrossRegionKnowledgeBaseModelId:
-    Type: AWS::SSM::Parameter
+  # Helper function to get adjusted stack name
+  GetAdjustedStackNameFunction:
+    Type: AWS::Serverless::Function
     Properties:
-      Name: !Sub "${AWS::StackName}-CrossRegionKnowledgeBaseModelId"
-      Type: String
-      Value: !Join
-        - "."
-        - [!Select [1, !Split [".", !Ref pKnowledgeBaseModelId]],
-           !Select [2, !Split [".", !Ref pKnowledgeBaseModelId]]]
+      PermissionsBoundary: !If [pHasPermissionsBoundary, !Ref pPermissionsBoundaryArn, !Ref AWS::NoValue]
+      Handler: index.handler
+      Runtime: python3.12
+      Timeout: 30
+      InlineCode: |
+        import cfnresponse
+        def handler(event, context):
+            output = event['ResourceProperties'].get('InputString', '').lower()
+            output = output[:32]
+            responseData = {'OutputString': output}
+            cfnresponse.send(event, context, cfnresponse.SUCCESS, responseData)
+      Environment:
+        Variables:
+          LOG_LEVEL: !Ref pLogLevel
 
-  S3VectorsProvisionerFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
+  AdjustedStackName:
+    Type: Custom::GetLowercase
     Properties:
-      LogGroupName: !Sub "/aws/lambda/${pStackName}-S3VecProvisionerLog"
-      KmsKeyId: !Ref pCustomerManagedEncryptionKeyArn
-      RetentionInDays: !Ref pLogRetentionDays
+      ServiceToken: !GetAtt GetAdjustedStackNameFunction.Arn
+      InputString: !Ref pStackName
 
+  # Note: Using existing OutputBucket from main template as S3 data source
+  # No need to create a separate bucket
+
+  # S3 Vectors resources for Knowledge Base backend
   S3VectorsProvisionerFunction:
     Type: AWS::Serverless::Function
     Properties:
-      CodeUri: src/s3_vectors_provisioner
+      CodeUri: src/bedrock_kb_provisioner
       Handler: index.handler
       Runtime: python3.12
-      Timeout: 120
-      MemorySize: 256
+      Timeout: 300
+      MemorySize: 512
       PermissionsBoundary: !If [pHasPermissionsBoundary, !Ref pPermissionsBoundaryArn, !Ref AWS::NoValue]
-      LoggingConfig:
-        LogGroup: !Ref S3VectorsProvisionerFunctionLogGroup
       Environment:
         Variables:
           LOG_LEVEL: !Ref pLogLevel
@@ -140,174 +178,212 @@ Resources:
     Type: AWS::CloudFormation::CustomResource
     Properties:
       ServiceToken: !GetAtt S3VectorsProvisionerFunction.Arn
-      VectorBucketName: !Sub "${pStackName}-s3vectors"
+      VectorBucketName: !Sub "${pStackName}-kb-s3vectors"
       VectorIndexName: !Ref VectorIndexName
       VectorDimension: !FindInMap 
         - EmbeddingModelDimensions
-        - !Select [0, !Split [":0", !Ref EmbeddingModelId]]
+        - !Ref EmbeddingModelId
         - Dimension
-      DistanceMetric: !Ref VectorSimilarityMeasure
+      DistanceMetric: "cosine"
 
-  S3VectorsQueryFunction:
+  # IAM Role for Bedrock Knowledge Base
+  KnowledgeBaseServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: bedrock.amazonaws.com
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Sub ${AWS::AccountId}
+              ArnLike:
+                aws:SourceArn: !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:knowledge-base/*"
+      PermissionsBoundary: !If [pHasPermissionsBoundary, !Ref pPermissionsBoundaryArn, !Ref AWS::NoValue]
+      Policies:
+        - PolicyName: bedrock-invoke-model
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: bedrock:InvokeModel
+                Resource: !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/*"
+        - PolicyName: s3vectors-access
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3vectors:PutVectors
+                  - s3vectors:QueryVectors
+                  - s3vectors:GetVectors
+                  - s3vectors:ListVectors
+                Resource: "*"
+        - PolicyName: s3-read-objects
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: s3:ListBucket
+                Resource: !Sub "arn:${AWS::Partition}:s3:::${pOutputBucket}"
+              - Effect: Allow
+                Action: s3:GetObject
+                Resource: !Sub "arn:${AWS::Partition}:s3:::${pOutputBucket}/*"
+        - !If
+          - pHasCustomerManagedEncryptionKey
+          - PolicyName: kms-key
+            PolicyDocument:
+              Version: "2012-10-17"
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - kms:Encrypt
+                    - kms:Decrypt
+                    - kms:ReEncrypt*
+                    - kms:GenerateDataKey*
+                    - kms:DescribeKey
+                  Resource: !Ref pCustomerManagedEncryptionKeyArn
+          - !Ref "AWS::NoValue"
+
+  # Bedrock Knowledge Base
+  KnowledgeBase:
+    Type: AWS::Bedrock::KnowledgeBase
+    DependsOn: S3VectorsProvisioner
+    Properties:
+      Description: !Sub "Bedrock Knowledge Base with S3 Vectors backend for ${pStackName}"
+      KnowledgeBaseConfiguration:
+        Type: VECTOR
+        VectorKnowledgeBaseConfiguration:
+          EmbeddingModelArn: !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/${EmbeddingModelId}"
+      Name: !Sub "${pStackName}-kb"
+      RoleArn: !GetAtt KnowledgeBaseServiceRole.Arn
+      StorageConfiguration:
+        Type: S3_VECTORS
+        S3VectorsConfiguration:
+          VectorBucketArn: !Sub "arn:${AWS::Partition}:s3vectors:${AWS::Region}:${AWS::AccountId}:bucket/${pStackName}-kb-s3vectors"
+          IndexArn: !Sub "arn:${AWS::Partition}:s3vectors:${AWS::Region}:${AWS::AccountId}:index/${pStackName}-kb-s3vectors/${VectorIndexName}"
+          IndexName: !Ref VectorIndexName
+
+  # Data Source for Knowledge Base
+  S3DataSource:
+    Type: AWS::Bedrock::DataSource
+    Properties:
+      DataDeletionPolicy: DELETE
+      DataSourceConfiguration:
+        Type: S3
+        S3Configuration:
+          BucketArn: !Sub "arn:${AWS::Partition}:s3:::${pOutputBucket}"
+          InclusionPrefixes: !If
+            - pHasInputDocumentUploadFolderPrefix
+            - !Split [",", !Ref pInputDocumentUploadFolderPrefix]
+            - !Ref AWS::NoValue
+      Description: !Sub "S3 Data Source for ${pStackName} Knowledge Base"
+      KnowledgeBaseId: !Ref KnowledgeBase
+      Name: !Sub "${pStackName}-s3-datasource"
+      VectorIngestionConfiguration:
+        ChunkingConfiguration:
+          ChunkingStrategy: !If
+            - pIsChunkingStrategyFixedOrDefault
+            - FIXED_SIZE
+            - NONE
+          FixedSizeChunkingConfiguration: !If
+            - pIsChunkingStrategyFixedOrDefault
+            - MaxTokens: !If
+                - pIsChunkingStrategyFixed
+                - !Ref pMaxTokens
+                - 300
+              OverlapPercentage: !If
+                - pIsChunkingStrategyFixed
+                - !Ref pOverlapPercentage
+                - 20
+            - !Ref AWS::NoValue
+
+  # Note: Query function removed - now using the main query_knowledgebase_resolver
+  # which works with both OpenSearch and S3 vectors backends through Bedrock KB APIs
+
+  # Ingestion management function
+  # Data Flow: OUTPUT_BUCKET (S3 data source) → Bedrock KB ingestion → S3 vectors backend
+  # This function only triggers ingestion jobs - Bedrock handles the rest automatically
+  BedrockKBIngestionFunction:
     Type: AWS::Serverless::Function
     Properties:
-      CodeUri: src/s3_vectors_query
+      CodeUri: src/bedrock_kb_ingestion
       Handler: index.handler
       Runtime: python3.12
-      Timeout: 60
+      Timeout: 300
       MemorySize: 512
       PermissionsBoundary: !If [pHasPermissionsBoundary, !Ref pPermissionsBoundaryArn, !Ref AWS::NoValue]
       Environment:
         Variables:
           LOG_LEVEL: !Ref pLogLevel
-          STACK_NAME: !Ref pStackName
-          S3_VECTORS_BUCKET: !Sub "${pStackName}-s3vectors"
-          S3_VECTORS_INDEX_NAME: !Ref VectorIndexName
-          VECTOR_SIMILARITY_MEASURE: !Ref VectorSimilarityMeasure
-          EMBEDDING_MODEL_ID: !Ref EmbeddingModelId
-          LLM_MODEL_ID: !Ref pKnowledgeBaseModelId
-          ALTERNATIVE_LLM_MODEL_ID: !GetAtt CrossRegionKnowledgeBaseModelId.Value
-          LIGHTWEIGHT_LLM_MODEL_ID: !Ref LightweightLLMModelId
-          ALTERNATE_LIGHTWEIGHT_LLM_MODEL_ID: !Ref CrossRegionLightweightLLMModelId
-          S3_VECTORS_CATALOG_TABLE: !Ref pS3VectorsCatalogTableName
-          GUARDRAIL_ID_AND_VERSION: !If [pHasGuardrailConfig, !Sub "${pGuardrailId}:${pGuardrailVersion}", ""]
+          KNOWLEDGE_BASE_ID: !Ref KnowledgeBase
+          DATA_SOURCE_ID: !GetAtt S3DataSource.DataSourceId
       Policies:
         - Statement:
             - Effect: Allow
               Action:
-                - s3vectors:QueryVectors
-                - s3vectors:GetVectors
-              Resource: "*"
-            - Effect: Allow
-              Action:
-                - bedrock:InvokeModel
-                - bedrock:InvokeModelWithResponseStream
-              Resource:
-                # Unknown AWS Routing Behavior for Nova Models to inference-profile
-                - !Sub "arn:${AWS::Partition}:bedrock:*::foundation-model/${EmbeddingModelId}"
-                - !Sub "arn:${AWS::Partition}:bedrock:*::foundation-model/${pKnowledgeBaseModelId}"
-                - !Sub "arn:${AWS::Partition}:bedrock:*::foundation-model/${LightweightLLMModelId}"
-                - !Sub "arn:${AWS::Partition}:bedrock:*::foundation-model/${CrossRegionLightweightLLMModelId}"
-                - !Sub "arn:${AWS::Partition}:bedrock:*::foundation-model/${CrossRegionKnowledgeBaseModelId.Value}"
-                - !Sub "arn:${AWS::Partition}:bedrock:*:${AWS::AccountId}:inference-profile/${EmbeddingModelId}"
-                - !Sub "arn:${AWS::Partition}:bedrock:*:${AWS::AccountId}:inference-profile/${pKnowledgeBaseModelId}"
-                - !Sub "arn:${AWS::Partition}:bedrock:*:${AWS::AccountId}:inference-profile/${LightweightLLMModelId}"
-                - !Sub "arn:${AWS::Partition}:bedrock:*:${AWS::AccountId}:inference-profile/${CrossRegionLightweightLLMModelId}"
-                - !Sub "arn:${AWS::Partition}:bedrock:*:${AWS::AccountId}:inference-profile/${CrossRegionKnowledgeBaseModelId.Value}"
-            - Effect: Allow
-              Action:
-                - dynamodb:GetItem
-                - dynamodb:PutItem
-                - dynamodb:UpdateItem
-              Resource: !Ref pS3VectorsCatalogTableArn
-            - Effect: Allow
-              Action:
-                - cloudwatch:PutMetricData
-              Resource: "*"
-            - Effect: Allow
-              Action:
-                - kms:Encrypt
-                - kms:Decrypt
-                - kms:ReEncrypt*
-                - kms:GenerateDataKey*
-                - kms:DescribeKey
-                - kms:CreateGrant
-              Resource: !Ref pCustomerManagedEncryptionKeyArn
+                - bedrock:StartIngestionJob
+              Resource: !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:knowledge-base/${KnowledgeBase}"
 
-  S3VectorsIngestionFunction:
+  # Start initial ingestion job
+  StartIngestionJobFunction:
     Type: AWS::Serverless::Function
     Properties:
-      CodeUri: src/s3_vectors_ingestion
       Handler: index.handler
       Runtime: python3.12
-      Timeout: 900
-      MemorySize: 1024
+      Timeout: 600
+      MemorySize: 128
       PermissionsBoundary: !If [pHasPermissionsBoundary, !Ref pPermissionsBoundaryArn, !Ref AWS::NoValue]
+      InlineCode: |
+        import boto3
+        import json
+        import cfnresponse
+        import logging
+        
+        logger = logging.getLogger()
+        logger.setLevel(logging.INFO)
+        
+        client = boto3.client('bedrock-agent')
+        
+        def handler(event, context):
+            try:
+                if event['RequestType'] in ['Create', 'Update']:
+                    knowledge_base_id = event['ResourceProperties']['knowledgeBaseId']
+                    data_source_id = event['ResourceProperties']['dataSourceId']
+                    
+                    response = client.start_ingestion_job(
+                        knowledgeBaseId=knowledge_base_id,
+                        dataSourceId=data_source_id,
+                        description="Initial ingestion job started by CloudFormation"
+                    )
+                    logger.info(f"Started ingestion job: {response}")
+                
+                cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+            except Exception as e:
+                logger.error(f"Error: {e}")
+                cfnresponse.send(event, context, cfnresponse.SUCCESS, {})  # Don't fail stack on ingestion errors
       Environment:
         Variables:
           LOG_LEVEL: !Ref pLogLevel
-          STACK_NAME: !Ref pStackName
-          OUTPUT_BUCKET: !Ref pOutputBucket
-          S3_VECTORS_BUCKET: !Sub "${pStackName}-s3vectors"
-          S3_VECTORS_CATALOG_TABLE: !Ref pS3VectorsCatalogTableName
-          S3_VECTORS_INDEX_NAME: !Ref VectorIndexName
-          EMBEDDING_MODEL_ID: !Ref EmbeddingModelId
-          MAX_VECTORS_PER_BATCH: !Ref MaxVectorsPerBatch
-          VECTOR_DIMENSION: !FindInMap
-            - EmbeddingModelDimensions
-            - !Select [0, !Split [":0", !Ref EmbeddingModelId]]
-            - Dimension
-          VECTOR_SIMILARITY_MEASURE: !Ref VectorSimilarityMeasure
-          CHUNK_SIZE: 300
-          CHUNK_OVERLAP: 50
-          USE_LLM_CLASSIFICATION: "false"
-          LIGHTWEIGHT_LLM_MODEL_ID: !Ref LightweightLLMModelId
-          ALTERNATE_LIGHTWEIGHT_LLM_MODEL_ID: !Ref CrossRegionLightweightLLMModelId
-          CONFIGURATION_TABLE_NAME: !Ref pConfigurationTable
-      LoggingConfig:
-        LogGroup: !Ref S3VectorsIngestionFunctionLogGroup
       Policies:
         - Statement:
             - Effect: Allow
               Action:
-                - s3:ListBucket
-              Resource: !Sub "arn:${AWS::Partition}:s3:::${pOutputBucket}"
-            - Effect: Allow
-              Action:
-                - s3:GetObject
-              Resource: !Sub "arn:${AWS::Partition}:s3:::${pOutputBucket}/*"
-            - Effect: Allow
-              Action:
-                - s3vectors:PutVectors
-                - s3vectors:CreateIndex
-              Resource: "*"
-            - Effect: Allow
-              Action:
-                - dynamodb:GetItem
-                - dynamodb:PutItem
-                - dynamodb:UpdateItem
-              Resource: !Ref pS3VectorsCatalogTableArn
-            - Effect: Allow
-              Action:
-                - dynamodb:GetItem
-              Resource: !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${pConfigurationTable}"
-            - !If
-              - pHasCustomerManagedEncryptionKey
-              - Effect: Allow
-                Action:
-                  - kms:Encrypt
-                  - kms:Decrypt
-                  - kms:ReEncrypt*
-                  - kms:GenerateDataKey*
-                  - kms:DescribeKey
-                  - kms:CreateGrant
-                Resource: !Ref pCustomerManagedEncryptionKeyArn
-              - !Ref AWS::NoValue
-            - Effect: Allow
-              Action:
-                - bedrock:InvokeModel
-                - bedrock:InvokeModelWithResponseStream
-              Resource:
-                # Unknown AWS Routing Behavior for Nova Models to inference-profile
-                - !Sub "arn:${AWS::Partition}:bedrock:*::foundation-model/${EmbeddingModelId}"
-                - !Sub "arn:${AWS::Partition}:bedrock:*::foundation-model/${LightweightLLMModelId}"
-                - !Sub "arn:${AWS::Partition}:bedrock:*::foundation-model/${CrossRegionLightweightLLMModelId}"
-                - !Sub "arn:${AWS::Partition}:bedrock:*:${AWS::AccountId}:inference-profile/${EmbeddingModelId}"
-                - !Sub "arn:${AWS::Partition}:bedrock:*:${AWS::AccountId}:inference-profile/${LightweightLLMModelId}"
-                - !Sub "arn:${AWS::Partition}:bedrock:*:${AWS::AccountId}:inference-profile/${CrossRegionLightweightLLMModelId}"
-            - Effect: Allow
-              Action:
-                - cloudwatch:PutMetricData
-              Resource: "*"
+                - bedrock:StartIngestionJob
+              Resource: !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:knowledge-base/${KnowledgeBase}"
 
-  S3VectorsIngestionFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
+  StartInitialIngestionJob:
+    Type: AWS::CloudFormation::CustomResource
     Properties:
-      LogGroupName: !Sub "/aws/lambda/${pStackName}-S3VecIngestFnLog"
-      KmsKeyId: !Ref pCustomerManagedEncryptionKeyArn
-      RetentionInDays: !Ref pLogRetentionDays
+      ServiceToken: !GetAtt StartIngestionJobFunction.Arn
+      knowledgeBaseId: !Ref KnowledgeBase
+      dataSourceId: !GetAtt S3DataSource.DataSourceId
 
-  S3VectorsIngestionSchedulerRole:
+  # Scheduler for periodic ingestion
+  IngestionSchedulerRole:
     Type: AWS::IAM::Role
     Properties:
       AssumeRolePolicyDocument:
@@ -319,156 +395,50 @@ Resources:
             Action: sts:AssumeRole
       PermissionsBoundary: !If [pHasPermissionsBoundary, !Ref pPermissionsBoundaryArn, !Ref AWS::NoValue]
       Policies:
-        - PolicyName: InvokeIngestionLambda
+        - PolicyName: InvokeLambda
           PolicyDocument:
             Version: "2012-10-17"
             Statement:
               - Effect: Allow
                 Action: lambda:InvokeFunction
-                Resource: !GetAtt S3VectorsIngestionFunction.Arn
+                Resource: !GetAtt BedrockKBIngestionFunction.Arn
 
-  S3VectorsIngestionSchedule:
+  IngestionSchedule:
     Type: AWS::Scheduler::Schedule
     Properties:
-      Description: "Schedule to trigger S3 Vectors ingestion"
+      Description: "Schedule to trigger Knowledge Base data source sync"
       FlexibleTimeWindow:
         Mode: "OFF"
-      ScheduleExpression: !Ref S3VectorsIngestionScheduleExpression
+      ScheduleExpression: !Ref pSyncScheduleExpression
       ScheduleExpressionTimezone: "UTC"
       State: ENABLED
       Target:
-        Arn: !GetAtt S3VectorsIngestionFunction.Arn
-        RoleArn: !GetAtt S3VectorsIngestionSchedulerRole.Arn
-        Input: !Sub |
-          {
-            "source": "scheduler",
-            "action": "scan_and_ingest"
-          }
+        Arn: !GetAtt BedrockKBIngestionFunction.Arn
+        RoleArn: !GetAtt IngestionSchedulerRole.Arn
 
-  S3MetadataFilterAnalyzerFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      CodeUri: src/s3_metadata_filter_analyzer
-      Handler: index.handler
-      Runtime: python3.12
-      Timeout: 300
-      MemorySize: 512
-      PermissionsBoundary: !If [pHasPermissionsBoundary, !Ref pPermissionsBoundaryArn, !Ref AWS::NoValue]
-      Environment:
-        Variables:
-          LOG_LEVEL: !Ref pLogLevel
-          S3_VECTORS_BUCKET_NAME: !Sub "${pStackName}-s3vectors"
-          S3_VECTORS_INDEX_NAME: !Ref VectorIndexName
-          QUERY_LAMBDA_FUNCTION_NAME: !Ref S3VectorsQueryFunction
-          WORKING_BUCKET: !Ref pWorkingBucket
-          LLM_MODEL_ID: !Ref pKnowledgeBaseModelId
-          ALTERNATIVE_LLM_MODEL_ID: !GetAtt CrossRegionKnowledgeBaseModelId.Value
-      LoggingConfig:
-        LogGroup: !Ref S3MetadataFilterAnalyzerLogGroup
-      Policies:
-        - Statement:
-            - Effect: Allow
-              Action:
-                - s3vectors:ListVectors
-                - s3vectors:GetVectors
-              Resource: "*"
-            - Effect: Allow
-              Action:
-                - s3:PutObject
-              Resource: !Sub "arn:${AWS::Partition}:s3:::${pWorkingBucket}/*"
-            - Effect: Allow
-              Action:
-                - lambda:GetFunctionConfiguration
-                - lambda:UpdateFunctionConfiguration
-              Resource: !GetAtt S3VectorsQueryFunction.Arn
-            - Effect: Allow
-              Action:
-                - cloudwatch:PutMetricData
-              Resource: "*"
-            - Effect: Allow
-              Action:
-                - bedrock:InvokeModel
-              Resource:
-                # Unknown AWS Routing Behavior for Nova Models to inference-profile
-                - !Sub "arn:${AWS::Partition}:bedrock:*::foundation-model/${pKnowledgeBaseModelId}"
-                - !Sub "arn:${AWS::Partition}:bedrock:*::foundation-model/${CrossRegionKnowledgeBaseModelId.Value}"
-                - !Sub "arn:${AWS::Partition}:bedrock:*:${AWS::AccountId}:inference-profile/${pKnowledgeBaseModelId}"
-                - !Sub "arn:${AWS::Partition}:bedrock:*:${AWS::AccountId}:inference-profile/${CrossRegionKnowledgeBaseModelId.Value}"
-            - !If
-              - pHasCustomerManagedEncryptionKey
-              - Effect: Allow
-                Action:
-                  - kms:Encrypt
-                  - kms:Decrypt
-                  - kms:ReEncrypt*
-                  - kms:GenerateDataKey*
-                  - kms:DescribeKey
-                  - kms:CreateGrant
-                Resource: !Ref pCustomerManagedEncryptionKeyArn
-              - !Ref AWS::NoValue
-
-  S3MetadataFilterAnalyzerLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName: !Sub "/aws/lambda/${pStackName}-S3MetaFilterLog"
-      KmsKeyId: !Ref pCustomerManagedEncryptionKeyArn
-      RetentionInDays: !Ref pLogRetentionDays
-
-  S3MetadataFilterAnalyzerSchedule:
-    Type: AWS::Events::Rule
-    Properties:
-      ScheduleExpression: rate(1 day)
-      State: ENABLED
-      Targets:
-        - Arn: !GetAtt S3MetadataFilterAnalyzerFunction.Arn
-          Id: "S3MetadataFilterAnalyzerTarget"
-
-  S3MetadataFilterAnalyzerPermission:
-    Type: AWS::Lambda::Permission
-    Properties:
-      FunctionName: !GetAtt S3MetadataFilterAnalyzerFunction.Arn
-      Action: lambda:InvokeFunction
-      Principal: events.amazonaws.com
-      SourceArn: !GetAtt S3MetadataFilterAnalyzerSchedule.Arn
-
-  S3VectorsQueryLatencyAlarm:
+  # CloudWatch Alarms for monitoring
+  KnowledgeBaseQueryLatencyAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
-      AlarmName: !Sub '${pStackName}-S3Vectors-HighQueryLatency'
-      AlarmDescription: 'S3 Vectors query latency exceeds 15 seconds'
-      MetricName: S3VectorsQueryLatency
+      AlarmName: !Sub '${pStackName}-KnowledgeBase-HighQueryLatency'
+      AlarmDescription: 'Knowledge Base query latency exceeds 30 seconds'
+      MetricName: KnowledgeBaseQueryLatency
       Namespace: !Ref pStackName
       Statistic: Average
       Period: 300
       EvaluationPeriods: 2
-      Threshold: 15000
+      Threshold: 30000
       ComparisonOperator: GreaterThanThreshold
       TreatMissingData: notBreaching
       AlarmActions:
         - !Ref pAlertsTopicArn
 
-  S3VectorsIngestionFailureAlarm:
+  KnowledgeBaseQueryFailureAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
-      AlarmName: !Sub '${pStackName}-S3Vectors-IngestionFailures'
-      AlarmDescription: 'S3 Vectors ingestion success rate below 95%'
-      MetricName: S3VectorsIngestionSuccessRate
-      Namespace: !Ref pStackName
-      Statistic: Average
-      Period: 300
-      EvaluationPeriods: 2
-      Threshold: 95
-      ComparisonOperator: LessThanThreshold
-      TreatMissingData: notBreaching
-      AlarmActions:
-        - !Ref pAlertsTopicArn
-
-  S3VectorsQueryFailureAlarm:
-    Type: AWS::CloudWatch::Alarm
-    Properties:
-      AlarmName: !Sub '${pStackName}-S3Vectors-QueryFailures'
-      AlarmDescription: 'S3 Vectors query success rate below 95%'
-      MetricName: S3VectorsQuerySuccessRate
+      AlarmName: !Sub '${pStackName}-KnowledgeBase-QueryFailures'
+      AlarmDescription: 'Knowledge Base query success rate below 95%'
+      MetricName: KnowledgeBaseQuerySuccessRate
       Namespace: !Ref pStackName
       Statistic: Average
       Period: 300
@@ -480,39 +450,53 @@ Resources:
         - !Ref pAlertsTopicArn
 
 Outputs:
-  S3VectorsProvisionerRoleArn:
-    Description: ARN of the provisioner IAM role for S3 Vectors
-    Value: !GetAtt S3VectorsProvisionerFunctionRole.Arn
+  KnowledgeBaseId:
+    Description: 'ID of the Bedrock Knowledge Base'
+    Value: !Ref KnowledgeBase
     Export:
-      Name: !Sub "${AWS::StackName}-S3VectorsProvisionerRoleArn"
+      Name: !Sub "${AWS::StackName}-KnowledgeBaseId"
 
-  S3VectorsProvisionerFunctionArn:
-    Description: ARN of the provisioner Lambda function for S3 Vectors
-    Value: !GetAtt S3VectorsProvisionerFunction.Arn
+  KnowledgeBaseArn:
+    Description: 'ARN of the Bedrock Knowledge Base'
+    Value: !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:knowledge-base/${KnowledgeBase}"
     Export:
-      Name: !Sub "${AWS::StackName}-S3VectorsProvisionerFunctionArn"
+      Name: !Sub "${AWS::StackName}-KnowledgeBaseArn"
+
+  DataSourceId:
+    Description: 'ID of the S3 Data Source'
+    Value: !GetAtt S3DataSource.DataSourceId
+    Export:
+      Name: !Sub "${AWS::StackName}-DataSourceId"
+
+  KnowledgeBaseBucketName:
+    Description: 'Name of the S3 bucket used for knowledge base data source'
+    Value: !If
+      - pCreateKnowledgeBaseBucket
+      - !Ref KnowledgeBaseBucket
+      - !Ref pKnowledgeBaseBucketName
+    Export:
+      Name: !Sub "${AWS::StackName}-KnowledgeBaseBucketName"
+
+  # Note: Query function ARN removed - now using main query_knowledgebase_resolver
+
+  BedrockKBIngestionFunctionArn:
+    Description: 'ARN of the Bedrock Knowledge Base Ingestion Lambda function'
+    Value: !GetAtt BedrockKBIngestionFunction.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-IngestionFunctionArn"
 
   S3VectorsCatalogTableName:
-    Description: 'Name of the DynamoDB catalog table used for S3 Vectors (status, vectors, sessions, history)'
+    Description: 'Name of the DynamoDB catalog table used for session management'
     Value: !Ref pS3VectorsCatalogTableName
+
   S3VectorsCatalogTableArn:
-    Description: 'ARN of the DynamoDB catalog table used for S3 Vectors'
+    Description: 'ARN of the DynamoDB catalog table used for session management'
     Value: !Ref pS3VectorsCatalogTableArn
-  S3VectorsQueryFunctionArn:
-    Description: 'ARN of the S3 Vectors Query Lambda function'
-    Value: !GetAtt S3VectorsQueryFunction.Arn
-  S3VectorsIngestionFunctionArn:
-    Description: 'ARN of the S3 Vectors Ingestion Lambda function'
-    Value: !GetAtt S3VectorsIngestionFunction.Arn
-  S3MetadataFilterAnalyzerFunctionArn:
-    Description: 'ARN of the S3 Metadata Filter Analyzer Lambda function'
-    Value: !GetAtt S3MetadataFilterAnalyzerFunction.Arn
+
   EmbeddingModelId:
     Description: 'Configured embedding model for vector generation'
     Value: !Ref EmbeddingModelId
-  MaxVectorsPerBatch:
-    Description: 'Configured maximum vectors per batch for ingestion'
-    Value: !Ref MaxVectorsPerBatch
-  VectorSimilarityMeasure:
-    Description: 'Configured distance metric for vectors'
-    Value: !Ref VectorSimilarityMeasure
+
+  VectorIndexName:
+    Description: 'Name of the S3 vectors index'
+    Value: !Ref VectorIndexName

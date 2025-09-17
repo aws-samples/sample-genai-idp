@@ -1,9 +1,29 @@
 Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 SPDX-License-Identifier: MIT-0
 
-# Document Knowledge Base Query
+# Document Knowledge Base
 
-The GenAIIDP solution includes an integrated Document Knowledge Base query feature that enables you to interactively ask questions about your processed document collection using natural language. This feature leverages the processed data to create a searchable knowledge base.
+The GenAI IDP solution includes an integrated Document Knowledge Base feature that enables you to interactively ask questions about your processed document collection using natural language. This feature leverages the processed data to create a searchable knowledge base with flexible backend options.
+
+## Backend Options Overview
+
+The solution provides **flexible knowledge base backend options**, allowing you to choose the storage and retrieval architecture that best fits your requirements:
+
+- **OpenSearch**: Traditional knowledge base using Amazon OpenSearch Service with Bedrock Knowledge Base integration
+- **S3 Vectors**: Serverless knowledge base using AWS S3 Vectors service with Bedrock Knowledge Base integration  
+- **Disabled**: No knowledge base functionality (document processing only)
+
+### Backend Comparison
+
+| Feature | OpenSearch | S3 Vectors | Disabled |
+|---------|------------|------------|----------|
+| **Architecture** | Always-on OpenSearch cluster | Serverless S3 Vectors service | No knowledge base |
+| **Query Processing** | Bedrock Knowledge Base APIs | Bedrock Knowledge Base APIs | N/A |
+| **Infrastructure Cost** | ~$11/day for cluster | Pay-per-query | $0 |
+| **Query Performance** | Sub-second responses | 2-10 second responses | N/A |
+| **Best For** | Real-time analytics, fast queries | Cost-effective large-scale processing | Processing-only workflows |
+
+Both OpenSearch and S3 Vectors backends use **Amazon Bedrock Knowledge Base** for consistent query processing, document chunking, and response generation. The difference is in the underlying vector storage mechanism.
 
 ## How It Works
 
@@ -35,26 +55,34 @@ The GenAIIDP solution includes an integrated Document Knowledge Base query featu
 
 ## Configuration
 
-The Document Knowledge Base Query feature can be configured during stack deployment:
+### CloudFormation Parameters
 
-```yaml
-ShouldUseDocumentKnowledgeBase:
-  Type: String
-  Default: "true"
-  AllowedValues:
-    - "true"
-    - "false"
-  Description: Enable/disable the Document Knowledge Base feature
+Configure the knowledge base backend during stack deployment:
 
-DocumentKnowledgeBaseModel:
-  Type: String
-  Default: "us.amazon.nova-pro-v1:0"
-  Description: Bedrock model to use for knowledge base queries (e.g., "us.anthropic.claude-3-7-sonnet-20250219-v1:0")
-```
+| Parameter | Values | Description |
+|-----------|--------|-------------|
+| `DocumentKnowledgeBase` | `OpenSearch` \| `S3 Vectors` \| `Disabled` | Selects knowledge base backend or disables it entirely |
+| `KnowledgeBaseModelId` | Model ARN | Foundational model for knowledge base chat (e.g., `us.amazon.nova-pro-v1:0`) |
+| `DocumentAnalysisAgentModelId` | Model ARN | Model for document analytics queries |
 
-When the feature is enabled, the solution:
-- Creates necessary OpenSearch resources for document indexing
-- Configures API endpoints for querying the knowledge base
+### S3 Vectors Specific Parameters
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `VectorSimilarityMeasure` | `cosine` | Distance metric (`cosine` \| `euclidean`) |
+| `KnowledgeBaseEmbeddingModelId` | `amazon.titan-embed-text-v2:0` | Embedding model for vectorization |
+
+### Vector Similarity Measures
+
+Choose the appropriate similarity measure for your use case:
+
+- **Cosine Similarity** (Recommended): Measures angle between vectors, normalized for document length. Best for finding documents with similar topics regardless of length.
+- **Euclidean Distance**: Measures absolute distance, sensitive to vector magnitude. Best when both content similarity and document characteristics matter.
+
+When the knowledge base is enabled, the solution:
+- Creates the selected backend infrastructure (OpenSearch cluster or S3 Vectors resources)
+- Configures Bedrock Knowledge Base integration
+- Sets up automatic document ingestion from processed documents
 - Adds the query interface to the Web UI
 
 ## Using the Knowledge Base
@@ -88,17 +116,59 @@ When the feature is enabled, the solution:
 3. This allows for a natural conversation about your documents
 4. You can start a new topic at any time by asking an unrelated question
 
+## Choosing the Right Backend
+
+### Choose OpenSearch When:
+- You need fast, sub-second query responses
+- You have consistent, predictable query patterns
+- You require real-time analytics capabilities
+- You have existing OpenSearch expertise
+- Query performance is more important than cost optimization
+
+### Choose S3 Vectors When:
+- You prefer serverless, pay-per-use pricing
+- You have variable or unpredictable query patterns
+- Cost optimization is a primary concern
+- You can accept 2-10 second query response times
+- You want to minimize always-on infrastructure
+
+### Choose Disabled When:
+- You only need document processing capabilities
+- Knowledge base querying is not required
+- You want to minimize infrastructure costs
+- You plan to integrate with external knowledge base systems
+
 ## Best Practices
 
+### Query Best Practices
 1. **Be specific**: Clearly state what information you're looking for
 2. **Start broad, then narrow**: Begin with general questions before diving into specifics
 3. **Use follow-ups**: Build on previous questions to explore topics in depth
 4. **Check citations**: Verify information by consulting the source documents
 5. **Refine questions**: If you don't get the expected answer, try rephrasing your question
 
+### Configuration Best Practices
+- Test both backends with your document corpus before deciding on production deployment
+- Monitor resource utilization and costs after deployment
+- Use appropriate embedding models for your content language and type
+- Consider your query patterns when choosing between backends
+
 ## Performance Considerations
 
-- **Document Collection Size**: Performance may vary with very large document collections
+### OpenSearch Backend
+- **Query Response Time**: Sub-second responses for most queries
+- **Infrastructure**: Always-on cluster with consistent performance
+- **Scaling**: Automatic scaling based on query load
+- **Cost**: Fixed daily cost (~$11/day) regardless of usage
+
+### S3 Vectors Backend  
+- **Query Response Time**: 2-10 seconds depending on document corpus size
+- **Infrastructure**: Serverless, scales automatically
+- **Scaling**: Pay-per-query model with automatic scaling
+- **Cost**: Variable cost based on actual usage
+
+### General Considerations
+- **Document Collection Size**: Both backends handle large collections, but query times may vary
 - **Query Complexity**: More complex queries may take longer to process
 - **Document Types**: Some document types may be indexed more effectively than others
 - **Model Selection**: Different Bedrock models offer different performance/accuracy tradeoffs
