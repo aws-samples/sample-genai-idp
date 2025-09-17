@@ -3,12 +3,6 @@ Transform: AWS::Serverless-2016-10-31
 Description: 'Bedrock Knowledge Base with S3 Vectors Backend for GenAI IDP Accelerator'
 
 Parameters:
-  pS3VectorsCatalogTableName:
-    Type: String
-    Description: 'Name of the DynamoDB catalog table used for session management'
-  pS3VectorsCatalogTableArn:
-    Type: String
-    Description: 'ARN of the DynamoDB catalog table used for session management'
   pStackName:
     Type: String
     Description: 'Name of the parent CloudFormation stack'
@@ -29,26 +23,6 @@ Parameters:
     Type: String
   pOutputBucket:
     Type: String
-  pWorkingBucket:
-    Type: String
-  pConfigurationTable:
-    Type: String
-  pKnowledgeBaseModelId:
-    Type: String
-  pGuardrailId:
-    Type: String
-    Default: ""
-  pGuardrailVersion:
-    Type: String
-    Default: ""
-  LightweightLLMModelId:
-    Type: String
-    Default: "amazon.nova-micro-v1:0"
-    Description: Lightweight LLM model ID for local region
-  CrossRegionLightweightLLMModelId:
-    Type: String
-    Default: "us.amazon.nova-micro-v1:0"
-    Description: Cross-region LLM model ID (with region prefix for cross-region access)
   VectorIndexName:
     Type: String
     Description: 'Name for the S3 vector index'
@@ -56,14 +30,10 @@ Parameters:
   EmbeddingModelId:
     Type: String
     Default: 'amazon.titan-embed-text-v2:0'
-  pKnowledgeBaseBucketName:
-    Type: String
-    Default: ""
-    Description: 'S3 bucket name for knowledge base data source (will be created if empty)'
   pInputDocumentUploadFolderPrefix:
     Type: String
     Default: ""
-    Description: 'S3 prefix for source documents'
+    Description: 'S3 prefix for source documents in OutputBucket'
   pChunkingStrategy:
     Type: String
     AllowedValues:
@@ -84,10 +54,17 @@ Parameters:
     MaxValue: 99
     Default: 15
     Description: 'Overlap percentage between chunks'
-  pSyncScheduleExpression:
+  VectorSimilarityMeasure:
     Type: String
-    Default: "cron(0 0 * * ? *)"
-    Description: 'Schedule for data source synchronization'
+    Default: "cosine"
+    AllowedValues:
+      - "cosine"
+      - "euclidean"
+    Description: 'Distance metric for S3 vectors similarity calculations'
+  S3VectorsIngestionScheduleExpression:
+    Type: String
+    Default: "cron(0/30 * ? * * *)"
+    Description: 'Schedule expression for S3 vectors ingestion jobs'
 
 Mappings:
   EmbeddingModelDimensions:
@@ -102,9 +79,7 @@ Mappings:
 
 Conditions:
   pHasPermissionsBoundary: !Not [!Equals [!Ref pPermissionsBoundaryArn, ""]]
-  pHasGuardrailConfig: !And [!Not [!Equals [!Ref pGuardrailId, ""]], !Not [!Equals [!Ref pGuardrailVersion, ""]]]
   pHasCustomerManagedEncryptionKey: !Not [!Equals [!Ref pCustomerManagedEncryptionKeyArn, ""]]
-  pCreateKnowledgeBaseBucket: !Equals [!Ref pKnowledgeBaseBucketName, ""]
   pHasInputDocumentUploadFolderPrefix: !Not [!Equals [!Ref pInputDocumentUploadFolderPrefix, ""]]
   pIsChunkingStrategyFixed: !Equals [!Ref pChunkingStrategy, "Fixed-size chunking"]
   pIsChunkingStrategyDefault: !Equals [!Ref pChunkingStrategy, "Default chunking"]
@@ -184,7 +159,7 @@ Resources:
         - EmbeddingModelDimensions
         - !Ref EmbeddingModelId
         - Dimension
-      DistanceMetric: "cosine"
+      DistanceMetric: !Ref VectorSimilarityMeasure
 
   # IAM Role for Bedrock Knowledge Base
   KnowledgeBaseServiceRole:
@@ -409,7 +384,7 @@ Resources:
       Description: "Schedule to trigger Knowledge Base data source sync"
       FlexibleTimeWindow:
         Mode: "OFF"
-      ScheduleExpression: !Ref pSyncScheduleExpression
+      ScheduleExpression: !Ref S3VectorsIngestionScheduleExpression
       ScheduleExpressionTimezone: "UTC"
       State: ENABLED
       Target:
@@ -469,11 +444,8 @@ Outputs:
       Name: !Sub "${AWS::StackName}-DataSourceId"
 
   KnowledgeBaseBucketName:
-    Description: 'Name of the S3 bucket used for knowledge base data source'
-    Value: !If
-      - pCreateKnowledgeBaseBucket
-      - !Ref KnowledgeBaseBucket
-      - !Ref pKnowledgeBaseBucketName
+    Description: 'Name of the S3 bucket used for knowledge base data source (OutputBucket)'
+    Value: !Ref pOutputBucket
     Export:
       Name: !Sub "${AWS::StackName}-KnowledgeBaseBucketName"
 
@@ -485,14 +457,6 @@ Outputs:
     Export:
       Name: !Sub "${AWS::StackName}-IngestionFunctionArn"
 
-  S3VectorsCatalogTableName:
-    Description: 'Name of the DynamoDB catalog table used for session management'
-    Value: !Ref pS3VectorsCatalogTableName
-
-  S3VectorsCatalogTableArn:
-    Description: 'ARN of the DynamoDB catalog table used for session management'
-    Value: !Ref pS3VectorsCatalogTableArn
-
   EmbeddingModelId:
     Description: 'Configured embedding model for vector generation'
     Value: !Ref EmbeddingModelId
@@ -500,3 +464,7 @@ Outputs:
   VectorIndexName:
     Description: 'Name of the S3 vectors index'
     Value: !Ref VectorIndexName
+
+  VectorSimilarityMeasure:
+    Description: 'Configured distance metric for vectors'
+    Value: !Ref VectorSimilarityMeasure

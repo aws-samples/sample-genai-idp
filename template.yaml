@@ -893,19 +893,11 @@ Resources:
         pLogRetentionDays: !Ref LogRetentionDays
         pPermissionsBoundaryArn: !Ref PermissionsBoundaryArn
         pCustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
-        pS3VectorsCatalogTableName: !Ref S3VectorsCatalogTable
-        pS3VectorsCatalogTableArn: !GetAtt S3VectorsCatalogTable.Arn
         pAlertsTopicArn: !Ref AlertsTopic
         pOutputBucket: !Ref OutputBucket
-        pWorkingBucket: !Ref WorkingBucket
-        pConfigurationTable: !Ref ConfigurationTable
-        pKnowledgeBaseModelId: !Ref KnowledgeBaseModelId
-        pGuardrailId: !Ref BedrockGuardrailId
-        pGuardrailVersion: !Ref BedrockGuardrailVersion
         VectorIndexName: !Ref KnowledgeBaseVectorIndexName
         VectorSimilarityMeasure: !Ref VectorSimilarityMeasure
         EmbeddingModelId: !Ref KnowledgeBaseEmbeddingModelId
-        MaxVectorsPerBatch: "100"
         S3VectorsIngestionScheduleExpression: !Ref S3VectorsIngestionScheduleExpression
 
 
