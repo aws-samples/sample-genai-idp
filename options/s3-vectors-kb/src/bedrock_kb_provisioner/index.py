@@ -64,6 +64,8 @@ def provision_s3_vector_resources_and_knowledge_base(
     
     try:
         # Try to create the Knowledge Base
+        # Based on the error "Vector index name should not be present with namespace arn"
+        # Let's try using just indexName without indexArn
         kb_response = bedrock_client.create_knowledge_base(
             name=kb_name,
             description=kb_description,
@@ -78,8 +80,8 @@ def provision_s3_vector_resources_and_knowledge_base(
                 'type': 'S3_VECTORS',
                 's3VectorsConfiguration': {
                     'vectorBucketArn': vector_bucket_arn,
-                    'indexArn': index_arn,
                     'indexName': vector_index_name
+                    # Trying without indexArn to avoid the namespace arn conflict
                 }
             }
         )
