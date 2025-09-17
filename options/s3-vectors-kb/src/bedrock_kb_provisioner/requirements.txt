@@ -1,2 +1,2 @@
 boto3
-../../idp_common_pkg
+../../lib/idp_common_pkg

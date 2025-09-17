@@ -6125,15 +6125,6 @@ Resources:
           KB_REGION: !Ref AWS::Region
           MODEL_ID: !Ref KnowledgeBaseModelId
           GUARDRAIL_ID_AND_VERSION: !If [HasGuardrailConfig, !Sub "${BedrockGuardrailId}:${BedrockGuardrailVersion}", ""]
-          # Note: S3 vectors specific environment variables removed - now handled by Bedrock KB
-            - ShouldUseS3VectorsKnowledgeBase
-            - !Ref S3VectorsCatalogTable
-            - ""
-          S3_VECTORS_EMBEDDING_MODEL: !If
-            - ShouldUseS3VectorsKnowledgeBase
-            - !GetAtt DOCUMENTS3VECTORSKB.Outputs.EmbeddingModelId
-            - ""
-          # Note: S3 vectors now uses Bedrock KB APIs directly, no separate query function needed
       LoggingConfig:
         LogGroup: !Ref QueryKnowledgeBaseResolverFunctionLogGroup
       Policies:
