@@ -134,7 +134,12 @@ Resources:
                 - bedrock:CreateKnowledgeBase
                 - bedrock:ListKnowledgeBases
                 - bedrock:GetKnowledgeBase
+                - bedrock:DeleteKnowledgeBase
               Resource: "*"
+            - Effect: Allow
+              Action:
+                - iam:PassRole
+              Resource: !GetAtt KnowledgeBaseServiceRole.Arn
             - Effect: Allow
               Action:
                 - kms:Encrypt
