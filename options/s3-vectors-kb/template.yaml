@@ -66,17 +66,6 @@ Parameters:
     Default: "cron(0/30 * ? * * *)"
     Description: 'Schedule expression for S3 vectors ingestion jobs'
 
-Mappings:
-  EmbeddingModelDimensions:
-    amazon.titan-embed-text-v1:
-      Dimension: 1536
-    amazon.titan-embed-text-v2:0:
-      Dimension: 1024
-    cohere.embed-english-v3:
-      Dimension: 1024
-    cohere.embed-multilingual-v3:
-      Dimension: 1024
-
 Conditions:
   pHasPermissionsBoundary: !Not [!Equals [!Ref pPermissionsBoundaryArn, ""]]
   pHasCustomerManagedEncryptionKey: !Not [!Equals [!Ref pCustomerManagedEncryptionKeyArn, ""]]
@@ -155,10 +144,7 @@ Resources:
       ServiceToken: !GetAtt S3VectorsProvisionerFunction.Arn
       VectorBucketName: !Sub "${pStackName}-kb-s3vectors"
       VectorIndexName: !Ref VectorIndexName
-      VectorDimension: !FindInMap 
-        - EmbeddingModelDimensions
-        - !Ref EmbeddingModelId
-        - Dimension
+      VectorDimension: 1024  # Default dimension - Bedrock KB will manage actual dimensions
       DistanceMetric: !Ref VectorSimilarityMeasure
 
   # IAM Role for Bedrock Knowledge Base
