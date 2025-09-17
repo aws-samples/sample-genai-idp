@@ -23,14 +23,16 @@ import yaml from 'js-yaml';
 import useConfiguration from '../../hooks/use-configuration';
 import FormView from './FormView';
 import KnowledgeBaseStatus from './KnowledgeBaseStatus';
-import useSettingsContext from '../../contexts/settings';
+// import useSettingsContext from '../../contexts/settings';
 
 const ConfigurationLayout = () => {
+  /*
   const { settings } = useSettingsContext() || {};
   const parseBool = (v) => (typeof v === 'boolean' ? v : v === 'true');
-  
   //  Setting isS3VectorsEnabled to False for now in anticipation of Filterable Keys inclusion in BKB Schema
-  const isS3VectorsEnabled = false //parseBool(settings?.ShouldUseS3VectorsKnowledgeBase ?? 'true');
+  const isS3VectorsEnabled = parseBool(settings?.ShouldUseS3VectorsKnowledgeBase ?? 'true');
+  */
+  const isS3VectorsEnabled = false;
 
   const {
     schema,
