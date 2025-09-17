@@ -63,9 +63,7 @@ def provision_s3_vector_resources_and_knowledge_base(
     index_arn = f"arn:aws:s3vectors:{aws_region}:{aws_account_id}:index/{vector_bucket_name}/{vector_index_name}"
     
     try:
-        # Try to create the Knowledge Base
-        # Based on the error "Vector index name should not be present with namespace arn"
-        # Let's try using just indexName without indexArn
+        # Try to create the Knowledge Base using the correct template structure
         kb_response = bedrock_client.create_knowledge_base(
             name=kb_name,
             description=kb_description,
@@ -73,15 +71,19 @@ def provision_s3_vector_resources_and_knowledge_base(
             knowledgeBaseConfiguration={
                 'type': 'VECTOR',
                 'vectorKnowledgeBaseConfiguration': {
-                    'embeddingModelArn': embedding_model_arn
+                    'embeddingModelArn': embedding_model_arn,
+                    'embeddingModelConfiguration': {
+                        'bedrockEmbeddingModelConfiguration': {
+                            'dimensions': dimension,
+                            'embeddingDataType': 'FLOAT32'
+                        }
+                    }
                 }
             },
             storageConfiguration={
                 'type': 'S3_VECTORS',
                 's3VectorsConfiguration': {
-                    'vectorBucketArn': vector_bucket_arn,
-                    'indexName': vector_index_name
-                    # Trying without indexArn to avoid the namespace arn conflict
+                    'indexArn': index_arn
                 }
             }
         )
