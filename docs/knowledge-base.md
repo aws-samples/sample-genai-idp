@@ -19,7 +19,6 @@ The solution provides **flexible knowledge base backend options**, allowing you 
 |---------|------------|------------|----------|
 | **Architecture** | Always-on OpenSearch cluster | Serverless S3 Vectors service | No knowledge base |
 | **Query Processing** | Bedrock Knowledge Base APIs | Bedrock Knowledge Base APIs | N/A |
-| **Infrastructure Cost** | ~$11/day for cluster | Pay-per-query | $0 |
 | **Query Performance** | Sub-second responses | 2-10 second responses | N/A |
 | **Best For** | Real-time analytics, fast queries | Cost-effective large-scale processing | Processing-only workflows |
 
@@ -63,7 +62,6 @@ Configure the knowledge base backend during stack deployment:
 |-----------|--------|-------------|
 | `DocumentKnowledgeBase` | `OpenSearch` \| `S3 Vectors` \| `Disabled` | Selects knowledge base backend or disables it entirely |
 | `KnowledgeBaseModelId` | Model ARN | Foundational model for knowledge base chat (e.g., `us.amazon.nova-pro-v1:0`) |
-| `DocumentAnalysisAgentModelId` | Model ARN | Model for document analytics queries |
 
 ### S3 Vectors Specific Parameters
 
@@ -159,7 +157,7 @@ When the knowledge base is enabled, the solution:
 - **Query Response Time**: Sub-second responses for most queries
 - **Infrastructure**: Always-on cluster with consistent performance
 - **Scaling**: Automatic scaling based on query load
-- **Cost**: Fixed daily cost (~$11/day) regardless of usage
+- **Cost**: Fixed daily cost regardless of usage
 
 ### S3 Vectors Backend  
 - **Query Response Time**: 2-10 seconds depending on document corpus size

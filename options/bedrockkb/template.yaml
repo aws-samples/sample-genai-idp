@@ -123,6 +123,38 @@ Parameters:
     Type: String
     Default: AMAZON_BEDROCK_TEXT_CHUNK
 
+  # S3 Vectors backend parameters
+  pVectorStoreBackend:
+    Type: String
+    AllowedValues:
+      - opensearch-serverless
+      - s3-vectors
+    Default: opensearch-serverless
+    Description: >-
+      Choose the vector store backend: OpenSearch Serverless (traditional) or S3 Vectors (newer service)
+
+  pS3VectorsBucketName:
+    Type: String
+    Default: ""
+    Description: >-
+      Name for the S3 Vectors bucket (only used when backend is s3-vectors). Leave blank for auto-generated name.
+
+  pVectorIndexName:
+    Type: String
+    Default: bedrock-kb-s3vectors-index
+    Description: >-
+      Name for the S3 Vectors index (only used when backend is s3-vectors)
+
+  pVectorSimilarityMeasure:
+    Type: String
+    AllowedValues:
+      - cosine
+      - euclidean
+      - dot_product
+    Default: cosine
+    Description: >-
+      Distance metric for S3 vectors similarity calculations (only used when backend is s3-vectors)
+
   PermissionsBoundaryArn:
     Type: String
     Default: ""
@@ -157,6 +189,13 @@ Metadata:
           - pChunkingStrategy
           - pMaxTokens
           - pOverlapPercentage
+      - Label:
+          default: Vector Store Backend
+        Parameters:
+          - pVectorStoreBackend
+          - pS3VectorsBucketName
+          - pVectorIndexName
+          - pVectorSimilarityMeasure
       - Label:
           default: Index Details
         Parameters:
@@ -196,6 +235,14 @@ Metadata:
         default: Metadata field name
       pTextFieldName:
         default: Text field name
+      pVectorStoreBackend:
+        default: Vector store backend type
+      pS3VectorsBucketName:
+        default: S3 Vectors bucket name (optional)
+      pVectorIndexName:
+        default: S3 Vectors index name
+      pVectorSimilarityMeasure:
+        default: Vector similarity measure
 
 Conditions:
   IsCustomerManagedKey:
@@ -203,11 +250,66 @@ Conditions:
       - Fn::Equals:
           - Ref: pCustomerManagedEncryptionKeyArn
           - ""
+
+  IsS3VectorsBackend:
+    Fn::Equals:
+      - Ref: pVectorStoreBackend
+      - s3-vectors
+
+  IsOpenSearchBackend:
+    Fn::Equals:
+      - Ref: pVectorStoreBackend
+      - opensearch-serverless
+
+  IsS3VectorsBucketNameEmpty:
+    Fn::Equals:
+      - Ref: pS3VectorsBucketName
+      - ""
+
+  IsTitanV2Model:
+    Fn::Equals:
+      - Ref: pEmbedModel
+      - amazon.titan-embed-text-v2:0
+
+  IsTitanV1Model:
+    Fn::Equals:
+      - Ref: pEmbedModel
+      - amazon.titan-embed-text-v1
+
+  IsCohereModel:
+    Fn::Or:
+      - Fn::Equals:
+          - Ref: pEmbedModel
+          - cohere.embed-english-v3
+      - Fn::Equals:
+          - Ref: pEmbedModel
+          - cohere.embed-multilingual-v3
+
+  HasPermissionsBoundary:
+    Fn::Not:
+      - Fn::Equals:
+          - Ref: PermissionsBoundaryArn
+          - ""
   IsS3DataSource:
     Fn::Not:
       - Fn::Equals:
           - ""
           - Ref: pKnowledgeBaseBucketName
+
+  IsS3DataSourceAndOpenSearch:
+    Fn::And:
+      - Condition: IsS3DataSource
+      - Condition: IsOpenSearchBackend
+
+  IsS3DataSourceAndS3Vectors:
+    Fn::And:
+      - Condition: IsS3DataSource
+      - Condition: IsS3VectorsBackend
+
+  IsWebDataSourceAndOpenSearch:
+    Fn::And:
+      - Condition: IsWebDataSource
+      - Condition: IsOpenSearchBackend
   IsWebDataSource:
     Fn::Not:
       - Fn::Equals:
@@ -287,6 +389,7 @@ Resources:
     Properties:
       ServiceToken: !GetAtt GetAdjustedStackNameFunction.Arn
       InputString: !Ref AWS::StackName
+      InputString: !Ref AWS::StackName
 
   # Custom resource to transform comma separated url list to an array of url objects for Web Crawler.
   GetSeedUrlsFunction:
@@ -336,6 +439,7 @@ Resources:
 
   OSSCollection:
     Type: AWS::OpenSearchServerless::Collection
+    Condition: IsOpenSearchBackend
     Properties:
       Name: !Sub "${AdjustedStackName.OutputString}"
       Type: VECTORSEARCH
@@ -347,6 +451,7 @@ Resources:
   #
   OSSEncryptionPolicy:
     Type: AWS::OpenSearchServerless::SecurityPolicy
+    Condition: IsOpenSearchBackend
     Properties:
       Name: !Sub "${AdjustedStackName.OutputString}"
       Type: encryption
@@ -357,6 +462,7 @@ Resources:
 
   OSSNetworkPolicy:
     Type: AWS::OpenSearchServerless::SecurityPolicy
+    Condition: IsOpenSearchBackend
     DependsOn:
       - OSSEncryptionPolicy
     Properties:
@@ -371,6 +477,7 @@ Resources:
 
   OSSDataAccessPolicy:
     Type: AWS::OpenSearchServerless::AccessPolicy
+    Condition: IsOpenSearchBackend
     DependsOn:
       - OSSNetworkPolicy
     Properties:
@@ -393,6 +500,7 @@ Resources:
 
   OpenSearchLambdaExecutionRole:
     Type: AWS::IAM::Role
+    Condition: IsOpenSearchBackend
     Properties:
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
@@ -469,6 +577,7 @@ Resources:
 
   CreateOSSIndexLambdaFunction:
     Type: AWS::Serverless::Function
+    Condition: IsOpenSearchBackend
     Metadata:
       cfn_nag:
         rules_to_suppress:
@@ -496,6 +605,7 @@ Resources:
 
   InvokeCreateOSSIndexLambdaFunction:
     Type: Custom::InvokeCreateOSSIndexLambdaFunction
+    Condition: IsOpenSearchBackend
     DependsOn:
     - CreateOSSIndexLambdaFunction
     - OSSDataAccessPolicy
@@ -543,15 +653,18 @@ Resources:
                 Action:
                   - bedrock:InvokeModel
                 Resource: !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/*"
-        - PolicyName: oss-api-access
-          PolicyDocument:
-            Version: "2012-10-17"
-            Statement:
-              - Sid: OpenSearchServerlessAPIAccessAll
-                Effect: Allow
-                Action:
-                  - aoss:APIAccessAll
-                Resource: !GetAtt OSSCollection.Arn
+        - !If
+          - IsOpenSearchBackend
+          - PolicyName: oss-api-access
+            PolicyDocument:
+              Version: "2012-10-17"
+              Statement:
+                - Sid: OpenSearchServerlessAPIAccessAll
+                  Effect: Allow
+                  Action:
+                    - aoss:APIAccessAll
+                  Resource: !GetAtt OSSCollection.Arn
+          - !Ref "AWS::NoValue"
         - !If
           - IsS3DataSource
           - PolicyName: s3-read-objects
@@ -586,10 +699,116 @@ Resources:
           - !Ref "AWS::NoValue"
 
   #
+  # S3 Vectors resources (conditional)
+  #
+  S3VectorsProvisionerFunction:
+    Type: AWS::Serverless::Function
+    Condition: IsS3VectorsBackend
+    Properties:
+      CodeUri: src/s3_vectors_kb_provisioner
+      Handler: index.handler
+      Runtime: python3.12
+      Timeout: 300
+      MemorySize: 512
+      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
+      Environment:
+        Variables:
+          LOG_LEVEL: !Ref LogLevel
+          STACK_NAME: !Ref AWS::StackName
+          KMS_KEY_ARN: !Ref pCustomerManagedEncryptionKeyArn
+          AWS_ACCOUNT_ID: !Ref AWS::AccountId
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - s3vectors:CreateVectorBucket
+                - s3vectors:CreateIndex
+                - s3vectors:ListVectorBuckets
+                - s3vectors:DescribeVectorBucket
+              Resource: "*"
+            - Effect: Allow
+              Action:
+                - bedrock:CreateKnowledgeBase
+                - bedrock:ListKnowledgeBases
+                - bedrock:GetKnowledgeBase
+                - bedrock:DeleteKnowledgeBase
+              Resource: "*"
+            - Effect: Allow
+              Action:
+                - iam:PassRole
+              Resource: !GetAtt KnowledgeBaseServiceRole.Arn
+            - !If
+              - IsCustomerManagedKey
+              - Effect: Allow
+                Action:
+                  - kms:Encrypt
+                  - kms:Decrypt
+                  - kms:ReEncrypt*
+                  - kms:GenerateDataKey*
+                  - kms:DescribeKey
+                  - kms:CreateGrant
+                Resource: !Ref pCustomerManagedEncryptionKeyArn
+              - !Ref AWS::NoValue
+
+  S3VectorsProvisioner:
+    Type: AWS::CloudFormation::CustomResource
+    Condition: IsS3VectorsBackend
+    DependsOn: 
+      - KnowledgeBaseServiceRole
+      - AdjustedStackName
+    Properties:
+      ServiceToken: !GetAtt S3VectorsProvisionerFunction.Arn
+      VectorBucketName: !If
+        - IsS3VectorsBucketNameEmpty
+        - !Sub "${AdjustedStackName.OutputString}-s3vectors"
+        - !Ref pS3VectorsBucketName
+      VectorIndexName: !Ref pVectorIndexName
+      VectorDimension: !If
+        - IsTitanV2Model
+        - 1024
+        - !If
+          - IsTitanV1Model
+          - 1536
+          - !If
+            - IsCohereModel
+            - 1024
+            - 1024  # default
+      DistanceMetric: !Ref pVectorSimilarityMeasure
+      KnowledgeBaseName: !Sub "${AWS::StackName}"
+      KnowledgeBaseDescription: "Bedrock Knowledge Base with S3 Vectors backend"
+      EmbeddingModelArn: !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/${pEmbedModel}"
+      KnowledgeBaseRoleArn: !GetAtt KnowledgeBaseServiceRole.Arn
+
+  BedrockKBIngestionFunction:
+    Type: AWS::Serverless::Function
+    Condition: IsS3VectorsBackend
+    Properties:
+      CodeUri: src/s3_vectors_kb_ingestion
+      Handler: index.handler
+      Runtime: python3.12
+      Timeout: 900
+      MemorySize: 512
+      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
+      Environment:
+        Variables:
+          LOG_LEVEL: !Ref LogLevel
+          KNOWLEDGE_BASE_ID: !If [IsS3VectorsBackend, !GetAtt S3VectorsProvisioner.KnowledgeBaseId, !Ref KnowledgeBase]
+          DATA_SOURCE_ID: !If [IsS3VectorsBackend, !Ref S3VectorsDataSource, !Ref S3DataSource]
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - bedrock:StartIngestionJob
+                - bedrock:GetIngestionJob
+                - bedrock:ListIngestionJobs
+              Resource: "*"
+
+  #
   # Bedrock Knowedge Base resources
   #
   KnowledgeBase:
     Type: AWS::Bedrock::KnowledgeBase
+    Condition: IsOpenSearchBackend
     DependsOn:
       - InvokeCreateOSSIndexLambdaFunction
     Properties:
@@ -617,7 +836,7 @@ Resources:
 
   S3DataSource:
     Type: AWS::Bedrock::DataSource
-    Condition: IsS3DataSource
+    Condition: IsS3DataSourceAndOpenSearch
     DependsOn:
       - KnowledgeBase
     Properties:
@@ -666,7 +885,7 @@ Resources:
 
   WebDataSource:
     Type: AWS::Bedrock::DataSource
-    Condition: IsWebDataSource
+    Condition: IsWebDataSourceAndOpenSearch
     DependsOn:
       - KnowledgeBase
     Properties:
@@ -716,9 +935,56 @@ Resources:
                         - Ref: AWS::NoValue
               - Ref: AWS::NoValue
 
+  S3VectorsDataSource:
+    Type: AWS::Bedrock::DataSource
+    Condition: IsS3DataSourceAndS3Vectors
+    Properties:
+      DataDeletionPolicy: DELETE
+      DataSourceConfiguration:
+        Type: S3
+        S3Configuration:
+          BucketArn:
+            Fn::Sub: arn:${AWS::Partition}:s3:::${pKnowledgeBaseBucketName}
+          InclusionPrefixes:
+            Fn::If:
+              - HasInputDocumentUploadFolderPrefix
+              - !Split [",", Ref: pInputDocumentUploadFolderPrefix]
+              - Ref: AWS::NoValue
+      Description: S3 Knowledge Base Data Source for S3 Vectors backend
+      KnowledgeBaseId: !GetAtt S3VectorsProvisioner.KnowledgeBaseId
+      Name: !Sub "S3VectorsKBDataSource-${AWS::StackName}"
+      VectorIngestionConfiguration:
+        ChunkingConfiguration:
+          ChunkingStrategy:
+            Fn::If:
+              - IsChunkingStrategyFixedOrDefault
+              - FIXED_SIZE
+              - NONE
+          FixedSizeChunkingConfiguration:
+            Fn::If:
+              - IsChunkingStrategyFixedOrDefault
+              - MaxTokens:
+                  Fn::If:
+                    - IsChunkingStrategyFixed
+                    - Ref: pMaxTokens
+                    - Fn::If:
+                        - IsChunkingStrategyDefault
+                        - 300
+                        - Ref: AWS::NoValue
+                OverlapPercentage:
+                  Fn::If:
+                    - IsChunkingStrategyFixed
+                    - Ref: pOverlapPercentage
+                    - Fn::If:
+                        - IsChunkingStrategyDefault
+                        - 20
+                        - Ref: AWS::NoValue
+              - Ref: AWS::NoValue
+
   # Start sync jobs for datasources
   StartIngestionJobFunctionRole:
     Type: AWS::IAM::Role
+    Condition: IsOpenSearchBackend
     Properties:
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
@@ -743,6 +1009,7 @@ Resources:
 
   StartIngestionJobFunction:
     Type: AWS::Lambda::Function
+    Condition: IsOpenSearchBackend
     Metadata:
       cfn_nag:
         rules_to_suppress:
@@ -769,7 +1036,7 @@ Resources:
 
   StartWebIngestionJob:
     Type: AWS::CloudFormation::CustomResource
-    Condition: IsWebDataSource
+    Condition: IsWebDataSourceAndOpenSearch
     Properties:
       ServiceToken: !GetAtt StartIngestionJobFunction.Arn
       knowledgeBaseId: !Ref KnowledgeBase
@@ -777,7 +1044,7 @@ Resources:
 
   StartS3IngestionJob:
     Type: AWS::CloudFormation::CustomResource
-    Condition: IsS3DataSource
+    Condition: IsS3DataSourceAndOpenSearch
     Properties:
       ServiceToken: !GetAtt StartIngestionJobFunction.Arn
       knowledgeBaseId: !Ref KnowledgeBase
@@ -786,7 +1053,7 @@ Resources:
   # EventBridge schedulers for data sources
   S3DataSourceScheduler:
     Type: AWS::Scheduler::Schedule
-    Condition: IsS3DataSource
+    Condition: IsS3DataSourceAndOpenSearch
     Properties:
       Description: "Rule to start Bedrock KB S3 datasource ingestion job on a schedule"
       FlexibleTimeWindow: 
@@ -806,7 +1073,7 @@ Resources:
   # EventBridge schedulers for data sources
   WebDataSourceScheduler:
     Type: AWS::Scheduler::Schedule
-    Condition: IsWebDataSource
+    Condition: IsWebDataSourceAndOpenSearch
     Properties:
       Description: "Rule to start Bedrock KB S3 datasource ingestion job on a schedule"
       FlexibleTimeWindow: 
@@ -823,8 +1090,44 @@ Resources:
                 "KnowledgeBaseId": "${KnowledgeBase}"
               }
 
+  S3VectorsDataSourceScheduler:
+    Type: AWS::Scheduler::Schedule
+    Condition: IsS3DataSourceAndS3Vectors
+    Properties:
+      Description: "Schedule to trigger Knowledge Base data source sync for S3 Vectors backend"
+      FlexibleTimeWindow:
+        Mode: "OFF"
+      ScheduleExpression: !Ref pS3SyncScheduleExpression
+      ScheduleExpressionTimezone: "UTC"
+      State: ENABLED
+      Target:
+        Arn: !GetAtt BedrockKBIngestionFunction.Arn
+        RoleArn: !GetAtt S3VectorsIngestionSchedulerRole.Arn
+
+  S3VectorsIngestionSchedulerRole:
+    Type: AWS::IAM::Role
+    Condition: IsS3VectorsBackend
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: scheduler.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: InvokeIngestionFunction
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource: !GetAtt BedrockKBIngestionFunction.Arn
+
   DataSourceSchedulerRole:
     Type: AWS::IAM::Role
+    Condition: IsOpenSearchBackend
     Properties:
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
@@ -853,17 +1156,35 @@ Outputs:
     Value: !Ref pWebCrawlerURLs
     Description: Knowledge Base Web Crawler data source urls
   KnowledgeBaseID:
-    Value: !Ref KnowledgeBase
+    Value: !If
+      - IsS3VectorsBackend
+      - !GetAtt S3VectorsProvisioner.KnowledgeBaseId
+      - !Ref KnowledgeBase
     Description: Knowledge Base ID
   OpenSearchCollectionName:
+    Condition: IsOpenSearchBackend
     Value: !Ref OSSCollection
     Description: OpenSearch collection
   OpenSearchCollectionArn:
+    Condition: IsOpenSearchBackend
     Value: !GetAtt OSSCollection.Arn
     Description: OpenSearch collection ARN
   OpenSearchCollectionEndpoint:
+    Condition: IsOpenSearchBackend
     Value: !GetAtt OSSCollection.CollectionEndpoint
     Description: OpenSearch collection endpoint
   OpenSearchCollectionDashboard:
+    Condition: IsOpenSearchBackend
     Value: !GetAtt OSSCollection.DashboardEndpoint
     Description: OpenSearch collection dashboard endpoint
+  S3VectorsBucketName:
+    Condition: IsS3VectorsBackend
+    Value: !GetAtt S3VectorsProvisioner.VectorBucketName
+    Description: S3 Vectors bucket name
+  S3VectorsIndexName:
+    Condition: IsS3VectorsBackend
+    Value: !GetAtt S3VectorsProvisioner.VectorIndexName
+    Description: S3 Vectors index name
+  VectorStoreBackend:
+    Value: !Ref pVectorStoreBackend
+    Description: Vector store backend type (opensearch-serverless or s3-vectors)

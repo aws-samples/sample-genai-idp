@@ -1563,14 +1563,9 @@ except Exception as e:
                 "options/bda-lending-project/template.yaml",
             ],
             "options/bedrockkb": [
+                LIB_DEPENDENCY,
                 "options/bedrockkb/src",
                 "options/bedrockkb/template.yaml",
-            ],
-            # s3-vectors-kb uses idp_common library
-            "options/s3-vectors-kb": [
-                LIB_DEPENDENCY,
-                "options/s3-vectors-kb/src",
-                "options/s3-vectors-kb/template.yaml",
             ],
             "lib": [LIB_DEPENDENCY],
         }

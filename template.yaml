@@ -235,6 +235,11 @@ Parameters:
 
 
   # Optional Knowledge Base Configuration
+  KnowledgeBaseScheduleExpression:
+    Type: String
+    Default: "cron(0/30 * ? * * *)"
+    Description: Schedule expression for Knowledge Base data source synchronization (EventBridge Scheduler)
+
   DocumentKnowledgeBase:
     Default: "OpenSearch"
     Type: String
@@ -244,7 +249,7 @@ Parameters:
       - "Disable"
     Description: |
       Use processed documents as knowledge base content. Bedrock Knowledge Base offers two backends: 
-      OpenSearch ($11/day, real-time analytics, faster queries), S3 Vectors (Bedrock-managed, cost-effective, good performance), or Disable to turn off knowledge base functionality.
+      OpenSearch (Always on server costs, real-time analytics, faster queries), S3 Vectors (On-Demand pricing, Bedrock-managed, good performance), or Disable to turn off knowledge base functionality.
 
   KnowledgeBaseModelId:
     Type: String
@@ -300,11 +305,7 @@ Parameters:
     Description: Name of the S3 Vectors index to create and use
     AllowedPattern: '^[a-zA-Z0-9-_]{1,255}$'
 
-  # S3 Vectors ingestion schedule
-  S3VectorsIngestionScheduleExpression:
-    Type: String
-    Default: "cron(0/30 * ? * * *)"
-    Description: Schedule expression for periodic S3 Vectors ingestion (EventBridge Scheduler)
+
 
   # Optional - Post processing Lambda hook
   PostProcessingLambdaHookFunctionArn:
@@ -493,7 +494,7 @@ Conditions:
   ShouldCreateS3VectorsKnowledgeBase: !Equals [!Ref DocumentKnowledgeBase, "S3 Vectors"]
   ShouldUseDocumentKnowledgeBase: !Condition ShouldCreateDocumentKnowledgeBase
   ShouldUseS3VectorsKnowledgeBase: !Condition ShouldCreateS3VectorsKnowledgeBase
-  ShouldUseAnyKnowledgeBase: !Or [!Condition ShouldUseDocumentKnowledgeBase, !Condition ShouldUseS3VectorsKnowledgeBase]
+  ShouldUseAnyKnowledgeBase: !Or [!Condition ShouldCreateDocumentKnowledgeBase, !Condition ShouldCreateS3VectorsKnowledgeBase]
   IsKnowledgeBaseDisabled: !Equals [!Ref DocumentKnowledgeBase, "Disable"]
   DocumentSectionsCrawlerScheduleEnabled: !Not [!Equals [!Ref DocumentSectionsCrawlerFrequency, "Manual"]]
   HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
@@ -550,6 +551,7 @@ Metadata:
       - Label:
           default: "Document Knowledge Base"
         Parameters:
+          - KnowledgeBaseScheduleExpression
           - DocumentKnowledgeBase
           - KnowledgeBaseModelId
           - VectorSimilarityMeasure
@@ -619,6 +621,8 @@ Metadata:
         default: "Evaluation Auto Enabled"
       ReportingBucketName:
         default: "Reporting Bucket Name"
+      KnowledgeBaseScheduleExpression:
+        default: "Knowledge Base Sync Schedule"
       DocumentKnowledgeBase:
         default: "Document Knowledge Base Configuration"
       KnowledgeBaseModelId:
@@ -866,39 +870,22 @@ Resources:
     DependsOn:
       - IsStacknameLengthOK
     Type: AWS::CloudFormation::Stack
-    Condition: ShouldCreateDocumentKnowledgeBase
+    Condition: ShouldUseAnyKnowledgeBase
     Properties:
       TemplateURL: ./options/bedrockkb/.aws-sam/packaged.yaml
       Parameters:
         pKnowledgeBaseBucketName: !Ref OutputBucket
         pInputDocumentUploadFolderPrefix: ""
-        pS3SyncScheduleExpression: "cron(0/30 * ? * * *)"  # default is to sync documents every 30 minutes
+        pS3SyncScheduleExpression: !Ref KnowledgeBaseScheduleExpression
         pCustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
         pChunkingStrategy: 'No chunking'
         pEmbedModel: !Ref KnowledgeBaseEmbeddingModelId
+        pVectorStoreBackend: !If [ShouldCreateS3VectorsKnowledgeBase, "s3-vectors", "opensearch-serverless"]
+        pVectorIndexName: !Ref KnowledgeBaseVectorIndexName
+        pVectorSimilarityMeasure: !Ref VectorSimilarityMeasure
         LogLevel: !Ref LogLevel
         PermissionsBoundaryArn: !Ref PermissionsBoundaryArn
 
-  DOCUMENTS3VECTORSKB:
-    DependsOn:
-      - IsStacknameLengthOK
-    Type: AWS::CloudFormation::Stack
-    DeletionPolicy: Retain
-    Condition: ShouldCreateS3VectorsKnowledgeBase
-    Properties:
-      TemplateURL: ./options/s3-vectors-kb/.aws-sam/packaged.yaml
-      Parameters:
-        pStackName: !GetAtt GetLowercase.Lowercase
-        pLogLevel: !Ref LogLevel
-        pLogRetentionDays: !Ref LogRetentionDays
-        pPermissionsBoundaryArn: !Ref PermissionsBoundaryArn
-        pCustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
-        pAlertsTopicArn: !Ref AlertsTopic
-        pOutputBucket: !Ref OutputBucket
-        VectorIndexName: !Ref KnowledgeBaseVectorIndexName
-        VectorSimilarityMeasure: !Ref VectorSimilarityMeasure
-        EmbeddingModelId: !Ref KnowledgeBaseEmbeddingModelId
-        S3VectorsIngestionScheduleExpression: !Ref S3VectorsIngestionScheduleExpression
 
 
   ##########################################################################
@@ -2213,34 +2200,6 @@ Resources:
       MessageRetentionPeriod: 345600  # 4 days
       KmsMasterKeyId: !Ref CustomerManagedEncryptionKey
 
-  S3VectorsCatalogTable:
-    Type: AWS::DynamoDB::Table
-    Properties:
-      BillingMode: PAY_PER_REQUEST
-      AttributeDefinitions:
-        - AttributeName: PK
-          AttributeType: S
-        - AttributeName: SK
-          AttributeType: S
-      KeySchema:
-        - AttributeName: PK
-          KeyType: HASH
-        - AttributeName: SK
-          KeyType: RANGE
-      TimeToLiveSpecification:
-        AttributeName: ttl
-        Enabled: true
-      PointInTimeRecoverySpecification:
-        PointInTimeRecoveryEnabled: true
-      SSESpecification:
-        SSEEnabled: true
-        SSEType: KMS
-        KMSMasterKeyId: !Ref CustomerManagedEncryptionKey
-      Tags:
-        - Key: Purpose
-          Value: S3VectorsCatalog
-        - Key: Component
-          Value: KnowledgeBase
 
   UpdateConfigurationFunction:
     Type: AWS::Serverless::Function
@@ -6110,8 +6069,8 @@ Resources:
             - ShouldUseDocumentKnowledgeBase
             - !GetAtt DOCUMENTBEDROCKKB.Outputs.KnowledgeBaseID
             - !If
-              - ShouldUseS3VectorsKnowledgeBase
-              - !GetAtt DOCUMENTS3VECTORSKB.Outputs.KnowledgeBaseId
+              - ShouldUseAnyKnowledgeBase
+              - !GetAtt DOCUMENTBEDROCKKB.Outputs.KnowledgeBaseID
               - ""
           KB_ACCOUNT_ID: !Ref AWS::AccountId
           KB_REGION: !Ref AWS::Region
@@ -6135,7 +6094,7 @@ Resources:
               Action:
                 - bedrock:Retrieve
                 - bedrock:RetrieveAndGenerate
-              Resource: !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:knowledge-base/${DOCUMENTS3VECTORSKB.Outputs.KnowledgeBaseId}"
+              Resource: !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:knowledge-base/${DOCUMENTBEDROCKKB.Outputs.KnowledgeBaseID}"
             - !Ref AWS::NoValue
           - !If
             - IsKnowledgeBaseDisabled

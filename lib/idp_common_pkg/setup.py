@@ -62,10 +62,6 @@ extras_require = {
     "docs_service": [
         "requests==2.32.4",
     ],
-    # S3 Vectors module dependencies
-    "s3vectors": [
-        # S3 Vectors only needs boto3/botocore which are already in core dependencies
-    ],
     # Testing dependencies
     "test": [
         "pytest>=7.4.0",
