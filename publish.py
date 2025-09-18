@@ -186,6 +186,9 @@ STDERR:
         self.console.print(
             "  [yellow][--clean-build][/yellow]: Optional. Delete all .checksum files to force full rebuild"
         )
+        self.console.print(
+            "  [yellow][--use-container][/yellow]: Optional. Use a container for building"
+        )
 
     def check_parameters(self, args):
         """Check and validate input parameters"""
@@ -250,6 +253,9 @@ STDERR:
                 )
             elif arg == "--clean-build":
                 self.clean_checksums()
+            elif arg == "--use-container":
+                self.use_container_flag = "--use-container"
+                self.console.print("[green]Using container for SAM build[/green]")
             else:
                 self.console.print(
                     f"[yellow]Warning: Unknown argument '{arg}' ignored[/yellow]"
@@ -1557,7 +1563,7 @@ except Exception as e:
                 "patterns/pattern-3/src",
                 "patterns/pattern-3/template.yaml",
             ],
-            # Option components
+            # Option components (no lib dependency - they don't use idp_common)
             "options/bda-lending-project": [
                 "options/bda-lending-project/src",
                 "options/bda-lending-project/template.yaml",
