@@ -666,6 +666,22 @@ Resources:
                   Resource: !GetAtt OSSCollection.Arn
           - !Ref "AWS::NoValue"
         - !If
+          - IsS3VectorsBackend
+          - PolicyName: s3-vectors-access
+            PolicyDocument:
+              Version: "2012-10-17"
+              Statement:
+                - Sid: S3VectorsAccess
+                  Effect: Allow
+                  Action:
+                    - s3vectors:QueryVectors
+                    - s3vectors:PutVectors
+                    - s3vectors:DeleteVectors
+                    - s3vectors:DescribeVectorBucket
+                    - s3vectors:DescribeIndex
+                  Resource: "*"
+          - !Ref "AWS::NoValue"
+        - !If
           - IsS3DataSource
           - PolicyName: s3-read-objects
             PolicyDocument:

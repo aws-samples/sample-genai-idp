@@ -921,21 +921,8 @@ Resources:
                     description: Sample JSON format for discovery output
                     default: "{\n  \"document_class\": \"Form-1040\",\n  \"document_description\": \"Brief summary of the document\",\n  \"groups\": [\n    {\n      \"name\": \"PersonalInformation\",\n      \"description\": \"Personal information of Tax payer\",\n      \"attributeType\": \"group\",\n      \"groupType\": \"normal\",\n      \"groupAttributes\": [\n        {\n          \"name\": \"FirstName\",\n          \"dataType\": \"string\",\n          \"description\": \"First Name of Taxpayer\"\n        },\n        {\n          \"name\": \"Age\",\n          \"dataType\": \"number\",\n          \"description\": \"Age of Taxpayer\"\n        }\n      ]\n    }\n  ]\n}"
                     order: 0
-          s3Vectors:
-            order: 9
-            type: object
-            sectionLabel: S3 Vectors
-            properties:
-              filterableMetadataKeys:
-                type: array
-                description: "Add up to 6 metadata keys for filtering.  These 2 are always included: document_id, confidence."
-                listLabel: "Filterable metadata keys"
-                itemLabel: "Metadata key"
-                maxItems: 6
-                items:
-                  type: string
           pricing:
-            order: 10
+            order: 9
             type: array
             sectionLabel: Pricing (Estimates only - check https://aws.amazon.com/bedrock/pricing/ & https://aws.amazon.com/textract/pricing/)
             listLabel: Services

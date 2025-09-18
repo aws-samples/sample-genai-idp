@@ -128,37 +128,20 @@ export const DocumentsQueryLayout = () => {
     return true;
   };
 
-  // Determine knowledge base type and status
-  const parseBool = (v) => (typeof v === 'boolean' ? v : v === 'true');
-  const isKnowledgeBaseEnabled =
-    parseBool(settings.ShouldUseDocumentKnowledgeBase) || parseBool(settings.ShouldUseS3VectorsKnowledgeBase);
-
-  const knowledgeBaseType = parseBool(settings.ShouldUseS3VectorsKnowledgeBase) ? 'S3 Vectors' : 'OpenSearch';
-
   // eslint-disable-next-line
-  const placeholder = isKnowledgeBaseEnabled
-    ? `Enter a question to query your document knowledge base (${knowledgeBaseType}).`
-    : 'Document Knowledge Base is set to DISABLED for this GenAIIDP deployment.';
-
+  const placeholder =
+    settings.ShouldUseDocumentKnowledgeBase === 'true'
+      ? 'Enter a question to query your document knowledge base.'
+      : 'Document Knowledge Base is set to DISABLED for this GenAIIDP deployment.';
   // eslint-disable-next-line
-  const initialMsg = isKnowledgeBaseEnabled
-    ? `Ask a question below. ${
-        parseBool(settings.ShouldUseS3VectorsKnowledgeBase)
-          ? 'Note: S3 Vectors queries may take 2-10 seconds to complete.'
-          : ''
-      }`
-    : 'Document Knowledge Base queries are not enabled. Document Knowledge Base is set to DISABLED for this GenAIIDP deployment.';
+  const initialMsg =
+    settings.ShouldUseDocumentKnowledgeBase === 'true'
+      ? 'Ask a question below.'
+      : 'Document Knowledge Base queries are not enabled. Document Knowledge Base is set to DISABLED for this GenAIIDP deployment.';
   return (
     <Container
       fitHeight={false}
-      header={
-        <Header
-          variant="h2"
-          description={isKnowledgeBaseEnabled ? `Using ${knowledgeBaseType} backend` : 'Knowledge Base disabled'}
-        >
-          Documents Knowledge Base Query Tool
-        </Header>
-      }
+      header={<Header variant="h2">Documents Knowledge Base Query Tool</Header>}
       /* For future use. :) */
       footer={
         <form onSubmit={onSubmit}>

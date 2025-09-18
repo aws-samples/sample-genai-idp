@@ -1563,7 +1563,6 @@ except Exception as e:
                 "options/bda-lending-project/template.yaml",
             ],
             "options/bedrockkb": [
-                LIB_DEPENDENCY,
                 "options/bedrockkb/src",
                 "options/bedrockkb/template.yaml",
             ],

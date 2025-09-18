@@ -1,2 +1,2 @@
 boto3>=1.37.4
-../../lib/idp_common_pkg
+-e ../../lib/idp_common_pkg

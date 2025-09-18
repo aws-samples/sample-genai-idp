@@ -1,3 +1,3 @@
 aws-requests-auth==0.4.3
 requests==2.31.0
-./lib/idp_common_pkg[agents]  # idp_common package with analytics agent implementation
+-e ./lib/idp_common_pkg[agents]  # idp_common package with analytics agent implementation

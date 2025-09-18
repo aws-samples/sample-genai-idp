@@ -1,2 +1,2 @@
 boto3>=1.38.45
-./lib/idp_common_pkg  # common utilities package
+-e ./lib/idp_common_pkg  # common utilities package

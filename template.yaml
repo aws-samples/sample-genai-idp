@@ -2358,14 +2358,8 @@ Resources:
           - ShouldUseDocumentKnowledgeBase
           - True
           - False
-        ShouldUseS3VectorsKnowledgeBase: !If
-          - ShouldUseS3VectorsKnowledgeBase
-          - True
-          - False
-        IsKnowledgeBaseDisabled: !If
-          - IsKnowledgeBaseDisabled
-          - True
-          - False
+
+
     UpdateReplacePolicy: Delete
     DeletionPolicy: Delete
 
