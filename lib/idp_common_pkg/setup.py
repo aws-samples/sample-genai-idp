@@ -7,7 +7,7 @@ from setuptools import find_packages, setup
 
 # Core dependencies required for all installations
 install_requires = [
-    "boto3==1.39.4",  # Core dependency for AWS services
+    "boto3==1.40.25",  # Core dependency for AWS services
 ]
 
 # Optional dependencies by component
