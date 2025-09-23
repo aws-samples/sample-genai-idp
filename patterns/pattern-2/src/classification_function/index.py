@@ -33,6 +33,13 @@ def handler(event, context):
     # Use default=str to handle Decimal and other non-serializable types
     logger.info(f"Config: {json.dumps(config, default=str)}")
     
+    # Check if classification is enabled
+    from idp_common.utils import normalize_boolean_value
+    classification_config = config.get('classification', {})
+    if not normalize_boolean_value(classification_config.get('enabled', True)):
+        logger.info("Classification is disabled in configuration, skipping.")
+        return { "document": event["OCRResult"]["document"] }
+    
     # Extract document from the OCR result - handle both compressed and uncompressed
     working_bucket = os.environ.get('WORKING_BUCKET')
     document = Document.load_document(event["OCRResult"]["document"], working_bucket, logger)

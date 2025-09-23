@@ -455,6 +455,16 @@ Resources:
                               columns: 2
                     # This controls the layout of the form fields inside each attribute item
                     columns: 2
+          classification:
+            order: 3
+            type: object
+            sectionLabel: Classification Inference
+            properties:
+              enabled:
+                type: boolean
+                description: Enable or disable classification processing
+                default: true
+                order: 0
           extraction:
             order: 4
             type: object
@@ -469,6 +479,11 @@ Resources:
               - system_prompt
               - task_prompt
             properties:
+              enabled:
+                type: boolean
+                description: Enable or disable extraction processing
+                default: true
+                order: 0
               image:
                 type: object
                 sectionLabel: Image Processing Settings

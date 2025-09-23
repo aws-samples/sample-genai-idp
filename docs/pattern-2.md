@@ -135,7 +135,7 @@ Each step includes comprehensive retry logic for handling transient errors:
   ```
 
 #### Extraction Function
-- **Purpose**: Extracts fields using Claude via Bedrock
+- **Purpose**: Extracts fields using Claude via Bedrock. This step can be disabled via configuration.
 - **Key Features**:
   - Document class-specific attribute extraction
   - Configurable extraction attributes
@@ -225,6 +225,8 @@ The pattern exports these outputs to the parent stack:
 
 **Stack Deployment Parameters:**
 - `ClassificationMethod`: Classification methodology to use (options: 'multimodalPageLevelClassification' or 'textbasedHolisticClassification')
+- **Classification**: Control classification via configuration file `classification.enabled` property.
+- **Extraction**: Control extraction via configuration file `extraction.enabled` property.
 - **Summarization**: Control summarization via configuration file `summarization.enabled` property (replaces `IsSummarizationEnabled` parameter)
 - `ConfigurationDefaultS3Uri`: Optional S3 URI to custom configuration (uses default configuration if not specified)
 - `MaxConcurrentWorkflows`: Workflow concurrency limit

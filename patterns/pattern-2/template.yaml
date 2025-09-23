@@ -471,6 +471,11 @@ Resources:
               - system_prompt
               - task_prompt
             properties:
+              enabled:
+                type: boolean
+                description: Enable or disable classification processing
+                default: true
+                order: 0
               image:
                 type: object
                 sectionLabel: Image Processing Settings
@@ -559,6 +564,11 @@ Resources:
               - system_prompt
               - task_prompt
             properties:
+              enabled:
+                type: boolean
+                description: Enable or disable extraction processing
+                default: true
+                order: 0
               image:
                 type: object
                 sectionLabel: Image Processing Settings
