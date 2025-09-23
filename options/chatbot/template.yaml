@@ -1,0 +1,337 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Embeddable Chatbot solution using an existing Amazon Bedrock Knowledge Base.
+  This template provisions a Lex V2 Bot, an API Gateway with a Lambda proxy,
+  and a JWT-based Lambda Authorizer for secure frontend integration.
+
+Parameters:
+  BedrockKnowledgeBaseId:
+    Type: String
+    Description: The ID of the existing Amazon Bedrock Knowledge Base.
+    AllowedPattern: '^[A-Z0-9]{10}$'
+    ConstraintDescription: Must be a valid Bedrock Knowledge Base ID (e.g., ABC123DEFG).
+
+  JwtSecret:
+    Type: String
+    NoEcho: true
+    Description: A strong secret key for signing and verifying JWTs. Minimum 32 characters.
+    MinLength: 32
+    ConstraintDescription: Must be at least 32 characters long.
+
+Resources:
+  # IAM Role for the Lex Bot to access the Bedrock Knowledge Base
+  LexBotRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lex.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: BedrockKnowledgeBasePolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: bedrock:RetrieveAndGenerate
+                Resource: !Sub 'arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:knowledge-base/${BedrockKnowledgeBaseId}'
+              # It's a best practice to also grant Kendra permissions as Bedrock KBs often use Kendra indexes.
+              - Effect: Allow
+                Action:
+                  - kendra:Query
+                  - kendra:Retrieve
+                Resource: !Sub 'arn:${AWS::Partition}:kendra:${AWS::Region}:${AWS::AccountId}:index/*'
+
+  # Lex V2 Bot configured with Bedrock Knowledge Base Fulfillment
+  LexBot:
+    Type: AWS::Lex::Bot
+    Properties:
+      Name: !Sub '${AWS::StackName}-BedrockKB-Bot'
+      DataPrivacy:
+        ChildDirected: false
+      IdleSessionTTLInSeconds: 300
+      RoleArn: !GetAtt LexBotRole.Arn
+      BotLocales:
+        - LocaleId: en_US
+          NluConfidenceThreshold: 0.40
+          Intents:
+            - Name: AMAZON.QnAIntent
+              Description: 'The primary intent to query the Bedrock Knowledge Base.'
+              ParentIntentSignature: AMAZON.QnAIntent
+              FulfillmentCodeHook:
+                Enabled: true
+                FulfillmentUpdatesSpecification:
+                  Active: true
+                  StartResponse:
+                    AllowInterrupt: true
+                    MessageGroups:
+                      - Message:
+                          PlainTextMessage:
+                            Value: "Searching for an answer..."
+                PostFulfillmentStatusSpecification:
+                  SuccessResponse:
+                    AllowInterrupt: true
+                    MessageGroups:
+                      - Message:
+                          PlainTextMessage:
+                            Value: "Let me know if you have other questions."
+              CodeHook:
+                IsActive: true
+                CodeHookInterface:
+                  Name: 'AMAZON.BedrockKnowledgeBase'
+                  Version: '1.0'
+                  LambdaArn: !Sub 'arn:${AWS::Partition}:lex:${AWS::Region}::kendra-search-bot' # This is a placeholder required by the schema but Bedrock manages the connection.
+              InitialResponseSetting:
+                CodeHook:
+                  IsActive: true
+                  CodeHookInterface:
+                    Name: 'AMAZON.BedrockKnowledgeBase'
+                    Version: '1.0'
+                    LambdaArn: !Sub 'arn:${AWS::Partition}:lex:${AWS::Region}::kendra-search-bot'
+                  InvocationLabel: 'Querying Knowledge Base'
+              InputContexts:
+                - Name: 'AMAZON.QnAIntent.Input'
+              OutputContexts:
+                - Name: 'AMAZON.QnAIntent.Output'
+                  TimeToLiveInSeconds: 300
+                  TurnsToLive: 5
+              KendraConfiguration:
+                KnowledgeBaseId: !Ref BedrockKnowledgeBaseId
+                QueryFilterStringEnabled: true
+                QueryFilterString: ''
+
+  LexBotAlias:
+    Type: AWS::Lex::BotAlias
+    Properties:
+      BotAliasName: 'live'
+      BotId: !GetAtt LexBot.Id
+
+  # IAM Role for the Authorizer Lambda
+  AuthorizerLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'
+
+  # Lambda function for JWT Authorization
+  AuthorizerLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub '${AWS::StackName}-JwtAuthorizer'
+      Handler: index.handler
+      Runtime: nodejs20.x
+      Role: !GetAtt AuthorizerLambdaRole.Arn
+      Environment:
+        Variables:
+          JWT_SECRET: !Ref JwtSecret
+      Code:
+        ZipFile: |
+          const jwt = require('jsonwebtoken');
+
+          exports.handler = async (event) => {
+            const token = event.headers.authorization?.split(' ')[1];
+
+            if (!token) {
+              return { statusCode: 401, body: 'Unauthorized' };
+            }
+
+            try {
+              const decoded = jwt.verify(token, process.env.JWT_SECRET);
+              // Successful verification
+              return {
+                isAuthorized: true,
+                principalId: decoded.sub || 'user',
+                context: {
+                  // You can pass additional context to the backend lambda here
+                  userId: decoded.sub,
+                },
+              };
+            } catch (err) {
+              console.error('JWT Verification Error:', err);
+              return { isAuthorized: false };
+            }
+          };
+
+  # IAM Role for the Lex Proxy Lambda
+  LexProxyLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'
+      Policies:
+        - PolicyName: LexRecognizeTextPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: lex:RecognizeText
+                Resource: !GetAtt LexBotAlias.Arn
+
+  # Lambda function to proxy requests to Lex
+  LexProxyLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub '${AWS::StackName}-LexProxy'
+      Handler: index.handler
+      Runtime: nodejs20.x
+      Role: !GetAtt LexProxyLambdaRole.Arn
+      Environment:
+        Variables:
+          LEX_BOT_ID: !Ref LexBot
+          LEX_BOT_ALIAS_ID: !GetAtt LexBotAlias.BotAliasId
+          LEX_LOCALE_ID: 'en_US'
+      Code:
+        ZipFile: |
+          const { LexRuntimeV2Client, RecognizeTextCommand } = require('@aws-sdk/client-lex-runtime-v2');
+          const client = new LexRuntimeV2Client({});
+
+          exports.handler = async (event) => {
+            try {
+              const { message, sessionId } = JSON.parse(event.body);
+
+              if (!message || !sessionId) {
+                return {
+                  statusCode: 400,
+                  headers: { "Access-Control-Allow-Origin": "*" },
+                  body: JSON.stringify({ error: 'Missing message or sessionId' }),
+                };
+              }
+
+              const command = new RecognizeTextCommand({
+                botId: process.env.LEX_BOT_ID,
+                botAliasId: process.env.LEX_BOT_ALIAS_ID,
+                localeId: process.env.LEX_LOCALE_ID,
+                sessionId: sessionId,
+                text: message,
+              });
+
+              const response = await client.send(command);
+
+              return {
+                statusCode: 200,
+                headers: { "Access-Control-Allow-Origin": "*" },
+                body: JSON.stringify(response.messages),
+              };
+            } catch (error) {
+              console.error('Error proxying to Lex:', error);
+              return {
+                statusCode: 500,
+                headers: { "Access-Control-Allow-Origin": "*" },
+                body: JSON.stringify({ error: 'Failed to communicate with the chatbot.' }),
+              };
+            }
+          };
+
+  # API Gateway REST API
+  ChatApi:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: !Sub '${AWS::StackName}-ChatbotApi'
+      Description: 'API for the Bedrock KB Chatbot'
+      EndpointConfiguration:
+        Types:
+          - REGIONAL
+
+  ApiGatewayAuthorizer:
+    Type: AWS::ApiGateway::Authorizer
+    Properties:
+      Name: !Sub '${AWS::StackName}-JwtAuthorizer'
+      RestApiId: !Ref ChatApi
+      Type: REQUEST
+      AuthorizerUri: !Sub 'arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${AuthorizerLambda.Arn}/invocations'
+      IdentitySource: 'method.request.header.Authorization'
+      AuthorizerResultTtlInSeconds: 300
+
+  ChatResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      ParentId: !GetAtt ChatApi.RootResourceId
+      PathPart: 'chat'
+      RestApiId: !Ref ChatApi
+
+  ChatMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref ChatApi
+      ResourceId: !Ref ChatResource
+      HttpMethod: POST
+      AuthorizationType: CUSTOM
+      AuthorizerId: !Ref ApiGatewayAuthorizer
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LexProxyLambda.Arn}/invocations'
+
+  ApiGatewayCors:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref ChatApi
+      ResourceId: !Ref ChatResource
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+        Type: MOCK
+        RequestTemplates:
+          'application/json': '{ "statusCode": 200 }'
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              'method.response.header.Access-Control-Allow-Headers': "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+              'method.response.header.Access-Control-Allow-Methods': "'OPTIONS,POST'"
+              'method.response.header.Access-control-allow-origin': "'*'"
+            ResponseTemplates:
+              'application/json': ''
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            'method.response.header.Access-Control-Allow-Headers': true
+            'method.response.header.Access-Control-Allow-Methods': true
+            'method.response.header.Access-control-allow-origin': true
+
+  # Permissions for API Gateway to invoke the Lambda functions
+  AuthorizerLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt AuthorizerLambda.Arn
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${ChatApi}/*'
+
+  LexProxyLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt LexProxyLambda.Arn
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${ChatApi}/*'
+
+Outputs:
+  ApiGatewayInvokeURL:
+    Description: 'The invoke URL for the API Gateway endpoint.'
+    Value: !Sub 'https://${ChatApi}.execute-api.${AWS::Region}.amazonaws.com/prod' # Assuming a 'prod' stage
+  ChatEndpointURL:
+    Description: 'The full URL for the /chat endpoint.'
+    Value: !Sub 'https://${ChatApi}.execute-api.${AWS::Region}.amazonaws.com/prod/chat'
+  LexBotId:
+    Description: 'The ID of the created Lex Bot.'
+    Value: !Ref LexBot
+  LexBotAliasId:
+    Description: 'The Alias ID of the created Lex Bot.'
+    Value: !GetAtt LexBotAlias.BotAliasId
