@@ -22,6 +22,7 @@ from botocore.config import Config
 from idp_common import bedrock, image, s3, utils
 from idp_common.models import Document, Page, Status
 from idp_common.ocr.document_converter import DocumentConverter
+from idp_common.text_extraction import TextExtractionService
 
 logger = logging.getLogger(__name__)
 
@@ -310,8 +311,123 @@ class OcrService:
             f"S3 client initialized with {max(self.max_workers, 10)} connection pool size"
         )
 
+        # Initialize the text extraction service for intelligent routing
+        self.text_extraction_service = TextExtractionService()
+
         # Initialize document converter for non-PDF formats
         self.document_converter = DocumentConverter(dpi=self.dpi or 150)
+
+    def _process_native_pdf_page(
+        self,
+        page_index: int,
+        pdf_page: fitz.Page,
+        page_text: str,
+        output_bucket: str,
+        prefix: str,
+    ) -> Tuple[Dict[str, str], Dict[str, Any]]:
+        """
+        Process a single page of a text-native PDF without sending to OCR.
+
+        This method generates all necessary artifacts (image, parsed text,
+        and placeholder OCR files) to maintain backward compatibility with
+        consumers expecting a standard document structure.
+
+        Args:
+            page_index: Zero-based index of the page
+            pdf_page: The PyMuPDF page object
+            page_text: The pre-extracted text for the page
+            output_bucket: S3 bucket for storing artifacts
+            prefix: S3 prefix for storing artifacts
+
+        Returns:
+            A tuple of (page_result_dict, metering_data)
+        """
+        page_id = page_index + 1
+
+        # 1. Render the page to an image and save to S3
+        img_bytes = self._extract_page_image(pdf_page, True, page_id)
+        image_key = f"{prefix}/pages/{page_id}/image.jpg"
+        s3.write_content(img_bytes, output_bucket, image_key, content_type="image/jpeg")
+
+        # 2. Save the directly extracted text
+        parsed_result = {"text": page_text}
+        parsed_text_key = f"{prefix}/pages/{page_id}/result.json"
+        s3.write_content(
+            parsed_result,
+            output_bucket,
+            parsed_text_key,
+            content_type="application/json",
+        )
+
+        # 3. Create placeholder raw OCR and confidence files for compatibility
+        empty_ocr_response = {"DocumentMetadata": {"Pages": 1}, "Blocks": []}
+        raw_text_key = f"{prefix}/pages/{page_id}/rawText.json"
+        s3.write_content(
+            empty_ocr_response,
+            output_bucket,
+            raw_text_key,
+            content_type="application/json",
+        )
+
+        text_confidence_data = {
+            "text": "| Text | Confidence |\n|:-----|:------------|\n| *Direct text extraction* | 100.0 |"
+        }
+        text_confidence_key = f"{prefix}/pages/{page_id}/textConfidence.json"
+        s3.write_content(
+            text_confidence_data,
+            output_bucket,
+            text_confidence_key,
+            content_type="application/json",
+        )
+
+        # 4. Assemble the result dictionary with S3 URIs
+        result = {
+            "raw_text_uri": f"s3://{output_bucket}/{raw_text_key}",
+            "parsed_text_uri": f"s3://{output_bucket}/{parsed_text_key}",
+            "text_confidence_uri": f"s3://{output_bucket}/{text_confidence_key}",
+            "image_uri": f"s3://{output_bucket}/{image_key}",
+        }
+
+        # 5. Provide minimal metering for this operation
+        metering = {"OCR/native/direct_extraction": {"pages": 1}}
+
+        return result, metering
+
+    def _process_futures(self, document: Document, future_to_page: dict):
+        """Helper to process futures from a ThreadPoolExecutor"""
+        # Start memory monitoring in background thread
+        memory_monitor_shutdown = self._start_memory_monitoring()
+        try:
+            for future in concurrent.futures.as_completed(future_to_page):
+                page_index = future_to_page[future]
+                page_id = str(page_index + 1)
+                try:
+                    ocr_result, page_metering = future.result()
+
+                    # Create Page object and add to document
+                    document.pages[page_id] = Page(
+                        page_id=page_id,
+                        image_uri=ocr_result["image_uri"],
+                        raw_text_uri=ocr_result["raw_text_uri"],
+                        parsed_text_uri=ocr_result["parsed_text_uri"],
+                        text_confidence_uri=ocr_result["text_confidence_uri"],
+                    )
+
+                    # Merge metering data
+                    document.metering = utils.merge_metering_data(
+                        document.metering, page_metering
+                    )
+
+                except Exception as e:
+                    import traceback
+
+                    error_msg = f"Error processing page {page_index + 1}: {str(e)}"
+                    stack_trace = traceback.format_exc()
+                    logger.error(f"{error_msg}\nStack trace:\n{stack_trace}")
+                    document.errors.append(f"{error_msg} (see logs for full trace)")
+        finally:
+            # Stop memory monitoring
+            memory_monitor_shutdown.set()
 
     def process_document(self, document: Document) -> Document:
         """
@@ -387,8 +503,44 @@ class OcrService:
                         stack_trace = traceback.format_exc()
                         logger.error(f"{error_msg}\nStack trace:\n{stack_trace}")
                         document.errors.append(f"{error_msg} (see logs for full trace)")
+            elif (
+                file_type == "pdf"
+                and self.text_extraction_service.is_pdf_text_native(file_content)
+            ):
+                # New path for text-native PDFs
+                logger.info("Processing as text-native PDF.")
+                pdf_document = fitz.open(stream=file_content, filetype="pdf")
+                document.num_pages = len(pdf_document)
+
+                # Extract all page texts at once to pass to the processing function
+                page_texts = self.text_extraction_service.extract_text_from_pdf(
+                    file_content
+                )
+
+                with concurrent.futures.ThreadPoolExecutor(
+                    max_workers=self.max_workers
+                ) as executor:
+                    future_to_page = {
+                        executor.submit(
+                            self._process_native_pdf_page,
+                            i,
+                            pdf_document.load_page(i),
+                            page_texts[i],
+                            document.output_bucket,
+                            document.input_key,
+                        ): i
+                        for i in range(document.num_pages)
+                    }
+                    self._process_futures(document, future_to_page)
+
+                pdf_document.close()
             else:
-                # Process PDF/image documents using existing logic
+                # Existing path for scanned PDFs and image files
+                if file_type == "pdf":
+                    logger.info("Processing as scanned PDF/image-based PDF.")
+                else:
+                    logger.info(f"Processing as image file: {file_type}")
+
                 pdf_document = fitz.open(stream=file_content, filetype=file_type)
                 num_pages = len(pdf_document)
                 document.num_pages = num_pages
@@ -397,7 +549,9 @@ class OcrService:
                     max_workers=self.max_workers
                 ) as executor:
                     # Pass original file content for image files
-                    original_content = file_content if not pdf_document.is_pdf else None
+                    original_content = (
+                        file_content if not pdf_document.is_pdf else None
+                    )
 
                     future_to_page = {
                         executor.submit(
@@ -410,52 +564,7 @@ class OcrService:
                         ): i
                         for i in range(num_pages)
                     }
-
-                    # Start memory monitoring in background thread
-                    memory_monitor_shutdown = self._start_memory_monitoring()
-                    completed_pages = 0
-
-                    try:
-                        for future in concurrent.futures.as_completed(future_to_page):
-                            page_index = future_to_page[future]
-                            page_id = str(page_index + 1)
-                            try:
-                                ocr_result, page_metering = future.result()
-
-                                # Create Page object and add to document
-                                document.pages[page_id] = Page(
-                                    page_id=page_id,
-                                    image_uri=ocr_result["image_uri"],
-                                    raw_text_uri=ocr_result["raw_text_uri"],
-                                    parsed_text_uri=ocr_result["parsed_text_uri"],
-                                    text_confidence_uri=ocr_result[
-                                        "text_confidence_uri"
-                                    ],
-                                )
-
-                                # Merge metering data
-                                document.metering = utils.merge_metering_data(
-                                    document.metering, page_metering
-                                )
-
-                                completed_pages += 1
-
-                            except Exception as e:
-                                import traceback
-
-                                error_msg = (
-                                    f"Error processing page {page_index + 1}: {str(e)}"
-                                )
-                                stack_trace = traceback.format_exc()
-                                logger.error(
-                                    f"{error_msg}\nStack trace:\n{stack_trace}"
-                                )
-                                document.errors.append(
-                                    f"{error_msg} (see logs for full trace)"
-                                )
-                    finally:
-                        # Stop memory monitoring
-                        memory_monitor_shutdown.set()
+                    self._process_futures(document, future_to_page)
 
                 pdf_document.close()
 

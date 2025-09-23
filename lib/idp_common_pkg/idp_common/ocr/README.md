@@ -9,6 +9,26 @@ This module provides OCR (Optical Character Recognition) capabilities for proces
 
 The OCR service is designed to process PDF documents and extract text using multiple backend options. It supports AWS Textract for traditional OCR with confidence scores, Amazon Bedrock for LLM-based text extraction, and image-only processing. The service works directly with the Document model from the common data model.
 
+## Intelligent Text Extraction (New)
+
+To improve efficiency and reduce costs, the OCR service now includes an intelligent routing mechanism that distinguishes between text-native PDFs and scanned (image-based) PDFs. This avoids sending documents that already contain machine-readable text to an expensive OCR service.
+
+This logic is handled by the `TextExtractionService`, which is used internally by the `OcrService`.
+
+### How It Works
+
+1.  **PDF Inspection**: When a PDF document is processed, it's first inspected by the `TextExtractionService`.
+2.  **Content-based Routing**:
+    -   **Text-Native PDFs**: If the service detects a significant amount of selectable text, it extracts the text directly using `PyMuPDF`. This bypasses the OCR backend (Textract or Bedrock) entirely. All required document artifacts (page images, parsed text) are still generated for compatibility with the rest of the IDP pipeline.
+    -   **Scanned PDFs & Images**: If the document is an image or a PDF with no extractable text, it is routed to the configured OCR backend (`textract` or `bedrock`) for standard processing.
+3.  **Seamless Integration**: This entire process is automatic and requires no configuration changes. The `OcrService` handles the routing internally, ensuring a consistent output structure for all document types.
+
+### Benefits
+
+-   **Cost Reduction**: Significantly lowers costs by avoiding unnecessary OCR calls for a large category of business documents (e.g., invoices, reports, statements that are "born digital").
+-   **Increased Speed**: Direct text extraction is much faster than performing OCR on a page image.
+-   **Improved Accuracy**: For text-native documents, direct extraction is 100% accurate, as it reads the text data embedded in the file, avoiding any potential OCR errors.
+
 ## OCR Backend Options
 
 The service supports three OCR backends, each with different capabilities and use cases:
