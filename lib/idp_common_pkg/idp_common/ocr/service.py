@@ -369,9 +369,12 @@ class OcrService:
             content_type="application/json",
         )
 
-        text_confidence_data = {
-            "text": "| Text | Confidence |\n|:-----|:------------|\n| *Direct text extraction* | 100.0 |"
-        }
+        lines = page_text.splitlines()
+        markdown_lines = ["| Text | Confidence |", "|:-----|:-----------|"]
+        for line in lines:
+            if line.strip():
+                markdown_lines.append(f"| {line.strip()} | 100.0 |")
+        text_confidence_data = {"text": "\n".join(markdown_lines)}
         text_confidence_key = f"{prefix}/pages/{page_id}/textConfidence.json"
         s3.write_content(
             text_confidence_data,
