@@ -11,8 +11,6 @@ import sys
 from io import BytesIO
 from unittest.mock import ANY, MagicMock, patch
 
-# Mock PyMuPDF and textractor before importing any modules that might depend on them
-sys.modules["fitz"] = MagicMock()
 sys.modules["textractor"] = MagicMock()
 sys.modules["textractor.parsers"] = MagicMock()
 sys.modules["textractor.parsers.response_parser"] = MagicMock()
