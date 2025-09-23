@@ -632,11 +632,6 @@ Resources:
             type: object
             sectionLabel: Assessment Inference
             properties:
-              enabled:
-                type: boolean
-                description: Enable or disable assessment processing
-                default: true
-                order: 0
               validation_enabled:
                 type: boolean
                 description: Enable or disable assessment validation checks
