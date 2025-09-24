@@ -46,6 +46,7 @@ def handler(event, context):
     
     # Load configuration and initialize the OCR service using new simplified pattern
     config = get_config()
+
     backend = config.get("ocr", {}).get("backend", "textract")
     
     logger.info(f"Initializing OCR with backend: {backend}")

@@ -46,16 +46,15 @@ def handler(event, context):
     
     # Load configuration and initialize the OCR service using new simplified pattern
     config = get_config()
+
     backend = config.get("ocr", {}).get("backend", "textract")
-    
     logger.info(f"Initializing OCR with backend: {backend}")
     service = ocr.OcrService(
         region=region,
         config=config,
         backend=backend
     )
-    
-    # Process the document - the service will read the PDF content directly
+    # Always call the service; gating is handled inside
     document = service.process_document(document)
     
     # Check if document processing failed

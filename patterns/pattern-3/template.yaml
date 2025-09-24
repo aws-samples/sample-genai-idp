@@ -155,6 +155,11 @@ Resources:
             required:
               - features
             properties:
+              enabled:
+                type: boolean
+                description: Enable or disable assessment processing
+                default: true
+                order: 0
               image:
                 type: object
                 sectionLabel: Image Processing Settings

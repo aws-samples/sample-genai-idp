@@ -30,27 +30,15 @@ def handler(event, context):
     config = get_config()
     logger.info(f"Config: {json.dumps(config)}")
 
-    # Check if extraction is enabled
-    from idp_common.utils import normalize_boolean_value
-    extraction_config = config.get('extraction', {})
-    if not normalize_boolean_value(extraction_config.get('enabled', True)):
-        logger.info("Extraction is disabled in configuration, skipping.")
-        # When skipping, we must still return the expected structure for the Map state output
-        section_id = event.get("section_id")
-        return {
-            "section_id": section_id,
-            "document": event.get("document", {})
-        }
-    
     # For Map state, we get just one section from the document
     # Extract the document and section from the event - handle both compressed and uncompressed
     working_bucket = os.environ.get('WORKING_BUCKET')
     full_document = Document.load_document(event.get("document", {}), working_bucket, logger)
-    
+
     # Get the section ID directly from the Map state input
     # Now using the simplified array of section IDs format
     section_id = event.get("section_id")
-    
+
     if not section_id:
         raise ValueError("No section_id found in event")
     

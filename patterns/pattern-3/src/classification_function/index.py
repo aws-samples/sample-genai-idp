@@ -12,7 +12,7 @@ import os
 import time
 
 from idp_common import classification, metrics, get_config
-from idp_common.models import Document, Status
+from idp_common.models import Document, Status, Section
 from idp_common.docs_service import create_document_service
 
 # Configuration will be loaded in handler function
@@ -34,13 +34,6 @@ def handler(event, context):
     config = get_config()
     logger.info(f"Config: {json.dumps(config, default=str)}")
 
-    # Check if classification is enabled
-    from idp_common.utils import normalize_boolean_value
-    classification_config = config.get('classification', {})
-    if not normalize_boolean_value(classification_config.get('enabled', True)):
-        logger.info("Classification is disabled in configuration, skipping.")
-        return { "document": event["OCRResult"]["document"] }
-    
     # Extract document from the OCR result - handle both compressed and uncompressed
     working_bucket = os.environ.get('WORKING_BUCKET')
     document = Document.load_document(event["OCRResult"]["document"], working_bucket, logger)
@@ -51,14 +44,6 @@ def handler(event, context):
     document_service = create_document_service()
     logger.info(f"Updating document status to {document.status}")
     document_service.update_document(document)
-    
-    if not document.pages:
-        error_message = "Document has no pages to classify"
-        logger.error(error_message)
-        document.status = Status.FAILED
-        document.errors.append(error_message)
-        document_service.update_document(document)
-        raise ValueError(error_message)
     
     t0 = time.time()
     

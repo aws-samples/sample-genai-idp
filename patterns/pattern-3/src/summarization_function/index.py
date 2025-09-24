@@ -51,27 +51,23 @@ def handler(event, context):
         logger.info(f"Updating document status to {document.status}")
         document_service.update_document(document)
         
-        # Load configuration and create the summarization service
+        # Load configuration
         config = get_config()
-        summarization_service = summarization.SummarizationService(
-            config=config
-        )        
-        # Process the document using the service
+        
+        # Create the summarization service and process document
+        summarization_service = summarization.SummarizationService(config=config)
         logger.info(f"Processing document with SummarizationService, document ID: {document.id}")
         processed_document = summarization_service.process_document(document)
-        
         # Check if document processing failed
         if processed_document.status == Status.FAILED:
             error_message = f"Summarization failed for document {processed_document.id}"
             logger.error(error_message)
             raise Exception(error_message)
-        
         # Log the result
         if hasattr(processed_document, 'summary_report_uri') and processed_document.summary_report_uri:
             logger.info(f"Document summarization successful, report URI: {processed_document.summary_report_uri}")
         else:
             logger.warning("Document summarization completed but no summary report URI was set")
-        
         # Prepare output with automatic compression if needed
         return {
             'document': processed_document.serialize_document(working_bucket, "summarization", logger),

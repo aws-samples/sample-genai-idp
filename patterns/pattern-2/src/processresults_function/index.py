@@ -411,7 +411,6 @@ def handler(event, context):
     # Clear sections list to rebuild from extraction results
     document.sections = []
     validation_errors = []
-    validation_errors = []
     hitl_triggered = False
     
     # Combine all section results
@@ -513,7 +512,10 @@ def handler(event, context):
     logger.info(f"Response: {json.dumps(response, default=str)}")
 
     if document.errors:
-        validation_errors.extend(document.errors)
+        # Do not add 'OCR step was disabled.' to validation_errors
+        filtered_errors = [e for e in document.errors if e != 'OCR step was disabled.']
+        if filtered_errors:
+            validation_errors.extend(filtered_errors)
 
     # Raise exception if there were validation errors
     if validation_errors:

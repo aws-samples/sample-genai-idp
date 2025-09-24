@@ -21,15 +21,20 @@ class Status(Enum):
     QUEUED = "QUEUED"  # Initial state when document is added to queue
     RUNNING = "RUNNING"  # Step function workflow has started
     OCR = "OCR"  # OCR processing
+    OCR_SKIPPED = "OCR_SKIPPED"  # OCR step was skipped
     CLASSIFYING = "CLASSIFYING"  # Document classification
+    CLASSIFICATION_SKIPPED = "CLASSIFICATION_SKIPPED"  # CLASSIFICATION step was skipped
+    CLASSIFICATION_SKIPPED_NO_OCR = "CLASSIFICATION_SKIPPED_BECAUSE_NO_OCR"  # No OCR pages to classify
     EXTRACTING = "EXTRACTING"  # Information extraction
+    EXTRACTION_SKIPPED = "EXTRACTION_SKIPPED"  # EXTRACTING step was skipped
     ASSESSING = "ASSESSING"  # Document assessment
     POSTPROCESSING = "POSTPROCESSING"  # Document summarization
     HITL_IN_PROGRESS = "HITL_IN_PROGRESS"  # Human-in-the-loop review in progress
     SUMMARIZING = "SUMMARIZING"  # Document summarization
+    SUMMARIZATION_SKIPPED_NO_OCR = "SUMMARIZATION_SKIPPED_BECAUSE_NO_OCR"  # Summarization step was skipped
     COMPLETED = "COMPLETED"  # All processing completed
     FAILED = "FAILED"  # Processing failed
-
+    
 
 @dataclass
 class Page:
@@ -249,15 +254,19 @@ class Document:
         # Convert sections
         result["sections"] = []
         for section in self.sections:
+            classification = getattr(section, "classification", None)
+            # If classification is a DocumentClassification object, convert to dict
+            if hasattr(classification, "__dict__"):
+                classification = dict(classification.__dict__)
             section_dict = {
-                "section_id": section.section_id,
-                "classification": section.classification,
-                "confidence": section.confidence,
-                "page_ids": section.page_ids,
-                "extraction_result_uri": section.extraction_result_uri,
-                "confidence_threshold_alerts": section.confidence_threshold_alerts,
+                "section_id": getattr(section, "section_id", None),
+                "classification": classification,
+                "confidence": getattr(section, "confidence", None),
+                "page_ids": getattr(section, "page_ids", []),
+                "extraction_result_uri": getattr(section, "extraction_result_uri", None),
+                "confidence_threshold_alerts": getattr(section, "confidence_threshold_alerts", []),
             }
-            if section.attributes:
+            if hasattr(section, "attributes") and section.attributes:
                 section_dict["attributes"] = section.attributes
             result["sections"].append(section_dict)
 

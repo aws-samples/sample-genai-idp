@@ -402,18 +402,18 @@ class SummarizationService:
             logger.info(
                 f"Summarization is disabled in configuration for document {document.id}, skipping processing"
             )
-            # Update document status to completed if not already failed
             if document.status != Status.FAILED:
                 document.status = Status.COMPLETED
             return document
 
+        # Gate summarization if OCR is disabled in config or no pages are present
         if not document.pages:
-            logger.warning("Document has no pages to summarize")
-            return self._update_document_status(
-                document,
-                success=False,
-                error_message="Document has no pages to summarize",
-            )
+            logger.warning("Summarization skipped: OCR is disabled in config or no OCR pages available.")
+            document.status = Status.FAILED
+            if not ocr_enabled:
+                document.status = Status.SUMMARIZATION_SKIPPED_NO_OCR
+            document.errors.append("Document has no pages to summarize")
+            return document
 
         # If no sections are defined, fall back to summarizing the entire document at once
         if not document.sections:
