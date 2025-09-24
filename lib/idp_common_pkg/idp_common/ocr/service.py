@@ -312,7 +312,7 @@ class OcrService:
         )
 
         # Initialize the text extraction service for intelligent routing
-        self.text_extraction_service = TextExtractionService()
+        self.text_extraction_service = TextExtractionService(ocr_service=self)
 
         # Initialize document converter for non-PDF formats
         self.document_converter = DocumentConverter(dpi=self.dpi or 150)
@@ -395,6 +395,41 @@ class OcrService:
         metering = {"OCR/native/direct_extraction": {"pages": 1}}
 
         return result, metering
+
+    def get_text_from_image(self, image_bytes: bytes) -> str:
+        """
+        Performs OCR on a single image and returns the extracted text.
+        """
+        if self.backend == "textract":
+            if isinstance(self.enhanced_features, list) and self.enhanced_features:
+                textract_result = self._analyze_document(image_bytes)
+            else:
+                textract_result = self.textract_client.detect_document_text(
+                    Document={"Bytes": image_bytes}
+                )
+            parsed_result = self._parse_textract_response(textract_result)
+            return parsed_result.get("text", "")
+        elif self.backend == "bedrock":
+            image_content = image.prepare_bedrock_image_attachment(image_bytes)
+            content = [{"text": self.bedrock_config["task_prompt"]}, image_content]
+            response_with_metering = bedrock.invoke_model(
+                model_id=self.bedrock_config["model_id"],
+                system_prompt=self.bedrock_config["system_prompt"],
+                content=content,
+                temperature=0.0,
+                top_p=0.1,
+                top_k=5,
+                max_tokens=4096,
+                context="OCR",
+            )
+            extracted_text = bedrock.extract_text_from_response(response_with_metering)
+            return extracted_text
+        elif self.backend == "none":
+            return "[Image Content: OCR not performed]"
+        else:
+            logger.warning(f"Unsupported OCR backend: {self.backend}. Cannot process image.")
+            return ""
+
 
     def _process_futures(self, document: Document, future_to_page: dict):
         """Helper to process futures from a ThreadPoolExecutor"""
@@ -516,7 +551,8 @@ class OcrService:
                 document.num_pages = len(pdf_document)
 
                 # Extract all page texts at once to pass to the processing function
-                page_texts = self.text_extraction_service.extract_text_from_pdf(
+                  # Extract all page texts at once, including OCR for embedded images
+                page_texts = self.text_extraction_service.extract_text_and_images_from_pdf(
                     file_content
                 )
 

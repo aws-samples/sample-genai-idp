@@ -23,6 +23,20 @@ This logic is handled by the `TextExtractionService`, which is used internally b
     -   **Scanned PDFs & Images**: If the document is an image or a PDF with no extractable text, it is routed to the configured OCR backend (`textract` or `bedrock`) for standard processing.
 3.  **Seamless Integration**: This entire process is automatic and requires no configuration changes. The `OcrService` handles the routing internally, ensuring a consistent output structure for all document types.
 
+### New: Embedded Image Analysis
+
+The `TextExtractionService` has been enhanced to handle text-native PDFs that contain embedded images. This creates a more comprehensive document representation by analyzing the content of these images and integrating their textual meaning directly into the final text output.
+
+#### How It Works
+
+1.  **Parse Text and Identify Images**: When processing a text-native PDF, the service iterates through the content in reading order.
+    *   Text content is appended directly to the output string.
+    *   When an embedded image is encountered, a unique placeholder is inserted into the text, and the image's byte data is extracted.
+2.  **Analyze Extracted Images**: After parsing the entire document, the extracted images are sent to the configured `OcrService` (Textract or Bedrock) to get a textual description of the image's content.
+3.  **Compose Final Text**: The image placeholders in the text are replaced with the corresponding text description returned by the OCR service, formatted as `[Image Content: <OCR Description>]`.
+
+This process is fully automated and ensures that no information is lost from PDFs that contain a mix of text and images.
+
 ### Benefits
 
 -   **Cost Reduction**: Significantly lowers costs by avoiding unnecessary OCR calls for a large category of business documents (e.g., invoices, reports, statements that are "born digital").

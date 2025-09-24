@@ -6,8 +6,12 @@ This module provides a service for intelligent text extraction from documents.
 """
 
 import logging
+from typing import TYPE_CHECKING
 
 import fitz  # PyMuPDF
+
+if TYPE_CHECKING:
+    from idp_common.ocr.service import OcrService
 
 logger = logging.getLogger(__name__)
 
@@ -23,16 +27,18 @@ class TextExtractionService:
     can be extracted directly.
     """
 
-    def __init__(self, text_length_threshold: int = 100):
+    def __init__(self, ocr_service: "OcrService" = None, text_length_threshold: int = 100):
         """
         Initializes the TextExtractionService.
 
         Args:
+            ocr_service: An instance of the OcrService to use for image analysis.
             text_length_threshold: The minimum number of text characters to find
                                    in a PDF to classify it as "text-native". This
                                    helps filter out scanned PDFs that might have
                                    a few characters from a scanner's header or footer.
         """
+        self.ocr_service = ocr_service
         self.text_length_threshold = text_length_threshold
 
     def is_pdf_text_native(self, pdf_bytes: bytes) -> bool:
@@ -84,21 +90,82 @@ class TextExtractionService:
             )
             return False
 
-    def extract_text_from_pdf(self, pdf_bytes: bytes) -> list[str]:
+    def extract_text_and_images_from_pdf(self, pdf_bytes: bytes) -> list[str]:
         """
-        Extracts text from each page of a PDF document.
+        Extracts text from a PDF, performs OCR on embedded images, and returns the consolidated text for each page.
+        This is the main entry point for processing PDFs with mixed content.
+        """
+        if not self.ocr_service:
+            logger.warning("OcrService not available. Cannot process images. Returning only text.")
+            pdf_document = fitz.open(stream=pdf_bytes, filetype="pdf")
+            page_texts = [page.get_text("text") for page in pdf_document]
+            pdf_document.close()
+            return page_texts
+
+        pages_data = self._extract_text_and_images_from_pdf(pdf_bytes)
+
+        final_page_texts = []
+        for page_text_with_placeholders, images in pages_data:
+            
+            final_text = page_text_with_placeholders
+            if images:
+                replacements = {}
+                for placeholder, image_bytes in images.items():
+                    ocr_text = self.ocr_service.get_text_from_image(image_bytes)
+                    replacements[placeholder] = f"[Image Content: {ocr_text}]"
+
+                for placeholder, ocr_content in replacements.items():
+                    final_text = final_text.replace(placeholder, ocr_content)
+            
+            final_page_texts.append(final_text)
+
+        return final_page_texts
+
+    def _extract_text_and_images_from_pdf(self, pdf_bytes: bytes) -> list[tuple[str, dict[str, bytes]]]:
+        """
+        Extracts text and images from each page of a PDF document.
 
         This method should be called for PDFs that are known to be text-native.
-        It uses PyMuPDF to efficiently parse the text content from each page.
+        It uses PyMuPDF to parse the text content and extract images from each page.
 
         Args:
             pdf_bytes: The byte content of the PDF file.
 
         Returns:
-            A list of strings, where each string corresponds to the
-            extracted text of a page in the document.
+            A list of tuples, where each tuple contains:
+            - The extracted text of a page with image placeholders.
+            - A dictionary mapping image placeholders to image bytes.
         """
+        import uuid
         pdf_document = fitz.open(stream=pdf_bytes, filetype="pdf")
-        page_texts = [page.get_text("text") for page in pdf_document]
+        results = []
+        for page in pdf_document:
+            page_text = ""
+            images = {}
+            page_dict = page.get_text("dict", sort=True)
+
+            for block in page_dict["blocks"]:
+                if block["type"] == 0:  # Text block
+                    for line in block["lines"]:
+                        line_text = ""
+                        for span in line["spans"]:
+                            line_text += span["text"]
+                        page_text += line_text + "\n"
+                elif block["type"] == 1:  # Image block
+                    try:
+                        if "image" in block:
+                            img_bytes = block["image"]
+                        elif "xref" in block and block["xref"] > 0:
+                            img_bytes = pdf_document.extract_image(block["xref"])["image"]
+                        else:
+                            logger.warning("Image block found without image data or xref.")
+                            continue
+                            
+                        placeholder = f"[IMAGE-PLACEHOLDER-{uuid.uuid4()}]"
+                        page_text += f"\n{placeholder}\n"
+                        images[placeholder] = img_bytes
+                    except Exception as e:
+                        logger.warning(f"Could not extract image from page: {e}")
+            results.append((page_text.strip(), images))
         pdf_document.close()
-        return page_texts
+        return results

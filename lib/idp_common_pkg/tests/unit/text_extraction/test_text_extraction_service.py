@@ -5,6 +5,9 @@ import unittest
 import os
 from idp_common.text_extraction.service import TextExtractionService
 
+import pytest
+
+@pytest.mark.unit
 class TestTextExtractionService(unittest.TestCase):
 
     def setUp(self):
@@ -49,22 +52,40 @@ class TestTextExtractionService(unittest.TestCase):
         malformed_bytes = b'this is not a pdf'
         self.assertFalse(service.is_pdf_text_native(malformed_bytes))
 
-    def test_extract_text_from_pdf(self):
+    def test_extract_text_and_images_from_pdf(self):
         """
-        Tests that extract_text_from_pdf returns a list of strings, one for each page.
+        Tests that _extract_text_and_images_from_pdf returns a list of tuples, one for each page.
         """
         service = TextExtractionService()
         with open(self.text_native_pdf_path, "rb") as f:
             pdf_bytes = f.read()
 
-        extracted_texts = service.extract_text_from_pdf(pdf_bytes)
+        extracted_data = service._extract_text_and_images_from_pdf(pdf_bytes)
 
         # The bank-statement-multipage.pdf has 5 pages
-        self.assertIsInstance(extracted_texts, list)
-        self.assertEqual(len(extracted_texts), 5)
-        self.assertIsInstance(extracted_texts[0], str)
+        self.assertIsInstance(extracted_data, list)
+        self.assertEqual(len(extracted_data), 5)
+        
+        # Check the structure of the first page data
+        first_page_data = extracted_data[0]
+        self.assertIsInstance(first_page_data, tuple)
+        self.assertEqual(len(first_page_data), 2)
+        
+        # Check text and images
+        text, images = first_page_data
+        self.assertIsInstance(text, str)
+        self.assertIsInstance(images, dict)
+        
+        # This document has 1 image
+        self.assertEqual(len(images), 1)
         # Check if some expected text is present on the first page
-        self.assertIn("Example Inc. Credit Union", extracted_texts[0])
+        self.assertIn("Example Inc. Credit Union", text)
+
+    def test_inspect_pdf_for_images(self):
+        import fitz
+        doc = fitz.open(self.text_native_pdf_path)
+        for i, page in enumerate(doc):
+            print(f"Page {i} images: {page.get_images(full=True)}")
 
 if __name__ == '__main__':
     unittest.main()

@@ -69,7 +69,7 @@ class TestOcrService:
             mock_fitz_open.assert_called_once()
             mock_pdf_doc.close.assert_called_once()
 
-    @patch("idp_common.ocr.service.TextExtractionService.extract_text_from_pdf", return_value=["text"] * 5)
+    @patch("idp_common.ocr.service.TextExtractionService.extract_text_and_images_from_pdf", return_value=["text"] * 5)
     @patch("idp_common.ocr.service.OcrService._detect_file_type", return_value="pdf")
     @patch("idp_common.ocr.service.TextExtractionService.is_pdf_text_native", return_value=True)
     @patch("idp_common.ocr.service.OcrService._process_single_page")
