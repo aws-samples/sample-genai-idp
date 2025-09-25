@@ -44,6 +44,7 @@ logger = logging.getLogger(__name__)
 
 
 class ClassificationService:
+    
     """Service for classifying documents using various backends."""
 
     # Configuration for the SageMaker retry mechanism
@@ -1626,47 +1627,91 @@ class ClassificationService:
         from idp_common.utils import normalize_boolean_value
         classification_config = self.config.get('classification', {})
         classification_enabled = normalize_boolean_value(classification_config.get('enabled', True))
-        classes = self.config.get('classes', [])
-        # Single-class optimization: if only one class is defined, assign all pages and skip backend
-        if len(classes) == 1 and document.pages:
-            single_class = classes[0].get('name', 'CLASSIFICATION DISABLED')
-            logger.info(f"Only one document class '{single_class}' is defined. Automatically classifying all pages as this class without calling backend.")
+
+        # Helper for classification disabled
+        def _classification_disabled(document):
+            section = self._create_section(
+                section_id="1",
+                doc_type=Status.CLASSIFICATION_SKIPPED.value,
+                pages=["1"],
+                confidence=1.0,
+            )
+            document.sections = [section]
+            return self._update_document_status(document, success=True, error_message=Status.CLASSIFICATION_SKIPPED.value)
+
+        # No pages: try to rebuild, else fail or skip
+        if not document.pages:
+            logger.warning("Document has no pages to classify")
+            ocr_config = self.config.get('ocr', {})
+            ocr_enabled = normalize_boolean_value(ocr_config.get('enabled', True))
+            if not ocr_enabled and not classification_enabled:
+                return _classification_disabled(document)
+            if classification_enabled:
+                document = Document.from_s3(os.environ["OUTPUT_BUCKET"], document.document_id)
+                if not document.pages:
+                    return self._update_document_status(document, success=False, error_message="Classification Failed - No Pages. Enable OCR Once to Create.")
+            else:
+                return self._update_document_status(document, success=False, error_message="Document has no pages to classify")
+
+        # Classification disabled
+        if not classification_enabled:
+            logger.info("Classification is disabled in configuration")
+            return _classification_disabled(document)
+
+
+        # Check for document name regex match (single-class configurations only)
+        regex_matched_class = self._check_document_name_regex(document)
+        if regex_matched_class:
+            logger.info(
+                f"Classifying all pages as '{regex_matched_class}' based on document name regex match. Skipping LLM classification."
+            )
+
+            # Set all pages to the regex-matched class
             for page_id, page in document.pages.items():
-                page.classification = single_class
+                page.classification = regex_matched_class
                 page.confidence = 1.0
+
+            # Create a single section containing all pages
             page_ids = list(document.pages.keys())
             section = self._create_section(
                 section_id="1",
-                doc_type=single_class,
+                doc_type=regex_matched_class,
                 pages=page_ids,
                 confidence=1.0,
             )
             document.sections = [section]
-            document.status = Status.CLASSIFICATION_SKIPPED
+            
+            # Update document status
+            document = self._update_document_status(document)
+
             return document
-        if not classification_enabled or not document.pages:
-            logger.info("Classification is disabled in configuration or document has no pages. Assigning default class and skipping classification.")
-            if len(classes) == 1:
-                default_class = classes[0].get('name', 'CLASSIFICATION DISABLED')
-            else:
-                default_class = 'CLASSIFICATION DISABLED'
+
+        # If there's only one document class defined, automatically classify all pages as that class
+        # without calling any backend service
+        if self.has_single_class:
+            logger.info(
+                f"Only one document class '{self.single_class_name}' is defined. Automatically classifying all pages as this class without calling backend."
+            )
+
+            # Set all pages to the single class
             for page_id, page in document.pages.items():
-                page.classification = default_class
+                page.classification = self.single_class_name
                 page.confidence = 1.0
+
+            # Create a single section containing all pages
             page_ids = list(document.pages.keys())
             section = self._create_section(
                 section_id="1",
-                doc_type=default_class,
+                doc_type=self.single_class_name,
                 pages=page_ids,
                 confidence=1.0,
             )
             document.sections = [section]
-            if not document.pages:
-                document.status = Status.CLASSIFICATION_SKIPPED_NO_OCR
-            else:
-                document.status = Status.CLASSIFICATION_SKIPPED
+
+            # Update document status
+            document = self._update_document_status(document)
+
             return document
-        # ...existing code for regex match and single class...
 
         # Check for limited page classification
         if self.max_pages_for_classification != "ALL":
@@ -1915,6 +1960,28 @@ class ClassificationService:
                     f"Document classified with {len(document.errors)} errors"
                 )
 
+        # Persist minimal section result.json in case of decoupled architecture
+        from idp_common import s3
+        try:
+            for section in document.sections: 
+                if section.classification == Status.CLASSIFICATION_SKIPPED.value:
+                    continue
+                s3_key = f"{document.id}/sections/{section.section_id}/fallback_result.json"
+                output_dict = {
+                    "section_id": section.section_id,
+                    "classification": section.classification,
+                    "confidence": section.confidence,
+                    "page_ids": section.page_ids,
+                }
+                s3.write_content(
+                    output_dict,
+                    os.environ["OUTPUT_BUCKET"],
+                    s3_key,
+                    content_type="application/json",
+                )
+        except Exception as e:
+            logger.error(f"Failed to persist section {section.id} to S3: {e}")
+
         return document
 
     def _format_pages(self, document: Document) -> Dict[str, str]:
@@ -1945,6 +2012,7 @@ class ClassificationService:
                 pages_content[page_id] = f"[No text content for page {page_id}]"
 
         return pages_content
+        
 
     def holistic_classify_document(self, document: Document) -> Document:
         """

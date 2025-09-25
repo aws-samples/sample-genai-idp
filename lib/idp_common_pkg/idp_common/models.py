@@ -21,19 +21,17 @@ class Status(Enum):
     QUEUED = "QUEUED"  # Initial state when document is added to queue
     RUNNING = "RUNNING"  # Step function workflow has started
     OCR = "OCR"  # OCR processing
-    OCR_SKIPPED = "OCR_SKIPPED"  # OCR step was skipped
     CLASSIFYING = "CLASSIFYING"  # Document classification
-    CLASSIFICATION_SKIPPED = "CLASSIFICATION_SKIPPED"  # CLASSIFICATION step was skipped
-    CLASSIFICATION_SKIPPED_NO_OCR = "CLASSIFICATION_SKIPPED_BECAUSE_NO_OCR"  # No OCR pages to classify
     EXTRACTING = "EXTRACTING"  # Information extraction
-    EXTRACTION_SKIPPED = "EXTRACTION_SKIPPED"  # EXTRACTING step was skipped
     ASSESSING = "ASSESSING"  # Document assessment
     POSTPROCESSING = "POSTPROCESSING"  # Document summarization
     HITL_IN_PROGRESS = "HITL_IN_PROGRESS"  # Human-in-the-loop review in progress
     SUMMARIZING = "SUMMARIZING"  # Document summarization
-    SUMMARIZATION_SKIPPED_NO_OCR = "SUMMARIZATION_SKIPPED_BECAUSE_NO_OCR"  # Summarization step was skipped
     COMPLETED = "COMPLETED"  # All processing completed
     FAILED = "FAILED"  # Processing failed
+    OCR_SKIPPED = "OCR step was skipped"  # OCR step was skipped
+    CLASSIFICATION_SKIPPED = "Classification step was skipped"  # CLASSIFICATION step was skipped
+    EXTRACTION_SKIPPED = "Extraction step was skipped"  # EXTRACTION step was skipped
     
 
 @dataclass
@@ -254,19 +252,15 @@ class Document:
         # Convert sections
         result["sections"] = []
         for section in self.sections:
-            classification = getattr(section, "classification", None)
-            # If classification is a DocumentClassification object, convert to dict
-            if hasattr(classification, "__dict__"):
-                classification = dict(classification.__dict__)
             section_dict = {
-                "section_id": getattr(section, "section_id", None),
-                "classification": classification,
-                "confidence": getattr(section, "confidence", None),
-                "page_ids": getattr(section, "page_ids", []),
-                "extraction_result_uri": getattr(section, "extraction_result_uri", None),
-                "confidence_threshold_alerts": getattr(section, "confidence_threshold_alerts", []),
+                "section_id": section.section_id,
+                "classification": section.classification,
+                "confidence": section.confidence,
+                "page_ids": section.page_ids,
+                "extraction_result_uri": section.extraction_result_uri,
+                "confidence_threshold_alerts": section.confidence_threshold_alerts,
             }
-            if hasattr(section, "attributes") and section.attributes:
+            if section.attributes:
                 section_dict["attributes"] = section.attributes
             result["sections"].append(section_dict)
 
@@ -477,48 +471,47 @@ class Document:
             # Process each section directory
             for section_id, section_dir in section_dirs:
                 result_key = f"{section_dir}result.json"
+                fallback_result_key = f"{section_dir}fallback_result.json"
 
                 try:
-                    # Check if result.json exists
                     s3_client.head_object(Bucket=bucket, Key=result_key)
-
-                    # Load section data from result.json
                     result_uri = build_s3_uri(bucket, result_key)
-                    section_data = get_json_content(result_uri)
+                except Exception:
+                    s3_client.head_object(Bucket=bucket, Key=fallback_result_key)
+                    result_uri = build_s3_uri(bucket, fallback_result_key)
 
-                    # Get section attributes if they exist in the result
-                    attributes = section_data.get("attributes", section_data)
+                section_data = get_json_content(result_uri)
 
-                    # Determine page IDs for this section based on classification
-                    # If not available in section_data, we'll try to infer from page classifications
-                    section_classification = section_data.get("classification")
-                    page_ids = section_data.get("page_ids", [])
+                # Get section attributes if they exist in the result
+                attributes = section_data.get("attributes", section_data)
 
-                    # If page_ids not found in section data, try to infer from pages
-                    if not page_ids and section_classification:
-                        for page_id, page in document.pages.items():
-                            if page.classification == section_classification:
-                                page_ids.append(page_id)
+                # Determine page IDs for this section based on classification
+                # If not available in section_data, we'll try to infer from page classifications
+                section_classification = section_data.get("classification")
+                page_ids = section_data.get("page_ids", [])
 
-                    # If section_id is numeric, match it to page_id
-                    if not page_ids and section_id.isdigit():
-                        if section_id in document.pages:
-                            page_ids = [section_id]
+                # If page_ids not found in section data, try to infer from pages
+                if not page_ids and section_classification:
+                    for page_id, page in document.pages.items():
+                        if page.classification == section_classification:
+                            page_ids.append(page_id)
 
-                    # Add section to document
-                    document.sections.append(
-                        Section(
-                            section_id=section_id,
-                            classification=section_classification,
-                            confidence=section_data.get("confidence", 1.0),
-                            page_ids=page_ids,
-                            extraction_result_uri=result_uri,
-                            attributes=attributes,
-                        )
+                # If section_id is numeric, match it to page_id
+                if not page_ids and section_id.isdigit():
+                    if section_id in document.pages:
+                        page_ids = [section_id]
+
+                # Add section to document
+                document.sections.append(
+                    Section(
+                        section_id=section_id,
+                        classification=section_classification,
+                        confidence=section_data.get("confidence", 1.0),
+                        page_ids=page_ids,
+                        extraction_result_uri=result_uri,
+                        attributes=attributes,
                     )
-
-                except Exception as e:
-                    logger.warning(f"Error loading section {section_id}: {str(e)}")
+                )
 
             return document
 

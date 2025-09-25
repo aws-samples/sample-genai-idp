@@ -513,7 +513,7 @@ def handler(event, context):
 
     if document.errors:
         # Do not add 'OCR step was disabled.' to validation_errors
-        filtered_errors = [e for e in document.errors if e != 'OCR step was disabled.']
+        filtered_errors = [e for e in document.errors if e != Status.OCR_SKIPPED.value and e != Status.CLASSIFICATION_SKIPPED.value and e != Status.EXTRACTION_SKIPPED.value]
         if filtered_errors:
             validation_errors.extend(filtered_errors)
 

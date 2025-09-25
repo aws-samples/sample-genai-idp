@@ -397,29 +397,37 @@ class SummarizationService:
         summarization_config = self.config.get("summarization", {})
         from idp_common.utils import normalize_boolean_value
 
-        enabled = normalize_boolean_value(summarization_config.get("enabled", True))
-        if not enabled:
-            logger.info(
-                f"Summarization is disabled in configuration for document {document.id}, skipping processing"
-            )
+        output_bucket = os.environ["OUTPUT_BUCKET"]
+        if not normalize_boolean_value(summarization_config.get("enabled", True)):
+            logger.info(f"Summarization is disabled in configuration for document {document.id}, skipping processing")
             if document.status != Status.FAILED:
                 document.status = Status.COMPLETED
+            try:
+                s3.get_s3_client().head_object(Bucket=output_bucket, Key=f"{document.id}/summary/summary.md")   
+                document.summary_report_uri = f"s3://{output_bucket}/{document.id}/summary/summary.md"
+            except Exception:
+                logger.warning(f"No existing summary found in S3 for document {document.id}")
             return document
-
-        # Gate summarization if OCR is disabled in config or no pages are present
+        
+        
+        # Gate summarization if no pages are present
         if not document.pages:
-            logger.warning("Summarization skipped: OCR is disabled in config or no OCR pages available.")
-            document.status = Status.FAILED
-            if not ocr_enabled:
-                document.status = Status.SUMMARIZATION_SKIPPED_NO_OCR
-            document.errors.append("Document has no pages to summarize")
-            return document
+            logger.warning("No pages found in document, attempting to rebuild from S3.")       
+            document = Document.from_s3(output_bucket, document.id)
+            # If still no pages, return error
+            if not document.pages:
+                logger.warning("Summarization skipped: OCR is disabled in config or no OCR pages available.")
+                document.status = Status.FAILED
+                document.errors.append("Document has no pages to summarize. Create pages by running OCR once.")
+                return document
 
-        # If no sections are defined, fall back to summarizing the entire document at once
-        if not document.sections:
-            logger.info("No sections defined, summarizing entire document at once")
-            return self._process_document_as_whole(document, store_results)
+        # Summarize as whole if no sections or classification disabled
+        if not document.sections or document.sections[0].classification == 'CLASSIFICATION DISABLED':
+            document = Document.from_s3(output_bucket, document.id)
+            if not document.sections:
+                return self._process_document_as_whole(document, store_results)
 
+        
         try:
             # Start timing
             start_time = time.time()
@@ -762,6 +770,12 @@ class SummarizationService:
                         "title": "Document Summary",
                     }
                 }
+
+                # Edge case: If classification is disabled, ensure we have a section for formatting
+                from idp_common.models import Section
+                if not document.sections or document.sections[0].classification == 'CLASSIFICATION DISABLED':
+                    document.sections = [Section(section_id="full_document", classification="summary")]
+                
                 formatter = SummaryMarkdownFormatter(
                     document, single_section, is_section=False, include_toc=True
                 )

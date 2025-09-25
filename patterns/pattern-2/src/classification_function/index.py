@@ -84,14 +84,15 @@ def handler(event, context):
     
     # Check if document processing completely failed or has critical page failures
     if document.status == Status.FAILED or failed_page_exceptions:
+        error_details = '; '.join(str(e) for e in getattr(document, 'errors', []) if e)
         error_message = f"Classification failed for document {document.id}"
         if failed_page_exceptions:
             error_message += f" - {len(failed_page_exceptions)} pages failed to classify"
-        
+        if error_details:
+            error_message += f" Details: {error_details}"
         logger.error(error_message)
-        # Update document status in AppSync before raising exception
         document_service.update_document(document)
-        
+
         # Raise the original exception type if available, otherwise raise generic exception
         if primary_exception:
             logger.error(f"Re-raising original exception: {type(primary_exception).__name__}")

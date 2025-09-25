@@ -720,42 +720,51 @@ class ExtractionService:
         Returns:
             Document: Updated Document object with extraction results for the section
         """
-        # Gating logic: check if extraction is enabled in config
-        from idp_common.utils import normalize_boolean_value
-        extraction_config = self.config.get('extraction', {})
-        extraction_enabled = normalize_boolean_value(extraction_config.get('enabled', True))
-        if not extraction_enabled:
-            logger.info(f"Extraction is disabled in configuration. Skipping extraction for section {section_id}.")
-            document.status = Status.EXTRACTION_SKIPPED
-            for section in document.sections:
-                section.extraction = "EXTRACTION DISABLED"
-                section.confidence = 1.0
-            return document
         # Validate input document
         if not document:
             logger.error("No document provided")
             return document
-        if not document.sections:
-            logger.error("Document has no sections to process")
-            document.errors.append("Document has no sections to process")
+
+        # Gating logic: check if extraction is enabled in config
+        from idp_common.utils import normalize_boolean_value
+        extraction_config = self.config.get('extraction', {})
+        if not normalize_boolean_value(extraction_config.get('enabled', True)):
+            logger.info(f"Extraction is disabled in configuration. Skipping extraction for section {section_id}.")
+            document.status = Status.COMPLETED
+            document.errors.append(Status.EXTRACTION_SKIPPED.value)
             return document
+        
+        # No sections: try to rebuild, else fail or skip
+        if not document.sections:
+            logger.warning("Document has no sections to extract")
+            document = Document.from_s3(os.environ["OUTPUT_BUCKET"], document.id)
+
+        # Validate and fail if needed
+        if not document.sections:
+            document.status = Status.FAILED
+            document.errors.append("No sections found to extract from")
+            return document
+
         # Find the section with the given ID
         section = None
         for s in document.sections:
             if s.section_id == section_id:
                 section = s
                 break
+
         if not section:
             error_msg = f"Section {section_id} not found in document"
             logger.error(error_msg)
             document.errors.append(error_msg)
             return document
+
         # Extract information about the section
         class_label = section.classification
         output_bucket = document.output_bucket
         output_prefix = document.input_key
         output_key = f"{output_prefix}/sections/{section.section_id}/result.json"
         output_uri = f"s3://{output_bucket}/{output_key}"
+
         # Check if the section has required pages
         if not section.page_ids:
             error_msg = f"Section {section_id} has no page IDs"

@@ -1,3 +1,4 @@
+
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: MIT-0
 
@@ -242,3 +243,4 @@ def _list_local_images(directory_path: str, image_extensions: set) -> List[str]:
     except Exception as e:
         logger.error(f"Error listing images from local directory {directory_path}: {e}")
         raise
+

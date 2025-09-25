@@ -330,8 +330,8 @@ class OcrService:
         if not normalize_boolean_value(ocr_config.get('enabled', True)):
             import os
             from idp_common.models import Status
-            document.status = Status.OCR_SKIPPED
-            document.errors.append("OCR step was disabled.")
+            document.status = Status.COMPLETED
+            document.errors.append(Status.OCR_SKIPPED.value)
             return document
         t0 = time.time()
 
