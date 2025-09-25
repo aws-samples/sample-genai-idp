@@ -742,7 +742,7 @@ class ExtractionService:
         # Validate and fail if needed
         if not document.sections:
             document.status = Status.FAILED
-            document.errors.append("No sections found to extract from")
+            document.errors.append("No sections found to extract from - Sections can be created by running Classification")
             return document
 
         # Find the section with the given ID

@@ -90,7 +90,12 @@ def handler(event, context):
     
     # Check if document processing failed
     if section_document.status == Status.FAILED:
+        error_details = ''
+        if hasattr(section_document, 'errors') and section_document.errors:
+            error_details = '; '.join(str(e) for e in section_document.errors)
         error_message = f"Extraction failed for document {section_document.id}, section {section_id}"
+        if error_details:
+            error_message += f" Details: {error_details}"
         logger.error(error_message)
         raise Exception(error_message)
     
