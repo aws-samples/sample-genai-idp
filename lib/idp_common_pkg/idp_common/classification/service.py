@@ -44,6 +44,7 @@ logger = logging.getLogger(__name__)
 
 
 class ClassificationService:
+    
     """Service for classifying documents using various backends."""
 
     # Configuration for the SageMaker retry mechanism
@@ -1932,6 +1933,28 @@ class ClassificationService:
                     f"Document classified with {len(document.errors)} errors"
                 )
 
+        # Persist minimal section result.json in case of decoupled architecture
+        from idp_common import s3
+        try:
+            for section in document.sections: 
+                if section.classification == Status.CLASSIFICATION_SKIPPED.value:
+                    continue
+                s3_key = f"{document.id}/sections/{section.section_id}/fallback_result.json"
+                output_dict = {
+                    "section_id": section.section_id,
+                    "classification": section.classification,
+                    "confidence": section.confidence,
+                    "page_ids": section.page_ids,
+                }
+                s3.write_content(
+                    output_dict,
+                    os.environ["OUTPUT_BUCKET"],
+                    s3_key,
+                    content_type="application/json",
+                )
+        except Exception as e:
+            logger.error(f"Failed to persist section {section.id} to S3: {e}")
+
         return document
 
     def _format_pages(self, document: Document) -> Dict[str, str]:
@@ -1962,6 +1985,7 @@ class ClassificationService:
                 pages_content[page_id] = f"[No text content for page {page_id}]"
 
         return pages_content
+        
 
     def holistic_classify_document(self, document: Document) -> Document:
         """

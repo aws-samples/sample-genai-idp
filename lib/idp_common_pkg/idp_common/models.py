@@ -468,48 +468,47 @@ class Document:
             # Process each section directory
             for section_id, section_dir in section_dirs:
                 result_key = f"{section_dir}result.json"
+                fallback_result_key = f"{section_dir}fallback_result.json"
 
                 try:
-                    # Check if result.json exists
                     s3_client.head_object(Bucket=bucket, Key=result_key)
-
-                    # Load section data from result.json
                     result_uri = build_s3_uri(bucket, result_key)
-                    section_data = get_json_content(result_uri)
+                except Exception:
+                    s3_client.head_object(Bucket=bucket, Key=fallback_result_key)
+                    result_uri = build_s3_uri(bucket, fallback_result_key)
 
-                    # Get section attributes if they exist in the result
-                    attributes = section_data.get("attributes", section_data)
+                section_data = get_json_content(result_uri)
 
-                    # Determine page IDs for this section based on classification
-                    # If not available in section_data, we'll try to infer from page classifications
-                    section_classification = section_data.get("classification")
-                    page_ids = section_data.get("page_ids", [])
+                # Get section attributes if they exist in the result
+                attributes = section_data.get("attributes", section_data)
 
-                    # If page_ids not found in section data, try to infer from pages
-                    if not page_ids and section_classification:
-                        for page_id, page in document.pages.items():
-                            if page.classification == section_classification:
-                                page_ids.append(page_id)
+                # Determine page IDs for this section based on classification
+                # If not available in section_data, we'll try to infer from page classifications
+                section_classification = section_data.get("classification")
+                page_ids = section_data.get("page_ids", [])
 
-                    # If section_id is numeric, match it to page_id
-                    if not page_ids and section_id.isdigit():
-                        if section_id in document.pages:
-                            page_ids = [section_id]
+                # If page_ids not found in section data, try to infer from pages
+                if not page_ids and section_classification:
+                    for page_id, page in document.pages.items():
+                        if page.classification == section_classification:
+                            page_ids.append(page_id)
 
-                    # Add section to document
-                    document.sections.append(
-                        Section(
-                            section_id=section_id,
-                            classification=section_classification,
-                            confidence=section_data.get("confidence", 1.0),
-                            page_ids=page_ids,
-                            extraction_result_uri=result_uri,
-                            attributes=attributes,
-                        )
+                # If section_id is numeric, match it to page_id
+                if not page_ids and section_id.isdigit():
+                    if section_id in document.pages:
+                        page_ids = [section_id]
+
+                # Add section to document
+                document.sections.append(
+                    Section(
+                        section_id=section_id,
+                        classification=section_classification,
+                        confidence=section_data.get("confidence", 1.0),
+                        page_ids=page_ids,
+                        extraction_result_uri=result_uri,
+                        attributes=attributes,
                     )
-
-                except Exception as e:
-                    logger.warning(f"Error loading section {section_id}: {str(e)}")
+                )
 
             return document
 

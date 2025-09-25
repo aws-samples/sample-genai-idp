@@ -422,11 +422,13 @@ class SummarizationService:
                 error_message="Document has no pages to summarize",
             )
 
-        # If no sections are defined, fall back to summarizing the entire document at once
-        if not document.sections:
-            logger.info("No sections defined, summarizing entire document at once")
-            return self._process_document_as_whole(document, store_results)
+        # Summarize as whole if no sections or classification disabled
+        if not document.sections or document.sections[0].classification == 'CLASSIFICATION DISABLED':
+            document = Document.from_s3(output_bucket, document.id)
+            if not document.sections:
+                return self._process_document_as_whole(document, store_results)
 
+        
         try:
             # Start timing
             start_time = time.time()
@@ -769,6 +771,12 @@ class SummarizationService:
                         "title": "Document Summary",
                     }
                 }
+
+                # Edge case: If classification is disabled, ensure we have a section for formatting
+                from idp_common.models import Section
+                if not document.sections or document.sections[0].classification == 'CLASSIFICATION DISABLED':
+                    document.sections = [Section(section_id="full_document", classification="summary")]
+                
                 formatter = SummaryMarkdownFormatter(
                     document, single_section, is_section=False, include_toc=True
                 )

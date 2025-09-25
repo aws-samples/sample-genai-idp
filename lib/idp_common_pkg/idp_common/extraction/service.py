@@ -726,8 +726,13 @@ class ExtractionService:
             return document
 
         if not document.sections:
-            logger.error("Document has no sections to process")
-            document.errors.append("Document has no sections to process")
+            logger.warning("Document has no sections to extract")
+            document = Document.from_s3(os.environ["OUTPUT_BUCKET"], document.id)
+
+        # Validate and fail if needed
+        if not document.sections:
+            document.status = Status.FAILED
+            document.errors.append("No sections found to extract from")
             return document
 
         # Find the section with the given ID
