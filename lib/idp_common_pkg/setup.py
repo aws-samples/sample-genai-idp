@@ -44,6 +44,7 @@ extras_require = {
     # Assessment module dependencies
     "assessment": [
         "Pillow==11.2.1",  # For image handling
+        "PyMuPDF==1.25.5", # Need fitz for creating text confidence from raw text uri
     ],
     # Evaluation module dependencies
     "evaluation": [

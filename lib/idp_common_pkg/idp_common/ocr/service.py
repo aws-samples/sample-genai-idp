@@ -328,8 +328,6 @@ class OcrService:
         ocr_config = getattr(self, 'config', {}).get('ocr', {})
         from idp_common.utils import normalize_boolean_value
         if not normalize_boolean_value(ocr_config.get('enabled', True)):
-            import os
-            from idp_common.models import Status
             document.status = Status.COMPLETED
             document.errors.append(Status.OCR_SKIPPED.value)
             return document

@@ -419,6 +419,12 @@ def handler(event, context):
         document_data = result.get("document", {})
         section_document = Document.load_document(document_data, working_bucket, logger)
         logger.info(f"section_document: {section_document}")
+        # Only escalate specific error strings from section_document.errors
+        if hasattr(section_document, 'errors') and section_document.errors:
+            for err in section_document.errors:
+                if err in ("EXTRACTION_SKIPPED", "ASSESSMENT_SKIPPED"):
+                    document.errors.append(err)
+            document.errors = list(set(document.errors))
         if section_document:       
             # Add section to document if present
             if section_document.sections:
@@ -500,6 +506,18 @@ def handler(event, context):
     #     logger.info(f"Document processing complete, setting status to {document.status}")
     
     # Update final status in AppSync / Document Service
+    skip_values = (
+    Status.OCR_SKIPPED.value,
+    Status.CLASSIFICATION_SKIPPED.value,
+    Status.EXTRACTION_SKIPPED.value,
+    Status.ASSESSMENT_SKIPPED.value,
+    )
+    # Only include skip values that are present in document.errors, in order
+    ordered_present_skips = [v for v in skip_values if v in document.errors]
+    filtered_errors = [e for e in document.errors if e not in skip_values]
+    document.errors = ordered_present_skips + filtered_errors
+
+    # Update final status in AppSync / Document Service
     logger.info(f"Updating document status to {document.status}")
     document_service.update_document(document)
     
@@ -508,14 +526,8 @@ def handler(event, context):
         "document": document.serialize_document(working_bucket, "processresults", logger),
         "hitl_triggered": hitl_triggered
     }
-    
-    logger.info(f"Response: {json.dumps(response, default=str)}")
 
-    if document.errors:
-        # Do not add 'OCR step was disabled.' to validation_errors
-        filtered_errors = [e for e in document.errors if e != Status.OCR_SKIPPED.value and e != Status.CLASSIFICATION_SKIPPED.value and e != Status.EXTRACTION_SKIPPED.value]
-        if filtered_errors:
-            validation_errors.extend(filtered_errors)
+    validation_errors.extend(filtered_errors)
 
     # Raise exception if there were validation errors
     if validation_errors:

@@ -1393,9 +1393,11 @@ class GranularAssessmentService:
         assessment_config = self.config.get("assessment", {})
         from idp_common.utils import normalize_boolean_value
 
+        # Validate input document
         enabled = normalize_boolean_value(assessment_config.get("enabled", True))
         if not enabled:
             logger.info("Assessment is disabled via configuration")
+            document.errors.append(Status.ASSESSMENT_SKIPPED.value)
             return document
 
         # Validate input document
@@ -1403,10 +1405,24 @@ class GranularAssessmentService:
             logger.error("No document provided")
             return document
 
-        if not document.sections:
-            logger.error("Document has no sections to process")
-            document.errors.append("Document has no sections to process")
-            return document
+        if not document.sections or Status.OCR_SKIPPED.value or Status.CLASSIFICATION_SKIPPED.value in document.errors or Status.EXTRACTION_SKIPPED.value in document.errors:
+            logger.warning("Document has no sections to extract")
+            current_errors = document.errors or []
+            document = Document.from_s3(os.environ["OUTPUT_BUCKET"], document.id)
+            document.errors.extend(current_errors)
+            if not document.pages:
+                document.errors.append("ASSESSMENT Failed - No Pages. Enable OCR Once to Create.")
+                document.status = Status.FAILED
+                return document
+            if not document.sections:
+                document.errors.append("ASSESSMENT Failed - No Sections. Enable Classification + Extraction once to create")
+                document.status = Status.FAILED
+                return document
+            extraction_uri = getattr(document.sections[0], "extraction_result_uri", None)
+            if not extraction_uri or extraction_uri.endswith("fallback_result.json"):
+                document.errors.append("ASSESSMENT Failed - No Results. Enable Extraction once to create")
+                document.status = Status.FAILED
+                return document
 
         # Find the section with the given ID
         section = None

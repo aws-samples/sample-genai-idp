@@ -1196,6 +1196,7 @@ Resources:
           TRACKING_TABLE: !Ref TrackingTable
           DOCUMENT_TRACKING_MODE: !If [HasAppSyncApi, 'appsync', 'dynamodb']
           WORKING_BUCKET: !Ref WorkingBucket
+          OUTPUT_BUCKET: !Ref OutputBucket
       LoggingConfig:
         LogGroup: !Ref AssessmentFunctionLogGroup
       Policies:
