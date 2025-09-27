@@ -69,6 +69,18 @@ def handler(event, context):
             create_metadata_file(page.raw_text_uri, page.classification, 'page')
         
     # Update final status in AppSync / Document Service
+    skip_values = (
+    Status.OCR_SKIPPED.value,
+    Status.CLASSIFICATION_SKIPPED.value,
+    Status.EXTRACTION_SKIPPED.value,
+    Status.ASSESSMENT_SKIPPED.value,
+    )
+    # Only include skip values that are present in document.errors, in order
+    ordered_present_skips = [v for v in skip_values if v in document.errors]
+    filtered_errors = [e for e in document.errors if e not in skip_values]
+    document.errors = ordered_present_skips + filtered_errors
+
+    # Update final status in AppSync / Document Service
     logger.info(f"Updating document status to {document.status}")
     document_service.update_document(document)
     
