@@ -1110,6 +1110,43 @@ except Exception as e:
         ui_dir = "src/ui"
         return self.get_directory_checksum(ui_dir)
 
+    def validate_ui_build(self):
+        """Validate UI build to catch ESLint/Prettier errors before packaging"""
+        try:
+            self.console.print("[bold cyan]🔍 VALIDATING UI build[/bold cyan]")
+            ui_dir = "src/ui"
+
+            if not os.path.exists(ui_dir):
+                self.console.print(
+                    "[yellow]No UI directory found, skipping UI validation[/yellow]"
+                )
+                return
+
+            # Run npm install first
+            self.log_verbose("Running npm install for UI dependencies...")
+            success, result = self.run_subprocess_with_logging(
+                ["npm", "install"], "UI npm install", ui_dir
+            )
+
+            if not success:
+                raise Exception("npm install failed")
+
+            # Run npm run build to validate ESLint/Prettier
+            self.log_verbose("Running npm run build for UI validation...")
+            success, result = self.run_subprocess_with_logging(
+                ["npm", "run", "build"], "UI build validation", ui_dir
+            )
+
+            if not success:
+                raise Exception("UI build validation failed")
+
+            self.console.print("[green]✅ UI build validation passed[/green]")
+
+        except Exception as e:
+            self.console.print("[red]❌ UI build validation failed:[/red]")
+            self.console.print(str(e), style="red", markup=False)
+            sys.exit(1)
+
     def package_ui(self):
         """Package UI source code"""
         ui_hash = self.compute_ui_hash()
@@ -1222,6 +1259,10 @@ except Exception as e:
             # Main template needs rebuilding, if any component needs rebuilding
             if components_needing_rebuild:
                 self.console.print("[yellow]Main template needs rebuilding[/yellow]")
+
+                # Validate UI build before rebuilding
+                self.validate_ui_build()
+
                 # Validate Python syntax in src directory before building
                 if not self._validate_python_syntax("src"):
                     raise Exception("Python syntax validation failed")

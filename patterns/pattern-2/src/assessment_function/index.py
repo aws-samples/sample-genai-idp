@@ -115,8 +115,73 @@ def handler(event, context):
     # Convert document data to Document object - handle compression
     working_bucket = os.environ.get('WORKING_BUCKET')
     document = Document.load_document(document_data, working_bucket, logger)
-    document.status = Status.ASSESSING
     logger.info(f"Processing assessment for document {document.id}, section {section_id}")
+
+    # Find the section we're processing
+    section = None
+    for s in document.sections:
+        if s.section_id == section_id:
+            section = s
+            break
+    
+    if not section:
+        raise ValueError(f"Section {section_id} not found in document")
+
+    # Intelligent Assessment Skip: Check if extraction results already contain explainability_info
+    if section.extraction_result_uri and section.extraction_result_uri.strip():
+        try:
+            logger.info(f"Checking extraction results for existing assessment: {section.extraction_result_uri}")
+            extraction_data = s3.get_json_content(section.extraction_result_uri)
+            
+            # If explainability_info exists, assessment was already done
+            if extraction_data.get('explainability_info'):
+                logger.info(f"Skipping assessment for section {section_id} - extraction results already contain explainability_info")
+                
+                # Create section-specific document (same as normal processing) to match output format
+                section_document = Document(
+                    id=document.id,
+                    input_bucket=document.input_bucket,
+                    input_key=document.input_key,
+                    output_bucket=document.output_bucket,
+                    status=Status.ASSESSING,  # Keep status consistent with normal flow
+                    initial_event_time=document.initial_event_time,
+                    queued_time=document.queued_time,
+                    start_time=document.start_time,
+                    completion_time=document.completion_time,
+                    workflow_execution_arn=document.workflow_execution_arn,
+                    num_pages=len(section.page_ids),
+                    summary_report_uri=document.summary_report_uri,
+                    evaluation_status=document.evaluation_status,
+                    evaluation_report_uri=document.evaluation_report_uri,
+                    evaluation_results_uri=document.evaluation_results_uri,
+                    errors=document.errors,
+                    metering={}  # Empty metering for skipped processing
+                )
+                
+                # Add only the pages needed for this section
+                for page_id in section.page_ids:
+                    if page_id in document.pages:
+                        section_document.pages[page_id] = document.pages[page_id]
+                
+                # Add only the section being processed (preserve existing data)
+                section_document.sections = [section]
+                
+                # Return consistent format for Map state collation
+                response = {
+                    "section_id": section_id, 
+                    "document": section_document.serialize_document(working_bucket, f"assessment_skip_{section_id}", logger)
+                }
+                
+                logger.info(f"Assessment skipped - Response: {json.dumps(response, default=str)}")
+                return response
+            else:
+                logger.info(f"Assessment needed for section {section_id} - no explainability_info found in extraction results")
+        except Exception as e:
+            logger.warning(f"Error checking extraction results for assessment skip: {e}")
+            # Continue with normal assessment if check fails
+
+    # Normal assessment processing
+    document.status = Status.ASSESSING
 
     # Update document status to ASSESSING for UI only
     # Create new 'shell' document since our input document has only 1 section. 

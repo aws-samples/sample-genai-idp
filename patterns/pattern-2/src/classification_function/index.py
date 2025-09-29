@@ -28,6 +28,7 @@ def handler(event, context):
     Lambda handler for document classification.
     """
     logger.info(f"Event: {json.dumps(event)}")
+    
     # Load configuration
     config = get_config()
     # Use default=str to handle Decimal and other non-serializable types
@@ -43,6 +44,39 @@ def handler(event, context):
     working_bucket = os.environ.get('WORKING_BUCKET')
     document = Document.load_document(event["OCRResult"]["document"], working_bucket, logger)
     
+    # Log loaded document for troubleshooting
+    logger.info(f"Loaded document - ID: {document.id}, input_key: {document.input_key}")
+    logger.info(f"Document buckets - input_bucket: {document.input_bucket}, output_bucket: {document.output_bucket}")
+    logger.info(f"Document status: {document.status}, num_pages: {document.num_pages}")
+    logger.info(f"Document pages count: {len(document.pages)}, sections count: {len(document.sections)}")
+    logger.info(f"Full document content: {json.dumps(document.to_dict(), default=str)}")
+    
+    # Intelligent Classification detection: Skip if pages already have classifications
+    pages_with_classification = 0
+    for page in document.pages.values():
+        if page.classification and page.classification.strip():
+            pages_with_classification += 1
+    
+    if pages_with_classification == len(document.pages) and len(document.pages) > 0:
+        logger.info(f"Skipping classification for document {document.id} - all {len(document.pages)} pages already classified")
+        
+        # Ensure document has the expected execution ARN
+        document.workflow_execution_arn = event.get("execution_arn")
+        
+        # Update document execution ARN for tracking
+        document_service = create_document_service()
+        logger.info(f"Updating document execution ARN for classification skip")
+        document_service.update_document(document)
+        
+        # Prepare output with existing document data
+        response = {
+            "document": document.serialize_document(working_bucket, "classification_skip", logger)
+        }
+        
+        logger.info(f"Classification skipped - Response: {json.dumps(response, default=str)}")
+        return response
+    
+    # Normal classification processing
     # Update document status to CLASSIFYING
     document.status = Status.CLASSIFYING
     document.workflow_execution_arn = event.get("execution_arn")

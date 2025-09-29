@@ -5,7 +5,27 @@ SPDX-License-Identifier: MIT-0
 
 ## [Unreleased]
 
+## [0.3.17]
+
 ### Added
+
+- **Edit Sections Feature for Modifying Class/Type and Reprocessing Extraction**
+  - Added Edit Sections interface for Pattern-2 and Pattern-3 workflows with reprocessing optimization
+  - **Key Features**: Section management (create, update, delete), classification updates, page reassignment with overlap detection, real-time validation
+  - **Selective Reprocessing**: Only modified sections are reprocessed while preserving existing data for unmodified sections
+  - **Processing Pipeline**: All functions (OCR/Classification/Extraction/Assessment) automatically skip redundant operations based on data presence
+  - **Pattern Compatibility**: Full functionality for Pattern-2/Pattern-3, informative modal for Pattern-1 explaining BDA not yet supported
+
+- **Analytics Agent Schema Optimization for Improved Performance**
+  - **Embedded Database Overview**: Complete table listing and guidance embedded directly in system prompt (no tool call needed)
+  - **On-Demand Detailed Schemas**: `get_table_info(['specific_tables'])` loads detailed column information only for tables actually needed by the query
+  - **Significant Performance Gains**: Eliminates redundant tool calls on every query while maintaining token efficiency
+  - **Enhanced SQL Guidance**: Comprehensive Athena/Trino function reference with explicit PostgreSQL operator warnings to prevent common query failures like `~` regex operator mistakes
+  - **Faster Time-to-Query**: Agent has immediate access to table overview and can proceed directly to detailed schema loading for relevant tables
+
+### Fixed
+- Fix missing data in Glue tables when using a document class that contains a dash (-). 
+
 
 ## [0.3.16]
 

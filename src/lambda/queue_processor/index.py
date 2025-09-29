@@ -81,11 +81,22 @@ def start_workflow(document: Document) -> Dict[str, Any]:
     document.status = Status.RUNNING
     document.start_time = datetime.now(timezone.utc).isoformat()
     
+    # Compress document for Step Functions to handle large documents
+    working_bucket = os.environ.get('WORKING_BUCKET')
+    if working_bucket:
+        # Use document compression (always compress with default 0KB threshold)
+        compressed_document = document.serialize_document(working_bucket, "workflow_start", logger)
+        logger.info(f"Document compressed for Step Functions workflow (always compress)")
+    else:
+        # Fallback to direct document dict if no working bucket
+        compressed_document = document.to_dict()
+        logger.warning("No WORKING_BUCKET configured, sending uncompressed document to workflow")
+    
     event = {
-        "document": document.to_dict()  # Pass the full document as the input
+        "document": compressed_document
     }
 
-    logger.info(f"Starting workflow for document with event: {event}")
+    logger.info(f"Starting workflow for document (size: {len(json.dumps(event, default=str))} chars)")
     
     try:
         execution = sfn.start_execution(
@@ -121,8 +132,10 @@ def process_message(record: Dict[str, Any]) -> Tuple[bool, str]:
     message_id = record['messageId']
     
     try:
-        # Deserialize the Document object from the message
-        document = Document.from_json(message)
+        # Handle both compressed and uncompressed documents
+        working_bucket = os.environ.get('WORKING_BUCKET')
+        message_data = json.loads(message)
+        document = Document.load_document(message_data, working_bucket, logger)
         object_key = document.input_key
         logger.info(f"Processing message {message_id} for object {object_key}")
         

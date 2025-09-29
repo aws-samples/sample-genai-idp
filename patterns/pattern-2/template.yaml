@@ -4,7 +4,7 @@
 
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
-Description: AWS GenAI IDP Accelerator - resources for IDP Pattern 2
+Description: AWS GenAI IDP Accelerator - resources for IDP Pattern 2 (Bedrock FMs)
 
 Parameters:
 
@@ -2315,9 +2315,9 @@ Outputs:
     Value: !Ref StateMachineLogGroup
 
   DashboardName:
-    Description: Name of the Pattern 1 CloudWatch Dashboard
+    Description: Name of the Pattern 2 (Bedrock FMs) CloudWatch Dashboard
     Value: !Ref Dashboard
 
   DashboardArn:
-    Description: ARN of the Pattern 1 CloudWatch Dashboard
+    Description: ARN of the Pattern 2 (Bedrock FMs) CloudWatch Dashboard
     Value: !Sub "arn:${AWS::Partition}:cloudwatch::${AWS::AccountId}:dashboard/${Dashboard}"

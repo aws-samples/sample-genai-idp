@@ -149,10 +149,18 @@ class DocumentAppSyncService:
                 if section.confidence_threshold_alerts:
                     alerts_data = []
                     for alert in section.confidence_threshold_alerts:
+                        # Convert Decimal values to string to avoid serialization issues
+                        confidence_value = alert.get("confidence")
+                        confidence_threshold_value = alert.get("confidence_threshold")
+
                         alert_data = {
                             "attributeName": alert.get("attribute_name"),
-                            "confidence": alert.get("confidence"),
-                            "confidenceThreshold": alert.get("confidence_threshold"),
+                            "confidence": float(confidence_value)
+                            if confidence_value is not None
+                            else None,
+                            "confidenceThreshold": float(confidence_threshold_value)
+                            if confidence_threshold_value is not None
+                            else None,
                         }
                         alerts_data.append(alert_data)
                     section_data["ConfidenceThresholdAlerts"] = alerts_data
@@ -164,7 +172,7 @@ class DocumentAppSyncService:
 
         # Add metering data if available
         if document.metering:
-            input_data["Metering"] = json.dumps(document.metering)
+            input_data["Metering"] = json.dumps(document.metering, default=str)
 
         # Add evaluation status & report if available
         if document.evaluation_status:

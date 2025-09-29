@@ -286,7 +286,7 @@ class DocumentDynamoDBService:
         doc = Document(
             id=item.get("ObjectKey"),
             input_key=item.get("ObjectKey"),
-            num_pages=item.get("PageCount", 0),
+            num_pages=int(item.get("PageCount", 0)),  # Ensure PageCount is integer
             queued_time=item.get("QueuedTime"),
             start_time=item.get("WorkflowStartTime"),
             completion_time=item.get("CompletionTime"),
@@ -304,23 +304,38 @@ class DocumentDynamoDBService:
                 logger.warning(f"Unknown status '{object_status}', using QUEUED")
                 doc.status = Status.QUEUED
 
-        # Convert metering data
-        metering_json = item.get("Metering")
-        if metering_json:
+        # Convert metering data - handle both JSON string and native dict formats
+        metering_data = item.get("Metering")
+        if metering_data:
             try:
-                doc.metering = json.loads(metering_json)
+                if isinstance(metering_data, str):
+                    # It's a JSON string, parse it
+                    if metering_data.strip():  # Only parse non-empty strings
+                        doc.metering = json.loads(metering_data)
+                    else:
+                        doc.metering = {}
+                else:
+                    # It's already a dict/object (native DynamoDB format), use it directly
+                    doc.metering = metering_data
             except json.JSONDecodeError:
-                logger.warning("Failed to parse metering data")
+                logger.warning("Failed to parse metering JSON string, using empty dict")
+                doc.metering = {}
+            except Exception as e:
+                logger.warning(f"Error processing metering data: {e}, using empty dict")
+                doc.metering = {}
 
         # Convert pages
         pages_data = item.get("Pages", [])
         if pages_data is not None:  # Ensure pages_data is not None before iterating
             for page_data in pages_data:
                 page_id = str(page_data.get("Id"))
+                text_uri = page_data.get("TextUri")
                 doc.pages[page_id] = Page(
                     page_id=page_id,
                     image_uri=page_data.get("ImageUri"),
-                    raw_text_uri=page_data.get("TextUri"),
+                    raw_text_uri=text_uri,
+                    parsed_text_uri=text_uri,  # Set both raw and parsed to same URI
+                    text_confidence_uri=page_data.get("TextConfidenceUri"),
                     classification=page_data.get("Class"),
                 )
 

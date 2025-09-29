@@ -2,7 +2,9 @@
 # SPDX-License-Identifier: MIT-0
 
 import os
+import boto3
 from typing import Any, Dict, Optional
+from botocore.exceptions import ClientError
 from idp_cli.util.cfn_util import CfnUtil
 from idp_cli.util.s3_util import S3Util
 from loguru import logger
@@ -54,8 +56,47 @@ class UninstallService():
         response = CfnUtil.delete_stack(stack_name=self.stack_name, wait=wait)
         logger.debug(response)
 
+    def delete_service_role_stack(self):
+        """Delete the CloudFormation service role stack if it exists"""
+        service_role_stack_name = f"{self.cfn_prefix}-cloudformation-service-role"
+        
+        try:
+            logger.info(f"Attempting to delete service role stack: {service_role_stack_name}")
+            response = CfnUtil.delete_stack(stack_name=service_role_stack_name, wait=True)
+            logger.info(f"Successfully deleted service role stack: {service_role_stack_name}")
+            logger.debug(response)
+        except Exception as e:
+            if "does not exist" in str(e):
+                logger.debug(f"Service role stack {service_role_stack_name} does not exist, skipping")
+            else:
+                logger.error(f"Failed to delete service role stack {service_role_stack_name}: {e}")
+
+    def delete_permission_boundary_policy(self):
+        """Delete the permission boundary policy if it exists"""
+        policy_name = f"{self.cfn_prefix}-IDPPermissionBoundary"
+        
+        try:
+            iam = boto3.client('iam')
+            policy_arn = f"arn:aws:iam::{self.account_id}:policy/{policy_name}"
+            
+            logger.info(f"Attempting to delete permission boundary policy: {policy_arn}")
+            iam.delete_policy(PolicyArn=policy_arn)
+            logger.info(f"Successfully deleted permission boundary policy: {policy_arn}")
+            
+        except ClientError as e:
+            if e.response['Error']['Code'] == 'NoSuchEntity':
+                logger.debug(f"Permission boundary policy {policy_name} does not exist, skipping")
+            elif e.response['Error']['Code'] == 'DeleteConflict':
+                logger.warning(f"Permission boundary policy {policy_name} is still attached to resources, skipping deletion")
+            else:
+                logger.error(f"Failed to delete permission boundary policy {policy_name}: {e}")
+        except Exception as e:
+            logger.error(f"Unexpected error deleting permission boundary policy {policy_name}: {e}")
+
     def uninstall(self):
         self.get_outputs()
         self.delete_stack(wait=True)
         self.get_buckets()
         self.delete_buckets()
+        self.delete_service_role_stack()
+        self.delete_permission_boundary_policy()

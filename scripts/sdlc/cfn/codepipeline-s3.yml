@@ -155,7 +155,10 @@ Resources:
                 - export IDP_CFN_PREFIX=$(make cfn-prefix) || { echo "CFN prefix generation failed"; exit 1; }
                 - make install -e IDP_CFN_PREFIX=$IDP_CFN_PREFIX
                 - make smoketest -e IDP_CFN_PREFIX=$IDP_CFN_PREFIX
-                - make uninstall -e IDP_CFN_PREFIX=$IDP_CFN_PREFIX
+            post_build:
+              commands:
+                - echo "Running cleanup regardless of build result..."
+                - make uninstall -e IDP_CFN_PREFIX=$IDP_CFN_PREFIX || echo "Cleanup failed but continuing"
 
   DeploymentPipeline:
     Type: 'AWS::CodePipeline::Pipeline'
@@ -177,6 +180,7 @@ Resources:
               Configuration:
                 S3Bucket: !Ref BucketName
                 S3ObjectKey: !Ref FileKey
+                PollForSourceChanges: true
               OutputArtifacts:
                 - Name: SourceOutput
               RunOrder: 1

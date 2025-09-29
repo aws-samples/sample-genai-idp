@@ -20,6 +20,17 @@ const getStatusIndicator = (status) => {
 };
 
 const AgentJobStatus = ({ jobId, status, error }) => {
+  // Show error even if there's no jobId (for validation errors)
+  if (error && !jobId) {
+    return (
+      <Box padding={{ vertical: 'xs' }}>
+        <div>
+          <strong>Error:</strong> {error}
+        </div>
+      </Box>
+    );
+  }
+
   if (!jobId) {
     return null;
   }

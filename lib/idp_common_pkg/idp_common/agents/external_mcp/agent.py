@@ -12,10 +12,10 @@ from typing import Any, Dict
 import boto3
 from mcp.client.streamable_http import streamablehttp_client
 from strands import Agent
-from strands.models import BedrockModel
 from strands.tools.mcp import MCPClient
 
 from ..common.oauth_auth import get_cognito_bearer_token
+from ..common.strands_bedrock_model import create_strands_bedrock_model
 
 logger = logging.getLogger(__name__)
 
@@ -130,7 +130,9 @@ def create_external_mcp_agent(
                     raise Exception(error_msg)
 
             # Create Bedrock model
-            bedrock_model = BedrockModel(model_id=model_id, boto_session=session)
+            bedrock_model = create_strands_bedrock_model(
+                model_id=model_id, boto_session=session
+            )
 
             # Create system prompt
             system_prompt = f"""

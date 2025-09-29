@@ -30,7 +30,7 @@ This pattern implements an intelligent document processing workflow that uses UD
 
 ## Fine tuning a UDOP model for classification
 
-See [Fine-Tuning Models on SageMaker](./fine-tune-sm-udop-classification/README.md) 
+See [Fine-Tuning Models on SageMaker](../patterns/pattern-3/fine-tune-sm-udop-classification/README.md) 
 
 Once you have trained the model, deploy the GenAIIDP stack for Pattern-3 using the path for your new fine tuned model.
 

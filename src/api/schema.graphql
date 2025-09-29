@@ -157,6 +157,20 @@ type CopyToBaselineResponse @aws_cognito_user_pools {
   message: String
 }
 
+type ProcessChangesResponse @aws_cognito_user_pools {
+  success: Boolean!
+  message: String
+  processingJobId: String
+}
+
+input ModifiedSectionInput {
+  sectionId: String!
+  classification: String!
+  pageIds: [Int!]!
+  isNew: Boolean
+  isDeleted: Boolean
+}
+
 type FileContentsResponse @aws_cognito_user_pools @aws_iam {
   content: String!
   contentType: String!
@@ -227,6 +241,7 @@ type Mutation  {
   uploadDiscoveryDocument(fileName: String!, contentType: String, prefix: String, bucket: String, groundTruthFileName: String): DisPresignedUrlResponse! @aws_cognito_user_pools
   copyToBaseline(objectKey: String!): CopyToBaselineResponse! @aws_cognito_user_pools
   reprocessDocument(objectKeys: [String!]!): Boolean! @aws_cognito_user_pools
+  processChanges(objectKey: String!, modifiedSections: [ModifiedSectionInput!]!): ProcessChangesResponse! @aws_cognito_user_pools
   updateAgentJobStatus(jobId: ID!, status: String!, userId: String!, result: String): Boolean @aws_iam
   updateDiscoveryJobStatus(jobId: ID!, status: String!, errorMessage: String): DiscoveryJob @aws_iam
   deleteAgentJob(jobId: ID!): Boolean @aws_cognito_user_pools

@@ -36,6 +36,7 @@ You need to have the following packages installed on your computer:
 4. python 3.11 or later
 5. A local Docker daemon
 6. Python packages for publish.py: `pip install boto3 rich typer PyYAML botocore setuptools`
+7. **Node.js 18+** and **npm** (required for UI validation in publish script)
 
 For guidance on setting up a development environment, see:
 - [Development Environment Setup Guide on Linux](./setup-development-env-linux.md) 
@@ -136,12 +137,12 @@ aws cloudformation update-stack \
 
 
 **Pattern Parameter Options:**
-* `Pattern1` - Packet or Media processing with Bedrock Data Automation (BDA)
+* `Pattern1 - Packet or Media processing with Bedrock Data Automation (BDA)`
   * Can use an existing BDA project or create a new demo project
-* `Pattern2` - Packet processing with Textract and Bedrock
+* `Pattern2 - Packet processing with Textract and Bedrock`
   * Supports both page-level and holistic classification
   * Recommended for first-time users
-* `Pattern3` - Packet processing with Textract, SageMaker(UDOP), and Bedrock
+* `Pattern3 - Packet processing with Textract, SageMaker(UDOP), and Bedrock`
   * Requires a UDOP model in S3 that will be deployed on SageMaker
 
 After deployment, check the Outputs tab in the CloudFormation console to find links to dashboards, buckets, workflows, and other solution resources.

@@ -13,7 +13,7 @@ Resources:
   CloudFormationServiceRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: IDPAcceleratorCloudFormationServiceRole
+      RoleName: !Sub '${AWS::StackName}-CFServiceRole'
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -109,7 +109,7 @@ Resources:
   PassRolePolicy:
     Type: AWS::IAM::ManagedPolicy
     Properties:
-      ManagedPolicyName: IDP-PassRolePolicy
+      ManagedPolicyName: !Sub '${AWS::StackName}-PassRolePolicy'
       Description: Policy to allow passing the IDP CloudFormation service role
       PolicyDocument:
         Version: '2012-10-17'

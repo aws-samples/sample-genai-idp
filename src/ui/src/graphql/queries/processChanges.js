@@ -1,7 +1,9 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
-// SPDX-License-Identifier: MIT-0
+// SPDX-License-Identifier: Apache-2.0
 
-const processChanges = /* GraphQL */ `
+import gql from 'graphql-tag';
+
+export default gql`
   mutation ProcessChanges($objectKey: String!, $modifiedSections: [ModifiedSectionInput!]!) {
     processChanges(objectKey: $objectKey, modifiedSections: $modifiedSections) {
       success
@@ -10,5 +12,3 @@ const processChanges = /* GraphQL */ `
     }
   }
 `;
-
-export default processChanges;

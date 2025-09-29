@@ -15,9 +15,9 @@ from typing import Any, Dict, List
 
 import strands
 from strands import tool
-from strands.models import BedrockModel
 
 from ..common.config import load_result_format_description
+from ..common.strands_bedrock_model import create_strands_bedrock_model
 
 logger = logging.getLogger(__name__)
 
@@ -161,7 +161,7 @@ If the agents response is a json already matching the above result format, retur
     )
 
     # Create the orchestrator agent
-    model = BedrockModel(
+    model = create_strands_bedrock_model(
         model_id=model_id,
         session=session,
     )

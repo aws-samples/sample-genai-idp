@@ -714,6 +714,7 @@ Resources:
           - id: W92
             reason: "Function does not require concurrent execution limits as it is designed to scale based on demand"
     Properties:
+      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
       CodeUri: src/bda_discovery_function/
       Handler: index.handler
       Runtime: python3.12

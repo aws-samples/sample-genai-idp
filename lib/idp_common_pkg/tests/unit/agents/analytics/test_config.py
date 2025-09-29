@@ -25,7 +25,6 @@ sys.modules["bedrock_agentcore.tools.code_interpreter_client"] = MagicMock()
 
 from idp_common.agents.analytics.config import (
     get_analytics_config,
-    load_db_description,
 )
 from idp_common.agents.common.config import load_result_format_description
 
@@ -74,24 +73,6 @@ class TestGetAnalyticsConfig:
             assert "Missing required environment variables" in error_message
             assert "ATHENA_DATABASE" in error_message
             assert "ATHENA_OUTPUT_LOCATION" in error_message
-
-
-@pytest.mark.unit
-class TestLoadDbDescription:
-    """Tests for the load_db_description function."""
-
-    def test_load_db_description_success(self):
-        """Test successful loading of database description."""
-        result = load_db_description()
-        assert isinstance(result, str)
-        assert len(result) > 0
-        assert "Athena Table Information" in result
-
-    def test_load_db_description_contains_expected_content(self):
-        """Test that database description contains expected table information."""
-        result = load_db_description()
-        assert "document_evaluations" in result
-        assert "section_evaluations" in result
 
 
 @pytest.mark.unit

@@ -102,7 +102,7 @@ class SmokeTestService():
         _, output_bucket_name = self.get_bucket_names()
         
         # Define the path to the expected result.json file
-        object_path = f"{folder_key}/pages/1/result.json"
+        object_path = f"{folder_key}/pages/0/result.json"
         logger.debug(f"Looking for result file at: s3://{output_bucket_name}/{object_path}")
         
         try:
@@ -122,7 +122,7 @@ class SmokeTestService():
             # Check if the text content contains the expected verification string
             if self.verify_string not in result_json["pages"][0]["representation"]["markdown"]:
                 logger.error(f"Text content does not contain expected string: '{self.verify_string}'")
-                logger.debug(f"Actual text starts with: '{result_json['text'][:100]}...'")
+                logger.debug(f"Actual text starts with: '{result_json['pages'][0]['representation']['markdown'][:100]}...'")
                 raise ValueError("Text content does not contain expected verification string")
             
             logger.debug("Smoke test verification passed!")

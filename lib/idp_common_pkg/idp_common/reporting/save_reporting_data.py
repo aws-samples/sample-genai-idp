@@ -375,9 +375,11 @@ class SaveReportingData:
             )
             return False
 
-        # Escape section_type to make it table-name-safe
-        escaped_section_type = re.sub(r"[/\\:*?\"<>|-]", "_", section_type.lower())
-        table_name = f"document_sections_{escaped_section_type}"
+        # Escape section_type to make it table-name-safe and s3 prefix-safe
+        # Note: we escape '-' in tablename but not in s3 prefix, only to provide backward compatability for data already stored.
+        section_type_tablename = re.sub(r"[/\\:*?\"<>|-]", "_", section_type.lower())
+        section_type_prefix = re.sub(r"[/\\:*?\"<>|]", "_", section_type.lower())
+        table_name = f"document_sections_{section_type_tablename}"
 
         # Convert schema to Glue columns
         columns = self._convert_schema_to_glue_columns(schema)
@@ -388,7 +390,7 @@ class SaveReportingData:
             "Description": f"Document sections table for type: {section_type}",
             "StorageDescriptor": {
                 "Columns": columns,
-                "Location": f"s3://{self.reporting_bucket}/document_sections/{escaped_section_type}/",
+                "Location": f"s3://{self.reporting_bucket}/document_sections/{section_type_prefix}/",
                 "InputFormat": "org.apache.hadoop.hive.ql.io.parquet.MapredParquetInputFormat",
                 "OutputFormat": "org.apache.hadoop.hive.ql.io.parquet.MapredParquetOutputFormat",
                 "Compressed": True,
@@ -407,7 +409,7 @@ class SaveReportingData:
                 "projection.date.range": "2024-01-01,2030-12-31",
                 "projection.date.interval": "1",
                 "projection.date.interval.unit": "DAYS",
-                "storage.location.template": f"s3://{self.reporting_bucket}/document_sections/{escaped_section_type}/date=${{date}}/",
+                "storage.location.template": f"s3://{self.reporting_bucket}/document_sections/{section_type_prefix}/date=${{date}}/",
             },
         }
 
@@ -426,16 +428,34 @@ class SaveReportingData:
             existing_column_names = {col["Name"] for col in existing_columns}
             new_column_names = {col["Name"] for col in columns}
 
-            # If there are new columns, update the table
-            if new_column_names - existing_column_names:
-                logger.info(f"Updating Glue table {table_name} with new columns")
+            # Check if location has changed
+            existing_location = (
+                existing_table.get("Table", {})
+                .get("StorageDescriptor", {})
+                .get("Location", "")
+            )
+            new_location = table_input["StorageDescriptor"]["Location"]
+
+            # Check if columns or location have changed
+            columns_changed = bool(new_column_names - existing_column_names)
+            location_changed = existing_location != new_location
+
+            # If there are new columns or location has changed, update the table
+            if columns_changed or location_changed:
+                if columns_changed:
+                    logger.info(f"Updating Glue table {table_name} with new columns")
+                if location_changed:
+                    logger.info(
+                        f"Updating Glue table {table_name} with new location: {existing_location} -> {new_location}"
+                    )
+
                 self.glue_client.update_table(
                     DatabaseName=self.database_name, TableInput=table_input
                 )
                 return True
             else:
                 logger.debug(
-                    f"Glue table {table_name} already exists with current schema"
+                    f"Glue table {table_name} already exists with current schema and location"
                 )
                 return False
 
@@ -861,21 +881,34 @@ class SaveReportingData:
 
         try:
             # Check if table exists
-            self.glue_client.get_table(DatabaseName=self.database_name, Name=table_name)
+            existing_table_response = self.glue_client.get_table(
+                DatabaseName=self.database_name, Name=table_name
+            )
 
             # Table exists, check if we need to update it
-            existing_table = self.glue_client.get_table(
-                DatabaseName=self.database_name, Name=table_name
-            )["Table"]
+            existing_table = existing_table_response["Table"]
             existing_columns = existing_table["StorageDescriptor"]["Columns"]
 
             # Check if new columns need to be added
             existing_column_names = {col["Name"] for col in existing_columns}
             new_column_names = {col["Name"] for col in columns}
 
-            if not new_column_names.issubset(existing_column_names):
-                # Update table with new columns
-                logger.info(f"Updating Glue table {table_name} with new columns")
+            # Check if location has changed
+            existing_location = existing_table["StorageDescriptor"].get("Location", "")
+            new_location = table_input["StorageDescriptor"]["Location"]
+
+            # Check if columns or location have changed
+            columns_changed = not new_column_names.issubset(existing_column_names)
+            location_changed = existing_location != new_location
+
+            if columns_changed or location_changed:
+                if columns_changed:
+                    logger.info(f"Updating Glue table {table_name} with new columns")
+                if location_changed:
+                    logger.info(
+                        f"Updating Glue table {table_name} with new location: {existing_location} -> {new_location}"
+                    )
+
                 self.glue_client.update_table(
                     DatabaseName=self.database_name, TableInput=table_input
                 )
@@ -1244,13 +1277,13 @@ class SaveReportingData:
                     section.classification if section.classification else "unknown"
                 )
                 # Escape section_type to make it filesystem-safe and lowercase for consistency
-                escaped_section_type = re.sub(
+                section_type_prefix = re.sub(
                     r"[/\\:*?\"<>|]", "_", section_type.lower()
                 )
 
                 s3_key = (
                     f"document_sections/"
-                    f"{escaped_section_type}/"
+                    f"{section_type_prefix}/"
                     f"date={date_partition}/"
                     f"{escaped_doc_id}_section_{section.section_id}.parquet"
                 )

@@ -1456,7 +1456,7 @@ Resources:
   Dashboard:
     Type: AWS::CloudWatch::Dashboard
     Properties:
-      DashboardName: !Sub "${AWS::StackName}-${AWS::Region}-Pattern2-Subset"
+      DashboardName: !Sub "${AWS::StackName}-${AWS::Region}-Pattern3-Subset"
       DashboardBody: !Sub |
         {
           "widgets": [

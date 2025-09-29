@@ -93,7 +93,7 @@ class AppSyncClient:
         request = AWSRequest(
             method="POST",
             url=self.api_url,
-            data=json.dumps(data).encode(),
+            data=json.dumps(data, default=str).encode(),
             headers={
                 "Content-Type": "application/json",
                 "Accept": "application/json",

@@ -30,6 +30,18 @@ class CodePipelineUtil:
         logger.info(f"Waiting {initial_wait_seconds} seconds for pipeline '{pipeline_name}' to start...")
         time.sleep(initial_wait_seconds)
         
+        # Get the latest execution ID to track the correct execution
+        try:
+            response = client.list_pipeline_executions(pipelineName=pipeline_name, maxResults=1)
+            executions = response.get('pipelineExecutionSummaries', [])
+            if not executions:
+                raise Exception(f"No executions found for pipeline '{pipeline_name}'")
+            
+            target_execution_id = executions[0]['pipelineExecutionId']
+            logger.info(f"Monitoring execution: {target_execution_id}")
+        except Exception as e:
+            raise Exception(f"Failed to get pipeline execution ID: {str(e)}")
+        
         start_time = time.time()
         max_wait_seconds = max_wait_minutes * 60
         
@@ -39,40 +51,41 @@ class CodePipelineUtil:
             if elapsed_time > max_wait_seconds:
                 raise Exception(f"Pipeline '{pipeline_name}' execution timed out after {max_wait_minutes} minutes")
             
-            # Get the latest execution
+            # Get the specific execution status
             try:
-                response = client.get_pipeline_state(name=pipeline_name)
-                stage_states = response.get('stageStates', [])
+                response = client.get_pipeline_execution(
+                    pipelineName=pipeline_name,
+                    pipelineExecutionId=target_execution_id
+                )
                 
-                # Check if pipeline is still running
-                pipeline_running = False
-                failed_stages = []
+                execution = response.get('pipelineExecution', {})
+                status = execution.get('status', 'Unknown')
                 
-                for stage in stage_states:
-                    stage_name = stage.get('stageName', 'Unknown')
-                    latest_execution = stage.get('latestExecution', {})
-                    status = latest_execution.get('status', 'Unknown')
-                    
-                    if status == 'InProgress':
-                        pipeline_running = True
-                        logger.info(f"Pipeline '{pipeline_name}' is running. Current stage: {stage_name}")
-                        break
-                    elif status == 'Failed':
-                        failed_stages.append(f"{stage_name} ({latest_execution.get('message', 'No message')})")
+                logger.info(f"Pipeline '{pipeline_name}' execution {target_execution_id} status: {status}")
                 
-                # If any stages failed, raise an exception
-                if failed_stages:
-                    message = f"Pipeline '{pipeline_name}' execution failed in stages: {', '.join(failed_stages)}"
-                    logger.error(message)
-                    raise Exception(message)
-                
-                # If pipeline is not running and no stages failed, it must have succeeded
-                if not pipeline_running:
+                if status == 'Succeeded':
                     logger.success(f"Pipeline '{pipeline_name}' execution completed successfully!")
                     return
+                elif status == 'Failed':
+                    failure_reason = execution.get('statusReason', 'No reason provided')
+                    message = f"Pipeline '{pipeline_name}' execution failed: {failure_reason}"
+                    logger.error(message)
+                    raise Exception(message)
+                elif status in ['InProgress', 'Stopping']:
+                    # Pipeline is still running, continue monitoring
+                    pass
+                elif status == 'Stopped':
+                    message = f"Pipeline '{pipeline_name}' execution was stopped"
+                    logger.error(message)
+                    raise Exception(message)
+                elif status == 'Superseded':
+                    message = f"Pipeline '{pipeline_name}' execution was superseded by a newer execution"
+                    logger.error(message)
+                    raise Exception(message)
+                else:
+                    logger.warning(f"Unknown pipeline status: {status}")
                 
                 # Wait before checking again
-                logger.info(f"Waiting {poll_interval_seconds} seconds before checking pipeline status again...")
                 time.sleep(poll_interval_seconds)
                 
             except Exception as e:

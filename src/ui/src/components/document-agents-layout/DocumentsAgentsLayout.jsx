@@ -199,8 +199,23 @@ const DocumentsAgentsLayout = () => {
       }, 1000);
     } catch (err) {
       logger.error('Error submitting query:', err);
+      logger.error('Error structure:', JSON.stringify(err, null, 2));
+
+      let errorMessage = 'Failed to submit query';
+
+      // Extract error message from GraphQL error structure
+      if (err.errors && err.errors.length > 0 && err.errors[0].message) {
+        errorMessage = err.errors[0].message;
+      } else if (err.message) {
+        errorMessage = err.message;
+      } else if (err.data && err.data.errors && err.data.errors.length > 0 && err.data.errors[0].message) {
+        errorMessage = err.data.errors[0].message;
+      } else if (typeof err === 'string') {
+        errorMessage = err;
+      }
+
       updateAnalyticsState({
-        error: err.message || 'Failed to submit query',
+        error: errorMessage,
         jobStatus: 'FAILED',
       });
     } finally {

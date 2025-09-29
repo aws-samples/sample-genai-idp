@@ -35,6 +35,13 @@ def handler(event, context):
     working_bucket = os.environ.get('WORKING_BUCKET')
     full_document = Document.load_document(event.get("document", {}), working_bucket, logger)
     
+    # Log loaded document for troubleshooting
+    logger.info(f"Loaded document - ID: {full_document.id}, input_key: {full_document.input_key}")
+    logger.info(f"Document buckets - input_bucket: {full_document.input_bucket}, output_bucket: {full_document.output_bucket}")
+    logger.info(f"Document status: {full_document.status}, num_pages: {full_document.num_pages}")
+    logger.info(f"Document pages count: {len(full_document.pages)}, sections count: {len(full_document.sections)}")
+    logger.info(f"Full document content: {json.dumps(full_document.to_dict(), default=str)}")
+    
     # Get the section ID directly from the Map state input
     # Now using the simplified array of section IDs format
     section_id = event.get("section_id")
@@ -54,6 +61,22 @@ def handler(event, context):
     
     logger.info(f"Processing section {section_id} with {len(section.page_ids)} pages")
     
+    # Intelligent Extraction detection: Skip if section already has extraction data
+    if section.extraction_result_uri and section.extraction_result_uri.strip():
+        logger.info(f"Skipping extraction for section {section_id} - already has extraction data: {section.extraction_result_uri}")
+        
+        # Return the section without processing
+        response = {
+            "section_id": section_id,
+            "document": full_document.serialize_document(working_bucket, f"extraction_skip_{section_id}", logger)
+        }
+        
+        logger.info(f"Extraction skipped - Response: {json.dumps(response, default=str)}")
+        return response
+    else:
+        logger.info(f"Processing section {section_id} - no extraction data found, proceeding with extraction")
+    
+    # Normal extraction processing
     # Update document status to EXTRACTING
     full_document.status = Status.EXTRACTING
     document_service = create_document_service()

@@ -1,0 +1,1 @@
+./lib/idp_common_pkg[docs_service]

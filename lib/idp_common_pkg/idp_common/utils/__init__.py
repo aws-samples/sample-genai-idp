@@ -89,7 +89,21 @@ def merge_metering_data(existing_metering: Dict[str, Any],
             for unit, value in metrics.items():
                 if service_api not in merged:
                     merged[service_api] = {}
-                merged[service_api][unit] = merged[service_api].get(unit, 0) + value
+                
+                # Convert both values to numbers to handle string vs int mismatch
+                try:
+                    existing_value = merged[service_api].get(unit, 0)
+                    # Handle both string and numeric values
+                    if isinstance(existing_value, str):
+                        existing_value = float(existing_value)
+                    if isinstance(value, str):
+                        value = float(value)
+                    
+                    merged[service_api][unit] = existing_value + value
+                except (ValueError, TypeError) as e:
+                    logger.warning(f"Error converting metering values for {service_api}.{unit}: existing={merged[service_api].get(unit)}, new={value}, error={e}")
+                    # Fallback to new value if conversion fails
+                    merged[service_api][unit] = value
         else:
             logger.warning(f"Unexpected metering data format for {service_api}: {metrics}")
             

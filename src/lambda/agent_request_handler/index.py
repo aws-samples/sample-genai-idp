@@ -76,18 +76,17 @@ def handler(event, context):
         if not query:
             error_msg = "Query parameter is required"
             logger.error(error_msg)
-            return {
-                "statusCode": 400,
-                "body": error_msg
-            }
+            raise Exception(error_msg)
+            
+        if len(query) > 100000:
+            error_msg = "Query exceeds maximum length of 100000 characters"
+            logger.error(f"{error_msg}. Query length: {len(query)}")
+            raise Exception(error_msg)
             
         if not agent_ids:
             error_msg = "At least one agent ID is required"
             logger.error(error_msg)
-            return {
-                "statusCode": 400,
-                "body": error_msg
-            }
+            raise Exception(error_msg)
         
         # Extract and validate user ID from the identity context
         identity = event.get("identity", {})
@@ -153,7 +152,18 @@ def handler(event, context):
             "body": error_msg
         }
     except Exception as e:
-        error_msg = f"Error processing request: {str(e)}"
+        # Check if this is a validation error that should propagate as GraphQL error
+        error_str = str(e)
+        if any(msg in error_str for msg in [
+            "Query parameter is required",
+            "Query exceeds maximum length",
+            "At least one agent ID is required"
+        ]):
+            # Re-raise validation errors so they become GraphQL errors
+            raise e
+        
+        # Handle other unexpected errors
+        error_msg = f"Error processing request: {error_str}"
         logger.error(error_msg)
         return {
             "statusCode": 500,

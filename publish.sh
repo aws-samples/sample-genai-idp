@@ -86,6 +86,37 @@ check_python_version() {
     exit 1
 }
 
+# Check if Node.js and npm are available for UI validation
+check_nodejs_dependencies() {
+    print_info "Checking Node.js dependencies for UI validation..."
+    
+    # Check Node.js
+    if ! command -v node >/dev/null 2>&1; then
+        print_error "Node.js not found but is required for UI build validation"
+        print_info "Install Node.js 18+ from: https://nodejs.org/"
+        exit 1
+    fi
+    
+    # Check npm
+    if ! command -v npm >/dev/null 2>&1; then
+        print_error "npm not found but is required for UI build validation"
+        print_info "npm is typically installed with Node.js"
+        exit 1
+    fi
+    
+    # Check Node.js version (require 18+)
+    node_version=$(node --version 2>/dev/null | sed 's/v//')
+    node_major=$(echo "$node_version" | cut -d'.' -f1)
+    
+    if [[ "$node_major" -lt 18 ]]; then
+        print_error "Node.js $node_version found, but 18+ is required for UI validation"
+        print_info "Please upgrade Node.js to version 18 or later"
+        exit 1
+    else
+        print_success "Found Node.js $node_version and npm $(npm --version)"
+    fi
+}
+
 # Check if required packages are installed and install them if missing
 check_and_install_packages() {
     print_info "Checking required Python packages..."
@@ -168,6 +199,9 @@ main() {
     
     # Check Python version
     check_python_version
+    
+    # Check Node.js dependencies for UI validation
+    check_nodejs_dependencies
     
     # Check and install required packages
     check_and_install_packages

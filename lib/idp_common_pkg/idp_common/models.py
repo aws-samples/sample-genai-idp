@@ -281,7 +281,7 @@ class Document:
             input_bucket=data.get("input_bucket"),
             input_key=data.get("input_key"),
             output_bucket=data.get("output_bucket"),
-            num_pages=data.get("num_pages", 0),
+            num_pages=int(data.get("num_pages", 0)),  # Ensure num_pages is integer
             initial_event_time=data.get("initial_event_time"),
             queued_time=data.get("queued_time"),
             start_time=data.get("start_time"),
@@ -360,7 +360,7 @@ class Document:
 
     def to_json(self) -> str:
         """Convert document to JSON string."""
-        return json.dumps(self.to_dict())
+        return json.dumps(self.to_dict(), default=str)
 
     @classmethod
     def from_json(cls, json_str: str) -> "Document":
