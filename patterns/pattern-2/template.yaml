@@ -150,10 +150,10 @@ Resources:
             required:
               - features
             properties:
-              enabled:
+              tuning:
                 type: boolean
-                description: Enable or disable assessment processing
-                default: true
+                description: Enable the ability to tune OCR ( try new model after initial run )
+                default: false
                 order: 0
               image:
                 type: object
@@ -476,10 +476,10 @@ Resources:
               - system_prompt
               - task_prompt
             properties:
-              enabled:
+              tuning:
                 type: boolean
-                description: Enable or disable classification processing
-                default: true
+                description: Enable tuning of the classification processing
+                default: false
                 order: 0
               image:
                 type: object
@@ -569,10 +569,10 @@ Resources:
               - system_prompt
               - task_prompt
             properties:
-              enabled:
+              tuning:
                 type: boolean
-                description: Enable or disable extraction processing
-                default: true
+                description: Enable tuning of extraction processing
+                default: false
                 order: 0
               image:
                 type: object

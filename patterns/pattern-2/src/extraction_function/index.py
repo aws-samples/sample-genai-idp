@@ -10,6 +10,7 @@ import logging
 from idp_common import metrics, get_config, extraction
 from idp_common.models import Document, Section, Status
 from idp_common.docs_service import create_document_service
+from idp_common.utils import normalize_boolean_value
 
 # Configuration will be loaded in handler function
 
@@ -60,22 +61,24 @@ def handler(event, context):
         raise ValueError(f"Section {section_id} not found in document")
     
     logger.info(f"Processing section {section_id} with {len(section.page_ids)} pages")
-    
+      
+    extraction_config = config.get('extraction', {})
     # Intelligent Extraction detection: Skip if section already has extraction data
     if section.extraction_result_uri and section.extraction_result_uri.strip():
-        logger.info(f"Skipping extraction for section {section_id} - already has extraction data: {section.extraction_result_uri}")
+        if not normalize_boolean_value(extraction_config.get('enabled', False)):
+            logger.info(f"Skipping extraction for section {section_id} - already has extraction data: {section.extraction_result_uri}")
+            
+            # Return the section without processing
+            response = {
+                "section_id": section_id,
+                "document": full_document.serialize_document(working_bucket, f"extraction_skip_{section_id}", logger)
+            }
+            
+            logger.info(f"Extraction skipped - Response: {json.dumps(response, default=str)}")
+            return response
+        else:
+            logger.info(f"Processing section {section_id} - no extraction data found, proceeding with extraction")
         
-        # Return the section without processing
-        response = {
-            "section_id": section_id,
-            "document": full_document.serialize_document(working_bucket, f"extraction_skip_{section_id}", logger)
-        }
-        
-        logger.info(f"Extraction skipped - Response: {json.dumps(response, default=str)}")
-        return response
-    else:
-        logger.info(f"Processing section {section_id} - no extraction data found, proceeding with extraction")
-    
     # Normal extraction processing or selective processing for modified sections
     # Update document status to EXTRACTING
     full_document.status = Status.EXTRACTING

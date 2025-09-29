@@ -324,13 +324,7 @@ class OcrService:
         Returns:
             Updated Document object with OCR results
         """
-        # Gating logic: check if OCR is enabled in config
-        ocr_config = getattr(self, 'config', {}).get('ocr', {})
-        from idp_common.utils import normalize_boolean_value
-        if not normalize_boolean_value(ocr_config.get('enabled', True)):
-            document.status = Status.COMPLETED
-            document.errors.append(Status.OCR_SKIPPED.value)
-            return document
+        
         t0 = time.time()
 
         # Get the document from S3
