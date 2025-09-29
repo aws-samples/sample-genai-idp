@@ -65,7 +65,7 @@ def handler(event, context):
     extraction_config = config.get('extraction', {})
     # Intelligent Extraction detection: Skip if section already has extraction data
     if section.extraction_result_uri and section.extraction_result_uri.strip():
-        if not normalize_boolean_value(extraction_config.get('enabled', False)):
+        if not normalize_boolean_value(extraction_config.get('tuning', False)):
             logger.info(f"Skipping extraction for section {section_id} - already has extraction data: {section.extraction_result_uri}")
             
             # Return the section without processing

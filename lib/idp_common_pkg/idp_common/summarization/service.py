@@ -406,7 +406,8 @@ class SummarizationService:
             if document.status != Status.FAILED:
                 document.status = Status.COMPLETED
             try:
-                # Perserving Document Summary for Frontend Across DeCoupled Architecture
+                # When we Reprocess a document and don't enable Summarization we lose the summary in the UI
+                # This preserves the summary across reprocessing runs
                 s3.get_s3_client().head_object(Bucket=output_bucket, Key=f"{document.id}/summary/summary.md")   
                 document.summary_report_uri = f"s3://{output_bucket}/{document.id}/summary/summary.md"
                 print(f'DOCUMENT: {document}')

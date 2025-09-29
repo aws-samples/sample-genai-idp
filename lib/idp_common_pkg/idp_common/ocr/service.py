@@ -324,7 +324,6 @@ class OcrService:
         Returns:
             Updated Document object with OCR results
         """
-        
         t0 = time.time()
 
         # Get the document from S3

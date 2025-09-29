@@ -16,7 +16,6 @@ from typing import Any, Dict, List
 
 from idp_common import bedrock, image, metrics, s3, utils
 from idp_common.models import Document
-from idp_common.models import Document
 from idp_common.utils import extract_json_from_text
 
 logger = logging.getLogger(__name__)

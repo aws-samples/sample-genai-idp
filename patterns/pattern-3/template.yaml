@@ -1011,7 +1011,6 @@ Resources:
           GUARDRAIL_ID_AND_VERSION: !If [HasGuardrailConfig, !Sub "${BedrockGuardrailId}:${BedrockGuardrailVersion}", ""]
           LOG_LEVEL: !Ref LogLevel
           WORKING_BUCKET: !Ref WorkingBucket
-          OUTPUT_BUCKET: !Ref OutputBucket
       LoggingConfig:
         LogGroup: !Ref ClassificationFunctionLogGroup
       Policies:
@@ -1100,7 +1099,6 @@ Resources:
           TRACKING_TABLE: !Ref TrackingTable
           DOCUMENT_TRACKING_MODE: !If [HasAppSyncApi, 'appsync', 'dynamodb']
           WORKING_BUCKET: !Ref WorkingBucket
-          OUTPUT_BUCKET: !Ref OutputBucket
       LoggingConfig:
         LogGroup: !Ref ExtractionFunctionLogGroup
       Policies:
@@ -1196,7 +1194,6 @@ Resources:
           TRACKING_TABLE: !Ref TrackingTable
           DOCUMENT_TRACKING_MODE: !If [HasAppSyncApi, 'appsync', 'dynamodb']
           WORKING_BUCKET: !Ref WorkingBucket
-          OUTPUT_BUCKET: !Ref OutputBucket
       LoggingConfig:
         LogGroup: !Ref AssessmentFunctionLogGroup
       Policies:
