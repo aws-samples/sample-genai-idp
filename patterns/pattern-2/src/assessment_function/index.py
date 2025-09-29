@@ -217,11 +217,6 @@ def handler(event, context):
     
     try:
         updated_document = assessment_service.process_document_section(document, section_id)
-        if updated_document.status == Status.FAILED:
-            error_message = f"Assesment failed for document {updated_document.id}, section {section_id} Details: {updated_document.errors[-1]}"
-            logger.error(error_message)
-            raise Exception(error_message)
-        
         t1 = time.time()
         logger.info(f"Total assessment time: {t1-t0:.2f} seconds")
         
