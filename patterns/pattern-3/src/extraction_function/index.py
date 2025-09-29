@@ -62,6 +62,7 @@ def handler(event, context):
     
     logger.info(f"Processing section {section_id} with {len(section.page_ids)} pages")
     
+    extraction_config = config.get('extraction', {})
     # Intelligent Extraction detection: Skip if section already has extraction data
     if section.extraction_result_uri and section.extraction_result_uri.strip():
         if not normalize_boolean_value(extraction_config.get('tuning', False)):
