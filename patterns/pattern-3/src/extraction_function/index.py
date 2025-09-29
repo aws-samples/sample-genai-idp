@@ -30,7 +30,7 @@ def handler(event, context):
     # Load configuration
     config = get_config()
     logger.info(f"Config: {json.dumps(config)}")
-        
+    
     # For Map state, we get just one section from the document
     # Extract the document and section from the event - handle both compressed and uncompressed
     working_bucket = os.environ.get('WORKING_BUCKET')
@@ -46,7 +46,7 @@ def handler(event, context):
     # Get the section ID directly from the Map state input
     # Now using the simplified array of section IDs format
     section_id = event.get("section_id")
-
+    
     if not section_id:
         raise ValueError("No section_id found in event")
     
@@ -62,7 +62,6 @@ def handler(event, context):
     
     logger.info(f"Processing section {section_id} with {len(section.page_ids)} pages")
     
-    extraction_config = config.get('extraction', {})
     # Intelligent Extraction detection: Skip if section already has extraction data
     if section.extraction_result_uri and section.extraction_result_uri.strip():
         if not normalize_boolean_value(extraction_config.get('tuning', False)):
@@ -116,12 +115,7 @@ def handler(event, context):
     
     # Check if document processing failed
     if section_document.status == Status.FAILED:
-        error_details = ''
-        if hasattr(section_document, 'errors') and section_document.errors:
-            error_details = '; '.join(str(e) for e in section_document.errors)
         error_message = f"Extraction failed for document {section_document.id}, section {section_id}"
-        if error_details:
-            error_message += f" Details: {error_details}"
         logger.error(error_message)
         raise Exception(error_message)
     

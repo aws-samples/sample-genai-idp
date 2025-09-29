@@ -12,7 +12,7 @@ import os
 import time
 
 from idp_common import classification, metrics, get_config
-from idp_common.models import Document, Status, Section
+from idp_common.models import Document, Status
 from idp_common.docs_service import create_document_service
 from idp_common.utils import normalize_boolean_value
 
@@ -31,10 +31,6 @@ def handler(event, context):
     """
     logger.info(f"Event: {json.dumps(event)}")
     
-    # Load configuration
-    config = get_config()
-    logger.info(f"Config: {json.dumps(config, default=str)}")
-
     # Extract document from the OCR result - handle both compressed and uncompressed
     working_bucket = os.environ.get('WORKING_BUCKET')
     document = Document.load_document(event["OCRResult"]["document"], working_bucket, logger)
@@ -46,8 +42,6 @@ def handler(event, context):
     logger.info(f"Document pages count: {len(document.pages)}, sections count: {len(document.sections)}")
     logger.info(f"Full document content: {json.dumps(document.to_dict(), default=str)}")
     
-    classification_config = config.get('classification', {})
-  
     # Intelligent Classification detection: Skip if pages already have classifications
     pages_with_classification = 0
     for page in document.pages.values():
@@ -82,6 +76,14 @@ def handler(event, context):
     logger.info(f"Updating document status to {document.status}")
     document_service.update_document(document)
     
+    if not document.pages:
+        error_message = "Document has no pages to classify"
+        logger.error(error_message)
+        document.status = Status.FAILED
+        document.errors.append(error_message)
+        document_service.update_document(document)
+        raise ValueError(error_message)
+    
     t0 = time.time()
     
     # Track pages processed for metrics
@@ -89,6 +91,7 @@ def handler(event, context):
     metrics.put_metric('ClassificationRequestsTotal', total_pages)
     
     # Load configuration and update with SageMaker endpoint name
+    config = get_config()
     config_with_endpoint = config.copy() if config else {}
     config_with_endpoint["sagemaker_endpoint_name"] = os.environ['SAGEMAKER_ENDPOINT_NAME']
     
@@ -121,23 +124,20 @@ def handler(event, context):
     
     # Check if document processing completely failed or has critical page failures
     if document.status == Status.FAILED or failed_page_exceptions:
-        error_details = '; '.join(str(e) for e in getattr(document, 'errors', []) if e)
         error_message = f"Classification failed for document {document.id}"
         if failed_page_exceptions:
             error_message += f" - {len(failed_page_exceptions)} pages failed to classify"
-        if error_details:
-            error_message += f" Details: {error_details}"
+        
         logger.error(error_message)
+        # Update document status in AppSync before raising exception
         document_service.update_document(document)
-
+        
         # Raise the original exception type if available, otherwise raise generic exception
         if primary_exception:
             logger.error(f"Re-raising original exception: {type(primary_exception).__name__}")
             raise primary_exception
         else:
             raise Exception(error_message)
-        
-        
     
     t1 = time.time()
     logger.info(f"Time taken for classification: {t1-t0:.2f} seconds")

@@ -45,14 +45,14 @@ def handler(event, context):
     logger.info(f"Full document content: {json.dumps(document.to_dict(), default=str)}")
     
     config = get_config()
-    
+    ocr_config = config.get('ocr', {})
+
     # Intelligent OCR detection: Skip if pages already have OCR data
     pages_with_ocr = 0
     for page in document.pages.values():
         if page.image_uri and page.raw_text_uri:
             pages_with_ocr += 1
     
-    ocr_config = config.get('ocr', {})
     if pages_with_ocr == len(document.pages) and len(document.pages) > 0:
         if not normalize_boolean_value(ocr_config.get('tuning', False)):
             logger.info(f"Skipping OCR processing for document {document.id} - all {len(document.pages)} pages already have OCR data")
@@ -87,15 +87,16 @@ def handler(event, context):
     
     # Load configuration and initialize the OCR service using new simplified pattern
     
-
     backend = ocr_config.get("backend", "textract")
+    
     logger.info(f"Initializing OCR with backend: {backend}")
     service = ocr.OcrService(
         region=region,
         config=config,
         backend=backend
     )
-    # Always call the service; gating is handled inside
+    
+    # Process the document - the service will read the PDF content directly
     document = service.process_document(document)
     
     # Check if document processing failed
