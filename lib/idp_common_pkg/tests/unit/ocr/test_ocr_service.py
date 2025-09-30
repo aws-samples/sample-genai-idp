@@ -69,15 +69,16 @@ class TestOcrService:
             mock_fitz_open.assert_called_once()
             mock_pdf_doc.close.assert_called_once()
 
-    @patch("idp_common.ocr.service.TextExtractionService.extract_text_and_images_from_pdf", return_value=["text"] * 5)
+    @patch("idp_common.s3.write_content")
+    @patch("idp_common.ocr.service.OcrService._extract_page_image", return_value=b"")
+    @patch("idp_common.ocr.service.TextExtractionService.extract_manifest")
     @patch("idp_common.ocr.service.OcrService._detect_file_type", return_value="pdf")
     @patch("idp_common.ocr.service.TextExtractionService.is_pdf_text_native", return_value=True)
     @patch("idp_common.ocr.service.OcrService._process_single_page")
-    @patch("idp_common.ocr.service.OcrService._process_native_pdf_page")
     @patch("boto3.client")
     @patch("fitz.open")
     def test_process_document_routes_native_pdf(
-        self, mock_fitz_open, mock_boto_client, mock_native_handler, mock_ocr_handler, mock_is_native, mock_detect_type, mock_extract_text, mock_document, mock_pdf_content
+        self, mock_fitz_open, mock_boto_client, mock_ocr_handler, mock_is_native, mock_detect_type, mock_extract_manifest, mock_extract_page_image, mock_s3_write, mock_document, mock_pdf_content
     ):
         mock_s3_client = MagicMock()
         mock_s3_client.get_object.return_value = {"Body": BytesIO(mock_pdf_content)}
@@ -87,13 +88,7 @@ class TestOcrService:
         mock_pdf_doc.__len__.return_value = 5
         mock_fitz_open.return_value = mock_pdf_doc
 
-        mock_native_handler.return_value = (
-            {
-                "raw_text_uri": "s3://a", "parsed_text_uri": "s3://b",
-                "text_confidence_uri": "s3://c", "image_uri": "s3://d",
-            },
-            {},
-        )
+        mock_extract_manifest.return_value = []
 
         service = OcrService()
         result = service.process_document(mock_document)
@@ -101,18 +96,16 @@ class TestOcrService:
         assert result.status != Status.FAILED
         assert len(result.pages) == 5
         mock_is_native.assert_called_once()
-        mock_extract_text.assert_called_once()
-        assert mock_native_handler.call_count == 5
+        mock_extract_manifest.assert_called_once()
         mock_ocr_handler.assert_not_called()
 
     @patch("idp_common.ocr.service.OcrService._detect_file_type", return_value="pdf")
     @patch("idp_common.ocr.service.TextExtractionService.is_pdf_text_native", return_value=False)
     @patch("idp_common.ocr.service.OcrService._process_single_page")
-    @patch("idp_common.ocr.service.OcrService._process_native_pdf_page")
     @patch("boto3.client")
     @patch("fitz.open")
     def test_process_document_routes_scanned_pdf(
-        self, mock_fitz_open, mock_boto_client, mock_native_handler, mock_ocr_handler, mock_is_native, mock_detect_type, mock_document, mock_pdf_content
+        self, mock_fitz_open, mock_boto_client, mock_ocr_handler, mock_is_native, mock_detect_type, mock_document, mock_pdf_content
     ):
         mock_s3_client = MagicMock()
         mock_s3_client.get_object.return_value = {"Body": BytesIO(mock_pdf_content)}
@@ -137,7 +130,6 @@ class TestOcrService:
         assert result.status != Status.FAILED
         assert len(result.pages) == 6
         mock_is_native.assert_called_once()
-        mock_native_handler.assert_not_called()
         assert mock_ocr_handler.call_count == 6
 
     def test_placeholder_for_other_tests(self):

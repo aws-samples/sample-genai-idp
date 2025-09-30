@@ -90,82 +90,72 @@ class TextExtractionService:
             )
             return False
 
-    def extract_text_and_images_from_pdf(self, pdf_bytes: bytes) -> list[str]:
+    def extract_manifest(self, pdf_bytes: bytes, s3_prefix: str) -> list[dict]:
         """
-        Extracts text from a PDF, performs OCR on embedded images, and returns the consolidated text for each page.
-        This is the main entry point for processing PDFs with mixed content.
-        """
-        if not self.ocr_service:
-            logger.warning("OcrService not available. Cannot process images. Returning only text.")
-            pdf_document = fitz.open(stream=pdf_bytes, filetype="pdf")
-            page_texts = [page.get_text("text") for page in pdf_document]
-            pdf_document.close()
-            return page_texts
+        Deconstructs a text-based PDF into a structured manifest of text and image blocks.
 
-        pages_data = self._extract_text_and_images_from_pdf(pdf_bytes)
-
-        final_page_texts = []
-        for page_text_with_placeholders, images in pages_data:
-            
-            final_text = page_text_with_placeholders
-            if images:
-                replacements = {}
-                for placeholder, image_bytes in images.items():
-                    ocr_text = self.ocr_service.get_text_from_image(image_bytes)
-                    replacements[placeholder] = f"[Image Content: {ocr_text}]"
-
-                for placeholder, ocr_content in replacements.items():
-                    final_text = final_text.replace(placeholder, ocr_content)
-            
-            final_page_texts.append(final_text)
-
-        return final_page_texts
-
-    def _extract_text_and_images_from_pdf(self, pdf_bytes: bytes) -> list[tuple[str, dict[str, bytes]]]:
-        """
-        Extracts text and images from each page of a PDF document.
-
-        This method should be called for PDFs that are known to be text-native.
-        It uses PyMuPDF to parse the text content and extract images from each page.
+        This method processes a PDF and generates a list of dictionaries, where each
+        dictionary represents a content block (text or image) in its correct order.
+        For image blocks, it performs OCR and prepares the necessary data for persistence.
 
         Args:
             pdf_bytes: The byte content of the PDF file.
+            s3_prefix: The S3 prefix for the document, used to generate image keys.
 
         Returns:
-            A list of tuples, where each tuple contains:
-            - The extracted text of a page with image placeholders.
-            - A dictionary mapping image placeholders to image bytes.
+            A list of dictionaries, representing the structured manifest of the document.
+            Returns an empty list if the PDF cannot be processed or if an ocr_service
+            is not available.
         """
-        import uuid
-        pdf_document = fitz.open(stream=pdf_bytes, filetype="pdf")
-        results = []
-        for page in pdf_document:
-            page_text = ""
-            images = {}
-            page_dict = page.get_text("dict", sort=True)
+        if not self.ocr_service:
+            logger.error("OcrService not available. Cannot process images.")
+            return []
 
-            for block in page_dict["blocks"]:
-                if block["type"] == 0:  # Text block
-                    for line in block["lines"]:
-                        line_text = ""
-                        for span in line["spans"]:
-                            line_text += span["text"]
-                        page_text += line_text + "\n"
-                elif block["type"] == 1:  # Image block
-                    try:
-                        if "image" in block:
-                            img_bytes = block["image"]
-                        elif "xref" in block and block["xref"] > 0:
-                            img_bytes = pdf_document.extract_image(block["xref"])["image"]
-                        else:
-                            logger.warning("Image block found without image data or xref.")
-                            continue
-                            
-                        placeholder = f"[IMAGE-PLACEHOLDER-{uuid.uuid4()}]"
-                        page_text += f"\n{placeholder}\n"
-                        images[placeholder] = img_bytes
-                    except Exception as e:
-                        logger.warning(f"Could not extract image from page: {e}")
-            results.append((page_text.strip(), images))
-        pdf_document.close()
-        return results
+        manifest = []
+        try:
+            pdf_document = fitz.open(stream=pdf_bytes, filetype="pdf")
+            for page_num, page in enumerate(pdf_document):
+                page_dict = page.get_text("dict", sort=True)
+                for block in page_dict["blocks"]:
+                    if block["type"] == 0:  # Text block
+                        for line in block["lines"]:
+                            for span in line["spans"]:
+                                if span["text"].strip():
+                                    manifest.append({
+                                        "type": "text",
+                                        "content": span["text"],
+                                        "page": page_num + 1,
+                                        "bbox": span["bbox"],
+                                    })
+                    elif block["type"] == 1:  # Image block
+                        try:
+                            if "image" in block:
+                                img_bytes = block["image"]
+                                # This is a simplified example; you might need to handle different image formats
+                                img_ext = "png"
+                            elif "xref" in block and block["xref"] > 0:
+                                img_info = pdf_document.extract_image(block["xref"])
+                                img_bytes = img_info["image"]
+                                img_ext = img_info["ext"]
+                            else:
+                                logger.warning("Image block found without image data or xref.")
+                                continue
+
+                            ocr_text = self.ocr_service.get_text_from_image(img_bytes)
+                            s3_key = f"{s3_prefix}/images/{page_num + 1}_{block['bbox']}.{img_ext}"
+                            manifest.append({
+                                "type": "image",
+                                "content": ocr_text,
+                                "image_bytes": img_bytes,
+                                "s3_key": s3_key,
+                                "page": page_num + 1,
+                                "bbox": block["bbox"],
+                            })
+                        except Exception as e:
+                            logger.warning(f"Could not extract or process image on page {page_num + 1}: {e}")
+            pdf_document.close()
+        except Exception as e:
+            logger.error(f"Failed to process PDF for manifest extraction: {e}")
+            return []
+
+        return manifest

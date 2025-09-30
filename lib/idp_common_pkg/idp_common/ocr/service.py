@@ -317,85 +317,6 @@ class OcrService:
         # Initialize document converter for non-PDF formats
         self.document_converter = DocumentConverter(dpi=self.dpi or 150)
 
-    def _process_native_pdf_page(
-        self,
-        page_index: int,
-        pdf_page: fitz.Page,
-        page_text: str,
-        output_bucket: str,
-        prefix: str,
-    ) -> Tuple[Dict[str, str], Dict[str, Any]]:
-        """
-        Process a single page of a text-native PDF without sending to OCR.
-
-        This method generates all necessary artifacts (image, parsed text,
-        and placeholder OCR files) to maintain backward compatibility with
-        consumers expecting a standard document structure.
-
-        Args:
-            page_index: Zero-based index of the page
-            pdf_page: The PyMuPDF page object
-            page_text: The pre-extracted text for the page
-            output_bucket: S3 bucket for storing artifacts
-            prefix: S3 prefix for storing artifacts
-
-        Returns:
-            A tuple of (page_result_dict, metering_data)
-        """
-        page_id = page_index + 1
-
-        # 1. Render the page to an image and save to S3
-        img_bytes = self._extract_page_image(pdf_page, True, page_id)
-        image_key = f"{prefix}/pages/{page_id}/image.jpg"
-        s3.write_content(img_bytes, output_bucket, image_key, content_type="image/jpeg")
-
-        # 2. Save the directly extracted text
-        parsed_result = {"text": page_text}
-        parsed_text_key = f"{prefix}/pages/{page_id}/result.json"
-        s3.write_content(
-            parsed_result,
-            output_bucket,
-            parsed_text_key,
-            content_type="application/json",
-        )
-
-        # 3. Create placeholder raw OCR and confidence files for compatibility
-        empty_ocr_response = {"DocumentMetadata": {"Pages": 1}, "Blocks": []}
-        raw_text_key = f"{prefix}/pages/{page_id}/rawText.json"
-        s3.write_content(
-            empty_ocr_response,
-            output_bucket,
-            raw_text_key,
-            content_type="application/json",
-        )
-
-        lines = page_text.splitlines()
-        markdown_lines = ["| Text | Confidence |", "|:-----|:-----------|"]
-        for line in lines:
-            if line.strip():
-                markdown_lines.append(f"| {line.strip()} | 100.0 |")
-        text_confidence_data = {"text": "\n".join(markdown_lines)}
-        text_confidence_key = f"{prefix}/pages/{page_id}/textConfidence.json"
-        s3.write_content(
-            text_confidence_data,
-            output_bucket,
-            text_confidence_key,
-            content_type="application/json",
-        )
-
-        # 4. Assemble the result dictionary with S3 URIs
-        result = {
-            "raw_text_uri": f"s3://{output_bucket}/{raw_text_key}",
-            "parsed_text_uri": f"s3://{output_bucket}/{parsed_text_key}",
-            "text_confidence_uri": f"s3://{output_bucket}/{text_confidence_key}",
-            "image_uri": f"s3://{output_bucket}/{image_key}",
-        }
-
-        # 5. Provide minimal metering for this operation
-        metering = {"OCR/native/direct_extraction": {"pages": 1}}
-
-        return result, metering
-
     def get_text_from_image(self, image_bytes: bytes) -> str:
         """
         Performs OCR on a single image and returns the extracted text.
@@ -550,24 +471,102 @@ class OcrService:
                 pdf_document = fitz.open(stream=file_content, filetype="pdf")
                 document.num_pages = len(pdf_document)
 
-                # Extract all page texts at once to pass to the processing function
-                  # Extract all page texts at once, including OCR for embedded images
-                page_texts = self.text_extraction_service.extract_text_and_images_from_pdf(
-                    file_content
+                # 1. Generate the manifest, which includes OCR for embedded images
+                manifest = self.text_extraction_service.extract_manifest(
+                    file_content, document.input_key
                 )
+
+                # 2. Process the manifest: upload images and aggregate text per page
+                page_texts = {i + 1: "" for i in range(document.num_pages)}
+                content_type_map = {
+                    "png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg",
+                    "gif": "image/gif", "bmp": "image/bmp", "tiff": "image/tiff",
+                    "tif": "image/tiff", "webp": "image/webp",
+                }
+
+                for item in manifest:
+                    page_num = item["page"]
+                    page_texts[page_num] += item["content"] + "\n"
+
+                    if item["type"] == "image":
+                        img_ext = item["s3_key"].split(".")[-1].lower()
+                        content_type = content_type_map.get(img_ext, "application/octet-stream")
+                        s3.write_content(
+                            item["image_bytes"],
+                            document.output_bucket,
+                            item["s3_key"],
+                            content_type=content_type,
+                        )
+
+                # 3. Create page artifacts for backward compatibility in parallel
+                def create_page_artifacts(page_index: int):
+                    page_id = page_index + 1
+                    pdf_page = pdf_document.load_page(page_index)
+                    page_text = page_texts.get(page_id, "").strip()
+                    prefix = document.input_key
+                    output_bucket = document.output_bucket
+
+                    # 1. Render page to image and save
+                    img_bytes = self._extract_page_image(pdf_page, True, page_id)
+                    image_key = f"{prefix}/pages/{page_id}/image.jpg"
+                    s3.write_content(
+                        img_bytes, output_bucket, image_key, content_type="image/jpeg"
+                    )
+
+                    # 2. Save aggregated text
+                    parsed_result = {"text": page_text}
+                    parsed_text_key = f"{prefix}/pages/{page_id}/result.json"
+                    s3.write_content(
+                        parsed_result,
+                        output_bucket,
+                        parsed_text_key,
+                        content_type="application/json",
+                    )
+
+                    # 3. Create placeholder raw OCR and confidence files
+                    empty_ocr_response = {"DocumentMetadata": {"Pages": 1}, "Blocks": []}
+                    raw_text_key = f"{prefix}/pages/{page_id}/rawText.json"
+                    s3.write_content(
+                        empty_ocr_response,
+                        output_bucket,
+                        raw_text_key,
+                        content_type="application/json",
+                    )
+
+                    lines = page_text.splitlines()
+                    markdown_lines = ["| Text | Confidence |", "|:-----|:-----------|"]
+                    for line in lines:
+                        if line.strip():
+                            markdown_lines.append(f"| {line.strip()} | 100.0 |")
+                    text_confidence_data = {"text": "\n".join(markdown_lines)}
+                    text_confidence_key = (
+                        f"{prefix}/pages/{page_id}/textConfidence.json"
+                    )
+                    s3.write_content(
+                        text_confidence_data,
+                        output_bucket,
+                        text_confidence_key,
+                        content_type="application/json",
+                    )
+
+                    # 4. Assemble result
+                    result = {
+                        "raw_text_uri": f"s3://{output_bucket}/{raw_text_key}",
+                        "parsed_text_uri": f"s3://{output_bucket}/{parsed_text_key}",
+                        "text_confidence_uri": f"s3://{output_bucket}/{text_confidence_key}",
+                        "image_uri": f"s3://{output_bucket}/{image_key}",
+                    }
+
+                    # 5. Metering
+                    metering = {"OCR/native/direct_extraction": {"pages": 1}}
+
+                    return result, metering
 
                 with concurrent.futures.ThreadPoolExecutor(
                     max_workers=self.max_workers
                 ) as executor:
                     future_to_page = {
-                        executor.submit(
-                            self._process_native_pdf_page,
-                            i,
-                            pdf_document.load_page(i),
-                            page_texts[i],
-                            document.output_bucket,
-                            document.input_key,
-                        ): i
+                        executor.submit(create_page_artifacts, i): i
                         for i in range(document.num_pages)
                     }
                     self._process_futures(document, future_to_page)

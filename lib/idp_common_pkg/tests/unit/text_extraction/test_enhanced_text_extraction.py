@@ -22,7 +22,7 @@ class TestEnhancedTextExtraction(unittest.TestCase):
         img_bytes_io = io.BytesIO()
         img.save(img_bytes_io, format='PNG')
         img_bytes = img_bytes_io.getvalue()
-        print(f"DEBUG: type of img_bytes: {type(img_bytes)}")
+        pix = fitz.Pixmap(img_bytes)
 
         # Create a dummy PDF with text and an image
         self.pdf_path = os.path.join(self.test_dir, "test_doc.pdf")
@@ -33,7 +33,7 @@ class TestEnhancedTextExtraction(unittest.TestCase):
         page.insert_text((50, 72), "This is the first line of text.")
         
         # Add image from memory
-        page.insert_image(fitz.Rect(50, 100, 150, 200), stream=img_bytes)
+        page.insert_image(fitz.Rect(50, 100, 150, 200), pixmap=pix)
         
         # Add more text
         page.insert_text((50, 250), "This is the second line of text.")
@@ -53,25 +53,29 @@ class TestEnhancedTextExtraction(unittest.TestCase):
         import shutil
         shutil.rmtree(self.test_dir)
 
-    def test_extract_text_and_images(self):
+    def test_extract_manifest(self):
         """
         Tests that the service correctly extracts text, identifies images,
-        calls the OCR service, and composes the final text.
+        calls the OCR service, and composes the final manifest.
         """
         with open(self.pdf_path, "rb") as f:
             pdf_bytes = f.read()
 
         # Process the PDF
-        final_texts = self.text_extraction_service.extract_text_and_images_from_pdf(pdf_bytes)
+        manifest = self.text_extraction_service.extract_manifest(pdf_bytes, "test_prefix")
         
-        # There's only one page
-        self.assertEqual(len(final_texts), 1)
-        final_text = final_texts[0]
+        self.assertGreaterEqual(len(manifest), 2)
 
-        # Assertions
-        self.assertIn("This is the first line of text.", final_text)
-        self.assertIn("This is the second line of text.", final_text)
-        self.assertIn("[Image Content: This is the image text.]", final_text)
+        text_items = [item for item in manifest if item['type'] == 'text']
+        image_items = [item for item in manifest if item['type'] == 'image']
+
+        self.assertEqual(len(text_items), 2)
+        self.assertEqual(len(image_items), 1)
+
+        self.assertIn("This is the first line of text", text_items[0]['content'])
+        self.assertIn("This is the second line of text", text_items[1]['content'])
+
+        self.assertEqual(image_items[0]['content'], "This is the image text.")
         
         # Check that the OCR service was called
         self.mock_ocr_service.get_text_from_image.assert_called_once()
