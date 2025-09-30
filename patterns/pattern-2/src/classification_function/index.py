@@ -53,8 +53,6 @@ def handler(event, context):
     for page in document.pages.values():
         if page.classification and page.classification.strip():
             pages_with_classification += 1
-
-    classification_config = config.get('classification', {})
         
     if pages_with_classification == len(document.pages) and len(document.pages) > 0:
         if not normalize_boolean_value(classification_config.get('tuning', False)):

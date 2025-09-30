@@ -34,7 +34,8 @@ def handler(event, context):
     # Extract document from the OCR result - handle both compressed and uncompressed
     working_bucket = os.environ.get('WORKING_BUCKET')
     document = Document.load_document(event["OCRResult"]["document"], working_bucket, logger)
-    
+    config = get_config()
+
     # Log loaded document for troubleshooting
     logger.info(f"Loaded document - ID: {document.id}, input_key: {document.input_key}")
     logger.info(f"Document buckets - input_bucket: {document.input_bucket}, output_bucket: {document.output_bucket}")
@@ -93,7 +94,6 @@ def handler(event, context):
     metrics.put_metric('ClassificationRequestsTotal', total_pages)
     
     # Load configuration and update with SageMaker endpoint name
-    config = get_config()
     config_with_endpoint = config.copy() if config else {}
     config_with_endpoint["sagemaker_endpoint_name"] = os.environ['SAGEMAKER_ENDPOINT_NAME']
     

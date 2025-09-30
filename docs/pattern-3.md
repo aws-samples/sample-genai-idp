@@ -93,7 +93,7 @@ Each step includes comprehensive retry logic for handling transient errors:
   ```
 
 #### Classification Function 
-- **Purpose**: Classifies pages using UDOP model on SageMaker, and segments into sections using class boundaries. This step can be disabled via configuration.
+- **Purpose**: Classifies pages using UDOP model on SageMaker, and segments into sections using class boundaries.
 - **Input**: Output from OCR function plus output bucket
 - **Output**: 
   ```json
@@ -209,8 +209,9 @@ The pattern exports these outputs to the parent stack:
 
 **Stack Deployment Parameters:**
 - `UDOPModelArtifactPath`: S3 path to UDOP model artifacts (see [Fine tuning a UDOP model](#fine-tuning-a-udop-model-for-classification))
-- **Classification**: Control classification via configuration file `classification.enabled` property.
-- **Extraction**: Control extraction via configuration file `extraction.enabled` property.
+- **OCR**: Control the ability to tune ocr via configuration file `ocr.tuning` property.
+- **Classification**: Control the ability to tune classification via configuration file `classification.tuning` property.
+- **Extraction**: Control the ability to tune extraction via configuration file `extraction.tuning` property.
 - **Summarization**: Control summarization via configuration file `summarization.enabled` property (replaces `IsSummarizationEnabled` parameter)
 - `ConfigurationDefaultS3Uri`: Optional S3 URI to custom configuration (uses default configuration if not specified)
 - `MaxConcurrentWorkflows`: Workflow concurrency limit

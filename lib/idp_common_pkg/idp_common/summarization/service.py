@@ -398,6 +398,7 @@ class SummarizationService:
         from idp_common.utils import normalize_boolean_value
 
         enabled = normalize_boolean_value(summarization_config.get("enabled", True))
+        output_bucket = os.environ["OUTPUT_BUCKET"]
         if not enabled:
             logger.info(
                 f"Summarization is disabled in configuration for document {document.id}, skipping processing"

@@ -62,12 +62,7 @@ def handler(event, context):
         
         # Check if document processing failed
         if processed_document.status == Status.FAILED:
-            error_details = ''
-            if hasattr(processed_document, 'errors') and processed_document.errors:
-                error_details = '; '.join(str(e) for e in processed_document.errors)
             error_message = f"Summarization failed for document {processed_document.id}"
-            if error_details:
-                error_message += f" Details: {error_details}"
             logger.error(error_message)
             raise Exception(error_message)
         
