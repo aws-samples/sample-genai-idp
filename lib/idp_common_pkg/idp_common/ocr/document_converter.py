@@ -110,6 +110,56 @@ class DocumentConverter:
             logger.error(f"Error converting text to pages: {str(e)}")
             return [(self._create_empty_page(), content)]
 
+    def convert_tsv_to_pages(self, content: str) -> List[Tuple[bytes, str]]:
+        """
+        Convert TSV (tab-separated values) content to page images and text.
+
+        Args:
+            content: TSV content as string
+
+        Returns:
+            List of tuples (image_bytes, page_text)
+        """
+        try:
+            import csv
+
+            import pandas as pd
+
+            # Parse TSV using pandas
+            try:
+                df = pd.read_csv(
+                    io.StringIO(content),
+                    sep="\t",
+                    dtype_backend="numpy_nullable",
+                    parse_dates=True,
+                )
+
+                if df.empty:
+                    return [(self._create_empty_page(), "")]
+
+                # Generate markdown table
+                formatted_text = self._format_csv_with_pandas(df, content)
+
+            except Exception as pandas_error:
+                logger.warning(
+                    f"Pandas TSV processing failed, falling back to basic parsing: {pandas_error}"
+                )
+                # Fallback to basic TSV parsing
+                csv_reader = csv.reader(io.StringIO(content), delimiter="\t")
+                rows = list(csv_reader)
+
+                if not rows:
+                    return [(self._create_empty_page(), "")]
+
+                formatted_text = self._format_csv_as_table(rows)
+
+            # Convert to pages
+            return self._convert_markdown_to_pages(formatted_text)
+
+        except Exception as e:
+            logger.error(f"Error converting TSV to pages: {str(e)}")
+            return [(self._create_empty_page(), content)]
+
     def convert_csv_to_pages(self, content: str) -> List[Tuple[bytes, str]]:
         """
         Convert CSV content to page images and text with enhanced pandas processing.
@@ -1433,3 +1483,221 @@ class DocumentConverter:
         # Return a hardcoded minimal valid 1x1 white JPEG
         logger.warning("Using hardcoded minimal JPEG")
         return b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x01\x00H\x00H\x00\x00\xff\xdb\x00C\x00\x08\x06\x06\x07\x06\x05\x08\x07\x07\x07\t\t\x08\n\x0c\x14\r\x0c\x0b\x0b\x0c\x19\x12\x13\x0f\x14\x1d\x1a\x1f\x1e\x1d\x1a\x1c\x1c $.' \",#\x1c\x1c(7),01444\x1f'9=82<.342\xff\xc0\x00\x11\x08\x00\x01\x00\x01\x01\x01\x11\x00\x02\x11\x01\x03\x11\x01\xff\xc4\x00\x14\x00\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x08\xff\xc4\x00\x14\x10\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xff\xda\x00\x0c\x03\x01\x00\x02\x11\x03\x11\x00\x3f\x00\x80\xff\xd9"
+
+    def convert_rtf_to_pages(self, file_bytes: bytes) -> List[Tuple[bytes, str]]:
+        """
+        Convert RTF (Rich Text Format) file to page images and text.
+
+        Args:
+            file_bytes: RTF file bytes
+
+        Returns:
+            List of tuples (image_bytes, page_text)
+        """
+        try:
+            # Try striprtf library first (lightweight)
+            try:
+                from striprtf.striprtf import rtf_to_text
+
+                text_content = rtf_to_text(file_bytes.decode("utf-8", errors="ignore"))
+                logger.info("Converted RTF using striprtf library")
+                return self.convert_text_to_pages(text_content)
+
+            except ImportError:
+                logger.warning("striprtf library not available, trying alternative method")
+                # Fallback: basic RTF parsing (extract text between braces)
+                text_content = file_bytes.decode("utf-8", errors="ignore")
+                # Remove RTF control words and extract plain text
+                import re
+
+                # Remove control words like \keyword
+                text_content = re.sub(r"\\[a-z]+\d*\s?", " ", text_content)
+                # Remove braces
+                text_content = text_content.replace("{", "").replace("}", "")
+                # Clean up multiple spaces
+                text_content = re.sub(r"\s+", " ", text_content)
+                logger.info("Converted RTF using basic parsing")
+                return self.convert_text_to_pages(text_content)
+
+        except Exception as e:
+            logger.error(f"Error converting RTF to pages: {str(e)}")
+            return [(self._create_empty_page(), "Error reading RTF file")]
+
+    def convert_odt_to_pages(self, file_bytes: bytes) -> List[Tuple[bytes, str]]:
+        """
+        Convert ODT (OpenDocument Text) file to page images and text.
+
+        Args:
+            file_bytes: ODT file bytes
+
+        Returns:
+            List of tuples (image_bytes, page_text)
+        """
+        try:
+            from odf import text, teletype
+            from odf.opendocument import load
+
+            # ODT is a ZIP file, write to temp and load
+            with tempfile.NamedTemporaryFile(suffix=".odt", delete=False) as tmp_file:
+                tmp_file.write(file_bytes)
+                tmp_file.flush()
+                tmp_path = tmp_file.name
+
+            try:
+                # Load ODT document
+                doc = load(tmp_path)
+
+                # Extract all text content
+                all_text = []
+                for para in doc.getElementsByType(text.P):
+                    para_text = teletype.extractText(para)
+                    if para_text.strip():
+                        all_text.append(para_text)
+
+                # Extract text from headings
+                for heading in doc.getElementsByType(text.H):
+                    heading_text = teletype.extractText(heading)
+                    if heading_text.strip():
+                        all_text.append(heading_text)
+
+                text_content = "\n".join(all_text)
+                logger.info(f"Converted ODT document with {len(all_text)} paragraphs")
+                return self.convert_text_to_pages(text_content)
+
+            finally:
+                # Clean up temp file
+                try:
+                    os.unlink(tmp_path)
+                except Exception:
+                    pass
+
+        except ImportError:
+            logger.error("odfpy library not available. Install with: pip install odfpy")
+            return [(self._create_empty_page(), "Error: odfpy library required for ODT files")]
+        except Exception as e:
+            logger.error(f"Error converting ODT to pages: {str(e)}")
+            return [(self._create_empty_page(), "Error reading ODT file")]
+
+    def convert_epub_to_pages(self, file_bytes: bytes) -> List[Tuple[bytes, str]]:
+        """
+        Convert EPUB file to page images and text.
+
+        Args:
+            file_bytes: EPUB file bytes
+
+        Returns:
+            List of tuples (image_bytes, page_text)
+        """
+        try:
+            import ebooklib
+            from bs4 import BeautifulSoup
+            from ebooklib import epub
+
+            # Write to temp file
+            with tempfile.NamedTemporaryFile(suffix=".epub", delete=False) as tmp_file:
+                tmp_file.write(file_bytes)
+                tmp_file.flush()
+                tmp_path = tmp_file.name
+
+            try:
+                # Read EPUB
+                book = epub.read_epub(tmp_path)
+
+                # Extract text from all chapters
+                all_text = []
+
+                # Get title if available
+                title = book.get_metadata("DC", "title")
+                if title and title[0]:
+                    all_text.append(f"# {title[0][0]}")
+                    all_text.append("")
+
+                # Extract text from each item
+                for item in book.get_items():
+                    if item.get_type() == ebooklib.ITEM_DOCUMENT:
+                        # Parse HTML content
+                        soup = BeautifulSoup(item.get_content(), "html.parser")
+
+                        # Extract text, preserving some structure
+                        for element in soup.find_all(["h1", "h2", "h3", "p", "li"]):
+                            text = element.get_text().strip()
+                            if text:
+                                # Add markdown formatting for headings
+                                if element.name == "h1":
+                                    all_text.append(f"# {text}")
+                                elif element.name == "h2":
+                                    all_text.append(f"## {text}")
+                                elif element.name == "h3":
+                                    all_text.append(f"### {text}")
+                                else:
+                                    all_text.append(text)
+                                all_text.append("")
+
+                text_content = "\n".join(all_text)
+                logger.info(f"Converted EPUB with {len(book.get_items())} items")
+                return self._convert_markdown_to_pages(text_content)
+
+            finally:
+                # Clean up temp file
+                try:
+                    os.unlink(tmp_path)
+                except Exception:
+                    pass
+
+        except ImportError:
+            logger.error(
+                "Required libraries not available. Install with: pip install ebooklib beautifulsoup4"
+            )
+            return [
+                (
+                    self._create_empty_page(),
+                    "Error: ebooklib and beautifulsoup4 libraries required for EPUB files",
+                )
+            ]
+        except Exception as e:
+            logger.error(f"Error converting EPUB to pages: {str(e)}")
+            return [(self._create_empty_page(), "Error reading EPUB file")]
+
+    def convert_mobi_to_pages(self, file_bytes: bytes) -> List[Tuple[bytes, str]]:
+        """
+        Convert MOBI file to page images and text.
+
+        Note: MOBI support is limited. Consider converting to EPUB first using Calibre.
+
+        Args:
+            file_bytes: MOBI file bytes
+
+        Returns:
+            List of tuples (image_bytes, page_text)
+        """
+        logger.warning(
+            "MOBI format has limited support. Consider converting to EPUB using Calibre for better results."
+        )
+        return [
+            (
+                self._create_empty_page(),
+                "MOBI format not fully supported. Please convert to EPUB or PDF format.",
+            )
+        ]
+
+    def convert_pages_to_pages(self, file_bytes: bytes) -> List[Tuple[bytes, str]]:
+        """
+        Convert Apple Pages file to page images and text.
+
+        Note: Pages format is proprietary and complex. Limited support available.
+
+        Args:
+            file_bytes: Pages file bytes
+
+        Returns:
+            List of tuples (image_bytes, page_text)
+        """
+        logger.warning(
+            "Apple Pages format is proprietary. Consider exporting as PDF or DOCX for better results."
+        )
+        return [
+            (
+                self._create_empty_page(),
+                "Apple Pages format not supported. Please export as PDF or DOCX format.",
+            )
+        ]

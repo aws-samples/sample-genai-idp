@@ -312,7 +312,14 @@ class OcrService:
         )
 
         # Initialize the text extraction service for intelligent routing
-        self.text_extraction_service = TextExtractionService(ocr_service=self)
+        # Extract image filter configuration if provided
+        text_extraction_config = self.config.get("text_extraction", {}) if hasattr(self, "config") else {}
+        image_filter_config = text_extraction_config.get("image_filter")
+
+        self.text_extraction_service = TextExtractionService(
+            ocr_service=self,
+            image_filter_config=image_filter_config
+        )
 
         # Initialize document converter for non-PDF formats
         self.document_converter = DocumentConverter(dpi=self.dpi or 150)
@@ -1785,34 +1792,93 @@ class OcrService:
             content: File content bytes
 
         Returns:
-            File type string
+            File type string (normalized to handler types)
         """
         # Get file extension
         ext = filename.lower().split(".")[-1] if "." in filename else ""
 
-        # Check for specific document types
-        if ext == "txt":
-            return "txt"
-        elif ext == "csv":
-            return "csv"
+        # PDF files
+        if ext == "pdf":
+            return "pdf"
+
+        # Excel files
         elif ext in ["xlsx", "xls"]:
             return "xlsx"
+
+        # Word documents
         elif ext in ["docx", "doc"]:
             return "docx"
-        elif ext in ["pdf"]:
-            return "pdf"
+
+        # CSV and TSV files
+        elif ext == "csv":
+            return "csv"
+        elif ext == "tsv":
+            return "tsv"
+
+        # Rich text formats
+        elif ext == "rtf":
+            return "rtf"
+        elif ext == "odt":
+            return "odt"
+
+        # eBook formats
+        elif ext in ["epub"]:
+            return "epub"
+        elif ext in ["mobi"]:
+            return "mobi"
+
+        # Apple Pages (will be handled specially)
+        elif ext == "pages":
+            return "pages"
+
+        # Markup and structured text formats (all treated as text)
+        elif ext in ["md", "markdown", "rst", "asciidoc", "adoc", "tex"]:
+            return "txt"
+        elif ext in ["xml", "html", "htm"]:
+            return "txt"
+        elif ext in ["json", "yaml", "yml"]:
+            return "txt"
+
+        # Programming/script files (all treated as text)
+        elif ext in ["py", "js", "java", "c", "cpp", "h", "hpp", "cs", "rb", "php", "go", "rs", "sql"]:
+            return "txt"
+
+        # Configuration files (all treated as text)
+        elif ext in ["ini", "conf", "config", "env", "toml", "properties"]:
+            return "txt"
+
+        # Log files
+        elif ext == "log":
+            return "txt"
+
+        # Plain text
+        elif ext == "txt":
+            return "txt"
+
+        # Image formats
         elif ext in ["jpg", "jpeg", "png", "gif", "bmp", "tiff", "tif", "webp"]:
             return ext
+
         else:
-            # Try to detect based on content
+            # Try to detect based on content magic bytes
             if content.startswith(b"%PDF"):
                 return "pdf"
             elif content.startswith(b"PK"):
-                # Could be Excel or Word (both are ZIP-based)
+                # ZIP-based formats
                 if b"xl/" in content[:1000]:
                     return "xlsx"
                 elif b"word/" in content[:1000]:
                     return "docx"
+                elif b"mimetype" in content[:1000]:
+                    # Could be ODT, EPUB, or other ZIP-based format
+                    if b"application/vnd.oasis.opendocument.text" in content[:2000]:
+                        return "odt"
+                    elif b"application/epub+zip" in content[:2000]:
+                        return "epub"
+
+            # Try RTF magic bytes
+            elif content.startswith(b"{\\rtf"):
+                return "rtf"
 
             # Default to treating as text if we can decode it
             try:
@@ -1822,6 +1888,7 @@ class OcrService:
                 pass
 
             # Default to PDF for unknown binary files
+            logger.warning(f"Unknown file type for {filename}, defaulting to PDF handling")
             return "pdf"
 
     def _process_non_pdf_document(
@@ -1838,30 +1905,56 @@ class OcrService:
             List of tuples (image_bytes, page_text)
         """
         try:
+            # Text-based formats
             if file_type == "txt":
-                text_content = content.decode("utf-8")
+                text_content = content.decode("utf-8", errors="ignore")
                 return self.document_converter.convert_text_to_pages(text_content)
 
+            # Tabular formats
             elif file_type == "csv":
-                text_content = content.decode("utf-8")
+                text_content = content.decode("utf-8", errors="ignore")
                 return self.document_converter.convert_csv_to_pages(text_content)
 
+            elif file_type == "tsv":
+                text_content = content.decode("utf-8", errors="ignore")
+                return self.document_converter.convert_tsv_to_pages(text_content)
+
+            # Microsoft Office formats
             elif file_type == "xlsx":
                 return self.document_converter.convert_excel_to_pages(content)
 
             elif file_type == "docx":
                 return self.document_converter.convert_word_to_pages(content)
 
+            # Rich text formats
+            elif file_type == "rtf":
+                return self.document_converter.convert_rtf_to_pages(content)
+
+            elif file_type == "odt":
+                return self.document_converter.convert_odt_to_pages(content)
+
+            # eBook formats
+            elif file_type == "epub":
+                return self.document_converter.convert_epub_to_pages(content)
+
+            elif file_type == "mobi":
+                return self.document_converter.convert_mobi_to_pages(content)
+
+            # Apple Pages
+            elif file_type == "pages":
+                return self.document_converter.convert_pages_to_pages(content)
+
             else:
-                # Fallback to text
+                # Fallback to text for unknown types
                 try:
-                    text_content = content.decode("utf-8")
+                    text_content = content.decode("utf-8", errors="ignore")
+                    logger.warning(f"Unknown file type {file_type}, treating as plain text")
                     return self.document_converter.convert_text_to_pages(text_content)
-                except UnicodeDecodeError:
+                except Exception:
                     return [
                         (
                             self.document_converter._create_empty_page(),
-                            "Error: Unable to process file",
+                            f"Error: Unable to process {file_type} file",
                         )
                     ]
 
