@@ -486,10 +486,11 @@ class OcrService:
                         document.errors.append(f"{error_msg} (see logs for full trace)")
             elif (
                 file_type == "pdf"
+                and self.backend != "textract"
                 and self.text_extraction_service.is_pdf_text_native(file_content)
             ):
-                # New path for text-native PDFs
-                logger.info("Processing as text-native PDF.")
+                # New path for text-native PDFs (only when not using Textract backend)
+                logger.info("Processing as text-native PDF with hybrid extraction.")
                 pdf_document = fitz.open(stream=file_content, filetype="pdf")
                 document.num_pages = len(pdf_document)
 
@@ -610,9 +611,12 @@ class OcrService:
 
                 pdf_document.close()
             else:
-                # Existing path for scanned PDFs and image files
+                # Standard OCR path: Used for Textract backend (all PDFs) or scanned PDFs with other backends
                 if file_type == "pdf":
-                    logger.info("Processing as scanned PDF/image-based PDF.")
+                    if self.backend == "textract":
+                        logger.info("Processing PDF with Textract backend (skipping hybrid extraction).")
+                    else:
+                        logger.info("Processing as scanned PDF/image-based PDF.")
                 else:
                     logger.info(f"Processing as image file: {file_type}")
 
