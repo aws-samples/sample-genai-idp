@@ -223,9 +223,9 @@ def handler(event, context):
         # Get object key from document
         try:
             if "document" in input_data:
-                object_key = input_data["document"]["input_key"]
+                object_key = input_data["document"]["document_id"]
             else:
-                raise ValueError("Unable to find object key in input")
+                raise ValueError("Unable to find document_id in input")
         except (KeyError, TypeError) as e:
             logger.error(f"Error extracting object_key from input: {e}")
             logger.error(f"Input data structure: {input_data}")

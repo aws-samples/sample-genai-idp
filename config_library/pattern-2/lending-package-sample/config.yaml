@@ -1456,6 +1456,15 @@ pricing:
         price: '1.5E-6'
       - name: cacheWriteInputTokens
         price: '1.875E-5'
+  # AWS Lambda pricing (US East - N. Virginia)
+  - name: lambda/requests
+    units:
+      - name: invocations
+        price: '2.0E-7'       # $0.0000002 per request ($0.20 per 1M requests)
+  - name: lambda/duration  
+    units:
+      - name: gb_seconds
+        price: '1.66667E-5'   # $0.0000166667 per GB-second ($16.67 per 1M GB-seconds)
 discovery:
   output_format:
     sample_json: |-

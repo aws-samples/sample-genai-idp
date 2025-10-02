@@ -1307,3 +1307,139 @@ discovery:
       and organizational structure. Focus on creating comprehensive blueprints
       for document processing without extracting actual values.
     max_tokens: '10000'
+pricing:
+  - name: textract/detect_document_text
+    units:
+      - name: pages
+        price: '0.0015'
+  - name: textract/analyze_document-Layout
+    units:
+      - name: pages
+        price: '0.004'
+  - name: textract/analyze_document-Signatures
+    units:
+      - name: pages
+        price: '0.0035'
+  - name: textract/analyze_document-Forms
+    units:
+      - name: pages
+        price: '0.05'
+  - name: textract/analyze_document-Tables
+    units:
+      - name: pages
+        price: '0.015'
+  - name: textract/analyze_document-Tables+Forms
+    units:
+      - name: pages
+        price: '0.065'
+  - name: bedrock/us.amazon.nova-lite-v1:0
+    units:
+      - name: inputTokens
+        price: '6.0E-8'
+      - name: outputTokens
+        price: '2.4E-7'
+      - name: cacheReadInputTokens
+        price: '1.5E-8'
+      - name: cacheWriteInputTokens
+        price: '6.0E-8'
+  - name: bedrock/us.amazon.nova-pro-v1:0
+    units:
+      - name: inputTokens
+        price: '8.0E-7'
+      - name: outputTokens
+        price: '3.2E-6'
+      - name: cacheReadInputTokens
+        price: '2.0E-7'
+      - name: cacheWriteInputTokens
+        price: '8.0E-7'
+  - name: bedrock/us.amazon.nova-premier-v1:0
+    units:
+      - name: inputTokens
+        price: '2.5E-6'
+      - name: outputTokens
+        price: '1.25E-5'
+  - name: bedrock/us.anthropic.claude-3-haiku-20240307-v1:0
+    units:
+      - name: inputTokens
+        price: '2.5E-7'
+      - name: outputTokens
+        price: '1.25E-6'
+  - name: bedrock/us.anthropic.claude-3-5-haiku-20241022-v1:0
+    units:
+      - name: inputTokens
+        price: '8.0E-7'
+      - name: outputTokens
+        price: '4.0E-6'
+      - name: cacheReadInputTokens
+        price: '8.0E-8'
+      - name: cacheWriteInputTokens
+        price: '1.0E-6'
+  - name: bedrock/us.anthropic.claude-3-5-sonnet-20241022-v2:0
+    units:
+      - name: inputTokens
+        price: '3.0E-6'
+      - name: outputTokens
+        price: '1.5E-5'
+      - name: cacheReadInputTokens
+        price: '3.0E-7'
+      - name: cacheWriteInputTokens
+        price: '3.75E-6'
+  - name: bedrock/us.anthropic.claude-3-7-sonnet-20250219-v1:0
+    units:
+      - name: inputTokens
+        price: '3.0E-6'
+      - name: outputTokens
+        price: '1.5E-5'
+      - name: cacheReadInputTokens
+        price: '3.0E-7'
+      - name: cacheWriteInputTokens
+        price: '3.75E-6'
+  - name: bedrock/us.anthropic.claude-sonnet-4-20250514-v1:0
+    units:
+      - name: inputTokens
+        price: '3.0E-6'
+      - name: outputTokens
+        price: '1.5E-5'
+      - name: cacheReadInputTokens
+        price: '3.0E-7'
+      - name: cacheWriteInputTokens
+        price: '3.75E-6'
+  - name: bedrock/us.anthropic.claude-sonnet-4-20250514-v1:0:1m
+    units:
+      - name: inputTokens
+        price: '6.0E-6'
+      - name: outputTokens
+        price: '2.25E-5'
+      - name: cacheReadInputTokens
+        price: '6.0E-7'
+      - name: cacheWriteInputTokens
+        price: '7.5E-6'
+  - name: bedrock/us.anthropic.claude-opus-4-20250514-v1:0
+    units:
+      - name: inputTokens
+        price: '1.5E-5'
+      - name: outputTokens
+        price: '7.5E-5'
+      - name: cacheReadInputTokens
+        price: '1.5E-6'
+      - name: cacheWriteInputTokens
+        price: '1.875E-5'
+  - name: bedrock/us.anthropic.claude-opus-4-1-20250805-v1:0
+    units:
+      - name: inputTokens
+        price: '1.5E-5'
+      - name: outputTokens
+        price: '7.5E-5'
+      - name: cacheReadInputTokens
+        price: '1.5E-6'
+      - name: cacheWriteInputTokens
+        price: '1.875E-5'
+  # AWS Lambda pricing (US East - N. Virginia)
+  - name: lambda/requests
+    units:
+      - name: invocations
+        price: '2.0E-7'       # $0.0000002 per request ($0.20 per 1M requests)
+  - name: lambda/duration  
+    units:
+      - name: gb_seconds
+        price: '1.66667E-5'   # $0.0000166667 per GB-second ($16.67 per 1M GB-seconds)

@@ -15,6 +15,8 @@ from idp_common import get_config, ocr
 from idp_common.models import Document, Status
 from idp_common.docs_service import create_document_service
 from idp_common.utils import normalize_boolean_value
+from idp_common.utils import calculate_lambda_metering, merge_metering_data
+
 
 # Configuration will be loaded in handler function
 
@@ -30,7 +32,8 @@ MAX_WORKERS = int(os.environ.get('MAX_WORKERS', 20))
 def handler(event, context): 
     """
     Lambda handler for OCR processing.
-    """       
+    """
+    start_time = time.time()  # Capture start time for Lambda metering
     logger.info(f"Event: {json.dumps(event)}")
     
     # Get document from event - handle both compressed and uncompressed
@@ -52,26 +55,33 @@ def handler(event, context):
     for page in document.pages.values():
         if page.image_uri and page.raw_text_uri:
             pages_with_ocr += 1
-    
+        
     if pages_with_ocr == len(document.pages) and len(document.pages) > 0:
         if not normalize_boolean_value(ocr_config.get('tuning', False)):
             logger.info(f"Skipping OCR processing for document {document.id} - all {len(document.pages)} pages already have OCR data")
-            
+
             # Ensure document has the expected execution ARN
             document.workflow_execution_arn = event.get("execution_arn")
-            
+
             # Update document execution ARN for tracking
             if document.status == Status.QUEUED:
                 document_service = create_document_service()
                 logger.info(f"Updating document execution ARN for OCR skip")
                 document_service.update_document(document)
-            
+
+            # Add Lambda metering for OCR skip execution
+            try:
+                lambda_metering = calculate_lambda_metering("OCR", context, start_time)
+                document.metering = merge_metering_data(document.metering, lambda_metering)
+            except Exception as e:
+                logger.warning(f"Failed to add Lambda metering for OCR skip: {str(e)}")
+
             # Prepare output with existing document data
             working_bucket = os.environ.get('WORKING_BUCKET')
             response = {
                 "document": document.serialize_document(working_bucket, "ocr_skip", logger)
             }
-            
+
             logger.info(f"OCR skipped - Response: {json.dumps(response, default=str)}")
             return response
     
@@ -108,6 +118,13 @@ def handler(event, context):
     
     t1 = time.time()
     logger.info(f"Total OCR processing time: {t1-t0:.2f} seconds")
+    
+    # Add Lambda metering for successful OCR execution
+    try:
+        lambda_metering = calculate_lambda_metering("OCR", context, start_time)
+        document.metering = merge_metering_data(document.metering, lambda_metering)
+    except Exception as e:
+        logger.warning(f"Failed to add Lambda metering for OCR: {str(e)}")
     
     # Prepare output with automatic compression if needed
     working_bucket = os.environ.get('WORKING_BUCKET')

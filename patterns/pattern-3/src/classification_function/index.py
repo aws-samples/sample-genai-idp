@@ -15,6 +15,8 @@ from idp_common import classification, metrics, get_config
 from idp_common.models import Document, Status
 from idp_common.docs_service import create_document_service
 from idp_common.utils import normalize_boolean_value
+from idp_common.utils import calculate_lambda_metering, merge_metering_data
+
 
 # Configuration will be loaded in handler function
 region = os.environ['AWS_REGION']
@@ -29,6 +31,7 @@ def handler(event, context):
     """
     Lambda handler for document classification using SageMaker UDOP model.
     """
+    start_time = time.time()  # Capture start time for Lambda metering
     logger.info(f"Event: {json.dumps(event)}")
     
     # Extract document from the OCR result - handle both compressed and uncompressed
@@ -50,24 +53,31 @@ def handler(event, context):
             pages_with_classification += 1
     
     classification_config = config.get('classification', {})
-    
+      
     if pages_with_classification == len(document.pages) and len(document.pages) > 0:
         if not normalize_boolean_value(classification_config.get('tuning', False)):
             logger.info(f"Skipping classification for document {document.id} - all {len(document.pages)} pages already classified")
-            
+
             # Ensure document has the expected execution ARN
             document.workflow_execution_arn = event.get("execution_arn")
-            
+
             # Update document execution ARN for tracking
             document_service = create_document_service()
             logger.info(f"Updating document execution ARN for classification skip")
             document_service.update_document(document)
-            
+
+            # Add Lambda metering for classification skip execution
+            try:
+                lambda_metering = calculate_lambda_metering("Classification", context, start_time)
+                document.metering = merge_metering_data(document.metering, lambda_metering)
+            except Exception as e:
+                logger.warning(f"Failed to add Lambda metering for classification skip: {str(e)}")
+
             # Prepare output with existing document data
             response = {
                 "document": document.serialize_document(working_bucket, "classification_skip", logger)
             }
-            
+
             logger.info(f"Classification skipped - Response: {json.dumps(response, default=str)}")
             return response
     
@@ -143,6 +153,13 @@ def handler(event, context):
     
     t1 = time.time()
     logger.info(f"Time taken for classification: {t1-t0:.2f} seconds")
+    
+    # Add Lambda metering for successful classification execution
+    try:
+        lambda_metering = calculate_lambda_metering("Classification", context, start_time)
+        document.metering = merge_metering_data(document.metering, lambda_metering)
+    except Exception as e:
+        logger.warning(f"Failed to add Lambda metering for classification: {str(e)}")
     
     # Prepare output with automatic compression if needed
     response = {

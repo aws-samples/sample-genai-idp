@@ -12,6 +12,9 @@ try:
 except ImportError:
     yaml = None
 
+# Import Lambda metering utility
+from .lambda_metering import calculate_lambda_metering
+
 logger = logging.getLogger(__name__)
 
 # Common backoff constants

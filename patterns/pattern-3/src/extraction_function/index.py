@@ -11,6 +11,8 @@ from idp_common import metrics, get_config, extraction
 from idp_common.models import Document, Section, Status
 from idp_common.docs_service import create_document_service
 from idp_common.utils import normalize_boolean_value
+from idp_common.utils import calculate_lambda_metering, merge_metering_data
+
 
 # Configuration will be loaded in handler function
 
@@ -25,6 +27,7 @@ def handler(event, context):
     """
     Process a single section of a document for information extraction
     """
+    start_time = time.time()  # Capture start time for Lambda metering
     logger.info(f"Event: {json.dumps(event)}")
 
     # Load configuration
@@ -63,22 +66,30 @@ def handler(event, context):
     logger.info(f"Processing section {section_id} with {len(section.page_ids)} pages")
     
     extraction_config = config.get('extraction', {})
-    # Intelligent Extraction detection: Skip if section already has extraction data
+    
+    # Intelligent Extraction detection: Skip if section already has extraction data   
     if section.extraction_result_uri and section.extraction_result_uri.strip():
         if not normalize_boolean_value(extraction_config.get('tuning', False)):
             logger.info(f"Skipping extraction for section {section_id} - already has extraction data: {section.extraction_result_uri}")
-            
+
+            # Add Lambda metering for extraction skip execution
+            try:
+                lambda_metering = calculate_lambda_metering("Extraction", context, start_time)
+                full_document.metering = merge_metering_data(full_document.metering, lambda_metering)
+            except Exception as e:
+                logger.warning(f"Failed to add Lambda metering for extraction skip: {str(e)}")
+
             # Return the section without processing
             response = {
                 "section_id": section_id,
                 "document": full_document.serialize_document(working_bucket, f"extraction_skip_{section_id}", logger)
             }
-            
+
             logger.info(f"Extraction skipped - Response: {json.dumps(response, default=str)}")
             return response
         else:
             logger.info(f"Processing section {section_id} - no extraction data found, proceeding with extraction")
-        
+                     
     # Normal extraction processing
     # Update document status to EXTRACTING
     full_document.status = Status.EXTRACTING
@@ -119,6 +130,13 @@ def handler(event, context):
         error_message = f"Extraction failed for document {section_document.id}, section {section_id}"
         logger.error(error_message)
         raise Exception(error_message)
+    
+    # Add Lambda metering for successful extraction execution
+    try:
+        lambda_metering = calculate_lambda_metering("Extraction", context, start_time)
+        section_document.metering = merge_metering_data(section_document.metering, lambda_metering)
+    except Exception as e:
+        logger.warning(f"Failed to add Lambda metering for extraction: {str(e)}")
     
     # Prepare output with automatic compression if needed
     response = {
