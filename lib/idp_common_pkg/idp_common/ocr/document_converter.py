@@ -1572,8 +1572,47 @@ class DocumentConverter:
                     pass
 
         except ImportError:
-            logger.error("odfpy library not available. Install with: pip install odfpy")
-            return [(self._create_empty_page(), "Error: odfpy library required for ODT files")]
+            logger.warning("odfpy library not available, trying fallback method")
+            # Fallback: basic ZIP extraction using built-in zipfile
+            try:
+                import zipfile
+                import xml.etree.ElementTree as ET
+
+                # ODT is a ZIP file, extract content.xml
+                with zipfile.ZipFile(io.BytesIO(file_bytes)) as zf:
+                    # Read content.xml which contains the document text
+                    if "content.xml" in zf.namelist():
+                        content_xml = zf.read("content.xml")
+
+                        # Parse XML and extract text (basic approach)
+                        try:
+                            root = ET.fromstring(content_xml)
+                            # Extract all text content from XML
+                            all_text = []
+                            for elem in root.iter():
+                                if elem.text and elem.text.strip():
+                                    all_text.append(elem.text.strip())
+                                if elem.tail and elem.tail.strip():
+                                    all_text.append(elem.tail.strip())
+
+                            if all_text:
+                                text_content = "\n".join(all_text)
+                                logger.info(f"Converted ODT using fallback method with {len(all_text)} text elements")
+                                return self.convert_text_to_pages(text_content)
+                        except ET.ParseError as parse_err:
+                            logger.warning(f"Failed to parse ODT XML: {parse_err}")
+
+                    logger.error("Could not extract text from ODT file using fallback method")
+                    return [(
+                        self._create_empty_page(),
+                        "ODT file could not be processed. For better results, install odfpy library (pip install odfpy) or convert to PDF/DOCX format."
+                    )]
+            except Exception as fallback_err:
+                logger.error(f"ODT fallback extraction failed: {fallback_err}")
+                return [(
+                    self._create_empty_page(),
+                    "ODT file could not be processed. Please install odfpy library (pip install odfpy) or convert to PDF/DOCX format."
+                )]
         except Exception as e:
             logger.error(f"Error converting ODT to pages: {str(e)}")
             return [(self._create_empty_page(), "Error reading ODT file")]
@@ -1645,15 +1684,72 @@ class DocumentConverter:
                     pass
 
         except ImportError:
-            logger.error(
-                "Required libraries not available. Install with: pip install ebooklib beautifulsoup4"
-            )
-            return [
-                (
+            logger.warning("ebooklib library not available, trying fallback method")
+            # Fallback: basic ZIP extraction using built-in zipfile
+            try:
+                import zipfile
+                import re
+
+                # EPUB is a ZIP file containing HTML/XHTML files
+                with zipfile.ZipFile(io.BytesIO(file_bytes)) as zf:
+                    all_text = []
+
+                    # Find HTML/XHTML files in the EPUB
+                    html_files = [
+                        name for name in zf.namelist()
+                        if name.endswith(('.html', '.xhtml', '.htm'))
+                        and not name.startswith('__MACOSX')
+                    ]
+
+                    if html_files:
+                        # Sort files to try to maintain reading order
+                        html_files.sort()
+
+                        for html_file in html_files:
+                            try:
+                                html_content = zf.read(html_file).decode('utf-8', errors='ignore')
+
+                                # Basic HTML tag removal using regex
+                                # Remove script and style elements
+                                html_content = re.sub(r'<script[^>]*>.*?</script>', '', html_content, flags=re.DOTALL | re.IGNORECASE)
+                                html_content = re.sub(r'<style[^>]*>.*?</style>', '', html_content, flags=re.DOTALL | re.IGNORECASE)
+
+                                # Remove HTML tags
+                                text = re.sub(r'<[^>]+>', '', html_content)
+
+                                # Decode HTML entities
+                                text = text.replace('&nbsp;', ' ')
+                                text = text.replace('&lt;', '<')
+                                text = text.replace('&gt;', '>')
+                                text = text.replace('&amp;', '&')
+                                text = text.replace('&quot;', '"')
+                                text = text.replace('&#39;', "'")
+
+                                # Clean up whitespace
+                                lines = [line.strip() for line in text.split('\n') if line.strip()]
+                                if lines:
+                                    all_text.extend(lines)
+
+                            except Exception as file_err:
+                                logger.warning(f"Failed to extract text from {html_file}: {file_err}")
+                                continue
+
+                        if all_text:
+                            text_content = "\n".join(all_text)
+                            logger.info(f"Converted EPUB using fallback method with {len(html_files)} HTML files")
+                            return self._convert_markdown_to_pages(text_content)
+
+                    logger.error("Could not extract text from EPUB file using fallback method")
+                    return [(
+                        self._create_empty_page(),
+                        "EPUB file could not be processed. For better results, install required libraries (pip install ebooklib beautifulsoup4) or convert to PDF format."
+                    )]
+            except Exception as fallback_err:
+                logger.error(f"EPUB fallback extraction failed: {fallback_err}")
+                return [(
                     self._create_empty_page(),
-                    "Error: ebooklib and beautifulsoup4 libraries required for EPUB files",
-                )
-            ]
+                    "EPUB file could not be processed. Please install required libraries (pip install ebooklib beautifulsoup4) or convert to PDF format."
+                )]
         except Exception as e:
             logger.error(f"Error converting EPUB to pages: {str(e)}")
             return [(self._create_empty_page(), "Error reading EPUB file")]

@@ -111,8 +111,7 @@ Both backends support the same features: natural language queries, document cita
 - [Pattern 3: UDOP + Bedrock](./pattern-3.md) - Fine-tuned classification with ML models
 
 ### Document Processing
-- [Supported Formats](./supported-formats.md) - Comprehensive guide to supported document formats
-- [Text Extraction](./text-extraction.md) - Text-native PDF processing and intelligent image filtering
+- [OCR and Text Processing](./ocr-text-processing.md) - Format support, hybrid PDF processing, and intelligent image filtering
 - [OCR Image Sizing Guide](./ocr-image-sizing-guide.md) - Image optimization for OCR processing
 
 ### Core Features

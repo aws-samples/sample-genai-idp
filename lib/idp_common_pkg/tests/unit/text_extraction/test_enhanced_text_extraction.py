@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 import io
 import pytest
 
-from idp_common.text_extraction.service import TextExtractionService
+from idp_common.ocr.text_extraction import TextExtractionService
 from idp_common.ocr.service import OcrService
 
 @pytest.mark.unit

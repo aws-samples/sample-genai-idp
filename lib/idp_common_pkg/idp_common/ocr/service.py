@@ -22,7 +22,7 @@ from botocore.config import Config
 from idp_common import bedrock, image, s3, utils
 from idp_common.models import Document, Page, Status
 from idp_common.ocr.document_converter import DocumentConverter
-from idp_common.text_extraction import TextExtractionService
+from idp_common.ocr.text_extraction import TextExtractionService
 
 logger = logging.getLogger(__name__)
 
@@ -324,10 +324,14 @@ class OcrService:
         # Initialize document converter for non-PDF formats
         self.document_converter = DocumentConverter(dpi=self.dpi or 150)
 
-    def get_text_from_image(self, image_bytes: bytes) -> str:
+    def get_text_from_image(self, image_bytes: bytes) -> Tuple[str, Dict[str, Any]]:
         """
-        Performs OCR on a single image and returns the extracted text.
+        Performs OCR on a single image and returns the extracted text with metering data.
+
+        Returns:
+            Tuple of (extracted_text, metering_data)
         """
+        logger.debug(f"get_text_from_image called with backend: {self.backend}")
         if self.backend == "textract":
             if isinstance(self.enhanced_features, list) and self.enhanced_features:
                 textract_result = self._analyze_document(image_bytes)
@@ -336,7 +340,16 @@ class OcrService:
                     Document={"Bytes": image_bytes}
                 )
             parsed_result = self._parse_textract_response(textract_result)
-            return parsed_result.get("text", "")
+
+            # Track Textract metering using same format as _process_single_page_textract
+            feature_combo = self._feature_combo()
+            metering = {
+                f"OCR/textract/{self._get_api_name()}{feature_combo}": {
+                    "pages": textract_result["DocumentMetadata"]["Pages"]
+                }
+            }
+            logger.debug(f"Textract OCR returned metering: {metering}")
+            return parsed_result.get("text", ""), metering
         elif self.backend == "bedrock":
             image_content = image.prepare_bedrock_image_attachment(image_bytes)
             content = [{"text": self.bedrock_config["task_prompt"]}, image_content]
@@ -351,12 +364,14 @@ class OcrService:
                 context="OCR",
             )
             extracted_text = bedrock.extract_text_from_response(response_with_metering)
-            return extracted_text
+            metering = response_with_metering.get("metering", {})
+            logger.debug(f"Bedrock OCR returned metering: {metering}")
+            return extracted_text, metering
         elif self.backend == "none":
-            return "[Image Content: OCR not performed]"
+            return "[Image Content: OCR not performed]", {}
         else:
             logger.warning(f"Unsupported OCR backend: {self.backend}. Cannot process image.")
-            return ""
+            return "", {}
 
 
     def _process_futures(self, document: Document, future_to_page: dict):
@@ -479,9 +494,17 @@ class OcrService:
                 document.num_pages = len(pdf_document)
 
                 # 1. Generate the manifest, which includes OCR for embedded images
-                manifest = self.text_extraction_service.extract_manifest(
+                manifest, manifest_metering = self.text_extraction_service.extract_manifest(
                     file_content, document.input_key
                 )
+
+                # Merge metering data from manifest extraction
+                if manifest_metering:
+                    logger.info(f"Merging manifest metering data: {manifest_metering}")
+                    document.metering = utils.merge_metering_data(document.metering, manifest_metering)
+                    logger.info(f"Document metering after manifest merge: {document.metering}")
+                else:
+                    logger.warning("No metering data returned from manifest extraction")
 
                 # 2. Process the manifest: upload images and aggregate text per page
                 page_texts = {i + 1: "" for i in range(document.num_pages)}
@@ -493,7 +516,14 @@ class OcrService:
 
                 for item in manifest:
                     page_num = item["page"]
-                    page_texts[page_num] += item["content"] + "\n"
+
+                    # Skip document-level items (page 0)
+                    if page_num == 0:
+                        continue
+
+                    # Ensure page_num is in range
+                    if page_num in page_texts:
+                        page_texts[page_num] += item["content"] + "\n"
 
                     if item["type"] == "image":
                         img_ext = item["s3_key"].split(".")[-1].lower()

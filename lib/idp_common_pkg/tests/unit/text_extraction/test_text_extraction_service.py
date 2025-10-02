@@ -1,6 +1,6 @@
 import unittest
 import os
-from idp_common.text_extraction.service import TextExtractionService
+from idp_common.ocr.text_extraction import TextExtractionService
 
 import pytest
 
