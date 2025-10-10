@@ -130,6 +130,11 @@ variable "reserved_concurrent_executions" {
   description = "Reserved concurrent executions (-1 for unreserved)"
   type        = number
   default     = -1
+
+  validation {
+    condition     = var.reserved_concurrent_executions == -1 || var.reserved_concurrent_executions >= 1
+    error_message = "Reserved concurrency must be -1 (unreserved) or a positive integer."
+  }
 }
 
 variable "lambda_layers" {
