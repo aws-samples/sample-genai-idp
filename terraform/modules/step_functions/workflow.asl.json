@@ -76,7 +76,7 @@
             "Choices": [
                 {
                     "Variable": "$.Result.hitl_triggered",
-                    "StringEquals": "true",
+                    "BooleanEquals": true,
                     "Next": "HITLReview"
                 }
             ],

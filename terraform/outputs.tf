@@ -356,17 +356,12 @@ output "next_steps" {
   8. View CloudWatch dashboard (if created):
      https://console.aws.amazon.com/cloudwatch/home?region=${var.aws_region}#dashboards
 
-  NOTE: Additional Lambda functions referenced in the state machine must be created
-        before the workflow can execute successfully:
-  - ProcessResults function
-  - HITL Wait function
-  - HITL Status Update function
-  - Summarization function
+  NOTE: All Lambda functions referenced in the state machine workflow have been
+        provisioned by this stack and are ready for use.
 
-  For full stack deployment, continue converting:
-  - EventBridge rules
-  - Additional Lambda functions
-  - CloudWatch dashboards
+  For enhanced monitoring and automation, consider adding:
+  - CloudWatch dashboards for workflow visualization
+  - Additional EventBridge rules for custom triggers
 
   EOT
 }

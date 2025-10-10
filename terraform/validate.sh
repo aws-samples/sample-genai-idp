@@ -70,7 +70,13 @@ if terraform fmt -check -recursive > /dev/null 2>&1; then
 else
     print_warning "Some files need formatting. Run: terraform fmt -recursive"
     echo "  Files to format:"
-    terraform fmt -check -recursive
+    # Capture the output and exit status separately to avoid set -e termination
+    FMT_OUTPUT=$(terraform fmt -check -recursive 2>&1)
+    FMT_STATUS=$?
+    echo "$FMT_OUTPUT"
+    if [ $FMT_STATUS -ne 0 ]; then
+        ERRORS=$((ERRORS + 1))
+    fi
 fi
 echo ""
 
