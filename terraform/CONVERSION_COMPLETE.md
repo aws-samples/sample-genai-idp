@@ -20,7 +20,10 @@ Successfully converted the entire GenAI IDP Accelerator infrastructure from Clou
 
 ## Infrastructure Resources Created
 
-### Total Resources: 26
+### Total AWS Resources: 117
+This includes all primary resources and their supporting infrastructure:
+
+**Primary Resources:**
 - **S3 Buckets:** 4 (Input, Discovery, Working, Output)
 - **DynamoDB Tables:** 4 (Configuration, DiscoveryTracking, Tracking, BDAMetadata)
 - **SQS Queues:** 3 (ConfigurationQueue, ConfigurationQueueDLQ, BDACompletionDLQ)
@@ -29,6 +32,14 @@ Successfully converted the entire GenAI IDP Accelerator infrastructure from Clou
 - **EventBridge Rules:** 2 (BDA Event Rule, HITL Event Rule)
 - **Event Source Mappings:** 1 (BDADiscovery SQS trigger)
 - **Lambda Permissions:** 2 (EventBridge invocations)
+
+**Supporting Resources (~90):**
+- IAM Roles and Policies (8 Lambda roles + Step Functions role + associated policies)
+- CloudWatch Log Groups (8 Lambda + 1 Step Functions)
+- CloudWatch Alarms (24 alarms: 3 per Lambda function + 2 for Step Functions + 8 for DynamoDB)
+- S3 Bucket Configurations (versioning, encryption, lifecycle, public access blocks, intelligent tiering)
+- DynamoDB Table Configurations (TTL, PITR, encryption)
+- EventBridge Targets and associated IAM permissions
 
 ---
 
