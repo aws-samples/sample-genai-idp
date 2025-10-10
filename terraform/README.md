@@ -127,7 +127,7 @@ Before deploying, you must have:
 
 When you run `terraform apply`, the following resources will be created:
 
-- **117 AWS Resources** total across multiple services
+- **123 AWS Resources** total across multiple services
 - **Infrastructure as Code** with complete traceability
 - **Tagged Resources** for cost tracking and management
 - **CloudWatch Monitoring** with alarms for operational visibility

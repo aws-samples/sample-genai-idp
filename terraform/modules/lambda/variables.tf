@@ -175,6 +175,12 @@ variable "create_alarms" {
   default     = false
 }
 
+variable "code_signing_config_arn" {
+  description = "(Optional) ARN of Lambda Code Signing Config"
+  type        = string
+  default     = ""
+}
+
 variable "tags" {
   description = "Tags to apply to resources"
   type        = map(string)

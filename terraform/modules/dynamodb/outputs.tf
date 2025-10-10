@@ -1,5 +1,5 @@
 output "table_id" {
-  description = "The name of the table"
+  description = "The ID of the table"
   value       = aws_dynamodb_table.this.id
 }
 

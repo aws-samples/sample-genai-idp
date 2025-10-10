@@ -486,7 +486,7 @@ module "process_results_function" {
       METRIC_NAMESPACE                = var.stack_name
       LOG_LEVEL                       = var.log_level
       TRACKING_TABLE                  = module.tracking_table.table_name
-      ENABLE_HITL                     = var.enable_hitl
+      ENABLE_HITL                     = tostring(var.enable_hitl)
       DB_NAME                         = module.bda_metadata_table.table_name
       BDA_PROJECT_ARN                 = var.bda_project_arn
       WORKING_BUCKET                  = module.working_bucket.bucket_id
@@ -854,13 +854,15 @@ module "hitl_process_function" {
 
   # Additional IAM permissions
   additional_policy_statements = [
+    # Step Functions SendTask* actions require Resource = "*"
+    # See: https://docs.aws.amazon.com/step-functions/latest/dg/callback-task-sample-sqs.html
     {
       Effect = "Allow"
       Action = [
         "states:SendTaskSuccess",
         "states:SendTaskFailure"
       ]
-      Resource = module.document_processing_state_machine.state_machine_arn
+      Resource = "*"
     }
   ]
 
@@ -929,13 +931,15 @@ module "bda_completion_function" {
 
   # Additional IAM permissions
   additional_policy_statements = [
+    # Step Functions SendTask* actions require Resource = "*"
+    # See: https://docs.aws.amazon.com/step-functions/latest/dg/callback-task-sample-sqs.html
     {
       Effect = "Allow"
       Action = [
         "states:SendTaskSuccess",
         "states:SendTaskFailure"
       ]
-      Resource = module.document_processing_state_machine.state_machine_arn
+      Resource = "*"
     },
     # SQS permissions for DLQ
     {
@@ -1009,39 +1013,44 @@ module "bda_discovery_function" {
   create_alarms = true
 
   # Additional IAM permissions
-  additional_policy_statements = [
-    {
-      Effect = "Allow"
-      Action = [
-        "bedrock:InvokeDataAutomationAsync",
-        "bedrock:CreateDataAutomationProject",
-        "bedrock:UpdateDataAutomationProject",
-        "bedrock:GetDataAutomationProject",
-        "bedrock:GetDataAutomationStatus",
-        "bedrock:GetBlueprint",
-        "bedrock:UpdateBlueprint",
-        "bedrock:CreateBlueprint",
-        "bedrock:CreateBlueprintVersion",
-        "bedrock:ListBlueprints",
-        "bedrock:DeleteBlueprint"
-      ]
-      Resource = [
-        var.bda_project_arn,
-        "arn:${local.partition}:bedrock:${var.aws_region}:${local.account_id}:blueprint/*",
-        "arn:${local.partition}:bedrock:${var.aws_region}:aws:blueprint/*"
-      ]
-    },
+  additional_policy_statements = concat(
+    # Bedrock permissions (conditional - only if bda_project_arn is provided)
+    var.bda_project_arn != "" ? [
+      {
+        Effect = "Allow"
+        Action = [
+          "bedrock:InvokeDataAutomationAsync",
+          "bedrock:CreateDataAutomationProject",
+          "bedrock:UpdateDataAutomationProject",
+          "bedrock:GetDataAutomationProject",
+          "bedrock:GetDataAutomationStatus",
+          "bedrock:GetBlueprint",
+          "bedrock:UpdateBlueprint",
+          "bedrock:CreateBlueprint",
+          "bedrock:CreateBlueprintVersion",
+          "bedrock:ListBlueprints",
+          "bedrock:DeleteBlueprint"
+        ]
+        Resource = [
+          var.bda_project_arn,
+          "arn:${local.partition}:bedrock:${var.aws_region}:${local.account_id}:blueprint/*",
+          "arn:${local.partition}:bedrock:${var.aws_region}:aws:blueprint/*"
+        ]
+      }
+    ] : [],
     # SQS permissions for event source mapping
-    {
-      Effect = "Allow"
-      Action = [
-        "sqs:ReceiveMessage",
-        "sqs:DeleteMessage",
-        "sqs:GetQueueAttributes"
-      ]
-      Resource = ["arn:${local.partition}:sqs:${var.aws_region}:${local.account_id}:${var.stack_name}-ConfigurationQueue"]
-    }
-  ]
+    [
+      {
+        Effect = "Allow"
+        Action = [
+          "sqs:ReceiveMessage",
+          "sqs:DeleteMessage",
+          "sqs:GetQueueAttributes"
+        ]
+        Resource = ["arn:${local.partition}:sqs:${var.aws_region}:${local.account_id}:${var.stack_name}-ConfigurationQueue"]
+      }
+    ]
+  )
 
   tags = local.common_tags
 

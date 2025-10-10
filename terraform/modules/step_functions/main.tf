@@ -123,9 +123,6 @@ resource "aws_iam_role_policy_attachment" "cloudwatch_logs" {
 
 # Load the state machine definition from file
 locals {
-  # Read the ASL definition file
-  definition_template = file("${path.module}/workflow.asl.json")
-
   # Substitute variables in the definition
   definition = templatefile("${path.module}/workflow.asl.json", {
     InvokeBDALambdaArn          = var.invoke_bda_lambda_arn

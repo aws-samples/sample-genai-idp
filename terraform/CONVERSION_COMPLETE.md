@@ -20,7 +20,7 @@ Successfully converted the entire GenAI IDP Accelerator infrastructure from Clou
 
 ## Infrastructure Resources Created
 
-### Total AWS Resources: 117
+### Total AWS Resources: 123
 This includes all primary resources and their supporting infrastructure:
 
 **Primary Resources:**
@@ -443,13 +443,9 @@ working_bucket_name             = "genai-idp-working"
 output_bucket_name              = "genai-idp-output"
 discovery_bucket_name           = "genai-idp-discovery"
 
-# DynamoDB Tables
-tracking_table_name             = "genai-idp-tracking"
-configuration_table_name        = "genai-idp-configuration"
-discovery_tracking_table_name   = "genai-idp-discovery-tracking"
+# (No DynamoDB table variables needed - tables are created automatically)
 
-# SQS Queue
-configuration_queue_arn         = "arn:aws:sqs:..."
+# (No SQS queue variables needed - queues are created automatically)
 
 # Bedrock
 bda_project_arn                 = "arn:aws:bedrock:..."
@@ -515,7 +511,7 @@ aws lambda list-event-source-mappings --function-name genai-idp-dev-BDADiscovery
 2. **terraform/variables.tf** (245 lines)
    - Phase 3: Added 9 new variables for Lambda configuration
    - Phase 4: Removed 4 obsolete variables (tracking_table_name, configuration_table_name, discovery_tracking_table_name, configuration_queue_arn)
-   - Kept external resource variables (appsync, bedrock, sagemaker)
+   - Kept external resource variables (appsync, bedrock, sagemaker, guardrail)
 
 3. **terraform/outputs.tf** (370+ lines)
    - Phase 6: Added outputs for 3 DynamoDB tables (name + arn)
@@ -605,7 +601,7 @@ aws lambda list-event-source-mappings --function-name genai-idp-dev-BDADiscovery
 **Ready for Deployment:** Yes ✅
 
 ### Resource Summary
-- **26 Total Infrastructure Resources** converted from CloudFormation to Terraform
+- **123 Total Infrastructure Resources** converted from CloudFormation to Terraform
 - **100% Feature Parity** with original CloudFormation template
 - **Zero manual intervention required** - fully automated deployment
 - **Production-ready** - all validation checks passed

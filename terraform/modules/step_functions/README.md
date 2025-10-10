@@ -122,14 +122,23 @@ module "document_processing_state_machine" {
 | state_machine_name | Name of the Step Functions state machine | string | - | yes |
 | invoke_bda_lambda_arn | ARN of the InvokeBDA Lambda function | string | - | yes |
 | process_results_lambda_arn | ARN of the ProcessResults Lambda function | string | - | yes |
-| lambda_function_arns | List of all Lambda function ARNs | list(string) | - | yes |
+| hitl_wait_function_arn | ARN of the HITL Wait Lambda function | string | "" | no |
+| hitl_status_update_function_arn | ARN of the HITL Status Update Lambda function | string | "" | no |
+| summarization_lambda_arn | ARN of the Summarization Lambda function | string | "" | no |
+| lambda_function_arns | List of all Lambda function ARNs that the state machine needs to invoke | list(string) | - | yes |
 | working_bucket | Name of the S3 working bucket | string | - | yes |
 | output_bucket | Name of the S3 output bucket | string | - | yes |
-| enable_hitl | Enable Human In The Loop functionality | string | "true" | no |
-| enable_xray_tracing | Enable AWS X-Ray tracing | bool | true | no |
+| bda_project_arn | ARN of the Bedrock Data Automation project | string | "" | no |
+| enable_hitl | Enable Human In The Loop (HITL) functionality | string | "true" | no |
+| enable_xray_tracing | Enable AWS X-Ray tracing for the state machine | bool | true | no |
+| log_retention_days | CloudWatch Logs retention period in days | number | 7 | no |
 | kms_key_arn | ARN of the KMS key for encryption | string | - | yes |
-| log_retention_days | CloudWatch Logs retention period | number | 7 | no |
-| create_alarms | Create CloudWatch alarms | bool | true | no |
+| permissions_boundary_arn | (Optional) ARN of IAM permissions boundary policy | string | "" | no |
+| create_alarms | Create CloudWatch alarms for the state machine | bool | true | no |
+| alarm_sns_topic_arns | List of SNS topic ARNs to notify when alarms trigger | list(string) | [] | no |
+| execution_failed_threshold | Threshold for failed executions alarm | number | 1 | no |
+| execution_time_threshold_ms | Threshold for execution duration alarm in milliseconds | number | 30000 | no |
+| tags | Map of tags to apply to all resources | map(string) | {} | no |
 
 ## Outputs
 

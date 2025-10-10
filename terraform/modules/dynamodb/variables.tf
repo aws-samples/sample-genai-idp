@@ -1,6 +1,11 @@
 variable "table_name" {
   description = "Name of the DynamoDB table"
   type        = string
+
+  validation {
+    condition     = can(regex("^[A-Za-z0-9_.-]{3,255}$", var.table_name))
+    error_message = "Table name must be 3-255 characters and contain only alphanumeric characters, underscores, hyphens, and periods"
+  }
 }
 
 variable "billing_mode" {
@@ -55,6 +60,11 @@ variable "enable_point_in_time_recovery" {
 variable "kms_key_arn" {
   description = "ARN of the KMS key for encryption"
   type        = string
+
+  validation {
+    condition     = can(regex("^arn:aws:kms:[a-z0-9-]+:[0-9]{12}:key/[a-f0-9-]+$", var.kms_key_arn))
+    error_message = "Must be a valid KMS key ARN"
+  }
 }
 
 variable "stream_enabled" {

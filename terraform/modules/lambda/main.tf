@@ -36,6 +36,13 @@ resource "aws_iam_role_policy_attachment" "lambda_basic" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
 }
 
+# VPC execution policy (only when VPC config is provided)
+resource "aws_iam_role_policy_attachment" "lambda_vpc" {
+  count      = var.vpc_config != null ? 1 : 0
+  role       = aws_iam_role.lambda.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"
+}
+
 # Custom IAM policy for Lambda
 resource "aws_iam_role_policy" "lambda_custom" {
   name = "${var.function_name}-policy"
@@ -128,10 +135,7 @@ resource "aws_iam_role_policy" "lambda_custom" {
           Action = "bedrock:InvokeDataAutomationAsync"
           Resource = concat(
             [var.bda_project_arn],
-            [
-              for region in ["us-east-1", "us-east-2", "us-west-1", "us-west-2"] :
-              "arn:aws:bedrock:${region}:${var.aws_account_id}:data-automation-profile/us.data-automation-v1"
-            ]
+            ["arn:aws:bedrock:*:${var.aws_account_id}:data-automation-profile/us.data-automation-v1"]
           )
         }
       ] : [],
@@ -145,6 +149,9 @@ resource "aws_iam_role_policy" "lambda_custom" {
 resource "aws_lambda_function" "this" {
   function_name = var.function_name
   role          = aws_iam_role.lambda.arn
+
+  # Optional code signing
+  code_signing_config_arn = var.code_signing_config_arn != "" ? var.code_signing_config_arn : null
 
   # Code configuration
   filename         = var.source_code_zip
@@ -217,7 +224,8 @@ resource "aws_lambda_function" "this" {
   depends_on = [
     aws_cloudwatch_log_group.lambda,
     aws_iam_role_policy.lambda_custom,
-    aws_iam_role_policy_attachment.lambda_basic
+    aws_iam_role_policy_attachment.lambda_basic,
+    aws_iam_role_policy_attachment.lambda_vpc
   ]
 }
 

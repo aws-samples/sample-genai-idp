@@ -191,13 +191,8 @@ variable "working_bucket_name" {
 # Step Functions Configuration
 variable "enable_hitl" {
   description = "Enable Human In The Loop (HITL) functionality"
-  type        = string
-  default     = "true"
-
-  validation {
-    condition     = contains(["true", "false"], var.enable_hitl)
-    error_message = "enable_hitl must be 'true' or 'false'"
-  }
+  type        = bool
+  default     = true
 }
 
 variable "enable_xray_tracing" {

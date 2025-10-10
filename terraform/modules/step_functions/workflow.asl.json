@@ -5,6 +5,7 @@
         "InvokeDataAutomation": {
             "Type": "Task",
             "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+            "TimeoutSeconds": 3600,
             "Parameters": {
                 "FunctionName": "${InvokeBDALambdaArn}",
                 "Payload": {
@@ -84,6 +85,7 @@
         "HITLReview": {
             "Type": "Task",
             "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+            "TimeoutSeconds": 86400,
             "Parameters": {
                 "FunctionName": "${HITLWaitFunctionArn}",
                 "Payload": {
