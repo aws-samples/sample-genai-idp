@@ -40,29 +40,18 @@ resource "aws_dynamodb_table" "this" {
   }
 
   # Stream configuration (optional)
-  dynamic "stream_specification" {
-    for_each = var.stream_enabled ? [1] : []
-    content {
-      enabled   = true
-      stream_view_type = var.stream_view_type
-    }
-  }
+  stream_enabled   = var.stream_enabled
+  stream_view_type = var.stream_enabled ? var.stream_view_type : null
 
   # Global secondary indexes (optional)
   dynamic "global_secondary_index" {
     for_each = var.global_secondary_indexes
     content {
-      name            = global_secondary_index.value.name
-      hash_key        = global_secondary_index.value.hash_key
-      range_key       = global_secondary_index.value.range_key
-      projection_type = global_secondary_index.value.projection_type
-
-      dynamic "non_key_attributes" {
-        for_each = global_secondary_index.value.non_key_attributes != null ? [1] : []
-        content {
-          non_key_attributes = global_secondary_index.value.non_key_attributes
-        }
-      }
+      name               = global_secondary_index.value.name
+      hash_key           = global_secondary_index.value.hash_key
+      range_key          = global_secondary_index.value.range_key
+      projection_type    = global_secondary_index.value.projection_type
+      non_key_attributes = global_secondary_index.value.non_key_attributes
 
       read_capacity  = var.billing_mode == "PROVISIONED" ? global_secondary_index.value.read_capacity : null
       write_capacity = var.billing_mode == "PROVISIONED" ? global_secondary_index.value.write_capacity : null
@@ -73,16 +62,10 @@ resource "aws_dynamodb_table" "this" {
   dynamic "local_secondary_index" {
     for_each = var.local_secondary_indexes
     content {
-      name            = local_secondary_index.value.name
-      range_key       = local_secondary_index.value.range_key
-      projection_type = local_secondary_index.value.projection_type
-
-      dynamic "non_key_attributes" {
-        for_each = local_secondary_index.value.non_key_attributes != null ? [1] : []
-        content {
-          non_key_attributes = local_secondary_index.value.non_key_attributes
-        }
-      }
+      name               = local_secondary_index.value.name
+      range_key          = local_secondary_index.value.range_key
+      projection_type    = local_secondary_index.value.projection_type
+      non_key_attributes = local_secondary_index.value.non_key_attributes
     }
   }
 
@@ -94,8 +77,8 @@ resource "aws_dynamodb_table" "this" {
   dynamic "replica" {
     for_each = var.replica_regions
     content {
-      region_name = replica.value
-      kms_key_arn = var.kms_key_arn
+      region_name            = replica.value
+      kms_key_arn            = var.kms_key_arn
       point_in_time_recovery = var.enable_point_in_time_recovery
     }
   }

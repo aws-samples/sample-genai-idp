@@ -102,6 +102,12 @@ variable "dynamodb_tables" {
   default     = []
 }
 
+variable "dynamodb_read_only" {
+  description = "Grant only read permissions for DynamoDB tables"
+  type        = bool
+  default     = false
+}
+
 # Bedrock Configuration
 variable "bda_project_arn" {
   description = "ARN of Bedrock Data Automation project"

@@ -29,8 +29,8 @@ variable "lifecycle_rules" {
       days          = number
       storage_class = string
     }))
-    expiration_days                      = optional(number)
-    noncurrent_version_expiration_days   = optional(number)
+    expiration_days                    = optional(number)
+    noncurrent_version_expiration_days = optional(number)
   }))
   default = null
 }

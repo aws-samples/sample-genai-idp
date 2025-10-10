@@ -1,0 +1,187 @@
+{
+    "Comment": "Data Automation Async Workflow with Step Functions-managed HITL Integration",
+    "StartAt": "InvokeDataAutomation",
+    "States": {
+        "InvokeDataAutomation": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+            "Parameters": {
+                "FunctionName": "${InvokeBDALambdaArn}",
+                "Payload": {
+                    "taskToken.$": "$$.Task.Token",
+                    "execution_arn.$": "$$.Execution.Id",
+                    "working_bucket": "${WorkingBucket}",
+                    "BDAProjectArn": "${BDAProjectArn}",
+                    "document.$": "$.document"
+                }
+            },
+            "ResultPath": "$.BDAResponse",
+            "Retry": [
+                {
+                    "ErrorEquals": [
+                        "Lambda.ServiceException",
+                        "Lambda.SdkClientException",
+                        "Lambda.TooManyRequestsException",
+                        "ServiceQuotaExceededException",
+                        "ThrottlingException",
+                        "ProvisionedThroughputExceededException",
+                        "RequestLimitExceeded"
+                    ],
+                    "IntervalSeconds": 2,
+                    "MaxAttempts": 10,
+                    "BackoffRate": 2
+                }
+            ],
+            "Next": "ProcessResultsStep",
+            "Catch": [
+                {
+                    "ErrorEquals": [
+                        "States.ALL"
+                    ],
+                    "Next": "FailState"
+                }
+            ]
+        },
+        "ProcessResultsStep": {
+            "Type": "Task",
+            "Resource": "${ProcessResultsLambdaArn}",
+            "Parameters": {
+                "execution_arn.$": "$$.Execution.Id",
+                "output_bucket": "${OutputBucket}",
+                "BDAResponse.$": "$.BDAResponse"
+            },
+            "ResultPath": "$.Result",
+            "Retry": [
+                {
+                    "ErrorEquals": [
+                        "Lambda.ServiceException",
+                        "Lambda.AWSLambdaException",
+                        "Lambda.SdkClientException",
+                        "Lambda.TooManyRequestsException",
+                        "ServiceQuotaExceededException",
+                        "ThrottlingException",
+                        "ProvisionedThroughputExceededException",
+                        "RequestLimitExceeded"
+                    ],
+                    "IntervalSeconds": 2,
+                    "MaxAttempts": 10,
+                    "BackoffRate": 2
+                }
+            ],
+            "Next": "CheckHITLRequired"
+        },
+        "CheckHITLRequired": {
+            "Type": "Choice",
+            "Choices": [
+                {
+                    "Variable": "$.Result.hitl_triggered",
+                    "StringEquals": "true",
+                    "Next": "HITLReview"
+                }
+            ],
+            "Default": "SummarizationStep"
+        },
+        "HITLReview": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+            "Parameters": {
+                "FunctionName": "${HITLWaitFunctionArn}",
+                "Payload": {
+                    "taskToken.$": "$$.Task.Token",
+                    "Payload.$": "$"
+                }
+            },
+            "ResultPath": "$.HITLWaitResult",
+            "Retry": [
+                {
+                    "ErrorEquals": [
+                        "Lambda.ServiceException",
+                        "Lambda.SdkClientException",
+                        "Lambda.TooManyRequestsException",
+                        "ServiceQuotaExceededException",
+                        "ThrottlingException",
+                        "ProvisionedThroughputExceededException",
+                        "RequestLimitExceeded"
+                    ],
+                    "IntervalSeconds": 2,
+                    "MaxAttempts": 10,
+                    "BackoffRate": 2
+                }
+            ],
+            "Catch": [
+                {
+                    "ErrorEquals": ["HITLFailedException"],
+                    "Next": "HITLFailState"
+                }
+            ],
+            "Next": "HITLStatusUpdate"
+        },
+        "HITLStatusUpdate": {
+            "Type": "Task",
+            "Resource": "${HITLStatusUpdateFunctionArn}",
+            "Parameters": {
+                "document.$": "$.Result.document",
+                "HITLWaitResult.$": "$.HITLWaitResult"
+            },
+            "ResultPath": "$.HITLStatusResult",
+            "Retry": [
+                {
+                    "ErrorEquals": [
+                        "Lambda.ServiceException",
+                        "Lambda.SdkClientException",
+                        "Lambda.TooManyRequestsException",
+                        "ServiceQuotaExceededException",
+                        "ThrottlingException",
+                        "ProvisionedThroughputExceededException",
+                        "RequestLimitExceeded"
+                    ],
+                    "IntervalSeconds": 2,
+                    "MaxAttempts": 10,
+                    "BackoffRate": 2
+                }
+            ],
+            "Next": "SummarizationStep"
+        },
+        "SummarizationStep": {
+            "Type": "Task",
+            "Resource": "${SummarizationLambdaArn}",
+            "Parameters": {
+                "execution_arn.$": "$$.Execution.Id",
+                "document.$": "$.Result.document"
+            },
+            "ResultPath": "$.Result",
+            "Retry": [
+                {
+                    "ErrorEquals": [
+                        "Lambda.ServiceException",
+                        "Lambda.AWSLambdaException",
+                        "Lambda.SdkClientException",
+                        "Lambda.TooManyRequestsException",
+                        "ServiceQuotaExceededException",
+                        "ThrottlingException",
+                        "ProvisionedThroughputExceededException",
+                        "RequestLimitExceeded"
+                    ],
+                    "IntervalSeconds": 2,
+                    "MaxAttempts": 10,
+                    "BackoffRate": 2
+                }
+            ],
+            "Next": "WorkflowComplete"
+        },
+        "WorkflowComplete": {
+            "Type": "Pass",
+            "End": true
+        },
+        "FailState": {
+            "Type": "Fail",
+            "Cause": "Data Automation Job Failed",
+            "Error": "JobFailedException"
+        },
+        "HITLFailState": {
+            "Type": "Fail",
+            "Cause": "Human In The Loop Review Failed",
+            "Error": "HITLFailedException"
+        }
+    }
+}

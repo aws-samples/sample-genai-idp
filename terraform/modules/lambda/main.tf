@@ -44,8 +44,8 @@ resource "aws_iam_role_policy" "lambda_custom" {
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = concat(
-      # S3 permissions
-      [
+      # S3 read permissions
+      length(var.s3_read_buckets) > 0 ? [
         {
           Effect = "Allow"
           Action = [
@@ -55,7 +55,10 @@ resource "aws_iam_role_policy" "lambda_custom" {
           Resource = [
             for bucket in var.s3_read_buckets : "arn:aws:s3:::${bucket}/*"
           ]
-        },
+        }
+      ] : [],
+      # S3 write permissions
+      length(var.s3_write_buckets) > 0 ? [
         {
           Effect = "Allow"
           Action = [
@@ -72,21 +75,25 @@ resource "aws_iam_role_policy" "lambda_custom" {
             ]
           ])
         }
-      ],
+      ] : [],
       # DynamoDB permissions
       length(var.dynamodb_tables) > 0 ? [
         {
           Effect = "Allow"
-          Action = [
-            "dynamodb:GetItem",
-            "dynamodb:PutItem",
-            "dynamodb:UpdateItem",
-            "dynamodb:DeleteItem",
-            "dynamodb:Query",
-            "dynamodb:Scan",
-            "dynamodb:BatchGetItem",
-            "dynamodb:BatchWriteItem"
-          ]
+          Action = concat(
+            [
+              "dynamodb:GetItem",
+              "dynamodb:Query",
+              "dynamodb:Scan",
+              "dynamodb:BatchGetItem"
+            ],
+            var.dynamodb_read_only ? [] : [
+              "dynamodb:PutItem",
+              "dynamodb:UpdateItem",
+              "dynamodb:DeleteItem",
+              "dynamodb:BatchWriteItem"
+            ]
+          )
           Resource = [
             for table in var.dynamodb_tables : "arn:aws:dynamodb:${var.aws_region}:${var.aws_account_id}:table/${table}"
           ]

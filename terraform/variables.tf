@@ -139,11 +139,6 @@ variable "log_level" {
 }
 
 # Lambda Environment Variables
-variable "tracking_table_name" {
-  description = "Name of the DynamoDB tracking table (created elsewhere)"
-  type        = string
-}
-
 variable "max_workers" {
   description = "Maximum number of concurrent workers for Lambda"
   type        = number
@@ -177,9 +172,9 @@ variable "permissions_boundary_arn" {
   }
 }
 
-# S3 Bucket References (from other stacks/modules)
+# S3 Bucket Names (will be created)
 variable "input_bucket_name" {
-  description = "Name of the input S3 bucket (created elsewhere)"
+  description = "Name of the input S3 bucket (will be created)"
   type        = string
 }
 
@@ -190,6 +185,97 @@ variable "output_bucket_name" {
 
 variable "working_bucket_name" {
   description = "Name of the working S3 bucket (will be created)"
+  type        = string
+}
+
+# Step Functions Configuration
+variable "enable_hitl" {
+  description = "Enable Human In The Loop (HITL) functionality"
+  type        = string
+  default     = "true"
+
+  validation {
+    condition     = contains(["true", "false"], var.enable_hitl)
+    error_message = "enable_hitl must be 'true' or 'false'"
+  }
+}
+
+variable "enable_xray_tracing" {
+  description = "Enable AWS X-Ray tracing for Step Functions"
+  type        = bool
+  default     = true
+}
+
+variable "create_step_functions_alarms" {
+  description = "Create CloudWatch alarms for Step Functions state machine"
+  type        = bool
+  default     = true
+}
+
+variable "execution_failed_threshold" {
+  description = "Threshold for Step Functions failed executions alarm"
+  type        = number
+  default     = 1
+
+  validation {
+    condition     = var.execution_failed_threshold >= 0
+    error_message = "Threshold must be a non-negative number"
+  }
+}
+
+variable "execution_time_threshold_ms" {
+  description = "Threshold for Step Functions execution duration alarm in milliseconds"
+  type        = number
+  default     = 30000
+
+  validation {
+    condition     = var.execution_time_threshold_ms > 0
+    error_message = "Threshold must be a positive number"
+  }
+}
+
+variable "alarm_sns_topic_arns" {
+  description = "List of SNS topic ARNs to notify when alarms trigger"
+  type        = list(string)
+  default     = []
+}
+
+# AppSync Configuration (optional)
+variable "appsync_api_url" {
+  description = "URL of the AppSync GraphQL API for document status updates"
+  type        = string
+  default     = ""
+}
+
+variable "appsync_api_arn" {
+  description = "ARN of the AppSync GraphQL API for document status updates"
+  type        = string
+  default     = ""
+}
+
+# Bedrock Guardrail Configuration (optional)
+variable "bedrock_guardrail_id" {
+  description = "ID (not name) of an existing Bedrock Guardrail"
+  type        = string
+  default     = ""
+}
+
+variable "bedrock_guardrail_version" {
+  description = "Version of the Bedrock Guardrail"
+  type        = string
+  default     = ""
+}
+
+# SageMaker A2I Configuration
+variable "sagemaker_a2i_review_portal_url" {
+  description = "SageMaker A2I Review Portal URL for HITL tasks"
+  type        = string
+  default     = ""
+}
+
+# Discovery Configuration
+variable "discovery_bucket_name" {
+  description = "Name of the discovery S3 bucket (will be created)"
   type        = string
 }
 

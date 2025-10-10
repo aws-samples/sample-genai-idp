@@ -5,73 +5,80 @@
 # ============================================================================
 # Core Configuration
 # ============================================================================
-
 aws_region  = "us-west-2"
 environment = "dev"
-stack_name  = "genai-idp-test"
+stack_name  = "genai-idp-dev"
 
 # ============================================================================
 # Security & Encryption
 # ============================================================================
-
-# KMS Key ARN for encryption at rest
-# You must create this KMS key first or use an existing one
-kms_key_id = "arn:aws:kms:us-west-2:123456789012:key/12345678-1234-1234-1234-123456789012"
-
-# Optional: IAM Permissions Boundary (required by some organizations)
-permissions_boundary_arn = ""
-# permissions_boundary_arn = "arn:aws:iam::123456789012:policy/YourPermissionsBoundary"
+kms_key_id               = "arn:aws:kms:us-west-2:123456789012:key/12345678-1234-1234-1234-123456789012"
+permissions_boundary_arn = ""  # Optional: IAM permissions boundary
 
 # ============================================================================
-# S3 Configuration
+# S3 Bucket Names (will be created)
 # ============================================================================
+input_bucket_name     = "genai-idp-dev-input"
+working_bucket_name   = "genai-idp-dev-working"
+output_bucket_name    = "genai-idp-dev-output"
+discovery_bucket_name = "genai-idp-dev-discovery"
 
-# Bucket names must be globally unique
-input_bucket_name   = "genai-idp-dev-input-123456"   # Must already exist
-working_bucket_name = "genai-idp-dev-working-123456" # Will be created
-output_bucket_name  = "genai-idp-dev-output-123456"  # Will be created
-
+# S3 Lifecycle
 enable_s3_versioning = true
-s3_lifecycle_days    = 90 # Days before transitioning to cheaper storage
+s3_lifecycle_days    = 90
 
 # ============================================================================
-# DynamoDB Configuration
+# DynamoDB Configuration (tables will be created)
 # ============================================================================
-
-dynamodb_billing_mode          = "PAY_PER_REQUEST" # or "PROVISIONED"
+dynamodb_billing_mode          = "PAY_PER_REQUEST"
 enable_point_in_time_recovery  = true
 dynamodb_ttl_attribute         = "ExpiresAfter"
 
 # ============================================================================
 # Lambda Configuration
 # ============================================================================
-
 lambda_runtime     = "python3.12"
-lambda_timeout     = 900  # 15 minutes (max)
-lambda_memory_size = 4096 # 4 GB
-log_retention_days = 7    # CloudWatch Logs retention
-log_level          = "WARN" # DEBUG, INFO, WARN, ERROR, CRITICAL
-
-# Lambda environment variables
-tracking_table_name = "genai-idp-tracking-table" # Must already exist
-max_workers         = 20
+lambda_timeout     = 900
+lambda_memory_size = 4096
+log_retention_days = 7
+log_level          = "INFO"
+max_workers        = 20
 
 # ============================================================================
 # Bedrock Configuration
 # ============================================================================
+bda_project_arn = "arn:aws:bedrock:us-west-2:123456789012:data-automation-project/my-project"
 
-# Bedrock Data Automation project ARN
-# Leave empty if not using BDA or create the BDA project first
-bda_project_arn = ""
-# bda_project_arn = "arn:aws:bedrock:us-west-2:123456789012:data-automation-project/your-project-id"
+# Optional: Bedrock Guardrail
+bedrock_guardrail_id      = ""  # e.g., "abc123defg"
+bedrock_guardrail_version = ""  # e.g., "1"
 
 # ============================================================================
-# Additional Tags
+# AppSync Configuration (Optional)
 # ============================================================================
+appsync_api_url = ""  # e.g., "https://abcdefghijklmnopqrstuvwxyz.appsync-api.us-west-2.amazonaws.com/graphql"
+appsync_api_arn = ""  # e.g., "arn:aws:appsync:us-west-2:123456789012:apis/abcdefghijklmnopqrstuvwxyz"
 
+# ============================================================================
+# SageMaker A2I Configuration (Optional)
+# ============================================================================
+sagemaker_a2i_review_portal_url = ""  # e.g., "https://us-west-2.a2i.sagemaker.aws/..."
+
+# ============================================================================
+# Step Functions Configuration
+# ============================================================================
+enable_hitl                 = "true"
+enable_xray_tracing         = true
+create_step_functions_alarms = true
+execution_failed_threshold   = 1
+execution_time_threshold_ms  = 30000
+alarm_sns_topic_arns        = []  # Optional: ["arn:aws:sns:..."]
+
+# ============================================================================
+# Tags
+# ============================================================================
 additional_tags = {
-  Owner       = "YourTeam"
-  CostCenter  = "Engineering"
-  Compliance  = "HIPAA" # if applicable
-  DataClass   = "Confidential"
+  CostCenter = "Engineering"
+  Owner      = "Platform-Team"
+  Project    = "GenAI-IDP"
 }
