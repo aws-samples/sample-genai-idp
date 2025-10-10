@@ -20,7 +20,7 @@ Successfully converted the entire GenAI IDP Accelerator infrastructure from Clou
 
 ## Infrastructure Resources Created
 
-### Total AWS Resources: 123
+### Total AWS Resources: 117
 This includes all primary resources and their supporting infrastructure:
 
 **Primary Resources:**
@@ -601,7 +601,7 @@ aws lambda list-event-source-mappings --function-name genai-idp-dev-BDADiscovery
 **Ready for Deployment:** Yes ✅
 
 ### Resource Summary
-- **123 Total Infrastructure Resources** converted from CloudFormation to Terraform
+- **117 Total Infrastructure Resources** converted from CloudFormation to Terraform
 - **100% Feature Parity** with original CloudFormation template
 - **Zero manual intervention required** - fully automated deployment
 - **Production-ready** - all validation checks passed

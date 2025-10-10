@@ -31,8 +31,8 @@ override.tf.json
 .terraformrc
 terraform.rc
 
-# Lambda deployment packages
-lambda_packages/
+# Lambda deployment packages (ignore .zip files but keep directory structure)
+lambda_packages/*.zip
 *.zip
 
 # Ignore lock files from dependency managers
