@@ -1,0 +1,77 @@
+# Example Terraform Variables File
+# Copy this file to terraform.tfvars and fill in your values
+# cp terraform.tfvars.example terraform.tfvars
+
+# ============================================================================
+# Core Configuration
+# ============================================================================
+
+aws_region  = "us-west-2"
+environment = "dev"
+stack_name  = "genai-idp-test"
+
+# ============================================================================
+# Security & Encryption
+# ============================================================================
+
+# KMS Key ARN for encryption at rest
+# You must create this KMS key first or use an existing one
+kms_key_id = "arn:aws:kms:us-west-2:123456789012:key/12345678-1234-1234-1234-123456789012"
+
+# Optional: IAM Permissions Boundary (required by some organizations)
+permissions_boundary_arn = ""
+# permissions_boundary_arn = "arn:aws:iam::123456789012:policy/YourPermissionsBoundary"
+
+# ============================================================================
+# S3 Configuration
+# ============================================================================
+
+# Bucket names must be globally unique
+input_bucket_name   = "genai-idp-dev-input-123456"   # Must already exist
+working_bucket_name = "genai-idp-dev-working-123456" # Will be created
+output_bucket_name  = "genai-idp-dev-output-123456"  # Will be created
+
+enable_s3_versioning = true
+s3_lifecycle_days    = 90 # Days before transitioning to cheaper storage
+
+# ============================================================================
+# DynamoDB Configuration
+# ============================================================================
+
+dynamodb_billing_mode          = "PAY_PER_REQUEST" # or "PROVISIONED"
+enable_point_in_time_recovery  = true
+dynamodb_ttl_attribute         = "ExpiresAfter"
+
+# ============================================================================
+# Lambda Configuration
+# ============================================================================
+
+lambda_runtime     = "python3.12"
+lambda_timeout     = 900  # 15 minutes (max)
+lambda_memory_size = 4096 # 4 GB
+log_retention_days = 7    # CloudWatch Logs retention
+log_level          = "WARN" # DEBUG, INFO, WARN, ERROR, CRITICAL
+
+# Lambda environment variables
+tracking_table_name = "genai-idp-tracking-table" # Must already exist
+max_workers         = 20
+
+# ============================================================================
+# Bedrock Configuration
+# ============================================================================
+
+# Bedrock Data Automation project ARN
+# Leave empty if not using BDA or create the BDA project first
+bda_project_arn = ""
+# bda_project_arn = "arn:aws:bedrock:us-west-2:123456789012:data-automation-project/your-project-id"
+
+# ============================================================================
+# Additional Tags
+# ============================================================================
+
+additional_tags = {
+  Owner       = "YourTeam"
+  CostCenter  = "Engineering"
+  Compliance  = "HIPAA" # if applicable
+  DataClass   = "Confidential"
+}
