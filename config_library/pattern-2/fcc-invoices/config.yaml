@@ -1,0 +1,130 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: MIT-0
+notes: Configuration for FCC invoice information extraction (no classification)
+ocr:
+  backend: "textract"
+  model_id: "us.anthropic.claude-3-7-sonnet-20250219-v1:0"
+  system_prompt: "You are an expert OCR system. Extract all text from the provided image accurately, preserving layout where possible."
+  task_prompt: "Extract all text from this document image. Preserve the layout, including paragraphs, tables, and formatting."
+  features:
+    - name: LAYOUT
+    - name: TABLES
+  image:
+    target_width: ""
+    target_height: ""
+
+classes:
+  - name: FCC-Invoice
+    description: >-
+      Federal Communications Commission (FCC) political advertising invoice showing broadcast 
+      time purchases, including line items with descriptions, dates, rates, and totals for 
+      political advertising campaigns.
+    attributes:
+      - name: agency
+        description: >-
+          The advertising agency or media buyer handling the political advertising purchase.
+        evaluation_method: EXACT
+        attributeType: simple
+      
+      - name: advertiser
+        description: >-
+          The political advertiser or campaign purchasing the broadcast time.
+        evaluation_method: EXACT
+        attributeType: simple
+      
+      - name: gross_total
+        description: >-
+          The total gross amount for all line items before any discounts or adjustments.
+        evaluation_method: NUMERIC_EXACT
+        attributeType: simple
+      
+      - name: net_amount_due
+        description: >-
+          The final net amount due after any discounts or adjustments have been applied.
+        evaluation_method: NUMERIC_EXACT
+        attributeType: simple
+      
+      - name: line_items
+        listItemTemplate:
+          itemAttributes:
+            - name: description
+              description: >-
+                The broadcast time slot description, typically showing days of week and time range 
+                (e.g., "M-F 11a-12p" for Monday through Friday 11am to 12pm).
+              evaluation_method: EXACT
+            
+            - name: days
+              description: >-
+                The days of the week for this broadcast slot, often in format like "MTWTF--" 
+                where each position represents a day (Monday, Tuesday, Wednesday, Thursday, Friday, 
+                Saturday, Sunday) with dashes for non-broadcast days.
+              evaluation_method: EXACT
+            
+            - name: rate
+              description: >-
+                The rate or cost for this specific broadcast time slot, may include commas 
+                for thousands separator.
+              evaluation_method: NUMERIC_EXACT
+            
+            - name: start_date
+              description: >-
+                The start date for this line item's broadcast schedule, typically in MM/DD/YY format.
+              evaluation_method: EXACT
+            
+            - name: end_date
+              description: >-
+                The end date for this line item's broadcast schedule, typically in MM/DD/YY format.
+              evaluation_method: EXACT
+          
+          itemDescription: >-
+            Each item represents a specific broadcast time slot purchase with its schedule, 
+            rate, and date range.
+        
+        description: >-
+          List of line items detailing each broadcast time slot purchase, including the time 
+          description, days of week, rate, and date range for the advertising schedule.
+        evaluation_method: LLM
+        attributeType: list
+
+extraction:
+  model_id: "us.anthropic.claude-3-7-sonnet-20250219-v1:0"
+  temperature: 0.0
+  top_p: 0.9
+  max_tokens: 4096
+  system_prompt: |
+    You are an expert at extracting structured information from FCC political advertising invoices.
+    Extract all requested fields accurately, paying special attention to:
+    - Line item details including time slots, days, rates, and date ranges
+    - Monetary amounts (preserve formatting with commas and decimals)
+    - Date formats (typically MM/DD/YY)
+    - Agency and advertiser names
+    
+    For line items, ensure you capture all rows from any tables showing broadcast schedules.
+    Days of week are often encoded as 7-character strings where each position represents a day.
+  
+  task_prompt: |
+    Extract the following information from this FCC invoice:
+    
+    1. Agency name
+    2. Advertiser name
+    3. Gross total amount
+    4. Net amount due
+    5. All line items with:
+       - Description (time slot)
+       - Days (day of week encoding)
+       - Rate (cost)
+       - Start date
+       - End date
+    
+    Return the information in the specified JSON schema format.
+
+classification:
+  enabled: false
+  # No classification needed - all documents are FCC invoices
+
+evaluation:
+  enabled: true
+  methods:
+    - EXACT
+    - NUMERIC_EXACT
+    - LLM

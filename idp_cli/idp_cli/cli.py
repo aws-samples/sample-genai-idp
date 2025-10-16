@@ -7,7 +7,9 @@ IDP CLI - Main Command Line Interface
 Command-line tool for batch document processing with the IDP Accelerator.
 """
 
+import fnmatch
 import logging
+import os
 import sys
 import time
 from typing import Optional
@@ -1084,8 +1086,6 @@ def generate_manifest(
             prefix = uri_parts[1] if len(uri_parts) > 1 else ""
 
             # List S3 objects
-            import fnmatch
-
             import boto3
 
             s3 = boto3.client("s3", region_name=region)
@@ -1133,8 +1133,6 @@ def generate_manifest(
                 console.print(
                     f"[bold blue]Matching baselines from: {baseline_dir}[/bold blue]"
                 )
-
-                import os
 
                 baseline_path = os.path.abspath(baseline_dir)
 
