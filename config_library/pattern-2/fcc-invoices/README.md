@@ -33,7 +33,7 @@ Sample documents are located in `samples/fcc-invoices/`:
 1. **AWS Credentials**: Valid AWS credentials with appropriate permissions
 2. **Python Environment**: Python 3.12+ with required packages
 3. **IDP CLI**: Installed and configured
-4. **Stickler**: Installed with `pip install -e "./stickler[dev]"`
+4. **Stickler**: Installed with `pip install stickler-eval`
 5. **Dependencies**: `pip install pandas`
 
 ## Step 1: Deploy the Stack
@@ -145,10 +145,12 @@ Evaluate the extraction results against ground truth:
 cd config_library/pattern-2/fcc-invoices
 
 python bulk_evaluate_fcc_invoices.py \
-  --results-dir ../../../fcc_results \
-  --csv-path sr_refactor_labels_5_5_25.csv \
+  --results-dir ../../../fcc_results/cli-batch-20251017-190516 \
+  --csv-path sample_labels_3.csv \
   --output-dir evaluation_output
 ```
+
+**Note**: The `sample_labels_3.csv` contains ground truth for only 1 of the 3 sample documents. For full dataset evaluation, use `sr_refactor_labels_5_5_25.csv`.
 
 **What this does:**
 - Loads ground truth labels from CSV

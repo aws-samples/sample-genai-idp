@@ -1,0 +1,2300 @@
+Unnamed: 0.2,Unnamed: 0,Unnamed: 0.1,document_path,image_files,labels,ocr,original_filename,text,doc_id,refactored_labels
+0,0,0,fcc_invoices/files/2dfd91c64c66a5a92b4eb1c46e26f87f.pdf,"[""fcc_invoices/images/2dfd91c64c66a5a92b4eb1c46e26f87f/page_0.png"", ""fcc_invoices/images/2dfd91c64c66a5a92b4eb1c46e26f87f/page_1.png"", ""fcc_invoices/images/2dfd91c64c66a5a92b4eb1c46e26f87f/page_2.png"", ""fcc_invoices/images/2dfd91c64c66a5a92b4eb1c46e26f87f/page_3.png"", ""fcc_invoices/images/2dfd91c64c66a5a92b4eb1c46e26f87f/page_4.png"", ""fcc_invoices/images/2dfd91c64c66a5a92b4eb1c46e26f87f/page_5.png""]","[{""label"": ""Line Item - Description"", ""start"": 5069, ""end"": 5081, ""text"": ""IA* 11a -12p""}, {""label"": ""Line Item - Description"", ""start"": 5082, ""end"": 5095, ""text"": ""M -F 11a -12p""}, {""label"": ""Line Item - Days"", ""start"": 5175, ""end"": 5182, ""text"": ""MTWTF--""}, {""label"": ""Line Item - Rate"", ""start"": 5186, ""end"": 5192, ""text"": ""100.00""}, {""label"": ""Line Item - Start Date"", ""start"": 5206, ""end"": 5214, ""text"": ""11/01/16""}, {""label"": ""Line Item - End Date"", ""start"": 5215, ""end"": 5223, ""text"": ""11/07/16""}, {""label"": ""Line Item - Description"", ""start"": 5224, ""end"": 5236, ""text"": ""M -F 12n -1p""}, {""label"": ""Line Item - Rate"", ""start"": 5268, ""end"": 5274, ""text"": ""150.00""}, {""label"": ""Line Item - Description"", ""start"": 5296, ""end"": 5308, ""text"": ""M -F 12n -1p""}, {""label"": ""Line Item - Days"", ""start"": 5387, ""end"": 5394, ""text"": ""MTWTF--""}, {""label"": ""Line Item - Rate"", ""start"": 5398, ""end"": 5404, ""text"": ""150.00""}, {""label"": ""Line Item - Start Date"", ""start"": 5418, ""end"": 5426, ""text"": ""11/01/16""}, {""label"": ""Line Item - End Date"", ""start"": 5427, ""end"": 5435, ""text"": ""11/07/16""}, {""label"": ""Line Item - Description"", ""start"": 5436, ""end"": 5449, ""text"": ""M -F 4p -430p""}, {""label"": ""Line Item - Rate"", ""start"": 5482, ""end"": 5488, ""text"": ""200.00""}, {""label"": ""Line Item - Description"", ""start"": 5510, ""end"": 5523, ""text"": ""M -F 4p -430p""}, {""label"": ""Line Item - Days"", ""start"": 5603, ""end"": 5610, ""text"": ""MTWTF--""}, {""label"": ""Line Item - Rate"", ""start"": 5614, ""end"": 5620, ""text"": ""200.00""}, {""label"": ""Line Item - Start Date"", ""start"": 5634, ""end"": 5642, ""text"": ""11/01/16""}, {""label"": ""Line Item - End Date"", ""start"": 5643, ""end"": 5651, ""text"": ""11/07/16""}, {""label"": ""Line Item - Description"", ""start"": 5652, ""end"": 5665, ""text"": ""M -F 430p -5p""}, {""label"": ""Line Item - Rate"", ""start"": 5698, ""end"": 5704, ""text"": ""300.00""}, {""label"": ""Line Item - Description"", ""start"": 5726, ""end"": 5739, ""text"": ""M -F 430p -5p""}, {""label"": ""Line Item - Days"", ""start"": 5818, ""end"": 5825, ""text"": ""MTWTF--""}, {""label"": ""Line Item - Rate"", ""start"": 5829, ""end"": 5835, ""text"": ""300.00""}, {""label"": ""Line Item - Start Date"", ""start"": 5849, ""end"": 5857, ""text"": ""11/01/16""}, {""label"": ""Line Item - End Date"", ""start"": 5858, ""end"": 5866, ""text"": ""11/07/16""}, {""label"": ""Line Item - Description"", ""start"": 5867, ""end"": 5881, ""text"": ""M -F 5p -5:30p""}, {""label"": ""Line Item - Rate"", ""start"": 5915, ""end"": 5921, ""text"": ""500.00""}, {""label"": ""Line Item - Description"", ""start"": 5945, ""end"": 5959, ""text"": ""M -F 5p -5:30p""}, {""label"": ""Line Item - Days"", ""start"": 6039, ""end"": 6046, ""text"": ""MTWTF--""}, {""label"": ""Line Item - Rate"", ""start"": 6050, ""end"": 6056, ""text"": ""500.00""}, {""label"": ""Line Item - Start Date"", ""start"": 6070, ""end"": 6078, ""text"": ""11/01/16""}, {""label"": ""Line Item - End Date"", ""start"": 6079, ""end"": 6087, ""text"": ""11/07/16""}, {""label"": ""Line Item - Description"", ""start"": 6088, ""end"": 6099, ""text"": ""M -F 5a -6a""}, {""label"": ""Line Item - Days"", ""start"": 6115, ""end"": 6122, ""text"": ""MTWTF--""}, {""label"": ""Line Item - Rate"", ""start"": 6130, ""end"": 6135, ""text"": ""60.00""}, {""label"": ""Line Item - Description"", ""start"": 6158, ""end"": 6169, ""text"": ""M -F 5a -6a""}, {""label"": ""Line Item - Days"", ""start"": 6249, ""end"": 6256, ""text"": ""MTWTF--""}, {""label"": ""Line Item - Rate"", ""start"": 6260, ""end"": 6265, ""text"": ""60.00""}, {""label"": ""Line Item - Start Date"", ""start"": 6279, ""end"": 6287, ""text"": ""11/01/16""}, {""label"": ""Line Item - End Date"", ""start"": 6288, ""end"": 6296, ""text"": ""11/07/16""}, {""label"": ""Line Item - Description"", ""start"": 6297, ""end"": 6310, ""text"": ""M -F 6p -630p""}, {""label"": ""Line Item - Days"", ""start"": 6329, ""end"": 6336, ""text"": ""MTWTF--""}, {""label"": ""Line Item - Rate"", ""start"": 6344, ""end"": 6350, ""text"": ""900.00""}, {""label"": ""Line Item - Description"", ""start"": 6374, ""end"": 6388, ""text"": ""M -F 6p -6:30p""}, {""label"": ""Line Item - Days"", ""start"": 6468, ""end"": 6475, ""text"": ""MTWTF--""}, {""label"": ""Line Item - Rate"", ""start"": 6479, ""end"": 6485, ""text"": ""900.00""}, {""label"": ""Line Item - Start Date"", ""start"": 6500, ""end"": 6508, ""text"": ""11/01/16""}, {""label"": ""Line Item - End Date"", ""start"": 6509, ""end"": 6517, ""text"": ""11/07/16""}, {""label"": ""Line Item - Description"", ""start"": 6518, ""end"": 6529, ""text"": ""M -F 6a -7a""}, {""label"": ""Line Item - Days"", ""start"": 6545, ""end"": 6552, ""text"": ""MTWTF--""}, {""label"": ""Line Item - Rate"", ""start"": 6560, ""end"": 6566, ""text"": ""300.00""}, {""label"": ""Line Item - Description"", ""start"": 6589, ""end"": 6600, ""text"": ""M -F 6a -7a""}, {""label"": ""Line Item - Days"", ""start"": 6680, ""end"": 6687, ""text"": ""MTWTF--""}, {""label"": ""Line Item - Rate"", ""start"": 6691, ""end"": 6697, ""text"": ""300.00""}, {""label"": ""Line Item - Start Date"", ""start"": 6712, ""end"": 6720, ""text"": ""11/01/16""}, {""label"": ""Line Item - End Date"", ""start"": 6721, ""end"": 6729, ""text"": ""11/07/16""}, {""label"": ""Line Item - Description"", ""start"": 6730, ""end"": 6743, ""text"": ""M -F 630p -7p""}, {""label"": ""Line Item - Days"", ""start"": 6761, ""end"": 6768, ""text"": ""MTWTF--""}, {""label"": ""Line Item - Rate"", ""start"": 6776, ""end"": 6784, ""text"": ""1,200.00""}, {""label"": ""Line Item - Description"", ""start"": 6808, ""end"": 6821, ""text"": ""M -F 630p -7p""}, {""label"": ""Line Item - Days"", ""start"": 6901, ""end"": 6908, ""text"": ""MTWTF--""}, {""label"": ""Line Item - Rate"", ""start"": 6912, ""end"": 6920, ""text"": ""1,200.00""}, {""label"": ""Line Item - Start Date"", ""start"": 6935, ""end"": 6943, ""text"": ""11/01/16""}, {""label"": ""Line Item - End Date"", ""start"": 6944, ""end"": 6952, ""text"": ""11/07/16""}, {""label"": ""Line Item - Description"", ""start"": 6953, ""end"": 6964, ""text"": ""M -F 7a -9a""}, {""label"": ""Line Item - Days"", ""start"": 6980, ""end"": 6987, ""text"": ""MTWTF--""}, {""label"": ""Line Item - Rate"", ""start"": 6995, ""end"": 7001, ""text"": ""500.00""}, {""label"": ""Line Item - Description"", ""start"": 7026, ""end"": 7037, ""text"": ""M -F 7a -9a""}, {""label"": ""Line Item - Days"", ""start"": 7117, ""end"": 7124, ""text"": ""MTWTF--""}, {""label"": ""Line Item - Rate"", ""start"": 7128, ""end"": 7134, ""text"": ""500.00""}, {""label"": ""Line Item - Start Date"", ""start"": 7149, ""end"": 7157, ""text"": ""11/01/16""}, {""label"": ""Line Item - End Date"", ""start"": 7158, ""end"": 7166, ""text"": ""11/07/16""}, {""label"": ""Line Item - Description"", ""start"": 7167, ""end"": 7179, ""text"": ""M -F 9a -10a""}, {""label"": ""Line Item - Days"", ""start"": 7196, ""end"": 7203, ""text"": ""MTWTF--""}, {""label"": ""Line Item - Rate"", ""start"": 7211, ""end"": 7217, ""text"": ""200.00""}, {""label"": ""Line Item - Description"", ""start"": 7240, ""end"": 7252, ""text"": ""M -F 9a -10a""}, {""label"": ""Line Item - Days"", ""start"": 7330, ""end"": 7337, ""text"": ""MTWTF--""}, {""label"": ""Line Item - Rate"", ""start"": 7341, ""end"": 7347, ""text"": ""200.00""}, {""label"": ""Line Item - Start Date"", ""start"": 7364, ""end"": 7372, ""text"": ""11/04/16""}, {""label"": ""Line Item - End Date"", ""start"": 7373, ""end"": 7381, ""text"": ""11/04/16""}, {""label"": ""Line Item - Description"", ""start"": 7382, ""end"": 7391, ""text"": ""Fri 9-10P""}, {""label"": ""Line Item - Rate"", ""start"": 7406, ""end"": 7414, ""text"": ""2,000.00""}, {""label"": ""Line Item - Description"", ""start"": 7438, ""end"": 7447, ""text"": ""Fri 9-10P""}, {""label"": ""Line Item - Days"", ""start"": 7527, ""end"": 7534, ""text"": ""----1--""}, {""label"": ""Line Item - Rate"", ""start"": 7538, ""end"": 7546, ""text"": ""2,000.00""}, {""label"": ""Line Item - Days"", ""start"": 7667, ""end"": 7677, ""text"": ""---- F----""}, {""label"": ""Line Item - Days"", ""start"": 7794, ""end"": 7804, ""text"": ""---- F----""}, {""label"": ""Line Item - Rate"", ""start"": 7810, ""end"": 7818, ""text"": ""2,000.00""}, {""label"": ""Line Item - Start Date"", ""start"": 7856, ""end"": 7864, ""text"": ""11/05/16""}, {""label"": ""Line Item - End Date"", ""start"": 7865, ""end"": 7873, ""text"": ""11/05/16""}, {""label"": ""Line Item - Description"", ""start"": 7874, ""end"": 7886, ""text"": ""Sat 5p -530p""}, {""label"": ""Line Item - Days"", ""start"": 7903, ""end"": 7910, ""text"": ""---- 1-""}, {""label"": ""Line Item - Rate"", ""start"": 7918, ""end"": 7924, ""text"": ""150.00""}, {""label"": ""Line Item - Description"", ""start"": 7937, ""end"": 7949, ""text"": ""Sat 5p -530p""}, {""label"": ""Line Item - Days"", ""start"": 8030, ""end"": 8037, ""text"": ""---- 1-""}, {""label"": ""Line Item - Rate"", ""start"": 8042, ""end"": 8048, ""text"": ""150.00""}, {""label"": ""Line Item - Start Date"", ""start"": 8072, ""end"": 8080, ""text"": ""11/05/16""}, {""label"": ""Line Item - End Date"", ""start"": 8081, ""end"": 8089, ""text"": ""11/05/16""}, {""label"": ""Line Item - Days"", ""start"": 8105, ""end"": 8112, ""text"": ""---- 1-""}, {""label"": ""Line Item - Rate"", ""start"": 8120, ""end"": 8126, ""text"": ""500.00""}, {""label"": ""Line Item - Description"", ""start"": 11801, ""end"": 11811, ""text"": ""M -h oa-ba""}, {""label"": ""Line Item - Description"", ""start"": 11812, ""end"": 11823, ""text"": ""M -F 5a -6a""}, {""label"": ""Line Item - Start Date"", ""start"": 11886, ""end"": 11894, ""text"": ""11/08/16""}, {""label"": ""Line Item - End Date"", ""start"": 11895, ""end"": 11903, ""text"": ""11/14/16""}, {""label"": ""Line Item - Days"", ""start"": 11904, ""end"": 11906, ""text"": ""-1""}, {""label"": ""Line Item - Rate"", ""start"": 11915, ""end"": 11920, ""text"": ""60.00""}, {""label"": ""Line Item - Description"", ""start"": 11953, ""end"": 11965, ""text"": ""M -F 9a -10a""}, {""label"": ""Line Item - Days"", ""start"": 11982, ""end"": 11984, ""text"": ""-1""}, {""label"": ""Line Item - Rate"", ""start"": 11997, ""end"": 12003, ""text"": ""200.00""}, {""label"": ""Line Item - Description"", ""start"": 12016, ""end"": 12028, ""text"": ""M -F 9a -10a""}, {""label"": ""Line Item - Start Date"", ""start"": 12090, ""end"": 12098, ""text"": ""11/08/16""}, {""label"": ""Line Item - End Date"", ""start"": 12099, ""end"": 12107, ""text"": ""11/14/16""}, {""label"": ""Line Item - Days"", ""start"": 12108, ""end"": 12110, ""text"": ""-1""}, {""label"": ""Line Item - Rate"", ""start"": 12119, ""end"": 12125, ""text"": ""200.00""}, {""label"": ""Line Item - Description"", ""start"": 8448, ""end"": 8459, ""text"": ""bat 6.30-/p""}, {""label"": ""Line Item - Description"", ""start"": 8460, ""end"": 8470, ""text"": ""Sat 630-7p""}, {""label"": ""Line Item - Days"", ""start"": 8555, ""end"": 8556, ""text"": ""1""}, {""label"": ""Line Item - Rate"", ""start"": 8561, ""end"": 8567, ""text"": ""500.00""}, {""label"": ""Line Item - Start Date"", ""start"": 8582, ""end"": 8590, ""text"": ""11/05/16""}, {""label"": ""Line Item - End Date"", ""start"": 8591, ""end"": 8599, ""text"": ""11/05/16""}, {""label"": ""Line Item - Description"", ""start"": 8600, ""end"": 8608, ""text"": ""Sat 7-9A""}, {""label"": ""Line Item - Rate"", ""start"": 8636, ""end"": 8642, ""text"": ""300.00""}, {""label"": ""Line Item - Description"", ""start"": 8665, ""end"": 8673, ""text"": ""Sat 7-9A""}, {""label"": ""Line Item - Days"", ""start"": 8757, ""end"": 8758, ""text"": ""1""}, {""label"": ""Line Item - Rate"", ""start"": 8763, ""end"": 8769, ""text"": ""300.00""}, {""label"": ""Line Item - Start Date"", ""start"": 8784, ""end"": 8792, ""text"": ""11/05/16""}, {""label"": ""Line Item - End Date"", ""start"": 8793, ""end"": 8801, ""text"": ""11/05/16""}, {""label"": ""Line Item - Description"", ""start"": 8802, ""end"": 8811, ""text"": ""Sat 9-10P""}, {""label"": ""Line Item - Rate"", ""start"": 8840, ""end"": 8846, ""text"": ""220.00""}, {""label"": ""Line Item - Description"", ""start"": 8869, ""end"": 8878, ""text"": ""Sat 9-10p""}, {""label"": ""Line Item - Days"", ""start"": 8962, ""end"": 8963, ""text"": ""1""}, {""label"": ""Line Item - Rate"", ""start"": 8968, ""end"": 8974, ""text"": ""220.00""}, {""label"": ""Line Item - Start Date"", ""start"": 8989, ""end"": 8997, ""text"": ""11/06/16""}, {""label"": ""Line Item - End Date"", ""start"": 8998, ""end"": 9006, ""text"": ""11/06/16""}, {""label"": ""Line Item - Description"", ""start"": 9007, ""end"": 9023, ""text"": ""Sun 1105p -1205a""}, {""label"": ""Line Item - Rate"", ""start"": 9057, ""end"": 9063, ""text"": ""100.00""}, {""label"": ""Line Item - Description"", ""start"": 9086, ""end"": 9101, ""text"": ""Su 1105p -1205a""}, {""label"": ""Line Item - Days"", ""start"": 9185, ""end"": 9186, ""text"": ""1""}, {""label"": ""Line Item - Rate"", ""start"": 9190, ""end"": 9196, ""text"": ""100.00""}, {""label"": ""Line Item - Start Date"", ""start"": 9211, ""end"": 9219, ""text"": ""11/06/16""}, {""label"": ""Line Item - End Date"", ""start"": 9220, ""end"": 9228, ""text"": ""11/06/16""}, {""label"": ""Line Item - Description"", ""start"": 9229, ""end"": 9242, ""text"": ""Sun 5p -5:30p""}, {""label"": ""Line Item - Rate"", ""start"": 9273, ""end"": 9279, ""text"": ""300.00""}, {""label"": ""Line Item - Description"", ""start"": 9302, ""end"": 9314, ""text"": ""Sun 5p -530p""}, {""label"": ""Line Item - Days"", ""start"": 9398, ""end"": 9399, ""text"": ""1""}, {""label"": ""Line Item - Rate"", ""start"": 9403, ""end"": 9409, ""text"": ""300.00""}, {""label"": ""Line Item - Start Date"", ""start"": 9424, ""end"": 9432, ""text"": ""11/06/16""}, {""label"": ""Line Item - End Date"", ""start"": 9433, ""end"": 9441, ""text"": ""11/06/16""}, {""label"": ""Line Item - Description"", ""start"": 9442, ""end"": 9450, ""text"": ""Sun 8-9a""}, {""label"": ""Line Item - Rate"", ""start"": 9477, ""end"": 9483, ""text"": ""300.00""}, {""label"": ""Line Item - Description"", ""start"": 9506, ""end"": 9514, ""text"": ""Sun 8-9a""}, {""label"": ""Line Item - Days"", ""start"": 9598, ""end"": 9599, ""text"": ""1""}, {""label"": ""Line Item - Rate"", ""start"": 9603, ""end"": 9609, ""text"": ""300.00""}, {""label"": ""Line Item - Start Date"", ""start"": 9626, ""end"": 9634, ""text"": ""11/03/16""}, {""label"": ""Line Item - End Date"", ""start"": 9635, ""end"": 9643, ""text"": ""11/03/16""}, {""label"": ""Line Item - Description"", ""start"": 9644, ""end"": 9653, ""text"": ""Thur 7-8p""}, {""label"": ""Line Item - Rate"", ""start"": 9680, ""end"": 9686, ""text"": ""800.00""}, {""label"": ""Line Item - Description"", ""start"": 9709, ""end"": 9718, ""text"": ""Thur 7-8p""}, {""label"": ""Line Item - Days"", ""start"": 9801, ""end"": 9802, ""text"": ""1""}, {""label"": ""Line Item - Rate"", ""start"": 9809, ""end"": 9815, ""text"": ""800.00""}, {""label"": ""Line Item - Rate"", ""start"": 10061, ""end"": 10067, ""text"": ""800.00""}, {""label"": ""Line Item - Start Date"", ""start"": 10105, ""end"": 10113, ""text"": ""11/01/16""}, {""label"": ""Line Item - End Date"", ""start"": 10114, ""end"": 10122, ""text"": ""11/07/16""}, {""label"": ""Line Item - Description"", ""start"": 10123, ""end"": 10139, ""text"": ""M -Su 10p -1035p""}, {""label"": ""Line Item - Rate"", ""start"": 10175, ""end"": 10183, ""text"": ""1,000.00""}, {""label"": ""Line Item - Description"", ""start"": 10195, ""end"": 10211, ""text"": ""M -Su 10p -1035p""}, {""label"": ""Line Item - Days"", ""start"": 10291, ""end"": 10298, ""text"": ""MTWTFSS""}, {""label"": ""Line Item - Rate"", ""start"": 10302, ""end"": 10310, ""text"": ""1,000.00""}, {""label"": ""Line Item - Start Date"", ""start"": 10325, ""end"": 10333, ""text"": ""11/08/16""}, {""label"": ""Line Item - End Date"", ""start"": 10334, ""end"": 10342, ""text"": ""11/08/16""}, {""label"": ""Line Item - Description"", ""start"": 10343, ""end"": 10356, ""text"": ""M -F 11a -12p""}, {""label"": ""Line Item - Rate"", ""start"": 10389, ""end"": 10395, ""text"": ""100.00""}, {""label"": ""Line Item - Description"", ""start"": 10408, ""end"": 10421, ""text"": ""M -F 11a -12p""}, {""label"": ""Line Item - Days"", ""start"": 10502, ""end"": 10503, ""text"": ""1""}, {""label"": ""Line Item - Rate"", ""start"": 10512, ""end"": 10518, ""text"": ""100.00""}, {""label"": ""Line Item - Start Date"", ""start"": 10533, ""end"": 10541, ""text"": ""11/08/16""}, {""label"": ""Line Item - End Date"", ""start"": 10542, ""end"": 10550, ""text"": ""11/08/16""}, {""label"": ""Line Item - Description"", ""start"": 10551, ""end"": 10563, ""text"": ""M -F 12n -1p""}, {""label"": ""Line Item - Rate"", ""start"": 10595, ""end"": 10601, ""text"": ""150.00""}, {""label"": ""Line Item - Description"", ""start"": 10614, ""end"": 10626, ""text"": ""M -F 12n -1p""}, {""label"": ""Line Item - Days"", ""start"": 10707, ""end"": 10708, ""text"": ""1""}, {""label"": ""Line Item - Rate"", ""start"": 10717, ""end"": 10723, ""text"": ""150.00""}, {""label"": ""Line Item - Start Date"", ""start"": 10738, ""end"": 10746, ""text"": ""11/08/16""}, {""label"": ""Line Item - End Date"", ""start"": 10747, ""end"": 10755, ""text"": ""11/08/16""}, {""label"": ""Line Item - Description"", ""start"": 10756, ""end"": 10769, ""text"": ""M -F 4p -430p""}, {""label"": ""Line Item - Rate"", ""start"": 10802, ""end"": 10808, ""text"": ""200.00""}, {""label"": ""Line Item - Description"", ""start"": 10821, ""end"": 10834, ""text"": ""M -F 4p -430p""}, {""label"": ""Line Item - Days"", ""start"": 10915, ""end"": 10916, ""text"": ""1""}, {""label"": ""Line Item - Rate"", ""start"": 10925, ""end"": 10931, ""text"": ""200.00""}, {""label"": ""Line Item - Start Date"", ""start"": 10946, ""end"": 10954, ""text"": ""11/08/16""}, {""label"": ""Line Item - End Date"", ""start"": 10955, ""end"": 10963, ""text"": ""11/08/16""}, {""label"": ""Line Item - Description"", ""start"": 10964, ""end"": 10977, ""text"": ""M -F 430p -5p""}, {""label"": ""Line Item - Rate"", ""start"": 11010, ""end"": 11016, ""text"": ""300.00""}, {""label"": ""Line Item - Description"", ""start"": 11029, ""end"": 11042, ""text"": ""M -F 430p -5p""}, {""label"": ""Line Item - Days"", ""start"": 11123, ""end"": 11124, ""text"": ""1""}, {""label"": ""Line Item - Rate"", ""start"": 11133, ""end"": 11139, ""text"": ""300.00""}, {""label"": ""Line Item - Start Date"", ""start"": 11154, ""end"": 11162, ""text"": ""11/08/16""}, {""label"": ""Line Item - End Date"", ""start"": 11163, ""end"": 11171, ""text"": ""11/08/16""}, {""label"": ""Line Item - Description"", ""start"": 11172, ""end"": 11186, ""text"": ""M -F 5p -5:30p""}, {""label"": ""Line Item - Rate"", ""start"": 11220, ""end"": 11226, ""text"": ""500.00""}, {""label"": ""Line Item - Description"", ""start"": 11239, ""end"": 11253, ""text"": ""M -F 5p -5:30p""}, {""label"": ""Line Item - Days"", ""start"": 11334, ""end"": 11335, ""text"": ""1""}, {""label"": ""Line Item - Rate"", ""start"": 11344, ""end"": 11350, ""text"": ""500.00""}, {""label"": ""Line Item - Start Date"", ""start"": 11365, ""end"": 11373, ""text"": ""11/08/16""}, {""label"": ""Line Item - End Date"", ""start"": 11374, ""end"": 11382, ""text"": ""11/08/16""}, {""label"": ""Line Item - Rate"", ""start"": 11413, ""end"": 11418, ""text"": ""60.00""}, {""label"": ""Agency"", ""start"": 3178, ""end"": 3198, ""text"": ""Great American Media""}, {""label"": ""Advertiser"", ""start"": 3240, ""end"": 3251, ""text"": ""ISS/DSCC IE""}, {""label"": ""Line Item - Start Date"", ""start"": 3318, ""end"": 3326, ""text"": ""10/31/16""}, {""label"": ""Line Item - End Date"", ""start"": 3328, ""end"": 3336, ""text"": ""11/08/16""}, {""label"": ""Gross Total"", ""start"": 3382, ""end"": 3391, ""text"": ""17,410.00""}, {""label"": ""Net Amount Due"", ""start"": 3665, ""end"": 3674, ""text"": ""14,798.50""}, {""label"": ""Line Item - Start Date"", ""start"": 4253, ""end"": 4261, ""text"": ""11/01/16""}, {""label"": ""Line Item - End Date"", ""start"": 4262, ""end"": 4270, ""text"": ""11/07/16""}, {""label"": ""Line Item - Description"", ""start"": 4271, ""end"": 4282, ""text"": ""M -F 1p -2p""}, {""label"": ""Line Item - Days"", ""start"": 4298, ""end"": 4305, ""text"": ""MTWTF--""}, {""label"": ""Line Item - Description"", ""start"": 4332, ""end"": 4343, ""text"": ""M -F 1p -2p""}, {""label"": ""Line Item - Days"", ""start"": 4423, ""end"": 4430, ""text"": ""MTWTF--""}, {""label"": ""Line Item - Start Date"", ""start"": 4454, ""end"": 4462, ""text"": ""11/01/16""}, {""label"": ""Line Item - End Date"", ""start"": 4463, ""end"": 4471, ""text"": ""11/07/16""}, {""label"": ""Line Item - Description"", ""start"": 4472, ""end"": 4487, ""text"": ""M -F 1035-1135P""}, {""label"": ""Line Item - Days"", ""start"": 4509, ""end"": 4516, ""text"": ""MTWTF--""}, {""label"": ""Line Item - Description"", ""start"": 4542, ""end"": 4559, ""text"": ""M -F 1035p -1135p""}, {""label"": ""Line Item - Days"", ""start"": 4637, ""end"": 4644, ""text"": ""MTWTF--""}, {""label"": ""Line Item - Start Date"", ""start"": 4668, ""end"": 4676, ""text"": ""11/01/16""}, {""label"": ""Line Item - End Date"", ""start"": 4677, ""end"": 4685, ""text"": ""11/07/16""}, {""label"": ""Line Item - Days"", ""start"": 4703, ""end"": 4710, ""text"": ""MTWTF--""}]",fcc_invoices/ocr/2dfd91c64c66a5a92b4eb1c46e26f87f.json.gz,01234878-30e1-46e6-910f-08f09ce50c4d.pdf,"REP HEADLINE# 8250799 TRF# 163314
+$$$ MOD# 0: UNAPPROVED REV #1 $$$
+
+ADV # ADV. NAME MSS/DSCC IE
+
+REP: TEL# 610-293-4100 FAX# 610-225-1191
+CREDIT ADVISORY: AGENCY CREDIT RISK Ell
+ORDER WORKSHEET HARRIS REPORT FROM REP SEP27/16 11.22
+**CHANGES** *** WAND -TV ***
+
+REP.# OFF.#
+
+AGY # ____ AGY. NAME GREAT AMERICAN MEDIA BUYER NAME THOMAS PINO
+
+SALESMAN #
+
+3050 K STREET NW - SUITE 100 SALES PRSN PH- KRISTEN WASKIE
+
+WASHINGTON, DC 20007
+
+ORDER # CONTRACT # 8250799
+
+CLASS: NATL. LOCAL REGIONAL
+
+PRDCT
+
+DSCC IE
+
+EST#4789 COMMENTS: (LINE, ORDER, INVOICE)
+
+FLIGHT DATES NOV1/16 NOV8/16 WK -2
+
+CITY TAX STATE TAX
+
+REP:
+
+MAKEGOOD M2 -M3
+N/A'S LINES 14,25/ADD LINES 35-36
+TOTAL $17410
+PLEASE CONFIRM THANKS
+JAMIE
+
+CO-OP BILLING NEEDED DATE
+
+SEP27/16 11.22
+
+STA:
+
+CON CM ***** THIS IS A CASH IN ADVANCE SCHEDULE *****
+DEMOCRATIC SENATORIAL CAMPAIGN COMMITTEE INDEPENDENT EXPENDITURE
+
+:LINE#:REP :CD: TIME PERIOD : LGTH : SEC : RATE : START : END :SPTS: WEEK : DAYS :TOTL:
+:LINE#: : : DATE DATE : /WK: INVT : :SPTS:
+
+AGENCY ADVERTISER CODE = 49 AGENCY EST# = 4789
+AGENCY PRODUCT CODE = 53
+
+14 S 900P -1000P 30 $2,000.00 11/4 11/4 0 FRI 0
+
+PROGRAM : DATELINE
+CON COM1: DATELINE
+
+35 A 800P -1000P
+
+30 $2,000.00 11/4 11/4 1 FRI 1
+
+PROGRAM : DATELINE
+ORD COM1: M2 PLEASE CORRECT TP FOR DATELINE.
+THIS IS A MAKE -GOOD FOR NOV4 ON LINE -14 FOR 1 SPOT/WK
+REP HEADLINE# 8250799 TRF# 163314
+$$$ MOD# 0: UNAPPROVED REV #1 $$$
+
+REP: TEL# 610-293-4100 FAX# 610-225-1191
+CREDIT ADVISORY: AGENCY CREDIT RISK
+ORDER WORKSHEET HARRIS REPORT FROM REP SEP27/16 11.22
+**CHANGES** *** WAND -TV ***
+
+:LINE#:REP :CD: TIME PERIOD : LGTH SEC : RATE : START : END :SPTS: WEEK : DAYS :TOTL:
+:LINE#: : DATE : DATE : /WK: INVT : :SPTS:
+
+25 S 700P -800P 30
+
+PROGRAM : YOU,ME,APOCLYPSE
+CON COM1: YOU,ME,APOCLYPSE
+
+36 A 700P -800P 30
+
+$800.00 11/3
+
+11/3 0 THU 0
+
+$800.00 11/3 11/3 1 THU
+
+PROGRAM : SUPERSTORE/GOOD PLACE
+ORD COM1: M3 PLEASE CORRECT PROGRAM NAME
+THIS IS A MAKE -GOOD FOR NOV3 ON LINE -25 FOR 1 SPOT/WK
+STATION MAKEGOOD OFFERS:
+M2 OK'D BUY#14 MISSED:FRI/900P-1000P NOV4 30S $2,000.00 (SEP27/16)
+OFFER:FRI/800P-1000P NOV4 30S $2,000.00 PLS ADVISE.
+CMT:M2 PLEASE CORRECT TP FOR DATELINE.
+
+M3 OK'D BUY#25 MISSED:THU/700P-800P NOV3 30S $800.00 (SEP27/16)
+OFFER:THU/700P-800P NOV3 30S $800.00 PLS ADVISE.
+CMT:M3 PLEASE CORRECT PROGRAM NAME
+
+NOV/16 17410.00
+
+MARKET TOTALS $56,161
+
+SVC- NSI
+DEMOS- RA35+*
+
+CONTRACT TOTAL
+TOTAL SPOTS
+
+WAND 31% WCIA 30% WFHL 0% WRSP 17% WCIX 2% WBUI 3% WICS 17%
+
+17410.00
+48
+
+MOD CODE A -ADD B -BUY TYPE C -CANCELLED DE -DELETE E-EFF DATES L -LENGTH M-MAKEGOOD N -PROGRAM NAME
+
+P-CLASS,PLAN,SECT Q -PAID PGM R -RATE S -SPOTS PER WEEK T -TIME X -LATE Y -DAYS Z -COMMENTS *-MULTIPLE
+Print Date 09/27/16 11:21:24 Page 1 of 4
+
+ORDER
+
+Orders
+
+Agency
+
+Order! Rev:
+
+163314
+
+WAND40
+
+Alt Order #:
+
+08250799
+
+Product Desc:
+
+DSCC IE
+
+Estimate:
+
+4789
+
+NewsCenter 17
+
+Flight Dates: 11/01/16 - 11/08/16 Primary AE:
+
+Telerep Philadelphia
+
+Original Date / Rev: 09/27/16 / 09/27/16 Sales Office:
+
+PHIL
+
+Order Type: GENERAL Sales Region:
+
+NAT
+
+Name:
+
+Buying Contact:
+
+Billing Contact:
+
+Advertiser Name:
+
+Demographic:
+
+A35+
+
+Product Codes: PL Issue
+Priority:
+
+Revenue Codes:
+
+Bill Plan
+
+Start Date
+
+Great American Media
+
+3050 K Street NE
+
+Washington, DC 20007
+
+ISS/DSCC IE
+
+P-2
+
+AGY, POL, ISS
+
+End Date
+
+# Spots
+
+Gross Amount
+
+Net Amount
+
+10/31/16
+
+11/08/16
+
+Account Executives
+
+Account Executive
+
+48
+
+$17,410.00
+
+Totals
+
+Month
+
+Billing Type: Cash
+
+Billing Calendar: Broadcast
+
+Billing Cycle: EOM/EOC
+
+Agency Commission: 15%
+
+New Business Thru:
+
+Order Separation:
+
+Advertiser External ID:
+
+Agency External ID:
+
+Unit Code:
+
+00:30:00
+
+General
+
+# Spots
+
+Gross Amount
+
+Net Amount
+
+Rating
+
+$14,798.50 November 2016
+
+48 $17,410.00 $14,798.50
+
+48 $17,410.00 $14,798.50 0.00
+
+0.00
+
+Totals
+
+Sales Office
+
+Sales Region
+
+Start Date / End Date
+
+Order %
+
+Telerep Philadelphia
+
+Order Share
+
+Share
+
+Total
+
+NewsCenter 17
+
+Market
+
+Competitive Share
+
+CABLE
+UNKWN
+WBUI
+WCCU
+WCIA
+
+WCIX
+WICD
+WICS
+WRSP
+
+25%
+
+$17,410.00
+
+100% $69,640.00
+
+Share
+
+Total
+
+0%
+0%
+0%
+0%
+25%
+0%
+0%
+25%
+25%
+
+$0.00
+$0.00
+$0.00
+$0.00
+$17,410.00
+$0.00
+$0.00
+$17,410.00
+$17,410.00
+
+Start Of Order - End Of Order
+
+100%
+
+Ln Ch Start End Inventory Code Break Start/End Time Days Len Spots Rate Pri Rtg Type Spots Amount
+
+1 WAND 11/01/16 11/07/16 M -F 1p -2p CM M -F 1p -2p MTWTF-- :30 1 $200.00 P-2 0.00 NM
+M -F 1p -2p
+
+Start Date End Date Weekdays Spots/Week
+
+Rate
+
+Rating
+Week: 11/01/16 11/07/16 MTWTF-- 1 $200.00 0.00
+
+2 WAND 11/01/16 11/07/16 M -F 1035-1135P CM M -F 1035p -1135p MTWTF-- :30 1 $600.00P-2 0.00 NM
+M -F 1035p -1135p
+
+Start Date End Date Weekdays Spots/Week Rate Rating
+Week: 11/01/16 11/07/16 MTWTF-- 1 $600.00 0.00
+
+3 WAND 11/01/16 11/07/16 CM M -F 11a -12p MTWTF-- :30 3 $100.00 P-2 0.00 NM
+
+1 $200.00
+$600.00
+3 $300.00
+Print Date: 09/27/16 11:21:24 Page 2 of 4
+
+Order / Rev:
+
+163314
+
+Advertiser:
+
+ISS/DSCC IE
+
+Alt Order #:
+
+08250799
+
+Product Desc:
+
+DSCC IE
+
+NewsCenter 17
+
+Flight Dates: 11/01/16 - 11/08/16 Estimate: 4789
+
+Ln Ch Start End Inventory Code Break Start/End Time Days Len Spots Rate Pri Rtg Type Spots Amount
+
+IA* 11a -12p
+M -F 11a -12p
+
+Start Date End Date Weekdays Spots/Week
+
+Rate
+
+Rating
+Week: 11/01/16 11/07/16 MTWTF-- 3 $100.00 0.00
+
+4 WAND 11/01/16 11/07/16 M -F 12n -1p CM M -F 12n -1p MTWTF-- :30 3 $150.00P-2 0.00 NM 3 $450.00
+M -F 12n -1p
+
+Start Date End Date Weekdays Spots/Week
+
+Rate
+
+Rating
+Week:11/01/16 11/07/16 MTWTF-- 3 $150.00 0.00
+
+5 WAND 11/01/16 11/07/16 M -F 4p -430p CM M -F 4p -430p MTWTF-- :30 3 $200.00P-2 0.00 NM 3 $600.00
+M -F 4p -430p
+
+Start Date End Date Weekdays Spots/Week
+
+Rate
+
+Rating
+Week: 11/01/16 11/07/16 MTWTF-- 3 $200.00 0.00
+
+6 WAND 11/01/16 11/07/16 M -F 430p -5p CM M -F 430p -5p MTWTF-- :30 3 $300.00P-2 0.00 NM 3 $900.00
+M -F 430p -5p
+
+Start Date End Date Weekdays Spots/Week
+
+Rate
+
+Rating
+Week:11/01/16 11/07/16 MTWTF-- 3 $300.00 0.00
+
+7 WAND 11/01/16 11/07/16 M -F 5p -5:30p CM M -F 5p -5:30p MTWTF-- :30 3 $500.00P-2 0.00 NM 3 $1,500.00
+M -F 5p -5:30p
+
+Start Date End Date Weekdays Spots/Week
+
+Rate
+
+Rating
+Week: 11/01/16 11/07/16 MTWTF-- 3 $500.00 0.00
+
+8 WAND 11/01/16 11/07/16 M -F 5a -6a CM M -F 5a -6a MTWTF-- :30 3 $60.00 P-2 0.00 NM 3 $180.00
+M -F 5a -6a
+
+Start Date End Date Weekdays Spots/Week
+
+Rate
+
+Rating
+Week: 11/01/16 11/07/16 MTWTF-- 3 $60.00 0.00
+
+9 WAND 11/01/16 11/07/16 M -F 6p -630p CM M -F 6p -6:30p MTWTF-- :30 2 $900.00P-2 0.00 NM 2 $1,800.00
+M -F 6p -6:30p
+
+Start Date End Date Weekdays Spots/Week
+
+Rate
+
+Rating
+Week: 11/01/16 11/07/16 MTWTF-- 2 $900.00 0.00
+
+10 WAND 11/01/16 11/07/16 M -F 6a -7a CM M -F 6a -7a MTWTF-- :30 3 $300.00 P-2 0.00 NM 3 $900.00
+M -F 6a -7a
+
+Start Date End Date Weekdays Spots/Week
+
+Rate
+
+Rating
+Week: 11/01/16 11/07/16 MTWTF-- 3 $300.00 0.00
+
+11 WAND 11/01/16 11/07/16 M -F 630p -7p CM M -F 630p -7p MTWTF-- :30 1 $1,200.00P-2 0.00 NM 1 $1,200.00
+M -F 630p -7p
+
+Start Date End Date Weekdays Spots/Week
+
+Rate
+
+Rating
+Week: 11/01/16 11/07/16 MTWTF-- 1 $1,200.00 0.00
+
+12 WAND 11/01/16 11/07/16 M -F 7a -9a CM M -F 7a -9a MTWTF-- :30 2 $500.00 P-2 0.00 NM 2 $1,000.00
+M -F 7a -9a
+
+Start Date End Date Weekdays Spots/Week
+
+Rate
+
+Rating
+Week: 11/01/16 11/07/16 MTWTF-- 2 $500.00 0.00
+
+13 WAND 11/01/16 11/07/16 M -F 9a -10a CM M -F 9a -10a MTWTF-- :30 3 $200.00 P-2 0.00 NM 3 $600.00
+M -F 9a -10a
+
+Start Date End Date Weekdays Spots/Week Rate Rating
+Week: 11/01/16 11/07/16 MTWTF-- 3 $200.00 0.00
+
+N 14 WAND 11/04/16 11/04/16 Fri 9-10P CM F 9-10P 1 $2,000.00P-1 0.00 NM 1 $2,000.00
+Fri 9-10P
+
+Start Date End Date Weekdays Spots/Week
+
+Rate
+
+Rating
+Week: 11/04/16 11/10/16 ----1-- 1 $2,000.00 0.00
+Spot Ch Date Range Description Start/End Time Weekdays Length Rate Rtq Type
+1 NAND 11/04/16-11/10/16 9-10P F 9-10P ---- F---- :30($27000,00) 0.00 NM
+See MG 14.2
+[Wrong Inventory Code-pgm is 2 hrs]
+2 NAND 11/04/16-11/10/16 Fri 8-1Op Fri 8-10p ---- F---- :30 $2,000.00 0.00 NM
+0 MG for 14.1 11/04
+
+15 WAND 11/05/16 11/05/16 Sat 5p -530p CM Sat 5p -530p ---- 1- :30 1 $150.00 P-2 0.00 NM
+Sat 5p -530p
+
+Start Date End Date Weekdays Spots/Week
+
+Rate
+
+Rating
+
+Week: 11/05/16 11/11/16 ---- 1-
+
+1 $150.00 0.00
+
+$150.00
+
+16 WAND 11/05/16 11/05/16
+
+CM Sat 630-7p ---- 1- :30 1 $500.00 P-2 0.00 NM
+
+$500.00
+Print Date: 09/27/16 11:21:24 Page 3 of 4
+
+Order/ Rev:
+
+163314
+
+Advertiser:
+
+ISS/DSCC IE
+
+Alt Order #:
+
+08250799
+
+Product Desc:
+
+DSCC IE NewsCenter 17
+Flight Dates: 11/01/16 - 11/08/16 Estimate: 4789
+
+Ln Ch Start End Inventory Code Break Start/End Time Days Len Spots Rate Pri Rtg Type Spots Amount
+
+bat 6.30-/p
+Sat 630-7p
+
+Start Date End Date Weekdays Spots/Week
+
+Rate
+
+Rating
+Week: 11/05/16 11/11/16 ---- 1- 1 $500.00 0.00
+
+17 WAND 11/05/16 11/05/16 Sat 7-9A CM Sat 7-9A ---- 1- :30 1 $300.00 P-2 0.00 NM 1 $300.00
+Sat 7-9A
+
+Start Date End Date Weekdays Spots/Week
+
+Rate Rating
+Week: 11/05/16 11/11/16 ---- 1- 1 $300.00 0.00
+
+18 WAND 11/05/16 11/05/16 Sat 9-10P CM Sat 9-10p ---- 1- :30 1 $220.00 P-2 0.00 NM 1 $220.00
+Sat 9-10p
+
+Start Date End Date Weekdays Spots/Week
+
+Rate Rating
+Week: 11/05/16 11/11/16 ---- 1- 1 $220.00 0.00
+
+19 WAND 11/06/16 11/06/16 Sun 1105p -1205a CM Su 1105p -1205a ---- 1 :30 1 $100.00 P-2 0.00 NM 1 $100.00
+Su 1105p -1205a
+
+Start Date End Date Weekdays Spots/Week
+
+Rate Rating
+Week: 11/06/16 11/12/16 ---- 1 1 $100.00 0.00
+
+20 WAND 11/06/16 11/06/16 Sun 5p -5:30p CM Sun 5p -530p ---- 1 :30 1 $300.00 P-2 0.00 NM 1 $300.00
+Sun 5p -530p
+
+Start Date End Date Weekdays Spots/Week
+
+Rate Rating
+Week: 11/06/16 11/12/16 ---- 1 1 $300.00 0.00
+
+21 WAND 11/06/16 11/06/16 Sun 8-9a CM Sun 8-9a ---- 1 :30 1 $300.00 P-2 0.00 NM 1 $300.00
+Sun 8-9a
+
+Start Date End Date Weekdays Spots/Week
+
+Rate Rating
+Week: 11/06/16 11/12/16 ---- 1 1 $300.00 0.00
+
+N 22 WAND 11/03/16 11/03/16 Thur 7-8p CM Th 7-8p ---1--- :30 1 $800.00 P-2 0.00 NM 1 $800.00
+Thur 7-8p
+
+Start Date End Date Weekdays Spots/Week
+
+Rate
+
+Rating
+Week: 11/03/16 11/09/16 ---1--- 1 $800.00 0.00
+Spot Ch Date Range Description Start/End Time Weekdays Length
+
+Rate Rtq Type
+1 NAND 11/03/16-11/09/16 Thur 7-8p Th 7-8p ---Th ---- :30 ($800.00} 0.00 NM
+See MG 22.2
+[Program Change]
+2 NAND 11/03/16-11/03/16 Thur 7-8p SUPERSTORE/G ---- :30 $800.00 0.00 NM
+0 MG for 22.1 11/03
+
+23 WAND 11/01/16 11/07/16 M -Su 10p -1035p CM M -Su 10p -1035p MTWTFSS :30 1 $1,000.00P-2 0.00 NM
+M -Su 10p -1035p
+
+Start Date End Date Weekdays Spots/Week
+
+Rate
+
+Rating
+Week: 11/01/16 11/07/16 MTWTFSS 1 $1,000.00 0.00
+
+24 WAND 11/08/16 11/08/16 M -F 11a -12p CM M -F 11a -12p -1 ---- :30 1 $100.00 P-2 0.00 NM
+M -F 11a -12p
+
+Start Date End Date Weekdays Spots/Week
+
+Rate
+
+Rating
+Week: 11/08/16 11/14/16 -1 ---- 1 $100.00 0.00
+
+25 WAND 11/08/16 11/08/16 M -F 12n -1p CM M -F 12n -1p -1 ---- :30 1 $150.00 P-2 0.00 NM
+M -F 12n -1p
+
+Start Date End Date Weekdays Spots/Week
+
+Rate
+
+Rating
+Week: 11/08/16 11/14/16 -1 ---- 1 $150.00 0.00
+
+26 WAND 11/08/16 11/08/16 M -F 4p -430p CM M -F 4p -430p -1 ---- :30 1 $200.00 P-2 0.00 NM
+M -F 4p -430p
+
+Start Date End Date Weekdays Spots/Week
+
+Rate
+
+Rating
+Week: 11/08/16 11/14/16 -1 ---- 1 $200.00 0.00
+
+27 WAND 11/08/16 11/08/16 M -F 430p -5p CM M -F 430p -5p -1 ---- :30 1 $300.00 P-2 0.00 NM
+M -F 430p -5p
+
+Start Date End Date Weekdays Spots/Week
+
+Rate
+
+Rating
+Week: 11/08/16 11/14/16 -1 ---- 1 $300.00 0.00
+
+28 WAND 11/08/16 11/08/16 M -F 5p -5:30p CM M -F 5p -5:30p -1 ---- :30 1 $500.00 P-2 0.00 NM
+M -F 5p -5:30p
+
+Start Date End Date Weekdays Spots/Week
+
+Rate
+
+Rating
+Week: 11/08/16 11/14/16 -1 ---- 1 $500.00 0.00
+
+29 WAND 11/08/16 11/08/16 CM M -F 5a -6a -1 ---- :30 1 $60.00 P-2 0.00 NM
+
+1 $1,000.00
+
+1 $100.00
+1 $150.00
+1 $200.00
+
+1 $300.00
+1 $500.00
+1 $60.00
+Print Date: 09/27/16 11:21:24 Page 4 of 4
+
+Order/ Rev:
+
+163314
+
+Advertiser:
+
+ISS/DSCC IE
+Alt Order #: 08250799 Product Desc: DSCC IE NewsCenter 17
+Flight Dates: 11/01/16 - 11/08/16 Estimate: 4789
+
+Ln Ch Start End Inventory Code Break Start/End Time Days Len Spots Rate Pri Rtg Type Spots Amount
+
+M -h oa-ba
+M -F 5a -6a
+
+Start Date End Date Weekdays Spots/VVeek
+
+Rate
+
+Rating
+Week: 11/08/16 11/14/16 -1 ---- 1 $60.00 0.00
+
+30 WAND 11/08/16 11/08/16 M -F 9a -10a CM M -F 9a -10a -1 ---- :30 1 $200.00 P-2 0.00 NM
+M -F 9a -10a
+
+Start Date End Date Weekdays Spots/Week
+
+Rate
+
+Rating
+Week: 11/08/16 11/14/16 -1 ---- 1 $200.00 0.00
+
+$200.00
+
+Totals 48 $17,410.00",2dfd91c64c66a5a92b4eb1c46e26f87f,"{""line_item__description"": [""IA* 11a -12p"", ""M -F 11a -12p"", ""M -F 12n -1p"", ""M -F 12n -1p"", ""M -F 4p -430p"", ""M -F 4p -430p"", ""M -F 430p -5p"", ""M -F 430p -5p"", ""M -F 5p -5:30p"", ""M -F 5p -5:30p"", ""M -F 5a -6a"", ""M -F 5a -6a"", ""M -F 6p -630p"", ""M -F 6p -6:30p"", ""M -F 6a -7a"", ""M -F 6a -7a"", ""M -F 630p -7p"", ""M -F 630p -7p"", ""M -F 7a -9a"", ""M -F 7a -9a"", ""M -F 9a -10a"", ""M -F 9a -10a"", ""Fri 9-10P"", ""Fri 9-10P"", ""Sat 5p -530p"", ""Sat 5p -530p"", ""M -h oa-ba"", ""M -F 5a -6a"", ""M -F 9a -10a"", ""M -F 9a -10a"", ""bat 6.30-/p"", ""Sat 630-7p"", ""Sat 7-9A"", ""Sat 7-9A"", ""Sat 9-10P"", ""Sat 9-10p"", ""Sun 1105p -1205a"", ""Su 1105p -1205a"", ""Sun 5p -5:30p"", ""Sun 5p -530p"", ""Sun 8-9a"", ""Sun 8-9a"", ""Thur 7-8p"", ""Thur 7-8p"", ""M -Su 10p -1035p"", ""M -Su 10p -1035p"", ""M -F 11a -12p"", ""M -F 11a -12p"", ""M -F 12n -1p"", ""M -F 12n -1p"", ""M -F 4p -430p"", ""M -F 4p -430p"", ""M -F 430p -5p"", ""M -F 430p -5p"", ""M -F 5p -5:30p"", ""M -F 5p -5:30p"", ""M -F 1p -2p"", ""M -F 1p -2p"", ""M -F 1035-1135P"", ""M -F 1035p -1135p""], ""line_item__days"": [""MTWTF--"", ""MTWTF--"", ""MTWTF--"", ""MTWTF--"", ""MTWTF--"", ""MTWTF--"", ""MTWTF--"", ""MTWTF--"", ""MTWTF--"", ""MTWTF--"", ""MTWTF--"", ""MTWTF--"", ""MTWTF--"", ""MTWTF--"", ""MTWTF--"", ""MTWTF--"", ""MTWTF--"", ""----1--"", ""---- F----"", ""---- F----"", ""---- 1-"", ""---- 1-"", ""---- 1-"", ""-1"", ""-1"", ""-1"", ""1"", ""1"", ""1"", ""1"", ""1"", ""1"", ""1"", ""MTWTFSS"", ""1"", ""1"", ""1"", ""1"", ""1"", ""MTWTF--"", ""MTWTF--"", ""MTWTF--"", ""MTWTF--"", ""MTWTF--""], ""line_item__rate"": [""100.00"", ""150.00"", ""150.00"", ""200.00"", ""200.00"", ""300.00"", ""300.00"", ""500.00"", ""500.00"", ""60.00"", ""60.00"", ""900.00"", ""900.00"", ""300.00"", ""300.00"", ""1,200.00"", ""1,200.00"", ""500.00"", ""500.00"", ""200.00"", ""200.00"", ""2,000.00"", ""2,000.00"", ""2,000.00"", ""150.00"", ""150.00"", ""500.00"", ""60.00"", ""200.00"", ""200.00"", ""500.00"", ""300.00"", ""300.00"", ""220.00"", ""220.00"", ""100.00"", ""100.00"", ""300.00"", ""300.00"", ""300.00"", ""300.00"", ""800.00"", ""800.00"", ""800.00"", ""1,000.00"", ""1,000.00"", ""100.00"", ""100.00"", ""150.00"", ""150.00"", ""200.00"", ""200.00"", ""300.00"", ""300.00"", ""500.00"", ""500.00"", ""60.00""], ""line_item__start_date"": [""11/01/16"", ""11/01/16"", ""11/01/16"", ""11/01/16"", ""11/01/16"", ""11/01/16"", ""11/01/16"", ""11/01/16"", ""11/01/16"", ""11/01/16"", ""11/04/16"", ""11/05/16"", ""11/05/16"", ""11/08/16"", ""11/08/16"", ""11/05/16"", ""11/05/16"", ""11/06/16"", ""11/06/16"", ""11/06/16"", ""11/03/16"", ""11/01/16"", ""11/08/16"", ""11/08/16"", ""11/08/16"", ""11/08/16"", ""11/08/16"", ""11/08/16"", ""10/31/16"", ""11/01/16"", ""11/01/16"", ""11/01/16""], ""line_item__end_date"": [""11/07/16"", ""11/07/16"", ""11/07/16"", ""11/07/16"", ""11/07/16"", ""11/07/16"", ""11/07/16"", ""11/07/16"", ""11/07/16"", ""11/07/16"", ""11/04/16"", ""11/05/16"", ""11/05/16"", ""11/14/16"", ""11/14/16"", ""11/05/16"", ""11/05/16"", ""11/06/16"", ""11/06/16"", ""11/06/16"", ""11/03/16"", ""11/07/16"", ""11/08/16"", ""11/08/16"", ""11/08/16"", ""11/08/16"", ""11/08/16"", ""11/08/16"", ""11/08/16"", ""11/07/16"", ""11/07/16"", ""11/07/16""], ""agency"": [""Great American Media""], ""advertiser"": [""ISS/DSCC IE""], ""gross_total"": [""17,410.00""], ""net_amount_due"": [""14,798.50""]}"
+1,1,1,fcc_invoices/files/e886440f05a096ba3cf66be0dd859474.pdf,"[""fcc_invoices/images/e886440f05a096ba3cf66be0dd859474/page_0.png"", ""fcc_invoices/images/e886440f05a096ba3cf66be0dd859474/page_1.png"", ""fcc_invoices/images/e886440f05a096ba3cf66be0dd859474/page_2.png"", ""fcc_invoices/images/e886440f05a096ba3cf66be0dd859474/page_3.png""]","[{""label"": ""Line Item - Description"", ""start"": 4777, ""end"": 4792, ""text"": ""M -F 12p -1230p""}, {""label"": ""Line Item - Description"", ""start"": 4819, ""end"": 4838, ""text"": ""NFL Reg Ssn Late Gm""}, {""label"": ""Advertiser"", ""start"": 4878, ""end"": 4900, ""text"": ""Senate Leadership Fund""}, {""label"": ""Line Item - Start Date"", ""start"": 5155, ""end"": 5163, ""text"": ""10/03/16""}, {""label"": ""Line Item - End Date"", ""start"": 5167, ""end"": 5175, ""text"": ""10/09/16""}, {""label"": ""Line Item - Days"", ""start"": 5517, ""end"": 5519, ""text"": ""Su""}, {""label"": ""Line Item - Rate"", ""start"": 5555, ""end"": 5563, ""text"": ""8,500.00""}, {""label"": ""Line Item - Description"", ""start"": 5856, ""end"": 5875, ""text"": ""Sunday Prime Hour 1""}, {""label"": ""Line Item - Start Date"", ""start"": 5894, ""end"": 5902, ""text"": ""10/03/16""}, {""label"": ""Line Item - End Date"", ""start"": 5906, ""end"": 5914, ""text"": ""10/09/16""}, {""label"": ""Line Item - Days"", ""start"": 5996, ""end"": 5998, ""text"": ""Su""}, {""label"": ""Line Item - Rate"", ""start"": 6034, ""end"": 6042, ""text"": ""8,500.00""}, {""label"": ""Line Item - Description"", ""start"": 6049, ""end"": 6068, ""text"": ""Sunday Prime Hour 2""}, {""label"": ""Line Item - Days"", ""start"": 6076, ""end"": 6078, ""text"": ""Su""}, {""label"": ""Line Item - Rate"", ""start"": 6114, ""end"": 6122, ""text"": ""8,500.00""}, {""label"": ""Line Item - Description"", ""start"": 6150, ""end"": 6169, ""text"": ""Presidential Debate""}, {""label"": ""Line Item - Description"", ""start"": 6191, ""end"": 6216, ""text"": ""NFL Thursday Night Pre Gm""}, {""label"": ""Line Item - Start Date"", ""start"": 6229, ""end"": 6237, ""text"": ""10/03/16""}, {""label"": ""Line Item - End Date"", ""start"": 6241, ""end"": 6249, ""text"": ""10/09/16""}, {""label"": ""Line Item - Days"", ""start"": 6265, ""end"": 6267, ""text"": ""Th""}, {""label"": ""Line Item - Rate"", ""start"": 6304, ""end"": 6312, ""text"": ""3,500.00""}, {""label"": ""Line Item - Description"", ""start"": 6323, ""end"": 6344, ""text"": ""Saturday Prime Hour 2""}, {""label"": ""Line Item - Start Date"", ""start"": 6364, ""end"": 6372, ""text"": ""10/03/16""}, {""label"": ""Line Item - End Date"", ""start"": 6376, ""end"": 6384, ""text"": ""10/09/16""}, {""label"": ""Line Item - Days"", ""start"": 6395, ""end"": 6397, ""text"": ""Su""}, {""label"": ""Line Item - Rate"", ""start"": 6434, ""end"": 6442, ""text"": ""6,000.00""}, {""label"": ""Line Item - Start Date"", ""start"": 6454, ""end"": 6462, ""text"": ""10/03/16""}, {""label"": ""Line Item - End Date"", ""start"": 6466, ""end"": 6474, ""text"": ""10/09/16""}, {""label"": ""Line Item - Days"", ""start"": 6480, ""end"": 6482, ""text"": ""Sa""}, {""label"": ""Line Item - Rate"", ""start"": 6518, ""end"": 6524, ""text"": ""750.00""}, {""label"": ""Gross Total"", ""start"": 6562, ""end"": 6571, ""text"": ""80,350.00""}, {""label"": ""Line Item - Description"", ""start"": 2501, ""end"": 2514, ""text"": ""Late Run News""}, {""label"": ""Line Item - Description"", ""start"": 2528, ""end"": 2543, ""text"": ""M -F 12p -1230p""}, {""label"": ""Advertiser"", ""start"": 2613, ""end"": 2635, ""text"": ""Senate Leadership Fund""}, {""label"": ""Line Item - Start Date"", ""start"": 3196, ""end"": 3204, ""text"": ""10/03/16""}, {""label"": ""Line Item - End Date"", ""start"": 3208, ""end"": 3216, ""text"": ""10/09/16""}, {""label"": ""Line Item - Days"", ""start"": 3270, ""end"": 3272, ""text"": ""Th""}, {""label"": ""Line Item - Rate"", ""start"": 3309, ""end"": 3317, ""text"": ""1,150.00""}, {""label"": ""Line Item - Start Date"", ""start"": 3339, ""end"": 3347, ""text"": ""10/03/16""}, {""label"": ""Line Item - End Date"", ""start"": 3351, ""end"": 3359, ""text"": ""10/09/16""}, {""label"": ""Line Item - Days"", ""start"": 3381, ""end"": 3383, ""text"": ""Th""}, {""label"": ""Line Item - Rate"", ""start"": 3420, ""end"": 3426, ""text"": ""600.00""}, {""label"": ""Line Item - Description"", ""start"": 3435, ""end"": 3460, ""text"": ""NFL Thursday Night Pre Gm""}, {""label"": ""Line Item - Description"", ""start"": 3485, ""end"": 3503, ""text"": ""NFL Thursday Night""}, {""label"": ""Line Item - Start Date"", ""start"": 3523, ""end"": 3531, ""text"": ""10/03/16""}, {""label"": ""Line Item - End Date"", ""start"": 3535, ""end"": 3543, ""text"": ""10/09/16""}, {""label"": ""Line Item - Days"", ""start"": 3548, ""end"": 3550, ""text"": ""Th""}, {""label"": ""Line Item - Rate"", ""start"": 3585, ""end"": 3593, ""text"": ""5,000.00""}, {""label"": ""Line Item - Start Date"", ""start"": 3618, ""end"": 3626, ""text"": ""10/03/16""}, {""label"": ""Line Item - End Date"", ""start"": 3630, ""end"": 3638, ""text"": ""10/09/16""}, {""label"": ""Line Item - Days"", ""start"": 3650, ""end"": 3652, ""text"": ""Th""}, {""label"": ""Line Item - Rate"", ""start"": 3689, ""end"": 3698, ""text"": ""10,000.00""}, {""label"": ""Line Item - Description"", ""start"": 3709, ""end"": 3724, ""text"": ""M -F 11p -1135p""}, {""label"": ""Line Item - Start Date"", ""start"": 3745, ""end"": 3753, ""text"": ""10/03/16""}, {""label"": ""Line Item - End Date"", ""start"": 3757, ""end"": 3765, ""text"": ""10/09/16""}, {""label"": ""Line Item - Days"", ""start"": 3782, ""end"": 3784, ""text"": ""Tu""}, {""label"": ""Line Item - Rate"", ""start"": 3822, ""end"": 3830, ""text"": ""1,150.00""}, {""label"": ""Line Item - Description"", ""start"": 3841, ""end"": 3856, ""text"": ""M -F 12p -1230p""}, {""label"": ""Line Item - Start Date"", ""start"": 3877, ""end"": 3885, ""text"": ""10/03/16""}, {""label"": ""Line Item - End Date"", ""start"": 3889, ""end"": 3897, ""text"": ""10/09/16""}, {""label"": ""Line Item - Days"", ""start"": 3909, ""end"": 3911, ""text"": ""Tu""}, {""label"": ""Line Item - Rate"", ""start"": 3948, ""end"": 3954, ""text"": ""600.00""}, {""label"": ""Line Item - Description"", ""start"": 3965, ""end"": 3985, ""text"": ""Tuesday Prime Hour 1""}, {""label"": ""Line Item - Start Date"", ""start"": 4004, ""end"": 4012, ""text"": ""10/03/16""}, {""label"": ""Line Item - End Date"", ""start"": 4016, ""end"": 4024, ""text"": ""10/09/16""}, {""label"": ""Line Item - Days"", ""start"": 4036, ""end"": 4038, ""text"": ""Tu""}, {""label"": ""Line Item - Rate"", ""start"": 4074, ""end"": 4082, ""text"": ""5,500.00""}, {""label"": ""Line Item - Days"", ""start"": 4087, ""end"": 4089, ""text"": ""Tu""}, {""label"": ""Line Item - Rate"", ""start"": 4125, ""end"": 4133, ""text"": ""5,500.00""}, {""label"": ""Line Item - Description"", ""start"": 4142, ""end"": 4157, ""text"": ""M -F 11p -1135p""}, {""label"": ""Line Item - Start Date"", ""start"": 4184, ""end"": 4192, ""text"": ""10/03/16""}, {""label"": ""Line Item - End Date"", ""start"": 4196, ""end"": 4204, ""text"": ""10/09/16""}, {""label"": ""Line Item - Days"", ""start"": 4220, ""end"": 4221, ""text"": ""W""}, {""label"": ""Line Item - Rate"", ""start"": 4258, ""end"": 4266, ""text"": ""1,150.00""}, {""label"": ""Line Item - Description"", ""start"": 4276, ""end"": 4291, ""text"": ""M -F 12p -1230p""}, {""label"": ""Line Item - Start Date"", ""start"": 4317, ""end"": 4325, ""text"": ""10/03/16""}, {""label"": ""Line Item - End Date"", ""start"": 4329, ""end"": 4337, ""text"": ""10/09/16""}, {""label"": ""Line Item - Days"", ""start"": 4350, ""end"": 4351, ""text"": ""W""}, {""label"": ""Line Item - Rate"", ""start"": 4388, ""end"": 4394, ""text"": ""600.00""}, {""label"": ""Advertiser"", ""start"": 253, ""end"": 275, ""text"": ""Senate Leadership Fund""}, {""label"": ""Line Item - Description"", ""start"": 561, ""end"": 576, ""text"": ""M -F 11p -1135p""}, {""label"": ""Line Item - Description"", ""start"": 606, ""end"": 621, ""text"": ""M -F 12p -1230p""}, {""label"": ""Line Item - Description"", ""start"": 653, ""end"": 672, ""text"": ""Friday Prime Hour 2""}, {""label"": ""Line Item - Description"", ""start"": 703, ""end"": 718, ""text"": ""M -F 11p -1135p""}, {""label"": ""Line Item - Description"", ""start"": 751, ""end"": 766, ""text"": ""M -F 12p -1230p""}, {""label"": ""Line Item - Description"", ""start"": 790, ""end"": 805, ""text"": ""Big Bang! Kevin""}, {""label"": ""Line Item - Description"", ""start"": 833, ""end"": 854, ""text"": ""Saturday Prime Hour 3""}, {""label"": ""Line Item - Description"", ""start"": 932, ""end"": 953, ""text"": ""Saturday Prime Hour 1""}, {""label"": ""Line Item - Start Date"", ""start"": 1051, ""end"": 1059, ""text"": ""10/03/16""}, {""label"": ""Line Item - End Date"", ""start"": 1063, ""end"": 1071, ""text"": ""10/09/16""}, {""label"": ""Line Item - Days"", ""start"": 1408, ""end"": 1409, ""text"": ""F""}, {""label"": ""Line Item - Start Date"", ""start"": 1437, ""end"": 1445, ""text"": ""10/03/16""}, {""label"": ""Line Item - End Date"", ""start"": 1449, ""end"": 1457, ""text"": ""10/09/16""}, {""label"": ""Line Item - Rate"", ""start"": 1464, ""end"": 1472, ""text"": ""1,150.00""}, {""label"": ""Line Item - Days"", ""start"": 1477, ""end"": 1478, ""text"": ""F""}, {""label"": ""Line Item - Start Date"", ""start"": 1515, ""end"": 1523, ""text"": ""10/03/16""}, {""label"": ""Line Item - End Date"", ""start"": 1527, ""end"": 1535, ""text"": ""10/09/16""}, {""label"": ""Line Item - Days"", ""start"": 1550, ""end"": 1551, ""text"": ""F""}, {""label"": ""Line Item - Rate"", ""start"": 1587, ""end"": 1595, ""text"": ""4,000.00""}, {""label"": ""Line Item - Rate"", ""start"": 1598, ""end"": 1604, ""text"": ""600.00""}, {""label"": ""Line Item - Start Date"", ""start"": 1608, ""end"": 1616, ""text"": ""10/10/16""}, {""label"": ""Line Item - End Date"", ""start"": 1620, ""end"": 1628, ""text"": ""10/16/16""}, {""label"": ""Line Item - Days"", ""start"": 1637, ""end"": 1638, ""text"": ""M""}, {""label"": ""Line Item - Rate"", ""start"": 1675, ""end"": 1683, ""text"": ""1,150.00""}, {""label"": ""Line Item - Start Date"", ""start"": 1688, ""end"": 1696, ""text"": ""10/10/16""}, {""label"": ""Line Item - End Date"", ""start"": 1700, ""end"": 1708, ""text"": ""10/16/16""}, {""label"": ""Line Item - Days"", ""start"": 1715, ""end"": 1716, ""text"": ""M""}, {""label"": ""Line Item - Rate"", ""start"": 1753, ""end"": 1759, ""text"": ""600.00""}, {""label"": ""Line Item - Start Date"", ""start"": 1761, ""end"": 1769, ""text"": ""10/10/16""}, {""label"": ""Line Item - End Date"", ""start"": 1773, ""end"": 1781, ""text"": ""10/16/16""}, {""label"": ""Line Item - Days"", ""start"": 1792, ""end"": 1793, ""text"": ""M""}, {""label"": ""Line Item - Rate"", ""start"": 1829, ""end"": 1837, ""text"": ""3,600.00""}, {""label"": ""Line Item - Start Date"", ""start"": 1841, ""end"": 1849, ""text"": ""10/03/16""}, {""label"": ""Line Item - End Date"", ""start"": 1853, ""end"": 1861, ""text"": ""10/09/16""}, {""label"": ""Line Item - Days"", ""start"": 1866, ""end"": 1868, ""text"": ""Sa""}, {""label"": ""Line Item - Rate"", ""start"": 1940, ""end"": 1948, ""text"": ""1,500.00""}, {""label"": ""Line Item - Start Date"", ""start"": 1988, ""end"": 1996, ""text"": ""10/03/16""}, {""label"": ""Line Item - End Date"", ""start"": 2000, ""end"": 2008, ""text"": ""10/09/16""}, {""label"": ""Line Item - Days"", ""start"": 2022, ""end"": 2024, ""text"": ""Sa""}, {""label"": ""Line Item - Rate"", ""start"": 2062, ""end"": 2068, ""text"": ""750.00""}, {""label"": ""Advertiser"", ""start"": 6754, ""end"": 6776, ""text"": ""Senate Leadership Fund""}, {""label"": ""Agency Commission"", ""start"": 7512, ""end"": 7521, ""text"": ""12,052.50""}, {""label"": ""Net Amount Due"", ""start"": 7523, ""end"": 7532, ""text"": ""68,297.50""}, {""label"": ""Payment Terms"", ""start"": 7548, ""end"": 7555, ""text"": ""30 Days""}]",fcc_invoices/ocr/e886440f05a096ba3cf66be0dd859474.json.gz,00da1104-d80b-438b-a625-557092b8bcb9.pdf,"Remit Address:
+
+WTTV-CBS
+*0 16779 Collections Center Drive
+Chicago, IL 60693
+Main: (317) 632-5900
+Billing: (317) 715-2704
+
+Billing Address:
+
+Mentzer Media
+Attention: Accounts Payable
+210 W Pennsylvania Ave
+Ste 250
+Towson, MD 21204
+
+INVOICE
+
+Advertiser
+
+Senate Leadership Fund
+
+Product
+
+SEN LEADERSHIP FUND
+
+Estimate Number
+
+3622
+
+Station
+
+WTTV-CBS
+
+Account Executive
+
+Justin Votta
+
+Sales Office
+
+NSO Philadelphia
+
+Sales Region
+
+National
+
+Billing Calendar
+
+Broadcast
+
+Billing Type
+
+Cash
+
+Special ____ Handling
+
+Line Channel Description 1 Time IDay I Date
+
+2 CBS M -F 11p -1135p 11:00 PM -11:35 PM
+CBS
+3 CBS M -F 12p -1230p 12:00 PM -12:30 PM
+
+CBS
+
+4 CBS Friday Prime Hour 2 9:00 PM -10:00 FM
+
+CBS
+
+5 CBS M -F 11p -1135p 11:00 PM -11:35 PM
+
+CBS
+
+Et CBS M -F 12p -1230p 12p -1230p
+
+CBS
+
+7 CBS Big Bang! Kevin 8:00 PM -9:00 PM
+
+CBS
+
+CBS Saturday Prime Hour 3 10:00 PM -11:00 PM
+
+CBS
+
+9 CBS Sa 1205a -1235a 12:05 AM -12:35 AM
+CBS
+i0 CBS Saturday Prime Hour 1 8:00 PM -9:00 PM
+
+CBS
+
+11 CBS Saturday Prime Hour 2 9:00 PM -10:00 PM
+
+Length 'Air Time
+
+Ad -ID
+
+10/03/16 to 10/09/16 lx
+
+----1---
+
+Page 1 of 4
+
+Invoice #
+
+WC161 00116
+
+invoice Date
+
+10/16/16
+
+Invoice Month
+
+October 2016
+
+Invoice Period
+
+09/26/16 - 10/10/16
+
+Order #
+
+373338
+
+Alt Order #
+
+08358687
+
+Deal #
+
+Order Flight
+
+10/04/16 - 10/10/16
+
+IDB #
+
+1021
+
+Advertiser Code
+
+275
+
+Product Code
+
+311
+
+Agency Ref
+
+Advertiser Ref
+
+'Rate
+
+Reconciliation
+
+Ref #
+
+F :30 11:33 PM sLFTv30IN09H
+
+10/03/16 to 10/09/16
+
+lx
+
+$1,150.00
+
+1
+
+F 10/07/16 :30 12:21 PM SLFIV3OINO9H
+
+10/03/16 to 10/09/16
+
+lx
+
+----1--
+
+F 10/07/16 :30 9:36 PM sLFTv30IN09H $4,000.00
+
+$600.00 1
+
+10/10/16 to 10/16/16
+
+lx
+
+1
+
+M 10/10/16 :30 11:13 PM SLFTV3DIN09H $1,150.00
+
+1
+
+10/10/16 to 10/16/16 lx 1
+
+M 10/10/16 :30 12:12 PM SLFTV30IN09H $600.00
+
+10/10/16 to 10/16/16 1 x 1
+
+1
+
+M 10/10/16 :30 8:48 PM SLFTV30IN09H $3,600.00 1
+
+10/03/16 to 10/09/16 lx
+
+Sa 10/08/16 :30 10:54 PM SLFTV30IN09H
+
+10/03/16 to 10/09/16
+
+lx
+
+---- 1
+
+$1,500.00 1
+
+Sa 10/08/16 :00 $250440 Credited 1
+
+10/03/16 to 10/09/16
+
+lx
+
+---- 1
+
+Sa 10/08/16 :30 9:17 PM siLFrv3Oir409H $750.00 1
+DT
+
+10/03/16 to 10/09/16 1x
+
+We warrant that the actual broadcast information shown on this invoice was taken from the program log.
+Remit Address:
+
+WTTV-CBS
+16779 Collections Center Drive
+Chicago, IL 60693
+Main: (317) 632-5900
+Billing: (317) 715-2704
+
+Billing Address:
+
+Mentzer Media
+Attention: Accounts Payable
+210 W Pennsylvania Ave
+Ste 250
+Towson, MD 21204
+
+Line
+
+Channel 'Description
+
+11 CBS Saturday Prime Hour 2
+CBS
+
+15 CBS Late Run News
+
+CBS
+
+16 CBS M -F 12p -1230p
+
+Time fDay Flats
+
+9:00 PM -10:00 PM
+
+11p -1135p
+
+INVOICE
+
+Advertiser Senate Leadership Fund
+
+Product
+
+Estimate Number1 3622
+
+SEN LEADERSHIP FUND
+
+Station
+
+Account Executive
+
+Sales Office
+
+Sales Region
+
+WTTV-CBS
+Justin Votta
+NSO Philadelphia
+
+National
+
+Billing Calendar
+
+Broadcast
+
+Billing Type
+
+Cash
+
+Special Handling
+
+Page 2 of 4
+
+Invoice #
+
+WC161 00116
+
+Invoice Date
+
+10/16/16
+
+Invoice Month
+
+October 2016
+
+Invoice Period
+
+09/26/16 - 10/10/16
+
+Order #
+
+373338
+
+Alt Order #
+
+08358687
+
+Deal #
+
+Order Flight
+
+10/04/16 - 10/10/16
+
+IDB #
+
+1021
+
+Advertiser Code
+
+275
+
+Product Code
+
+311
+
+Agency Ref
+
+Advertiser Ref
+
+Length Air Time Ad -ID
+
+Sa 10/08/16 :00
+
+10/03/16 to 10/09/16
+
+1x---1---
+
+'Rate 'Reconciliation
+
+$7-50X0 Credited
+
+Th 10/06/16 :30 12:20 AM SLFFV3OINO9H $1,150.00
+
+12:00 PM -12:30 PM
+
+10/03/16 to 10/09/16 lx
+
+Ref #
+
+1
+
+1
+
+CBS Th 10/06/16 :30 12:12 PM SLED/30INO9H $600.00
+
+17 CBS NFL Thursday Night Pre Gm 730p -815p
+
+CBS
+
+18 CBS NFL Thursday Night 8:15 PM -11:15 PM
+
+10/03/16 to 10/09/16 lx
+
+Th 10/06/16 :30 7:29 PM JGIN161330H $5,000.00
+Time swap
+
+--.-1---
+
+1
+
+10/03/16 to 10/09/16 lx
+
+1
+
+CBS Th 10/06/16 :30 11:45 PM SLFTV3OINO9H $10,000.00 1
+
+19 CBS M -F 11p -1135p 11:00 PM -11:35 PM
+
+10/03/16 to 10/09/16 lx -1 ----
+
+CBS Tu 10/04/16 :30 11:22 PM
+
+SLFTV3OINO8H $1,150.00 1
+
+20 CBS M -F 12p -1230p 12:00 PM -12:30 PM
+
+10/03/16 to 10/09/16 lx -1
+
+CBS Tu 10/04/16 :30 12:12 PM SLFTV3OINO8H $600.00 1
+
+21 CBS Tuesday Prime Hour 1 8:00 PM -9:00 PM
+
+10/03/16 to 10/09/16 2x -2
+
+CBS Tu 10/04/16 :30 8:31 PM SLFTV3OINO8H $5,500.00
+CBS Tu 10/04/16 :30 8:44 PM SLFTV3OINO8H $5,500.00
+
+22 CBS M -F 11p -1135p 11:00 PM -11:35 PM
+
+1
+
+2
+
+10/03/16 to 10/09/16 lx --1----
+CBS W 10/05/16 :30 11:30 PM SLFTV3OINO8H $1,150.00 1
+23 CBS M -F 12p -1230p 12:00 PM -12:30 PM
+
+CBS
+
+10/03/16 to 10/09/16 lx --1----
+
+W
+10/05/16 :30 12:24 PM SLFTv3OINO8H $600.00
+We warrant that the actual broadcast information shown on this invoice was taken from the program log.
+Remit Address:
+
+WTTV-C BS
+16779 Collections Center Drive
+Chicago, IL 60693
+Main: (317) 632-5900
+Billing: (317) 715-2704
+
+Billing Address:
+
+Mentzer Media
+Attention: Accounts Payable
+210 W Pennsylvania Ave
+Ste 250
+Towson, MD 21204
+
+Line i Channel i Description
+
+Time I Day
+
+23 CBS M -F 12p -1230p 12:00 PM -12:30 PM
+24 CBS NFL Reg Ssn Late Gm 4:00 PM -7:30 PM
+
+INVOICE
+
+Advertiser
+
+Senate Leadership Fund
+
+Product
+
+SEN LEADERSHIP FUND
+
+Estimate Number
+
+3622
+
+Station
+
+Account Executive
+
+WTTV-CBS
+
+Justin \/otta
+
+Sales Office
+
+NSO Philadelphia
+
+Sales Region
+
+Nationai
+
+Billing Calendar
+
+Broadcast
+
+Billing Type
+
+Cash
+
+Special Handling
+
+Date
+
+Length
+
+Air Time
+
+10/03/16 to 10/09/16 lx
+
+1
+
+Page 3 of 4
+
+Invoice #
+
+WC161 00116
+
+Invoice Date
+
+10/16/16
+
+Invoice Month
+
+October 2016
+
+invoice Period
+
+09/26/16 - 10/10/16
+
+Order #
+
+373338
+
+Alt Order #
+
+08358687
+
+Deal #
+
+Order Flight
+
+10/04/16 - 10/10/16
+
+IDB #
+
+1021
+
+Advertiser Code
+
+275
+
+Product Code
+
+311
+
+Agency Ref
+
+Advertiser Ref
+
+Ad -ID
+
+[Rate
+
+Reconciliation
+
+Ref #
+
+CBS Su 10/09/16 :30 6:37 PM SLFTV3OINO9H $8,500.00 1
+
+25 CBS Sunday Prime Hour 1 7:30 PM -8:30 PM
+
+10/03/16 to 10/09/16 2x ---- 2
+CBS Su 10/09/16 :00 $5700040 Credited 1
+
+CBS Su 10/09/16 :00
+
+26 CBS Sunday Prime Hour 2 8:30 PM -9:30 PM
+
+10/03/16 to 10/09/16 lx
+
+1
+
+____ INI•1=1•111=1.k. ____
+
+$5;000,00 Credited 2
+
+CBS Su 10/09/16 :00
+
+27 CBS Sunday Prime Hour 1 7:30 PM -8:30 PM
+
+10/03/16 to 10/09/16 2x ---- 2
+
+$5,0004)0 Credited 1
+
+CBS Su 10/09/16 :00 $8,500,08 See MG 27.3 2
+CBS Su 10/09/16 :30 8:24 PM SLFTV3OINO9H $8,500.00 1
+CBS Sunday Prime Hour 2 8p -9p Su 10/09/16 :30 8:42 PM SLFTV3OINO9H $8,500.00 MG for 27.2 10/09 3
+28 CBS Presidential Debate 9p -11p
+
+CBS
+
+29 CBS NFL Thursday Night Pre Gm 730p -815p
+
+10/03/16 to 10/09/16 lx ---1---
+CBS Th 10/06/16 :30 7:54 PM sLF-rv3OINO9H $3,500.00 1
+
+30 CBS Saturday Prime Hour 2 9:00 PM -10:00 PM
+
+10/03/16 to 10/09/16 lx ---- S
+Su 10/09/16 :30 11:05 PM SLFT/30INO9H $6,000.00 1
+DT
+
+CBS
+
+10/03/16 to 10/09/16 1 x
+
+Sa 10/08/16 :30 10:25 PM SLFTV3OINON $750.00 1
+DT
+
+Aired Spots
+
+24
+
+Gross Total
+
+$80,350.00
+
+We warrant that the actual broadcast Information shown on this invoice was taken from the program log.
+Remit Address: INVOICE
+MTV -CRS
+16779 Collections Center Drive I Advertiser I Senate Leadership Fund
+
+Chicago, IL 60693
+
+f Product I SEN LEADERSHIP FUND
+
+Main: (317) 632-5900
+
+Estimate Number L3622
+
+Billing: (317) 715-2704
+
+Billing Address:
+
+Mentzer Media
+Attention: Accounts Payable
+210 W Pennsylvania Ave
+Ste 250
+Towson, MD 21204
+
+Station
+
+WTTV-CBS
+
+Account Executive
+
+Justin Votta
+
+Sales Office
+
+NSO Philadelphia
+
+Sales Region
+
+National
+
+Billing Calendar
+
+Broadcast
+
+Billing Type
+
+Cash
+
+Special Handling
+
+Agency Commission
+
+Net Amount Due
+
+Page 4 of 4
+
+Invoice #
+
+WC161 00116
+
+Invoice Date
+
+10/16/16
+
+Invoice Month
+
+October 2016
+
+Invoice Period
+
+09/26/16 - 10/10/16
+
+Order #
+
+373338
+
+Alt Order #
+
+08358687
+
+Deal #
+
+Order Flight
+
+10/04/16 - 10/10/16
+
+IDB #
+
+1021
+
+Advertiser Code
+
+275
+
+Product Code
+
+311
+
+Agency Ref
+
+Advertiser Ref
+
+$12,052.50
+$68,297.50
+
+Payment Terms 30 Days
+
+,Ne warrant that the actual broadcast information shown on this invoice was taken from the program log.",e886440f05a096ba3cf66be0dd859474,"{""line_item__description"": [""M -F 12p -1230p"", ""NFL Reg Ssn Late Gm"", ""Sunday Prime Hour 1"", ""Sunday Prime Hour 2"", ""Presidential Debate"", ""NFL Thursday Night Pre Gm"", ""Saturday Prime Hour 2"", ""Late Run News"", ""M -F 12p -1230p"", ""NFL Thursday Night Pre Gm"", ""NFL Thursday Night"", ""M -F 11p -1135p"", ""M -F 12p -1230p"", ""Tuesday Prime Hour 1"", ""M -F 11p -1135p"", ""M -F 12p -1230p"", ""M -F 11p -1135p"", ""M -F 12p -1230p"", ""Friday Prime Hour 2"", ""M -F 11p -1135p"", ""M -F 12p -1230p"", ""Big Bang! Kevin"", ""Saturday Prime Hour 3"", ""Saturday Prime Hour 1""], ""advertiser"": [""Senate Leadership Fund"", ""Senate Leadership Fund"", ""Senate Leadership Fund"", ""Senate Leadership Fund""], ""line_item__start_date"": [""10/03/16"", ""10/03/16"", ""10/03/16"", ""10/03/16"", ""10/03/16"", ""10/03/16"", ""10/03/16"", ""10/03/16"", ""10/03/16"", ""10/03/16"", ""10/03/16"", ""10/03/16"", ""10/03/16"", ""10/03/16"", ""10/03/16"", ""10/03/16"", ""10/03/16"", ""10/10/16"", ""10/10/16"", ""10/10/16"", ""10/03/16"", ""10/03/16""], ""line_item__end_date"": [""10/09/16"", ""10/09/16"", ""10/09/16"", ""10/09/16"", ""10/09/16"", ""10/09/16"", ""10/09/16"", ""10/09/16"", ""10/09/16"", ""10/09/16"", ""10/09/16"", ""10/09/16"", ""10/09/16"", ""10/09/16"", ""10/09/16"", ""10/09/16"", ""10/09/16"", ""10/16/16"", ""10/16/16"", ""10/16/16"", ""10/09/16"", ""10/09/16""], ""line_item__days"": [""Su"", ""Su"", ""Su"", ""Th"", ""Su"", ""Sa"", ""Th"", ""Th"", ""Th"", ""Th"", ""Tu"", ""Tu"", ""Tu"", ""Tu"", ""W"", ""W"", ""F"", ""F"", ""F"", ""M"", ""M"", ""M"", ""Sa"", ""Sa""], ""line_item__rate"": [""8,500.00"", ""8,500.00"", ""8,500.00"", ""3,500.00"", ""6,000.00"", ""750.00"", ""1,150.00"", ""600.00"", ""5,000.00"", ""10,000.00"", ""1,150.00"", ""600.00"", ""5,500.00"", ""5,500.00"", ""1,150.00"", ""600.00"", ""1,150.00"", ""4,000.00"", ""600.00"", ""1,150.00"", ""600.00"", ""3,600.00"", ""1,500.00"", ""750.00""], ""gross_total"": [""80,350.00""], ""agency_commission"": [""12,052.50""], ""net_amount_due"": [""68,297.50""], ""payment_terms"": [""30 Days""]}"
+2,2,2,fcc_invoices/files/34d4c874dd87752d683e4763e9333559.pdf,"[""fcc_invoices/images/34d4c874dd87752d683e4763e9333559/page_0.png"", ""fcc_invoices/images/34d4c874dd87752d683e4763e9333559/page_1.png"", ""fcc_invoices/images/34d4c874dd87752d683e4763e9333559/page_2.png"", ""fcc_invoices/images/34d4c874dd87752d683e4763e9333559/page_3.png"", ""fcc_invoices/images/34d4c874dd87752d683e4763e9333559/page_4.png"", ""fcc_invoices/images/34d4c874dd87752d683e4763e9333559/page_5.png"", ""fcc_invoices/images/34d4c874dd87752d683e4763e9333559/page_6.png"", ""fcc_invoices/images/34d4c874dd87752d683e4763e9333559/page_7.png"", ""fcc_invoices/images/34d4c874dd87752d683e4763e9333559/page_8.png"", ""fcc_invoices/images/34d4c874dd87752d683e4763e9333559/page_9.png"", ""fcc_invoices/images/34d4c874dd87752d683e4763e9333559/page_10.png"", ""fcc_invoices/images/34d4c874dd87752d683e4763e9333559/page_11.png"", ""fcc_invoices/images/34d4c874dd87752d683e4763e9333559/page_12.png"", ""fcc_invoices/images/34d4c874dd87752d683e4763e9333559/page_13.png""]","[{""label"": ""Advertiser"", ""start"": 182, ""end"": 203, ""text"": ""POLI/M HEINZ/D/CON/AZ""}, {""label"": ""Agency"", ""start"": 239, ""end"": 255, ""text"": ""BUYING TIME, LLC""}, {""label"": ""Gross Total"", ""start"": 581, ""end"": 587, ""text"": ""24,980""}, {""label"": ""Payment Terms"", ""start"": 688, ""end"": 703, ""text"": ""CASH IN ADVANCE""}, {""label"": ""Advertiser"", ""start"": 720, ""end"": 737, ""text"": ""HEINZ FOR ARIZONA""}, {""label"": ""Line Item - Rate"", ""start"": 955, ""end"": 961, ""text"": ""105.00""}, {""label"": ""Line Item - Description"", ""start"": 974, ""end"": 982, ""text"": ""THE TALK""}, {""label"": ""Line Item - Rate"", ""start"": 1021, ""end"": 1027, ""text"": ""375.00""}, {""label"": ""Line Item - Description"", ""start"": 1039, ""end"": 1052, ""text"": ""NEWS 13 AT 10""}, {""label"": ""Line Item - Rate"", ""start"": 1097, ""end"": 1103, ""text"": ""275.00""}, {""label"": ""Line Item - Description"", ""start"": 1115, ""end"": 1129, ""text"": ""PRICE IS RIGHT""}, {""label"": ""Line Item - Start Date"", ""start"": 1156, ""end"": 1160, ""text"": ""9/23""}, {""label"": ""Line Item - End Date"", ""start"": 1161, ""end"": 1165, ""text"": ""9/23""}, {""label"": ""Line Item - Days"", ""start"": 1168, ""end"": 1171, ""text"": ""FRI""}, {""label"": ""Line Item - Start Date"", ""start"": 1174, ""end"": 1178, ""text"": ""9/23""}, {""label"": ""Line Item - End Date"", ""start"": 1179, ""end"": 1183, ""text"": ""9/23""}, {""label"": ""Line Item - Days"", ""start"": 1186, ""end"": 1189, ""text"": ""FRI""}, {""label"": ""Line Item - Start Date"", ""start"": 1192, ""end"": 1196, ""text"": ""9/23""}, {""label"": ""Line Item - End Date"", ""start"": 1197, ""end"": 1201, ""text"": ""9/23""}, {""label"": ""Line Item - Days"", ""start"": 1204, ""end"": 1207, ""text"": ""FRI""}, {""label"": ""Line Item - Description"", ""start"": 12003, ""end"": 12020, ""text"": ""KOLD AM NEWS 6-7A""}, {""label"": ""Line Item - Rate"", ""start"": 12069, ""end"": 12075, ""text"": ""185.00""}, {""label"": ""Line Item - Start Date"", ""start"": 12076, ""end"": 12080, ""text"": ""9/20""}, {""label"": ""Line Item - End Date"", ""start"": 12081, ""end"": 12085, ""text"": ""9/20""}, {""label"": ""Line Item - Days"", ""start"": 12088, ""end"": 12091, ""text"": ""TUE""}, {""label"": ""Line Item - Rate"", ""start"": 12098, ""end"": 12104, ""text"": ""325.00""}, {""label"": ""Line Item - Start Date"", ""start"": 12105, ""end"": 12109, ""text"": ""9/20""}, {""label"": ""Line Item - End Date"", ""start"": 12110, ""end"": 12114, ""text"": ""9/20""}, {""label"": ""Line Item - Days"", ""start"": 12117, ""end"": 12120, ""text"": ""TUE""}, {""label"": ""Line Item - Description"", ""start"": 12134, ""end"": 12155, ""text"": ""ENTERTAINMENT TONIGHT""}, {""label"": ""Line Item - Description"", ""start"": 12214, ""end"": 12230, ""text"": ""CBS THIS MORNING""}, {""label"": ""Line Item - Description"", ""start"": 12284, ""end"": 12288, ""text"": ""BULL""}, {""label"": ""Line Item - Description"", ""start"": 12331, ""end"": 12347, ""text"": ""NCIS NEW ORLEANS""}, {""label"": ""Line Item - Description"", ""start"": 12401, ""end"": 12418, ""text"": ""RIGHT THIS MINUTE""}, {""label"": ""Line Item - Description"", ""start"": 12474, ""end"": 12491, ""text"": ""RIGHT THIS MINUTE""}, {""label"": ""Line Item - Description"", ""start"": 12545, ""end"": 12553, ""text"": ""THE TALK""}, {""label"": ""Line Item - Description"", ""start"": 12599, ""end"": 12612, ""text"": ""NEWS 13 AT 10""}, {""label"": ""Line Item - Rate"", ""start"": 12642, ""end"": 12648, ""text"": ""125.00""}, {""label"": ""Line Item - Start Date"", ""start"": 12649, ""end"": 12653, ""text"": ""9/20""}, {""label"": ""Line Item - End Date"", ""start"": 12654, ""end"": 12658, ""text"": ""9/20""}, {""label"": ""Line Item - Days"", ""start"": 12661, ""end"": 12664, ""text"": ""TUE""}, {""label"": ""Line Item - Rate"", ""start"": 12671, ""end"": 12680, ""text"": ""1',100.00""}, {""label"": ""Line Item - Start Date"", ""start"": 12681, ""end"": 12685, ""text"": ""9/20""}, {""label"": ""Line Item - End Date"", ""start"": 12686, ""end"": 12690, ""text"": ""9/20""}, {""label"": ""Line Item - Days"", ""start"": 12693, ""end"": 12696, ""text"": ""TUE""}, {""label"": ""Line Item - Rate"", ""start"": 12702, ""end"": 12710, ""text"": ""1,100.00""}, {""label"": ""Line Item - Start Date"", ""start"": 12711, ""end"": 12715, ""text"": ""9/20""}, {""label"": ""Line Item - End Date"", ""start"": 12716, ""end"": 12720, ""text"": ""9/20""}, {""label"": ""Line Item - Days"", ""start"": 12723, ""end"": 12726, ""text"": ""TUE""}, {""label"": ""Line Item - Rate"", ""start"": 12733, ""end"": 12738, ""text"": ""60.00""}, {""label"": ""Line Item - Start Date"", ""start"": 12739, ""end"": 12743, ""text"": ""9/20""}, {""label"": ""Line Item - End Date"", ""start"": 12744, ""end"": 12748, ""text"": ""9/20""}, {""label"": ""Line Item - Days"", ""start"": 12751, ""end"": 12754, ""text"": ""TUE""}, {""label"": ""Line Item - Rate"", ""start"": 12762, ""end"": 12767, ""text"": ""60.00""}, {""label"": ""Line Item - Start Date"", ""start"": 12768, ""end"": 12772, ""text"": ""9/20""}, {""label"": ""Line Item - End Date"", ""start"": 12773, ""end"": 12777, ""text"": ""9/20""}, {""label"": ""Line Item - Days"", ""start"": 12780, ""end"": 12783, ""text"": ""TUE""}, {""label"": ""Line Item - Rate"", ""start"": 12790, ""end"": 12796, ""text"": ""105.00""}, {""label"": ""Line Item - Start Date"", ""start"": 12797, ""end"": 12801, ""text"": ""9/21""}, {""label"": ""Line Item - End Date"", ""start"": 12802, ""end"": 12806, ""text"": ""9/21""}, {""label"": ""Line Item - Days"", ""start"": 12809, ""end"": 12812, ""text"": ""WED""}, {""label"": ""Line Item - Rate"", ""start"": 12820, ""end"": 12826, ""text"": ""375.00""}, {""label"": ""Line Item - Start Date"", ""start"": 12827, ""end"": 12831, ""text"": ""9/21""}, {""label"": ""Line Item - End Date"", ""start"": 12832, ""end"": 12836, ""text"": ""9/21""}, {""label"": ""Line Item - Days"", ""start"": 12839, ""end"": 12842, ""text"": ""WED""}, {""label"": ""Line Item - Rate"", ""start"": 15505, ""end"": 15510, ""text"": ""60.00""}, {""label"": ""Line Item - Start Date"", ""start"": 15511, ""end"": 15515, ""text"": ""9/21""}, {""label"": ""Line Item - End Date"", ""start"": 15516, ""end"": 15520, ""text"": ""9/21""}, {""label"": ""Line Item - Days"", ""start"": 15523, ""end"": 15526, ""text"": ""WED""}, {""label"": ""Line Item - Description"", ""start"": 15540, ""end"": 15557, ""text"": ""RIGHT THIS MINUTE""}, {""label"": ""Gross Total"", ""start"": 15782, ""end"": 15790, ""text"": ""24980.00""}, {""label"": ""Line Item - Rate"", ""start"": 14325, ""end"": 14331, ""text"": ""315.00""}, {""label"": ""Line Item - Description"", ""start"": 14343, ""end"": 14355, ""text"": ""NEWS 13 AT 5""}, {""label"": ""Line Item - Rate"", ""start"": 14398, ""end"": 14404, ""text"": ""100.00""}, {""label"": ""Line Item - Description"", ""start"": 14416, ""end"": 14433, ""text"": ""KOLD AM NEWS 5-6A""}, {""label"": ""Line Item - Rate"", ""start"": 14481, ""end"": 14487, ""text"": ""290.00""}, {""label"": ""Line Item - Description"", ""start"": 14499, ""end"": 14513, ""text"": ""NEWS 13 AT 6PM""}, {""label"": ""Line Item - Rate"", ""start"": 14558, ""end"": 14564, ""text"": ""185.00""}, {""label"": ""Line Item - Description"", ""start"": 14576, ""end"": 14593, ""text"": ""KOLD AM NEWS 6-7A""}, {""label"": ""Line Item - Rate"", ""start"": 14641, ""end"": 14647, ""text"": ""325.00""}, {""label"": ""Line Item - Description"", ""start"": 14659, ""end"": 14680, ""text"": ""ENTERTAINMENT TONIGHT""}, {""label"": ""Line Item - Rate"", ""start"": 14732, ""end"": 14738, ""text"": ""125_00""}, {""label"": ""Line Item - Description"", ""start"": 14750, ""end"": 14766, ""text"": ""CBS THIS MORNING""}, {""label"": ""Line Item - Rate"", ""start"": 14813, ""end"": 14821, ""text"": ""1,100.00""}, {""label"": ""Line Item - Description"", ""start"": 14833, ""end"": 14847, ""text"": ""CRIMINAL MINDS""}, {""label"": ""Line Item - Rate"", ""start"": 14893, ""end"": 14899, ""text"": ""675.00""}, {""label"": ""Line Item - Description"", ""start"": 14911, ""end"": 14921, ""text"": ""CODE BLACK""}, {""label"": ""Line Item - Rate"", ""start"": 14963, ""end"": 14968, ""text"": ""60.00""}, {""label"": ""Line Item - Description"", ""start"": 14980, ""end"": 14997, ""text"": ""RIGHT THIS MINUTE""}, {""label"": ""Line Item - Start Date"", ""start"": 15027, ""end"": 15031, ""text"": ""9/21""}, {""label"": ""Line Item - End Date"", ""start"": 15032, ""end"": 15036, ""text"": ""9/21""}, {""label"": ""Line Item - Days"", ""start"": 15039, ""end"": 15042, ""text"": ""WED""}, {""label"": ""Line Item - Start Date"", ""start"": 15045, ""end"": 15049, ""text"": ""9/21""}, {""label"": ""Line Item - End Date"", ""start"": 15050, ""end"": 15054, ""text"": ""9/21""}, {""label"": ""Line Item - Days"", ""start"": 15057, ""end"": 15060, ""text"": ""WED""}, {""label"": ""Line Item - Start Date"", ""start"": 15063, ""end"": 15067, ""text"": ""9/21""}, {""label"": ""Line Item - End Date"", ""start"": 15068, ""end"": 15072, ""text"": ""9/21""}, {""label"": ""Line Item - Days"", ""start"": 15075, ""end"": 15078, ""text"": ""WED""}, {""label"": ""Line Item - Start Date"", ""start"": 15082, ""end"": 15086, ""text"": ""9/21""}, {""label"": ""Line Item - End Date"", ""start"": 15087, ""end"": 15091, ""text"": ""9/21""}, {""label"": ""Line Item - Days"", ""start"": 15094, ""end"": 15097, ""text"": ""WED""}, {""label"": ""Line Item - Start Date"", ""start"": 15100, ""end"": 15104, ""text"": ""9/21""}, {""label"": ""Line Item - End Date"", ""start"": 15105, ""end"": 15109, ""text"": ""9/21""}, {""label"": ""Line Item - Days"", ""start"": 15112, ""end"": 15115, ""text"": ""WED""}, {""label"": ""Line Item - Start Date"", ""start"": 15118, ""end"": 15122, ""text"": ""9/21""}, {""label"": ""Line Item - End Date"", ""start"": 15123, ""end"": 15127, ""text"": ""9/21""}, {""label"": ""Line Item - Days"", ""start"": 15130, ""end"": 15133, ""text"": ""WED""}, {""label"": ""Line Item - Start Date"", ""start"": 15137, ""end"": 15141, ""text"": ""9/21""}, {""label"": ""Line Item - End Date"", ""start"": 15142, ""end"": 15146, ""text"": ""9/21""}, {""label"": ""Line Item - Days"", ""start"": 15149, ""end"": 15152, ""text"": ""WED""}, {""label"": ""Line Item - Start Date"", ""start"": 15155, ""end"": 15159, ""text"": ""9/21""}, {""label"": ""Line Item - End Date"", ""start"": 15160, ""end"": 15164, ""text"": ""9/21""}, {""label"": ""Line Item - Days"", ""start"": 15167, ""end"": 15170, ""text"": ""WED""}, {""label"": ""Line Item - Start Date"", ""start"": 15173, ""end"": 15177, ""text"": ""9/21""}, {""label"": ""Line Item - End Date"", ""start"": 15178, ""end"": 15182, ""text"": ""9/21""}, {""label"": ""Line Item - Days"", ""start"": 15185, ""end"": 15188, ""text"": ""WED""}, {""label"": ""Line Item - Description"", ""start"": 13156, ""end"": 13170, ""text"": ""PRICE IS RIGHT""}, {""label"": ""Line Item - Rate"", ""start"": 13218, ""end"": 13224, ""text"": ""275.00""}, {""label"": ""Line Item - Start Date"", ""start"": 13225, ""end"": 13229, ""text"": ""9/21""}, {""label"": ""Line Item - End Date"", ""start"": 13230, ""end"": 13234, ""text"": ""9/21""}, {""label"": ""Line Item - Days"", ""start"": 13237, ""end"": 13240, ""text"": ""WED""}, {""label"": ""Line Item - Rate"", ""start"": 13248, ""end"": 13254, ""text"": ""165.00""}, {""label"": ""Line Item - Start Date"", ""start"": 13255, ""end"": 13259, ""text"": ""9/21""}, {""label"": ""Line Item - End Date"", ""start"": 13260, ""end"": 13264, ""text"": ""9/21""}, {""label"": ""Line Item - Days"", ""start"": 13267, ""end"": 13270, ""text"": ""WED""}, {""label"": ""Line Item - Description"", ""start"": 13284, ""end"": 13303, ""text"": ""LATE SHOW - COLBERT""}, {""label"": ""Line Item - Rate"", ""start"": 13355, ""end"": 13360, ""text"": ""90.00""}, {""label"": ""Line Item - Start Date"", ""start"": 13361, ""end"": 13365, ""text"": ""9/21""}, {""label"": ""Line Item - End Date"", ""start"": 13366, ""end"": 13370, ""text"": ""9/21""}, {""label"": ""Line Item - Days"", ""start"": 13373, ""end"": 13376, ""text"": ""WED""}, {""label"": ""Line Item - Description"", ""start"": 13390, ""end"": 13404, ""text"": ""LATE LATE SHOW""}, {""label"": ""Line Item - Rate"", ""start"": 13450, ""end"": 13456, ""text"": ""125.00""}, {""label"": ""Line Item - Start Date"", ""start"": 13457, ""end"": 13461, ""text"": ""9/21""}, {""label"": ""Line Item - End Date"", ""start"": 13462, ""end"": 13466, ""text"": ""9/21""}, {""label"": ""Line Item - Days"", ""start"": 13469, ""end"": 13472, ""text"": ""WED""}, {""label"": ""Line Item - Description"", ""start"": 13486, ""end"": 13502, ""text"": ""YOUNG & RESTLESS""}, {""label"": ""Line Item - Rate"", ""start"": 13550, ""end"": 13556, ""text"": ""125.00""}, {""label"": ""Line Item - Start Date"", ""start"": 13557, ""end"": 13561, ""text"": ""9/21""}, {""label"": ""Line Item - End Date"", ""start"": 13562, ""end"": 13566, ""text"": ""9/21""}, {""label"": ""Line Item - Days"", ""start"": 13569, ""end"": 13572, ""text"": ""WED""}, {""label"": ""Line Item - Description"", ""start"": 13586, ""end"": 13601, ""text"": ""NEWS 13 AT NOON""}, {""label"": ""Line Item - Rate"", ""start"": 13646, ""end"": 13652, ""text"": ""105.00""}, {""label"": ""Line Item - Start Date"", ""start"": 13653, ""end"": 13657, ""text"": ""9/21""}, {""label"": ""Line Item - End Date"", ""start"": 13658, ""end"": 13662, ""text"": ""9/21""}, {""label"": ""Line Item - Days"", ""start"": 13665, ""end"": 13668, ""text"": ""WED""}, {""label"": ""Line Item - Description"", ""start"": 13682, ""end"": 13699, ""text"": ""LET'S MAKE A DEAL""}, {""label"": ""Line Item - Rate"", ""start"": 13747, ""end"": 13752, ""text"": ""60.00""}, {""label"": ""Line Item - Start Date"", ""start"": 13753, ""end"": 13757, ""text"": ""9/21""}, {""label"": ""Line Item - End Date"", ""start"": 13758, ""end"": 13762, ""text"": ""9/21""}, {""label"": ""Line Item - Days"", ""start"": 13765, ""end"": 13768, ""text"": ""WED""}, {""label"": ""Line Item - Description"", ""start"": 13782, ""end"": 13797, ""text"": ""CRIMEWTCH DAILY""}, {""label"": ""Line Item - Rate"", ""start"": 13843, ""end"": 13849, ""text"": ""125.00""}, {""label"": ""Line Item - Start Date"", ""start"": 13850, ""end"": 13854, ""text"": ""9/21""}, {""label"": ""Line Item - End Date"", ""start"": 13855, ""end"": 13859, ""text"": ""9/21""}, {""label"": ""Line Item - Days"", ""start"": 13862, ""end"": 13865, ""text"": ""WED""}, {""label"": ""Line Item - Description"", ""start"": 13879, ""end"": 13893, ""text"": ""NEWS 13 AT 4PM""}, {""label"": ""Line Item - Rate"", ""start"": 13939, ""end"": 13944, ""text"": ""40.00""}, {""label"": ""Line Item - Start Date"", ""start"": 13945, ""end"": 13949, ""text"": ""9/21""}, {""label"": ""Line Item - End Date"", ""start"": 13950, ""end"": 13954, ""text"": ""9/21""}, {""label"": ""Line Item - Days"", ""start"": 13957, ""end"": 13960, ""text"": ""WED""}, {""label"": ""Line Item - Description"", ""start"": 13974, ""end"": 13992, ""text"": ""KOLD AM NEWS 430AM""}, {""label"": ""Line Item - Rate"", ""start"": 10841, ""end"": 10847, ""text"": ""135.00""}, {""label"": ""Line Item - Start Date"", ""start"": 10848, ""end"": 10852, ""text"": ""9/20""}, {""label"": ""Line Item - End Date"", ""start"": 10853, ""end"": 10857, ""text"": ""9/20""}, {""label"": ""Line Item - Days"", ""start"": 10860, ""end"": 10863, ""text"": ""TUE""}, {""label"": ""Line Item - Description"", ""start"": 10877, ""end"": 10893, ""text"": ""BOLD & BEAUTIFUL""}, {""label"": ""Line Item - Rate"", ""start"": 10941, ""end"": 10947, ""text"": ""125.00""}, {""label"": ""Line Item - Start Date"", ""start"": 10948, ""end"": 10952, ""text"": ""9/20""}, {""label"": ""Line Item - End Date"", ""start"": 10953, ""end"": 10957, ""text"": ""9/20""}, {""label"": ""Line Item - Days"", ""start"": 10960, ""end"": 10963, ""text"": ""TUE""}, {""label"": ""Line Item - Description"", ""start"": 10977, ""end"": 10992, ""text"": ""NEWS 13 AT NOON""}, {""label"": ""Line Item - Rate"", ""start"": 11037, ""end"": 11043, ""text"": ""105.00""}, {""label"": ""Line Item - Start Date"", ""start"": 11044, ""end"": 11048, ""text"": ""9/20""}, {""label"": ""Line Item - End Date"", ""start"": 11049, ""end"": 11053, ""text"": ""9/20""}, {""label"": ""Line Item - Days"", ""start"": 11056, ""end"": 11059, ""text"": ""TUE""}, {""label"": ""Line Item - Description"", ""start"": 11073, ""end"": 11090, ""text"": ""LET'S MAKE A DEAL""}, {""label"": ""Line Item - Rate"", ""start"": 11137, ""end"": 11142, ""text"": ""60.00""}, {""label"": ""Line Item - Start Date"", ""start"": 11143, ""end"": 11147, ""text"": ""9/20""}, {""label"": ""Line Item - End Date"", ""start"": 11148, ""end"": 11152, ""text"": ""9/20""}, {""label"": ""Line Item - Days"", ""start"": 11155, ""end"": 11158, ""text"": ""TUE""}, {""label"": ""Line Item - Description"", ""start"": 11170, ""end"": 11185, ""text"": ""CRIMEWTCH DAILY""}, {""label"": ""Line Item - Rate"", ""start"": 11230, ""end"": 11236, ""text"": ""125.00""}, {""label"": ""Line Item - Start Date"", ""start"": 11237, ""end"": 11241, ""text"": ""9/20""}, {""label"": ""Line Item - End Date"", ""start"": 11242, ""end"": 11246, ""text"": ""9/20""}, {""label"": ""Line Item - Days"", ""start"": 11249, ""end"": 11252, ""text"": ""TUE""}, {""label"": ""Line Item - Description"", ""start"": 11266, ""end"": 11280, ""text"": ""NEWS 13 AT 4PM""}, {""label"": ""Line Item - Rate"", ""start"": 11324, ""end"": 11329, ""text"": ""40.00""}, {""label"": ""Line Item - Start Date"", ""start"": 11330, ""end"": 11334, ""text"": ""9/20""}, {""label"": ""Line Item - End Date"", ""start"": 11335, ""end"": 11339, ""text"": ""9/20""}, {""label"": ""Line Item - Days"", ""start"": 11342, ""end"": 11345, ""text"": ""TUE""}, {""label"": ""Line Item - Description"", ""start"": 11359, ""end"": 11377, ""text"": ""KOLD AM NEWS 430AM""}, {""label"": ""Line Item - Rate"", ""start"": 11425, ""end"": 11431, ""text"": ""315.00""}, {""label"": ""Line Item - Start Date"", ""start"": 11432, ""end"": 11436, ""text"": ""9/20""}, {""label"": ""Line Item - End Date"", ""start"": 11437, ""end"": 11441, ""text"": ""9/20""}, {""label"": ""Line Item - Days"", ""start"": 11444, ""end"": 11447, ""text"": ""TUE""}, {""label"": ""Line Item - Description"", ""start"": 11461, ""end"": 11473, ""text"": ""NEWS 13 AT 5""}, {""label"": ""Line Item - Rate"", ""start"": 11515, ""end"": 11521, ""text"": ""100.00""}, {""label"": ""Line Item - Start Date"", ""start"": 11522, ""end"": 11526, ""text"": ""9/20""}, {""label"": ""Line Item - End Date"", ""start"": 11527, ""end"": 11531, ""text"": ""9/20""}, {""label"": ""Line Item - Days"", ""start"": 11534, ""end"": 11537, ""text"": ""TUE""}, {""label"": ""Line Item - Description"", ""start"": 11551, ""end"": 11568, ""text"": ""KOLD AM NEWS 5-6A""}, {""label"": ""Line Item - Rate"", ""start"": 11616, ""end"": 11622, ""text"": ""290.00""}, {""label"": ""Line Item - Start Date"", ""start"": 11623, ""end"": 11627, ""text"": ""9/20""}, {""label"": ""Line Item - End Date"", ""start"": 11628, ""end"": 11632, ""text"": ""9/20""}, {""label"": ""Line Item - Days"", ""start"": 11635, ""end"": 11638, ""text"": ""TUE""}, {""label"": ""Line Item - Description"", ""start"": 11652, ""end"": 11666, ""text"": ""NEWS 13 AT 6PM""}, {""label"": ""Line Item - Description"", ""start"": 9676, ""end"": 9692, ""text"": ""CBS THIS MORNING""}, {""label"": ""Line Item - Description"", ""start"": 9746, ""end"": 9763, ""text"": ""RIGHT THIS MINUTE""}, {""label"": ""Line Item - Description"", ""start"": 9819, ""end"": 9836, ""text"": ""RIGHT THIS MINUTE""}, {""label"": ""Line Item - Description"", ""start"": 9891, ""end"": 9899, ""text"": ""THE TALK""}, {""label"": ""Line Item - Description"", ""start"": 9947, ""end"": 9960, ""text"": ""NEWS 13 AT 10""}, {""label"": ""Line Item - Description"", ""start"": 10013, ""end"": 10027, ""text"": ""PRICE IS RIGHT""}, {""label"": ""Line Item - Rate"", ""start"": 10075, ""end"": 10081, ""text"": ""125.00""}, {""label"": ""Line Item - Start Date"", ""start"": 10082, ""end"": 10086, ""text"": ""9/22""}, {""label"": ""Line Item - End Date"", ""start"": 10087, ""end"": 10091, ""text"": ""9/22""}, {""label"": ""Line Item - Days"", ""start"": 10094, ""end"": 10097, ""text"": ""THU""}, {""label"": ""Line Item - Rate"", ""start"": 10104, ""end"": 10109, ""text"": ""60.00""}, {""label"": ""Line Item - Start Date"", ""start"": 10110, ""end"": 10114, ""text"": ""9/22""}, {""label"": ""Line Item - End Date"", ""start"": 10115, ""end"": 10119, ""text"": ""9/22""}, {""label"": ""Line Item - Days"", ""start"": 10122, ""end"": 10125, ""text"": ""THU""}, {""label"": ""Line Item - Rate"", ""start"": 10133, ""end"": 10138, ""text"": ""60.00""}, {""label"": ""Line Item - Start Date"", ""start"": 10139, ""end"": 10143, ""text"": ""9/22""}, {""label"": ""Line Item - End Date"", ""start"": 10144, ""end"": 10148, ""text"": ""9/22""}, {""label"": ""Line Item - Days"", ""start"": 10151, ""end"": 10154, ""text"": ""THU""}, {""label"": ""Line Item - Rate"", ""start"": 10161, ""end"": 10167, ""text"": ""105.00""}, {""label"": ""Line Item - Start Date"", ""start"": 10168, ""end"": 10172, ""text"": ""9/20""}, {""label"": ""Line Item - End Date"", ""start"": 10173, ""end"": 10177, ""text"": ""9/20""}, {""label"": ""Line Item - Days"", ""start"": 10180, ""end"": 10183, ""text"": ""TUE""}, {""label"": ""Line Item - Rate"", ""start"": 10191, ""end"": 10197, ""text"": ""375.00""}, {""label"": ""Line Item - Start Date"", ""start"": 10198, ""end"": 10202, ""text"": ""9/20""}, {""label"": ""Line Item - End Date"", ""start"": 10203, ""end"": 10207, ""text"": ""9/20""}, {""label"": ""Line Item - Days"", ""start"": 10210, ""end"": 10213, ""text"": ""TUE""}, {""label"": ""Line Item - Rate"", ""start"": 10220, ""end"": 10226, ""text"": ""275.00""}, {""label"": ""Line Item - Start Date"", ""start"": 10227, ""end"": 10231, ""text"": ""9/20""}, {""label"": ""Line Item - End Date"", ""start"": 10232, ""end"": 10236, ""text"": ""9/20""}, {""label"": ""Line Item - Days"", ""start"": 10239, ""end"": 10242, ""text"": ""TUE""}, {""label"": ""Line Item - Description"", ""start"": 10260, ""end"": 10279, ""text"": ""LATE SHOW - COLBERT""}, {""label"": ""Line Item - Description"", ""start"": 10338, ""end"": 10352, ""text"": ""LATE LATE SHOW""}, {""label"": ""Line Item - Description"", ""start"": 10405, ""end"": 10421, ""text"": ""YOUNG & RESTLESS""}, {""label"": ""Line Item - Rate"", ""start"": 10455, ""end"": 10461, ""text"": ""165.00""}, {""label"": ""Line Item - Start Date"", ""start"": 10462, ""end"": 10466, ""text"": ""9/20""}, {""label"": ""Line Item - End Date"", ""start"": 10467, ""end"": 10471, ""text"": ""9/20""}, {""label"": ""Line Item - Days"", ""start"": 10474, ""end"": 10477, ""text"": ""TUE""}, {""label"": ""Line Item - Rate"", ""start"": 10481, ""end"": 10486, ""text"": ""90.00""}, {""label"": ""Line Item - Start Date"", ""start"": 10487, ""end"": 10491, ""text"": ""9/20""}, {""label"": ""Line Item - End Date"", ""start"": 10492, ""end"": 10496, ""text"": ""9/20""}, {""label"": ""Line Item - Days"", ""start"": 10499, ""end"": 10502, ""text"": ""TUE""}, {""label"": ""Line Item - Rate"", ""start"": 10510, ""end"": 10516, ""text"": ""125.00""}, {""label"": ""Line Item - Start Date"", ""start"": 10517, ""end"": 10521, ""text"": ""9/20""}, {""label"": ""Line Item - End Date"", ""start"": 10522, ""end"": 10526, ""text"": ""9/20""}, {""label"": ""Line Item - Days"", ""start"": 10529, ""end"": 10532, ""text"": ""TUE""}, {""label"": ""Line Item - Rate"", ""start"": 8497, ""end"": 8503, ""text"": ""105.00""}, {""label"": ""Line Item - Description"", ""start"": 8515, ""end"": 8532, ""text"": ""LET'S MAKE A DEAL""}, {""label"": ""Line Item - Rate"", ""start"": 8579, ""end"": 8584, ""text"": ""60.00""}, {""label"": ""Line Item - Description"", ""start"": 8596, ""end"": 8611, ""text"": ""CRIMEWTCH DAILY""}, {""label"": ""Line Item - Rate"", ""start"": 8656, ""end"": 8662, ""text"": ""125.00""}, {""label"": ""Line Item - Description"", ""start"": 8674, ""end"": 8688, ""text"": ""NEWS 13 AT 4PM""}, {""label"": ""Line Item - Rate"", ""start"": 8732, ""end"": 8737, ""text"": ""40.00""}, {""label"": ""Line Item - Description"", ""start"": 8749, ""end"": 8767, ""text"": ""KOLD AM NEWS 430AM""}, {""label"": ""Line Item - Rate"", ""start"": 8815, ""end"": 8821, ""text"": ""315.00""}, {""label"": ""Line Item - Description"", ""start"": 8833, ""end"": 8845, ""text"": ""NEWS 13 AT 5""}, {""label"": ""Line Item - Rate"", ""start"": 8887, ""end"": 8893, ""text"": ""100.00""}, {""label"": ""Line Item - Description"", ""start"": 8905, ""end"": 8922, ""text"": ""KOLD AM NEWS 5-6A""}, {""label"": ""Line Item - Rate"", ""start"": 8969, ""end"": 8975, ""text"": ""290.00""}, {""label"": ""Line Item - Description"", ""start"": 8987, ""end"": 9001, ""text"": ""NEWS 13 AT 6PM""}, {""label"": ""Line Item - Rate"", ""start"": 9045, ""end"": 9051, ""text"": ""185.00""}, {""label"": ""Line Item - Description"", ""start"": 9063, ""end"": 9080, ""text"": ""KOLD AM NEWS 6-7A""}, {""label"": ""Line Item - Rate"", ""start"": 9128, ""end"": 9134, ""text"": ""325.00""}, {""label"": ""Line Item - Description"", ""start"": 9146, ""end"": 9167, ""text"": ""ENTERTAINMENT TONIGHT""}, {""label"": ""Line Item - Start Date"", ""start"": 9201, ""end"": 9205, ""text"": ""9/22""}, {""label"": ""Line Item - End Date"", ""start"": 9206, ""end"": 9210, ""text"": ""9/22""}, {""label"": ""Line Item - Days"", ""start"": 9213, ""end"": 9216, ""text"": ""THU""}, {""label"": ""Line Item - Start Date"", ""start"": 9219, ""end"": 9223, ""text"": ""9/22""}, {""label"": ""Line Item - End Date"", ""start"": 9224, ""end"": 9228, ""text"": ""9/22""}, {""label"": ""Line Item - Days"", ""start"": 9231, ""end"": 9234, ""text"": ""THU""}, {""label"": ""Line Item - Start Date"", ""start"": 9237, ""end"": 9241, ""text"": ""9/22""}, {""label"": ""Line Item - End Date"", ""start"": 9242, ""end"": 9246, ""text"": ""9/22""}, {""label"": ""Line Item - Days"", ""start"": 9249, ""end"": 9252, ""text"": ""THU""}, {""label"": ""Line Item - Start Date"", ""start"": 9256, ""end"": 9260, ""text"": ""9/22""}, {""label"": ""Line Item - End Date"", ""start"": 9261, ""end"": 9265, ""text"": ""9/22""}, {""label"": ""Line Item - Days"", ""start"": 9268, ""end"": 9271, ""text"": ""THU""}, {""label"": ""Line Item - Start Date"", ""start"": 9274, ""end"": 9278, ""text"": ""9/22""}, {""label"": ""Line Item - End Date"", ""start"": 9279, ""end"": 9283, ""text"": ""9/22""}, {""label"": ""Line Item - Days"", ""start"": 9286, ""end"": 9289, ""text"": ""THU""}, {""label"": ""Line Item - Start Date"", ""start"": 9292, ""end"": 9296, ""text"": ""9/22""}, {""label"": ""Line Item - End Date"", ""start"": 9297, ""end"": 9301, ""text"": ""9/22""}, {""label"": ""Line Item - Days"", ""start"": 9304, ""end"": 9307, ""text"": ""THU""}, {""label"": ""Line Item - Start Date"", ""start"": 9311, ""end"": 9315, ""text"": ""9/22""}, {""label"": ""Line Item - End Date"", ""start"": 9316, ""end"": 9320, ""text"": ""9/22""}, {""label"": ""Line Item - Days"", ""start"": 9323, ""end"": 9326, ""text"": ""THU""}, {""label"": ""Line Item - Start Date"", ""start"": 9329, ""end"": 9333, ""text"": ""9/22""}, {""label"": ""Line Item - End Date"", ""start"": 9334, ""end"": 9338, ""text"": ""9/22""}, {""label"": ""Line Item - Days"", ""start"": 9341, ""end"": 9344, ""text"": ""THU""}, {""label"": ""Line Item - Start Date"", ""start"": 9347, ""end"": 9351, ""text"": ""9/22""}, {""label"": ""Line Item - End Date"", ""start"": 9352, ""end"": 9356, ""text"": ""9/22""}, {""label"": ""Line Item - Days"", ""start"": 9359, ""end"": 9362, ""text"": ""THU""}, {""label"": ""Line Item - Description"", ""start"": 7347, ""end"": 7354, ""text"": ""NCIS LA""}, {""label"": ""Line Item - Description"", ""start"": 7399, ""end"": 7407, ""text"": ""THE TALK""}, {""label"": ""Line Item - Description"", ""start"": 7455, ""end"": 7468, ""text"": ""NEWS 13 AT 10""}, {""label"": ""Line Item - Description"", ""start"": 7521, ""end"": 7535, ""text"": ""PRICE IS RIGHT""}, {""label"": ""Line Item - Rate"", ""start"": 7579, ""end"": 7585, ""text"": ""675_00""}, {""label"": ""Line Item - Rate"", ""start"": 7587, ""end"": 7593, ""text"": ""105.00""}, {""label"": ""Line Item - Rate"", ""start"": 7595, ""end"": 7601, ""text"": ""375.00""}, {""label"": ""Line Item - Rate"", ""start"": 7604, ""end"": 7610, ""text"": ""275.00""}, {""label"": ""Line Item - Rate"", ""start"": 7632, ""end"": 7638, ""text"": ""165.00""}, {""label"": ""Line Item - Description"", ""start"": 7651, ""end"": 7670, ""text"": ""LATE SHOW - COLBERT""}, {""label"": ""Line Item - Rate"", ""start"": 7721, ""end"": 7726, ""text"": ""90.00""}, {""label"": ""Line Item - Description"", ""start"": 7738, ""end"": 7752, ""text"": ""LATE LATE SHOW""}, {""label"": ""Line Item - Rate"", ""start"": 7798, ""end"": 7804, ""text"": ""125.00""}, {""label"": ""Line Item - Description"", ""start"": 7816, ""end"": 7832, ""text"": ""YOUNG & RESTLESS""}, {""label"": ""Line Item - Rate"", ""start"": 7879, ""end"": 7885, ""text"": ""135.00""}, {""label"": ""Line Item - Description"", ""start"": 7897, ""end"": 7913, ""text"": ""BOLD & BEAUTIFUL""}, {""label"": ""Line Item - Rate"", ""start"": 7962, ""end"": 7968, ""text"": ""125.00""}, {""label"": ""Line Item - Description"", ""start"": 7980, ""end"": 7995, ""text"": ""NEWS 13 AT NOON""}, {""label"": ""Line Item - Start Date"", ""start"": 8023, ""end"": 8027, ""text"": ""9/25""}, {""label"": ""Line Item - End Date"", ""start"": 8028, ""end"": 8032, ""text"": ""9/25""}, {""label"": ""Line Item - Days"", ""start"": 8035, ""end"": 8038, ""text"": ""SUN""}, {""label"": ""Line Item - Start Date"", ""start"": 8041, ""end"": 8045, ""text"": ""9/22""}, {""label"": ""Line Item - End Date"", ""start"": 8046, ""end"": 8050, ""text"": ""9/22""}, {""label"": ""Line Item - Days"", ""start"": 8053, ""end"": 8056, ""text"": ""THU""}, {""label"": ""Line Item - Start Date"", ""start"": 8059, ""end"": 8063, ""text"": ""9/22""}, {""label"": ""Line Item - End Date"", ""start"": 8064, ""end"": 8068, ""text"": ""9/22""}, {""label"": ""Line Item - Days"", ""start"": 8071, ""end"": 8074, ""text"": ""THU""}, {""label"": ""Line Item - Start Date"", ""start"": 8078, ""end"": 8082, ""text"": ""9/22""}, {""label"": ""Line Item - End Date"", ""start"": 8083, ""end"": 8087, ""text"": ""9/22""}, {""label"": ""Line Item - Days"", ""start"": 8090, ""end"": 8093, ""text"": ""THU""}, {""label"": ""Line Item - Start Date"", ""start"": 8096, ""end"": 8100, ""text"": ""9/22""}, {""label"": ""Line Item - End Date"", ""start"": 8101, ""end"": 8105, ""text"": ""9/22""}, {""label"": ""Line Item - Days"", ""start"": 8108, ""end"": 8111, ""text"": ""THU""}, {""label"": ""Line Item - Start Date"", ""start"": 8114, ""end"": 8118, ""text"": ""9/22""}, {""label"": ""Line Item - End Date"", ""start"": 8119, ""end"": 8123, ""text"": ""9/22""}, {""label"": ""Line Item - Days"", ""start"": 8126, ""end"": 8129, ""text"": ""THU""}, {""label"": ""Line Item - Start Date"", ""start"": 8133, ""end"": 8137, ""text"": ""9/22""}, {""label"": ""Line Item - End Date"", ""start"": 8138, ""end"": 8142, ""text"": ""9/22""}, {""label"": ""Line Item - Days"", ""start"": 8145, ""end"": 8148, ""text"": ""THU""}, {""label"": ""Line Item - Start Date"", ""start"": 8151, ""end"": 8155, ""text"": ""9/22""}, {""label"": ""Line Item - End Date"", ""start"": 8156, ""end"": 8160, ""text"": ""9/22""}, {""label"": ""Line Item - Days"", ""start"": 8163, ""end"": 8166, ""text"": ""THU""}, {""label"": ""Line Item - Start Date"", ""start"": 8169, ""end"": 8173, ""text"": ""9/22""}, {""label"": ""Line Item - End Date"", ""start"": 8174, ""end"": 8178, ""text"": ""9/22""}, {""label"": ""Line Item - Days"", ""start"": 8181, ""end"": 8184, ""text"": ""THU""}, {""label"": ""Line Item - Description"", ""start"": 6180, ""end"": 6199, ""text"": ""PRESIDENTIAL DEBATE""}, {""label"": ""Line Item - Description"", ""start"": 6257, ""end"": 6265, ""text"": ""SCORPION""}, {""label"": ""Line Item - Rate"", ""start"": 6287, ""end"": 6293, ""text"": ""500.00""}, {""label"": ""Line Item - Start Date"", ""start"": 6294, ""end"": 6298, ""text"": ""9/26""}, {""label"": ""Line Item - End Date"", ""start"": 6300, ""end"": 6304, ""text"": ""9/26""}, {""label"": ""Line Item - Days"", ""start"": 6307, ""end"": 6310, ""text"": ""MON""}, {""label"": ""Line Item - Rate"", ""start"": 6318, ""end"": 6324, ""text"": ""775.00""}, {""label"": ""Line Item - Start Date"", ""start"": 6325, ""end"": 6329, ""text"": ""9/26""}, {""label"": ""Line Item - End Date"", ""start"": 6330, ""end"": 6334, ""text"": ""9/26""}, {""label"": ""Line Item - Days"", ""start"": 6337, ""end"": 6340, ""text"": ""MON""}, {""label"": ""Line Item - Rate"", ""start"": 6362, ""end"": 6367, ""text"": ""60.00""}, {""label"": ""Line Item - Description"", ""start"": 6379, ""end"": 6397, ""text"": ""FIX IT & FINISH IT""}, {""label"": ""Line Item - Rate"", ""start"": 6447, ""end"": 6453, ""text"": ""225.00""}, {""label"": ""Line Item - Description"", ""start"": 6465, ""end"": 6484, ""text"": ""NEWS 13 SAT AT 10PM""}, {""label"": ""Line Item - Rate"", ""start"": 6533, ""end"": 6539, ""text"": ""125.00""}, {""label"": ""Line Item - Description"", ""start"": 6551, ""end"": 6571, ""text"": ""NEWS 13 SAT AT 530PM""}, {""label"": ""Line Item - Rate"", ""start"": 6622, ""end"": 6628, ""text"": ""325.00""}, {""label"": ""Line Item - Description"", ""start"": 6640, ""end"": 6648, ""text"": ""48 HOURS""}, {""label"": ""Line Item - Rate"", ""start"": 6688, ""end"": 6694, ""text"": ""300.00""}, {""label"": ""Line Item - Description"", ""start"": 6706, ""end"": 6724, ""text"": ""NEWS 13 SUN AT 10P""}, {""label"": ""Line Item - Rate"", ""start"": 6772, ""end"": 6778, ""text"": ""200.00""}, {""label"": ""Line Item - Description"", ""start"": 6790, ""end"": 6809, ""text"": ""NEWS 13 SUN AT 530P""}, {""label"": ""Line Item - Rate"", ""start"": 6859, ""end"": 6865, ""text"": ""525.00""}, {""label"": ""Line Item - Description"", ""start"": 6876, ""end"": 6886, ""text"": ""60 MINUTES""}, {""label"": ""Line Item - Start Date"", ""start"": 6909, ""end"": 6913, ""text"": ""9/26""}, {""label"": ""Line Item - End Date"", ""start"": 6914, ""end"": 6918, ""text"": ""9/26""}, {""label"": ""Line Item - Days"", ""start"": 6921, ""end"": 6924, ""text"": ""MON""}, {""label"": ""Line Item - Start Date"", ""start"": 6928, ""end"": 6932, ""text"": ""9/24""}, {""label"": ""Line Item - End Date"", ""start"": 6933, ""end"": 6937, ""text"": ""9/24""}, {""label"": ""Line Item - Days"", ""start"": 6940, ""end"": 6943, ""text"": ""SAT""}, {""label"": ""Line Item - Start Date"", ""start"": 6946, ""end"": 6950, ""text"": ""9/24""}, {""label"": ""Line Item - End Date"", ""start"": 6951, ""end"": 6955, ""text"": ""9/24""}, {""label"": ""Line Item - Days"", ""start"": 6958, ""end"": 6961, ""text"": ""SAT""}, {""label"": ""Line Item - Start Date"", ""start"": 6964, ""end"": 6968, ""text"": ""9/24""}, {""label"": ""Line Item - End Date"", ""start"": 6969, ""end"": 6973, ""text"": ""9/24""}, {""label"": ""Line Item - Days"", ""start"": 6976, ""end"": 6979, ""text"": ""SAT""}, {""label"": ""Line Item - Start Date"", ""start"": 6983, ""end"": 6987, ""text"": ""9/25""}, {""label"": ""Line Item - End Date"", ""start"": 6988, ""end"": 6992, ""text"": ""9/25""}, {""label"": ""Line Item - Days"", ""start"": 6995, ""end"": 6998, ""text"": ""SUN""}, {""label"": ""Line Item - Start Date"", ""start"": 7001, ""end"": 7005, ""text"": ""9/25""}, {""label"": ""Line Item - End Date"", ""start"": 7006, ""end"": 7010, ""text"": ""9/25""}, {""label"": ""Line Item - Days"", ""start"": 7013, ""end"": 7016, ""text"": ""SUN""}, {""label"": ""Line Item - Start Date"", ""start"": 7019, ""end"": 7023, ""text"": ""9/25""}, {""label"": ""Line Item - End Date"", ""start"": 7024, ""end"": 7028, ""text"": ""9/25""}, {""label"": ""Line Item - Days"", ""start"": 7031, ""end"": 7034, ""text"": ""SUN""}, {""label"": ""Line Item - Rate"", ""start"": 4992, ""end"": 4998, ""text"": ""125.00""}, {""label"": ""Line Item - Description"", ""start"": 5010, ""end"": 5024, ""text"": ""NEWS 13 AT 4PM""}, {""label"": ""Line Item - Rate"", ""start"": 5068, ""end"": 5073, ""text"": ""40.00""}, {""label"": ""Line Item - Description"", ""start"": 5085, ""end"": 5103, ""text"": ""KOLD AM NEWS 430AM""}, {""label"": ""Line Item - Rate"", ""start"": 5151, ""end"": 5157, ""text"": ""315.00""}, {""label"": ""Line Item - Description"", ""start"": 5169, ""end"": 5181, ""text"": ""NEWS 13 AT 5""}, {""label"": ""Line Item - Rate"", ""start"": 5223, ""end"": 5229, ""text"": ""100.00""}, {""label"": ""Line Item - Description"", ""start"": 5241, ""end"": 5258, ""text"": ""KOLD AM NEWS 5-6A""}, {""label"": ""Line Item - Rate"", ""start"": 5305, ""end"": 5311, ""text"": ""290.00""}, {""label"": ""Line Item - Description"", ""start"": 5323, ""end"": 5337, ""text"": ""NEWS 13 AT 6PM""}, {""label"": ""Line Item - Rate"", ""start"": 5381, ""end"": 5387, ""text"": ""185.00""}, {""label"": ""Line Item - Description"", ""start"": 5399, ""end"": 5416, ""text"": ""KOLD AM NEWS 6-7A""}, {""label"": ""Line Item - Rate"", ""start"": 5463, ""end"": 5469, ""text"": ""325.00""}, {""label"": ""Line Item - Description"", ""start"": 5481, ""end"": 5502, ""text"": ""ENTERTAINMENT TONIGHT""}, {""label"": ""Line Item - Rate"", ""start"": 5553, ""end"": 5559, ""text"": ""500.00""}, {""label"": ""Line Item - Description"", ""start"": 5571, ""end"": 5590, ""text"": ""PRESIDENTIAL DEBATE""}, {""label"": ""Line Item - Rate"", ""start"": 5640, ""end"": 5646, ""text"": ""125.00""}, {""label"": ""Line Item - Description"", ""start"": 5658, ""end"": 5674, ""text"": ""CBS THIS MORNING""}, {""label"": ""Line Item - Start Date"", ""start"": 5703, ""end"": 5707, ""text"": ""9/26""}, {""label"": ""Line Item - End Date"", ""start"": 5708, ""end"": 5712, ""text"": ""9/26""}, {""label"": ""Line Item - Days"", ""start"": 5715, ""end"": 5718, ""text"": ""MON""}, {""label"": ""Line Item - Start Date"", ""start"": 5721, ""end"": 5725, ""text"": ""9/26""}, {""label"": ""Line Item - End Date"", ""start"": 5726, ""end"": 5730, ""text"": ""9/26""}, {""label"": ""Line Item - Days"", ""start"": 5733, ""end"": 5736, ""text"": ""MON""}, {""label"": ""Line Item - Start Date"", ""start"": 5739, ""end"": 5743, ""text"": ""9/26""}, {""label"": ""Line Item - End Date"", ""start"": 5744, ""end"": 5748, ""text"": ""9/26""}, {""label"": ""Line Item - Days"", ""start"": 5751, ""end"": 5754, ""text"": ""MON""}, {""label"": ""Line Item - Start Date"", ""start"": 5758, ""end"": 5762, ""text"": ""9/26""}, {""label"": ""Line Item - End Date"", ""start"": 5763, ""end"": 5767, ""text"": ""9/26""}, {""label"": ""Line Item - Days"", ""start"": 5770, ""end"": 5773, ""text"": ""MON""}, {""label"": ""Line Item - Start Date"", ""start"": 5776, ""end"": 5780, ""text"": ""9/26""}, {""label"": ""Line Item - End Date"", ""start"": 5781, ""end"": 5785, ""text"": ""9/26""}, {""label"": ""Line Item - Days"", ""start"": 5788, ""end"": 5791, ""text"": ""MON""}, {""label"": ""Line Item - Start Date"", ""start"": 5794, ""end"": 5798, ""text"": ""9/26""}, {""label"": ""Line Item - End Date"", ""start"": 5799, ""end"": 5803, ""text"": ""9/26""}, {""label"": ""Line Item - Days"", ""start"": 5806, ""end"": 5809, ""text"": ""MON""}, {""label"": ""Line Item - Start Date"", ""start"": 5813, ""end"": 5817, ""text"": ""9/26""}, {""label"": ""Line Item - End Date"", ""start"": 5818, ""end"": 5822, ""text"": ""9/26""}, {""label"": ""Line Item - Days"", ""start"": 5825, ""end"": 5828, ""text"": ""MON""}, {""label"": ""Line Item - Start Date"", ""start"": 5831, ""end"": 5835, ""text"": ""9/26""}, {""label"": ""Line Item - End Date"", ""start"": 5836, ""end"": 5840, ""text"": ""9/26""}, {""label"": ""Line Item - Days"", ""start"": 5843, ""end"": 5846, ""text"": ""MON""}, {""label"": ""Line Item - Start Date"", ""start"": 5849, ""end"": 5853, ""text"": ""9/26""}, {""label"": ""Line Item - End Date"", ""start"": 5854, ""end"": 5858, ""text"": ""9/26""}, {""label"": ""Line Item - Days"", ""start"": 5861, ""end"": 5864, ""text"": ""MON""}, {""label"": ""Line Item - Rate"", ""start"": 3838, ""end"": 3843, ""text"": ""60.00""}, {""label"": ""Line Item - Description"", ""start"": 3855, ""end"": 3872, ""text"": ""RIGHT THIS MINUTE""}, {""label"": ""Line Item - Rate"", ""start"": 3919, ""end"": 3925, ""text"": ""105.00""}, {""label"": ""Line Item - Description"", ""start"": 3937, ""end"": 3945, ""text"": ""THE TALK""}, {""label"": ""Line Item - Rate"", ""start"": 3985, ""end"": 3991, ""text"": ""375.00""}, {""label"": ""Line Item - Description"", ""start"": 4003, ""end"": 4016, ""text"": ""NEWS 13 AT 10""}, {""label"": ""Line Item - Rate"", ""start"": 4061, ""end"": 4067, ""text"": ""275.00""}, {""label"": ""Line Item - Description"", ""start"": 4079, ""end"": 4093, ""text"": ""PRICE IS RIGHT""}, {""label"": ""Line Item - Rate"", ""start"": 4139, ""end"": 4145, ""text"": ""165.00""}, {""label"": ""Line Item - Description"", ""start"": 4157, ""end"": 4176, ""text"": ""LATE SHOW - COLBERT""}, {""label"": ""Line Item - Rate"", ""start"": 4227, ""end"": 4233, ""text"": ""125.00""}, {""label"": ""Line Item - Description"", ""start"": 4245, ""end"": 4261, ""text"": ""YOUNG & RESTLESS""}, {""label"": ""Line Item - Rate"", ""start"": 4308, ""end"": 4314, ""text"": ""135.00""}, {""label"": ""Line Item - Description"", ""start"": 4326, ""end"": 4342, ""text"": ""BOLD & BEAUTIFUL""}, {""label"": ""Line Item - Rate"", ""start"": 4390, ""end"": 4396, ""text"": ""125.00""}, {""label"": ""Line Item - Description"", ""start"": 4408, ""end"": 4423, ""text"": ""NEWS 13 AT NOON""}, {""label"": ""Line Item - Rate"", ""start"": 4468, ""end"": 4474, ""text"": ""105.00""}, {""label"": ""Line Item - Description"", ""start"": 4486, ""end"": 4503, ""text"": ""LET'S MAKE A DEAL""}, {""label"": ""Line Item - Start Date"", ""start"": 4533, ""end"": 4537, ""text"": ""9/23""}, {""label"": ""Line Item - End Date"", ""start"": 4538, ""end"": 4542, ""text"": ""9/23""}, {""label"": ""Line Item - Days"", ""start"": 4545, ""end"": 4548, ""text"": ""FRI""}, {""label"": ""Line Item - Start Date"", ""start"": 4551, ""end"": 4555, ""text"": ""9/26""}, {""label"": ""Line Item - End Date"", ""start"": 4556, ""end"": 4560, ""text"": ""9/26""}, {""label"": ""Line Item - Days"", ""start"": 4563, ""end"": 4566, ""text"": ""MON""}, {""label"": ""Line Item - Start Date"", ""start"": 4569, ""end"": 4573, ""text"": ""9/26""}, {""label"": ""Line Item - End Date"", ""start"": 4574, ""end"": 4578, ""text"": ""9/26""}, {""label"": ""Line Item - Days"", ""start"": 4581, ""end"": 4584, ""text"": ""MON""}, {""label"": ""Line Item - Start Date"", ""start"": 4587, ""end"": 4591, ""text"": ""9/26""}, {""label"": ""Line Item - End Date"", ""start"": 4592, ""end"": 4596, ""text"": ""9/26""}, {""label"": ""Line Item - Days"", ""start"": 4599, ""end"": 4602, ""text"": ""MON""}, {""label"": ""Line Item - Start Date"", ""start"": 4606, ""end"": 4610, ""text"": ""9/26""}, {""label"": ""Line Item - End Date"", ""start"": 4611, ""end"": 4615, ""text"": ""9/26""}, {""label"": ""Line Item - Days"", ""start"": 4618, ""end"": 4621, ""text"": ""MON""}, {""label"": ""Line Item - Start Date"", ""start"": 4622, ""end"": 4626, ""text"": ""9/26""}, {""label"": ""Line Item - End Date"", ""start"": 4627, ""end"": 4631, ""text"": ""9/26""}, {""label"": ""Line Item - Days"", ""start"": 4634, ""end"": 4637, ""text"": ""MON""}, {""label"": ""Line Item - Start Date"", ""start"": 4640, ""end"": 4644, ""text"": ""9/26""}, {""label"": ""Line Item - End Date"", ""start"": 4645, ""end"": 4649, ""text"": ""9/26""}, {""label"": ""Line Item - Days"", ""start"": 4652, ""end"": 4655, ""text"": ""MON""}, {""label"": ""Line Item - Start Date"", ""start"": 4658, ""end"": 4662, ""text"": ""9/26""}, {""label"": ""Line Item - End Date"", ""start"": 4663, ""end"": 4667, ""text"": ""9/26""}, {""label"": ""Line Item - Days"", ""start"": 4670, ""end"": 4673, ""text"": ""MON""}, {""label"": ""Line Item - Start Date"", ""start"": 4676, ""end"": 4680, ""text"": ""9/26""}, {""label"": ""Line Item - End Date"", ""start"": 4681, ""end"": 4685, ""text"": ""9/26""}, {""label"": ""Line Item - Days"", ""start"": 4688, ""end"": 4691, ""text"": ""MON""}, {""label"": ""Line Item - Rate"", ""start"": 2689, ""end"": 2695, ""text"": ""315.00""}, {""label"": ""Line Item - Description"", ""start"": 2707, ""end"": 2719, ""text"": ""NEWS 13 AT 5""}, {""label"": ""Line Item - Rate"", ""start"": 2761, ""end"": 2767, ""text"": ""100.00""}, {""label"": ""Line Item - Description"", ""start"": 2779, ""end"": 2796, ""text"": ""KOLD AM NEWS 5-6A""}, {""label"": ""Line Item - Rate"", ""start"": 2843, ""end"": 2849, ""text"": ""190.00""}, {""label"": ""Line Item - Description"", ""start"": 2861, ""end"": 2875, ""text"": ""NEWS 13 AT 6PM""}, {""label"": ""Line Item - Rate"", ""start"": 2919, ""end"": 2925, ""text"": ""185.00""}, {""label"": ""Line Item - Description"", ""start"": 2937, ""end"": 2954, ""text"": ""KOLD AM NEWS 6-7A""}, {""label"": ""Line Item - Rate"", ""start"": 3001, ""end"": 3007, ""text"": ""325.00""}, {""label"": ""Line Item - Description"", ""start"": 3019, ""end"": 3040, ""text"": ""ENTERTAINMENT TONIGHT""}, {""label"": ""Line Item - Rate"", ""start"": 3091, ""end"": 3097, ""text"": ""375.00""}, {""label"": ""Line Item - Description"", ""start"": 3109, ""end"": 3117, ""text"": ""MACGYVER""}, {""label"": ""Line Item - Rate"", ""start"": 3155, ""end"": 3161, ""text"": ""125.00""}, {""label"": ""Line Item - Description"", ""start"": 3173, ""end"": 3189, ""text"": ""CBS THIS MORNING""}, {""label"": ""Line Item - Rate"", ""start"": 3236, ""end"": 3244, ""text"": ""1,000.00""}, {""label"": ""Line Item - Description"", ""start"": 3256, ""end"": 3267, ""text"": ""BLUE BLOODS""}, {""label"": ""Line Item - Rate"", ""start"": 3309, ""end"": 3314, ""text"": ""60.00""}, {""label"": ""Line Item - Description"", ""start"": 3326, ""end"": 3343, ""text"": ""RIGHT THIS MINUTE""}, {""label"": ""Line Item - Start Date"", ""start"": 3373, ""end"": 3377, ""text"": ""9/23""}, {""label"": ""Line Item - End Date"", ""start"": 3378, ""end"": 3382, ""text"": ""9/23""}, {""label"": ""Line Item - Days"", ""start"": 3385, ""end"": 3388, ""text"": ""FRI""}, {""label"": ""Line Item - Start Date"", ""start"": 3391, ""end"": 3395, ""text"": ""9/23""}, {""label"": ""Line Item - End Date"", ""start"": 3396, ""end"": 3400, ""text"": ""9/23""}, {""label"": ""Line Item - Days"", ""start"": 3403, ""end"": 3406, ""text"": ""FRI""}, {""label"": ""Line Item - Start Date"", ""start"": 3409, ""end"": 3413, ""text"": ""9/23""}, {""label"": ""Line Item - End Date"", ""start"": 3414, ""end"": 3418, ""text"": ""9/23""}, {""label"": ""Line Item - Days"", ""start"": 3421, ""end"": 3424, ""text"": ""FRI""}, {""label"": ""Line Item - Start Date"", ""start"": 3428, ""end"": 3432, ""text"": ""9/23""}, {""label"": ""Line Item - End Date"", ""start"": 3433, ""end"": 3437, ""text"": ""9/23""}, {""label"": ""Line Item - Days"", ""start"": 3440, ""end"": 3443, ""text"": ""FRI""}, {""label"": ""Line Item - Start Date"", ""start"": 3446, ""end"": 3450, ""text"": ""9/23""}, {""label"": ""Line Item - End Date"", ""start"": 3451, ""end"": 3455, ""text"": ""9/23""}, {""label"": ""Line Item - Days"", ""start"": 3458, ""end"": 3461, ""text"": ""FRI""}, {""label"": ""Line Item - Start Date"", ""start"": 3464, ""end"": 3468, ""text"": ""9/23""}, {""label"": ""Line Item - End Date"", ""start"": 3469, ""end"": 3473, ""text"": ""9/23""}, {""label"": ""Line Item - Days"", ""start"": 3476, ""end"": 3479, ""text"": ""FRI""}, {""label"": ""Line Item - Start Date"", ""start"": 3483, ""end"": 3487, ""text"": ""9/23""}, {""label"": ""Line Item - End Date"", ""start"": 3488, ""end"": 3492, ""text"": ""9/23""}, {""label"": ""Line Item - Days"", ""start"": 3495, ""end"": 3498, ""text"": ""FRI""}, {""label"": ""Line Item - Start Date"", ""start"": 3501, ""end"": 3505, ""text"": ""9/23""}, {""label"": ""Line Item - End Date"", ""start"": 3506, ""end"": 3510, ""text"": ""9/23""}, {""label"": ""Line Item - Days"", ""start"": 3513, ""end"": 3516, ""text"": ""FRI""}, {""label"": ""Line Item - Start Date"", ""start"": 3519, ""end"": 3523, ""text"": ""9/23""}, {""label"": ""Line Item - End Date"", ""start"": 3524, ""end"": 3528, ""text"": ""9/23""}, {""label"": ""Line Item - Days"", ""start"": 3531, ""end"": 3534, ""text"": ""FRI""}, {""label"": ""Line Item - Rate"", ""start"": 1517, ""end"": 1523, ""text"": ""165.00""}, {""label"": ""Line Item - Start Date"", ""start"": 1524, ""end"": 1528, ""text"": ""9/23""}, {""label"": ""Line Item - End Date"", ""start"": 1529, ""end"": 1533, ""text"": ""9/23""}, {""label"": ""Line Item - Days"", ""start"": 1536, ""end"": 1539, ""text"": ""FRI""}, {""label"": ""Line Item - Description"", ""start"": 1553, ""end"": 1572, ""text"": ""LATE SHOW - COLBERT""}, {""label"": ""Line Item - Rate"", ""start"": 1623, ""end"": 1628, ""text"": ""90.00""}, {""label"": ""Line Item - Description"", ""start"": 1640, ""end"": 1654, ""text"": ""LATE LATE SHOW""}, {""label"": ""Line Item - Rate"", ""start"": 1699, ""end"": 1705, ""text"": ""125.00""}, {""label"": ""Line Item - Description"", ""start"": 1717, ""end"": 1733, ""text"": ""YOUNG & RESTLESS""}, {""label"": ""Line Item - Rate"", ""start"": 1779, ""end"": 1785, ""text"": ""135.00""}, {""label"": ""Line Item - Description"", ""start"": 1797, ""end"": 1813, ""text"": ""BOLD & BEAUTIFUL""}, {""label"": ""Line Item - Rate"", ""start"": 1860, ""end"": 1866, ""text"": ""125.00""}, {""label"": ""Line Item - Description"", ""start"": 1878, ""end"": 1893, ""text"": ""NEWS 13 AT NOON""}, {""label"": ""Line Item - Rate"", ""start"": 1937, ""end"": 1943, ""text"": ""105.00""}, {""label"": ""Line Item - Description"", ""start"": 1955, ""end"": 1972, ""text"": ""LET'S MAKE A DEAL""}, {""label"": ""Line Item - Rate"", ""start"": 2019, ""end"": 2024, ""text"": ""60.00""}, {""label"": ""Line Item - Description"", ""start"": 2036, ""end"": 2051, ""text"": ""CRIMEWTCH DAILY""}, {""label"": ""Line Item - Rate"", ""start"": 2096, ""end"": 2102, ""text"": ""125.00""}, {""label"": ""Line Item - Description"", ""start"": 2114, ""end"": 2128, ""text"": ""NEWS 13 AT 4PM""}, {""label"": ""Line Item - Rate"", ""start"": 2173, ""end"": 2178, ""text"": ""40.00""}, {""label"": ""Line Item - Description"", ""start"": 2190, ""end"": 2208, ""text"": ""KOLD AM NEWS 430AM""}, {""label"": ""Line Item - Start Date"", ""start"": 2239, ""end"": 2243, ""text"": ""9/23""}, {""label"": ""Line Item - End Date"", ""start"": 2244, ""end"": 2248, ""text"": ""9/23""}, {""label"": ""Line Item - Days"", ""start"": 2251, ""end"": 2254, ""text"": ""FRI""}, {""label"": ""Line Item - Start Date"", ""start"": 2258, ""end"": 2262, ""text"": ""9/23""}, {""label"": ""Line Item - End Date"", ""start"": 2263, ""end"": 2267, ""text"": ""9/23""}, {""label"": ""Line Item - Days"", ""start"": 2270, ""end"": 2273, ""text"": ""FRI""}, {""label"": ""Line Item - Start Date"", ""start"": 2277, ""end"": 2281, ""text"": ""9/23""}, {""label"": ""Line Item - End Date"", ""start"": 2282, ""end"": 2286, ""text"": ""9/23""}, {""label"": ""Line Item - Days"", ""start"": 2289, ""end"": 2292, ""text"": ""FRI""}, {""label"": ""Line Item - Start Date"", ""start"": 2295, ""end"": 2299, ""text"": ""9/23""}, {""label"": ""Line Item - End Date"", ""start"": 2300, ""end"": 2304, ""text"": ""9/23""}, {""label"": ""Line Item - Days"", ""start"": 2307, ""end"": 2310, ""text"": ""FRI""}, {""label"": ""Line Item - Start Date"", ""start"": 2313, ""end"": 2317, ""text"": ""9/23""}, {""label"": ""Line Item - End Date"", ""start"": 2318, ""end"": 2322, ""text"": ""9/23""}, {""label"": ""Line Item - Days"", ""start"": 2325, ""end"": 2328, ""text"": ""FRI""}, {""label"": ""Line Item - Start Date"", ""start"": 2332, ""end"": 2336, ""text"": ""9/23""}, {""label"": ""Line Item - End Date"", ""start"": 2337, ""end"": 2341, ""text"": ""9/23""}, {""label"": ""Line Item - Days"", ""start"": 2344, ""end"": 2347, ""text"": ""FRI""}, {""label"": ""Line Item - Start Date"", ""start"": 2350, ""end"": 2354, ""text"": ""9/23""}, {""label"": ""Line Item - End Date"", ""start"": 2355, ""end"": 2359, ""text"": ""9/23""}, {""label"": ""Line Item - Days"", ""start"": 2362, ""end"": 2365, ""text"": ""FRI""}, {""label"": ""Line Item - Start Date"", ""start"": 2368, ""end"": 2372, ""text"": ""9/23""}, {""label"": ""Line Item - End Date"", ""start"": 2373, ""end"": 2377, ""text"": ""9/23""}, {""label"": ""Line Item - Days"", ""start"": 2380, ""end"": 2383, ""text"": ""FRI""}]",fcc_invoices/ocr/34d4c874dd87752d683e4763e9333559.json.gz,00c7b3f3-369b-4e99-868e-f2cb09c12e49.pdf,"REP: TEL# 703-528-9967
+REP HEADLINE# 8372114 ORDER WORKSHEET
+*** ORIGINAL REV#0 ***
+
+FAX# 703-516-9680
+HARRIS REPORT FROM REP SEP16/16 17.31
+*** KOLD-TV ***
+
+ADV #
+
+AGY #
+
+ADV. NAME POLI/M HEINZ/D/CON/AZ REP.#
+
+OFF.# SALESMAN #
+
+AGY_ NAME BUYING TIME, LLC BUYER NAME KATHRYN WELSH
+
+650 MASSACHUSETTS AVE.N.W. #210 SALES PRSN WA- RYAN GORDON (H)
+
+WASHINGTON, DC 20001
+
+ORDER # CONTRACT # 8372114
+
+CLASS: NATL. LOCAL REGIONAL
+
+PRDCT
+
+HEINZ FOR ARIZONA
+
+EST#4996 COMMENTS: (LINE, ORDER, INVOICE)
+
+FLIGHT DATES SEP20/16 SEP26/16 WK -1
+
+CITY TAX STATE TAX
+
+REP:
+
+CON CM
+
+NEW ORDER
+TTL $24,980 8 112X
+PLS CFM
+THX, ALEX FOR FRANK
+
+***
+
+CO-OP BILLING NEEDED ____ DATE SEP16/16 17.31
+
+* THIS IS A CASH IN ADVANCE SCHEDULE *****
+
+HEINZ FOR ARIZONA
+
+:LINE#:REP :CD: TIME PERIOD : LGTH : SEC : RATE START END :SPTS: WEEK : DAYS :TOTL:
+:LINE#: DATE DATE : /WK: INVT : :SPTS:
+
+AGENCY ADVERTISER CODE = 782 AGENCY EST# = 4996
+AGENCY PRODUCT CODE = 792
+
+1 100P -200P 30 $105.00
+
+PROGRAM •: THE TALK
+CON COM1: THE TALK
+2 1000P -1035P 30 $375.00
+
+PROGRAM : NEWS 13 AT 10
+CON COM1: NEWS 13 AT 10
+
+3 1000A -1100A 30 $275.00
+
+PROGRAM : PRICE IS RIGHT
+CON COM1: PRICE IS RIGHT
+
+9/23 9/23 1 FRI 1
+9/23 9/23 1 FRI 1
+9/23 9/23 1 FRI 1
+REP: TEL# 703-528-9967
+REP HEADLINE# 8372114 ORDER WORKSHEET
+*** ORIGINAL REV00 ***
+
+FAX# 703-516-9680
+HARRIS REPORT FROM REP SEP16/16 17.31
+*** KOLD-TV ***
+
+:LINE#:REP :CD: TIME PERIOD : LGTH : SEC : RATE START END :SPTS: WEEK : DAYS :TOTL:
+
+:LINE*: : : DATE DATE : /WK: INVT : :SPTS:
+
+4
+
+1035P -1137P 30 $165.00 9/23 9/23 1 FRI 1
+
+PROGRAM : LATE SHOW - COLBERT
+CON COM1: LATE SHOW - COLBERT
+
+5 1137P -1237A 30 $90.00
+
+PROGRAM : LATE LATE SHOW
+CON COM1: LATE LATE SHOW
+6 1100A -1200N 30 $125.00
+
+PROGRAM : YOUNG & RESTLESS
+CON COM1: YOUNG & RESTLESS
+7 1230P -100P 30 $135.00
+
+PROGRAM : BOLD & BEAUTIFUL
+CON COM1: BOLD & BEAUTIFUL
+8 1200N -1230P 30 $125.00
+
+PROGRAM : NEWS 13 AT NOON
+CON COM1: NEWS 13 AT NOON
+9 200P -300P 30 $105.00
+
+PROGRAM : LET'S MAKE A DEAL
+CON COM1: LET'S MAKE A DEAL
+10 300P -400P 30 $60.00
+
+PROGRAM : CRIMEWTCH DAILY
+CON COM1: CRIMEWTCH DAILY
+11 400P -500P 30 $125.00
+
+PROGRAM : NEWS 13 AT 4PM
+CON COM1: NEWS 13 AT 4PM
+
+12 430A -459A 30 $40.00
+
+PROGRAM : KOLD AM NEWS 430AM
+CON COM1: KOLD AM NEWS 430AM
+
+9/23 9/23 1 FRI 1
+
+9/23 9/23 1 FRI 1
+
+9/23 9/23 1 FRI 1
+9/23 9/23 1 FRI 1
+9/23 9/23 1 FRI 1
+
+9/23 9/23 1 FRI 1
+9/23 9/23 1 FRI 1
+9/23 9/23 1 FRI 1
+REP: TEL# 703-528-9967
+REP HEADLINE# 8372114 ORDER WORKSHEET
+*** ORIGINAL REV#0 ***
+
+FAX# 703-516-9680
+HARRIS REPORT FROM REP SEP16/16 17.31
+*** KOLD-TV ***
+
+:LINE#:REP :CD: TIME PERIOD : LGTH : SEC : RATE START END :SPTS: WEEK : DAYS :TOTL:
+
+:LINE*: : : DATE DATE : /WK: INVT :SPTS:
+
+13 500P -530P 30 $315.00
+
+PROGRAM : NEWS 13 AT 5
+CON COM1: NEWS 13 AT 5
+14 500A -600A 30 $100.00
+
+PROGRAM : KOLD AM NEWS 5-6A
+CON COM1: KOLD AM NEWS 5-6A
+15 600P -630P 30 $190.00
+
+PROGRAM : NEWS 13 AT 6PM
+CON COM1: NEWS 13 AT 6PM
+16 600A -700A 30 $185.00
+
+PROGRAM : KOLD AM NEWS 6-7A
+CON COM1: KOLD AM NEWS 6-7A
+17 630P -700P 30 $325.00
+
+PROGRAM : ENTERTAINMENT TONIGHT
+CON COM1: ENTERTAINMENT TONIGHT
+18 700P -800P 30 $375.00
+
+PROGRAM : MACGYVER
+CON COM1: MACGYVER
+19 700A -900A 30 $125.00
+
+PROGRAM : CBS THIS MORNING
+CON COM1: CBS THIS MORNING
+20 900P -1000P 30 $1,000.00
+
+PROGRAM : BLUE BLOODS
+CON COM1: BLUE BLOODS
+
+21 900A -930A 30 $60.00
+
+PROGRAM : RIGHT THIS MINUTE
+CON COM1: RIGHT THIS MINUTE
+
+9/23 9/23 1 FRI 1
+9/23 9/23 1 FRI 1
+9/23 9/23 1 FRI 1
+
+9/23 9/23 1 FRI 1
+9/23 9/23 1 FRI 1
+9/23 9/23 1 FRI 1
+
+9/23 9/23 1 FRI 1
+9/23 9/23 1 FRI 1
+9/23 9/23 1 FRI 1
+REP: TEL# 703-528-9967
+REP HEADLINE# 8372114 ORDER WORKSHEET
+*** ORIGINAL REV*0 ***
+
+FAX# 703-516-9680
+HARRIS REPORT FROM REP SEP16/16 17.31
+*** KOLD-TV ***
+
+:LINE#:REP :CD: TIME PERIOD : LGTH : SEC : RATE START END :SPTS: WEEK : DAYS :TOTL:
+:LINE*: : DATE DATE : /WK: INVT :SPTS:
+
+22 930A -1000A 30 $60.00
+
+PROGRAM : RIGHT THIS MINUTE
+CON COM1: RIGHT THIS MINUTE
+23 100P -200P 30 $105.00
+
+PROGRAM : THE TALK
+CON COM1: THE TALK
+24 1000P -1035P 30 $375.00
+
+PROGRAM : NEWS 13 AT 10
+CON COM1: NEWS 13 AT 10
+25 1000A -1100A 30 $275.00
+
+PROGRAM : PRICE IS RIGHT
+CON COM1: PRICE IS RIGHT
+26 1035P -1137P 30 $165.00
+
+PROGRAM : LATE SHOW - COLBERT
+CON COM1: LATE SHOW - COLBERT
+27 1100A -1200N 30 $125.00
+
+PROGRAM : YOUNG & RESTLESS
+CON COM1: YOUNG & RESTLESS
+28 1230P -100P 30 $135.00
+
+PROGRAM : BOLD & BEAUTIFUL
+CON COM1: BOLD & BEAUTIFUL
+29 1200N -1230P 30 $125.00
+
+PROGRAM : NEWS 13 AT NOON
+CON COM1: NEWS 13 AT NOON
+
+30 2009-3009 30 $105.00
+
+PROGRAM : LET'S MAKE A DEAL
+CON COM1: LET'S MAKE A DEAL
+
+9/23 9/23 1 FRI 1
+9/26 9/26 1 MON 1
+9/26 9/26 1 MON 1
+9/26 9/26 1 MON 1
+
+9/26 9/26 1 MON
+9/26 9/26 1 MON 1
+9/26 9/26 1 MON 1
+9/26 9/26 1 MON 1
+9/26 9/26 1 MON 1
+REP: TEL# 703-528-9967
+REP HEADLINE# 8372114 ORDER WORKSHEET
+*** ORIGINAL REV#0 ***
+
+FAX# 703-516-9680
+HARRIS REPORT FROM REP SEP16/16 17.31
+*** KOLD-TV ***
+
+:LINE#:REP :CD: TIME PERIOD : LGTH : SEC : RATE START END :SPTS: WEEK : DAYS :TOTL:
+:LINE#: DATE DATE : /WK: INVT :SPTS:
+
+31 400P -500P 30 $125.00
+
+PROGRAM : NEWS 13 AT 4PM
+CON COM1: NEWS 13 AT 4PM
+32 430A -459A 30 $40.00
+
+PROGRAM : KOLD AM NEWS 430AM
+CON COM1: KOLD AM NEWS 430AM
+33 500P -530P 30 $315.00
+
+PROGRAM : NEWS 13 AT 5
+CON COM1: NEWS 13 AT 5
+34 500A -600A 30 $100.00
+
+PROGRAM : KOLD AM NEWS 5-6A
+CON COM1: KOLD AM NEWS 5-6A
+35 600P -630P 30 $290.00
+
+PROGRAM : NEWS 13 AT 6PM
+CON COM1: NEWS 13 AT 6PM
+36 600A -700A 30 $185.00
+
+PROGRAM : KOLD AM NEWS 6-7A
+CON COM1: KOLD AM NEWS 6-7A
+37 630P -700P 30 $325.00
+
+PROGRAM : ENTERTAINMENT TONIGHT
+CON COM1: ENTERTAINMENT TONIGHT
+38 700P -900P 30 $500.00
+
+PROGRAM : PRESIDENTIAL DEBATE
+CON COM1: PRESIDENTIAL DEBATE
+
+39 700A -900A 30 $125.00
+
+PROGRAM : CBS THIS MORNING
+CON COM1: CBS THIS MORNING
+
+9/26 9/26 1 MON 1
+9/26 9/26 1 MON 1
+9/26 9/26 1 MON 1
+
+9/26 9/26 1 MON 1
+9/26 9/26 1 MON 1
+9/26 9/26 1 MON 1
+
+9/26 9/26 1 MON 1
+9/26 9/26 1 MON 1
+9/26 9/26 1 MON 1
+REP: TEL# 703-528-9967
+REP HEADLINE# 8372114 ORDER WORKSHEET
+*** ORIGINAL REV#0 ***
+
+FAX# 703-516-9680
+HARRIS REPORT FROM REP SEP16/16 17.31
+*** KOLD-TV ***
+
+:LINE#:REP :CD: TIME PERIOD : LGTH : SEC : RATE START END :SPTS: WEEK : DAYS :TOTL:
+:LINE#: : : DATE DATE : /WK: INVT :SPTS:
+
+40 700P -900P
+
+30
+
+PROGRAM : PRESIDENTIAL DEBATE
+CON COM1: PRESIDENTIAL DEBATE
+
+41 900P -1000P
+
+PROGRAM : SCORPION
+CON COM1: SCORPION
+
+$500.00 9/26
+
+9/26 1 MON 1
+
+30 $775.00 9/26 9/26 1 MON 1
+
+42 900A -930A 30 $60.00
+
+PROGRAM : FIX IT & FINISH IT
+CON COM1: FIX IT & FINISH IT
+43 1000P -1035P 30 $225.00
+
+PROGRAM : NEWS 13 SAT AT 10PM
+CON COM1: NEWS 13 SAT AT 10PM
+44 530P -600P 30 $125.00
+
+PROGRAM : NEWS 13 SAT AT 530PM
+CON COM1: NEWS 13 SAT AT 530PM
+45 900P -1000P 30 $325.00
+
+PROGRAM : 48 HOURS
+CON COM1: 48 HOURS
+46 1000P -1035P 30 $300.00
+
+PROGRAM : NEWS 13 SUN AT 10P
+CON COM1: NEWS 13 SUN AT 109
+47 530P -600P 30 $200.00
+
+PROGRAM : NEWS 13 SUN AT 530P
+CON COM1: NEWS 13 SUN AT 530P
+
+48 600P -700P 30 $525.00
+PROGRAM : 60 MINUTES
+CON COM1: 60 MINUTES
+
+9/26 9/26 1 MON 1
+
+9/24 9/24 1 SAT 1
+9/24 9/24 1 SAT 1
+9/24 9/24 1 SAT 1
+
+9/25 9/25 1 SUN 1
+9/25 9/25 1 SUN 1
+9/25 9/25 1 SUN 1
+REP: TEL# 703-528-9967
+REP HEADLINE# 8372114 ORDER WORKSHEET
+*** ORIGINAL REV#0 ***
+
+FAX# 703-516-9680
+HARRIS REPORT FROM REP SEP16/16 17.31
+*** KOLD-TV ***
+
+:LINE#:REP :CD: TIME PERIOD : LGTH : SEC : RATE START END :SPTS: WEEK : DAYS :TOTL:
+:LINE#: : DATE : DATE : /WK: INVT :SPTS:
+
+49 900P -1000P
+
+PROGRAM : NCIS LA
+CON COM1: NCIS LA
+
+50 100P -200P
+
+PROGRAM : THE TALK
+CON COM1: THE TALK
+
+51 1000P -1035P
+
+PROGRAM : NEWS 13 AT 10
+CON COM1: NEWS 13 AT 10
+
+52 1000A -1100A
+
+PROGRAM : PRICE IS RIGHT
+CON COM1: PRICE IS RIGHT
+
+30
+
+30
+
+30
+
+30
+
+$675_00
+$105.00
+$375.00
+
+$275.00
+
+53 1035P -1137P 30 $165.00.
+
+PROGRAM : LATE SHOW - COLBERT
+CON COM1: LATE SHOW - COLBERT
+54 1137P -1237A 30 $90.00
+
+PROGRAM : LATE LATE SHOW
+CON COM1: LATE LATE SHOW
+55 1100A -1200N 30 $125.00
+
+PROGRAM : YOUNG & RESTLESS
+CON COM1: YOUNG & RESTLESS
+56 1230P -100P 30 $135.00
+
+PROGRAM : BOLD & BEAUTIFUL
+CON COM1: BOLD & BEAUTIFUL
+
+57 1200N -1230P 30 $125.00
+
+PROGRAM : NEWS 13 AT NOON
+CON COM1: NEWS 13 AT NOON
+
+9/25 9/25 1 SUN 1
+9/22 9/22 1 THU 1
+9/22 9/22 1 THU 1
+
+9/22 9/22 1 THU 1
+9/22 9/22 1 THU 1
+9/22 9/22 1 THU 1
+
+9/22 9/22 1 THU 1
+9/22 9/22 1 THU 1
+9/22 9/22 1 THU 1
+REP: TEL# 703-528-9967
+REP HEADLINE# 8372114 ORDER WORKSHEET
+*** ORIGINAL REV#0 ***
+
+FAX# 703-516-9680
+HARRIS REPORT FROM REP SEP16/16 17.31
+*** KOLD-TV ***
+
+:LINE4:REP :CD: TIME PERIOD : LGTH : SEC : RATE START : END :SPTS: WEEK : DAYS :TOTL:
+. :LINE#: : DATE . : DATE : /WK: INVT : :SPTS:
+
+58 200P -300P 30 $105.00
+
+PROGRAM : LET'S MAKE A DEAL
+CON COM1: LET'S MAKE A DEAL
+59 300P -400P 30 $60.00
+
+PROGRAM : CRIMEWTCH DAILY
+CON COM1: CRIMEWTCH DAILY
+60 400P -500P 30 $125.00
+
+PROGRAM : NEWS 13 AT 4PM
+CON COM1: NEWS 13 AT 4PM
+61 430A -459A 30 $40.00
+
+PROGRAM : KOLD AM NEWS 430AM
+CON COM1: KOLD AM NEWS 430AM
+62 500P -530P 30 $315.00
+
+PROGRAM : NEWS 13 AT 5
+CON COM1: NEWS 13 AT 5
+63 500A -600A 30 $100.00
+
+PROGRAM : KOLD AM NEWS 5-6A
+CON COM1: KOLD AM NEWS 5-6A
+64 600P -630P 30 $290.00
+
+PROGRAM : NEWS 13 AT 6PM
+CON COM1: NEWS 13 AT 6PM
+65 600A -700A 30 $185.00
+
+PROGRAM : KOLD AM NEWS 6-7A
+CON COM1: KOLD AM NEWS 6-7A
+
+66 630P -700P 30 $325.00
+
+PROGRAM : ENTERTAINMENT TONIGHT
+CON COM1: ENTERTAINMENT TONIGHT
+
+9/22 9/22 1 THU 1
+9/22 9/22 1 THU 1
+9/22 9/22 1 THU 1
+
+9/22 9/22 1 THU 1
+9/22 9/22 1 THU 1
+9/22 9/22 1 THU 1
+
+9/22 9/22 1 THU 1
+9/22 9/22 1 THU 1
+9/22 9/22 1 THU 1
+REP: TEL# 703-528-9967
+REP HEADLINE# 8372114 ORDER WORKSHEET
+*** ORIGINAL REV#0 ***
+
+FAX# 703-516-9680
+HARRIS REPORT FROM REP SEP16/16 17.31
+*** KOLD-TV ***
+
+:LINE#:REP :CD: TIME PERIOD : LGTH : SEC : RATE START
+:LINE#: DATE
+
+END :SPTS: WEEK :
+
+DATE : /WK: INVT :
+
+DAYS :TOTL:
+
+:SPTS:
+
+67 700A -900A
+
+PROGRAM : CBS THIS MORNING
+CON COM1: CBS THIS MORNING
+
+68 900A -930A
+
+PROGRAM : RIGHT THIS MINUTE
+CON COM1: RIGHT THIS MINUTE
+
+69 930A -1000A
+
+PROGRAM : RIGHT THIS MINUTE
+CON COM1: RIGHT THIS MINUTE
+
+70 100P -200P
+
+PROGRAM : THE TALK
+CON COM1: THE TALK
+
+71 1000P -1035P
+
+PROGRAM : NEWS 13 AT 10
+CON COM1: NEWS 13 AT 10
+
+72 1000A -1100A
+
+PROGRAM : PRICE IS RIGHT
+CON COM1: PRICE IS RIGHT
+
+73 1035P-:11372
+
+30 $125.00 9/22 9/22 1 THU 1
+30 $60.00 9/22 9/22 1 THU 1
+
+30 $60.00 9/22 9/22 1 THU 1
+30 $105.00 9/20 9/20 1 TUE 1
+
+30 $375.00 9/20 9/20 1 TUE 1
+30 $275.00 9/20 9/20 1 TUE 1
+
+30
+
+PROGRAM : LATE SHOW - COLBERT
+CON COM1: LATE SHOW - COLBERT
+
+74 1137P -1237A
+
+PROGRAM : LATE LATE SHOW
+CON COM1: LATE LATE SHOW
+
+75 1100A -1200N
+PROGRAM : YOUNG & RESTLESS
+CON COM1: YOUNG & RESTLESS
+
+30
+
+$165.00 9/20 9/20 1 TUE 1
+$90.00 9/20 9/20 1 TUE 1
+
+30 $125.00 9/20 9/20 1 TUE 1
+REP: TEL# 703-528-9967
+REP HEADLINE# 8372114 ORDER WORKSHEET
+*** ORIGINAL REV#0 ***
+
+FAX# 703-516-9680
+HARRIS REPORT FROM REP SEP16/16 17.31
+*** KOLD-TV ***
+
+:LINE#:REP :CD: TIME PERIOD : LGTH : SEC : RATE START END :SPTS: WEEK : DAYS :TOTL:
+
+:LINE*: : DATE : DATE : /WK: INVT : :SPTS:
+
+76 1230P -100P 30 $135.00 9/20 9/20 1 TUE 1
+
+PROGRAM : BOLD & BEAUTIFUL
+CON COM1: BOLD & BEAUTIFUL
+77 1200N -1230P 30 $125.00 9/20 9/20 1 TUE 1
+
+PROGRAM : NEWS 13 AT NOON
+CON COM1: NEWS 13 AT NOON
+78 200P -300P 30 $105.00 9/20 9/20 1 TUE 1
+
+PROGRAM : LET'S MAKE A DEAL
+CON COM1: LET'S MAKE A DEAL
+79 300P -400P 30 $60.00 9/20 9/20 1 TUE
+
+PROGRAM : CRIMEWTCH DAILY
+CON COM1: CRIMEWTCH DAILY
+80 400P -500P 30 $125.00 9/20 9/20 1 TUE 1
+
+PROGRAM : NEWS 13 AT 4PM
+CON COM1: NEWS 13 AT 4PM
+81 430A -459A 30 $40.00 9/20 9/20 1 TUE 1
+
+PROGRAM : KOLD AM NEWS 430AM
+CON COM1: KOLD AM NEWS 430AM
+82 500P -530P 30 $315.00 9/20 9/20 1 TUE 1
+
+PROGRAM : NEWS 13 AT 5
+CON COM1: NEWS 13 AT 5
+83 500A -600A 30 $100.00 9/20 9/20 1 TUE 1
+
+PROGRAM : KOLD AM NEWS 5-6A
+CON COM1: KOLD AM NEWS 5-6A
+
+84 600P -630P 30 $290.00 9/20 9/20 1 TUE 1
+
+PROGRAM : NEWS 13 AT 6PM
+CON COM1: NEWS 13 AT 6PM
+REP: TEL# 703-528-9967
+REP HEADLINE* 8372114 ORDER WORKSHEET
+*** ORIGINAL REV*0 ***
+
+FAX# 703-516-9680
+HARRIS REPORT FROM REP SEP16/16 17.31
+*** KOLD-TV ***
+
+:LINE4:REP :CD: TIME PERIOD : LGTH : SEC : RATE START END :SPTS: WEEK : DAYS :TOTL:
+:LINE4: : DATE : DATE : /WK: INVT : :SPTS:
+
+85 600A -700A
+
+PROGRAM : KOLD AM NEWS 6-7A
+CON COM1: KOLD AM NEWS 6-7A
+
+86 630P -700P
+
+30 $185.00 9/20 9/20 1 TUE 1
+30 $325.00 9/20 9/20 1 TUE 1
+
+PROGRAM : ENTERTAINMENT TONIGHT
+CON COM1: ENTERTAINMENT TONIGHT
+
+87 700A -900A
+
+PROGRAM : CBS THIS MORNING
+CON COM1: CBS THIS MORNING
+
+88 800P -900P
+
+PROGRAM : BULL
+CON COM1: BULL
+
+89 900P -1000P
+
+PROGRAM : NCIS NEW ORLEANS
+CON COM1: NCIS NEW ORLEANS
+
+90 900A -930A
+
+PROGRAM : RIGHT THIS MINUTE
+CON COM1: RIGHT THIS MINUTE
+
+91 930A -1000A
+
+PROGRAM : RIGHT THIS MINUTE
+CON COM1: RIGHT THIS MINUTE
+
+92 100P-2009
+
+PROGRAM : THE TALK
+CON COM1: THE TALK
+93 1000P -1035P
+PROGRAM : NEWS 13 AT 10
+CON COM1: NEWS 13 AT 10
+
+30 $125.00 9/20 9/20 1 TUE 1
+30 $1',100.00 9/20 9/20 1 TUE
+
+30 $1,100.00 9/20 9/20 1 TUE 1
+30 $60.00 9/20 9/20 1 TUE 1
+
+30 $60.00 9/20 9/20 1 TUE 1
+30 $105.00 9/21 9/21 1 WED 1
+
+30 $375.00 9/21 9/21 1 WED 1
+REP: TEL# 703-528-9967
+REP HEADLINE# 8372114 ORDER WORKSHEET
+*** ORIGINAL REV#0 ***
+
+FAX# 703-516-9680
+HARRIS REPORT FROM REP SEP16/16 17.31
+*** KOLD-TV ***
+
+:LINE#:REP :CD: TIME PERIOD : LGTH : SEC : RATE START END :SPTS: WEEK : DAYS :TOTL:
+:LINE*: : DATE : DATE : /WK: INVT :SPTS:
+
+94 1000A -1100A
+
+PROGRAM : PRICE IS RIGHT
+CON COM1: PRICE IS RIGHT
+
+95 1035P -1137P
+
+30 $275.00 9/21 9/21 1 WED 1
+
+30 $165.00 9/21 9/21 1 WED 1
+
+PROGRAM : LATE SHOW - COLBERT
+CON COM1: LATE SHOW - COLBERT
+
+96 1137P -1237A 30 $90.00 9/21 9/21 1 WED 1
+
+PROGRAM : LATE LATE SHOW
+CON COM1: LATE LATE SHOW
+97 1100A -1200N 30 $125.00 9/21 9/21 1 WED 1
+
+PROGRAM : YOUNG & RESTLESS
+CON COM1: YOUNG & RESTLESS
+98 1200N -1230P 30 $125.00 9/21 9/21 1 WED 1
+
+PROGRAM : NEWS 13 AT NOON
+CON COM1: NEWS 13 AT NOON
+99 200P -300P 30 $105.00 9/21 9/21 1 WED 1
+
+PROGRAM : LET'S MAKE A DEAL
+CON COM1: LET'S MAKE A DEAL
+100 300P -400P 30 $60.00 9/21 9/21 1 WED 1
+
+PROGRAM : CRIMEWTCH DAILY
+CON COM1: CRIMEWTCH DAILY
+101 400P -500P 30 $125.00 9/21 9/21 1 WED 1
+
+PROGRAM : NEWS 13 AT 4PM
+CON COM1: NEWS 13 AT 4PM
+
+102 430A -459A 30 $40.00 9/21 9/21 1 WED 1
+
+PROGRAM : KOLD AM NEWS 430AM
+CON COM1: KOLD AM NEWS 430AM
+REP: TEL# 703-528-9967
+REP HEADLINE* 8372114 ORDER WORKSHEET
+*** ORIGINAL REV#0 ***
+
+FAX# 703-516-9680
+HARRIS REPORT FROM REP SEP16/16 17.31
+*** KOLD-TV ***
+
+:LINE#:REP :CD: TIME PERIOD : LGTH : SEC : RATE START END :SPTS: WEEK : DAYS :TOTL:
+:LINE#: : DATE DATE : /WK: INVT : :SPTS:
+
+103 500P -530P 30 $315.00
+
+PROGRAM : NEWS 13 AT 5
+CON COM1: NEWS 13 AT 5
+104 500A -600A 30 $100.00
+
+PROGRAM : KOLD AM NEWS 5-6A
+CON COM1: KOLD AM NEWS 5-6A
+105 600P -630P 30 $290.00
+
+PROGRAM : NEWS 13 AT 6PM
+CON COM1: NEWS 13 AT 6PM
+106 600A -700A 30 $185.00
+
+PROGRAM : KOLD AM NEWS 6-7A
+CON COM1: KOLD AM NEWS 6-7A
+107 630P -700P 30 $325.00
+
+PROGRAM : ENTERTAINMENT TONIGHT
+CON COM1: ENTERTAINMENT TONIGHT
+108 700A -900A 30 $125_00
+
+PROGRAM : CBS THIS MORNING
+CON COM1: CBS THIS MORNING
+109 800P -900P 30 $1,100.00
+
+PROGRAM : CRIMINAL MINDS
+CON COM1: CRIMINAL MINDS
+110 900P -1000P 30 $675.00
+
+PROGRAM : CODE BLACK
+CON COM1: CODE BLACK
+
+111 900A -930A 30 $60.00
+
+PROGRAM : RIGHT THIS MINUTE
+CON COM1: RIGHT THIS MINUTE
+
+9/21 9/21 1 WED 1
+9/21 9/21 1 WED 1
+9/21 9/21 1 WED 1
+
+9/21 9/21 1 WED 1
+9/21 9/21 1 WED 1
+9/21 9/21 1 WED 1
+
+9/21 9/21 1 WED 1
+9/21 9/21 1 WED 1
+9/21 9/21 1 WED 1
+REP: TEL# 703-528-9967
+REP HEADLINE* 8372114 ORDER WORKSHEET
+*** ORIGINAL REV#0 ***
+
+FAX# 703-516-9680
+HARRIS REPORT FROM REP SEP16/16 17.31
+*** KOLD-TV ***
+
+:LINE#:REP :CD: TIME PERIOD : LGTH : SEC : RATE : START END :SPTS: WEEK : DAYS :TOTL:
+:LINE*: : : : : DATE : DATE : /WK: INVT : :SPTS:
+
+112 930A -1000A 30 $60.00 9/21 9/21 1 WED 1
+
+PROGRAM : RIGHT THIS MINUTE
+CON COM1: RIGHT THIS MINUTE
+
+SEP/16 20230.00 OCT/16 $4,750.00 CONTRACT TOTAL
+TOTAL SPOTS
+
+MARKET TOTALS $90,991
+
+ACCURATE SHARES
+
+SVC- NSI
+DEMOS- RA35-1-*
+
+KOLD 27% KGUN 27% KVOA 32% KMSB 7% KTTU 7% CABL 0% KWBA 0%
+FOLD 0%
+
+24980.00
+112",34d4c874dd87752d683e4763e9333559,"{""advertiser"": [""POLI/M HEINZ/D/CON/AZ"", ""HEINZ FOR ARIZONA""], ""agency"": [""BUYING TIME, LLC""], ""gross_total"": [""24,980"", ""24980.00""], ""payment_terms"": [""CASH IN ADVANCE""], ""line_item__rate"": [""105.00"", ""375.00"", ""275.00"", ""185.00"", ""325.00"", ""125.00"", ""1',100.00"", ""1,100.00"", ""60.00"", ""60.00"", ""105.00"", ""375.00"", ""60.00"", ""315.00"", ""100.00"", ""290.00"", ""185.00"", ""325.00"", ""125_00"", ""1,100.00"", ""675.00"", ""60.00"", ""275.00"", ""165.00"", ""90.00"", ""125.00"", ""125.00"", ""105.00"", ""60.00"", ""125.00"", ""40.00"", ""135.00"", ""125.00"", ""105.00"", ""60.00"", ""125.00"", ""40.00"", ""315.00"", ""100.00"", ""290.00"", ""125.00"", ""60.00"", ""60.00"", ""105.00"", ""375.00"", ""275.00"", ""165.00"", ""90.00"", ""125.00"", ""105.00"", ""60.00"", ""125.00"", ""40.00"", ""315.00"", ""100.00"", ""290.00"", ""185.00"", ""325.00"", ""675_00"", ""105.00"", ""375.00"", ""275.00"", ""165.00"", ""90.00"", ""125.00"", ""135.00"", ""125.00"", ""500.00"", ""775.00"", ""60.00"", ""225.00"", ""125.00"", ""325.00"", ""300.00"", ""200.00"", ""525.00"", ""125.00"", ""40.00"", ""315.00"", ""100.00"", ""290.00"", ""185.00"", ""325.00"", ""500.00"", ""125.00"", ""60.00"", ""105.00"", ""375.00"", ""275.00"", ""165.00"", ""125.00"", ""135.00"", ""125.00"", ""105.00"", ""315.00"", ""100.00"", ""190.00"", ""185.00"", ""325.00"", ""375.00"", ""125.00"", ""1,000.00"", ""60.00"", ""165.00"", ""90.00"", ""125.00"", ""135.00"", ""125.00"", ""105.00"", ""60.00"", ""125.00"", ""40.00""], ""line_item__description"": [""THE TALK"", ""NEWS 13 AT 10"", ""PRICE IS RIGHT"", ""KOLD AM NEWS 6-7A"", ""ENTERTAINMENT TONIGHT"", ""CBS THIS MORNING"", ""BULL"", ""NCIS NEW ORLEANS"", ""RIGHT THIS MINUTE"", ""RIGHT THIS MINUTE"", ""THE TALK"", ""NEWS 13 AT 10"", ""RIGHT THIS MINUTE"", ""NEWS 13 AT 5"", ""KOLD AM NEWS 5-6A"", ""NEWS 13 AT 6PM"", ""KOLD AM NEWS 6-7A"", ""ENTERTAINMENT TONIGHT"", ""CBS THIS MORNING"", ""CRIMINAL MINDS"", ""CODE BLACK"", ""RIGHT THIS MINUTE"", ""PRICE IS RIGHT"", ""LATE SHOW - COLBERT"", ""LATE LATE SHOW"", ""YOUNG & RESTLESS"", ""NEWS 13 AT NOON"", ""LET'S MAKE A DEAL"", ""CRIMEWTCH DAILY"", ""NEWS 13 AT 4PM"", ""KOLD AM NEWS 430AM"", ""BOLD & BEAUTIFUL"", ""NEWS 13 AT NOON"", ""LET'S MAKE A DEAL"", ""CRIMEWTCH DAILY"", ""NEWS 13 AT 4PM"", ""KOLD AM NEWS 430AM"", ""NEWS 13 AT 5"", ""KOLD AM NEWS 5-6A"", ""NEWS 13 AT 6PM"", ""CBS THIS MORNING"", ""RIGHT THIS MINUTE"", ""RIGHT THIS MINUTE"", ""THE TALK"", ""NEWS 13 AT 10"", ""PRICE IS RIGHT"", ""LATE SHOW - COLBERT"", ""LATE LATE SHOW"", ""YOUNG & RESTLESS"", ""LET'S MAKE A DEAL"", ""CRIMEWTCH DAILY"", ""NEWS 13 AT 4PM"", ""KOLD AM NEWS 430AM"", ""NEWS 13 AT 5"", ""KOLD AM NEWS 5-6A"", ""NEWS 13 AT 6PM"", ""KOLD AM NEWS 6-7A"", ""ENTERTAINMENT TONIGHT"", ""NCIS LA"", ""THE TALK"", ""NEWS 13 AT 10"", ""PRICE IS RIGHT"", ""LATE SHOW - COLBERT"", ""LATE LATE SHOW"", ""YOUNG & RESTLESS"", ""BOLD & BEAUTIFUL"", ""NEWS 13 AT NOON"", ""PRESIDENTIAL DEBATE"", ""SCORPION"", ""FIX IT & FINISH IT"", ""NEWS 13 SAT AT 10PM"", ""NEWS 13 SAT AT 530PM"", ""48 HOURS"", ""NEWS 13 SUN AT 10P"", ""NEWS 13 SUN AT 530P"", ""60 MINUTES"", ""NEWS 13 AT 4PM"", ""KOLD AM NEWS 430AM"", ""NEWS 13 AT 5"", ""KOLD AM NEWS 5-6A"", ""NEWS 13 AT 6PM"", ""KOLD AM NEWS 6-7A"", ""ENTERTAINMENT TONIGHT"", ""PRESIDENTIAL DEBATE"", ""CBS THIS MORNING"", ""RIGHT THIS MINUTE"", ""THE TALK"", ""NEWS 13 AT 10"", ""PRICE IS RIGHT"", ""LATE SHOW - COLBERT"", ""YOUNG & RESTLESS"", ""BOLD & BEAUTIFUL"", ""NEWS 13 AT NOON"", ""LET'S MAKE A DEAL"", ""NEWS 13 AT 5"", ""KOLD AM NEWS 5-6A"", ""NEWS 13 AT 6PM"", ""KOLD AM NEWS 6-7A"", ""ENTERTAINMENT TONIGHT"", ""MACGYVER"", ""CBS THIS MORNING"", ""BLUE BLOODS"", ""RIGHT THIS MINUTE"", ""LATE SHOW - COLBERT"", ""LATE LATE SHOW"", ""YOUNG & RESTLESS"", ""BOLD & BEAUTIFUL"", ""NEWS 13 AT NOON"", ""LET'S MAKE A DEAL"", ""CRIMEWTCH DAILY"", ""NEWS 13 AT 4PM"", ""KOLD AM NEWS 430AM""], ""line_item__start_date"": [""9/23"", ""9/23"", ""9/23"", ""9/20"", ""9/20"", ""9/20"", ""9/20"", ""9/20"", ""9/20"", ""9/20"", ""9/21"", ""9/21"", ""9/21"", ""9/21"", ""9/21"", ""9/21"", ""9/21"", ""9/21"", ""9/21"", ""9/21"", ""9/21"", ""9/21"", ""9/21"", ""9/21"", ""9/21"", ""9/21"", ""9/21"", ""9/21"", ""9/21"", ""9/21"", ""9/21"", ""9/20"", ""9/20"", ""9/20"", ""9/20"", ""9/20"", ""9/20"", ""9/20"", ""9/20"", ""9/20"", ""9/22"", ""9/22"", ""9/22"", ""9/20"", ""9/20"", ""9/20"", ""9/20"", ""9/20"", ""9/20"", ""9/22"", ""9/22"", ""9/22"", ""9/22"", ""9/22"", ""9/22"", ""9/22"", ""9/22"", ""9/22"", ""9/25"", ""9/22"", ""9/22"", ""9/22"", ""9/22"", ""9/22"", ""9/22"", ""9/22"", ""9/22"", ""9/26"", ""9/26"", ""9/26"", ""9/24"", ""9/24"", ""9/24"", ""9/25"", ""9/25"", ""9/25"", ""9/26"", ""9/26"", ""9/26"", ""9/26"", ""9/26"", ""9/26"", ""9/26"", ""9/26"", ""9/26"", ""9/23"", ""9/26"", ""9/26"", ""9/26"", ""9/26"", ""9/26"", ""9/26"", ""9/26"", ""9/26"", ""9/23"", ""9/23"", ""9/23"", ""9/23"", ""9/23"", ""9/23"", ""9/23"", ""9/23"", ""9/23"", ""9/23"", ""9/23"", ""9/23"", ""9/23"", ""9/23"", ""9/23"", ""9/23"", ""9/23"", ""9/23""], ""line_item__end_date"": [""9/23"", ""9/23"", ""9/23"", ""9/20"", ""9/20"", ""9/20"", ""9/20"", ""9/20"", ""9/20"", ""9/20"", ""9/21"", ""9/21"", ""9/21"", ""9/21"", ""9/21"", ""9/21"", ""9/21"", ""9/21"", ""9/21"", ""9/21"", ""9/21"", ""9/21"", ""9/21"", ""9/21"", ""9/21"", ""9/21"", ""9/21"", ""9/21"", ""9/21"", ""9/21"", ""9/21"", ""9/20"", ""9/20"", ""9/20"", ""9/20"", ""9/20"", ""9/20"", ""9/20"", ""9/20"", ""9/20"", ""9/22"", ""9/22"", ""9/22"", ""9/20"", ""9/20"", ""9/20"", ""9/20"", ""9/20"", ""9/20"", ""9/22"", ""9/22"", ""9/22"", ""9/22"", ""9/22"", ""9/22"", ""9/22"", ""9/22"", ""9/22"", ""9/25"", ""9/22"", ""9/22"", ""9/22"", ""9/22"", ""9/22"", ""9/22"", ""9/22"", ""9/22"", ""9/26"", ""9/26"", ""9/26"", ""9/24"", ""9/24"", ""9/24"", ""9/25"", ""9/25"", ""9/25"", ""9/26"", ""9/26"", ""9/26"", ""9/26"", ""9/26"", ""9/26"", ""9/26"", ""9/26"", ""9/26"", ""9/23"", ""9/26"", ""9/26"", ""9/26"", ""9/26"", ""9/26"", ""9/26"", ""9/26"", ""9/26"", ""9/23"", ""9/23"", ""9/23"", ""9/23"", ""9/23"", ""9/23"", ""9/23"", ""9/23"", ""9/23"", ""9/23"", ""9/23"", ""9/23"", ""9/23"", ""9/23"", ""9/23"", ""9/23"", ""9/23"", ""9/23""], ""line_item__days"": [""FRI"", ""FRI"", ""FRI"", ""TUE"", ""TUE"", ""TUE"", ""TUE"", ""TUE"", ""TUE"", ""TUE"", ""WED"", ""WED"", ""WED"", ""WED"", ""WED"", ""WED"", ""WED"", ""WED"", ""WED"", ""WED"", ""WED"", ""WED"", ""WED"", ""WED"", ""WED"", ""WED"", ""WED"", ""WED"", ""WED"", ""WED"", ""WED"", ""TUE"", ""TUE"", ""TUE"", ""TUE"", ""TUE"", ""TUE"", ""TUE"", ""TUE"", ""TUE"", ""THU"", ""THU"", ""THU"", ""TUE"", ""TUE"", ""TUE"", ""TUE"", ""TUE"", ""TUE"", ""THU"", ""THU"", ""THU"", ""THU"", ""THU"", ""THU"", ""THU"", ""THU"", ""THU"", ""SUN"", ""THU"", ""THU"", ""THU"", ""THU"", ""THU"", ""THU"", ""THU"", ""THU"", ""MON"", ""MON"", ""MON"", ""SAT"", ""SAT"", ""SAT"", ""SUN"", ""SUN"", ""SUN"", ""MON"", ""MON"", ""MON"", ""MON"", ""MON"", ""MON"", ""MON"", ""MON"", ""MON"", ""FRI"", ""MON"", ""MON"", ""MON"", ""MON"", ""MON"", ""MON"", ""MON"", ""MON"", ""FRI"", ""FRI"", ""FRI"", ""FRI"", ""FRI"", ""FRI"", ""FRI"", ""FRI"", ""FRI"", ""FRI"", ""FRI"", ""FRI"", ""FRI"", ""FRI"", ""FRI"", ""FRI"", ""FRI"", ""FRI""]}"
