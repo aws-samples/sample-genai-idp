@@ -3,15 +3,9 @@
 notes: Configuration for FCC invoice information extraction (no classification)
 ocr:
   backend: "textract"
-  model_id: "us.anthropic.claude-3-7-sonnet-20250219-v1:0"
-  system_prompt: "You are an expert OCR system. Extract all text from the provided image accurately, preserving layout where possible."
-  task_prompt: "Extract all text from this document image. Preserve the layout, including paragraphs, tables, and formatting."
   features:
     - name: LAYOUT
     - name: TABLES
-  image:
-    target_width: ""
-    target_height: ""
 
 classes:
   - name: FCC-Invoice
@@ -87,9 +81,10 @@ classes:
         attributeType: list
 
 extraction:
-  model_id: "us.anthropic.claude-3-7-sonnet-20250219-v1:0"
+  model: "us.anthropic.claude-3-7-sonnet-20250219-v1:0"
   temperature: 0.0
   top_p: 0.9
+  top_k: 5
   max_tokens: 4096
   system_prompt: |
     You are an expert at extracting structured information from FCC political advertising invoices.
@@ -119,8 +114,14 @@ extraction:
     Return the information in the specified JSON schema format.
 
 classification:
-  enabled: false
-  # No classification needed - all documents are FCC invoices
+  enabled: true
+  model: "us.anthropic.claude-3-7-sonnet-20250219-v1:0"
+  temperature: 0.0
+  top_p: 0.9
+  top_k: 5
+  max_tokens: 1024
+  system_prompt: "You are a document classification expert. Classify each page according to the provided document types."
+  task_prompt: "Classify this page as one of the available document types based on its content and structure."
 
 evaluation:
   enabled: true

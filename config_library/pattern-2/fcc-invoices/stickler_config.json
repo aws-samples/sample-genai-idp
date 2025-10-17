@@ -1,0 +1,87 @@
+{
+  "model_name": "FCCInvoice",
+  "match_threshold": 0.7,
+  "fields": {
+    "agency": {
+      "type": "list",
+      "comparator": "FuzzyComparator",
+      "threshold": 0.8,
+      "weight": 2.0,
+      "required": false,
+      "default": [],
+      "description": "The advertising agency or media buyer handling the political advertising purchase"
+    },
+    "advertiser": {
+      "type": "list",
+      "comparator": "FuzzyComparator",
+      "threshold": 0.8,
+      "weight": 2.0,
+      "required": false,
+      "default": [],
+      "description": "The political advertiser or campaign purchasing the broadcast time"
+    },
+    "gross_total": {
+      "type": "list",
+      "comparator": "ExactComparator",
+      "threshold": 1.0,
+      "weight": 3.0,
+      "required": false,
+      "default": [],
+      "description": "The total gross amount for all line items before any discounts or adjustments (stored as string with commas)"
+    },
+    "net_amount_due": {
+      "type": "list",
+      "comparator": "ExactComparator",
+      "threshold": 1.0,
+      "weight": 3.0,
+      "required": false,
+      "default": [],
+      "description": "The final net amount due after any discounts or adjustments have been applied (stored as string with commas)"
+    },
+    "line_item__description": {
+      "type": "list",
+      "comparator": "LevenshteinComparator",
+      "threshold": 0.7,
+      "weight": 1.5,
+      "required": false,
+      "default": [],
+      "description": "List of broadcast time slot descriptions (e.g., 'M-F 11a-12p' for Monday through Friday 11am to 12pm)"
+    },
+    "line_item__days": {
+      "type": "list",
+      "comparator": "ExactComparator",
+      "threshold": 1.0,
+      "weight": 1.0,
+      "required": false,
+      "default": [],
+      "description": "List of days of the week for each broadcast slot (e.g., 'MTWTF--' where each position represents a day)"
+    },
+    "line_item__rate": {
+      "type": "list",
+      "comparator": "ExactComparator",
+      "threshold": 1.0,
+      "weight": 2.0,
+      "required": false,
+      "default": [],
+      "description": "List of rates or costs for each broadcast time slot (may include commas for thousands separator)"
+    },
+    "line_item__start_date": {
+      "type": "list",
+      "comparator": "ExactComparator",
+      "threshold": 1.0,
+      "weight": 2.0,
+      "required": false,
+      "default": [],
+      "description": "List of start dates for each line item's broadcast schedule (typically in MM/DD/YY format)"
+    },
+    "line_item__end_date": {
+      "type": "list",
+      "comparator": "ExactComparator",
+      "threshold": 1.0,
+      "weight": 2.0,
+      "required": false,
+      "default": [],
+      "description": "List of end dates for each line item's broadcast schedule (typically in MM/DD/YY format)"
+    }
+  }
+}

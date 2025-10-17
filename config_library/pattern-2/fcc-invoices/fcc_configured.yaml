@@ -1,0 +1,576 @@
+classification:
+  top_p: 0.9
+  max_tokens: 1024
+  top_k: 5
+  task_prompt: |-
+    <task-description>
+
+        You are a document classification system. Your task is to analyze a document package containing multiple pages and identify distinct document segments, classifying each segment according to the predefined document types provided below.
+
+        </task-description>
+
+
+        <document-types>
+
+        {CLASS_NAMES_AND_DESCRIPTIONS}
+
+        </document-types>
+
+
+        <terminology-definitions>
+
+        Key terms used in this task:
+
+        - ordinal_start_page: The one-based beginning page number of a document segment within the document package
+
+        - ordinal_end_page: The one-based ending page number of a document segment within the document package
+
+        - document_type: The document type code detected for a document segment
+
+        - document segment: A continuous range of pages that form a single, complete document
+
+        </terminology-definitions>
+
+
+        <classification-instructions>
+
+        Follow these steps to classify documents:
+
+        1. Read through the entire document package to understand its contents
+
+        2. Identify page ranges that form complete, distinct documents
+
+        3. Match each document segment to ONE of the document types listed in <document-types>
+
+        4. CRITICAL: Only use document types explicitly listed in the <document-types> section
+
+        5. If a document doesn't clearly match any listed type, assign it to the most similar listed type
+
+        6. Pay special attention to adjacent documents of the same type - they must be separated into distinct segments
+
+        7. Record the ordinal_start_page and ordinal_end_page for each identified segment
+
+        8. Provide appropriate reasons and facts for the predicted document type
+
+        </classification-instructions>
+
+
+        <document-boundary-rules>
+
+        Rules for determining document boundaries:
+
+        - Content continuity: Pages with continuing paragraphs, numbered sections, or ongoing narratives belong to the same document
+
+        - Visual consistency: Similar layouts, headers, footers, and styling indicate pages belong together
+
+        - Logical structure: Documents typically have clear beginning, middle, and end sections
+
+        - New document indicators: Title pages, cover sheets, or significantly different subject matter signal a new document
+
+        - Topic coherence: Pages discussing the same subject should be grouped together
+
+        - IMPORTANT: Distinct documents of the same type that are adjacent must be separated into different segments
+
+        </document-boundary-rules>
+
+
+        <output-format>
+
+        Return your classification as valid JSON following this exact structure:
+
+        ```json
+
+        {
+            "segments": [
+                {
+                    "ordinal_start_page": 1,
+                    "ordinal_end_page": 3,
+                    "type": "document_type_from_list",
+                    "reason": "facts and reasons to classify as the predicted type",
+                },
+                {
+                    "ordinal_start_page": 4,
+                    "ordinal_end_page": 7,
+                    "type": "document_type_from_list"
+                    "reason": "facts and reasons to classify as the predicted type",
+                }
+            ]
+        }
+
+        ```
+
+        </output-format>
+
+
+        <<CACHEPOINT>>
+
+
+        <document-text>
+
+        {DOCUMENT_TEXT}
+
+        </document-text>
+
+
+        <final-instructions>
+
+        Analyze the <document-text> provided above and:
+
+        1. Apply the <classification-instructions> to identify distinct document segments
+
+        2. Use the <document-boundary-rules> to determine where one document ends and another begins
+
+        3. Classify each segment using ONLY the document types from the <document-types> list
+
+        4. Ensure adjacent documents of the same type are separated into distinct segments
+
+        5. Output your classification in the exact JSON format specified in <output-format>
+
+        6. You can get this information from the previous message. Analyze the previous messages to get these instructions.
+
+
+        Remember: You must ONLY use document types that appear in the <document-types> reference data. Do not invent or create new document types.
+
+        </final-instructions>
+  temperature: 0
+  model: us.anthropic.claude-sonnet-4-20250514-v1:0
+  system_prompt: >-
+    You are a document classification expert. Classify each page according to
+    the provided document types.
+  enabled: true
+  maxPagesForClassification: ALL
+  classificationMethod: textbasedHolisticClassification
+notes: Configuration for FCC invoice information extraction (no classification)
+classes:
+  - name: FCC-Invoice
+    description: >-
+      Federal Communications Commission (FCC) political advertising invoice
+      showing broadcast  time purchases, including line items with descriptions,
+      dates, rates, and totals for  political advertising campaigns.
+    attributes:
+      - name: agency
+        description: >-
+          The advertising agency or media buyer handling the political
+          advertising purchase.
+        evaluation_method: EXACT
+        attributeType: simple
+      - name: advertiser
+        description: The political advertiser or campaign purchasing the broadcast time.
+        evaluation_method: EXACT
+        attributeType: simple
+      - name: gross_total
+        description: >-
+          The total gross amount for all line items before any discounts or
+          adjustments.
+        evaluation_method: NUMERIC_EXACT
+        attributeType: simple
+      - name: net_amount_due
+        description: >-
+          The final net amount due after any discounts or adjustments have been
+          applied.
+        evaluation_method: NUMERIC_EXACT
+        attributeType: simple
+      - name: line_item__description
+        listItemTemplate:
+          itemDescription: >-
+            Each line item description is usually a specification in industry
+            short-hand of when the advertisement should run. examples include "M
+            -F 6p -6:30p", "M -F 11a -12p"
+        description: >
+          These line item descriptions list include the code of what advertising
+          spots were bought, in industry short-hand. i.e. 'IA* 11a -12p'
+        attributeType: list
+        evaluation_method: ''
+      - name: line_item__days
+        listItemTemplate:
+          itemDescription: >-
+            Each list item will be a string with shorthand representing the days
+            of the week the ad should run. I.e. "MTWTF--"
+        description: >-
+          The Line item days list contains the days of the week that the ad
+          should run. 
+        attributeType: list
+        evaluation_method: ''
+      - name: line_item__rate
+        listItemTemplate:
+          itemDescription: 'Each entry is a unitless float, i.e. "300.00", or "1200.00" '
+        description: >-
+          The line item rate is a list of rates for each of the line items.
+          These are rates represented in dollars, but without any $ sign. i.e. 
+        attributeType: list
+        evaluation_method: ''
+      - name: line_item__start_date
+        listItemTemplate:
+          itemDescription: Each start date, formatted, as MM/DD/YY. i.e. "11/07/21"
+        description: 'The start dates for each line item. '
+        attributeType: list
+        evaluation_method: ''
+      - name: line_item__end_date
+        listItemTemplate:
+          itemDescription: Each end date, formatted, as MM/DD/YY. i.e. "11/07/21"
+        description: 'The end dates for each line item. '
+        attributeType: list
+        evaluation_method: ''
+extraction:
+  top_p: 0.9
+  max_tokens: 4096
+  top_k: 5
+  task_prompt: |
+    <background>
+        
+        You are an expert in document analysis and information extraction. 
+        You can understand and extract key information from documents classified as type 
+
+        {DOCUMENT_CLASS}.
+
+        </background>
+
+
+        <task>
+
+        Your task is to take the unstructured text provided and convert it into a well-organized table format using JSON. Identify the main entities, attributes, or categories mentioned in the attributes list below and use them as keys in the JSON object. 
+        Then, extract the relevant information from the text and populate the corresponding values in the JSON object.
+
+        </task>
+
+
+        <extraction-guidelines>
+
+        Guidelines:
+            1. Ensure that the data is accurately represented and properly formatted within
+            the JSON structure
+            2. Include double quotes around all keys and values
+            3. Do not make up data - only extract information explicitly found in the
+            document
+            4. Do not use /n for new lines, use a space instead
+            5. If a field is not found or if unsure, return null
+            6. All dates should be in MM/DD/YYYY format
+            7. Do not perform calculations or summations unless totals are explicitly given
+            8. If an alias is not found in the document, return null
+            9. Guidelines for checkboxes:
+             9.A. CAREFULLY examine each checkbox, radio button, and selection field:
+                - Look for marks like ✓, ✗, x, filled circles (●), darkened areas, or handwritten checks indicating selection
+                - For checkboxes and multi-select fields, ONLY INCLUDE options that show clear visual evidence of selection
+                - DO NOT list options that have no visible selection mark
+             9.B. For ambiguous or overlapping tick marks:
+                - If a mark overlaps between two or more checkboxes, determine which option contains the majority of the mark
+                - Consider a checkbox selected if the mark is primarily inside the check box or over the option text
+                - When a mark touches multiple options, analyze which option was most likely intended based on position and density. For handwritten checks, the mark typically flows from the selected checkbox outward.
+                - Carefully analyze visual cues and contextual hints. Think from a human perspective, anticipate natural tendencies, and apply thoughtful reasoning to make the best possible judgment.
+            10. Think step by step first and then answer.
+
+        </extraction-guidelines>
+
+        If the attributes section below contains a list of attribute names and
+        descriptions, then output only those attributes, using the provided
+        descriptions as guidance for finding the correct values. 
+
+        <attributes>
+
+        {ATTRIBUTE_NAMES_AND_DESCRIPTIONS}
+
+        </attributes>
+
+
+        <<CACHEPOINT>>
+
+
+        <document-text>
+
+        {DOCUMENT_TEXT}
+
+        </document-text>
+      
+
+        <document_image>
+
+        {DOCUMENT_IMAGE}
+
+        </document_image>
+
+
+        <final-instructions>
+
+        Extract key information from the document and return a JSON object with the following key steps:
+        1. Carefully analyze the document text to identify the requested attributes
+        2. Extract only information explicitly found in the document - never make up data
+        3. Format all dates as MM/DD/YYYY and replace newlines with spaces
+        4. For checkboxes, only include options with clear visual selection marks
+        5. Use null for any fields not found in the document
+        6. Ensure the output is properly formatted JSON with quoted keys and values
+        7. Think step by step before finalizing your answer
+
+        </final-instructions>
+
+
+    Next, 
+    1. Agency name
+    2. Advertiser name
+    3. Gross total amount
+    4. Net amount due
+    5. All line items with:
+       - Description (time slot)
+       - Days (day of week encoding)
+       - Rate (cost)
+       - Start date
+       - End date
+
+    Return the information in the specified JSON schema format.
+  temperature: 0
+  model: us.anthropic.claude-sonnet-4-20250514-v1:0
+  system_prompt: >
+    You are an expert at extracting structured information from FCC political
+    advertising invoices.
+
+    Extract all requested fields accurately, paying special attention to:
+
+    - Line item details including time slots, days, rates, and date ranges
+
+    - Monetary amounts (preserve formatting with commas and decimals)
+
+    - Date formats (typically MM/DD/YY)
+
+    - Agency and advertiser names
+
+
+    For line items, ensure you capture all rows from any tables showing
+    broadcast schedules.
+
+    Days of week are often encoded as 7-character strings where each position
+    represents a day.
+  agentic:
+    enabled: false
+    review_agent: false
+evaluation:
+  enabled: true
+  methods:
+    - EXACT
+    - NUMERIC_EXACT
+    - LLM
+  llm_method:
+    temperature: '0.0'
+    top_k: '250'
+ocr:
+  features:
+    - name: LAYOUT
+    - name: TABLES
+  backend: textract
+  image:
+    dpi: '150'
+    preprocessing: false
+agents:
+  error_analyzer:
+    parameters:
+      time_range_hours_default: '24'
+      max_log_events: '100'
+    model_id: us.anthropic.claude-3-7-sonnet-20250219-v1:0
+    system_prompt: |2-
+
+            You are an intelligent error analysis agent for the GenAI IDP system.
+
+            Use the analyze_errors tool to investigate issues. ALWAYS format your response with exactly these three sections in this order:
+
+            ## Root Cause
+            Identify the specific underlying technical reason why the error occurred. Focus on the primary cause, not symptoms.
+
+            ## Recommendations
+            Provide specific, actionable steps to resolve the issue. Limit to top three recommendations only.
+
+            <details>
+            <summary><strong>Evidence</strong></summary>
+
+            Format log entries with their source information. For each log entry, show:
+            **Log Group:**  
+            [full log_group name from tool response]
+
+            **Log Stream:**  
+            [full log_stream name from tool response]
+            ```
+            [ERROR] timestamp message (from events data)
+            ```
+
+            </details>
+
+            FORMATTING RULES:
+            - Use the exact three-section structure above
+            - Make Evidence section collapsible using HTML details tags
+            - Extract log_group, log_stream, and events data from tool response
+            - Show complete log group and log stream names without truncation
+            - Present actual log messages from events array in code blocks
+
+            RECOMMENDATION GUIDELINES:
+            For code-related issues or system bugs:
+            - Do not suggest code modifications
+            - Include error details, timestamps, and context
+
+            For configuration-related issues:
+            - Direct users to UI configuration panel
+            - Specify exact configuration section and parameter names
+
+            For operational issues:
+            - Provide immediate troubleshooting steps
+            - Include preventive measures
+
+            TIME RANGE PARSING:
+            - recent/recently: 1 hour
+            - last week: 168 hours  
+            - last day/yesterday: 24 hours
+            - No time specified: 24 hours (default)
+
+            SPECIAL CASES:
+            If analysis_type is "document_not_found": explain document cannot be located, focus on verification steps and processing issues.
+
+            DO NOT include code suggestions, technical summaries, or multiple paragraphs of explanation. Keep responses concise and actionable.
+
+            IMPORTANT: Do not include any search quality reflections, search quality scores, or meta-analysis sections in your response. Only provide the three required sections: Root Cause, Recommendations, and Evidence.
+summarization:
+  top_p: '0.9'
+  max_tokens: '2048'
+  top_k: '250'
+  task_prompt: |-
+    <document-text>
+
+        {DOCUMENT_TEXT}
+
+        </document-text>
+
+        Analyze the provided document (<document-text>) and create a comprehensive summary.
+
+        CRITICAL INSTRUCTION: You MUST return your response as valid JSON with the
+        EXACT structure shown at the end of these instructions. Do not include any
+        explanations, notes, or text outside of the JSON structure.
+
+        Create a summary that captures the essential information from the document.
+        Your summary should:
+
+        1. Extract key information, main points, and important details
+
+        2. Maintain the original document's organizational structure where
+        appropriate
+
+        3. Preserve important facts, figures, dates, and entities
+
+        4. Reduce the length while retaining all critical information
+
+        5. Use markdown formatting for better readability (headings, lists,
+        emphasis, etc.)
+
+        6. Cite all relevant facts from the source document using inline citations
+        in the format [Cite-X, Page-Y] where X is a sequential citation number and Y
+        is the page number
+
+        7. Format citations as markdown links that reference the full citation list
+        at the bottom of the summary
+          Example: [[Cite-1, Page-3]](#cite-1-page-3)
+
+        8. At the end of the summary, include a "References" section that lists all
+        citations with their exact text from the source document in the format:
+          [Cite-X, Page-Y]: Exact text from the document
+
+        Output Format:
+
+        You MUST return ONLY valid JSON with the following structure and nothing
+        else:
+
+        ```json
+        {
+          "summary": "A comprehensive summary in markdown format with inline citations linked to a references section at the bottom"
+        }
+        ```
+
+        Do not include any text, explanations, or notes outside of this JSON
+        structure. The JSON must be properly formatted and parseable.
+  temperature: '0.5'
+  model: us.amazon.nova-pro-v1:0
+  system_prompt: 'do the task. '
+  enabled: false
+discovery:
+  output_format:
+    sample_json: |-
+      {
+        "document_class": "Form-1040",
+        "document_description": "Brief summary of the document",
+        "groups": [
+          {
+            "name": "PersonalInformation",
+            "description": "Personal information of Tax payer",
+            "attributeType": "group",
+            "groupType": "normal",
+            "groupAttributes": [
+              {
+                "name": "FirstName",
+                "dataType": "string",
+                "description": "First Name of Taxpayer"
+              },
+              {
+                "name": "Age",
+                "dataType": "number",
+                "description": "Age of Taxpayer"
+              }
+            ]
+          }
+        ]
+      }
+  with_ground_truth:
+    top_p: '0.1'
+    temperature: '1.0'
+    user_prompt: >-
+      This image contains unstructured data. Analyze the data line by line using
+      the provided ground truth as reference.
+      <GROUND_TRUTH_REFERENCE>{ground_truth_json}</GROUND_TRUTH_REFERENCE>
+      Ground truth reference JSON has the fields we are interested in extracting
+      from the document/image. Use the ground truth to optimize field
+      extraction. Match field names, data types, and groupings from the
+      reference. Image may contain multiple pages, process all pages. Extract
+      all field names including those without values. Do not change the group
+      name and field name from ground truth in the extracted data json. Add
+      field_description field for every field which will contain instruction to
+      LLM to extract the field data from the image/document. Add data_type field
+      for every field. Add two fields document_class and document_description.
+      For document_class generate a short name based on the document content
+      like W4, I-9, Paystub. For document_description generate a description
+      about the document in less than 50 words. If the group repeats and follows
+      table format, add a special field group_type with value "Table" and
+      description field for the group. Do not extract the values.
+    model_id: us.amazon.nova-pro-v1:0
+    system_prompt: >-
+      You are an expert in processing forms. Extracting data from images and
+      documents. Use provided ground truth data as reference to optimize field
+      extraction and ensure consistency with expected document structure and
+      field definitions.
+    max_tokens: '10000'
+  without_ground_truth:
+    top_p: '0.1'
+    temperature: '1.0'
+    user_prompt: >-
+      This image contains forms data. Analyze the form line by line. Image may
+      contains multiple pages, process all the pages. Form may contain multiple
+      name value pair in one line. Extract all the names in the form including
+      the name value pair which doesn't have value. Organize them into groups,
+      extract field_name, data_type and field description. Field_name should be
+      less than 60 characters, should not have space use '-' instead of space.
+      field_description is a brief description of the field and the location of
+      the field like box number or line number in the form and section of the
+      form. Field_name should be unique within the group. Add two fields
+      document_class and document_description. For document_class generate a
+      short name based on the document content like W4, I-9, Paystub. For
+      document_description generate a description about the document in less
+      than 50 words. Group the fields based on the section they are grouped in
+      the form. Group should have attributeType as "group". If the group
+      repeats, add an additional field groupType and set the value as "Table".
+      Do not extract the values. Return the extracted data in JSON format.
+    model_id: us.amazon.nova-pro-v1:0
+    system_prompt: >-
+      You are an expert in processing forms. Extracting data from images and
+      documents. Analyze forms line by line to identify field names, data types,
+      and organizational structure. Focus on creating comprehensive blueprints
+      for document processing without extracting actual values.
+    max_tokens: '10000'
+assessment:
+  validation_enabled: false
+  granular:
+    list_batch_size: '1'
+    simple_batch_size: '3'
+    max_workers: '4'
+    enabled: true
+  enabled: false

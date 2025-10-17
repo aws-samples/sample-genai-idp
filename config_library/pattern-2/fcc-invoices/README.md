@@ -1,0 +1,333 @@
+# FCC Invoice Processing - End-to-End Example
+
+This directory contains a complete end-to-end example for processing FCC (Federal Communications Commission) political advertising invoices using the IDP accelerator with Stickler-based evaluation.
+
+## Overview
+
+This example demonstrates:
+1. **Deployment** - Deploy the IDP stack with FCC invoice configuration
+2. **Inference** - Run inference on sample FCC invoices
+3. **Evaluation** - Evaluate extraction results using Stickler
+4. **Review** - Analyze individual and aggregated metrics
+
+## Directory Contents
+
+```
+config_library/pattern-2/fcc-invoices/
+├── README.md                           # This file
+├── config.yaml                         # Base IDP configuration
+├── fcc_configured.yaml                 # Deployed stack configuration
+├── stickler_config.json               # Stickler evaluation rules
+├── bulk_evaluate_fcc_invoices.py      # Evaluation script
+└── sr_refactor_labels_5_5_25.csv      # Ground truth labels (full dataset)
+```
+
+## Sample Data
+
+Sample documents are located in `samples/fcc-invoices/`:
+- 3 sample PDF invoices
+- `fcc_invoices_sample_3.csv` - Manifest for the 3 samples
+
+## Prerequisites
+
+1. **AWS Credentials**: Valid AWS credentials with appropriate permissions
+2. **Python Environment**: Python 3.12+ with required packages
+3. **IDP CLI**: Installed and configured
+4. **Stickler**: Installed with `pip install -e "./stickler[dev]"`
+5. **Dependencies**: `pip install pandas`
+
+## Step 1: Deploy the Stack
+
+Deploy the IDP stack with FCC invoice configuration:
+
+```bash
+idp-cli deploy \
+  --stack-name fcc-inf-test \
+  --custom-config config_library/pattern-2/fcc-invoices/config.yaml \
+  --region us-west-2 \
+  --wait \
+  --template-url https://s3.us-west-2.amazonaws.com/bobs-artifacts-us-west-2/idp-wip/idp-main.yaml \
+  --admin-email your-email@example.com \
+  --pattern pattern-2
+```
+
+**What this does:**
+- Creates CloudFormation stack with Lambda functions, S3 buckets, and DynamoDB tables
+- Configures extraction model (Claude Sonnet 4)
+- Sets up OCR with Textract (LAYOUT + TABLES features)
+- Deploys with FCC-specific prompts and schema
+
+**Expected output:**
+- Stack creation takes ~5-10 minutes
+- Stack status: `CREATE_COMPLETE`
+
+## Step 2: Run Inference
+
+Run inference on the sample documents:
+
+```bash
+idp-cli run-inference \
+  --stack-name fcc-inf-test \
+  --manifest samples/fcc-invoices/fcc_invoices_sample_3.csv \
+  --region us-west-2
+```
+
+**What this does:**
+- Uploads documents to S3 input bucket
+- Triggers Lambda processing pipeline
+- Performs OCR with Textract
+- Extracts structured data using Claude
+- Stores results in S3 output bucket
+
+**Expected output:**
+```
+Validating manifest...
+✓ Manifest validated successfully
+Initializing batch processor for stack: fcc-inf-test
+✓ Batch submitted successfully
+Batch ID: batch-20251017-140000
+Processing 3 documents...
+```
+
+**Monitor progress:**
+```bash
+idp-cli status \
+  --stack-name fcc-inf-test \
+  --batch-id <batch-id> \
+  --region us-west-2 \
+  --wait
+```
+
+## Step 3: Download Results
+
+Download the inference results locally:
+
+```bash
+idp-cli download-results \
+  --stack-name fcc-inf-test \
+  --batch-id cli-batch-20251017-190516 \
+  --output-dir fcc_results \
+  --region us-west-2
+```
+
+**Note**: Replace `cli-batch-20251017-190516` with your actual batch ID from the inference step. You can specify any output directory name.
+
+**What this does:**
+- Downloads all result files from S3
+- Creates directory structure: `fcc_results/<doc_id>/sections/1/result.json`
+- Each result contains extracted fields and metadata
+
+**Result structure:**
+```json
+{
+  "document_class": {
+    "type": "FCC-Invoice"
+  },
+  "inference_result": {
+    "agency": "Agency Name",
+    "advertiser": "Advertiser Name",
+    "gross_total": "1,234.56",
+    "net_amount_due": "1,234.56",
+    "line_item__description": ["M-F 11a-12p", "M-F 12n-1p"],
+    "line_item__days": ["MTWTF--", "MTWTF--"],
+    "line_item__rate": ["100.00", "150.00"],
+    "line_item__start_date": ["11/01/21", "11/01/21"],
+    "line_item__end_date": ["11/07/21", "11/07/21"]
+  }
+}
+```
+
+## Step 4: Run Evaluation
+
+Evaluate the extraction results against ground truth:
+
+```bash
+cd config_library/pattern-2/fcc-invoices
+
+python bulk_evaluate_fcc_invoices.py \
+  --results-dir ../../../fcc_results \
+  --csv-path sr_refactor_labels_5_5_25.csv \
+  --output-dir evaluation_output
+```
+
+**What this does:**
+- Loads ground truth labels from CSV
+- Matches documents by doc_id
+- Performs doc-by-doc comparison using Stickler
+- Saves individual comparison results
+- Aggregates metrics across all documents
+- Generates comprehensive evaluation report
+
+**Expected output:**
+```
+================================================================================
+BULK FCC INVOICE EVALUATION
+================================================================================
+
+📊 Loading ground truth from sr_refactor_labels_5_5_25.csv...
+✓ Loaded 221 documents with ground truth labels
+
+📁 Loading inference results from ../../../fcc_results...
+✓ Loaded 3 inference results
+
+🔗 Matching ground truth to inference results...
+✓ Matched 3 document pairs
+
+⚙️  Evaluating 3 documents...
+✓ Completed evaluation
+  Individual results saved to: evaluation_output
+
+================================================================================
+AGGREGATED EVALUATION RESULTS
+================================================================================
+
+📊 Processing Summary:
+  Documents processed:  3
+  Errors encountered:   0
+  Non-matches found:    23
+
+📈 Overall Metrics:
+  Precision:    0.7341
+  Recall:       0.4637
+  F1 Score:     0.5684
+  Accuracy:     0.3993
+
+  Confusion Matrix:
+    TP:    530  |  FP:    192
+    FN:    613  |  TN:      5
+    FP1 (False Alarm):     11
+    FP2 (Wrong Value):    181
+
+📋 Field-Level Metrics (Top 10 by F1 Score):
+  Field                                     Precision     Recall         F1
+  ---------------------------------------- ---------- ---------- ----------
+  line_item__description                       0.9236     0.8261     0.8721
+  gross_total                                  1.0000     0.7500     0.8571
+  net_amount_due                               1.0000     0.7500     0.8571
+  line_item__rate                              0.8169     0.7117     0.7607
+  ...
+
+💾 Aggregated results saved to evaluation_output/aggregated_metrics.json
+
+================================================================================
+✅ Evaluation complete!
+   Individual results: evaluation_output
+   Aggregated metrics: evaluation_output/aggregated_metrics.json
+================================================================================
+```
+
+## Step 5: Review Results
+
+### Individual Document Results
+
+Each document has a detailed comparison result:
+
+```bash
+cat evaluation_output/0492b95bc342870920c480040bc33513.json | python -m json.tool | less
+```
+
+**Contains:**
+- Field-by-field scores
+- Confusion matrix (overall and per-field)
+- Non-matches with details
+- Similarity scores
+
+### Aggregated Metrics
+
+View the overall performance:
+
+```bash
+cat evaluation_output/aggregated_metrics.json | python -m json.tool | less
+```
+
+**Contains:**
+- Overall precision, recall, F1, accuracy
+- Per-field performance metrics
+- Confusion matrix breakdown
+- Non-match summary
+
+## Understanding the Results
+
+### Confusion Matrix Metrics
+
+- **TP (True Positive)**: Correctly extracted field with correct value
+- **FP (False Positive)**: Extracted field with incorrect value or shouldn't exist
+- **TN (True Negative)**: Correctly didn't extract a field that shouldn't exist
+- **FN (False Negative)**: Failed to extract a field that should exist
+- **FP1 (False Alarm)**: Extracted a field that shouldn't exist
+- **FP2 (Wrong Value)**: Extracted a field with wrong value
+
+### Derived Metrics
+
+- **Precision**: TP / (TP + FP) - How many extracted values are correct
+- **Recall**: TP / (TP + FN) - How many ground truth values were found
+- **F1 Score**: Harmonic mean of precision and recall
+- **Accuracy**: (TP + TN) / Total - Overall correctness
+
+## Stickler Configuration
+
+The `stickler_config.json` defines validation rules:
+
+### Simple Fields (Lists)
+- `agency`: FuzzyComparator (threshold 0.8) - Allows minor name variations
+- `advertiser`: FuzzyComparator (threshold 0.8)
+- `gross_total`: ExactComparator (threshold 1.0) - Requires exact match
+- `net_amount_due`: ExactComparator (threshold 1.0)
+
+### Line Item Fields (Lists)
+- `line_item__description`: LevenshteinComparator (threshold 0.7) - Allows typos
+- `line_item__days`: ExactComparator (threshold 1.0)
+- `line_item__rate`: ExactComparator (threshold 1.0)
+- `line_item__start_date`: ExactComparator (threshold 1.0)
+- `line_item__end_date`: ExactComparator (threshold 1.0)
+
+**Note**: All fields are configured as lists to match the flat format used by both ground truth and predictions.
+
+## Data Format
+
+### Ground Truth (CSV)
+The `sr_refactor_labels_5_5_25.csv` contains:
+- `doc_id`: Document identifier (without .pdf extension)
+- `refactored_labels`: JSON string with ground truth in flat list format
+
+### Inference Results
+Directory structure: `results_dir/{doc_id}.pdf/sections/1/result.json`
+
+The flat format uses `line_item__` prefix for list fields, where each field is a list of values.
+
+## Troubleshooting
+
+### No matched pairs found
+- Verify `doc_id` in CSV matches directory names in results
+- Check if doc_id has `.pdf` extension mismatch
+
+### AWS Token Expired
+```bash
+# Refresh your AWS credentials
+aws sso login --profile your-profile
+```
+
+### Stack not found
+```bash
+# Verify stack exists
+idp-cli list-stacks --region us-west-2
+```
+
+### Large matrix warnings
+- Normal for documents with many line items (>100)
+- Stickler uses Hungarian algorithm for optimal matching
+- May be slower but produces accurate results
+
+## Next Steps
+
+1. **Scale Up**: Process more documents by creating a larger manifest
+2. **Tune Configuration**: Adjust Stickler thresholds based on results
+3. **Analyze Errors**: Review non-matches to identify extraction issues
+4. **Iterate**: Update prompts or schema based on evaluation findings
+
+## Additional Resources
+
+- [IDP CLI Documentation](../../README.md)
+- [Stickler Documentation](../../../stickler/README.md)
+- [Pattern 2 Architecture](../README.md)
+- [Evaluation Guide](../../../lib/idp_common_pkg/idp_common/evaluation/README_STICKLER.md)
