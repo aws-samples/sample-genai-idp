@@ -23,6 +23,7 @@ from idp_common.evaluation.models import (
     SectionEvaluationResult,
 )
 from idp_common.evaluation.service import EvaluationService
+from idp_common.evaluation.stickler_service import SticklerEvaluationService
 
 __all__ = [
     "EvaluationMethod",
@@ -31,6 +32,7 @@ __all__ = [
     "SectionEvaluationResult",
     "DocumentEvaluationResult",
     "EvaluationService",
+    "SticklerEvaluationService",
     "compare_values",
     "compare_exact",
     "compare_numeric",
