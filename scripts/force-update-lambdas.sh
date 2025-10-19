@@ -42,6 +42,7 @@ ALL_FUNCTIONS=(
     "queue_sender:QueueSender"
     "queue_processor:QueueProcessor"
     "create_document_resolver:CreateDocumentResolverFunction"
+    "workflow_tracker:WorkflowTracker"
     # Add more as your project grows:
     # "discovery_upload_resolver:DiscoveryUploadResolverFunction"
     # "update_configuration:UpdateConfigurationFunction"
