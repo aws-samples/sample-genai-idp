@@ -35,14 +35,22 @@ echo "Stack: $STACK_NAME"
 echo "Region: $REGION"
 echo ""
 
-# Functions to update (source_dir:LogicalResourceId)
-# Add more Lambda functions here as needed
+# Functions to update (source_dir:LogicalResourceId:StackName)
+# Format: "source_dir:LogicalResourceId:StackName"
+# If StackName is omitted, uses default STACK_NAME
 ALL_FUNCTIONS=(
     "upload_resolver:UploadResolverFunction"
     "queue_sender:QueueSender"
     "queue_processor:QueueProcessor"
     "create_document_resolver:CreateDocumentResolverFunction"
     "workflow_tracker:WorkflowTracker"
+    # Pattern 2 Functions (in nested stack)
+    "pattern-2-ocr:OCRFunction:fiscalshield-idp-dev-PATTERN2STACK-19EURLXCA5XXH"
+    "pattern-2-classification:ClassificationFunction:fiscalshield-idp-dev-PATTERN2STACK-19EURLXCA5XXH"
+    "pattern-2-extraction:ExtractionFunction:fiscalshield-idp-dev-PATTERN2STACK-19EURLXCA5XXH"
+    "pattern-2-assessment:AssessmentFunction:fiscalshield-idp-dev-PATTERN2STACK-19EURLXCA5XXH"
+    "pattern-2-processresults:ProcessResultsFunction:fiscalshield-idp-dev-PATTERN2STACK-19EURLXCA5XXH"
+    "pattern-2-summarization:SummarizationFunction:fiscalshield-idp-dev-PATTERN2STACK-19EURLXCA5XXH"
     # Add more as your project grows:
     # "discovery_upload_resolver:DiscoveryUploadResolverFunction"
     # "update_configuration:UpdateConfigurationFunction"
@@ -86,14 +94,17 @@ echo "Building and updating Lambda functions..."
 echo "----------------------------------------------"
 
 for func_def in "${FUNCTIONS[@]}"; do
-    IFS=':' read -r source_dir logical_id <<< "$func_def"
+    IFS=':' read -r source_dir logical_id stack_override <<< "$func_def"
+    
+    # Use stack override if provided, otherwise use default
+    CURRENT_STACK="${stack_override:-$STACK_NAME}"
     
     echo ""
-    echo "📦 Processing: $source_dir → $logical_id"
+    echo "📦 Processing: $source_dir → $logical_id (Stack: $CURRENT_STACK)"
     
     # Get physical function name from CloudFormation
     FUNCTION_NAME=$(aws cloudformation describe-stack-resource \
-        --stack-name "$STACK_NAME" \
+        --stack-name "$CURRENT_STACK" \
         --logical-resource-id "$logical_id" \
         --query 'StackResourceDetail.PhysicalResourceId' \
         --output text 2>/dev/null)
@@ -109,7 +120,15 @@ for func_def in "${FUNCTIONS[@]}"; do
     PACKAGE_DIR="$TEMP_DIR/$source_dir"
     mkdir -p "$PACKAGE_DIR"
     
-    SOURCE_PATH="src/lambda/$source_dir"
+    # Determine source path based on naming convention
+    if [[ "$source_dir" == pattern-* ]]; then
+        # Extract pattern number and function name (e.g., pattern-2-ocr -> patterns/pattern-2/src/ocr_function)
+        pattern_part=$(echo "$source_dir" | cut -d'-' -f1-2)  # pattern-2
+        func_name=$(echo "$source_dir" | cut -d'-' -f3-)      # ocr
+        SOURCE_PATH="patterns/$pattern_part/src/${func_name}_function"
+    else
+        SOURCE_PATH="src/lambda/$source_dir"
+    fi
     
     if [ ! -d "$SOURCE_PATH" ]; then
         echo "   ⚠️  Source directory not found: $SOURCE_PATH, skipping..."
@@ -120,6 +139,12 @@ for func_def in "${FUNCTIONS[@]}"; do
     
     # Copy source code
     cp -r "$SOURCE_PATH"/* "$PACKAGE_DIR/" 2>/dev/null || true
+    
+    # Copy idp_common library for all functions
+    if [ -d "lib/idp_common_pkg/idp_common" ]; then
+        echo "   Including idp_common library..."
+        cp -r lib/idp_common_pkg/idp_common "$PACKAGE_DIR/" 2>/dev/null || true
+    fi
     
     # Install dependencies if requirements.txt exists
     if [ -f "$SOURCE_PATH/requirements.txt" ]; then

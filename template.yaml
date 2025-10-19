@@ -5135,10 +5135,10 @@ Resources:
       FieldName: getDocument
       DataSourceName: !GetAtt TrackingTableDataSource.Name
       RequestMappingTemplate: |
-        ## Extract user ID from Cognito identity
-        #set( $userId = $ctx.identity.username )
+        ## Extract user ID from Cognito identity (use 'sub' which is the UUID)
+        #set( $userId = $ctx.identity.sub )
         ## Construct user-scoped PK
-        #set( $PK = "user#${userId}#doc#${context.arguments.ObjectKey}" )
+        #set( $PK = "user#${userId}#doc#${ctx.arguments.ObjectKey}" )
         {
           "version": "2018-05-29",
           "operation": "GetItem",
@@ -5214,8 +5214,8 @@ Resources:
         #set( $hourPad = $date.format("%02d", $hour) )
         #set( $hourShard = $hour / $shardDivider )
         #set( $shardPad = $date.format("%02d", $hourShard) )
-        ## Extract user ID from Cognito identity
-        #set( $userId = $ctx.identity.username )
+        ## Extract user ID from Cognito identity (use 'sub' which is the UUID)
+        #set( $userId = $ctx.identity.sub )
 
         #set( $PK = "list#${date}#s#${shardPad}" )
         #set( $skPrefix = "ts#${date}T${hourPad}" )
@@ -5264,8 +5264,8 @@ Resources:
         #end
         #set( $hourShard = $hour / $shardDivider )
         #set( $shardPad = $date.format("%02d", $shard) )
-        ## Extract user ID from Cognito identity
-        #set( $userId = $ctx.identity.username )
+        ## Extract user ID from Cognito identity (use 'sub' which is the UUID)
+        #set( $userId = $ctx.identity.sub )
 
         #set( $PK = "list#${date}#s#${shardPad}" )
 
@@ -5273,9 +5273,14 @@ Resources:
           "version" : "2018-05-29",
           "operation" : "Query",
           "query" : {
-            "expression": "PK = :PK AND UserId = :userId",
+            "expression": "PK = :PK",
             "expressionValues": {
-              ":PK": $util.dynamodb.toDynamoDBJson($PK),
+              ":PK": $util.dynamodb.toDynamoDBJson($PK)
+            }
+          },
+          "filter": {
+            "expression": "UserId = :userId",
+            "expressionValues": {
               ":userId": $util.dynamodb.toDynamoDBJson($userId)
             }
           }
