@@ -5071,11 +5071,12 @@ Resources:
       FieldName: updateDocument
       DataSourceName: !GetAtt TrackingTableDataSource.Name
       RequestMappingTemplate: |-
-        ## Construct user-scoped PK if UserId is provided
+        ## Construct user-scoped PK - UserId is REQUIRED for user-scoped documents
         #if( !$util.isNullOrBlank($ctx.args.input.UserId) )
           #set( $PK = "user#${ctx.args.input.UserId}#doc#${ctx.args.input.ObjectKey}" )
         #else
-          #set( $PK = "doc#${ctx.args.input.ObjectKey}" )
+          ## ERROR: UserId is required but not provided - log and fail gracefully
+          $util.error("UserId is required for document updates but was not provided for ObjectKey: ${ctx.args.input.ObjectKey}")
         #end
         #set( $expNames = {} )
         #set( $expValues = {} )

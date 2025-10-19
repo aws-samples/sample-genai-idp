@@ -20,6 +20,28 @@ from idp_common.models import Document, Page, Section, Status
 logger = logging.getLogger(__name__)
 
 
+def extract_doc_key_from_object_key(object_key: str, user_id: Optional[str] = None) -> str:
+    """
+    Extract the document key suffix from the full S3 object key.
+    
+    If the object_key starts with 'users/<user_id>/', strip that prefix to avoid duplication
+    in the PK construction.
+    
+    Args:
+        object_key: Full S3 object key (e.g., 'users/uuid/filename.pdf')
+        user_id: Optional user ID to strip from the path
+        
+    Returns:
+        Document key suffix (e.g., 'filename.pdf' if user_id matches, or original object_key)
+    """
+    if user_id and object_key.startswith(f"users/{user_id}/"):
+        # Strip the users/<user_id>/ prefix
+        doc_key = object_key[len(f"users/{user_id}/"):]
+        logger.debug(f"Stripped user prefix from object_key: {object_key} -> {doc_key}")
+        return doc_key
+    return object_key
+
+
 def convert_floats_to_decimal(obj):
     """
     Recursively convert float values to Decimal for DynamoDB compatibility.
@@ -103,6 +125,7 @@ class DocumentDynamoDBService:
             Dictionary compatible with DynamoDB item format
         """
         # Use user-scoped PK if user_id is present
+        # IMPORTANT: Use FULL input_key (including users/<user_id>/ prefix) to match GetDocumentResolver
         if document.user_id:
             pk = f"user#{document.user_id}#doc#{document.input_key}"
         else:
@@ -457,6 +480,7 @@ class DocumentDynamoDBService:
             DynamoDBError: If the DynamoDB operation fails
         """
         # Use user-scoped PK if user_id is present
+        # IMPORTANT: Use FULL input_key (including users/<user_id>/ prefix) to match GetDocumentResolver
         if document.user_id:
             pk = f"user#{document.user_id}#doc#{document.input_key}"
         else:
@@ -501,7 +525,7 @@ class DocumentDynamoDBService:
         Raises:
             DynamoDBError: If the DynamoDB operation fails
         """
-        # Use user-scoped PK if user_id is provided
+        # Use user-scoped PK if user_id is provided (use FULL object_key to match GetDocumentResolver)
         if user_id:
             pk = f"user#{user_id}#doc#{object_key}"
         else:

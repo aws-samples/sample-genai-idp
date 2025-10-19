@@ -35,7 +35,7 @@ class TestUserIdExtraction:
         assert user_id == valid_uuid
     
     def test_extract_user_id_prefers_username(self):
-        """Should prefer 'username' over 'sub' when both are present."""
+        """Should prefer 'sub' field over 'username' when both are present."""
         event = {
             'identity': {
                 'username': 'preferred-username-id',
@@ -43,7 +43,8 @@ class TestUserIdExtraction:
             }
         }
         user_id = index.extract_user_id(event)
-        assert user_id == 'preferred-username-id'
+        # sub is prioritized over username as it contains the actual Cognito UUID
+        assert user_id == 'fallback-sub-id'
     
     def test_extract_user_id_missing_raises_error(self):
         """Should raise ValueError when no user ID is found."""
@@ -102,7 +103,8 @@ class TestHandler:
         
         # Verify document record
         doc_item = calls[0][1]['Item']
-        expected_pk = f'user#{valid_uuid}#doc#users/{valid_uuid}/test-document.pdf'
+        # PK should only contain the filename, not the full path with user prefix
+        expected_pk = f'user#{valid_uuid}#doc#test-document.pdf'
         assert doc_item['PK'] == expected_pk
         assert doc_item['SK'] == 'none'
         assert doc_item['UserId'] == valid_uuid

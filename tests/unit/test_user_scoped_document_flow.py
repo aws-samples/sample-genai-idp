@@ -112,7 +112,7 @@ class TestUserScopedDocumentLifecycle:
         
         retrieved_doc = document_service.get_document(object_key, user_id=user_id)
         
-        # Verify retrieval used same user-scoped PK
+        # Verify retrieval used same user-scoped PK (uses FULL object_key to match GetDocumentResolver)
         get_call = mock_dynamodb_client.get_item.call_args[0][0]
         assert get_call['PK'] == f"user#{user_id}#doc#{object_key}"
         

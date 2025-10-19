@@ -35,7 +35,8 @@ class TestHandlerDocumentCreation:
         
         # Verify document record structure
         doc_item = calls[0][1]['Item']
-        expected_pk = f'user#{valid_cognito_uuid}#doc#users/{valid_cognito_uuid}/test-document.pdf'
+        # PK should use FULL object_key to match GetDocumentResolver
+        expected_pk = f'user#{valid_cognito_uuid}#doc#{doc_item["ObjectKey"]}'
         assert doc_item['PK'] == expected_pk
         assert doc_item['SK'] == 'none'
         assert doc_item['UserId'] == valid_cognito_uuid

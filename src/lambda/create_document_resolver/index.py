@@ -91,8 +91,12 @@ def handler(event, context):
         logger.info(f"Using tracking table: {os.environ['TRACKING_TABLE_NAME']}")
         
         # Define USER-SCOPED document key format
+        # IMPORTANT: Use the FULL object_key (including users/<user_id>/ prefix) to match GetDocumentResolver expectations
+        # GetDocumentResolver constructs: user#<userId>#doc#<ObjectKey> where ObjectKey is the full S3 path
         doc_pk = f"user#{user_id}#doc#{object_key}"
         doc_sk = "none"
+        
+        logger.info(f"Creating user-scoped document record: PK={doc_pk}, SK={doc_sk}")
         
         # First check if document already exists
         logger.info(f"Checking if document {object_key} already exists for user {user_id}")

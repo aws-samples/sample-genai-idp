@@ -69,7 +69,7 @@ class TestDocumentCreationWithUserScoping:
         call_args = mock_dynamodb_client.transact_write_items.call_args[0][0]
         doc_item = call_args[0]['Put']['Item']
         
-        # Verify user-scoped PK format
+        # Verify user-scoped PK format (uses FULL input_key to match GetDocumentResolver)
         expected_pk = f"user#{sample_document_with_user.user_id}#doc#{sample_document_with_user.input_key}"
         assert doc_item['PK'] == expected_pk
         assert doc_item['SK'] == 'none'
@@ -157,7 +157,7 @@ class TestDocumentUpdateWithUserScoping:
         # Execute
         result = service.update_document(sample_document_with_user)
         
-        # Verify correct PK was used
+        # Verify correct PK was used (uses FULL input_key to match GetDocumentResolver)
         call_args = mock_dynamodb_client.update_item.call_args[1]
         expected_pk = f"user#{sample_document_with_user.user_id}#doc#{sample_document_with_user.input_key}"
         assert call_args['key']['PK'] == expected_pk
@@ -235,7 +235,7 @@ class TestDocumentGetWithUserScoping:
         # Execute
         result = service.get_document(object_key, user_id=user_id)
         
-        # Verify correct PK was used
+        # Verify correct PK was used (uses FULL object_key to match GetDocumentResolver)
         call_args = mock_dynamodb_client.get_item.call_args[0][0]
         expected_pk = f"user#{user_id}#doc#{object_key}"
         assert call_args['PK'] == expected_pk
@@ -348,10 +348,10 @@ class TestUserIsolation:
         call2 = mock_dynamodb_client.transact_write_items.call_args_list[1][0][0]
         pk2 = call2[0]['Put']['Item']['PK']
         
-        # Verify PKs are different
+        # Verify PKs are different (uses FULL input_key to match GetDocumentResolver)
         assert pk1 == f"user#{user_1}#doc#{doc1.input_key}"
         assert pk2 == f"user#{user_2}#doc#{doc2.input_key}"
-        assert pk1 != pk2
+        assert pk1 != pk2  # Different user IDs make PKs different
     
     def test_user_cannot_get_another_users_document(
         self, service, mock_dynamodb_client
