@@ -4,6 +4,7 @@ import { React } from 'react';
 import { Route, Switch, useLocation } from 'react-router-dom';
 import { SideNavigation } from '@awsui/components-react';
 import useSettingsContext from '../../contexts/settings';
+import useAppContext from '../../contexts/app';
 
 import {
   DOCUMENTS_PATH,
@@ -16,14 +17,34 @@ import {
 } from '../../routes/constants';
 
 export const documentsNavHeader = { text: 'Tools', href: `#${DEFAULT_PATH}` };
-export const documentsNavItems = [
-  { type: 'link', text: 'Document List', href: `#${DOCUMENTS_PATH}` },
-  { type: 'link', text: 'Document KB', href: `#${DOCUMENTS_KB_QUERY_PATH}` },
-  { type: 'link', text: 'Agent Analysis', href: `#${DOCUMENTS_ANALYTICS_PATH}` },
-  { type: 'link', text: 'Upload Document(s)', href: `#${UPLOAD_DOCUMENT_PATH}` },
-  { type: 'link', text: 'Discovery', href: `#${DISCOVERY_PATH}` },
-  { type: 'link', text: 'View/Edit Configuration', href: `#${CONFIGURATION_PATH}` },
-  {
+
+// Function to generate navigation items based on user role
+export const getDocumentsNavItems = (isAdmin = false) => {
+  const baseItems = [
+    { type: 'link', text: 'Document List', href: `#${DOCUMENTS_PATH}` },
+    { type: 'link', text: 'Upload Document(s)', href: `#${UPLOAD_DOCUMENT_PATH}` },
+  ];
+
+  // Items available to all users (including regular users)
+  const sharedItems = [
+    { type: 'link', text: 'Document KB', href: `#${DOCUMENTS_KB_QUERY_PATH}` },
+    { type: 'link', text: 'Agent Analysis', href: `#${DOCUMENTS_ANALYTICS_PATH}` },
+  ];
+
+  // Admin-only items
+  const adminItems = [
+    { type: 'link', text: 'Discovery', href: `#${DISCOVERY_PATH}` },
+    { type: 'link', text: 'View/Edit Configuration', href: `#${CONFIGURATION_PATH}` },
+  ];
+
+  // Combine items based on role
+  const items = [...baseItems, ...sharedItems];
+  if (isAdmin) {
+    items.push(...adminItems);
+  }
+
+  // Add resources section (available to all)
+  items.push({
     type: 'section',
     text: 'Resources',
     items: [
@@ -40,8 +61,13 @@ export const documentsNavItems = [
         external: true,
       },
     ],
-  },
-];
+  });
+
+  return items;
+};
+
+// Default items (for backwards compatibility)
+export const documentsNavItems = getDocumentsNavItems(true);
 
 const defaultOnFollowHandler = (ev) => {
   // Prevent navigation for deployment info items (make them non-clickable)
@@ -55,15 +81,13 @@ const defaultOnFollowHandler = (ev) => {
 };
 
 /* eslint-disable react/prop-types */
-const Navigation = ({
-  header = documentsNavHeader,
-  items = documentsNavItems,
-  onFollowHandler = defaultOnFollowHandler,
-}) => {
+const Navigation = ({ header = documentsNavHeader, items = null, onFollowHandler = defaultOnFollowHandler }) => {
   const location = useLocation();
   const path = location.pathname;
-  let activeHref = `#${DEFAULT_PATH}`;
+  const { isAdmin } = useAppContext();
   const { settings } = useSettingsContext() || {};
+
+  let activeHref = `#${DEFAULT_PATH}`;
 
   // Determine active link based on current path, most specific routes first
   if (path.includes(CONFIGURATION_PATH)) {
@@ -80,8 +104,8 @@ const Navigation = ({
     activeHref = `#${DOCUMENTS_PATH}`;
   }
 
-  // Create a copy of the items array to add the deployment info
-  const navigationItems = [...(items || documentsNavItems)];
+  // Get navigation items based on role (or use provided items)
+  const navigationItems = [...(items || getDocumentsNavItems(isAdmin))];
 
   // Add deployment info section if version, stack name, or build datetime is available
   if (settings?.Version || settings?.StackName || settings?.BuildDateTime || settings?.IDPPattern) {

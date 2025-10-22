@@ -25,6 +25,7 @@ import Breadcrumbs from './breadcrumbs';
 import ToolsPanel from './tools-panel';
 import SplitPanel from './documents-split-panel';
 import ConfigurationLayout from '../configuration-layout';
+import RequireAdmin from '../RequireAdmin';
 
 import { DOCUMENT_LIST_SHARDS_PER_DAY, PERIODS_TO_LOAD_STORAGE_KEY } from '../document-list/documents-table-config';
 import { UPLOAD_DOCUMENT_PATH, DISCOVERY_PATH } from '../../routes/constants';
@@ -126,13 +127,17 @@ const GenAIIDPLayout = () => {
               <DocumentsAgentsLayout />
             </Route>
             <Route path={`${path}/config`}>
-              <ConfigurationLayout />
+              <RequireAdmin>
+                <ConfigurationLayout />
+              </RequireAdmin>
             </Route>
             <Route path={UPLOAD_DOCUMENT_PATH}>
               <UploadDocumentPanel />
             </Route>
             <Route path={DISCOVERY_PATH}>
-              <DiscoveryPanel />
+              <RequireAdmin>
+                <DiscoveryPanel />
+              </RequireAdmin>
             </Route>
             <Route path={`${path}/:objectKey`}>
               <DocumentDetails />
