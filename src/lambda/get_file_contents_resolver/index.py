@@ -61,14 +61,16 @@ def handler(event, context):
         logger.info(f"File size: {response['ContentLength']}")
         
         # Read file content with error handling for different encodings
+        # Read the body once and store it
+        body_bytes = response['Body'].read()
+        
         try:
             # First try UTF-8
-            file_content = response['Body'].read().decode('utf-8')
+            file_content = body_bytes.decode('utf-8')
         except UnicodeDecodeError:
             # If UTF-8 fails, try with error handling
             try:
-                response['Body'].seek(0)  # Reset the file pointer
-                file_content = response['Body'].read().decode('utf-8', errors='replace')
+                file_content = body_bytes.decode('utf-8', errors='replace')
                 logger.warning("File content contained invalid UTF-8 characters that were replaced")
             except Exception as decode_error:
                 # Last resort - if it's a binary file format with text extension
