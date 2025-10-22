@@ -85,10 +85,19 @@ echo -e "${YELLOW}INFO: This step bypasses CloudFormation caching to ensure${NC}
 echo -e "${YELLOW}      Lambda code is always refreshed with latest changes.${NC}"
 echo ""
 
-# Wait for CloudFormation to stabilize
+# Wait for CloudFormation to complete
 if [ $DEPLOY_EXIT_CODE -eq 0 ]; then
-    echo "Waiting 10 seconds for stack to stabilize..."
-    sleep 10
+    echo "Waiting for CloudFormation stack to complete..."
+    echo "This may take 15-20 minutes..."
+    aws cloudformation wait stack-update-complete --stack-name fiscalshield-idp-dev --region eu-central-1
+    if [ $? -eq 0 ]; then
+        echo -e "${GREEN}✓ CloudFormation stack update completed successfully${NC}"
+    else
+        echo -e "${RED}✗ CloudFormation stack update failed or timed out${NC}"
+        echo -e "${YELLOW}You can check the status with:${NC}"
+        echo "  aws cloudformation describe-stacks --stack-name fiscalshield-idp-dev --region eu-central-1"
+        exit 1
+    fi
 fi
 
 if [ -f "./scripts/force-update-lambdas.sh" ]; then
