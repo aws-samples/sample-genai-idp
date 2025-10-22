@@ -34,11 +34,11 @@ const useUserAuthState = () => {
     logger.debug('Is admin:', isAdmin);
   }
 
-  return { 
-    authState: authStatus, 
+  return {
+    authState: authStatus,
     user,
     groups,
-    isAdmin 
+    isAdmin,
   };
 };
 

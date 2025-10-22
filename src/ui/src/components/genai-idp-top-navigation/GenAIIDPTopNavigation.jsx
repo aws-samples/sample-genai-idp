@@ -49,10 +49,10 @@ const GenAIIDPTopNavigation = () => {
   const userId = user?.attributes?.email || 'user';
   const userRole = isAdmin ? 'Admin' : 'User';
   const [isSignOutModalVisible, setIsSignOutModalVisiblesetVisible] = useState(false);
-  
+
   logger.debug('User role:', userRole);
   logger.debug('User groups:', groups);
-  
+
   return (
     <>
       <div id="top-navigation" style={{ position: 'sticky', top: 0, zIndex: 1002 }}>
