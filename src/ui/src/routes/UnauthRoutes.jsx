@@ -20,6 +20,7 @@ const UnauthRoutes = ({ location }) => (
     <Route path={LOGIN_PATH}>
       <Authenticator
         initialState="signIn"
+        loginMechanisms={['email']}
         components={{
           Header: AuthHeader,
         }}

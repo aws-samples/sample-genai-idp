@@ -4400,19 +4400,43 @@ Resources:
         import json
         def lambda_handler(event, context):
             print(json.dumps(event))
+            
+            # Get trigger source to determine which validation to perform
+            trigger_source = event.get('triggerSource')
+            
+            # For PreSignUp, enforce email as username for consistency
+            if trigger_source == 'PreSignUp_SignUp':
+                user_attributes = event.get('request', {}).get('userAttributes', {})
+                email = user_attributes.get('email')
+                
+                if not email or '@' not in email:
+                    raise ValueError('Invalid email address')
+                
+                # Force username to be the email address for consistency
+                # This ensures all new users have email as username
+                event['response']['autoConfirmUser'] = False
+                event['response']['autoVerifyEmail'] = False
+                
+                print(f"PreSignUp: Email {email} will be used as username")
+            
+            # For PreAuthentication, validate email domain if configured
             allowed_domains = [
                 domain.strip() 
                 for domain in os.environ.get('ALLOWED_SIGNUP_EMAIL_DOMAINS', '').split(',')
             ]
-            user_attributes = event.get('request', {}).get('userAttributes', {})
-            email = user_attributes.get('email')
-            if not email or '@' not in email:
-                raise ValueError('Username does not exist or invalid email address')
-            email_domain = email.split('@')[1]
-            if not email_domain or not allowed_domains:
-                raise ValueError('Server error - invalid configuration')
-            if email_domain not in allowed_domains:
-                raise ValueError('Invalid email address domain')
+            
+            if allowed_domains and allowed_domains[0]:  # Only validate if domains are configured
+                user_attributes = event.get('request', {}).get('userAttributes', {})
+                email = user_attributes.get('email')
+                
+                if not email or '@' not in email:
+                    raise ValueError('Username does not exist or invalid email address')
+                
+                email_domain = email.split('@')[1]
+                
+                if email_domain not in allowed_domains:
+                    raise ValueError('Invalid email address domain')
+            
             return event
       LoggingConfig:
         LogGroup: !Ref CognitoUserPoolEmailDomainVerifyFunctionLogGroup

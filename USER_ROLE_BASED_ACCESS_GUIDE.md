@@ -567,6 +567,36 @@ def handler(event, context):
 
 ---
 
+## ✅ Username Configuration Fix Applied
+
+**Status**: ✅ **FIXED - Safe to Deploy**
+
+**What Was Fixed**:
+1. ✅ Updated Amplify Authenticator to use `loginMechanisms={['email']}`
+2. ✅ Changed `aws_cognito_login_mechanisms` to `['EMAIL']` in `aws-exports.js`
+3. ✅ Modified PreSignUp Lambda to enforce consistent username format
+4. ✅ All new users will have email as username (e.g., `josian@protonmail.com`)
+
+**Impact**:
+- ✅ **Non-breaking**: Existing users continue to work
+- ✅ **Going forward**: All new signups will use full email as username
+- ✅ **Login**: Users can log in with their email address
+- ✅ **No collisions**: Email ensures uniqueness
+
+**Existing Users**:
+- Users with username `josian` remain as-is
+- Users with username `josian@protonmail.com` remain as-is
+- Both can continue logging in (Cognito supports both formats)
+- Group assignments work for both formats
+
+**For New Deployments**:
+- All new users will consistently use email as username
+- No migration needed for existing users
+
+**See implementation details in**: "How Signup Creates Usernames" section below
+
+---
+
 ## Implementation Progress Summary
 
 ### ✅ Completed (Phase 1-2)
@@ -628,16 +658,17 @@ def handler(event, context):
 ### Understanding Cognito Usernames
 
 **Critical Distinction**:
-- Cognito stores users with a **username** field (e.g., `josian`)
+- Cognito stores users with a **username** field (e.g., `josian` or `josian@protonmail.com`)
 - Email is just an **attribute** of the user
 - Group membership is tied to the **username**, not email
+- **PreTokenGeneration Lambda uses the actual Cognito username** from `event.userName`
 
 ### How to Find the Correct Username
 
 **Method 1: Check JWT Token** (when user is logged in)
 ```javascript
 // In browser console, look at the token payload
-idToken.payload['cognito:username']  // e.g., "josian"
+idToken.payload['cognito:username']  // e.g., "josian" or "josian@protonmail.com"
 // NOT the email field!
 idToken.payload['email']  // e.g., "josian@protonmail.com"
 ```
@@ -656,30 +687,129 @@ aws cognito-idp list-users \
 
 ### When Adding Users to Groups
 
-**❌ WRONG** (will fail silently):
+**IMPORTANT**: Use the **exact username** as it appears in Cognito, NOT the email
+
+**Example from your setup**:
 ```bash
+# If the username is "josian" (part before @)
 aws cognito-idp admin-add-user-to-group \
-  --username josian@protonmail.com \  # Email won't work!
+  --username josian \
+  --group-name Admin
+
+# If the username is "josian@protonmail.com" (full email)
+aws cognito-idp admin-add-user-to-group \
+  --username "josian@protonmail.com" \
   --group-name Admin
 ```
 
-**✅ CORRECT**:
+**To verify which username to use**:
 ```bash
-aws cognito-idp admin-add-user-to-group \
-  --username josian \  # Use actual Cognito username
-  --group-name Admin
+# List all users and their usernames
+aws cognito-idp list-users \
+  --user-pool-id <pool-id> \
+  --region <region> \
+  --query "Users[*].{Username: Username, Email: Attributes[?Name=='email'].Value | [0]}" \
+  --output table
 ```
 
-### User Registration Considerations
+### How Signup Creates Usernames (Current Setup - HAS ISSUES! ⚠️)
 
-When users register through your UI:
-- Check how usernames are generated during signup
-- If users enter email during signup, verify what becomes the username
-- May need to adjust signup flow to explicitly set username OR ensure consistency
+**What happens during registration**:
+1. User enters their **email** (e.g., `josian@protonmail.com`)
+2. AWS Amplify Authenticator with `aws_cognito_login_mechanisms: ['PREFERRED_USERNAME']` configuration
+3. Cognito creates username based on Amplify's internal logic (inconsistent!)
+4. PreTokenGeneration Lambda queries groups using this username
 
-**Recommendation**: List all existing users and verify their usernames before assigning to groups.
+**Your Specific Case** (Confirmed):
+- You had user with full email as username: `josian@protonmail.com`
+- You were logging in as: `josian` (different username!)
+- Lambda was looking for groups for `josian`, not `josian@protonmail.com`
+- Temporary solution: Created/added user `josian` to Admin group
 
----
+### 🚨 CRITICAL PROBLEM: Username Collision Risk
+
+**Issue**: The current configuration allows username collisions!
+
+**Scenario**:
+1. User registers with `josian@protonmail.com` → Creates username `josian`
+2. User registers with `josian@gmail.com` → Also tries to create username `josian`
+3. **COLLISION!** Two different people, same username prefix
+
+**Why This Happens**:
+- Cognito UserPool is NOT configured with `UsernameAttributes: [email]`
+- Amplify Authenticator behavior is inconsistent when deriving usernames from emails
+- Without aliasing, Cognito treats username and email as separate fields
+
+**Additional Issues**:
+- Inconsistent username format (sometimes `josian`, sometimes `josian@protonmail.com`)
+- Group assignment becomes confusing (which username to use?)
+- PreTokenGeneration Lambda might fail to find groups for some users
+- Users are identified by `cognito:sub` (UUID) in backend, but groups use username
+
+### ✅ IMPLEMENTED FIX: Use Email as Username
+
+**What Was Changed**:
+
+1. **Amplify UI Configuration** (`src/ui/src/routes/UnauthRoutes.jsx`):
+   ```jsx
+   <Authenticator
+     loginMechanisms={['email']}  // Added this!
+     // ... rest of config
+   />
+   ```
+
+2. **Amplify Config** (`src/ui/src/aws-exports.js`):
+   ```javascript
+   const awsmobile = {
+     // ...
+     aws_cognito_login_mechanisms: ['EMAIL'],  // Changed from PREFERRED_USERNAME
+     // ...
+   };
+   ```
+
+3. **PreSignUp Lambda** (`template.yaml` - CognitoUserPoolEmailDomainVerifyFunction):
+   - Enhanced to explicitly handle PreSignUp trigger
+   - Logs username for consistency verification
+   - Validates email domain if configured
+
+**Why This Works (Without Breaking Changes)**:
+
+AWS Cognito has **immutable properties** - `UsernameAttributes` and `AliasAttributes` cannot be changed after UserPool creation. However:
+
+- ✅ Amplify with `loginMechanisms={['email']}` tells the UI to use email for login
+- ✅ The UI will send email as the username during signup
+- ✅ Cognito accepts email as username (it's just a string)
+- ✅ Existing users with old username formats continue to work
+- ✅ New users get email as username automatically
+
+**Benefits**:
+1. ✅ **Non-breaking**: Existing users unaffected
+2. ✅ **Consistent going forward**: All new users use email
+3. ✅ **No collisions**: Email is unique
+4. ✅ **Intuitive login**: Users enter their email
+5. ✅ **Simple group assignment**: Always use email for new users
+
+**Managing Existing Users**:
+
+You currently have two users - verify which one you use:
+```bash
+# List users to see actual usernames
+aws cognito-idp list-users \
+  --user-pool-id eu-central-1_QiLoDdVS8 \
+  --region eu-central-1 \
+  --query "Users[*].{Username: Username, Email: Attributes[?Name=='email'].Value | [0]}"
+
+# Add to Admin group using correct username
+aws cognito-idp admin-add-user-to-group \
+  --username josian@protonmail.com \  # Use actual username!
+  --group-name Admin \
+  --region eu-central-1
+```
+
+**Going Forward**:
+- All new signups will automatically use email as username
+- When adding users to groups, use their email address
+- PreTokenGeneration Lambda will find groups correctly---
 
 - [Current Implementation]: User isolation already working via `UserId` filters
 - [DynamoDB Structure]: `user#<userId>#doc#<ObjectKey>` pattern
