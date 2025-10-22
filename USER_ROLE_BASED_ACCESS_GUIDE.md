@@ -41,7 +41,7 @@ Implement role-based access control (RBAC) to differentiate between **Admin** an
 
 ## Implementation Steps
 
-### Phase 1: Cognito User Groups Setup
+### Phase 1: Cognito User Groups Setup ✅ COMPLETED
 
 #### 1.1 Create User Groups in Cognito
 
@@ -51,16 +51,37 @@ Implement role-based access control (RBAC) to differentiate between **Admin** an
 1. Go to AWS Console → Cognito → Your User Pool
 2. Navigate to "Groups" section
 3. Create two groups:
-   - **Group Name**: `Admins`
-     - **Description**: "System administrators with full access"
-     - **Precedence**: 1 (higher priority)
+   - **Group Name**: `Admin`
+     - **Description**: "System administrators with full access to all documents and configuration"
+     - **Precedence**: 0 (higher priority)
    
    - **Group Name**: `Users`
      - **Description**: "Regular users with access to own documents only"
-     - **Precedence**: 2
+     - **Precedence**: 1
 
 4. Assign existing users to groups:
-   - Add your current admin user(s) to `Admins` group
+   - **IMPORTANT**: Use the Cognito **username**, NOT the email address
+   - Find the username by checking: `cognito:username` field in JWT token OR Cognito Console user list
+   - Add your current admin user(s) to `Admin` group using CLI:
+   
+   ```bash
+   # First, find the username (NOT email)
+   aws cognito-idp list-users --user-pool-id <pool-id> --region <region>
+   
+   # Then add user to Admin group
+   aws cognito-idp admin-add-user-to-group \
+     --user-pool-id <pool-id> \
+     --username <actual-username> \
+     --group-name Admin \
+     --region <region>
+   
+   # Verify
+   aws cognito-idp admin-list-groups-for-user \
+     --user-pool-id <pool-id> \
+     --username <actual-username> \
+     --region <region>
+   ```
+   
    - New users will be assigned to `Users` group by default (or during signup)
 
 #### 1.2 Configure Group Assignment Strategy
@@ -81,55 +102,94 @@ Implement role-based access control (RBAC) to differentiate between **Admin** an
 
 ---
 
-### Phase 2: Frontend Role Detection
+### Phase 2: Frontend Role Detection ✅ COMPLETED
 
 #### 2.1 Create Authentication Context/Hook
 
 **Goal**: Detect user role from Cognito JWT token
 
-**Location**: `src/ui/src/hooks/useAuth.js` or `src/ui/src/context/AuthContext.jsx`
+**Implementation Status**: ✅ Implemented in `src/ui/src/App.jsx`
 
-**What to Implement**:
-- Extract `cognito:groups` from JWT token
-- Determine if user is in `Admins` group
-- Provide role information throughout the app
+**What Was Implemented**:
+- Extract `cognito:groups` from JWT token (ID token and Access token)
+- Determine if user is in `Admin` group
+- Provide role information throughout the app via AppContext
 
-**Key Information to Expose**:
+**Key Information Exposed**:
 ```javascript
 {
-  isAuthenticated: true,
-  user: { sub, username, email },
   isAdmin: true/false,
-  groups: ['Admins'] or ['Users'],
-  userId: 'cognito-user-id'
+  groups: ['Admin'] or []
 }
+```
+
+**Code Implementation**:
+```javascript
+// In App.jsx
+let groups = [];
+let isAdmin = false;
+
+if (user?.signInUserSession) {
+  const { idToken, accessToken } = user.signInUserSession;
+
+  // Try ID token first, then access token
+  groups = idToken?.payload['cognito:groups'] || accessToken?.payload['cognito:groups'] || [];
+  isAdmin = groups.includes('Admin');
+}
+
+// Passed to AppContext
+const appContextValue = {
+  // ... other values
+  groups,
+  isAdmin,
+};
 ```
 
 **Where JWT Groups are Located**:
 ```javascript
-// In AWS Amplify Auth
-const session = await Auth.currentSession();
-const groups = session.getAccessToken().payload['cognito:groups'] || [];
-
-// OR from currentAuthenticatedUser
-const user = await Auth.currentAuthenticatedUser();
-const groups = user.signInUserSession.accessToken.payload['cognito:groups'] || [];
+// The groups claim is added by PreTokenGeneration Lambda trigger
+idToken.payload['cognito:groups']  // e.g., ['Admin']
+accessToken.payload['cognito:groups']  // e.g., ['Admin']
 ```
 
-#### 2.2 Update Existing Auth Context
+#### 2.2 Backend Lambda Trigger ✅ IMPLEMENTED
 
-**Files to Modify**:
-- Look for existing auth context (likely in `src/ui/src/context/` or `src/ui/src/hooks/`)
-- Add `isAdmin` property to auth state
-- Add `groups` property to auth state
+**PreTokenGeneration Lambda**: Automatically adds `cognito:groups` claim to JWT tokens
+
+**Location**: `src/lambda/cognito_add_groups_to_token/index.py`
+
+**How It Works**:
+1. Cognito triggers Lambda during token generation (V2_0 trigger)
+2. Lambda queries Cognito API to get user's groups
+3. Lambda adds groups to both ID token and Access token
+4. Frontend reads groups from token payload
+
+**Configuration** (in `template.yaml`):
+```yaml
+LambdaConfig:
+  PreTokenGeneration: !GetAtt CognitoPreTokenGenerationFunction.Arn
+  PreTokenGenerationConfig:
+    LambdaVersion: V2_0
+    LambdaArn: !GetAtt CognitoPreTokenGenerationFunction.Arn
+```
+
+**CRITICAL**: Both `PreTokenGeneration` and `PreTokenGenerationConfig` are required for V2_0 triggers to work!
 
 ---
 
-### Phase 3: UI Segregation
+### Phase 3: UI Segregation ⏳ IN PROGRESS
 
-#### 3.1 Create Role-Based Navigation
+#### 3.1 Create Role-Based Navigation ✅ PARTIALLY COMPLETE
 
 **Goal**: Show different navigation items based on role
+
+**Status**: Basic role display implemented in top navigation
+
+**Implemented**:
+- `src/ui/src/components/genai-idp-top-navigation/GenAIIDPTopNavigation.jsx` shows "(Admin)" or "(User)" badge
+- AppContext provides `isAdmin` and `groups` to all components
+
+**Still TODO**:
 
 **Regular User Navigation**:
 - Home / Dashboard
@@ -425,11 +485,59 @@ def handler(event, context):
 
 ## Troubleshooting
 
-### Common Issues
+### Common Issues & Solutions ✅
 
-**Issue**: User role not detected
-- **Check**: JWT token includes `cognito:groups`
-- **Fix**: Ensure user is assigned to a group in Cognito
+**Issue**: User role not detected / Shows "(User)" instead of "(Admin)"
+- **Root Cause**: User not actually in the Admin group in Cognito
+- **Check**: Verify user is in group:
+  ```bash
+  aws cognito-idp admin-list-groups-for-user \
+    --user-pool-id <pool-id> \
+    --username <actual-username> \
+    --region <region>
+  ```
+- **Fix**: Add user to group using their **Cognito username** (not email):
+  ```bash
+  aws cognito-idp admin-add-user-to-group \
+    --user-pool-id <pool-id> \
+    --username <actual-username> \
+    --group-name Admin \
+    --region <region>
+  ```
+- **CRITICAL**: Use the username from `cognito:username` field in JWT token, NOT the email address!
+
+**Issue**: Groups not appearing in JWT tokens
+- **Check**: Verify PreTokenGeneration Lambda trigger is configured:
+  ```bash
+  aws cognito-idp describe-user-pool \
+    --user-pool-id <pool-id> \
+    --region <region> \
+    --query "UserPool.LambdaConfig"
+  ```
+- **Expected**: Should show both `PreTokenGeneration` AND `PreTokenGenerationConfig` with `LambdaVersion: V2_0`
+- **Fix**: Ensure template.yaml has both keys set:
+  ```yaml
+  LambdaConfig:
+    PreTokenGeneration: !GetAtt CognitoPreTokenGenerationFunction.Arn
+    PreTokenGenerationConfig:
+      LambdaVersion: V2_0
+      LambdaArn: !GetAtt CognitoPreTokenGenerationFunction.Arn
+  ```
+
+**Issue**: Lambda not being invoked by Cognito
+- **Check**: Look for Lambda logs during login:
+  ```bash
+  aws logs tail /aws/lambda/<function-name> --since 5m --follow
+  ```
+- **Fix**: Both `PreTokenGeneration` key and `PreTokenGenerationConfig` must be present (V2_0 requirement)
+
+**Issue**: Build failing with Prettier errors
+- **Cause**: Trailing whitespace in source files
+- **Fix**: Remove all trailing spaces from modified files:
+  ```bash
+  # Check for trailing spaces
+  grep -n ' $' src/ui/src/App.jsx
+  ```
 
 **Issue**: Admin can't see other users' documents
 - **Check**: Using correct GraphQL query (`listDocuments` vs `listDocumentsDateHour`)
@@ -459,19 +567,119 @@ def handler(event, context):
 
 ---
 
-## Next Steps
+## Implementation Progress Summary
 
-1. ✅ Review this guide
-2. ✅ Set up Cognito groups
-3. ✅ Implement role detection in frontend
-4. ✅ Start with simple UI hiding (configuration editor)
-5. ✅ Gradually add admin dashboard
-6. ✅ Test with multiple users
-7. ✅ Deploy to production
+### ✅ Completed (Phase 1-2)
+
+1. **Cognito User Groups**
+   - Created `Admin` group (precedence 0)
+   - Created `Users` group (precedence 1)
+   - Assigned users to Admin group using correct username
+
+2. **PreTokenGeneration Lambda Trigger**
+   - Created `src/lambda/cognito_add_groups_to_token/index.py`
+   - Queries Cognito API to fetch user groups
+   - Adds `cognito:groups` claim to ID and Access tokens
+   - Configured as V2_0 trigger in template.yaml
+
+3. **Frontend Role Detection**
+   - Modified `src/ui/src/App.jsx` to extract groups from JWT tokens
+   - Added `groups` and `isAdmin` to AppContext
+   - All components have access to user role via context
+
+4. **Basic UI Updates**
+   - Modified `src/ui/src/components/genai-idp-top-navigation/GenAIIDPTopNavigation.jsx`
+   - Shows "(Admin)" or "(User)" badge in top navigation
+   - Visual confirmation of role working
+
+### ⏳ In Progress / Next Steps (Phase 3-7)
+
+5. **Conditional Navigation** - Hide/show menu items based on role
+6. **Route Guards** - Prevent regular users from accessing admin routes
+7. **Admin Dashboard** - Create admin-specific views
+8. **User Document Filtering** - Already working via backend
+9. **Testing** - Multi-user testing across roles
+
+### 🔧 Technical Lessons Learned
+
+1. **Username vs Email**: Cognito uses username (from `cognito:username`), not email, for group membership
+2. **V2_0 Triggers**: Require BOTH `PreTokenGeneration` and `PreTokenGenerationConfig` keys in CloudFormation
+3. **Token Refresh**: Users must log out and back in to get new tokens with groups
+4. **Prettier Enforcement**: Build fails on trailing whitespace - strict formatting rules
+5. **Lambda Invocation**: Lambda only triggers on actual authentication, not on page refresh with existing tokens
 
 ---
 
-## References
+## Next Steps for Implementation
+
+1. ✅ ~~Set up Cognito groups~~
+2. ✅ ~~Implement PreTokenGeneration Lambda~~
+3. ✅ ~~Implement role detection in frontend~~
+4. **TODO**: Implement conditional navigation (hide admin menu items for regular users)
+5. **TODO**: Add route guards for admin-only pages
+6. **TODO**: Create admin dashboard with all-users document view
+7. **TODO**: Test with multiple users
+8. **TODO**: Deploy to production
+
+---
+
+## Important: Username vs Email Address 🚨
+
+### Understanding Cognito Usernames
+
+**Critical Distinction**:
+- Cognito stores users with a **username** field (e.g., `josian`)
+- Email is just an **attribute** of the user
+- Group membership is tied to the **username**, not email
+
+### How to Find the Correct Username
+
+**Method 1: Check JWT Token** (when user is logged in)
+```javascript
+// In browser console, look at the token payload
+idToken.payload['cognito:username']  // e.g., "josian"
+// NOT the email field!
+idToken.payload['email']  // e.g., "josian@protonmail.com"
+```
+
+**Method 2: List Users in Cognito**
+```bash
+aws cognito-idp list-users \
+  --user-pool-id <pool-id> \
+  --region <region> \
+  --query "Users[*].{Username: Username, Email: Attributes[?Name=='email'].Value | [0]}"
+```
+
+**Method 3: Cognito Console**
+- Go to AWS Console → Cognito → Users
+- The "Username" column shows the actual username
+
+### When Adding Users to Groups
+
+**❌ WRONG** (will fail silently):
+```bash
+aws cognito-idp admin-add-user-to-group \
+  --username josian@protonmail.com \  # Email won't work!
+  --group-name Admin
+```
+
+**✅ CORRECT**:
+```bash
+aws cognito-idp admin-add-user-to-group \
+  --username josian \  # Use actual Cognito username
+  --group-name Admin
+```
+
+### User Registration Considerations
+
+When users register through your UI:
+- Check how usernames are generated during signup
+- If users enter email during signup, verify what becomes the username
+- May need to adjust signup flow to explicitly set username OR ensure consistency
+
+**Recommendation**: List all existing users and verify their usernames before assigning to groups.
+
+---
 
 - [Current Implementation]: User isolation already working via `UserId` filters
 - [DynamoDB Structure]: `user#<userId>#doc#<ObjectKey>` pattern
