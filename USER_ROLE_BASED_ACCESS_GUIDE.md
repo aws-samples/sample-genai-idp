@@ -84,21 +84,46 @@ Implement role-based access control (RBAC) to differentiate between **Admin** an
    
    - New users will be assigned to `Users` group by default (or during signup)
 
-#### 1.2 Configure Group Assignment Strategy
+#### 1.2 Configure Group Assignment Strategy ✅ IMPLEMENTED
 
-**Options**:
+**Implemented Solution**: **Option B - Automatic Assignment**
 
-**Option A: Manual Assignment** (Simplest)
-- Admin manually assigns users to groups via Cognito console
-- Good for small teams or controlled environments
+**How It Works**:
+- PostConfirmation Lambda trigger automatically assigns new users to `Users` group
+- Triggers after user confirms email/account (`PostConfirmation_ConfirmSignUp`)
+- No manual intervention required for regular user registrations
+- Admins manually promote users to `Admin` group when needed
 
-**Option B: Automatic Assignment** (Recommended)
-- Modify signup Lambda trigger to auto-assign new users to `Users` group
-- Admins manually promote users to `Admins` when needed
+**Implementation Details**:
+- **Lambda**: `src/lambda/cognito_post_confirmation/index.py`
+- **Trigger**: PostConfirmation (runs after account confirmation)
+- **Action**: Automatically calls `admin_add_user_to_group` to add user to "Users" group
+- **Error Handling**: Gracefully handles errors without failing user confirmation
+- **Configuration**: Added to UserPool LambdaConfig in `template.yaml`
 
-**Option C: Self-Service with Approval**
-- Users sign up → assigned to `Users` group
-- Admin dashboard to upgrade users to admin role
+**IAM Permissions**:
+```yaml
+CognitoPostConfirmationFunctionPolicy:
+  PolicyDocument:
+    Statement:
+      - Effect: Allow
+        Action:
+          - cognito-idp:AdminAddUserToGroup
+        Resource: !GetAtt UserPool.Arn
+```
+
+**To Promote a User to Admin**:
+```bash
+# Add user to Admin group (they'll also remain in Users group)
+aws cognito-idp admin-add-user-to-group \
+  --user-pool-id <pool-id> \
+  --username <user-email> \
+  --group-name Admin \
+  --region <region>
+
+# Users can be in multiple groups
+# Admin group takes precedence (precedence: 0 vs 1)
+```
 
 ---
 
@@ -634,13 +659,36 @@ def handler(event, context):
    - Non-admin users redirected to documents page with "Access Denied" message
    - Admin routes only accessible by users in Admin group
 
-### ⏳ In Progress / Next Steps (Phase 3-7)
+7. **Automatic User Group Assignment** (Phase 1 Enhancement)
+   - Created PostConfirmation Lambda (`src/lambda/cognito_post_confirmation/index.py`)
+   - Automatically adds new users to "Users" group after account confirmation
+   - Triggers on `PostConfirmation_ConfirmSignUp` event
+   - No manual intervention needed for regular user registrations
+   - Admins must be manually promoted to "Admin" group
+   - Added to UserPool LambdaConfig in both conditional branches
 
-5. ✅ **Conditional Navigation** - Hide/show menu items based on role (COMPLETED)
-6. ✅ **Route Guards** - Prevent regular users from accessing admin routes (COMPLETED)
-7. **Admin Dashboard** - Create admin-specific views (OPTIONAL)
-8. **User Document Filtering** - Already working via backend (COMPLETED)
-9. **Testing** - Multi-user testing across roles (TODO)
+### ⏳ In Progress / Next Steps (Phase 4-7)
+
+**Phase 3 Complete!** ✅ All core RBAC functionality is now working:
+- ✅ Cognito groups configured (Admin, Users)
+- ✅ Automatic user group assignment on signup
+- ✅ Role detection from JWT tokens
+- ✅ Role-based navigation (admins see more menu items)
+- ✅ Route guards prevent unauthorized access
+- ✅ Email-as-username for consistency
+
+**Optional Enhancements** (Not Required for Basic RBAC):
+- **Phase 4**: Admin can view all users' documents (currently admins only see their own)
+- **Phase 5**: Admin dashboard with system statistics
+- **Phase 6**: User management interface
+- **Phase 7**: Audit logging
+
+**Testing Checklist**:
+- ✅ Admin user can see Discovery and Configuration in menu
+- ✅ Regular user cannot see Discovery and Configuration in menu
+- ✅ Regular user redirected if accessing admin routes directly
+- ✅ New user registrations automatically assigned to Users group
+- ✅ Email used as username consistently
 
 ### 🔧 Technical Lessons Learned
 
