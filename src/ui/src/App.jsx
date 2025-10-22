@@ -38,7 +38,7 @@ const AppContent = () => {
 
     logger.debug('User groups:', groups);
     logger.debug('Is admin:', isAdmin);
-    
+
     // Temporary debug logging
     console.log('[RBAC] Groups from token:', groups);
     console.log('[RBAC] Is admin:', isAdmin);
