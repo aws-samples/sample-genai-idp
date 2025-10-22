@@ -30,11 +30,18 @@ const AppContent = () => {
   let isAdmin = false;
 
   if (user?.signInUserSession) {
-    const { accessToken } = user.signInUserSession;
-    groups = accessToken?.payload['cognito:groups'] || [];
+    const { idToken, accessToken } = user.signInUserSession;
+
+    // Try ID token first, then access token
+    groups = idToken?.payload['cognito:groups'] || accessToken?.payload['cognito:groups'] || [];
     isAdmin = groups.includes('Admin');
+
     logger.debug('User groups:', groups);
     logger.debug('Is admin:', isAdmin);
+    
+    // Temporary debug logging
+    console.log('[RBAC] Groups from token:', groups);
+    console.log('[RBAC] Is admin:', isAdmin);
   }
 
   // eslint-disable-next-line react/jsx-no-constructed-context-values
