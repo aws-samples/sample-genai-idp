@@ -622,13 +622,25 @@ def handler(event, context):
    - Shows "(Admin)" or "(User)" badge in top navigation
    - Visual confirmation of role working
 
+5. **Role-Based Navigation** (Phase 3)
+   - Created `getDocumentsNavItems(isAdmin)` function in `navigation.jsx`
+   - Regular users see: Document List, Upload, KB Query, Agent Analysis
+   - Admins additionally see: Discovery, View/Edit Configuration
+   - Navigation dynamically adjusts based on `isAdmin` from AppContext
+
+6. **Route Guards** (Phase 3)
+   - Created `RequireAdmin.jsx` component to guard admin-only routes
+   - Protected routes: `/documents/config` and `/documents/discovery`
+   - Non-admin users redirected to documents page with "Access Denied" message
+   - Admin routes only accessible by users in Admin group
+
 ### ⏳ In Progress / Next Steps (Phase 3-7)
 
-5. **Conditional Navigation** - Hide/show menu items based on role
-6. **Route Guards** - Prevent regular users from accessing admin routes
-7. **Admin Dashboard** - Create admin-specific views
-8. **User Document Filtering** - Already working via backend
-9. **Testing** - Multi-user testing across roles
+5. ✅ **Conditional Navigation** - Hide/show menu items based on role (COMPLETED)
+6. ✅ **Route Guards** - Prevent regular users from accessing admin routes (COMPLETED)
+7. **Admin Dashboard** - Create admin-specific views (OPTIONAL)
+8. **User Document Filtering** - Already working via backend (COMPLETED)
+9. **Testing** - Multi-user testing across roles (TODO)
 
 ### 🔧 Technical Lessons Learned
 
