@@ -4083,7 +4083,14 @@ Resources:
         - ShouldAllowSignUpEmailDomain
         - PreAuthentication: !GetAtt CognitoUserPoolEmailDomainVerifyFunction.Arn
           PreSignUp: !GetAtt CognitoUserPoolEmailDomainVerifyFunction.Arn
-        - !Ref AWS::NoValue
+          PreTokenGeneration: !GetAtt CognitoPreTokenGenerationFunction.Arn
+          PreTokenGenerationConfig:
+            LambdaVersion: V2_0
+            LambdaArn: !GetAtt CognitoPreTokenGenerationFunction.Arn
+        - PreTokenGeneration: !GetAtt CognitoPreTokenGenerationFunction.Arn
+          PreTokenGenerationConfig:
+            LambdaVersion: V2_0
+            LambdaArn: !GetAtt CognitoPreTokenGenerationFunction.Arn
       Policies:
         PasswordPolicy:
           MinimumLength: 8
@@ -4308,6 +4315,58 @@ Resources:
       GroupName: !Ref AdminGroup
       Username: !Ref AdminUser
       UserPoolId: !Ref UserPool
+
+  # Pre Token Generation Lambda - Adds groups to JWT tokens
+  CognitoPreTokenGenerationFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: "Function does not require VPC access"
+          - id: W92
+            reason: "Function does not require reserved concurrency"
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for Cognito trigger"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
+    Properties:
+      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
+      Description: Adds user groups to ID and Access tokens
+      CodeUri: src/lambda/cognito_add_groups_to_token/
+      Handler: index.handler
+      Runtime: python3.12
+      Timeout: 10
+      LoggingConfig:
+        LogGroup: !Ref CognitoPreTokenGenerationFunctionLogGroup
+
+  CognitoPreTokenGenerationFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      KmsKeyId: !GetAtt CustomerManagedEncryptionKey.Arn
+      RetentionInDays: !Ref LogRetentionDays
+
+  CognitoPreTokenGenerationFunctionPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: CognitoGroupsAccess
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - cognito-idp:AdminListGroupsForUser
+            Resource: !GetAtt UserPool.Arn
+      Roles:
+        - !Ref CognitoPreTokenGenerationFunctionRole
+
+  CognitoPreTokenGenerationPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref CognitoPreTokenGenerationFunction
+      Principal: !Sub "cognito-idp.${AWS::URLSuffix}"
+      SourceAccount: !Ref AWS::AccountId
+      SourceArn: !GetAtt UserPool.Arn
 
   CognitoUserPoolEmailDomainVerifyFunction:
     DependsOn:

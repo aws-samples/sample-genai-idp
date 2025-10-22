@@ -40,6 +40,8 @@ const AppContent = () => {
     logger.debug('Is admin:', isAdmin);
 
     // Temporary debug logging
+    console.log('[RBAC] ID Token payload:', idToken?.payload);
+    console.log('[RBAC] Access Token payload:', accessToken?.payload);
     console.log('[RBAC] Groups from token:', groups);
     console.log('[RBAC] Is admin:', isAdmin);
   }
