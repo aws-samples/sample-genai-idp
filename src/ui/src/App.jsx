@@ -25,6 +25,18 @@ const AppContent = () => {
   const [errorMessage, setErrorMessage] = useState();
   const [navigationOpen, setNavigationOpen] = useState(true);
 
+  // Extract user groups and admin status
+  let groups = [];
+  let isAdmin = false;
+
+  if (user?.signInUserSession) {
+    const { accessToken } = user.signInUserSession;
+    groups = accessToken?.payload['cognito:groups'] || [];
+    isAdmin = groups.includes('Admin');
+    logger.debug('User groups:', groups);
+    logger.debug('Is admin:', isAdmin);
+  }
+
   // eslint-disable-next-line react/jsx-no-constructed-context-values
   const appContextValue = {
     authState,
@@ -34,6 +46,8 @@ const AppContent = () => {
     currentSession,
     setErrorMessage,
     user,
+    groups,
+    isAdmin,
     navigationOpen,
     setNavigationOpen,
   };

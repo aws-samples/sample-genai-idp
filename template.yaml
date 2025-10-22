@@ -4130,6 +4130,15 @@ Resources:
         - COGNITO
       UserPoolId: !Ref UserPool
 
+  # User Group for Regular Users (Admin group already exists below)
+  UsersGroup:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      GroupName: Users
+      Description: Regular users with access to their own documents only
+      Precedence: 1
+      UserPoolId: !Ref UserPool
+
   GetDomainLambda:
     DependsOn:
       - IsStacknameLengthOK
@@ -4288,7 +4297,7 @@ Resources:
   AdminGroup:
     Type: AWS::Cognito::UserPoolGroup
     Properties:
-      Description: Administrators
+      Description: System administrators with full access to all documents and configuration
       GroupName: Admin
       Precedence: 0
       UserPoolId: !Ref UserPool
