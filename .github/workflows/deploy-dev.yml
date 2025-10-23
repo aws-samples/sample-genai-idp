@@ -8,6 +8,7 @@ on:
 jobs:
   deploy-dev:
     runs-on: ubuntu-latest
+    environment: dev  # 👈 Add this line to use the 'dev' environment secrets
     
     steps:
     - name: Checkout code
@@ -27,6 +28,10 @@ jobs:
         aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID_DEV }}
         aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY_DEV }}
         aws-region: eu-central-1
+      env:
+        AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID_DEV }}
+        AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY_DEV }}
+        AWS_DEFAULT_REGION: eu-central-1
     
     - name: Install dependencies
       run: |
