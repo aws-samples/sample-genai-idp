@@ -1,7 +1,7 @@
 # Assessment configuration with bounding box support
 assessment:
   enabled: true
-  model: us.amazon.nova-lite-v1:0
+  model: eu.amazon.nova-lite-v1:0
   temperature: 0.0
   top_k: 5
   top_p: 0.1

@@ -179,6 +179,7 @@ class Document:
     input_bucket: Optional[str] = None  # S3 bucket containing the input document
     input_key: Optional[str] = None  # S3 key of the input document
     output_bucket: Optional[str] = None  # S3 bucket for processing outputs
+    user_id: Optional[str] = None  # Cognito user ID for multi-tenant isolation
 
     # Processing state and timing
     status: Status = Status.QUEUED
@@ -215,6 +216,7 @@ class Document:
             "input_bucket": self.input_bucket,
             "input_key": self.input_key,
             "output_bucket": self.output_bucket,
+            "user_id": self.user_id,
             "status": self.status.value,
             "initial_event_time": self.initial_event_time,
             "queued_time": self.queued_time,
@@ -277,6 +279,7 @@ class Document:
             input_bucket=data.get("input_bucket"),
             input_key=data.get("input_key"),
             output_bucket=data.get("output_bucket"),
+            user_id=data.get("user_id"),
             num_pages=int(data.get("num_pages", 0)),  # Ensure num_pages is integer
             initial_event_time=data.get("initial_event_time"),
             queued_time=data.get("queued_time"),

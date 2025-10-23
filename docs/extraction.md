@@ -9,6 +9,82 @@ Information extraction is a central capability of the GenAIIDP solution, transfo
 
 Configure extraction behavior through several components:
 
+### Agentic Extraction (Preview)
+
+The extraction service supports two modes: **traditional** and **agentic**. Agentic extraction provides superior accuracy and consistency, especially for complex documents with nested structures or strict schema requirements.
+
+> **Preview Status**: Agentic extraction is currently in preview. While it demonstrates significant improvements in accuracy and reliability, we recommend thorough testing in your specific use case before production deployment.
+
+#### When to Enable Agentic Extraction
+
+Enable agentic extraction when you need:
+
+- **Schema Compliance**: Guaranteed adherence to defined data structures
+- **Data Validation**: Automatic validation with retry mechanisms
+- **Complex Structures**: Proper handling of nested objects and arrays
+- **Date Standardization**: Consistent date formatting (e.g., MM/DD/YYYY)
+- **Self-Correction**: Automatic fixing of extraction errors
+- **Production Reliability**: Higher accuracy for business-critical data
+- **Extensibility**: Future integration with Model Context Protocol (MCP) servers for advanced validation, enrichment, and external data lookups during extraction
+
+```yaml
+extraction:
+  agentic:
+    enabled: true  # Enable for better consistency and accuracy
+  model:anthropic.claude-3-haiku-20240307-v1:0
+```
+
+#### Cost Considerations
+
+Agentic extraction may have slightly higher costs due to:
+
+- Additional processing for validation and correction
+- Tool-use capabilities requiring more sophisticated models
+- Multiple retry attempts for error correction
+
+However, the benefits typically outweigh the costs:
+
+Agentic extraction helps improve model performance significantly on tasks, for example Claude Sonnet 3.5 increases over 20% in accuracy on [getomni-ai benchmark](https://getomni.ai/blog/ocr-benchmark).
+
+- **100% schema compliance** vs frequent validation failures
+- **Reduced manual review** and correction efforts
+- **Automatic caching**: For supported models, prompt and tool caching is automatically enabled, reducing costs for repeated extractions with the same configuration
+
+#### Supported Models for Agentic Extraction
+
+Agentic extraction requires models with tool-use support:
+
+- **Anthropic Claude Sonnet** models (recommended for optimal performance)
+  - `anthropic.claude-3-5-sonnet-20241022-v2:0` - Best balance of speed and accuracy
+  - `anthropic.claude-3-7-sonnet-20250219-v1:0` - Latest with enhanced capabilities
+- **Anthropic Claude Opus** models (for highest accuracy requirements)
+- **Amazon Nova Pro** (AWS native alternative)
+- **Amazon Nova Premier** (for complex multi-modal extraction)
+
+> **Note on Future Enhancements**: The full power of agentic extraction will become available when Pydantic models are fully supported in the configuration. This will enable:
+>
+> - Custom field validators
+> - Complex type definitions
+> - Nested model hierarchies
+> - Advanced data transformations
+> - Business logic validation
+> - **MCP Server Integration**: Connect to external validation services, databases, or APIs to enrich extraction with real-time data lookups (e.g., validate addresses, verify company names, check product codes)
+>
+> **Current Implementation**: Agentic extraction automatically converts your document class configuration (classes, attributes, descriptions, types) into Pydantic models internally. This means improving your configuration directly improves extraction accuracy. The agent uses these Pydantic models to validate extracted data and ensure schema compliance.
+>
+> **Future Enhancement**: You'll be able to define custom Pydantic models directly in your configuration with advanced validators, custom types, and complex business logic. This will provide even more powerful extraction capabilities while maintaining the same ease of use.
+
+#### Automatic Retry Handling
+
+Agentic extraction automatically handles throttling and transient errors:
+
+- **Automatic retries**: Up to 7 retry attempts with exponential backoff (matching bedrock client behavior)
+- **Adaptive retry mode**: Intelligently adjusts retry timing based on error types
+- **Step Functions integration**: If retries are exhausted, ThrottlingException is propagated to Step Functions for workflow-level retry handling
+- **No configuration needed**: Retry logic is transparent and matches the standard bedrock client behavior
+
+This ensures reliable extraction even in accounts with low service quotas, with no manual configuration required.
+
 ### Document Classes and Attributes
 
 Specify document classes and the fields to extract from each:
@@ -32,15 +108,24 @@ classes:
 
 Configure the extraction model and prompting strategy:
 
+#### Configuration for Agentic Extraction (Recommended)
+
 ```yaml
 extraction:
-  # Model selection and parameters
-  model: us.amazon.nova-pro-v1:0
-  temperature: 0.0
+  # Enable agentic extraction for better accuracy
+  agentic:
+    enabled: true # Turn on for production use
+
+  # Model selection - must support tool use for agentic
+  model: anthropic.claude-3-5-sonnet-20241022-v2:0 # Recommended for best results
+  # Alternative models:
+  # - anthropic.claude-3-7-sonnet-20250219-v1:0  # Latest Sonnet with enhanced capabilities
+  # - us.amazon.nova-pro-v1:0  # AWS native option
+  temperature: 0.0 # Keep low for consistency
   top_p: 0.1
   top_k: 5
   max_tokens: 4096
-  
+
   # Prompts for extraction
   system_prompt: |
     You are an expert in extracting structured information from documents.
@@ -48,26 +133,71 @@ extraction:
     For each field, look for both the field label and the associated value.
     Pay attention to formatting patterns common in business documents.
     When a field is not present, indicate this explicitly rather than guessing.
-    
+
   task_prompt: |
     Extract the following fields from this {DOCUMENT_CLASS} document:
-    
+
     {ATTRIBUTE_NAMES_AND_DESCRIPTIONS}
-    
+
     <few_shot_examples>
     {FEW_SHOT_EXAMPLES}
     </few_shot_examples>
-    
+
     <<CACHEPOINT>>
-    
+
     Here is the document to analyze:
     {DOCUMENT_TEXT}
-    
+
     Format your response as valid JSON:
     {
       "field_name": "extracted value",
       ...
     }
+```
+
+##### How Prompts Work in Agentic vs Traditional Extraction
+
+Both extraction modes use the same `system_prompt` and `task_prompt` configuration, but they are applied differently:
+
+**Traditional Extraction:**
+
+- `system_prompt` → Sent directly to Bedrock as the system message
+- `task_prompt` → Sent as the user message with document content
+- Model responds with JSON text that requires parsing
+- No validation or retry mechanism
+
+**Agentic Extraction:**
+
+- `system_prompt` → Passed via `custom_instruction` parameter and appended to the agentic system prompt
+- `task_prompt` → Sent as user message with document content (text/images as content blocks)
+- Uses Strands agent framework with tools for structured output
+- Returns validated Pydantic model (no JSON parsing needed)
+- Automatic retry and self-correction on validation failures
+
+**Key Difference:** The agentic system prompt (in `agentic_idp.py`) provides extraction guidelines and tool usage instructions. Your existing `system_prompt` and `task_prompt` are incorporated as custom instructions to guide the extraction without changing the core agent behavior.
+
+**How Agentic Uses Your Configuration:** Agentic extraction automatically transforms your document class configuration (classes, attributes, and descriptions) into Pydantic models. These models define the exact structure, types, and field descriptions that the agent must follow. As you improve your attribute descriptions and add more detailed field definitions in your configuration, the agentic extraction becomes more accurate because the Pydantic models provide stronger type validation and clearer extraction targets.
+
+**Result:** The same prompt configuration works for both methods, just applied differently under the hood. You don't need separate prompts for agentic extraction. The better you define your document classes and attributes, the more accurate your agentic extraction will be.
+
+#### Configuration for Traditional Extraction (Legacy/Testing)
+
+```yaml
+extraction:
+  # Disable agentic for traditional extraction
+  agentic:
+    enabled: false # Only for testing or legacy compatibility
+
+  # Model selection - any Bedrock model
+  model: anthropic.claude-3-haiku-20240307-v1:0 # Can use simpler models
+  temperature: 0.0
+  max_tokens: 4096
+
+  # Note: Traditional extraction has limitations:
+  # - No automatic validation or retry
+  # - Inconsistent date/number formatting
+  # - Poor handling of nested structures
+  # - Lower overall accuracy (~70% vs 95%)
 ```
 
 The extraction service automatically detects and parses both JSON and YAML responses from the LLM, making the structured data available for downstream processing.
@@ -79,83 +209,90 @@ The extraction service supports precise control over where document images are p
 ### How {DOCUMENT_IMAGE} Works
 
 **Without Placeholder (Default Behavior):**
+
 ```yaml
 extraction:
   task_prompt: |
     Extract the following fields from this {DOCUMENT_CLASS} document:
-    
+
     {ATTRIBUTE_NAMES_AND_DESCRIPTIONS}
-    
+
     Document text:
     {DOCUMENT_TEXT}
-    
+
     Respond with valid JSON.
 ```
+
 Images are automatically appended after the text content.
 
 **With Placeholder (Controlled Placement):**
+
 ```yaml
 extraction:
   task_prompt: |
     Extract the following fields from this {DOCUMENT_CLASS} document:
-    
+
     {ATTRIBUTE_NAMES_AND_DESCRIPTIONS}
-    
+
     Examine this document image:
     {DOCUMENT_IMAGE}
-    
+
     Text content:
     {DOCUMENT_TEXT}
-    
+
     Respond with valid JSON containing the extracted values.
 ```
+
 Images are inserted exactly where `{DOCUMENT_IMAGE}` appears in the prompt.
 
 ### Usage Examples
 
 **Visual-First Extraction:**
+
 ```yaml
 task_prompt: |
   You are extracting data from a {DOCUMENT_CLASS}. Here are the fields to find:
   {ATTRIBUTE_NAMES_AND_DESCRIPTIONS}
-  
+
   First, examine the document layout and visual structure:
   {DOCUMENT_IMAGE}
-  
+
   Now analyze the extracted text:
   {DOCUMENT_TEXT}
-  
+
   Extract the requested fields as JSON:
 ```
 
 **Image for Context and Verification:**
+
 ```yaml
 task_prompt: |
   Extract these fields from a {DOCUMENT_CLASS}:
   {ATTRIBUTE_NAMES_AND_DESCRIPTIONS}
-  
+
   Document text (may contain OCR errors):
   {DOCUMENT_TEXT}
-  
+
   Use this image to verify and correct any unclear information:
   {DOCUMENT_IMAGE}
-  
+
   Extracted data (JSON format):
 ```
 
 **Mixed Content Analysis:**
+
 ```yaml
 task_prompt: |
   You are processing a {DOCUMENT_CLASS} that may contain both text and visual elements like tables, stamps, or signatures.
-  
+
   Target fields: {ATTRIBUTE_NAMES_AND_DESCRIPTIONS}
-  
+
   Document image (shows full layout):
   {DOCUMENT_IMAGE}
-  
+
   Extracted text (may miss visual-only elements):
   {DOCUMENT_TEXT}
-  
+
   Extract all available information as JSON:
 ```
 
@@ -167,19 +304,19 @@ The `{DOCUMENT_IMAGE}` placeholder works seamlessly with few-shot examples:
 extraction:
   task_prompt: |
     Extract fields from {DOCUMENT_CLASS} documents. Here are examples:
-    
+
     {FEW_SHOT_EXAMPLES}
-    
+
     Now process this new document:
-    
+
     Visual layout:
     {DOCUMENT_IMAGE}
-    
+
     Text content:
     {DOCUMENT_TEXT}
-    
+
     Fields to extract: {ATTRIBUTE_NAMES_AND_DESCRIPTIONS}
-    
+
     JSON response:
 ```
 
@@ -206,15 +343,15 @@ For documents with multiple pages, the system provides robust image management:
 extraction:
   task_prompt: |
     Extract data from this multi-page {DOCUMENT_CLASS}:
-    
+
     {ATTRIBUTE_NAMES_AND_DESCRIPTIONS}
-    
+
     Document pages (up to 20 images):
     {DOCUMENT_IMAGE}
-    
+
     Combined text from all pages:
     {DOCUMENT_TEXT}
-    
+
     Return JSON with extracted fields:
 ```
 
@@ -255,6 +392,7 @@ extraction:
 ```
 
 **Lambda Function Requirements:**
+
 - Function name must start with `GENAIIDP-` (required for IAM permissions)
 - Must return valid JSON with `system_prompt` and `task_prompt_content` fields
 - Available in Patterns 2 and 3 only
@@ -264,6 +402,7 @@ extraction:
 Your Lambda function receives a comprehensive payload with all context needed for prompt generation:
 
 **Input Payload:**
+
 ```json
 {
   "config": {
@@ -279,12 +418,12 @@ Your Lambda function receives a comprehensive payload with all context needed fo
   },
   "default_task_prompt_content": [
     {"text": "Resolved default task prompt with placeholders replaced"},
-    {"image_uri": "<image_placeholder>"}, 
+    {"image_uri": "<image_placeholder>"},
     {"cachePoint": true}
   ],
   "serialized_document": {
     "id": "document-123",
-    "input_bucket": "my-bucket", 
+    "input_bucket": "my-bucket",
     "input_key": "documents/invoice.pdf",
     "pages": {...},
     "sections": [...],
@@ -294,13 +433,14 @@ Your Lambda function receives a comprehensive payload with all context needed fo
 ```
 
 **Required Output:**
+
 ```json
 {
   "system_prompt": "Your custom system prompt based on document analysis",
   "task_prompt_content": [
-    {"text": "Your custom task prompt with business logic applied"},
-    {"image_uri": "<preserved_placeholder>"},
-    {"cachePoint": true}
+    { "text": "Your custom task prompt with business logic applied" },
+    { "image_uri": "<preserved_placeholder>" },
+    { "cachePoint": true }
   ]
 }
 ```
@@ -308,11 +448,12 @@ Your Lambda function receives a comprehensive payload with all context needed fo
 ### Implementation Examples
 
 **Document Type Detection:**
+
 ```python
 def lambda_handler(event, context):
     placeholders = event.get('prompt_placeholders', {})
     document_class = placeholders.get('DOCUMENT_CLASS', '')
-    
+
     if 'bank statement' in document_class.lower():
         return generate_banking_prompts(event)
     elif 'invoice' in document_class.lower():
@@ -322,41 +463,43 @@ def lambda_handler(event, context):
 ```
 
 **Content-Based Analysis:**
+
 ```python
 def lambda_handler(event, context):
     placeholders = event.get('prompt_placeholders', {})
     document_text = placeholders.get('DOCUMENT_TEXT', '')
     image_uris = placeholders.get('DOCUMENT_IMAGE', [])
-    
+
     # Multi-page processing logic
     if len(image_uris) > 3:
         return generate_multi_page_prompts(event)
-    
+
     # International document detection
     if any(term in document_text.lower() for term in ['vat', 'gst', 'euro']):
         return generate_international_prompts(event)
-    
+
     return use_standard_prompts(event)
 ```
 
 **External System Integration:**
+
 ```python
 import boto3
 
 def lambda_handler(event, context):
     document = event.get('serialized_document', {})
     customer_id = document.get('customer_id')  # Custom field
-    
+
     # Retrieve customer-specific rules
     dynamodb = boto3.resource('dynamodb')
     table = dynamodb.Table('customer-extraction-rules')
-    
+
     customer_rules = table.get_item(Key={'customer_id': customer_id}).get('Item', {})
-    
+
     # Apply customer-specific customization
     if customer_rules.get('enhanced_validation'):
         return generate_enhanced_validation_prompts(event)
-    
+
     return use_standard_prompts(event)
 ```
 
@@ -370,6 +513,7 @@ The system implements **fail-fast error handling** for custom Lambda functions:
 - **Timeout scenarios** fail with timeout information
 
 **Example Error Messages:**
+
 ```
 Failed to invoke custom prompt Lambda arn:aws:lambda:...: Connection timeout
 Custom prompt Lambda failed: KeyError: 'system_prompt' not found in response
@@ -387,6 +531,7 @@ Custom prompt Lambda returned invalid response format: expected dict, got str
 
 **1. Demo Lambda Function:**
 Deploy the provided demo Lambda for testing:
+
 ```bash
 cd notebooks/examples/demo-lambda
 sam deploy --guided
@@ -394,6 +539,7 @@ sam deploy --guided
 
 **2. Interactive Testing:**
 Use the demo notebook for hands-on experimentation:
+
 ```bash
 jupyter notebook notebooks/examples/step3_extraction_with_custom_lambda.ipynb
 ```
@@ -404,21 +550,25 @@ Create your production Lambda with business-specific logic and deploy with appro
 ### Use Cases
 
 **Financial Services:**
+
 - Regulatory compliance prompts for different financial products
 - Multi-currency transaction handling with exchange rate awareness
 - Customer-specific formatting for different banking institutions
 
 **Healthcare:**
+
 - HIPAA compliance with privacy-focused prompts
 - Medical terminology enhancement for clinical documents
 - Provider-specific templates for different healthcare systems
 
 **Legal:**
+
 - Jurisdiction-specific legal language processing
 - Contract type specialization (NDAs, service agreements, etc.)
 - Compliance requirements for regulatory documents
 
 **Insurance:**
+
 - Policy type customization for different insurance products
 - Claims processing with adjuster-specific requirements
 - Risk assessment integration with underwriting systems
@@ -447,14 +597,14 @@ CachePoint is enabled by placing special `<<CACHEPOINT>>` tags in your prompt te
 
 ```yaml
 extraction:
-  model: us.amazon.nova-pro-v1:0  # Must be a CachePoint-compatible model
+  model: us.amazon.nova-pro-v1:0 # Must be a CachePoint-compatible model
   task_prompt: |
     <background>
     You are an expert in business document analysis and information extraction.
     </background>
-    
+
     <<CACHEPOINT>>  # Cache the instruction portion
-    
+
     Here is the document to analyze:
     {DOCUMENT_TEXT}
 ```
@@ -477,18 +627,19 @@ pricing:
   - name: bedrock/us.anthropic.claude-3-5-haiku-20241022-v1:0
     units:
       - name: inputTokens
-        price: '8.0E-7'
+        price: "8.0E-7"
       - name: outputTokens
-        price: '4.0E-6'
-      - name: cacheReadInputTokens  # Reduced rate for cached content
-        price: '8.0E-8'             # 10x cheaper than standard input tokens
+        price: "4.0E-6"
+      - name: cacheReadInputTokens # Reduced rate for cached content
+        price: "8.0E-8" # 10x cheaper than standard input tokens
       - name: cacheWriteInputTokens
-        price: '1.0E-6'
+        price: "1.0E-6"
 ```
 
 ### Optimal CachePoint Placement
 
 For extraction tasks, place CachePoint tags to separate:
+
 1. **Static content** (system instructions, few-shot examples) - cacheable
 2. **Dynamic content** (document text, specific attributes) - not cacheable
 
@@ -592,13 +743,13 @@ The extraction service will use these examples as context when processing simila
 extraction:
   task_prompt: |
     Extract the following fields from this {DOCUMENT_CLASS} document:
-    
+
     {ATTRIBUTE_NAMES_AND_DESCRIPTIONS}
-    
+
     <few_shot_examples>
     {FEW_SHOT_EXAMPLES}
     </few_shot_examples>
-    
+
     Now extract the attributes from this document:
     {DOCUMENT_TEXT}
 ```
@@ -618,8 +769,8 @@ extraction:
   model: us.amazon.nova-pro-v1:0
   # Image processing settings - preserves original resolution
   image:
-    target_width: ""     # Empty string = no resizing (recommended)
-    target_height: ""    # Empty string = no resizing (recommended)
+    target_width: "" # Empty string = no resizing (recommended)
+    target_height: "" # Empty string = no resizing (recommended)
 ```
 
 ### Custom Image Dimensions
@@ -720,38 +871,41 @@ YAML format provides significant token savings for extraction tasks:
 ### Example Prompt Configurations
 
 **JSON-focused extraction prompt:**
+
 ```yaml
 extraction:
   system_prompt: |
     You are a document assistant. Respond only with JSON. Never make up data, only provide data found in the document being provided.
   task_prompt: |
     Extract the following fields from this {DOCUMENT_CLASS} document and return a JSON object:
-    
+
     {ATTRIBUTE_NAMES_AND_DESCRIPTIONS}
-    
+
     Document text: {DOCUMENT_TEXT}
-    
+
     JSON response:
 ```
 
 **YAML-focused extraction prompt:**
+
 ```yaml
 extraction:
   system_prompt: |
     You are a document assistant. Respond only with YAML. Never make up data, only provide data found in the document being provided.
   task_prompt: |
     Extract the following fields from this {DOCUMENT_CLASS} document and return YAML:
-    
+
     {ATTRIBUTE_NAMES_AND_DESCRIPTIONS}
-    
+
     Document text: {DOCUMENT_TEXT}
-    
+
     YAML response:
 ```
 
 ### Complex Data Structure Examples
 
 **JSON format for nested extraction:**
+
 ```json
 {
   "vendor_info": {
@@ -762,18 +916,19 @@ extraction:
     {
       "description": "Widget A",
       "quantity": 5,
-      "unit_price": 10.00
+      "unit_price": 10.0
     },
     {
-      "description": "Widget B", 
+      "description": "Widget B",
       "quantity": 2,
-      "unit_price": 25.00
+      "unit_price": 25.0
     }
   ]
 }
 ```
 
 **Equivalent YAML format (more compact):**
+
 ```yaml
 vendor_info:
   name: ACME Corporation
@@ -809,11 +964,24 @@ The extraction service uses the new `extract_structured_data_from_text()` functi
 For a typical invoice extraction with 10 fields:
 
 **JSON format (traditional):**
+
 ```json
-{"invoice_number": "INV-2024-001", "invoice_date": "2024-03-15", "vendor_name": "ACME Corp", "total_amount": "1,234.56", "tax_amount": "123.45", "subtotal": "1,111.11", "due_date": "2024-04-15", "payment_terms": "Net 30", "customer_name": "John Smith", "customer_address": "456 Oak Ave, City, State 67890"}
+{
+  "invoice_number": "INV-2024-001",
+  "invoice_date": "2024-03-15",
+  "vendor_name": "ACME Corp",
+  "total_amount": "1,234.56",
+  "tax_amount": "123.45",
+  "subtotal": "1,111.11",
+  "due_date": "2024-04-15",
+  "payment_terms": "Net 30",
+  "customer_name": "John Smith",
+  "customer_address": "456 Oak Ave, City, State 67890"
+}
 ```
 
 **YAML format (more efficient):**
+
 ```yaml
 invoice_number: INV-2024-001
 invoice_date: 2024-03-15
@@ -829,29 +997,38 @@ customer_address: 456 Oak Ave, City, State 67890
 
 The YAML version uses approximately 25% fewer tokens while maintaining the same information content.
 
+## Traditional vs Agentic Extraction Comparison
+
+The main performance difference is in the schema adherence over multiple invocations as the agent is required to validate against a
+pydantic model and has a retry and review mechanisms over the single invocation of the traditional method.
+
 ## Best Practices
 
-1. **Clear Attribute Descriptions**: Include detail on where and how information appears in the document. More specific descriptions lead to better extraction results.
+1. **Enable Agentic**:
 
-2. **Balance Precision and Recall**: Decide whether false positives or false negatives are more problematic for your use case and adjust the prompt accordingly.
+2. **Clear Attribute Descriptions**: Include detail on where and how information appears in the document. More specific descriptions lead to better extraction results.
 
-3. **Optimize Few-Shot Examples**: Select diverse, representative examples that cover common variations in your document formats and challenging edge cases.
+3. **Balance Precision and Recall**: Decide whether false positives or false negatives are more problematic for your use case and adjust the prompt accordingly.
 
-4. **Use CachePoint Strategically**: Position CachePoint tags to maximize caching of static content while isolating dynamic content, placing them right before document text is introduced.
+4. **Optimize Few-Shot Examples**: Select diverse, representative examples that cover common variations in your document formats and challenging edge cases.
 
-5. **Leverage Image Examples**: When providing few-shot examples with `imagePath`, ensure the images highlight the key fields to extract, especially for visually complex documents.
+5. **Use CachePoint Strategically**: Position CachePoint tags to maximize caching of static content while isolating dynamic content, placing them right before document text is introduced.
 
-6. **Monitor Evaluation Results**: Use the evaluation framework to identify extraction issues and iteratively refine your prompts and examples.
+6. **Leverage Image Examples**: When providing few-shot examples with `imagePath`, ensure the images highlight the key fields to extract, especially for visually complex documents.
 
-7. **Choose Appropriate Models**: Select models based on your task requirements:
+7. **Monitor Evaluation Results**: Use the evaluation framework to identify extraction issues and iteratively refine your prompts and examples.
+
+8. **Choose Appropriate Models**: Select models based on your task requirements:
    - `us.amazon.nova-pro-v1:0` - Best for complex extraction with few-shot learning
    - `us.anthropic.claude-3-5-haiku-20241022-v1:0` - Good balance of performance vs. cost
    - `us.anthropic.claude-3-7-sonnet-20250219-v1:0` - Highest accuracy for specialized tasks
 
-8. **Handle Document Variations**: Consider creating separate document classes for significantly different layouts of the same document type rather than trying to handle all variations with a single class.
+For agentic extraction claude sonnet models are recommended.
 
-9. **Test Extraction Pipeline End-to-End**: Validate your extraction configuration with the full pipeline including OCR, classification, and extraction to ensure components work together effectively.
+9. **Handle Document Variations**: Consider creating separate document classes for significantly different layouts of the same document type rather than trying to handle all variations with a single class.
 
-10. **Optimize Image Dimensions**: Configure image dimensions based on document complexity - use higher resolution for forms and tables, standard resolution for simple text documents.
+10. **Test Extraction Pipeline End-to-End**: Validate your extraction configuration with the full pipeline including OCR, classification, and extraction to ensure components work together effectively.
 
-11. **Balance Quality vs Performance**: Higher resolution images provide better extraction accuracy but consume more resources and processing time.
+11. **Optimize Image Dimensions**: Configure image dimensions based on document complexity - use higher resolution for forms and tables, standard resolution for simple text documents.
+
+12. **Balance Quality vs Performance**: Higher resolution images provide better extraction accuracy but consume more resources and processing time.

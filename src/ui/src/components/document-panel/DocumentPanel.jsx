@@ -551,6 +551,7 @@ export const DocumentPanel = ({ item, setToolsOpen, getDocumentDetailsFromIds, o
           executionArn={item.executionArn}
           visible={isFlowViewerVisible}
           onDismiss={() => setIsFlowViewerVisible(false)}
+          mergedConfig={mergedConfig}
         />
       )}
 

@@ -4,7 +4,7 @@ extraction:
   max_tokens: '4096'
   top_k: '5'
   temperature: '0.0'
-  model: us.amazon.nova-pro-v1:0
+  model: eu.amazon.nova-pro-v1:0
   system_prompt: >-
     You are a document assistant. Respond only with JSON. Never make up data, only provide data found in the document being provided.
   task_prompt: >-

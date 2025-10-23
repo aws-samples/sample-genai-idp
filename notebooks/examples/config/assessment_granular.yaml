@@ -8,7 +8,7 @@ assessment:
   max_tokens: '10000'
   top_k: '5'
   temperature: '0.0'
-  model: us.amazon.nova-pro-v1:0
+  model: eu.amazon.nova-pro-v1:0
   system_prompt: >-
     You are a document analysis assessment expert. Your task is to evaluate the confidence of extraction results by analyzing the source document evidence. Respond only with JSON containing confidence scores for each extracted attribute.
   

@@ -227,7 +227,7 @@ def get_ai_summary(comparison_results, summary_stats, field_differences):
         })
         
         response = bedrock.invoke_model(
-            modelId='us.anthropic.claude-3-5-sonnet-20241022-v2:0',
+            modelId='eu.anthropic.claude-3-5-sonnet-20240620-v1:0',
             body=body
         )
         

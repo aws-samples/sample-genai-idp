@@ -13,6 +13,7 @@ from typing import Any, Dict
 import boto3
 from strands import tool
 
+from ..config import create_error_response, safe_int_conversion
 from .lambda_tools import get_document_context
 
 logger = logging.getLogger(__name__)
@@ -26,7 +27,22 @@ def search_cloudwatch_logs(
     start_time: datetime = None,
     end_time: datetime = None,
 ) -> Dict[str, Any]:
-    """Internal function: Search CloudWatch logs for error patterns."""
+    """
+    Search CloudWatch logs within a specific log group for matching patterns.
+    Internal utility function that performs the actual log filtering and event retrieval.
+    Handles time window calculations and event formatting.
+
+    Args:
+        log_group_name: CloudWatch log group name to search
+        filter_pattern: CloudWatch filter pattern for log events
+        hours_back: Hours to look back from current time
+        max_events: Maximum number of events to return
+        start_time: Optional start time for search window
+        end_time: Optional end time for search window
+
+    Returns:
+        Dict containing found events and search metadata
+    """
     try:
         logger.debug(
             f"Searching CloudWatch logs in {log_group_name} with filter '{filter_pattern}'"
@@ -74,11 +90,21 @@ def search_cloudwatch_logs(
 
     except Exception as e:
         logger.error(f"CloudWatch search failed for log group '{log_group_name}': {e}")
-        return {"error": str(e), "events_found": 0, "events": []}
+        return create_error_response(str(e), events_found=0, events=[])
 
 
 def get_cloudwatch_log_groups(prefix: str = "") -> Dict[str, Any]:
-    """Internal function: List CloudWatch log groups with prefix filter."""
+    """
+    Lists CloudWatch log groups matching specified prefix.
+    Internal utility function that lists available log groups and their metadata.
+    Filters by prefix to reduce API calls and focus on relevant groups.
+
+    Args:
+        prefix: Log group name prefix to filter by
+
+    Returns:
+        Dict containing found log groups and their metadata
+    """
     try:
         if not prefix or len(prefix) < 5:
             return {
@@ -107,11 +133,21 @@ def get_cloudwatch_log_groups(prefix: str = "") -> Dict[str, Any]:
 
     except Exception as e:
         logger.error(f"Failed to get log groups with prefix '{prefix}': {e}")
-        return {"error": str(e), "log_groups_found": 0, "log_groups": []}
+        return create_error_response(str(e), log_groups_found=0, log_groups=[])
 
 
 def _extract_prefix_from_state_machine_arn(arn: str) -> str:
-    """Extract prefix from StateMachineArn."""
+    """
+    Extracts log group prefix from Step Functions State Machine ARN.
+    Parses the State Machine ARN to determine the appropriate CloudWatch log group prefix
+    for finding related Lambda function logs.
+
+    Args:
+        arn: Step Functions State Machine ARN
+
+    Returns:
+        Extracted prefix string or empty string if parsing fails
+    """
     if ":stateMachine:" in arn:
         state_machine_name = arn.split(":stateMachine:")[-1]
         if "-DocumentProcessingWorkflow" in state_machine_name:
@@ -123,7 +159,17 @@ def _extract_prefix_from_state_machine_arn(arn: str) -> str:
 
 
 def get_log_group_prefix(stack_name: str) -> Dict[str, Any]:
-    """Determine the correct CloudWatch log group prefix for a stack."""
+    """
+    Determines CloudWatch log group prefix from CloudFormation stack.
+    Analyzes CloudFormation stack outputs to find the correct log group prefix pattern.
+    Prioritizes pattern-based prefixes from State Machine ARNs over generic stack prefixes.
+
+    Args:
+        stack_name: CloudFormation stack name
+
+    Returns:
+        Dict containing prefix information and metadata
+    """
     try:
         logger.info(f"Getting log group prefix for stack: {stack_name}")
         cf_client = boto3.client("cloudformation")
@@ -175,7 +221,7 @@ def get_log_group_prefix(stack_name: str) -> Dict[str, Any]:
         logger.error(
             f"Failed to determine log group prefix for stack '{stack_name}': {e}"
         )
-        return {"error": str(e), "stack_name": stack_name}
+        return create_error_response(str(e), stack_name=stack_name)
 
 
 @tool
@@ -187,14 +233,24 @@ def search_document_logs(
     max_log_groups: int = 20,
 ) -> Dict[str, Any]:
     """
-    Search CloudWatch logs for a specific document using execution context.
+    Finds document-specific errors using execution context.
+    Leverages document execution context to perform targeted log searches with precise
+    time windows and execution-specific filters for enhanced accuracy.
+
+    Args:
+        document_id: Document ObjectKey to search logs for
+        stack_name: CloudFormation stack name for log group discovery
+        filter_pattern: CloudWatch filter pattern (default: "ERROR")
+        max_log_events: Maximum events per log group (default: 10)
+        max_log_groups: Maximum log groups to search (default: 20)
+
+    Returns:
+        Dict containing document-specific log search results
     """
     try:
-        # Use default if max_log_events not provided and ensure int type
-        if max_log_events is None:
-            max_log_events = 10
-        max_log_events = int(max_log_events)
-        max_log_groups = int(max_log_groups)
+        # Use safe integer conversion with defaults
+        max_log_events = safe_int_conversion(max_log_events, 10)
+        max_log_groups = safe_int_conversion(max_log_groups, 20)
         # Get document execution context
         context = get_document_context(document_id, stack_name)
 
@@ -282,9 +338,6 @@ def search_document_logs(
                         }
                     )
                     total_events += search_result["events_found"]
-
-                    # Continue searching other groups for more errors
-                    # break  # Removed to search ALL log groups
                 else:
                     logger.info(
                         f"  No events found in {log_group_name} with pattern '{pattern}'"
@@ -308,7 +361,7 @@ def search_document_logs(
 
     except Exception as e:
         logger.error(f"Document log search failed for {document_id}: {e}")
-        return {"error": str(e), "document_id": document_id, "events_found": 0}
+        return create_error_response(str(e), document_id=document_id, events_found=0)
 
 
 @tool
@@ -321,7 +374,20 @@ def search_stack_logs(
     end_time: datetime = None,
 ) -> Dict[str, Any]:
     """
-    PRIMARY TOOL: Search CloudWatch logs by automatically finding correct log groups.
+    Searches all stack-related log groups for error patterns.
+    Primary tool for system-wide log analysis. Automatically discovers relevant log groups
+    based on CloudFormation stack configuration and searches for specified patterns.
+
+    Args:
+        filter_pattern: CloudWatch filter pattern (default: "ERROR")
+        hours_back: Hours to look back from current time (default: 24)
+        max_log_events: Maximum events per log group (default: 10)
+        max_log_groups: Maximum log groups to search (default: 20)
+        start_time: Optional start time for search window
+        end_time: Optional end time for search window
+
+    Returns:
+        Dict containing comprehensive log search results across all relevant groups
     """
     stack_name = os.environ.get("AWS_STACK_NAME", "")
 
@@ -332,14 +398,10 @@ def search_stack_logs(
         }
 
     try:
-        # Use defaults if parameters not provided and ensure int types
-        if max_log_events is None:
-            max_log_events = 10
-        if hours_back is None:
-            hours_back = 24
-        max_log_events = int(max_log_events)
-        max_log_groups = int(max_log_groups)
-        hours_back = int(hours_back)
+        # Use safe integer conversion with defaults
+        max_log_events = safe_int_conversion(max_log_events, 10)
+        max_log_groups = safe_int_conversion(max_log_groups, 20)
+        hours_back = safe_int_conversion(hours_back, 24)
         logger.info(f"Starting log search for stack: {stack_name}")
         prefix_info = get_log_group_prefix(stack_name)
         logger.info(f"Prefix info result: {prefix_info}")
@@ -421,4 +483,4 @@ def search_stack_logs(
 
     except Exception as e:
         logger.error(f"Stack log search failed for '{stack_name}': {e}")
-        return {"error": str(e), "stack_name": stack_name, "events_found": 0}
+        return create_error_response(str(e), stack_name=stack_name, events_found=0)

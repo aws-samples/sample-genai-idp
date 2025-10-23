@@ -27,7 +27,7 @@ def test_pricing_from_config_with_valid_configuration():
                 ],
             },
             {
-                "name": "bedrock/us.amazon.nova-lite-v1:0",
+                "name": "bedrock/eu.amazon.nova-lite-v1:0",
                 "units": [
                     {
                         "name": "inputTokens",
@@ -45,10 +45,10 @@ def test_pricing_from_config_with_valid_configuration():
     # Test that pricing is loaded from configuration
     textract_cost = reporter._get_unit_cost("textract/detect_document_text", "pages")
     nova_input_cost = reporter._get_unit_cost(
-        "bedrock/us.amazon.nova-lite-v1:0", "inputTokens"
+        "bedrock/eu.amazon.nova-lite-v1:0", "inputTokens"
     )
     nova_output_cost = reporter._get_unit_cost(
-        "bedrock/us.amazon.nova-lite-v1:0", "outputTokens"
+        "bedrock/eu.amazon.nova-lite-v1:0", "outputTokens"
     )
 
     # Verify the costs match the configuration values
@@ -68,7 +68,7 @@ def test_pricing_returns_zero_when_config_fails():
     # Test that pricing returns 0.0 when configuration is invalid
     textract_cost = reporter._get_unit_cost("textract/detect_document_text", "pages")
     nova_input_cost = reporter._get_unit_cost(
-        "bedrock/us.amazon.nova-lite-v1:0", "inputTokens"
+        "bedrock/eu.amazon.nova-lite-v1:0", "inputTokens"
     )
 
     # Verify the costs return 0.0 when configuration is not valid
@@ -88,7 +88,7 @@ def test_pricing_without_config_returns_zero():
     # Test that pricing returns 0.0 when no config is available
     textract_cost = reporter._get_unit_cost("textract/detect_document_text", "pages")
     nova_input_cost = reporter._get_unit_cost(
-        "bedrock/us.amazon.nova-lite-v1:0", "inputTokens"
+        "bedrock/eu.amazon.nova-lite-v1:0", "inputTokens"
     )
 
     # Verify the costs return 0.0 when no configuration is available

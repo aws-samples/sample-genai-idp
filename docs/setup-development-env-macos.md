@@ -247,8 +247,10 @@ EOF
 Install the required Python packages for the publish.py script:
 
 ```bash
-pip install boto3 typer rich botocore
+pip install boto3 rich PyYAML botocore setuptools docker
 ```
+
+> **Note**: The `docker` Python package is required for container-based Lambda deployments.
 
 ## **13) Configure AWS CLI**
 ### Refer this link for AWS configure
@@ -263,10 +265,12 @@ Test publish script help:
 python3 publish.py --help
 ```
 
-Test build using publish.py:
+Test standard ZIP-based deployment:
 ```bash
 python3 publish.py bucket_name build-test us-east-1
 ```
+
+Pattern-2 container images are built and pushed automatically when Pattern-2 changes are detected. Ensure Docker is running and you have ECR permissions.
 
 **Troubleshooting Build Issues:**
 If the build fails, use the `--verbose` flag to see detailed error messages:

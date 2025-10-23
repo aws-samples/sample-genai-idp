@@ -16,7 +16,7 @@ class TestMaxPagesForClassification:
             "classification": {
                 "maxPagesForClassification": "ALL",
                 "classificationMethod": "multimodalPageLevelClassification",
-                "model": "us.amazon.nova-pro-v1:0",
+                "model": "eu.amazon.nova-pro-v1:0",
                 "system_prompt": "Test system prompt",
                 "task_prompt": "Test task prompt",
             }
@@ -183,7 +183,7 @@ class TestMaxPagesForClassification:
             "classification": {
                 "maxPagesForClassification": "2",
                 "classificationMethod": "multimodalPageLevelClassification",
-                "model": "us.amazon.nova-pro-v1:0",
+                "model": "eu.amazon.nova-pro-v1:0",
                 "system_prompt": "Test system prompt",
                 "task_prompt": "Test task prompt",
             }
@@ -197,7 +197,7 @@ class TestMaxPagesForClassification:
         mock_config = {
             "classification": {
                 "classificationMethod": "multimodalPageLevelClassification",
-                "model": "us.amazon.nova-pro-v1:0",
+                "model": "eu.amazon.nova-pro-v1:0",
                 "system_prompt": "Test system prompt",
                 "task_prompt": "Test task prompt",
             }

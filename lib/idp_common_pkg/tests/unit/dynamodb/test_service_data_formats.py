@@ -62,9 +62,8 @@ class TestDynamoDBServiceDataFormats:
             ],
         }
 
-    def test_metering_as_native_dict_causes_error(self):
-        """Test that reproduces the exact error: metering as native dict causes json.loads() to fail."""
-        # This reproduces the exact error from the stack trace
+    def test_metering_as_native_dict_works(self):
+        """Test that metering as native dict works correctly (now supported)."""
         mock_item = self.create_base_dynamodb_item()
         mock_item["Metering"] = {
             "tokens_used": 150,
@@ -72,11 +71,13 @@ class TestDynamoDBServiceDataFormats:
             "model_calls": 3,
         }
 
-        # This should raise the TypeError we're seeing
-        with pytest.raises(
-            TypeError, match="the JSON object must be str, bytes or bytearray, not dict"
-        ):
-            self.service._dynamodb_item_to_document(mock_item)
+        # This should work without errors - native dict format is now supported
+        document = self.service._dynamodb_item_to_document(mock_item)
+        
+        # Verify metering data was extracted correctly
+        assert document.metering is not None
+        assert document.metering["tokens_used"] == 150
+        assert document.metering["model_calls"] == 3
 
     def test_metering_as_json_string_works(self):
         """Test that metering as JSON string works correctly."""

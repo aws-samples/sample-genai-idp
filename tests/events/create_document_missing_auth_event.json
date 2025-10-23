@@ -1,0 +1,9 @@
+{
+  "identity": {},
+  "arguments": {
+    "input": {
+      "ObjectKey": "document.pdf",
+      "QueuedTime": "2025-01-15T10:30:00Z"
+    }
+  }
+}

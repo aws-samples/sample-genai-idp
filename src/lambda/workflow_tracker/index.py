@@ -4,6 +4,7 @@
 import boto3
 import json
 import os
+import re
 from datetime import datetime, timezone
 import logging
 from idp_common.models import Document, Status, Page, Section
@@ -29,6 +30,42 @@ concurrency_table = dynamodb.Table(os.environ['CONCURRENCY_TABLE'])
 COUNTER_ID = 'workflow_counter'
 
 
+def extract_user_id_from_object_key(object_key: str) -> Optional[str]:
+    """
+    Extract user ID from S3 object key if it follows the user-scoped pattern.
+    Expected format: users/<user_id>/filename.ext
+    
+    Args:
+        object_key: S3 object key
+        
+    Returns:
+        str: User ID if found, None otherwise
+    """
+    if not object_key.startswith('users/'):
+        logger.debug(f"Object key doesn't start with 'users/', no user_id to extract: {object_key}")
+        return None
+    
+    # Split path and extract user ID
+    parts = object_key.split('/')
+    if len(parts) < 3:
+        logger.warning(f"Object key has 'users/' prefix but invalid structure: {object_key}")
+        return None
+    
+    user_id = parts[1]
+    
+    if not user_id:
+        logger.warning(f"User ID is empty in path: {object_key}")
+        return None
+    
+    # Validate UUID format
+    uuid_pattern = r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+    if not re.match(uuid_pattern, user_id, re.IGNORECASE):
+        logger.warning(f"Extracted user_id doesn't match UUID pattern: {user_id}")
+    
+    logger.info(f"Extracted user_id: {user_id} from object_key: {object_key}")
+    return user_id
+
+
 def update_document_completion(object_key: str, workflow_status: str, output_data: Dict[str, Any]) -> Document:
     """
     Update document completion status via document service
@@ -41,12 +78,16 @@ def update_document_completion(object_key: str, workflow_status: str, output_dat
     Returns:
         The updated Document object
     """
+    # Extract user_id from object_key if it follows the user-scoped pattern
+    user_id = extract_user_id_from_object_key(object_key)
+    
     # Create a document with basic properties
     document = Document(
         id=object_key,
         input_key=object_key,
         status=Status.COMPLETED if workflow_status == 'SUCCEEDED' else Status.FAILED,
-        completion_time=datetime.now(timezone.utc).isoformat()
+        completion_time=datetime.now(timezone.utc).isoformat(),
+        user_id=user_id  # Set user_id for user-scoped documents
     )
     
     # Get sections, pages, and metering data if workflow succeeded

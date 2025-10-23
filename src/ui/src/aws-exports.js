@@ -20,7 +20,7 @@ const awsmobile = {
   aws_user_pools_id: REACT_APP_USER_POOL_ID,
   aws_user_pools_web_client_id: REACT_APP_USER_POOL_CLIENT_ID,
   oauth: {},
-  aws_cognito_login_mechanisms: ['PREFERRED_USERNAME'],
+  aws_cognito_login_mechanisms: ['EMAIL'],
   aws_cognito_signup_attributes: ['EMAIL'],
   aws_cognito_mfa_configuration: 'OFF',
   aws_cognito_mfa_types: ['SMS'],

@@ -92,6 +92,7 @@ input CreateDocumentInput {
   InitialEventTime: AWSDateTime
   QueuedTime: AWSDateTime
   ExpiresAfter: AWSTimestamp
+  UserId: String
 }
 
 type CreateDocumentOutput @aws_iam {
@@ -113,6 +114,7 @@ type DisPresignedUrlResponse @aws_cognito_user_pools {
 
 input UpdateDocumentInput {
   ObjectKey: ID!
+  UserId: String
   ObjectStatus: String
   QueuedTime: AWSDateTime
   WorkflowStartTime: AWSDateTime

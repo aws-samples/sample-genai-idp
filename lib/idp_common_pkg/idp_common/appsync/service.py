@@ -55,13 +55,19 @@ class DocumentAppSyncService:
         Returns:
             Dictionary compatible with CreateDocumentInput GraphQL type
         """
-        return {
+        input_data = {
             "ObjectKey": document.input_key,
             "ObjectStatus": document.status.value,
             "InitialEventTime": document.initial_event_time,
             "QueuedTime": document.queued_time,
             "ExpiresAfter": expires_after,
         }
+        
+        # Add UserId for user-scoped operations
+        if document.user_id:
+            input_data["UserId"] = document.user_id
+            
+        return input_data
 
     def _document_to_update_input(self, document: Document) -> Dict[str, Any]:
         """
@@ -77,6 +83,10 @@ class DocumentAppSyncService:
             "ObjectKey": document.input_key,
             "ObjectStatus": document.status.value,
         }
+        
+        # Add UserId for user-scoped operations
+        if document.user_id:
+            input_data["UserId"] = document.user_id
 
         # Add optional fields if they exist
         if document.queued_time:

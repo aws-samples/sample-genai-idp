@@ -6,7 +6,7 @@ assessment:
   enabled: true
   validation_enabled: false
 criteria_validation:
-  model: us.anthropic.claude-3-5-sonnet-20240620-v1:0
+  model: eu.anthropic.claude-3-5-sonnet-20240620-v1:0
   temperature: 0.0
   top_k: 20
   top_p: 0.01
@@ -252,7 +252,7 @@ discovery:
       Format the extracted data using the below JSON format:
       Format the extracted groups and fields using the below JSON format:
 
-    model_id: us.amazon.nova-pro-v1:0
+    model_id: eu.amazon.nova-pro-v1:0
     system_prompt: >-
       You are an expert in processing forms. Extracting data from images and
       documents. Use provided ground truth data as reference to optimize field
@@ -281,7 +281,7 @@ discovery:
       Return the extracted data in JSON format.
       Format the extracted data using the below JSON format:
       Format the extracted groups and fields using the below JSON format:
-    model_id: us.amazon.nova-pro-v1:0
+    model_id: eu.amazon.nova-pro-v1:0
     system_prompt: >-
       You are an expert in processing forms. Extracting data from images and
       documents. Analyze forms line by line to identify field names, data types,
@@ -291,7 +291,7 @@ discovery:
 
 agents:
   error_analyzer:
-    model_id: us.anthropic.claude-sonnet-4-20250514-v1:0
+    model_id: eu.anthropic.claude-sonnet-4-20250514-v1:0
 
     system_prompt: |-
       You are an intelligent error analysis agent for the GenAI IDP system.
@@ -363,7 +363,7 @@ pricing:
         price: 0.0015
       - name: over_million_pages
         price: 0.0006
-  - name: bedrock/us.anthropic.claude-3-5-sonnet-20240620-v1:0
+  - name: bedrock/eu.anthropic.claude-3-5-sonnet-20240620-v1:0
     units:
       - name: inputTokens
         price: 0.000003
@@ -373,7 +373,7 @@ pricing:
         price: 0.0000003
       - name: cacheWriteInputTokens
         price: 0.00000375
-  - name: bedrock/us.amazon.nova-pro-v1:0
+  - name: bedrock/eu.amazon.nova-pro-v1:0
     units:
       - name: inputTokens
         price: 0.0000008

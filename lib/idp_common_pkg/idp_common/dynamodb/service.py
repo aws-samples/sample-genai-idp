@@ -20,6 +20,28 @@ from idp_common.models import Document, Page, Section, Status
 logger = logging.getLogger(__name__)
 
 
+def extract_doc_key_from_object_key(object_key: str, user_id: Optional[str] = None) -> str:
+    """
+    Extract the document key suffix from the full S3 object key.
+    
+    If the object_key starts with 'users/<user_id>/', strip that prefix to avoid duplication
+    in the PK construction.
+    
+    Args:
+        object_key: Full S3 object key (e.g., 'users/uuid/filename.pdf')
+        user_id: Optional user ID to strip from the path
+        
+    Returns:
+        Document key suffix (e.g., 'filename.pdf' if user_id matches, or original object_key)
+    """
+    if user_id and object_key.startswith(f"users/{user_id}/"):
+        # Strip the users/<user_id>/ prefix
+        doc_key = object_key[len(f"users/{user_id}/"):]
+        logger.debug(f"Stripped user prefix from object_key: {object_key} -> {doc_key}")
+        return doc_key
+    return object_key
+
+
 def convert_floats_to_decimal(obj):
     """
     Recursively convert float values to Decimal for DynamoDB compatibility.
@@ -102,14 +124,26 @@ class DocumentDynamoDBService:
         Returns:
             Dictionary compatible with DynamoDB item format
         """
+        # Use user-scoped PK if user_id is present
+        # IMPORTANT: Use FULL input_key (including users/<user_id>/ prefix) to match GetDocumentResolver
+        if document.user_id:
+            pk = f"user#{document.user_id}#doc#{document.input_key}"
+        else:
+            # Fallback to legacy format for backwards compatibility
+            pk = f"doc#{document.input_key}"
+            
         item = {
-            "PK": f"doc#{document.input_key}",
+            "PK": pk,
             "SK": "none",
             "ObjectKey": document.input_key,
             "ObjectStatus": document.status.value,
             "InitialEventTime": document.initial_event_time,
             "QueuedTime": document.queued_time,
         }
+        
+        # Add UserId to the item if present
+        if document.user_id:
+            item["UserId"] = document.user_id
 
         if expires_after:
             item["ExpiresAfter"] = expires_after
@@ -293,6 +327,7 @@ class DocumentDynamoDBService:
             workflow_execution_arn=item.get("WorkflowExecutionArn"),
             evaluation_report_uri=item.get("EvaluationReportUri"),
             summary_report_uri=item.get("SummaryReportUri"),
+            user_id=item.get("UserId"),  # Extract user_id from DynamoDB item
         )
 
         # Convert status
@@ -404,6 +439,10 @@ class DocumentDynamoDBService:
             "ObjectKey": document.input_key,
             "QueuedTime": document.queued_time,
         }
+        
+        # Add UserId to list item if present for filtering
+        if document.user_id:
+            list_item["UserId"] = document.user_id
 
         if expires_after:
             list_item["ExpiresAfter"] = expires_after
@@ -440,8 +479,16 @@ class DocumentDynamoDBService:
         Raises:
             DynamoDBError: If the DynamoDB operation fails
         """
+        # Use user-scoped PK if user_id is present
+        # IMPORTANT: Use FULL input_key (including users/<user_id>/ prefix) to match GetDocumentResolver
+        if document.user_id:
+            pk = f"user#{document.user_id}#doc#{document.input_key}"
+        else:
+            # Fallback to legacy format for backwards compatibility
+            pk = f"doc#{document.input_key}"
+            
         key = {
-            "PK": f"doc#{document.input_key}",
+            "PK": pk,
             "SK": "none",
         }
 
@@ -464,12 +511,13 @@ class DocumentDynamoDBService:
         logger.info(f"Successfully updated document: {document.input_key}")
         return updated_document
 
-    def get_document(self, object_key: str) -> Optional[Document]:
+    def get_document(self, object_key: str, user_id: Optional[str] = None) -> Optional[Document]:
         """
         Get a document from DynamoDB by its object key.
 
         Args:
             object_key: The object key of the document to retrieve
+            user_id: Optional user ID for user-scoped documents
 
         Returns:
             Document object if found, None otherwise
@@ -477,8 +525,15 @@ class DocumentDynamoDBService:
         Raises:
             DynamoDBError: If the DynamoDB operation fails
         """
+        # Use user-scoped PK if user_id is provided (use FULL object_key to match GetDocumentResolver)
+        if user_id:
+            pk = f"user#{user_id}#doc#{object_key}"
+        else:
+            # Fallback to legacy format for backwards compatibility
+            pk = f"doc#{object_key}"
+            
         key = {
-            "PK": f"doc#{object_key}",
+            "PK": pk,
             "SK": "none",
         }
 

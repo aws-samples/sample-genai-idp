@@ -135,9 +135,24 @@ def process_message(record: Dict[str, Any]) -> Tuple[bool, str]:
         # Handle both compressed and uncompressed documents
         working_bucket = os.environ.get('WORKING_BUCKET')
         message_data = json.loads(message)
+        
+        # Extract UserId and ExpiresAfter from message attributes
+        message_attributes = record.get('messageAttributes', {})
+        user_id = message_attributes.get('UserId', {}).get('stringValue')
+        expires_after_str = message_attributes.get('ExpiresAfter', {}).get('stringValue')
+        expires_after = int(expires_after_str) if expires_after_str else None
+        
         document = Document.load_document(message_data, working_bucket, logger)
+        
+        # Set user_id on the Document object if present in message attributes
+        if user_id:
+            document.user_id = user_id
+            logger.info(f"Set user_id on document: {user_id}")
+        else:
+            logger.warning(f"No UserId found in SQS message for document: {document.input_key}")
+        
         object_key = document.input_key
-        logger.info(f"Processing message {message_id} for object {object_key}")
+        logger.info(f"Processing message {message_id} for object {object_key}, user: {user_id}")
         
         # Try to increment counter
         if not update_counter(increment=True):
@@ -145,12 +160,17 @@ def process_message(record: Dict[str, Any]) -> Tuple[bool, str]:
             return False, message_id
         
         try:
+            # Create document in tracking table before starting workflow
+            expires_after = message_data.get('ExpiresAfter')
+            created_key = document_service.create_document(document, expires_after=expires_after)
+            logger.info(f"Document created in tracking table: {created_key}")
+            
             # Start workflow with the document
             execution = start_workflow(document)
             
-            # Update document status in document service
+            # Update document status with workflow execution info
             updated_doc = document_service.update_document(document)
-            logger.info(f"Document updated: {updated_doc}")
+            logger.info(f"Document updated with workflow info: {updated_doc}")
             
             return True, message_id
             

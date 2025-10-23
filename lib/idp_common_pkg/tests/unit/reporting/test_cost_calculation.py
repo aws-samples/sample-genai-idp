@@ -19,14 +19,14 @@ def test_cost_calculation_pricing_lookup():
     pricing_config = {
         "pricing": [
             {
-                "name": "bedrock/us.anthropic.claude-3-haiku-20240307-v1:0",
+                "name": "bedrock/eu.anthropic.claude-3-haiku-20240307-v1:0",
                 "units": [
                     {"name": "inputTokens", "price": "0.00025"},
                     {"name": "outputTokens", "price": "0.00125"},
                 ],
             },
             {
-                "name": "bedrock/us.amazon.nova-lite-v1:0",
+                "name": "bedrock/eu.amazon.nova-lite-v1:0",
                 "units": [
                     {"name": "inputTokens", "price": "0.00006"},
                     {"name": "outputTokens", "price": "0.00024"},
@@ -44,10 +44,10 @@ def test_cost_calculation_pricing_lookup():
 
     # Test Bedrock pricing lookup
     claude_input_cost = reporter._get_unit_cost(
-        "bedrock/us.anthropic.claude-3-haiku-20240307-v1:0", "inputTokens"
+        "bedrock/eu.anthropic.claude-3-haiku-20240307-v1:0", "inputTokens"
     )
     claude_output_cost = reporter._get_unit_cost(
-        "bedrock/us.anthropic.claude-3-haiku-20240307-v1:0", "outputTokens"
+        "bedrock/eu.anthropic.claude-3-haiku-20240307-v1:0", "outputTokens"
     )
 
     assert claude_input_cost > 0, (
@@ -59,10 +59,10 @@ def test_cost_calculation_pricing_lookup():
 
     # Test Nova pricing lookup
     nova_input_cost = reporter._get_unit_cost(
-        "bedrock/us.amazon.nova-lite-v1:0", "inputTokens"
+        "bedrock/eu.amazon.nova-lite-v1:0", "inputTokens"
     )
     nova_output_cost = reporter._get_unit_cost(
-        "bedrock/us.amazon.nova-lite-v1:0", "outputTokens"
+        "bedrock/eu.amazon.nova-lite-v1:0", "outputTokens"
     )
 
     assert nova_input_cost > 0, "Nova Lite input token cost should be greater than 0"
@@ -82,14 +82,14 @@ def test_cost_calculation_with_document():
     pricing_config = {
         "pricing": [
             {
-                "name": "bedrock/us.anthropic.claude-3-haiku-20240307-v1:0",
+                "name": "bedrock/eu.anthropic.claude-3-haiku-20240307-v1:0",
                 "units": [
                     {"name": "inputTokens", "price": "0.00025"},
                     {"name": "outputTokens", "price": "0.00125"},
                 ],
             },
             {
-                "name": "bedrock/us.amazon.nova-lite-v1:0",
+                "name": "bedrock/eu.amazon.nova-lite-v1:0",
                 "units": [
                     {"name": "inputTokens", "price": "0.00006"},
                     {"name": "outputTokens", "price": "0.00024"},
@@ -107,16 +107,16 @@ def test_cost_calculation_with_document():
 
     # Get unit costs
     claude_input_cost = reporter._get_unit_cost(
-        "bedrock/us.anthropic.claude-3-haiku-20240307-v1:0", "inputTokens"
+        "bedrock/eu.anthropic.claude-3-haiku-20240307-v1:0", "inputTokens"
     )
     claude_output_cost = reporter._get_unit_cost(
-        "bedrock/us.anthropic.claude-3-haiku-20240307-v1:0", "outputTokens"
+        "bedrock/eu.anthropic.claude-3-haiku-20240307-v1:0", "outputTokens"
     )
     nova_input_cost = reporter._get_unit_cost(
-        "bedrock/us.amazon.nova-lite-v1:0", "inputTokens"
+        "bedrock/eu.amazon.nova-lite-v1:0", "inputTokens"
     )
     nova_output_cost = reporter._get_unit_cost(
-        "bedrock/us.amazon.nova-lite-v1:0", "outputTokens"
+        "bedrock/eu.amazon.nova-lite-v1:0", "outputTokens"
     )
     textract_cost = reporter._get_unit_cost("textract/detect_document_text", "pages")
 

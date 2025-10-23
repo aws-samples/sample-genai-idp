@@ -1,0 +1,110 @@
+name: Deploy to Production
+
+# Manual deployment to production (requires approval)
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "DEPLOY" to confirm production deployment'
+        required: true
+        default: 'CANCEL'
+
+jobs:
+  deploy-prod:
+    runs-on: ubuntu-latest
+    environment: production  # Requires environment approval in GitHub settings
+    
+    steps:
+    - name: Verify confirmation
+      run: |
+        if [ "${{ github.event.inputs.confirm }}" != "DEPLOY" ]; then
+          echo "❌ Deployment cancelled - confirmation not provided"
+          exit 1
+        fi
+    
+    - name: Checkout code (main branch only)
+      uses: actions/checkout@v4
+      with:
+        ref: main
+    
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    
+    - name: Set up AWS SAM CLI
+      uses: aws-actions/setup-sam@v2
+    
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID_PROD }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY_PROD }}
+        aws-region: eu-central-1
+    
+    - name: Install dependencies
+      run: |
+        pip install boto3 rich typer PyYAML botocore setuptools ruff
+    
+    - name: Run tests before deployment
+      run: |
+        pip install pytest pytest-cov
+        pip install -e lib/idp_common_pkg/
+        pytest lib/idp_common_pkg/tests/ -v
+    
+    - name: Build and publish
+      run: |
+        python3 publish.py fiscalshield-prod idp eu-central-1
+    
+    - name: Deploy to production stack
+      run: |
+        aws cloudformation update-stack \
+          --stack-name fiscalshield-idp-prod \
+          --template-url https://s3.eu-central-1.amazonaws.com/fiscalshield-prod-eu-central-1/idp/idp-main.yaml \
+          --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND \
+          --region eu-central-1 \
+          --parameters ParameterKey=AdminEmail,UsePreviousValue=true \
+                       ParameterKey=IDPPattern,UsePreviousValue=true
+    
+    - name: Wait for deployment to complete
+      run: |
+        echo "⏳ Waiting for CloudFormation stack to complete..."
+        echo "This may take 15-20 minutes..."
+        aws cloudformation wait stack-update-complete \
+          --stack-name fiscalshield-idp-prod \
+          --region eu-central-1
+        
+        if [ $? -eq 0 ]; then
+          echo "✓ CloudFormation stack update completed successfully"
+        else
+          echo "✗ CloudFormation stack update failed or timed out"
+          exit 1
+        fi
+    
+    - name: Force update Lambda functions (bypass CloudFormation caching)
+      run: |
+        echo "🔄 Force updating Lambda functions with latest code..."
+        ./scripts/force-update-lambdas.sh
+      env:
+        STACK_NAME: fiscalshield-idp-prod
+        REGION: eu-central-1
+    
+    - name: Deployment summary
+      run: |
+        echo ""
+        echo "✅ PRODUCTION deployment complete!"
+        echo ""
+        echo "Deployment Summary:"
+        echo "  ✓ Artifacts built and published to S3"
+        echo "  ✓ CloudFormation stack deployed/updated"
+        echo "  ✓ Lambda functions force-updated with latest code"
+        echo ""
+        echo "Stack URL: https://eu-central-1.console.aws.amazon.com/cloudformation/home?region=eu-central-1#/stacks/stackinfo?stackId=fiscalshield-idp-prod"
+        echo ""
+        echo "⚠️  IMPORTANT: Remember to verify Cognito groups are configured!"
+        echo ""
+        echo "Next Steps:"
+        echo "  1. Verify Cognito Admin and Users groups exist"
+        echo "  2. Assign admin users to Admin group"
+        echo "  3. Test admin and regular user access"
+        echo "  4. Monitor Lambda logs for errors"

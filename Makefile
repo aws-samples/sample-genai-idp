@@ -9,9 +9,10 @@ NC := \033[0m  # No Color
 # Default target - run both lint and test
 all: lint test
 
-# Run tests in idp_common_pkg directory
+# Run tests in idp_common_pkg and idp_cli directories
 test:
 	$(MAKE) -C lib/idp_common_pkg test
+	cd idp_cli && python -m pytest -v
 
 # Run both linting and formatting in one command
 lint: ruff-lint format check-arn-partitions

@@ -19,7 +19,7 @@ Prerequisites:
 
 Example usage:
     python inference_example.py \
-        --model-id us.amazon.nova-lite-v1:0 \
+        --model-id eu.amazon.nova-lite-v1:0 \
         --image-path /path/to/document.png \
         --system-prompt-file system_prompt.txt
 
@@ -29,7 +29,7 @@ Example usage:
         --compare-with-base
 
     python inference_example.py \
-        --model-id us.amazon.nova-lite-v1:0 \
+        --model-id eu.amazon.nova-lite-v1:0 \
         --image-directory /path/to/images/ \
         --ground-truth-file labels.json \
         --output-file results.json
@@ -491,7 +491,7 @@ def main():
 Examples:
   # Single image inference with base model
   python inference_example.py \\
-    --model-id us.amazon.nova-lite-v1:0 \\
+    --model-id eu.amazon.nova-lite-v1:0 \\
     --image-path document.png
   
   # Single image inference with provisioned model
@@ -501,7 +501,7 @@ Examples:
   
   # Batch inference with ground truth
   python inference_example.py \\
-    --model-id us.amazon.nova-lite-v1:0 \\
+    --model-id eu.amazon.nova-lite-v1:0 \\
     --image-directory /path/to/images/ \\
     --ground-truth-file labels.json \\
     --output-file results.json
@@ -518,7 +518,7 @@ Examples:
     # Model specification (mutually exclusive)
     model_group = parser.add_mutually_exclusive_group(required=True)
     model_group.add_argument(
-        "--model-id", help="Base model ID (e.g., us.amazon.nova-lite-v1:0)"
+        "--model-id", help="Base model ID (e.g., eu.amazon.nova-lite-v1:0)"
     )
     model_group.add_argument("--provisioned-model-arn", help="Provisioned model ARN")
 
@@ -607,7 +607,7 @@ Examples:
         ]
 
         if args.compare_with_base and args.provisioned_model_arn:
-            model_ids.append("us.amazon.nova-lite-v1:0")
+            model_ids.append("eu.amazon.nova-lite-v1:0")
             model_names = ["Fine-tuned Model", "Base Model"]
 
         # Prepare image paths

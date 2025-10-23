@@ -13,11 +13,14 @@ import concurrent.futures
 import hashlib
 import json
 import os
+import py_compile
 import shutil
 import subprocess
 import sys
 import time
+import traceback
 import zipfile
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import quote
 
@@ -53,12 +56,15 @@ class IDPPublisher:
         self.public = False
         self.main_template = "idp-main.yaml"
         self.use_container_flag = ""
+        self.pattern2_use_containers = True  # Default to containers for Pattern-2
 
         self.s3_client = None
         self.cf_client = None
+        self.sts_client = None
         self._is_lib_changed = False
         self.skip_validation = False
         self.lint_enabled = True
+        self.account_id = None
 
     def clean_checksums(self):
         """Delete all .checksum files in main, patterns, options, and lib directories"""
@@ -226,7 +232,7 @@ STDERR:
         """Print usage information with Rich formatting"""
         self.console.print("\n[bold cyan]Usage:[/bold cyan]")
         self.console.print(
-            "  python3 publish.py <cfn_bucket_basename> <cfn_prefix> <region> [public] [--max-workers N] [--verbose] [--no-validate] [--clean-build] [--lint on|off]"
+            "  python3 publish.py <cfn_bucket_basename> <cfn_prefix> <region> [public] [--max-workers N] [--verbose] [--no-validate] [--lint on|off]"
         )
 
         self.console.print("\n[bold cyan]Parameters:[/bold cyan]")
@@ -364,6 +370,10 @@ STDERR:
         self.prefix_and_version = f"{self.prefix}/{self.version}"
         self.bucket = f"{self.bucket_basename}-{self.region}"
 
+        # Generate content-based Lambda image version
+        # Must be after bucket/prefix are set (needed for checksum cache key)
+        self.lambda_image_version = self._generate_lambda_image_version()
+
         # Set UDOP model path based on region
         self.public_sample_udop_model = f"s3://aws-ml-blog-{self.region}/artifacts/genai-idp/udop-finetuning/rvl-cdip/model.tar.gz"
 
@@ -405,6 +415,52 @@ STDERR:
                 f"[red]Error: Python version >= {min_python_version} is required. (Installed version is {python_version})[/red]"
             )
             sys.exit(1)
+
+    def _generate_lambda_image_version(self):
+        """Generate content-based version for Lambda container images.
+
+        Uses content hash of relevant source files to ensure builds are reproducible
+        and only change when actual code changes.
+
+        Hash includes:
+        - lib/idp_common_pkg source code
+        - Dockerfile.optimized
+        - patterns/pattern-2/src (all function code)
+
+        Format: <content-hash>
+        Example: a1b2c3d4
+
+        Returns:
+            str: Content-based version string (8-char hash)
+        """
+        import hashlib
+
+        # Compute hash of all relevant content
+        paths_to_hash = [
+            "lib/idp_common_pkg/idp_common",
+            "Dockerfile.optimized",
+            "patterns/pattern-2/src",
+        ]
+
+        combined_hash = hashlib.sha256()
+
+        for path in paths_to_hash:
+            if os.path.isfile(path):
+                # Single file
+                file_hash = self.get_file_checksum(path)
+                if file_hash:
+                    combined_hash.update(file_hash.encode())
+            elif os.path.isdir(path):
+                # Directory - use existing component checksum
+                dir_hash = self.get_component_checksum(path)
+                if dir_hash:
+                    combined_hash.update(dir_hash.encode())
+
+        # Return first 8 characters of hash for readability
+        content_hash = combined_hash.hexdigest()[:8]
+
+        self.log_verbose(f"Generated content-based image version: {content_hash}")
+        return content_hash
 
     def version_compare(self, version1, version2):
         """Compare two version strings. Returns -1 if v1 < v2, 0 if equal, 1 if v1 > v2"""
@@ -578,11 +634,16 @@ STDERR:
         build_start = time.time()
 
         try:
+            # Pattern-2 uses containers - images built separately by build_and_push_pattern2_containers()
+            # SAM build with SkipBuild: True just prepares template
             cmd = ["sam", "build", "--template-file", "template.yaml"]
 
             # Add container flag if needed
             if self.use_container_flag and self.use_container_flag.strip():
                 cmd.append(self.use_container_flag)
+
+            if self.verbose:
+                cmd.append("--debug")
 
             sam_build_start = time.time()
 
@@ -606,10 +667,16 @@ STDERR:
             build_template_path = os.path.join(
                 directory, ".aws-sam", "build", "template.yaml"
             )
-            # Use standard packaged.yaml name
-            packaged_template_path = os.path.join(
-                directory, ".aws-sam", "packaged.yaml"
-            )
+            # Use different name for pattern-2 container deployment
+            if directory == "patterns/pattern-2" and self.pattern2_use_containers:
+                packaged_template_path = os.path.join(
+                    directory, ".aws-sam", "packaged-container.yaml"
+                )
+            else:
+                # Use standard packaged.yaml name
+                packaged_template_path = os.path.join(
+                    directory, ".aws-sam", "packaged.yaml"
+                )
 
             cmd = [
                 "sam",
@@ -623,6 +690,15 @@ STDERR:
                 "--s3-prefix",
                 self.prefix_and_version,
             ]
+            if self.verbose:
+                cmd.append("--debug")
+
+            # Pattern-2 needs --image-repository even though images are built in CodeBuild
+            if directory == "patterns/pattern-2" and self.pattern2_use_containers:
+                placeholder_ecr = (
+                    f"{self.account_id}.dkr.ecr.{self.region}.amazonaws.com/placeholder"
+                )
+                cmd.extend(["--image-repository", placeholder_ecr])
 
             sam_package_start = time.time()
             self.log_verbose(f"Running SAM package command: {' '.join(cmd)}")
@@ -634,6 +710,20 @@ STDERR:
 
             if not success:
                 raise Exception("SAM package failed")
+
+            # For Pattern-2 with containers, ensure packaged.yaml exists with standard name
+            if directory == "patterns/pattern-2" and self.pattern2_use_containers:
+                standard_packaged_path = os.path.join(
+                    directory, ".aws-sam", "packaged.yaml"
+                )
+                # If using a different packaged name, copy to standard name for main template compatibility
+                if packaged_template_path != standard_packaged_path:
+                    import shutil
+
+                    shutil.copy2(packaged_template_path, standard_packaged_path)
+                    self.log_verbose(
+                        "Created packaged.yaml copy for Pattern-2 compatibility"
+                    )
 
             # Log S3 upload location for Lambda artifacts
             self.console.print(
@@ -648,8 +738,6 @@ STDERR:
             )
 
         except Exception as e:
-            import traceback
-
             # Delete checksum on any failure to force rebuild next time
             self._delete_checksum_file(directory)
             self.log_verbose(f"Exception in build_and_package_template: {str(e)}")
@@ -770,7 +858,6 @@ STDERR:
 
                     except Exception as e:
                         # Log detailed error information
-                        import traceback
 
                         error_output = f"Exception: {str(e)}\n\nTraceback:\n{traceback.format_exc()}"
                         self.log_error_details(
@@ -834,6 +921,14 @@ STDERR:
                 source_path = func_info["source_path"]
 
                 self.log_verbose(f"Validating function: {func_key} → {function_name}")
+
+                # Skip validation for Pattern-2 functions when using containers
+                if "pattern-2" in func_key and self.pattern2_use_containers:
+                    results.append((func_key, True, "Skipped (container deployment)"))
+                    self.log_verbose(
+                        f"⏭️  {func_key}: Skipping validation for container deployment"
+                    )
+                    continue
 
                 # Check if build directory exists and has idp_common
                 has_package, issues = self._validate_idp_common_in_build(
@@ -904,8 +999,6 @@ STDERR:
             self.console.print("[red]❌ Error running lambda build validation:[/red]")
             self.console.print(str(e), style="red", markup=False)
             if self.verbose:
-                import traceback
-
                 self.console.print(f"[red]{traceback.format_exc()}[/red]")
             self.console.print(
                 "[bold red]🚫 Publish process aborted due to validation error![/bold red]"
@@ -931,6 +1024,12 @@ STDERR:
         if patterns_dir.exists():
             for pattern_dir in patterns_dir.iterdir():
                 if pattern_dir.is_dir() and (pattern_dir / "template.yaml").exists():
+                    # Skip Pattern-2 validation since it uses containers
+                    if pattern_dir.name == "pattern-2" and self.pattern2_use_containers:
+                        self.console.print(
+                            "[dim]Skipping validation for Pattern-2 (uses containers)[/dim]"
+                        )
+                        continue
                     pattern_src = pattern_dir / "src"
                     if pattern_src.exists():
                         functions.update(
@@ -1079,10 +1178,11 @@ STDERR:
 
         except Exception as e:
             self.console.print(
-                f"[red]❌ Error extracting function name for {dir_name} from {template_path}:[/red]"
+                f"[yellow]⚠ Warning: Could not extract function name for {dir_name} from {template_path}:[/yellow]"
             )
-            self.console.print(str(e), style="red", markup=False)
-            sys.exit(1)
+            self.console.print(f"[dim]{str(e)}[/dim]")
+            # Don't exit - just skip this function
+            return None
 
     def _validate_idp_common_in_build(self, template_dir, function_name, source_path):
         """Validate that idp_common package exists in the built Lambda function."""
@@ -1222,8 +1322,6 @@ except Exception as e:
         if not changed:
             return None, None
 
-        import concurrent.futures
-
         ui_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
         ui_validation_future = ui_executor.submit(self.validate_ui_build)
         self.console.print(
@@ -1249,16 +1347,16 @@ except Exception as e:
                 )
                 return
 
-            # Run npm install first
+            # Run npm ci first (clean install from lock file)
             self.console.print(
                 "[cyan]📦 Installing UI dependencies (this may take a while)...[/cyan]"
             )
             success, result = self.run_subprocess_with_logging(
-                ["npm", "install"], "UI npm install", ui_dir, realtime=True
+                ["npm", "ci"], "UI npm ci", ui_dir, realtime=True
             )
 
             if not success:
-                raise Exception("npm install failed")
+                raise Exception("npm ci failed")
 
             # Run npm run build to validate ESLint/Prettier
             self.console.print(
@@ -1324,6 +1422,122 @@ except Exception as e:
 
         return zipfile_name
 
+    def package_pattern2_source(self):
+        """Package Pattern-2 source code for CodeBuild to build Docker images"""
+        self.console.print(
+            "[bold cyan]📦 Packaging Pattern-2 source for Docker builds[/bold cyan]"
+        )
+
+        # Calculate content hash for versioning
+        paths_to_hash = [
+            "Dockerfile.optimized",
+            "patterns/pattern-2/buildspec.yml",
+            "lib/idp_common_pkg",
+            "patterns/pattern-2/src",
+        ]
+
+        combined_hash = hashlib.sha256()
+        for path in paths_to_hash:
+            if os.path.isfile(path):
+                file_hash = self.get_file_checksum(path)
+                if file_hash:
+                    combined_hash.update(file_hash.encode())
+            elif os.path.isdir(path):
+                dir_hash = self.get_component_checksum(path)
+                if dir_hash:
+                    combined_hash.update(dir_hash.encode())
+
+        content_hash = combined_hash.hexdigest()[:8]
+        zipfile_name = f"pattern-2-source-{content_hash}.zip"
+        zipfile_path = os.path.join(".aws-sam", zipfile_name)
+
+        # Create zip if it doesn't exist
+        if not os.path.exists(zipfile_path):
+            os.makedirs(".aws-sam", exist_ok=True)
+            self.console.print(
+                f"[cyan]Creating Pattern-2 source zip: {zipfile_name}[/cyan]"
+            )
+
+            with zipfile.ZipFile(zipfile_path, "w", zipfile.ZIP_DEFLATED) as zipf:
+                # Add Dockerfile
+                zipf.write("Dockerfile.optimized", "Dockerfile.optimized")
+
+                # Add buildspec.yml
+                zipf.write(
+                    "patterns/pattern-2/buildspec.yml",
+                    "patterns/pattern-2/buildspec.yml",
+                )
+
+                # Add lib/idp_common_pkg
+                for root, dirs, files in os.walk("lib/idp_common_pkg"):
+                    # Exclude build artifacts and cache
+                    dirs[:] = [
+                        d
+                        for d in dirs
+                        if d
+                        not in {
+                            "__pycache__",
+                            ".pytest_cache",
+                            "dist",
+                            "build",
+                            "*.egg-info",
+                        }
+                    ]
+                    for file in files:
+                        if file.endswith((".pyc", ".pyo")):
+                            continue
+                        file_path = os.path.join(root, file)
+                        arcname = os.path.relpath(file_path, ".")
+                        zipf.write(file_path, arcname)
+
+                # Add patterns/pattern-2/src
+                for root, dirs, files in os.walk("patterns/pattern-2/src"):
+                    dirs[:] = [
+                        d
+                        for d in dirs
+                        if d not in {"__pycache__", ".pytest_cache", ".aws-sam"}
+                    ]
+                    for file in files:
+                        if file.endswith((".pyc", ".pyo")):
+                            continue
+                        file_path = os.path.join(root, file)
+                        arcname = os.path.relpath(file_path, ".")
+                        zipf.write(file_path, arcname)
+
+            self.console.print(
+                f"[green]✅ Created Pattern-2 source zip ({os.path.getsize(zipfile_path) / 1024 / 1024:.2f} MB)[/green]"
+            )
+
+        # Upload to S3 if needed
+        s3_key = f"{self.prefix_and_version}/{zipfile_name}"
+        try:
+            self.s3_client.head_object(Bucket=self.bucket, Key=s3_key)
+            self.console.print(
+                f"[green]Pattern-2 source already exists in S3: {zipfile_name}[/green]"
+            )
+        except ClientError as e:
+            if e.response["Error"]["Code"] == "404":
+                self.console.print(
+                    f"[cyan]Uploading Pattern-2 source to S3: {s3_key}[/cyan]"
+                )
+                try:
+                    self.s3_client.upload_file(zipfile_path, self.bucket, s3_key)
+                    self.console.print(
+                        "[green]✅ Uploaded Pattern-2 source to S3[/green]"
+                    )
+                except ClientError as upload_error:
+                    self.console.print(
+                        f"[red]❌ Error uploading Pattern-2 source: {upload_error}[/red]"
+                    )
+                    sys.exit(1)
+            else:
+                self.console.print(
+                    f"[red]❌ Error checking S3 for Pattern-2 source: {e}[/red]"
+                )
+                sys.exit(1)
+
+        return zipfile_name
+
     def _upload_template_to_s3(self, template_path, s3_key, description):
         """Helper method to upload template to S3 with error handling"""
         self.console.print(f"[cyan]Uploading {description} to S3: {s3_key}[/cyan]")
@@ -1357,7 +1571,9 @@ except Exception as e:
                 )
                 self.console.print(str(e), style="red", markup=False)
 
-    def build_main_template(self, webui_zipfile, components_needing_rebuild):
+    def build_main_template(
+        self, webui_zipfile, pattern2_source_zipfile, components_needing_rebuild
+    ):
         """Build and package main template with smart detection"""
         try:
             self.console.print("[bold cyan]BUILDING main[/bold cyan]")
@@ -1418,7 +1634,6 @@ except Exception as e:
                 )
 
                 # Replace tokens in template
-                from datetime import datetime, timezone
 
                 build_date_time = datetime.now(timezone.utc).strftime(
                     "%Y-%m-%d %H:%M:%S"
@@ -1431,6 +1646,8 @@ except Exception as e:
                     "<ARTIFACT_BUCKET_TOKEN>": self.bucket,
                     "<ARTIFACT_PREFIX_TOKEN>": self.prefix_and_version,
                     "<WEBUI_ZIPFILE_TOKEN>": webui_zipfile,
+                    "<PATTERN2_SOURCE_ZIPFILE_TOKEN>": pattern2_source_zipfile,
+                    "<LAMBDA_IMAGE_VERSION>": self.lambda_image_version,
                     "<HASH_TOKEN>": self.get_directory_checksum("./lib")[:16],
                     "<CONFIG_LIBRARY_HASH_TOKEN>": self.get_directory_checksum(
                         "config_library"
@@ -1696,6 +1913,7 @@ except Exception as e:
                 LIB_DEPENDENCY,
                 "patterns/pattern-2/src",
                 "patterns/pattern-2/template.yaml",
+                "Dockerfile.optimized",
             ],
             "patterns/pattern-3": [
                 LIB_DEPENDENCY,
@@ -1772,7 +1990,6 @@ except Exception as e:
 
     def _validate_python_syntax(self, directory):
         """Validate Python syntax in all .py files in the directory"""
-        import py_compile
 
         for root, dirs, files in os.walk(directory):
             for file in files:
@@ -1977,6 +2194,8 @@ except Exception as e:
             # Parse and validate parameters
             self.check_parameters(args)
 
+            # Container deployment is now handled within this script
+
             # Set up environment
             self.setup_environment()
 
@@ -1989,6 +2208,12 @@ except Exception as e:
 
             # Set up S3 bucket
             self.setup_artifacts_bucket()
+
+            # Get AWS account ID (needed for ECR placeholder)
+            if not self.account_id:
+                if not self.sts_client:
+                    self.sts_client = boto3.client("sts", region_name=self.region)
+                self.account_id = self.sts_client.get_caller_identity()["Account"]
 
             # Perform smart rebuild detection and cache management
             components_needing_rebuild = self.smart_rebuild_detection()
@@ -2018,6 +2243,14 @@ except Exception as e:
                 self.console.print(
                     f"[green]Auto-detected {self.max_workers} concurrent workers[/green]"
                 )
+
+            # Build and push Pattern-2 container images FIRST if Pattern-2 needs rebuilding
+            # This MUST happen before SAM build/package since the images need to exist
+            # Pattern-2 Docker images are now built during CloudFormation deployment via CodeBuild
+            # No pre-build required - CodeBuild will download source from S3 and build images
+            self.console.print(
+                "\n[cyan]ℹ️  Pattern-2 Docker images will be built during stack deployment via CodeBuild[/cyan]"
+            )
 
             # Build patterns with smart detection
             self.console.print("\n[bold yellow]📦 Building Patterns[/bold yellow]")
@@ -2088,8 +2321,13 @@ except Exception as e:
             # Package UI and start validation in parallel if needed
             webui_zipfile = self.package_ui()
 
+            # Package Pattern-2 source for CodeBuild Docker builds
+            pattern2_source_zipfile = self.package_pattern2_source()
+
             # Build main template
-            self.build_main_template(webui_zipfile, components_needing_rebuild)
+            self.build_main_template(
+                webui_zipfile, pattern2_source_zipfile, components_needing_rebuild
+            )
 
             # Validate Lambda builds for idp_common inclusion (after all builds complete)
             self.validate_lambda_builds()
@@ -2111,6 +2349,10 @@ except Exception as e:
         except Exception as e:
             self.console.print("[red]Error:[/red]")
             self.console.print(str(e), style="red", markup=False)
+            import traceback
+
+            self.console.print("\n[yellow]Traceback:[/yellow]")
+            traceback.print_exc()
             sys.exit(1)
 
 

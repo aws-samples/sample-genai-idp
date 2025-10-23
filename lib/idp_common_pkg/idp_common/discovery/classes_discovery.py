@@ -219,7 +219,7 @@ class ClassesDiscovery:
     def _extract_data_from_document(self, document_content, file_extension):
         try:
             # Get configuration for without ground truth
-            model_id = self.without_gt_config.get("model_id", "us.amazon.nova-pro-v1:0")
+            model_id = self.without_gt_config.get("model_id", "eu.amazon.nova-pro-v1:0")
             system_prompt = self.without_gt_config.get(
                 "system_prompt",
                 "You are an expert in processing forms. Extracting data from images and documents",
@@ -294,7 +294,7 @@ class ClassesDiscovery:
         """Extract data from document using ground truth as reference."""
         try:
             # Get configuration for with ground truth
-            model_id = self.with_gt_config.get("model_id", "us.amazon.nova-pro-v1:0")
+            model_id = self.with_gt_config.get("model_id", "eu.amazon.nova-pro-v1:0")
             system_prompt = self.with_gt_config.get(
                 "system_prompt",
                 "You are an expert in processing forms. Extracting data from images and documents",

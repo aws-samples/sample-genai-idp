@@ -233,21 +233,11 @@ This multi-level analysis helps identify specific areas for improvement, such as
 - Performance degradation with larger transaction lists
 - Specific list item attributes that frequently fail evaluation
 
-## Viewing Reports
+## Setup and Usage
 
-1. In the web UI, select a document from the Documents list
-2. Click "View Evaluation Report" button 
-3. The report shows:
-   - Section classification accuracy
-   - Field-by-field comparison with visual indicators (✅/❌)
-   - Analysis of differences with detailed reasons
-   - Overall accuracy assessment with color-coded metrics (🟢 Excellent, 🟡 Good, 🟠 Fair, 🔴 Poor)
-   - Progress bar visualizations for match rates
-   - Comprehensive metrics and performance ratings
+### Step 1: Creating Baseline Data
 
-## Creating Baseline Data
-
-There are two main approaches to creating baseline data:
+Creating accurate baseline data is the foundation of the evaluation framework. There are two main approaches:
 
 ### Method 1: Use Existing Processing Results (Using Copy to Baseline Feature)
 
@@ -263,39 +253,132 @@ There are two main approaches to creating baseline data:
 
 ### Method 2: Create Baseline Data Manually
 
-1. Create a JSON file following the GenAIIDP output schema
-2. Include all required fields and values for each document
-3. Upload to the baseline bucket with an object key matching the input document
+**Important:** Baselines must follow the correct directory structure:
+- Create a directory named after your document (e.g., `invoice.pdf/`)
+- Inside, create a `sections/1/` subdirectory
+- Place your `result.json` file in `sections/1/`
+- Upload the entire directory structure to the baseline bucket
 
-## Baseline Bucket Structure
+**Best Practices for Creating Baseline Files:**
 
+The easiest way to create accurate baseline files is to start with processed results:
+
+1. **Option A: Use Processed Results as Template**
+   - Process your document through the GenAIIDP solution first
+   - Download the results from the OutputBucket
+   - Locate the `sections/1/result.json` file in the output
+   - Find the `inference_result` section within that file
+   - Use this as your baseline template, making any necessary corrections
+   - The `inference_result` contains the extracted attributes in the correct format
+
+2. **Option B: Use the Solution UI**
+   - Process your document through the GenAIIDP solution
+   - In the Web UI, navigate to the processed document
+   - Click "View / Edit data" to review the extracted results
+   - Correct any errors directly in the UI
+   - Export or copy the corrected data to create your baseline
+   - This ensures your baseline matches the exact structure expected by the evaluation framework
+
+**Manual Steps:**
+
+1. Create the directory structure following the pattern: `<document-name>/sections/1/`
+2. Create a `result.json` file with extracted attributes in the correct format (using one of the methods above)
+3. Upload the complete directory structure to the baseline bucket
+
+**Example structure to upload:**
 ```
-baseline-bucket/
-├── document1.pdf.json    # Baseline for document1.pdf
-├── document2.pdf.json    # Baseline for document2.pdf
-└── subfolder/
-    └── document3.pdf.json  # Baseline for subfolder/document3.pdf
+invoice.pdf/
+└── sections/
+    └── 1/
+        └── result.json
 ```
 
-Each baseline file should match the format of the GenAIIDP output, typically including:
-
+**Example result.json content:**
 ```json
 {
-  "documentMetadata": { ... },
-  "sections": [ ... ],
-  "extractedData": { ... }
+  "inference_result": {
+    "Invoice Number": "INV-2024-001",
+    "Invoice Date": "2024-01-15",
+    "Total Amount": "$1,250.00",
+    "Vendor Name": "Acme Corp"
+  }
 }
 ```
 
+### Understanding the Baseline Structure
+
+All baselines must follow this directory structure in your S3 baseline bucket:
+
+```
+baseline-bucket/
+├── document1.pdf/
+│   └── sections/
+│       └── 1/
+│           └── result.json    # Baseline for document1.pdf
+├── document2.pdf/
+│   └── sections/
+│       └── 1/
+│           └── result.json    # Baseline for document2.pdf
+└── subfolder/
+    └── document3.pdf/
+        └── sections/
+            └── 1/
+                └── result.json  # Baseline for subfolder/document3.pdf
+```
+
+**Key Structure Rules:**
+- Directory name matches the document filename (e.g., `invoice.pdf/`)
+- Contains a `sections/1/` subdirectory
+- The `result.json` file contains the inference results in this format:
+
+```json
+{
+  "inference_result": {
+    "Invoice Number": "INV-2024-001",
+    "Invoice Date": "2024-01-15",
+    "Total Amount": "$1,250.00",
+    "Vendor Name": "Acme Corp"
+  }
+}
+```
+
+### Step 2: Viewing Evaluation Reports
+
+Once documents are processed with baselines:
+
+1. In the Web UI, select a document from the Documents list
+2. Click "View Evaluation Report" button
+3. The report displays:
+   - Section classification accuracy
+   - Field-by-field comparison with visual indicators (✅/❌)
+   - Analysis of differences with detailed reasons
+   - Overall accuracy assessment with color-coded metrics (🟢 Excellent, 🟡 Good, 🟠 Fair, 🔴 Poor)
+   - Progress bar visualizations for match rates
+   - Comprehensive metrics and performance ratings
+   - Confidence scores (if assessment is enabled)
+
 ## Best Practices
 
-- Enable auto-evaluation during testing/tuning phases
-- Disable auto-evaluation in production for cost efficiency 
-- Use evaluation reports to:
+### Baseline Management
+- **Start with high-quality baselines**: Use processed results from the UI and correct any errors before creating baselines
+- **Maintain baseline consistency**: Ensure all baseline files follow the correct directory structure
+- **Version your baselines**: Keep different baseline sets for different document versions or testing scenarios
+
+### Evaluation Strategy
+
+- **Enable auto-evaluation during testing/tuning phases**: Get immediate feedback on accuracy
+- **Disable auto-evaluation in production**: Reduce costs by evaluating only when needed
+- **Use evaluation reports to**:
   - Compare different processing patterns
   - Test effects of prompt changes
   - Monitor accuracy over time
   - Identify areas for improvement
+
+### Configuration Best Practices
+
+- **Choose appropriate evaluation methods**: Match methods to your data types (EXACT for IDs, FUZZY for names, SEMANTIC for descriptions)
+- **Set realistic thresholds**: Start with strict thresholds (0.9+) and adjust based on your accuracy requirements
+- **Configure confidence tracking**: Enable assessment to get confidence scores in evaluation reports
 
 ## Automatic Field Discovery
 
@@ -386,7 +469,24 @@ Stores detailed attribute-level metrics including:
 - Individual attribute scores and evaluation methods
 - Detailed reasoning for matches/mismatches
 
-### Querying with Amazon Athena
+### Querying Evaluation Results
+
+You have two primary ways to analyze evaluation data:
+
+#### Option 1: Agent Analytics (Recommended for Most Users)
+
+The **Agent Analytics** feature in the Web UI provides a natural language interface to query and analyze evaluation results without writing SQL:
+
+- **Natural Language Queries**: Ask questions like "Show me documents with accuracy below 80%" or "What attributes have the lowest match rates?"
+- **Automatic SQL Generation**: The AI agent automatically writes optimized Athena queries based on your questions
+- **Interactive Visualizations**: Generate charts, graphs, and tables to visualize evaluation trends
+- **No SQL Knowledge Required**: Ideal for business users and analysts
+
+Access Agent Analytics through the Web UI's "Document Analytics" section. For detailed guidance, see [`docs/agent-analysis.md`](./agent-analysis.md).
+
+#### Option 2: Direct Athena SQL Queries
+
+For advanced users and automated workflows, you can query the evaluation tables directly with Amazon Athena.
 
 All evaluation data is partitioned by date and document for efficient querying:
 

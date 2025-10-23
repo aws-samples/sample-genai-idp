@@ -203,6 +203,7 @@ def handler(event, context):
         id=document.id,
         input_key=document.input_key,
         status=Status.ASSESSING,
+        user_id=document.user_id  # Preserve user_id for user-scoped documents
     )
     document_service = create_document_service()
     logger.info(f"Updating document status to {docStatus.status}")

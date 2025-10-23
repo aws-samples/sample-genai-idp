@@ -84,7 +84,7 @@ class TestAssessmentBackwardCompatibility(unittest.TestCase):
                 }
             ],
             "assessment": {
-                "model": "us.anthropic.claude-3-haiku-20240307-v1:0",
+                "model": "eu.anthropic.claude-3-haiku-20240307-v1:0",
                 "system_prompt": "You are an assessment expert.",
                 "task_prompt": "Assess the confidence of extraction results for this {DOCUMENT_CLASS} document.\n\n<attributes-definitions>\n{ATTRIBUTE_NAMES_AND_DESCRIPTIONS}\n</attributes-definitions>\n\n<<CACHEPOINT>>\n\n<document-image>\n{DOCUMENT_IMAGE}\n</document-image>\n\n<ocr-text-confidence-results>\n{OCR_TEXT_CONFIDENCE}\n</ocr-text-confidence-results>\n\n<<CACHEPOINT>>\n\n<extraction-results>\n{EXTRACTION_RESULTS}\n</extraction-results>",
                 "temperature": "0.0",

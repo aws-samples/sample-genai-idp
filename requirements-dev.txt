@@ -1,0 +1,39 @@
+# Development and Testing Dependencies
+# Install with: pip install -r requirements-dev.txt
+
+# ============================================================================
+# Testing Framework
+# ============================================================================
+pytest>=7.4.0
+pytest-cov>=4.1.0
+pytest-mock>=3.11.1
+pytest-xdist>=3.3.1          # Parallel test execution
+pytest-timeout>=2.1.0        # Timeout for long-running tests
+pytest-asyncio>=0.21.0       # Async test support
+
+# ============================================================================
+# AWS Mocking
+# ============================================================================
+moto>=4.2.0                  # Mock AWS services
+boto3-stubs[dynamodb,s3,cognito-identity,lambda]>=1.28.0
+
+# ============================================================================
+# Code Quality
+# ============================================================================
+ruff>=0.1.0                  # Fast Python linter
+black>=23.0.0                # Code formatter
+mypy>=1.5.0                  # Type checker
+isort>=5.12.0                # Import sorter
+
+# ============================================================================
+# Test Utilities
+# ============================================================================
+faker>=19.0.0                # Generate fake test data
+freezegun>=1.2.0             # Mock datetime
+responses>=0.23.0            # Mock HTTP requests
+
+# ============================================================================
+# Documentation
+# ============================================================================
+pytest-html>=4.0.0           # HTML test reports
+coverage[toml]>=7.3.0        # Coverage with pyproject.toml support

@@ -25,6 +25,27 @@ const AppContent = () => {
   const [errorMessage, setErrorMessage] = useState();
   const [navigationOpen, setNavigationOpen] = useState(true);
 
+  // Extract user groups and admin status
+  let groups = [];
+  let isAdmin = false;
+
+  if (user?.signInUserSession) {
+    const { idToken, accessToken } = user.signInUserSession;
+
+    // Try ID token first, then access token
+    groups = idToken?.payload['cognito:groups'] || accessToken?.payload['cognito:groups'] || [];
+    isAdmin = groups.includes('Admin');
+
+    logger.debug('User groups:', groups);
+    logger.debug('Is admin:', isAdmin);
+
+    // Temporary debug logging
+    console.log('[RBAC] ID Token payload:', idToken?.payload);
+    console.log('[RBAC] Access Token payload:', accessToken?.payload);
+    console.log('[RBAC] Groups from token:', groups);
+    console.log('[RBAC] Is admin:', isAdmin);
+  }
+
   // eslint-disable-next-line react/jsx-no-constructed-context-values
   const appContextValue = {
     authState,
@@ -34,6 +55,8 @@ const AppContent = () => {
     currentSession,
     setErrorMessage,
     user,
+    groups,
+    isAdmin,
     navigationOpen,
     setNavigationOpen,
   };

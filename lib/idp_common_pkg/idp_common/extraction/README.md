@@ -85,29 +85,29 @@ The extraction service uses the following configuration structure:
 
 ```json
 {
-    "extraction": {
-        "model": "anthropic.claude-3-sonnet-20240229-v1:0",
-        "temperature": 0.0,
-        "top_k": 5,
-        "system_prompt": "You are an expert at extracting information from documents...",
-        "task_prompt": "Extract the following fields from this {DOCUMENT_CLASS} document: {ATTRIBUTE_NAMES_AND_DESCRIPTIONS}\n\n{FEW_SHOT_EXAMPLES}\n\nDocument text:\n{DOCUMENT_TEXT}"
-    },
-    "classes": [
+  "extraction": {
+    "model": "anthropic.claude-3-sonnet-20240229-v1:0",
+    "temperature": 0.0,
+    "top_k": 5,
+    "system_prompt": "You are an expert at extracting information from documents...",
+    "task_prompt": "Extract the following fields from this {DOCUMENT_CLASS} document: {ATTRIBUTE_NAMES_AND_DESCRIPTIONS}\n\n{FEW_SHOT_EXAMPLES}\n\nDocument text:\n{DOCUMENT_TEXT}"
+  },
+  "classes": [
+    {
+      "name": "invoice",
+      "description": "An invoice document",
+      "attributes": [
         {
-            "name": "invoice",
-            "description": "An invoice document",
-            "attributes": [
-                {
-                    "name": "invoice_number",
-                    "description": "The invoice number or ID"
-                },
-                {
-                    "name": "date",
-                    "description": "The invoice date"
-                }
-            ]
+          "name": "invoice_number",
+          "description": "The invoice number or ID"
+        },
+        {
+          "name": "date",
+          "description": "The invoice date"
         }
-    ]
+      ]
+    }
+  ]
 }
 ```
 
@@ -188,26 +188,31 @@ Each few-shot example includes:
 The `imagePath` field now supports multiple formats for maximum flexibility:
 
 **Single Image File (Original functionality)**:
+
 ```yaml
 imagePath: "config_library/pattern-2/few_shot_example/example-images/letter1.jpg"
 ```
 
 **Local Directory with Multiple Images (New)**:
+
 ```yaml
 imagePath: "config_library/pattern-2/few_shot_example/example-images/"
 ```
 
 **S3 Prefix with Multiple Images (New)**:
+
 ```yaml
 imagePath: "s3://my-config-bucket/few-shot-examples/letter/"
 ```
 
 **Direct S3 Image URI**:
+
 ```yaml
 imagePath: "s3://my-config-bucket/few-shot-examples/letter/example1.jpg"
 ```
 
 When pointing to a directory or S3 prefix, the system automatically:
+
 - Discovers all image files with supported extensions (`.jpg`, `.jpeg`, `.png`, `.gif`, `.bmp`, `.tiff`, `.tif`, `.webp`)
 - Sorts them alphabetically by filename for consistent ordering
 - Includes each image as a separate content item in the few-shot examples
@@ -234,25 +239,25 @@ extraction:
   task_prompt: |
     <background>
     You are an expert in business document analysis and information extraction.
-    
+
     <task>
     Your task is to take the unstructured text provided and convert it into a
     well-organized table format using JSON. Identify the main entities,
     attributes, or categories mentioned in the attributes list below and use
     them as keys in the JSON object.
-    
+
     Here are the attributes you should extract:
     <attributes>
     {ATTRIBUTE_NAMES_AND_DESCRIPTIONS}
     </attributes>
-    
+
     <few_shot_examples>
     {FEW_SHOT_EXAMPLES}
     </few_shot_examples>
-    
+
     </task>
     </background>
-    
+
     The document type is {DOCUMENT_CLASS}. Here is the document content:
     <document_ocr_data>
     {DOCUMENT_TEXT}
@@ -374,7 +379,7 @@ config = get_config()
 
 # Initialize service - few-shot examples are automatically used
 service = ExtractionService(
-    region="us-east-1", 
+    region="us-east-1",
     config=config
 )
 
@@ -384,6 +389,7 @@ document = service.process_document_section(document, section_id)
 ```
 
 The service automatically:
+
 1. Loads few-shot examples from the configuration
 2. Filters examples to only include those from the document's classified type
 3. Includes them in extraction prompts using the `{FEW_SHOT_EXAMPLES}` placeholder
@@ -400,7 +406,7 @@ classes:
     attributes:
       - name: from_address
         description: "The email address of the sender..."
-      - name: to_address  
+      - name: to_address
         description: "The email address of the primary recipient..."
       - name: subject
         description: "The topic of the email..."
@@ -427,23 +433,23 @@ extraction:
   task_prompt: |
     <background>
     You are an expert in business document analysis and information extraction.
-    
+
     <task>
     Your task is to take the unstructured text provided and convert it into a
     well-organized table format using JSON.
-    
+
     Here are the attributes you should extract:
     <attributes>
     {ATTRIBUTE_NAMES_AND_DESCRIPTIONS}
     </attributes>
-    
+
     <few_shot_examples>
     {FEW_SHOT_EXAMPLES}
     </few_shot_examples>
-    
+
     </task>
     </background>
-    
+
     The document type is {DOCUMENT_CLASS}. Here is the document content:
     <document_ocr_data>
     {DOCUMENT_TEXT}
@@ -487,22 +493,22 @@ print(f"Built content with {len(content)} items")
 
 Common issues and solutions:
 
-1. **No Examples Loaded**: 
+1. **No Examples Loaded**:
    - Verify `{FEW_SHOT_EXAMPLES}` placeholder exists in task_prompt
    - Check that examples are defined for the document class being processed
    - Ensure example image paths are correct
 
-2. **Images Not Found**: 
+2. **Images Not Found**:
    - Set `ROOT_DIR` environment variable for local development
    - Set `CONFIGURATION_BUCKET` for S3 deployment
    - Verify image files exist at specified paths
 
-3. **Inconsistent Extraction Results**: 
+3. **Inconsistent Extraction Results**:
    - Review example quality and ensure they're representative
    - Check that `attributesPrompt` format matches expected output
    - Ensure examples cover the range of variations in your documents
 
-4. **Poor Performance**: 
+4. **Poor Performance**:
    - Add more diverse examples for the document class
    - Improve example quality and accuracy
    - Ensure examples demonstrate proper null handling

@@ -1,0 +1,16 @@
+{
+  "identity": {
+    "sub": "123e4567-e89b-12d3-a456-426614174000",
+    "sourceIp": ["192.0.2.1"],
+    "accountId": "123456789012"
+  },
+  "arguments": {
+    "input": {
+      "ObjectKey": "users/123e4567-e89b-12d3-a456-426614174000/bank-statement.pdf",
+      "QueuedTime": "2025-01-15T14:45:00Z",
+      "Status": "QUEUED",
+      "DocumentType": "bank_statement",
+      "ExpiresAfter": 1737800000
+    }
+  }
+}

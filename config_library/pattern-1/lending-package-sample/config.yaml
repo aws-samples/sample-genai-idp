@@ -63,7 +63,7 @@ summarization:
     Do not include any text, explanations, or notes outside of this JSON
     structure. The JSON must be properly formatted and parseable.
   temperature: '0.0'
-  model: us.amazon.nova-premier-v1:0
+  model: eu.amazon.nova-pro-v1:0
   system_prompt: >-
     You are a document summarization expert who can analyze and summarize documents from various domains including medical, financial, legal, and general business documents. Your task is to create a summary that captures the key information, main points, and important details from the document. Your output must be in valid JSON format. \nSummarization Style: Balanced\\nCreate a balanced summary that provides a moderate level of detail. Include the main points and key supporting information, while maintaining the document's overall structure. Aim for a comprehensive yet concise summary.\n Your output MUST be in valid JSON format with markdown content. You MUST strictly adhere to the output format specified in the instructions.
 evaluation:
@@ -101,7 +101,7 @@ evaluation:
         "reason": "Your explanation here"
       }
     temperature: '0.0'
-    model: us.anthropic.claude-3-haiku-20240307-v1:0
+    model: eu.anthropic.claude-3-haiku-20240307-v1:0
     system_prompt: >-
       You are an evaluator that helps determine if the predicted and expected values match for document attribute extraction. You will consider the context and meaning rather than just exact string matching.
 discovery:
@@ -170,7 +170,7 @@ discovery:
       Format the extracted data using the below JSON format:
       Format the extracted groups and fields using the below JSON format:
 
-    model_id: us.amazon.nova-pro-v1:0
+    model_id: eu.amazon.nova-pro-v1:0
     system_prompt: >-
       You are an expert in processing forms. Extracting data from images and
       documents. Use provided ground truth data as reference to optimize field
@@ -199,7 +199,7 @@ discovery:
       Return the extracted data in JSON format.
       Format the extracted data using the below JSON format:
       Format the extracted groups and fields using the below JSON format:
-    model_id: us.amazon.nova-pro-v1:0
+    model_id: eu.amazon.nova-pro-v1:0
     system_prompt: >-
       You are an expert in processing forms. Extracting data from images and
       documents. Analyze forms line by line to identify field names, data types,
@@ -208,7 +208,7 @@ discovery:
     max_tokens: '10000'
 agents:
   error_analyzer:
-    model_id: us.anthropic.claude-sonnet-4-20250514-v1:0
+    model_id: eu.anthropic.claude-sonnet-4-20250514-v1:0
 
     system_prompt: |-
       You are an intelligent error analysis agent for the GenAI IDP system.
@@ -280,7 +280,7 @@ pricing:
     units:
       - name: pages
         price: '0.01'
-  - name: bedrock/us.amazon.nova-lite-v1:0
+  - name: bedrock/eu.amazon.nova-lite-v1:0
     units:
       - name: inputTokens
         price: '6.0E-8'
@@ -290,7 +290,7 @@ pricing:
         price: '1.5E-8'
       - name: cacheWriteInputTokens
         price: '6.0E-8'
-  - name: bedrock/us.amazon.nova-pro-v1:0
+  - name: bedrock/eu.amazon.nova-pro-v1:0
     units:
       - name: inputTokens
         price: '8.0E-7'
@@ -300,19 +300,19 @@ pricing:
         price: '2.0E-7'
       - name: cacheWriteInputTokens
         price: '8.0E-7'
-  - name: bedrock/us.amazon.nova-premier-v1:0
+  - name: bedrock/eu.amazon.nova-pro-v1:0
     units:
       - name: inputTokens
         price: '2.5E-6'
       - name: outputTokens
         price: '1.25E-5'
-  - name: bedrock/us.anthropic.claude-3-haiku-20240307-v1:0
+  - name: bedrock/eu.anthropic.claude-3-haiku-20240307-v1:0
     units:
       - name: inputTokens
         price: '2.5E-7'
       - name: outputTokens
         price: '1.25E-6'
-  - name: bedrock/us.anthropic.claude-3-5-haiku-20241022-v1:0
+  - name: bedrock/eu.anthropic.claude-3-haiku-20240307-v1:0
     units:
       - name: inputTokens
         price: '8.0E-7'
@@ -322,7 +322,7 @@ pricing:
         price: '8.0E-8'
       - name: cacheWriteInputTokens
         price: '1.0E-6'
-  - name: bedrock/us.anthropic.claude-3-5-sonnet-20241022-v2:0
+  - name: bedrock/eu.anthropic.claude-3-5-sonnet-20240620-v1:0
     units:
       - name: inputTokens
         price: '3.0E-6'
@@ -332,7 +332,7 @@ pricing:
         price: '3.0E-7'
       - name: cacheWriteInputTokens
         price: '3.75E-6'
-  - name: bedrock/us.anthropic.claude-3-7-sonnet-20250219-v1:0
+  - name: bedrock/eu.anthropic.claude-3-7-sonnet-20250219-v1:0
     units:
       - name: inputTokens
         price: '3.0E-6'
@@ -342,7 +342,7 @@ pricing:
         price: '3.0E-7'
       - name: cacheWriteInputTokens
         price: '3.75E-6'
-  - name: bedrock/us.anthropic.claude-sonnet-4-20250514-v1:0
+  - name: bedrock/eu.anthropic.claude-sonnet-4-20250514-v1:0
     units:
       - name: inputTokens
         price: '3.0E-6'
@@ -352,7 +352,7 @@ pricing:
         price: '3.0E-7'
       - name: cacheWriteInputTokens
         price: '3.75E-6'
-  - name: bedrock/us.anthropic.claude-sonnet-4-20250514-v1:0:1m
+  - name: bedrock/eu.anthropic.claude-sonnet-4-20250514-v1:0:1m
     units:
       - name: inputTokens
         price: '6.0E-6'
@@ -362,7 +362,7 @@ pricing:
         price: '6.0E-7'
       - name: cacheWriteInputTokens
         price: '7.5E-6'
-  - name: bedrock/us.anthropic.claude-sonnet-4-5-20250929-v1:0
+  - name: bedrock/eu.anthropic.claude-sonnet-4-5-20250929-v1:0
     units:
       - name: inputTokens
         price: '3.3E-6'
@@ -372,7 +372,7 @@ pricing:
         price: '3.3E-7'
       - name: cacheWriteInputTokens
         price: '4.125E-6'
-  - name: bedrock/us.anthropic.claude-sonnet-4-5-20250929-v1:0:1m
+  - name: bedrock/eu.anthropic.claude-sonnet-4-5-20250929-v1:0:1m
     units:
       - name: inputTokens
         price: '6.6E-6'
@@ -382,7 +382,7 @@ pricing:
         price: '6.6E-7'
       - name: cacheWriteInputTokens
         price: '8.25E-6'
-  - name: bedrock/us.anthropic.claude-opus-4-20250514-v1:0
+  - name: bedrock/eu.anthropic.claude-sonnet-4-20250514-v1:0
     units:
       - name: inputTokens
         price: '1.5E-5'
@@ -392,7 +392,7 @@ pricing:
         price: '1.5E-6'
       - name: cacheWriteInputTokens
         price: '1.875E-5'
-  - name: bedrock/us.anthropic.claude-opus-4-1-20250805-v1:0
+  - name: bedrock/eu.anthropic.claude-sonnet-4-5-20250929-v1:0
     units:
       - name: inputTokens
         price: '1.5E-5'

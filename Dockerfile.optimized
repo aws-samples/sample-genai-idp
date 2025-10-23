@@ -1,0 +1,43 @@
+# Optimized Dockerfile for Lambda functions with minimal dependencies
+# This builds each function with ONLY the dependencies it needs
+
+FROM public.ecr.aws/lambda/python:3.12-arm64 AS builder
+
+# Copy uv from official distroless image
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+
+# Build argument for function path
+ARG FUNCTION_PATH
+ARG INSTALL_IDP_COMMON=true
+
+# Create working directory
+WORKDIR /build
+
+# Copy idp_common_pkg and requirements for installation
+COPY lib/idp_common_pkg /tmp/idp_common_pkg
+COPY ${FUNCTION_PATH}/requirements.txt* /build/
+
+# Install all dependencies including idp_common_pkg in one step
+RUN --mount=type=cache,target=/root/.cache/uv \
+    if [ -f /build/requirements.txt ]; then \
+        sed 's|^\.\./\.\.\(/\.\.\)\?/lib/idp_common_pkg|/tmp/idp_common_pkg|' /build/requirements.txt > /tmp/requirements.txt && \
+        uv pip install --python python3.12 --target /opt/python -r /tmp/requirements.txt && \
+        rm /tmp/requirements.txt; \
+    fi && \
+    rm -rf /tmp/idp_common_pkg
+
+# Final stage - minimal runtime
+FROM public.ecr.aws/lambda/python:3.12-arm64
+
+# Copy only the installed packages
+COPY --from=builder /opt/python /opt/python
+
+# Copy function code
+ARG FUNCTION_PATH
+COPY ${FUNCTION_PATH}/*.py ${LAMBDA_TASK_ROOT}/
+
+# Set Python path
+ENV PYTHONPATH=/opt/python:${LAMBDA_TASK_ROOT}
+
+# Set handler
+CMD ["index.handler"]

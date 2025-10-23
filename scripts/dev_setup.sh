@@ -90,7 +90,7 @@ if [ "\$PS1" != "" ]; then
  
     alias python=python3
     alias pip=pip3
-    alias interpreter="interpreter --model bedrock/us.anthropic.claude-3-haiku-20240307-v1:0"
+    alias interpreter="interpreter --model bedrock/eu.anthropic.claude-3-haiku-20240307-v1:0"
 fi
 _EOF
 

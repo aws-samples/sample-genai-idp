@@ -28,6 +28,7 @@
 			"ms-toolsai.jupyter",
 			"ms-python.python",
 			"charliermarsh.ruff",
+			"anthropic.claude-code",
 		]
 	}
 }

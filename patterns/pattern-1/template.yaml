@@ -107,7 +107,7 @@ Parameters:
   BedrockModelId:
     Type: String
     Description: "Bedrock model id to use for label extraction"
-    Default: "us.amazon.nova-pro-v1:0"
+    Default: "eu.amazon.nova-pro-v1:0"
 
   PermissionsBoundaryArn:
     Type: String
@@ -362,7 +362,7 @@ Resources:
                   model:
                     type: string
                     description: Bedrock model ID
-                    enum: ["us.amazon.nova-lite-v1:0", "us.amazon.nova-pro-v1:0", "us.amazon.nova-premier-v1:0", "us.anthropic.claude-3-haiku-20240307-v1:0", "us.anthropic.claude-3-5-sonnet-20241022-v2:0", "us.anthropic.claude-3-7-sonnet-20250219-v1:0", "us.anthropic.claude-sonnet-4-20250514-v1:0", "us.anthropic.claude-sonnet-4-20250514-v1:0:1m", "us.anthropic.claude-sonnet-4-5-20250929-v1:0", "us.anthropic.claude-sonnet-4-5-20250929-v1:0:1m", "us.anthropic.claude-opus-4-20250514-v1:0", "us.anthropic.claude-opus-4-1-20250805-v1:0"]
+                    enum: ["eu.amazon.nova-lite-v1:0", "eu.amazon.nova-pro-v1:0", "eu.anthropic.claude-3-haiku-20240307-v1:0", "eu.anthropic.claude-3-5-sonnet-20240620-v1:0", "eu.anthropic.claude-3-7-sonnet-20250219-v1:0", "eu.anthropic.claude-sonnet-4-20250514-v1:0", "eu.anthropic.claude-sonnet-4-5-20250929-v1:0"]
                     order: 1
                   temperature:
                     type: number
@@ -414,7 +414,7 @@ Resources:
               model:
                 type: string
                 description: Bedrock model ID
-                enum: ["us.amazon.nova-lite-v1:0", "us.amazon.nova-pro-v1:0", "us.amazon.nova-premier-v1:0", "us.anthropic.claude-3-haiku-20240307-v1:0", "us.anthropic.claude-3-5-sonnet-20241022-v2:0", "us.anthropic.claude-3-7-sonnet-20250219-v1:0", "us.anthropic.claude-sonnet-4-20250514-v1:0", "us.anthropic.claude-sonnet-4-20250514-v1:0:1m", "us.anthropic.claude-sonnet-4-5-20250929-v1:0", "us.anthropic.claude-sonnet-4-5-20250929-v1:0:1m", "us.anthropic.claude-opus-4-20250514-v1:0", "us.anthropic.claude-opus-4-1-20250805-v1:0"]
+                enum: ["eu.amazon.nova-lite-v1:0", "eu.amazon.nova-pro-v1:0", "eu.anthropic.claude-3-haiku-20240307-v1:0", "eu.anthropic.claude-3-5-sonnet-20240620-v1:0", "eu.anthropic.claude-3-7-sonnet-20250219-v1:0", "eu.anthropic.claude-sonnet-4-20250514-v1:0", "eu.anthropic.claude-sonnet-4-5-20250929-v1:0"]
                 order: 1
               temperature:
                 type: number
@@ -440,7 +440,7 @@ Resources:
               task_prompt:
                 type: string
                 format: textarea
-                description: Task prompt - supports parameter {DOCUMENT_TEXT}. Optionally use <<CACHEPOINT>> to separate static and dynamic elements of prompt for Bedrock prompt caching.
+                description: Task prompt - supports parameters {DOCUMENT_TEXT} and {EXTRACTION_RESULTS}. Optionally use <<CACHEPOINT>> to separate static and dynamic elements of prompt for Bedrock prompt caching.
                 order: 7
           discovery:
             order: 5
@@ -457,8 +457,8 @@ Resources:
                   model_id:
                     type: string
                     description: Bedrock model ID for discovery without ground truth
-                    enum: ["us.amazon.nova-lite-v1:0", "us.amazon.nova-pro-v1:0", "us.amazon.nova-premier-v1:0", "us.anthropic.claude-3-haiku-20240307-v1:0", "us.anthropic.claude-3-5-sonnet-20241022-v2:0", "us.anthropic.claude-3-7-sonnet-20250219-v1:0", "us.anthropic.claude-sonnet-4-20250514-v1:0", "us.anthropic.claude-sonnet-4-20250514-v1:0:1m", "us.anthropic.claude-sonnet-4-5-20250929-v1:0", "us.anthropic.claude-sonnet-4-5-20250929-v1:0:1m", "us.anthropic.claude-opus-4-20250514-v1:0", "us.anthropic.claude-opus-4-1-20250805-v1:0"]
-                    default: "us.amazon.nova-pro-v1:0"
+                    enum: ["eu.amazon.nova-lite-v1:0", "eu.amazon.nova-pro-v1:0", "eu.anthropic.claude-3-haiku-20240307-v1:0", "eu.anthropic.claude-3-5-sonnet-20240620-v1:0", "eu.anthropic.claude-3-7-sonnet-20250219-v1:0", "eu.anthropic.claude-sonnet-4-20250514-v1:0", "eu.anthropic.claude-sonnet-4-5-20250929-v1:0"]
+                    default: "eu.amazon.nova-pro-v1:0"
                     order: 0
                   temperature:
                     type: number
@@ -502,8 +502,8 @@ Resources:
                   model_id:
                     type: string
                     description: Bedrock model ID for discovery with ground truth
-                    enum: ["us.amazon.nova-lite-v1:0", "us.amazon.nova-pro-v1:0", "us.amazon.nova-premier-v1:0", "us.anthropic.claude-3-haiku-20240307-v1:0", "us.anthropic.claude-3-5-sonnet-20241022-v2:0", "us.anthropic.claude-3-7-sonnet-20250219-v1:0", "us.anthropic.claude-sonnet-4-20250514-v1:0", "us.anthropic.claude-sonnet-4-20250514-v1:0:1m", "us.anthropic.claude-sonnet-4-5-20250929-v1:0", "us.anthropic.claude-sonnet-4-5-20250929-v1:0:1m", "us.anthropic.claude-opus-4-20250514-v1:0", "us.anthropic.claude-opus-4-1-20250805-v1:0"]
-                    default: "us.amazon.nova-pro-v1:0"
+                    enum: ["eu.amazon.nova-lite-v1:0", "eu.amazon.nova-pro-v1:0", "eu.anthropic.claude-3-haiku-20240307-v1:0", "eu.anthropic.claude-3-5-sonnet-20240620-v1:0", "eu.anthropic.claude-3-7-sonnet-20250219-v1:0", "eu.anthropic.claude-sonnet-4-20250514-v1:0", "eu.anthropic.claude-sonnet-4-5-20250929-v1:0"]
+                    default: "eu.amazon.nova-pro-v1:0"
                     order: 0
                   temperature:
                     type: number
@@ -564,8 +564,8 @@ Resources:
                   model_id:
                     type: string
                     description: Model ID for the error analysis agent
-                    enum: ["anthropic.claude-3-sonnet-20240229-v1:0", "us.anthropic.claude-3-5-sonnet-20241022-v2:0", "us.anthropic.claude-3-7-sonnet-20250219-v1:0", "us.anthropic.claude-sonnet-4-20250514-v1:0"]
-                    default: "us.anthropic.claude-sonnet-4-20250514-v1:0"
+                    enum: ["eu.anthropic.claude-3-haiku-20240307-v1:0", "eu.anthropic.claude-3-5-sonnet-20240620-v1:0", "eu.anthropic.claude-3-7-sonnet-20250219-v1:0", "eu.anthropic.claude-sonnet-4-20250514-v1:0"]
+                    default: "eu.anthropic.claude-sonnet-4-20250514-v1:0"
                     order: 0
                   system_prompt:
                     type: string

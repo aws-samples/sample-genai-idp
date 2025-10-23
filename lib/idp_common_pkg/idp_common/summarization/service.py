@@ -147,12 +147,15 @@ class SummarizationService:
             metadata={"error": error_message},
         )
 
-    def process_text(self, text: str) -> DocumentSummary:
+    def process_text(
+        self, text: str, extraction_results: Dict[str, Any] = None
+    ) -> DocumentSummary:
         """
         Summarize text content using the configured backend.
 
         Args:
             text: Text content to summarize
+            extraction_results: Optional extraction results to include in the summary
 
         Returns:
             DocumentSummary: Summary of the text content with flexible structure
@@ -164,11 +167,20 @@ class SummarizationService:
         # Get summarization configuration
         config = self._get_summarization_config()
 
+        # Build placeholders for the prompt
+        placeholders = {"DOCUMENT_TEXT": text}
+        if extraction_results:
+            placeholders["EXTRACTION_RESULTS"] = json.dumps(
+                extraction_results, indent=2
+            )
+
         # Use common function to prepare prompt with required placeholder validation
         task_prompt = bedrock.format_prompt(
             config["task_prompt"],
-            {"DOCUMENT_TEXT": text},
-            required_placeholders=["DOCUMENT_TEXT"],
+            placeholders,
+            required_placeholders=[
+                "DOCUMENT_TEXT"
+            ],  # Keep DOCUMENT_TEXT as only required
         )
 
         content = [{"text": task_prompt}]
@@ -290,6 +302,18 @@ class SummarizationService:
             # Start timing
             # start_time = time.time()
 
+            # Read extraction results if available
+            extraction_results = {}
+            if section.extraction_result_uri:
+                try:
+                    extraction_data = s3.get_json_content(section.extraction_result_uri)
+                    extraction_results = extraction_data.get("inference_result", {})
+                    logger.info(f"Loaded extraction results for section {section_id}")
+                except Exception as e:
+                    logger.warning(
+                        f"Failed to load extraction results for section {section_id}: {e}"
+                    )
+
             # Read document text from all pages in order
             all_text = ""
             for page_id in sorted_page_ids:
@@ -313,8 +337,8 @@ class SummarizationService:
                 )
                 return document, {}
 
-            # Generate summary
-            summary = self.process_text(all_text)
+            # Generate summary with extraction results
+            summary = self.process_text(all_text, extraction_results)
 
             # TODO: Uncomment this when needed
             # Calculate execution time
@@ -706,6 +730,36 @@ class SummarizationService:
             # Start timing
             start_time = time.time()
 
+            # Read extraction results if available (when document has sections with extraction results)
+            extraction_results = {}
+            if document.sections:
+                # Combine extraction results from all sections
+                for section in document.sections:
+                    if section.extraction_result_uri:
+                        try:
+                            extraction_data = s3.get_json_content(
+                                section.extraction_result_uri
+                            )
+                            section_results = extraction_data.get(
+                                "inference_result", {}
+                            )
+                            # Merge section results into overall extraction_results
+                            # Prefix keys with section classification if available
+                            if section.classification:
+                                for key, value in section_results.items():
+                                    extraction_results[
+                                        f"{section.classification}_{key}"
+                                    ] = value
+                            else:
+                                extraction_results.update(section_results)
+                            logger.info(
+                                f"Loaded extraction results from section {section.section_id}"
+                            )
+                        except Exception as e:
+                            logger.warning(
+                                f"Failed to load extraction results from section {section.section_id}: {e}"
+                            )
+
             # Combine text from all pages
             all_text = self._get_all_text(document)
 
@@ -717,8 +771,8 @@ class SummarizationService:
                     error_message="No text content found in document pages",
                 )
 
-            # Generate summary
-            summary = self.process_text(all_text)
+            # Generate summary with extraction results
+            summary = self.process_text(all_text, extraction_results)
 
             # Calculate execution time
             execution_time = time.time() - start_time

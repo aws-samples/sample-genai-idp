@@ -27,14 +27,14 @@ class TestDiscoveryConfigIntegration(unittest.TestCase):
         self.yaml_config = """
 discovery:
   without_ground_truth:
-    model_id: "us.anthropic.claude-3-7-sonnet-20250219-v1:0"
+    model_id: "eu.anthropic.claude-3-7-sonnet-20250219-v1:0"
     temperature: 0.8
     top_p: 0.15
     max_tokens: 8000
     system_prompt: "You are an expert document analyzer for form discovery."
     user_prompt: "Analyze this form and extract field structure without values."
   with_ground_truth:
-    model_id: "us.anthropic.claude-3-7-sonnet-20250219-v1:0"
+    model_id: "eu.anthropic.claude-3-7-sonnet-20250219-v1:0"
     temperature: 0.6
     top_p: 0.12
     max_tokens: 9000
@@ -142,7 +142,7 @@ discovery:
 
         # Verify configuration parameters were used
         self.assertEqual(
-            call_args["model_id"], "us.anthropic.claude-3-7-sonnet-20250219-v1:0"
+            call_args["model_id"], "eu.anthropic.claude-3-7-sonnet-20250219-v1:0"
         )
         self.assertEqual(
             call_args["system_prompt"],
@@ -259,7 +259,7 @@ discovery:
 
         # Verify configuration parameters were used (with_ground_truth config)
         self.assertEqual(
-            call_args["model_id"], "us.anthropic.claude-3-7-sonnet-20250219-v1:0"
+            call_args["model_id"], "eu.anthropic.claude-3-7-sonnet-20250219-v1:0"
         )
         self.assertEqual(
             call_args["system_prompt"],
@@ -358,7 +358,7 @@ discovery:
         # Verify without_ground_truth section
         without_gt = discovery_config["without_ground_truth"]
         self.assertEqual(
-            without_gt["model_id"], "us.anthropic.claude-3-7-sonnet-20250219-v1:0"
+            without_gt["model_id"], "eu.anthropic.claude-3-7-sonnet-20250219-v1:0"
         )
         self.assertEqual(without_gt["temperature"], 0.8)
         self.assertEqual(without_gt["top_p"], 0.15)
@@ -367,7 +367,7 @@ discovery:
         # Verify with_ground_truth section
         with_gt = discovery_config["with_ground_truth"]
         self.assertEqual(
-            with_gt["model_id"], "us.anthropic.claude-3-7-sonnet-20250219-v1:0"
+            with_gt["model_id"], "eu.anthropic.claude-3-7-sonnet-20250219-v1:0"
         )
         self.assertEqual(with_gt["temperature"], 0.6)
         self.assertEqual(with_gt["top_p"], 0.12)

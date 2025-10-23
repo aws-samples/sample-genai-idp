@@ -60,7 +60,7 @@ class TestAssessmentEnabledProperty(unittest.TestCase):
                 }
             ],
             "assessment": {
-                "model": "us.anthropic.claude-3-haiku-20240307-v1:0",
+                "model": "eu.anthropic.claude-3-haiku-20240307-v1:0",
                 "temperature": 0.0,
                 "top_k": 5,
                 "top_p": 0.1,

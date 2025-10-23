@@ -6,107 +6,204 @@ DynamoDB tools for error analysis.
 """
 
 import logging
+import os
+from datetime import datetime, timedelta
 from typing import Any, Dict
 
 import boto3
 from strands import tool
 
+from ..config import create_error_response, create_success_response, decimal_to_float
+
 logger = logging.getLogger(__name__)
 
 
 @tool
-def scan_dynamodb_table(
-    table_name: str, filter_expression: str = "", limit: int = 100
-) -> Dict[str, Any]:
+def get_document_status(object_key: str) -> Dict[str, Any]:
     """
-    Scan DynamoDB table for analysis.
+    Retrieve document processing status from DynamoDB tracking table.
+    Performs a direct lookup to get the current status and metadata for a specific document.
+
+    Args:
+        object_key: The S3 object key for the document
+
+    Returns:
+        Dict containing document status information or error details
     """
     try:
-        dynamodb = boto3.resource("dynamodb")
-        table = dynamodb.Table(table_name)
+        result = get_document_by_key(object_key)
 
-        scan_params = {"Limit": limit}
-
-        if filter_expression and "=" in filter_expression:
-            from boto3.dynamodb.conditions import Attr
-
-            attr_name, attr_value = filter_expression.split("=", 1)
-            attr_name = attr_name.strip()
-            attr_value = attr_value.strip().strip("\"'")
-            scan_params["FilterExpression"] = Attr(attr_name).eq(attr_value)
-
-        response = table.scan(**scan_params)
-
-        def decimal_to_float(obj):
-            if hasattr(obj, "__class__") and obj.__class__.__name__ == "Decimal":
-                return float(obj)
-            elif isinstance(obj, dict):
-                return {k: decimal_to_float(v) for k, v in obj.items()}
-            elif isinstance(obj, list):
-                return [decimal_to_float(v) for v in obj]
-            return obj
-
-        items = [decimal_to_float(item) for item in response.get("Items", [])]
-
-        return {
-            "table_name": table_name,
-            "items_found": len(items),
-            "items": items,
-            "scanned_count": response.get("ScannedCount", 0),
-        }
+        if result.get("document_found"):
+            document = result.get("document", {})
+            return create_success_response(
+                {
+                    "document_found": True,
+                    "object_key": object_key,
+                    "status": document.get("Status"),
+                    "initial_event_time": document.get("InitialEventTime"),
+                    "completion_time": document.get("CompletionTime"),
+                    "execution_arn": document.get("ExecutionArn"),
+                }
+            )
+        else:
+            return result
 
     except Exception as e:
-        logger.error(f"DynamoDB scan failed: {e}")
-        return {"error": str(e), "items_found": 0, "items": []}
+        logger.error(f"Status lookup failed for '{object_key}': {e}")
+        return create_error_response(
+            str(e), document_found=False, object_key=object_key
+        )
 
 
 @tool
-def find_tracking_table(stack_name: str) -> Dict[str, Any]:
+def get_tracking_table_name() -> Dict[str, Any]:
     """
-    Find the TrackingTable for a given stack.
+    Retrieve the DynamoDB tracking table name from environment configuration.
+    Checks for the TRACKING_TABLE_NAME environment variable and validates its availability.
+
+    Returns:
+        Dict containing table name or error if not configured
+    """
+    table_name = os.environ.get("TRACKING_TABLE_NAME")
+    if table_name:
+        return create_success_response(
+            {
+                "tracking_table_found": True,
+                "table_name": table_name,
+            }
+        )
+    return create_error_response(
+        "TRACKING_TABLE_NAME environment variable not set", tracking_table_found=False
+    )
+
+
+@tool
+def query_tracking_table(
+    date: str = "", hours_back: int = 24, limit: int = 100
+) -> Dict[str, Any]:
+    """
+    Query DynamoDB tracking table using efficient time-based partition scanning.
+    Searches through time-partitioned data to find documents processed within the specified timeframe.
+    Uses optimized querying to minimize DynamoDB read costs.
+
+    Args:
+        date: Date in YYYY-MM-DD format (defaults to today)
+        hours_back: Number of hours to look back from date (default 24)
+        limit: Maximum number of items to return
+
+    Returns:
+        Dict containing found items and query metadata
     """
     try:
-        dynamodb = boto3.client("dynamodb")
-        response = dynamodb.list_tables()
+        table_name = os.environ.get("TRACKING_TABLE_NAME")
+        if not table_name:
+            return create_error_response(
+                "TRACKING_TABLE_NAME environment variable not set",
+                items_found=0,
+                items=[],
+            )
 
-        # Look for the main TrackingTable, excluding DiscoveryTrackingTable
-        tracking_tables = []
-        for table_name in response.get("TableNames", []):
-            if stack_name in table_name and "TrackingTable" in table_name:
-                tracking_tables.append(table_name)
+        dynamodb = boto3.resource("dynamodb")
+        table = dynamodb.Table(table_name)
 
-        logger.info(f"Found tables with 'TrackingTable': {tracking_tables}")
+        # Use current date if not provided
+        if not date:
+            date = datetime.now().strftime("%Y-%m-%d")
 
-        # Prefer the main TrackingTable over DiscoveryTrackingTable
-        main_tracking_table = None
-        for table_name in tracking_tables:
-            if "DiscoveryTrackingTable" not in table_name:
-                main_tracking_table = table_name
-                break
+        # Generate time-based partition keys to query
+        base_date = datetime.strptime(date, "%Y-%m-%d")
+        end_time = base_date + timedelta(days=1)
+        start_time = end_time - timedelta(hours=hours_back)
 
-        # If no main tracking table found, use any tracking table as fallback
-        if not main_tracking_table and tracking_tables:
-            main_tracking_table = tracking_tables[0]
-            logger.warning(f"Using fallback tracking table: {main_tracking_table}")
+        all_items = []
+        current_time = start_time
 
-        if main_tracking_table:
-            logger.info(f"Selected tracking table: {main_tracking_table}")
-            return {
-                "tracking_table_found": True,
-                "table_name": main_tracking_table,
-                "stack_name": stack_name,
+        # Query by hour partitions for efficiency
+        while current_time < end_time and len(all_items) < limit:
+            hour_str = current_time.strftime("%Y-%m-%dT%H")
+
+            # Query the list partition for this hour
+            pk = f"list#{current_time.strftime('%Y-%m-%d')}#s#{current_time.hour // 4:02d}"
+            sk_prefix = f"ts#{hour_str}"
+
+            try:
+                response = table.query(
+                    KeyConditionExpression="PK = :pk AND begins_with(SK, :sk_prefix)",
+                    ExpressionAttributeValues={":pk": pk, ":sk_prefix": sk_prefix},
+                    Limit=min(limit - len(all_items), 50),
+                )
+
+                items = response.get("Items", [])
+                all_items.extend(items)
+
+            except Exception as query_error:
+                logger.debug(f"Query failed for {pk}: {query_error}")
+
+            current_time += timedelta(hours=1)
+
+        items = [decimal_to_float(item) for item in all_items[:limit]]
+
+        return create_success_response(
+            {
+                "table_name": table_name,
+                "items_found": len(items),
+                "items": items,
+                "query_date": date,
+                "hours_back": hours_back,
             }
-
-        return {
-            "tracking_table_found": False,
-            "error": f"No TrackingTable found for stack '{stack_name}'",
-            "stack_name": stack_name,
-        }
+        )
 
     except Exception as e:
-        logger.error(f"Failed to find tracking table for stack '{stack_name}': {e}")
-        return {
-            "tracking_table_found": False,
-            "error": str(e),
-            "stack_name": stack_name,
-        }
+        logger.error(f"TrackingTable query failed: {e}")
+        return create_error_response(str(e), items_found=0, items=[])
+
+
+@tool
+def get_document_by_key(object_key: str) -> Dict[str, Any]:
+    """
+    Retrieve a specific document record from DynamoDB tracking table by its object key.
+    Performs a direct item lookup using the document's S3 object key as the primary identifier.
+    Handles DynamoDB Decimal conversion for JSON compatibility.
+
+    Args:
+        object_key: The S3 object key for the document
+
+    Returns:
+        Dict containing document data or error information
+    """
+    try:
+        table_name = os.environ.get("TRACKING_TABLE_NAME")
+        if not table_name:
+            return create_error_response(
+                "TRACKING_TABLE_NAME environment variable not set",
+                document_found=False,
+                object_key=object_key,
+            )
+
+        dynamodb = boto3.resource("dynamodb")
+        table = dynamodb.Table(table_name)
+
+        # Direct key lookup
+        response = table.get_item(Key={"PK": f"doc#{object_key}", "SK": "none"})
+
+        if "Item" in response:
+            item = decimal_to_float(response["Item"])
+            return create_success_response(
+                {
+                    "document_found": True,
+                    "document": item,
+                    "object_key": object_key,
+                }
+            )
+        else:
+            return create_error_response(
+                f"Document not found for key: {object_key}",
+                document_found=False,
+                object_key=object_key,
+            )
+
+    except Exception as e:
+        logger.error(f"Document lookup failed for key '{object_key}': {e}")
+        return create_error_response(
+            str(e), document_found=False, object_key=object_key
+        )

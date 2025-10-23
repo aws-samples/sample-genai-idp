@@ -523,3 +523,38 @@
 .status-text-pending {
   color: #6c757d;
 }
+
+/* Disabled step styling for flow diagram */
+.flow-step.step-disabled {
+  opacity: 0.5;
+  border-style: dashed;
+  border-color: #dee2e6;
+  background-color: #f8f9fa;
+}
+
+.flow-step.step-disabled:hover {
+  transform: translateY(0);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+}
+
+.flow-step.step-disabled .step-icon-container {
+  background-color: #e9ecef;
+  opacity: 0.7;
+}
+
+.flow-step.step-disabled .step-name {
+  color: #6c757d;
+}
+
+.flow-step.step-disabled .step-icon {
+  opacity: 0.6;
+  filter: grayscale(50%);
+}
+
+.flow-step.step-disabled .step-status-text {
+  color: #adb5bd;
+}
+
+.flow-step.step-disabled .step-progress-bar {
+  background: linear-gradient(90deg, #adb5bd, #ced4da);
+}

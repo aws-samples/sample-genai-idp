@@ -243,6 +243,12 @@ const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2
     setIsDocumentsListLoading(true);
   }, [periodsToLoad]);
 
+  // Initial load on mount
+  useEffect(() => {
+    logger.debug('Initial document list load on mount');
+    setIsDocumentsListLoading(true);
+  }, []);
+
   const deleteDocuments = async (objectKeys) => {
     try {
       logger.debug('Deleting documents', objectKeys);

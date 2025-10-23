@@ -1,0 +1,5 @@
+# Test dependencies for create_document_resolver Lambda
+pytest>=7.4.0
+pytest-cov>=4.1.0
+pytest-mock>=3.11.1
+moto>=4.2.0  # For mocking AWS services if needed

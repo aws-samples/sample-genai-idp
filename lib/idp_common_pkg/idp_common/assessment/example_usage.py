@@ -36,7 +36,7 @@ def example_granular_assessment():
     config = {
         "assessment": {
             "default_confidence_threshold": 0.9,
-            "model": "us.anthropic.claude-3-7-sonnet-20250219-v1:0",
+            "model": "eu.anthropic.claude-3-7-sonnet-20250219-v1:0",
             "system_prompt": "You are a document analysis assessment expert...",
             "task_prompt": """
             <background>

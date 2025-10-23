@@ -1,0 +1,17 @@
+{
+  "identity": {
+    "username": "123e4567-e89b-12d3-a456-426614174000",
+    "sourceIp": ["192.0.2.1"],
+    "userArn": "arn:aws:sts::123456789012:assumed-role/AppSyncRole/123e4567-e89b-12d3-a456-426614174000",
+    "accountId": "123456789012",
+    "caller": "AIDAI..."
+  },
+  "arguments": {
+    "input": {
+      "ObjectKey": "users/123e4567-e89b-12d3-a456-426614174000/invoice-2025-01-15.pdf",
+      "QueuedTime": "2025-01-15T10:30:00Z",
+      "Status": "QUEUED",
+      "DocumentType": "invoice"
+    }
+  }
+}

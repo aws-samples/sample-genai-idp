@@ -50,7 +50,7 @@ class TestGranularAssessmentService:
                     "simple_batch_size": 3,
                     "list_batch_size": 1,
                 },
-                "model": "us.anthropic.claude-3-7-sonnet-20250219-v1:0",
+                "model": "eu.anthropic.claude-3-7-sonnet-20250219-v1:0",
                 "temperature": 0.0,
                 "top_k": 5,
                 "top_p": 0.1,
@@ -342,7 +342,7 @@ class TestGranularAssessmentService:
         # Mock Bedrock response
         mock_response = {
             "metering": {
-                "us.anthropic.claude-3-7-sonnet-20250219-v1:0": {
+                "eu.anthropic.claude-3-7-sonnet-20250219-v1:0": {
                     "input_tokens": 100,
                     "output_tokens": 50,
                 }

@@ -287,10 +287,12 @@ class CodePipelineUtil:
         if not version_id:
             raise Exception("Version ID is required")
         
-        retry_count = 5
+        retry_count = 10
         
         for attempt in range(retry_count):
-            time.sleep(wait_seconds)
+            # Initial wait of 1 minute, then use wait_seconds for subsequent attempts
+            sleep_time = 60 if attempt == 0 else wait_seconds
+            time.sleep(sleep_time)
             
             response = client.list_pipeline_executions(pipelineName=pipeline_name, maxResults=10)
             executions = response.get('pipelineExecutionSummaries', [])

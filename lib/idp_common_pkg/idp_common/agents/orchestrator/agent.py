@@ -157,7 +157,7 @@ If the agents response is a json already matching the above result format, retur
     # Get model ID from environment variable
     model_id = os.environ.get(
         "DOCUMENT_ANALYSIS_AGENT_MODEL_ID",
-        "us.anthropic.claude-3-7-sonnet-20250219-v1:0",
+        "eu.anthropic.claude-3-7-sonnet-20250219-v1:0",
     )
 
     # Create the orchestrator agent

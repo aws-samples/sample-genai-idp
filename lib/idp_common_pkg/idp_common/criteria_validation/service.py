@@ -176,6 +176,7 @@ class CriteriaValidationService:
             top_k,
             top_p,
             max_tokens,
+            None,
             context,
         )
 

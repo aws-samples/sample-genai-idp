@@ -100,11 +100,11 @@ def get_summarization_model():
                 return config_data['summarization']['model']
         
         # Fallback to a default model if not found in config
-        return 'us.amazon.nova-pro-v1:0'
+        return 'eu.amazon.nova-pro-v1:0'
         
     except Exception as e:
         logger.error(f"Error getting summarization model from config: {str(e)}")
-        return 'us.amazon.nova-pro-v1:0'  # Fallback default
+        return 'eu.amazon.nova-pro-v1:0'  # Fallback default
 
 def handler(event, context):
     response_data = {}
