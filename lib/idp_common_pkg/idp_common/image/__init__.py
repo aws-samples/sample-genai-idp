@@ -1,12 +1,11 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: MIT-0
 
-from PIL import Image, ImageFilter, ImageChops, ImageOps
+from PIL import Image, ImageFilter
 import io
 import logging
-from typing import Tuple, Optional, Dict, Any, Union
+from typing import Optional, Dict, Any, Union
 from ..s3 import get_binary_content
-from ..utils import parse_s3_uri
 
 logger = logging.getLogger(__name__)
 

@@ -172,7 +172,7 @@ def handle_update_configuration(custom_config):
         # Handle empty configuration case
         if not custom_config:
             # For empty config, just store the Configuration key with no other attributes
-            response = table.put_item(
+            table.put_item(
                 Item={
                     'Configuration': 'Custom'
                 }

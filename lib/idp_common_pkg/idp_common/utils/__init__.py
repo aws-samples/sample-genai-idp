@@ -2,7 +2,6 @@
 # SPDX-License-Identifier: MIT-0
 
 import random
-import time
 import logging
 from typing import Tuple, Dict, Any, Optional
 
@@ -12,8 +11,8 @@ try:
 except ImportError:
     yaml = None
 
-# Import Lambda metering utility
-from .lambda_metering import calculate_lambda_metering
+# Import Lambda metering utility for re-export
+from .lambda_metering import calculate_lambda_metering as calculate_lambda_metering
 
 logger = logging.getLogger(__name__)
 

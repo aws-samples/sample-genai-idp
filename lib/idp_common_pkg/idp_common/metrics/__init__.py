@@ -5,7 +5,7 @@ import boto3
 import os
 import logging
 import threading
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
