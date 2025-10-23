@@ -37,7 +37,6 @@ def handler(event, context):
         
     except Exception as e:
             logger.error(f"Error processing record: {str(e)}")
-            batch_item_failures.append({"itemIdentifier": record['messageId']})
     
     sqs_batch_response["batchItemFailures"] = batch_item_failures
     return sqs_batch_response

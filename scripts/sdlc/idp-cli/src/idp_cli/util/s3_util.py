@@ -182,7 +182,7 @@ class S3Util:
                     if not existing_text.endswith('\n'):
                         existing_text += '\n'
                     text = existing_text + text
-            except:
+            except Exception:
                 pass
         S3Util.put_object(bucket_name, object_name, text.encode('utf-8'))
 
