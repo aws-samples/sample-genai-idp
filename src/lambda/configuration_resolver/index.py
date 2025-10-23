@@ -76,7 +76,7 @@ def handle_get_configuration():
             'Custom': custom_config
         }
         
-        logger.info(f"Returning configuration")
+        logger.info("Returning configuration")
         return result
         
     except Exception as e:
@@ -215,7 +215,7 @@ def handle_update_configuration(custom_config):
                 }
             )
             
-            logger.info(f"Updated Default configuration and cleared Custom")
+            logger.info("Updated Default configuration and cleared Custom")
             
         else:
             # Normal custom config update
@@ -228,7 +228,7 @@ def handle_update_configuration(custom_config):
                 }
             )
             
-            logger.info(f"Updated Custom configuration")
+            logger.info("Updated Custom configuration")
             
             # Send configuration update message for Custom configuration
             try:

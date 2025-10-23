@@ -3,14 +3,7 @@
 import json
 import boto3
 import logging
-import botocore
-import html
-import mimetypes
-import base64
-import hashlib
 import os
-import re 
-from urllib.parse import urlparse
 from botocore.exceptions import ClientError
 from idp_common.bedrock.client import BedrockClient
 

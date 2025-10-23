@@ -4,7 +4,6 @@ This file is automatically discovered by pytest and makes fixtures available to 
 """
 import pytest
 import sys
-import os
 from pathlib import Path
 from unittest.mock import Mock
 

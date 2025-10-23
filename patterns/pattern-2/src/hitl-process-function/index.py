@@ -10,7 +10,6 @@ import re
 from collections import defaultdict
 from decimal import Decimal
 from botocore.exceptions import ClientError
-from urllib.parse import urlparse
 
 # Configure logger
 logger = logging.getLogger()

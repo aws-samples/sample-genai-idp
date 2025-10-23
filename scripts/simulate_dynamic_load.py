@@ -6,7 +6,6 @@
 import boto3
 import time
 import argparse
-from datetime import datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Lock
 import os
@@ -143,7 +142,7 @@ if __name__ == "__main__":
     
     args = parser.parse_args()
     
-    print(f"Starting scheduled copy test...")
+    print("Starting scheduled copy test...")
     stress_test(
         args.source_bucket,
         args.source_key,

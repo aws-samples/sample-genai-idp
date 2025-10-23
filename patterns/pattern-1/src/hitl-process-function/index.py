@@ -10,7 +10,7 @@ import re
 from collections import defaultdict
 from decimal import Decimal
 from botocore.exceptions import ClientError
-from idp_common.s3 import get_s3_client, write_content
+from idp_common.s3 import write_content
 
 # Configure logger
 logger = logging.getLogger()

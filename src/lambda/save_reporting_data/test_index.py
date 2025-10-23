@@ -5,7 +5,6 @@ Unit tests for the save_reporting_data Lambda function.
 """
 
 import pytest
-import json
 import os
 from unittest.mock import patch, MagicMock
 

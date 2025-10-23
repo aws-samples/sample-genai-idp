@@ -60,7 +60,7 @@ def handler(event, context):
         # Update document execution ARN for tracking
         if document.status == Status.QUEUED:
             document_service = create_document_service()
-            logger.info(f"Updating document execution ARN for OCR skip")
+            logger.info("Updating document execution ARN for OCR skip")
             document_service.update_document(document)
         
         # Add Lambda metering for OCR skip execution

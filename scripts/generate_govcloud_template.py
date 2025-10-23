@@ -21,7 +21,7 @@ import yaml
 import subprocess
 import boto3
 from pathlib import Path
-from typing import Dict, Any, List, Set
+from typing import Dict, Any, List
 import logging
 
 
@@ -293,7 +293,7 @@ class GovCloudTemplateGenerator:
             # Generate URL (using standard format - works for both AWS and GovCloud)
             template_url = f"https://s3.{region}.amazonaws.com/{bucket_name}/{s3_key}"
             
-            self.logger.info(f"✅ GovCloud template uploaded successfully")
+            self.logger.info("✅ GovCloud template uploaded successfully")
             return template_url
             
         except Exception as e:
@@ -328,7 +328,7 @@ class GovCloudTemplateGenerator:
             with open(output_file, 'w', encoding='utf-8') as f:
                 yaml.dump(template, f, default_flow_style=False, width=120, indent=2)
             
-            self.logger.info(f"✅ GovCloud template saved successfully")
+            self.logger.info("✅ GovCloud template saved successfully")
             
         except Exception as e:
             raise ValueError(f"Failed to save template: {e}")
@@ -918,17 +918,17 @@ class GovCloudTemplateGenerator:
         from urllib.parse import quote
         
         # Display deployment information first (matching original format)
-        print(f"\nDeployment Information:")
+        print("\nDeployment Information:")
         print(f"  • Region: {region}")
         print(f"  • Bucket: {bucket_name}")
         print(f"  • Template Path: {prefix}/idp-main.yaml")
         print(f"  • GovCloud Template Path: {prefix}/idp-govcloud.yaml")
         
-        print(f"\nDeployment Outputs")
+        print("\nDeployment Outputs")
                      
         # GovCloud template outputs (if available)
         if govcloud_url:
-            print(f"\n🏛️  GovCloud Template:")
+            print("\n🏛️  GovCloud Template:")
             
             # 1-Click Launch for GovCloud template
             encoded_govcloud_url = quote(govcloud_url, safe=":/?#[]@!$&'()*+,;=")
@@ -937,9 +937,9 @@ class GovCloudTemplateGenerator:
             else:
                 domain="aws.amazon.com"
             govcloud_launch_url = f"https://{region}.console.{domain}/cloudformation/home?region={region}#/stacks/create/review?templateURL={encoded_govcloud_url}&stackName=IDP-GovCloud"
-            print(f"1-Click Launch (creates new stack):")
+            print("1-Click Launch (creates new stack):")
             print(f"  {govcloud_launch_url}")
-            print(f"Template URL (for updating existing stack):")
+            print("Template URL (for updating existing stack):")
             print(f"  {govcloud_url}")
 
 

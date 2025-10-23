@@ -8,7 +8,6 @@ from botocore.config import Config
 import json
 from deepdiff import DeepDiff
 from collections import defaultdict
-import pandas as pd
 from datetime import datetime
 import argparse
 import logging
@@ -323,7 +322,7 @@ def main():
     if args.debug:
         logger.setLevel(logging.DEBUG)
     
-    logger.info(f"Starting comparison between:")
+    logger.info("Starting comparison between:")
     logger.info(f"Bucket: {args.bucket}")
     logger.info(f"Folder 1: {args.folder1}")
     logger.info(f"Folder 2: {args.folder2}")
@@ -336,7 +335,7 @@ def main():
     report_path = generate_report(
         comparison_results, summary_stats, field_differences, invalid_files, args.output_dir
     )
-    logger.info(f"\nComparison complete! Reports generated:")
+    logger.info("\nComparison complete! Reports generated:")
     logger.info(f"Detailed report: {report_path}")
 
 if __name__ == "__main__":

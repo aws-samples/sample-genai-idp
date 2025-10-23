@@ -12,7 +12,6 @@ import time
 import boto3
 import requests
 from aws_requests_auth.aws_auth import AWSRequestsAuth
-from botocore.exceptions import ClientError
 from idp_common.discovery.classes_discovery import ClassesDiscovery
 
 logger = logging.getLogger()

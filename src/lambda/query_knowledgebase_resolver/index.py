@@ -80,7 +80,6 @@ def extract_document_id(s3_uri):
 
 
 def markdown_response(kb_response):
-    import urllib.parse  # Add this import for URL encoding
     
     showContextText = True
     message = kb_response.get("output", {}).get("text", {}) or kb_response.get(

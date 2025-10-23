@@ -86,7 +86,7 @@ def start_workflow(document: Document) -> Dict[str, Any]:
     if working_bucket:
         # Use document compression (always compress with default 0KB threshold)
         compressed_document = document.serialize_document(working_bucket, "workflow_start", logger)
-        logger.info(f"Document compressed for Step Functions workflow (always compress)")
+        logger.info("Document compressed for Step Functions workflow (always compress)")
     else:
         # Fallback to direct document dict if no working bucket
         compressed_document = document.to_dict()

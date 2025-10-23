@@ -5,10 +5,9 @@ This script validates the API calls and logic without requiring CloudFormation.
 """
 
 import boto3
-import json
 import logging
 import sys
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock, patch
 from botocore.exceptions import ClientError
 
 # Import the handler functions

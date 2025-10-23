@@ -2,10 +2,8 @@
 # SPDX-License-Identifier: MIT-0
 
 from idp_cli.util.cfn_util import CfnUtil
-from idp_cli.util.path_util import PathUtil
 from idp_cli.util.s3_util import S3Util
 import time
-import json
 import os
 from loguru import logger
 
@@ -51,7 +49,7 @@ class SmokeTestService():
             bucket_name=input_bucket_name,  # input_bucketname
             key=file_key 
         )
-        logger.debug(f"Successfully uploaded test file")
+        logger.debug("Successfully uploaded test file")
 
         return file_key
         
@@ -112,7 +110,7 @@ class SmokeTestService():
             # Check if result exists
             if not result_json:
                 logger.error(f"Result file not found at: s3://{output_bucket_name}/{object_path}")
-                raise ValueError(f"Result file not found")
+                raise ValueError("Result file not found")
             
             # Check for text property
             if "pages" not in result_json:

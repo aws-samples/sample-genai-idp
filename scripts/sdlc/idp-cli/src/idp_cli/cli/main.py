@@ -1,7 +1,6 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: MIT-0
 
-import os
 import sys
 from idp_cli.service.install_service import InstallService
 from idp_cli.util.codepipeline_util import CodePipelineUtil
@@ -132,7 +131,7 @@ def monitor_pipeline(
                 pipeline_name=pipeline_name,
                 stage_name="Build"
             )
-            typer.echo(f"---\nCodebuild logs:")
+            typer.echo("---\nCodebuild logs:")
             for message in log_messages:
                 typer.echo(message)
         except Exception as e:

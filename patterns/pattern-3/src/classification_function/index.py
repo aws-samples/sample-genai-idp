@@ -57,7 +57,7 @@ def handler(event, context):
         
         # Update document execution ARN for tracking
         document_service = create_document_service()
-        logger.info(f"Updating document execution ARN for classification skip")
+        logger.info("Updating document execution ARN for classification skip")
         document_service.update_document(document)
         
         # Add Lambda metering for classification skip execution

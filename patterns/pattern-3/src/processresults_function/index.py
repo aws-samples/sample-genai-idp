@@ -8,7 +8,7 @@ import os
 from urllib.parse import urlparse
 
 from idp_common import s3, utils
-from idp_common.models import Document, Page, Section, Status
+from idp_common.models import Document, Status
 from idp_common.docs_service import create_document_service
 
 logger = logging.getLogger()

@@ -5,7 +5,7 @@ Tests user ID extraction, validation, and document creation with user isolation.
 import pytest
 import json
 import os
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock, patch
 from decimal import Decimal
 
 import index

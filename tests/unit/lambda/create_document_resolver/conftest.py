@@ -3,7 +3,6 @@ Fixtures specific to create_document_resolver lambda tests.
 """
 import pytest
 import sys
-import os
 from pathlib import Path
 
 # Add the lambda function directory to path

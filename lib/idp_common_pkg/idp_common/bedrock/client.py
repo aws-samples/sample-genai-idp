@@ -15,8 +15,7 @@ import time
 import logging
 import copy
 import random
-import socket
-from typing import Dict, Any, List, Optional, Union, Tuple
+from typing import Dict, Any, List, Optional, Union
 from botocore.config import Config
 from botocore.exceptions import ClientError, ReadTimeoutError, ConnectTimeoutError, EndpointConnectionError
 from urllib3.exceptions import ReadTimeoutError as Urllib3ReadTimeoutError

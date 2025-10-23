@@ -6,10 +6,7 @@ import logging
 import os
 import torch
 
-import numpy as np
-import lightning.pytorch as pl
 
-from PIL import Image
 from transformers import AutoProcessor
 
 from model import UDOPModel

@@ -8,7 +8,7 @@ import time
 import logging
 
 from idp_common import metrics, get_config, extraction
-from idp_common.models import Document, Section, Status
+from idp_common.models import Document, Status
 from idp_common.docs_service import create_document_service
 from idp_common.utils import calculate_lambda_metering, merge_metering_data
 

@@ -7,7 +7,6 @@ import os
 from typing import Dict, Any, Optional
 from botocore.exceptions import ClientError
 import logging
-from copy import deepcopy
 
 logger = logging.getLogger(__name__)
 
@@ -112,7 +111,6 @@ class ConfigurationManager:
         Handle the updateConfiguration GraphQL mutation
         Updates the Custom or Default configuration item in DynamoDB
         """
-        import json
         try:
             # Handle empty configuration case
             if not custom_config:
@@ -141,7 +139,7 @@ class ConfigurationManager:
                 }
             )
             
-            logger.info(f"Updated Custom configuration")
+            logger.info("Updated Custom configuration")
             
             return True
             

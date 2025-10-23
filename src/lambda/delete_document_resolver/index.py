@@ -67,7 +67,7 @@ def handler(event, context):
                     Bucket=input_bucket,
                     Key=object_key
                 )
-                logger.info(f"Successfully deleted document from input bucket")
+                logger.info("Successfully deleted document from input bucket")
             except Exception as e:
                 logger.error(f"Error deleting from input bucket: {str(e)}")
 
@@ -114,7 +114,7 @@ def handler(event, context):
                             'SK': 'none'
                         }
                     )
-                    logger.info(f"Successfully deleted document record from tracking table")
+                    logger.info("Successfully deleted document record from tracking table")
                 except Exception as e:
                     logger.error(f"Error deleting document record from tracking table: {str(e)}")
             

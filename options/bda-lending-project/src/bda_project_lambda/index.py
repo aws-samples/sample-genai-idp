@@ -7,7 +7,6 @@ import cfnresponse
 import logging
 import os
 from enum import Enum
-import uuid
 
 # Get the logging level from environment variable with INFO as default
 log_level = os.environ.get('LOG_LEVEL', 'INFO')

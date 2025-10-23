@@ -7,7 +7,7 @@ import os
 import re
 from datetime import datetime, timezone
 import logging
-from idp_common.models import Document, Status, Page, Section
+from idp_common.models import Document, Status
 from idp_common.docs_service import create_document_service
 from botocore.exceptions import ClientError
 from typing import Dict, Any, Optional

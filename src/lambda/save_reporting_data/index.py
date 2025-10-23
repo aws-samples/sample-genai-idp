@@ -8,7 +8,6 @@ import json
 import logging
 import os
 import traceback
-from typing import Dict, Any, List
 
 from idp_common.config import get_config
 from idp_common.models import Document

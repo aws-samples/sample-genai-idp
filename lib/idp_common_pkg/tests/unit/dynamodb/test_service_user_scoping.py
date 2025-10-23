@@ -5,7 +5,7 @@ Tests verify that user-scoped partition keys work correctly for
 create, update, and get operations.
 """
 import pytest
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock, patch
 from idp_common.dynamodb.service import DocumentDynamoDBService
 from idp_common.models import Document, Status
 

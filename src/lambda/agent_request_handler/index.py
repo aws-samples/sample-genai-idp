@@ -11,7 +11,7 @@ import logging
 import os
 import time
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime
 
 import boto3
 from botocore.exceptions import ClientError

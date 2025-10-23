@@ -5,8 +5,7 @@ These tests verify the complete flow from document creation through
 workflow updates, ensuring user isolation works correctly.
 """
 import pytest
-from unittest.mock import Mock, patch, MagicMock
-from datetime import datetime, timezone
+from unittest.mock import Mock, patch
 from idp_common.models import Document, Status
 from idp_common.dynamodb.service import DocumentDynamoDBService
 

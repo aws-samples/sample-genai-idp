@@ -3,7 +3,7 @@
 
 import os
 import boto3
-from typing import Any, Dict, Optional
+from typing import Dict, Optional
 from botocore.exceptions import ClientError
 from idp_cli.util.cfn_util import CfnUtil
 from idp_cli.util.s3_util import S3Util

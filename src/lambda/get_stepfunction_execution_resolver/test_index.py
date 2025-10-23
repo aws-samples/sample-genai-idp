@@ -2,9 +2,7 @@
 # SPDX-License-Identifier: MIT-0
 
 import pytest
-import json
 from datetime import datetime
-from unittest.mock import Mock, patch
 from index import parse_execution_history, find_step_name_for_failure_event
 
 @pytest.mark.unit

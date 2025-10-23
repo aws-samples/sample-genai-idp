@@ -2,11 +2,8 @@
 # SPDX-License-Identifier: MIT-0
 
 import json
-import io
 import os
 import logging
-import time
-from datetime import datetime
 
 from idp_common.bda.bda_blueprint_service import BdaBlueprintService
 

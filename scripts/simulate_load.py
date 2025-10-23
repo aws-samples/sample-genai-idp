@@ -6,7 +6,6 @@
 import boto3
 import time
 import argparse
-from datetime import datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor
 from threading import Lock
 import os

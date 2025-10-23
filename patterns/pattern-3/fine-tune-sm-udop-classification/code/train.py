@@ -8,7 +8,6 @@ import shutil
 import torch
 
 import lightning.pytorch as pl
-import numpy as np
 
 from lightning.pytorch.callbacks import ModelCheckpoint
 from lightning.pytorch.callbacks.early_stopping import EarlyStopping

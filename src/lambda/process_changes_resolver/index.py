@@ -8,7 +8,7 @@ import logging
 from datetime import datetime, timezone
 
 # Import IDP Common modules
-from idp_common.models import Document, Section, Status
+from idp_common.models import Section, Status
 from idp_common.docs_service import create_document_service
 
 logger = logging.getLogger()
@@ -192,7 +192,7 @@ def handler(event, context):
         if working_bucket:
             # Use document compression (always compress with 0KB threshold)
             sqs_message_content = document.serialize_document(working_bucket, "process_changes", logger)
-            logger.info(f"Document compressed for SQS (always compress)")
+            logger.info("Document compressed for SQS (always compress)")
         else:
             # Fallback to direct document dict if no working bucket
             sqs_message_content = document.to_dict()
@@ -221,7 +221,7 @@ def handler(event, context):
             appsync_service = create_document_service(mode='appsync')
             document.status = Status.QUEUED  # Ensure status is QUEUED for UI
             updated_document = appsync_service.update_document(document)
-            logger.info(f"Updated document status to QUEUED in AppSync for immediate UI feedback")
+            logger.info("Updated document status to QUEUED in AppSync for immediate UI feedback")
         except Exception as e:
             logger.warning(f"Failed to update document status in AppSync: {str(e)}")
             # Don't fail the entire operation if AppSync update fails

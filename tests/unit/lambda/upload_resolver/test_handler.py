@@ -7,7 +7,7 @@ user scoping, and authentication.
 import pytest
 import os
 import json
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 import sys
 
 # Add Lambda source directory to path

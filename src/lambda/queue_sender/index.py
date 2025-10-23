@@ -7,7 +7,6 @@ import boto3
 import logging
 import re
 from datetime import datetime, timezone, timedelta
-from decimal import Decimal
 from idp_common.models import Document, Status
 
 logger = logging.getLogger()

@@ -7,7 +7,7 @@ Utility functions for working with Amazon S3.
 
 import json
 import boto3
-from typing import Dict, Any, Tuple, Optional, Union
+from typing import Dict, Any, Tuple, Optional
 from urllib.parse import urlparse
 
 class S3Util:

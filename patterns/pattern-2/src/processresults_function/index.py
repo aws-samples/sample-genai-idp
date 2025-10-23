@@ -9,10 +9,9 @@ import boto3
 import random
 import string
 from urllib.parse import urlparse
-from decimal import Decimal
 
 from idp_common import s3, utils
-from idp_common.models import Document, Page, Section, Status, HitlMetadata
+from idp_common.models import Document, Section, Status, HitlMetadata
 from idp_common.docs_service import create_document_service
 from idp_common.config import get_config
 
@@ -176,7 +175,6 @@ def extract_field_value(inference_result: dict, field_name: str):
     Handles nested fields like 'CompanyAddress.Line2' and array notation like 'FederalTaxes[0].YTD'
     """
     # Handle array notation
-    import re
     parts = []
     current_part = ""
     i = 0
