@@ -889,5 +889,140 @@ aws cognito-idp admin-add-user-to-group \
 
 ---
 
-*Last Updated: October 22, 2025*
-*Status: Ready for Implementation*
+## Production Deployment Plan 🚀
+
+### Phase 1: Manual Production Deployment (TODAY)
+
+**Objective**: Get RBAC feature live in production now
+
+**Steps**:
+
+1. **Push dev changes to remote**:
+   ```bash
+   git push origin dev
+   ```
+
+2. **Create Pull Request** (GitHub web interface):
+   - Title: "Deploy RBAC Feature - Admin/User Role Separation"
+   - Source: `dev` → Target: `main`
+   - Description: [See deployment guide above for PR template]
+
+3. **Merge PR to main**
+
+4. **Deploy to production**:
+   ```bash
+   # Checkout main and pull latest
+   git checkout main
+   git pull origin main
+   
+   # Build and publish
+   python3 publish.py fiscalshield-prod idp eu-central-1 --verbose
+   
+   # Note the S3 template URL from output
+   ```
+
+5. **Update CloudFormation stack** (AWS Console):
+   - Navigate to CloudFormation
+   - Select production stack or create new: `fiscalshield-idp-prod`
+   - Update stack → Replace template
+   - Use S3 URL from publish.py output
+   - Review parameters carefully
+   - Update stack
+
+6. **Configure Cognito groups in production**:
+   ```bash
+   # Get production User Pool ID
+   USER_POOL_ID=$(aws cloudformation describe-stack-resource \
+     --stack-name fiscalshield-idp-prod \
+     --logical-resource-id CognitoUserPool \
+     --region eu-central-1 \
+     --query 'StackResourceDetail.PhysicalResourceId' \
+     --output text)
+   
+   # Create Admin group
+   aws cognito-idp create-group \
+     --user-pool-id $USER_POOL_ID \
+     --group-name Admin \
+     --description "System administrators" \
+     --precedence 0 \
+     --region eu-central-1
+   
+   # Create Users group
+   aws cognito-idp create-group \
+     --user-pool-id $USER_POOL_ID \
+     --group-name Users \
+     --description "Regular users" \
+     --precedence 1 \
+     --region eu-central-1
+   
+   # Assign production admin user
+   aws cognito-idp admin-add-user-to-group \
+     --user-pool-id $USER_POOL_ID \
+     --username <production-admin-email> \
+     --group-name Admin \
+     --region eu-central-1
+   ```
+
+7. **Test production**:
+   - Login as admin → Verify admin features visible
+   - Create test regular user → Verify limited access
+   - Test document upload → Verify user scoping
+   - Monitor Lambda logs for errors
+
+**Duration**: 1-2 hours
+
+---
+
+### Phase 2: CI/CD Automation (AFTER Production is Stable)
+
+**Objective**: Automate testing and deployments for future changes
+
+✅ **GitHub Actions workflows created** in `.github/workflows/`:
+- `test.yml` - Runs tests on every push
+- `deploy-dev.yml` - Auto-deploys to dev on push to dev branch
+- `deploy-prod.yml` - Manual production deployments with safety checks
+
+**Setup Steps** (See `.github/workflows/README.md` for details):
+
+1. **Create IAM user for GitHub Actions**:
+   ```bash
+   aws iam create-user --user-name github-actions-idp
+   # Add necessary policies (see CI/CD README)
+   aws iam create-access-key --user-name github-actions-idp
+   ```
+
+2. **Configure GitHub Secrets**:
+   - Go to: Repository Settings → Secrets and variables → Actions
+   - Add:
+     - `AWS_ACCESS_KEY_ID_DEV`
+     - `AWS_SECRET_ACCESS_KEY_DEV`
+     - `AWS_ACCESS_KEY_ID_PROD`
+     - `AWS_SECRET_ACCESS_KEY_PROD`
+
+3. **(Optional) Add production environment protection**:
+   - Repository Settings → Environments → Create "production"
+   - Enable "Required reviewers" (manual approval for prod deploys)
+
+4. **Test the workflows**:
+   ```bash
+   # Tests run automatically on push
+   git push origin dev
+   
+   # Check Actions tab on GitHub to see results
+   ```
+
+**Benefits of CI/CD**:
+- ✅ Automated testing on every push
+- ✅ Auto-deploy to dev when dev branch updates
+- ✅ Safe production deployments (manual trigger + tests + approval)
+- ✅ Consistent builds (no "works on my machine")
+- ✅ Deployment history and logs
+
+**Duration**: 1-2 hours to set up
+
+**Complexity**: 🟢 Easy (you already have the hard parts done!)
+
+---
+
+*Last Updated: October 23, 2025*
+*Status: Ready for Production Deployment*
