@@ -84,7 +84,17 @@ jobs:
     - name: Force update Lambda functions (bypass CloudFormation caching)
       run: |
         echo "🔄 Force updating Lambda functions with latest code..."
+        chmod +x scripts/force-update-lambdas.sh
         ./scripts/force-update-lambdas.sh
+      env:
+        STACK_NAME: fiscalshield-idp-prod
+        REGION: eu-central-1
+    
+    - name: Run smoke tests
+      run: |
+        echo "🔍 Running post-deployment smoke tests..."
+        chmod +x scripts/smoke-test.sh
+        ./scripts/smoke-test.sh
       env:
         STACK_NAME: fiscalshield-idp-prod
         REGION: eu-central-1
@@ -108,3 +118,41 @@ jobs:
         echo "  2. Assign admin users to Admin group"
         echo "  3. Test admin and regular user access"
         echo "  4. Monitor Lambda logs for errors"
+    
+    - name: Send deployment notification
+      if: always()
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const status = '${{ job.status }}';
+          const emoji = status === 'success' ? '🚀' : '❌';
+          const color = status === 'success' ? '28a745' : 'dc3545';
+          
+          const body = `${emoji} **PRODUCTION Deployment ${status.toUpperCase()}**
+          
+          **Branch:** \`main\`
+          **Commit:** \`${context.sha.substring(0, 7)}\`
+          **Author:** @${context.actor}
+          **Workflow:** [${context.workflow}](${context.payload.repository.html_url}/actions/runs/${context.runId})
+          
+          ${status === 'success' ? '✅ Production deployment completed successfully!\n\n⚠️ **Action Required:**\n1. Verify Cognito groups\n2. Test critical user flows\n3. Monitor logs for 15 minutes' : '❌ **PRODUCTION DEPLOYMENT FAILED**\n\nImmediate action required! Check logs and consider rollback.'}
+          `;
+          
+          // Create an issue for failed production deployments
+          if (status !== 'success') {
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `🚨 Production Deployment Failed - ${new Date().toISOString()}`,
+              body: body,
+              labels: ['deployment', 'production', 'urgent']
+            });
+          } else {
+            // Create a comment on the commit for successful deployments
+            await github.rest.repos.createCommitComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              commit_sha: context.sha,
+              body: body
+            });
+          }

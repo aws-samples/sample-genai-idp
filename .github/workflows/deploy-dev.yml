@@ -64,7 +64,17 @@ jobs:
     - name: Force update Lambda functions (bypass CloudFormation caching)
       run: |
         echo "🔄 Force updating Lambda functions with latest code..."
+        chmod +x scripts/force-update-lambdas.sh
         ./scripts/force-update-lambdas.sh
+      env:
+        STACK_NAME: fiscalshield-idp-dev
+        REGION: eu-central-1
+    
+    - name: Run smoke tests
+      run: |
+        echo "🔍 Running post-deployment smoke tests..."
+        chmod +x scripts/smoke-test.sh
+        ./scripts/smoke-test.sh
       env:
         STACK_NAME: fiscalshield-idp-dev
         REGION: eu-central-1
@@ -73,3 +83,30 @@ jobs:
       run: |
         echo "✅ Dev deployment complete!"
         echo "Stack URL: https://eu-central-1.console.aws.amazon.com/cloudformation/home?region=eu-central-1#/stacks/stackinfo?stackId=fiscalshield-idp-dev"
+    
+    - name: Send deployment notification
+      if: always()
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const status = '${{ job.status }}';
+          const emoji = status === 'success' ? '✅' : '❌';
+          const color = status === 'success' ? '28a745' : 'dc3545';
+          
+          const body = `${emoji} **Dev Deployment ${status.toUpperCase()}**
+          
+          **Branch:** \`${context.ref}\`
+          **Commit:** \`${context.sha.substring(0, 7)}\`
+          **Author:** @${context.actor}
+          **Workflow:** [${context.workflow}](${context.payload.repository.html_url}/actions/runs/${context.runId})
+          
+          ${status === 'success' ? '🎉 Changes are now live in dev environment!' : '⚠️ Deployment failed. Check logs for details.'}
+          `;
+          
+          // Create a comment on the commit
+          await github.rest.repos.createCommitComment({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            commit_sha: context.sha,
+            body: body
+          });
