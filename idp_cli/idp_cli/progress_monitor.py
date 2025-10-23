@@ -162,9 +162,9 @@ class ProgressMonitor:
                 "workflow_arn": "",
                 "start_time": "",
                 "end_time": "",
-                "duration": elapsed.get("total", 0) / 1000.0
-                if elapsed.get("total")
-                else 0,  # Convert ms to seconds
+                "duration": (
+                    elapsed.get("total", 0) / 1000.0 if elapsed.get("total") else 0
+                ),  # Convert ms to seconds
             }
             statuses.append(status)
 

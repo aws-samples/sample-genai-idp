@@ -200,7 +200,9 @@ def create_dynamic_extraction_tool_and_patch_tool(model_class: Type[TargetModel]
         agent: Agent,  # pyright: ignore[reportInvalidTypeForm]
     ) -> str:  # pyright: ignore[reportInvalidTypeForm]
         logger.info("extraction_tool called", extra={"models_extraction": extraction})
-        extraction_model = model_class(**extraction)  # pyright: ignore[reportAssignmentType]
+        extraction_model = model_class(
+            **extraction
+        )  # pyright: ignore[reportAssignmentType]
         extraction_dict = extraction_model.model_dump()
         agent.state.set(key="current_extraction", value=extraction_dict)
         logger.debug(
@@ -584,7 +586,9 @@ async def structured_output_async(
 
     for attempt in range(max_retries):
         try:
-            response = await agent.invoke_async(prompt_content)  # pyright: ignore[reportArgumentType]
+            response = await agent.invoke_async(
+                prompt_content
+            )  # pyright: ignore[reportArgumentType]
             logger.debug("Agent response received")
             break  # Success, exit retry loop
         except Exception as e:

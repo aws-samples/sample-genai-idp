@@ -53,7 +53,9 @@ def create_or_update(event, _):
 
     if resource_type == "Custom::ECRRepositoryCleanup":
         repository_name = resource_properties["RepositoryName"]
-        LOGGER.info("registered ECR cleanup resource for repository %s", repository_name)
+        LOGGER.info(
+            "registered ECR cleanup resource for repository %s", repository_name
+        )
         HELPER.Data["repository_name"] = repository_name
         return
 

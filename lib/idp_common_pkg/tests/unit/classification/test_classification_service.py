@@ -44,7 +44,8 @@ class TestClassificationService:
                 "temperature": 0.0,
                 "top_k": 5,
                 "system_prompt": "You are a document classification assistant.",
-                "task_prompt": dedent("""
+                "task_prompt": dedent(
+                    """
                     Classify the following document text into one of the available classes:
                     {CLASS_NAMES_AND_DESCRIPTIONS}
                     
@@ -55,7 +56,8 @@ class TestClassificationService:
                     {DOCUMENT_IMAGE}
                     
                     Respond with a JSON object with a single field "class" containing the document type.
-                """),
+                """
+                ),
                 "classificationMethod": "multimodalPageLevelClassification",
             },
         }
@@ -72,7 +74,8 @@ class TestClassificationService:
                 "temperature": 0.0,
                 "top_k": 5,
                 "system_prompt": "You are a document classification assistant.",
-                "task_prompt": dedent("""
+                "task_prompt": dedent(
+                    """
                     Classify the following document text into one of the available classes:
                     {CLASS_NAMES_AND_DESCRIPTIONS}
                     
@@ -83,7 +86,8 @@ class TestClassificationService:
                     {DOCUMENT_IMAGE}
                     
                     Respond with a JSON object with a single field "class" containing the document type.
-                """),
+                """
+                ),
                 "classificationMethod": "multimodalPageLevelClassification",
             },
         }

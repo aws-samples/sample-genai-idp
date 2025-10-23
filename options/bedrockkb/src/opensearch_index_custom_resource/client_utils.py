@@ -19,7 +19,9 @@ from aws_lambda_powertools import Logger
 from opensearchpy import OpenSearch, RequestsHttpConnection
 from requests_aws4auth import AWS4Auth
 
-logger = Logger(service="amazon_bedrock_knowledge_base_infra_setup_lambda", level="INFO")
+logger = Logger(
+    service="amazon_bedrock_knowledge_base_infra_setup_lambda", level="INFO"
+)
 
 
 def get_session():
@@ -55,7 +57,9 @@ def get_oss_http_client(session, region, host):
     access_key = credentials.access_key
     secret_key = credentials.secret_key
     session_token = credentials.token
-    awsauth = AWS4Auth(access_key, secret_key, region, "aoss", session_token=session_token)
+    awsauth = AWS4Auth(
+        access_key, secret_key, region, "aoss", session_token=session_token
+    )
 
     return OpenSearch(
         hosts=[{"host": host, "port": 443}],

@@ -62,9 +62,9 @@ class TestAppSyncMutations:
         ]
 
         for field in required_fields:
-            assert field in UPDATE_DOCUMENT, (
-                f"Field {field} not found in UPDATE_DOCUMENT mutation"
-            )
+            assert (
+                field in UPDATE_DOCUMENT
+            ), f"Field {field} not found in UPDATE_DOCUMENT mutation"
 
     def test_update_document_sections_fields(self):
         """Test that UPDATE_DOCUMENT mutation selects all required section fields."""
@@ -77,9 +77,9 @@ class TestAppSyncMutations:
         required_section_fields = ["Id", "PageIds", "Class", "OutputJSONUri"]
 
         for field in required_section_fields:
-            assert field in sections_block, (
-                f"Section field {field} not found in UPDATE_DOCUMENT mutation"
-            )
+            assert (
+                field in sections_block
+            ), f"Section field {field} not found in UPDATE_DOCUMENT mutation"
 
     def test_update_document_pages_fields(self):
         """Test that UPDATE_DOCUMENT mutation selects all required page fields."""
@@ -92,6 +92,6 @@ class TestAppSyncMutations:
         required_page_fields = ["Id", "Class", "ImageUri", "TextUri"]
 
         for field in required_page_fields:
-            assert field in pages_block, (
-                f"Page field {field} not found in UPDATE_DOCUMENT mutation"
-            )
+            assert (
+                field in pages_block
+            ), f"Page field {field} not found in UPDATE_DOCUMENT mutation"

@@ -9,9 +9,11 @@ from idp_cli.service.uninstall_service import UninstallService
 import pytest
 from loguru import logger
 from dotenv import load_dotenv
+
 load_dotenv()
 # Global variable to store resources created in setup
 test_resources = None
+
 
 @pytest.fixture(scope="session", autouse=True)
 def setup_and_teardown():
@@ -23,25 +25,36 @@ def setup_and_teardown():
     # Setup phase - runs before any tests
     global test_resources
     logger.debug("\n----- Setting up test resources -----")
-    cfn_prefix = f"idp-{datetime.now().strftime("%Y%m%d-%H%M%S")}"
-    stack_name = f"idp-Stack-{datetime.now().strftime("%Y%m%d-%H%M%S")}" # os.getenv("IDP_STACK_NAME")
-    cwd="../../../"
-    install_service = InstallService(account_id=os.getenv("IDP_ACCOUNT_ID"), cfn_prefix=cfn_prefix, cwd=cwd, debug=True)
+    cfn_prefix = f"idp-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+    stack_name = f"idp-Stack-{datetime.now().strftime('%Y%m%d-%H%M%S')}"  # os.getenv("IDP_STACK_NAME")
+    cwd = "../../../"
+    install_service = InstallService(
+        account_id=os.getenv("IDP_ACCOUNT_ID"),
+        cfn_prefix=cfn_prefix,
+        cwd=cwd,
+        debug=True,
+    )
 
     idp_pattern = "Pattern2 - Packet processing with Textract and Bedrock"
     # TODO: This is not working, fix at a future date...
-    install_service.install(admin_email=os.getenv("IDP_ADMIN_EMAIL"), idp_pattern=idp_pattern)
+    install_service.install(
+        admin_email=os.getenv("IDP_ADMIN_EMAIL"), idp_pattern=idp_pattern
+    )
 
     install_service.publish()
 
-    test_resources = {"stack_name": stack_name }
-    
+    test_resources = {"stack_name": stack_name}
+
     # This yield statement separates setup from teardown
     yield
-    
+
     # Teardown phase - runs after all tests complete
     logger.debug("\n----- Cleaning up test resources -----")
-    uninstall_service = UninstallService(stack_name=stack_name, account_id=os.getenv("IDP_ACCOUNT_ID", stack_name=stack_name), cfn_prefix=cfn_prefix)
+    uninstall_service = UninstallService(
+        stack_name=stack_name,
+        account_id=os.getenv("IDP_ACCOUNT_ID", stack_name=stack_name),
+        cfn_prefix=cfn_prefix,
+    )
 
     uninstall_service.uninstall()
     test_resources = None
@@ -55,8 +68,8 @@ def test_pattern2_smoketest():
     service = SmokeTestService(
         stack_name=test_resources["stack_name"],
         file_path="../../../../samples/rvl_cdip_package.pdf",
-        verify_string="WESTERN DARK FIRED TOBACCO GROWERS"
+        verify_string="WESTERN DARK FIRED TOBACCO GROWERS",
     )
-    
+
     result = service.do_smoketest()
-    assert(result)
+    assert result

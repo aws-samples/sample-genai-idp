@@ -20,23 +20,25 @@ from idp_common.models import Document, Page, Section, Status
 logger = logging.getLogger(__name__)
 
 
-def extract_doc_key_from_object_key(object_key: str, user_id: Optional[str] = None) -> str:
+def extract_doc_key_from_object_key(
+    object_key: str, user_id: Optional[str] = None
+) -> str:
     """
     Extract the document key suffix from the full S3 object key.
-    
+
     If the object_key starts with 'users/<user_id>/', strip that prefix to avoid duplication
     in the PK construction.
-    
+
     Args:
         object_key: Full S3 object key (e.g., 'users/uuid/filename.pdf')
         user_id: Optional user ID to strip from the path
-        
+
     Returns:
         Document key suffix (e.g., 'filename.pdf' if user_id matches, or original object_key)
     """
     if user_id and object_key.startswith(f"users/{user_id}/"):
         # Strip the users/<user_id>/ prefix
-        doc_key = object_key[len(f"users/{user_id}/"):]
+        doc_key = object_key[len(f"users/{user_id}/") :]
         logger.debug(f"Stripped user prefix from object_key: {object_key} -> {doc_key}")
         return doc_key
     return object_key
@@ -131,7 +133,7 @@ class DocumentDynamoDBService:
         else:
             # Fallback to legacy format for backwards compatibility
             pk = f"doc#{document.input_key}"
-            
+
         item = {
             "PK": pk,
             "SK": "none",
@@ -140,7 +142,7 @@ class DocumentDynamoDBService:
             "InitialEventTime": document.initial_event_time,
             "QueuedTime": document.queued_time,
         }
-        
+
         # Add UserId to the item if present
         if document.user_id:
             item["UserId"] = document.user_id
@@ -439,7 +441,7 @@ class DocumentDynamoDBService:
             "ObjectKey": document.input_key,
             "QueuedTime": document.queued_time,
         }
-        
+
         # Add UserId to list item if present for filtering
         if document.user_id:
             list_item["UserId"] = document.user_id
@@ -486,7 +488,7 @@ class DocumentDynamoDBService:
         else:
             # Fallback to legacy format for backwards compatibility
             pk = f"doc#{document.input_key}"
-            
+
         key = {
             "PK": pk,
             "SK": "none",
@@ -511,7 +513,9 @@ class DocumentDynamoDBService:
         logger.info(f"Successfully updated document: {document.input_key}")
         return updated_document
 
-    def get_document(self, object_key: str, user_id: Optional[str] = None) -> Optional[Document]:
+    def get_document(
+        self, object_key: str, user_id: Optional[str] = None
+    ) -> Optional[Document]:
         """
         Get a document from DynamoDB by its object key.
 
@@ -531,7 +535,7 @@ class DocumentDynamoDBService:
         else:
             # Fallback to legacy format for backwards compatibility
             pk = f"doc#{object_key}"
-            
+
         key = {
             "PK": pk,
             "SK": "none",
@@ -580,9 +584,9 @@ class DocumentDynamoDBService:
 
         response = self.client.scan(
             filter_expression=filter_expression,
-            expression_attribute_values=expression_attribute_values
-            if expression_attribute_values
-            else None,
+            expression_attribute_values=(
+                expression_attribute_values if expression_attribute_values else None
+            ),
             limit=limit or 50,
             exclusive_start_key=exclusive_start_key,
         )

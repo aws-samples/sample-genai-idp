@@ -73,9 +73,9 @@ def test_pricing_returns_zero_when_config_fails():
 
     # Verify the costs return 0.0 when configuration is not valid
     assert textract_cost == 0.0, f"Expected 0.0 (no valid config), got {textract_cost}"
-    assert nova_input_cost == 0.0, (
-        f"Expected 0.0 (no valid config), got {nova_input_cost}"
-    )
+    assert (
+        nova_input_cost == 0.0
+    ), f"Expected 0.0 (no valid config), got {nova_input_cost}"
 
 
 @pytest.mark.unit

@@ -87,9 +87,11 @@ class SummarizationService:
             "temperature": float(summarization_config.get("temperature", 0)),
             "top_k": float(summarization_config.get("top_k", 5)),
             "top_p": float(summarization_config.get("top_p", 0.1)),
-            "max_tokens": int(summarization_config.get("max_tokens", 4096))
-            if summarization_config.get("max_tokens")
-            else None,
+            "max_tokens": (
+                int(summarization_config.get("max_tokens", 4096))
+                if summarization_config.get("max_tokens")
+                else None
+            ),
         }
 
         # Validate system prompt
@@ -451,7 +453,9 @@ class SummarizationService:
             # Initialize data structures for results
             combined_content = {}
             combined_metadata = {"section_summaries": {}}
-            section_markdowns = {}  # Use dictionary instead of list for section markdowns
+            section_markdowns = (
+                {}
+            )  # Use dictionary instead of list for section markdowns
 
             # Create a thread pool with 20 workers for parallel processing
             max_workers = 20

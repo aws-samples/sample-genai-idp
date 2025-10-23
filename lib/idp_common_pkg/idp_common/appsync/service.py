@@ -62,11 +62,11 @@ class DocumentAppSyncService:
             "QueuedTime": document.queued_time,
             "ExpiresAfter": expires_after,
         }
-        
+
         # Add UserId for user-scoped operations
         if document.user_id:
             input_data["UserId"] = document.user_id
-            
+
         return input_data
 
     def _document_to_update_input(self, document: Document) -> Dict[str, Any]:
@@ -83,7 +83,7 @@ class DocumentAppSyncService:
             "ObjectKey": document.input_key,
             "ObjectStatus": document.status.value,
         }
-        
+
         # Add UserId for user-scoped operations
         if document.user_id:
             input_data["UserId"] = document.user_id
@@ -165,12 +165,16 @@ class DocumentAppSyncService:
 
                         alert_data = {
                             "attributeName": alert.get("attribute_name"),
-                            "confidence": float(confidence_value)
-                            if confidence_value is not None
-                            else None,
-                            "confidenceThreshold": float(confidence_threshold_value)
-                            if confidence_threshold_value is not None
-                            else None,
+                            "confidence": (
+                                float(confidence_value)
+                                if confidence_value is not None
+                                else None
+                            ),
+                            "confidenceThreshold": (
+                                float(confidence_threshold_value)
+                                if confidence_threshold_value is not None
+                                else None
+                            ),
                         }
                         alerts_data.append(alert_data)
                     section_data["ConfidenceThresholdAlerts"] = alerts_data

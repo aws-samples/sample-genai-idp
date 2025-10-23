@@ -16,8 +16,8 @@ from torch.utils.data import Dataset
 
 def get_words_in_order(doc):
     """
-        Helper method to get words from textract document in order 
-        (left to right, top to bottom)
+    Helper method to get words from textract document in order
+    (left to right, top to bottom)
     """
     words = []
     for page in doc.pages:
@@ -29,12 +29,12 @@ def get_words_in_order(doc):
 
 def get_boxes_from_textract(textract, model_norm_dim=1000):
     """
-        Gets the bounding boxes and words from the textract output
+    Gets the bounding boxes and words from the textract output
     """
     doc = response_parser.parse(textract)
     words = get_words_in_order(doc)
     if len(words) == 0:
-        return {'boxes': None, 'words': []}
+        return {"boxes": None, "words": []}
     boxes = []
     texts = []
     for word in words:
@@ -46,18 +46,18 @@ def get_boxes_from_textract(textract, model_norm_dim=1000):
     boxes[:, [1, 3]] /= doc.pages[0].height
     boxes[:, [0, 2]] /= doc.pages[0].width
     boxes *= model_norm_dim
-    return {'boxes': np.array(boxes), 'words': texts}
+    return {"boxes": np.array(boxes), "words": texts}
 
 
-class InferenceHelper():
+class InferenceHelper:
     def __init__(self):
-        self.s3_client = boto3.client('s3')
+        self.s3_client = boto3.client("s3")
 
     def _get_image_from_s3(self, image_location):
         bucket, key = image_location[5:].split("/", 1)
         response = self.s3_client.get_object(Bucket=bucket, Key=key)
         image = np.array(Image.open(response["Body"]))
-        # let's convert this from one channel to three channel if needed. 
+        # let's convert this from one channel to three channel if needed.
         if len(image.shape) == 2:
             image = np.stack([image for i in range(3)], axis=-1)
         return image
@@ -77,9 +77,12 @@ class InferenceHelper():
 
         encoding = processor(
             images=image,
-            text=prompt_words + textract['words'], 
-            boxes=prompt_boxes if textract['boxes'] is None \
-                else np.concatenate([prompt_boxes, textract['boxes']]),
+            text=prompt_words + textract["words"],
+            boxes=(
+                prompt_boxes
+                if textract["boxes"] is None
+                else np.concatenate([prompt_boxes, textract["boxes"]])
+            ),
             truncation=True,
             max_length=1024,
             return_tensors="pt",
@@ -126,14 +129,14 @@ class DocClassificationEvaluator:
 class ClassificationDataset(Dataset):
     def __init__(self, processor, data_dir, split="training"):
         self.processor = processor
-        self.data_dir = data_dir + '/' + split
+        self.data_dir = data_dir + "/" + split
         self.evaluator = DocClassificationEvaluator(processor=self.processor)
-        with open(self.data_dir + '/metadata.json', 'r') as jfile:
+        with open(self.data_dir + "/metadata.json", "r") as jfile:
             metadata = json.load(jfile)
         self.prompt = "Document Classification on {}.".format(
-            metadata.get('name', 'ClassificationDataset')
+            metadata.get("name", "ClassificationDataset")
         )
-        self._size = int(metadata['size'])
+        self._size = int(metadata["size"])
 
     def prepare_input(self, image, textract, label):
         textract = get_boxes_from_textract(textract)
@@ -142,10 +145,12 @@ class ClassificationDataset(Dataset):
         return {
             "prompt": self.prompt,
             "text_target": label,
-            "boxes": prompt_boxes if textract['boxes'] is None else np.concatenate(
-                [prompt_boxes, textract['boxes']]
-                ),
-            "text":  prompt_words + textract['words'],
+            "boxes": (
+                prompt_boxes
+                if textract["boxes"] is None
+                else np.concatenate([prompt_boxes, textract["boxes"]])
+            ),
+            "text": prompt_words + textract["words"],
             "image": np.stack([np.array(image) for _ in range(3)], axis=-1),
             "return_tensors": "pt",
         }
@@ -155,24 +160,30 @@ class ClassificationDataset(Dataset):
 
     def __getitem__(self, idx):
         batch = self.prepare_input(
-            self._load_data('images', idx),
-            self._load_data('textract', idx),
-            self._load_data('labels', idx),
+            self._load_data("images", idx),
+            self._load_data("textract", idx),
+            self._load_data("labels", idx),
         )
         # https://github.com/huggingface/transformers/blob/main/src/transformers/models/udop/processing_udop.py#L86
         # https://github.com/huggingface/transformers/blob/main/src/transformers/models/udop/processing_udop.py#L55
         encoding = self.processor(
-            images=batch["image"], text=batch["text"], boxes=batch["boxes"],
-            truncation=True, max_length=1024, return_tensors=batch['return_tensors']
+            images=batch["image"],
+            text=batch["text"],
+            boxes=batch["boxes"],
+            truncation=True,
+            max_length=1024,
+            return_tensors=batch["return_tensors"],
         )
         target_encodings = self.processor(
-            images=batch["image"], boxes=batch["boxes"],
-            text_target=batch["text_target"], return_tensors=batch['return_tensors']
+            images=batch["image"],
+            boxes=batch["boxes"],
+            text_target=batch["text_target"],
+            return_tensors=batch["return_tensors"],
         )
-        encoding["labels"] = target_encodings['input_ids']
+        encoding["labels"] = target_encodings["input_ids"]
         return {
             "model_inputs": encoding,
-            "encoded_label": target_encodings['input_ids'],
+            "encoded_label": target_encodings["input_ids"],
             "prompt": batch["prompt"],
             "text_label": batch["text_target"],
             "evaluator": self.evaluator,
@@ -180,11 +191,19 @@ class ClassificationDataset(Dataset):
         }
 
     def _load_data(self, datatype, idx):
-        if datatype == 'textract':
-            with open(self.data_dir + '/{}/{}.json'.format(datatype, idx), "r", encoding='utf-8') as f:
+        if datatype == "textract":
+            with open(
+                self.data_dir + "/{}/{}.json".format(datatype, idx),
+                "r",
+                encoding="utf-8",
+            ) as f:
                 return json.load(f)
-        elif datatype == 'images':
-            return Image.open(self.data_dir + '/{}/{}.png'.format(datatype, idx))
-        elif datatype == 'labels':
-            with open(self.data_dir + '/{}/{}.json'.format(datatype, idx), "r", encoding='utf-8') as f:
-                return json.load(f)['label']
+        elif datatype == "images":
+            return Image.open(self.data_dir + "/{}/{}.png".format(datatype, idx))
+        elif datatype == "labels":
+            with open(
+                self.data_dir + "/{}/{}.json".format(datatype, idx),
+                "r",
+                encoding="utf-8",
+            ) as f:
+                return json.load(f)["label"]

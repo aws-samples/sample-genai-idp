@@ -37,7 +37,9 @@ from oss_utils import (
 
 import cfnresponse
 
-logger = Logger(service="amazon_bedrock_knowledge_base_infra_setup_lambda", level="INFO")
+logger = Logger(
+    service="amazon_bedrock_knowledge_base_infra_setup_lambda", level="INFO"
+)
 
 """
 Custom resources: https://docs.aws.amazon.com/cdk/api/v2/docs/aws-cdk-lib.custom_resources-readme.html
@@ -50,20 +52,22 @@ In this case, the resource is an OSS index.
 @logger.inject_lambda_context(log_event=True)
 def lambda_handler(event, context):
     logger.info(event)
-    
+
     request_type = event["RequestType"]
     response_id = event["RequestId"]
 
     if request_type == "Create":
         response = on_create(event)
     elif request_type == "Update":
-        response =  on_update(event)
+        response = on_update(event)
     elif request_type == "Delete":
         response = on_delete(event)
     else:
         raise Exception("Invalid request type: %s" % request_type)
-        
-    return cfnresponse.send(event, context, cfnresponse.SUCCESS, response, response_id, response["reason"])
+
+    return cfnresponse.send(
+        event, context, cfnresponse.SUCCESS, response, response_id, response["reason"]
+    )
 
 
 """
@@ -92,14 +96,16 @@ def on_create(event):
     oss_client = get_oss_client(session, region)
     oss_http_client = get_oss_http_client(session, region, host)
 
-    update_access_policy_with_caller_arn_if_applicable(sts_client, oss_client, policy_name)
+    update_access_policy_with_caller_arn_if_applicable(
+        sts_client, oss_client, policy_name
+    )
 
     logger.info("Creating index {}".format(index_name))
     create_index_with_retries(oss_http_client, index_name, index_request)
 
     return {"PhysicalResourceId": index_name, "reason": "OSS index created"}
-    
-    
+
+
 """
 During an update event:
 1. We first check if the old resouce properties and the new ones are the same. If they are, we do not do anything.
@@ -118,7 +124,10 @@ the Custom Resource provider will send a delete event for the old index but our 
 def on_update(event):
     props = event["ResourceProperties"]
     old_props = event["OldResourceProperties"]
-    logger.info("Updating OpenSearch index with new props %s, old props: %s" % (props, old_props))
+    logger.info(
+        "Updating OpenSearch index with new props %s, old props: %s"
+        % (props, old_props)
+    )
     index_name = event["PhysicalResourceId"]
 
     if old_props == props:
@@ -139,7 +148,9 @@ def on_update(event):
     oss_client = get_oss_client(session, region)
     oss_http_client = get_oss_http_client(session, region, host)
 
-    update_access_policy_with_caller_arn_if_applicable(sts_client, oss_client, policy_name)
+    update_access_policy_with_caller_arn_if_applicable(
+        sts_client, oss_client, policy_name
+    )
 
     old_index_name = old_props["index_name"]
     logger.info("Deleting old index {}".format(old_index_name))
@@ -173,13 +184,17 @@ def on_delete(event):
     return {"PhysicalResourceId": index_name, "reason": "OSS index deleted"}
 
 
-def update_access_policy_with_caller_arn_if_applicable(sts_client, oss_client, policy_name):
+def update_access_policy_with_caller_arn_if_applicable(
+    sts_client, oss_client, policy_name
+):
     caller_arn = get_caller_arn(sts_client)
 
     access_policy = get_access_policy(oss_client, policy_name)
     updated_access_policy = {
         **access_policy,
-        "Policy": get_updated_access_policy_with_caller_arn(access_policy["Policy"], caller_arn),
+        "Policy": get_updated_access_policy_with_caller_arn(
+            access_policy["Policy"], caller_arn
+        ),
     }
     logger.info("Updating access policy")
     update_access_policy(

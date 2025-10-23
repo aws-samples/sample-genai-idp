@@ -1353,15 +1353,17 @@ class ExtractionService:
                     message_prompt = content
                 logger.info("Using Agentic extraction")
                 logger.debug(f"Using input: {str(message_prompt)}")
-                structured_data, response_with_metering = structured_output(  # pyright: ignore[reportPossiblyUnboundVariable]
-                    model_id=model_id,
-                    data_format=dynamic_model,
-                    prompt=message_prompt,  # pyright: ignore[reportArgumentType]
-                    custom_instruction=system_prompt,
-                    review_agent=self.config.get("extraction", {}).get(
-                        "review_agent", False
-                    ),
-                    context="Extraction",
+                structured_data, response_with_metering = (
+                    structured_output(  # pyright: ignore[reportPossiblyUnboundVariable]
+                        model_id=model_id,
+                        data_format=dynamic_model,
+                        prompt=message_prompt,  # pyright: ignore[reportArgumentType]
+                        custom_instruction=system_prompt,
+                        review_agent=self.config.get("extraction", {}).get(
+                            "review_agent", False
+                        ),
+                        context="Extraction",
+                    )
                 )
 
                 # Extract the structured data as dict for compatibility with existing code

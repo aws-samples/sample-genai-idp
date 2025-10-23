@@ -2012,16 +2012,18 @@ except Exception as e:
 
         self.console.print("[cyan]🔍 Running Python linting...[/cyan]")
 
-        # Run ruff check (same as GitLab CI lint-cicd)
+        # Run ruff check (excludes notebooks via ruff.toml)
         result = subprocess.run(["ruff", "check"], capture_output=True, text=True)
         if result.returncode != 0:
             self.console.print("[red]❌ Ruff linting failed![/red]")
             self.console.print(result.stdout, style="red", markup=False)
             return False
 
-        # Run ruff format check (same as GitLab CI lint-cicd)
+        # Run Black format check (excludes notebooks via --exclude)
         result = subprocess.run(
-            ["ruff", "format", "--check"], capture_output=True, text=True
+            ["black", "--check", "--exclude", "notebooks", "."],
+            capture_output=True,
+            text=True,
         )
         if result.returncode != 0:
             self.console.print("[red]❌ Code formatting check failed![/red]")

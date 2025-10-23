@@ -19,23 +19,23 @@ logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 def handler(event, context):
     """
     List all available agents from the factory.
-    
+
     Args:
         event: The event dict from AppSync
         context: The Lambda context
-        
+
     Returns:
         List of available agents with metadata
     """
     logger.info(f"Received event: {json.dumps(event)}")
-    
+
     try:
         # Get list of available agents from factory
         available_agents = agent_factory.list_available_agents()
-        
+
         logger.info(f"Found {len(available_agents)} available agents")
         return available_agents
-        
+
     except Exception as e:
         error_msg = f"Error listing available agents: {str(e)}"
         logger.error(error_msg)

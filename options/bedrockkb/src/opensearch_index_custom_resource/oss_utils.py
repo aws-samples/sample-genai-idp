@@ -22,7 +22,9 @@ from time import sleep
 from aws_lambda_powertools import Logger
 from opensearchpy import NotFoundError
 
-logger = Logger(service="amazon_bedrock_knowledge_base_infra_setup_lambda", level="INFO")
+logger = Logger(
+    service="amazon_bedrock_knowledge_base_infra_setup_lambda", level="INFO"
+)
 
 MODEL_ID_TO_INDEX_REQUEST_MAP = {
     "amazon.titan-embed-text-v2:0": {
@@ -103,6 +105,7 @@ MODEL_ID_TO_INDEX_REQUEST_MAP = {
     },
 }
 
+
 def get_access_policy(oss_client, policy_name):
     policy_response = oss_client.get_access_policy(name=policy_name, type="data")
     policy_details = policy_response["accessPolicyDetail"]
@@ -124,7 +127,9 @@ def update_access_policy(oss_client, updated_policy, policy_version, policy_name
         type="data",
     )
     logger.info(response)
-    logger.info("Updated data access policy, sleeping for 2 minutes for permissions to propagate")
+    logger.info(
+        "Updated data access policy, sleeping for 2 minutes for permissions to propagate"
+    )
     sleep(120)
 
 
@@ -147,7 +152,9 @@ def create_index_with_retries(oss_http_client, index_name, request_body):
             response = create_index(oss_http_client, index_name, request_body)
             logger.info(response)
             logger.info(
-                "Created index {}, sleeping for 2 minutes for index to get ready".format(index_name)
+                "Created index {}, sleeping for 2 minutes for index to get ready".format(
+                    index_name
+                )
             )
             sleep(120)
             return response
