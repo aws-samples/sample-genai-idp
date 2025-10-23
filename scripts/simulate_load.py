@@ -78,7 +78,7 @@ def stress_test(source_bucket, source_key, dest_bucket, dest_prefix='', copies_p
     
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         while time.time() < end_time:
-            batch_start = time.time()
+            time.time()
             futures = []
             
             current_rate = stats.get_current_rate()
@@ -94,7 +94,7 @@ def stress_test(source_bucket, source_key, dest_bucket, dest_prefix='', copies_p
                     copy_file, s3_client, source_bucket, source_key, dest_bucket, dest_prefix, stats
                 ))
             
-            completed = sum(1 for f in futures if f.result())
+            sum(1 for f in futures if f.result())
             time.sleep(0.1) # semgrep-ignore: arbitrary-sleep - Intentional delay to avoid tight loop. Duration is hardcoded and not user-controlled.
     
     final_total = stats.get_total()

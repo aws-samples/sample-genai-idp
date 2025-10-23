@@ -270,7 +270,7 @@ class TestHandler:
         # Add ExpiresAfter to input
         valid_event['arguments']['input']['ExpiresAfter'] = 1234567890
         
-        result = index.handler(valid_event, mock_context)
+        index.handler(valid_event, mock_context)
         
         # Verify list item includes ExpiresAfter
         list_item = mock_table.put_item.call_args_list[1][1]['Item']
@@ -288,7 +288,7 @@ class TestHandler:
         # Mock shard calculation
         mock_calculate_shard.return_value = ('2025-01-15', '03')
         
-        result = index.handler(valid_event, mock_context)
+        index.handler(valid_event, mock_context)
         
         # Verify calculate_shard was called with QueuedTime
         mock_calculate_shard.assert_called_once_with('2025-01-15T10:30:00Z')

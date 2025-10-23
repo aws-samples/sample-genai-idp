@@ -220,7 +220,7 @@ def handler(event, context):
         try:
             appsync_service = create_document_service(mode='appsync')
             document.status = Status.QUEUED  # Ensure status is QUEUED for UI
-            updated_document = appsync_service.update_document(document)
+            appsync_service.update_document(document)
             logger.info("Updated document status to QUEUED in AppSync for immediate UI feedback")
         except Exception as e:
             logger.warning(f"Failed to update document status in AppSync: {str(e)}")

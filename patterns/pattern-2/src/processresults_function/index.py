@@ -351,7 +351,7 @@ def process_section_for_hitl(section: Section, section_data: dict, confidence_th
         source_image_uri = f"s3://{output_bucket}/{document_id}/pages/{page_id}/image.jpg"
         
         try:
-            response = start_human_loop(
+            start_human_loop(
                 execution_id=execution_id,
                 kv_pairs=kv_pairs,
                 source_image_uri=source_image_uri,

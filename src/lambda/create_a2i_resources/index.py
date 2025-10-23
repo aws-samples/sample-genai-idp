@@ -1225,7 +1225,7 @@ def delete_default_workforce():
     try:
         # First check if the default workforce exists
         try:
-            workforce_response = sagemaker.describe_workforce(WorkforceName='default')
+            sagemaker.describe_workforce(WorkforceName='default')
             logger.info("Default workforce found, attempting deletion...")
         except sagemaker.exceptions.ResourceNotFound:
             logger.info("Default workforce does not exist, skipping deletion.")

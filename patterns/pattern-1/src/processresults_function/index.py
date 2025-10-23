@@ -824,7 +824,6 @@ def process_segments(
         logger.warning("DB_NAME environment variable not set, skipping DynamoDB operations")
     
     now = datetime.datetime.now().isoformat()
-    hitl_triggered = False
     overall_hitl_triggered = False
 
     for record_number, segment in enumerate(segment_metadata, start=1):
@@ -900,7 +899,6 @@ def process_segments(
             )
 
             if low_confidence:
-                hitl_triggered = low_confidence
                 metrics.put_metric('HITLTriggered', 1)
                 overall_hitl_triggered = True
                 for page_number in page_indices:
@@ -930,10 +928,10 @@ def process_segments(
                 })
         else:
             if enable_hitl == 'true':
-                std_hitl = 'true'
+                pass
                 # std_hitl = None # HITL for standard output blueprint match is disabled until we have option to choose Blueprint in A2I
             else:
-                std_hitl = None 
+                pass 
             # Process standard output if no custom output match
             std_bucket, std_key = parse_s3_path(segment['standard_output_path'])
             std_output = download_decimal(std_bucket, std_key)
@@ -961,7 +959,6 @@ def process_segments(
             )
             
             # hitl_triggered = std_hitl
-            hitl_triggered = None
             # if enable_hitl == 'true':
             # # if std_hitl: # HITL for standard output blueprint match is disabled until we have option to choose Blueprint in A2I
             #     for page_number in range(start_page, end_page + 1):

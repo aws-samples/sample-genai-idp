@@ -64,7 +64,7 @@ class TestUserScopedDocumentLifecycle:
         )
         
         mock_dynamodb_client.transact_write_items.return_value = {}
-        result = document_service.create_document(doc)
+        document_service.create_document(doc)
         
         # Verify creation used user-scoped PK
         create_call = mock_dynamodb_client.transact_write_items.call_args[0][0]
@@ -92,7 +92,7 @@ class TestUserScopedDocumentLifecycle:
             }
         }
         
-        updated_doc = document_service.update_document(doc)
+        document_service.update_document(doc)
         
         # Verify update used same user-scoped PK
         update_call = mock_dynamodb_client.update_item.call_args[1]

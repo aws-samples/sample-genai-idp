@@ -180,7 +180,7 @@ def extract_ids_from_human_loop_name(human_loop_name):
                 # The human_review_id is the first part before the first hyphen
                 prefix_parts = parts[0].split('-', 1)  # Split only on first hyphen
                 if len(prefix_parts) == 2:
-                    human_review_id = prefix_parts[0]  # e.g., 'SI'
+                    prefix_parts[0]  # e.g., 'SI'
                     execution_id = prefix_parts[1]     # e.g., 'ca13b3ed-d4eb-4e7f-a9aa-01913d24a1e7'
                     return execution_id, record_number, page_id
     except Exception as e:

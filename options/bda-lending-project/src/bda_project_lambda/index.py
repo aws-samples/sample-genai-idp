@@ -603,7 +603,7 @@ def update_project(event, project_arn):
     update_config.pop('projectName')
     
     logger.info(f"Updating project with config: {json.dumps(update_config)}")
-    response = bedrock_client.update_data_automation_project(**update_config)
+    bedrock_client.update_data_automation_project(**update_config)
     
     # Extract blueprint ARNs for response
     blueprint_arns = [config.get('blueprintArn') for config in all_blueprint_configs]

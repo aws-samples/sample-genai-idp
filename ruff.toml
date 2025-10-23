@@ -6,4 +6,5 @@ extend-exclude = [
     ".aws-sam",
     "build",
     "dist",
+    "notebooks/**/*.ipynb",
 ]

@@ -68,7 +68,7 @@ def lambda_handler(event, context):
             raise ValueError(f"Could not retrieve IPSet with ID {ipset_id}")
         
         # Update the IPSet
-        response = update_ipset(wafv2_client, ipset, lambda_ip_ranges)
+        update_ipset(wafv2_client, ipset, lambda_ip_ranges)
         
         logger.info(f"Successfully updated IPSet with {len(lambda_ip_ranges)} Lambda IP ranges")
         

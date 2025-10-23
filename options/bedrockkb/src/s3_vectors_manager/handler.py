@@ -36,7 +36,7 @@ def lambda_handler(event, context):
             raise ValueError("Missing required ResourceProperties in event")
             
         # Get request type and properties
-        request_type = event['RequestType']
+        event['RequestType']
         properties = event['ResourceProperties']
         
         resource_type = properties.get('ResourceType', 'S3VectorBucketAndIndex')
@@ -439,7 +439,7 @@ def create_s3_vector_resources(s3vectors_client, bucket_name, index_name, embedd
             }
             logger.info(f"Using KMS encryption for bucket with key: {kms_key_arn}")
         
-        bucket_response = s3vectors_client.create_vector_bucket(**create_bucket_params)
+        s3vectors_client.create_vector_bucket(**create_bucket_params)
         logger.info(f"Created vector bucket: {bucket_name}")
         
         # Create S3 Vector Index using modular function with configuration

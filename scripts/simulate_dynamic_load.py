@@ -123,7 +123,7 @@ def stress_test(source_bucket, source_key, dest_bucket, dest_prefix, schedule_fi
                     for _ in range(remaining_copies)
                 ]
                 
-                completed = sum(1 for f in as_completed(futures) if f.result())
+                sum(1 for f in as_completed(futures) if f.result())
             
             time.sleep(0.01) # semgrep-ignore: arbitrary-sleep - Intentional delay to avoid tight loop. Duration is hardcoded and not user-controlled.
     

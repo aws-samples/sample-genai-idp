@@ -33,10 +33,9 @@ def handler(event, context):
     try:
         bda_project_arn = os.environ.get("BDA_PROJECT_ARN")
         bdaBlueprintService = BdaBlueprintService( dataAutomationProjectArn=bda_project_arn )
-        result = bdaBlueprintService.create_blueprints_from_custom_configuration()
+        bdaBlueprintService.create_blueprints_from_custom_configuration()
         
     except Exception as e:
-            status = 'Failed'
             logger.error(f"Error processing record: {str(e)}")
             batch_item_failures.append({"itemIdentifier": record['messageId']})
     

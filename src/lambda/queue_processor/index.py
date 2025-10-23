@@ -166,7 +166,7 @@ def process_message(record: Dict[str, Any]) -> Tuple[bool, str]:
             logger.info(f"Document created in tracking table: {created_key}")
             
             # Start workflow with the document
-            execution = start_workflow(document)
+            start_workflow(document)
             
             # Update document status with workflow execution info
             updated_doc = document_service.update_document(document)

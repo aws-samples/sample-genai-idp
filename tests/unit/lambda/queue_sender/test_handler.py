@@ -72,7 +72,7 @@ class TestHandlerMessageSending:
         mock_sqs.send_message.return_value = mock_sqs_response
         
         # Execute
-        result = index.handler(valid_s3_event, mock_lambda_context)
+        index.handler(valid_s3_event, mock_lambda_context)
         
         # Verify EventTime in message
         call_args = mock_sqs.send_message.call_args[1]
@@ -98,7 +98,7 @@ class TestHandlerMessageSending:
         mock_datetime.now.return_value = mock_now
         
         # Execute
-        result = index.handler(event, mock_lambda_context)
+        index.handler(event, mock_lambda_context)
         
         # Verify current time was used
         call_args = mock_sqs.send_message.call_args[1]
@@ -115,7 +115,7 @@ class TestHandlerMessageSending:
         mock_sqs.send_message.return_value = mock_sqs_response
         
         # Execute
-        result = index.handler(s3_event_with_nested_path, mock_lambda_context)
+        index.handler(s3_event_with_nested_path, mock_lambda_context)
         
         # Verify user ID extraction
         call_args = mock_sqs.send_message.call_args[1]
@@ -267,7 +267,7 @@ class TestHandlerLogging:
         mock_sqs.send_message.return_value = mock_sqs_response
         
         # Execute
-        result = index.handler(valid_s3_event, mock_lambda_context)
+        index.handler(valid_s3_event, mock_lambda_context)
         
         # Verify logging
         assert "QueueSender invoked with event" in caplog.text
@@ -284,7 +284,7 @@ class TestHandlerLogging:
         mock_sqs.send_message.return_value = mock_sqs_response
         
         # Execute
-        result = index.handler(valid_s3_event, mock_lambda_context)
+        index.handler(valid_s3_event, mock_lambda_context)
         
         # Verify user ID logging
         assert f"Extracted user_id: {valid_cognito_uuid}" in caplog.text
@@ -300,7 +300,7 @@ class TestHandlerLogging:
         mock_sqs.send_message.return_value = mock_sqs_response
         
         # Execute
-        result = index.handler(valid_s3_event, mock_lambda_context)
+        index.handler(valid_s3_event, mock_lambda_context)
         
         # Verify message ID logging
         assert "Successfully sent message to SQS" in caplog.text

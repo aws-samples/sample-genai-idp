@@ -56,7 +56,7 @@ class TestHandlerDocumentCreation:
         mock_table.put_item.return_value = {}
         
         # Execute
-        result = index.handler(valid_create_document_event, mock_lambda_context)
+        index.handler(valid_create_document_event, mock_lambda_context)
         
         # Verify list item
         list_item = mock_table.put_item.call_args_list[1][1]['Item']
@@ -98,7 +98,7 @@ class TestHandlerDocumentCreation:
         mock_table.put_item.return_value = {}
         
         # Execute
-        result = index.handler(create_document_event_with_expires, mock_lambda_context)
+        index.handler(create_document_event_with_expires, mock_lambda_context)
         
         # Verify list item includes ExpiresAfter
         list_item = mock_table.put_item.call_args_list[1][1]['Item']
@@ -119,7 +119,7 @@ class TestHandlerDocumentCreation:
         mock_calculate_shard.return_value = ('2025-01-15', '03')
         
         # Execute
-        result = index.handler(valid_create_document_event, mock_lambda_context)
+        index.handler(valid_create_document_event, mock_lambda_context)
         
         # Verify calculate_shard was called
         mock_calculate_shard.assert_called_once()
@@ -148,7 +148,7 @@ class TestHandlerExistingDocuments:
         mock_delete_robust.return_value = True
         
         # Execute
-        result = index.handler(valid_create_document_event, mock_lambda_context)
+        index.handler(valid_create_document_event, mock_lambda_context)
         
         # Verify deletion was attempted
         assert mock_delete_robust.called

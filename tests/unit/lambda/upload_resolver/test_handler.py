@@ -70,7 +70,7 @@ class TestHandlerUserScoping:
         mock_s3.generate_presigned_post.return_value = mock_presigned_post
         
         # Execute
-        result = index.handler(upload_event_with_spaces, mock_lambda_context)
+        index.handler(upload_event_with_spaces, mock_lambda_context)
         
         # Verify sanitized filename
         expected_key = f'users/{valid_cognito_uuid}/My_Invoice_2025.pdf'
@@ -109,7 +109,7 @@ class TestHandlerPresignedPost:
         mock_s3.generate_presigned_post.return_value = mock_presigned_post
         
         # Execute
-        result = index.handler(valid_upload_event, mock_lambda_context)
+        index.handler(valid_upload_event, mock_lambda_context)
         
         # Verify presigned POST configuration
         call_args = mock_s3.generate_presigned_post.call_args[1]
@@ -196,7 +196,7 @@ class TestHandlerBucketFallback:
         mock_s3.generate_presigned_post.return_value = mock_presigned_post
         
         # Execute
-        result = index.handler(event, mock_lambda_context)
+        index.handler(event, mock_lambda_context)
         
         # Verify INPUT_BUCKET was used
         call_args = mock_s3.generate_presigned_post.call_args[1]
@@ -211,7 +211,7 @@ class TestHandlerBucketFallback:
         mock_s3.generate_presigned_post.return_value = mock_presigned_post
         
         # Execute
-        result = index.handler(valid_upload_event, mock_lambda_context)
+        index.handler(valid_upload_event, mock_lambda_context)
         
         # Verify argument bucket was used, not env fallback
         call_args = mock_s3.generate_presigned_post.call_args[1]
@@ -232,7 +232,7 @@ class TestHandlerLogging:
         mock_s3.generate_presigned_post.return_value = mock_presigned_post
         
         # Execute
-        result = index.handler(valid_upload_event, mock_lambda_context)
+        index.handler(valid_upload_event, mock_lambda_context)
         
         # Verify logging
         assert f"Extracted user_id from username: {valid_cognito_uuid}" in caplog.text
@@ -248,7 +248,7 @@ class TestHandlerLogging:
         mock_s3.generate_presigned_post.return_value = mock_presigned_post
         
         # Execute
-        result = index.handler(valid_upload_event, mock_lambda_context)
+        index.handler(valid_upload_event, mock_lambda_context)
         
         # Verify path logging
         assert f"User-scoped upload path: users/{valid_cognito_uuid}/invoice-2025.pdf" in caplog.text

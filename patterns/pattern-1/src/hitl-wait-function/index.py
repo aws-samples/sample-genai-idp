@@ -76,7 +76,7 @@ def lambda_handler(event, context):
     
     # Process each section that needs HITL
     for section in hitl_metadata:
-        if section.get('hitl_triggered') == True:
+        if section.get('hitl_triggered'):
             section_id = str(section.get('record_number'))
             page_array = section.get('page_array', [])
             section_execution_id = section.get('execution_id')

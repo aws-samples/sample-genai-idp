@@ -83,7 +83,7 @@ class TestDocumentCreationWithUserScoping:
         mock_dynamodb_client.transact_write_items.return_value = {}
         
         # Execute
-        result = service.create_document(sample_document_without_user)
+        service.create_document(sample_document_without_user)
         
         # Verify
         call_args = mock_dynamodb_client.transact_write_items.call_args[0][0]
@@ -155,7 +155,7 @@ class TestDocumentUpdateWithUserScoping:
         }
         
         # Execute
-        result = service.update_document(sample_document_with_user)
+        service.update_document(sample_document_with_user)
         
         # Verify correct PK was used (uses FULL input_key to match GetDocumentResolver)
         call_args = mock_dynamodb_client.update_item.call_args[1]
@@ -180,7 +180,7 @@ class TestDocumentUpdateWithUserScoping:
         }
         
         # Execute
-        result = service.update_document(sample_document_without_user)
+        service.update_document(sample_document_without_user)
         
         # Verify correct PK was used
         call_args = mock_dynamodb_client.update_item.call_args[1]
@@ -205,7 +205,7 @@ class TestDocumentUpdateWithUserScoping:
         }
         
         # Execute
-        result = service.update_document(sample_document_with_user)
+        service.update_document(sample_document_with_user)
         
         # Verify WorkflowStatus in expression values
         call_args = mock_dynamodb_client.update_item.call_args[1]
@@ -260,7 +260,7 @@ class TestDocumentGetWithUserScoping:
         }
         
         # Execute
-        result = service.get_document(object_key)
+        service.get_document(object_key)
         
         # Verify correct PK was used
         call_args = mock_dynamodb_client.get_item.call_args[0][0]
@@ -359,7 +359,6 @@ class TestUserIsolation:
         """Should not find document when queried with wrong user_id."""
         # Setup - Document belongs to user-111 but we query with user-222
         object_key = 'users/user-111/test-doc.pdf'
-        actual_user = 'user-111'
         wrong_user = 'user-222'
         
         # Mock returns nothing because PK doesn't match
