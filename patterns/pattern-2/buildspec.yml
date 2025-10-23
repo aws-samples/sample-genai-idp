@@ -1,0 +1,55 @@
+version: 0.2
+phases:
+  pre_build:
+    commands:
+      - echo "Logging into Amazon ECR..."
+      - aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $ECR_URI
+      - echo "Verifying Docker..."
+      - docker --version
+  build:
+    commands:
+      - echo "Building Pattern-2 Docker images..."
+      - echo "Using IMAGE_VERSION from environment (content-based hash)"
+      - echo "Image tag will be $IMAGE_VERSION"
+      - export FUNCTION_ocr="patterns/pattern-2/src/ocr_function"
+      - export FUNCTION_classification="patterns/pattern-2/src/classification_function"
+      - export FUNCTION_extraction="patterns/pattern-2/src/extraction_function"
+      - export FUNCTION_assessment="patterns/pattern-2/src/assessment_function"
+      - export FUNCTION_processresults="patterns/pattern-2/src/processresults_function"
+      - export FUNCTION_hitl_wait="patterns/pattern-2/src/hitl-wait-function"
+      - export FUNCTION_hitl_status_update="patterns/pattern-2/src/hitl-status-update-function"
+      - export FUNCTION_hitl_process="patterns/pattern-2/src/hitl-process-function"
+      - export FUNCTION_summarization="patterns/pattern-2/src/summarization_function"
+      - docker build -f Dockerfile.optimized --build-arg FUNCTION_PATH=$FUNCTION_ocr -t $ECR_URI:ocr-function-$IMAGE_VERSION -t $ECR_URI:ocr-function --platform linux/arm64 .
+      - docker push $ECR_URI:ocr-function-$IMAGE_VERSION
+      - docker push $ECR_URI:ocr-function
+      - docker build -f Dockerfile.optimized --build-arg FUNCTION_PATH=$FUNCTION_classification -t $ECR_URI:classification-function-$IMAGE_VERSION -t $ECR_URI:classification-function --platform linux/arm64 .
+      - docker push $ECR_URI:classification-function-$IMAGE_VERSION
+      - docker push $ECR_URI:classification-function
+      - docker build -f Dockerfile.optimized --build-arg FUNCTION_PATH=$FUNCTION_extraction -t $ECR_URI:extraction-function-$IMAGE_VERSION -t $ECR_URI:extraction-function --platform linux/arm64 .
+      - docker push $ECR_URI:extraction-function-$IMAGE_VERSION
+      - docker push $ECR_URI:extraction-function
+      - docker build -f Dockerfile.optimized --build-arg FUNCTION_PATH=$FUNCTION_assessment -t $ECR_URI:assessment-function-$IMAGE_VERSION -t $ECR_URI:assessment-function --platform linux/arm64 .
+      - docker push $ECR_URI:assessment-function-$IMAGE_VERSION
+      - docker push $ECR_URI:assessment-function
+      - docker build -f Dockerfile.optimized --build-arg FUNCTION_PATH=$FUNCTION_processresults -t $ECR_URI:processresults-function-$IMAGE_VERSION -t $ECR_URI:processresults-function --platform linux/arm64 .
+      - docker push $ECR_URI:processresults-function-$IMAGE_VERSION
+      - docker push $ECR_URI:processresults-function
+      - docker build -f Dockerfile.optimized --build-arg FUNCTION_PATH=$FUNCTION_hitl_wait -t $ECR_URI:hitl-wait-function-$IMAGE_VERSION -t $ECR_URI:hitl-wait-function --platform linux/arm64 .
+      - docker push $ECR_URI:hitl-wait-function-$IMAGE_VERSION
+      - docker push $ECR_URI:hitl-wait-function
+      - docker build -f Dockerfile.optimized --build-arg FUNCTION_PATH=$FUNCTION_hitl_status_update -t $ECR_URI:hitl-status-update-function-$IMAGE_VERSION -t $ECR_URI:hitl-status-update-function --platform linux/arm64 .
+      - docker push $ECR_URI:hitl-status-update-function-$IMAGE_VERSION
+      - docker push $ECR_URI:hitl-status-update-function
+      - docker build -f Dockerfile.optimized --build-arg FUNCTION_PATH=$FUNCTION_hitl_process -t $ECR_URI:hitl-process-function-$IMAGE_VERSION -t $ECR_URI:hitl-process-function --platform linux/arm64 .
+      - docker push $ECR_URI:hitl-process-function-$IMAGE_VERSION
+      - docker push $ECR_URI:hitl-process-function
+      - docker build -f Dockerfile.optimized --build-arg FUNCTION_PATH=$FUNCTION_summarization -t $ECR_URI:summarization-function-$IMAGE_VERSION -t $ECR_URI:summarization-function --platform linux/arm64 .
+      - docker push $ECR_URI:summarization-function-$IMAGE_VERSION
+      - docker push $ECR_URI:summarization-function
+  post_build:
+    commands:
+      - echo "Build completed on $(date)"
+      - echo "All Pattern-2 Docker images successfully built and pushed to ECR"
+      - echo "ECR Repository - $ECR_URI"
+      - echo "Image Version - $IMAGE_VERSION"

@@ -1,0 +1,16 @@
+# IDP CLI Requirements
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: MIT-0
+
+# Core CLI framework
+click>=8.1.0
+rich>=13.0.0
+
+# AWS SDK
+boto3>=1.28.0
+botocore>=1.31.0
+
+# Testing dependencies (optional, install with: pip install -e ".[test]")
+pytest>=7.4.0
+pytest-mock>=3.11.0
+moto>=4.2.0

@@ -26,7 +26,26 @@ import './StepFunctionFlowViewer.css';
 
 const logger = new Logger('StepFunctionFlowViewer');
 
-const StepFunctionFlowViewer = ({ executionArn, visible, onDismiss }) => {
+// Helper function to check if a step is disabled based on configuration
+const isStepDisabled = (stepName, config) => {
+  if (!config) return false;
+
+  const stepNameLower = stepName.toLowerCase();
+
+  // Check if this is a summarization step
+  if (stepNameLower.includes('summarization') || stepNameLower.includes('summary')) {
+    return config.summarization?.enabled === false;
+  }
+
+  // Check if this is an assessment step
+  if (stepNameLower.includes('assessment') || stepNameLower.includes('assess')) {
+    return config.assessment?.enabled === false;
+  }
+
+  return false;
+};
+
+const StepFunctionFlowViewer = ({ executionArn, visible, onDismiss, mergedConfig }) => {
   const [selectedStep, setSelectedStep] = useState(null);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -385,57 +404,68 @@ const StepFunctionFlowViewer = ({ executionArn, visible, onDismiss }) => {
             onStepClick={setSelectedStep}
             selectedStep={selectedStep}
             getStepIcon={getStepIcon}
+            mergedConfig={mergedConfig}
           />
         </Container>
 
         {/* Step Details */}
         {selectedStep && (
           <Container header={<Header variant="h3">Step Details</Header>}>
-            <StepDetails step={selectedStep} formatDuration={formatDuration} getStepIcon={getStepIcon} />
+            <StepDetails
+              step={selectedStep}
+              formatDuration={formatDuration}
+              getStepIcon={getStepIcon}
+              mergedConfig={mergedConfig}
+            />
           </Container>
         )}
 
         {/* Steps Timeline */}
         <Container header={<Header variant="h3">Steps Timeline</Header>}>
           <div className="steps-timeline">
-            {(processedSteps.length > 0 ? processedSteps : execution.steps)?.map((step, index) => (
-              <div
-                key={`timeline-${step.name}-${step.type}-${step.status}-${step.startDate || index}`}
-                className={`timeline-step ${step.status.toLowerCase()} ${
-                  selectedStep?.name === step.name ? 'selected' : ''
-                } ${step.isMapIteration ? 'map-iteration-step' : ''}`}
-                onClick={() => setSelectedStep(step)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    setSelectedStep(step);
-                  }
-                }}
-                role="button"
-                tabIndex={0}
-              >
-                <div className="timeline-step-icon">{getStepIcon(step.name, step.type, step.status)}</div>
-                <div className="timeline-step-content">
-                  <div className="timeline-step-name">
-                    {step.name}
-                    {step.isMapIteration && <Badge color="green">Map Iteration</Badge>}
-                    {step.type === 'Map' && step.mapIterations && (
-                      <Badge color="blue">{step.mapIterations} iterations</Badge>
+            {(processedSteps.length > 0 ? processedSteps : execution.steps)?.map((step, index) => {
+              const stepDisabled = isStepDisabled(step.name, mergedConfig);
+              return (
+                <div
+                  key={`timeline-${step.name}-${step.type}-${step.status}-${step.startDate || index}`}
+                  className={`timeline-step ${step.status.toLowerCase()} ${
+                    selectedStep?.name === step.name ? 'selected' : ''
+                  } ${step.isMapIteration ? 'map-iteration-step' : ''} ${stepDisabled ? 'step-disabled' : ''}`}
+                  onClick={() => setSelectedStep(step)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      setSelectedStep(step);
+                    }
+                  }}
+                  role="button"
+                  tabIndex={0}
+                  title={stepDisabled ? 'This step was disabled in configuration and performed no processing' : ''}
+                >
+                  <div className="timeline-step-icon">{getStepIcon(step.name, step.type, step.status)}</div>
+                  <div className="timeline-step-content">
+                    <div className="timeline-step-name">
+                      {step.name}
+                      {stepDisabled && <Badge color="grey">NOT ENABLED</Badge>}
+                      {step.isMapIteration && <Badge color="green">Map Iteration</Badge>}
+                      {step.type === 'Map' && step.mapIterations && (
+                        <Badge color="blue">{step.mapIterations} iterations</Badge>
+                      )}
+                    </div>
+                    <div className="timeline-step-meta">
+                      <span className={`timeline-step-status status-${step.status.toLowerCase()}`}>{step.status}</span>
+                      <span className="timeline-step-duration">{formatDuration(step.startDate, step.stopDate)}</span>
+                    </div>
+                    {step.error && (
+                      <div className="timeline-step-error">
+                        <FaExclamationTriangle size={14} style={{ marginRight: '4px', color: '#d13212' }} />
+                        <strong>Error:</strong>{' '}
+                        {step.error.length > 100 ? `${step.error.substring(0, 100)}...` : step.error}
+                      </div>
                     )}
                   </div>
-                  <div className="timeline-step-meta">
-                    <span className={`timeline-step-status status-${step.status.toLowerCase()}`}>{step.status}</span>
-                    <span className="timeline-step-duration">{formatDuration(step.startDate, step.stopDate)}</span>
-                  </div>
-                  {step.error && (
-                    <div className="timeline-step-error">
-                      <FaExclamationTriangle size={14} style={{ marginRight: '4px', color: '#d13212' }} />
-                      <strong>Error:</strong>{' '}
-                      {step.error.length > 100 ? `${step.error.substring(0, 100)}...` : step.error}
-                    </div>
-                  )}
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </Container>
       </SpaceBetween>
@@ -447,6 +477,18 @@ StepFunctionFlowViewer.propTypes = {
   executionArn: PropTypes.string.isRequired,
   visible: PropTypes.bool.isRequired,
   onDismiss: PropTypes.func.isRequired,
+  mergedConfig: PropTypes.shape({
+    summarization: PropTypes.shape({
+      enabled: PropTypes.bool,
+    }),
+    assessment: PropTypes.shape({
+      enabled: PropTypes.bool,
+    }),
+  }),
+};
+
+StepFunctionFlowViewer.defaultProps = {
+  mergedConfig: null,
 };
 
 export default StepFunctionFlowViewer;

@@ -25,6 +25,7 @@ def create_error_analyzer_agent(
     **kwargs,
 ) -> strands.Agent:
     """
+    Creates configured error analyzer agent with AWS integrations.
     Create the Error Analyzer Agent with modular tools.
 
     Args:

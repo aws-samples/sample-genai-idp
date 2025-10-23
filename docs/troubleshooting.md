@@ -15,15 +15,17 @@ For automated troubleshooting, use the **Error Analyzer** tool:
 - **Documentation**: See [Error Analyzer](error-analyzer.md) for complete guide
 
 **Quick Start**:
+
 ```
 # Document-specific analysis
 Query: "document: filename.pdf"
 
-# System-wide analysis  
+# System-wide analysis
 Query: "Show recent processing errors"
 ```
 
 The Error Analyzer automatically:
+
 - Searches CloudWatch Logs across all Lambda functions
 - Correlates errors with DynamoDB tracking data
 - Identifies root causes with AI reasoning
@@ -37,46 +39,46 @@ For issues not covered by the Error Analyzer, use the manual troubleshooting ste
 
 ### Document Processing Failures
 
-| Issue | Resolution |
-|-------|------------|
-| **Workflow execution fails** | Check CloudWatch logs for specific error messages. Look in the Step Functions execution history to identify which step failed. |
-| **PDF document not processing** | Verify the PDF is not password protected or encrypted. Ensure it's not corrupted by opening it in another application. |
-| **OCR fails on document** | Check if the document is scanned at sufficient quality. Verify the document doesn't exceed size limits (typically 5MB for Textract). |
-| **Classification returns "other"** | Review document class definitions. Consider adding more detailed class descriptions or adding few-shot examples. |
-| **Extraction missing fields** | Review attribute descriptions and prompt engineering. Check if fields are present but in an unusual format or location. |
+| Issue                              | Resolution                                                                                                                           |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| **Workflow execution fails**       | Check CloudWatch logs for specific error messages. Look in the Step Functions execution history to identify which step failed.       |
+| **PDF document not processing**    | Verify the PDF is not password protected or encrypted. Ensure it's not corrupted by opening it in another application.               |
+| **OCR fails on document**          | Check if the document is scanned at sufficient quality. Verify the document doesn't exceed size limits (typically 5MB for Textract). |
+| **Classification returns "other"** | Review document class definitions. Consider adding more detailed class descriptions or adding few-shot examples.                     |
+| **Extraction missing fields**      | Review attribute descriptions and prompt engineering. Check if fields are present but in an unusual format or location.              |
 
 ### Web UI Access Issues
 
-| Issue | Resolution |
-|-------|------------|
-| **Cannot login to Web UI** | Verify Cognito user status and permissions in AWS Console. Check email for temporary credentials if first-time login. |
-| **Web UI loads but shows errors** | Check browser console for specific error messages. Verify API endpoints are accessible. |
-| **Cannot see document history** | Verify AWS AppSync API permissions. Check CloudWatch Logs for API errors. |
-| **Configuration changes not saving** | Check browser console for validation errors. Verify that the configuration Lambda function has correct permissions. |
+| Issue                                | Resolution                                                                                                            |
+| ------------------------------------ | --------------------------------------------------------------------------------------------------------------------- |
+| **Cannot login to Web UI**           | Verify Cognito user status and permissions in AWS Console. Check email for temporary credentials if first-time login. |
+| **Web UI loads but shows errors**    | Check browser console for specific error messages. Verify API endpoints are accessible.                               |
+| **Cannot see document history**      | Verify AWS AppSync API permissions. Check CloudWatch Logs for API errors.                                             |
+| **Configuration changes not saving** | Check browser console for validation errors. Verify that the configuration Lambda function has correct permissions.   |
 
 ### Model and Service Issues
 
-| Issue | Resolution |
-|-------|------------|
-| **Bedrock model throttling** | Check CloudWatch metrics for throttling events. Consider increasing MaxConcurrentWorkflows parameter or requesting service quota increases. |
-| **SageMaker endpoint errors** | Verify endpoint status in SageMaker console. Check endpoint logs for specific error messages. |
-| **Slow document processing** | Monitor CloudWatch metrics to identify bottlenecks. Consider optimizing model selection or increasing concurrency limits. |
+| Issue                         | Resolution                                                                                                                                  |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Bedrock model throttling**  | Check CloudWatch metrics for throttling events. Consider increasing MaxConcurrentWorkflows parameter or requesting service quota increases. |
+| **SageMaker endpoint errors** | Verify endpoint status in SageMaker console. Check endpoint logs for specific error messages.                                               |
+| **Slow document processing**  | Monitor CloudWatch metrics to identify bottlenecks. Consider optimizing model selection or increasing concurrency limits.                   |
 
 ### Infrastructure Issues
 
-| Issue | Resolution |
-|-------|------------|
-| **Lambda function timeouts** | Increase function timeout or memory allocation. Consider breaking processing into smaller chunks. |
+| Issue                          | Resolution                                                                                                            |
+| ------------------------------ | --------------------------------------------------------------------------------------------------------------------- |
+| **Lambda function timeouts**   | Increase function timeout or memory allocation. Consider breaking processing into smaller chunks.                     |
 | **DynamoDB capacity exceeded** | Check CloudWatch metrics for throttling. Consider increasing provisioned capacity or switching to on-demand capacity. |
-| **S3 permission errors** | Verify bucket policies and IAM role permissions. Check for cross-account access issues. |
+| **S3 permission errors**       | Verify bucket policies and IAM role permissions. Check for cross-account access issues.                               |
 
 ### Agent Processing Issues
 
-| Issue | Resolution |
-|-------|------------|
+| Issue                                     | Resolution                                                                                                                                                                       |
+| ----------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Agent query shows "processing failed"** | Check CloudWatch logs for the Agent Processing Lambda function (`{StackName}-AgentProcessorFunction-*`). Look for specific error messages, timeout issues, or permission errors. |
-| **External MCP agent not appearing** | Verify the External MCP Agents secret is properly configured with valid JSON array format. Check CloudWatch logs for agent registration errors. |
-| **Agent responses are incomplete** | Check CloudWatch logs for token limits, model throttling, or timeout issues in the Agent Processing function. |
+| **External MCP agent not appearing**      | Verify the External MCP Agents secret is properly configured with valid JSON array format. Check CloudWatch logs for agent registration errors.                                  |
+| **Agent responses are incomplete**        | Check CloudWatch logs for token limits, model throttling, or timeout issues in the Agent Processing function.                                                                    |
 
 ## Performance Considerations
 
@@ -87,7 +89,6 @@ Optimize performance through proper resource sizing:
 - **Lambda Memory**: Scale based on document complexity
   - OCR Function: 1024-2048 MB recommended
   - Classification/Extraction: 512-1024 MB for text-only, 1024-2048 MB for image-based processing
-  
 - **Timeouts**: Configure appropriate timeouts
   - Step Functions: 5-15 minutes for standard documents
   - Lambda functions: 1-3 minutes for individual processing steps
@@ -144,7 +145,7 @@ for message in response.get('Messages', []):
         QueueUrl='main-queue-url',
         MessageBody=message['Body']
     )
-    
+
     # Delete from DLQ
     sqs.delete_message(
         QueueUrl='dlq-url',
@@ -239,32 +240,38 @@ Test system capacity and identify bottlenecks:
 
 ### Publishing Script Failures
 
-| Issue | Resolution |
-|-------|------------|
+| Issue                               | Resolution                                                                                               |
+| ----------------------------------- | -------------------------------------------------------------------------------------------------------- |
 | **Generic "Failed to build" error** | Use `--verbose` flag to see detailed error messages: `python3 publish.py bucket prefix region --verbose` |
-| **Python version mismatch** | Ensure Python 3.13 is installed and available in PATH. Check with `python3 --version` |
-| **SAM build fails** | Verify SAM CLI is installed and up to date. Check Docker is running if using containerized builds |
-| **Missing dependencies** | Install required packages: `pip install boto3 typer rich botocore` |
-| **Permission errors** | Verify AWS credentials are configured and have necessary S3/CloudFormation permissions |
+| **Python version mismatch**         | Ensure Python 3.13 is installed and available in PATH. Check with `python3 --version`                    |
+| **SAM build fails**                 | Verify SAM CLI is installed and up to date. Check Docker is running if using containerized builds        |
+| **Missing dependencies**            | Install required packages: `pip install boto3 typer rich botocore`                                       |
+| **Permission errors**               | Verify AWS credentials are configured and have necessary S3/CloudFormation permissions                   |
 
 ### Common Build Error Messages
 
 **Python Runtime Error:**
+
 ```
 Error: PythonPipBuilder:Validation - Binary validation failed for python, searched for python in following locations: [...] which did not satisfy constraints for runtime: python3.12
 ```
+
 **Resolution:** Install Python 3.13 and ensure it's in your PATH, or use the `--use-container` flag for containerized builds.
 
 **Docker Not Running:**
+
 ```
 Error: Running AWS SAM projects locally requires Docker
 ```
+
 **Resolution:** Start Docker daemon before running the publish script.
 
 **AWS Credentials Not Found:**
+
 ```
 Error: Unable to locate credentials
 ```
+
 **Resolution:** Configure AWS credentials using `aws configure` or set environment variables.
 
 ### Verbose Mode Usage
@@ -280,7 +287,23 @@ python3 publish.py my-bucket idp us-east-1 --verbose
 ```
 
 Verbose mode provides:
+
 - Exact SAM build commands being executed
 - Complete stdout/stderr from failed operations
 - Python environment and dependency information
 - Detailed error traces and stack traces
+
+### Container-Based Lambda Deployment Issues
+
+| Issue | Resolution |
+|-------|------------|
+| **Lambda package exceeds 250MB limit** | Pattern-2 uses container images automatically. For Pattern-1/3, consider reducing dependency size or switching to container images in a future update. |
+| **Docker daemon not running** | Start Docker Desktop or Docker service before running container deployment |
+| **ECR login failed** | Ensure AWS credentials have ECR permissions. The script will automatically handle ECR login |
+| **Container build fails** | Check Dockerfile syntax and ensure all referenced files exist |
+| **Image push timeout** | Check network connectivity and ECR repository permissions |
+
+**Container Deployment Behavior:**
+- Pattern-2 builds and pushes container images automatically when Pattern-2 changes are detected.
+- Ensure Docker Desktop/service is running and your AWS credentials have ECR permissions.
+- Use `--verbose` to see detailed build and push logs.

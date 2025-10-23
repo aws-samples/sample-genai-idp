@@ -175,7 +175,7 @@ def create_analytics_agent(
     WHERE CONTAINS("service_api", 'classification')
     
     -- ✅ CORRECT: Numeric validation with regex
-    WHERE REGEXP_LIKE("inference_result.amount", '^[0-9]+\.?[0-9]*$')
+    WHERE REGEXP_LIKE("inference_result.amount", '^[0-9]+\\.?[0-9]*$')
     
     -- ❌ WRONG: PostgreSQL regex operator
     WHERE "inference_result.amount" ~ '^[0-9.]+$'

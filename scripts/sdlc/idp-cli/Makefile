@@ -29,7 +29,9 @@ uninstall:
 	poetry run idpcli uninstall \
 	--stack-name=$(IDP_STACK_NAME) \
 	--account-id=$(IDP_ACCOUNT_ID) \
-	--cfn-prefix=$(IDP_CFN_PREFIX) \
+	--cfn-prefix=$(IDP_CFN_PREFIX)
+	# Clean up CloudWatch Logs resource policy after uninstall
+	cd $(IDP_CWD) && python3 scripts/cleanup-logs.py || echo "Log cleanup failed but continuing" \
 
 smoketest:
 	poetry run idpcli smoketest \
@@ -37,7 +39,9 @@ smoketest:
 
 wait:
 	$(eval VERSION_ID := $(shell cat $(IDP_CWD)/.upload_version_id 2>/dev/null || echo ""))
-	$(eval EXECUTION_ID := $(shell poetry run python -c "from idp_cli.util.codepipeline_util import CodePipelineUtil; print(CodePipelineUtil.get_execution_id_by_version('$(IDP_PIPELINE_NAME)', '$(VERSION_ID)'))"))
+	@if [ -z "$(VERSION_ID)" ]; then echo "Error: No version ID found"; exit 1; fi
+	$(eval EXECUTION_ID := $(shell poetry run python -c "from idp_cli.util.codepipeline_util import CodePipelineUtil; print(CodePipelineUtil.get_execution_id_by_version('$(IDP_PIPELINE_NAME)', '$(VERSION_ID)'))" || echo "FAILED"))
+	@if [ "$(EXECUTION_ID)" = "FAILED" ]; then echo "Error: Failed to find pipeline execution for version $(VERSION_ID)"; exit 1; fi
 	poetry run idpcli monitor-pipeline \
 	--pipeline-name=$(IDP_PIPELINE_NAME) \
 	--execution-id=$(EXECUTION_ID) \

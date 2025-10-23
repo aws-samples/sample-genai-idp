@@ -1,0 +1,99 @@
+# Git
+.git
+.gitignore
+.gitlab-ci.yml
+
+# AWS SAM build artifacts
+.aws-sam/
+**/.aws-sam/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+*.egg-info/
+dist/
+build/
+*.egg
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Documentation
+docs/
+*.md
+LICENSE
+NOTICE
+CONTRIBUTING.md
+CHANGELOG.md
+
+# Test files
+tests/
+**/tests/
+**/test_*.py
+**/*_test.py
+pytest.ini
+.coverage
+htmlcov/
+
+# Node (for UI components)
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# Temporary files
+*.log
+*.tmp
+*.temp
+.cache/
+tmp/
+temp/
+
+# Build scripts and configs
+samconfig*.toml
+template.yaml
+template-*.yaml
+Makefile
+publish.py
+publish_container*.py
+deploy*.py
+update_templates.py
+
+# Notebooks and samples
+notebooks/
+samples/
+
+# CloudFormation packaged templates
+**/*.packaged.yaml
+**/packaged.yaml
+
+# Docker files we don't need in context
+Dockerfile*
+docker-compose*.yml
+
+# Other unnecessary files for Lambda
+images/
+scripts/
+memory-bank/
+*.xlsx
+*.pdf
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.ico
+
+# Keep only source code and requirements
+!patterns/*/src/**
+!lib/idp_common_pkg/**
+!src/lambda/**

@@ -1,0 +1,8 @@
+# Sample CSV Manifest for IDP CLI
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: MIT-0
+
+document_path,document_id,type
+samples/lending_package.pdf,lending-001,s3-key
+samples/w2/w2-sample.pdf,w2-001,s3-key
+samples/bank-statement-multipage.pdf,bank-statement-001,s3-key

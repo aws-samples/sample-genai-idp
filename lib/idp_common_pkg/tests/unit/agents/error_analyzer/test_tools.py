@@ -69,3 +69,10 @@ class TestErrorAnalyzerTools:
             "idp_common.agents.error_analyzer.tools.general_analysis_tool"
         )
         assert spec is not None, "Failed to find general_analysis_tool module"
+
+    def test_stepfunction_tools(self):
+        """Test Step Function analysis tool can be imported."""
+        spec = importlib.util.find_spec(
+            "idp_common.agents.error_analyzer.tools.stepfunction_tools"
+        )
+        assert spec is not None, "Failed to find stepfunction_tools module"

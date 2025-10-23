@@ -4,24 +4,30 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["."]
-exclude = ["build", "build.*", "*build", "*build.*", "*.build", "*.build.*", "**build**"]
+exclude = [
+  "build",
+  "build.*",
+  "*build",
+  "*build.*",
+  "*.build",
+  "*.build.*",
+  "**build**",
+]
 
 [project]
 name = "idp_common"
 version = "0.3.13"
 description = "Common utilities for GenAI IDP Accelerator patterns"
-authors = [
-    {name = "AWS", email = "noreply@amazon.com"}
-]
+authors = [{ name = "AWS", email = "noreply@amazon.com" }]
 requires-python = ">=3.9,<3.14"
 dependencies = [
-    "boto3==1.39.7",  # Core dependency for AWS services
+  "boto3==1.39.7", # Core dependency for AWS services
 ]
 readme = "README.md"
 classifiers = [
-    "Programming Language :: Python :: 3",
-    "License :: OSI Approved :: MIT License",
-    "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
 ]
 
 # Optional dependencies for each component
@@ -31,106 +37,120 @@ core = []
 
 # Development only dependencies
 dev = [
-    "python-dotenv (>=1.1.0,<2.0.0)",
-    "ipykernel (>=6.29.5,<7.0.0)",
-    "jupyter (>=1.1.1,<2.0.0)",
+  "python-dotenv (>=1.1.0,<2.0.0)",
+  "ipykernel (>=6.29.5,<7.0.0)",
+  "jupyter (>=1.1.1,<2.0.0)",
 ]
 
 # Image handling dependencies
-image = [
-    "Pillow==11.2.1",
-]
+image = ["Pillow==11.2.1"]
 
 # OCR module dependencies
 ocr = [
-    "Pillow==11.2.1",
-    "PyMuPDF==1.25.5",
-    "amazon-textract-textractor[pandas]==1.9.2",
-    "numpy==1.26.4",
-    "pandas==2.2.3",
-    "openpyxl==3.1.5",
-    "python-docx==1.2.0",
+  "Pillow==11.2.1",
+  "PyMuPDF==1.25.5",
+  "amazon-textract-textractor[pandas]==1.9.2",
+  "numpy==1.26.4",
+  "pandas==2.2.3",
+  "openpyxl==3.1.5",
+  "python-docx==1.2.0",
 ]
 
 # Classification module dependencies
 classification = [
-    "Pillow==11.2.1",  # For image handling
+  "Pillow==11.2.1", # For image handling
 ]
 
 # Extraction module dependencies
 extraction = [
-    "Pillow==11.2.1",  # For image handling
+  "Pillow==11.2.1", # For image handling
 ]
 
 # Assessment module dependencies
 assessment = [
-    "Pillow==11.2.1",  # For image handling
+  "Pillow==11.2.1", # For image handling
 ]
 
 # Evaluation module dependencies
 evaluation = [
-    "munkres>=1.1.4",  # For Hungarian algorithm
-    "numpy==1.26.4",   # For numeric operations
+  "munkres>=1.1.4", # For Hungarian algorithm
+  "numpy==1.26.4",  # For numeric operations
 ]
 
 # Criteria validation module dependencies
 criteria_validation = [
-    "s3fs==2023.12.2",  # For S3 file system operations
+  "s3fs==2023.12.2", # For S3 file system operations
 ]
 
 # Reporting module dependencies
 reporting = [
-    "pyarrow==20.0.0",  # For Parquet conversion
+  "pyarrow==20.0.0", # For Parquet conversion
 ]
 
 # Appsync module dependencies
-appsync = [
-    "requests==2.32.4",
-]
+appsync = ["requests==2.32.4"]
 
 # Agents module dependencies
 agents = [
-    "strands-agents>=1.0.0",
-    "strands-agents-tools>=0.2.2",
-    "bedrock-agentcore>=0.1.1" # Specifically for the code interpreter tool
+  "strands-agents>=1.0.0; python_version>='3.10'",
+  "strands-agents-tools>=0.2.2; python_version>='3.10'",
+  "bedrock-agentcore>=0.1.1; python_version>='3.10'",    # Specifically for the code interpreter tool
 ]
 
 # Document service factory dependencies (includes both appsync and dynamodb support)
 # This includes all dependencies needed for both backends
 docs_service = [
-    "requests==2.32.4",  # Required for appsync module (dynamodb only needs boto3 which is core)
+  "requests==2.32.4", # Required for appsync module (dynamodb only needs boto3 which is core)
 ]
 
 # Testing dependencies
 test = [
-    "pytest>=7.4.0",
-    "pytest-cov>=4.1.0",
-    "pytest-xdist>=3.3.1",  # For parallel test execution
-    "requests (>=2.32.3,<3.0.0)",
-    "pyarrow==20.0.0",
-    "PyYAML==6.0.2",
-    "openpyxl==3.1.5",
-    "python-docx==1.2.0",
-    "moto[s3]==5.1.8",  # For mocking AWS services in tests
-    "Pillow==11.2.1",  # Required for image processing in assessment tests
-    # "s3fs==2023.12.2",  # Required for criteria validation tests - disabled till we fix package dependencies
+  "pytest>=7.4.0",
+  "pytest-cov>=4.1.0",
+  "pytest-xdist>=3.3.1",            # For parallel test execution
+  "requests (>=2.32.3,<3.0.0)",
+  "pyarrow==20.0.0",
+  "PyYAML==6.0.2",
+  "openpyxl==3.1.5",
+  "python-docx==1.2.0",
+  "moto[s3]==5.1.8",                # For mocking AWS services in tests
+  "Pillow==11.2.1",                 # Required for image processing in assessment tests
+  "rich>=13.0.0",                   # Required for publish tests
+  "idp_common[agentic-extraction]", # Required for agentic_idp tests
+  # "s3fs==2023.12.2",  # Required for criteria validation tests - disabled till we fix package dependencies
+  "moto>=5.1.8",
+  "pytest-asyncio>=1.1.0",
+  "typer>=0.19.2",
+  "ruff>=0.14.0",
 ]
 
 # Full package with all dependencies
 all = [
-    "Pillow==11.2.1",
-    "PyMuPDF==1.25.5",
-    "amazon-textract-textractor[pandas]==1.9.2",
-    "munkres>=1.1.4",
-    "numpy==1.26.4",
-    "pandas==2.2.3",
-    "requests==2.32.4",
-    "pyarrow==20.0.0",
-    "openpyxl==3.1.5",
-    "python-docx==1.2.0",
-    "strands-agents>=1.0.0",
-    # "s3fs==2023.12.2" - - disabled till we fix package dependencies
+  "Pillow==11.2.1",
+  "PyMuPDF==1.25.5",
+  "amazon-textract-textractor[pandas]==1.9.2",
+  "munkres>=1.1.4",
+  "numpy==1.26.4",
+  "pandas==2.2.3",
+  "requests==2.32.4",
+  "pyarrow==20.0.0",
+  "openpyxl==3.1.5",
+  "python-docx==1.2.0",
+  "strands-agents>=1.0.0; python_version>='3.10'",
+  "strands-agents-tools>=0.2.2; python_version>='3.10'",
+  "bedrock-agentcore>=0.1.1; python_version>='3.10'",
+  # "s3fs==2023.12.2" - - disabled till we fix package dependencies
+]
+agentic-extraction = [
+  "jsonpatch==1.33",
+  "strands-agents>=1.7.1 ; python_full_version >= '3.10'",
+  "pandas>=2.2.3",
+  "pymupdf>=1.25.5",
+  "tabulate>=0.9.0",
+  "aws-lambda-powertools>=3.2.0",                          # Structured logging and observability
 ]
 
 [project.urls]
 "Homepage" = "https://github.com/aws-samples/sample-genai-idp"
+
+[dependency-groups]

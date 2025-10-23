@@ -10,6 +10,7 @@ The GenAI IDP Accelerator now supports deployment to AWS GovCloud regions throug
 ## Architecture Differences
 
 ### Standard AWS Deployment
+
 ```mermaid
 graph TB
     A[Users] --> B[CloudFront Distribution]
@@ -22,6 +23,7 @@ graph TB
 ```
 
 ### GovCloud Deployment
+
 ```mermaid
 graph TB
     A[Direct S3 Upload] --> F[Core Processing Engine]
@@ -42,7 +44,7 @@ You need to have the following packages installed on your computer:
 3. [sam (AWS SAM)](https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/install-sam-cli.html)
 4. python 3.11 or later
 5. A local Docker daemon
-6. Python packages for publish.py: `pip install boto3 rich PyYAML botocore setuptools`
+6. Python packages for publish.py: `pip install boto3 rich PyYAML botocore setuptools docker`
 
 ### Step 1: Generate GovCloud Template
 
@@ -75,45 +77,51 @@ aws cloudformation deploy \
 The following services are automatically removed from the GovCloud template:
 
 ### Web UI Components (22 resources removed)
+
 - CloudFront distribution and origin access identity
 - WebUI S3 bucket and build pipeline
 - CodeBuild project for UI deployment
 - Security headers policy
 
 ### API Layer (20+ resources removed)
+
 - AppSync GraphQL API and schema
 - All GraphQL resolvers and data sources
 - 10+ Lambda resolver functions
 - API authentication and authorization
 
 ### Authentication (8 resources removed)
+
 - Cognito User Pool and Identity Pool
 - User pool client and domain
 - Admin user and group management
 - Email verification functions
 
 ### WAF Security (6 resources removed)
+
 - WAF WebACL and IP sets
 - IP set updater functions
 - CloudFront protection rules
 
 ### Analytics Features (8 resources removed)
+
 - Analytics processing functions
 - Knowledge base query functions
 - Chat with document features
 - Text-to-SQL query capabilities
 
 ### HITL Support
+
 - SageMaker A2I Human-in-the-Loop
 - Private workforce configuration
 - Human review workflows
-
 
 ## Core Services Retained
 
 The following essential services remain available:
 
 ### Document Processing
+
 - ✅ All 3 processing patterns (BDA, Textract+Bedrock, Textract+SageMaker+Bedrock)
 - ✅ Complete 6-step pipeline (OCR, Classification, Extraction, Assessment, Summarization, Evaluation)
 - ✅ Step Functions workflows
@@ -121,30 +129,33 @@ The following essential services remain available:
 - ✅ Custom prompt Lambda integration
 
 ### Storage & Data
+
 - ✅ S3 buckets (Input, Output, Working, Configuration, Logging)
 - ✅ DynamoDB tables (Tracking, Configuration, Concurrency)
 - ✅ Data encryption with customer-managed KMS keys
 - ✅ Lifecycle policies and data retention
 
 ### Monitoring & Operations
+
 - ✅ CloudWatch dashboards and metrics
 - ✅ CloudWatch alarms and SNS notifications
 - ✅ Lambda function logging and tracing
 - ✅ Step Functions execution logging
 
 ### Integration
+
 - ✅ SQS queues for document processing
 - ✅ EventBridge rules for workflow orchestration
 - ✅ Post-processing Lambda hooks
 - ✅ Evaluation and reporting systems
-
 
 ## Access Methods
 
 Without the web UI, you can interact with the system through:
 
 ### 1. Direct S3 Upload
-```bash
+
+````bash
 # Upload documents directly to input bucket
 aws s3 cp my-document.pdf s3://InputBucket/my-document.pdf
 
@@ -154,26 +165,30 @@ Using the lookup script
 ```bash
 # Use the lookup script to check document status
 ./scripts/lookup_file_status.sh documents/my-document.pdf MyStack
-```
+````
 
 Or navigate to the AWS Step Functions workflow using the link in the stack Outputs tab in CloudFormation, to visually monitor workflow progress.
-
 
 ## Monitoring & Troubleshooting
 
 ### CloudWatch Dashboards
+
 Access monitoring through CloudWatch console:
+
 - Navigate to CloudWatch → Dashboards
 - Find dashboard: `{StackName}-{Region}`
 - View processing metrics, error rates, and performance
 
 ### CloudWatch Logs
+
 Monitor processing through log groups:
+
 - `/aws/lambda/{StackName}-*` - Lambda function logs
 - `/aws/vendedlogs/states/{StackName}/workflow` - Step Functions logs
 - `/{StackName}/lambda/*` - Pattern-specific logs
 
 ### Alarms and Notifications
+
 - SNS topic receives alerts for errors and performance issues
 - Configure email subscriptions to the AlertsTopic
 
@@ -182,6 +197,7 @@ Monitor processing through log groups:
 The following features are not available:
 
 ### ❌ Removed Features
+
 - Web-based user interface
 - Real-time document status updates via websockets
 - Interactive configuration management
@@ -192,6 +208,7 @@ The following features are not available:
 - Document knowledge base chat interface
 
 ### ✅ Available Workarounds
+
 - Use S3 direct upload instead of web UI
 - Monitor through CloudWatch instead of real-time UI
 - Edit configuration files in S3 directly
@@ -204,18 +221,21 @@ The following features are not available:
 ## Best Practices
 
 ### Security
+
 1. **IAM Roles**: Use least-privilege IAM roles
 2. **Encryption**: Enable encryption at rest and in transit
 3. **Network**: Deploy in private subnets if required
 4. **Access Control**: Implement custom authentication as needed
 
 ### Operations
+
 1. **Monitoring**: Set up CloudWatch alarms for critical metrics
 2. **Logging**: Configure appropriate log retention policies
 3. **Backup**: Implement backup strategies for important data
 4. **Updates**: Plan for template updates and maintenance
 
 ### Performance
+
 1. **Concurrency**: Adjust `MaxConcurrentWorkflows` based on load
 2. **Timeouts**: Configure appropriate timeout values
 3. **Memory**: Optimize Lambda memory settings
@@ -226,11 +246,13 @@ The following features are not available:
 ### Common Issues
 
 **Missing Dependencies**
+
 - Ensure all Bedrock models are enabled in the region
 - Verify IAM permissions for service roles
 - Check S3 bucket policies and access
 
 **Processing Failures**
+
 - Check CloudWatch logs for detailed error messages
 - Verify document formats are supported
 - Confirm configuration settings are valid
@@ -254,6 +276,7 @@ If migrating an existing deployment:
 ## Cost Considerations
 
 GovCloud pricing may differ from commercial regions:
+
 - Review [GovCloud Pricing](https://aws.amazon.com/govcloud-us/pricing/)
 - Update cost estimates in configuration files
 - Monitor actual usage through billing dashboards
@@ -261,6 +284,6 @@ GovCloud pricing may differ from commercial regions:
 ## Compliance Notes
 
 - The GovCloud version maintains the same security features
-- Data encryption and retention policies are preserved  
+- Data encryption and retention policies are preserved
 - All processing remains within GovCloud boundaries
 - No data egress to commercial AWS regions

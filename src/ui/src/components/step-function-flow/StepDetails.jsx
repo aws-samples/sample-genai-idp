@@ -54,10 +54,31 @@ JsonDisplay.defaultProps = {
   data: null,
 };
 
-const StepDetails = ({ step, formatDuration, getStepIcon }) => {
+// Helper function to check if a step is disabled based on configuration
+const isStepDisabled = (stepName, config) => {
+  if (!config) return false;
+
+  const stepNameLower = stepName.toLowerCase();
+
+  // Check if this is a summarization step
+  if (stepNameLower.includes('summarization') || stepNameLower.includes('summary')) {
+    return config.summarization?.enabled === false;
+  }
+
+  // Check if this is an assessment step
+  if (stepNameLower.includes('assessment') || stepNameLower.includes('assess')) {
+    return config.assessment?.enabled === false;
+  }
+
+  return false;
+};
+
+const StepDetails = ({ step, formatDuration, getStepIcon, mergedConfig }) => {
   const [inputExpanded, setInputExpanded] = useState(false);
   const [outputExpanded, setOutputExpanded] = useState(false);
   const [errorExpanded, setErrorExpanded] = useState(true); // Default to expanded for errors
+
+  const stepDisabled = isStepDisabled(step.name, mergedConfig);
 
   const formatJson = (jsonString) => {
     if (!jsonString) return '';
@@ -102,6 +123,15 @@ const StepDetails = ({ step, formatDuration, getStepIcon }) => {
             </div>
           </SpaceBetween>
         </Box>
+
+        {/* Configuration Disabled Notice */}
+        {stepDisabled && (
+          <Alert type="info" header="Step Disabled in Configuration">
+            This step was disabled in the configuration (<strong>enabled: false</strong>) and performed no processing.
+            While the step function executed this step, the Lambda function detected the disabled state and skipped all
+            processing logic.
+          </Alert>
+        )}
 
         {/* Step Metadata */}
         <div className="step-metadata">
@@ -268,6 +298,18 @@ StepDetails.propTypes = {
   }).isRequired,
   formatDuration: PropTypes.func.isRequired,
   getStepIcon: PropTypes.func.isRequired,
+  mergedConfig: PropTypes.shape({
+    summarization: PropTypes.shape({
+      enabled: PropTypes.bool,
+    }),
+    assessment: PropTypes.shape({
+      enabled: PropTypes.bool,
+    }),
+  }),
+};
+
+StepDetails.defaultProps = {
+  mergedConfig: null,
 };
 
 export default StepDetails;

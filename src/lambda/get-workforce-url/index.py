@@ -1,48 +1,14 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: MIT-0
 import boto3
+import cfnresponse
 import json
 import logging
 import os
-import urllib.request
 import time
 
 logger = logging.getLogger()
 logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
-
-def send_cfn_response(event, context, response_status, response_data, physical_resource_id=None):
-    """Send response to CloudFormation custom resource request"""
-    response_url = event['ResponseURL']
-    
-    response_body = {
-        'Status': response_status,
-        'Reason': f'See the details in CloudWatch Log Stream: {context.log_stream_name}',
-        'PhysicalResourceId': physical_resource_id or context.log_stream_name,
-        'StackId': event['StackId'],
-        'RequestId': event['RequestId'],
-        'LogicalResourceId': event['LogicalResourceId'],
-        'Data': response_data
-    }
-    
-    json_response_body = json.dumps(response_body)
-    headers = {
-        'content-type': '',
-        'content-length': str(len(json_response_body))
-    }
-    
-    try:
-        req = urllib.request.Request(
-            response_url,
-            data=json_response_body.encode('utf-8'),
-            headers=headers,
-            method='PUT'
-        )
-        response = urllib.request.urlopen(req)
-        logger.info(f"Status code: {response.getcode()}")
-        return True
-    except Exception as e:
-        logger.error(f"Error sending CloudFormation response: {str(e)}")
-        return False
 
 def handler(event, context):
     """
@@ -50,14 +16,15 @@ def handler(event, context):
     """
     logger.info(f"Received event: {json.dumps(event)}")
     
-    # Initialize response data
+    # Initialize physical resource ID for CloudFormation
+    physical_resource_id = f"WorkforceURL-{event.get('LogicalResourceId', 'unknown')}"
     response_data = {}
     
     try:
         # For Delete requests, just return success
         if event['RequestType'] == 'Delete':
             logger.info("Delete request - no action needed")
-            send_cfn_response(event, context, 'SUCCESS', response_data)
+            cfnresponse.send(event, context, cfnresponse.SUCCESS, response_data, physical_resource_id)
             return
         
         # Get the workteam name from the event
@@ -90,7 +57,7 @@ def handler(event, context):
                     response_data['ConsoleURL'] = f"https://{os.environ.get('REGION', 'us-east-1')}.console.aws.amazon.com/sagemaker/groundtruth?region={os.environ.get('REGION', 'us-east-1')}#/labeling-workforces/private"
                     
                     # Send success response
-                    send_cfn_response(event, context, 'SUCCESS', response_data)
+                    cfnresponse.send(event, context, cfnresponse.SUCCESS, response_data, physical_resource_id)
                     return
                 else:
                     logger.warning("No SubDomain found in workteam response")
@@ -117,9 +84,14 @@ def handler(event, context):
                     raise
         
         # If we get here, we've exhausted retries
-        send_cfn_response(event, context, 'SUCCESS', response_data)
+        cfnresponse.send(event, context, cfnresponse.SUCCESS, response_data, physical_resource_id)
+        
+    except KeyError as e:
+        error_msg = f"Missing required property: {str(e)}"
+        logger.error(error_msg)
+        cfnresponse.send(event, context, cfnresponse.FAILED, {'Error': error_msg}, physical_resource_id, reason=error_msg)
         
     except Exception as e:
-        logger.error(f"Error: {str(e)}")
-        response_data['Error'] = str(e)
-        send_cfn_response(event, context, 'FAILED', response_data)
+        error_msg = f"Unexpected error: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        cfnresponse.send(event, context, cfnresponse.FAILED, {'Error': error_msg}, physical_resource_id, reason=error_msg)

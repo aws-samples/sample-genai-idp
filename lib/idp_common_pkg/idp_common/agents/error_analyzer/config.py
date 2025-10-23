@@ -15,92 +15,64 @@ logger = logging.getLogger(__name__)
 
 def get_error_analyzer_config(pattern_config: Dict[str, Any] = None) -> Dict[str, Any]:
     """
-    Get error analyzer configuration from pattern config or DynamoDB.
-    Args:
-        pattern_config: Optional pattern configuration containing agents section
+    Builds complete error analyzer configuration from environment and patterns.
+    Get error analyzer configuration with defaults and overrides.
+
     Returns:
-        Dict containing error analyzer configuration values
-    Raises:
-        ValueError: If required configuration is missing
+        Dict containing complete error analyzer configuration
     """
-    # Get base environment configuration
-    required_keys = ["CLOUDWATCH_LOG_GROUP_PREFIX", "AWS_STACK_NAME"]
-    config = get_environment_config(required_keys)
     from ... import get_config
 
-    # Call get_config() to load merged configuration
+    # Start with base environment and context limits
+    config = get_environment_config(["CLOUDWATCH_LOG_GROUP_PREFIX", "AWS_STACK_NAME"])
+    config.update(get_context_limits())
+
+    # Load and apply agent configuration
     full_config = get_config()
-    logger.info(f"get_config() returned type: {type(full_config)}")
-    logger.info(
-        f"get_config() keys: {list(full_config.keys()) if full_config else 'None'}"
+    agent_config = full_config.get("agents", {}).get("error_analyzer", {})
+
+    if not agent_config:
+        raise ValueError("error_analyzer configuration not found")
+
+    # Apply agent settings with defaults
+    config.update(
+        {
+            "model_id": agent_config.get(
+                "model_id", "anthropic.claude-3-sonnet-20240229-v1:0"
+            ),
+            "system_prompt": agent_config.get("system_prompt"),
+            "error_patterns": get_default_error_patterns(),
+            "aws_capabilities": get_aws_service_capabilities(),
+        }
     )
 
-    # Extract error analyzer configuration
-    if (
-        full_config
-        and "agents" in full_config
-        and "error_analyzer" in full_config["agents"]
-    ):
-        agent_config = full_config["agents"]["error_analyzer"]
-        logger.info("Found error_analyzer configuration")
+    # Apply parameters with type conversion
+    params = agent_config.get("parameters", {})
+    config["max_log_events"] = safe_int_conversion(params.get("max_log_events"), 5)
+    config["time_range_hours_default"] = safe_int_conversion(
+        params.get("time_range_hours_default"), 24
+    )
 
-        # Apply agent configuration
-        config["model_id"] = agent_config.get(
-            "model_id", "anthropic.claude-3-sonnet-20240229-v1:0"
-        )
-        config["system_prompt"] = agent_config.get("system_prompt")
-
-        # Load parameters with proper type conversion
-        if "parameters" in agent_config:
-            params = agent_config["parameters"]
-            config["max_log_events"] = int(float(params.get("max_log_events", 5)))
-            config["time_range_hours_default"] = int(
-                float(params.get("time_range_hours_default", 24))
-            )
-        else:
-            config["max_log_events"] = 5
-            config["time_range_hours_default"] = 24
-    else:
-        logger.info("No error_analyzer configuration found in agents section")
-        raise ValueError(
-            "error_analyzer configuration not found in pattern configuration"
+    # Apply UI overrides for context limits - UI config takes precedence
+    if pattern_config and "max_log_events" in pattern_config:
+        config["max_log_events"] = safe_int_conversion(
+            pattern_config["max_log_events"], config["max_log_events"]
         )
 
-    # Add error analyzer specific defaults
-    config["error_patterns"] = get_default_error_patterns()
-    config["aws_capabilities"] = get_aws_service_capabilities()
+    # Validate required fields
+    if not config.get("system_prompt"):
+        raise ValueError("system_prompt is required")
 
-    # Configure logging
     configure_logging(
         log_level=config.get("log_level"),
         strands_log_level=config.get("strands_log_level"),
     )
 
-    # Validate required fields
-    if not config.get("system_prompt"):
-        logger.error("system_prompt is missing from error_analyzer configuration")
-        raise ValueError("system_prompt is required in error_analyzer configuration")
-
-    if not config.get("model_id"):
-        logger.error("model_id is missing from error_analyzer configuration")
-        raise ValueError("model_id is required in error_analyzer configuration")
-
-    logger.info(f"Model: {config['model_id']}")
-    logger.info(f"Max log events: {config['max_log_events']}")
-    logger.info(f"Default time range: {config['time_range_hours_default']}")
-    logger.info(f"System prompt length: {len(config['system_prompt'])} characters")
-    logger.info(f"System prompt preview: {config['system_prompt'][:100]}...")
-
     return config
 
 
 def get_default_error_patterns() -> List[str]:
-    """
-    Get default error patterns to search for in logs.
-
-    Returns:
-        List of error patterns to match against
-    """
+    """Returns standard error patterns for CloudWatch log filtering."""
     return [
         "ERROR",
         "CRITICAL",
@@ -111,42 +83,92 @@ def get_default_error_patterns() -> List[str]:
         "Timeout",
         "AccessDenied",
         "ThrottlingException",
-        "ServiceException",
     ]
 
 
-def get_aws_service_capabilities() -> Dict[str, Any]:
-    """
-    Get AWS service capabilities available through direct SDK integration.
+def get_context_limits() -> Dict[str, int]:
+    """Returns default resource and context size constraints."""
+    return {
+        "max_log_events": 5,
+        "max_log_message_length": 400,
+        "max_events_per_log_group": 5,
+        "max_log_groups": 20,
+        "max_stepfunction_timeline_events": 3,
+        "max_stepfunction_error_length": 200,
+        "time_range_hours_default": 24,
+    }
 
-    Returns:
-        Dict containing AWS service capabilities and tools
-    """
+
+def get_aws_service_capabilities() -> Dict[str, Any]:
+    """Returns AWS service integration metadata and descriptions."""
     return {
         "cloudwatch_logs": {
-            "description": "Direct CloudWatch Logs integration",
-            "implementation": "boto3.client('logs')",
+            "description": "CloudWatch Logs integration for error analysis",
             "capabilities": [
                 "search_log_events",
                 "get_log_groups",
-                "get_log_streams",
                 "filter_log_events",
             ],
+            "implementation": "Native AWS SDK integration",
         },
         "dynamodb": {
-            "description": "Direct DynamoDB integration",
-            "implementation": "boto3.resource('dynamodb')",
-            "capabilities": [
-                "scan_table",
-                "query_table",
-                "get_item",
-                "describe_table",
-            ],
+            "description": "DynamoDB integration for document tracking",
+            "capabilities": ["scan_table", "query_table", "get_item"],
+            "implementation": "Native AWS SDK integration",
         },
         "benefits": [
-            "No external server dependencies",
+            "No external dependencies",
             "Native Lambda integration",
             "Optimal performance",
-            "Automatic AWS credential handling",
         ],
     }
+
+
+# Utility functions
+def decimal_to_float(obj: Any) -> Any:
+    """Recursively converts DynamoDB Decimal objects to JSON-compatible floats."""
+    if hasattr(obj, "__class__") and obj.__class__.__name__ == "Decimal":
+        return float(obj)
+    elif isinstance(obj, dict):
+        return {k: decimal_to_float(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [decimal_to_float(v) for v in obj]
+    return obj
+
+
+def create_error_response(error: str, **kwargs) -> Dict[str, Any]:
+    """Creates standardized error response with consistent format."""
+    response = {"error": str(error), "success": False}
+    response.update(kwargs)
+    return response
+
+
+def create_success_response(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Creates standardized success response with consistent format."""
+    response = {"success": True}
+    response.update(data)
+    return response
+
+
+def safe_int_conversion(value: Any, default: int = 0) -> int:
+    """Safely converts values to integers with fallback handling."""
+    try:
+        return int(float(value)) if value is not None else default
+    except (ValueError, TypeError):
+        return default
+
+
+def truncate_message(message: str, max_length: int = 200) -> str:
+    """Truncates messages to specified length with ellipsis indicator."""
+    if len(message) <= max_length:
+        return message
+    return message[:max_length] + "... [truncated]"
+
+
+def get_config_with_fallback() -> Dict[str, Any]:
+    """Gets error analyzer config with graceful fallback to defaults."""
+    try:
+        return get_error_analyzer_config()
+    except Exception as e:
+        logger.warning(f"Failed to load config, using defaults: {e}")
+        return get_context_limits()

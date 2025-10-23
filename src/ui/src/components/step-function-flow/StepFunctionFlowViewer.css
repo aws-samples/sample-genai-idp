@@ -176,6 +176,42 @@
   color: #6c757d;
 }
 
+/* Disabled step styling */
+.timeline-step.step-disabled {
+  opacity: 0.5;
+  border-style: dashed;
+  border-color: #dee2e6;
+  background-color: #f8f9fa;
+}
+
+.timeline-step.step-disabled:hover {
+  border-color: #adb5bd;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
+.timeline-step.step-disabled .timeline-step-icon {
+  background-color: #e9ecef;
+  opacity: 0.7;
+}
+
+.timeline-step.step-disabled .timeline-step-name {
+  color: #6c757d;
+}
+
+.timeline-step.step-disabled .step-icon {
+  opacity: 0.6;
+  filter: grayscale(50%);
+}
+
+.timeline-step.step-disabled .timeline-step-status {
+  background-color: #e9ecef;
+  color: #6c757d;
+}
+
+.timeline-step.step-disabled .timeline-step-meta {
+  color: #adb5bd;
+}
+
 @keyframes pulse {
   0% {
     opacity: 1;

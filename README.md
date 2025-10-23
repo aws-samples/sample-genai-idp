@@ -3,6 +3,8 @@
 Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 SPDX-License-Identifier: MIT-0
 
+**Questions?** [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws)
+
 ## Table of Contents
 
 - [Introduction](#introduction)
@@ -31,6 +33,7 @@ White-glove customization, deployment, and integration support for production us
 
 - **Serverless Architecture**: Built entirely on AWS serverless technologies including Lambda, Step Functions, SQS, and DynamoDB
 - **Modular, pluggable patterns**: Pre-built processing patterns using state-of-the-art models and AWS services
+- **Command Line Interface**: Programmatic batch processing with evaluation framework and analytics integration
 - **Advanced Classification**: Support for page-level and holistic document packet classification
 - **Few Shot Example Support**: Improve accuracy through example-based prompting
 - **Custom Business Logic Integration**: Inject custom prompt generation logic via Lambda functions for specialized document processing
@@ -73,23 +76,50 @@ To quickly deploy the GenAI-IDP solution in your AWS account:
 
 ### Processing Your First Document
 
-After deployment, you can quickly process a document and view results:
+After deployment, choose the processing method that fits your use case:
 
-1. **Upload a Document**:
-   - **Via Web UI**: Open the Web UI URL from the CloudFormation stack's Outputs tab, log in, and click "Upload Document"
-   - **Via S3**: Upload directly to the S3 input bucket (find the bucket URL in CloudFormation stack Outputs)
+#### Method 1: Web UI (Interactive)
 
-2. **Use Sample Documents**:
-   - For Patterns 1 (BDA) and Pattern 2: Use [samples/lending_package.pdf](./samples/lending_package.pdf)
-   - For Pattern 3 (UDOP): Use [samples/rvl_cdip_package.pdf](./samples/rvl_cdip_package.pdf)
+1. Open the Web UI URL from CloudFormation stack Outputs
+2. Log in and click "Upload Document"
+3. Upload a sample document:
+   - For Patterns 1 & 2: [samples/lending_package.pdf](./samples/lending_package.pdf)
+   - For Pattern 3: [samples/rvl_cdip_package.pdf](./samples/rvl_cdip_package.pdf)
+4. Monitor processing and view results in the dashboard
 
-3. **Monitor Processing**:
-   - **Via Web UI**: Track document status on the dashboard
-   - **Via Step Functions**: Open the StateMachine URL from CloudFormation stack Outputs to observe workflow execution
+#### Method 2: Direct S3 Upload (Simple)
 
-4. **View Results**:
-   - **Via Web UI**: Access processing results through the document details page
-   - **Via S3**: Check the output bucket for structured JSON files with extracted data
+1. Upload to the InputBucket (URL in CloudFormation Outputs)
+2. Monitor via Step Functions console
+3. Results appear in OutputBucket automatically
+
+#### Method 3: IDP CLI (Batch/Programmatic)
+
+For batch processing, automation, or evaluation workflows:
+
+```bash
+# Install CLI
+cd idp_cli && pip install -e .
+
+# Process documents
+idp-cli run-inference \
+    --stack-name <your-stack-name> \
+    --dir ./samples/ \
+    --monitor
+
+# Download results
+idp-cli download-results \
+    --stack-name <your-stack-name> \
+    --batch-id <batch-id> \
+    --output-dir ./results/
+```
+
+**See [IDP CLI Documentation](./idp_cli/README.md)** for:
+- CLI-based stack deployment and updates
+- Batch document processing
+- Complete evaluation workflows with baselines
+- Athena and Agent Analytics integration
+- CI/CD integration examples
 
 See the [Deployment Guide](./docs/deployment.md#testing-the-solution) for more detailed testing instructions.
 
@@ -124,6 +154,7 @@ For detailed deployment and testing instructions, see the [Deployment Guide](./d
 
 - [Architecture](./docs/architecture.md) - Detailed component architecture and data flow
 - [Deployment](./docs/deployment.md) - Build, publish, deploy, and test instructions
+- [IDP CLI](./idp_cli/README.md) - Command line interface for batch processing and evaluation workflows
 - [Web UI](./docs/web-ui.md) - Web interface features and usage
 - [Agent Analysis](./docs/agent-analysis.md) - Natural language analytics and data visualization feature
 - [Custom MCP Agent](./docs/custom-MCP-agent.md) - Integrating external MCP servers for custom tools and capabilities

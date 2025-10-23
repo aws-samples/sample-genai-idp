@@ -1,0 +1,23 @@
+{
+  "documents": [
+    {
+      "document_id": "lending-001",
+      "path": "samples/lending_package.pdf",
+      "type": "s3-key"
+    },
+    {
+      "document_id": "w2-001",
+      "path": "samples/w2/w2-sample.pdf",
+      "type": "s3-key"
+    },
+    {
+      "document_id": "bank-statement-001",
+      "path": "samples/bank-statement-multipage.pdf",
+      "type": "s3-key"
+    }
+  ],
+  "config": {
+    "pattern": "pattern-2",
+    "output_prefix": "cli-batch-example"
+  }
+}

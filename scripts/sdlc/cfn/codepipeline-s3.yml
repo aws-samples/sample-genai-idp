@@ -13,7 +13,7 @@ Parameters:
   BucketName:
     Type: String
     Description: 'Name of the S3 bucket containing the deployment assets'
-    Default: idp-sdlc-sourcecode-YOUR_AWS_ACCOUNT-YOUR_REGION
+    Default: !Sub 'idp-sdlc-sourcecode-${AWS::AccountId}-${AWS::Region}'
   
   FileKey:
     Type: String
@@ -137,7 +137,7 @@ Resources:
         Type: CODEPIPELINE
       Environment:
         Type: LINUX_CONTAINER
-        ComputeType: BUILD_GENERAL1_SMALL
+        ComputeType: BUILD_GENERAL1_LARGE
         Image: aws/codebuild/standard:7.0
       Source:
         Type: CODEPIPELINE
@@ -159,8 +159,7 @@ Resources:
                 - export IDP_CFN_PREFIX=$(make cfn-prefix) || { echo "CFN prefix generation failed"; exit 1; }
                 - make install -e IDP_CFN_PREFIX=$IDP_CFN_PREFIX
                 - make smoketest -e IDP_CFN_PREFIX=$IDP_CFN_PREFIX
-              finally:
-                - echo "Running cleanup regardless of build result..."
+                - echo "All tests passed successfully, running cleanup..."
                 - make uninstall -e IDP_CFN_PREFIX=$IDP_CFN_PREFIX || echo "Cleanup failed but continuing"
 
   DeploymentPipeline:
