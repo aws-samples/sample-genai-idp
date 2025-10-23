@@ -115,7 +115,7 @@ class ConfigurationManager:
             # Handle empty configuration case
             if not custom_config:
                 # For empty config, just store the Configuration key with no other attributes
-                response = self.table.put_item(
+                self.table.put_item(
                     Item={
                         'Configuration': 'Custom'
                     }
