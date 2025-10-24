@@ -39,7 +39,7 @@ def __getattr__(name):
         return config.get_config
 
     # Special handling for directly exposed classes
-    if name in ["Document", "Page", "Section", "Status"]:
+    if name in ["Document", "Page", "Section", "Status", "extract_user_id_from_object_key"]:
         models = __getattr__("models")
         return getattr(models, name)
 
@@ -69,4 +69,5 @@ __all__ = [
     "Page",
     "Section",
     "Status",
+    "extract_user_id_from_object_key",
 ]

@@ -9,10 +9,51 @@ as it moves through the processing pipeline.
 """
 
 import json
+import logging
+import re
 import time
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional
+
+logger = logging.getLogger(__name__)
+
+
+def extract_user_id_from_object_key(object_key: str) -> Optional[str]:
+    """
+    Extract user ID from S3 object key if it follows the user-scoped pattern.
+    Expected format: users/<user_id>/filename.ext
+
+    Args:
+        object_key: S3 object key
+
+    Returns:
+        str: User ID if found, None otherwise
+    """
+    if not object_key or not object_key.startswith("users/"):
+        return None
+
+    # Split path and extract user ID
+    parts = object_key.split("/")
+    if len(parts) < 3:
+        logger.warning(
+            f"Object key has 'users/' prefix but invalid structure: {object_key}"
+        )
+        return None
+
+    user_id = parts[1]
+
+    if not user_id:
+        logger.warning(f"User ID is empty in path: {object_key}")
+        return None
+
+    # Validate UUID format
+    uuid_pattern = r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    if not re.match(uuid_pattern, user_id, re.IGNORECASE):
+        logger.warning(f"Extracted user_id doesn't match UUID pattern: {user_id}")
+
+    logger.debug(f"Extracted user_id: {user_id} from object_key: {object_key}")
+    return user_id
 
 
 class Status(Enum):
@@ -274,12 +315,17 @@ class Document:
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "Document":
         """Create a Document from a dictionary representation."""
+        # Extract user_id from data or from input_key if not present
+        user_id = data.get("user_id")
+        if not user_id and data.get("input_key"):
+            user_id = extract_user_id_from_object_key(data.get("input_key"))
+        
         document = cls(
             id=data.get("id", data.get("input_key")),
             input_bucket=data.get("input_bucket"),
             input_key=data.get("input_key"),
             output_bucket=data.get("output_bucket"),
-            user_id=data.get("user_id"),
+            user_id=user_id,
             num_pages=int(data.get("num_pages", 0)),  # Ensure num_pages is integer
             initial_event_time=data.get("initial_event_time"),
             queued_time=data.get("queued_time"),
@@ -348,11 +394,15 @@ class Document:
         input_key = event.get("detail", {}).get("object", {}).get("key", "")
         initial_event_time = event.get("time", "")
 
+        # Extract user_id from input_key if it follows the user-scoped pattern
+        user_id = extract_user_id_from_object_key(input_key)
+
         return cls(
             id=input_key,
             input_bucket=input_bucket,
             input_key=input_key,
             output_bucket=output_bucket,
+            user_id=user_id,
             initial_event_time=initial_event_time,
             status=Status.QUEUED,
         )
