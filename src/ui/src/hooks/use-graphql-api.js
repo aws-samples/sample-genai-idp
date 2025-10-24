@@ -108,7 +108,7 @@ const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2
 
   const listDocumentIdsByDateShards = async ({ date, shards }) => {
     logger.debug('[USER-DEBUG] Querying documents by date shards:', { date, shards });
-    logger.debug('[USER-DEBUG] These queries will be filtered by the authenticated user\'s sub (UserId)');
+    logger.debug("[USER-DEBUG] These queries will be filtered by the authenticated user's sub (UserId)");
     const listDocumentsDateShardPromises = shards.map((i) => {
       logger.debug('sending list document date shard', date, i);
       return API.graphql({ query: listDocumentsDateShard, variables: { date, shard: i } });
@@ -126,7 +126,10 @@ const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2
       .reduce((pv, cv) => [...cv, ...pv], []);
 
     logger.debug('[USER-DEBUG] Documents found by date shard query:', documentData.length);
-    logger.debug('[USER-DEBUG] Document ObjectKeys returned:', documentData.map(d => d.ObjectKey));
+    logger.debug(
+      '[USER-DEBUG] Document ObjectKeys returned:',
+      documentData.map((d) => d.ObjectKey),
+    );
     if (documentData.length === 0) {
       logger.warn('[USER-DEBUG] ⚠️ No documents returned! This means either:');
       logger.warn('[USER-DEBUG]   1. No documents exist for this time period');
