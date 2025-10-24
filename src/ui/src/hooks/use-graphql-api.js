@@ -51,14 +51,18 @@ const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2
       setErrorMessage('failed to get document details - please try again later');
       logger.error('get document promises rejected', getDocumentRejected);
       logger.error('[USER-DEBUG] ⚠️ Failed to get details for', getDocumentRejected.length, 'documents');
-      logger.error('[USER-DEBUG] This could mean document PK doesn\'t match your UserId');
+      logger.error("[USER-DEBUG] This could mean document PK doesn't match your UserId");
     }
     const documentValues = getDocumentResolutions
       .filter((r) => r.status === 'fulfilled')
       .map((r) => r.value?.data?.getDocument);
 
-    logger.debug('[USER-DEBUG] Successfully retrieved', documentValues.filter(d => d).length, 'document details');
-    const nullDocs = documentValues.filter(d => !d).length;
+    logger.debug(
+      '[USER-DEBUG] Successfully retrieved',
+      documentValues.filter((d) => d).length,
+      'document details',
+    );
+    const nullDocs = documentValues.filter((d) => !d).length;
     if (nullDocs > 0) {
       logger.warn('[USER-DEBUG] ⚠️', nullDocs, 'documents returned null - they exist in list but not accessible');
       logger.warn('[USER-DEBUG] This means document PK uses different UserId than yours');
