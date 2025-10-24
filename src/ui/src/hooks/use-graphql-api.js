@@ -57,11 +57,7 @@ const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2
       .filter((r) => r.status === 'fulfilled')
       .map((r) => r.value?.data?.getDocument);
 
-    logger.debug(
-      '[USER-DEBUG] Successfully retrieved',
-      documentValues.filter((d) => d).length,
-      'document details',
-    );
+    logger.debug('[USER-DEBUG] Successfully retrieved', documentValues.filter((d) => d).length, 'document details');
     const nullDocs = documentValues.filter((d) => !d).length;
     if (nullDocs > 0) {
       logger.warn('[USER-DEBUG] ⚠️', nullDocs, 'documents returned null - they exist in list but not accessible');
