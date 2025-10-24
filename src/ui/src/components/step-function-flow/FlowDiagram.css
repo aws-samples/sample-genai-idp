@@ -355,15 +355,15 @@
     flex-direction: column;
     gap: 16px;
   }
-  
+
   .flow-arrow {
     transform: rotate(90deg);
   }
-  
+
   .arrow-line {
     width: 30px;
   }
-  
+
   .flow-legend {
     flex-wrap: wrap;
     gap: 16px;
