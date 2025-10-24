@@ -14,6 +14,25 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
     
+    - name: Set up Node.js for UI formatting check
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+        cache-dependency-path: src/ui/package-lock.json
+    
+    - name: Check UI code formatting with Prettier
+      run: |
+        echo "🎨 Checking code formatting with Prettier..."
+        cd src/ui
+        npm ci --prefer-offline --no-audit
+        npx prettier --check "src/**/*.{js,jsx,ts,tsx,json,css,scss}" || {
+          echo "❌ Code formatting issues detected!"
+          echo "💡 Run 'cd src/ui && npx prettier --write \"src/**/*.{js,jsx}\"' to fix"
+          exit 1
+        }
+        echo "✅ All code is properly formatted"
+    
     - name: Set up Python 3.12
       uses: actions/setup-python@v4
       with:
