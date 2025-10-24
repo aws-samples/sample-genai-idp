@@ -48,7 +48,7 @@ jobs:
     
     - name: Install dependencies
       run: |
-        pip install boto3 rich typer PyYAML botocore setuptools ruff
+        pip install boto3 rich typer PyYAML botocore setuptools ruff black
     
     - name: Run tests before deployment
       run: |

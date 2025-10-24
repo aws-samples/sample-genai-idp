@@ -2013,7 +2013,11 @@ except Exception as e:
         self.console.print("[cyan]🔍 Running Python linting...[/cyan]")
 
         # Run ruff check (excludes notebooks via ruff.toml)
-        result = subprocess.run(["ruff", "check"], capture_output=True, text=True)
+        result = subprocess.run(
+            [sys.executable, "-m", "ruff", "check"],
+            capture_output=True,
+            text=True,
+        )
         if result.returncode != 0:
             self.console.print("[red]❌ Ruff linting failed![/red]")
             self.console.print(result.stdout, style="red", markup=False)
@@ -2021,7 +2025,7 @@ except Exception as e:
 
         # Run Black format check (excludes notebooks via --exclude)
         result = subprocess.run(
-            ["black", "--check", "--exclude", "notebooks", "."],
+            [sys.executable, "-m", "black", "--check", "--exclude", "notebooks", "."],
             capture_output=True,
             text=True,
         )
