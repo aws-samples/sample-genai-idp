@@ -76,10 +76,15 @@ jobs:
         REGION: eu-central-1
     
     - name: Run smoke tests
+      id: smoke-tests
       run: |
         echo "🔍 Running post-deployment smoke tests..."
         chmod +x scripts/smoke-test.sh
-        ./scripts/smoke-test.sh || echo "⚠️  Some smoke tests failed but deployment continues"
+        if ./scripts/smoke-test.sh; then
+          echo "smoke_test_status=✅ PASSED" >> $GITHUB_OUTPUT
+        else
+          echo "smoke_test_status=⚠️ FAILED" >> $GITHUB_OUTPUT
+        fi
       continue-on-error: true
       env:
         STACK_NAME: fiscalshield-idp-dev
@@ -96,6 +101,7 @@ jobs:
       with:
         script: |
           const status = '${{ job.status }}';
+          const smokeTestStatus = '${{ steps.smoke-tests.outputs.smoke_test_status }}' || '⏭️ SKIPPED';
           const emoji = status === 'success' ? '✅' : '❌';
           const color = status === 'success' ? '28a745' : 'dc3545';
           
@@ -106,7 +112,11 @@ jobs:
           **Author:** @${context.actor}
           **Workflow:** [${context.workflow}](${context.payload.repository.html_url}/actions/runs/${context.runId})
           
-          ${status === 'success' ? '🎉 Changes are now live in dev environment!' : '⚠️ Deployment failed. Check logs for details.'}
+          **Smoke Tests:** ${smokeTestStatus}
+          
+          ${status === 'success' ? '🎉 Changes are now live in dev environment!\n\n**Next Steps:**\n- [ ] Verify smoke test results above\n- [ ] Test your specific changes manually\n- [ ] Check CloudWatch logs if needed' : '⚠️ Deployment failed. Check logs for details.'}
+          
+          **Stack URL:** https://eu-central-1.console.aws.amazon.com/cloudformation/home?region=eu-central-1#/stacks/stackinfo?stackId=fiscalshield-idp-dev
           `;
           
           // Create a comment on the commit
