@@ -24,6 +24,10 @@ Parameters:
   TrackingTable:
     Type: String
 
+  ExtractionResultsTable:
+    Type: String
+    Description: "DynamoDB table for storing extraction results"
+
   CustomerManagedEncryptionKeyArn:
     Type: String
 
@@ -1598,6 +1602,7 @@ Resources:
           METRIC_NAMESPACE: !Ref StackName
           CONFIGURATION_BUCKET: !Ref ConfigurationBucket
           CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
+          EXTRACTION_RESULTS_TABLE: !Ref ExtractionResultsTable
           GUARDRAIL_ID_AND_VERSION:
             !If [
               HasGuardrailConfig,
@@ -1626,6 +1631,8 @@ Resources:
             TableName: !Ref ConfigurationTable
         - DynamoDBCrudPolicy:
             TableName: !Ref TrackingTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ExtractionResultsTable
         - Statement:
             - Effect: Allow
               Action: cloudwatch:PutMetricData
@@ -1677,6 +1684,76 @@ Resources:
     Properties:
       KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
       LogGroupName: !Sub "/${AWS::StackName}/lambda/ExtractionFunction"
+      RetentionInDays: !Ref LogRetentionDays
+
+  ##########################################################################
+  # Invoice Extraction Function (Specialized for Invoices)
+  ##########################################################################
+
+  InvoiceExtractionFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: "This Lambda function does not require VPC access as it only interacts with AWS services via AWS APIs"
+          - id: W92
+            reason: "Function does not require concurrent execution limits as it is designed to scale based on demand"
+          - id: W11
+            reason: "Cloudwatch does not support resource-level permissions, and Bedrock should support any enabled Bedrock model_id or inference profile"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for this function as StepFunctions will handle retries"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only configuration values like feature flags and non-sensitive settings"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
+    Properties:
+      PermissionsBoundary:
+        !If [
+          HasPermissionsBoundary,
+          !Ref PermissionsBoundaryArn,
+          !Ref AWS::NoValue,
+        ]
+      Handler: invoice_extraction_handler.lambda_handler
+      Runtime: python3.12
+      CodeUri: ./lambdas/invoice_extraction/
+      Timeout: 900
+      MemorySize: 1024
+      Environment:
+        Variables:
+          LOG_LEVEL: !Ref LogLevel
+          EXTRACTION_RESULTS_TABLE: !Ref ExtractionResultsTable
+          CONFIGURATION_TABLE: !Ref ConfigurationTable
+          BEDROCK_MODEL_ID: "anthropic.claude-3-5-sonnet-20240620-v1:0"
+          AWS_REGION: !Ref AWS::Region
+      LoggingConfig:
+        LogGroup: !Ref InvoiceExtractionFunctionLogGroup
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ExtractionResultsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref ConfigurationTable
+        - Statement:
+            - Effect: Allow
+              Action:
+                - kms:Encrypt
+                - kms:Decrypt
+                - kms:ReEncrypt*
+                - kms:GenerateDataKey*
+                - kms:DescribeKey
+              Resource: !Ref CustomerManagedEncryptionKeyArn
+            - Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+                - bedrock:InvokeModelWithResponseStream
+              Resource:
+                - !Sub "arn:${AWS::Partition}:bedrock:*::foundation-model/*"
+                - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
+
+  InvoiceExtractionFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+      LogGroupName: !Sub "/${AWS::StackName}/lambda/InvoiceExtractionFunction"
       RetentionInDays: !Ref LogRetentionDays
 
   AssessmentFunction:

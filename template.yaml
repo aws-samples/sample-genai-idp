@@ -915,6 +915,7 @@ Resources:
         OutputBucket: !Ref OutputBucket
         WorkingBucket: !Ref WorkingBucket
         TrackingTable: !Ref TrackingTable
+        ExtractionResultsTable: !Ref ExtractionResultsTable
         CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
         LogRetentionDays: !Ref LogRetentionDays
         LogLevel: !Ref LogLevel
@@ -2168,7 +2169,6 @@ Resources:
   ExtractionResultsTable:
     Type: AWS::DynamoDB::Table
     Properties:
-      TableName: !Sub "${AWS::StackName}-ExtractionResults"
       PointInTimeRecoverySpecification:
         PointInTimeRecoveryEnabled: true
       BillingMode: PAY_PER_REQUEST

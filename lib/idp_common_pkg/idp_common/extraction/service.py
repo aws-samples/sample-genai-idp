@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field, create_model
 
 from idp_common import bedrock, image, metrics, s3, utils
 from idp_common.models import Document
+from idp_common.extraction_results_writer import get_extraction_results_writer
 
 # Conditional import for agentic extraction (requires Python 3.10+ dependencies)
 try:
@@ -1428,6 +1429,38 @@ class ExtractionService:
 
             # Update the section with extraction result URI only (not the attributes themselves)
             section.extraction_result_uri = output_uri
+
+            # Write to DynamoDB ExtractionResults table (if configured)
+            try:
+                writer = get_extraction_results_writer()
+                if writer.table:
+                    # Extract user_id from document (should be set during document creation)
+                    user_id = getattr(document, 'user_id', None)
+                    if not user_id:
+                        logger.warning(f"Document {document.id} has no user_id - skipping DynamoDB write")
+                    else:
+                        writer.write_extraction_result(
+                            document_id=document.id,
+                            section_id=section.section_id,
+                            user_id=user_id,
+                            document_type=class_label,
+                            extraction_data=output,
+                            s3_object=output_uri,
+                            company_id=None,  # Will be extracted from inference_result by writer
+                            company_name=None,  # Will be extracted from inference_result by writer
+                            client_id=getattr(document, 'client_id', None),
+                            username=getattr(document, 'username', None),
+                            confidence_score=None,  # Could be calculated from extraction metadata
+                            extraction_status="COMPLETED" if parsing_succeeded else "REVIEW_REQUIRED",
+                            execution_id=getattr(document, 'execution_id', None),
+                            model_id=model_id,
+                            section_index=None,  # Could be calculated from section order
+                            total_sections=len(document.sections) if document.sections else None,
+                        )
+            except Exception as e:
+                # Don't fail the extraction if DynamoDB write fails
+                logger.warning(f"Failed to write extraction result to DynamoDB: {e}")
+                logger.debug("DynamoDB write failure details:", exc_info=True)
 
             # Update document with metering data
             document.metering = utils.merge_metering_data(
