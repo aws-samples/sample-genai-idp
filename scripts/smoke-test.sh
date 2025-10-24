@@ -2,7 +2,7 @@
 # Post-deployment smoke tests
 # Verify critical functionality after deployment
 
-set -e
+# Note: Removed 'set -e' to allow all tests to run even if some fail
 
 # Configuration
 STACK_NAME="${STACK_NAME:-fiscalshield-idp-dev}"
