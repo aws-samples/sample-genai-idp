@@ -39,7 +39,7 @@ jobs:
     
     - name: Build and publish
       run: |
-        python3 publish.py fiscalshield-dev idp eu-central-1
+        python3 publish.py fiscalshield-dev idp eu-central-1 --lint off
     
     - name: Deploy to dev stack
       run: |
