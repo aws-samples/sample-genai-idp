@@ -49,7 +49,8 @@ jobs:
           --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND \
           --region eu-central-1 \
           --parameters ParameterKey=AdminEmail,UsePreviousValue=true \
-                       ParameterKey=IDPPattern,UsePreviousValue=true
+                       ParameterKey=IDPPattern,UsePreviousValue=true \
+                       ParameterKey=DocumentKnowledgeBase,ParameterValue=DISABLED
     
     - name: Wait for deployment to complete
       run: |
