@@ -1731,6 +1731,8 @@ Resources:
             TableName: !Ref ExtractionResultsTable
         - DynamoDBReadPolicy:
             TableName: !Ref ConfigurationTable
+        - S3ReadPolicy:
+            BucketName: !Ref WorkingBucket
         - Statement:
             - Effect: Allow
               Action:
