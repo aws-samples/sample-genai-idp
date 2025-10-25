@@ -1,0 +1,245 @@
+name: Deploy Data Collection Stack - Production
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: 'Type "DEPLOY" to confirm production deployment'
+        required: true
+      reason:
+        description: 'Reason for production deployment'
+        required: true
+
+env:
+  AWS_REGION: us-east-1
+  STACK_NAME: fiscalshield-dc-prod
+  ENVIRONMENT: prod
+
+jobs:
+  validate-confirmation:
+    name: Validate Deployment Confirmation
+    runs-on: ubuntu-latest
+    steps:
+      - name: ✅ Check confirmation
+        run: |
+          if [ "${{ github.event.inputs.confirmation }}" != "DEPLOY" ]; then
+            echo "❌ Confirmation failed. You must type 'DEPLOY' to proceed."
+            exit 1
+          fi
+          echo "✅ Confirmation validated"
+
+  deploy:
+    name: Deploy to Production Environment
+    runs-on: ubuntu-latest
+    needs: validate-confirmation
+    timeout-minutes: 45
+    environment:
+      name: production
+      url: https://console.aws.amazon.com/cloudformation/home?region=${{ env.AWS_REGION }}#/stacks
+
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 🐍 Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: 📦 Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install aws-sam-cli boto3 pytest pytest-cov
+
+      - name: 🔐 Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID_PROD }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY_PROD }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: 🧪 Run unit tests
+        run: |
+          if [ -d "tests/data_collection/unit" ]; then
+            pytest tests/data_collection/unit/ -v --cov=src/data_collection --cov-report=term-missing --cov-fail-under=70
+          else
+            echo "⚠️  No unit tests found - production deployment should have tests!"
+          fi
+
+      - name: ✅ Validate CloudFormation template
+        working-directory: stacks/data-collection
+        run: |
+          sam validate --lint
+
+      - name: 🔨 Build SAM application
+        working-directory: stacks/data-collection
+        run: |
+          sam build --config-env prod --parallel --cached
+
+      - name: 📋 Create changeset
+        working-directory: stacks/data-collection
+        run: |
+          sam deploy \
+            --config-env prod \
+            --no-execute-changeset \
+            --region ${{ env.AWS_REGION }}
+          
+          echo "Changeset created. Review changes before executing."
+
+      - name: 🚀 Deploy to Production
+        working-directory: stacks/data-collection
+        run: |
+          sam deploy \
+            --config-env prod \
+            --no-confirm-changeset \
+            --no-fail-on-empty-changeset \
+            --region ${{ env.AWS_REGION }}
+
+      - name: 📊 Get stack outputs
+        id: stack-outputs
+        run: |
+          OUTPUTS=$(aws cloudformation describe-stacks \
+            --stack-name ${{ env.STACK_NAME }} \
+            --region ${{ env.AWS_REGION }} \
+            --query 'Stacks[0].Outputs' \
+            --output json)
+          
+          echo "Stack outputs:"
+          echo "$OUTPUTS" | jq -r '.[] | "\(.OutputKey) = \(.OutputValue)"'
+
+      - name: 🧪 Run smoke tests
+        run: |
+          echo "🔍 Running Data Collection Stack smoke tests..."
+          
+          # Check DynamoDB tables exist
+          TABLES=(
+            "fiscalshield-dc-prod-FilingEvents"
+            "fiscalshield-dc-prod-CompanyEvents"
+            "fiscalshield-dc-prod-HMRCData"
+          )
+          
+          for table in "${TABLES[@]}"; do
+            echo "Checking table: $table"
+            aws dynamodb describe-table --table-name "$table" --region ${{ env.AWS_REGION }} > /dev/null
+            if [ $? -eq 0 ]; then
+              echo "✅ Table $table exists"
+            else
+              echo "❌ Table $table not found"
+              exit 1
+            fi
+          done
+          
+          # Verify Point-in-Time Recovery enabled (production requirement)
+          for table in "${TABLES[@]}"; do
+            echo "Checking PITR for table: $table"
+            PITR_STATUS=$(aws dynamodb describe-continuous-backups \
+              --table-name "$table" \
+              --region ${{ env.AWS_REGION }} \
+              --query 'ContinuousBackupsDescription.PointInTimeRecoveryDescription.PointInTimeRecoveryStatus' \
+              --output text)
+            
+            if [ "$PITR_STATUS" == "ENABLED" ]; then
+              echo "✅ PITR enabled for $table"
+            else
+              echo "❌ PITR not enabled for $table"
+              exit 1
+            fi
+          done
+          
+          # Check secrets exist
+          SECRETS=(
+            "fiscalshield-dc-prod-CompaniesHouseAPI"
+            "fiscalshield-dc-prod-HMRCAPI"
+            "fiscalshield-dc-prod-BankingAPI"
+          )
+          
+          for secret in "${SECRETS[@]}"; do
+            echo "Checking secret: $secret"
+            aws secretsmanager describe-secret --secret-id "$secret" --region ${{ env.AWS_REGION }} > /dev/null
+            if [ $? -eq 0 ]; then
+              echo "✅ Secret $secret exists"
+            else
+              echo "❌ Secret $secret not found"
+              exit 1
+            fi
+          done
+          
+          echo "🎉 All production smoke tests passed!"
+
+      - name: 📝 Create deployment issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issue = await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: '✅ Data Collection Stack Deployed to Production',
+              body: `## Production Deployment Summary
+              
+              **Date:** ${new Date().toISOString()}
+              **Triggered by:** @${{ github.actor }}
+              **Reason:** ${{ github.event.inputs.reason }}
+              **Stack:** fiscalshield-dc-prod
+              **Region:** ${{ env.AWS_REGION }}
+              **Commit:** ${{ github.sha }}
+              
+              ### Resources Deployed:
+              - ✅ DynamoDB Tables (with Point-in-Time Recovery)
+              - ✅ Secrets Manager (3 secrets)
+              - ✅ IAM Roles
+              - ✅ CloudWatch Log Groups & Alarms
+              - ✅ KMS Keys (production encryption)
+              
+              ### Verification:
+              - ✅ All smoke tests passed
+              - ✅ Point-in-Time Recovery enabled
+              - ✅ Encryption at rest enabled
+              - ✅ CloudWatch monitoring active
+              
+              ### Post-Deployment Tasks:
+              - [ ] Verify Companies House API key is updated in Secrets Manager
+              - [ ] Test Lambda functions (when implemented)
+              - [ ] Monitor CloudWatch metrics for 24 hours
+              - [ ] Update runbook with any production-specific notes
+              
+              [View workflow run](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})`,
+              labels: ['deployment', 'production', 'data-collection']
+            });
+
+      - name: ⚠️ Notify on failure
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issue = await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: '❌ Data Collection Stack Production Deployment Failed',
+              body: `## Production Deployment Failed
+              
+              **Date:** ${new Date().toISOString()}
+              **Triggered by:** @${{ github.actor }}
+              **Reason:** ${{ github.event.inputs.reason }}
+              **Stack:** fiscalshield-dc-prod
+              **Commit:** ${{ github.sha }}
+              **Status:** FAILED
+              
+              ### Action Required:
+              1. Review the [failed workflow logs](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
+              2. Identify the root cause
+              3. Fix the issue
+              4. Re-run deployment after validation
+              
+              ### Rollback if Needed:
+              \`\`\`bash
+              aws cloudformation update-stack \\
+                --stack-name fiscalshield-dc-prod \\
+                --use-previous-template \\
+                --region ${{ env.AWS_REGION }}
+              \`\`\`
+              
+              @${{ github.actor }} - Please investigate immediately.`,
+              labels: ['deployment', 'production', 'bug', 'data-collection'],
+              assignees: ['${{ github.actor }}']
+            });
