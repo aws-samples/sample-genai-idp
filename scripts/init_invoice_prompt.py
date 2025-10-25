@@ -11,7 +11,6 @@ Usage:
 
 import argparse
 import boto3
-import json
 from datetime import datetime
 
 # Your proven invoice extraction prompt
@@ -87,8 +86,8 @@ def get_configuration_table_name(stack_name: str, region: str) -> str:
                 return output['OutputValue']
         
         # If not in outputs, try to find it in resources
-        print(f"⚠️  ConfigurationTable not found in stack outputs")
-        print(f"   Trying to find in stack resources...")
+        print("⚠️  ConfigurationTable not found in stack outputs")
+        print("   Trying to find in stack resources...")
         
         resources = cfn.list_stack_resources(StackName=stack_name)
         for resource in resources['StackResourceSummaries']:
@@ -130,7 +129,7 @@ def initialize_invoice_prompt(table_name: str, region: str, user_email: str = 's
         response = table.get_item(Key={'Configuration': 'INVOICE_EXTRACTION_PROMPT'})
         
         if 'Item' in response:
-            print(f"⚠️  Invoice prompt already exists in ConfigurationTable")
+            print("⚠️  Invoice prompt already exists in ConfigurationTable")
             print(f"   Current version: {response['Item'].get('Version', 'unknown')}")
             print(f"   Last modified: {response['Item'].get('LastModified', 'unknown')}")
             
@@ -144,9 +143,9 @@ def initialize_invoice_prompt(table_name: str, region: str, user_email: str = 's
         
         # Write to DynamoDB
         table.put_item(Item=item)
-        print(f"✅ Successfully initialized invoice extraction prompt in ConfigurationTable")
+        print("✅ Successfully initialized invoice extraction prompt in ConfigurationTable")
         print(f"   Table: {table_name}")
-        print(f"   Configuration Key: INVOICE_EXTRACTION_PROMPT")
+        print("   Configuration Key: INVOICE_EXTRACTION_PROMPT")
         print(f"   Version: {item['Version']}")
         print(f"   Last Modified: {item['LastModified']}")
         
@@ -183,7 +182,7 @@ def main():
     
     args = parser.parse_args()
     
-    print(f"\n🚀 Initializing Invoice Extraction Prompt")
+    print("\n🚀 Initializing Invoice Extraction Prompt")
     print(f"   Stack: {args.stack_name}")
     print(f"   Region: {args.region}")
     print(f"   User: {args.user_email}\n")
@@ -193,23 +192,23 @@ def main():
         table_name = args.table_name
         print(f"✅ Using provided table name: {table_name}")
     else:
-        print(f"🔍 Looking up ConfigurationTable from stack...")
+        print("🔍 Looking up ConfigurationTable from stack...")
         table_name = get_configuration_table_name(args.stack_name, args.region)
         print(f"✅ Found ConfigurationTable: {table_name}")
     
     # Initialize prompt
-    print(f"\n📝 Writing invoice extraction prompt to DynamoDB...")
+    print("\n📝 Writing invoice extraction prompt to DynamoDB...")
     success = initialize_invoice_prompt(table_name, args.region, args.user_email)
     
     if success:
-        print(f"\n✅ Initialization complete!")
-        print(f"\n📋 Next Steps:")
-        print(f"   1. Deploy the InvoiceExtractionLambda (if not already deployed)")
-        print(f"   2. Frontend users can now edit this prompt via Configuration UI")
-        print(f"   3. Changes take effect immediately (no Lambda redeployment needed)")
-        print(f"   4. Test with sample invoices to validate extraction quality")
+        print("\n✅ Initialization complete!")
+        print("\n📋 Next Steps:")
+        print("   1. Deploy the InvoiceExtractionLambda (if not already deployed)")
+        print("   2. Frontend users can now edit this prompt via Configuration UI")
+        print("   3. Changes take effect immediately (no Lambda redeployment needed)")
+        print("   4. Test with sample invoices to validate extraction quality")
     else:
-        print(f"\n⚠️  Initialization skipped")
+        print("\n⚠️  Initialization skipped")
 
 
 if __name__ == '__main__':

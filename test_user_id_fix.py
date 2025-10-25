@@ -6,7 +6,6 @@ This script simulates the Document loading flow that happens in the OCR Lambda
 and verifies that user_id is properly extracted and available for AppSync updates.
 """
 
-import json
 import os
 import sys
 
@@ -31,13 +30,13 @@ def test_user_id_extraction():
     regular_key = "documents/invoice7.pdf"
     user_id = extract_user_id_from_object_key(regular_key)
     assert user_id is None, f"Expected None for non-user path, got {user_id}"
-    print(f"  ✓ Non-user-scoped path returns None")
+    print("  ✓ Non-user-scoped path returns None")
     
     # Test case 3: Invalid structure
     invalid_key = "users/invalid"
     user_id = extract_user_id_from_object_key(invalid_key)
     assert user_id is None, f"Expected None for invalid path, got {user_id}"
-    print(f"  ✓ Invalid path structure returns None")
+    print("  ✓ Invalid path structure returns None")
     
     print()
 
@@ -66,7 +65,7 @@ def test_document_from_dict():
     doc = Document.from_dict(doc_data_explicit)
     assert doc.user_id == "explicit-user-id", \
         f"Expected explicit user_id, got {doc.user_id}"
-    print(f"  ✓ Explicit user_id takes precedence")
+    print("  ✓ Explicit user_id takes precedence")
     
     # Test case 3: Non-user-scoped path, user_id should be None
     doc_data_regular = {
@@ -75,7 +74,7 @@ def test_document_from_dict():
     }
     doc = Document.from_dict(doc_data_regular)
     assert doc.user_id is None, f"Expected None for non-user path, got {doc.user_id}"
-    print(f"  ✓ Non-user-scoped path has None user_id")
+    print("  ✓ Non-user-scoped path has None user_id")
     
     print()
 
@@ -104,7 +103,7 @@ def test_document_to_update_input():
     
     # Verify ObjectKey is correct
     assert update_input["ObjectKey"] == doc.input_key
-    print(f"  ✓ ObjectKey matches input_key")
+    print("  ✓ ObjectKey matches input_key")
     
     print()
 
@@ -125,14 +124,14 @@ def test_document_serialization():
     doc_dict = doc.to_dict()
     assert doc_dict["user_id"] == "93c46832-90d1-7096-708c-e7d4f19e6695", \
         f"user_id lost in to_dict, got {doc_dict.get('user_id')}"
-    print(f"  ✓ user_id preserved in to_dict()")
+    print("  ✓ user_id preserved in to_dict()")
     
     # Serialize to JSON and back
     doc_json = doc.to_json()
     doc_restored = Document.from_json(doc_json)
     assert doc_restored.user_id == "93c46832-90d1-7096-708c-e7d4f19e6695", \
         f"user_id lost in JSON round-trip, got {doc_restored.user_id}"
-    print(f"  ✓ user_id preserved through JSON serialization")
+    print("  ✓ user_id preserved through JSON serialization")
     
     print()
 

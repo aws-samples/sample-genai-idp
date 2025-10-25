@@ -145,7 +145,6 @@ def write_extraction_to_dynamodb(section_document, section_id, extraction_result
             'GSI1PK': gsi1_pk,  # User + Type queries
             'GSI3PK': gsi3_pk,  # Company + Type queries
             'GSI4PK': f"doc#{document_id}",  # Document-centric queries
-            'DocumentId': document_id,  # For GSI4 sort key
             'GSI5PK': 'COMPLETED',  # Status monitoring
             'GSI6PK': gsi6_pk,  # Client reporting
             

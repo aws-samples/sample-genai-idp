@@ -14,7 +14,7 @@ Comprehensive test coverage for:
 import pytest
 import json
 from decimal import Decimal
-from unittest.mock import Mock, patch, MagicMock, call
+from unittest.mock import patch, MagicMock
 import sys
 import os
 
@@ -96,8 +96,6 @@ class TestCompanyNameNormalization:
         assert handler.normalize_company_name("3M Company") == "3m-company"
 
 
-class TestXMLParsing:
-    """Test suite for XML invoice parsing"""
 class TestXMLParsing:
     """Test suite for XML invoice parsing"""
     
@@ -272,8 +270,6 @@ class TestXMLParsing:
 
 class TestPromptManagement:
     """Test suite for prompt loading and management"""
-class TestPromptManagement:
-    """Test suite for prompt loading and management"""
     
     def test_get_default_prompt(self):
         """Test default prompt contains required elements"""
@@ -328,8 +324,6 @@ class TestPromptManagement:
         assert 'MULTIPLE INVOICES' in prompt
 
 
-class TestDynamoDBOperations:
-    """Test suite for DynamoDB write operations"""
 class TestDynamoDBOperations:
     """Test suite for DynamoDB write operations"""
     
@@ -500,8 +494,6 @@ class TestDynamoDBOperations:
         assert inserted_count == 1  # First insert succeeded
 
 
-class TestBedrockIntegration:
-    """Test suite for Bedrock API integration"""
 class TestBedrockIntegration:
     """Test suite for Bedrock API integration"""
     

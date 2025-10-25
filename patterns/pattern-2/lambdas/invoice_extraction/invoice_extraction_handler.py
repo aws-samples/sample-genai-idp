@@ -160,7 +160,7 @@ def safe_decimal_convert(value: Any) -> Decimal:
     
     try:
         return Decimal(cleaned)
-    except:
+    except (ValueError, TypeError, ArithmeticError):
         return Decimal('0')
 
 

@@ -5,17 +5,13 @@
 Module for writing extraction results to DynamoDB ExtractionResults table.
 """
 
-import json
 import logging
 import os
 import time
-import uuid
 from decimal import Decimal
 from typing import Any, Dict, List, Optional
-from datetime import datetime
 
 import boto3
-from botocore.exceptions import ClientError
 
 logger = logging.getLogger(__name__)
 
@@ -211,7 +207,7 @@ class ExtractionResultsWriter:
         failed_items = []
         
         try:
-            with self.table.batch_writer() as batch:
+            with self.table.batch_writer():
                 for item_data in items:
                     try:
                         # Use write_extraction_result logic but with batch writer
