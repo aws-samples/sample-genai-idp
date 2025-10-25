@@ -1,0 +1,10 @@
+{
+  "Parameters": {
+    "Environment": "prod",
+    "CacheTTLHours": "24",
+    "CompaniesHouseRateLimit": "600",
+    "CompaniesHouseRateWindow": "300",
+    "EnableXRayTracing": "true",
+    "LogRetentionDays": "30"
+  }
+}
