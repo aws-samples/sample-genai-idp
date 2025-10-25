@@ -16,7 +16,9 @@ import sys
 import os
 
 # Add Lambda path to import
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../patterns/pattern-2/lambdas/invoice_extraction'))
+# From tests/unit/lambda/invoice_extraction/ -> ../../../../patterns/pattern-2/lambdas/invoice_extraction/
+lambda_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../../patterns/pattern-2/lambdas/invoice_extraction'))
+sys.path.insert(0, lambda_path)
 
 # Mock AWS services before importing the handler
 with patch('boto3.resource') as mock_resource, \

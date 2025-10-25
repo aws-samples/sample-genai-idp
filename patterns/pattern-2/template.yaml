@@ -1723,7 +1723,6 @@ Resources:
           EXTRACTION_RESULTS_TABLE: !Ref ExtractionResultsTable
           CONFIGURATION_TABLE: !Ref ConfigurationTable
           BEDROCK_MODEL_ID: "anthropic.claude-3-5-sonnet-20240620-v1:0"
-          AWS_REGION: !Ref AWS::Region
       LoggingConfig:
         LogGroup: !Ref InvoiceExtractionFunctionLogGroup
       Policies:
