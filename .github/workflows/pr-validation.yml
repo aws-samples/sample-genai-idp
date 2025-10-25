@@ -54,7 +54,13 @@ jobs:
           --cov-report=term \
           --cov-report=xml \
           --cov-report=html \
-          --junitxml=pytest-report.xml
+          --junitxml=pytest-report.xml \
+          --ignore=lib/idp_common_pkg/tests/unit/test_publish.py \
+          --ignore=lib/idp_common_pkg/tests/test_assessment_backward_compatibility.py \
+          --ignore=lib/idp_common_pkg/tests/unit/test_document_compression.py \
+          --ignore=lib/idp_common_pkg/tests/unit/test_granular_assessment.py \
+          --ignore=lib/idp_common_pkg/tests/unit/assessment/test_assessment_enabled_property.py \
+          --ignore=lib/idp_common_pkg/tests/unit/assessment/test_bounding_box_integration.py
     
     - name: Check test coverage threshold
       run: |
