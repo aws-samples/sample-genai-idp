@@ -31,22 +31,22 @@ with patch('boto3.resource') as mock_resource, \
     mock_table = MagicMock()
     mock_dynamodb.Table.return_value = mock_table
     mock_resource.return_value = mock_dynamodb
-    
+
     # Mock Bedrock client
     mock_bedrock = MagicMock()
     mock_client.return_value = mock_bedrock
-    
+
     # Mock S3 client
     mock_s3 = MagicMock()
     mock_client.return_value = mock_s3
-    
+
     # Now import the handler
     import invoice_extraction_handler as handler
 
 
 class TestDecimalConversion:
     """Test suite for safe decimal conversion"""
-    
+
     def test_safe_decimal_convert_valid(self):
         """Test decimal conversion with valid inputs"""
         assert handler.safe_decimal_convert("5.88") == Decimal("5.88")
@@ -56,7 +56,7 @@ class TestDecimalConversion:
         assert handler.safe_decimal_convert("1,234.56") == Decimal("1234.56")
         assert handler.safe_decimal_convert(5.88) == Decimal("5.88")
         assert handler.safe_decimal_convert(10) == Decimal("10")
-    
+
     def test_safe_decimal_convert_invalid(self):
         """Test decimal conversion with invalid inputs"""
         assert handler.safe_decimal_convert("") == Decimal("0")
@@ -66,7 +66,7 @@ class TestDecimalConversion:
         assert handler.safe_decimal_convert(".") == Decimal("0")
         # Note: "abc123" extracts "123" as the function strips non-numeric chars
         assert handler.safe_decimal_convert("abc123") == Decimal("123")
-    
+
     def test_safe_decimal_convert_edge_cases(self):
         """Test decimal conversion with edge cases"""
         assert handler.safe_decimal_convert("0") == Decimal("0")
@@ -77,7 +77,7 @@ class TestDecimalConversion:
 
 class TestCompanyNameNormalization:
     """Test suite for company name normalization"""
-    
+
     def test_normalize_company_name(self):
         """Test company name normalization for GSI keys"""
         assert handler.normalize_company_name("Microsoft Limited") == "microsoft-limited"
@@ -87,7 +87,7 @@ class TestCompanyNameNormalization:
         assert handler.normalize_company_name("Apple Inc.") == "apple-inc"
         assert handler.normalize_company_name("") == "unknown"
         assert handler.normalize_company_name(None) == "unknown"
-    
+
     def test_normalize_company_name_special_characters(self):
         """Test normalization with special characters"""
         assert handler.normalize_company_name("O'Reilly Media") == "oreilly-media"
@@ -98,7 +98,7 @@ class TestCompanyNameNormalization:
 
 class TestXMLParsing:
     """Test suite for XML invoice parsing"""
-    
+
     def test_parse_single_invoice(self):
         """Test parsing XML with single invoice"""
         xml_content = """
@@ -121,9 +121,9 @@ class TestXMLParsing:
         </invoice>
         </invoices>
         """
-        
+
         invoices = handler.parse_invoices_from_xml(xml_content)
-        
+
         assert len(invoices) == 1
         assert invoices[0]['supplier_name'] == 'Microsoft Limited'
         assert invoices[0]['vendor_name'] == 'Microsoft Limited'
@@ -135,7 +135,7 @@ class TestXMLParsing:
         assert invoices[0]['vat_amount'] == Decimal('0.98')
         assert invoices[0]['net_amount'] == Decimal('4.90')
         assert invoices[0]['description'] == 'Microsoft 365 subscription'
-    
+
     def test_parse_multiple_invoices(self):
         """Test parsing XML with multiple invoices (critical for multi-invoice documents)"""
         xml_content = """
@@ -163,9 +163,9 @@ class TestXMLParsing:
         </invoice>
         </invoices>
         """
-        
+
         invoices = handler.parse_invoices_from_xml(xml_content)
-        
+
         assert len(invoices) == 3
         assert invoices[0]['supplier_name'] == 'Microsoft Limited'
         assert invoices[1]['supplier_name'] == 'Amazon Web Services'
@@ -176,7 +176,7 @@ class TestXMLParsing:
         assert invoices[0]['source_page'] == 1
         assert invoices[1]['source_page'] == 2
         assert invoices[2]['source_page'] == 3
-    
+
     def test_parse_many_invoices(self):
         """Test parsing 10+ invoices (stress test for batch processing)"""
         invoice_template = """
@@ -187,20 +187,20 @@ class TestXMLParsing:
         <source_page>{idx}</source_page>
         </invoice>
         """
-        
+
         invoices_xml = "<invoices>"
         for i in range(1, 16):  # 15 invoices
             invoices_xml += invoice_template.format(idx=i, amount=i * 10.5, day=i)
         invoices_xml += "</invoices>"
-        
+
         invoices = handler.parse_invoices_from_xml(invoices_xml)
-        
+
         assert len(invoices) == 15
         assert invoices[0]['supplier_name'] == 'Vendor 1'
         assert invoices[14]['supplier_name'] == 'Vendor 15'
         assert invoices[0]['total_amount'] == Decimal('10.5')
         assert invoices[14]['total_amount'] == Decimal('157.5')
-    
+
     def test_parse_incomplete_invoice(self):
         """Test that incomplete invoices (no supplier_name AND no total_amount) are skipped"""
         xml_content = """
@@ -218,14 +218,14 @@ class TestXMLParsing:
         </invoice>
         </invoices>
         """
-        
+
         invoices = handler.parse_invoices_from_xml(xml_content)
-        
+
         # Only the second invoice should be parsed (has supplier_name AND total_amount)
         assert len(invoices) == 1
         assert invoices[0]['supplier_name'] == 'Microsoft Limited'
         assert invoices[0]['total_amount'] == Decimal('5.88')
-    
+
     def test_parse_missing_supplier_fallback(self):
         """Test fallback to 'Unknown Vendor' when supplier_name is missing but total exists"""
         xml_content = """
@@ -237,14 +237,14 @@ class TestXMLParsing:
         </invoice>
         </invoices>
         """
-        
+
         invoices = handler.parse_invoices_from_xml(xml_content)
-        
+
         assert len(invoices) == 1
         assert invoices[0]['supplier_name'] == 'Unknown Vendor'
         assert invoices[0]['vendor_name'] == 'Unknown Vendor'
         assert invoices[0]['total_amount'] == Decimal('5.88')
-    
+
     def test_parse_missing_source_page(self):
         """Test source_page fallback when not provided"""
         xml_content = """
@@ -259,9 +259,9 @@ class TestXMLParsing:
         </invoice>
         </invoices>
         """
-        
+
         invoices = handler.parse_invoices_from_xml(xml_content)
-        
+
         # When source_page is missing, default "1" is used for all invoices
         # This is the current behavior in the handler (uses default "1" not index)
         assert invoices[0]['source_page'] == 1
@@ -270,11 +270,11 @@ class TestXMLParsing:
 
 class TestPromptManagement:
     """Test suite for prompt loading and management"""
-    
+
     def test_get_default_prompt(self):
         """Test default prompt contains required elements"""
         prompt = handler.get_default_invoice_prompt()
-        
+
         assert '{section_text}' in prompt
         assert 'MULTIPLE INVOICES' in prompt
         assert '<invoice>' in prompt
@@ -283,7 +283,7 @@ class TestPromptManagement:
         assert 'invoice_date' in prompt
         assert 'source_page' in prompt
         assert 'VENDOR NAME EXTRACTION RULES' in prompt
-    
+
     @patch('invoice_extraction_handler.config_table')
     def test_get_prompt_from_config_table(self, mock_config_table):
         """Test fetching custom prompt from ConfigurationTable"""
@@ -293,32 +293,32 @@ class TestPromptManagement:
                 'PromptTemplate': 'Custom prompt with {section_text} placeholder'
             }
         }
-        
+
         prompt = handler.get_invoice_extraction_prompt()
-        
+
         assert prompt == 'Custom prompt with {section_text} placeholder'
         mock_config_table.get_item.assert_called_once_with(
             Key={'Configuration': 'INVOICE_EXTRACTION_PROMPT'}
         )
-    
+
     @patch('invoice_extraction_handler.config_table')
     def test_get_prompt_fallback_on_missing_item(self, mock_config_table):
         """Test fallback to default prompt when ConfigurationTable has no prompt"""
         mock_config_table.get_item.return_value = {}
-        
+
         prompt = handler.get_invoice_extraction_prompt()
-        
+
         # Should fall back to default prompt
         assert '{section_text}' in prompt
         assert 'MULTIPLE INVOICES' in prompt
-    
+
     @patch('invoice_extraction_handler.config_table')
     def test_get_prompt_fallback_on_error(self, mock_config_table):
         """Test fallback to default prompt on ConfigurationTable error"""
         mock_config_table.get_item.side_effect = Exception('DynamoDB connection error')
-        
+
         prompt = handler.get_invoice_extraction_prompt()
-        
+
         # Should fall back to default prompt
         assert '{section_text}' in prompt
         assert 'MULTIPLE INVOICES' in prompt
@@ -326,7 +326,7 @@ class TestPromptManagement:
 
 class TestDynamoDBOperations:
     """Test suite for DynamoDB write operations"""
-    
+
     @patch('invoice_extraction_handler.extraction_table')
     def test_write_single_invoice_to_dynamodb(self, mock_extraction_table):
         """Test writing a single invoice to DynamoDB with correct schema"""
@@ -349,7 +349,7 @@ class TestDynamoDBOperations:
                 'source_page': 1
             }
         ]
-        
+
         inserted_count = handler.write_invoices_to_dynamodb(
             invoices=invoices,
             document_id='doc-123',
@@ -357,24 +357,24 @@ class TestDynamoDBOperations:
             user_id='user@example.com',
             client_id='client-abc'
         )
-        
+
         assert inserted_count == 1
         mock_extraction_table.put_item.assert_called_once()
-        
+
         # Verify DynamoDB item structure matches schema
         call_args = mock_extraction_table.put_item.call_args
         item = call_args[1]['Item']
-        
+
         # Primary Key verification
         assert item['PK'] == 'user#user@example.com#doc#doc-123'
         assert item['SK'].startswith('type#INVOICE#section#section-1#invoice#1')
-        
+
         # GSI verification
         assert item['GSI1PK'] == 'user#user@example.com#type#INVOICE'
         assert 'ProcessedAt' in item
         assert item['GSI3PK'] == 'company#microsoft-limited#type#INVOICE'
         assert item['GSI6PK'] == 'client#client-abc#type#INVOICE'
-        
+
         # Core fields
         assert item['DocumentType'] == 'INVOICE'
         assert item['SupplierName'] == 'Microsoft Limited'
@@ -388,13 +388,13 @@ class TestDynamoDBOperations:
         assert item['DocumentId'] == 'doc-123'
         assert item['SectionId'] == 'section-1'
         assert item['SourcePage'] == 1
-        
+
         # Metadata
         assert 'CreatedAt' in item
         assert 'UpdatedAt' in item
         assert 'TTL' in item
         assert item['ExtractionStatus'] == 'COMPLETED'
-    
+
     @patch('invoice_extraction_handler.extraction_table')
     def test_write_multiple_invoices_to_dynamodb(self, mock_extraction_table):
         """Test writing multiple invoices creates separate DynamoDB records"""
@@ -434,7 +434,7 @@ class TestDynamoDBOperations:
                 'source_page': 2
             }
         ]
-        
+
         inserted_count = handler.write_invoices_to_dynamodb(
             invoices=invoices,
             document_id='doc-456',
@@ -442,20 +442,20 @@ class TestDynamoDBOperations:
             user_id='admin@example.com',
             client_id='client-xyz'
         )
-        
+
         assert inserted_count == 2
         assert mock_extraction_table.put_item.call_count == 2
-        
+
         # Verify both invoices have different SKs
         first_call = mock_extraction_table.put_item.call_args_list[0][1]['Item']
         second_call = mock_extraction_table.put_item.call_args_list[1][1]['Item']
-        
+
         assert first_call['SK'] != second_call['SK']
         assert 'invoice#1' in first_call['SK']
         assert 'invoice#2' in second_call['SK']
         assert first_call['SupplierName'] == 'Vendor A'
         assert second_call['SupplierName'] == 'Vendor B'
-    
+
     @patch('invoice_extraction_handler.extraction_table')
     def test_write_invoices_handles_errors_gracefully(self, mock_extraction_table):
         """Test that DynamoDB write errors don't crash the entire batch"""
@@ -478,10 +478,10 @@ class TestDynamoDBOperations:
                 'source_page': 1
             }
         ]
-        
+
         # First call succeeds, second call fails
         mock_extraction_table.put_item.side_effect = [None, Exception('DynamoDB error')]
-        
+
         # Should not raise exception
         inserted_count = handler.write_invoices_to_dynamodb(
             invoices=invoices,
@@ -490,13 +490,13 @@ class TestDynamoDBOperations:
             user_id='test@example.com',
             client_id='client-test'
         )
-        
+
         assert inserted_count == 1  # First insert succeeded
 
 
 class TestBedrockIntegration:
     """Test suite for Bedrock API integration"""
-    
+
     @patch('invoice_extraction_handler.bedrock_runtime')
     def test_invoke_bedrock_success(self, mock_bedrock):
         """Test successful Bedrock invocation"""
@@ -506,40 +506,40 @@ class TestBedrockIntegration:
         mock_response['body'].read.return_value = json.dumps({
             'content': [{'text': '<invoices><invoice><supplier_name>Test</supplier_name></invoice></invoices>'}]
         }).encode('utf-8')
-        
+
         mock_bedrock.invoke_model.return_value = mock_response
-        
+
         result = handler.invoke_bedrock('test prompt')
-        
+
         assert '<invoices>' in result
         assert '<supplier_name>Test</supplier_name>' in result
         mock_bedrock.invoke_model.assert_called_once()
-        
+
         # Verify request structure
         call_args = mock_bedrock.invoke_model.call_args
         assert call_args[1]['modelId'] == handler.BEDROCK_MODEL_ID
-        
+
         # Verify body structure
         body = json.loads(call_args[1]['body'])
         assert body['anthropic_version'] == 'bedrock-2023-05-31'
         assert body['max_tokens'] == 8000
         assert len(body['messages']) == 1
         assert body['messages'][0]['role'] == 'user'
-    
+
     @patch('invoice_extraction_handler.bedrock_runtime')
     def test_invoke_bedrock_error_handling(self, mock_bedrock):
         """Test Bedrock error handling"""
         mock_bedrock.invoke_model.side_effect = Exception('Bedrock service unavailable')
-        
+
         with pytest.raises(Exception) as exc_info:
             handler.invoke_bedrock('test prompt')
-        
+
         assert 'Bedrock service unavailable' in str(exc_info.value)
 
 
 class TestLambdaHandler:
     """Test suite for main Lambda handler (event processing)"""
-    
+
     @patch('invoice_extraction_handler.invoke_bedrock')
     @patch('invoice_extraction_handler.get_invoice_extraction_prompt')
     @patch('invoice_extraction_handler.write_invoices_to_dynamodb')
@@ -555,10 +555,10 @@ class TestLambdaHandler:
         # Mock S3 client
         mock_s3 = MagicMock()
         mock_boto_client.return_value = mock_s3
-        
+
         # Mock prompt retrieval
         mock_get_prompt.return_value = 'Extract invoices from: {section_text}'
-        
+
         # Mock Bedrock response with valid XML
         mock_invoke_bedrock.return_value = """
         <invoices>
@@ -571,10 +571,10 @@ class TestLambdaHandler:
         </invoice>
         </invoices>
         """
-        
+
         # Mock DynamoDB write
         mock_write.return_value = 1
-        
+
         # Create event with inline document
         event = {
             'section_id': 'section-1',
@@ -597,10 +597,10 @@ class TestLambdaHandler:
                 }
             }
         }
-        
+
         # Invoke Lambda
         response = handler.lambda_handler(event, None)
-        
+
         # Verify response structure
         assert 'section_id' in response
         assert response['section_id'] == 'section-1'
@@ -608,7 +608,7 @@ class TestLambdaHandler:
         assert response['invoices_inserted'] == 1
         assert 'processing_time_seconds' in response
         assert 'document' in response
-    
+
     @patch('invoice_extraction_handler.invoke_bedrock')
     @patch('invoice_extraction_handler.get_invoice_extraction_prompt')
     def test_lambda_handler_no_text_content(self, mock_get_prompt, mock_invoke_bedrock):
@@ -628,21 +628,21 @@ class TestLambdaHandler:
                 'pages': {}
             }
         }
-        
+
         response = handler.lambda_handler(event, None)
-        
+
         assert response['invoices_extracted'] == 0
         assert response['message'] == 'No text content in section'
         # Bedrock should not be called
         mock_invoke_bedrock.assert_not_called()
-    
+
     @patch('invoice_extraction_handler.invoke_bedrock')
     @patch('invoice_extraction_handler.get_invoice_extraction_prompt')
     def test_lambda_handler_no_invoices_found(self, mock_get_prompt, mock_invoke_bedrock):
         """Test Lambda handler when Bedrock finds no invoices"""
         mock_get_prompt.return_value = 'Extract: {section_text}'
         mock_invoke_bedrock.return_value = '<invoices></invoices>'
-        
+
         event = {
             'section_id': 'section-1',
             'document': {
@@ -659,12 +659,12 @@ class TestLambdaHandler:
                 'pages': {}
             }
         }
-        
+
         response = handler.lambda_handler(event, None)
-        
+
         assert response['invoices_extracted'] == 0
         assert response['message'] == 'No invoices found'
-    
+
     def test_lambda_handler_missing_section_id(self):
         """Test Lambda handler with missing section_id"""
         event = {
@@ -672,22 +672,22 @@ class TestLambdaHandler:
                 'id': 'doc-123'
             }
         }
-        
+
         response = handler.lambda_handler(event, None)
-        
+
         assert 'error' in response
         assert response['invoices_extracted'] == 0
-    
+
     def test_lambda_handler_error_handling(self):
         """Test Lambda handler error handling doesn't crash workflow"""
         event = {
             'section_id': 'section-1',
             'document': None  # Invalid document
         }
-        
+
         # Should not raise exception
         response = handler.lambda_handler(event, None)
-        
+
         assert 'error' in response
         assert response['invoices_extracted'] == 0
         assert 'document' in response  # Pass through for workflow

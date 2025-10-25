@@ -6,7 +6,7 @@ Nova Lite Fine-tuning Dataset Preparation Script
 
 This script prepares datasets for fine-tuning Nova Lite models. It can:
 1. Load datasets from Hugging Face or local sources
-2. Sample data per label 
+2. Sample data per label
 3. Save images in PNG format to S3
 4. Create train.jsonl and validation.jsonl files in Bedrock format
 5. Upload all data to S3 buckets
@@ -490,10 +490,10 @@ def main():
 Examples:
   # Prepare RVL-CDIP dataset with 100 samples per label
   python prepare_nova_finetuning_data.py --bucket-name my-bucket --samples-per-label 100
-  
+
   # Use custom dataset from Hugging Face
   python prepare_nova_finetuning_data.py --bucket-name my-bucket --dataset custom/dataset --samples-per-label 50
-  
+
   # Use local dataset
   python prepare_nova_finetuning_data.py --bucket-name my-bucket --local-dataset /path/to/data --samples-per-label 75
         """,

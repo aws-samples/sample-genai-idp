@@ -1026,7 +1026,7 @@ Args:
     max_tokens: Optional max_tokens parameter (int or string)
     max_retries: Optional override for the instance's max_retries setting
     context: Context prefix for metering key (default: "Unspecified")
-    
+
 Returns:
     Bedrock response object with metering information
 """

@@ -133,8 +133,8 @@ def _handle_bank_statement(placeholders, default_system_prompt, document_text):
 
     # Create specialized system prompt
     if is_business:
-        custom_system_prompt = """You are a specialized business banking document processor. 
-        You understand business financial terminology, corporate account structures, and commercial banking products. 
+        custom_system_prompt = """You are a specialized business banking document processor.
+        You understand business financial terminology, corporate account structures, and commercial banking products.
         Focus on business-specific transaction patterns and corporate financial data."""
 
         context_note = "BUSINESS BANKING CONTEXT"
@@ -161,23 +161,23 @@ def _handle_bank_statement(placeholders, default_system_prompt, document_text):
     custom_task_prompt = f"""
     <demo-customization>
     This is a DEMONSTRATION of custom prompt generation.
-    
+
     {context_note}: This appears to be a {'business' if is_business else 'personal'} bank statement.
-    
+
     Special Processing Instructions:
     {business_instructions}
     </demo-customization>
-    
+
     <document-class>{placeholders.get("DOCUMENT_CLASS")}</document-class>
-    
+
     <attributes-to-extract>
     {placeholders.get("ATTRIBUTE_NAMES_AND_DESCRIPTIONS")}
     </attributes-to-extract>
-    
+
     <document-content>
     {placeholders.get("DOCUMENT_TEXT")}
     </document-content>
-    
+
     Apply the special processing instructions above when extracting the requested attributes.
     Return valid JSON with all requested fields.
     """
@@ -235,23 +235,23 @@ def _handle_invoice(placeholders, default_system_prompt, document_text):
     custom_task_prompt = f"""
     <demo-customization>
     This is a DEMONSTRATION of custom prompt generation.
-    
+
     {context_note}: This appears to be an {'international' if is_international else 'domestic'} invoice.
-    
+
     Special Processing Instructions:
     {context_instructions}
     </demo-customization>
-    
+
     <document-class>{placeholders.get("DOCUMENT_CLASS")}</document-class>
-    
+
     <attributes-to-extract>
     {placeholders.get("ATTRIBUTE_NAMES_AND_DESCRIPTIONS")}
     </attributes-to-extract>
-    
+
     <document-content>
     {placeholders.get("DOCUMENT_TEXT")}
     </document-content>
-    
+
     Apply the special processing instructions above when extracting invoice data.
     Return valid JSON with all requested fields.
     """
@@ -277,9 +277,9 @@ def _handle_generic_document(placeholders, default_system_prompt, default_conten
         "text": f"""
         <demo-customization>
         This is a DEMONSTRATION of custom prompt generation.
-        
+
         GENERIC DOCUMENT PROCESSING: Document class '{placeholders.get("DOCUMENT_CLASS")}' is being processed with enhanced generic prompts.
-        
+
         The Lambda function detected this as a generic document type and applied standard enhancements.
         </demo-customization>
         """

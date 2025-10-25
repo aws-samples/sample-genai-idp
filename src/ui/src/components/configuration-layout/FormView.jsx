@@ -26,23 +26,23 @@ const customStyles = `
     overflow-y: auto !important;
     resize: vertical;
   }
-  
+
   /* Make form fields more compact */
   .awsui-form-field {
     margin-bottom: 4px !important;
   }
-  
+
   /* Reduce space inside form fields */
   .awsui-form-field-control {
-    margin-top: 2px !important;  
+    margin-top: 2px !important;
   }
-  
+
   /* Minimize space between label and control */
   .awsui-form-field-label {
     margin-bottom: 0 !important;
     padding-bottom: 0 !important;
   }
-  
+
   /* Highlight modified fields */
   .modified-field {
     background-color: rgba(255, 240, 179, 0.2) !important;
@@ -50,13 +50,13 @@ const customStyles = `
     padding-left: 8px !important;
     border-radius: 4px !important;
   }
-  
+
   /* Style for the restore default button */
   .restore-default-button {
     margin-left: 8px;
     font-size: 12px;
   }
-  
+
   /* More compact list and nested list styling */
   .awsui-button-icon {
     padding: 2px !important;
@@ -65,7 +65,7 @@ const customStyles = `
     display: inline-flex !important;
     align-items: center !important;
   }
-  
+
   /* Make nested lists more compact - target specific AWSUI class patterns */
   .awsui-box,
   div[class*="awsui_box_"],
@@ -78,79 +78,79 @@ const customStyles = `
     padding-top: 0 !important;
     padding-bottom: 0 !important;
   }
-  
+
   /* Target specific padding for containers */
   div[class*="awsui_p-s_"] {
     padding: 2px !important;
   }
-  
+
   /* Fix box alignment */
   .awsui-box-inline {
     display: inline-flex !important;
     align-items: center !important;
   }
-  
+
   /* Target container tables */
   table, tbody, tr, td {
     margin: 0 !important;
     padding: 0 !important;
   }
-  
+
   /* Target space-between components */
   div[class*="awsui_space-between_"],
   div[class*="awsui_container_"] {
     margin-top: 0 !important;
     margin-bottom: 0 !important;
   }
-  
+
   /* Remove excess padding in list items */
   div[class*="awsui_content-"] {
     padding: 2px !important;
   }
-  
+
   /* Target form field spacing */
   div[class*="awsui_form-field_"] {
     margin-bottom: 4px !important;
   }
-  
+
   /* Indentation visual indicator */
   .list-content-indented {
     border-left: 2px solid #aab7b8;
     margin-left: 12px;
     padding-left: 12px !important;
   }
-  
+
   /* Property indentation style - more subtle than list indentation */
   .property-content-indented {
     border-left: 1px solid #d5dbdb;
     margin-left: 8px;
     padding-left: 8px !important;
   }
-  
+
   /* Add button spacing */
   .list-add-button-container {
     padding: 8px 4px 12px 4px !important;
     margin: 0 0 8px 0 !important;
   }
-  
+
   /* Base add button container styling */
   .list-add-button-container {
     position: relative;
     margin-top: 0 !important;
   }
-  
+
   /* Specific styling for nested list add buttons */
   .property-content-indented .list-add-button-container,
   .list-content-indented .list-content-indented .list-add-button-container {
     padding-top: 8px !important;
     margin-top: 4px !important;
   }
-  
+
   /* List separator styling */
   .list-separator {
     margin: 16px 0 16px 0 !important;
   }
-  
+
   /* Nested list separator - more space without a visible line */
   .property-content-indented .list-separator,
   .list-content-indented .list-content-indented .list-separator {

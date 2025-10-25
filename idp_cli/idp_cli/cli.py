@@ -109,21 +109,21 @@ def deploy(
 ):
     """
     Deploy or update IDP stack from command line
-    
+
     For new stacks, --pattern and --admin-email are required.
     For existing stacks, only specify parameters you want to update.
-    
+
     Examples:
-    
+
       # Create new stack with Pattern 2
       idp-cli deploy --stack-name my-idp --pattern pattern-2 --admin-email user@example.com
-      
+
       # Update existing stack with local config file (NEW!)
       idp-cli deploy --stack-name my-idp --custom-config ./my-config.yaml
-      
+
       # Update existing stack with custom settings
       idp-cli deploy --stack-name my-idp --max-concurrent 200 --wait
-      
+
       # Create with additional parameters
       idp-cli deploy --stack-name my-idp --pattern pattern-2 \\
           --admin-email user@example.com \\
@@ -505,24 +505,24 @@ def rerun_inference(
 ):
     """
     Rerun processing for existing documents from a specific step
-    
+
     Reprocesses documents already in InputBucket, leveraging existing OCR data.
-    
+
     Steps:
       - classification: Reruns classification and all subsequent steps
       - extraction: Reruns extraction and assessment (keeps classification)
-    
+
     Document ID Format: Use the S3 key format (e.g., "batch-id/document.pdf")
-    
+
     Examples:
-    
+
       # Rerun classification for specific documents
       idp-cli rerun-inference \\
           --stack-name my-stack \\
           --step classification \\
           --document-ids "batch-123/doc1.pdf,batch-123/doc2.pdf" \\
           --monitor
-      
+
       # Rerun extraction for all documents in a batch
       idp-cli rerun-inference \\
           --stack-name my-stack \\

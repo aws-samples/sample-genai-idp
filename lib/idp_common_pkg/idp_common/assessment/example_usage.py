@@ -42,13 +42,13 @@ def example_granular_assessment():
             <background>
             You are an expert document analysis assessment system...
             </background>
-            
+
             <<CACHEPOINT>>
-            
+
             <extraction-results>
             {EXTRACTION_RESULTS}
             </extraction-results>
-            
+
             <final-instructions>
             Analyze and provide confidence assessments...
             </final-instructions>

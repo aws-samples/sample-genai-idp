@@ -145,42 +145,42 @@ def create_human_task_ui(human_task_ui_name):
             }
 
             * { box-sizing: border-box; }
-            
-            body { 
-                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+
+            body {
+                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
                 margin: 0; padding: 0;
                 height: 100vh; overflow: hidden;
                 background: var(--light-gray);
             }
-            
-            .container { 
+
+            .container {
                 display: flex; height: 100vh;
                 box-shadow: var(--shadow);
             }
-            
-            .image-pane { 
+
+            .image-pane {
                 width: 65%; padding: 15px;
                 background: white; position: relative;
                 border-right: 2px solid var(--border-gray);
             }
-            
-            .review-pane { 
+
+            .review-pane {
                 width: 35%; padding: 15px;
                 display: flex; flex-direction: column;
                 background: var(--light-gray);
             }
-            
+
             .controls-bar {
                 display: flex; justify-content: space-between;
                 align-items: center; margin-bottom: 15px;
                 padding: 10px; background: var(--secondary-blue);
                 border-radius: 6px; box-shadow: var(--shadow);
             }
-            
-            .image-controls { 
+
+            .image-controls {
                 display: flex; gap: 8px; align-items: center;
             }
-            
+
             .image-controls button {
                 background: var(--primary-blue);
                 color: white; border: none;
@@ -189,18 +189,18 @@ def create_human_task_ui(human_task_ui_name):
                 transition: all 0.2s ease;
                 min-width: 32px;
             }
-            
+
             .image-controls button:hover {
                 background: var(--dark-blue);
                 transform: translateY(-1px);
             }
-            
+
             .image-controls button:disabled {
                 background: #ccc;
                 cursor: not-allowed;
                 transform: none;
             }
-            
+
             .image-container {
                 position: relative; overflow: auto;
                 height: calc(100vh - 80px);
@@ -208,11 +208,11 @@ def create_human_task_ui(human_task_ui_name):
                 border-radius: 6px; background: white;
                 cursor: grab;
             }
-            
+
             .image-container:active {
                 cursor: grabbing;
             }
-            
+
             .image-wrapper {
                 display: inline-block;
                 min-width: 100%;
@@ -220,15 +220,15 @@ def create_human_task_ui(human_task_ui_name):
                 text-align: center;
                 transition: width 0.2s ease, height 0.2s ease;
             }
-            
-            #documentImage { 
+
+            #documentImage {
                 display: block; margin: 0 auto;
                 max-width: none; max-height: none;
                 border-radius: 4px;
                 transition: transform 0.2s ease;
                 transform-origin: center center;
             }
-            
+
             .highlight-box {
                 position: absolute; z-index: 10;
                 border: 3px solid var(--primary-blue);
@@ -236,101 +236,101 @@ def create_human_task_ui(human_task_ui_name):
                 pointer-events: none; border-radius: 2px;
                 box-shadow: 0 0 10px rgba(0,115,230,0.3);
             }
-            
-            .document-info { 
+
+            .document-info {
                 background: white; padding: 15px;
                 border-radius: 8px; margin-bottom: 15px;
                 box-shadow: var(--shadow); border-left: 4px solid var(--primary-blue);
             }
-            
+
             .info-toggle {
                 cursor: pointer; display: flex;
                 justify-content: space-between; align-items: center;
                 color: var(--primary-blue); font-weight: 600;
             }
-            
+
             .info-content {
                 margin-top: 10px; display: none;
                 font-size: 13px; color: var(--text-dark);
             }
-            
+
             .info-content.expanded { display: block; }
-            
+
             .info-content p {
                 margin: 5px 0; padding: 3px 0;
                 border-bottom: 1px solid #f0f0f0;
             }
-            
+
             .scroll-container {
                 flex: 1; overflow-y: auto;
                 padding-right: 8px; max-height: calc(100vh - 300px);
             }
-            
-            .key-value-pair { 
+
+            .key-value-pair {
                 margin-bottom: 15px; padding: 15px;
                 border: 1px solid var(--border-gray);
                 border-radius: 8px; background: white;
                 transition: all 0.2s ease; cursor: pointer;
                 box-shadow: 0 1px 3px rgba(0,0,0,0.1);
             }
-            
+
             .key-value-pair:hover {
                 transform: translateY(-2px);
                 box-shadow: 0 4px 12px rgba(0,0,0,0.15);
                 border-color: var(--primary-blue);
             }
-            
+
             .key-value-pair label {
                 display: block; font-weight: 600;
                 color: var(--primary-blue); margin-bottom: 8px;
                 font-size: 14px;
             }
-            
+
             .key-value-pair crowd-input {
                 width: 100%; margin-bottom: 8px;
             }
-            
+
             .confidence-display {
                 display: flex; justify-content: space-between;
                 align-items: center; font-size: 12px;
                 margin-top: 5px;
             }
-            
+
             .confidence-score {
                 font-weight: 600; padding: 2px 6px;
                 border-radius: 3px;
             }
-            
-            .confidence-low { 
+
+            .confidence-low {
                 color: var(--warning-red);
                 background: rgba(220,53,69,0.1);
             }
-            
-            .confidence-high { 
+
+            .confidence-high {
                 color: var(--success-green);
                 background: rgba(40,167,69,0.1);
             }
-            
+
             .threshold-info {
                 color: #6c757d; font-size: 11px;
             }
-            
+
             .missing-value {
                 color: var(--warning-red);
                 font-size: 12px; margin-top: 5px;
                 padding: 5px; background: rgba(220,53,69,0.1);
                 border-radius: 3px; border-left: 3px solid var(--warning-red);
             }
-            
+
             .tab-container {
                 background: white; border-radius: 8px;
                 box-shadow: var(--shadow); margin-bottom: 15px;
             }
-            
+
             .tab-buttons {
                 display: flex; border-bottom: 1px solid var(--border-gray);
             }
-            
+
             .tab-button {
                 flex: 1; padding: 12px; text-align: center;
                 background: var(--light-gray); border: none;
@@ -338,69 +338,69 @@ def create_human_task_ui(human_task_ui_name):
                 color: var(--text-dark); transition: all 0.2s ease;
                 border-radius: 8px 8px 0 0;
             }
-            
+
             .tab-button.active {
                 background: white; color: var(--primary-blue);
                 border-bottom: 2px solid var(--primary-blue);
             }
-            
+
             .tab-button:hover:not(.active) {
                 background: var(--secondary-blue);
             }
-            
+
             .tab-content {
                 padding: 15px; display: none;
             }
-            
+
             .tab-content.active {
                 display: block;
             }
-            
+
             .instructions-list {
                 list-style: none; padding: 0; margin: 0;
             }
-            
+
             .instructions-list li {
                 padding: 10px 0; border-bottom: 1px solid #f0f0f0;
                 display: flex; align-items: flex-start; gap: 10px;
             }
-            
+
             .instructions-list li:last-child {
                 border-bottom: none;
             }
-            
+
             .step-number {
                 background: var(--primary-blue); color: white;
                 width: 24px; height: 24px; border-radius: 50%;
                 display: flex; align-items: center; justify-content: center;
                 font-size: 12px; font-weight: 600; flex-shrink: 0;
             }
-            
+
             .step-text {
                 flex: 1; font-size: 14px; line-height: 1.4;
             }
-            
+
             .verification-section {
                 background: white; padding: 15px;
                 border-radius: 8px; margin-top: 15px;
                 box-shadow: var(--shadow); border-left: 4px solid var(--success-green);
             }
-            
+
             .verification-checkbox {
                 display: flex; align-items: center;
                 gap: 10px; margin-bottom: 15px;
             }
-            
+
             .verification-checkbox input[type="checkbox"] {
                 width: 18px; height: 18px;
                 accent-color: var(--success-green);
             }
-            
+
             .verification-checkbox label {
                 font-weight: 600; color: var(--text-dark);
                 cursor: pointer;
             }
-            
+
             .submit-button {
                 background: var(--success-green);
                 color: white; border: none;
@@ -409,22 +409,22 @@ def create_human_task_ui(human_task_ui_name):
                 transition: all 0.2s ease; width: 100%;
                 opacity: 0.5; pointer-events: none;
             }
-            
+
             .submit-button.enabled {
                 opacity: 1; pointer-events: auto;
             }
-            
+
             .submit-button.enabled:hover {
                 background: #218838;
                 transform: translateY(-1px);
                 box-shadow: 0 4px 8px rgba(0,0,0,0.2);
             }
-            
-            h3 { 
+
+            h3 {
                 color: var(--primary-blue); margin: 0 0 15px 0;
                 font-size: 18px; font-weight: 600;
             }
-            
+
             select {
                 width: 100%; padding: 8px;
                 border: 1px solid var(--border-gray);
@@ -450,8 +450,8 @@ def create_human_task_ui(human_task_ui_name):
                     </div>
                     <div class="image-container" id="imageContainer">
                         <div class="image-wrapper" id="imageWrapper">
-                            <img id="documentImage" 
-                                src="{{ task.input.sourceDocument | grant_read_access }}" 
+                            <img id="documentImage"
+                                src="{{ task.input.sourceDocument | grant_read_access }}"
                                 onload="initImage()">
                         </div>
                     </div>
@@ -470,7 +470,7 @@ def create_human_task_ui(human_task_ui_name):
                             <p><strong>Threshold:</strong> {{ task.input.confidenceThreshold | round: 2 }}</p>
                             <p><strong>Page:</strong> {{ task.input.page_number }}</p>
                             <p><strong>Execution ID:</strong> {{ task.input.execution_id }}</p>
-                            
+
                             <label for="blueprintSelection" style="margin-top: 10px; display: block;"><strong>Select Blueprint:</strong></label>
                             <select name="blueprintSelection" id="blueprintSelection" required disabled onchange="handleBlueprintChange()">
                                 {% for option in task.input.blueprintOptions %}
@@ -488,7 +488,7 @@ def create_human_task_ui(human_task_ui_name):
                             <button type="button" class="tab-button active" onclick="switchTab('review')">📋 Review</button>
                             <button type="button" class="tab-button" onclick="switchTab('instructions')">📖 Instructions</button>
                         </div>
-                        
+
                         <!-- Review Tab Content -->
                         <div id="reviewTab" class="tab-content active">
                             <!-- Scrollable Key Value Section -->
@@ -496,13 +496,13 @@ def create_human_task_ui(human_task_ui_name):
                                 <h3>🔍 Field Review</h3>
                                 {% for pair in task.input.keyValuePairs %}
                                     {% assign bbox_index = forloop.index0 %}
-                                    <div class="key-value-pair" 
-                                        data-key="{{ pair.key | escape }}" 
+                                    <div class="key-value-pair"
+                                        data-key="{{ pair.key | escape }}"
                                         data-bbox="{{ task.input.boundingBoxes[bbox_index].bounding_box | to_json | escape }}"
                                         onclick="highlightBBox(this)">
                                         <label>{{ pair.key | escape }}</label>
-                                        <crowd-input 
-                                            name="{{ pair.key | escape }}" 
+                                        <crowd-input
+                                            name="{{ pair.key | escape }}"
                                             value="{{ pair.value | escape }}">
                                         </crowd-input>
                                         <div class="confidence-display">
@@ -522,7 +522,7 @@ def create_human_task_ui(human_task_ui_name):
                                 {% endfor %}
                             </div>
                         </div>
-                        
+
                         <!-- Instructions Tab Content -->
                         <div id="instructionsTab" class="tab-content">
                             <div class="scroll-container">
@@ -565,7 +565,7 @@ def create_human_task_ui(human_task_ui_name):
                                         </div>
                                     </li>
                                 </ul>
-                                
+
                                 <div style="margin-top: 20px; padding: 15px; background: var(--secondary-blue); border-radius: 6px;">
                                     <strong>💡 Tips:</strong>
                                     <ul style="margin: 10px 0 0 20px; font-size: 13px;">
@@ -585,10 +585,10 @@ def create_human_task_ui(human_task_ui_name):
                             <input type="checkbox" id="reviewComplete" onchange="toggleSubmit()">
                             <label for="reviewComplete">I have reviewed all fields and verified their accuracy</label>
                         </div>
-                        <crowd-button 
+                        <crowd-button
                             id="submitButton"
                             class="submit-button"
-                            form-action="submit" 
+                            form-action="submit"
                             variant="primary"
                             disabled="true">
                             ✓ Submit Review
@@ -604,7 +604,7 @@ def create_human_task_ui(human_task_ui_name):
             let isDragging = false;
             let dragStart = { x: 0, y: 0 };
             let scrollStart = { x: 0, y: 0 };
-            
+
             const imgElement = document.getElementById('documentImage');
             const imageContainer = document.getElementById('imageContainer');
             const imageWrapper = document.getElementById('imageWrapper');
@@ -614,7 +614,7 @@ def create_human_task_ui(human_task_ui_name):
                 const containerRect = imageContainer.getBoundingClientRect();
                 const imgAspect = imgElement.naturalWidth / imgElement.naturalHeight;
                 const containerAspect = containerRect.width / containerRect.height;
-                
+
                 if (imgAspect > containerAspect) {
                     imgElement.style.width = '100%';
                     imgElement.style.height = 'auto';
@@ -622,7 +622,7 @@ def create_human_task_ui(human_task_ui_name):
                     imgElement.style.width = 'auto';
                     imgElement.style.height = '100%';
                 }
-                
+
                 updateWrapperSize();
                 updateHighlight();
             }
@@ -632,11 +632,11 @@ def create_human_task_ui(human_task_ui_name):
                 const imgRect = imgElement.getBoundingClientRect();
                 const baseWidth = imgElement.offsetWidth;
                 const baseHeight = imgElement.offsetHeight;
-                
+
                 // Calculate the size needed for the zoomed image
                 const scaledWidth = baseWidth * currentZoom;
                 const scaledHeight = baseHeight * currentZoom;
-                
+
                 // Set wrapper size to accommodate the scaled image
                 imageWrapper.style.width = `${scaledWidth}px`;
                 imageWrapper.style.height = `${scaledHeight}px`;
@@ -645,15 +645,15 @@ def create_human_task_ui(human_task_ui_name):
             function zoomIn() {
                 const centerX = imageContainer.scrollLeft + imageContainer.clientWidth / 2;
                 const centerY = imageContainer.scrollTop + imageContainer.clientHeight / 2;
-                
+
                 currentZoom = Math.min(currentZoom * 1.25, 4);
                 applyZoom();
-                
+
                 // Maintain center point
                 setTimeout(() => {
                     const newCenterX = centerX * 1.25;
                     const newCenterY = centerY * 1.25;
-                    
+
                     imageContainer.scrollLeft = newCenterX - imageContainer.clientWidth / 2;
                     imageContainer.scrollTop = newCenterY - imageContainer.clientHeight / 2;
                 }, 50);
@@ -662,15 +662,15 @@ def create_human_task_ui(human_task_ui_name):
             function zoomOut() {
                 const centerX = imageContainer.scrollLeft + imageContainer.clientWidth / 2;
                 const centerY = imageContainer.scrollTop + imageContainer.clientHeight / 2;
-                
+
                 currentZoom = Math.max(currentZoom / 1.25, 0.25);
                 applyZoom();
-                
+
                 // Maintain center point
                 setTimeout(() => {
                     const newCenterX = centerX / 1.25;
                     const newCenterY = centerY / 1.25;
-                    
+
                     imageContainer.scrollLeft = newCenterX - imageContainer.clientWidth / 2;
                     imageContainer.scrollTop = newCenterY - imageContainer.clientHeight / 2;
                 }, 50);
@@ -700,7 +700,7 @@ def create_human_task_ui(human_task_ui_name):
 
             function highlightBBox(element) {
                 if(currentHighlight) currentHighlight.remove();
-                
+
                 const bbox = JSON.parse(element.dataset.bbox || '{}');
                 if(bbox?.width > 0 && bbox?.height > 0) {
                     currentHighlight = document.createElement('div');
@@ -709,7 +709,7 @@ def create_human_task_ui(human_task_ui_name):
 
                     const containerRect = imageContainer.getBoundingClientRect();
                     const imgRect = imgElement.getBoundingClientRect();
-                    
+
                     const left = imgRect.left - containerRect.left + (bbox.left * imgRect.width);
                     const top = imgRect.top - containerRect.top + (bbox.top * imgRect.height);
                     const width = bbox.width * imgRect.width;
@@ -721,11 +721,11 @@ def create_human_task_ui(human_task_ui_name):
                     currentHighlight.style.height = `${height}px`;
 
                     imageContainer.appendChild(currentHighlight);
-                    
+
                     // Auto-scroll to highlight
                     const scrollX = left - (imageContainer.clientWidth / 2) + (width / 2);
                     const scrollY = top - (imageContainer.clientHeight / 2) + (height / 2);
-                    
+
                     imageContainer.scrollTo({
                         left: Math.max(0, scrollX),
                         top: Math.max(0, scrollY),
@@ -748,7 +748,7 @@ def create_human_task_ui(human_task_ui_name):
                 if (isDragging) {
                     const deltaX = e.clientX - dragStart.x;
                     const deltaY = e.clientY - dragStart.y;
-                    
+
                     imageContainer.scrollLeft = scrollStart.x - deltaX;
                     imageContainer.scrollTop = scrollStart.y - deltaY;
                     e.preventDefault();
@@ -774,7 +774,7 @@ def create_human_task_ui(human_task_ui_name):
             function switchTab(tabName) {
                 document.querySelectorAll('.tab-button').forEach(btn => btn.classList.remove('active'));
                 document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
-                
+
                 document.querySelector(`[onclick="switchTab('${tabName}')"]`).classList.add('active');
                 document.getElementById(`${tabName}Tab`).classList.add('active');
             }
@@ -782,7 +782,7 @@ def create_human_task_ui(human_task_ui_name):
             function toggleInfo() {
                 const content = document.getElementById('infoContent');
                 const icon = document.getElementById('toggleIcon');
-                
+
                 if (content.classList.contains('expanded')) {
                     content.classList.remove('expanded');
                     icon.textContent = '▼';
@@ -795,7 +795,7 @@ def create_human_task_ui(human_task_ui_name):
             function toggleSubmit() {
                 const checkbox = document.getElementById('reviewComplete');
                 const submitButton = document.getElementById('submitButton');
-                
+
                 if (checkbox.checked) {
                     submitButton.classList.add('enabled');
                     submitButton.removeAttribute('disabled');
@@ -838,7 +838,7 @@ def create_human_task_ui(human_task_ui_name):
                 updateWrapperSize();
                 updateHighlight();
             });
-            
+
             // Keyboard shortcuts
             document.addEventListener('keydown', (e) => {
                 if (e.ctrlKey || e.metaKey) {

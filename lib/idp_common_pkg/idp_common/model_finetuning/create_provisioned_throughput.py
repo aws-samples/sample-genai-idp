@@ -209,28 +209,28 @@ Examples:
     --model-id arn:aws:bedrock:us-east-1:123456789012:custom-model/amazon.nova-lite-v1... \\
     --provisioned-model-name my-provisioned-model \\
     --model-units 1
-  
+
   # Create provisioned throughput from job details file
   python create_provisioned_throughput.py \\
     --job-details-file finetuning_job_20241201_120000.json \\
     --provisioned-model-name my-provisioned-model \\
     --model-units 2
-  
+
   # Create provisioned throughput from job ARN
   python create_provisioned_throughput.py \\
     --job-arn arn:aws:states:us-east-1:123456789012:execution:... \\
     --provisioned-model-name my-provisioned-model
-  
+
   # Check status of provisioned throughput
   python create_provisioned_throughput.py \\
     --status-only \\
     --provisioned-model-arn arn:aws:bedrock:us-east-1:123456789012:provisioned-model/...
-  
+
   # Delete provisioned throughput
   python create_provisioned_throughput.py \\
     --delete \\
     --provisioned-model-arn arn:aws:bedrock:us-east-1:123456789012:provisioned-model/...
-  
+
   # List all provisioned models
   python create_provisioned_throughput.py --list-models
         """,

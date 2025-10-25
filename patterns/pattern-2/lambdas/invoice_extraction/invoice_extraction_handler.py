@@ -45,7 +45,7 @@ def get_invoice_extraction_prompt() -> str:
         response = config_table.get_item(
             Key={'Configuration': 'INVOICE_EXTRACTION_PROMPT'}
         )
-        
+
         if 'Item' in response and 'PromptTemplate' in response['Item']:
             log_with_timestamp("✅ Retrieved custom invoice prompt from ConfigurationTable")
             return response['Item']['PromptTemplate']
@@ -81,7 +81,7 @@ VENDOR NAME EXTRACTION RULES:
 
 MULTIPLE INVOICE HANDLING:
 - If you find 5 invoices → output 5 separate <invoice> blocks
-- If you find 1 invoice → output 1 <invoice> block  
+- If you find 1 invoice → output 1 <invoice> block
 - If you find 10 invoices → output 10 separate <invoice> blocks
 - NEVER skip invoices because there are "too many"
 - NEVER merge multiple invoices into one block
@@ -130,12 +130,12 @@ def invoke_bedrock(prompt: str) -> str:
                 {"role": "user", "content": prompt}
             ]
         }
-        
+
         response = bedrock_runtime.invoke_model(
             modelId=BEDROCK_MODEL_ID,
             body=json.dumps(body)
         )
-        
+
         response_body = json.loads(response['body'].read())
         return response_body['content'][0]['text']
     except Exception as e:
@@ -147,17 +147,17 @@ def safe_decimal_convert(value: Any) -> Decimal:
     """Safely convert string to Decimal for DynamoDB"""
     if isinstance(value, (int, float)):
         return Decimal(str(value))
-    
+
     if not value or not isinstance(value, str):
         return Decimal('0')
-    
+
     # Clean the value - remove currency symbols and commas
     cleaned = re.sub(r'[£$€,\s]', '', str(value))
     cleaned = re.sub(r'[^\d.-]', '', cleaned)
-    
+
     if not cleaned or cleaned in ['-', '.']:
         return Decimal('0')
-    
+
     try:
         return Decimal(cleaned)
     except (ValueError, TypeError, ArithmeticError):
@@ -171,38 +171,38 @@ def parse_invoices_from_xml(xml_content: str) -> List[Dict[str, Any]]:
     """
     invoice_pattern = r'<invoice>(.*?)</invoice>'
     field_pattern = r'<(\w+)>(.*?)</\1>'
-    
+
     invoice_matches = list(re.finditer(invoice_pattern, xml_content, re.DOTALL))
     log_with_timestamp(f"📋 Found {len(invoice_matches)} invoices in XML response")
-    
+
     invoices = []
-    
+
     for idx, invoice_match in enumerate(invoice_matches, 1):
         invoice_data = invoice_match.group(1)
         row_data = {}
-        
+
         # Extract fields from XML (HARDCODED parsing)
         for field_match in re.finditer(field_pattern, invoice_data):
             field_name, value = field_match.groups()
             row_data[field_name] = value.strip()
-        
+
         # Skip incomplete invoices (must have supplier_name OR total_amount)
         if not row_data.get('supplier_name') and not row_data.get('total_amount'):
             log_with_timestamp(f"⚠️ Skipping incomplete invoice #{idx}")
             continue
-        
+
         # Get supplier name with fallback
         supplier_name = row_data.get('supplier_name', '').strip()
         if not supplier_name:
             supplier_name = 'Unknown Vendor'
-        
+
         # Extract and validate source_page
         source_page = row_data.get('source_page', '1')
         try:
             source_page = int(source_page)
         except (ValueError, TypeError):
             source_page = idx  # Use invoice index as fallback
-        
+
         # Create standardized invoice record
         invoice_record = {
             'invoice_type': row_data.get('invoice_type', 'SUPPLIER_INVOICE'),
@@ -221,9 +221,9 @@ def parse_invoices_from_xml(xml_content: str) -> List[Dict[str, Any]]:
             'payment_terms': row_data.get('payment_terms', ''),
             'source_page': source_page
         }
-        
+
         invoices.append(invoice_record)
-    
+
     return invoices
 
 
@@ -240,18 +240,18 @@ def write_invoices_to_dynamodb(
     """
     inserted_count = 0
     current_timestamp = int(time.time())
-    
+
     for idx, invoice_data in enumerate(invoices):
         try:
             # Generate unique invoice ID
             invoice_id = f"{document_id}-inv-{section_id}-{idx+1}-{str(uuid.uuid4())[:8]}"
-            
+
             # Create DynamoDB item matching your schema
             item = {
                 # Primary Key
                 'PK': f"user#{user_id}#doc#{document_id}",
                 'SK': f"type#INVOICE#section#{section_id}#invoice#{idx+1}",
-                
+
                 # GSI Keys
                 'GSI1PK': f"user#{user_id}#type#INVOICE",
                 'ProcessedAt': current_timestamp,
@@ -260,13 +260,13 @@ def write_invoices_to_dynamodb(
                 'DocumentId': document_id,
                 'ExtractionStatus': 'COMPLETED',
                 'GSI6PK': f"client#{client_id}#type#INVOICE",
-                
+
                 # Core identifiers
                 'InvoiceId': invoice_id,
                 'SectionId': section_id,
                 'ClientId': client_id,
                 'DocumentType': 'INVOICE',
-                
+
                 # Invoice-specific fields
                 'InvoiceType': invoice_data['invoice_type'],
                 'InvoiceNumber': invoice_data['invoice_number'],
@@ -284,31 +284,31 @@ def write_invoices_to_dynamodb(
                 'Description': invoice_data['description'],
                 'PaymentTerms': invoice_data['payment_terms'],
                 'SourcePage': invoice_data['source_page'],
-                
+
                 # Metadata
                 'CreatedAt': current_timestamp,
                 'UpdatedAt': current_timestamp,
                 'DateExtracted': datetime.now().strftime('%Y-%m-%d'),
                 'ConfidenceScore': Decimal('0.95'),  # Placeholder - can be enhanced
                 'Version': 1,
-                
+
                 # TTL (optional - set to 1 year from now)
                 'TTL': current_timestamp + (365 * 24 * 60 * 60)
             }
-            
+
             # Write to DynamoDB
             extraction_table.put_item(Item=item)
             inserted_count += 1
-            
+
             log_with_timestamp(
                 f"✅ Inserted invoice {idx+1}/{len(invoices)}: "
                 f"{invoice_data['supplier_name']} - "
                 f"{invoice_data['currency']}{invoice_data['total_amount']}"
             )
-            
+
         except Exception as e:
             log_with_timestamp(f"❌ Error inserting invoice {idx+1}: {str(e)}")
-    
+
     return inserted_count
 
 
@@ -316,19 +316,19 @@ def normalize_company_name(company_name: str) -> str:
     """Normalize company name for consistent GSI3PK keys"""
     if not company_name:
         return 'unknown'
-    
+
     # Convert to lowercase, remove special chars, replace spaces with hyphens
     normalized = company_name.lower()
     normalized = re.sub(r'[^a-z0-9\s-]', '', normalized)
     normalized = re.sub(r'\s+', '-', normalized).strip('-')
-    
+
     return normalized or 'unknown'
 
 
 def lambda_handler(event, context):
     """
     Main Lambda handler for invoice extraction
-    
+
     Expected event structure from Step Functions:
     {
         "execution_arn": "...",
@@ -337,22 +337,22 @@ def lambda_handler(event, context):
     }
     """
     start_time = time.time()
-    
+
     try:
         # Log the full event for debugging
         log_with_timestamp(f"📥 Received event: {json.dumps(event, default=str)[:1000]}...")
-        
+
         # Get section_id from event
         section_id = event.get('section_id')
         if not section_id:
             raise ValueError("No section_id found in event")
-        
+
         log_with_timestamp(f"📋 Section ID: {section_id}")
-        
+
         # Get document data (handle compressed S3 URI, inline S3 URI string, and inline dict)
         document_data = event.get('document', {})
         log_with_timestamp(f"📄 Document data type: {type(document_data)}")
-        
+
         if isinstance(document_data, str):
             # Document is S3 URI string - fetch from S3
             s3_client = boto3.client('s3')
@@ -360,64 +360,64 @@ def lambda_handler(event, context):
             parsed_uri = urlparse(document_data)
             bucket = parsed_uri.netloc
             key = parsed_uri.path.lstrip('/')
-            
+
             log_with_timestamp(f"📦 Fetching document from S3: s3://{bucket}/{key}")
             s3_obj = s3_client.get_object(Bucket=bucket, Key=key)
             document_dict = json.loads(s3_obj['Body'].read().decode('utf-8'))
-            
+
         elif isinstance(document_data, dict) and document_data.get('compressed') and document_data.get('s3_uri'):
             # Document is compressed and stored in S3 - fetch it
             s3_uri = document_data['s3_uri']
             log_with_timestamp(f"📦 Document is compressed, fetching from S3: {s3_uri}")
-            
+
             s3_client = boto3.client('s3')
             from urllib.parse import urlparse
             parsed_uri = urlparse(s3_uri)
             bucket = parsed_uri.netloc
             key = parsed_uri.path.lstrip('/')
-            
+
             s3_obj = s3_client.get_object(Bucket=bucket, Key=key)
             document_dict = json.loads(s3_obj['Body'].read().decode('utf-8'))
-            
+
         elif isinstance(document_data, dict):
             # Document is inline dict (already decompressed)
             document_dict = document_data
         else:
             raise ValueError(f"Invalid document format: {type(document_data)}")
-        
+
         # Log document structure for debugging
         log_with_timestamp(f"📦 Document keys: {list(document_dict.keys())}")
         log_with_timestamp(f"🔍 Full document structure (first 2000 chars): {json.dumps(document_dict, default=str)[:2000]}")
-        
+
         # Extract metadata from document dict
         document_id = document_dict.get('id')
         user_id = document_dict.get('user_id')
         client_id = document_dict.get('client_id') or 'default-client'  # Use placeholder if None
-        
+
         log_with_timestamp(f"🔍 Extracted metadata - ID: {document_id}, User: {user_id}, Client: {client_id}")
-        
+
         # Find the section in the document
         sections = document_dict.get('sections', [])
         log_with_timestamp(f"📚 Found {len(sections)} sections in document")
-        
+
         section_data = None
         for sec in sections:
             if sec.get('section_id') == section_id:
                 section_data = sec
                 break
-        
+
         if not section_data:
             raise ValueError(f"Section {section_id} not found in document. Available sections: {[s.get('section_id') for s in sections]}")
-        
+
         log_with_timestamp(f"📋 Section data keys: {list(section_data.keys())}")
         log_with_timestamp(f"📋 Section data: {json.dumps(section_data, default=str)[:500]}")
-        
+
         # Get section text from OCR results
         section_text = ""
         section_pages = section_data.get('page_ids', [])
-        
+
         log_with_timestamp(f"📄 Section has {len(section_pages)} page IDs: {section_pages}")
-        
+
         # Check if section has ocr_result_uri or ocr_text directly
         if 'ocr_result_uri' in section_data:
             log_with_timestamp(f"📥 Found ocr_result_uri in section: {section_data['ocr_result_uri']}")
@@ -425,43 +425,43 @@ def lambda_handler(event, context):
         elif 'ocr_text' in section_data:
             section_text = section_data['ocr_text']
             log_with_timestamp(f"✅ Found ocr_text directly in section ({len(section_text)} chars)")
-        
+
         # Build section text from pages if not found in section
         if not section_text:
             pages = document_dict.get('pages', {})
             log_with_timestamp(f"📚 Document has {len(pages)} pages (dict format)")
-            
+
             # Pages is a dict with page_id as key
             for page_id in section_pages:
                 if page_id in pages:
                     page_data = pages[page_id]
                     log_with_timestamp(f"📄 Processing page {page_id}, keys: {list(page_data.keys())}")
-                    
+
                     # Check if page has inline ocr_text
                     if 'ocr_text' in page_data:
                         page_text = page_data['ocr_text']
                         section_text += page_text + "\n"
                         log_with_timestamp(f"✅ Added inline text from page {page_id} ({len(page_text)} chars)")
-                    
+
                     # Otherwise fetch from raw_text_uri
                     elif 'raw_text_uri' in page_data:
                         raw_text_uri = page_data['raw_text_uri']
                         log_with_timestamp(f"📥 Fetching OCR text from: {raw_text_uri}")
-                        
+
                         from urllib.parse import urlparse
                         parsed_uri = urlparse(raw_text_uri)
                         bucket = parsed_uri.netloc
                         key = parsed_uri.path.lstrip('/')
-                        
+
                         s3_obj = s3_client.get_object(Bucket=bucket, Key=key)
                         raw_text_data = json.loads(s3_obj['Body'].read().decode('utf-8'))
-                        
+
                         log_with_timestamp(f"📋 rawText.json keys: {list(raw_text_data.keys())}")
                         log_with_timestamp(f"📋 rawText.json sample: {json.dumps(raw_text_data, default=str)[:500]}")
-                        
+
                         # rawText.json contains the extracted text - try different field names
                         page_text = raw_text_data.get('text', '') or raw_text_data.get('Text', '') or raw_text_data.get('content', '')
-                        
+
                         # If still empty, try to extract from blocks or lines
                         if not page_text and 'Blocks' in raw_text_data:
                             # Textract format - extract text from LINE blocks
@@ -469,7 +469,7 @@ def lambda_handler(event, context):
                             lines = [block.get('Text', '') for block in blocks if block.get('BlockType') == 'LINE']
                             page_text = '\n'.join(lines)
                             log_with_timestamp(f"📝 Extracted {len(lines)} lines from Textract Blocks")
-                        
+
                         if page_text:
                             section_text += page_text + "\n"
                             log_with_timestamp(f"✅ Added text from S3 for page {page_id} ({len(page_text)} chars)")
@@ -479,18 +479,18 @@ def lambda_handler(event, context):
                         log_with_timestamp(f"⚠️ No OCR text found for page {page_id}")
                 else:
                     log_with_timestamp(f"⚠️ Page {page_id} not found in pages dict")
-        
+
         log_with_timestamp(f"📝 Total section text length: {len(section_text)} chars")
-        
+
         log_with_timestamp(f"🚀 Starting invoice extraction for document {document_id}, section {section_id}")
         log_with_timestamp(f"   User: {user_id}, Client: {client_id}")
         log_with_timestamp(f"   Section text length: {len(section_text)} chars")
         log_with_timestamp(f"   Section pages: {section_pages}")
-        
+
         # Validate required fields
         if not all([document_id, section_id, user_id, client_id]):
             raise ValueError("Missing required fields in event")
-        
+
         # Check if section has text
         if not section_text or len(section_text.strip()) == 0:
             log_with_timestamp("⚠️ No text content in section - skipping invoice extraction")
@@ -500,19 +500,19 @@ def lambda_handler(event, context):
                 'invoices_extracted': 0,
                 'message': 'No text content in section'
             }
-        
+
         # Get extraction prompt (dynamic from ConfigurationTable)
         prompt_template = get_invoice_extraction_prompt()
         prompt = prompt_template.format(section_text=section_text)
-        
+
         # Invoke Bedrock to extract invoices
         log_with_timestamp("📤 Calling Bedrock for invoice extraction...")
         xml_response = invoke_bedrock(prompt)
-        
+
         # Parse invoices from XML (hardcoded logic)
         log_with_timestamp("🔍 Parsing invoices from XML response...")
         invoices = parse_invoices_from_xml(xml_response)
-        
+
         if not invoices:
             log_with_timestamp("⚠️ No valid invoices found in section")
             return {
@@ -521,20 +521,20 @@ def lambda_handler(event, context):
                 'invoices_extracted': 0,
                 'message': 'No invoices found'
             }
-        
+
         # Write invoices to DynamoDB
         log_with_timestamp(f"💾 Writing {len(invoices)} invoices to DynamoDB...")
         inserted_count = write_invoices_to_dynamodb(
             invoices, document_id, section_id, user_id, client_id
         )
-        
+
         processing_time = time.time() - start_time
         log_with_timestamp(
             f"✅ Invoice extraction completed successfully in {processing_time:.2f}s"
         )
         log_with_timestamp(f"   Extracted: {len(invoices)} invoices")
         log_with_timestamp(f"   Inserted: {inserted_count} records")
-        
+
         # Return response matching workflow expectations
         # Must include document and section_id for AssessmentStep
         return {
@@ -545,12 +545,12 @@ def lambda_handler(event, context):
             'processing_time_seconds': processing_time,
             'message': f'Successfully extracted {len(invoices)} invoices'
         }
-        
+
     except Exception as e:
         log_with_timestamp(f"💥 Error in invoice extraction: {str(e)}")
         import traceback
         log_with_timestamp(f"📋 Traceback: {traceback.format_exc()}")
-        
+
         # Return error response but maintain workflow structure
         # Don't raise exception - let workflow continue even if invoice extraction fails
         return {

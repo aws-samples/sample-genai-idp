@@ -122,7 +122,7 @@ const AgentMessagesDisplay = ({ agentMessages, isProcessing }) => {
 This database contains three main categories of tables for document processing analytics:
 
 1. **Metering Table**: Usage metrics, costs, and consumption data
-2. **Evaluation Tables**: Accuracy assessment data (typically empty unless evaluation jobs are run)  
+2. **Evaluation Tables**: Accuracy assessment data (typically empty unless evaluation jobs are run)
 3. **Document Sections Tables**: Extracted content from processed documents (dynamically created)
 
 ## Important Notes
@@ -140,7 +140,7 @@ This database contains three main categories of tables for document processing a
 
 **Key Usage**: Always use this table for questions about:
 - Volume of documents processed
-- Models used and their consumption patterns  
+- Models used and their consumption patterns
 - Units of consumption (tokens, pages) for each processing step
 - Costs and spending analysis
 - Processing patterns and trends
@@ -165,8 +165,8 @@ This database contains three main categories of tables for document processing a
 - **For total pages across documents**: Use \`SUM\` of per-document MAX values:
   \`\`\`sql
   SELECT SUM(max_pages) FROM (
-    SELECT "document_id", MAX("number_of_pages") as max_pages 
-    FROM metering 
+    SELECT "document_id", MAX("number_of_pages") as max_pages
+    FROM metering
     GROUP BY "document_id"
   )
   \`\`\`
@@ -180,22 +180,22 @@ SELECT COUNT(DISTINCT "document_id") FROM metering
 
 -- Total pages processed (correct aggregation)
 SELECT SUM(max_pages) FROM (
-  SELECT "document_id", MAX("number_of_pages") as max_pages 
-  FROM metering 
+  SELECT "document_id", MAX("number_of_pages") as max_pages
+  FROM metering
   GROUP BY "document_id"
 )
 
 -- Cost breakdown by processing context
 SELECT "context", SUM("estimated_cost") as total_cost
-FROM metering 
+FROM metering
 GROUP BY "context"
 ORDER BY total_cost DESC
 
 -- Token usage by model
-SELECT "service_api", 
+SELECT "service_api",
        SUM(CASE WHEN "unit" = 'inputTokens' THEN "value" ELSE 0 END) as input_tokens,
        SUM(CASE WHEN "unit" = 'outputTokens' THEN "value" ELSE 0 END) as output_tokens
-FROM metering 
+FROM metering
 WHERE "unit" IN ('inputTokens', 'outputTokens')
 GROUP BY "service_api"
 \`\`\`
@@ -216,7 +216,7 @@ GROUP BY "service_api"
 
 #### Schema:
 - \`document_id\` (string): Unique identifier for the document
-- \`input_key\` (string): S3 key of the input document  
+- \`input_key\` (string): S3 key of the input document
 - \`evaluation_date\` (timestamp): When the evaluation was performed
 - \`accuracy\` (double): Overall accuracy score (0-1)
 - \`precision\` (double): Precision score (0-1)
@@ -280,7 +280,7 @@ GROUP BY "service_api"
 ### Known Document Sections Tables:
 
 - \`document_sections_payslip\`
-- \`document_sections_us_drivers_licenses\`  
+- \`document_sections_us_drivers_licenses\`
 - \`document_sections_bank_checks\`
 - \`document_sections_bank_statement\`
 - \`document_sections_w2\`
@@ -384,7 +384,7 @@ Each table has the following structure:
 ### Sample Queries:
 \`\`\`sql
 -- Query specific attributes (example for Payslip)
-SELECT "document_id", 
+SELECT "document_id",
        "inference_result.ytdnetpay",
        "inference_result.employeename.firstname",
        "inference_result.companyaddress.state"
@@ -427,7 +427,7 @@ JOIN document_evaluations e ON m."document_id" = e."document_id"
 
 -- Join document sections with metering for content analysis with costs
 SELECT ds.*, m."estimated_cost"
-FROM document_sections_payslip ds  
+FROM document_sections_payslip ds
 JOIN metering m ON ds."document_id" = m."document_id"
 \`\`\``;
 

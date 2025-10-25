@@ -33,7 +33,7 @@ VENDOR NAME EXTRACTION RULES:
 
 MULTIPLE INVOICE HANDLING:
 - If you find 5 invoices → output 5 separate <invoice> blocks
-- If you find 1 invoice → output 1 <invoice> block  
+- If you find 1 invoice → output 1 <invoice> block
 - If you find 10 invoices → output 10 separate <invoice> blocks
 - NEVER skip invoices because there are "too many"
 - NEVER merge multiple invoices into one block
@@ -75,27 +75,27 @@ Text to extract from:
 def get_configuration_table_name(stack_name: str, region: str) -> str:
     """Get ConfigurationTable name from CloudFormation stack outputs"""
     cfn = boto3.client('cloudformation', region_name=region)
-    
+
     try:
         response = cfn.describe_stacks(StackName=stack_name)
         stack = response['Stacks'][0]
-        
+
         # Look for ConfigurationTable in outputs
         for output in stack.get('Outputs', []):
             if output['OutputKey'] == 'ConfigurationTable':
                 return output['OutputValue']
-        
+
         # If not in outputs, try to find it in resources
         print("⚠️  ConfigurationTable not found in stack outputs")
         print("   Trying to find in stack resources...")
-        
+
         resources = cfn.list_stack_resources(StackName=stack_name)
         for resource in resources['StackResourceSummaries']:
             if resource['LogicalResourceId'] == 'ConfigurationTable':
                 return resource['PhysicalResourceId']
-        
+
         raise ValueError(f"ConfigurationTable not found in stack {stack_name}")
-        
+
     except Exception as e:
         print(f"❌ Error getting ConfigurationTable name: {e}")
         raise
@@ -105,7 +105,7 @@ def initialize_invoice_prompt(table_name: str, region: str, user_email: str = 's
     """Initialize ConfigurationTable with invoice extraction prompt"""
     dynamodb = boto3.resource('dynamodb', region_name=region)
     table = dynamodb.Table(table_name)
-    
+
     item = {
         'Configuration': 'INVOICE_EXTRACTION_PROMPT',
         'PromptTemplate': INVOICE_PROMPT_TEMPLATE,
@@ -123,24 +123,24 @@ def initialize_invoice_prompt(table_name: str, region: str, user_email: str = 's
             'Notes': 'XML parsing logic is hardcoded in Lambda - do not change XML structure'
         }
     }
-    
+
     try:
         # Check if prompt already exists
         response = table.get_item(Key={'Configuration': 'INVOICE_EXTRACTION_PROMPT'})
-        
+
         if 'Item' in response:
             print("⚠️  Invoice prompt already exists in ConfigurationTable")
             print(f"   Current version: {response['Item'].get('Version', 'unknown')}")
             print(f"   Last modified: {response['Item'].get('LastModified', 'unknown')}")
-            
+
             overwrite = input("\nOverwrite existing prompt? (yes/no): ").strip().lower()
             if overwrite != 'yes':
                 print("❌ Aborted - existing prompt preserved")
                 return False
-            
+
             # Increment version if overwriting
             item['Version'] = response['Item'].get('Version', 0) + 1
-        
+
         # Write to DynamoDB
         table.put_item(Item=item)
         print("✅ Successfully initialized invoice extraction prompt in ConfigurationTable")
@@ -148,9 +148,9 @@ def initialize_invoice_prompt(table_name: str, region: str, user_email: str = 's
         print("   Configuration Key: INVOICE_EXTRACTION_PROMPT")
         print(f"   Version: {item['Version']}")
         print(f"   Last Modified: {item['LastModified']}")
-        
+
         return True
-        
+
     except Exception as e:
         print(f"❌ Error writing to ConfigurationTable: {e}")
         raise
@@ -179,14 +179,14 @@ def main():
         '--table-name',
         help='Override ConfigurationTable name (auto-detected from stack if not provided)'
     )
-    
+
     args = parser.parse_args()
-    
+
     print("\n🚀 Initializing Invoice Extraction Prompt")
     print(f"   Stack: {args.stack_name}")
     print(f"   Region: {args.region}")
     print(f"   User: {args.user_email}\n")
-    
+
     # Get table name from stack or use override
     if args.table_name:
         table_name = args.table_name
@@ -195,11 +195,11 @@ def main():
         print("🔍 Looking up ConfigurationTable from stack...")
         table_name = get_configuration_table_name(args.stack_name, args.region)
         print(f"✅ Found ConfigurationTable: {table_name}")
-    
+
     # Initialize prompt
     print("\n📝 Writing invoice extraction prompt to DynamoDB...")
     success = initialize_invoice_prompt(table_name, args.region, args.user_email)
-    
+
     if success:
         print("\n✅ Initialization complete!")
         print("\n📋 Next Steps:")

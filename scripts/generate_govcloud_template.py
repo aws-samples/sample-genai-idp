@@ -6,7 +6,7 @@ Complete GovCloud template generation and publication script.
 This script orchestrates the complete GovCloud-compatible build process:
 1. Runs the standard publish.py script to build all artifacts
 2. Generates a GovCloud-compatible template that excludes unsupported services
-3. Uploads the GovCloud template to S3 alongside the main template  
+3. Uploads the GovCloud template to S3 alongside the main template
 4. Provides deployment URLs and instructions for both templates
 
 Usage:
@@ -1057,7 +1057,7 @@ def main():
 This script orchestrates the complete GovCloud-compatible build process:
 
 1. Builds all Lambda functions and uploads to S3 (calls publish.py)
-2. Generates GovCloud-compatible template 
+2. Generates GovCloud-compatible template
 3. Uploads GovCloud template to S3
 4. Provides deployment URLs and instructions
 
@@ -1065,7 +1065,7 @@ Examples:
     # Standard deployment
     python scripts/generate_govcloud_template.py my-bucket my-prefix us-east-1
 
-    # GovCloud deployment  
+    # GovCloud deployment
     python scripts/generate_govcloud_template.py my-bucket my-prefix us-gov-west-1
 
     # With verbose output and concurrency control

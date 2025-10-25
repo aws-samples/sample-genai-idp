@@ -137,11 +137,11 @@ def create_external_mcp_agent(
             # Create system prompt
             system_prompt = f"""
             You are an AI agent that has access to external tools via MCP (Model Context Protocol).
-            
+
             {dynamic_description}
-            
+
             Use the available tools to help answer user questions. When using tools, provide clear explanations of what you're doing and what the results mean.
-            
+
             If a tool fails or returns an error, explain the issue to the user and suggest alternatives if possible.
             """
 

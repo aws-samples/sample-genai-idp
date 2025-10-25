@@ -135,16 +135,16 @@ class TestAssessmentService:
                 "task_prompt": dedent(
                     """
                     Assess the confidence of the following extraction results from this {DOCUMENT_CLASS} document:
-                    
+
                     Expected fields:
                     {ATTRIBUTE_NAMES_AND_DESCRIPTIONS}
-                    
+
                     Extraction results:
                     {EXTRACTION_RESULTS}
-                    
+
                     Document text:
                     {DOCUMENT_TEXT}
-                    
+
                     Respond with a JSON object containing confidence scores and reasons for each field.
                 """
                 ),

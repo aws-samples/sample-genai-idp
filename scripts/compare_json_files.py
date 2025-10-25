@@ -210,7 +210,7 @@ def get_ai_summary(comparison_results, summary_stats, field_differences):
         ]
     )
 
-    prompt = f"""Analyze the following JSON file differences and provide a detailed summary. 
+    prompt = f"""Analyze the following JSON file differences and provide a detailed summary.
     Focus on:
     1. Most commonly different fields
     2. Whether differences are substantial (affecting meaning/operations) or cosmetic (formatting)

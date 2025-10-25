@@ -27,7 +27,7 @@ def get_metering_table_description() -> str:
 
 **Key Usage**: Always use this table for questions about:
 - Volume of documents processed
-- Models used and their consumption patterns  
+- Models used and their consumption patterns
 - Units of consumption (tokens, pages) for each processing step
 - Costs and spending analysis
 - Processing patterns and trends
@@ -52,8 +52,8 @@ def get_metering_table_description() -> str:
 - **For total pages across documents**: Use `SUM` of per-document MAX values:
   ```sql
   SELECT SUM(max_pages) FROM (
-    SELECT "document_id", MAX("number_of_pages") as max_pages 
-    FROM metering 
+    SELECT "document_id", MAX("number_of_pages") as max_pages
+    FROM metering
     GROUP BY "document_id"
   )
   ```
@@ -67,22 +67,22 @@ SELECT COUNT(DISTINCT "document_id") FROM metering
 
 -- Total pages processed (correct aggregation)
 SELECT SUM(max_pages) FROM (
-  SELECT "document_id", MAX("number_of_pages") as max_pages 
-  FROM metering 
+  SELECT "document_id", MAX("number_of_pages") as max_pages
+  FROM metering
   GROUP BY "document_id"
 )
 
 -- Cost breakdown by processing context
 SELECT "context", SUM("estimated_cost") as total_cost
-FROM metering 
+FROM metering
 GROUP BY "context"
 ORDER BY total_cost DESC
 
 -- Token usage by model
-SELECT "service_api", 
+SELECT "service_api",
        SUM(CASE WHEN "unit" = 'inputTokens' THEN "value" ELSE 0 END) as input_tokens,
        SUM(CASE WHEN "unit" = 'outputTokens' THEN "value" ELSE 0 END) as output_tokens
-FROM metering 
+FROM metering
 WHERE "unit" IN ('inputTokens', 'outputTokens')
 GROUP BY "service_api"
 ```
@@ -111,7 +111,7 @@ def get_evaluation_tables_description() -> str:
 
 #### Schema:
 - `document_id` (string): Unique identifier for the document
-- `input_key` (string): S3 key of the input document  
+- `input_key` (string): S3 key of the input document
 - `evaluation_date` (timestamp): When the evaluation was performed
 - `accuracy` (double): Overall accuracy score (0-1)
 - `precision` (double): Precision score (0-1)
@@ -170,7 +170,7 @@ def get_evaluation_tables_description() -> str:
 ### Sample Queries:
 ```sql
 -- Overall accuracy by document type
-SELECT "section_type", 
+SELECT "section_type",
        AVG("accuracy") as avg_accuracy,
        COUNT(*) as document_count
 FROM section_evaluations
@@ -178,8 +178,8 @@ GROUP BY "section_type"
 ORDER BY avg_accuracy DESC
 
 -- Confidence vs accuracy correlation
-SELECT 
-  CASE 
+SELECT
+  CASE
     WHEN CAST("confidence" AS double) < 0.7 THEN 'Low (<0.7)'
     WHEN CAST("confidence" AS double) < 0.9 THEN 'Medium (0.7-0.9)'
     ELSE 'High (>0.9)'
@@ -190,12 +190,12 @@ FROM attribute_evaluations
 WHERE "confidence" IS NOT NULL
 GROUP BY confidence_band
 
--- Cost per accuracy point by document type  
+-- Cost per accuracy point by document type
 SELECT se."section_type",
        AVG(se."accuracy") as avg_accuracy,
        SUM(m."estimated_cost") / COUNT(DISTINCT m."document_id") as avg_cost_per_doc
 FROM section_evaluations se
-JOIN metering m ON se."document_id" = m."document_id"  
+JOIN metering m ON se."document_id" = m."document_id"
 GROUP BY se."section_type"
 ```
 """
@@ -338,7 +338,7 @@ WHERE "document_class.type" = 'W2'
 AND date >= '2024-01-01'
 
 -- CORRECT: Query specific attributes (example for Payslip)
-SELECT "document_id", 
+SELECT "document_id",
        "document_class.type",
        "inference_result.ytdnetpay",
        "inference_result.employeename.firstname",
@@ -347,7 +347,7 @@ FROM document_sections_payslip
 WHERE date >= '2024-01-01'
 AND "document_class.type" = 'Payslip'
 
--- CORRECT: Parse JSON list data (example for FederalTaxes)  
+-- CORRECT: Parse JSON list data (example for FederalTaxes)
 SELECT "document_id",
        "document_class.type",
        json_extract_scalar(tax_item, '$.ItemDescription') as tax_type,
@@ -516,13 +516,13 @@ def get_database_overview(config: Optional[Dict[str, Any]] = None) -> str:
 
 ### Usage metering and cost
 Table name: `metering`
-**Purpose**: Usage metrics, costs, and consumption data  
+**Purpose**: Usage metrics, costs, and consumption data
 **Use for**: Document volume, processing costs, token usage, model performance
 **Key columns**: `document_id`, `context`, `service_api`, `estimated_cost`, `date`
 
 ### Accuracy evaluations
 Table name: `document_evaluations` - Overall document accuracy scores
-Table name: `section_evaluations` - Section-level accuracy by document type  
+Table name: `section_evaluations` - Section-level accuracy by document type
 Table name: `attribute_evaluations` - Detailed attribute-level comparisons
 **Use for**: Accuracy analysis, precision/recall metrics
 
@@ -652,14 +652,14 @@ def _get_specific_document_sections_table_info(
 
         info = f"""## Document Sections Table: {table_name}
 
-**Class**: "{class_name}"  
+**Class**: "{class_name}"
 **Description**: {class_desc}
 
 ### Complete Schema:
 
 #### Standard Columns (present in all document_sections tables):
 - `"document_id"` (string): Unique identifier for the document
-- `"section_id"` (string): Unique identifier for the section  
+- `"section_id"` (string): Unique identifier for the section
 - `"section_classification"` (string): Type/class of the document section
 - `"section_confidence"` (string): Confidence score for classification
 - `"explainability_info"` (string): JSON with extraction field confidence scores and geometry

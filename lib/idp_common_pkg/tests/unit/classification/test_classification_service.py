@@ -48,13 +48,13 @@ class TestClassificationService:
                     """
                     Classify the following document text into one of the available classes:
                     {CLASS_NAMES_AND_DESCRIPTIONS}
-                    
+
                     Document text:
                     {DOCUMENT_TEXT}
-                    
+
                     Document image:
                     {DOCUMENT_IMAGE}
-                    
+
                     Respond with a JSON object with a single field "class" containing the document type.
                 """
                 ),
@@ -78,13 +78,13 @@ class TestClassificationService:
                     """
                     Classify the following document text into one of the available classes:
                     {CLASS_NAMES_AND_DESCRIPTIONS}
-                    
+
                     Document text:
                     {DOCUMENT_TEXT}
-                    
+
                     Document image:
                     {DOCUMENT_IMAGE}
-                    
+
                     Respond with a JSON object with a single field "class" containing the document type.
                 """
                 ),

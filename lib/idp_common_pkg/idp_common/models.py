@@ -319,7 +319,7 @@ class Document:
         user_id = data.get("user_id")
         if not user_id and data.get("input_key"):
             user_id = extract_user_id_from_object_key(data.get("input_key"))
-        
+
         document = cls(
             id=data.get("id", data.get("input_key")),
             input_bucket=data.get("input_bucket"),

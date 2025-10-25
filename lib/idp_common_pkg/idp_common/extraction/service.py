@@ -1157,12 +1157,12 @@ class ExtractionService:
                     # Default content if no template
                     task_prompt = f"""
                     Extract the following fields from this {class_label} document:
-                    
+
                     {attribute_descriptions}
-                    
+
                     Document text:
                     {document_text}
-                    
+
                     Respond with a JSON object containing each field name and its extracted value.
                     """
                     default_content = [{"text": task_prompt}]
@@ -1250,12 +1250,12 @@ class ExtractionService:
                     # Default prompt if template not found
                     task_prompt = f"""
                     Extract the following fields from this {class_label} document:
-                    
+
                     {attribute_descriptions}
-                    
+
                     Document text:
                     {document_text}
-                    
+
                     Respond with a JSON object containing each field name and its extracted value.
                     """
                     content = [{"text": task_prompt}]
@@ -1297,12 +1297,12 @@ class ExtractionService:
                             # Fall back to default prompt if template validation fails
                             task_prompt = f"""
                             Extract the following fields from this {class_label} document:
-                            
+
                             {attribute_descriptions}
-                            
+
                             Document text:
                             {document_text}
-                            
+
                             Respond with a JSON object containing each field name and its extracted value.
                             """
                             content = [{"text": task_prompt}]

@@ -22,47 +22,47 @@ class TestExtractUserIdFromObjectKey:
         """Should extract user_id from user-scoped path."""
         object_key = "users/93c46832-90d1-7096-708c-e7d4f19e6695/invoice7.pdf"
         user_id = extract_user_id_from_object_key(object_key)
-        
+
         assert user_id == "93c46832-90d1-7096-708c-e7d4f19e6695"
 
     def test_returns_none_for_non_user_scoped_path(self):
         """Should return None for paths not starting with 'users/'."""
         object_key = "documents/invoice7.pdf"
         user_id = extract_user_id_from_object_key(object_key)
-        
+
         assert user_id is None
 
     def test_returns_none_for_empty_string(self):
         """Should return None for empty string."""
         user_id = extract_user_id_from_object_key("")
-        
+
         assert user_id is None
 
     def test_returns_none_for_none_input(self):
         """Should return None for None input."""
         user_id = extract_user_id_from_object_key(None)
-        
+
         assert user_id is None
 
     def test_returns_none_for_invalid_structure(self):
         """Should return None for invalid user-scoped structure."""
         object_key = "users/invalid"  # Missing filename
         user_id = extract_user_id_from_object_key(object_key)
-        
+
         assert user_id is None
 
     def test_handles_nested_paths(self):
         """Should extract user_id from nested path structures."""
         object_key = "users/93c46832-90d1-7096-708c-e7d4f19e6695/subfolder/invoice7.pdf"
         user_id = extract_user_id_from_object_key(object_key)
-        
+
         assert user_id == "93c46832-90d1-7096-708c-e7d4f19e6695"
 
     def test_warns_on_non_uuid_format(self, caplog):
         """Should extract but warn if user_id doesn't match UUID format."""
         object_key = "users/not-a-uuid/invoice7.pdf"
         user_id = extract_user_id_from_object_key(object_key)
-        
+
         # Should still extract the value
         assert user_id == "not-a-uuid"
         # But should log a warning
@@ -76,7 +76,7 @@ class TestExtractUserIdFromObjectKey:
     def test_various_uuid_formats(self, object_key, expected_user_id):
         """Should handle various UUID formats (upper, lower, mixed case)."""
         user_id = extract_user_id_from_object_key(object_key)
-        
+
         assert user_id == expected_user_id
 
 
@@ -90,9 +90,9 @@ class TestDocumentUserIdExtraction:
             "input_key": "users/93c46832-90d1-7096-708c-e7d4f19e6695/invoice7.pdf",
             "status": "OCR",
         }
-        
+
         doc = Document.from_dict(doc_data)
-        
+
         assert doc.user_id == "93c46832-90d1-7096-708c-e7d4f19e6695"
         assert doc.input_key == "users/93c46832-90d1-7096-708c-e7d4f19e6695/invoice7.pdf"
 
@@ -103,9 +103,9 @@ class TestDocumentUserIdExtraction:
             "user_id": "explicit-user-id-123",
             "status": "OCR",
         }
-        
+
         doc = Document.from_dict(doc_data)
-        
+
         # Should use the explicitly provided user_id
         assert doc.user_id == "explicit-user-id-123"
 
@@ -115,9 +115,9 @@ class TestDocumentUserIdExtraction:
             "input_key": "documents/invoice7.pdf",
             "status": "OCR",
         }
-        
+
         doc = Document.from_dict(doc_data)
-        
+
         assert doc.user_id is None
 
     def test_from_s3_event_extracts_user_id(self):
@@ -129,9 +129,9 @@ class TestDocumentUserIdExtraction:
             },
             "time": "2025-10-24T15:00:00Z"
         }
-        
+
         doc = Document.from_s3_event(event, output_bucket="output-bucket")
-        
+
         assert doc.user_id == "93c46832-90d1-7096-708c-e7d4f19e6695"
         assert doc.input_key == "users/93c46832-90d1-7096-708c-e7d4f19e6695/invoice7.pdf"
 
@@ -142,9 +142,9 @@ class TestDocumentUserIdExtraction:
             user_id="93c46832-90d1-7096-708c-e7d4f19e6695",
             status=Status.OCR,
         )
-        
+
         doc_dict = doc.to_dict()
-        
+
         assert doc_dict["user_id"] == "93c46832-90d1-7096-708c-e7d4f19e6695"
 
     def test_json_serialization_round_trip_preserves_user_id(self):
@@ -155,13 +155,13 @@ class TestDocumentUserIdExtraction:
             status=Status.OCR,
             num_pages=1,
         )
-        
+
         # Serialize to JSON
         json_str = original_doc.to_json()
-        
+
         # Deserialize from JSON
         restored_doc = Document.from_json(json_str)
-        
+
         assert restored_doc.user_id == "93c46832-90d1-7096-708c-e7d4f19e6695"
         assert restored_doc.input_key == original_doc.input_key
 
@@ -170,7 +170,7 @@ class TestDocumentUserIdExtraction:
 class TestDocumentUserIdForAppSync:
     """
     Tests ensuring user_id is properly set for AppSync mutations.
-    
+
     Regression test for error:
     "UserId is required for document updates but was not provided for ObjectKey: users/..."
     """
@@ -178,7 +178,7 @@ class TestDocumentUserIdForAppSync:
     def test_document_loaded_from_event_has_user_id_for_appsync(self):
         """
         Should ensure Documents loaded from Lambda events have user_id populated.
-        
+
         This simulates the flow in OCR Lambda where:
         1. Document is loaded from event
         2. Document is updated via AppSync (requires user_id)
@@ -191,14 +191,14 @@ class TestDocumentUserIdForAppSync:
             "status": "QUEUED",
             "num_pages": 0,
         }
-        
+
         # Load document (as done in Lambda handlers)
         doc = Document.from_dict(event_document_data)
-        
+
         # Verify user_id is populated
         assert doc.user_id is not None, "user_id should be extracted from input_key"
         assert doc.user_id == "93c46832-90d1-7096-708c-e7d4f19e6695"
-        
+
         # Verify it's ready for AppSync update
         # (AppSync service will use this user_id to create the UserId field)
         assert doc.input_key == event_document_data["input_key"]
@@ -206,26 +206,26 @@ class TestDocumentUserIdForAppSync:
     def test_appsync_update_input_includes_user_id(self):
         """
         Should verify that AppSync update input includes UserId field.
-        
+
         This is the critical check that prevents the original error.
         """
         from unittest.mock import Mock
         from idp_common.appsync.service import DocumentAppSyncService
-        
+
         # Create document with user-scoped path
         doc = Document.from_dict({
             "input_key": "users/93c46832-90d1-7096-708c-e7d4f19e6695/invoice7.pdf",
             "status": "OCR",
             "num_pages": 1,
         })
-        
+
         # Create AppSync service with mocked client
         mock_client = Mock()
         service = DocumentAppSyncService(appsync_client=mock_client)
-        
+
         # Generate update input (as done in document_service.update_document)
         update_input = service._document_to_update_input(doc)
-        
+
         # Critical assertion: UserId must be present
         assert "UserId" in update_input, "UserId is required for user-scoped documents"
         assert update_input["UserId"] == "93c46832-90d1-7096-708c-e7d4f19e6695"
@@ -235,17 +235,17 @@ class TestDocumentUserIdForAppSync:
         """Should not include UserId for non-user-scoped documents."""
         from unittest.mock import Mock
         from idp_common.appsync.service import DocumentAppSyncService
-        
+
         # Create document with non-user-scoped path
         doc = Document.from_dict({
             "input_key": "documents/invoice7.pdf",
             "status": "OCR",
         })
-        
+
         # Create AppSync service with mocked client
         mock_client = Mock()
         service = DocumentAppSyncService(appsync_client=mock_client)
         update_input = service._document_to_update_input(doc)
-        
+
         # UserId should not be included for non-user-scoped documents
         assert "UserId" not in update_input or update_input.get("UserId") is None

@@ -325,14 +325,14 @@ Examples:
     --validation-data-uri s3://my-bucket/data/validation.jsonl \\
     --output-uri s3://my-bucket/output/ \\
     --job-name my-finetuning-job
-  
+
   # Create job with automatic data splitting
   python create_finetuning_job.py \\
     --training-data-uri s3://my-bucket/data/train.jsonl \\
     --output-uri s3://my-bucket/output/ \\
     --job-name my-auto-split-job \\
     --validation-split 0.2
-  
+
   # Create IAM role and job with custom hyperparameters
   python create_finetuning_job.py \\
     --training-data-uri s3://my-bucket/data/train.jsonl \\

@@ -355,7 +355,7 @@ class ClassesDiscovery:
         ground_truth_json = json.dumps(ground_truth_data, indent=2)
         sample_output_format = self._sample_output_format()
         return f"""
-                        This image contains unstructured data. Analyze the data line by line using the provided ground truth as reference.                        
+                        This image contains unstructured data. Analyze the data line by line using the provided ground truth as reference.
                         <GROUND_TRUTH_REFERENCE>
                         {ground_truth_json}
                         </GROUND_TRUTH_REFERENCE>
@@ -363,11 +363,11 @@ class ClassesDiscovery:
                         Image may contain multiple pages, process all pages.
                         Extract all field names including those without values.
                         Do not change the group name and field name from ground truth in the extracted data json.
-                        Add field_description field for every field which will contain instruction to LLM to extract the field data from the image/document. Add data_type field for every field. 
-                        Add two fields document_class and document_description. 
-                        For document_class generate a short name based on the document content like W4, I-9, Paystub. 
+                        Add field_description field for every field which will contain instruction to LLM to extract the field data from the image/document. Add data_type field for every field.
+                        Add two fields document_class and document_description.
+                        For document_class generate a short name based on the document content like W4, I-9, Paystub.
                         For document_description generate a description about the document in less than 50 words.
-                        If the group repeats and follows table format, update the attributeType as "list".                         
+                        If the group repeats and follows table format, update the attributeType as "list".
                         Do not extract the values.
                         Format the extracted data using the below JSON format:
                         Format the extracted groups and fields using the below JSON format:
@@ -378,16 +378,16 @@ class ClassesDiscovery:
         sample_output_format = self._sample_output_format()
         return f"""
                         This image contains forms data. Analyze the form line by line.
-                        Image may contains multiple pages, process all the pages. 
-                        Form may contain multiple name value pair in one line. 
-                        Extract all the names in the form including the name value pair which doesn't have value. 
+                        Image may contains multiple pages, process all the pages.
+                        Form may contain multiple name value pair in one line.
+                        Extract all the names in the form including the name value pair which doesn't have value.
                         Organize them into groups, extract field_name, data_type and field description
                         Field_name should be less than 60 characters, should not have space use '-' instead of space.
                         field_description is a brief description of the field and the location of the field like box number or line number in the form and section of the form.
                         Field_name should be unique within the group.
-                        Add two fields document_class and document_description. 
-                        For document_class generate a short name based on the document content like W4, I-9, Paystub. 
-                        For document_description generate a description about the document in less than 50 words. 
+                        Add two fields document_class and document_description.
+                        For document_class generate a short name based on the document content like W4, I-9, Paystub.
+                        For document_description generate a description about the document in less than 50 words.
 
                         Group the fields based on the section they are grouped in the form. Group should have attributeType as "group".
                         If the group repeats and follows table format, update the attributeType as "list".

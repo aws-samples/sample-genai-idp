@@ -117,15 +117,15 @@ class TestExtractionService:
                 "task_prompt": dedent(
                     """
                     Extract the following fields from this {DOCUMENT_CLASS} document:
-                    
+
                     {ATTRIBUTE_NAMES_AND_DESCRIPTIONS}
-                    
+
                     Document text:
                     {DOCUMENT_TEXT}
-                    
+
                     Document image:
                     {DOCUMENT_IMAGE}
-                    
+
                     Respond with a JSON object containing each field name and its extracted value.
                 """
                 ),
