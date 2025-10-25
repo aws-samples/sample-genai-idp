@@ -349,22 +349,38 @@ def lambda_handler(event, context):
         
         log_with_timestamp(f"📋 Section ID: {section_id}")
         
-        # Get document data (handle both compressed S3 URI and inline dict)
+        # Get document data (handle compressed S3 URI, inline S3 URI string, and inline dict)
         document_data = event.get('document', {})
         log_with_timestamp(f"📄 Document data type: {type(document_data)}")
         
         if isinstance(document_data, str):
-            # Document is S3 URI - fetch from S3
+            # Document is S3 URI string - fetch from S3
             s3_client = boto3.client('s3')
             from urllib.parse import urlparse
             parsed_uri = urlparse(document_data)
             bucket = parsed_uri.netloc
             key = parsed_uri.path.lstrip('/')
             
+            log_with_timestamp(f"📦 Fetching document from S3: s3://{bucket}/{key}")
             s3_obj = s3_client.get_object(Bucket=bucket, Key=key)
             document_dict = json.loads(s3_obj['Body'].read().decode('utf-8'))
+            
+        elif isinstance(document_data, dict) and document_data.get('compressed') and document_data.get('s3_uri'):
+            # Document is compressed and stored in S3 - fetch it
+            s3_uri = document_data['s3_uri']
+            log_with_timestamp(f"📦 Document is compressed, fetching from S3: {s3_uri}")
+            
+            s3_client = boto3.client('s3')
+            from urllib.parse import urlparse
+            parsed_uri = urlparse(s3_uri)
+            bucket = parsed_uri.netloc
+            key = parsed_uri.path.lstrip('/')
+            
+            s3_obj = s3_client.get_object(Bucket=bucket, Key=key)
+            document_dict = json.loads(s3_obj['Body'].read().decode('utf-8'))
+            
         elif isinstance(document_data, dict):
-            # Document is inline dict
+            # Document is inline dict (already decompressed)
             document_dict = document_data
         else:
             raise ValueError(f"Invalid document format: {type(document_data)}")
