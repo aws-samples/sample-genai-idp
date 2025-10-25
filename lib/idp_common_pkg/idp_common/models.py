@@ -605,9 +605,16 @@ class Document:
             s3_uri = f"s3://{bucket}/{s3_key}"
             logger.info(f"Compressed document {self.id} to {s3_uri}")
 
-            # Create lightweight wrapper with just section IDs for Map step
-            # This significantly reduces payload size for large documents
-            sections_for_map = [section.section_id for section in self.sections]
+            # Create lightweight wrapper with section metadata for routing
+            # Include section_id and classification for Step Functions routing
+            sections_for_map = [
+                {
+                    "section_id": section.section_id,
+                    "classification": section.classification,
+                    "confidence": section.confidence
+                }
+                for section in self.sections
+            ]
 
             return {
                 "document_id": self.id,
@@ -615,7 +622,7 @@ class Document:
                 "timestamp": timestamp,
                 "status": self.status.value,
                 "num_pages": self.num_pages,
-                "sections": sections_for_map,  # For Step Functions Map state
+                "sections": sections_for_map,  # For Step Functions Map state with routing info
                 "compressed": True,
             }
 

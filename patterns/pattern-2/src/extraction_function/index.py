@@ -321,9 +321,13 @@ def handler(event, context):
         logger.error(f"Failed to write extraction to DynamoDB (non-fatal): {str(e)}")
         # Don't fail the extraction if DynamoDB write fails
 
+    # Get the section classification for routing
+    section_classification = section.classification if section else None
+    
     # Prepare output with automatic compression if needed
     response = {
         "section_id": section_id,
+        "section_classification": section_classification,
         "document": section_document.serialize_document(
             working_bucket, f"extraction_{section_id}", logger
         ),

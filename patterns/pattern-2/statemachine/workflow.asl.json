@@ -60,11 +60,10 @@
         "ProcessSections": {
             "Type": "Map",
             "ItemsPath": "$.ClassificationResult.document.sections",
-            "ItemSelector": {
+            "Parameters": {
+                "section.$": "$$.Map.Item.Value",
                 "execution_arn.$": "$$.Execution.Id",
-                "document.$": "$.ClassificationResult.document",
-                "section_id.$": "$$.Map.Item.Value.section_id",
-                "section_classification.$": "$$.Map.Item.Value.classification"
+                "document.$": "$.ClassificationResult.document"
             },
             "MaxConcurrency": 10,
             "Iterator": {
@@ -74,16 +73,21 @@
                         "Type": "Choice",
                         "Choices": [
                             {
-                                "Variable": "$.section_classification",
+                                "Variable": "$.section.classification",
                                 "StringEquals": "invoice",
                                 "Next": "InvoiceExtraction"
                             }
                         ],
                         "Default": "GenericExtraction"
                     },
-                    "InvoiceExtraction": {
+                    "GenericExtraction": {
                         "Type": "Task",
-                        "Resource": "${InvoiceExtractionFunctionArn}",
+                        "Resource": "${ExtractionFunctionArn}",
+                        "Parameters": {
+                            "execution_arn.$": "$.execution_arn",
+                            "document.$": "$.document",
+                            "section_id.$": "$.section.section_id"
+                        },
                         "Retry": [
                             {
                                 "ErrorEquals": [
@@ -104,9 +108,14 @@
                         ],
                         "Next": "AssessmentStep"
                     },
-                    "GenericExtraction": {
+                    "InvoiceExtraction": {
                         "Type": "Task",
-                        "Resource": "${ExtractionFunctionArn}",
+                        "Resource": "${InvoiceExtractionFunctionArn}",
+                        "Parameters": {
+                            "execution_arn.$": "$.execution_arn",
+                            "document.$": "$.document",
+                            "section_id.$": "$.section.section_id"
+                        },
                         "Retry": [
                             {
                                 "ErrorEquals": [
