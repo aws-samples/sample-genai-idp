@@ -73,7 +73,7 @@ class TestDynamoDBServiceDataFormats:
 
         # This should work without errors - native dict format is now supported
         document = self.service._dynamodb_item_to_document(mock_item)
-        
+
         # Verify metering data was extracted correctly
         assert document.metering is not None
         assert document.metering["tokens_used"] == 150

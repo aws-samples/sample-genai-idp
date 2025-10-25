@@ -915,6 +915,7 @@ Resources:
         OutputBucket: !Ref OutputBucket
         WorkingBucket: !Ref WorkingBucket
         TrackingTable: !Ref TrackingTable
+        ExtractionResultsTable: !Ref ExtractionResultsTable
         CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
         LogRetentionDays: !Ref LogRetentionDays
         LogLevel: !Ref LogLevel
@@ -2160,6 +2161,138 @@ Resources:
         SSEEnabled: true
         SSEType: KMS
         KMSMasterKeyId: !Ref CustomerManagedEncryptionKey
+
+  ##########################################################################
+  # Extraction Results table for storing parsed document data
+  ##########################################################################
+
+  ExtractionResultsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      BillingMode: PAY_PER_REQUEST
+      StreamSpecification:
+        StreamViewType: NEW_AND_OLD_IMAGES
+      AttributeDefinitions:
+        # Primary Key
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+        # GSI1 - User + Type queries with date sorting
+        - AttributeName: GSI1PK
+          AttributeType: S
+        - AttributeName: ProcessedAt
+          AttributeType: N
+        # GSI2 - All user documents (cross-type)
+        - AttributeName: UserId
+          AttributeType: S
+        # GSI3 - Company/Vendor queries
+        - AttributeName: GSI3PK
+          AttributeType: S
+        # GSI4 - Document-centric queries
+        - AttributeName: DocumentId
+          AttributeType: S
+        # GSI5 - Status monitoring
+        - AttributeName: ExtractionStatus
+          AttributeType: S
+        # GSI6 - Client-level reporting
+        - AttributeName: GSI6PK
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
+      TimeToLiveSpecification:
+        AttributeName: TTL
+        Enabled: true
+      GlobalSecondaryIndexes:
+        # GSI1: User's documents by type and date
+        - IndexName: GSI1-UserTypeDate
+          KeySchema:
+            - AttributeName: GSI1PK
+              KeyType: HASH
+            - AttributeName: ProcessedAt
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        # GSI2: All user's documents (cross-type), sorted by date
+        - IndexName: GSI2-UserAllDocs
+          KeySchema:
+            - AttributeName: UserId
+              KeyType: HASH
+            - AttributeName: ProcessedAt
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        # GSI3: Company/Vendor queries with date sorting
+        - IndexName: GSI3-CompanyTypeDate
+          KeySchema:
+            - AttributeName: GSI3PK
+              KeyType: HASH
+            - AttributeName: ProcessedAt
+              KeyType: RANGE
+          Projection:
+            ProjectionType: INCLUDE
+            NonKeyAttributes:
+              - UserId
+              - DocumentId
+              - SectionId
+              - DocumentType
+              - CompanyName
+              - TotalAmount
+              - InvoiceDate
+              - TransactionDate
+              - ExtractionStatus
+              - ConfidenceScore
+        # GSI4: Document-centric queries (get all sections)
+        - IndexName: GSI4-DocumentSections
+          KeySchema:
+            - AttributeName: DocumentId
+              KeyType: HASH
+            - AttributeName: SK
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        # GSI5: Status monitoring (for operations & review queue)
+        - IndexName: GSI5-StatusDate
+          KeySchema:
+            - AttributeName: ExtractionStatus
+              KeyType: HASH
+            - AttributeName: ProcessedAt
+              KeyType: RANGE
+          Projection:
+            ProjectionType: KEYS_ONLY
+        # GSI6: Client-level reporting
+        - IndexName: GSI6-ClientTypeDate
+          KeySchema:
+            - AttributeName: GSI6PK
+              KeyType: HASH
+            - AttributeName: ProcessedAt
+              KeyType: RANGE
+          Projection:
+            ProjectionType: INCLUDE
+            NonKeyAttributes:
+              - UserId
+              - DocumentId
+              - SectionId
+              - CompanyName
+              - TotalAmount
+              - InvoiceDate
+              - TransactionAmount
+              - TransactionDate
+              - ExtractionStatus
+      SSESpecification:
+        SSEEnabled: true
+        SSEType: KMS
+        KMSMasterKeyId: !Ref CustomerManagedEncryptionKey
+      Tags:
+        - Key: Purpose
+          Value: ExtractionResultsStorage
+        - Key: DataClassification
+          Value: Confidential
 
   ##########################################################################
   # Discovery SQS queue for processing discovery jobs
@@ -7273,6 +7406,18 @@ Outputs:
   DynamoDBConcurrencyTableConsoleURL:
     Description: DynamoDB table console URL
     Value: !Sub https://${AWS::Region}.console.aws.amazon.com/dynamodbv2/home?region=${AWS::Region}#item-explorer?maximize=true&operation=QUERY&table=${ConcurrencyTable}
+  DynamoDBExtractionResultsTableName:
+    Description: DynamoDB Extraction Results table name
+    Value: !Ref ExtractionResultsTable
+  DynamoDBExtractionResultsTableArn:
+    Description: DynamoDB Extraction Results table ARN
+    Value: !GetAtt ExtractionResultsTable.Arn
+  DynamoDBExtractionResultsTableConsoleURL:
+    Description: DynamoDB Extraction Results table console URL
+    Value: !Sub https://${AWS::Region}.console.aws.amazon.com/dynamodbv2/home?region=${AWS::Region}#item-explorer?maximize=true&operation=QUERY&table=${ExtractionResultsTable}
+  DynamoDBExtractionResultsStreamArn:
+    Description: DynamoDB Extraction Results table stream ARN (for downstream processing)
+    Value: !GetAtt ExtractionResultsTable.StreamArn
   DynamoDBConfigurationTableConsoleURL:
     Description: DynamoDB table console URL
     Value: !Sub https://${AWS::Region}.console.aws.amazon.com/dynamodbv2/home?region=${AWS::Region}#item-explorer?maximize=true&operation=QUERY&table=${ConfigurationTable}

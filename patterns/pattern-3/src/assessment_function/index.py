@@ -15,7 +15,10 @@ from idp_common.utils import calculate_lambda_metering, merge_metering_data
 
 logger = logging.getLogger()
 logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
-logging.getLogger('idp_common.bedrock.client').setLevel(os.environ.get("BEDROCK_LOG_LEVEL", "INFO"))
+logging.getLogger("idp_common.bedrock.client").setLevel(
+    os.environ.get("BEDROCK_LOG_LEVEL", "INFO")
+)
+
 
 def handler(event, context):
     """
@@ -24,27 +27,31 @@ def handler(event, context):
     using the Assessment service from the idp_common library.
     """
     start_time = time.time()  # Capture start time for Lambda metering
-    logger.info(f"Starting assessment processing for event: {json.dumps(event, default=str)}")
+    logger.info(
+        f"Starting assessment processing for event: {json.dumps(event, default=str)}"
+    )
 
     # Load configuration
     config = get_config()
     logger.info(f"Config: {json.dumps(config, default=str)}")
-    
+
     # Extract input from event - handle both compressed and uncompressed
-    document_data = event.get('document', {})
-    section_id = event.get('section_id')
-    
+    document_data = event.get("document", {})
+    section_id = event.get("section_id")
+
     # Validate inputs
     if not document_data:
         raise ValueError("No document provided in event")
-        
+
     if not section_id:
         raise ValueError("No section_id provided in event")
-        
+
     # Convert document data to Document object - handle compression
-    working_bucket = os.environ.get('WORKING_BUCKET')
+    working_bucket = os.environ.get("WORKING_BUCKET")
     document = Document.load_document(document_data, working_bucket, logger)
-    logger.info(f"Processing assessment for document {document.id}, section {section_id}")
+    logger.info(
+        f"Processing assessment for document {document.id}, section {section_id}"
+    )
 
     # Find the section we're processing
     section = None
@@ -52,27 +59,34 @@ def handler(event, context):
         if s.section_id == section_id:
             section = s
             break
-    
+
     if not section:
         raise ValueError(f"Section {section_id} not found in document")
 
     # Check if granular assessment is enabled (for Lambda metering context)
-    granular_config = config.get('assessment', {}).get('granular', {})
-    granular_enabled = granular_config.get('enabled', False)
+    granular_config = config.get("assessment", {}).get("granular", {})
+    granular_enabled = granular_config.get("enabled", False)
     assessment_context = "GranularAssessment" if granular_enabled else "Assessment"
-    logger.info(f"Assessment mode: {'Granular' if granular_enabled else 'Regular'} (context: {assessment_context})")
+    logger.info(
+        f"Assessment mode: {'Granular' if granular_enabled else 'Regular'} (context: {assessment_context})"
+    )
 
     # Intelligent Assessment Skip: Check if extraction results already contain explainability_info
     if section.extraction_result_uri and section.extraction_result_uri.strip():
         try:
             from idp_common import s3
-            logger.info(f"Checking extraction results for existing assessment: {section.extraction_result_uri}")
+
+            logger.info(
+                f"Checking extraction results for existing assessment: {section.extraction_result_uri}"
+            )
             extraction_data = s3.get_json_content(section.extraction_result_uri)
-            
+
             # If explainability_info exists, assessment was already done
-            if extraction_data.get('explainability_info'):
-                logger.info(f"Skipping assessment for section {section_id} - extraction results already contain explainability_info")
-                
+            if extraction_data.get("explainability_info"):
+                logger.info(
+                    f"Skipping assessment for section {section_id} - extraction results already contain explainability_info"
+                )
+
                 # Create section-specific document (same as normal processing) to match output format
                 section_document = Document(
                     id=document.id,
@@ -91,43 +105,57 @@ def handler(event, context):
                     evaluation_report_uri=document.evaluation_report_uri,
                     evaluation_results_uri=document.evaluation_results_uri,
                     errors=document.errors,
-                    metering={}  # Empty metering for skipped processing
+                    metering={},  # Empty metering for skipped processing
                 )
-                
+
                 # Add only the pages needed for this section
                 for page_id in section.page_ids:
                     if page_id in document.pages:
                         section_document.pages[page_id] = document.pages[page_id]
-                
+
                 # Add only the section being processed (preserve existing data)
                 section_document.sections = [section]
-                
+
                 # Add Lambda metering for assessment skip execution with dynamic context
                 try:
-                    lambda_metering = calculate_lambda_metering(assessment_context, context, start_time)
-                    section_document.metering = merge_metering_data(section_document.metering, lambda_metering)
+                    lambda_metering = calculate_lambda_metering(
+                        assessment_context, context, start_time
+                    )
+                    section_document.metering = merge_metering_data(
+                        section_document.metering, lambda_metering
+                    )
                 except Exception as e:
-                    logger.warning(f"Failed to add Lambda metering for assessment skip: {str(e)}")
-                
+                    logger.warning(
+                        f"Failed to add Lambda metering for assessment skip: {str(e)}"
+                    )
+
                 # Return consistent format for Map state collation
                 response = {
-                    "section_id": section_id, 
-                    "document": section_document.serialize_document(working_bucket, f"assessment_skip_{section_id}", logger)
+                    "section_id": section_id,
+                    "document": section_document.serialize_document(
+                        working_bucket, f"assessment_skip_{section_id}", logger
+                    ),
                 }
-                
-                logger.info(f"Assessment skipped - Response: {json.dumps(response, default=str)}")
+
+                logger.info(
+                    f"Assessment skipped - Response: {json.dumps(response, default=str)}"
+                )
                 return response
             else:
-                logger.info(f"Assessment needed for section {section_id} - no explainability_info found in extraction results")
+                logger.info(
+                    f"Assessment needed for section {section_id} - no explainability_info found in extraction results"
+                )
         except Exception as e:
-            logger.warning(f"Error checking extraction results for assessment skip: {e}")
+            logger.warning(
+                f"Error checking extraction results for assessment skip: {e}"
+            )
             # Continue with normal assessment if check fails
 
     # Normal assessment processing
     document.status = Status.ASSESSING
 
     # Update document status to ASSESSING for UI only
-    # Create new 'shell' document since our input document has only 1 section. 
+    # Create new 'shell' document since our input document has only 1 section.
     docStatus = Document(
         id=document.id,
         input_key=document.input_key,
@@ -152,19 +180,25 @@ def handler(event, context):
         error_message = f"Assessment failed for document {updated_document.id}, section {section_id}"
         logger.error(error_message)
         raise Exception(error_message)
-    
+
     # Add Lambda metering for successful assessment execution with dynamic context
     try:
-        lambda_metering = calculate_lambda_metering(assessment_context, context, start_time)
-        updated_document.metering = merge_metering_data(updated_document.metering, lambda_metering)
+        lambda_metering = calculate_lambda_metering(
+            assessment_context, context, start_time
+        )
+        updated_document.metering = merge_metering_data(
+            updated_document.metering, lambda_metering
+        )
     except Exception as e:
         logger.warning(f"Failed to add Lambda metering for assessment: {str(e)}")
-    
+
     # Prepare output with automatic compression if needed
     result = {
-        'document': updated_document.serialize_document(working_bucket, f"assessment_{section_id}", logger),
-        'section_id': section_id
+        "document": updated_document.serialize_document(
+            working_bucket, f"assessment_{section_id}", logger
+        ),
+        "section_id": section_id,
     }
-    
+
     logger.info("Assessment processing completed")
     return result

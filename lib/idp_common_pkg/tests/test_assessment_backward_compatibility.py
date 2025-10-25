@@ -470,9 +470,9 @@ class TestAssessmentBackwardCompatibility(unittest.TestCase):
         for threshold_input, expected_output in test_cases:
             config = self.base_config.copy()
             if threshold_input is not None:
-                config["classes"][0]["attributes"][0]["confidence_threshold"] = (
-                    threshold_input
-                )
+                config["classes"][0]["attributes"][0][
+                    "confidence_threshold"
+                ] = threshold_input
             else:
                 # Remove confidence_threshold to test None case
                 if "confidence_threshold" in config["classes"][0]["attributes"][0]:

@@ -293,9 +293,11 @@ class DocumentConverter:
                             "bold": bool(run.bold),
                             "italic": bool(run.italic),
                             "underline": bool(run.underline),
-                            "font_size": getattr(run.font.size, "pt", None)
-                            if run.font.size
-                            else None,
+                            "font_size": (
+                                getattr(run.font.size, "pt", None)
+                                if run.font.size
+                                else None
+                            ),
                             "font_name": run.font.name if run.font.name else None,
                         }
                         formatted_runs.append(run_info)
@@ -938,9 +940,11 @@ class DocumentConverter:
                     if pd.api.types.is_float_dtype(df_formatted[col]):
                         # Format floats with 2 decimal places, but remove trailing zeros
                         df_formatted[col] = df_formatted[col].apply(
-                            lambda x: f"{x:,.2f}".rstrip("0").rstrip(".")
-                            if pd.notna(x)
-                            else ""
+                            lambda x: (
+                                f"{x:,.2f}".rstrip("0").rstrip(".")
+                                if pd.notna(x)
+                                else ""
+                            )
                         )
                     else:
                         # Format integers with thousand separators
@@ -1050,11 +1054,11 @@ class DocumentConverter:
                                 if pd.api.types.is_numeric_dtype(df_display[col]):
                                     if pd.api.types.is_float_dtype(df_display[col]):
                                         df_display[col] = df_display[col].apply(
-                                            lambda x: f"{x:,.2f}".rstrip("0").rstrip(
-                                                "."
+                                            lambda x: (
+                                                f"{x:,.2f}".rstrip("0").rstrip(".")
+                                                if pd.notna(x)
+                                                else ""
                                             )
-                                            if pd.notna(x)
-                                            else ""
                                         )
                                     else:
                                         df_display[col] = df_display[col].apply(

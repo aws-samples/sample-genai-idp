@@ -350,18 +350,18 @@ class ClassificationService:
                 else:
                     # Update document with cached classification
                     cached_result = cached_page_classifications[page_id]
-                    document.pages[
-                        page_id
-                    ].classification = cached_result.classification.doc_type
-                    document.pages[
-                        page_id
-                    ].confidence = cached_result.classification.confidence
+                    document.pages[page_id].classification = (
+                        cached_result.classification.doc_type
+                    )
+                    document.pages[page_id].confidence = (
+                        cached_result.classification.confidence
+                    )
 
                     # Copy metadata (including boundary information) to the page
                     if hasattr(document.pages[page_id], "metadata"):
-                        document.pages[
-                            page_id
-                        ].metadata = cached_result.classification.metadata
+                        document.pages[page_id].metadata = (
+                            cached_result.classification.metadata
+                        )
                     else:
                         # If the page doesn't have a metadata attribute, add it
                         setattr(
@@ -411,18 +411,18 @@ class ClassificationService:
                                     document.errors.append(error_msg)
 
                             # Update the page in the document
-                            document.pages[
-                                page_id
-                            ].classification = page_result.classification.doc_type
-                            document.pages[
-                                page_id
-                            ].confidence = page_result.classification.confidence
+                            document.pages[page_id].classification = (
+                                page_result.classification.doc_type
+                            )
+                            document.pages[page_id].confidence = (
+                                page_result.classification.confidence
+                            )
 
                             # Copy metadata (including boundary information) to the page
                             if hasattr(document.pages[page_id], "metadata"):
-                                document.pages[
-                                    page_id
-                                ].metadata = page_result.classification.metadata
+                                document.pages[page_id].metadata = (
+                                    page_result.classification.metadata
+                                )
                             else:
                                 # If the page doesn't have a metadata attribute, add it
                                 setattr(
@@ -449,9 +449,9 @@ class ClassificationService:
 
                             # Mark page as unclassified on error
                             if page_id in document.pages:
-                                document.pages[
-                                    page_id
-                                ].classification = "error (backoff/retry)"
+                                document.pages[page_id].classification = (
+                                    "error (backoff/retry)"
+                                )
                                 document.pages[page_id].confidence = 0.0
 
                 # Store failed page exceptions in document metadata for caller to access
@@ -620,9 +620,11 @@ class ClassificationService:
             "temperature": float(classification_config.get("temperature", 0)),
             "top_k": float(classification_config.get("top_k", 5)),
             "top_p": float(classification_config.get("top_p", 0.1)),
-            "max_tokens": int(classification_config.get("max_tokens", 4096))
-            if classification_config.get("max_tokens")
-            else None,
+            "max_tokens": (
+                int(classification_config.get("max_tokens", 4096))
+                if classification_config.get("max_tokens")
+                else None
+            ),
         }
 
         # Validate system prompt

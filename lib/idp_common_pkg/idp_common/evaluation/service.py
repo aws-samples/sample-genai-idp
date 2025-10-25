@@ -253,11 +253,11 @@ IMPORTANT: Respond ONLY with a valid JSON object and nothing else. Here's the ex
                     # This is a confidence assessment
                     flattened[full_key] = {
                         "confidence": float(value["confidence"]),
-                        "confidence_threshold": float(
-                            value.get("confidence_threshold", None)
-                        )
-                        if value.get("confidence_threshold") is not None
-                        else None,
+                        "confidence_threshold": (
+                            float(value.get("confidence_threshold", None))
+                            if value.get("confidence_threshold") is not None
+                            else None
+                        ),
                     }
                 else:
                     # Nested group - recurse
@@ -494,9 +494,11 @@ IMPORTANT: Respond ONLY with a valid JSON object and nothing else. Here's the ex
             reason=reason,
             evaluation_method=evaluation_method.value,
             evaluation_threshold=evaluation_threshold if include_threshold else None,
-            comparator_type=comparator_type
-            if evaluation_method == EvaluationMethod.HUNGARIAN
-            else None,
+            comparator_type=(
+                comparator_type
+                if evaluation_method == EvaluationMethod.HUNGARIAN
+                else None
+            ),
         )
 
         # Create metrics dictionary

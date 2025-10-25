@@ -93,40 +93,40 @@ def test_both_services_convert_bbox_to_geometry():
     print("\n🔍 Verification:")
 
     # Both should convert bbox to geometry
-    assert regular_ytd_has_geometry, (
-        "Regular service should convert YTDNetPay bbox to geometry"
-    )
-    assert not regular_ytd_has_bbox, (
-        "Regular service should remove YTDNetPay bbox after conversion"
-    )
-    assert granular_ytd_has_geometry, (
-        "Granular service should convert YTDNetPay bbox to geometry"
-    )
-    assert not granular_ytd_has_bbox, (
-        "Granular service should remove YTDNetPay bbox after conversion"
-    )
+    assert (
+        regular_ytd_has_geometry
+    ), "Regular service should convert YTDNetPay bbox to geometry"
+    assert (
+        not regular_ytd_has_bbox
+    ), "Regular service should remove YTDNetPay bbox after conversion"
+    assert (
+        granular_ytd_has_geometry
+    ), "Granular service should convert YTDNetPay bbox to geometry"
+    assert (
+        not granular_ytd_has_bbox
+    ), "Granular service should remove YTDNetPay bbox after conversion"
 
     # Both should handle nested attributes
-    assert regular_state_has_geometry, (
-        "Regular service should convert nested State bbox to geometry"
-    )
-    assert not regular_state_has_bbox, (
-        "Regular service should remove nested State bbox after conversion"
-    )
-    assert granular_state_has_geometry, (
-        "Granular service should convert nested State bbox to geometry"
-    )
-    assert not granular_state_has_bbox, (
-        "Granular service should remove nested State bbox after conversion"
-    )
+    assert (
+        regular_state_has_geometry
+    ), "Regular service should convert nested State bbox to geometry"
+    assert (
+        not regular_state_has_bbox
+    ), "Regular service should remove nested State bbox after conversion"
+    assert (
+        granular_state_has_geometry
+    ), "Granular service should convert nested State bbox to geometry"
+    assert (
+        not granular_state_has_bbox
+    ), "Granular service should remove nested State bbox after conversion"
 
     # Check geometry values are equivalent
     regular_ytd_geometry = regular_ytd["geometry"][0]["boundingBox"]
     granular_ytd_geometry = granular_ytd["geometry"][0]["boundingBox"]
 
-    assert regular_ytd_geometry == granular_ytd_geometry, (
-        "Both services should produce identical geometry"
-    )
+    assert (
+        regular_ytd_geometry == granular_ytd_geometry
+    ), "Both services should produce identical geometry"
 
     print("✅ Regular AssessmentService: Converts bbox → geometry correctly")
     print("✅ GranularAssessmentService: Converts bbox → geometry correctly")

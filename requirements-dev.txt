@@ -18,6 +18,12 @@ moto>=4.2.0                  # Mock AWS services
 boto3-stubs[dynamodb,s3,cognito-identity,lambda]>=1.28.0
 
 # ============================================================================
+# Runtime Dependencies (needed by lib/idp_common_pkg tests)
+# ============================================================================
+pydantic>=2.0.0              # Required by extraction service
+pyarrow==20.0.0              # Required by reporting module
+
+# ============================================================================
 # Code Quality
 # ============================================================================
 ruff>=0.1.0                  # Fast Python linter

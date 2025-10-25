@@ -270,11 +270,11 @@ def analyze_recent_system_errors(
                 "error_categories": {
                     category: {
                         "count": len(errors),
-                        "sample": truncate_message(
-                            errors[0]["message"], max_message_length
-                        )
-                        if errors
-                        else None,
+                        "sample": (
+                            truncate_message(errors[0]["message"], max_message_length)
+                            if errors
+                            else None
+                        ),
                     }
                     for category, errors in categorized_errors.items()
                     if errors

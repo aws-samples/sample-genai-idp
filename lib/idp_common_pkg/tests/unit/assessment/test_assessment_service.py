@@ -132,7 +132,8 @@ class TestAssessmentService:
                 "top_k": 5,
                 "default_confidence_threshold": 0.8,
                 "system_prompt": "You are a document assessment assistant.",
-                "task_prompt": dedent("""
+                "task_prompt": dedent(
+                    """
                     Assess the confidence of the following extraction results from this {DOCUMENT_CLASS} document:
                     
                     Expected fields:
@@ -145,7 +146,8 @@ class TestAssessmentService:
                     {DOCUMENT_TEXT}
                     
                     Respond with a JSON object containing confidence scores and reasons for each field.
-                """),
+                """
+                ),
             },
         }
 

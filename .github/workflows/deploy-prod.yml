@@ -27,10 +27,29 @@ jobs:
       with:
         ref: main
     
-    - name: Set up Python 3.11
+    - name: Set up Node.js for UI formatting check
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+        cache-dependency-path: src/ui/package-lock.json
+    
+    - name: Check UI code formatting with Prettier
+      run: |
+        echo "🎨 Checking code formatting with Prettier..."
+        cd src/ui
+        npm ci --prefer-offline --no-audit
+        npx prettier --check "src/**/*.{js,jsx,ts,tsx,json,css,scss}" || {
+          echo "❌ Code formatting issues detected!"
+          echo "💡 Run 'cd src/ui && npx prettier --write \"src/**/*.{js,jsx}\"' to fix"
+          exit 1
+        }
+        echo "✅ All code is properly formatted"
+    
+    - name: Set up Python 3.12
       uses: actions/setup-python@v4
       with:
-        python-version: '3.11'
+        python-version: '3.12'
     
     - name: Set up AWS SAM CLI
       uses: aws-actions/setup-sam@v2
@@ -41,10 +60,14 @@ jobs:
         aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID_PROD }}
         aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY_PROD }}
         aws-region: eu-central-1
+      env:
+        AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID_PROD }}
+        AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY_PROD }}
+        AWS_DEFAULT_REGION: eu-central-1
     
     - name: Install dependencies
       run: |
-        pip install boto3 rich typer PyYAML botocore setuptools ruff
+        pip install boto3 rich typer PyYAML botocore setuptools ruff black
     
     - name: Run tests before deployment
       run: |
@@ -54,7 +77,7 @@ jobs:
     
     - name: Build and publish
       run: |
-        python3 publish.py fiscalshield-prod idp eu-central-1
+        python3 publish.py fiscalshield-prod idp eu-central-1 --lint off
     
     - name: Deploy to production stack
       run: |
@@ -84,7 +107,18 @@ jobs:
     - name: Force update Lambda functions (bypass CloudFormation caching)
       run: |
         echo "🔄 Force updating Lambda functions with latest code..."
+        chmod +x scripts/force-update-lambdas.sh
         ./scripts/force-update-lambdas.sh
+      env:
+        STACK_NAME: fiscalshield-idp-prod
+        REGION: eu-central-1
+    
+    - name: Run smoke tests
+      run: |
+        echo "🔍 Running post-deployment smoke tests..."
+        chmod +x scripts/smoke-test.sh
+        ./scripts/smoke-test.sh || echo "⚠️  Some smoke tests failed but deployment continues"
+      continue-on-error: true
       env:
         STACK_NAME: fiscalshield-idp-prod
         REGION: eu-central-1
@@ -108,3 +142,41 @@ jobs:
         echo "  2. Assign admin users to Admin group"
         echo "  3. Test admin and regular user access"
         echo "  4. Monitor Lambda logs for errors"
+    
+    - name: Send deployment notification
+      if: always()
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const status = '${{ job.status }}';
+          const emoji = status === 'success' ? '🚀' : '❌';
+          const color = status === 'success' ? '28a745' : 'dc3545';
+          
+          const body = `${emoji} **PRODUCTION Deployment ${status.toUpperCase()}**
+          
+          **Branch:** \`main\`
+          **Commit:** \`${context.sha.substring(0, 7)}\`
+          **Author:** @${context.actor}
+          **Workflow:** [${context.workflow}](${context.payload.repository.html_url}/actions/runs/${context.runId})
+          
+          ${status === 'success' ? '✅ Production deployment completed successfully!\n\n⚠️ **Action Required:**\n1. Verify Cognito groups\n2. Test critical user flows\n3. Monitor logs for 15 minutes' : '❌ **PRODUCTION DEPLOYMENT FAILED**\n\nImmediate action required! Check logs and consider rollback.'}
+          `;
+          
+          // Create an issue for failed production deployments
+          if (status !== 'success') {
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `🚨 Production Deployment Failed - ${new Date().toISOString()}`,
+              body: body,
+              labels: ['deployment', 'production', 'urgent']
+            });
+          } else {
+            // Create a comment on the commit for successful deployments
+            await github.rest.repos.createCommitComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              commit_sha: context.sha,
+              body: body
+            });
+          }

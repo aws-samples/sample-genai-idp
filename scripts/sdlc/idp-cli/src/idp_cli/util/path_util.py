@@ -1,15 +1,16 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: MIT-0
 
-# This deliverable is considered Developed Content as defined in the AWS Service Terms and the SOW between the parties. 
-# The libraries used in this developed content are subject to their respective license disclosures. 
+# This deliverable is considered Developed Content as defined in the AWS Service Terms and the SOW between the parties.
+# The libraries used in this developed content are subject to their respective license disclosures.
 # Please see the license and SBOM artifact files included in this repository for specific license references.
 
 import os
 import pathlib
-from typing import Optional 
+from typing import Optional
 
-class PathUtil():
+
+class PathUtil:
     @staticmethod
     def root(path: Optional[str] = None):
 
@@ -18,7 +19,5 @@ class PathUtil():
         if path:
             join_path.append(path)
 
-        p = os.path.join(
-            *join_path
-        )
+        p = os.path.join(*join_path)
         return p

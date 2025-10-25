@@ -12,40 +12,43 @@ from botocore.exceptions import ClientError
 logger = logging.getLogger()
 logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 
-sagemaker = boto3.client('sagemaker')
-sts = boto3.client('sts')
+sagemaker = boto3.client("sagemaker")
+sts = boto3.client("sts")
+
 
 def get_remaining_time_in_millis(context):
     """
     Get remaining execution time for the Lambda function.
-    
+
     Args:
         context: Lambda context object
-        
+
     Returns:
         int: Remaining time in milliseconds
     """
-    if context and hasattr(context, 'get_remaining_time_in_millis'):
+    if context and hasattr(context, "get_remaining_time_in_millis"):
         return context.get_remaining_time_in_millis()
     return 300000  # Default to 5 minutes if context is not available
+
 
 def calculate_safe_wait_time(context, default_wait_time, buffer_time=30):
     """
     Calculate a safe wait time that doesn't exceed Lambda timeout.
-    
+
     Args:
         context: Lambda context object
         default_wait_time (int): Default wait time in seconds
         buffer_time (int): Buffer time in seconds to leave for cleanup
-        
+
     Returns:
         int: Safe wait time in seconds
     """
     remaining_ms = get_remaining_time_in_millis(context)
     remaining_seconds = remaining_ms // 1000
     safe_wait_time = max(30, remaining_seconds - buffer_time)  # Minimum 30 seconds
-    
+
     return min(default_wait_time, safe_wait_time)
+
 
 def sanitize_name(name, max_length=63):
     """
@@ -57,40 +60,41 @@ def sanitize_name(name, max_length=63):
     """
     # Convert to lowercase
     name = name.lower()
-    
+
     # Convert underscores to hyphens
-    name = name.replace('_', '-')
-    
+    name = name.replace("_", "-")
+
     # Process the string character by character to ensure hyphens are only between alphanumeric
     result = []
     for i, char in enumerate(name):
         if char.isalnum():
             result.append(char)
-        elif char == '-' and i > 0 and i < len(name) - 1:
+        elif char == "-" and i > 0 and i < len(name) - 1:
             # Only add hyphen if it's between alphanumeric characters
-            if name[i-1].isalnum() and name[i+1].isalnum():
+            if name[i - 1].isalnum() and name[i + 1].isalnum():
                 result.append(char)
-    
-    name = ''.join(result)
-    
+
+    name = "".join(result)
+
     # Ensure it's not empty
     if not name:
-        name = 'default'
-    
+        name = "default"
+
     # Ensure it starts with alphanumeric
     if not name[0].isalnum():
-        name = 'a' + name
-    
+        name = "a" + name
+
     # Truncate to max length while preserving word boundaries
     if len(name) > max_length:
         # Try to truncate at last hyphen before max_length
-        last_hyphen = name.rfind('-', 0, max_length)
+        last_hyphen = name.rfind("-", 0, max_length)
         if last_hyphen > 0:
             name = name[:last_hyphen]
         else:
             name = name[:max_length]
-    
+
     return name
+
 
 def generate_resource_names(stack_name):
     """
@@ -98,21 +102,26 @@ def generate_resource_names(stack_name):
     """
     base_name = sanitize_name(stack_name)
     return {
-        'human_task_ui': f'{base_name}-hitl-ui',  # Keep hyphens for readability
-        'flow_definition': f'{base_name}-hitl-fd'  # Keep hyphens for readability
+        "human_task_ui": f"{base_name}-hitl-ui",  # Keep hyphens for readability
+        "flow_definition": f"{base_name}-hitl-fd",  # Keep hyphens for readability
     }
+
 
 def get_account_id():
     """Get the current AWS account ID"""
     try:
-        return sts.get_caller_identity()['Account']
+        return sts.get_caller_identity()["Account"]
     except Exception as e:
         logger.warning(f"Warning: Could not get account ID: {e}")
         return ""
 
+
 def get_region():
     """Get the current AWS region"""
-    return os.environ.get('AWS_REGION', os.environ.get('AWS_DEFAULT_REGION', 'us-west-2'))
+    return os.environ.get(
+        "AWS_REGION", os.environ.get("AWS_DEFAULT_REGION", "us-west-2")
+    )
+
 
 def create_human_task_ui(human_task_ui_name):
     # human_task_ui_name = f'{stack_name}-bda-hitl-template'
@@ -853,35 +862,37 @@ def create_human_task_ui(human_task_ui_name):
     try:
         response = sagemaker.create_human_task_ui(
             HumanTaskUiName=human_task_ui_name,
-            UiTemplate={
-                'Content': ui_template_content
-            }
+            UiTemplate={"Content": ui_template_content},
         )
-        return response['HumanTaskUiArn']
+        return response["HumanTaskUiArn"]
     except Exception as e:
         logger.error(f"Error creating HumanTaskUI: {e}")
         # Re-raise the exception with the original error details
         raise Exception(f"Failed to create human task UI: {str(e)}")
 
 
-def create_flow_definition(stack_name, human_task_ui_arn, a2i_workteam_arn, flow_definition_name):
-    role_arn = os.environ.get('A2I_FLOW_DEFINITION_ROLE_ARN')  # Use dedicated Flow Definition role
+def create_flow_definition(
+    stack_name, human_task_ui_arn, a2i_workteam_arn, flow_definition_name
+):
+    role_arn = os.environ.get(
+        "A2I_FLOW_DEFINITION_ROLE_ARN"
+    )  # Use dedicated Flow Definition role
     try:
         response = sagemaker.create_flow_definition(
             FlowDefinitionName=flow_definition_name,
             HumanLoopConfig={
-                'WorkteamArn': a2i_workteam_arn,
-                'HumanTaskUiArn': human_task_ui_arn,
-                'TaskTitle': 'Review Extracted Key Values',
-                'TaskDescription': 'Review the key values extracted from the document.',
-                'TaskCount': 1 
+                "WorkteamArn": a2i_workteam_arn,
+                "HumanTaskUiArn": human_task_ui_arn,
+                "TaskTitle": "Review Extracted Key Values",
+                "TaskDescription": "Review the key values extracted from the document.",
+                "TaskCount": 1,
             },
             OutputConfig={
-                'S3OutputPath': f's3://{os.environ["BDA_OUTPUT_BUCKET"]}/a2i-output' #Output to BDA Bucket
+                "S3OutputPath": f's3://{os.environ["BDA_OUTPUT_BUCKET"]}/a2i-output'  # Output to BDA Bucket
             },
-            RoleArn=role_arn
+            RoleArn=role_arn,
         )
-        return response['FlowDefinitionArn']
+        return response["FlowDefinitionArn"]
     except Exception as e:
         logger.error(f"Error creating FlowDefinition: {e}")
         # Re-raise the exception with the original error details
@@ -894,191 +905,258 @@ def comprehensive_workforce_cleanup(workteam_name, stack_name):
     Handles all scenarios including orphaned workforces when workteam is already deleted
     """
     cleanup_results = []
-    
+
     try:
-        logger.info(f"Starting comprehensive workforce cleanup for workteam: {workteam_name}")
-        
+        logger.info(
+            f"Starting comprehensive workforce cleanup for workteam: {workteam_name}"
+        )
+
         # Step 1: Clean up any remaining human loops
         try:
             # Use the sanitized flow definition name
             resource_names = generate_resource_names(stack_name)
-            flow_definition_name = resource_names['flow_definition']
-            
+            flow_definition_name = resource_names["flow_definition"]
+
             # Try to list human loops (this might fail if flow definition is already deleted)
             try:
                 response = sagemaker.list_human_loops(
-                    FlowDefinitionArn=f'arn:aws:sagemaker:{get_region()}:{get_account_id()}:flow-definition/{flow_definition_name}',
-                    MaxResults=100
+                    FlowDefinitionArn=f"arn:aws:sagemaker:{get_region()}:{get_account_id()}:flow-definition/{flow_definition_name}",
+                    MaxResults=100,
                 )
-                
-                for human_loop in response.get('HumanLoops', []):
-                    if human_loop['HumanLoopStatus'] in ['InProgress', 'Waiting']:
+
+                for human_loop in response.get("HumanLoops", []):
+                    if human_loop["HumanLoopStatus"] in ["InProgress", "Waiting"]:
                         try:
-                            sagemaker.stop_human_loop(HumanLoopName=human_loop['HumanLoopName'])
-                            cleanup_results.append(f"Stopped human loop: {human_loop['HumanLoopName']}")
+                            sagemaker.stop_human_loop(
+                                HumanLoopName=human_loop["HumanLoopName"]
+                            )
+                            cleanup_results.append(
+                                f"Stopped human loop: {human_loop['HumanLoopName']}"
+                            )
                         except Exception as e:
-                            cleanup_results.append(f"Warning: Could not stop human loop {human_loop['HumanLoopName']}: {e}")
-                            
+                            cleanup_results.append(
+                                f"Warning: Could not stop human loop {human_loop['HumanLoopName']}: {e}"
+                            )
+
             except Exception as e:
-                cleanup_results.append(f"Could not list human loops (flow definition may be deleted): {e}")
-                
+                cleanup_results.append(
+                    f"Could not list human loops (flow definition may be deleted): {e}"
+                )
+
         except Exception as e:
             cleanup_results.append(f"Human loop cleanup failed: {e}")
-        
+
         # Step 2: Wait for operations to settle
         logger.info("Waiting for SageMaker operations to settle...")
         time.sleep(10)
-        
+
         # Step 3: Check if workteam exists and try direct deletion
         workteam_exists = False
         try:
             sagemaker.describe_workteam(WorkteamName=workteam_name)
             workteam_exists = True
             logger.info(f"Workteam {workteam_name} exists, attempting deletion")
-            
+
             try:
                 sagemaker.delete_workteam(WorkteamName=workteam_name)
-                cleanup_results.append(f"Successfully deleted workteam: {workteam_name}")
+                cleanup_results.append(
+                    f"Successfully deleted workteam: {workteam_name}"
+                )
                 time.sleep(5)  # Wait for deletion to propagate
-                
+
             except Exception as delete_error:
-                cleanup_results.append(f"Direct workteam deletion failed: {delete_error}")
-                
+                cleanup_results.append(
+                    f"Direct workteam deletion failed: {delete_error}"
+                )
+
         except Exception as describe_error:
-            if 'ValidationException' in str(describe_error):
-                cleanup_results.append(f"Workteam {workteam_name} already deleted or doesn't exist")
+            if "ValidationException" in str(describe_error):
+                cleanup_results.append(
+                    f"Workteam {workteam_name} already deleted or doesn't exist"
+                )
                 workteam_exists = False
             else:
                 cleanup_results.append(f"Error describing workteam: {describe_error}")
                 workteam_exists = False
-        
+
         # Step 4: ALWAYS check for and clean up orphaned workforces
         # This is critical - we must check regardless of workteam status
         logger.info("Checking for orphaned workforce resources...")
         try:
             workforces = sagemaker.list_workforces()
-            
-            for workforce in workforces.get('Workforces', []):
-                workforce_name = workforce['WorkforceName']
-                
+
+            for workforce in workforces.get("Workforces", []):
+                workforce_name = workforce["WorkforceName"]
+
                 # Check if this is a private workforce
-                if 'private' in workforce_name.lower():
+                if "private" in workforce_name.lower():
                     try:
                         # Get workforce details to check if it's associated with our stack
-                        workforce_details = sagemaker.describe_workforce(WorkforceName=workforce_name)
-                        
+                        workforce_details = sagemaker.describe_workforce(
+                            WorkforceName=workforce_name
+                        )
+
                         # Multiple ways to identify if this workforce belongs to our stack:
                         # 1. Check if workteam name appears in workforce details
-                        # 2. Check if stack name appears in workforce details  
+                        # 2. Check if stack name appears in workforce details
                         # 3. Check workforce creation patterns
-                        
+
                         workforce_str = str(workforce_details).lower()
                         stack_name_lower = stack_name.lower()
                         workteam_name_lower = workteam_name.lower()
-                        
+
                         is_our_workforce = (
-                            workteam_name_lower in workforce_str or
-                            stack_name_lower in workforce_str or
+                            workteam_name_lower in workforce_str
+                            or stack_name_lower in workforce_str
+                            or
                             # Check for common naming patterns
-                            f"{stack_name_lower}-private" in workforce_name.lower() or
+                            f"{stack_name_lower}-private" in workforce_name.lower()
+                            or
                             # Check if workforce was created around the same time as our stack
                             # (This is a heuristic but helps identify orphaned resources)
-                            workforce_name.lower().startswith('private-crowd')
+                            workforce_name.lower().startswith("private-crowd")
                         )
-                        
+
                         if is_our_workforce:
                             logger.info(f"Found associated workforce: {workforce_name}")
-                            cleanup_results.append(f"Found workforce associated with our stack: {workforce_name}")
-                            
+                            cleanup_results.append(
+                                f"Found workforce associated with our stack: {workforce_name}"
+                            )
+
                             # Check if workforce has any remaining workteams
                             try:
                                 # If workteam still exists, we already tried to delete it above
                                 # If workteam doesn't exist, we can safely delete the workforce
                                 if not workteam_exists:
-                                    logger.info(f"Workteam already deleted, cleaning up orphaned workforce: {workforce_name}")
-                                    sagemaker.delete_workforce(WorkforceName=workforce_name)
-                                    cleanup_results.append(f"Deleted orphaned workforce: {workforce_name}")
+                                    logger.info(
+                                        f"Workteam already deleted, cleaning up orphaned workforce: {workforce_name}"
+                                    )
+                                    sagemaker.delete_workforce(
+                                        WorkforceName=workforce_name
+                                    )
+                                    cleanup_results.append(
+                                        f"Deleted orphaned workforce: {workforce_name}"
+                                    )
                                     time.sleep(5)
                                     break
                                 else:
                                     # Workteam exists but deletion might have failed, try workforce deletion as fallback
-                                    logger.info(f"Attempting workforce-level cleanup for: {workforce_name}")
-                                    sagemaker.delete_workforce(WorkforceName=workforce_name)
-                                    cleanup_results.append(f"Deleted workforce (workteam deletion fallback): {workforce_name}")
+                                    logger.info(
+                                        f"Attempting workforce-level cleanup for: {workforce_name}"
+                                    )
+                                    sagemaker.delete_workforce(
+                                        WorkforceName=workforce_name
+                                    )
+                                    cleanup_results.append(
+                                        f"Deleted workforce (workteam deletion fallback): {workforce_name}"
+                                    )
                                     time.sleep(5)
                                     break
-                                    
+
                             except Exception as workforce_delete_error:
-                                cleanup_results.append(f"Could not delete workforce {workforce_name}: {workforce_delete_error}")
+                                cleanup_results.append(
+                                    f"Could not delete workforce {workforce_name}: {workforce_delete_error}"
+                                )
                                 continue
                         else:
-                            cleanup_results.append(f"Skipped unrelated workforce: {workforce_name}")
-                            
+                            cleanup_results.append(
+                                f"Skipped unrelated workforce: {workforce_name}"
+                            )
+
                     except Exception as workforce_describe_error:
-                        cleanup_results.append(f"Could not describe workforce {workforce_name}: {workforce_describe_error}")
-                        
+                        cleanup_results.append(
+                            f"Could not describe workforce {workforce_name}: {workforce_describe_error}"
+                        )
+
                         # If we can't describe it, but it's a private workforce, try to delete it anyway
                         # This handles cases where the workforce is in a bad state
-                        if 'private-crowd' in workforce_name.lower():
+                        if "private-crowd" in workforce_name.lower():
                             try:
-                                logger.info(f"Attempting cleanup of potentially orphaned workforce: {workforce_name}")
+                                logger.info(
+                                    f"Attempting cleanup of potentially orphaned workforce: {workforce_name}"
+                                )
                                 sagemaker.delete_workforce(WorkforceName=workforce_name)
-                                cleanup_results.append(f"Deleted potentially orphaned workforce: {workforce_name}")
+                                cleanup_results.append(
+                                    f"Deleted potentially orphaned workforce: {workforce_name}"
+                                )
                                 time.sleep(5)
                                 break
                             except Exception as fallback_delete_error:
-                                cleanup_results.append(f"Could not delete potentially orphaned workforce {workforce_name}: {fallback_delete_error}")
+                                cleanup_results.append(
+                                    f"Could not delete potentially orphaned workforce {workforce_name}: {fallback_delete_error}"
+                                )
                         continue
-                        
+
         except Exception as workforce_list_error:
-            cleanup_results.append(f"Workforce listing/cleanup failed: {workforce_list_error}")
-        
+            cleanup_results.append(
+                f"Workforce listing/cleanup failed: {workforce_list_error}"
+            )
+
         # Step 5: Clean up default workforce if it exists
         logger.info("Checking for default workforce...")
         try:
-            sagemaker.describe_workforce(WorkforceName='default')
+            sagemaker.describe_workforce(WorkforceName="default")
             logger.info("Default workforce found, attempting cleanup...")
             try:
-                sagemaker.delete_workforce(WorkforceName='default')
+                sagemaker.delete_workforce(WorkforceName="default")
                 cleanup_results.append("Successfully deleted default workforce")
                 time.sleep(5)  # Wait for deletion to propagate
             except Exception as default_workforce_error:
-                cleanup_results.append(f"Could not delete default workforce: {default_workforce_error}")
+                cleanup_results.append(
+                    f"Could not delete default workforce: {default_workforce_error}"
+                )
         except Exception as e:
-            if 'ValidationException' in str(e) or 'ResourceNotFound' in str(e):
-                cleanup_results.append("Default workforce does not exist or already deleted")
+            if "ValidationException" in str(e) or "ResourceNotFound" in str(e):
+                cleanup_results.append(
+                    "Default workforce does not exist or already deleted"
+                )
             else:
                 cleanup_results.append(f"Error checking default workforce: {e}")
-        
+
         # Step 6: Final verification - check both workteam and workforce status
         logger.info("Performing final verification...")
         try:
             time.sleep(5)
             sagemaker.describe_workteam(WorkteamName=workteam_name)
-            cleanup_results.append(f"Warning: Workteam {workteam_name} still exists after cleanup attempts")
+            cleanup_results.append(
+                f"Warning: Workteam {workteam_name} still exists after cleanup attempts"
+            )
         except Exception:
-            cleanup_results.append(f"Verification: Workteam {workteam_name} successfully removed")
-        
+            cleanup_results.append(
+                f"Verification: Workteam {workteam_name} successfully removed"
+            )
+
         # Also verify no orphaned workforces remain
         try:
             remaining_workforces = sagemaker.list_workforces()
-            private_workforces = [w for w in remaining_workforces.get('Workforces', []) 
-                                if 'private' in w['WorkforceName'].lower()]
-            
+            private_workforces = [
+                w
+                for w in remaining_workforces.get("Workforces", [])
+                if "private" in w["WorkforceName"].lower()
+            ]
+
             if private_workforces:
-                cleanup_results.append(f"Note: {len(private_workforces)} private workforce(s) still exist in account")
+                cleanup_results.append(
+                    f"Note: {len(private_workforces)} private workforce(s) still exist in account"
+                )
                 for wf in private_workforces:
-                    cleanup_results.append(f"  - Remaining workforce: {wf['WorkforceName']}")
+                    cleanup_results.append(
+                        f"  - Remaining workforce: {wf['WorkforceName']}"
+                    )
             else:
-                cleanup_results.append("Verification: No private workforces remain in account")
-                
+                cleanup_results.append(
+                    "Verification: No private workforces remain in account"
+                )
+
         except Exception as verification_error:
-            cleanup_results.append(f"Could not verify workforce cleanup: {verification_error}")
-        
+            cleanup_results.append(
+                f"Could not verify workforce cleanup: {verification_error}"
+            )
+
         logger.info("Workforce cleanup completed")
         logger.info("Cleanup results:", cleanup_results)
         return cleanup_results
-        
+
     except Exception as e:
         error_msg = f"Comprehensive workforce cleanup failed: {e}"
         cleanup_results.append(error_msg)
@@ -1086,76 +1164,98 @@ def comprehensive_workforce_cleanup(workteam_name, stack_name):
         return cleanup_results
 
 
-def wait_for_flow_definition_deletion(flow_definition_name, max_wait_time=180, check_interval=10, context=None):
+def wait_for_flow_definition_deletion(
+    flow_definition_name, max_wait_time=180, check_interval=10, context=None
+):
     """
     Wait for flow definition to be completely deleted before proceeding.
-    
+
     Args:
         flow_definition_name (str): Name of the flow definition
         max_wait_time (int): Maximum time to wait in seconds (default: 3 minutes)
         check_interval (int): Time between checks in seconds (default: 10 seconds)
         context: Lambda context for timeout management
-    
+
     Returns:
         bool: True if deletion is confirmed, False if timeout or error
     """
     # Adjust wait time based on remaining Lambda execution time
     if context:
-        safe_wait_time = calculate_safe_wait_time(context, max_wait_time, buffer_time=60)
+        safe_wait_time = calculate_safe_wait_time(
+            context, max_wait_time, buffer_time=60
+        )
         if safe_wait_time < max_wait_time:
-            logger.info(f"Adjusting flow definition wait time from {max_wait_time}s to {safe_wait_time}s due to Lambda timeout constraints")
+            logger.info(
+                f"Adjusting flow definition wait time from {max_wait_time}s to {safe_wait_time}s due to Lambda timeout constraints"
+            )
             max_wait_time = safe_wait_time
-    
-    logger.info(f"Waiting for flow definition '{flow_definition_name}' to be completely deleted (max {max_wait_time}s)...")
+
+    logger.info(
+        f"Waiting for flow definition '{flow_definition_name}' to be completely deleted (max {max_wait_time}s)..."
+    )
     start_time = time.time()
-    
+
     while time.time() - start_time < max_wait_time:
         try:
             # Try to describe the flow definition
             sagemaker.describe_flow_definition(FlowDefinitionName=flow_definition_name)
             elapsed = int(time.time() - start_time)
-            logger.info(f"Flow definition still exists, waiting... ({elapsed}s elapsed)")
+            logger.info(
+                f"Flow definition still exists, waiting... ({elapsed}s elapsed)"
+            )
             time.sleep(check_interval)
         except sagemaker.exceptions.ResourceNotFound:
             elapsed = int(time.time() - start_time)
-            logger.info(f"Flow definition '{flow_definition_name}' successfully deleted after {elapsed}s")
+            logger.info(
+                f"Flow definition '{flow_definition_name}' successfully deleted after {elapsed}s"
+            )
             return True
         except Exception as e:
-            if 'ValidationException' in str(e) or 'ResourceNotFound' in str(e):
+            if "ValidationException" in str(e) or "ResourceNotFound" in str(e):
                 elapsed = int(time.time() - start_time)
-                logger.info(f"Flow definition '{flow_definition_name}' successfully deleted after {elapsed}s")
+                logger.info(
+                    f"Flow definition '{flow_definition_name}' successfully deleted after {elapsed}s"
+                )
                 return True
             else:
                 logger.error(f"Error checking flow definition status: {e}")
                 time.sleep(check_interval)
-    
+
     logger.info(f"Timeout waiting for flow definition deletion after {max_wait_time}s")
     return False
 
 
-def wait_for_human_task_ui_deletion(human_task_ui_name, max_wait_time=120, check_interval=5, context=None):
+def wait_for_human_task_ui_deletion(
+    human_task_ui_name, max_wait_time=120, check_interval=5, context=None
+):
     """
     Wait for human task UI to be completely deleted before proceeding.
-    
+
     Args:
         human_task_ui_name (str): Name of the human task UI
         max_wait_time (int): Maximum time to wait in seconds (default: 2 minutes)
         check_interval (int): Time between checks in seconds (default: 5 seconds)
         context: Lambda context for timeout management
-    
+
     Returns:
         bool: True if deletion is confirmed, False if timeout or error
     """
     # Adjust wait time based on remaining Lambda execution time
     if context:
-        safe_wait_time = calculate_safe_wait_time(context, max_wait_time, buffer_time=30)
+        safe_wait_time = calculate_safe_wait_time(
+            context, max_wait_time, buffer_time=30
+        )
         if safe_wait_time < max_wait_time:
-            logger.info(f"Adjusting human task UI wait time from {max_wait_time}s to {safe_wait_time}s due to Lambda timeout constraints")
+            logger.info(
+                f"Adjusting human task UI wait time from {max_wait_time}s to {safe_wait_time}s due to Lambda timeout constraints"
+            )
             max_wait_time = safe_wait_time
-    
-    logger.info(f"Waiting for human task UI '{human_task_ui_name}' to be completely deleted (max {max_wait_time}s)...")
+
+    logger.info(
+        f"Waiting for human task UI '{human_task_ui_name}' to be completely deleted (max {max_wait_time}s)..."
+    )
     start_time = time.time()
-    
+
     while time.time() - start_time < max_wait_time:
         try:
             # Try to describe the human task UI
@@ -1165,17 +1265,21 @@ def wait_for_human_task_ui_deletion(human_task_ui_name, max_wait_time=120, check
             time.sleep(check_interval)
         except sagemaker.exceptions.ResourceNotFound:
             elapsed = int(time.time() - start_time)
-            logger.info(f"Human task UI '{human_task_ui_name}' successfully deleted after {elapsed}s")
+            logger.info(
+                f"Human task UI '{human_task_ui_name}' successfully deleted after {elapsed}s"
+            )
             return True
         except Exception as e:
-            if 'ValidationException' in str(e) or 'ResourceNotFound' in str(e):
+            if "ValidationException" in str(e) or "ResourceNotFound" in str(e):
                 elapsed = int(time.time() - start_time)
-                logger.info(f"Human task UI '{human_task_ui_name}' successfully deleted after {elapsed}s")
+                logger.info(
+                    f"Human task UI '{human_task_ui_name}' successfully deleted after {elapsed}s"
+                )
                 return True
             else:
                 logger.error(f"Error checking human task UI status: {e}")
                 time.sleep(check_interval)
-    
+
     logger.info(f"Timeout waiting for human task UI deletion after {max_wait_time}s")
     return False
 
@@ -1183,11 +1287,11 @@ def wait_for_human_task_ui_deletion(human_task_ui_name, max_wait_time=120, check
 def delete_flow_definition(flow_definition_name, context=None):
     """
     Delete flow definition and wait for completion.
-    
+
     Args:
         flow_definition_name (str): Name of the flow definition to delete
         context: Lambda context for timeout management
-        
+
     Returns:
         bool: True if deletion was successful, False otherwise
     """
@@ -1196,20 +1300,24 @@ def delete_flow_definition(flow_definition_name, context=None):
         try:
             sagemaker.describe_flow_definition(FlowDefinitionName=flow_definition_name)
         except sagemaker.exceptions.ResourceNotFound:
-            logger.info(f"Flow Definition '{flow_definition_name}' does not exist, skipping deletion.")
+            logger.info(
+                f"Flow Definition '{flow_definition_name}' does not exist, skipping deletion."
+            )
             return True
         except Exception as e:
-            if 'ValidationException' in str(e) or 'ResourceNotFound' in str(e):
-                logger.info(f"Flow Definition '{flow_definition_name}' does not exist, skipping deletion.")
+            if "ValidationException" in str(e) or "ResourceNotFound" in str(e):
+                logger.info(
+                    f"Flow Definition '{flow_definition_name}' does not exist, skipping deletion."
+                )
                 return True
-        
+
         # Attempt deletion
         sagemaker.delete_flow_definition(FlowDefinitionName=flow_definition_name)
         logger.info(f"Flow Definition '{flow_definition_name}' deletion initiated.")
-        
+
         # Wait for deletion to complete
         return wait_for_flow_definition_deletion(flow_definition_name, context=context)
-        
+
     except Exception as e:
         logger.error(f"Error deleting Flow Definition '{flow_definition_name}': {e}")
         return False
@@ -1218,49 +1326,51 @@ def delete_flow_definition(flow_definition_name, context=None):
 def delete_default_workforce():
     """
     Delete the default SageMaker workforce.
-    
+
     Returns:
         bool: True if deletion was successful or workforce doesn't exist, False otherwise
     """
     try:
         # First check if the default workforce exists
         try:
-            workforce_response = sagemaker.describe_workforce(WorkforceName='default')
+            sagemaker.describe_workforce(WorkforceName="default")
             logger.info("Default workforce found, attempting deletion...")
         except sagemaker.exceptions.ResourceNotFound:
             logger.info("Default workforce does not exist, skipping deletion.")
             return True
         except Exception as e:
-            if 'ValidationException' in str(e) or 'ResourceNotFound' in str(e):
+            if "ValidationException" in str(e) or "ResourceNotFound" in str(e):
                 logger.info("Default workforce does not exist, skipping deletion.")
                 return True
             else:
                 logger.error(f"Error checking default workforce existence: {e}")
                 return False
-        
+
         # Attempt to delete the default workforce
-        sagemaker.delete_workforce(WorkforceName='default')
+        sagemaker.delete_workforce(WorkforceName="default")
         logger.info("Default workforce deletion initiated successfully.")
-        
+
         # Wait a bit for the deletion to propagate
         time.sleep(5)
-        
+
         # Verify deletion
         try:
-            sagemaker.describe_workforce(WorkforceName='default')
-            logger.info("Warning: Default workforce still exists after deletion attempt")
+            sagemaker.describe_workforce(WorkforceName="default")
+            logger.info(
+                "Warning: Default workforce still exists after deletion attempt"
+            )
             return False
         except sagemaker.exceptions.ResourceNotFound:
             logger.info("Default workforce successfully deleted.")
             return True
         except Exception as e:
-            if 'ValidationException' in str(e) or 'ResourceNotFound' in str(e):
+            if "ValidationException" in str(e) or "ResourceNotFound" in str(e):
                 logger.info("Default workforce successfully deleted.")
                 return True
             else:
                 logger.error(f"Error verifying default workforce deletion: {e}")
                 return False
-                
+
     except Exception as e:
         logger.error(f"Error deleting default workforce: {e}")
         return False
@@ -1269,11 +1379,11 @@ def delete_default_workforce():
 def delete_human_task_ui(human_task_ui_name, context=None):
     """
     Delete human task UI and wait for completion.
-    
+
     Args:
         human_task_ui_name (str): Name of the human task UI to delete
         context: Lambda context for timeout management
-        
+
     Returns:
         bool: True if deletion was successful, False otherwise
     """
@@ -1282,23 +1392,28 @@ def delete_human_task_ui(human_task_ui_name, context=None):
         try:
             sagemaker.describe_human_task_ui(HumanTaskUiName=human_task_ui_name)
         except sagemaker.exceptions.ResourceNotFound:
-            logger.info(f"HumanTaskUI '{human_task_ui_name}' does not exist, skipping deletion.")
+            logger.info(
+                f"HumanTaskUI '{human_task_ui_name}' does not exist, skipping deletion."
+            )
             return True
         except Exception as e:
-            if 'ValidationException' in str(e) or 'ResourceNotFound' in str(e):
-                logger.info(f"HumanTaskUI '{human_task_ui_name}' does not exist, skipping deletion.")
+            if "ValidationException" in str(e) or "ResourceNotFound" in str(e):
+                logger.info(
+                    f"HumanTaskUI '{human_task_ui_name}' does not exist, skipping deletion."
+                )
                 return True
-        
+
         # Attempt deletion
         sagemaker.delete_human_task_ui(HumanTaskUiName=human_task_ui_name)
         logger.info(f"HumanTaskUI '{human_task_ui_name}' deletion initiated.")
-        
+
         # Wait for deletion to complete
         return wait_for_human_task_ui_deletion(human_task_ui_name, context=context)
-        
+
     except Exception as e:
         logger.error(f"Error deleting HumanTaskUI '{human_task_ui_name}': {e}")
         return False
+
 
 def handler(event, context):
     """
@@ -1306,171 +1421,239 @@ def handler(event, context):
     Ensures all exceptions are captured and proper CFN responses are sent.
     """
     # Initialize variables for exception handling
-    stack_name = os.environ.get('STACK_NAME', 'unknown')
+    stack_name = os.environ.get("STACK_NAME", "unknown")
     physical_resource_id = f"A2IResources-{stack_name}"
-    
+
     try:
         logger.info(f"Event received: {json.dumps(event)}")
-        
+
         # Validate required environment variables
-        a2i_workteam_arn = os.environ['A2I_WORKTEAM_ARN']
-        
+        a2i_workteam_arn = os.environ["A2I_WORKTEAM_ARN"]
+
         # Generate resource names
         resource_names = generate_resource_names(stack_name)
-        human_task_ui_name = resource_names['human_task_ui']
-        flow_definition_name = resource_names['flow_definition']
-        
+        human_task_ui_name = resource_names["human_task_ui"]
+        flow_definition_name = resource_names["flow_definition"]
+
         logger.info(f"Request: {event.get('RequestType')}, Stack: {stack_name}")
         logger.info(f"Resources: UI={human_task_ui_name}, Flow={flow_definition_name}")
-        
-        request_type = event.get('RequestType')
-        
-        if request_type == 'Create':
-            response_data = _handle_create(stack_name, human_task_ui_name, flow_definition_name, a2i_workteam_arn, event)
-            
-        elif request_type == 'Update':
-            response_data = _handle_update(stack_name, human_task_ui_name, flow_definition_name, a2i_workteam_arn, event, context)
-            
-        elif request_type == 'Delete':
-            response_data = _handle_delete(human_task_ui_name, flow_definition_name, context)
-            
+
+        request_type = event.get("RequestType")
+
+        if request_type == "Create":
+            response_data = _handle_create(
+                stack_name,
+                human_task_ui_name,
+                flow_definition_name,
+                a2i_workteam_arn,
+                event,
+            )
+
+        elif request_type == "Update":
+            response_data = _handle_update(
+                stack_name,
+                human_task_ui_name,
+                flow_definition_name,
+                a2i_workteam_arn,
+                event,
+                context,
+            )
+
+        elif request_type == "Delete":
+            response_data = _handle_delete(
+                human_task_ui_name, flow_definition_name, context
+            )
+
         else:
             raise ValueError(f"Unknown RequestType: {request_type}")
-        
+
         logger.info(f"A2I Resources {request_type.lower()} completed successfully")
-        cfnresponse.send(event, context, cfnresponse.SUCCESS, response_data, physical_resource_id)
-        
+        cfnresponse.send(
+            event, context, cfnresponse.SUCCESS, response_data, physical_resource_id
+        )
+
     except KeyError as e:
         error_msg = f"Missing required environment variable: {str(e)}"
         logger.error(error_msg)
-        cfnresponse.send(event, context, cfnresponse.FAILED, {'Error': error_msg}, physical_resource_id, reason=error_msg)
-        
+        cfnresponse.send(
+            event,
+            context,
+            cfnresponse.FAILED,
+            {"Error": error_msg},
+            physical_resource_id,
+            reason=error_msg,
+        )
+
     except ValueError as e:
         error_msg = f"Invalid request: {str(e)}"
         logger.error(error_msg)
-        cfnresponse.send(event, context, cfnresponse.FAILED, {'Error': error_msg}, physical_resource_id, reason=error_msg)
-        
+        cfnresponse.send(
+            event,
+            context,
+            cfnresponse.FAILED,
+            {"Error": error_msg},
+            physical_resource_id,
+            reason=error_msg,
+        )
+
     except ClientError as e:
         error_msg = f"AWS service error: {str(e)}"
         logger.error(error_msg)
-        cfnresponse.send(event, context, cfnresponse.FAILED, {'Error': error_msg}, physical_resource_id, reason=error_msg)
-        
+        cfnresponse.send(
+            event,
+            context,
+            cfnresponse.FAILED,
+            {"Error": error_msg},
+            physical_resource_id,
+            reason=error_msg,
+        )
+
     except Exception as e:
         error_msg = f"Unexpected error: {str(e)}"
         logger.error(error_msg, exc_info=True)  # Include stack trace
-        cfnresponse.send(event, context, cfnresponse.FAILED, {'Error': error_msg}, physical_resource_id, reason=error_msg)
+        cfnresponse.send(
+            event,
+            context,
+            cfnresponse.FAILED,
+            {"Error": error_msg},
+            physical_resource_id,
+            reason=error_msg,
+        )
 
 
-def _handle_create(stack_name, human_task_ui_name, flow_definition_name, a2i_workteam_arn, event):
+def _handle_create(
+    stack_name, human_task_ui_name, flow_definition_name, a2i_workteam_arn, event
+):
     """Handle CREATE request"""
     logger.info("Creating A2I Resources...")
-    
+
     # Create resources (functions will raise exceptions on failure)
     human_task_ui_arn = create_human_task_ui(human_task_ui_name)
-    flow_definition_arn = create_flow_definition(stack_name, human_task_ui_arn, a2i_workteam_arn, flow_definition_name)
-    
+    flow_definition_arn = create_flow_definition(
+        stack_name, human_task_ui_arn, a2i_workteam_arn, flow_definition_name
+    )
+
     # Store ARN in SSM
-    ssm = boto3.client('ssm')
+    ssm = boto3.client("ssm")
     ssm.put_parameter(
         Name=f"/{stack_name}/FlowDefinitionArn",
         Value=flow_definition_arn,
-        Type='String',
-        Overwrite=True
+        Type="String",
+        Overwrite=True,
     )
-    
+
     # Create HITL threshold parameter (non-critical)
     try:
         ssm.put_parameter(
             Name=f"/{stack_name}/hitl_confidence_threshold",
             Value="80",
-            Type='String',
+            Type="String",
             Overwrite=True,
-            Description="HITL confidence threshold for Pattern-1 BDA processing"
+            Description="HITL confidence threshold for Pattern-1 BDA processing",
         )
         logger.info("Created HITL confidence threshold parameter")
     except Exception as e:
         logger.warning(f"Failed to create HITL threshold parameter: {e}")
-    
+
     return {
-        'HumanTaskUiArn': human_task_ui_arn,
-        'FlowDefinitionArn': flow_definition_arn
+        "HumanTaskUiArn": human_task_ui_arn,
+        "FlowDefinitionArn": flow_definition_arn,
     }
 
 
-def _handle_update(stack_name, human_task_ui_name, flow_definition_name, a2i_workteam_arn, event, context):
+def _handle_update(
+    stack_name,
+    human_task_ui_name,
+    flow_definition_name,
+    a2i_workteam_arn,
+    event,
+    context,
+):
     """Handle UPDATE request"""
     logger.info("Updating A2I Resources...")
-    
+
     # Delete existing resources
     logger.info("Deleting existing resources...")
     flow_success = delete_flow_definition(flow_definition_name, context)
     ui_success = delete_human_task_ui(human_task_ui_name, context)
-    
+
     if not flow_success:
-        raise Exception(f"Failed to delete existing Flow Definition '{flow_definition_name}' within timeout period")
+        raise Exception(
+            f"Failed to delete existing Flow Definition '{flow_definition_name}' within timeout period"
+        )
     if not ui_success:
-        raise Exception(f"Failed to delete existing Human Task UI '{human_task_ui_name}' within timeout period")
-    
+        raise Exception(
+            f"Failed to delete existing Human Task UI '{human_task_ui_name}' within timeout period"
+        )
+
     logger.info("Existing resources deleted, recreating...")
     time.sleep(10)  # Buffer time
-    
+
     # Recreate resources (functions will raise exceptions on failure)
     human_task_ui_arn = create_human_task_ui(human_task_ui_name)
-    flow_definition_arn = create_flow_definition(stack_name, human_task_ui_arn, a2i_workteam_arn, flow_definition_name)
-    
+    flow_definition_arn = create_flow_definition(
+        stack_name, human_task_ui_arn, a2i_workteam_arn, flow_definition_name
+    )
+
     # Update SSM parameter
-    ssm = boto3.client('ssm')
+    ssm = boto3.client("ssm")
     ssm.put_parameter(
         Name=f"/{stack_name}/FlowDefinitionArn",
         Value=flow_definition_arn,
-        Type='String',
-        Overwrite=True
+        Type="String",
+        Overwrite=True,
     )
-    
+
     return {
-        'HumanTaskUiArn': human_task_ui_arn,
-        'FlowDefinitionArn': flow_definition_arn
+        "HumanTaskUiArn": human_task_ui_arn,
+        "FlowDefinitionArn": flow_definition_arn,
     }
 
 
 def _handle_delete(human_task_ui_name, flow_definition_name, context):
     """Handle DELETE request"""
     logger.info("Deleting A2I Resources...")
-    
+
     # Only delete A2I resources (Flow Definition and Human Task UI)
     # Never delete workforce/workteam as they may be shared across deployments
     flow_success = delete_flow_definition(flow_definition_name, context)
     ui_success = delete_human_task_ui(human_task_ui_name, context)
-    
+
     if not flow_success:
         logger.warning(f"Flow Definition '{flow_definition_name}' deletion incomplete")
     if not ui_success:
         logger.warning(f"Human Task UI '{human_task_ui_name}' deletion incomplete")
-    
+
     # Check if we're using an existing workforce (don't delete shared resources)
-    workteam_arn = os.environ.get('A2I_WORKTEAM_ARN', '')
-    stack_name = os.environ.get('STACK_NAME', '')
-    
+    workteam_arn = os.environ.get("A2I_WORKTEAM_ARN", "")
+    stack_name = os.environ.get("STACK_NAME", "")
+
     # Only delete workforce if this stack created it (not using existing ARN)
     # If workteam ARN contains the stack name, it was created by this stack
     if workteam_arn and stack_name and stack_name.lower() in workteam_arn.lower():
         logger.info("Deleting workforce created by this stack...")
-        
+
         # Delete the default SageMaker workforce
         workforce_success = delete_default_workforce()
         if not workforce_success:
             logger.warning("Default workforce deletion incomplete")
-        
+
         # Cleanup workteam
-        if '/' in workteam_arn:
-            workteam_name = workteam_arn.split('/')[-1]
+        if "/" in workteam_arn:
+            workteam_name = workteam_arn.split("/")[-1]
             try:
-                cleanup_results = comprehensive_workforce_cleanup(workteam_name, stack_name)
-                logger.info(f"Workforce cleanup completed: {len(cleanup_results)} operations")
+                cleanup_results = comprehensive_workforce_cleanup(
+                    workteam_name, stack_name
+                )
+                logger.info(
+                    f"Workforce cleanup completed: {len(cleanup_results)} operations"
+                )
             except Exception as e:
                 logger.warning(f"Workforce cleanup failed: {e}")
     else:
-        logger.info("Using existing workforce - skipping workforce deletion to preserve shared resources")
-    
+        logger.info(
+            "Using existing workforce - skipping workforce deletion to preserve shared resources"
+        )
+
     logger.info("A2I resources deletion completed")
     return {}

@@ -1094,9 +1094,9 @@ class AssessmentService:
             extraction_data["explainability_info"] = [enhanced_assessment_data]
             extraction_data["metadata"] = extraction_data.get("metadata", {})
             extraction_data["metadata"]["assessment_time_seconds"] = total_duration
-            extraction_data["metadata"]["assessment_parsing_succeeded"] = (
-                parsing_succeeded
-            )
+            extraction_data["metadata"][
+                "assessment_parsing_succeeded"
+            ] = parsing_succeeded
 
             # Write the updated result back to S3
             bucket, key = utils.parse_s3_uri(section.extraction_result_uri)

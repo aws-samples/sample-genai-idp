@@ -253,72 +253,72 @@ def test_payslip(execution_number, s3_bucket):
         # Verify CurrentNetPay value (known from payslip sample)
         current_net = parse_money(inference_result.get("CurrentNetPay"))
         assert current_net is not None, "CurrentNetPay should not be null"
-        assert current_net == 291.90, (
-            f"CurrentNetPay should be ~$291.90, got ${current_net}"
-        )
+        assert (
+            current_net == 291.90
+        ), f"CurrentNetPay should be ~$291.90, got ${current_net}"
 
         # Verify YTDGrossPay value (known from payslip sample)
         ytd_gross = parse_money(inference_result.get("YTDGrossPay"))
         assert ytd_gross is not None, "YTDGrossPay should not be null"
-        assert 23526.8 == ytd_gross, (
-            f"YTDGrossPay should be ~$23526.8, got ${ytd_gross}"
-        )
+        assert (
+            23526.8 == ytd_gross
+        ), f"YTDGrossPay should be ~$23526.8, got ${ytd_gross}"
 
         # Verify date fields are present and valid
         assert "PayDate" in inference_result, "Should extract PayDate"
         pay_date = inference_result.get("PayDate")
         assert pay_date is not None, "PayDate should not be null"
-        assert "07/25/2008" in pay_date or "7/25/2008" in pay_date, (
-            f"PayDate should be 07/25/2008, got {pay_date}"
-        )
+        assert (
+            "07/25/2008" in pay_date or "7/25/2008" in pay_date
+        ), f"PayDate should be 07/25/2008, got {pay_date}"
 
         # Verify EmployeeName with exact values
         assert "EmployeeName" in inference_result, "Should extract EmployeeName"
-        assert inference_result.get("EmployeeName") is not None, (
-            "EmployeeName should not be null"
-        )
-        assert isinstance(inference_result["EmployeeName"], dict), (
-            "EmployeeName should be a nested object"
-        )
+        assert (
+            inference_result.get("EmployeeName") is not None
+        ), "EmployeeName should not be null"
+        assert isinstance(
+            inference_result["EmployeeName"], dict
+        ), "EmployeeName should be a nested object"
 
         employee_name = inference_result["EmployeeName"]
-        assert employee_name.get("FirstName") == "JOHN", (
-            f"FirstName should be JOHN, got {employee_name.get('FirstName')}"
-        )
-        assert employee_name.get("LastName") == "STILES", (
-            f"LastName should be STILES, got {employee_name.get('LastName')}"
-        )
+        assert (
+            employee_name.get("FirstName") == "JOHN"
+        ), f"FirstName should be JOHN, got {employee_name.get('FirstName')}"
+        assert (
+            employee_name.get("LastName") == "STILES"
+        ), f"LastName should be STILES, got {employee_name.get('LastName')}"
 
         # Verify address fields if present
         if inference_result.get("EmployeeAddress"):
-            assert isinstance(inference_result["EmployeeAddress"], dict), (
-                "EmployeeAddress should be a nested object"
-            )
+            assert isinstance(
+                inference_result["EmployeeAddress"], dict
+            ), "EmployeeAddress should be a nested object"
             emp_addr = inference_result["EmployeeAddress"]
             # Check for known values if extracted
             if emp_addr.get("ZipCode"):
-                assert "12345" in str(emp_addr["ZipCode"]), (
-                    f"Employee ZipCode should be 12345, got {emp_addr['ZipCode']}"
-                )
+                assert "12345" in str(
+                    emp_addr["ZipCode"]
+                ), f"Employee ZipCode should be 12345, got {emp_addr['ZipCode']}"
 
         if inference_result.get("CompanyAddress"):
-            assert isinstance(inference_result["CompanyAddress"], dict), (
-                "CompanyAddress should be a nested object"
-            )
+            assert isinstance(
+                inference_result["CompanyAddress"], dict
+            ), "CompanyAddress should be a nested object"
 
         # Verify metadata contains timing information
         assert "extraction_time_seconds" in metadata, "Should have extraction time"
-        assert isinstance(metadata["extraction_time_seconds"], (int, float)), (
-            "Extraction time should be numeric"
-        )
-        assert metadata["extraction_time_seconds"] > 0, (
-            "Extraction time should be positive"
-        )
+        assert isinstance(
+            metadata["extraction_time_seconds"], (int, float)
+        ), "Extraction time should be numeric"
+        assert (
+            metadata["extraction_time_seconds"] > 0
+        ), "Extraction time should be positive"
 
         # Verify reasonable extraction time (should be under 2 minutes for a single page)
-        assert metadata["extraction_time_seconds"] < 120, (
-            f"Extraction took too long: {metadata['extraction_time_seconds']}s"
-        )
+        assert (
+            metadata["extraction_time_seconds"] < 120
+        ), f"Extraction took too long: {metadata['extraction_time_seconds']}s"
 
         # Print complete results as formatted JSON
         print("\n" + "=" * 80)

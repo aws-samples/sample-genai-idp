@@ -28,9 +28,13 @@ const AppContent = () => {
   // Extract user groups and admin status
   let groups = [];
   let isAdmin = false;
+  let userSub = null;
 
   if (user?.signInUserSession) {
     const { idToken, accessToken } = user.signInUserSession;
+
+    // Extract the 'sub' (user ID) from the token
+    userSub = idToken?.payload?.sub || accessToken?.payload?.sub;
 
     // Try ID token first, then access token
     groups = idToken?.payload['cognito:groups'] || accessToken?.payload['cognito:groups'] || [];
@@ -44,6 +48,8 @@ const AppContent = () => {
     console.log('[RBAC] Access Token payload:', accessToken?.payload);
     console.log('[RBAC] Groups from token:', groups);
     console.log('[RBAC] Is admin:', isAdmin);
+    console.log('[DEBUG] User Sub (ID):', userSub);
+    console.log('[DEBUG] This sub should match the UserId in DynamoDB:', userSub);
   }
 
   // eslint-disable-next-line react/jsx-no-constructed-context-values
@@ -55,6 +61,7 @@ const AppContent = () => {
     currentSession,
     setErrorMessage,
     user,
+    userSub,
     groups,
     isAdmin,
     navigationOpen,

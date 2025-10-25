@@ -50,12 +50,12 @@ def test_cost_calculation_pricing_lookup():
         "bedrock/eu.anthropic.claude-3-haiku-20240307-v1:0", "outputTokens"
     )
 
-    assert claude_input_cost > 0, (
-        "Claude Haiku input token cost should be greater than 0"
-    )
-    assert claude_output_cost > 0, (
-        "Claude Haiku output token cost should be greater than 0"
-    )
+    assert (
+        claude_input_cost > 0
+    ), "Claude Haiku input token cost should be greater than 0"
+    assert (
+        claude_output_cost > 0
+    ), "Claude Haiku output token cost should be greater than 0"
 
     # Test Nova pricing lookup
     nova_input_cost = reporter._get_unit_cost(
@@ -70,9 +70,9 @@ def test_cost_calculation_pricing_lookup():
 
     # Test Textract pricing lookup
     textract_cost = reporter._get_unit_cost("textract/detect_document_text", "pages")
-    assert textract_cost > 0, (
-        "Textract detect document text cost should be greater than 0"
-    )
+    assert (
+        textract_cost > 0
+    ), "Textract detect document text cost should be greater than 0"
 
 
 @pytest.mark.unit
