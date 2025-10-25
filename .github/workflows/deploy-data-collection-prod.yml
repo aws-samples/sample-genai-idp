@@ -61,10 +61,13 @@ jobs:
 
       - name: 🧪 Run unit tests
         run: |
-          if [ -d "tests/data_collection/unit" ]; then
+          if [ -d "tests/data_collection/unit" ] && [ -n "$(find tests/data_collection/unit -name 'test_*.py' -type f)" ]; then
+            echo "Running unit tests..."
             pytest tests/data_collection/unit/ -v --cov=src/data_collection --cov-report=term-missing --cov-fail-under=70
           else
-            echo "⚠️  No unit tests found - production deployment should have tests!"
+            echo "❌ ERROR: Unit tests are required for production deployment!"
+            echo "Please add unit tests to tests/data_collection/unit/ before deploying to production"
+            exit 1
           fi
 
       - name: ✅ Validate CloudFormation template
