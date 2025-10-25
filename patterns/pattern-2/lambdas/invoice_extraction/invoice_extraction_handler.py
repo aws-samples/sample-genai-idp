@@ -339,13 +339,19 @@ def lambda_handler(event, context):
     start_time = time.time()
     
     try:
+        # Log the full event for debugging
+        log_with_timestamp(f"📥 Received event: {json.dumps(event, default=str)[:1000]}...")
+        
         # Get section_id from event
         section_id = event.get('section_id')
         if not section_id:
             raise ValueError("No section_id found in event")
         
+        log_with_timestamp(f"📋 Section ID: {section_id}")
+        
         # Get document data (handle both compressed S3 URI and inline dict)
         document_data = event.get('document', {})
+        log_with_timestamp(f"📄 Document data type: {type(document_data)}")
         
         if isinstance(document_data, str):
             # Document is S3 URI - fetch from S3
@@ -363,13 +369,20 @@ def lambda_handler(event, context):
         else:
             raise ValueError(f"Invalid document format: {type(document_data)}")
         
+        # Log document structure for debugging
+        log_with_timestamp(f"📦 Document keys: {list(document_dict.keys())}")
+        
         # Extract metadata from document dict
         document_id = document_dict.get('id')
         user_id = document_dict.get('user_id')
         client_id = document_dict.get('client_id')
         
+        log_with_timestamp(f"🔍 Extracted metadata - ID: {document_id}, User: {user_id}, Client: {client_id}")
+        
         # Find the section in the document
         sections = document_dict.get('sections', [])
+        log_with_timestamp(f"📚 Found {len(sections)} sections in document")
+        
         section_data = None
         for sec in sections:
             if sec.get('section_id') == section_id:
@@ -377,7 +390,7 @@ def lambda_handler(event, context):
                 break
         
         if not section_data:
-            raise ValueError(f"Section {section_id} not found in document")
+            raise ValueError(f"Section {section_id} not found in document. Available sections: {[s.get('section_id') for s in sections]}")
         
         # Get section text from OCR results
         section_text = ""
