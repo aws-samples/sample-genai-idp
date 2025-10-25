@@ -75,7 +75,7 @@
                         "Choices": [
                             {
                                 "Variable": "$.section_classification",
-                                "StringEquals": "Invoice",
+                                "StringEquals": "invoice",
                                 "Next": "InvoiceExtraction"
                             }
                         ],
