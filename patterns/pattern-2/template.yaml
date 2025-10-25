@@ -2348,6 +2348,7 @@ Resources:
         OCRFunctionArn: !GetAtt OCRFunction.Arn
         ClassificationFunctionArn: !GetAtt ClassificationFunction.Arn
         ExtractionFunctionArn: !GetAtt ExtractionFunction.Arn
+        InvoiceExtractionFunctionArn: !GetAtt InvoiceExtractionFunction.Arn
         AssessmentFunctionArn: !GetAtt AssessmentFunction.Arn
         ProcessResultsLambdaArn: !GetAtt ProcessResultsFunction.Arn
         HITLWaitFunctionArn: !GetAtt HITLWaitFunction.Arn
@@ -2366,6 +2367,8 @@ Resources:
             FunctionName: !Ref ClassificationFunction
         - LambdaInvokePolicy:
             FunctionName: !Ref ExtractionFunction
+        - LambdaInvokePolicy:
+            FunctionName: !Ref InvoiceExtractionFunction
         - LambdaInvokePolicy:
             FunctionName: !Ref AssessmentFunction
         - LambdaInvokePolicy:

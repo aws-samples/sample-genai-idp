@@ -67,9 +67,43 @@
             },
             "MaxConcurrency": 10,
             "Iterator": {
-                "StartAt": "ExtractionStep",
+                "StartAt": "RouteByDocumentType",
                 "States": {
-                    "ExtractionStep": {
+                    "RouteByDocumentType": {
+                        "Type": "Choice",
+                        "Choices": [
+                            {
+                                "Variable": "$.document.document_type",
+                                "StringEquals": "INVOICE",
+                                "Next": "InvoiceExtraction"
+                            }
+                        ],
+                        "Default": "GenericExtraction"
+                    },
+                    "InvoiceExtraction": {
+                        "Type": "Task",
+                        "Resource": "${InvoiceExtractionFunctionArn}",
+                        "Retry": [
+                            {
+                                "ErrorEquals": [
+                                    "Sandbox.Timedout",
+                                    "Lambda.ServiceException",
+                                    "Lambda.AWSLambdaException",
+                                    "Lambda.SdkClientException",
+                                    "Lambda.TooManyRequestsException",
+                                    "ServiceQuotaExceededException",
+                                    "ThrottlingException",
+                                    "ProvisionedThroughputExceededException",
+                                    "RequestLimitExceeded"
+                                ],
+                                "IntervalSeconds": 2,
+                                "MaxAttempts": 10,
+                                "BackoffRate": 2
+                            }
+                        ],
+                        "Next": "AssessmentStep"
+                    },
+                    "GenericExtraction": {
                         "Type": "Task",
                         "Resource": "${ExtractionFunctionArn}",
                         "Retry": [
