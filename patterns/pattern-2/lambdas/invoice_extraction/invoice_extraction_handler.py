@@ -387,11 +387,12 @@ def lambda_handler(event, context):
         
         # Log document structure for debugging
         log_with_timestamp(f"📦 Document keys: {list(document_dict.keys())}")
+        log_with_timestamp(f"🔍 Full document structure (first 2000 chars): {json.dumps(document_dict, default=str)[:2000]}")
         
         # Extract metadata from document dict
         document_id = document_dict.get('id')
         user_id = document_dict.get('user_id')
-        client_id = document_dict.get('client_id')
+        client_id = document_dict.get('client_id') or 'default-client'  # Use placeholder if None
         
         log_with_timestamp(f"🔍 Extracted metadata - ID: {document_id}, User: {user_id}, Client: {client_id}")
         
@@ -408,17 +409,78 @@ def lambda_handler(event, context):
         if not section_data:
             raise ValueError(f"Section {section_id} not found in document. Available sections: {[s.get('section_id') for s in sections]}")
         
+        log_with_timestamp(f"📋 Section data keys: {list(section_data.keys())}")
+        log_with_timestamp(f"📋 Section data: {json.dumps(section_data, default=str)[:500]}")
+        
         # Get section text from OCR results
         section_text = ""
         section_pages = section_data.get('page_ids', [])
         
-        # Build section text from pages
-        pages = document_dict.get('pages', [])
-        for page in pages:
-            if page.get('page_id') in section_pages:
-                page_text = page.get('ocr_text', '')
-                if page_text:
-                    section_text += page_text + "\n"
+        log_with_timestamp(f"📄 Section has {len(section_pages)} page IDs: {section_pages}")
+        
+        # Check if section has ocr_result_uri or ocr_text directly
+        if 'ocr_result_uri' in section_data:
+            log_with_timestamp(f"📥 Found ocr_result_uri in section: {section_data['ocr_result_uri']}")
+            # TODO: Fetch OCR text from S3
+        elif 'ocr_text' in section_data:
+            section_text = section_data['ocr_text']
+            log_with_timestamp(f"✅ Found ocr_text directly in section ({len(section_text)} chars)")
+        
+        # Build section text from pages if not found in section
+        if not section_text:
+            pages = document_dict.get('pages', {})
+            log_with_timestamp(f"📚 Document has {len(pages)} pages (dict format)")
+            
+            # Pages is a dict with page_id as key
+            for page_id in section_pages:
+                if page_id in pages:
+                    page_data = pages[page_id]
+                    log_with_timestamp(f"📄 Processing page {page_id}, keys: {list(page_data.keys())}")
+                    
+                    # Check if page has inline ocr_text
+                    if 'ocr_text' in page_data:
+                        page_text = page_data['ocr_text']
+                        section_text += page_text + "\n"
+                        log_with_timestamp(f"✅ Added inline text from page {page_id} ({len(page_text)} chars)")
+                    
+                    # Otherwise fetch from raw_text_uri
+                    elif 'raw_text_uri' in page_data:
+                        raw_text_uri = page_data['raw_text_uri']
+                        log_with_timestamp(f"📥 Fetching OCR text from: {raw_text_uri}")
+                        
+                        from urllib.parse import urlparse
+                        parsed_uri = urlparse(raw_text_uri)
+                        bucket = parsed_uri.netloc
+                        key = parsed_uri.path.lstrip('/')
+                        
+                        s3_obj = s3_client.get_object(Bucket=bucket, Key=key)
+                        raw_text_data = json.loads(s3_obj['Body'].read().decode('utf-8'))
+                        
+                        log_with_timestamp(f"📋 rawText.json keys: {list(raw_text_data.keys())}")
+                        log_with_timestamp(f"📋 rawText.json sample: {json.dumps(raw_text_data, default=str)[:500]}")
+                        
+                        # rawText.json contains the extracted text - try different field names
+                        page_text = raw_text_data.get('text', '') or raw_text_data.get('Text', '') or raw_text_data.get('content', '')
+                        
+                        # If still empty, try to extract from blocks or lines
+                        if not page_text and 'Blocks' in raw_text_data:
+                            # Textract format - extract text from LINE blocks
+                            blocks = raw_text_data.get('Blocks', [])
+                            lines = [block.get('Text', '') for block in blocks if block.get('BlockType') == 'LINE']
+                            page_text = '\n'.join(lines)
+                            log_with_timestamp(f"📝 Extracted {len(lines)} lines from Textract Blocks")
+                        
+                        if page_text:
+                            section_text += page_text + "\n"
+                            log_with_timestamp(f"✅ Added text from S3 for page {page_id} ({len(page_text)} chars)")
+                        else:
+                            log_with_timestamp(f"⚠️ No text found in rawText.json for page {page_id}")
+                    else:
+                        log_with_timestamp(f"⚠️ No OCR text found for page {page_id}")
+                else:
+                    log_with_timestamp(f"⚠️ Page {page_id} not found in pages dict")
+        
+        log_with_timestamp(f"📝 Total section text length: {len(section_text)} chars")
         
         log_with_timestamp(f"🚀 Starting invoice extraction for document {document_id}, section {section_id}")
         log_with_timestamp(f"   User: {user_id}, Client: {client_id}")
