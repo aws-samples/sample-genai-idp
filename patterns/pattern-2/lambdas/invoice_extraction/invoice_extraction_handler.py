@@ -339,57 +339,57 @@ def lambda_handler(event, context):
     start_time = time.time()
     
     try:
-        # Import Document model for deserialization
-        from idp_common.models import Document
-        import boto3
-        
         # Get section_id from event
         section_id = event.get('section_id')
         if not section_id:
             raise ValueError("No section_id found in event")
         
-        # Deserialize document (handle both compressed and dict formats)
+        # Get document data (handle both compressed S3 URI and inline dict)
         document_data = event.get('document', {})
         
         if isinstance(document_data, str):
-            # Document is S3 URI - fetch and deserialize
+            # Document is S3 URI - fetch from S3
             s3_client = boto3.client('s3')
-            full_document = Document.deserialize_document(
-                s3_client=s3_client,
-                working_bucket=None,  # Will be extracted from URI
-                s3_key=document_data,
-                logger=None
-            )
+            from urllib.parse import urlparse
+            parsed_uri = urlparse(document_data)
+            bucket = parsed_uri.netloc
+            key = parsed_uri.path.lstrip('/')
+            
+            s3_obj = s3_client.get_object(Bucket=bucket, Key=key)
+            document_dict = json.loads(s3_obj['Body'].read().decode('utf-8'))
         elif isinstance(document_data, dict):
-            # Document is inline dict - convert to Document object
-            full_document = Document.from_dict(document_data)
+            # Document is inline dict
+            document_dict = document_data
         else:
             raise ValueError(f"Invalid document format: {type(document_data)}")
         
-        # Extract metadata from document
-        document_id = full_document.id
-        user_id = full_document.user_id
-        client_id = full_document.client_id
+        # Extract metadata from document dict
+        document_id = document_dict.get('id')
+        user_id = document_dict.get('user_id')
+        client_id = document_dict.get('client_id')
         
         # Find the section in the document
-        section = None
-        for doc_section in full_document.sections:
-            if doc_section.section_id == section_id:
-                section = doc_section
+        sections = document_dict.get('sections', [])
+        section_data = None
+        for sec in sections:
+            if sec.get('section_id') == section_id:
+                section_data = sec
                 break
         
-        if not section:
+        if not section_data:
             raise ValueError(f"Section {section_id} not found in document")
         
         # Get section text from OCR results
         section_text = ""
-        section_pages = section.page_ids or []
+        section_pages = section_data.get('page_ids', [])
         
         # Build section text from pages
-        for page in full_document.pages:
-            if page.page_id in section_pages:
-                if hasattr(page, 'ocr_text') and page.ocr_text:
-                    section_text += page.ocr_text + "\n"
+        pages = document_dict.get('pages', [])
+        for page in pages:
+            if page.get('page_id') in section_pages:
+                page_text = page.get('ocr_text', '')
+                if page_text:
+                    section_text += page_text + "\n"
         
         log_with_timestamp(f"🚀 Starting invoice extraction for document {document_id}, section {section_id}")
         log_with_timestamp(f"   User: {user_id}, Client: {client_id}")
