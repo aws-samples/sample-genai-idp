@@ -330,24 +330,65 @@ def lambda_handler(event, context):
     
     Expected event structure from Step Functions:
     {
-        "document_id": "doc123",
-        "section_id": "1",
-        "user_id": "user@example.com",
-        "client_id": "client-abc",
-        "section_text": "...",  # OCR text for this section
-        "section_pages": [1, 2, 3]  # Page numbers in this section
+        "execution_arn": "...",
+        "document": { ... },  # Full document object (compressed or dict)
+        "section_id": "1"
     }
     """
     start_time = time.time()
     
     try:
-        # Extract parameters from event
-        document_id = event.get('document_id')
+        # Import Document model for deserialization
+        from idp_common.models import Document
+        import boto3
+        
+        # Get section_id from event
         section_id = event.get('section_id')
-        user_id = event.get('user_id')
-        client_id = event.get('client_id')
-        section_text = event.get('section_text', '')
-        section_pages = event.get('section_pages', [])
+        if not section_id:
+            raise ValueError("No section_id found in event")
+        
+        # Deserialize document (handle both compressed and dict formats)
+        document_data = event.get('document', {})
+        
+        if isinstance(document_data, str):
+            # Document is S3 URI - fetch and deserialize
+            s3_client = boto3.client('s3')
+            full_document = Document.deserialize_document(
+                s3_client=s3_client,
+                working_bucket=None,  # Will be extracted from URI
+                s3_key=document_data,
+                logger=None
+            )
+        elif isinstance(document_data, dict):
+            # Document is inline dict - convert to Document object
+            full_document = Document.from_dict(document_data)
+        else:
+            raise ValueError(f"Invalid document format: {type(document_data)}")
+        
+        # Extract metadata from document
+        document_id = full_document.id
+        user_id = full_document.user_id
+        client_id = full_document.client_id
+        
+        # Find the section in the document
+        section = None
+        for doc_section in full_document.sections:
+            if doc_section.section_id == section_id:
+                section = doc_section
+                break
+        
+        if not section:
+            raise ValueError(f"Section {section_id} not found in document")
+        
+        # Get section text from OCR results
+        section_text = ""
+        section_pages = section.page_ids or []
+        
+        # Build section text from pages
+        for page in full_document.pages:
+            if page.page_id in section_pages:
+                if hasattr(page, 'ocr_text') and page.ocr_text:
+                    section_text += page.ocr_text + "\n"
         
         log_with_timestamp(f"🚀 Starting invoice extraction for document {document_id}, section {section_id}")
         log_with_timestamp(f"   User: {user_id}, Client: {client_id}")
@@ -355,8 +396,18 @@ def lambda_handler(event, context):
         log_with_timestamp(f"   Section pages: {section_pages}")
         
         # Validate required fields
-        if not all([document_id, section_id, user_id, client_id, section_text]):
+        if not all([document_id, section_id, user_id, client_id]):
             raise ValueError("Missing required fields in event")
+        
+        # Check if section has text
+        if not section_text or len(section_text.strip()) == 0:
+            log_with_timestamp("⚠️ No text content in section - skipping invoice extraction")
+            return {
+                'section_id': section_id,
+                'document': event.get('document'),
+                'invoices_extracted': 0,
+                'message': 'No text content in section'
+            }
         
         # Get extraction prompt (dynamic from ConfigurationTable)
         prompt_template = get_invoice_extraction_prompt()
@@ -373,9 +424,8 @@ def lambda_handler(event, context):
         if not invoices:
             log_with_timestamp("⚠️ No valid invoices found in section")
             return {
-                'statusCode': 200,
-                'document_id': document_id,
                 'section_id': section_id,
+                'document': event.get('document'),  # Pass through for next step
                 'invoices_extracted': 0,
                 'message': 'No invoices found'
             }
@@ -393,10 +443,11 @@ def lambda_handler(event, context):
         log_with_timestamp(f"   Extracted: {len(invoices)} invoices")
         log_with_timestamp(f"   Inserted: {inserted_count} records")
         
+        # Return response matching workflow expectations
+        # Must include document and section_id for AssessmentStep
         return {
-            'statusCode': 200,
-            'document_id': document_id,
             'section_id': section_id,
+            'document': event.get('document'),  # Pass through original document format
             'invoices_extracted': len(invoices),
             'invoices_inserted': inserted_count,
             'processing_time_seconds': processing_time,
@@ -408,8 +459,12 @@ def lambda_handler(event, context):
         import traceback
         log_with_timestamp(f"📋 Traceback: {traceback.format_exc()}")
         
+        # Return error response but maintain workflow structure
+        # Don't raise exception - let workflow continue even if invoice extraction fails
         return {
-            'statusCode': 500,
+            'section_id': event.get('section_id', 'unknown'),
+            'document': event.get('document'),  # Pass through for next step
+            'invoices_extracted': 0,
             'error': str(e),
             'message': 'Invoice extraction failed'
         }
