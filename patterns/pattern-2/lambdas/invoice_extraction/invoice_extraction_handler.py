@@ -275,6 +275,7 @@ def write_invoices_to_dynamodb(
                 'DueDate': invoice_data['due_date'],
                 'SupplierName': invoice_data['supplier_name'],
                 'VendorName': invoice_data['vendor_name'],
+                'CompanyName': invoice_data['supplier_name'],  # For GSI3 queries
                 'SupplierAddress': invoice_data['supplier_address'],
                 'TotalAmount': invoice_data['total_amount'],
                 'Currency': invoice_data['currency'],
