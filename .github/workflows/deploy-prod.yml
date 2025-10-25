@@ -71,8 +71,8 @@ jobs:
     
     - name: Run tests before deployment
       run: |
-        pip install pytest pytest-cov
-        pip install -e lib/idp_common_pkg/
+        pip install pytest pytest-cov moto pyarrow
+        pip install -e lib/idp_common_pkg/[test]
         pytest lib/idp_common_pkg/tests/ -v
     
     - name: Build and publish
