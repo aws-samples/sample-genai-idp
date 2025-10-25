@@ -145,12 +145,12 @@ jobs:
     
     - name: Send deployment notification
       if: always()
+      continue-on-error: true
       uses: actions/github-script@v7
       with:
         script: |
           const status = '${{ job.status }}';
           const emoji = status === 'success' ? '🚀' : '❌';
-          const color = status === 'success' ? '28a745' : 'dc3545';
           
           const body = `${emoji} **PRODUCTION Deployment ${status.toUpperCase()}**
           
@@ -162,21 +162,14 @@ jobs:
           ${status === 'success' ? '✅ Production deployment completed successfully!\n\n⚠️ **Action Required:**\n1. Verify Cognito groups\n2. Test critical user flows\n3. Monitor logs for 15 minutes' : '❌ **PRODUCTION DEPLOYMENT FAILED**\n\nImmediate action required! Check logs and consider rollback.'}
           `;
           
-          // Create an issue for failed production deployments
-          if (status !== 'success') {
-            await github.rest.issues.create({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              title: `🚨 Production Deployment Failed - ${new Date().toISOString()}`,
-              body: body,
-              labels: ['deployment', 'production', 'urgent']
-            });
-          } else {
-            // Create a comment on the commit for successful deployments
+          try {
+            // Try to create a comment on the commit
             await github.rest.repos.createCommitComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
               commit_sha: context.sha,
               body: body
             });
+          } catch (error) {
+            console.log('Could not create notification (Issues may be disabled):', error.message);
           }
