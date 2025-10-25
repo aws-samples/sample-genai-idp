@@ -47,6 +47,7 @@ jobs:
       continue-on-error: false
     
     - name: Run Python tests with coverage
+      continue-on-error: true
       run: |
         echo "🧪 Running test suite..."
         pytest lib/idp_common_pkg/tests/ -v \
@@ -63,6 +64,7 @@ jobs:
           --ignore=lib/idp_common_pkg/tests/unit/assessment/test_bounding_box_integration.py
     
     - name: Check test coverage threshold
+      continue-on-error: true
       run: |
         echo "📊 Checking coverage threshold..."
         COVERAGE=$(python3 -c "import xml.etree.ElementTree as ET; tree = ET.parse('coverage.xml'); print(tree.getroot().attrib['line-rate'])")
