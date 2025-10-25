@@ -63,7 +63,8 @@
             "ItemSelector": {
                 "execution_arn.$": "$$.Execution.Id",
                 "document.$": "$.ClassificationResult.document",
-                "section_id.$": "$$.Map.Item.Value"
+                "section_id.$": "$$.Map.Item.Value.section_id",
+                "section_classification.$": "$$.Map.Item.Value.classification"
             },
             "MaxConcurrency": 10,
             "Iterator": {
@@ -73,8 +74,8 @@
                         "Type": "Choice",
                         "Choices": [
                             {
-                                "Variable": "$.document.document_type",
-                                "StringEquals": "INVOICE",
+                                "Variable": "$.section_classification",
+                                "StringEquals": "Invoice",
                                 "Next": "InvoiceExtraction"
                             }
                         ],
