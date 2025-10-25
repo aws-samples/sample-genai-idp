@@ -11,7 +11,7 @@ on:
         required: true
 
 env:
-  AWS_REGION: us-east-1
+  AWS_REGION: eu-central-1
   STACK_NAME: fiscalshield-dc-prod
   ENVIRONMENT: prod
 

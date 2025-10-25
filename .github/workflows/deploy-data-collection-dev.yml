@@ -18,7 +18,7 @@ on:
         default: 'Manual deployment'
 
 env:
-  AWS_REGION: us-east-1
+  AWS_REGION: eu-central-1
   STACK_NAME: fiscalshield-dc-dev
   ENVIRONMENT: dev
 

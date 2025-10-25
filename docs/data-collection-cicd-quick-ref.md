@@ -65,7 +65,7 @@ pytest tests/data_collection/integration/ -v --env=dev
 
 ### Dev Environment
 - **Stack Name:** `fiscalshield-dc-dev`
-- **Region:** `us-east-1`
+- **Region:** `eu-central-1`
 - **Tables:**
   - `fiscalshield-dc-dev-FilingEvents`
   - `fiscalshield-dc-dev-CompanyEvents`
@@ -77,7 +77,7 @@ pytest tests/data_collection/integration/ -v --env=dev
 
 ### Production Environment
 - **Stack Name:** `fiscalshield-dc-prod`
-- **Region:** `us-east-1`
+- **Region:** `eu-central-1`
 - **Tables:** (same pattern with `-prod` suffix)
 - **Secrets:** (same pattern with `-prod` suffix)
 
@@ -88,13 +88,13 @@ pytest tests/data_collection/integration/ -v --env=dev
 # Dev
 aws cloudformation describe-stacks \
   --stack-name fiscalshield-dc-dev \
-  --region us-east-1 \
+  --region eu-central-1 \
   --query 'Stacks[0].StackStatus'
 
 # Production
 aws cloudformation describe-stacks \
   --stack-name fiscalshield-dc-prod \
-  --region us-east-1 \
+  --region eu-central-1 \
   --query 'Stacks[0].StackStatus'
 ```
 
@@ -102,7 +102,7 @@ aws cloudformation describe-stacks \
 ```bash
 aws cloudformation describe-stacks \
   --stack-name fiscalshield-dc-dev \
-  --region us-east-1 \
+  --region eu-central-1 \
   --query 'Stacks[0].Outputs[*].[OutputKey,OutputValue]' \
   --output table
 ```
@@ -111,13 +111,13 @@ aws cloudformation describe-stacks \
 ```bash
 # List tables
 aws dynamodb list-tables \
-  --region us-east-1 \
+  --region eu-central-1 \
   --query 'TableNames[?starts_with(@, `fiscalshield-dc`)]'
 
 # Describe table
 aws dynamodb describe-table \
   --table-name fiscalshield-dc-dev-FilingEvents \
-  --region us-east-1
+  --region eu-central-1
 ```
 
 ### View CloudWatch Logs
@@ -125,12 +125,12 @@ aws dynamodb describe-table \
 # List log groups
 aws logs describe-log-groups \
   --log-group-name-prefix /aws/lambda/fiscalshield-dc-dev \
-  --region us-east-1
+  --region eu-central-1
 
 # Tail logs
 aws logs tail /aws/lambda/fiscalshield-dc-dev-CompanyLookup \
   --follow \
-  --region us-east-1
+  --region eu-central-1
 ```
 
 ### Check Secrets
@@ -139,12 +139,12 @@ aws logs tail /aws/lambda/fiscalshield-dc-dev-CompanyLookup \
 aws secretsmanager list-secrets \
   --query 'SecretList[?starts_with(Name, `fiscalshield-dc`)].[Name,LastChangedDate]' \
   --output table \
-  --region us-east-1
+  --region eu-central-1
 
 # Get secret value (careful - contains API keys!)
 aws secretsmanager get-secret-value \
   --secret-id fiscalshield-dc-dev-CompaniesHouseAPI \
-  --region us-east-1 \
+  --region eu-central-1 \
   --query 'SecretString' \
   --output text
 ```
@@ -157,13 +157,13 @@ aws secretsmanager get-secret-value \
 aws secretsmanager update-secret \
   --secret-id fiscalshield-dc-dev-CompaniesHouseAPI \
   --secret-string '{"api_key":"YOUR_KEY","base_url":"https://api.company-information.service.gov.uk","rate_limit":600,"rate_limit_window":300}' \
-  --region us-east-1
+  --region eu-central-1
 
 # Production
 aws secretsmanager update-secret \
   --secret-id fiscalshield-dc-prod-CompaniesHouseAPI \
   --secret-string '{"api_key":"YOUR_KEY","base_url":"https://api.company-information.service.gov.uk","rate_limit":600,"rate_limit_window":300}' \
-  --region us-east-1
+  --region eu-central-1
 ```
 
 ### Rollback Stack Update
@@ -172,13 +172,13 @@ aws secretsmanager update-secret \
 aws cloudformation update-stack \
   --stack-name fiscalshield-dc-prod \
   --use-previous-template \
-  --region us-east-1 \
+  --region eu-central-1 \
   --capabilities CAPABILITY_NAMED_IAM
 
 # Wait for rollback to complete
 aws cloudformation wait stack-update-complete \
   --stack-name fiscalshield-dc-prod \
-  --region us-east-1
+  --region eu-central-1
 ```
 
 ### Delete Stack (Careful!)
@@ -188,12 +188,12 @@ aws cloudformation wait stack-update-complete \
 
 aws cloudformation delete-stack \
   --stack-name fiscalshield-dc-dev \
-  --region us-east-1
+  --region eu-central-1
 
 # Wait for deletion
 aws cloudformation wait stack-delete-complete \
   --stack-name fiscalshield-dc-dev \
-  --region us-east-1
+  --region eu-central-1
 ```
 
 ## 🔐 Security
@@ -214,14 +214,14 @@ aws cloudformation wait stack-delete-complete \
 ```bash
 aws cloudwatch describe-alarms \
   --alarm-name-prefix fiscalshield-dc-dev \
-  --region us-east-1
+  --region eu-central-1
 ```
 
 ### Check Alarm State
 ```bash
 aws cloudwatch describe-alarms \
   --alarm-names fiscalshield-dc-dev-HighErrorRate \
-  --region us-east-1 \
+  --region eu-central-1 \
   --query 'MetricAlarms[0].StateValue'
 ```
 

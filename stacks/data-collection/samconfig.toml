@@ -1,0 +1,115 @@
+version = 0.1
+
+[default]
+[default.global.parameters]
+stack_name = "fiscalshield-dc"
+
+[default.build.parameters]
+cached = true
+parallel = true
+
+[default.validate.parameters]
+lint = true
+
+[default.deploy.parameters]
+capabilities = "CAPABILITY_NAMED_IAM"
+confirm_changeset = true
+resolve_s3 = true
+s3_prefix = "fiscalshield-dc"
+region = "eu-central-1"
+image_repositories = []
+
+# ========================================================================
+# DEVELOPMENT ENVIRONMENT
+# ========================================================================
+[dev]
+[dev.global.parameters]
+stack_name = "fiscalshield-dc-dev"
+
+[dev.build.parameters]
+cached = true
+parallel = true
+
+[dev.deploy.parameters]
+capabilities = "CAPABILITY_NAMED_IAM"
+confirm_changeset = false
+resolve_s3 = true
+s3_prefix = "fiscalshield-dc-dev"
+region = "eu-central-1"
+parameter_overrides = [
+    "Environment=dev",
+    "CacheTTLHours=24",
+    "CompaniesHouseRateLimit=600",
+    "CompaniesHouseRateWindow=300",
+    "EnableXRayTracing=true",
+    "LogRetentionDays=7"
+]
+tags = [
+    "Environment=dev",
+    "Stack=fiscalshield-dc",
+    "ManagedBy=SAM"
+]
+
+# ========================================================================
+# STAGING ENVIRONMENT
+# ========================================================================
+[staging]
+[staging.global.parameters]
+stack_name = "fiscalshield-dc-staging"
+
+[staging.build.parameters]
+cached = true
+parallel = true
+
+[staging.deploy.parameters]
+capabilities = "CAPABILITY_NAMED_IAM"
+confirm_changeset = true
+resolve_s3 = true
+s3_prefix = "fiscalshield-dc-staging"
+region = "eu-central-1"
+parameter_overrides = [
+    "Environment=staging",
+    "CacheTTLHours=24",
+    "CompaniesHouseRateLimit=600",
+    "CompaniesHouseRateWindow=300",
+    "EnableXRayTracing=true",
+    "LogRetentionDays=14"
+]
+tags = [
+    "Environment=staging",
+    "Stack=fiscalshield-dc",
+    "ManagedBy=SAM"
+]
+
+# ========================================================================
+# PRODUCTION ENVIRONMENT
+# ========================================================================
+[prod]
+[prod.global.parameters]
+stack_name = "fiscalshield-dc-prod"
+
+[prod.build.parameters]
+cached = true
+parallel = true
+
+[prod.deploy.parameters]
+capabilities = "CAPABILITY_NAMED_IAM"
+confirm_changeset = true
+resolve_s3 = true
+s3_prefix = "fiscalshield-dc-prod"
+region = "eu-central-1"
+parameter_overrides = [
+    "Environment=prod",
+    "CacheTTLHours=24",
+    "CompaniesHouseRateLimit=600",
+    "CompaniesHouseRateWindow=300",
+    "EnableXRayTracing=true",
+    "LogRetentionDays=30"
+]
+tags = [
+    "Environment=prod",
+    "Stack=fiscalshield-dc",
+    "ManagedBy=SAM",
+    "CostCenter=FiscalShield",
+    "Owner=BackendTeam"
+]

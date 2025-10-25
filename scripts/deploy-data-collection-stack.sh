@@ -34,7 +34,7 @@ STACK_DIR="$PROJECT_ROOT/stacks/data-collection"
 
 # Default values
 ENVIRONMENT="dev"
-REGION="us-east-1"
+REGION="eu-central-1"
 VALIDATE_ONLY=false
 BUILD_ONLY=false
 
