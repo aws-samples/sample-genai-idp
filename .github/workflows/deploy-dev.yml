@@ -4,6 +4,13 @@ name: Deploy to Dev
 on:
   push:
     branches: [dev]
+    paths-ignore:
+      - 'stacks/data-collection/**'
+      - 'src/data_collection/**'
+      - 'tests/data_collection/**'
+      - 'docs/data-collection-*.md'
+      - 'docs/Data_Collection_Stack_Implementation_Plan.md'
+      - '.github/workflows/deploy-data-collection-*.yml'
 
 jobs:
   deploy-dev:
