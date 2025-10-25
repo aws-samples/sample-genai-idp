@@ -1733,6 +1733,8 @@ Resources:
             TableName: !Ref ConfigurationTable
         - S3ReadPolicy:
             BucketName: !Ref WorkingBucket
+        - S3ReadPolicy:
+            BucketName: !Ref OutputBucket
         - Statement:
             - Effect: Allow
               Action:
