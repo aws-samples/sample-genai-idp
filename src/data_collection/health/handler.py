@@ -113,18 +113,31 @@ def check_dynamodb():
     Verify DynamoDB tables exist and are accessible
     """
     try:
-        # Check if FilingEvents table exists
-        table_name = f"fiscalshield-dc-{ENVIRONMENT}-FilingEvents"
-        response = dynamodb.describe_table(TableName=table_name)
-
-        if response["Table"]["TableStatus"] == "ACTIVE":
-            print(f"DynamoDB table {table_name}: OK")
-            return "operational"
-        else:
-            print(
-                f"DynamoDB table {table_name} status: {response['Table']['TableStatus']}"
-            )
-            return "degraded"
+        # Check both FilingEvents and CompanyEvents tables
+        tables = [
+            f"fiscalshield-dc-{ENVIRONMENT}-FilingEvents",
+            f"fiscalshield-dc-{ENVIRONMENT}-CompanyEvents"
+        ]
+        
+        all_active = True
+        for table_name in tables:
+            try:
+                response = dynamodb.describe_table(TableName=table_name)
+                status = response["Table"]["TableStatus"]
+                
+                if status == "ACTIVE":
+                    print(f"DynamoDB table {table_name}: OK")
+                else:
+                    print(f"DynamoDB table {table_name} status: {status}")
+                    all_active = False
+            except ClientError as e:
+                if e.response["Error"]["Code"] == "ResourceNotFoundException":
+                    print(f"DynamoDB table {table_name} not found")
+                    all_active = False
+                else:
+                    raise
+        
+        return "operational" if all_active else "degraded"
 
     except ClientError as e:
         error_code = e.response["Error"]["Code"]

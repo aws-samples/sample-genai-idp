@@ -232,6 +232,33 @@ Resources:
         - Key: Status
           Value: Future implementation
 
+  RateLimitsTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: !Sub 'fiscalshield-dc-${Environment}-RateLimits'
+      BillingMode: PAY_PER_REQUEST
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+      SSESpecification:
+        SSEEnabled: true
+        SSEType: KMS
+      AttributeDefinitions:
+        - AttributeName: api_name
+          AttributeType: S
+      KeySchema:
+        - AttributeName: api_name
+          KeyType: HASH
+      Tags:
+        - Key: Name
+          Value: !Sub 'fiscalshield-dc-${Environment}-RateLimits'
+        - Key: Purpose
+          Value: Track API rate limits for external services
+        - Key: DataRetention
+          Value: Auto-expire with TTL
+
   # ========================================================================
   # SECRETS MANAGER
   # ========================================================================
@@ -340,10 +367,12 @@ Resources:
                   - dynamodb:Scan
                   - dynamodb:BatchGetItem
                   - dynamodb:BatchWriteItem
+                  - dynamodb:DescribeTable
                 Resource:
                   - !GetAtt FilingEventsTable.Arn
                   - !GetAtt CompanyEventsTable.Arn
                   - !GetAtt HMRCDataTable.Arn
+                  - !GetAtt RateLimitsTable.Arn
                   - !Sub '${FilingEventsTable.Arn}/index/*'
                   - !Sub '${CompanyEventsTable.Arn}/index/*'
                   - !Sub '${HMRCDataTable.Arn}/index/*'
@@ -463,6 +492,7 @@ Resources:
         Variables:
           CACHE_TABLE_NAME: !Ref CompanyEventsTable
           SECRET_NAME: !Ref CompaniesHouseApiSecret
+          RATE_LIMIT_TABLE: !Ref RateLimitsTable
       Events:
         GetCompany:
           Type: Api
@@ -506,6 +536,7 @@ Resources:
         Variables:
           CACHE_TABLE_NAME: !Ref CompanyEventsTable
           SECRET_NAME: !Ref CompaniesHouseApiSecret
+          RATE_LIMIT_TABLE: !Ref RateLimitsTable
       Events:
         GetOfficers:
           Type: Api
@@ -528,6 +559,7 @@ Resources:
         Variables:
           CACHE_TABLE_NAME: !Ref CompanyEventsTable
           SECRET_NAME: !Ref CompaniesHouseApiSecret
+          RATE_LIMIT_TABLE: !Ref RateLimitsTable
       Events:
         GetFilingHistory:
           Type: Api
@@ -550,6 +582,7 @@ Resources:
         Variables:
           CACHE_TABLE_NAME: !Ref CompanyEventsTable
           SECRET_NAME: !Ref CompaniesHouseApiSecret
+          RATE_LIMIT_TABLE: !Ref RateLimitsTable
       Events:
         GetPSC:
           Type: Api
@@ -572,6 +605,7 @@ Resources:
         Variables:
           CACHE_TABLE_NAME: !Ref CompanyEventsTable
           SECRET_NAME: !Ref CompaniesHouseApiSecret
+          RATE_LIMIT_TABLE: !Ref RateLimitsTable
       Events:
         GetCharges:
           Type: Api
@@ -594,6 +628,7 @@ Resources:
         Variables:
           CACHE_TABLE_NAME: !Ref CompanyEventsTable
           SECRET_NAME: !Ref CompaniesHouseApiSecret
+          RATE_LIMIT_TABLE: !Ref RateLimitsTable
       Events:
         GetInsolvency:
           Type: Api
