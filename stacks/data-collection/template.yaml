@@ -511,6 +511,22 @@ Resources:
         Stack: fiscalshield-dc
 
   # ========================================================================
+  # SSM PARAMETER STORE - API URL
+  # ========================================================================
+
+  ApiUrlParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub '/fiscalshield/data-collection/${Environment}/api-url'
+      Description: Data Collection API Gateway URL for cross-stack integration
+      Type: String
+      Value: !Sub 'https://${DataCollectionApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}'
+      Tags:
+        Environment: !Ref Environment
+        Stack: fiscalshield-dc
+        Purpose: Cross-stack integration
+
+  # ========================================================================
   # OUTPUTS
   # ========================================================================
 
@@ -580,3 +596,9 @@ Outputs:
     Value: !GetAtt HealthCheckFunction.Arn
     Export:
       Name: !Sub '${AWS::StackName}-HealthCheckFunction'
+
+  ApiUrlParameterName:
+    Description: SSM Parameter Store path for API URL (for Core Stack integration)
+    Value: !Sub '/fiscalshield/data-collection/${Environment}/api-url'
+    Export:
+      Name: !Sub '${AWS::StackName}-ApiUrlParameter'

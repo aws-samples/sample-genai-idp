@@ -1,18 +1,84 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
-import { Logger } from 'aws-amplify';
+import { Auth, Logger } from 'aws-amplify';
+import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm';
+import awsExports from '../aws-exports';
 
 const logger = new Logger('dataCollectionService');
 
 // Configuration
-const DATA_COLLECTION_API =
+const DATA_COLLECTION_API_PARAM = '/fiscalshield/data-collection/dev/api-url';
+const DATA_COLLECTION_API_FALLBACK =
   process.env.REACT_APP_DATA_COLLECTION_API ||
   'https://your-data-collection-api.execute-api.eu-central-1.amazonaws.com/dev';
+
+// API URL cache
+let cachedApiUrl = null;
+let apiUrlFetchAttempted = false;
 
 // Health check cache
 const HEALTH_CHECK_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 let healthCheckCache = null;
 let lastHealthCheck = 0;
+
+/**
+ * Fetch Data Collection API URL from Parameter Store
+ * Cached after first successful fetch
+ */
+const getDataCollectionApiUrl = async () => {
+  // Return cached URL if available
+  if (cachedApiUrl) {
+    return cachedApiUrl;
+  }
+
+  // Don't retry if we already failed once in this session
+  if (apiUrlFetchAttempted) {
+    logger.debug('Using fallback URL after previous fetch failure');
+    return DATA_COLLECTION_API_FALLBACK;
+  }
+
+  try {
+    apiUrlFetchAttempted = true;
+
+    // Get AWS credentials from Amplify
+    const credentials = await Auth.currentUserCredentials();
+
+    if (!credentials) {
+      logger.warn('No credentials available, using fallback URL');
+      return DATA_COLLECTION_API_FALLBACK;
+    }
+
+    // Create SSM client
+    const ssmClient = new SSMClient({
+      credentials,
+      region: awsExports.aws_project_region,
+    });
+
+    // Fetch parameter
+    const command = new GetParameterCommand({ Name: DATA_COLLECTION_API_PARAM });
+    const response = await ssmClient.send(command);
+
+    if (response.Parameter?.Value) {
+      cachedApiUrl = response.Parameter.Value;
+      logger.info('Data Collection API URL loaded from Parameter Store:', cachedApiUrl);
+      return cachedApiUrl;
+    }
+
+    logger.warn('Parameter exists but has no value, using fallback');
+    return DATA_COLLECTION_API_FALLBACK;
+  } catch (error) {
+    // Parameter not found or access denied - Data Collection Stack not deployed
+    if (error.name === 'ParameterNotFound' || error.code === 'ParameterNotFound') {
+      logger.info('Data Collection Stack not deployed yet (parameter not found)');
+    } else if (error.name === 'AccessDeniedException') {
+      logger.warn('No permission to read Data Collection API URL parameter');
+    } else {
+      logger.error('Error fetching Data Collection API URL:', error);
+    }
+
+    return DATA_COLLECTION_API_FALLBACK;
+  }
+};
 
 /**
  * Check if Data Collection Stack is available
@@ -28,10 +94,13 @@ export const checkDataCollectionHealth = async () => {
   }
 
   try {
+    // Get API URL dynamically
+    const apiUrl = await getDataCollectionApiUrl();
+
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 2000); // 2 second timeout
 
-    const response = await fetch(`${DATA_COLLECTION_API}/health`, {
+    const response = await fetch(`${apiUrl}/health`, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
@@ -86,7 +155,9 @@ export const lookupCompany = async (companyNumber) => {
   logger.debug('Looking up company:', companyNumber);
 
   try {
-    const response = await fetch(`${DATA_COLLECTION_API}/company/${companyNumber}`, {
+    const apiUrl = await getDataCollectionApiUrl();
+
+    const response = await fetch(`${apiUrl}/company/${companyNumber}`, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
@@ -123,7 +194,9 @@ export const lookupOfficers = async (companyNumber) => {
   logger.debug('Looking up officers for company:', companyNumber);
 
   try {
-    const response = await fetch(`${DATA_COLLECTION_API}/officers/${companyNumber}`, {
+    const apiUrl = await getDataCollectionApiUrl();
+
+    const response = await fetch(`${apiUrl}/officers/${companyNumber}`, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
@@ -160,7 +233,9 @@ export const checkFilingHistory = async (companyNumber) => {
   logger.debug('Checking filing history for company:', companyNumber);
 
   try {
-    const response = await fetch(`${DATA_COLLECTION_API}/filing-history/${companyNumber}`, {
+    const apiUrl = await getDataCollectionApiUrl();
+
+    const response = await fetch(`${apiUrl}/filing-history/${companyNumber}`, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
@@ -198,7 +273,9 @@ export const triggerBackgroundResearch = async ({ company_number, company_name, 
   logger.debug('Triggering background research:', { company_number, company_name, user_id, client_id });
 
   try {
-    const response = await fetch(`${DATA_COLLECTION_API}/research/company`, {
+    const apiUrl = await getDataCollectionApiUrl();
+
+    const response = await fetch(`${apiUrl}/research/company`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -236,8 +313,10 @@ export const checkResearchStatus = async (executionArn) => {
   logger.debug('Checking research status:', executionArn);
 
   try {
+    const apiUrl = await getDataCollectionApiUrl();
+
     const encodedArn = encodeURIComponent(executionArn);
-    const response = await fetch(`${DATA_COLLECTION_API}/research/status/${encodedArn}`, {
+    const response = await fetch(`${apiUrl}/research/status/${encodedArn}`, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
