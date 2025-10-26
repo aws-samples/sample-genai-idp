@@ -501,12 +501,36 @@ const CompanySelect = () => {
     );
   };
 
+  // Admin bypass function
+  const handleAdminBypass = () => {
+    logger.info('Admin bypass: Skipping company selection');
+    // Store a placeholder company to maintain localStorage expectations
+    localStorage.setItem(
+      'selectedCompany',
+      JSON.stringify({
+        company_number: 'BYPASS',
+        company_name: 'Admin Bypass - Direct Access',
+        company_status: 'active',
+        bypassed: true,
+      }),
+    );
+    history.push(DOCUMENTS_PATH);
+  };
+
   return (
     <Box padding={{ top: 'xxxl' }}>
       <SpaceBetween size="l">
         <Container
           header={
-            <Header variant="h1" description="Enter a UK Companies House number to get started">
+            <Header
+              variant="h1"
+              description="Enter a UK Companies House number to get started"
+              actions={
+                <Button variant="link" iconName="arrow-right" onClick={handleAdminBypass}>
+                  Skip to Documents (Admin)
+                </Button>
+              }
+            >
               Select Your Company
             </Header>
           }
