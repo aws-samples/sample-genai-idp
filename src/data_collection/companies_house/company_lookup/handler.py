@@ -259,18 +259,18 @@ def get_from_cache(company_number):
     try:
         table = dynamodb.Table(CACHE_TABLE_NAME)
 
-        # Query cache with event_type = "COMPANY_INFO"
+        # Query cache with event_type_timestamp = "COMPANY_INFO#YYYY-MM-DD"
         response = table.get_item(
             Key={
                 "company_number": company_number,
-                "event_type": f"COMPANY_INFO#{datetime.utcnow().isoformat()[:10]}",  # Date-based SK
+                "event_type_timestamp": f"COMPANY_INFO#{datetime.utcnow().isoformat()[:10]}",  # Date-based SK
             }
         )
 
         if "Item" not in response:
             # Try to get most recent entry
             response = table.query(
-                KeyConditionExpression="company_number = :num AND begins_with(event_type, :type)",
+                KeyConditionExpression="company_number = :num AND begins_with(event_type_timestamp, :type)",
                 ExpressionAttributeValues={
                     ":num": company_number,
                     ":type": "COMPANY_INFO",
@@ -314,7 +314,7 @@ def store_in_cache(company_number, data):
 
         item = {
             "company_number": company_number,
-            "event_type": f"COMPANY_INFO#{now.isoformat()[:10]}",
+            "event_type_timestamp": f"COMPANY_INFO#{now.isoformat()[:10]}",
             "timestamp": now.isoformat(),
             "last_updated": now.isoformat(),
             "ttl": ttl,
