@@ -492,6 +492,116 @@ Resources:
             Path: /health
             Method: GET
 
+  OfficersFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub 'fiscalshield-dc-${Environment}-Officers'
+      Description: Fetch Companies House officers data with caching
+      CodeUri: ../../src/data_collection/companies_house/officers/
+      Handler: handler.lambda_handler
+      Role: !GetAtt DataCollectionLambdaRole.Arn
+      Timeout: 30
+      MemorySize: 256
+      Environment:
+        Variables:
+          CACHE_TABLE_NAME: !Ref CompanyEventsTable
+          SECRET_NAME: !Ref CompaniesHouseApiSecret
+      Events:
+        GetOfficers:
+          Type: Api
+          Properties:
+            RestApiId: !Ref DataCollectionApi
+            Path: /officers/{company_number}
+            Method: GET
+
+  FilingHistoryFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub 'fiscalshield-dc-${Environment}-FilingHistory'
+      Description: Fetch Companies House filing history with caching
+      CodeUri: ../../src/data_collection/companies_house/filing_history/
+      Handler: handler.lambda_handler
+      Role: !GetAtt DataCollectionLambdaRole.Arn
+      Timeout: 60
+      MemorySize: 512
+      Environment:
+        Variables:
+          CACHE_TABLE_NAME: !Ref CompanyEventsTable
+          SECRET_NAME: !Ref CompaniesHouseApiSecret
+      Events:
+        GetFilingHistory:
+          Type: Api
+          Properties:
+            RestApiId: !Ref DataCollectionApi
+            Path: /filing-history/{company_number}
+            Method: GET
+
+  PSCFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub 'fiscalshield-dc-${Environment}-PSCLookup'
+      Description: Fetch Companies House PSC data with caching
+      CodeUri: ../../src/data_collection/companies_house/psc_lookup/
+      Handler: handler.lambda_handler
+      Role: !GetAtt DataCollectionLambdaRole.Arn
+      Timeout: 30
+      MemorySize: 256
+      Environment:
+        Variables:
+          CACHE_TABLE_NAME: !Ref CompanyEventsTable
+          SECRET_NAME: !Ref CompaniesHouseApiSecret
+      Events:
+        GetPSC:
+          Type: Api
+          Properties:
+            RestApiId: !Ref DataCollectionApi
+            Path: /psc/{company_number}
+            Method: GET
+
+  ChargesFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub 'fiscalshield-dc-${Environment}-Charges'
+      Description: Fetch Companies House charges data with caching
+      CodeUri: ../../src/data_collection/companies_house/charges/
+      Handler: handler.lambda_handler
+      Role: !GetAtt DataCollectionLambdaRole.Arn
+      Timeout: 30
+      MemorySize: 256
+      Environment:
+        Variables:
+          CACHE_TABLE_NAME: !Ref CompanyEventsTable
+          SECRET_NAME: !Ref CompaniesHouseApiSecret
+      Events:
+        GetCharges:
+          Type: Api
+          Properties:
+            RestApiId: !Ref DataCollectionApi
+            Path: /charges/{company_number}
+            Method: GET
+
+  InsolvencyFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub 'fiscalshield-dc-${Environment}-Insolvency'
+      Description: Fetch Companies House insolvency data with caching
+      CodeUri: ../../src/data_collection/companies_house/insolvency/
+      Handler: handler.lambda_handler
+      Role: !GetAtt DataCollectionLambdaRole.Arn
+      Timeout: 30
+      MemorySize: 256
+      Environment:
+        Variables:
+          CACHE_TABLE_NAME: !Ref CompanyEventsTable
+          SECRET_NAME: !Ref CompaniesHouseApiSecret
+      Events:
+        GetInsolvency:
+          Type: Api
+          Properties:
+            RestApiId: !Ref DataCollectionApi
+            Path: /insolvency/{company_number}
+            Method: GET
+
   # ========================================================================
   # API GATEWAY
   # ========================================================================
@@ -597,8 +707,49 @@ Outputs:
     Export:
       Name: !Sub '${AWS::StackName}-HealthCheckFunction'
 
+  OfficersFunctionArn:
+    Description: ARN of Officers Lambda function
+    Value: !GetAtt OfficersFunction.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-OfficersFunction'
+
+  FilingHistoryFunctionArn:
+    Description: ARN of Filing History Lambda function
+    Value: !GetAtt FilingHistoryFunction.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-FilingHistoryFunction'
+
+  PSCFunctionArn:
+    Description: ARN of PSC Lookup Lambda function
+    Value: !GetAtt PSCFunction.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-PSCFunction'
+
+  ChargesFunctionArn:
+    Description: ARN of Charges Lambda function
+    Value: !GetAtt ChargesFunction.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-ChargesFunction'
+
+  InsolvencyFunctionArn:
+    Description: ARN of Insolvency Lambda function
+    Value: !GetAtt InsolvencyFunction.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-InsolvencyFunction'
+
   ApiUrlParameterName:
     Description: SSM Parameter Store path for API URL (for Core Stack integration)
     Value: !Sub '/fiscalshield/data-collection/${Environment}/api-url'
     Export:
       Name: !Sub '${AWS::StackName}-ApiUrlParameter'
+
+  AllApiEndpoints:
+    Description: All available API endpoints
+    Value: !Sub |
+      Health Check: GET https://${DataCollectionApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}/health
+      Company Lookup: GET https://${DataCollectionApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}/company/{company_number}
+      Officers: GET https://${DataCollectionApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}/officers/{company_number}
+      Filing History: GET https://${DataCollectionApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}/filing-history/{company_number}
+      PSC: GET https://${DataCollectionApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}/psc/{company_number}
+      Charges: GET https://${DataCollectionApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}/charges/{company_number}
+      Insolvency: GET https://${DataCollectionApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}/insolvency/{company_number}
