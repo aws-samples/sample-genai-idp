@@ -17,8 +17,13 @@ Phase 3: Region Alignment             [█████████████�
 Phase 4: Deployment Optimization      [████████████████████] 100% ✅
 Phase 5: Infrastructure Verification  [████████████████████] 100% ✅
 Phase 6: Core Stack Integration       [████████████████████] 100% ✅
-Phase 7: Lambda Implementation        [████░░░░░░░░░░░░░░░░]  25% 🔄
-Phase 8: Testing & Monitoring         [░░░░░░░░░░░░░░░░░░░░]   0% ❌
+Phase 7: Companies House Lambda Impl  [████████████████░░░░]  85% 🔄
+Phase 8: Step Functions Orchestration [████████████████████] 100% ✅
+Phase 9: S3 Data Archiving            [████████████████████] 100% ✅
+Phase 10: HMRC Integration            [░░░░░░░░░░░░░░░░░░░░]   0% ❌
+Phase 11: Banking API Integration     [░░░░░░░░░░░░░░░░░░░░]   0% ❌
+Phase 12: SIC Code Enrichment         [░░░░░░░░░░░░░░░░░░░░]   0% ❌
+Phase 13: Testing & Monitoring        [░░░░░░░░░░░░░░░░░░░░]   0% ❌
 ```
 
 ---
@@ -316,18 +321,309 @@ from src.data_collection.common.constants import (
 
 ## 🔄 IN PROGRESS
 
-### Phase 6: Lambda Implementation - Shared Utilities
+### Phase 7: Lambda Implementation - Remaining Functions
 **Status**: 🔄 Ready to start  
-**Started**: October 25, 2025
+**Started**: October 26, 2025
 
-**Next Steps**:
-1. Implement shared utilities (secrets.py, cache.py, logging_utils.py, rate_limiter.py)
-2. Write unit tests for utilities
-3. Implement first Lambda function (Company Lookup)
+**Completed**:
+- ✅ Company Lookup Lambda (100%)
+- ✅ Health Check Lambda (100%)
+- ✅ Officers Lambda (100%) - NEW!
+- ✅ Filing History Lambda (100%) - NEW!
+- ✅ PSC Lookup Lambda (100%) - NEW!
+- ✅ Charges Lambda (100%) - NEW!
+- ✅ Insolvency Lambda (100%) - NEW!
+- ✅ Rate Limiting (100%) - NEW!
+
+**Still Needed**:
+1. ❌ HMRC VAT Obligations Lambda
+2. ❌ HMRC VAT Returns Lambda
+3. ❌ Banking API Integration Lambda
+4. ❌ SIC Code Enrichment Lambda
+5. ❌ Credit Rating Integration (future)
+6. ❌ Companies House Disqualified Directors check
 
 ---
 
-## ✅ COMPLETED TASKS (CONTINUED)
+### 16. Rate Limiting Implementation (100%)
+**Status**: ✅ Complete  
+**Date**: October 26, 2025
+
+**Challenge**: Companies House API has 600 requests per 5-minute window limit
+
+**Solution Implemented**:
+- ✅ Created shared `rate_limiter.py` module
+- ✅ DynamoDB-based counter with TTL (5 minutes)
+- ✅ Shared counter across all Lambda functions
+- ✅ Token bucket algorithm
+- ✅ Graceful HTTP 429 responses when limit exceeded
+
+**Implementation**:
+```python
+# src/data_collection/companies_house/rate_limiter.py
+def check_rate_limit(api_name: str, limit: int = 600, window: int = 300):
+    """
+    Check if API call is within rate limit
+    - Shared counter in DynamoDB (RateLimitsTable)
+    - TTL automatically cleans up old entries
+    - Returns current count and limit info
+    """
+```
+
+**Deployed To**:
+- ✅ Company Lookup Lambda
+- ✅ Officers Lambda
+- ✅ Filing History Lambda
+- ✅ PSC Lookup Lambda
+- ✅ Charges Lambda
+- ✅ Insolvency Lambda
+
+**Testing**:
+- ✅ Manual test showed shared counter working (2/600 across multiple Lambdas)
+- ✅ Rate limit status logged in CloudWatch
+
+**Benefits**:
+- Prevents API quota exhaustion
+- Fair sharing across all data collection functions
+- No hardcoded delays - intelligent throttling
+- Automatic cleanup via TTL
+
+---
+
+### 17. Remaining Companies House Lambda Functions (100%)
+**Status**: ✅ Complete  
+**Date**: October 26, 2025
+
+#### Officers Lambda
+**Function**: `fiscalshield-dc-dev-Officers`  
+**Endpoint**: `GET /officers/{company_number}`  
+**Code**: `src/data_collection/companies_house/officers/handler.py`
+
+**Features**:
+- ✅ Fetches all company officers (active + resigned)
+- ✅ Pagination support (100 items per page)
+- ✅ DynamoDB caching (24-hour TTL)
+- ✅ Rate limiting integrated
+- ✅ Separates active vs resigned officers
+- ✅ Returns officer details: name, role, appointed date, nationality, address
+
+**Response Format**:
+```json
+{
+  "success": true,
+  "company_number": "00445790",
+  "cached": false,
+  "total_results": 74,
+  "active_count": 12,
+  "resigned_count": 62,
+  "active_officers": [...],
+  "resigned_officers": [...]
+}
+```
+
+#### Filing History Lambda
+**Function**: `fiscalshield-dc-dev-FilingHistory`  
+**Endpoint**: `GET /filing-history/{company_number}?summary=true`  
+**Code**: `src/data_collection/companies_house/filing_history/handler.py`
+
+**Features**:
+- ✅ Fetches ALL company filings with pagination
+- ✅ Handles large datasets (8,314+ filings for major companies)
+- ✅ **Hybrid Storage Strategy**:
+  - Summary in DynamoDB (recent 10 filings, counts by type, metadata)
+  - Full data archived to S3 when exceeds 350KB
+- ✅ Rate limiting integrated
+- ✅ Summary mode for Step Functions (avoids 256KB payload limit)
+- ✅ Query parameter support: `?summary=true` or `?summary=false`
+
+**Storage Intelligence**:
+- If data size > 350KB: Store full data in S3, summary in DynamoDB
+- If data size < 350KB: Store everything in DynamoDB
+- S3 reference included in DynamoDB metadata
+
+**Response Format**:
+```json
+{
+  "success": true,
+  "company_number": "00445790",
+  "total_count": 8314,
+  "filing_types": {
+    "SH01": 771,
+    "AA": 54,
+    "88(2)R": 5480,
+    ...
+  },
+  "recent_filings": [...10 most recent...],
+  "s3_archive": {
+    "bucket": "fiscalshield-dc-dev-data-archive-864899848062",
+    "key": "filing-history/00445790/2025-10-26.json",
+    "size_bytes": 3219239
+  }
+}
+```
+
+#### PSC Lookup Lambda
+**Function**: `fiscalshield-dc-dev-PSCLookup`  
+**Endpoint**: `GET /psc/{company_number}`  
+**Code**: `src/data_collection/companies_house/psc_lookup/handler.py`
+
+**Features**:
+- ✅ Fetches Persons with Significant Control
+- ✅ Pagination support
+- ✅ DynamoDB caching (24-hour TTL)
+- ✅ Rate limiting integrated
+- ✅ Identifies beneficial owners
+- ✅ Separates active vs ceased PSCs
+
+#### Charges Lambda
+**Function**: `fiscalshield-dc-dev-Charges`  
+**Endpoint**: `GET /charges/{company_number}`  
+**Code**: `src/data_collection/companies_house/charges/handler.py`
+
+**Features**:
+- ✅ Fetches company charges (mortgages, debentures)
+- ✅ Pagination support
+- ✅ DynamoDB caching (24-hour TTL)
+- ✅ Rate limiting integrated
+- ✅ Separates outstanding vs satisfied charges
+- ✅ Returns detailed charge information
+
+#### Insolvency Lambda
+**Function**: `fiscalshield-dc-dev-Insolvency`  
+**Endpoint**: `GET /insolvency/{company_number}`  
+**Code**: `src/data_collection/companies_house/insolvency/handler.py`
+
+**Features**:
+- ✅ Checks for insolvency cases
+- ✅ DynamoDB caching (24-hour TTL)
+- ✅ Rate limiting integrated
+- ✅ Returns insolvency history
+- ✅ Boolean flag for quick checks
+
+---
+
+### 18. Step Functions State Machine (100%)
+**Status**: ✅ Complete  
+**Date**: October 26, 2025
+
+**Resource**: `CompanyResearchStateMachine`  
+**Definition**: `stacks/data-collection/state-machines/company-research.asl.json`  
+**ARN**: `arn:aws:states:eu-central-1:864899848062:stateMachine:fiscalshield-dc-dev-CompanyResearch`
+
+**Purpose**: Orchestrate parallel data collection from all Companies House endpoints
+
+**Architecture**:
+- **Pattern**: Parallel execution (fan-out)
+- **Branches**: 6 independent branches
+  1. Company Profile
+  2. Officers
+  3. PSC (Persons with Significant Control)
+  4. Charges
+  5. Insolvency
+  6. Filing History (with summary mode)
+
+**Features Implemented**:
+- ✅ Parallel execution for speed (all 6 APIs called simultaneously)
+- ✅ Error handling per branch (Catch blocks)
+- ✅ Graceful degradation (partial success allowed)
+- ✅ Results consolidation (ConsolidateResults state)
+- ✅ Retry logic with exponential backoff
+- ✅ CloudWatch logging
+- ✅ IAM role with Lambda invoke permissions
+
+**Error Handling**:
+- Each branch has a "Failed" state
+- Errors don't block other branches
+- Failed branches return error object instead of data
+- State machine succeeds even if some branches fail
+
+**Testing**:
+- ✅ Tested with Tesco (00445790)
+- ✅ All 6 branches succeeded in ~23 seconds
+- ✅ Filing History returned summary (not full 8,314 filings)
+- ✅ Data properly consolidated
+
+**Execution Example**:
+```bash
+aws stepfunctions start-execution \
+  --state-machine-arn arn:aws:states:eu-central-1:864899848062:stateMachine:fiscalshield-dc-dev-CompanyResearch \
+  --input '{"company_number": "00445790"}'
+```
+
+**Result**:
+- Status: SUCCEEDED
+- Duration: ~23 seconds
+- All data collected and cached
+
+---
+
+### 19. S3 Data Archive Bucket (100%)
+**Status**: ✅ Complete  
+**Date**: October 26, 2025
+
+**Problem Solved**: 
+- DynamoDB has 400KB item size limit
+- Step Functions has 256KB payload limit
+- Some filing histories exceed both limits (e.g., Tesco: 3.2MB)
+
+**Solution**: Hybrid storage strategy
+
+**Bucket**: `fiscalshield-dc-dev-data-archive-864899848062`
+
+**Features**:
+- ✅ Created via CloudFormation (fully IaC)
+- ✅ AES-256 encryption at rest
+- ✅ Versioning enabled
+- ✅ Lifecycle rules:
+  - Transition to IA after 30 days
+  - Transition to Glacier after 90 days
+  - Delete old versions after 90 days
+- ✅ Public access blocked
+- ✅ IAM permissions granted to Lambda execution role
+
+**Storage Strategy**:
+1. Lambda measures response size
+2. If > 350KB:
+   - Store full data in S3: `s3://bucket/filing-history/{company_number}/{date}.json`
+   - Store summary in DynamoDB with S3 reference
+3. If < 350KB:
+   - Store everything in DynamoDB
+
+**Example**:
+- Tesco filing history: 3.2MB (8,314 filings)
+- S3 object: `filing-history/00445790/2025-10-26.json` (3,219,239 bytes)
+- DynamoDB: Summary + S3 reference (total count, 10 recent, metadata)
+
+**Benefits**:
+- ✅ No data loss due to size limits
+- ✅ Fast queries for summaries (DynamoDB)
+- ✅ Full data available when needed (S3)
+- ✅ Cost-efficient (S3 cheaper than DynamoDB for large data)
+- ✅ Automatic lifecycle management
+
+**Production-Ready**:
+- ✅ Fully declarative (no manual bucket creation needed)
+- ✅ Works identically in dev/staging/prod
+- ✅ Fixed S3 tag validation issues
+- ✅ Proper retention policies
+
+**Verification**:
+```bash
+# Check S3 object exists
+aws s3 ls s3://fiscalshield-dc-dev-data-archive-864899848062/filing-history/00445790/
+# Output: 2025-10-26 22:32:57    3219239 2025-10-26.json
+
+# Check DynamoDB has reference
+aws dynamodb query \
+  --table-name fiscalshield-dc-dev-CompanyEvents \
+  --key-condition-expression "company_number = :cn AND begins_with(event_type_timestamp, :et)" \
+  --expression-attribute-values '{":cn":{"S":"00445790"},":et":{"S":"FILING_HISTORY#"}}'
+# Output: Summary data + s3_archive metadata
+```
+
+---
+
+## 🔄 IN PROGRESS
 
 ### 11. Infrastructure Verification (100%)
 **Status**: ✅ Complete  
@@ -1031,36 +1327,67 @@ def with_rate_limit(func):
 
 **Priority Order**:
 
-1. **HIGH: Implement Remaining Lambda Functions** 🔥 NEXT
-   - Health Check Lambda refinements (Step Functions check)
-   - Officers Lookup Lambda
-   - Filing History Lambda (with compliance scoring)
-   - PSC Lookup Lambda
+1. **HIGH: HMRC Integration** 🔥 NEXT
+   - Register for HMRC Developer Hub
+   - Implement OAuth 2.0 flow
+   - Create VAT Obligations Lambda
+   - Create VAT Returns Lambda
+   - Test with HMRC sandbox
 
-2. **HIGH: Add Lambda Resources to CloudFormation**
-   - Update `template.yaml` with new Lambda functions
-   - Configure API Gateway routes
-   - Set environment variables
-   - Deploy updated stack
+2. **HIGH: SIC Code Enrichment**
+   - Fetch industry classification data
+   - Enrich company profiles with industry information
+   - Store in DynamoDB for analysis
 
-3. **MEDIUM: Write Unit Tests**
+3. **MEDIUM: Banking API Integration**
+   - Design open banking integration
+   - Implement bank account verification Lambda
+   - Store banking data securely
+
+4. **MEDIUM: Write Unit Tests**
    - Test each Lambda independently
-   - Mock AWS services (DynamoDB, Secrets Manager)
+   - Mock AWS services (DynamoDB, Secrets Manager, S3)
    - Achieve >80% coverage
 
-4. **MEDIUM: Integration Testing**
+5. **MEDIUM: Integration Testing**
    - Test end-to-end flow
    - Verify caching behavior
-   - Test cross-stack access
+   - Test Step Functions orchestration
+   - Test S3 archiving
 
-5. **LOW: Documentation**
+6. **LOW: Documentation**
    - Lambda function documentation
    - API endpoint documentation
    - Troubleshooting guides
+   - Cost optimization guide
 
 ---
 
 ## 🎉 MAJOR MILESTONES ACHIEVED
+
+### ✅ All Companies House Endpoints Operational (October 26, 2025)
+- 7 Lambda functions deployed and tested
+- Rate limiting implemented and working (600/5min shared counter)
+- Step Functions orchestration complete (parallel execution)
+- S3 archiving for large datasets (hybrid storage strategy)
+- All data successfully cached in DynamoDB
+- Tested with real company (Tesco - 00445790)
+- Full company research in ~23 seconds
+
+### ✅ Hybrid Storage Solution (October 26, 2025)
+- DynamoDB for fast queries and summaries
+- S3 for large datasets (>350KB)
+- Automatic size detection and routing
+- S3 references stored in DynamoDB metadata
+- Lifecycle management (IA → Glacier)
+- Production-ready IaC (no manual steps)
+
+### ✅ Step Functions Orchestration (October 26, 2025)
+- Parallel execution pattern (6 branches)
+- Graceful error handling per branch
+- Results consolidation
+- Tested and working end-to-end
+- CloudWatch logging integrated
 
 ### ✅ Core Stack Integration Complete (October 26, 2025)
 - Dynamic API URL resolution via Parameter Store
@@ -1087,19 +1414,28 @@ def with_rate_limit(func):
 ## 📈 METRICS TRACKING
 
 ### Code Statistics
-- **Total Files Created**: 40+
-- **Lines of Code Written**: 2,500+ (CloudFormation + Lambda + Frontend)
+- **Total Files Created**: 60+
+- **Lines of Code Written**: 5,000+ (CloudFormation + Lambda + Frontend + State Machines)
 - **Test Coverage**: 0% (tests not yet implemented)
-- **Documentation Pages**: 4
+- **Documentation Pages**: 5
 
 ### Infrastructure Status
-- **DynamoDB Tables**: 3 ✅ (deployed, verified, schema correct)
+- **DynamoDB Tables**: 3 ✅ (FilingEvents, CompanyEvents, HMRCData)
+- **S3 Buckets**: 1 ✅ (DataArchiveBucket for large responses)
 - **Secrets**: 1 active, 2 placeholders ✅ (Companies House key configured)
-- **Lambda Functions**: 2 ✅ (CompanyLookup deployed, HealthCheck deployed)
-- **API Gateway**: 1 ✅ (deployed with CORS, 2 routes active)
+- **Lambda Functions**: 7 ✅ (All Companies House endpoints operational)
+  - CompanyLookup ✅
+  - HealthCheck ✅
+  - Officers ✅
+  - FilingHistory ✅ (with S3 archiving)
+  - PSCLookup ✅
+  - Charges ✅
+  - Insolvency ✅
+- **Step Functions**: 1 ✅ (CompanyResearchStateMachine - 6 parallel branches)
+- **API Gateway**: 1 ✅ (7 routes active + health endpoint)
 - **Parameter Store**: 1 ✅ (API URL stored)
 - **CloudWatch Alarms**: 3 ✅ (deployed with template)
-- **IAM Roles**: 1 ✅ (permissions verified and expanded)
+- **IAM Roles**: 2 ✅ (LambdaExecutionRole + StepFunctionsExecutionRole)
 
 ### Deployment Status
 - **Dev Environment**: ✅ Fully deployed and operational
@@ -1111,19 +1447,30 @@ def with_rate_limit(func):
 - **Base URL**: `https://fmeltkizuk.execute-api.eu-central-1.amazonaws.com/dev`
 - **Health**: `GET /health` ✅ Working
 - **Company Lookup**: `GET /company/{company_number}` ✅ Working
-- **Officers**: `GET /officers/{company_number}` ❌ Not implemented
-- **Filing History**: `GET /filing-history/{company_number}` ❌ Not implemented
-- **PSC**: `GET /psc/{company_number}` ❌ Not implemented
+- **Officers**: `GET /officers/{company_number}` ✅ Working
+- **Filing History**: `GET /filing-history/{company_number}` ✅ Working (with S3 archiving)
+- **PSC**: `GET /psc/{company_number}` ✅ Working
+- **Charges**: `GET /charges/{company_number}` ✅ Working
+- **Insolvency**: `GET /insolvency/{company_number}` ✅ Working
+
+### Step Functions
+- **State Machine**: `fiscalshield-dc-dev-CompanyResearch` ✅ Working
+- **Execution Pattern**: Parallel (6 branches)
+- **Average Duration**: ~23 seconds for full company research
+- **Success Rate**: 100% (with graceful degradation)
 
 ### Testing Status
-- **Manual Testing**: ✅ Complete (Company Lookup tested with Tesco)
+- **Manual Testing**: ✅ Complete (All endpoints tested with Tesco)
+- **Step Functions Testing**: ✅ Complete (Parallel execution verified)
+- **S3 Archiving**: ✅ Tested (3.2MB filing history archived successfully)
+- **Rate Limiting**: ✅ Tested (Shared counter working across Lambdas)
 - **Unit Tests**: ❌ Not implemented
 - **Integration Tests**: ❌ Not implemented
 - **Load Tests**: ❌ Not implemented
 
 ### Cost (Estimated)
-- **Current**: ~$2/month (infrastructure + light usage)
-- **Projected**: <$15/month for 1000 clients (once fully operational)
+- **Current**: ~$5/month (infrastructure + light usage + S3)
+- **Projected**: <$20/month for 1000 clients (with S3 lifecycle management)
 
 ---
 

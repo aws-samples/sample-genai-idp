@@ -1,0 +1,350 @@
+{
+  "Comment": "Company Research Orchestration - Collects comprehensive company data from multiple sources",
+  "StartAt": "CollectCompaniesHouseData",
+  "States": {
+    "CollectCompaniesHouseData": {
+      "Type": "Parallel",
+      "Comment": "Collect all Companies House data in parallel",
+      "Branches": [
+        {
+          "StartAt": "GetCompanyProfile",
+          "States": {
+            "GetCompanyProfile": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::lambda:invoke",
+              "Parameters": {
+                "FunctionName": "${CompanyLookupFunctionArn}",
+                "Payload": {
+                  "pathParameters": {
+                    "company_number.$": "$.company_number"
+                  }
+                }
+              },
+              "ResultSelector": {
+                "statusCode.$": "$.Payload.statusCode",
+                "body.$": "States.StringToJson($.Payload.body)"
+              },
+              "ResultPath": "$.companyProfile",
+              "Retry": [
+                {
+                  "ErrorEquals": [
+                    "Lambda.ServiceException",
+                    "Lambda.AWSLambdaException",
+                    "Lambda.SdkClientException"
+                  ],
+                  "IntervalSeconds": 2,
+                  "MaxAttempts": 3,
+                  "BackoffRate": 2
+                }
+              ],
+              "Catch": [
+                {
+                  "ErrorEquals": ["States.ALL"],
+                  "ResultPath": "$.companyProfile.error",
+                  "Next": "CompanyProfileFailed"
+                }
+              ],
+              "End": true
+            },
+            "CompanyProfileFailed": {
+              "Type": "Pass",
+              "Result": {
+                "success": false,
+                "error": "Failed to retrieve company profile"
+              },
+              "ResultPath": "$.companyProfile",
+              "End": true
+            }
+          }
+        },
+        {
+          "StartAt": "GetOfficers",
+          "States": {
+            "GetOfficers": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::lambda:invoke",
+              "Parameters": {
+                "FunctionName": "${OfficersFunctionArn}",
+                "Payload": {
+                  "pathParameters": {
+                    "company_number.$": "$.company_number"
+                  }
+                }
+              },
+              "ResultSelector": {
+                "statusCode.$": "$.Payload.statusCode",
+                "body.$": "States.StringToJson($.Payload.body)"
+              },
+              "ResultPath": "$.officers",
+              "Retry": [
+                {
+                  "ErrorEquals": [
+                    "Lambda.ServiceException",
+                    "Lambda.AWSLambdaException",
+                    "Lambda.SdkClientException"
+                  ],
+                  "IntervalSeconds": 2,
+                  "MaxAttempts": 3,
+                  "BackoffRate": 2
+                }
+              ],
+              "Catch": [
+                {
+                  "ErrorEquals": ["States.ALL"],
+                  "ResultPath": "$.officers.error",
+                  "Next": "OfficersFailed"
+                }
+              ],
+              "End": true
+            },
+            "OfficersFailed": {
+              "Type": "Pass",
+              "Result": {
+                "success": false,
+                "error": "Failed to retrieve officers"
+              },
+              "ResultPath": "$.officers",
+              "End": true
+            }
+          }
+        },
+        {
+          "StartAt": "GetPSC",
+          "States": {
+            "GetPSC": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::lambda:invoke",
+              "Parameters": {
+                "FunctionName": "${PSCFunctionArn}",
+                "Payload": {
+                  "pathParameters": {
+                    "company_number.$": "$.company_number"
+                  }
+                }
+              },
+              "ResultSelector": {
+                "statusCode.$": "$.Payload.statusCode",
+                "body.$": "States.StringToJson($.Payload.body)"
+              },
+              "ResultPath": "$.psc",
+              "Retry": [
+                {
+                  "ErrorEquals": [
+                    "Lambda.ServiceException",
+                    "Lambda.AWSLambdaException",
+                    "Lambda.SdkClientException"
+                  ],
+                  "IntervalSeconds": 2,
+                  "MaxAttempts": 3,
+                  "BackoffRate": 2
+                }
+              ],
+              "Catch": [
+                {
+                  "ErrorEquals": ["States.ALL"],
+                  "ResultPath": "$.psc.error",
+                  "Next": "PSCFailed"
+                }
+              ],
+              "End": true
+            },
+            "PSCFailed": {
+              "Type": "Pass",
+              "Result": {
+                "success": false,
+                "error": "Failed to retrieve PSC data"
+              },
+              "ResultPath": "$.psc",
+              "End": true
+            }
+          }
+        },
+        {
+          "StartAt": "GetCharges",
+          "States": {
+            "GetCharges": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::lambda:invoke",
+              "Parameters": {
+                "FunctionName": "${ChargesFunctionArn}",
+                "Payload": {
+                  "pathParameters": {
+                    "company_number.$": "$.company_number"
+                  }
+                }
+              },
+              "ResultSelector": {
+                "statusCode.$": "$.Payload.statusCode",
+                "body.$": "States.StringToJson($.Payload.body)"
+              },
+              "ResultPath": "$.charges",
+              "Retry": [
+                {
+                  "ErrorEquals": [
+                    "Lambda.ServiceException",
+                    "Lambda.AWSLambdaException",
+                    "Lambda.SdkClientException"
+                  ],
+                  "IntervalSeconds": 2,
+                  "MaxAttempts": 3,
+                  "BackoffRate": 2
+                }
+              ],
+              "Catch": [
+                {
+                  "ErrorEquals": ["States.ALL"],
+                  "ResultPath": "$.charges.error",
+                  "Next": "ChargesFailed"
+                }
+              ],
+              "End": true
+            },
+            "ChargesFailed": {
+              "Type": "Pass",
+              "Result": {
+                "success": false,
+                "error": "Failed to retrieve charges"
+              },
+              "ResultPath": "$.charges",
+              "End": true
+            }
+          }
+        },
+        {
+          "StartAt": "GetInsolvency",
+          "States": {
+            "GetInsolvency": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::lambda:invoke",
+              "Parameters": {
+                "FunctionName": "${InsolvencyFunctionArn}",
+                "Payload": {
+                  "pathParameters": {
+                    "company_number.$": "$.company_number"
+                  }
+                }
+              },
+              "ResultSelector": {
+                "statusCode.$": "$.Payload.statusCode",
+                "body.$": "States.StringToJson($.Payload.body)"
+              },
+              "ResultPath": "$.insolvency",
+              "Retry": [
+                {
+                  "ErrorEquals": [
+                    "Lambda.ServiceException",
+                    "Lambda.AWSLambdaException",
+                    "Lambda.SdkClientException"
+                  ],
+                  "IntervalSeconds": 2,
+                  "MaxAttempts": 3,
+                  "BackoffRate": 2
+                }
+              ],
+              "Catch": [
+                {
+                  "ErrorEquals": ["States.ALL"],
+                  "ResultPath": "$.insolvency.error",
+                  "Next": "InsolvencyFailed"
+                }
+              ],
+              "End": true
+            },
+            "InsolvencyFailed": {
+              "Type": "Pass",
+              "Result": {
+                "success": false,
+                "error": "Failed to retrieve insolvency data"
+              },
+              "ResultPath": "$.insolvency",
+              "End": true
+            }
+          }
+        },
+        {
+          "StartAt": "GetFilingHistory",
+          "States": {
+            "GetFilingHistory": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::lambda:invoke",
+              "Parameters": {
+                "FunctionName": "${FilingHistoryFunctionArn}",
+                "Payload": {
+                  "pathParameters": {
+                    "company_number.$": "$.company_number"
+                  },
+                  "queryStringParameters": {
+                    "summary": "true"
+                  }
+                }
+              },
+              "ResultSelector": {
+                "statusCode.$": "$.Payload.statusCode",
+                "body.$": "States.StringToJson($.Payload.body)"
+              },
+              "ResultPath": "$.filingHistory",
+              "Retry": [
+                {
+                  "ErrorEquals": [
+                    "Lambda.ServiceException",
+                    "Lambda.AWSLambdaException",
+                    "Lambda.SdkClientException"
+                  ],
+                  "IntervalSeconds": 2,
+                  "MaxAttempts": 3,
+                  "BackoffRate": 2
+                }
+              ],
+              "Catch": [
+                {
+                  "ErrorEquals": ["States.ALL"],
+                  "ResultPath": "$.filingHistory.error",
+                  "Next": "FilingHistoryFailed"
+                }
+              ],
+              "End": true
+            },
+            "FilingHistoryFailed": {
+              "Type": "Pass",
+              "Result": {
+                "success": false,
+                "error": "Failed to retrieve filing history"
+              },
+              "ResultPath": "$.filingHistory",
+              "End": true
+            }
+          }
+        }
+      ],
+      "ResultPath": "$.companiesHouseData",
+      "Next": "ConsolidateResults"
+    },
+    "ConsolidateResults": {
+      "Type": "Pass",
+      "Comment": "Consolidate all collected data into final response",
+      "Parameters": {
+        "company_number.$": "$.company_number",
+        "execution_id.$": "$$.Execution.Name",
+        "timestamp.$": "$$.Execution.StartTime",
+        "data": {
+          "company_profile.$": "$.companiesHouseData[0].companyProfile.body",
+          "officers.$": "$.companiesHouseData[1].officers.body",
+          "psc.$": "$.companiesHouseData[2].psc.body",
+          "charges.$": "$.companiesHouseData[3].charges.body",
+          "insolvency.$": "$.companiesHouseData[4].insolvency.body",
+          "filing_history.$": "$.companiesHouseData[5].filingHistory"
+        },
+        "metadata": {
+          "sources": ["companies_house"],
+          "collection_complete": true,
+          "notes": "Filing history may be summarized due to size limits"
+        }
+      },
+      "Next": "Success"
+    },
+    "Success": {
+      "Type": "Succeed",
+      "Comment": "Company research completed successfully"
+    }
+  }
+}

@@ -22,6 +22,7 @@ except ImportError:
 # Initialize AWS clients
 secrets_manager = boto3.client("secretsmanager")
 dynamodb = boto3.resource("dynamodb")
+s3 = boto3.client("s3")
 
 # Environment variables
 ENVIRONMENT = os.environ.get("ENVIRONMENT", "dev")
@@ -31,9 +32,14 @@ SECRET_NAME = os.environ.get(
 CACHE_TABLE_NAME = os.environ.get(
     "CACHE_TABLE_NAME", f"fiscalshield-dc-{ENVIRONMENT}-CompanyEvents"
 )
+DATA_ARCHIVE_BUCKET = os.environ.get(
+    "DATA_ARCHIVE_BUCKET", f"fiscalshield-dc-{ENVIRONMENT}-data-archive"
+)
 
 # Cache TTL (24 hours in seconds)
 CACHE_TTL_SECONDS = 24 * 60 * 60
+# DynamoDB item size limit (400KB, use 350KB to be safe)
+DYNAMODB_MAX_SIZE = 350 * 1024
 
 
 def lambda_handler(event, context):
@@ -57,11 +63,12 @@ def lambda_handler(event, context):
     if not company_number:
         return create_response(400, {"error": "Invalid company number format"})
 
-    # Check for force refresh
+    # Check for force refresh and summary mode
     query_params = event.get("queryStringParameters") or {}
     force_refresh = query_params.get("refresh", "false").lower() == "true"
+    summary_only = query_params.get("summary", "false").lower() == "true"
 
-    print(f"Looking up filing history for company: {company_number}, force_refresh: {force_refresh}")
+    print(f"Looking up filing history for company: {company_number}, force_refresh: {force_refresh}, summary_only: {summary_only}")
 
     try:
         # Check cache first (unless force refresh)
@@ -69,6 +76,22 @@ def lambda_handler(event, context):
             cached_data = get_from_cache(company_number)
             if cached_data:
                 print(f"Cache HIT for filing history: {company_number}")
+                
+                # Return summary if requested
+                if summary_only:
+                    summary_response = {
+                        "success": True,
+                        "company_number": company_number,
+                        "cached": True,
+                        "total_count": cached_data.get("total_count", 0),
+                        "filing_types": cached_data.get("filing_types", {}),
+                        "recent_filings": cached_data.get("recent_filings", [])[:5],
+                        "note": "Full filing history cached in DynamoDB - use ?summary=false to get all data",
+                        "last_updated": cached_data.get("last_updated"),
+                    }
+                    return create_response(200, summary_response)
+                
+                # Return full data
                 return create_response(
                     200,
                     {
@@ -113,9 +136,27 @@ def lambda_handler(event, context):
         # Format data for response
         formatted_data = format_filing_data(filing_data)
 
-        # Store in cache
+        # Store FULL data in cache FIRST (before returning response)
         store_in_cache(company_number, formatted_data)
+        print(f"Cached {formatted_data.get('total_count', 0)} filings for {company_number}")
 
+        # For Step Functions or summary requests, return summary only (to stay under 256KB limit)
+        # Full data is always available in cache
+        if summary_only:
+            summary_data = {
+                "success": True,
+                "company_number": company_number,
+                "cached": False,
+                "total_count": formatted_data.get("total_count", 0),
+                "filing_types": formatted_data.get("filing_types", {}),
+                "recent_filings": formatted_data.get("recent_filings", [])[:5],  # Just 5 most recent
+                "note": "Full filing history cached in DynamoDB - use ?summary=false to get all data",
+                "last_updated": formatted_data.get("last_updated"),
+            }
+            print(f"Returning summary: {len(json.dumps(summary_data))} bytes")
+            return create_response(200, summary_data)
+        
+        # For direct API calls without summary flag, return full data
         print(f"Successfully looked up filing history for company: {company_number}")
         return create_response(
             200,
@@ -349,28 +390,74 @@ def get_from_cache(company_number):
 
 def store_in_cache(company_number, data):
     """
-    Store filing history in DynamoDB cache
+    Store filing history in DynamoDB cache and S3 for large datasets
+    Strategy: Always store summary in DynamoDB, store full data in S3 if too large
     """
     try:
-        table = dynamodb.Table(CACHE_TABLE_NAME)
-
         now = datetime.utcnow()
         ttl = int(now.timestamp()) + CACHE_TTL_SECONDS
-
+        date_key = now.isoformat()[:10]
+        
+        # Create summary for DynamoDB (always)
+        summary_data = {
+            "total_count": data.get("total_count", 0),
+            "filing_types": data.get("filing_types", {}),
+            "recent_filings": data.get("recent_filings", [])[:10],  # Keep 10 most recent
+            "last_updated": data.get("last_updated"),
+        }
+        
+        # Check if full data exceeds DynamoDB limits
+        full_data_json = json.dumps(data, default=str)
+        data_size = len(full_data_json.encode('utf-8'))
+        
+        if data_size > DYNAMODB_MAX_SIZE:
+            # Store full data in S3
+            s3_key = f"filing-history/{company_number}/{date_key}.json"
+            try:
+                s3.put_object(
+                    Bucket=DATA_ARCHIVE_BUCKET,
+                    Key=s3_key,
+                    Body=full_data_json,
+                    ContentType='application/json',
+                    ServerSideEncryption='AES256',
+                    Metadata={
+                        'company_number': company_number,
+                        'date': date_key,
+                        'data_type': 'filing_history',
+                        'size_bytes': str(data_size)
+                    }
+                )
+                print(f"Stored full data in S3: s3://{DATA_ARCHIVE_BUCKET}/{s3_key} ({data_size} bytes)")
+                
+                # Add S3 reference to summary
+                summary_data["s3_archive"] = {
+                    "bucket": DATA_ARCHIVE_BUCKET,
+                    "key": s3_key,
+                    "size_bytes": data_size,
+                    "archived_at": now.isoformat()
+                }
+            except Exception as s3_error:
+                print(f"Error storing in S3: {s3_error}")
+                # Continue anyway - at least we have summary in DynamoDB
+        
+        # Store summary in DynamoDB
+        table = dynamodb.Table(CACHE_TABLE_NAME)
         item = {
             "company_number": company_number,
-            "event_type_timestamp": f"FILING_HISTORY#{now.isoformat()[:10]}",
+            "event_type_timestamp": f"FILING_HISTORY#{date_key}",
             "timestamp": now.isoformat(),
             "last_updated": now.isoformat(),
             "ttl": ttl,
-            "data": data,
+            "data": summary_data,
         }
-
+        
         table.put_item(Item=item)
-        print(f"Stored filing history in cache: {company_number}")
+        print(f"Stored summary in DynamoDB cache: {company_number} (summary: {len(json.dumps(summary_data))} bytes)")
 
     except Exception as e:
         print(f"Error storing in cache: {e}")
+        import traceback
+        print(f"Traceback: {traceback.format_exc()}")
 
 
 def create_response(status_code, body):

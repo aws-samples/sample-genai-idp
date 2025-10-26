@@ -260,6 +260,47 @@ Resources:
           Value: Auto-expire with TTL
 
   # ========================================================================
+  # S3 STORAGE
+  # ========================================================================
+
+  DataArchiveBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub 'fiscalshield-dc-${Environment}-data-archive-${AWS::AccountId}'
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      VersioningConfiguration:
+        Status: Enabled
+      LifecycleConfiguration:
+        Rules:
+          - Id: TransitionToIA
+            Status: Enabled
+            Transitions:
+              - TransitionInDays: 30
+                StorageClass: STANDARD_IA
+              - TransitionInDays: 90
+                StorageClass: GLACIER
+          - Id: DeleteOldVersions
+            Status: Enabled
+            NoncurrentVersionExpirationInDays: 90
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      Tags:
+        - Key: Name
+          Value: !Sub 'fiscalshield-dc-${Environment}-data-archive'
+        - Key: Purpose
+          Value: Large-API-Response-Archive
+        - Key: DataRetention
+          Value: Lifecycle-Managed
+
+  # ========================================================================
   # SECRETS MANAGER
   # ========================================================================
 
@@ -389,6 +430,20 @@ Resources:
                   - !Ref CompaniesHouseApiSecret
                   - !Ref HMRCApiSecret
                   - !Ref BankingApiSecret
+        - PolicyName: S3DataArchiveAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: S3BucketAccess
+                Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                  - s3:DeleteObject
+                  - s3:ListBucket
+                Resource:
+                  - !Sub 'arn:aws:s3:::fiscalshield-dc-${Environment}-data-archive-${AWS::AccountId}'
+                  - !Sub 'arn:aws:s3:::fiscalshield-dc-${Environment}-data-archive-${AWS::AccountId}/*'
         - PolicyName: CloudWatchMetrics
           PolicyDocument:
             Version: '2012-10-17'
@@ -560,6 +615,7 @@ Resources:
           CACHE_TABLE_NAME: !Ref CompanyEventsTable
           SECRET_NAME: !Ref CompaniesHouseApiSecret
           RATE_LIMIT_TABLE: !Ref RateLimitsTable
+          DATA_ARCHIVE_BUCKET: !Sub 'fiscalshield-dc-${Environment}-data-archive-${AWS::AccountId}'
       Events:
         GetFilingHistory:
           Type: Api
@@ -638,6 +694,100 @@ Resources:
             Method: GET
 
   # ========================================================================
+  # STEP FUNCTIONS STATE MACHINE
+  # ========================================================================
+
+  CompanyResearchStateMachine:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      Name: !Sub 'fiscalshield-dc-${Environment}-CompanyResearch'
+      Type: STANDARD
+      DefinitionUri: state-machines/company-research.asl.json
+      DefinitionSubstitutions:
+        CompanyLookupFunctionArn: !GetAtt CompanyLookupFunction.Arn
+        OfficersFunctionArn: !GetAtt OfficersFunction.Arn
+        PSCFunctionArn: !GetAtt PSCFunction.Arn
+        ChargesFunctionArn: !GetAtt ChargesFunction.Arn
+        InsolvencyFunctionArn: !GetAtt InsolvencyFunction.Arn
+        FilingHistoryFunctionArn: !GetAtt FilingHistoryFunction.Arn
+      Role: !GetAtt StepFunctionsExecutionRole.Arn
+      Logging:
+        Level: !If [IsProduction, ERROR, ALL]
+        IncludeExecutionData: true
+        Destinations:
+          - CloudWatchLogsLogGroup:
+              LogGroupArn: !GetAtt StepFunctionsLogGroup.Arn
+      Tracing:
+        Enabled: !If [EnableTracing, true, false]
+      Tags:
+        Environment: !Ref Environment
+        Purpose: Orchestrate company data collection from multiple sources
+
+  StepFunctionsExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub 'fiscalshield-dc-${Environment}-StepFunctionsRole'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: states.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: InvokeLambdaFunctions
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource:
+                  - !GetAtt CompanyLookupFunction.Arn
+                  - !GetAtt OfficersFunction.Arn
+                  - !GetAtt PSCFunction.Arn
+                  - !GetAtt ChargesFunction.Arn
+                  - !GetAtt InsolvencyFunction.Arn
+                  - !GetAtt FilingHistoryFunction.Arn
+        - PolicyName: CloudWatchLogs
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogDelivery
+                  - logs:GetLogDelivery
+                  - logs:UpdateLogDelivery
+                  - logs:DeleteLogDelivery
+                  - logs:ListLogDeliveries
+                  - logs:PutLogEvents
+                  - logs:PutResourcePolicy
+                  - logs:DescribeResourcePolicies
+                  - logs:DescribeLogGroups
+                Resource: '*'
+        - PolicyName: XRayTracing
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - xray:PutTraceSegments
+                  - xray:PutTelemetryRecords
+                Resource: '*'
+      Tags:
+        - Key: Name
+          Value: !Sub 'fiscalshield-dc-${Environment}-StepFunctionsRole'
+        - Key: Environment
+          Value: !Ref Environment
+
+  StepFunctionsLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/vendedlogs/states/fiscalshield-dc-${Environment}-CompanyResearch'
+      RetentionInDays: !Ref LogRetentionDays
+      KmsKeyId: !If [IsProduction, !GetAtt LogsKMSKey.Arn, !Ref AWS::NoValue]
+
+  # ========================================================================
   # API GATEWAY
   # ========================================================================
 
@@ -693,6 +843,14 @@ Outputs:
     Value: !Ref HMRCDataTable
     Export:
       Name: !Sub '${AWS::StackName}-HMRCDataTable'
+
+  DataArchiveBucketName:
+    Description: S3 bucket for archiving large API responses
+    Value: !Sub 'fiscalshield-dc-${Environment}-data-archive-${AWS::AccountId}'
+
+  DataArchiveBucketArn:
+    Description: ARN of S3 data archive bucket
+    Value: !Sub 'arn:aws:s3:::fiscalshield-dc-${Environment}-data-archive-${AWS::AccountId}'
 
   CompaniesHouseSecretArn:
     Description: ARN of Companies House API secret
@@ -777,6 +935,18 @@ Outputs:
     Value: !Sub '/fiscalshield/data-collection/${Environment}/api-url'
     Export:
       Name: !Sub '${AWS::StackName}-ApiUrlParameter'
+
+  CompanyResearchStateMachineArn:
+    Description: ARN of Company Research Step Functions state machine
+    Value: !Ref CompanyResearchStateMachine
+    Export:
+      Name: !Sub '${AWS::StackName}-CompanyResearchStateMachine'
+
+  CompanyResearchStateMachineName:
+    Description: Name of Company Research Step Functions state machine
+    Value: !GetAtt CompanyResearchStateMachine.Name
+    Export:
+      Name: !Sub '${AWS::StackName}-CompanyResearchStateMachineName'
 
   AllApiEndpoints:
     Description: All available API endpoints
