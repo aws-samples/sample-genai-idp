@@ -10,6 +10,15 @@ import urllib.error
 from datetime import datetime
 from botocore.exceptions import ClientError
 
+# Import rate limiter
+try:
+    from rate_limiter import check_rate_limit, RateLimitExceeded, get_rate_limit_status
+except ImportError:
+    print("Warning: rate_limiter module not found, rate limiting disabled")
+    check_rate_limit = None
+    get_rate_limit_status = None
+    RateLimitExceeded = Exception
+
 # Initialize AWS clients
 secrets_manager = boto3.client("secretsmanager")
 dynamodb = boto3.resource("dynamodb")
@@ -76,7 +85,19 @@ def lambda_handler(event, context):
         api_credentials = get_companies_house_credentials()
 
         # Lookup PSC from Companies House API
-        psc_data = lookup_psc(company_number, api_credentials["api_key"])
+        try:
+            psc_data = lookup_psc(company_number, api_credentials["api_key"])
+        except RateLimitExceeded as e:
+            print(f"Rate limit exceeded: {str(e)}")
+            return create_response(
+                429,
+                {
+                    "success": False,
+                    "error": "Rate limit exceeded",
+                    "message": str(e),
+                    "company_number": company_number,
+                },
+            )
 
         if psc_data is None:
             print(f"No PSC data found for company: {company_number}")
@@ -153,6 +174,17 @@ def lookup_psc(company_number, api_key):
     """
     Call Companies House API to get PSC data
     """
+    # Check rate limit before making API call
+    if check_rate_limit:
+        try:
+            rate_status = check_rate_limit("companies_house")
+            print(f"Rate limit status: {rate_status['current_count']}/{rate_status['limit']}")
+        except RateLimitExceeded as e:
+            print(f"Rate limit exceeded: {str(e)}")
+            raise
+        except Exception as e:
+            print(f"Rate limit check failed: {e} - proceeding anyway")
+    
     base_url = "https://api.company-information.service.gov.uk"
 
     # Create authentication header
