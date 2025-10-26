@@ -448,6 +448,69 @@ Resources:
       TreatMissingData: notBreaching
 
   # ========================================================================
+  # LAMBDA FUNCTIONS
+  # ========================================================================
+
+  CompanyLookupFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub 'fiscalshield-dc-${Environment}-CompanyLookup'
+      Description: Lookup Companies House company profile with caching
+      CodeUri: ../../src/data_collection/companies_house/company_lookup/
+      Handler: handler.lambda_handler
+      Role: !GetAtt DataCollectionLambdaRole.Arn
+      Environment:
+        Variables:
+          CACHE_TABLE_NAME: !Ref CompanyEventsTable
+          SECRET_NAME: !Ref CompaniesHouseApiSecret
+      Events:
+        GetCompany:
+          Type: Api
+          Properties:
+            RestApiId: !Ref DataCollectionApi
+            Path: /company/{company_number}
+            Method: GET
+
+  HealthCheckFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub 'fiscalshield-dc-${Environment}-HealthCheck'
+      Description: Health check endpoint for Core Stack integration
+      CodeUri: ../../src/data_collection/health/
+      Handler: handler.lambda_handler
+      Role: !GetAtt DataCollectionLambdaRole.Arn
+      Timeout: 10
+      MemorySize: 128
+      Environment:
+        Variables:
+          SECRET_NAME: !Ref CompaniesHouseApiSecret
+      Events:
+        HealthCheck:
+          Type: Api
+          Properties:
+            RestApiId: !Ref DataCollectionApi
+            Path: /health
+            Method: GET
+
+  # ========================================================================
+  # API GATEWAY
+  # ========================================================================
+
+  DataCollectionApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: !Sub 'fiscalshield-dc-${Environment}-api'
+      StageName: !Ref Environment
+      Cors:
+        AllowMethods: "'GET,POST,OPTIONS'"
+        AllowHeaders: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+        AllowOrigin: "'*'"
+      TracingEnabled: !If [EnableTracing, true, false]
+      Tags:
+        Environment: !Ref Environment
+        Stack: fiscalshield-dc
+
+  # ========================================================================
   # OUTPUTS
   # ========================================================================
 
@@ -499,3 +562,21 @@ Outputs:
   ConventionBasedNaming:
     Description: Resource naming convention for cross-stack access
     Value: !Sub 'fiscalshield-dc-${Environment}-{ResourceName}'
+
+  ApiGatewayUrl:
+    Description: Base URL for Data Collection API Gateway
+    Value: !Sub 'https://${DataCollectionApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}'
+    Export:
+      Name: !Sub '${AWS::StackName}-ApiUrl'
+
+  CompanyLookupFunctionArn:
+    Description: ARN of Company Lookup Lambda function
+    Value: !GetAtt CompanyLookupFunction.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-CompanyLookupFunction'
+
+  HealthCheckFunctionArn:
+    Description: ARN of Health Check Lambda function
+    Value: !GetAtt HealthCheckFunction.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-HealthCheckFunction'
