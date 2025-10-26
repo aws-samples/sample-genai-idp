@@ -11,11 +11,13 @@ import { SettingsContext } from '../contexts/settings';
 import useParameterStore from '../hooks/use-parameter-store';
 import useAppContext from '../contexts/app';
 
+import CompanySelect from '../components/company-select';
 import DocumentsRoutes from './DocumentsRoutes';
 import DocumentsQueryRoutes from './DocumentsQueryRoutes';
 import DocumentsAnalyticsRoutes from './DocumentsAnalyticsRoutes';
 
 import {
+  COMPANY_SELECT_PATH,
   DOCUMENTS_PATH,
   DEFAULT_PATH,
   LOGIN_PATH,
@@ -40,6 +42,9 @@ const AuthRoutes = ({ redirectParam }) => {
   return (
     <SettingsContext.Provider value={settingsContextValue}>
       <Switch>
+        <Route exact path={COMPANY_SELECT_PATH}>
+          <CompanySelect />
+        </Route>
         <Route path={DOCUMENTS_PATH}>
           <DocumentsRoutes />
         </Route>
