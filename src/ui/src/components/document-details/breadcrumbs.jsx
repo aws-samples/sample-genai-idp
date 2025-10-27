@@ -26,10 +26,8 @@ const Breadcrumbs = () => {
   const decodedDocumentId = decodeURIComponent(objectKey);
   // Always ensure the objectKey in the URL is properly encoded to handle slashes correctly
   const encodedObjectKey = encodeURIComponent(decodedDocumentId);
-  
-  const items = [
-    { text: 'Company Selection', href: `#${COMPANY_SELECT_PATH}` },
-  ];
+
+  const items = [{ text: 'Company Selection', href: `#${COMPANY_SELECT_PATH}` }];
 
   if (companyContext) {
     items.push({

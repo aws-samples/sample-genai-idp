@@ -22,11 +22,11 @@ export const documentsNavHeader = { text: 'Tools', href: `#${DEFAULT_PATH}` };
 // Function to generate navigation items based on user role
 export const getDocumentsNavItems = (isAdmin = false) => {
   const baseItems = [
-    { 
-      type: 'link', 
-      text: '← Change Company', 
+    {
+      type: 'link',
+      text: '← Change Company',
       href: `#${COMPANY_SELECT_PATH}`,
-      info: 'Return to company selection'
+      info: 'Return to company selection',
     },
     { type: 'divider' },
     { type: 'link', text: 'Document List', href: `#${DOCUMENTS_PATH}` },

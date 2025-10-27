@@ -19,9 +19,7 @@ const Breadcrumbs = () => {
     }
   }, []);
 
-  const items = [
-    { text: 'Company Selection', href: `#${COMPANY_SELECT_PATH}` },
-  ];
+  const items = [{ text: 'Company Selection', href: `#${COMPANY_SELECT_PATH}` }];
 
   if (companyContext) {
     items.push({
