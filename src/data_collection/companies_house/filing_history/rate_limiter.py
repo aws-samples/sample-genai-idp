@@ -7,7 +7,6 @@ import os
 import time
 import boto3
 from botocore.exceptions import ClientError
-from decimal import Decimal
 
 # Initialize DynamoDB client
 dynamodb = boto3.resource("dynamodb")
