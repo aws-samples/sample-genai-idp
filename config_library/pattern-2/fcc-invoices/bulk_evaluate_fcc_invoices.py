@@ -1,27 +1,52 @@
 #!/usr/bin/env python3
 """
-Bulk evaluation script for FCC invoices using Stickler.
+Bulk evaluation script for FCC invoices using SticklerEvaluationService.
 
 This script:
 1. Loads ground truth from CSV
 2. Loads inference results from a directory
 3. Matches ground truth to inference results
-4. Evaluates using Stickler's BulkStructuredModelEvaluator
+4. Evaluates using SticklerEvaluationService (IDP framework integration)
 5. Produces aggregated evaluation metrics
 """
 
 import argparse
 import json
+import sys
 from pathlib import Path
 from typing import Dict, List, Tuple, Any
 import pandas as pd
-
-from stickler import StructuredModel
 from collections import defaultdict
+import numpy as np
+
+# Add lib path for idp_common imports
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "lib" / "idp_common_pkg"))
+
+from idp_common.evaluation.stickler_service import SticklerEvaluationService
+from idp_common.models import Document, Section
+from idp_common.evaluation.models import DocumentEvaluationResult
+
+
+def convert_to_json_serializable(obj):
+    """Convert numpy types to Python native types for JSON serialization."""
+    if isinstance(obj, np.bool_):
+        return bool(obj)
+    elif isinstance(obj, np.integer):
+        return int(obj)
+    elif isinstance(obj, np.floating):
+        return float(obj)
+    elif isinstance(obj, np.ndarray):
+        return obj.tolist()
+    elif isinstance(obj, dict):
+        return {k: convert_to_json_serializable(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [convert_to_json_serializable(item) for item in obj]
+    else:
+        return obj
 
 
 class BulkEvaluator:
-    """Handles bulk evaluation of FCC invoice extraction results."""
+    """Handles bulk evaluation of FCC invoice extraction results using SticklerEvaluationService."""
     
     def __init__(
         self,
@@ -53,11 +78,18 @@ class BulkEvaluator:
         # Create output directory
         self.output_dir.mkdir(parents=True, exist_ok=True)
         
-        # Load configuration and create model class
+        # Load configuration and initialize SticklerEvaluationService
         self.stickler_config = self._load_stickler_config()
-        self.model_class = StructuredModel.model_from_json(self.stickler_config)
         
-        # Initialize aggregation state (same logic as BulkStructuredModelEvaluator)
+        # Initialize SticklerEvaluationService with the loaded config
+        service_config = {
+            "stickler_models": {
+                "fcc_invoice": self.stickler_config
+            }
+        }
+        self.evaluation_service = SticklerEvaluationService(config=service_config)
+        
+        # Initialize aggregation state
         self.confusion_matrix = {
             "overall": defaultdict(int),
             "fields": defaultdict(lambda: defaultdict(int)),
@@ -66,8 +98,8 @@ class BulkEvaluator:
         self.errors = []
         self.processed_count = 0
         
-        print(f"✓ Initialized evaluator")
-        print(f"  Model: {self.stickler_config['model_name']}")
+        print(f"✓ Initialized evaluator with SticklerEvaluationService")
+        print(f"  Model: {self.stickler_config.get('model_name', 'fcc_invoice')}")
         print(f"  Output directory: {self.output_dir}")
     
     def _load_stickler_config(self) -> Dict[str, Any]:
@@ -93,12 +125,12 @@ class BulkEvaluator:
         print(f"✓ Loaded {len(df)} documents with ground truth labels")
         return df
     
-    def load_inference_results(self) -> Dict[str, Dict[str, Any]]:
+    def load_inference_results(self) -> Dict[str, Tuple[Dict[str, Any], str]]:
         """
         Load all inference results from the results directory.
         
         Returns:
-            Dictionary mapping doc_id to inference result data
+            Dictionary mapping doc_id to tuple of (inference_result_data, result_file_path)
         """
         print(f"\n📁 Loading inference results from {self.results_dir}...")
         results = {}
@@ -118,7 +150,8 @@ class BulkEvaluator:
                 with open(result_path, 'r') as f:
                     result_data = json.load(f)
                 
-                results[doc_id] = result_data.get("inference_result", {})
+                inference_result = result_data.get("inference_result", {})
+                results[doc_id] = (inference_result, str(result_path))
             except Exception as e:
                 print(f"  ⚠️  Error loading {doc_id}: {e}")
                 continue
@@ -129,17 +162,17 @@ class BulkEvaluator:
     def match_ground_truth_to_results(
         self,
         ground_truth_df: pd.DataFrame,
-        inference_results: Dict[str, Dict[str, Any]]
-    ) -> List[Tuple[str, Dict[str, Any], Dict[str, Any]]]:
+        inference_results: Dict[str, Tuple[Dict[str, Any], str]]
+    ) -> List[Tuple[str, Dict[str, Any], Dict[str, Any], str]]:
         """
         Match ground truth labels to inference results.
         
         Args:
             ground_truth_df: DataFrame with ground truth
-            inference_results: Dictionary of inference results
+            inference_results: Dictionary of inference results with file paths
         
         Returns:
-            List of tuples (doc_id, expected_results, actual_results)
+            List of tuples (doc_id, expected_results, actual_results, result_file_path)
         """
         print(f"\n🔗 Matching ground truth to inference results...")
         matched_pairs = []
@@ -168,9 +201,9 @@ class BulkEvaluator:
                     continue
                 
                 expected_results = json.loads(labels_json)
-                actual_results = inference_results[result_key]
+                actual_results, result_file_path = inference_results[result_key]
                 
-                matched_pairs.append((doc_id, expected_results, actual_results))
+                matched_pairs.append((doc_id, expected_results, actual_results, result_file_path))
             except Exception as e:
                 print(f"  ⚠️  Error parsing labels for {doc_id}: {e}")
                 continue
@@ -207,84 +240,204 @@ class BulkEvaluator:
         
         return normalized
     
-    def _accumulate_confusion_matrix(self, cm_result: Dict[str, Any]):
+    def _create_section_from_data(self, doc_id: str, classification: str = "fcc_invoice") -> Section:
         """
-        Accumulate confusion matrix from a single result (same logic as BulkStructuredModelEvaluator).
+        Create a Section object for evaluation.
         
         Args:
-            cm_result: Confusion matrix result from comparison
-        """
-        # Accumulate overall metrics
-        if "overall" in cm_result:
-            for metric_name, value in cm_result["overall"].items():
-                if isinstance(value, (int, float)) and metric_name in [
-                    "tp", "fp", "tn", "fn", "fp1", "fp2", "fa", "fd"
-                ]:
-                    self.confusion_matrix["overall"][metric_name] += value
+            doc_id: Document identifier
+            classification: Document classification
         
-        # Accumulate field-level metrics
-        if "fields" in cm_result:
-            for field_path, field_data in cm_result["fields"].items():
-                # Get the aggregate metrics for this field
-                if "aggregate" in field_data:
-                    for metric_name, value in field_data["aggregate"].items():
-                        if isinstance(value, (int, float)) and metric_name in [
-                            "tp", "fp", "tn", "fn", "fp1", "fp2", "fa", "fd"
-                        ]:
-                            self.confusion_matrix["fields"][field_path][metric_name] += value
+        Returns:
+            Section object
+        """
+        return Section(
+            section_id="1",
+            classification=classification,
+            confidence=1.0,
+            page_ids=["1"]
+        )
+    
+    def _save_ground_truth_to_temp(self, doc_id: str, expected_results: Dict[str, Any]) -> str:
+        """
+        Save ground truth to a temporary file for evaluation.
+        
+        Args:
+            doc_id: Document identifier
+            expected_results: Ground truth data (will be normalized to list format)
+        
+        Returns:
+            Path to temporary file
+        """
+        temp_dir = self.output_dir / "temp_ground_truth"
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Normalize to list format before saving
+        normalized_results = self._normalize_to_list_format(expected_results)
+        
+        temp_file = temp_dir / f"{doc_id}_gt.json"
+        with open(temp_file, 'w') as f:
+            json.dump({"inference_result": normalized_results}, f, indent=2)
+        
+        return str(temp_file)
+    
+    def _save_actual_results_to_temp(self, doc_id: str, actual_results: Dict[str, Any]) -> str:
+        """
+        Save actual results to a temporary file for evaluation.
+        
+        Args:
+            doc_id: Document identifier
+            actual_results: Actual inference results (will be normalized to list format)
+        
+        Returns:
+            Path to temporary file
+        """
+        temp_dir = self.output_dir / "temp_actual_results"
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Normalize to list format before saving
+        normalized_results = self._normalize_to_list_format(actual_results)
+        
+        temp_file = temp_dir / f"{doc_id}_actual.json"
+        with open(temp_file, 'w') as f:
+            json.dump({"inference_result": normalized_results}, f, indent=2)
+        
+        return str(temp_file)
+    
+    def _accumulate_metrics_from_evaluation(self, eval_result: DocumentEvaluationResult):
+        """
+        Accumulate metrics from DocumentEvaluationResult.
+        
+        Args:
+            eval_result: Document evaluation result from SticklerEvaluationService
+        """
+        # Accumulate field-level metrics from section results
+        for section_result in eval_result.section_results:
+            for attr_result in section_result.attributes:
+                field_name = attr_result.name
+                
+                # Determine metric contribution based on attribute result
+                expected = attr_result.expected
+                actual = attr_result.actual
+                matched = attr_result.matched
+                
+                # Case 1: Expected value is None/empty
+                if expected is None or (isinstance(expected, str) and not expected.strip()) or (isinstance(expected, list) and len(expected) == 0):
+                    if actual is None or (isinstance(actual, str) and not actual.strip()) or (isinstance(actual, list) and len(actual) == 0):
+                        self.confusion_matrix["fields"][field_name]["tn"] += 1
+                        self.confusion_matrix["overall"]["tn"] += 1
+                    else:
+                        self.confusion_matrix["fields"][field_name]["fp"] += 1
+                        self.confusion_matrix["fields"][field_name]["fp1"] += 1
+                        self.confusion_matrix["overall"]["fp"] += 1
+                        self.confusion_matrix["overall"]["fp1"] += 1
+                
+                # Case 2: Expected value exists but actual doesn't
+                elif actual is None or (isinstance(actual, str) and not actual.strip()) or (isinstance(actual, list) and len(actual) == 0):
+                    self.confusion_matrix["fields"][field_name]["fn"] += 1
+                    self.confusion_matrix["overall"]["fn"] += 1
+                
+                # Case 3: Both values exist
+                else:
+                    if matched:
+                        self.confusion_matrix["fields"][field_name]["tp"] += 1
+                        self.confusion_matrix["overall"]["tp"] += 1
+                    else:
+                        self.confusion_matrix["fields"][field_name]["fp"] += 1
+                        self.confusion_matrix["fields"][field_name]["fp2"] += 1
+                        self.confusion_matrix["overall"]["fp"] += 1
+                        self.confusion_matrix["overall"]["fp2"] += 1
     
     def evaluate_all(
         self,
-        matched_pairs: List[Tuple[str, Dict[str, Any], Dict[str, Any]]]
+        matched_pairs: List[Tuple[str, Dict[str, Any], Dict[str, Any], str]]
     ):
         """
-        Evaluate all matched pairs, save individual results, and accumulate metrics.
+        Evaluate all matched pairs using SticklerEvaluationService.
         
         Args:
-            matched_pairs: List of (doc_id, expected, actual) tuples
+            matched_pairs: List of (doc_id, expected, actual, result_file_path) tuples
         """
         print(f"\n⚙️  Evaluating {len(matched_pairs)} documents...")
         
-        for doc_id, expected_results, actual_results in matched_pairs:
+        for doc_id, expected_results, actual_results, result_file_path in matched_pairs:
             try:
-                # Normalize both to list format (ground truth already has lists, predictions have strings)
-                expected_results = self._normalize_to_list_format(expected_results)
-                actual_results = self._normalize_to_list_format(actual_results)
+                # Create a Section object for evaluation
+                section = self._create_section_from_data(doc_id)
                 
-                # Create model instances
-                gt_model = self.model_class(**expected_results)
-                pred_model = self.model_class(**actual_results)
+                # Save ground truth and actual results to temporary files (normalized to list format)
+                gt_file_path = self._save_ground_truth_to_temp(doc_id, expected_results)
+                actual_file_path = self._save_actual_results_to_temp(doc_id, actual_results)
                 
-                # Perform comparison for individual result
-                comparison_result = gt_model.compare_with(
-                    pred_model,
-                    include_confusion_matrix=True,
-                    document_non_matches=True
+                # Use SticklerEvaluationService to evaluate
+                # Note: We're adapting the service to work with local files
+                eval_result = self.evaluation_service.evaluate_document(
+                    document_id=doc_id,
+                    sections=[section],
+                    expected_results_uri=f"file://{gt_file_path}",
+                    actual_results_uri=f"file://{actual_file_path}"
                 )
+                
+                # Convert evaluation result to dict for saving
+                result_dict = {
+                    "doc_id": doc_id,
+                    "evaluation_result": {
+                        "document_id": eval_result.document_id,
+                        "overall_metrics": eval_result.overall_metrics,
+                        "execution_time": eval_result.execution_time,
+                        "section_results": [
+                            {
+                                "section_id": sr.section_id,
+                                "document_class": sr.document_class,
+                                "metrics": sr.metrics,
+                                "attributes": [
+                                    {
+                                        "name": ar.name,
+                                        "expected": ar.expected,
+                                        "actual": ar.actual,
+                                        "matched": ar.matched,
+                                        "score": ar.score,
+                                        "reason": ar.reason,
+                                        "evaluation_method": ar.evaluation_method
+                                    }
+                                    for ar in sr.attributes
+                                ]
+                            }
+                            for sr in eval_result.section_results
+                        ]
+                    }
+                }
+                
+                # Convert numpy types to JSON-serializable types
+                result_dict = convert_to_json_serializable(result_dict)
                 
                 # Save individual result
                 result_file = self.output_dir / f"{doc_id}.json"
                 with open(result_file, 'w') as f:
-                    json.dump({
-                        "doc_id": doc_id,
-                        "comparison_result": comparison_result
-                    }, f, indent=2)
+                    json.dump(result_dict, f, indent=2)
                 
-                # Accumulate confusion matrix for aggregation
-                if "confusion_matrix" in comparison_result:
-                    self._accumulate_confusion_matrix(comparison_result["confusion_matrix"])
+                # Accumulate metrics for aggregation
+                self._accumulate_metrics_from_evaluation(eval_result)
                 
-                # Collect non-matches
-                if "non_matches" in comparison_result:
-                    for non_match in comparison_result["non_matches"]:
-                        non_match_with_doc = non_match.copy()
-                        non_match_with_doc["doc_id"] = doc_id
-                        self.non_matches.append(non_match_with_doc)
+                # Collect non-matches (attributes that didn't match)
+                for section_result in eval_result.section_results:
+                    for attr_result in section_result.attributes:
+                        if not attr_result.matched:
+                            self.non_matches.append({
+                                "doc_id": doc_id,
+                                "field": attr_result.name,
+                                "expected": attr_result.expected,
+                                "actual": attr_result.actual,
+                                "reason": attr_result.reason
+                            })
                 
                 self.processed_count += 1
                 
             except Exception as e:
                 print(f"  ✗ Error evaluating {doc_id}: {e}")
+                import traceback
+                traceback.print_exc()
+                
                 # Save error result
                 error_file = self.output_dir / f"{doc_id}.error.json"
                 with open(error_file, 'w') as f:

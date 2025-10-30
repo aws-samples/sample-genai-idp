@@ -14,12 +14,14 @@ This example demonstrates:
 
 ```
 config_library/pattern-2/fcc-invoices/
-├── README.md                           # This file
-├── config.yaml                         # Base IDP configuration
-├── fcc_configured.yaml                 # Deployed stack configuration
-├── stickler_config.json               # Stickler evaluation rules
-├── bulk_evaluate_fcc_invoices.py      # Evaluation script
-└── sr_refactor_labels_5_5_25.csv      # Ground truth labels (full dataset)
+├── README.md                              # This file
+├── config.yaml                            # Base IDP configuration
+├── fcc_configured.yaml                    # Deployed stack configuration
+├── stickler_config.json                   # Stickler evaluation rules
+├── bulk_evaluate_fcc_invoices.py          # Legacy evaluation script (complex)
+├── bulk_evaluate_fcc_invoices_simple.py   # Simplified evaluation script (recommended)
+├── sample_labels_3.csv                    # Ground truth for 3 sample documents
+└── sr_refactor_labels_5_5_25.csv          # Ground truth labels (full dataset)
 ```
 
 ## Sample Data
@@ -139,26 +141,43 @@ idp-cli download-results \
 
 ## Step 4: Run Evaluation
 
-Evaluate the extraction results against ground truth:
+Evaluate the extraction results against ground truth using the **simplified evaluation script** (recommended):
 
 ```bash
 cd config_library/pattern-2/fcc-invoices
 
-python bulk_evaluate_fcc_invoices.py \
+python bulk_evaluate_fcc_invoices_simple.py \
   --results-dir ../../../fcc_results/cli-batch-20251017-190516 \
   --csv-path sample_labels_3.csv \
+  --config-path stickler_config.json \
   --output-dir evaluation_output
 ```
 
-**Note**: The `sample_labels_3.csv` contains ground truth for only 1 of the 3 sample documents. For full dataset evaluation, use `sr_refactor_labels_5_5_25.csv`.
+**Alternative**: Use the legacy script (more complex, same results):
+```bash
+python bulk_evaluate_fcc_invoices.py \
+  --results-dir ../../../fcc_results/cli-batch-20251017-190516 \
+  --csv-path sample_labels_3.csv \
+  --config-path stickler_config.json \
+  --output-dir evaluation_output
+```
+
+**Note**: The `sample_labels_3.csv` contains ground truth for 3 sample documents. For full dataset evaluation, use `sr_refactor_labels_5_5_25.csv`.
 
 **What this does:**
 - Loads ground truth labels from CSV
 - Matches documents by doc_id
-- Performs doc-by-doc comparison using Stickler
+- Performs doc-by-doc comparison using SticklerEvaluationService
 - Saves individual comparison results
 - Aggregates metrics across all documents
 - Generates comprehensive evaluation report
+
+**Why use the simplified script?**
+- 260 lines vs 671 lines (61% less code)
+- Easier to understand and modify
+- No temporary file overhead
+- Direct integration with SticklerEvaluationService
+- Same accurate results
 
 **Expected output:**
 ```
