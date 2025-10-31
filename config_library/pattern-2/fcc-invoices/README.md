@@ -141,11 +141,31 @@ idp-cli download-results \
 
 ## Step 4: Run Evaluation
 
-Evaluate the extraction results against ground truth using the **simplified evaluation script** (recommended):
+### Option A: Single Source of Truth (Recommended)
+
+Use the IDP config directly - no separate Stickler config needed:
 
 ```bash
 cd config_library/pattern-2/fcc-invoices
 
+python bulk_evaluate_from_idp_config.py \
+  --results-dir ../../../fcc_results/cli-batch-20251017-190516 \
+  --csv-path sample_labels_3.csv \
+  --idp-config-path sr_FCC_config.json \
+  --output-dir evaluation_output
+```
+
+**Benefits:**
+- Single source of truth - evaluation config comes from IDP config
+- Extracts Stickler settings from `x-aws-stickler-*` extensions in JSON Schema
+- No need to maintain separate `stickler_config.json`
+- Guarantees evaluation matches deployment configuration
+
+### Option B: Separate Stickler Config
+
+Use the simplified script with standalone Stickler config:
+
+```bash
 python bulk_evaluate_fcc_invoices_simple.py \
   --results-dir ../../../fcc_results/cli-batch-20251017-190516 \
   --csv-path sample_labels_3.csv \
@@ -153,7 +173,16 @@ python bulk_evaluate_fcc_invoices_simple.py \
   --output-dir evaluation_output
 ```
 
-**Alternative**: Use the legacy script (more complex, same results):
+**Benefits:**
+- 260 lines vs 671 lines (61% less code)
+- Easier to understand and modify
+- No temporary file overhead
+- Direct integration with SticklerEvaluationService
+
+### Option C: Legacy Script
+
+Use the original complex script (not recommended):
+
 ```bash
 python bulk_evaluate_fcc_invoices.py \
   --results-dir ../../../fcc_results/cli-batch-20251017-190516 \
@@ -164,20 +193,13 @@ python bulk_evaluate_fcc_invoices.py \
 
 **Note**: The `sample_labels_3.csv` contains ground truth for 3 sample documents. For full dataset evaluation, use `sr_refactor_labels_5_5_25.csv`.
 
-**What this does:**
+**What evaluation does:**
 - Loads ground truth labels from CSV
 - Matches documents by doc_id
 - Performs doc-by-doc comparison using SticklerEvaluationService
 - Saves individual comparison results
 - Aggregates metrics across all documents
 - Generates comprehensive evaluation report
-
-**Why use the simplified script?**
-- 260 lines vs 671 lines (61% less code)
-- Easier to understand and modify
-- No temporary file overhead
-- Direct integration with SticklerEvaluationService
-- Same accurate results
 
 **Expected output:**
 ```
@@ -416,12 +438,48 @@ python bulk_evaluate_fcc_invoices_simple.py \
   --output-dir evaluation_output-2
 ```
 
+### Evaluation with IDP Config
+
+New evaluation script that uses IDP config directly:
+
+```bash
+python bulk_evaluate_from_idp_config.py \
+  --results-dir ../../../fcc_results-updated-2/cli-batch-20251031-164416 \
+  --csv-path sample_labels_3.csv \
+  --idp-config-path sr_FCC_config.json \
+  --output-dir evaluation_output-idp-config
+```
+
+**Results:**
+```
+📈 Overall Metrics:
+  Precision: 0.5185
+  Recall:    1.0000
+  F1 Score:  0.6829
+  Accuracy:  0.5185
+
+  Confusion Matrix:
+    TP:     14  |  FP:     13
+    FN:      0  |  TN:      0
+    FP1:      2  |  FP2:     11
+
+📋 Field-Level Metrics (Top Fields):
+  agency                 F1: 0.8000
+  gross_total            F1: 0.8000
+  net_amount_due         F1: 0.8000
+  line_item__days        F1: 0.8000
+  line_item__start_date  F1: 0.8000
+  line_item__end_date    F1: 0.8000
+```
+
 ### Notes
 
 - Multiple deploy/inference cycles were run to iterate on the configuration
 - Final batch ID: `cli-batch-20251031-164416`
 - Evaluation successfully produced results with the simplified script
 - Configuration now properly uses `{ATTRIBUTE_NAMES_AND_DESCRIPTIONS}` placeholder for automatic schema injection
+- New `bulk_evaluate_from_idp_config.py` extracts Stickler config from `x-aws-stickler-*` extensions
+- Single source of truth: IDP config contains both extraction schema and evaluation settings
 
 -region us-west-2 \
   --wait \
