@@ -370,79 +370,59 @@ idp-cli list-stacks --region us-west-2
 
 ## Update Log
 
-### 10/31/2024 - Flat Schema Migration
+### October 31, 2024 - Flat Schema Testing
 
-Updated the FCC invoice configuration to use a flat array schema structure for better evaluation compatibility.
+Testing with updated `sr_FCC_config.json` that uses a flat array structure for all fields.
 
 **Configuration Changes:**
-- Created `sr_FCC_config.json` with flat schema (arrays for all fields)
-- Updated field names: `agency_name` → `agency`, `advertiser_name` → `advertiser`, etc.
-- Changed line items from nested objects to parallel arrays with `line_item__` prefix
-- Added Stickler ex31, 2ten - Flat Schema Testing
+- Simple fields (agency, advertiser, gross_total, net_amount_due) as single-element arrays
+- Line item fields with `line_item__` prefix as parallel arrays
+- Stickler evaluation extensions added to JSON Schema
+- Assessment and summarization steps disabled for faster processing
 
-sionConfiguration Changess (`x-aws-stickler-*`) to JSON Schema
-- Updated extraction prompts to use `{ATTRIBUTE_NAMES_AND_DESCRIPTIONS}` placeholder
-- Disag with updbled `sr_FCCed assessson` that uses a flme array stnt and  for all fields:
-- Simple fisummarigency, advertiserzation steps , net_amount_due) afor faster pment arrays
-- Linerocessings with `lineprefix as parallel rays
-- Stickler evaluation eons added to a
-- Aessment and summariion steps disabled for fssing
+**Test Run Commands:**
 
-###t Run Commands
-
-**Deploy with ated configura**
-```b
-**Commi deploy \
-  -ands Run:**c-inf-tes
-  --custom-config config_library/patternFCC_config.json 
-1. Dregion us-west-2 \
-  --wait eploy stack with updated configuration:
-```-template-url https://s3.ubashst-2.amazonaartifacts-us-west/idp-wip/idp-maiyaml \
-  --min-email sazon.com \
-  --patt
+1. Deploy with updated configuration:
+```bash
+idp-cli deploy \
+  --stack-name fcc-inf-test-2 \
+  --custom-config config_library/pattern-2/fcc-invoices/sr_FCC_config.json \
+  --region us-west-2 \
+  --wait \
+  --template-url https://s3.us-west-2.amazonaws.com/bobs-artifacts-us-west-2/idp-wip/idp-main.yaml \
+  --admin-email sromo@amazon.com \
+  --pattern pattern-2
 ```
 
-*erence:**
+2. Run inference:
 ```bash
-idn-inference \
-  --staame fcc-inf-\
-  --manifples/fcc-s/fcc_invoic.csv \
-  ion us-west-2
-
-
-**Monitor idp-cli deploy \
-```bash
-idp-  --stacus \
-  --stack-k-namfcc-inf-tee fc \
-  --batch-ic-inf-test-220251031-164 \6 \
- -wait
+idp-cli run-inference \
+  --stack-name fcc-inf-test-2 \
+  --manifest samples/fcc-invoices/fcc_invoices_sample_3.csv \
+  --region us-west-2
 ```
 
- *Download results --custom-config config_library/pattern-2/fcc-invoices/sr_FCC_config.json \
- ``bash
-idp-cli d -nload-results \
+3. Monitor status:
+```bash
+idp-cli status \
+  --stack-name fcc-inf-test-2 \
+  --batch-id cli-batch-20251031-164416 \
+  --wait
+```
+
+4. Download results:
+```bash
+idp-cli download-results \
   --stack-name fcc-inf-test-2 \
   --batch-id cli-batch-20251031-164416 \
   --output-dir fcc_results-updated-2 \
   --region us-west-2
 ```
 
-**Run evaluation:**
+5. Run evaluation with IDP config:
 ```bash
 cd config_library/pattern-2/fcc-invoices
 
-python bulk_evaluate_fcc_invoices_simple.py \
-  --results-dir ../../../fcc_results-updated-2/cli-batch-20251031-164416 \
-  --csv-path sample_labels_3.csv \
-  --config-path stickler_config.json \
-  --output-dir evaluation_output-2
-```
-
-### Evaluation with IDP Config
-
-New evaluation script that uses IDP config directly:
-
-```bash
 python bulk_evaluate_from_idp_config.py \
   --results-dir ../../../fcc_results-updated-2/cli-batch-20251031-164416 \
   --csv-path sample_labels_3.csv \
@@ -450,7 +430,7 @@ python bulk_evaluate_from_idp_config.py \
   --output-dir evaluation_output-idp-config
 ```
 
-**Results:**
+**Evaluation Results:**
 ```
 📈 Overall Metrics:
   Precision: 0.5185
@@ -472,58 +452,16 @@ python bulk_evaluate_from_idp_config.py \
   line_item__end_date    F1: 0.8000
 ```
 
-### Notes
-
+**Key Learnings:**
 - Multiple deploy/inference cycles were run to iterate on the configuration
 - Final batch ID: `cli-batch-20251031-164416`
-- Evaluation successfully produced results with the simplified script
 - Configuration now properly uses `{ATTRIBUTE_NAMES_AND_DESCRIPTIONS}` placeholder for automatic schema injection
 - New `bulk_evaluate_from_idp_config.py` extracts Stickler config from `x-aws-stickler-*` extensions
 - Single source of truth: IDP config contains both extraction schema and evaluation settings
 
--region us-west-2 \
-  --wait \
-  --template-url https://s3.us-west-2.amazonaws.com/bobs-artifacts-us-west-2/idp-wip/idp-main.yaml \
-  --admin-email sromo@amazon.com \
-  --pattern pattern-2
-```
+## Additional Resources
 
-2. Run inference on sample documents:
-```bash
-idp-cli run-inference \
-  --stack-name fcc-inf-test-2 \
-  --manifest samples/fcc-invoices/fcc_invoices_sample_3.csv \
-  --region us-west-2
-```
-
-3. Monitor processing status:
-```bash
-idp-cli status \
-  --stack-name fcc-inf-test-2 \
-  --batch-id cli-batch-20251031-164416 \
-  --wait
-```
-
-4. Download results:
-```bash
-idp-cli download-results \
-  --stack-namest-2 \
-  --bation us-wesch-id cli-batch-20251031-164416 \
-  `md)
---output-dir fcc_results-updated-2 ommon_pkg/idp_common/README_ST
-October valuation with slified script:
-cd confertion Guide](../../../lin 2 Architecture]ig_librapatmd)
-- [Evapdated-2t../../../stickern-2EADME.md)
-- /fcc-ine_fcc_invoicle.py \ identicalsults
-d) Documentation
-- [Sti
-  --re ..onal Resntation](../ources
-/ [IDPation scrip../../fct (260 l/c251031-71 lines) prod164416 \marking)
-- Simplifi
-  --cmple_labels_3.cpctath stickler_con\
-  --outt-dir evaluation_outpsults:**ring (disabled for
-- Sloyedipt produced with fl metrics using Sat scurEvaluationSece completield names aay format
-uation s:**tion fl
-- JSON Scma iLMn `clasows  calls for coinTE_NAsired ouMES_ANDS}` placeholdtpert
-- Assessment 
-- Extompts must exprequest the 
+- [IDP CLI Documentation](../../README.md)
+- [Stickler Documentation](../../../stickler/README.md)
+- [Pattern 2 Architecture](../README.md)
+- [Evaluation Guide](../../../lib/idp_common_pkg/idp_common/evaluation/README_STICKLER.md) 
