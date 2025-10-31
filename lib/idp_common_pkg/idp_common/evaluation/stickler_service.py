@@ -84,16 +84,23 @@ class SticklerEvaluationService:
 
     def _load_extraction_results(self, uri: str) -> Dict[str, Any]:
         """
-        Load extraction results from S3.
+        Load extraction results from S3 or local file.
 
         Args:
-            uri: S3 URI to the extraction results
+            uri: S3 URI or file:// URI to the extraction results
 
         Returns:
             Dictionary of extraction results
         """
         try:
-            content = s3.get_json_content(uri)
+            # Handle local file paths (file:// URIs)
+            if uri.startswith("file://"):
+                file_path = uri.replace("file://", "")
+                with open(file_path, 'r') as f:
+                    content = json.load(f)
+            else:
+                # Handle S3 URIs
+                content = s3.get_json_content(uri)
 
             # Check if results are wrapped in inference_result key
             if isinstance(content, dict) and "inference_result" in content:
