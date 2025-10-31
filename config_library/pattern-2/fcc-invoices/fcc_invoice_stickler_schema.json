@@ -1,0 +1,107 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "FCC-Invoice",
+  "type": "object",
+  "title": "FCC Invoice",
+  "description": "Federal Communications Commission (FCC) political advertising invoice showing broadcast time purchases, including line items with descriptions, dates, rates, and totals for political advertising campaigns.",
+  "x-aws-stickler-model-name": "FCCInvoice",
+  "x-aws-stickler-match-threshold": 0.7,
+  "properties": {
+    "agency": {
+      "type": "array",
+      "description": "The advertising agency or media buyer handling the political advertising purchase.",
+      "items": {
+        "type": "string"
+      },
+      "x-aws-stickler-comparator": "FuzzyComparator",
+      "x-aws-stickler-threshold": 0.8,
+      "x-aws-stickler-weight": 2.0
+    },
+    "advertiser": {
+      "type": "array",
+      "description": "The political advertiser or campaign purchasing the broadcast time.",
+      "items": {
+        "type": "string"
+      },
+      "x-aws-stickler-comparator": "FuzzyComparator",
+      "x-aws-stickler-threshold": 0.8,
+      "x-aws-stickler-weight": 2.0
+    },
+    "gross_total": {
+      "type": "array",
+      "description": "The total gross amount for all line items before any discounts or adjustments.",
+      "items": {
+        "type": "string"
+      },
+      "x-aws-stickler-comparator": "ExactComparator",
+      "x-aws-stickler-threshold": 1.0,
+      "x-aws-stickler-weight": 3.0
+    },
+    "net_amount_due": {
+      "type": "array",
+      "description": "The final net amount due after any discounts or adjustments have been applied.",
+      "items": {
+        "type": "string"
+      },
+      "x-aws-stickler-comparator": "ExactComparator",
+      "x-aws-stickler-threshold": 1.0,
+      "x-aws-stickler-weight": 3.0
+    },
+    "line_item__description": {
+      "type": "array",
+      "description": "Each line item description is usually a specification in industry short-hand of when the advertisement should run. Examples include \"M-F 6p-6:30p\", \"M-F 11a-12p\"",
+      "items": {
+        "type": "string"
+      },
+      "x-aws-stickler-comparator": "LevenshteinComparator",
+      "x-aws-stickler-threshold": 0.7,
+      "x-aws-stickler-weight": 1.5
+    },
+    "line_item__days": {
+      "type": "array",
+      "description": "Each list item will be a string with shorthand representing the days of the week the ad should run. I.e. \"MTWTF--\"",
+      "items": {
+        "type": "string"
+      },
+      "x-aws-stickler-comparator": "ExactComparator",
+      "x-aws-stickler-threshold": 1.0,
+      "x-aws-stickler-weight": 1.0
+    },
+    "line_item__rate": {
+      "type": "array",
+      "description": "Each entry is a unitless float, i.e. \"300.00\", or \"1200.00\"",
+      "items": {
+        "type": "string"
+      },
+      "x-aws-stickler-comparator": "ExactComparator",
+      "x-aws-stickler-threshold": 1.0,
+      "x-aws-stickler-weight": 2.0
+    },
+    "line_item__start_date": {
+      "type": "array",
+      "description": "Each start date, formatted as MM/DD/YY. i.e. \"11/07/21\"",
+      "items": {
+        "type": "string"
+      },
+      "x-aws-stickler-comparator": "ExactComparator",
+      "x-aws-stickler-threshold": 1.0,
+      "x-aws-stickler-weight": 2.0
+    },
+    "line_item__end_date": {
+      "type": "array",
+      "description": "Each end date, formatted as MM/DD/YY. i.e. \"11/07/21\"",
+      "items": {
+        "type": "string"
+      },
+      "x-aws-stickler-comparator": "ExactComparator",
+      "x-aws-stickler-threshold": 1.0,
+      "x-aws-stickler-weight": 2.0
+    }
+  },
+  "required": [
+    "agency",
+    "advertiser",
+    "gross_total",
+    "net_amount_due"
+  ]
+}

@@ -1,0 +1,848 @@
+{
+  "notes": "Configuration for FCC invoice information extraction (no classification)",
+  "ocr": {
+    "backend": "textract",
+    "model_id": "us.anthropic.claude-3-7-sonnet-20250219-v1:0",
+    "system_prompt": "You are an expert OCR system. Extract all text from the provided image accurately, preserving layout where possible.",
+    "task_prompt": "Extract all text from this document image. Preserve the layout, including paragraphs, tables, and formatting.",
+    "features": [
+      {
+        "name": "LAYOUT"
+      },
+      {
+        "name": "TABLES"
+      }
+    ],
+    "max_workers": 20,
+    "image": {
+      "target_width": null,
+      "target_height": null,
+      "dpi": 150,
+      "preprocessing": null
+    }
+  },
+  "classification": {
+    "model": "us.anthropic.claude-3-7-sonnet-20250219-v1:0",
+    "system_prompt": "You are a document classification expert. Classify each page according to the provided document types.",
+    "task_prompt": "Classify this page as one of the available document types based on its content and structure.",
+    "temperature": 0,
+    "top_p": 0.9,
+    "top_k": 5,
+    "max_tokens": 1024,
+    "maxPagesForClassification": 0,
+    "classificationMethod": "textbasedHolisticClassification",
+    "image": {
+      "target_width": null,
+      "target_height": null,
+      "dpi": null,
+      "preprocessing": null
+    }
+  },
+  "extraction": {
+    "model": "us.anthropic.claude-3-7-sonnet-20250219-v1:0",
+    "system_prompt": "You are an expert at extracting structured information from FCC political advertising invoices.\nExtract all requested fields accurately, paying special attention to:\n- Line item details including time slots, days, rates, and date ranges\n- Monetary amounts (preserve formatting with commas and decimals)\n- Date formats (typically MM/DD/YY)\n- Agency and advertiser names\n\nFor line items, ensure you capture all rows from any tables showing broadcast schedules.\nDays of week are often encoded as 7-character strings where each position represents a day.\n",
+    "task_prompt": "Extract the following information from this FCC invoice:\n\n1. Agency name\n2. Advertiser name\n3. Gross total amount\n4. Net amount due\n5. All line items with:\n   - Description (time slot)\n   - Days (day of week encoding)\n   - Rate (cost)\n   - Start date\n   - End date\n\nReturn the information in the specified JSON schema format.\n",
+    "temperature": 0,
+    "top_p": 0.9,
+    "top_k": 5,
+    "max_tokens": 4096,
+    "image": {
+      "target_width": null,
+      "target_height": null,
+      "dpi": null,
+      "preprocessing": null
+    },
+    "agentic": {
+      "enabled": false,
+      "review_agent": false
+    },
+    "custom_prompt_lambda_arn": null
+  },
+  "assessment": {
+    "enabled": true,
+    "model": "us.amazon.nova-lite-v1:0",
+    "system_prompt": "You are a document analysis assessment expert. Your role is to evaluate the confidence and accuracy of data extraction results by analyzing them against source documents.\nProvide accurate confidence scores for each assessment. When bounding boxes are requested, provide precise coordinate locations where information appears in the document.",
+    "task_prompt": "<background> You are an expert document analysis assessment system. Your task is to evaluate the confidence of extraction results for a document of class {DOCUMENT_CLASS} and provide precise spatial localization for each field. </background>\n<task> Analyze the extraction results against the source document and provide confidence assessments AND bounding box coordinates for each extracted attribute. Consider factors such as: 1. Text clarity and OCR quality in the source regions  2. Alignment between extracted values and document content  3. Presence of clear evidence supporting the extraction  4. Potential ambiguity or uncertainty in the source material  5. Completeness and accuracy of the extracted information 6. Precise spatial location of each field in the document </task>\n<assessment-guidelines> For each attribute, provide:  - A confidence score between 0.0 and 1.0 where:\n   - 1.0 = Very high confidence, clear and unambiguous evidence\n   - 0.8-0.9 = High confidence, strong evidence with minor uncertainty\n   - 0.6-0.7 = Medium confidence, reasonable evidence but some ambiguity\n   - 0.4-0.5 = Low confidence, weak or unclear evidence\n   - 0.0-0.3 = Very low confidence, little to no supporting evidence\n- A clear explanation of the confidence reasoning - Precise spatial coordinates where the field appears in the document\nGuidelines:  - Base assessments on actual document content and OCR quality  - Consider both text-based evidence and visual/layout clues  - Account for OCR confidence scores when provided  - Be objective and specific in reasoning  - If an extraction appears incorrect, score accordingly with explanation - Provide tight, accurate bounding boxes around the actual text </assessment-guidelines>\n<spatial-localization-guidelines> For each field, provide bounding box coordinates: - bbox: [x1, y1, x2, y2] coordinates in normalized 0-1000 scale - page: Page number where the field appears (starting from 1)\nCoordinate system: - Use normalized scale 0-1000 for both x and y axes - x1, y1 = top-left corner of bounding box   - x2, y2 = bottom-right corner of bounding box - Ensure x2 > x1 and y2 > y1 - Make bounding boxes tight around the actual text content - If a field spans multiple lines, create a bounding box that encompasses all relevant text </spatial-localization-guidelines>\n<final-instructions> Analyze the extraction results against the source document and provide confidence assessments with spatial localization. Return a JSON object with the following structure based on the attribute type:\nFor SIMPLE attributes:  {\n  \"simple_attribute_name\": {\n    \"confidence\": 0.85,\n    \"bbox\": [100, 200, 300, 250],\n    \"page\": 1\n  }\n}\nFor GROUP attributes (nested object structure):  {\n  \"group_attribute_name\": {\n    \"sub_attribute_1\": {\n      \"confidence\": 0.90,\n      \"bbox\": [150, 300, 250, 320],\n      \"page\": 1\n    },\n    \"sub_attribute_2\": {\n      \"confidence\": 0.75,\n      \"bbox\": [150, 325, 280, 345],\n      \"page\": 1\n    }\n  }\n}\nFor LIST attributes (array of assessed items):  {\n  \"list_attribute_name\": [\n    {\n      \"item_attribute_1\": {\n        \"confidence\": 0.95,\n        \"bbox\": [100, 400, 200, 420],\n        \"page\": 1\n      },\n      \"item_attribute_2\": {\n        \"confidence\": 0.88,\n        \"bbox\": [250, 400, 350, 420],\n        \"page\": 1\n      }\n    },\n    {\n      \"item_attribute_1\": {\n        \"confidence\": 0.92,\n        \"bbox\": [100, 425, 200, 445],\n        \"page\": 1\n      },\n      \"item_attribute_2\": {\n        \"confidence\": 0.70,\n        \"bbox\": [250, 425, 350, 445],\n        \"page\": 1\n      }\n    }\n  ]\n}\nIMPORTANT:   - For LIST attributes like \"Transactions\", assess EACH individual item in the list separately with individual bounding boxes - Each transaction should be assessed as a separate object in the array with its own spatial coordinates - Do NOT provide aggregate assessments for list items - assess each one individually with precise locations - Include assessments AND bounding boxes for ALL attributes present in the extraction results - Match the exact structure of the extracted data - Provide page numbers for all bounding boxes (starting from 1) </final-instructions>\n<<CACHEPOINT>>\n<document-image> {DOCUMENT_IMAGE} </document-image>\n<ocr-text-confidence-results> {OCR_TEXT_CONFIDENCE} </ocr-text-confidence-results>\n<<CACHEPOINT>>\n<attributes-definitions> {ATTRIBUTE_NAMES_AND_DESCRIPTIONS} </attributes-definitions>\n<extraction-results> {EXTRACTION_RESULTS} </extraction-results>",
+    "temperature": 0,
+    "top_p": 0.1,
+    "top_k": 5,
+    "max_tokens": 10000,
+    "default_confidence_threshold": 0.8,
+    "validation_enabled": false,
+    "image": {
+      "target_width": null,
+      "target_height": null,
+      "dpi": null,
+      "preprocessing": null
+    },
+    "granular": {
+      "enabled": true,
+      "list_batch_size": 1,
+      "simple_batch_size": 3,
+      "max_workers": 20
+    }
+  },
+  "summarization": {
+    "enabled": true,
+    "model": "us.anthropic.claude-3-7-sonnet-20250219-v1:0",
+    "system_prompt": "You are a document summarization expert who can analyze and summarize documents from various domains including medical, financial, legal, and general business documents. Your task is to create a summary that captures the key information, main points, and important details from the document. Your output must be in valid JSON format. \\nSummarization Style: Balanced\\\\nCreate a balanced summary that provides a moderate level of detail. Include the main points and key supporting information, while maintaining the document's overall structure. Aim for a comprehensive yet concise summary.\\n Your output MUST be in valid JSON format with markdown content. You MUST strictly adhere to the output format specified in the instructions.",
+    "task_prompt": "<document-text>\n{DOCUMENT_TEXT}\n</document-text>\nAnalyze the provided document (<document-text>) and create a comprehensive summary.\nCRITICAL INSTRUCTION: You MUST return your response as valid JSON with the EXACT structure shown at the end of these instructions. Do not include any explanations, notes, or text outside of the JSON structure.\nCreate a summary that captures the essential information from the document. Your summary should:\n1. Extract key information, main points, and important details\n2. Maintain the original document's organizational structure where appropriate\n3. Preserve important facts, figures, dates, and entities\n4. Reduce the length while retaining all critical information\n5. Use markdown formatting for better readability (headings, lists, emphasis, etc.)\n6. Cite all relevant facts from the source document using inline citations in the format [Cite-X, Page-Y] where X is a sequential citation number and Y is the page number\n7. Format citations as markdown links that reference the full citation list at the bottom of the summary\n  Example: [[Cite-1, Page-3]](#cite-1-page-3)\n\n8. At the end of the summary, include a \"References\" section that lists all citations with their exact text from the source document in the format:\n  [Cite-X, Page-Y]: Exact text from the document\n\nOutput Format:\nYou MUST return ONLY valid JSON with the following structure and nothing else:\n```json {\n  \"summary\": \"A comprehensive summary in markdown format with inline citations linked to a references section at the bottom\"\n} ```\nDo not include any text, explanations, or notes outside of this JSON structure. The JSON must be properly formatted and parseable.",
+    "temperature": 0,
+    "top_p": 0.1,
+    "top_k": 5,
+    "max_tokens": 4096
+  },
+  "criteria_validation": {
+    "model": "us.anthropic.claude-3-5-sonnet-20240620-v1:0",
+    "system_prompt": "",
+    "task_prompt": "",
+    "temperature": 0,
+    "top_p": 0.01,
+    "top_k": 20,
+    "max_tokens": 4096,
+    "semaphore": 3,
+    "max_chunk_size": 180000,
+    "token_size": 4,
+    "overlap_percentage": 10,
+    "response_prefix": "<response>"
+  },
+  "agents": {
+    "error_analyzer": {
+      "model_id": "us.anthropic.claude-sonnet-4-20250514-v1:0",
+      "error_patterns": [
+        "ERROR",
+        "CRITICAL",
+        "FATAL",
+        "Exception",
+        "Traceback",
+        "Failed",
+        "Timeout",
+        "AccessDenied",
+        "ThrottlingException"
+      ],
+      "system_prompt": "You are an intelligent error analysis agent for the GenAI IDP system.\n\nUse the analyze_errors tool to investigate issues. ALWAYS format your response with exactly these three sections in this order:\n\n## Root Cause\nIdentify the specific underlying technical reason why the error occurred. Focus on the primary cause, not symptoms.\n\n## Recommendations\nProvide specific, actionable steps to resolve the issue. Limit to top three recommendations only.\n\n<details>\n<summary><strong>Evidence</strong></summary>\n\nFormat log entries with their source information. For each log entry, show:\n**Log Group:**  \n[full log_group name from tool response]\n\n**Log Stream:**  \n[full log_stream name from tool response]\n```\n[ERROR] timestamp message (from events data)\n```\n\n</details>\n\nFORMATTING RULES:\n- Use the exact three-section structure above\n- Make Evidence section collapsible using HTML details tags\n- Extract log_group, log_stream, and events data from tool response\n- Show complete log group and log stream names without truncation\n- Present actual log messages from events array in code blocks\n\nANALYSIS GUIDELINES:\n- If has_performance_issues is false, focus on application logic errors\n- Use service timeline to rule out infrastructure bottlenecks\n- Service response times help eliminate timeout-related causes\n- For application errors use CloudWatch error messages for recommendations\n\nROOT CAUSE DETERMINATION:\n- Start with Step Function failure details (most specific)\n- Validate with CloudWatch error logs (most detailed)\n- Use X-Ray to categorize as infrastructure vs. application issue\n- DynamoDB provides supporting timeline context only\n\nRECOMMENDATION GUIDELINES:\nFor code-related issues or system bugs:\n- Do not suggest code modifications\n- Include error details, timestamps, and context\n\nFor configuration-related issues:\n- Direct users to UI configuration panel\n- Specify exact configuration section and parameter names\n\nFor operational issues:\n- Provide immediate troubleshooting steps\n- Include preventive measures\n\nTIME RANGE PARSING:\n- recent/recently: 1 hour\n- last week: 168 hours  \n- last day/yesterday: 24 hours\n- No time specified: 24 hours (default)\n\nSPECIAL CASES:\nIf analysis_type is \"document_not_found\": explain document cannot be located, focus on verification steps and processing issues.\n\nDO NOT include code suggestions, technical summaries, or multiple paragraphs of explanation. Keep responses concise and actionable.\n\nIMPORTANT: Do not include any search quality reflections, search quality scores, or meta-analysis sections in your response. Only provide the three required sections: Root Cause, Recommendations, and Evidence.",
+      "parameters": {
+        "max_log_events": 5,
+        "time_range_hours_default": 24,
+        "max_log_message_length": 400,
+        "max_events_per_log_group": 5,
+        "max_log_groups": 20,
+        "max_stepfunction_timeline_events": 3,
+        "max_stepfunction_error_length": 400,
+        "xray_slow_segment_threshold_ms": 5000,
+        "xray_error_rate_threshold": 0.05,
+        "xray_response_time_threshold_ms": 10000
+      }
+    },
+    "chat_companion": {
+      "model_id": "us.anthropic.claude-sonnet-4-20250514-v1:0:1m",
+      "error_patterns": [
+        "ERROR",
+        "CRITICAL",
+        "FATAL",
+        "Exception",
+        "Traceback",
+        "Failed",
+        "Timeout",
+        "AccessDenied",
+        "ThrottlingException"
+      ],
+      "system_prompt": "\n            You are an intelligent error analysis agent for the GenAI IDP system with access to specialized diagnostic tools.\n\n              GENERAL TROUBLESHOOTING WORKFLOW:\n              1. Identify document status from DynamoDB\n                  2. Find any errors reported during Step Function execution\n              3. Collect relevant logs from CloudWatch\n              4. Identify any performance issues from X-Ray traces\n          5. Provide root cause analysis based on the collected information\n          \n          TOOL SELECTION STRATEGY:\n          - If user provides a filename: Use cloudwatch_document_logs and dynamodb_status for document-specific analysis\n          - For system-wide issues: Use cloudwatch_logs and dynamodb_query\n          - For execution context: Use lambda_lookup or stepfunction_details\n          - For distributed tracing: Use xray_trace or xray_performance_analysis\n          \n          ALWAYS format your response with exactly these three sections in this order:\n          \n          ## Root Cause\n          Identify the specific underlying technical reason why the error occurred. Focus on the primary cause, not symptoms.\n\n          ## Recommendations\n              Provide specific, actionable steps to resolve the issue. Limit to top three recommendations only.\n\n          <details>\n              <summary><strong>Evidence</strong></summary>\n              \n              Format evidence with source information. Include relevant data from tool responses:\n              \n              **For CloudWatch logs:**\n                  **Log Group:** [full log_group name]\n              **Log Stream:** [full log_stream name]\n                  ```\n              [ERROR] timestamp message\n          ```\n          \n          **For other sources (DynamoDB, Step Functions, X-Ray):**\n              **Source:** [service name and resource]\n              ```\n          Relevant data from tool response\n              ```\n\n          </details>\n\n              FORMATTING RULES:\n          - Use the exact three-section structure above\n          - Make Evidence section collapsible using HTML details tags\n          - Include relevant data from all tool responses (CloudWatch, DynamoDB, Step Functions, X-Ray)\n          - For CloudWatch: Show complete log group and log stream names without truncation\n          - Present evidence data in code blocks with appropriate source labels\n                \n              ANALYSIS GUIDELINES:\n          - Use multiple tools for comprehensive analysis when needed\n              - Start with document-specific tools for targeted queries\n              - Use system-wide tools for pattern analysis\n              - Combine DynamoDB status with CloudWatch logs for complete picture\n              - Leverage X-Ray for distributed system issues\n                  \n                  ROOT CAUSE DETERMINATION:\n                  1. Document Status: Check dynamodb_status first\n              2. Execution Details: Use stepfunction_details for workflow failures\n              3. Log Analysis: Use cloudwatch_document_logs or cloudwatch_logs for error details\n              4. Distributed Tracing: Use xray_performance_analysis for service interaction issues\n              5. Context: Use lambda_lookup for execution environment\n              \n              RECOMMENDATION GUIDELINES:\n              For code-related issues or system bugs:\n                  - Do not suggest code modifications\n              - Include error details, timestamps, and context\n\n              For configuration-related issues:\n                  - Direct users to UI configuration panel\n                      - Specify exact configuration section and parameter names\n\n                      For operational issues:\n                      - Provide immediate troubleshooting steps\n                      - Include preventive measures\n\n                      TIME RANGE PARSING:\n                      - recent: 1 hour\n              - last week: 168 hours  \n                      - last day: 24 hours\n                      - No time specified: 24 hours (default)\n              \n              IMPORTANT: Do not include any search quality reflections, search quality scores, or meta-analysis sections in your response. Only provide the three required sections: Root Cause, Recommendations, and Evidence.",
+      "parameters": {
+        "max_log_events": 5,
+        "time_range_hours_default": 24,
+        "max_log_message_length": 400,
+        "max_events_per_log_group": 5,
+        "max_log_groups": 20,
+        "max_stepfunction_timeline_events": 3,
+        "max_stepfunction_error_length": 400,
+        "xray_slow_segment_threshold_ms": 5000,
+        "xray_error_rate_threshold": 0.05,
+        "xray_response_time_threshold_ms": 10000
+      }
+    }
+  },
+  "pricing": [
+    {
+      "name": "textract/detect_document_text",
+      "units": [
+        {
+          "name": "pages",
+          "price": 0.0015
+        }
+      ]
+    },
+    {
+      "name": "textract/analyze_document-Layout",
+      "units": [
+        {
+          "name": "pages",
+          "price": 0.004
+        }
+      ]
+    },
+    {
+      "name": "textract/analyze_document-Signatures",
+      "units": [
+        {
+          "name": "pages",
+          "price": 0.0035
+        }
+      ]
+    },
+    {
+      "name": "textract/analyze_document-Forms",
+      "units": [
+        {
+          "name": "pages",
+          "price": 0.05
+        }
+      ]
+    },
+    {
+      "name": "textract/analyze_document-Tables",
+      "units": [
+        {
+          "name": "pages",
+          "price": 0.015
+        }
+      ]
+    },
+    {
+      "name": "textract/analyze_document-Tables+Forms",
+      "units": [
+        {
+          "name": "pages",
+          "price": 0.065
+        }
+      ]
+    },
+    {
+      "name": "bedrock/us.amazon.nova-lite-v1:0",
+      "units": [
+        {
+          "name": "inputTokens",
+          "price": 6e-8
+        },
+        {
+          "name": "outputTokens",
+          "price": 2.4e-7
+        },
+        {
+          "name": "cacheReadInputTokens",
+          "price": 1.5e-8
+        },
+        {
+          "name": "cacheWriteInputTokens",
+          "price": 6e-8
+        }
+      ]
+    },
+    {
+      "name": "bedrock/us.amazon.nova-pro-v1:0",
+      "units": [
+        {
+          "name": "inputTokens",
+          "price": 8e-7
+        },
+        {
+          "name": "outputTokens",
+          "price": 0.0000032
+        },
+        {
+          "name": "cacheReadInputTokens",
+          "price": 2e-7
+        },
+        {
+          "name": "cacheWriteInputTokens",
+          "price": 8e-7
+        }
+      ]
+    },
+    {
+      "name": "bedrock/us.amazon.nova-premier-v1:0",
+      "units": [
+        {
+          "name": "inputTokens",
+          "price": 0.0000025
+        },
+        {
+          "name": "outputTokens",
+          "price": 0.0000125
+        }
+      ]
+    },
+    {
+      "name": "bedrock/us.anthropic.claude-3-haiku-20240307-v1:0",
+      "units": [
+        {
+          "name": "inputTokens",
+          "price": 2.5e-7
+        },
+        {
+          "name": "outputTokens",
+          "price": 0.00000125
+        }
+      ]
+    },
+    {
+      "name": "bedrock/us.anthropic.claude-3-5-haiku-20241022-v1:0",
+      "units": [
+        {
+          "name": "inputTokens",
+          "price": 8e-7
+        },
+        {
+          "name": "outputTokens",
+          "price": 0.000004
+        },
+        {
+          "name": "cacheReadInputTokens",
+          "price": 8e-8
+        },
+        {
+          "name": "cacheWriteInputTokens",
+          "price": 0.000001
+        }
+      ]
+    },
+    {
+      "name": "bedrock/us.anthropic.claude-haiku-4-5-20251001-v1:0",
+      "units": [
+        {
+          "name": "inputTokens",
+          "price": 0.0000011
+        },
+        {
+          "name": "outputTokens",
+          "price": 0.0000055
+        },
+        {
+          "name": "cacheReadInputTokens",
+          "price": 1.1e-7
+        },
+        {
+          "name": "cacheWriteInputTokens",
+          "price": 0.0000014
+        }
+      ]
+    },
+    {
+      "name": "bedrock/us.anthropic.claude-3-5-sonnet-20241022-v2:0",
+      "units": [
+        {
+          "name": "inputTokens",
+          "price": 0.000003
+        },
+        {
+          "name": "outputTokens",
+          "price": 0.000015
+        },
+        {
+          "name": "cacheReadInputTokens",
+          "price": 3e-7
+        },
+        {
+          "name": "cacheWriteInputTokens",
+          "price": 0.00000375
+        }
+      ]
+    },
+    {
+      "name": "bedrock/us.anthropic.claude-3-7-sonnet-20250219-v1:0",
+      "units": [
+        {
+          "name": "inputTokens",
+          "price": 0.000003
+        },
+        {
+          "name": "outputTokens",
+          "price": 0.000015
+        },
+        {
+          "name": "cacheReadInputTokens",
+          "price": 3e-7
+        },
+        {
+          "name": "cacheWriteInputTokens",
+          "price": 0.00000375
+        }
+      ]
+    },
+    {
+      "name": "bedrock/us.anthropic.claude-sonnet-4-20250514-v1:0",
+      "units": [
+        {
+          "name": "inputTokens",
+          "price": 0.000003
+        },
+        {
+          "name": "outputTokens",
+          "price": 0.000015
+        },
+        {
+          "name": "cacheReadInputTokens",
+          "price": 3e-7
+        },
+        {
+          "name": "cacheWriteInputTokens",
+          "price": 0.00000375
+        }
+      ]
+    },
+    {
+      "name": "bedrock/us.anthropic.claude-sonnet-4-20250514-v1:0:1m",
+      "units": [
+        {
+          "name": "inputTokens",
+          "price": 0.000006
+        },
+        {
+          "name": "outputTokens",
+          "price": 0.0000225
+        },
+        {
+          "name": "cacheReadInputTokens",
+          "price": 6e-7
+        },
+        {
+          "name": "cacheWriteInputTokens",
+          "price": 0.0000075
+        }
+      ]
+    },
+    {
+      "name": "bedrock/us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+      "units": [
+        {
+          "name": "inputTokens",
+          "price": 0.0000033
+        },
+        {
+          "name": "outputTokens",
+          "price": 0.0000165
+        },
+        {
+          "name": "cacheReadInputTokens",
+          "price": 3.3e-7
+        },
+        {
+          "name": "cacheWriteInputTokens",
+          "price": 0.000004125
+        }
+      ]
+    },
+    {
+      "name": "bedrock/us.anthropic.claude-sonnet-4-5-20250929-v1:0:1m",
+      "units": [
+        {
+          "name": "inputTokens",
+          "price": 0.0000066
+        },
+        {
+          "name": "outputTokens",
+          "price": 0.00002475
+        },
+        {
+          "name": "cacheReadInputTokens",
+          "price": 6.6e-7
+        },
+        {
+          "name": "cacheWriteInputTokens",
+          "price": 0.00000825
+        }
+      ]
+    },
+    {
+      "name": "bedrock/us.anthropic.claude-opus-4-20250514-v1:0",
+      "units": [
+        {
+          "name": "inputTokens",
+          "price": 0.000015
+        },
+        {
+          "name": "outputTokens",
+          "price": 0.000075
+        },
+        {
+          "name": "cacheReadInputTokens",
+          "price": 0.0000015
+        },
+        {
+          "name": "cacheWriteInputTokens",
+          "price": 0.00001875
+        }
+      ]
+    },
+    {
+      "name": "bedrock/us.anthropic.claude-opus-4-1-20250805-v1:0",
+      "units": [
+        {
+          "name": "inputTokens",
+          "price": 0.000015
+        },
+        {
+          "name": "outputTokens",
+          "price": 0.000075
+        },
+        {
+          "name": "cacheReadInputTokens",
+          "price": 0.0000015
+        },
+        {
+          "name": "cacheWriteInputTokens",
+          "price": 0.00001875
+        }
+      ]
+    },
+    {
+      "name": "bedrock/eu.amazon.nova-lite-v1:0",
+      "units": [
+        {
+          "name": "inputTokens",
+          "price": 7.8e-8
+        },
+        {
+          "name": "outputTokens",
+          "price": 3.1e-7
+        },
+        {
+          "name": "cacheReadInputTokens",
+          "price": 1.9e-8
+        },
+        {
+          "name": "cacheWriteInputTokens",
+          "price": 7.8e-8
+        }
+      ]
+    },
+    {
+      "name": "bedrock/eu.amazon.nova-pro-v1:0",
+      "units": [
+        {
+          "name": "inputTokens",
+          "price": 0.000001
+        },
+        {
+          "name": "outputTokens",
+          "price": 0.0000042
+        },
+        {
+          "name": "cacheReadInputTokens",
+          "price": 2.6e-7
+        },
+        {
+          "name": "cacheWriteInputTokens",
+          "price": 0.000001
+        }
+      ]
+    },
+    {
+      "name": "bedrock/eu.anthropic.claude-3-haiku-20240307-v1:0",
+      "units": [
+        {
+          "name": "inputTokens",
+          "price": 2.5e-7
+        },
+        {
+          "name": "outputTokens",
+          "price": 0.00000125
+        }
+      ]
+    },
+    {
+      "name": "bedrock/eu.anthropic.claude-haiku-4-5-20251001-v1:0",
+      "units": [
+        {
+          "name": "inputTokens",
+          "price": 0.0000011
+        },
+        {
+          "name": "outputTokens",
+          "price": 0.0000055
+        },
+        {
+          "name": "cacheReadInputTokens",
+          "price": 1.1e-7
+        },
+        {
+          "name": "cacheWriteInputTokens",
+          "price": 0.0000014
+        }
+      ]
+    },
+    {
+      "name": "bedrock/eu.anthropic.claude-3-5-sonnet-20241022-v2:0",
+      "units": [
+        {
+          "name": "inputTokens",
+          "price": 0.000003
+        },
+        {
+          "name": "outputTokens",
+          "price": 0.000015
+        },
+        {
+          "name": "cacheReadInputTokens",
+          "price": 3e-7
+        },
+        {
+          "name": "cacheWriteInputTokens",
+          "price": 0.00000375
+        }
+      ]
+    },
+    {
+      "name": "bedrock/eu.anthropic.claude-3-7-sonnet-20250219-v1:0",
+      "units": [
+        {
+          "name": "inputTokens",
+          "price": 0.000003
+        },
+        {
+          "name": "outputTokens",
+          "price": 0.000015
+        },
+        {
+          "name": "cacheReadInputTokens",
+          "price": 3e-7
+        },
+        {
+          "name": "cacheWriteInputTokens",
+          "price": 0.00000375
+        }
+      ]
+    },
+    {
+      "name": "bedrock/eu.anthropic.claude-sonnet-4-20250514-v1:0",
+      "units": [
+        {
+          "name": "inputTokens",
+          "price": 0.000003
+        },
+        {
+          "name": "outputTokens",
+          "price": 0.000015
+        },
+        {
+          "name": "cacheReadInputTokens",
+          "price": 3e-7
+        },
+        {
+          "name": "cacheWriteInputTokens",
+          "price": 0.00000375
+        }
+      ]
+    },
+    {
+      "name": "bedrock/eu.anthropic.claude-sonnet-4-5-20250929-v1:0",
+      "units": [
+        {
+          "name": "inputTokens",
+          "price": 0.0000033
+        },
+        {
+          "name": "outputTokens",
+          "price": 0.0000165
+        },
+        {
+          "name": "cacheReadInputTokens",
+          "price": 3.3e-7
+        },
+        {
+          "name": "cacheWriteInputTokens",
+          "price": 0.000004125
+        }
+      ]
+    },
+    {
+      "name": "bedrock/eu.anthropic.claude-sonnet-4-5-20250929-v1:0:1m",
+      "units": [
+        {
+          "name": "inputTokens",
+          "price": 0.0000066
+        },
+        {
+          "name": "outputTokens",
+          "price": 0.00002475
+        },
+        {
+          "name": "cacheReadInputTokens",
+          "price": 6.6e-7
+        },
+        {
+          "name": "cacheWriteInputTokens",
+          "price": 0.00000825
+        }
+      ]
+    },
+    {
+      "name": "lambda/requests",
+      "units": [
+        {
+          "name": "invocations",
+          "price": 2e-7
+        }
+      ]
+    },
+    {
+      "name": "lambda/duration",
+      "units": [
+        {
+          "name": "gb_seconds",
+          "price": 0.0000166667
+        }
+      ]
+    }
+  ],
+  "classes": [
+    {
+      "description": "Federal Communications Commission (FCC) political advertising invoice showing broadcast time purchases, including line items with descriptions, dates, rates, and totals for political advertising campaigns.",
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "x-aws-idp-document-type": "FCC-Invoice",
+      "x-aws-stickler-model-name": "FCCInvoice",
+      "x-aws-stickler-match-threshold": 0.7,
+      "properties": {
+        "agency": {
+          "type": "array",
+          "description": "The advertising agency or media buyer handling the political advertising purchase.",
+          "items": {
+            "type": "string"
+          },
+          "x-aws-idp-evaluation-method": "EXACT",
+          "x-aws-stickler-comparator": "FuzzyComparator",
+          "x-aws-stickler-threshold": 0.8,
+          "x-aws-stickler-weight": 2.0
+        },
+        "advertiser": {
+          "type": "array",
+          "description": "The political advertiser or campaign purchasing the broadcast time.",
+          "items": {
+            "type": "string"
+          },
+          "x-aws-idp-evaluation-method": "EXACT",
+          "x-aws-stickler-comparator": "FuzzyComparator",
+          "x-aws-stickler-threshold": 0.8,
+          "x-aws-stickler-weight": 2.0
+        },
+        "gross_total": {
+          "type": "array",
+          "description": "The total gross amount for all line items before any discounts or adjustments.",
+          "items": {
+            "type": "string"
+          },
+          "x-aws-idp-evaluation-method": "NUMERIC_EXACT",
+          "x-aws-stickler-comparator": "ExactComparator",
+          "x-aws-stickler-threshold": 1.0,
+          "x-aws-stickler-weight": 3.0
+        },
+        "net_amount_due": {
+          "type": "array",
+          "description": "The final net amount due after any discounts or adjustments have been applied.",
+          "items": {
+            "type": "string"
+          },
+          "x-aws-idp-evaluation-method": "NUMERIC_EXACT",
+          "x-aws-stickler-comparator": "ExactComparator",
+          "x-aws-stickler-threshold": 1.0,
+          "x-aws-stickler-weight": 3.0
+        },
+        "line_item__description": {
+          "type": "array",
+          "description": "List of broadcast time slot descriptions (e.g., 'M-F 11a-12p' for Monday through Friday 11am to 12pm).",
+          "items": {
+            "type": "string"
+          },
+          "x-aws-idp-evaluation-method": "EXACT",
+          "x-aws-stickler-comparator": "LevenshteinComparator",
+          "x-aws-stickler-threshold": 0.7,
+          "x-aws-stickler-weight": 1.5
+        },
+        "line_item__days": {
+          "type": "array",
+          "description": "List of days of the week for each broadcast slot (e.g., 'MTWTF--' where each position represents a day).",
+          "items": {
+            "type": "string"
+          },
+          "x-aws-idp-evaluation-method": "EXACT",
+          "x-aws-stickler-comparator": "ExactComparator",
+          "x-aws-stickler-threshold": 1.0,
+          "x-aws-stickler-weight": 1.0
+        },
+        "line_item__rate": {
+          "type": "array",
+          "description": "List of rates or costs for each broadcast time slot (may include commas for thousands separator).",
+          "items": {
+            "type": "string"
+          },
+          "x-aws-idp-evaluation-method": "NUMERIC_EXACT",
+          "x-aws-stickler-comparator": "ExactComparator",
+          "x-aws-stickler-threshold": 1.0,
+          "x-aws-stickler-weight": 2.0
+        },
+        "line_item__start_date": {
+          "type": "array",
+          "description": "List of start dates for each line item's broadcast schedule (typically in MM/DD/YY format).",
+          "items": {
+            "type": "string"
+          },
+          "x-aws-idp-evaluation-method": "EXACT",
+          "x-aws-stickler-comparator": "ExactComparator",
+          "x-aws-stickler-threshold": 1.0,
+          "x-aws-stickler-weight": 2.0
+        },
+        "line_item__end_date": {
+          "type": "array",
+          "description": "List of end dates for each line item's broadcast schedule (typically in MM/DD/YY format).",
+          "items": {
+            "type": "string"
+          },
+          "x-aws-idp-evaluation-method": "EXACT",
+          "x-aws-stickler-comparator": "ExactComparator",
+          "x-aws-stickler-threshold": 1.0,
+          "x-aws-stickler-weight": 2.0
+        }
+      },
+      "$id": "FCC-Invoice"
+    }
+  ],
+  "discovery": {
+    "without_ground_truth": {
+      "model_id": "us.amazon.nova-pro-v1:0",
+      "system_prompt": "You are an expert in processing forms. Extracting data from images and documents. Analyze forms line by line to identify field names, data types, and organizational structure. Focus on creating comprehensive blueprints for document processing without extracting actual values.",
+      "temperature": 1,
+      "top_p": 0.1,
+      "max_tokens": 10000,
+      "user_prompt": "This image contains forms data. Analyze the form line by line. Image may contains multiple pages, process all the pages.  Form may contain multiple name value pair in one line.  Extract all the names in the form including the name value pair which doesn't have value.  Organize them into groups, extract field_name, data_type and field description Field_name should be less than 60 characters, should not have space use '-' instead of space. field_description is a brief description of the field and the location of the field like box number or line number in the form and section of the form. Field_name should be unique within the group. Add two fields document_class and document_description.  For document_class generate a short name based on the document content like W4, I-9, Paystub.  For document_description generate a description about the document in less than 50 words. \nGroup the fields based on the section they are grouped in the form. Group should have attributeType as \"group\". If the group repeats and follows table format, update the attributeType as \"list\". Do not extract the values. Return the extracted data in JSON format. Format the extracted data using the below JSON format: Format the extracted groups and fields using the below JSON format:"
+    },
+    "with_ground_truth": {
+      "model_id": "us.amazon.nova-pro-v1:0",
+      "system_prompt": "You are an expert in processing forms. Extracting data from images and documents. Use provided ground truth data as reference to optimize field extraction and ensure consistency with expected document structure and field definitions.",
+      "temperature": 1,
+      "top_p": 0.1,
+      "max_tokens": 10000,
+      "user_prompt": "This image contains unstructured data. Analyze the data line by line using the provided ground truth as reference.                         <GROUND_TRUTH_REFERENCE> {ground_truth_json} </GROUND_TRUTH_REFERENCE> Ground truth reference JSON has the fields we are interested in extracting from the document/image. Use the ground truth to optimize field extraction. Match field names, data types, and groupings from the reference. Image may contain multiple pages, process all pages. Extract all field names including those without values. Do not change the group name and field name from ground truth in the extracted data json. Add field_description field for every field which will contain instruction to LLM to extract the field data from the image/document. Add data_type field for every field.  Add two fields document_class and document_description.  For document_class generate a short name based on the document content like W4, I-9, Paystub.  For document_description generate a description about the document in less than 50 words. If the group repeats and follows table format, update the attributeType as \"list\".                          Do not extract the values. Format the extracted data using the below JSON format: Format the extracted groups and fields using the below JSON format:"
+    }
+  },
+  "evaluation": {
+    "enabled": true,
+    "llm_method": {
+      "top_p": 0.1,
+      "max_tokens": 4096,
+      "top_k": 5,
+      "task_prompt": "I need to evaluate attribute extraction for a document of class: {DOCUMENT_CLASS}.\n\nFor the attribute named \"{ATTRIBUTE_NAME}\" described as \"{ATTRIBUTE_DESCRIPTION}\":\n- Expected value: {EXPECTED_VALUE}\n- Actual value: {ACTUAL_VALUE}\n\nDo these values match in meaning, taking into account formatting differences, word order, abbreviations, and semantic equivalence?\nProvide your assessment as a JSON with three fields:\n- \"match\": boolean (true if they match, false if not)\n- \"score\": number between 0 and 1 representing the confidence/similarity score\n- \"reason\": brief explanation of your decision\n\nRespond ONLY with the JSON and nothing else. Here's the exact format:\n{\n  \"match\": true or false,\n  \"score\": 0.0 to 1.0,\n  \"reason\": \"Your explanation here\"\n}",
+      "temperature": 0,
+      "model": "us.anthropic.claude-3-haiku-20240307-v1:0",
+      "system_prompt": "You are an evaluator that helps determine if the predicted and expected values match for document attribute extraction. You will consider the context and meaning rather than just exact string matching."
+    }
+  },
+  "summary": null,
+  "criteria_types": null,
+  "request_bucket": null,
+  "request_history_prefix": null,
+  "criteria_bucket": null,
+  "output_bucket": null,
+  "textract_page_tracker": null,
+  "cost_report_bucket": null
+}
