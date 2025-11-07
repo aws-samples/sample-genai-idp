@@ -96,7 +96,7 @@ classes:
               "cc": null,
               "reference_number": "TNJB 0008497"
         imagePath: >-
-          config_library/pattern-2/few_shot_example_with_multimodal_page_classification/example-images/letter1.jpg
+          config_library/pattern-2/rvl-cdip-package-sample-with-few-shot-examples/example-images/letter1.jpg
       - classPrompt: This is an example of the class 'letter'
         name: Letter2
         attributesPrompt: |-
@@ -112,7 +112,7 @@ classes:
               "cc": null,
               "reference_number": null
         imagePath: >-
-          config_library/pattern-2/few_shot_example_with_multimodal_page_classification/example-images/letter2.png
+          config_library/pattern-2/rvl-cdip-package-sample-with-few-shot-examples/example-images/letter2.png
   - $schema: https://json-schema.org/draft/2020-12/schema
     $id: form
     x-aws-idp-document-type: form
@@ -587,7 +587,7 @@ classes:
               "thread_id": null,
               "message_id": null
         imagePath: >-
-          config_library/pattern-2/few_shot_example_with_multimodal_page_classification/example-images/email1.jpg
+          config_library/pattern-2/rvl-cdip-package-sample-with-few-shot-examples/example-images/email1.jpg
   - $schema: https://json-schema.org/draft/2020-12/schema
     $id: questionnaire
     x-aws-idp-document-type: questionnaire
@@ -805,7 +805,7 @@ classes:
               "account_number": ["003525801543","352580154336"],
               "transactions": [{"Date": "2/6/2020", "Description": "Food Purchase - AnyCompany Restaurant - 1194989245", "Amount": "-171"}]
         imagePath: >-
-          config_library/pattern-2/few_shot_example_with_multimodal_page_classification/example-images/bank-statement-pages/
+          config_library/pattern-2/rvl-cdip-package-sample-with-few-shot-examples/example-images/bank-statement-pages/
 
 classification:
   maxPagesForClassification: "ALL"
@@ -822,9 +822,9 @@ classification:
     You are a multimodal document classification expert that analyzes business documents using both visual layout and textual content. Your task is to classify single-page documents into predefined categories based on their structural patterns, visual features, and text content. Your output must be valid JSON according to the requested format.
 
     <variables>
-    DOCUMENT_TEXT: OCR-extracted text content from the document page that provides textual information for classification
-    DOCUMENT_IMAGE: Visual representation of the document page that provides layout, formatting, and visual structure information
-    CLASS_NAMES_AND_DESCRIPTIONS: List of valid document types with their descriptions that the document must be classified into
+    <document-ocr-data>: OCR-extracted text content from the document page that provides textual information for classification
+    <document-image>: Visual representation of the document page that provides layout, formatting, and visual structure information
+    <document-types>: List of valid document types with their descriptions that the document must be classified into
     </variables>
   task_prompt: >-
     <reasoning-guidelines>
@@ -835,6 +835,10 @@ classification:
     - Consider the document's intended audience and use case
     - Provide specific evidence from both visual and textual analysis
     </reasoning-guidelines>
+
+    <document-types>
+    {CLASS_NAMES_AND_DESCRIPTIONS}
+    </document-types>
 
     <output-format>
     Return your classification as valid JSON following this exact structure:
@@ -892,6 +896,11 @@ extraction:
 
     </task>
 
+    <few-shot-examples>
+
+    {FEW_SHOT_EXAMPLES}
+
+    </few-shot-examples>
 
     <extraction-guidelines>
 
