@@ -29,7 +29,7 @@ from pydantic import BaseModel, Field
 from strands import Agent, tool
 from strands.agent.conversation_manager import SummarizingConversationManager
 from strands.models.bedrock import BedrockModel
-from strands.types.content import ContentBlock, Message
+from strands.types.content import CachePoint, ContentBlock, Message
 from strands.types.media import (
     DocumentContent,
     ImageContent,
@@ -725,15 +725,21 @@ async def structured_output_async(
                             format="png", source=ImageSource(bytes=img_bytes)
                         )
                     ),
+                    ContentBlock(cachePoint=CachePoint(type="default")),
                 ],
             )
         ]
     elif isinstance(prompt, dict) and "content" in prompt:
         prompt_content = [prompt]
-        # Extract and store images as binary strings
     else:
         prompt_content = [
-            Message(role="user", content=[ContentBlock(text=str(prompt))])
+            Message(
+                role="user",
+                content=[
+                    ContentBlock(text=str(prompt)),
+                    ContentBlock(cachePoint=CachePoint(type="default")),
+                ],
+            )
         ]
 
     # Track token usage
