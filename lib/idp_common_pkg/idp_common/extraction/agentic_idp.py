@@ -42,6 +42,9 @@ from idp_common.utils.strands_agent_tools.todo_list import (
     update_todo,
     view_todo_list,
 )
+from lib.idp_common_pkg.idp_common.utils.bedrock_utils import (
+    async_exponential_backoff_retry,
+)
 
 # Use AWS Lambda Powertools Logger for structured logging
 # Automatically logs as JSON with Lambda context, request_id, timestamp, etc.
@@ -458,6 +461,16 @@ After successfully using the extraction tool, you MUST:
 """
 
 
+@async_exponential_backoff_retry(
+    max_retries=50,
+    initial_delay=5,
+    max_delay=1800,
+    jitter=0.5,
+)
+async def invoke_agent_with_retry(input: Any, agent: Agent):
+    return await agent.invoke_async(input)
+
+
 async def structured_output_async(
     model_id: str,
     data_format: type[TargetModel],
@@ -755,7 +768,7 @@ async def structured_output_async(
 
     for attempt in range(max_retries):
         try:
-            response = await agent.invoke_async(prompt_content)
+            response = await invoke_agent_with_retry(agent=agent, input=prompt_content)
             logger.debug("Agent response received")
             break  # Success, exit retry loop
         except Exception as e:
@@ -885,7 +898,9 @@ async def structured_output_async(
                 )
             )
 
-            review_response = await agent.invoke_async(review_prompt)
+            review_response = await invoke_agent_with_retry(
+                agent=agent, input=review_prompt
+            )
             logger.debug("Review response received", extra={"review_completed": True})
 
             # Accumulate token usage from review
