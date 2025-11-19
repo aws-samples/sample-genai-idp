@@ -71,7 +71,8 @@ extraction = [
 
 # Assessment module dependencies
 assessment = [
-  "Pillow==11.2.1", # For image handling
+  "Pillow==11.2.1",               # For image handling
+  "aws-lambda-powertools>=3.2.0", # Structured logging and observability
 ]
 
 # Evaluation module dependencies
