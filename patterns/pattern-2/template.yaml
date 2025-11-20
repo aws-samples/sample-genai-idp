@@ -114,14 +114,14 @@ Parameters:
 
   EnableXRayTracing:
     Type: String
-    Default: 'true'
-    AllowedValues: ['true', 'false']
+    Default: "true"
+    AllowedValues: ["true", "false"]
     Description: Enable X-Ray tracing
 
   EnableECRImageScanning:
     Type: String
-    Default: 'true'
-    AllowedValues: ['true', 'false']
+    Default: "true"
+    AllowedValues: ["true", "false"]
     Description: Enable automatic vulnerability scanning for Lambda container images in ECR
 
   PermissionsBoundaryArn:
@@ -384,7 +384,7 @@ Resources:
       MemorySize: 128
       Handler: index.handler
       CodeUri: ../../src/lambda/start_codebuild
-      Description:  CodeBuild trigger Lambda for Docker image builds
+      Description: CodeBuild trigger Lambda for Docker image builds
       LoggingConfig:
         LogGroup: !Ref CodeBuildTriggerLogGroup
 
@@ -426,7 +426,7 @@ Resources:
     Properties:
       ServiceToken: !GetAtt CodeBuildTrigger.Arn
       RepositoryName: !Ref ECRRepository
-      
+
   # Shared IAM policy for Lambda functions to pull container images from ECR
   LambdaECRAccessPolicy:
     Type: AWS::IAM::ManagedPolicy
@@ -852,7 +852,6 @@ Resources:
                   - "eu.anthropic.claude-sonnet-4-5-20250929-v1:0"
                   - "eu.anthropic.claude-sonnet-4-5-20250929-v1:0:1m"
 
-
                 order: 1
               classificationMethod:
                 type: string
@@ -925,6 +924,10 @@ Resources:
                     description: This introduces a second agent to review the first agents work. Only use with highly complex workflows as it increases token usage.
                     order: 1
                     default: false
+                  review_agent_model:
+                    type: string
+                    description: Model to review the initial extraction agents work and correct it if needed, if not specified will default to the same as the extraction model.
+                    default: Null
               image:
                 type: object
                 sectionLabel: Image Processing Settings
@@ -1098,7 +1101,7 @@ Resources:
                     "us.anthropic.claude-sonnet-4-5-20250929-v1:0:1m",
                     "us.anthropic.claude-opus-4-20250514-v1:0",
                     "us.anthropic.claude-opus-4-1-20250805-v1:0",
-                    "eu.amazon.nova-lite-v1:0",     
+                    "eu.amazon.nova-lite-v1:0",
                     "eu.amazon.nova-pro-v1:0",
                     "eu.anthropic.claude-3-haiku-20240307-v1:0",
                     "eu.anthropic.claude-haiku-4-5-20251001-v1:0",
@@ -1163,7 +1166,7 @@ Resources:
                     "us.anthropic.claude-sonnet-4-5-20250929-v1:0:1m",
                     "us.anthropic.claude-opus-4-20250514-v1:0",
                     "us.anthropic.claude-opus-4-1-20250805-v1:0",
-                    "eu.amazon.nova-lite-v1:0",     
+                    "eu.amazon.nova-lite-v1:0",
                     "eu.amazon.nova-pro-v1:0",
                     "eu.anthropic.claude-3-haiku-20240307-v1:0",
                     "eu.anthropic.claude-haiku-4-5-20251001-v1:0",
@@ -1231,7 +1234,7 @@ Resources:
                         "us.anthropic.claude-sonnet-4-5-20250929-v1:0:1m",
                         "us.anthropic.claude-opus-4-20250514-v1:0",
                         "us.anthropic.claude-opus-4-1-20250805-v1:0",
-                        "eu.amazon.nova-lite-v1:0",     
+                        "eu.amazon.nova-lite-v1:0",
                         "eu.amazon.nova-pro-v1:0",
                         "eu.anthropic.claude-3-haiku-20240307-v1:0",
                         "eu.anthropic.claude-haiku-4-5-20251001-v1:0",
@@ -1300,7 +1303,7 @@ Resources:
                         "us.anthropic.claude-sonnet-4-5-20250929-v1:0:1m",
                         "us.anthropic.claude-opus-4-20250514-v1:0",
                         "us.anthropic.claude-opus-4-1-20250805-v1:0",
-                        "eu.amazon.nova-lite-v1:0",     
+                        "eu.amazon.nova-lite-v1:0",
                         "eu.amazon.nova-pro-v1:0",
                         "eu.anthropic.claude-3-haiku-20240307-v1:0",
                         "eu.anthropic.claude-haiku-4-5-20251001-v1:0",
@@ -1369,7 +1372,7 @@ Resources:
                         "us.anthropic.claude-sonnet-4-5-20250929-v1:0:1m",
                         "us.anthropic.claude-opus-4-20250514-v1:0",
                         "us.anthropic.claude-opus-4-1-20250805-v1:0",
-                        "eu.amazon.nova-lite-v1:0",     
+                        "eu.amazon.nova-lite-v1:0",
                         "eu.amazon.nova-pro-v1:0",
                         "eu.anthropic.claude-3-haiku-20240307-v1:0",
                         "eu.anthropic.claude-haiku-4-5-20251001-v1:0",
@@ -2514,7 +2517,7 @@ Resources:
           SAVE_REPORTING_FUNCTION_NAME: !Ref SaveReportingFunctionName
           CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
           WORKING_BUCKET: !Ref WorkingBucket
-          DOCUMENT_TRACKING_MODE: !If [HasAppSyncApi, 'appsync', 'dynamodb']
+          DOCUMENT_TRACKING_MODE: !If [HasAppSyncApi, "appsync", "dynamodb"]
           TRACKING_TABLE: !Ref TrackingTable
       LoggingConfig:
         LogGroup: !Ref EvaluationFunctionLogGroup

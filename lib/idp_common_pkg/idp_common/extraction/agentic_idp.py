@@ -24,6 +24,10 @@ import jsonpatch
 from aws_lambda_powertools import Logger
 from botocore.config import Config
 from botocore.exceptions import ClientError
+from idp_common_pkg.idp_common import IDPConfig
+from idp_common_pkg.idp_common.utils.bedrock_utils import (
+    async_exponential_backoff_retry,
+)
 from PIL import Image
 from pydantic import BaseModel, Field
 from strands import Agent, tool
@@ -41,9 +45,6 @@ from idp_common.utils.strands_agent_tools.todo_list import (
     create_todo_list,
     update_todo,
     view_todo_list,
-)
-from lib.idp_common_pkg.idp_common.utils.bedrock_utils import (
-    async_exponential_backoff_retry,
 )
 
 # Use AWS Lambda Powertools Logger for structured logging
@@ -478,7 +479,7 @@ async def structured_output_async(
     existing_data: BaseModel | None = None,
     system_prompt: str | None = None,
     custom_instruction: str | None = None,
-    review_agent: bool = False,
+    config: IDPConfig = IDPConfig(),
     context: str = "Extraction",
     max_retries: int = 7,
     connect_timeout: float = 10.0,
@@ -593,9 +594,6 @@ async def structured_output_async(
         },
     )
 
-    # Build final system prompt without modifying the original
-    final_system_prompt = system_prompt
-
     # Configure retry behavior and timeouts using boto3 Config
     boto_config = Config(
         retries={
@@ -605,13 +603,6 @@ async def structured_output_async(
         connect_timeout=connect_timeout,
         read_timeout=read_timeout,
     )
-
-    model_config = dict(model_id=model_id, boto_client_config=boto_config)
-    # Set max_tokens based on actual model limits
-    # Reference: https://docs.aws.amazon.com/bedrock/latest/userguide/
-
-    # Determine model's maximum
-    # Use regex for more flexible matching (e.g., claude-sonnet-4-5 should match claude-sonnet-4)
 
     model_max = 4_096  # Default fallback
     model_id_lower = model_id.lower()
@@ -681,7 +672,7 @@ async def structured_output_async(
     else:
         logger.debug("Caching not supported for model", extra={"model_id": model_id})
 
-    final_system_prompt = SYSTEM_PROMPT
+    final_system_prompt = system_prompt if system_prompt else SYSTEM_PROMPT
 
     if custom_instruction:
         final_system_prompt = f"{final_system_prompt}\n\nCustom Instructions for this specific task: {custom_instruction}"
@@ -763,6 +754,7 @@ async def structured_output_async(
                     ContentBlock(
                         text=f"Please update the existing data using the extraction tool or patches. Existing data: {existing_data.model_dump()}"
                     ),
+                    ContentBlock(cachePoint=CachePoint(type="default")),
                 ],
             )
         )
@@ -875,7 +867,7 @@ async def structured_output_async(
         )
 
         # Add explicit review step (Option 2)
-        if review_agent:
+        if config.extraction.agentic.enabled and config.extraction.agentic.review_agent:
             logger.debug(
                 "Initiating final review of extracted data",
                 extra={"review_enabled": True},
@@ -899,9 +891,31 @@ async def structured_output_async(
                 If everything is correct, respond with "Data verified and accurate."
                 If corrections are needed, use the apply_json_patches tool to fix any issues you find.
                 """
-                        )
+                        ),
+                        ContentBlock(cachePoint=CachePoint(type="default")),
                     ],
                 )
+            )
+            model_config = dict(
+                model_id=config.extraction.agentic.review_agent_model,
+                boto_client_config=boto_config,
+                max_tokens=max_output_tokens,
+            )
+            agent = Agent(
+                model=BedrockModel(**model_config),  # pyright: ignore[reportArgumentType]
+                tools=tools,
+                system_prompt=f"{final_system_prompt}",
+                state={
+                    "current_extraction": None,
+                    "images": {},
+                    "existing_data": existing_data.model_dump()
+                    if existing_data
+                    else None,
+                    "extraction_schema_json": schema_json,  # Store for schema reminder tool
+                },
+                conversation_manager=SummarizingConversationManager(
+                    summary_ratio=0.8, preserve_recent_messages=2
+                ),
             )
 
             review_response = await invoke_agent_with_retry(
@@ -960,8 +974,8 @@ def structured_output(
     existing_data: BaseModel | None = None,
     system_prompt: str | None = None,
     custom_instruction: str | None = None,
-    review_agent: bool = False,
     context: str = "Extraction",
+    config: IDPConfig = IDPConfig(),
     max_retries: int = 7,
     connect_timeout: float = 10.0,
     read_timeout: float = 300.0,
@@ -1045,7 +1059,7 @@ def structured_output(
                         existing_data=existing_data,
                         system_prompt=system_prompt,
                         custom_instruction=custom_instruction,
-                        review_agent=review_agent,
+                        config=config,
                         context=context,
                         max_retries=max_retries,
                         connect_timeout=connect_timeout,
@@ -1076,7 +1090,7 @@ def structured_output(
                 existing_data=existing_data,
                 system_prompt=system_prompt,
                 custom_instruction=custom_instruction,
-                review_agent=review_agent,
+                config=config,
                 context=context,
                 max_retries=max_retries,
                 connect_timeout=connect_timeout,

@@ -1104,7 +1104,7 @@ class ExtractionService:
                     data_format=dynamic_model,
                     prompt=message_prompt,  # pyright: ignore[reportArgumentType]
                     custom_instruction=system_prompt,
-                    review_agent=self.config.extraction.agentic.review_agent,  # Type-safe boolean!
+                    config=self.config,
                     context="Extraction",
                 )
 
