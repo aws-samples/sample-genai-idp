@@ -9,10 +9,10 @@ tool-based approach with dynamic tool creation based on Pydantic models.
 import asyncio
 import io
 import json
+import logging
 import os
 import re
 import threading
-import traceback
 from pathlib import Path
 from typing import (
     Any,
@@ -23,16 +23,12 @@ from typing import (
 import jsonpatch
 from aws_lambda_powertools import Logger
 from botocore.config import Config
-from botocore.exceptions import ClientError
-from idp_common_pkg.idp_common import IDPConfig
-from idp_common_pkg.idp_common.utils.bedrock_utils import (
-    async_exponential_backoff_retry,
-)
 from PIL import Image
 from pydantic import BaseModel, Field
 from strands import Agent, tool
 from strands.agent.conversation_manager import SummarizingConversationManager
-from strands.models.bedrock import BedrockModel
+from strands.models import BedrockModel
+from strands.types.agent import AgentInput
 from strands.types.content import CachePoint, ContentBlock, Message
 from strands.types.media import (
     DocumentContent,
@@ -41,6 +37,10 @@ from strands.types.media import (
 )
 
 from idp_common.bedrock.client import CACHEPOINT_SUPPORTED_MODELS
+from idp_common.config.models import IDPConfig
+from idp_common.utils.bedrock_utils import (
+    async_exponential_backoff_retry,
+)
 from idp_common.utils.strands_agent_tools.todo_list import (
     create_todo_list,
     update_todo,
@@ -52,7 +52,7 @@ from idp_common.utils.strands_agent_tools.todo_list import (
 # In Lambda: Full JSON structured logs
 # Outside Lambda: Human-readable format for local development
 logger = Logger(service="agentic_idp", level=os.getenv("LOG_LEVEL", "INFO"))
-
+logging.getLogger("strands.models.bedrock").setLevel(logging.DEBUG)
 TargetModel = TypeVar("TargetModel", bound=BaseModel)
 
 
@@ -138,14 +138,6 @@ class BedrockInvokeModelResponse(TypedDict):
     metering: dict[str, BedrockUsage]  # Key format: "{context}/bedrock/{model_id}"
 
 
-# Data Models for structured extraction
-class BoolResponseModel(BaseModel):
-    """Model for boolean validation responses."""
-
-    valid_result: bool
-    description: str = Field(..., description="explanation of the decision")
-
-
 class JsonPatchModel(BaseModel):
     """Model for JSON patch operations."""
 
@@ -180,6 +172,59 @@ def apply_patches_to_data(
     patched_dict = patch.apply(existing_data)
 
     return patched_dict
+
+
+def create_view_image_tool(page_images: list[bytes]) -> Any:
+    """
+    Create a view_image tool that has access to page images.
+
+    Args:
+        page_images: List of page image bytes (with grid overlay already applied)
+        sorted_page_ids: List of page IDs in sorted order
+
+    Returns:
+        A Strands tool function for viewing images
+    """
+
+    @tool
+    def view_image(image_index: int, agent: Agent) -> dict:
+        """
+        View a specific page image. Use this tool when the doc has more images than what you already see.
+        """
+
+        # Validate image index exists
+        if image_index >= len(page_images):
+            raise ValueError(
+                f"Invalid image_index {image_index}. "
+                f"Valid range: 0-{len(page_images) - 1}"
+            )
+
+        # Get the base image (already has grid overlay)
+        img_bytes = page_images[image_index]
+
+        logger.info(
+            "Returning image to agent",
+            extra={
+                "image_index": image_index,
+                "image_size_bytes": len(img_bytes),
+            },
+        )
+
+        return {
+            "status": "success",
+            "content": [
+                {
+                    "image": {
+                        "format": "png",
+                        "source": {
+                            "bytes": img_bytes,
+                        },
+                    }
+                }
+            ],
+        }
+
+    return view_image
 
 
 def create_dynamic_extraction_tool_and_patch_tool(model_class: type[TargetModel]):
@@ -468,8 +513,336 @@ After successfully using the extraction tool, you MUST:
     max_delay=1800,
     jitter=0.5,
 )
-async def invoke_agent_with_retry(input: Any, agent: Agent):
+async def invoke_agent_with_retry(input: AgentInput, agent: Agent):
     return await agent.invoke_async(input)
+
+
+def _initialize_token_usage() -> dict[str, int]:
+    """Initialize token usage tracking dictionary."""
+    return {
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "totalTokens": 0,
+        "cacheReadInputTokens": 0,
+        "cacheWriteInputTokens": 0,
+    }
+
+
+def _accumulate_token_usage(response: Any, token_usage: dict[str, int]) -> None:
+    """
+    Accumulate token usage from response into usage dict.
+
+    Args:
+        response: Agent response object with metrics
+        token_usage: Dictionary to accumulate usage into (modified in place)
+    """
+    if response and response.metrics and response.metrics.accumulated_usage:
+        for key in token_usage.keys():
+            token_usage[key] += response.metrics.accumulated_usage.get(key, 0)
+
+
+def _build_system_prompt(
+    base_prompt: str, custom_instruction: str | None, data_format: type[BaseModel]
+) -> tuple[str, str]:
+    """
+    Build complete system prompt with custom instructions and schema.
+
+    Args:
+        base_prompt: The base system prompt (typically SYSTEM_PROMPT constant)
+        custom_instruction: Optional custom instructions to append
+        data_format: Pydantic model class to extract schema from
+
+    Returns:
+        Tuple of (complete system prompt with schema, schema_json for state storage)
+    """
+    # Generate and clean schema
+    schema_json = json.dumps(data_format.model_json_schema(), indent=2)
+
+    # Build final prompt
+    final_prompt = base_prompt
+    if custom_instruction:
+        final_prompt = f"{final_prompt}\n\nCustom Instructions for this specific task: {custom_instruction}"
+
+    complete_prompt = f"{final_prompt}\n\nExpected Schema:\n{schema_json}"
+
+    return complete_prompt, schema_json
+
+
+def _build_model_config(
+    model_id: str,
+    max_tokens: int | None,
+    max_retries: int,
+    connect_timeout: float,
+    read_timeout: float,
+) -> dict[str, Any]:
+    """
+    Build model configuration with token limits and caching settings.
+
+    This function:
+    1. Creates boto3 Config with retry and timeout settings
+    2. Determines model-specific max token limits
+    3. Validates and caps max_tokens if needed
+    4. Auto-detects and enables caching support (prompt and tool caching)
+
+    Args:
+        model_id: Bedrock model identifier (supports us.*, eu.*, and global.anthropic.*)
+        max_tokens: Optional max tokens override (will be capped at model max)
+        max_retries: Maximum retry attempts for API calls
+        connect_timeout: Connection timeout in seconds
+        read_timeout: Read timeout in seconds
+
+    Returns:
+        Dictionary of model configuration parameters for create_strands_bedrock_model.
+        Automatically uses BedrockModel for regional models (us.*, eu.*) and
+        AnthropicModel with AnthropicBedrock for cross-region models (global.anthropic.*).
+    """
+    # Configure retry behavior and timeouts using boto3 Config
+    boto_config = Config(
+        retries={
+            "max_attempts": max_retries,
+            "mode": "adaptive",  # Uses exponential backoff with adaptive retry mode
+        },
+        connect_timeout=connect_timeout,
+        read_timeout=read_timeout,
+    )
+
+    # Determine model-specific maximum token limits
+    model_max = 4_096  # Default fallback
+    model_id_lower = model_id.lower()
+
+    # Check Claude 4 patterns first (more specific)
+    if re.search(r"claude-(opus|sonnet|haiku)-4", model_id_lower):
+        model_max = 64_000
+    # Check Nova models
+    elif any(
+        nova in model_id_lower
+        for nova in ["nova-premier", "nova-pro", "nova-lite", "nova-micro"]
+    ):
+        model_max = 10_000
+    # Check Claude 3 models
+    elif "claude-3" in model_id_lower:
+        model_max = 8_192
+
+    # Use config value if provided, but cap at model's maximum
+    if max_tokens is not None:
+        if max_tokens > model_max:
+            logger.warning(
+                "Config max_tokens exceeds model limit, capping at model maximum",
+                extra={
+                    "config_max_tokens": max_tokens,
+                    "model_max_tokens": model_max,
+                    "model_id": model_id,
+                },
+            )
+            max_output_tokens = model_max
+        else:
+            max_output_tokens = max_tokens
+    else:
+        # No config value - use model maximum for agentic extraction
+        max_output_tokens = model_max
+
+    # Build base model config
+    model_config = dict(
+        model_id=model_id, boto_client_config=boto_config, max_tokens=max_output_tokens
+    )
+
+    logger.info(
+        "Setting max_tokens for model",
+        extra={
+            "max_tokens": max_output_tokens,
+            "model_id": model_id,
+            "model_max_tokens": model_max,
+        },
+    )
+
+    # Auto-detect caching support based on model capabilities
+    if supports_prompt_caching(model_id):
+        model_config["cache_prompt"] = "default"
+        logger.info(
+            "Prompt caching enabled for model",
+            extra={"model_id": model_id, "auto_detected": True},
+        )
+
+        # Only enable tool caching if the model supports it (Claude only, not Nova)
+        if supports_tool_caching(model_id):
+            model_config["cache_tools"] = "default"
+            logger.info(
+                "Tool caching enabled for model",
+                extra={"model_id": model_id, "auto_detected": True},
+            )
+        else:
+            logger.info(
+                "Tool caching not supported for model",
+                extra={"model_id": model_id, "reason": "prompt_caching_only"},
+            )
+    else:
+        logger.debug("Caching not supported for model", extra={"model_id": model_id})
+
+    return model_config
+
+
+def _prepare_prompt_content(
+    prompt: str | Message | Image.Image,
+    page_images: list[bytes] | None,
+    existing_data: BaseModel | None,
+) -> list[ContentBlock]:
+    """
+    Prepare prompt content from various input types.
+
+    Converts different prompt types (text, PIL Image, Message dict) into
+    a list of ContentBlocks, adds page images, and appends existing data context.
+
+    Args:
+        prompt: Input content (text string, PIL Image, or Message dict)
+        page_images: Optional list of page image bytes to include
+        existing_data: Optional existing extraction data to update
+
+    Returns:
+        List of ContentBlock objects ready for agent invocation
+    """
+    prompt_content: list[ContentBlock] = []
+
+    # Process prompt based on type
+    if isinstance(prompt, Image.Image):
+        # Convert PIL Image to binary string
+        img_buffer = io.BytesIO()
+        prompt.save(img_buffer, format="PNG")
+        img_bytes = img_buffer.getvalue()
+
+        logger.debug(
+            "Processing PIL Image",
+            extra={"size": prompt.size, "mode": prompt.mode},
+        )
+
+        prompt_content = [
+            ContentBlock(text="Extract structured data from this image:"),
+            ContentBlock(
+                image=ImageContent(format="png", source=ImageSource(bytes=img_bytes))
+            ),
+        ]
+    elif isinstance(prompt, dict) and "content" in prompt:
+        prompt_content = prompt["content"]  # type: ignore
+    else:
+        prompt_content = [ContentBlock(text=str(prompt))]
+
+    # Add page images if provided
+    if page_images:
+        if len(page_images) > 20:
+            prompt_content.append(
+                ContentBlock(
+                    text=f"There are {len(page_images)} images, initially you'll see 20 of them, use the tools to see the rest."
+                )
+            )
+
+        prompt_content += [
+            ContentBlock(
+                image=ImageContent(format="png", source=ImageSource(bytes=img_bytes))
+            )
+            for img_bytes in page_images
+        ]
+
+    # Add existing data context if provided
+    if existing_data:
+        prompt_content.append(
+            ContentBlock(
+                text=f"Please update the existing data using the extraction tool or patches. Existing data: {existing_data.model_dump()}"
+            )
+        )
+
+    prompt_content += [
+        ContentBlock(text="end of your main task description"),
+        ContentBlock(cachePoint=CachePoint(type="default")),
+    ]
+    return prompt_content
+
+
+async def _invoke_agent_for_extraction(
+    agent: Agent,
+    prompt_content: list[ContentBlock],
+    data_format: type[TargetModel],
+    max_extraction_retries: int = 3,
+) -> tuple[Any, TargetModel | None]:
+    """
+    Invoke agent and retry if extraction fails.
+
+    Unlike network retries (handled by invoke_agent_with_retry), this retries when
+    the agent completes successfully but fails to produce a valid extraction.
+
+    Args:
+        agent: The Strands agent to invoke
+        prompt_content: List of ContentBlocks to send to the agent
+        data_format: Pydantic model class for validation
+        max_extraction_retries: Maximum retry attempts for failed extractions (default: 3)
+
+    Returns:
+        Tuple of (response, validated_result or None)
+    """
+    response = None
+
+    for attempt in range(max_extraction_retries):
+        # invoke_agent_with_retry already handles network errors and throttling
+        response = await invoke_agent_with_retry(agent=agent, input=prompt_content)
+        logger.debug("Agent response received")
+
+        # Try to get extraction from state
+        current_extraction = agent.state.get("current_extraction")
+
+        if current_extraction:
+            try:
+                result = data_format(**current_extraction)
+                logger.debug(
+                    "Successfully validated extraction",
+                    extra={"data_format": data_format.__name__, "attempt": attempt + 1},
+                )
+                return response, result
+            except Exception as e:
+                logger.warning(
+                    "Extraction validation failed, retrying",
+                    extra={
+                        "attempt": attempt + 1,
+                        "max_retries": max_extraction_retries,
+                        "error": str(e),
+                        "data_format": data_format.__name__,
+                    },
+                )
+                if attempt < max_extraction_retries - 1:
+                    # Ask agent to fix the extraction
+                    prompt_content = [
+                        ContentBlock(
+                            text=f"The extraction failed validation with error: {str(e)}. Please fix the extraction using the tools."
+                        )
+                    ]
+                    continue
+                else:
+                    # Last attempt failed
+                    logger.error(
+                        "Failed to validate extraction after all retries",
+                        extra={
+                            "data_format": data_format.__name__,
+                            "error": str(e),
+                            "extraction_data": current_extraction,
+                        },
+                    )
+                    return response, None
+        else:
+            logger.warning(
+                "No extraction found in agent state",
+                extra={"attempt": attempt + 1, "max_retries": max_extraction_retries},
+            )
+            if attempt < max_extraction_retries - 1:
+                # Ask agent to provide extraction
+                prompt_content = [
+                    ContentBlock(
+                        text="No extraction was found. Please use the extraction_tool to provide the extracted data."
+                    )
+                ]
+                continue
+
+    # Should never reach here, but handle it gracefully
+    if response is None:
+        raise ValueError("No response from agent after retries")
+
+    return response, None
 
 
 async def structured_output_async(
@@ -480,6 +853,7 @@ async def structured_output_async(
     system_prompt: str | None = None,
     custom_instruction: str | None = None,
     config: IDPConfig = IDPConfig(),
+    page_images: list[bytes] | None = None,
     context: str = "Extraction",
     max_retries: int = 7,
     connect_timeout: float = 10.0,
@@ -566,10 +940,14 @@ async def structured_output_async(
     dynamic_extraction_tools = create_dynamic_extraction_tool_and_patch_tool(
         data_format
     )
+    image_tools = []
+    if page_images:
+        image_tools.append(create_view_image_tool(page_images))
 
     # Prepare tools list
     tools = [
         *dynamic_extraction_tools,
+        *image_tools,
         view_existing_extraction,
         patch_buffer_data,
         view_buffer_data,
@@ -582,8 +960,13 @@ async def structured_output_async(
         view_todo_list,
     ]
 
-    # Create agent with system prompt and tools
-    schema_json = json.dumps(data_format.model_json_schema(), indent=2)
+    # Build system prompt with schema
+    final_system_prompt, schema_json = _build_system_prompt(
+        base_prompt=system_prompt or SYSTEM_PROMPT,
+        custom_instruction=custom_instruction,
+        data_format=data_format,
+    )
+
     tool_names = [getattr(tool, "__name__", str(tool)) for tool in tools]
     logger.debug(
         "Created agent with tools",
@@ -594,93 +977,26 @@ async def structured_output_async(
         },
     )
 
-    # Configure retry behavior and timeouts using boto3 Config
-    boto_config = Config(
-        retries={
-            "max_attempts": max_retries,
-            "mode": "adaptive",  # Uses exponential backoff with adaptive retry mode
-        },
+    # Build model configuration with token limits and caching
+    model_config = _build_model_config(
+        model_id=model_id,
+        max_tokens=max_tokens,
+        max_retries=max_retries,
         connect_timeout=connect_timeout,
         read_timeout=read_timeout,
     )
 
-    model_max = 4_096  # Default fallback
-    model_id_lower = model_id.lower()
-    # Check Claude 4 patterns first (more specific)
-    if re.search(r"claude-(opus|sonnet|haiku)-4", model_id_lower):
-        model_max = 64_000
-    # Check Nova models
-    elif any(
-        nova in model_id_lower
-        for nova in ["nova-premier", "nova-pro", "nova-lite", "nova-micro"]
-    ):
-        model_max = 10_000
-    # Check Claude 3 models
-    elif "claude-3" in model_id_lower:
-        model_max = 8_192
-
-    # Use config value if provided, but cap at model's maximum
-    if max_tokens is not None:
-        if max_tokens > model_max:
-            logger.warning(
-                "Config max_tokens exceeds model limit, capping at model maximum",
-                extra={
-                    "config_max_tokens": max_tokens,
-                    "model_max_tokens": model_max,
-                    "model_id": model_id,
-                },
-            )
-            max_output_tokens = model_max
-        else:
-            max_output_tokens = max_tokens
-    else:
-        # No config value - use model maximum for agentic extraction
-        max_output_tokens = model_max
-
-    model_config = dict(
-        model_id=model_id, boto_client_config=boto_config, max_tokens=max_output_tokens
-    )
-    logger.info(
-        "Setting max_tokens for model",
-        extra={
-            "max_tokens": max_output_tokens,
-            "model_id": model_id,
-            "model_max_tokens": model_max,
-        },
+    # Prepare prompt content
+    prompt_content = _prepare_prompt_content(
+        prompt=prompt, page_images=page_images, existing_data=existing_data
     )
 
-    # Auto-detect caching support based on model capabilities
-    if supports_prompt_caching(model_id):
-        model_config["cache_prompt"] = "default"
-        logger.info(
-            "Prompt caching enabled for model",
-            extra={"model_id": model_id, "auto_detected": True},
-        )
-
-        # Only enable tool caching if the model supports it (Claude only, not Nova)
-        if supports_tool_caching(model_id):
-            model_config["cache_tools"] = "default"
-            logger.info(
-                "Tool caching enabled for model",
-                extra={"model_id": model_id, "auto_detected": True},
-            )
-        else:
-            logger.info(
-                "Tool caching not supported for model",
-                extra={"model_id": model_id, "reason": "prompt_caching_only"},
-            )
-    else:
-        logger.debug("Caching not supported for model", extra={"model_id": model_id})
-
-    final_system_prompt = system_prompt if system_prompt else SYSTEM_PROMPT
-
-    if custom_instruction:
-        final_system_prompt = f"{final_system_prompt}\n\nCustom Instructions for this specific task: {custom_instruction}"
-
+    # Track token usage
+    token_usage = _initialize_token_usage()
     agent = Agent(
         model=BedrockModel(**model_config),  # pyright: ignore[reportArgumentType]
         tools=tools,
-        system_prompt=f"{final_system_prompt}\n\nExpected Schema:\n{schema_json}",
+        system_prompt=final_system_prompt,
         state={
             "current_extraction": None,
             "images": {},
@@ -691,195 +1007,40 @@ async def structured_output_async(
             summary_ratio=0.8, preserve_recent_messages=2
         ),
     )
-
-    # Process prompt based on type
-    if isinstance(prompt, Image.Image):
-        # Convert PIL Image to binary string for state storage
-        img_buffer = io.BytesIO()
-        prompt.save(img_buffer, format="PNG")
-        img_bytes = img_buffer.getvalue()
-
-        logger.debug(
-            "Processing PIL Image",
-            extra={"size": prompt.size, "mode": prompt.mode},
-        )
-
-        # Store image as binary string in state
-
-        prompt_content = [
-            Message(
-                role="user",
-                content=[
-                    ContentBlock(text="Extract structured data from this image:"),
-                    ContentBlock(
-                        image=ImageContent(
-                            format="png", source=ImageSource(bytes=img_bytes)
-                        )
-                    ),
-                    ContentBlock(cachePoint=CachePoint(type="default")),
-                ],
-            )
-        ]
-    elif isinstance(prompt, dict) and "content" in prompt:
-        prompt_content = [prompt]
-    else:
-        prompt_content = [
-            Message(
-                role="user",
-                content=[
-                    ContentBlock(text=str(prompt)),
-                    ContentBlock(cachePoint=CachePoint(type="default")),
-                ],
-            )
-        ]
-
-    # Track token usage
-    token_usage = {
-        "inputTokens": 0,
-        "outputTokens": 0,
-        "totalTokens": 0,
-        "cacheReadInputTokens": 0,
-        "cacheWriteInputTokens": 0,
-    }
-
-    # Main extraction loop
-    result = None
-    response = None
-    # Prepare prompt for this cycle
     if existing_data:
-        prompt_content.append(
-            Message(
-                role="user",
-                content=[
-                    ContentBlock(
-                        text=f"Please update the existing data using the extraction tool or patches. Existing data: {existing_data.model_dump()}"
-                    ),
-                    ContentBlock(cachePoint=CachePoint(type="default")),
-                ],
-            )
-        )
         agent.state.set("current_extraction", existing_data.model_dump())
 
-    # Retry logic for network errors (ProtocolError, etc.)
-    max_retries = 3
-    retry_delay = 2  # seconds
-
-    for attempt in range(max_retries):
-        try:
-            response = await invoke_agent_with_retry(agent=agent, input=prompt_content)
-            logger.debug("Agent response received")
-            break  # Success, exit retry loop
-        except Exception as e:
-            error_type = type(e).__name__
-            error_msg = str(e)
-            is_last_attempt = attempt == max_retries - 1
-
-            # Check if this is a retryable network error
-            is_retryable = (
-                error_type
-                in [
-                    "ProtocolError",
-                    "ConnectionError",
-                    "ReadTimeoutError",
-                    "IncompleteRead",
-                ]
-                or "Response ended prematurely" in error_msg
-                or "Connection" in error_msg
-            )
-
-            if is_retryable and not is_last_attempt:
-                logger.warning(
-                    "Network error during agent invocation, retrying",
-                    extra={
-                        "attempt": attempt + 1,
-                        "max_retries": max_retries,
-                        "error_type": error_type,
-                        "error_message": error_msg,
-                        "retry_delay_seconds": retry_delay,
-                    },
-                )
-                await asyncio.sleep(retry_delay)
-                retry_delay *= 2  # Exponential backoff
-                continue
-
-            # Log the error
-
-            logger.error(
-                "Agent invocation failed",
-                extra={
-                    "error_type": error_type,
-                    "error_message": error_msg,
-                    "traceback": traceback.format_exc(),
-                },
-            )
-
-            # Re-raise ClientError (including ThrottlingException) directly for Step Functions retry handling
-            if isinstance(e, ClientError):
-                logger.error(
-                    "Bedrock ClientError detected",
-                    extra={
-                        "error_code": e.response["Error"]["Code"],
-                        "error_message": e.response["Error"].get("Message", ""),
-                    },
-                )
-                raise
-
-            # Wrap other exceptions
-            raise ValueError(f"Agent invocation failed: {error_msg}")
-
-    # Accumulate token usage
-    if response and response.metrics and response.metrics.accumulated_usage:
-        for key in token_usage.keys():
-            token_usage[key] += response.metrics.accumulated_usage.get(key, 0)
-
-    # Check for extraction in state
-    current_extraction = agent.state.get("current_extraction")
-    logger.debug(
-        "Current extraction from state",
-        extra={"extraction": current_extraction},
+    response, result = await _invoke_agent_for_extraction(
+        agent=agent,
+        prompt_content=prompt_content,
+        data_format=data_format,
+        max_extraction_retries=3,
     )
 
-    if current_extraction:
-        try:
-            result = data_format(**current_extraction)
-            logger.debug(
-                "Successfully created extraction instance",
-                extra={"data_format": data_format.__name__},
-            )
-        except Exception as e:
-            logger.error(
-                "Failed to validate extraction against schema",
-                extra={
-                    "data_format": data_format.__name__,
-                    "error": str(e),
-                    "extraction_data": current_extraction,
-                },
-            )
-            raise ValueError(f"Failed to validate extraction against schema: {str(e)}")
-    else:
-        logger.error(
-            "No extraction found in agent state",
-            extra={"agent_state_keys": list(agent.state._state.keys())},
-        )
-        logger.error(
-            "Full agent state dump",
-            extra={"agent_state": agent.state._state},
-        )
+    # Accumulate token usage
+    _accumulate_token_usage(response, token_usage)
 
-        # Add explicit review step (Option 2)
-        if config.extraction.agentic.enabled and config.extraction.agentic.review_agent:
-            logger.debug(
-                "Initiating final review of extracted data",
-                extra={"review_enabled": True},
-            )
-            review_prompt = prompt_content.append(
-                Message(
-                    role="user",
-                    content=[
-                        ContentBlock(
-                            text=f"""
+    # Add explicit review step (Option 2)
+    if (
+        config.extraction.agentic.enabled
+        and config.extraction.agentic.review_agent
+        and config.extraction.agentic.review_agent_model
+    ):
+        # result is guaranteed to be non-None here (we raised an error earlier if it was None)
+        assert result is not None
+
+        logger.debug(
+            "Initiating final review of extracted data",
+            extra={"review_enabled": True},
+        )
+        review_prompt = Message(
+            role="user",
+            content=[
+                *prompt_content,
+                ContentBlock(
+                    text=f"""
                 You have successfully extracted the following data:
-                {json.dumps(current_extraction, indent=2)}
+                {json.dumps(result.model_dump(), indent=2)}
 
                 Please take one final careful look at this extraction:
                 1. Check each field against the source document
@@ -891,60 +1052,56 @@ async def structured_output_async(
                 If everything is correct, respond with "Data verified and accurate."
                 If corrections are needed, use the apply_json_patches tool to fix any issues you find.
                 """
-                        ),
-                        ContentBlock(cachePoint=CachePoint(type="default")),
-                    ],
-                )
-            )
-            model_config = dict(
-                model_id=config.extraction.agentic.review_agent_model,
-                boto_client_config=boto_config,
-                max_tokens=max_output_tokens,
-            )
-            agent = Agent(
-                model=BedrockModel(**model_config),  # pyright: ignore[reportArgumentType]
-                tools=tools,
-                system_prompt=f"{final_system_prompt}",
-                state={
-                    "current_extraction": None,
-                    "images": {},
-                    "existing_data": existing_data.model_dump()
-                    if existing_data
-                    else None,
-                    "extraction_schema_json": schema_json,  # Store for schema reminder tool
-                },
-                conversation_manager=SummarizingConversationManager(
-                    summary_ratio=0.8, preserve_recent_messages=2
                 ),
-            )
+                ContentBlock(cachePoint=CachePoint(type="default")),
+            ],
+        )
+        # Build config for review agent
+        review_model_config = _build_model_config(
+            model_id=config.extraction.agentic.review_agent_model,
+            max_tokens=max_tokens,
+            max_retries=max_retries,
+            connect_timeout=connect_timeout,
+            read_timeout=read_timeout,
+        )
+        agent = Agent(
+            model=BedrockModel(**review_model_config),  # pyright: ignore[reportArgumentType]
+            tools=tools,
+            system_prompt=f"{final_system_prompt}",
+            state={
+                "current_extraction": None,
+                "images": {},
+                "existing_data": existing_data.model_dump() if existing_data else None,
+                "extraction_schema_json": schema_json,  # Store for schema reminder tool
+            },
+            conversation_manager=SummarizingConversationManager(
+                summary_ratio=0.8, preserve_recent_messages=2
+            ),
+        )
 
-            review_response = await invoke_agent_with_retry(
-                agent=agent, input=review_prompt
-            )
-            logger.debug("Review response received", extra={"review_completed": True})
+        review_response = await invoke_agent_with_retry(
+            agent=agent, input=review_prompt
+        )
+        logger.debug("Review response received", extra={"review_completed": True})
 
-            # Accumulate token usage from review
-            if review_response.metrics and review_response.metrics.accumulated_usage:
-                for key in token_usage.keys():
-                    token_usage[key] += review_response.metrics.accumulated_usage.get(
-                        key, 0
-                    )
+        # Accumulate token usage from review
+        _accumulate_token_usage(review_response, token_usage)
 
-            # Check if patches were applied during review
-            updated_extraction = agent.state.get("current_extraction")
-            if updated_extraction != current_extraction:
-                # Patches were applied, validate the new extraction
-                try:
-                    result = data_format(**updated_extraction)
-                    logger.debug(
-                        "Applied corrections after final review",
-                        extra={"corrections_applied": True},
-                    )
-                except Exception as e:
-                    logger.debug(
-                        "Post-review validation failed",
-                        extra={"error": str(e)},
-                    )
+        # Check if patches were applied during review
+        updated_extraction = agent.state.get("current_extraction")
+        if updated_extraction != result.model_dump():
+            # Patches were applied, validate the new extraction
+            try:
+                result = data_format(**updated_extraction)
+                logger.debug(
+                    "Applied corrections after final review",
+                    extra={"corrections_applied": True},
+                )
+            except Exception as e:
+                logger.debug(
+                    "Post-review validation failed",
+                    extra={"error": str(e)},
+                )
 
     # Return best effort result
     if result and response:
@@ -974,6 +1131,7 @@ def structured_output(
     existing_data: BaseModel | None = None,
     system_prompt: str | None = None,
     custom_instruction: str | None = None,
+    page_images: list[bytes] | None = None,
     context: str = "Extraction",
     config: IDPConfig = IDPConfig(),
     max_retries: int = 7,
@@ -1064,6 +1222,7 @@ def structured_output(
                         max_retries=max_retries,
                         connect_timeout=connect_timeout,
                         read_timeout=read_timeout,
+                        page_images=page_images,
                     )
                 )
             except Exception as e:
@@ -1095,6 +1254,7 @@ def structured_output(
                 max_retries=max_retries,
                 connect_timeout=connect_timeout,
                 read_timeout=read_timeout,
+                page_images=page_images,
             )
         )
 

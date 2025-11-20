@@ -14,9 +14,10 @@ import json
 import logging
 import os
 import time
-from typing import Any, Dict, List, Union
+from typing import Any
 
 from idp_common import bedrock, image, metrics, s3, utils
+from idp_common.bedrock import format_prompt
 from idp_common.config.models import IDPConfig
 from idp_common.config.schema_constants import (
     ID_FIELD,
@@ -36,9 +37,45 @@ try:
     AGENTIC_AVAILABLE = True
 except ImportError:
     AGENTIC_AVAILABLE = False
+from pydantic import BaseModel
+
 from idp_common.utils import extract_json_from_text
 
 logger = logging.getLogger(__name__)
+
+
+# Pydantic models for internal data transfer
+class SectionInfo(BaseModel):
+    """Metadata about a document section being processed."""
+
+    class_label: str
+    sorted_page_ids: list[str]
+    page_indices: list[int]
+    output_bucket: str
+    output_key: str
+    output_uri: str
+    start_page: int
+    end_page: int
+
+
+class ExtractionConfig(BaseModel):
+    """Configuration for model invocation."""
+
+    model_id: str
+    temperature: float
+    top_k: float
+    top_p: float
+    max_tokens: int | None
+    system_prompt: str
+
+
+class ExtractionResult(BaseModel):
+    """Result from model extraction."""
+
+    extracted_fields: dict[str, Any]
+    metering: dict[str, Any]
+    parsing_succeeded: bool
+    total_duration: float
 
 
 class ExtractionService:
@@ -46,8 +83,8 @@ class ExtractionService:
 
     def __init__(
         self,
-        region: str = None,
-        config: Union[Dict[str, Any], "IDPConfig"] = None,
+        region: str | None = None,
+        config: dict[str, Any] | IDPConfig | None = None,
     ):
         """
         Initialize the extraction service.
@@ -67,13 +104,62 @@ class ExtractionService:
         self.config = config_model
         self.region = region or os.environ.get("AWS_REGION")
 
+        # Instance variables for prompt context
+        # These are initialized here and populated during each process_document_section call
+        # This allows methods to access context without passing multiple parameters
+        self._document_text: str = ""
+        self._class_label: str = ""
+        self._attribute_descriptions: str = ""
+        self._class_schema: dict[str, Any] = {}
+        self._page_images: list[Any] = []
+        self._image_uris: list[str] = []
+
         # Get model_id from config for logging (type-safe access with fallback)
         model_id = (
             self.config.extraction.model if self.config.extraction else "not configured"
         )
         logger.info(f"Initialized extraction service with model {model_id}")
 
-    def _get_class_schema(self, class_label: str) -> Dict[str, Any]:
+    @property
+    def _substitutions(self) -> dict[str, str]:
+        """Get prompt placeholder substitutions from stored context."""
+        return {
+            "DOCUMENT_TEXT": self._document_text,
+            "DOCUMENT_CLASS": self._class_label,
+            "ATTRIBUTE_NAMES_AND_DESCRIPTIONS": self._attribute_descriptions,
+        }
+
+    def _get_default_prompt_content(self) -> list[dict[str, Any]]:
+        """
+        Build default fallback prompt content when no template is provided.
+
+        Returns:
+            List of content items with default prompt text and images
+        """
+        task_prompt = f"""
+        Extract the following fields from this {self._class_label} document:
+        
+        {self._attribute_descriptions}
+        
+        Document text:
+        {self._document_text}
+        
+        Respond with a JSON object containing each field name and its extracted value.
+        """
+        content = [{"text": task_prompt}]
+
+        # Add image attachments to the content (limit to 20 images as per Bedrock constraints)
+        if self._page_images:
+            logger.info(
+                f"Attaching images to default prompt, for {len(self._page_images)} pages."
+            )
+            # Limit to 20 images as per Bedrock constraints
+            for img in self._page_images[:20]:
+                content.append(image.prepare_bedrock_image_attachment(img))
+
+        return content
+
+    def _get_class_schema(self, class_label: str) -> dict[str, Any]:
         """
         Get JSON Schema for a specific document class from configuration.
 
@@ -96,7 +182,7 @@ class ExtractionService:
 
         return {}
 
-    def _clean_schema_for_prompt(self, schema: Dict[str, Any]) -> Dict[str, Any]:
+    def _clean_schema_for_prompt(self, schema: dict[str, Any]) -> dict[str, Any]:
         """
         Clean JSON Schema by removing IDP custom fields (x-aws-idp-*) for the prompt.
         Keeps all standard JSON Schema fields including descriptions.
@@ -129,7 +215,7 @@ class ExtractionService:
 
         return cleaned
 
-    def _format_schema_for_prompt(self, schema: Dict[str, Any]) -> str:
+    def _format_schema_for_prompt(self, schema: dict[str, Any]) -> str:
         """
         Format JSON Schema for inclusion in the extraction prompt.
 
@@ -148,8 +234,8 @@ class ExtractionService:
     def _prepare_prompt_from_template(
         self,
         prompt_template: str,
-        substitutions: Dict[str, str],
-        required_placeholders: List[str] = None,
+        substitutions: dict[str, str],
+        required_placeholders: list[str] | None = None,
     ) -> str:
         """
         Prepare prompt from template by replacing placeholders with values.
@@ -165,338 +251,156 @@ class ExtractionService:
         Raises:
             ValueError: If a required placeholder is missing from the template
         """
-        from idp_common.bedrock import format_prompt
 
         return format_prompt(prompt_template, substitutions, required_placeholders)
 
-    def _build_content_with_or_without_image_placeholder(
+    def _build_prompt_content(
         self,
         prompt_template: str,
-        document_text: str,
-        class_label: str,
-        attribute_descriptions: str,
         image_content: Any = None,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """
-        Build content array, automatically deciding whether to use image placeholder processing.
+        Build prompt content array handling FEW_SHOT_EXAMPLES and DOCUMENT_IMAGE placeholders.
 
-        If the prompt contains {DOCUMENT_IMAGE}, the image will be inserted at that location.
-        If the prompt does NOT contain {DOCUMENT_IMAGE}, the image will NOT be included at all.
+        This consolidated method handles all placeholder types and combinations:
+        - {FEW_SHOT_EXAMPLES}: Inserts few-shot examples from config
+        - {DOCUMENT_IMAGE}: Inserts images at specific location
+        - Regular text placeholders: DOCUMENT_TEXT, DOCUMENT_CLASS, etc.
 
         Args:
-            prompt_template: The prompt template that may contain {DOCUMENT_IMAGE}
-            document_text: The document text content
-            class_label: The document class label
-            attribute_descriptions: Formatted attribute names and descriptions
-            image_content: Optional image content to insert (only used when {DOCUMENT_IMAGE} is present)
+            prompt_template: The prompt template with optional placeholders
+            image_content: Optional image content to insert (only used with {DOCUMENT_IMAGE})
 
         Returns:
-            List of content items with text and image content properly ordered based on presence of placeholder
+            List of content items with text and image content properly ordered
         """
+        content: list[dict[str, Any]] = []
+
+        # Handle FEW_SHOT_EXAMPLES placeholder first
+        if "{FEW_SHOT_EXAMPLES}" in prompt_template:
+            parts = prompt_template.split("{FEW_SHOT_EXAMPLES}")
+            if len(parts) == 2:
+                # Process before examples
+                content.extend(
+                    self._build_text_and_image_content(parts[0], image_content)
+                )
+
+                # Add few-shot examples
+                content.extend(self._build_few_shot_examples_content())
+
+                # Process after examples (only pass images if not already used)
+                image_for_after = (
+                    None if "{DOCUMENT_IMAGE}" in parts[0] else image_content
+                )
+                content.extend(
+                    self._build_text_and_image_content(parts[1], image_for_after)
+                )
+
+                return content
+
+        # No FEW_SHOT_EXAMPLES, just handle text and images
+        return self._build_text_and_image_content(prompt_template, image_content)
+
+    def _build_text_and_image_content(
+        self,
+        prompt_template: str,
+        image_content: Any = None,
+    ) -> list[dict[str, Any]]:
+        """
+        Build content array with text and optionally images based on DOCUMENT_IMAGE placeholder.
+
+        Args:
+            prompt_template: Template that may contain {DOCUMENT_IMAGE}
+            image_content: Optional image content
+
+        Returns:
+            List of content items
+        """
+        content: list[dict[str, Any]] = []
+
+        # Handle DOCUMENT_IMAGE placeholder
         if "{DOCUMENT_IMAGE}" in prompt_template:
-            return self._build_content_with_image_placeholder(
-                prompt_template,
-                document_text,
-                class_label,
-                attribute_descriptions,
-                image_content,
-            )
-        else:
-            return self._build_content_without_image_placeholder(
-                prompt_template,
-                document_text,
-                class_label,
-                attribute_descriptions,
-                image_content,
-            )
+            parts = prompt_template.split("{DOCUMENT_IMAGE}")
+            if len(parts) == 2:
+                # Add text before image
+                before_text = self._prepare_prompt_from_template(
+                    parts[0], self._substitutions, required_placeholders=[]
+                )
+                if before_text.strip():
+                    content.append({"text": before_text})
 
-    def _build_content_with_image_placeholder(
-        self,
-        prompt_template: str,
-        document_text: str,
-        class_label: str,
-        attribute_descriptions: str,
-        image_content: Any = None,
-    ) -> List[Dict[str, Any]]:
-        """
-        Build content array with image inserted at DOCUMENT_IMAGE placeholder if present.
+                # Add images
+                if image_content:
+                    content.extend(self._prepare_image_attachments(image_content))
 
-        Args:
-            prompt_template: The prompt template that may contain {DOCUMENT_IMAGE}
-            document_text: The document text content
-            class_label: The document class label
-            attribute_descriptions: Formatted attribute names and descriptions
-            image_content: Optional image content to insert
+                # Add text after image
+                after_text = self._prepare_prompt_from_template(
+                    parts[1], self._substitutions, required_placeholders=[]
+                )
+                if after_text.strip():
+                    content.append({"text": after_text})
 
-        Returns:
-            List of content items with text and image content properly ordered
-        """
-        # Split the prompt at the DOCUMENT_IMAGE placeholder
-        parts = prompt_template.split("{DOCUMENT_IMAGE}")
-
-        if len(parts) != 2:
-            logger.warning(
-                "Invalid DOCUMENT_IMAGE placeholder usage, falling back to standard processing"
-            )
-            # Fallback to standard processing
-            return self._build_content_without_image_placeholder(
-                prompt_template,
-                document_text,
-                class_label,
-                attribute_descriptions,
-                image_content,
-            )
-
-        # Process the parts before and after the image placeholder
-        before_image = self._prepare_prompt_from_template(
-            parts[0],
-            {
-                "DOCUMENT_TEXT": document_text,
-                "DOCUMENT_CLASS": class_label,
-                "ATTRIBUTE_NAMES_AND_DESCRIPTIONS": attribute_descriptions,
-            },
-            required_placeholders=[],  # Don't enforce required placeholders for partial templates
-        )
-
-        after_image = self._prepare_prompt_from_template(
-            parts[1],
-            {
-                "DOCUMENT_TEXT": document_text,
-                "DOCUMENT_CLASS": class_label,
-                "ATTRIBUTE_NAMES_AND_DESCRIPTIONS": attribute_descriptions,
-            },
-            required_placeholders=[],  # Don't enforce required placeholders for partial templates
-        )
-
-        # Build content array with image in the middle
-        content = []
-
-        # Add the part before the image
-        if before_image.strip():
-            content.append({"text": before_image})
-
-        # Add the image if available
-        if image_content:
-            if isinstance(image_content, list):
-                # Multiple images (limit to 20 as per Bedrock constraints)
-                if len(image_content) > 20:
-                    logger.warning(
-                        f"Found {len(image_content)} images, truncating to 20 due to Bedrock constraints. "
-                        f"{len(image_content) - 20} images will be dropped."
-                    )
-                for img in image_content[:20]:
-                    content.append(image.prepare_bedrock_image_attachment(img))
+                return content
             else:
-                # Single image
-                content.append(image.prepare_bedrock_image_attachment(image_content))
+                logger.warning("Invalid DOCUMENT_IMAGE placeholder usage")
 
-        # Add the part after the image
-        if after_image.strip():
-            content.append({"text": after_image})
-
-        return content
-
-    def _build_content_without_image_placeholder(
-        self,
-        prompt_template: str,
-        document_text: str,
-        class_label: str,
-        attribute_descriptions: str,
-        image_content: Any = None,
-    ) -> List[Dict[str, Any]]:
-        """
-        Build content array without DOCUMENT_IMAGE placeholder (standard processing).
-
-        Note: This method does NOT attach the image content when no placeholder is present.
-
-        Args:
-            prompt_template: The prompt template
-            document_text: The document text content
-            class_label: The document class label
-            attribute_descriptions: Formatted attribute names and descriptions
-            image_content: Optional image content (not used when no placeholder is present)
-
-        Returns:
-            List of content items with text content only (no image)
-        """
-        # Prepare the full prompt
+        # No image placeholder, just text
         task_prompt = self._prepare_prompt_from_template(
-            prompt_template,
-            {
-                "DOCUMENT_TEXT": document_text,
-                "DOCUMENT_CLASS": class_label,
-                "ATTRIBUTE_NAMES_AND_DESCRIPTIONS": attribute_descriptions,
-            },
-            required_placeholders=[],
+            prompt_template, self._substitutions, required_placeholders=[]
         )
-
-        content = [{"text": task_prompt}]
-
-        # No longer adding image content when no placeholder is present
+        content.append({"text": task_prompt})
 
         return content
 
-    def _build_content_with_few_shot_examples(
-        self,
-        task_prompt_template: str,
-        document_text: str,
-        class_label: str,
-        attribute_descriptions: str,
-        image_content: Any = None,
-    ) -> List[Dict[str, Any]]:
+    def _prepare_image_attachments(self, image_content: Any) -> list[dict[str, Any]]:
         """
-        Build content array with few-shot examples inserted at the FEW_SHOT_EXAMPLES placeholder.
-        Also supports DOCUMENT_IMAGE placeholder for image positioning.
+        Prepare image attachments for Bedrock, limiting to 20 images.
 
         Args:
-            task_prompt_template: The task prompt template containing {FEW_SHOT_EXAMPLES}
-            document_text: The document text content
-            class_label: The document class label
-            attribute_descriptions: Formatted attribute names and descriptions
-            image_content: Optional image content to insert
+            image_content: Single image or list of images
 
         Returns:
-            List of content items with text and image content properly ordered
+            List of image attachment dicts
         """
-        # Split the task prompt at the FEW_SHOT_EXAMPLES placeholder
-        parts = task_prompt_template.split("{FEW_SHOT_EXAMPLES}")
+        attachments: list[dict[str, Any]] = []
 
-        if len(parts) != 2:
-            # Fallback to regular prompt processing if placeholder not found or malformed
-            return self._build_content_with_or_without_image_placeholder(
-                task_prompt_template,
-                document_text,
-                class_label,
-                attribute_descriptions,
-                image_content,
-            )
+        if isinstance(image_content, list):
+            # Multiple images (limit to 20 as per Bedrock constraints)
+            if len(image_content) > 20:
+                logger.warning(
+                    f"Found {len(image_content)} images, truncating to 20 due to Bedrock constraints. "
+                    f"{len(image_content) - 20} images will be dropped."
+                )
+            for img in image_content[:20]:
+                attachments.append(image.prepare_bedrock_image_attachment(img))
+        else:
+            # Single image
+            attachments.append(image.prepare_bedrock_image_attachment(image_content))
 
-        # Process each part using the unified function
-        before_examples_content = self._build_content_with_or_without_image_placeholder(
-            parts[0], document_text, class_label, attribute_descriptions, image_content
-        )
+        return attachments
 
-        # Only pass image_content if it wasn't already used in the first part
-        image_for_second_part = (
-            None if "{DOCUMENT_IMAGE}" in parts[0] else image_content
-        )
-        after_examples_content = self._build_content_with_or_without_image_placeholder(
-            parts[1],
-            document_text,
-            class_label,
-            attribute_descriptions,
-            image_for_second_part,
-        )
-
-        # Build content array
-        content = []
-
-        # Add the part before examples (may include image if DOCUMENT_IMAGE was in the first part)
-        content.extend(before_examples_content)
-
-        # Add few-shot examples from config for this specific class
-        examples_content = self._build_few_shot_examples_content(class_label)
-        content.extend(examples_content)
-
-        # Add the part after examples (may include image if DOCUMENT_IMAGE was in the second part)
-        content.extend(after_examples_content)
-
-        # No longer appending image content when no placeholder is found
-
-        return content
-
-    def _build_few_shot_examples_content(
-        self, class_label: str
-    ) -> List[Dict[str, Any]]:
+    def _build_few_shot_examples_content(self) -> list[dict[str, Any]]:
         """
         Build content items for few-shot examples from the configuration for a specific class.
-
-        Args:
-            class_label: The document class label to get examples for
 
         Returns:
             List of content items containing text and image content for examples
         """
-        content = []
+        content: list[dict[str, Any]] = []
 
-        # Find the specific class that matches the class_label (now in JSON Schema format)
-        target_class = self._get_class_schema(class_label)
-
-        if not target_class:
+        # Use the stored class schema
+        if not self._class_schema:
             logger.warning(
-                f"No class found matching '{class_label}' for few-shot examples"
+                f"No class schema found for '{self._class_label}' for few-shot examples"
             )
             return content
 
         # Get examples from the JSON Schema for this specific class
-        content = build_few_shot_extraction_examples_content(target_class)
+        content = build_few_shot_extraction_examples_content(self._class_schema)
 
         return content
 
-    def _get_image_files_from_path(self, image_path: str) -> List[str]:
-        """
-        Get list of image files from a path that could be a single file, directory, or S3 prefix.
-
-        Args:
-            image_path: Path to image file, directory, or S3 prefix
-
-        Returns:
-            List of image file paths/URIs sorted by filename
-        """
-        import os
-
-        from idp_common import s3
-
-        # Handle S3 URIs
-        if image_path.startswith("s3://"):
-            # Check if it's a direct file or a prefix
-            if image_path.endswith(
-                (".jpg", ".jpeg", ".png", ".gif", ".bmp", ".tiff", ".tif", ".webp")
-            ):
-                # Direct S3 file
-                return [image_path]
-            else:
-                # S3 prefix - list all images
-                return s3.list_images_from_path(image_path)
-        else:
-            # Handle local paths
-            config_bucket = os.environ.get("CONFIGURATION_BUCKET")
-            root_dir = os.environ.get("ROOT_DIR")
-
-            if config_bucket:
-                # Use environment bucket with imagePath as key
-                s3_uri = f"s3://{config_bucket}/{image_path}"
-
-                # Check if it's a direct file or a prefix
-                if image_path.endswith(
-                    (".jpg", ".jpeg", ".png", ".gif", ".bmp", ".tiff", ".tif", ".webp")
-                ):
-                    # Direct S3 file
-                    return [s3_uri]
-                else:
-                    # S3 prefix - list all images
-                    return s3.list_images_from_path(s3_uri)
-            elif root_dir:
-                # Use relative path from ROOT_DIR
-                full_path = os.path.join(root_dir, image_path)
-                full_path = os.path.normpath(full_path)
-
-                if os.path.isfile(full_path):
-                    # Single local file
-                    return [full_path]
-                elif os.path.isdir(full_path):
-                    # Local directory - list all images
-                    return s3.list_images_from_path(full_path)
-                else:
-                    # Path doesn't exist
-                    logger.warning(f"Image path does not exist: {full_path}")
-                    return []
-            else:
-                raise ValueError(
-                    "No CONFIGURATION_BUCKET or ROOT_DIR set. Cannot read example images from local filesystem."
-                )
-
-    def _make_json_serializable(self, obj):
+    def _make_json_serializable(self, obj: Any) -> Any:
         """
         Recursively convert any object to a JSON-serializable format.
 
@@ -534,96 +438,18 @@ class ExtractionService:
                 # Convert non-serializable objects to string representation
                 return str(obj)
 
-    def _convert_image_bytes_to_uris_in_content(
-        self, content: List[Dict[str, Any]]
-    ) -> List[Dict[str, Any]]:
-        """
-        Convert image bytes to URIs in content array for JSON serialization.
-
-        Args:
-            content: Content array that may contain image objects with bytes
-
-        Returns:
-            Content array with image URIs instead of bytes
-        """
-        converted_content = []
-
-        for item in content:
-            if "image" in item and isinstance(item["image"], dict):
-                # Extract image URI if it exists, or use placeholder
-                if "source" in item["image"] and "bytes" in item["image"]["source"]:
-                    # This is a bytes-based image - replace with URI reference
-                    # In practice, we need to store these bytes somewhere accessible
-                    # For now, we'll use a placeholder that indicates bytes were present
-                    converted_item = {
-                        "image_uri": f"<image_bytes_placeholder_{len(converted_content)}>"
-                    }
-                else:
-                    # Keep other image formats as-is
-                    converted_item = item.copy()
-            else:
-                # Keep non-image items as-is
-                converted_item = item.copy()
-
-            converted_content.append(converted_item)
-
-        return converted_content
-
-    def _convert_image_uris_to_bytes_in_content(
-        self, content: List[Dict[str, Any]], original_images: List[Any]
-    ) -> List[Dict[str, Any]]:
-        """
-        Convert image URIs back to bytes in content array after Lambda processing.
-
-        Args:
-            content: Content array from Lambda that may contain image URIs
-            original_images: Original image data to restore
-
-        Returns:
-            Content array with image bytes restored
-        """
-        converted_content = []
-        image_index = 0
-
-        for item in content:
-            if "image_uri" in item:
-                # Convert image URI back to bytes format
-                if image_index < len(original_images):
-                    # Restore original image bytes
-                    converted_item = image.prepare_bedrock_image_attachment(
-                        original_images[image_index]
-                    )
-                    image_index += 1
-                else:
-                    # Skip if no original image data
-                    logger.warning(
-                        "No original image data available for URI conversion"
-                    )
-                    continue
-            elif "image" in item:
-                # Keep existing image objects as-is
-                converted_item = item.copy()
-            else:
-                # Keep non-image items as-is
-                converted_item = item.copy()
-
-            converted_content.append(converted_item)
-
-        return converted_content
-
     def _invoke_custom_prompt_lambda(
-        self, lambda_arn: str, payload: dict, original_images: List[Any] = None
-    ) -> dict:
+        self, lambda_arn: str, payload: dict[str, Any]
+    ) -> dict[str, Any]:
         """
         Invoke custom prompt generator Lambda function with JSON-serializable payload.
 
         Args:
             lambda_arn: ARN of the Lambda function to invoke
             payload: Payload to send to Lambda function (must be JSON serializable)
-            original_images: Original image data for restoration after Lambda processing
 
         Returns:
-            Dict containing system_prompt and task_prompt_content with images restored
+            Dict containing system_prompt and task_prompt_content
 
         Raises:
             Exception: If Lambda invocation fails or returns invalid response
@@ -665,20 +491,534 @@ class ExtractionService:
                 logger.error(error_msg)
                 raise Exception(error_msg)
 
-            # Convert image URIs back to bytes in the response
-            if original_images:
-                result["task_prompt_content"] = (
-                    self._convert_image_uris_to_bytes_in_content(
-                        result["task_prompt_content"], original_images
-                    )
-                )
-
             return result
 
         except Exception as e:
             error_msg = f"Failed to invoke custom prompt Lambda {lambda_arn}: {str(e)}"
             logger.error(error_msg)
             raise Exception(error_msg)
+
+    def _reset_context(self) -> None:
+        """Reset instance variables for clean state before processing."""
+        self._document_text = ""
+        self._class_label = ""
+        self._attribute_descriptions = ""
+        self._class_schema = {}
+        self._page_images = []
+        self._image_uris = []
+
+    def _validate_and_find_section(
+        self, document: Document, section_id: str
+    ) -> Any | None:
+        """
+        Validate document and find section by ID.
+
+        Args:
+            document: Document to validate
+            section_id: ID of section to find
+
+        Returns:
+            Section if found, None otherwise (errors added to document)
+        """
+        if not document:
+            logger.error("No document provided")
+            return None
+
+        if not document.sections:
+            logger.error("Document has no sections to process")
+            document.errors.append("Document has no sections to process")
+            return None
+
+        # Find the section with the given ID
+        for section in document.sections:
+            if section.section_id == section_id:
+                return section
+
+        error_msg = f"Section {section_id} not found in document"
+        logger.error(error_msg)
+        document.errors.append(error_msg)
+        return None
+
+    def _prepare_section_info(self, document: Document, section: Any) -> SectionInfo:
+        """
+        Prepare section metadata and output paths.
+
+        Args:
+            document: Document being processed
+            section: Section being processed
+
+        Returns:
+            SectionInfo with all metadata
+        """
+        class_label = section.classification
+        output_bucket = document.output_bucket
+        output_prefix = document.input_key
+        output_key = f"{output_prefix}/sections/{section.section_id}/result.json"
+        output_uri = f"s3://{output_bucket}/{output_key}"
+
+        # Check if the section has required pages
+        if not section.page_ids:
+            error_msg = f"Section {section.section_id} has no page IDs"
+            logger.error(error_msg)
+            document.errors.append(error_msg)
+            raise ValueError(error_msg)
+
+        # Sort pages by page number
+        sorted_page_ids = sorted(section.page_ids, key=int)
+        start_page = int(sorted_page_ids[0])
+        end_page = int(sorted_page_ids[-1])
+
+        # Find minimum page ID across all sections
+        min_page_id = min(
+            int(page_id) for sec in document.sections for page_id in sec.page_ids
+        )
+
+        # Adjust page indices to be zero-based
+        page_indices = [int(page_id) - min_page_id for page_id in sorted_page_ids]
+
+        logger.info(
+            f"Processing {len(sorted_page_ids)} pages, class {class_label}: {start_page}-{end_page}"
+        )
+
+        # Track metrics
+        metrics.put_metric("InputDocuments", 1)
+        metrics.put_metric("InputDocumentPages", len(section.page_ids))
+
+        return SectionInfo(
+            class_label=class_label,
+            sorted_page_ids=sorted_page_ids,
+            page_indices=page_indices,
+            output_bucket=output_bucket,
+            output_key=output_key,
+            output_uri=output_uri,
+            start_page=start_page,
+            end_page=end_page,
+        )
+
+    def _load_document_text(
+        self, document: Document, sorted_page_ids: list[str]
+    ) -> str:
+        """
+        Load and concatenate text from all pages.
+
+        Args:
+            document: Document containing pages
+            sorted_page_ids: Sorted list of page IDs
+
+        Returns:
+            Concatenated document text
+        """
+        t0 = time.time()
+        document_texts = []
+
+        for page_id in sorted_page_ids:
+            if page_id not in document.pages:
+                error_msg = f"Page {page_id} not found in document"
+                logger.error(error_msg)
+                document.errors.append(error_msg)
+                continue
+
+            page = document.pages[page_id]
+            text_path = page.parsed_text_uri
+            page_text = s3.get_text_content(text_path)
+            document_texts.append(page_text)
+
+        document_text = "\n".join(document_texts)
+        t1 = time.time()
+        logger.info(f"Time taken to read text content: {t1 - t0:.2f} seconds")
+
+        return document_text
+
+    def _load_document_images(
+        self, document: Document, sorted_page_ids: list[str]
+    ) -> list[Any]:
+        """
+        Load images from all pages.
+
+        Args:
+            document: Document containing pages
+            sorted_page_ids: Sorted list of page IDs
+
+        Returns:
+            List of prepared images
+        """
+        t0 = time.time()
+        target_width = self.config.extraction.image.target_width
+        target_height = self.config.extraction.image.target_height
+
+        page_images = []
+        for page_id in sorted_page_ids:
+            if page_id not in document.pages:
+                continue
+
+            page = document.pages[page_id]
+            image_uri = page.image_uri
+            image_content = image.prepare_image(image_uri, target_width, target_height)
+            page_images.append(image_content)
+
+        t1 = time.time()
+        logger.info(f"Time taken to read images: {t1 - t0:.2f} seconds")
+
+        return page_images
+
+    def _initialize_extraction_context(
+        self,
+        class_label: str,
+        document_text: str,
+        page_images: list[Any],
+        sorted_page_ids: list[str],
+        document: Document,
+    ) -> tuple[dict[str, Any], str]:
+        """
+        Initialize extraction context and set instance variables.
+
+        Args:
+            class_label: Document class
+            document_text: Text content
+            page_images: Prepared images
+            sorted_page_ids: Sorted page IDs
+            document: Document being processed
+
+        Returns:
+            Tuple of (class_schema, attribute_descriptions)
+        """
+        # Get JSON Schema for this document class
+        class_schema = self._get_class_schema(class_label)
+        attribute_descriptions = self._format_schema_for_prompt(class_schema)
+
+        # Store context in instance variables
+        self._document_text = document_text
+        self._class_label = class_label
+        self._attribute_descriptions = attribute_descriptions
+        self._class_schema = class_schema
+        self._page_images = page_images
+
+        # Prepare image URIs for Lambda
+        image_uris = []
+        for page_id in sorted_page_ids:
+            if page_id in document.pages:
+                page = document.pages[page_id]
+                if page.image_uri:
+                    image_uris.append(page.image_uri)
+        self._image_uris = image_uris
+
+        return class_schema, attribute_descriptions
+
+    def _handle_empty_schema(
+        self,
+        document: Document,
+        section: Any,
+        section_info: SectionInfo,
+        section_id: str,
+        t0: float,
+    ) -> Document:
+        """
+        Handle case when schema has no attributes - skip LLM and return empty result.
+
+        Args:
+            document: Document being processed
+            section: Section being processed
+            section_info: Section metadata
+            section_id: Section ID
+            t0: Start time
+
+        Returns:
+            Updated document
+        """
+        logger.info(
+            f"No attributes defined for class {section_info.class_label}, skipping LLM extraction"
+        )
+
+        # Create empty result structure
+        extracted_fields = {}
+        metering = {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "invocation_count": 0,
+            "total_cost": 0.0,
+        }
+        total_duration = 0.0
+        parsing_succeeded = True
+
+        # Write to S3
+        output = {
+            "document_class": {"type": section_info.class_label},
+            "split_document": {"page_indices": section_info.page_indices},
+            "inference_result": extracted_fields,
+            "metadata": {
+                "parsing_succeeded": parsing_succeeded,
+                "extraction_time_seconds": total_duration,
+                "skipped_due_to_empty_attributes": True,
+            },
+        }
+        s3.write_content(
+            output,
+            section_info.output_bucket,
+            section_info.output_key,
+            content_type="application/json",
+        )
+
+        # Update section and document
+        section.extraction_result_uri = section_info.output_uri
+        document.metering = utils.merge_metering_data(document.metering, metering)
+
+        t3 = time.time()
+        logger.info(
+            f"Skipped extraction for section {section_id} due to empty attributes: {t3 - t0:.2f} seconds"
+        )
+        return document
+
+    def _build_extraction_content(
+        self,
+        document: Document,
+        page_images: list[Any],
+    ) -> tuple[list[dict[str, Any]], str]:
+        """
+        Build prompt content (with or without custom Lambda).
+
+        Args:
+            document: Document being processed
+            page_images: Prepared page images
+
+        Returns:
+            Tuple of (content, system_prompt)
+        """
+        system_prompt = self.config.extraction.system_prompt
+        custom_lambda_arn = self.config.extraction.custom_prompt_lambda_arn
+
+        if custom_lambda_arn and custom_lambda_arn.strip():
+            logger.info(f"Using custom prompt Lambda: {custom_lambda_arn}")
+
+            prompt_placeholders = {
+                "DOCUMENT_TEXT": self._document_text,
+                "DOCUMENT_CLASS": self._class_label,
+                "ATTRIBUTE_NAMES_AND_DESCRIPTIONS": self._attribute_descriptions,
+                "DOCUMENT_IMAGE": self._image_uris,
+            }
+
+            logger.info(
+                f"Lambda will receive {len(self._image_uris)} image URIs in DOCUMENT_IMAGE placeholder"
+            )
+
+            # Build default content for Lambda input
+            prompt_template = self.config.extraction.task_prompt
+            if prompt_template:
+                default_content = self._build_prompt_content(
+                    prompt_template, page_images
+                )
+            else:
+                default_content = self._get_default_prompt_content()
+
+            # Prepare Lambda payload
+            try:
+                document_dict = document.to_dict()
+            except Exception as e:
+                logger.warning(f"Error serializing document for Lambda payload: {e}")
+                document_dict = {"id": getattr(document, "id", "unknown")}
+
+            payload = {
+                "config": self._make_json_serializable(self.config),
+                "prompt_placeholders": prompt_placeholders,
+                "default_task_prompt_content": self._make_json_serializable(
+                    default_content
+                ),
+                "serialized_document": document_dict,
+            }
+
+            # Invoke custom Lambda
+            lambda_result = self._invoke_custom_prompt_lambda(
+                custom_lambda_arn, payload
+            )
+
+            # Use Lambda results
+            system_prompt = lambda_result.get("system_prompt", system_prompt)
+            content = lambda_result.get("task_prompt_content", default_content)
+
+            logger.info("Successfully applied custom prompt from Lambda function")
+        else:
+            # Use default prompt logic
+            logger.info(
+                "No custom prompt Lambda configured - using default prompt generation"
+            )
+            prompt_template = self.config.extraction.task_prompt
+
+            if not prompt_template:
+                content = self._get_default_prompt_content()
+            else:
+                try:
+                    content = self._build_prompt_content(prompt_template, page_images)
+                except ValueError as e:
+                    logger.warning(
+                        f"Error formatting prompt template: {str(e)}. Using default prompt."
+                    )
+                    content = self._get_default_prompt_content()
+
+        return content, system_prompt
+
+    def _invoke_extraction_model(
+        self,
+        content: list[dict[str, Any]],
+        system_prompt: str,
+        section_info: SectionInfo,
+    ) -> ExtractionResult:
+        """
+        Invoke Bedrock model (agentic or standard) and parse response.
+
+        Args:
+            content: Prompt content
+            system_prompt: System prompt
+            section_info: Section metadata
+
+        Returns:
+            ExtractionResult with extracted fields and metering
+        """
+        logger.info(
+            f"Extracting fields for {section_info.class_label} document, section"
+        )
+
+        # Get extraction config
+        model_id = self.config.extraction.model
+        temperature = self.config.extraction.temperature
+        top_k = self.config.extraction.top_k
+        top_p = self.config.extraction.top_p
+        max_tokens = (
+            self.config.extraction.max_tokens
+            if self.config.extraction.max_tokens
+            else None
+        )
+
+        # Time the model invocation
+        request_start_time = time.time()
+
+        if self.config.extraction.agentic.enabled:
+            if not AGENTIC_AVAILABLE:
+                raise ImportError(
+                    "Agentic extraction requires Python 3.10+ and strands-agents dependencies. "
+                    "Install with: pip install 'idp_common[agents]' or use agentic=False"
+                )
+
+            # Create dynamic Pydantic model from JSON Schema
+            dynamic_model = create_pydantic_model_from_json_schema(
+                schema=self._class_schema,
+                class_label=section_info.class_label,
+                clean_schema=False,  # Already cleaned
+            )
+
+            # Log schema for debugging
+            model_schema = dynamic_model.model_json_schema()
+            logger.debug(f"Pydantic model schema for {section_info.class_label}:")
+            logger.debug(json.dumps(model_schema, indent=2))
+
+            # Use agentic extraction
+            if isinstance(content, list):
+                message_prompt = {"role": "user", "content": content}
+            else:
+                message_prompt = content
+
+            logger.info("Using Agentic extraction")
+            logger.debug(f"Using input: {str(message_prompt)}")
+
+            structured_data, response_with_metering = structured_output(
+                model_id=model_id,
+                data_format=dynamic_model,
+                prompt=message_prompt,
+                page_images=self._page_images,
+                config=self.config,
+                context="Extraction",
+            )
+
+            extracted_fields = structured_data.model_dump()
+            metering = response_with_metering["metering"]
+            parsing_succeeded = True
+        else:
+            # Standard Bedrock invocation
+            response_with_metering = bedrock.invoke_model(
+                model_id=model_id,
+                system_prompt=system_prompt,
+                content=content,
+                temperature=temperature,
+                top_k=top_k,
+                top_p=top_p,
+                max_tokens=max_tokens,
+                context="Extraction",
+            )
+
+            extracted_text = bedrock.extract_text_from_response(
+                dict(response_with_metering)
+            )
+            metering = response_with_metering["metering"]
+
+            # Parse response into JSON
+            extracted_fields = {}
+            parsing_succeeded = True
+
+            try:
+                extracted_fields = json.loads(extract_json_from_text(extracted_text))
+            except Exception as e:
+                logger.error(
+                    f"Error parsing LLM output - invalid JSON?: {extracted_text} - {e}"
+                )
+                logger.info("Using unparsed LLM output.")
+                extracted_fields = {"raw_output": extracted_text}
+                parsing_succeeded = False
+
+        total_duration = time.time() - request_start_time
+        logger.info(f"Time taken for extraction: {total_duration:.2f} seconds")
+
+        return ExtractionResult(
+            extracted_fields=extracted_fields,
+            metering=metering,
+            parsing_succeeded=parsing_succeeded,
+            total_duration=total_duration,
+        )
+
+    def _save_results(
+        self,
+        document: Document,
+        section: Any,
+        result: ExtractionResult,
+        section_info: SectionInfo,
+        section_id: str,
+        t0: float,
+    ) -> None:
+        """
+        Save extraction results to S3 and update document.
+
+        Args:
+            document: Document being processed
+            section: Section being processed
+            result: Extraction result
+            section_info: Section metadata
+            section_id: Section ID
+            t0: Start time
+        """
+        # Write to S3
+        output = {
+            "document_class": {"type": section_info.class_label},
+            "split_document": {"page_indices": section_info.page_indices},
+            "inference_result": result.extracted_fields,
+            "metadata": {
+                "parsing_succeeded": result.parsing_succeeded,
+                "extraction_time_seconds": result.total_duration,
+            },
+        }
+        s3.write_content(
+            output,
+            section_info.output_bucket,
+            section_info.output_key,
+            content_type="application/json",
+        )
+
+        # Update section and document
+        section.extraction_result_uri = section_info.output_uri
+        document.metering = utils.merge_metering_data(
+            document.metering, result.metering or {}
+        )
+
+        t3 = time.time()
+        logger.info(
+            f"Total extraction time for section {section_id}: {t3 - t0:.2f} seconds"
+        )
 
     def process_document_section(self, document: Document, section_id: str) -> Document:
         """
@@ -691,495 +1031,59 @@ class ExtractionService:
         Returns:
             Document: Updated Document object with extraction results for the section
         """
-        # Validate input document
-        if not document:
-            logger.error("No document provided")
-            return document
+        # Reset state
+        self._reset_context()
 
-        if not document.sections:
-            logger.error("Document has no sections to process")
-            document.errors.append("Document has no sections to process")
-            return document
-
-        # Find the section with the given ID
-        section = None
-        for s in document.sections:
-            if s.section_id == section_id:
-                section = s
-                break
-
+        # Validate and get section
+        section = self._validate_and_find_section(document, section_id)
         if not section:
-            error_msg = f"Section {section_id} not found in document"
-            logger.error(error_msg)
-            document.errors.append(error_msg)
             return document
 
-        # Extract information about the section
-        class_label = section.classification
-        output_bucket = document.output_bucket
-        output_prefix = document.input_key
-        output_key = f"{output_prefix}/sections/{section.section_id}/result.json"
-        output_uri = f"s3://{output_bucket}/{output_key}"
-
-        # Check if the section has required pages
-        if not section.page_ids:
-            error_msg = f"Section {section_id} has no page IDs"
-            logger.error(error_msg)
-            document.errors.append(error_msg)
+        # Prepare section metadata
+        try:
+            section_info = self._prepare_section_info(document, section)
+        except ValueError:
             return document
-
-        # Sort pages by page number
-        sorted_page_ids = sorted(section.page_ids, key=int)
-        start_page = int(sorted_page_ids[0])
-        end_page = int(sorted_page_ids[-1])
-
-        # Convert 1-based page IDs to 0-based indices for the original document packet
-        # This preserves the actual position of pages in the document (e.g., pages [5,6,7] -> indices [4,5,6])
-        page_indices = [int(page_id) - 1 for page_id in sorted_page_ids]
-
-        logger.info(
-            f"Processing {len(sorted_page_ids)} pages, class {class_label}: {start_page}-{end_page}"
-        )
-
-        # Track metrics
-        metrics.put_metric("InputDocuments", 1)
-        metrics.put_metric("InputDocumentPages", len(section.page_ids))
 
         try:
-            # Read document text from all pages in order
             t0 = time.time()
-            document_texts = []
-            for page_id in sorted_page_ids:
-                if page_id not in document.pages:
-                    error_msg = f"Page {page_id} not found in document"
-                    logger.error(error_msg)
-                    document.errors.append(error_msg)
-                    continue
 
-                page = document.pages[page_id]
-                text_path = page.parsed_text_uri
-                page_text = s3.get_text_content(text_path)
-                document_texts.append(page_text)
-
-            document_text = "\n".join(document_texts)
-            t1 = time.time()
-            logger.info(f"Time taken to read text content: {t1 - t0:.2f} seconds")
-
-            # Read page images with configurable dimensions (type-safe access)
-            target_width = self.config.extraction.image.target_width
-            target_height = self.config.extraction.image.target_height
-
-            page_images = []
-            for page_id in sorted_page_ids:
-                if page_id not in document.pages:
-                    continue
-
-                page = document.pages[page_id]
-                image_uri = page.image_uri
-                # Just pass the values directly - prepare_image handles empty strings/None
-                image_content = image.prepare_image(
-                    image_uri, target_width, target_height
-                )
-                page_images.append(image_content)
-
-            t2 = time.time()
-            logger.info(f"Time taken to read images: {t2 - t1:.2f} seconds")
-
-            # Get extraction configuration (type-safe access, automatic type conversion)
-            model_id = self.config.extraction.model
-            temperature = (
-                self.config.extraction.temperature
-            )  # Already float, no conversion needed!
-            top_k = self.config.extraction.top_k  # Already float!
-            top_p = self.config.extraction.top_p  # Already float!
-            max_tokens = (
-                self.config.extraction.max_tokens
-                if self.config.extraction.max_tokens
-                else None
+            # Load document content
+            document_text = self._load_document_text(
+                document, section_info.sorted_page_ids
             )
-            system_prompt = self.config.extraction.system_prompt
+            page_images = self._load_document_images(
+                document, section_info.sorted_page_ids
+            )
 
-            # Get JSON Schema for this document class
-            class_schema = self._get_class_schema(class_label)
-            attribute_descriptions = self._format_schema_for_prompt(class_schema)
+            # Initialize extraction context
+            class_schema, attribute_descriptions = self._initialize_extraction_context(
+                section_info.class_label,
+                document_text,
+                page_images,
+                section_info.sorted_page_ids,
+                document,
+            )
 
-            # Check if schema has properties - if not, skip LLM invocation entirely
+            # Handle empty schema case (early return)
             if (
                 not class_schema.get(SCHEMA_PROPERTIES)
                 or not attribute_descriptions.strip()
             ):
-                logger.info(
-                    f"No attributes defined for class {class_label}, skipping LLM extraction"
+                return self._handle_empty_schema(
+                    document, section, section_info, section_id, t0
                 )
 
-                # Create empty result structure without invoking LLM
-                extracted_fields = {}
-                metering = {
-                    "input_tokens": 0,
-                    "output_tokens": 0,
-                    "invocation_count": 0,
-                    "total_cost": 0.0,
-                }
-                total_duration = 0.0
-                parsing_succeeded = True
-
-                # Write to S3 with empty extraction result
-                output = {
-                    "document_class": {"type": class_label},
-                    "split_document": {"page_indices": page_indices},
-                    "inference_result": extracted_fields,
-                    "metadata": {
-                        "parsing_succeeded": parsing_succeeded,
-                        "extraction_time_seconds": total_duration,
-                        "skipped_due_to_empty_attributes": True,
-                    },
-                }
-                s3.write_content(
-                    output, output_bucket, output_key, content_type="application/json"
-                )
-
-                # Update the section with extraction result URI
-                section.extraction_result_uri = output_uri
-
-                # Update document with zero metering data
-                document.metering = utils.merge_metering_data(
-                    document.metering, metering
-                )
-
-                t3 = time.time()
-                logger.info(
-                    f"Skipped extraction for section {section_id} due to empty attributes: {t3 - t0:.2f} seconds"
-                )
-                return document
-
-            # Check for custom prompt Lambda function (type-safe access)
-            custom_lambda_arn = self.config.extraction.custom_prompt_lambda_arn
-
-            if custom_lambda_arn and custom_lambda_arn.strip():
-                logger.info(f"Using custom prompt Lambda: {custom_lambda_arn}")
-
-                # Prepare prompt placeholders including image URIs
-                image_uris = []
-                for page_id in sorted_page_ids:
-                    if page_id in document.pages:
-                        page = document.pages[page_id]
-                        if page.image_uri:
-                            image_uris.append(page.image_uri)
-
-                prompt_placeholders = {
-                    "DOCUMENT_TEXT": document_text,
-                    "DOCUMENT_CLASS": class_label,
-                    "ATTRIBUTE_NAMES_AND_DESCRIPTIONS": attribute_descriptions,
-                    "DOCUMENT_IMAGE": image_uris,
-                }
-
-                logger.info(
-                    f"Lambda will receive {len(image_uris)} image URIs in DOCUMENT_IMAGE placeholder"
-                )
-
-                # Build default content for Lambda input
-                prompt_template = self.config.extraction.task_prompt
-                if prompt_template:
-                    # Check if task prompt contains FEW_SHOT_EXAMPLES placeholder
-                    if "{FEW_SHOT_EXAMPLES}" in prompt_template:
-                        default_content = self._build_content_with_few_shot_examples(
-                            prompt_template,
-                            document_text,
-                            class_label,
-                            attribute_descriptions,
-                            page_images,
-                        )
-                    else:
-                        # Use the unified content builder for DOCUMENT_IMAGE placeholder support
-                        default_content = (
-                            self._build_content_with_or_without_image_placeholder(
-                                prompt_template,
-                                document_text,
-                                class_label,
-                                attribute_descriptions,
-                                page_images,
-                            )
-                        )
-                else:
-                    # Default content if no template
-                    task_prompt = f"""
-                    Extract the following fields from this {class_label} document:
-                    
-                    {attribute_descriptions}
-                    
-                    Document text:
-                    {document_text}
-                    
-                    Respond with a JSON object containing each field name and its extracted value.
-                    """
-                    default_content = [{"text": task_prompt}]
-                    if page_images:
-                        for img in page_images[:20]:
-                            default_content.append(
-                                image.prepare_bedrock_image_attachment(img)
-                            )
-
-                # Prepare Lambda payload with JSON-serializable content
-                try:
-                    # Use Document's built-in to_dict() method which properly handles Status enum conversion
-                    document_dict = document.to_dict()
-                except Exception as e:
-                    logger.warning(
-                        f"Error serializing document for Lambda payload: {e}"
-                    )
-                    document_dict = {"id": getattr(document, "id", "unknown")}
-
-                # Convert image bytes to URIs in default content for JSON serialization
-                serializable_default_content = (
-                    self._convert_image_bytes_to_uris_in_content(default_content)
-                )
-
-                # Create fully serializable payload using comprehensive helper
-                payload = {
-                    "config": self._make_json_serializable(self.config),
-                    "prompt_placeholders": prompt_placeholders,
-                    "default_task_prompt_content": serializable_default_content,
-                    "serialized_document": document_dict,
-                }
-
-                # Test JSON serialization before sending to Lambda to catch any remaining issues
-                try:
-                    json.dumps(payload)
-                    logger.info("Lambda payload successfully serialized")
-                except (TypeError, ValueError) as e:
-                    logger.error(
-                        f"Lambda payload still contains non-serializable data: {e}"
-                    )
-                    logger.info("Using comprehensive serialization as fallback")
-                    # Apply comprehensive serialization to entire payload
-                    payload = self._make_json_serializable(payload)
-                    try:
-                        json.dumps(payload)
-                        logger.info("Comprehensive serialization successful")
-                    except (TypeError, ValueError) as e2:
-                        logger.error(f"Even comprehensive serialization failed: {e2}")
-                        # Ultimate fallback to minimal payload
-                        payload = {
-                            "config": {
-                                "extraction": {"model": self.config.extraction.model}
-                            },
-                            "prompt_placeholders": prompt_placeholders,
-                            "default_task_prompt_content": [
-                                {"text": "Fallback content"}
-                            ],
-                            "serialized_document": {
-                                "id": str(document.id),
-                                "status": "PROCESSING",
-                            },
-                        }
-
-                # Invoke custom Lambda and get result (pass original images for restoration)
-                lambda_result = self._invoke_custom_prompt_lambda(
-                    custom_lambda_arn, payload, page_images
-                )
-
-                # Use Lambda results
-                system_prompt = lambda_result.get("system_prompt", system_prompt)
-                content = lambda_result.get("task_prompt_content", default_content)
-
-                logger.info("Successfully applied custom prompt from Lambda function")
-
-            else:
-                # Use default prompt logic when no custom Lambda is configured
-                logger.info(
-                    "No custom prompt Lambda configured - using default prompt generation"
-                )
-                prompt_template = self.config.extraction.task_prompt
-
-                if not prompt_template:
-                    # Default prompt if template not found
-                    task_prompt = f"""
-                    Extract the following fields from this {class_label} document:
-                    
-                    {attribute_descriptions}
-                    
-                    Document text:
-                    {document_text}
-                    
-                    Respond with a JSON object containing each field name and its extracted value.
-                    """
-                    content = [{"text": task_prompt}]
-
-                    # Add image attachments to the content (limit to 20 images as per Bedrock constraints)
-                    if page_images:
-                        logger.info(
-                            f"Attaching images to prompt, for {len(page_images)} pages."
-                        )
-                        # Limit to 20 images as per Bedrock constraints
-                        for img in page_images[:20]:
-                            content.append(image.prepare_bedrock_image_attachment(img))
-                else:
-                    # Check if task prompt contains FEW_SHOT_EXAMPLES placeholder
-                    if "{FEW_SHOT_EXAMPLES}" in prompt_template:
-                        content = self._build_content_with_few_shot_examples(
-                            prompt_template,
-                            document_text,
-                            class_label,
-                            attribute_descriptions,
-                            page_images,  # Pass images to the content builder
-                        )
-                    else:
-                        # Use the unified content builder for DOCUMENT_IMAGE placeholder support
-                        try:
-                            content = (
-                                self._build_content_with_or_without_image_placeholder(
-                                    prompt_template,
-                                    document_text,
-                                    class_label,
-                                    attribute_descriptions,
-                                    page_images,  # Pass images to the content builder
-                                )
-                            )
-                        except ValueError as e:
-                            logger.warning(
-                                f"Error formatting prompt template: {str(e)}. Using default prompt."
-                            )
-                            # Fall back to default prompt if template validation fails
-                            task_prompt = f"""
-                            Extract the following fields from this {class_label} document:
-                            
-                            {attribute_descriptions}
-                            
-                            Document text:
-                            {document_text}
-                            
-                            Respond with a JSON object containing each field name and its extracted value.
-                            """
-                            content = [{"text": task_prompt}]
-
-                            # Add image attachments for fallback case
-                            if page_images:
-                                logger.info(
-                                    f"Attaching images to prompt, for {len(page_images)} pages."
-                                )
-                                # Limit to 20 images as per Bedrock constraints
-                                for img in page_images[:20]:
-                                    content.append(
-                                        image.prepare_bedrock_image_attachment(img)
-                                    )
-
-            logger.info(
-                f"Extracting fields for {class_label} document, section {section_id}"
+            # Build prompt content
+            content, system_prompt = self._build_extraction_content(
+                document, page_images
             )
 
-            # Time the model invocation
-            request_start_time = time.time()
+            # Invoke model
+            result = self._invoke_extraction_model(content, system_prompt, section_info)
 
-            # Type-safe boolean access - no string conversion needed!
-            if self.config.extraction.agentic.enabled:
-                if not AGENTIC_AVAILABLE:
-                    raise ImportError(
-                        "Agentic extraction requires Python 3.10+ and strands-agents dependencies. "
-                        "Install with: pip install 'idp_common[agents]' or use agentic=False"
-                    )
-
-                # Create dynamic Pydantic model from JSON Schema
-                # Schema is already cleaned by _clean_schema_for_prompt before being passed here
-                dynamic_model = create_pydantic_model_from_json_schema(
-                    schema=class_schema,
-                    class_label=class_label,
-                    clean_schema=False,  # Already cleaned
-                )
-
-                # Log the Pydantic model schema for debugging
-                model_schema = dynamic_model.model_json_schema()
-                logger.debug(f"Pydantic model schema for {class_label}:")
-                logger.debug(json.dumps(model_schema, indent=2))
-
-                # Use agentic extraction with the dynamic model
-                # Wrap content list in proper Message format for agentic_idp compatibility
-                if isinstance(content, list):
-                    message_prompt = {"role": "user", "content": content}
-                else:
-                    message_prompt = content
-                logger.info("Using Agentic extraction")
-                logger.debug(f"Using input: {str(message_prompt)}")
-                structured_data, response_with_metering = structured_output(  # pyright: ignore[reportPossiblyUnboundVariable]
-                    model_id=model_id,
-                    data_format=dynamic_model,
-                    prompt=message_prompt,  # pyright: ignore[reportArgumentType]
-                    custom_instruction=system_prompt,
-                    config=self.config,
-                    context="Extraction",
-                )
-
-                # Extract the structured data as dict for compatibility with existing code
-                extracted_fields = structured_data.model_dump()
-                # Extract metering from BedrockInvokeModelResponse
-                metering = response_with_metering["metering"]
-                parsing_succeeded = True  # Agentic approach always succeeds in parsing since it returns structured data
-
-            else:
-                # Invoke Bedrock with the common library
-                response_with_metering = bedrock.invoke_model(
-                    model_id=model_id,
-                    system_prompt=system_prompt,
-                    content=content,
-                    temperature=temperature,
-                    top_k=top_k,
-                    top_p=top_p,
-                    max_tokens=max_tokens,
-                    context="Extraction",
-                )
-                # For non-agentic approach, response_with_metering is BedrockInvokeModelResponse
-                # Extract text from response for non-agentic approach
-                extracted_text = bedrock.extract_text_from_response(
-                    dict(response_with_metering)
-                )
-                metering = response_with_metering["metering"]
-
-                # Parse response into JSON
-                extracted_fields = {}
-                parsing_succeeded = True  # Flag to track if parsing was successful
-
-                try:
-                    # Try to parse the extracted text as JSON
-                    extracted_fields = json.loads(
-                        extract_json_from_text(extracted_text)
-                    )
-                except Exception as e:
-                    # Handle parsing error
-                    logger.error(
-                        f"Error parsing LLM output - invalid JSON?: {extracted_text} - {e}"
-                    )
-                    logger.info("Using unparsed LLM output.")
-                    extracted_fields = {"raw_output": extracted_text}
-                    parsing_succeeded = False  # Mark that parsing failed
-
-            total_duration = time.time() - request_start_time
-            logger.info(f"Time taken for extraction: {total_duration:.2f} seconds")
-
-            # Write to S3
-            output = {
-                "document_class": {"type": class_label},
-                "split_document": {"page_indices": page_indices},
-                "inference_result": extracted_fields,
-                "metadata": {
-                    "parsing_succeeded": parsing_succeeded,
-                    "extraction_time_seconds": total_duration,
-                },
-            }
-            s3.write_content(
-                output, output_bucket, output_key, content_type="application/json"
-            )
-
-            # Update the section with extraction result URI only (not the attributes themselves)
-            section.extraction_result_uri = output_uri
-
-            # Update document with metering data
-            document.metering = utils.merge_metering_data(
-                document.metering, metering or {}
-            )
-
-            t3 = time.time()
-            logger.info(
-                f"Total extraction time for section {section_id}: {t3 - t0:.2f} seconds"
-            )
+            # Save results
+            self._save_results(document, section, result, section_info, section_id, t0)
 
         except Exception as e:
             error_msg = f"Error processing section {section_id}: {str(e)}"
