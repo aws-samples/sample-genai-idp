@@ -251,9 +251,13 @@ def create_dynamic_extraction_tool_and_patch_tool(model_class: type[TargetModel]
         When you call this tool it overwrites the previous extraction, if you want to expand the extraction use jsonpatch.
         This tool needs to be Successfully invoked before the patch tool can be used."""
 
-        logger.info("extraction_tool called", extra={"models_extraction": extraction})
-        extraction_model = model_class(**extraction)  # pyright: ignore[reportAssignmentType]
-        extraction_dict = extraction_model.model_dump()
+        # Note: The @tool decorator passes data as a dict, not as a model instance
+        # We need to validate it manually using the Pydantic model
+        extraction_model = model_class.model_validate(extraction)  # pyright: ignore[reportAssignmentType]
+        extraction_dict = extraction_model.model_dump(mode="json")
+        logger.info(
+            "extraction_tool called", extra={"models_extraction": extraction_dict}
+        )
         agent.state.set(key="current_extraction", value=extraction_dict)
         logger.debug(
             "Successfully stored extraction in state",
@@ -1000,7 +1004,9 @@ async def structured_output_async(
         state={
             "current_extraction": None,
             "images": {},
-            "existing_data": existing_data.model_dump() if existing_data else None,
+            "existing_data": existing_data.model_dump(mode="json")
+            if existing_data
+            else None,
             "extraction_schema_json": schema_json,  # Store for schema reminder tool
         },
         conversation_manager=SummarizingConversationManager(

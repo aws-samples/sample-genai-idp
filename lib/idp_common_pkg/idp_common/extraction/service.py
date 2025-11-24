@@ -927,7 +927,7 @@ class ExtractionService:
                 context="Extraction",
             )
 
-            extracted_fields = structured_data.model_dump()
+            extracted_fields = structured_data.model_dump(mode="json")
             metering = response_with_metering["metering"]
             parsing_succeeded = True
         else:
