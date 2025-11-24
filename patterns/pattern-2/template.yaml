@@ -927,7 +927,7 @@ Resources:
                   review_agent_model:
                     type: string
                     description: Model to review the initial extraction agents work and correct it if needed, if not specified will default to the same as the extraction model.
-                    default: Null
+                    default: ""
               image:
                 type: object
                 sectionLabel: Image Processing Settings
