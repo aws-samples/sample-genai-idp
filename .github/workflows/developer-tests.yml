@@ -104,6 +104,7 @@ jobs:
         with:
           files: lib/idp_common_pkg/test-reports/test-results.xml
           check_name: Test Results
+          comment_mode: off  # Disable PR comments to avoid permission issues on fork PRs
 
       - name: Code Coverage Report
         uses: irongut/CodeCoverageSummary@v1.3.0
