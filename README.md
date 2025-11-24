@@ -34,6 +34,8 @@ White-glove customization, deployment, and integration support for production us
 
 **Prefer AWS CDK?** This solution is also available as [GenAI IDP Accelerator for AWS CDK](https://github.com/cdklabs/genai-idp), providing the same functional capabilities through AWS CDK constructs for customers who prefer Infrastructure-as-Code with CDK.
 
+**Prefer Terraform?** This solution is also available as [GenAI IDP Terraform](https://github.com/awslabs/genai-idp-terraform), providing the same functional capabilities as a Terraform module that integrates with existing infrastructure and supports customization through module variables.
+
 ## Key Features
 
 - **Serverless Architecture**: Built entirely on AWS serverless technologies including Lambda, Step Functions, SQS, and DynamoDB
