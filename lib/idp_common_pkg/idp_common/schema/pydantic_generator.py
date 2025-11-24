@@ -146,7 +146,7 @@ def create_json_schema_validator(
     def validate_against_json_schema(value: BaseModel) -> BaseModel:
         """Validate model data against the original JSON Schema."""
         # Convert Pydantic model to dict for JSON Schema validation
-        data = value.model_dump()
+        data = value.model_dump(mode="json")
 
         try:
             # Validate against JSON Schema
