@@ -18,7 +18,6 @@ from mypy_boto3_bedrock_runtime.type_defs import (
     InvokeModelRequestTypeDef,
     InvokeModelResponseTypeDef,
 )
-from pydantic_core import ArgsKwargs
 
 # Configure logger
 logger = logging.getLogger(__name__)
@@ -48,14 +47,14 @@ def async_exponential_backoff_retry[T, **P](
 
             def log_bedrock_invocation_error(error: Exception, attempt_num: int):
                 """Log bedrock invocation details when an error occurs"""
-                    # Fallback logging if extraction fails
+                # Fallback logging if extraction fails
                 logger.error(
                     "Bedrock invocation error",
                     extra={
                         "function_name": func.__name__,
                         "original_error": str(error),
                         "max_attempts": max_retries,
-                        "attempt_num":attempt_num
+                        "attempt_num": attempt_num,
                     },
                 )
 
@@ -203,6 +202,7 @@ def exponential_backoff_retry[T, **P](
                         error_code
                         not in [
                             "ThrottlingException",
+                            "throttlingException",
                             "ModelErrorException",
                             "ValidationException",
                         ]

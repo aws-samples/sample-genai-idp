@@ -20,7 +20,14 @@ Usage:
 
 from typing import Any, Dict, List, Optional, Union, Literal, Annotated
 from typing_extensions import Self
-from pydantic import BaseModel, ConfigDict, Field, field_validator, Discriminator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    Discriminator,
+    model_validator,
+)
 
 
 class ImageConfig(BaseModel):
@@ -79,7 +86,10 @@ class AgenticConfig(BaseModel):
 
     enabled: bool = Field(default=False, description="Enable agentic extraction")
     review_agent: bool = Field(default=False, description="Enable review agent")
-    review_agent_model: str | None= Field(default=None, description="Model used for reviewing and correcting extraction work")
+    review_agent_model: str | None = Field(
+        default=None,
+        description="Model used for reviewing and correcting extraction work",
+    )
 
 
 class ExtractionConfig(BaseModel):
@@ -121,15 +131,14 @@ class ExtractionConfig(BaseModel):
         if isinstance(v, str):
             return int(v) if v else 0
         return int(v)
-    
-    @model_validator(mode="after")
-    def model_validator(self) -> Self:
 
+    @model_validator(mode="after")
+    def set_default_review_agent_model(self) -> Self:
+        """Set review_agent_model to extraction model if not specified."""
         if not self.agentic.review_agent_model:
             self.agentic.review_agent_model = self.model
 
         return self
-
 
 
 class ClassificationConfig(BaseModel):
@@ -434,7 +443,7 @@ class ErrorAnalyzerConfig(BaseModel):
             "AccessDenied",
             "ThrottlingException",
         ],
-        description="Error patterns to search for in logs"
+        description="Error patterns to search for in logs",
     )
     system_prompt: str = Field(
         default="""
@@ -522,11 +531,10 @@ class ErrorAnalyzerConfig(BaseModel):
                       - No time specified: 24 hours (default)
               
               IMPORTANT: Do not include any search quality reflections, search quality scores, or meta-analysis sections in your response. Only provide the three required sections: Root Cause, Recommendations, and Evidence.""",
-        description="System prompt for error analyzer"
+        description="System prompt for error analyzer",
     )
     parameters: ErrorAnalyzerParameters = Field(
-        default_factory=ErrorAnalyzerParameters,
-        description="Error analyzer parameters"
+        default_factory=ErrorAnalyzerParameters, description="Error analyzer parameters"
     )
 
 
@@ -646,12 +654,10 @@ class AgentsConfig(BaseModel):
     """Agents configuration"""
 
     error_analyzer: Optional[ErrorAnalyzerConfig] = Field(
-        default_factory=ErrorAnalyzerConfig,
-        description="Error analyzer configuration"
+        default_factory=ErrorAnalyzerConfig, description="Error analyzer configuration"
     )
     chat_companion: Optional[ChatCompanionConfig] = Field(
-        default_factory=ChatCompanionConfig,
-        description="Chat companion configuration"
+        default_factory=ChatCompanionConfig, description="Chat companion configuration"
     )
 
 

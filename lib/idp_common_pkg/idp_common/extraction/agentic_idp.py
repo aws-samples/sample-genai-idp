@@ -52,7 +52,10 @@ from idp_common.utils.strands_agent_tools.todo_list import (
 # In Lambda: Full JSON structured logs
 # Outside Lambda: Human-readable format for local development
 logger = Logger(service="agentic_idp", level=os.getenv("LOG_LEVEL", "INFO"))
-logging.getLogger("strands.models.bedrock").setLevel(logging.DEBUG)
+# Configure strands bedrock logger based on environment variable
+logging.getLogger("strands.models.bedrock").setLevel(
+    os.getenv("STRANDS_LOG_LEVEL", os.getenv("LOG_LEVEL", "INFO"))
+)
 TargetModel = TypeVar("TargetModel", bound=BaseModel)
 
 
@@ -193,6 +196,8 @@ def create_view_image_tool(page_images: list[bytes]) -> Any:
         """
 
         # Validate image index exists
+        if not page_images:
+            raise ValueError("No images available to view.")
         if image_index >= len(page_images):
             raise ValueError(
                 f"Invalid image_index {image_index}. "
@@ -729,12 +734,12 @@ def _prepare_prompt_content(
     else:
         prompt_content = [ContentBlock(text=str(prompt))]
 
-    # Add page images if provided
+    # Add page images if provided (limit to 20 as per Bedrock constraints)
     if page_images:
         if len(page_images) > 20:
             prompt_content.append(
                 ContentBlock(
-                    text=f"There are {len(page_images)} images, initially you'll see 20 of them, use the tools to see the rest."
+                    text=f"There are {len(page_images)} images, initially you'll see 20 of them, use the view_image tool to see the rest."
                 )
             )
 
@@ -742,14 +747,14 @@ def _prepare_prompt_content(
             ContentBlock(
                 image=ImageContent(format="png", source=ImageSource(bytes=img_bytes))
             )
-            for img_bytes in page_images
+            for img_bytes in page_images[:20]
         ]
 
     # Add existing data context if provided
     if existing_data:
         prompt_content.append(
             ContentBlock(
-                text=f"Please update the existing data using the extraction tool or patches. Existing data: {existing_data.model_dump()}"
+                text=f"Please update the existing data using the extraction tool or patches. Existing data: {existing_data.model_dump(mode='json')}"
             )
         )
 
@@ -1014,7 +1019,7 @@ async def structured_output_async(
         ),
     )
     if existing_data:
-        agent.state.set("current_extraction", existing_data.model_dump())
+        agent.state.set("current_extraction", existing_data.model_dump(mode="json"))
 
     response, result = await _invoke_agent_for_extraction(
         agent=agent,
@@ -1075,9 +1080,11 @@ async def structured_output_async(
             tools=tools,
             system_prompt=f"{final_system_prompt}",
             state={
-                "current_extraction": None,
+                "current_extraction": result.model_dump(mode="json"),
                 "images": {},
-                "existing_data": existing_data.model_dump() if existing_data else None,
+                "existing_data": existing_data.model_dump(mode="json")
+                if existing_data
+                else None,
                 "extraction_schema_json": schema_json,  # Store for schema reminder tool
             },
             conversation_manager=SummarizingConversationManager(
@@ -1095,7 +1102,7 @@ async def structured_output_async(
 
         # Check if patches were applied during review
         updated_extraction = agent.state.get("current_extraction")
-        if updated_extraction != result.model_dump():
+        if updated_extraction != result.model_dump(mode="json"):
             # Patches were applied, validate the new extraction
             try:
                 result = data_format(**updated_extraction)

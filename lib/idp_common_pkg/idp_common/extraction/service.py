@@ -111,7 +111,7 @@ class ExtractionService:
         self._class_label: str = ""
         self._attribute_descriptions: str = ""
         self._class_schema: dict[str, Any] = {}
-        self._page_images: list[Any] = []
+        self._page_images: list[bytes] = []
         self._image_uris: list[str] = []
 
         # Get model_id from config for logging (type-safe access with fallback)
