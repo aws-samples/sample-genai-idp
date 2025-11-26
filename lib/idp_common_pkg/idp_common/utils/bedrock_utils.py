@@ -30,15 +30,21 @@ def async_exponential_backoff_retry[T, **P](
     max_delay: float = 32.0,
     exponential_base: float = 2.0,
     jitter: float = 0.1,
-    retryable_errors: list[str] | None = None,
+    retryable_errors: set[str] | None = None,
 ) -> Callable[[Callable[P, Awaitable[T]]], Callable[P, Awaitable[T]]]:
     if not retryable_errors:
-        retryable_errors = [
+        retryable_errors = set( [
             "ThrottlingException",
             "throttlingException",
             "ModelErrorException",
             "ValidationException",
-        ]
+            "ServiceQuotaExceededException",
+            "RequestLimitExceeded",
+            "TooManyRequestsException",
+            "ServiceUnavailableException",
+            "RequestTimeout",
+            "RequestTimeoutException",
+        ] )
 
     def decorator(func: Callable[P, Awaitable[T]]) -> Callable[P, Awaitable[T]]:
         @wraps(func)
