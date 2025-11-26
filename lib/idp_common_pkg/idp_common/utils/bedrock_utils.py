@@ -3,6 +3,7 @@ import json
 import logging
 import os
 import random
+import re
 import time
 from collections.abc import Awaitable, Callable
 from functools import wraps
@@ -33,18 +34,21 @@ def async_exponential_backoff_retry[T, **P](
     retryable_errors: set[str] | None = None,
 ) -> Callable[[Callable[P, Awaitable[T]]], Callable[P, Awaitable[T]]]:
     if not retryable_errors:
-        retryable_errors = set( [
-            "ThrottlingException",
-            "throttlingException",
-            "ModelErrorException",
-            "ValidationException",
-            "ServiceQuotaExceededException",
-            "RequestLimitExceeded",
-            "TooManyRequestsException",
-            "ServiceUnavailableException",
-            "RequestTimeout",
-            "RequestTimeoutException",
-        ] )
+        retryable_errors = set(
+            [
+                "ThrottlingException",
+                "throttlingException",
+                "ModelErrorException",
+                "ValidationException",
+                "ServiceQuotaExceededException",
+                "RequestLimitExceeded",
+                "TooManyRequestsException",
+                "ServiceUnavailableException",
+                "serviceUnavailableException",  # lowercase variant from EventStreamError
+                "RequestTimeout",
+                "RequestTimeoutException",
+            ]
+        )
 
     def decorator(func: Callable[P, Awaitable[T]]) -> Callable[P, Awaitable[T]]:
         @wraps(func)
@@ -69,6 +73,15 @@ def async_exponential_backoff_retry[T, **P](
                     return await func(*args, **kwargs)
                 except botocore.exceptions.ClientError as e:
                     error_code = e.response.get("Error", {}).get("Code")
+
+                    # For EventStreamError (subclass of ClientError), the error code
+                    # may be in a different location or need to be extracted from the message
+                    if not error_code:
+                        # Try to extract error code from exception message
+                        # Format: "An error occurred (errorCode) when calling..."
+                        match = re.search(r"\((\w+)\)", str(e))
+                        if match:
+                            error_code = match.group(1)
 
                     # Log bedrock invocation details for all errors
                     log_bedrock_invocation_error(e, attempt + 1)
