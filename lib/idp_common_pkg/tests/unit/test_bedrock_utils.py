@@ -38,8 +38,8 @@ class MockEventStreamError(MockClientError):
     pass
 
 
-# Now import the module under test
-from idp_common.utils.bedrock_utils import (
+# Now import the module under test (must be after mock classes are defined)
+from idp_common.utils.bedrock_utils import (  # noqa: E402
     async_exponential_backoff_retry,
     exponential_backoff_retry,
 )
