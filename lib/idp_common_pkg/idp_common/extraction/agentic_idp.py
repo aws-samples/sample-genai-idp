@@ -291,7 +291,8 @@ def create_dynamic_extraction_tool_and_patch_tool(model_class: type[TargetModel]
         patched_data = apply_patches_to_data(current_data, patches)
         validated_patched_data = model_class(**patched_data)
         agent.state.set(
-            key="current_extraction", value=validated_patched_data.model_dump()
+            key="current_extraction",
+            value=validated_patched_data.model_dump(mode="json"),
         )
 
         return {
@@ -303,9 +304,9 @@ def create_dynamic_extraction_tool_and_patch_tool(model_class: type[TargetModel]
     def make_buffer_data_final_extraction(agent: Agent) -> str:
         valid_extraction = model_class(**agent.state.get("intermediate_extraction"))
 
-        agent.state.set("current_extraction", valid_extraction.model_dump())
+        agent.state.set("current_extraction", valid_extraction.model_dump(mode="json"))
 
-        return f"Successfully made the existing extraction the same as the buffer data {str(valid_extraction.model_dump())[100:]}..."
+        return f"Successfully made the existing extraction the same as the buffer data {str(valid_extraction.model_dump(mode='json'))[:100]}..."
 
     return extraction_tool, apply_json_patches, make_buffer_data_final_extraction
 
@@ -1051,7 +1052,7 @@ async def structured_output_async(
                 ContentBlock(
                     text=f"""
                 You have successfully extracted the following data:
-                {json.dumps(result.model_dump(), indent=2)}
+                {json.dumps(result.model_dump(mode="json"), indent=2)}
 
                 Please take one final careful look at this extraction:
                 1. Check each field against the source document
