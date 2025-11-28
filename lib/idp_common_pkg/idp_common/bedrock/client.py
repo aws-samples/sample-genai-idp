@@ -26,10 +26,6 @@ from botocore.exceptions import (
     EndpointConnectionError,
 )
 from urllib3.exceptions import ReadTimeoutError as Urllib3ReadTimeoutError
-from idp_common.image import (
-    prepare_image,
-    prepare_bedrock_image_attachment
-)
 
 # Dummy exception classes for requests timeouts if requests is not available
 class _RequestsReadTimeout(Exception):
@@ -737,6 +733,11 @@ class BedrockClient:
         Returns:
             List of floats representing the embedding vector
         """
+        from idp_common.image import (
+            prepare_image,
+            prepare_bedrock_image_attachment
+        )
+
         if (not text or not isinstance(text, str)) and (not image_source):
             # Return an empty vector for empty input
             return []
