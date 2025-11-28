@@ -73,6 +73,47 @@ embedding = client.generate_embedding(
 # Use embedding for vector search, clustering, etc.
 ```
 
+Amazon Titan Multimodal Embeddings support both text and image at the same time. The resulting embeddings vector averages the text embeddings and image embeddings vectors.
+
+```python
+from idp_common.bedrock.client import BedrockClient
+
+with open("/path/to/document.png", "rb") as image_file:
+    image_data = image_file.read()
+
+client = BedrockClient()
+embedding = client.generate_embedding(
+    text="This document contains information about loan applications.",
+    image_source=image_data,
+    model_id="amazon.titan-embed-image-v1"
+)
+```
+
+The image source can also be an S3 URI:
+
+```python
+from idp_common.bedrock.client import BedrockClient
+
+client = BedrockClient()
+embedding = client.generate_embedding(
+    image_data="s3://bucket/key",
+    model_id="amazon.titan-embed-image-v1"
+)
+```
+
+Amazon Nova Multimodal Embeddings with 3072 dimension size:
+
+```python
+from idp_common.bedrock.client import BedrockClient
+
+client = BedrockClient()
+embedding = client.generate_embedding(
+    image_data="s3://bucket/key",
+    model_id="amazon.nova-2-multimodal-embeddings-v1:0",
+    dimensions=3072
+)
+```
+
 ## Prompt Caching with CachePoint
 
 Prompt caching is a powerful feature in Amazon Bedrock that significantly reduces response latency for workloads with repetitive contexts. The Bedrock client provides built-in support for this via the `<<CACHEPOINT>>` tag.

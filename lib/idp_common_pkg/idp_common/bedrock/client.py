@@ -16,6 +16,7 @@ import logging
 import copy
 import random
 import socket
+import base64
 from typing import Dict, Any, List, Optional, Union, Tuple, Type
 from botocore.config import Config
 from botocore.exceptions import (
@@ -25,7 +26,10 @@ from botocore.exceptions import (
     EndpointConnectionError,
 )
 from urllib3.exceptions import ReadTimeoutError as Urllib3ReadTimeoutError
-
+from idp_common.image import (
+    prepare_image,
+    prepare_bedrock_image_attachment
+)
 
 # Dummy exception classes for requests timeouts if requests is not available
 class _RequestsReadTimeout(Exception):
@@ -711,22 +715,29 @@ class BedrockClient:
 
     def generate_embedding(
         self,
-        text: str,
+        text: str = "",
+        image_source: Optional[Union[str, bytes]] = None,
         model_id: str = "amazon.titan-embed-text-v1",
+        dimensions: int = 1024,
         max_retries: Optional[int] = None,
     ) -> List[float]:
         """
-        Generate an embedding vector for the given text using Amazon Bedrock.
+        Generate an embedding vector for the given text or image_source using Amazon Bedrock.
+        At least one of text or the image is required to generate the embedding.
+        For Titan Multimodal embedding models, you can include both to create an embeddings query vector that averages the resulting text embeddings and image embeddings vectors.
+        For Nova Multimodal embedding models, exactly one of text or the image must be present, but not both.
 
         Args:
             text: The text to generate embeddings for
+            image_source: The image to generate embeddings for (can be either an S3 URI (s3://bucket/key) or raw image bytes)
             model_id: The embedding model ID to use (default: amazon.titan-embed-text-v1)
             max_retries: Optional override for the instance's max_retries setting
+            dimensions: Length of the output embeddings vector
 
         Returns:
             List of floats representing the embedding vector
         """
-        if not text or not isinstance(text, str):
+        if (not text or not isinstance(text, str)) and (not image_source):
             # Return an empty vector for empty input
             return []
 
@@ -741,12 +752,61 @@ class BedrockClient:
         # Normalize whitespace and prepare the input text
         normalized_text = " ".join(text.split())
 
+        # Convert image to base64
+        if image_source:
+            image_bytes = prepare_image(image_source)
+            image_base64 = base64.b64encode(image_bytes).decode('utf-8')
+
+        dimensions = int(dimensions)
+
         # Prepare the request body based on the model
-        if "amazon.titan-embed" in model_id:
-            request_body = json.dumps({"inputText": normalized_text})
+        payload_body: Dict[str, Any] = {}
+
+        if "amazon.titan-embed-text" in model_id:
+            if not normalized_text:
+                raise ValueError(
+                    "Amazon Titan Text models require a text parameter to generate embeddings for."
+                )
+            payload_body = {
+                "inputText": normalized_text,
+                "dimensions":  dimensions,
+            }
+        elif "amazon.titan-embed-image" in model_id:
+            payload_body = {
+                "embeddingConfig": {
+                    "outputEmbeddingLength": dimensions,
+                }
+            }
+            if normalized_text:
+                payload_body["inputText"] = normalized_text
+            if image_base64:
+                payload_body["inputImage"] = image_base64
+        elif "amazon.nova-2-multimodal-embeddings" in model_id:
+            if normalized_text and image_source:
+                raise ValueError(
+                    "Amazon Nova Multimodal Embedding models require exactly one of text or image parameter, but noth both at the same time."
+                )
+            payload_body = {
+                "taskType": "SINGLE_EMBEDDING",
+                "singleEmbeddingParams": {
+                    "embeddingPurpose": "GENERIC_INDEX",
+                    "embeddingDimension": dimensions,
+                }
+            }
+            if normalized_text:
+                payload_body["singleEmbeddingParams"]["text"] = {"truncationMode": "END", "value": normalized_text}
+            if image_source:
+                payload_body["singleEmbeddingParams"].update(prepare_bedrock_image_attachment(image_bytes)) # detect image format
+                payload_body["singleEmbeddingParams"]["image"]["source"]["bytes"] = image_base64
         else:
             # Default format for other models
-            request_body = json.dumps({"text": normalized_text})
+            if not normalized_text:
+                raise ValueError(
+                    "Default format requires a text parameter to generate embeddings for."
+                )
+            payload_body = {"text": normalized_text}
+
+        request_body = json.dumps(payload_body)
 
         # Call the recursive embedding function
         return self._generate_embedding_with_retry(
@@ -805,6 +865,10 @@ class BedrockClient:
             # Handle different response formats based on the model
             if "amazon.titan-embed" in model_id:
                 embedding = response_body.get("embedding", [])
+            elif "amazon.titan-embed-image" in model_id:
+                embedding = response_body.get("embedding", [])
+            elif "amazon.nova-2-multimodal-embeddings" in model_id:
+                embedding = response_body["embeddings"][0]["embedding"]
             else:
                 # Default extraction format
                 embedding = response_body.get("embedding", [])
