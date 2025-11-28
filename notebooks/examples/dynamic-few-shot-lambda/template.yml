@@ -1,0 +1,204 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: MIT-0
+
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Deploy demo Lambda function for GenAI IDP dynamic few-shot prompting
+
+Parameters:
+
+  PermissionsBoundaryArn:
+    Type: String
+    Default: ""
+    Description: >-
+      (Optional) ARN of an existing IAM Permissions Boundary policy to attach to the Lambda execution role.
+      Leave blank if no Permissions Boundary is required.
+    AllowedPattern: "^(|arn:aws[a-z-]*::iam::[0-9]{12}:policy/.+)$"
+    ConstraintDescription: Must be empty or a valid IAM policy ARN
+
+  VectorBucketName:
+    Type: String
+    Default: "genaiidp-dynamic-few-shot"
+
+  VectorIndexName:
+    Type: String
+    Default: "documents"
+
+  VectorDimensions:
+    Type: Number
+    Default: 3072
+
+  ModelId:
+    Type: String
+    Default: "amazon.nova-2-multimodal-embeddings-v1:0"
+
+  TopK:
+    Type: Number
+    Default: 2
+
+  LambdaFunctionName:
+    Type: String
+    Default: "GENAIIDP-dynamic-few-shot"
+
+Conditions:
+  HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
+
+Resources:
+
+  DynamicFewShotFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: "Demo function - does not require VPC access"
+          - id: W92
+            reason: "Demo function - does not require reserved concurrency as it scales based on demand"
+          - id: W58
+            reason: "Demo function - DLQ not required"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for AppSync resolver function as GraphQL handles retries"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only configuration values like feature flags and non-sensitive settings"
+    Properties:
+      FunctionName: !Ref LambdaFunctionName
+      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
+      CodeUri: ./
+      Handler: GENAIIDP-dynamic-few-shot.lambda_handler
+      Runtime: python3.12
+      Architectures:
+        - arm64
+      Timeout: 300
+      MemorySize: 512
+      Description: Demo Lambda function for GenAI IDP dynamic few-shot prompting
+      Environment:
+        Variables:
+          LOG_LEVEL: INFO
+          S3VECTOR_BUCKET: !Ref VectorBucketName
+          S3VECTOR_INDEX: !Ref VectorIndexName
+          S3VECTOR_DIMENSIONS: !Ref VectorDimensions
+          MODEL_ID: !Ref ModelId
+          TOP_K: !Ref TopK
+      LoggingConfig:
+        LogGroup: !Ref DynamicFewShotLogGroup
+      # Minimal permissions - only needs basic execution and logging
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - S3ReadPolicy:
+            BucketName: !Ref DynamicFewShotDatasetBucket
+        - Statement:
+            - Effect: Allow
+              Action: cloudwatch:PutMetricData
+              Resource: "*"
+            - Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+                - bedrock:InvokeModelWithResponseStream
+              Resource:
+                - !Sub "arn:${AWS::Partition}:bedrock:*::foundation-model/*"
+                - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
+            - Effect: Allow
+              Action:
+                - s3vectors:GetVectors
+                - s3vectors:QueryVectors
+              Resource:
+                - !Ref DynamicFewShotVectorIndex
+
+  DynamicFewShotLogGroup:
+    Type: AWS::Logs::LogGroup
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W84
+            reason: "Demo function - KMS CMK not required, but can be added by customer for production use cases"
+    # checkov:skip=CKV_AWS_158: "Demo function - KMS CMK not required, but can be added by customer for production use cases"
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${LambdaFunctionName}"
+      RetentionInDays: 7  # Short retention for demo purposes
+
+  DynamicFewShotVectorBucket:
+    Type: AWS::S3Vectors::VectorBucket
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W84
+            reason: "Demo function - KMS CMK not required, but can be added by customer for production use cases"
+    # checkov:skip=CKV_AWS_158: "Demo function - KMS CMK not required, but can be added by customer for production use cases"
+    Properties:
+      VectorBucketName: !Ref VectorBucketName
+      EncryptionConfiguration:
+        SseType: "AES256"
+
+  DynamicFewShotVectorIndex:
+    Type: AWS::S3Vectors::Index
+    Properties:
+      IndexName: !Ref VectorIndexName
+      DataType: "float32"
+      Dimension: !Ref VectorDimensions
+      DistanceMetric: "cosine"
+      MetadataConfiguration:
+        NonFilterableMetadataKeys:
+          - "classPrompt"
+          - "attributesPrompt"
+          - "imagePath"
+      VectorBucketArn: !Ref DynamicFewShotVectorBucket
+
+  DynamicFewShotDatasetBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: RetainExceptOnCreate
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W84
+            reason: "Demo function - KMS CMK not required, but can be added by customer for production use cases"
+    # checkov:skip=CKV_AWS_158: "Demo function - KMS CMK not required, but can be added by customer for production use cases"
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: "AES256"
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: Enabled
+
+Outputs:
+
+  DynamicFewShotFunctionName:
+    Description: Name of the demo Lambda function
+    Value: !Ref DynamicFewShotFunction
+
+  DynamicFewShotFunctionArn:
+    Description: ARN of the demo Lambda function (use this in your GenAIIDP configuration)
+    Value: !GetAtt DynamicFewShotFunction.Arn
+
+  DynamicFewShotLogGroup:
+    Description: CloudWatch Log Group for monitoring demo Lambda execution
+    Value: !Ref DynamicFewShotLogGroup
+
+  DynamicFewShotVectorBucketArn:
+    Description: S3 Vectors bucket for dynamic few-shot examples
+    Value: !Ref DynamicFewShotVectorBucket
+
+  DynamicFewShotVectorIndexArn:
+    Description: S3 Vectors index for dynamic few-shot examples
+    Value: !Ref DynamicFewShotVectorIndex
+
+  DynamicFewShotDatasetBucket:
+    Description: S3 Bucket for example data sets
+    Value: !Ref DynamicFewShotDatasetBucket
+
+  UsageInstructions:
+    Description: How to use this Lambda in your IDP configuration
+    Value: !Sub |
+      Add this ARN to your extraction config:
+      extraction:
+        dynamic_few_shot_lambda_arn: "${DynamicFewShotFunction.Arn}"
+        
+  MonitoringLink:
+    Description: Direct link to CloudWatch logs for this function
+    Value: !Sub |
+      https://console.aws.amazon.com/cloudwatch/home?region=${AWS::Region}#logsV2:log-groups/log-group/$252Faws$252Flambda$252F${LambdaFunctionName}

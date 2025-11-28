@@ -1,0 +1,11 @@
+version = 0.1
+
+[default.deploy.parameters]
+stack_name = "GENAIIDP-dynamic-few-shot-stack"
+resolve_s3 = true
+s3_prefix = "GENAIIDP-dynamic-few-shot-stack"
+region = "us-east-1"
+capabilities = "CAPABILITY_IAM"
+disable_rollback = true
+parameter_overrides = "PermissionsBoundaryArn=\"\" VectorBucketName=\"genaiidp-dynamic-few-shot\" VectorIndexName=\"documents\" VectorDimensions=\"3072\" ModelId=\"amazon.nova-2-multimodal-embeddings-v1:0\" TopK=\"2\" LambdaFunctionName=\"GENAIIDP-dynamic-few-shot\""
+image_repositories = []
