@@ -103,10 +103,7 @@ extraction:
 ```json
 {
   "class_label": "invoice",
-  "document_texts": [
-    "Invoice text or markdown from page 1...",
-    "Invoice text or markdown from page 2..."
-  ],
+  "document_text": "Text or markdown from section 1 (pages 1-3)...",
   "image_content": [
     "base64_encoded_image_1",
     "base64_encoded_image_2"

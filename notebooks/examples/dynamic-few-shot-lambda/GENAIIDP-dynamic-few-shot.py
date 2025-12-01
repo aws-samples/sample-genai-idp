@@ -21,7 +21,8 @@ import os
 from idp_common import bedrock, s3
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
+level = logging.getLevelName(os.environ.get("LOG_LEVEL", "INFO"))
+logger.setLevel(level)
 
 # Parse environment variables with error handling
 try:
@@ -45,7 +46,7 @@ def lambda_handler(event, context):
     Input event:
     {
         "class_label": "<class_label>",
-        "document_texts": ["<document_text_1>", "<document_text_2>", ...],
+        "document_text": "<document_text>",
         "image_content": ["<base64_image_content_1>", "<base64_image_content_2>", ...]
     }
 
@@ -66,13 +67,13 @@ def lambda_handler(event, context):
         
         # Validate input
         class_label = event.get("class_label")
-        document_texts = event.get("document_texts", [])
+        document_text = event.get("document_text")
         image_content = event.get("image_content", [])
 
         logger.info(f"=== INPUT VALUES ===")
         logger.info(f"Class label: {class_label if class_label else 'Not specified'}")
-        logger.info(f"Document texts: {len(document_texts)}")
-        logger.info(f"Image content: {len(image_content)}")
+        logger.info(f"Document text: {len(document_text) if document_text else "0"} bytes")
+        logger.info(f"Image content: {len(image_content)} images")
 
         # Decode input data
         image_data = _decode_images(image_content)
@@ -114,17 +115,17 @@ def _encode_images(image_content):
 
 def _s3vectors_find_similar_items(image_data):
     """Find similar items for input"""
-
     # find similar items based on image similarity only
     similar_items = {}
     for page_image in image_data:
-        result = _s3vectors_find_similar_items_from_image(image_data)
+        result = _s3vectors_find_similar_items_from_image(page_image)
         _merge_examples(similar_items, result)
 
     # create result set
     result = []
     for key, example in similar_items.items():
         metadata = example.get("metadata", {})
+        distance = example.get("distance")
         attributes_prompt = metadata.get("attributesPrompt")
 
         # Only process this example if it has a non-empty attributesPrompt
@@ -134,7 +135,7 @@ def _s3vectors_find_similar_items(image_data):
             )
             continue
 
-        attributes = _extract_metadata(metadata)
+        attributes = _extract_metadata(metadata, distance)
         result.append(attributes)
 
     return result
@@ -169,8 +170,8 @@ def _merge_examples(examples, new_examples):
         new_distance = new_example.get("distance", 1.0)
         
         # update example
-        if combined_examples.get(key):
-            existing_distance = combined_examples[key].get("distance", 1.0)
+        if examples.get(key):
+            existing_distance = examples[key].get("distance", 1.0)
             examples[key]["distance"] = min(new_distance, existing_distance)
             examples[key]["metadata"] = new_example.get("metadata")
         # insert example
