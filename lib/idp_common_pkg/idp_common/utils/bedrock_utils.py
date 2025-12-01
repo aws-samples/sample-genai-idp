@@ -19,10 +19,32 @@ from mypy_boto3_bedrock_runtime.type_defs import (
     InvokeModelRequestTypeDef,
     InvokeModelResponseTypeDef,
 )
+from strands.models.bedrock import ModelThrottledException
 
 # Configure logger
 logger = logging.getLogger(__name__)
 logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
+
+# Default retryable error codes (matched against ClientError codes and exception messages)
+DEFAULT_RETRYABLE_ERRORS = {
+    "ThrottlingException",
+    "throttlingException",
+    "ModelThrottledException",  # Strands wrapper for throttling
+    "ModelErrorException",
+    "ValidationException",
+    "ServiceQuotaExceededException",
+    "RequestLimitExceeded",
+    "TooManyRequestsException",
+    "ServiceUnavailableException",
+    "serviceUnavailableException",  # lowercase variant from EventStreamError
+    "RequestTimeout",
+    "RequestTimeoutException",
+}
+
+# Default retryable exception types (caught by isinstance check)
+DEFAULT_RETRYABLE_EXCEPTION_TYPES: tuple[type[Exception], ...] = (
+    ModelThrottledException,
+)
 
 
 def async_exponential_backoff_retry[T, **P](
@@ -32,23 +54,13 @@ def async_exponential_backoff_retry[T, **P](
     exponential_base: float = 2.0,
     jitter: float = 0.1,
     retryable_errors: set[str] | None = None,
+    retryable_exception_types: tuple[type[Exception], ...] | None = None,
 ) -> Callable[[Callable[P, Awaitable[T]]], Callable[P, Awaitable[T]]]:
-    if not retryable_errors:
-        retryable_errors = set(
-            [
-                "ThrottlingException",
-                "throttlingException",
-                "ModelErrorException",
-                "ValidationException",
-                "ServiceQuotaExceededException",
-                "RequestLimitExceeded",
-                "TooManyRequestsException",
-                "ServiceUnavailableException",
-                "serviceUnavailableException",  # lowercase variant from EventStreamError
-                "RequestTimeout",
-                "RequestTimeoutException",
-            ]
-        )
+    # Use defaults if not provided
+    if retryable_errors is None:
+        retryable_errors = DEFAULT_RETRYABLE_ERRORS
+    if retryable_exception_types is None:
+        retryable_exception_types = DEFAULT_RETRYABLE_EXCEPTION_TYPES
 
     def decorator(func: Callable[P, Awaitable[T]]) -> Callable[P, Awaitable[T]]:
         @wraps(func)
@@ -104,7 +116,34 @@ def async_exponential_backoff_retry[T, **P](
                     await asyncio.sleep(sleep_time)
                     delay = min(delay * exponential_base, max_delay)
                 except Exception as e:
-                    # Log bedrock invocation details for non-ClientError exceptions too
+                    # Check if this is a retryable exception type (e.g., Strands ModelThrottledException)
+                    is_retryable_type = retryable_exception_types and isinstance(
+                        e, retryable_exception_types
+                    )
+
+                    # Also check if exception name or message contains retryable error patterns
+                    exception_name = type(e).__name__
+                    exception_str = str(e)
+                    is_retryable_name = exception_name in retryable_errors or any(
+                        err in exception_str for err in retryable_errors
+                    )
+
+                    if (
+                        is_retryable_type or is_retryable_name
+                    ) and attempt < max_retries - 1:
+                        # Log and retry
+                        log_bedrock_invocation_error(e, attempt + 1)
+                        jitter_value = random.uniform(-jitter, jitter)
+                        sleep_time = max(0.1, delay * (1 + jitter_value))
+                        logger.warning(
+                            f"{exception_name}: {exception_str} encountered in {func.__name__}. "
+                            f"Retrying in {sleep_time:.2f} seconds. Attempt {attempt + 1}/{max_retries}"
+                        )
+                        await asyncio.sleep(sleep_time)
+                        delay = min(delay * exponential_base, max_delay)
+                        continue
+
+                    # Log bedrock invocation details for non-retryable exceptions
                     log_bedrock_invocation_error(e, attempt + 1)
                     raise
 
