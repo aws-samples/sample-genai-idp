@@ -35,6 +35,12 @@ Parameters:
   TopK:
     Type: Number
     Default: 2
+    Description: The number of results to return for each S3 vectors query.
+
+  Threshold:
+    Type: Number
+    Default: 0.2
+    Description: Filter results exceeding this similarity threshold (lower is more similar)
 
   LambdaFunctionName:
     Type: String
@@ -79,6 +85,7 @@ Resources:
           S3VECTOR_DIMENSIONS: !Ref VectorDimensions
           MODEL_ID: !Ref ModelId
           TOP_K: !Ref TopK
+          THRESHOLD: !Ref Threshold
       LoggingConfig:
         LogGroup: !Ref DynamicFewShotLogGroup
       # Minimal permissions - only needs basic execution and logging

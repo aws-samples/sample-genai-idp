@@ -31,6 +31,7 @@ try:
     S3VECTOR_DIMENSIONS = int(os.environ['S3VECTOR_DIMENSIONS'])
     MODEL_ID = os.environ['MODEL_ID']
     TOP_K = int(os.environ['TOP_K'])
+    THRESHOLD = float(os.environ['THRESHOLD'])
 except (KeyError, ValueError, IndexError) as e:
     logger.error(f"Failed to parse environment variables: {e}")
     raise
@@ -64,7 +65,7 @@ def lambda_handler(event, context):
     try:
         logger.info("=== DYNAMIC FEW-SHOT LAMBDA INVOKED ===")
         logger.debug(f"Complete input event: {json.dumps(event, indent=2)}")
-        
+
         # Validate input
         class_label = event.get("class_label")
         document_text = event.get("document_text")
@@ -77,6 +78,8 @@ def lambda_handler(event, context):
 
         # Decode input data
         image_data = _decode_images(image_content)
+
+        logger.info(f"=== FIND SIMILAR ITEMS ===")
 
         # Find similar items using S3 vectors lookup from image similarity
         result = _s3vectors_find_similar_items(image_data)
@@ -141,7 +144,17 @@ def _s3vectors_find_similar_items(image_data):
     # sort results by distance score (lowest to highest - lower is more similar)
     sorted_result = sorted(result, key=lambda example: example['distance'], reverse=False)
 
-    return sorted_result
+    # filter result by distance score
+    filtered_result = []
+    for example in sorted_result:
+        if example['distance'] > THRESHOLD:
+            logger.info(
+                f"Skipping example with distance {example['distance']} above threshold {THRESHOLD}: {key}"
+            )
+        else:
+            filtered_result.append(example)
+
+    return filtered_result
 
 def _s3vectors_find_similar_items_from_image(page_image):
     """Search for similar items using image query"""
