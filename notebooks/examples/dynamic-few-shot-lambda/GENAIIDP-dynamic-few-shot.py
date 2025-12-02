@@ -158,6 +158,7 @@ def _s3vectors_find_similar_items_from_image(page_image):
         returnDistance=True,
         returnMetadata=True
     )
+    logger.debug(f"S3 vectors lookup result: {response['vectors']}")
     return response["vectors"]
 
 def _merge_examples(examples, new_examples):
