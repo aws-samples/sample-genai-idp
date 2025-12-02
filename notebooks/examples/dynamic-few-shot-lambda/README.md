@@ -117,7 +117,7 @@ extraction:
   {
     "attributes_prompt": "Expected attributes are: invoice_number [Unique identifier], invoice_date [Invoice date], total_amount [Total amount]...",
     "class_prompt": "This is an example of the class 'invoice'",
-    "distance": 0.892344521145,
+    "distance": 0.122344521145, # lower is more similar
     "image_content": ["<base64_image_content_1>", "<base64_image_content_2>", ...]
   }
 ]

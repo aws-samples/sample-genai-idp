@@ -45,8 +45,8 @@ def lambda_handler(event, context):
 
     Input event:
     {
-        "class_label": "<class_label>",
-        "document_text": "<document_text>",
+        "class_label": "<class_label e.g. invoice>",
+        "document_text": "<document_text e.g. plain text or markdown from section 1 (pages 1-3)...>",
         "image_content": ["<base64_image_content_1>", "<base64_image_content_2>", ...]
     }
 
@@ -55,7 +55,7 @@ def lambda_handler(event, context):
         {
             "attributes_prompt": "expected attributes are: ...",
             "class_prompt": "This is an example of the class 'invoice'",
-            "distance": 0.892344521145,
+            "distance": 0.122344521145,
             "image_content": ["<base64_image_content_1>", "<base64_image_content_2>", ...]
         }
     ]
@@ -138,7 +138,10 @@ def _s3vectors_find_similar_items(image_data):
         attributes = _extract_metadata(metadata, distance)
         result.append(attributes)
 
-    return result
+    # sort results by distance score (lowest to highest - lower is more similar)
+    sorted_result = sorted(result, key=lambda example: example['distance'], reverse=False)
+
+    return sorted_result
 
 def _s3vectors_find_similar_items_from_image(page_image):
     """Search for similar items using image query"""
