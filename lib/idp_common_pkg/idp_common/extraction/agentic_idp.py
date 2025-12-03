@@ -1098,7 +1098,7 @@ async def structured_output_async(
         )
 
         review_response = await invoke_agent_with_retry(
-            agent=agent, input=review_prompt
+            agent=agent, input=[review_prompt]
         )
         logger.debug("Review response received", extra={"review_completed": True})
 

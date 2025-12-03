@@ -19,7 +19,16 @@ from mypy_boto3_bedrock_runtime.type_defs import (
     InvokeModelRequestTypeDef,
     InvokeModelResponseTypeDef,
 )
-from strands.types.exceptions import ModelThrottledException
+
+# Optional import for strands-agents (may not be installed in all environments)
+try:
+    from strands.types.exceptions import ModelThrottledException
+
+    _STRANDS_AVAILABLE = True
+except ImportError:
+    _STRANDS_AVAILABLE = False
+    # Create a placeholder exception class that will never match
+    ModelThrottledException = type("ModelThrottledException", (Exception,), {})  # type: ignore[misc, assignment]
 
 # Configure logger
 logger = logging.getLogger(__name__)
@@ -42,8 +51,9 @@ DEFAULT_RETRYABLE_ERRORS = {
 }
 
 # Default retryable exception types (caught by isinstance check)
+# Only include ModelThrottledException if strands is available
 DEFAULT_RETRYABLE_EXCEPTION_TYPES: tuple[type[Exception], ...] = (
-    ModelThrottledException,
+    (ModelThrottledException,) if _STRANDS_AVAILABLE else ()
 )
 
 
