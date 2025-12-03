@@ -32,12 +32,16 @@ const ValueConstraints = ({ attribute, onUpdate }) => {
   const updateValueConstraint = (updates) => {
     if (isSimpleArray) {
       // Place enum/const inside items for simple arrays
-      onUpdate({
-        items: {
-          ...attribute.items,
-          ...updates,
-        },
+      // Need to handle undefined values by explicitly removing keys
+      const newItems = { ...attribute.items };
+      Object.keys(updates).forEach((key) => {
+        if (updates[key] === undefined) {
+          delete newItems[key];
+        } else {
+          newItems[key] = updates[key];
+        }
       });
+      onUpdate({ items: newItems });
     } else {
       onUpdate(updates);
     }
