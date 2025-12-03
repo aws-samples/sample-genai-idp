@@ -19,7 +19,7 @@ from mypy_boto3_bedrock_runtime.type_defs import (
     InvokeModelRequestTypeDef,
     InvokeModelResponseTypeDef,
 )
-from strands.models.bedrock import ModelThrottledException
+from strands.types.exceptions import ModelThrottledException
 
 # Configure logger
 logger = logging.getLogger(__name__)
