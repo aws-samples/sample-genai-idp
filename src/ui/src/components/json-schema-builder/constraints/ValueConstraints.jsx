@@ -8,26 +8,49 @@ const ValueConstraints = ({ attribute, onUpdate }) => {
   const [constInput, setConstInput] = useState('');
   const [enumInput, setEnumInput] = useState('');
 
+  // For arrays with simple item types (not $ref), enum/const should be on items, not the array itself
+  const isSimpleArray = attribute.type === 'array' && attribute.items && !attribute.items.$ref;
+  const effectiveType = isSimpleArray ? attribute.items?.type : attribute.type;
+
+  // Get enum value from the correct location (items for simple arrays, attribute otherwise)
+  const currentEnum = isSimpleArray ? attribute.items?.enum : attribute.enum;
+  const currentConst = isSimpleArray ? attribute.items?.const : attribute.const;
+
   // Initialize local state from attribute values
   useEffect(() => {
-    setConstInput(formatValueForInput(attribute.const));
-  }, [attribute.const]);
+    setConstInput(formatValueForInput(currentConst));
+  }, [currentConst]);
 
   // Initialize enum input as empty (it's only shown when no enum exists yet)
   useEffect(() => {
-    if (!attribute.enum || attribute.enum.length === 0) {
+    if (!currentEnum || currentEnum.length === 0) {
       setEnumInput('');
     }
-  }, [attribute.enum]);
+  }, [currentEnum]);
+
+  // Helper to update enum/const at the correct level (items for simple arrays)
+  const updateValueConstraint = (updates) => {
+    if (isSimpleArray) {
+      // Place enum/const inside items for simple arrays
+      onUpdate({
+        items: {
+          ...attribute.items,
+          ...updates,
+        },
+      });
+    } else {
+      onUpdate(updates);
+    }
+  };
 
   // Handle Const field blur - parse and update parent state
   const handleConstBlur = () => {
     if (!constInput) {
-      onUpdate({ const: undefined });
+      updateValueConstraint({ const: undefined });
       return;
     }
-    const parsed = parseInputValue(constInput, attribute.type);
-    onUpdate({ const: parsed });
+    const parsed = parseInputValue(constInput, effectiveType);
+    updateValueConstraint({ const: parsed });
   };
 
   // Handle Enum field blur - parse and update parent state
@@ -36,54 +59,89 @@ const ValueConstraints = ({ attribute, onUpdate }) => {
     if (value) {
       try {
         const parsed = JSON.parse(`[${value}]`);
-        onUpdate({ enum: parsed });
+        updateValueConstraint({ enum: parsed });
       } catch {
         const enumValues = value
           .split(',')
           .map((v) => v.trim())
           .filter((v) => v);
-        onUpdate({ enum: enumValues.length > 0 ? enumValues : undefined });
+        updateValueConstraint({ enum: enumValues.length > 0 ? enumValues : undefined });
       }
       // Clear the input after successful processing
       setEnumInput('');
     }
   };
 
+  // Get placeholder examples based on effective type
+  const getEnumPlaceholder = () => {
+    switch (effectiveType) {
+      case 'number':
+      case 'integer':
+        return 'e.g., 1, 2, 3';
+      case 'boolean':
+        return 'e.g., true, false';
+      default:
+        return 'e.g., active, pending, completed';
+    }
+  };
+
+  const getConstPlaceholder = () => {
+    switch (effectiveType) {
+      case 'number':
+      case 'integer':
+        return 'e.g., 42';
+      case 'boolean':
+        return 'e.g., true';
+      default:
+        return 'e.g., active';
+    }
+  };
+
+  // Build description with JSON Schema context
+  const enumDescription = isSimpleArray
+    ? 'Allowed values for each item in the array (JSON Schema enum). Comma-separated list.'
+    : 'Allowed values for this field (JSON Schema enum). Comma-separated list.';
+
+  const constDescription = isSimpleArray
+    ? 'Each item in the array must be exactly this value (JSON Schema const).'
+    : 'Field must be exactly this value (JSON Schema const).';
+
   return (
     <>
-      <Header variant="h4">Value Constraints</Header>
+      <Header variant="h4">Value Constraints (JSON Schema)</Header>
 
-      <FormField label="Const (Single Constant Value)" description="Field must be exactly this value">
+      <FormField label="Const (Single Constant Value)" description={constDescription} constraintText={`Example: ${getConstPlaceholder()}`}>
         <Input
           value={constInput}
           onChange={({ detail }) => setConstInput(detail.value)}
           onBlur={handleConstBlur}
-          placeholder='e.g., "active", 42, or JSON value'
-          disabled={attribute.enum && attribute.enum.length > 0}
+          placeholder={getConstPlaceholder()}
+          disabled={currentEnum && currentEnum.length > 0}
         />
       </FormField>
 
       <FormField
-        label="Enum Values (Multiple Allowed Values)"
-        description="Comma-separated list of allowed values (mutually exclusive with const)"
+        label="Enum (Allowed Values)"
+        description={enumDescription}
+        constraintText={`Example: ${getEnumPlaceholder()} - Values are comma-separated`}
       >
-        {attribute.enum && attribute.enum.length > 0 ? (
+        {currentEnum && currentEnum.length > 0 ? (
           <SpaceBetween size="xs">
             <TokenGroup
-              items={attribute.enum.map((val) => ({
+              items={currentEnum.map((val) => ({
                 label: typeof val === 'object' ? JSON.stringify(val) : String(val),
                 dismissLabel: `Remove ${val}`,
               }))}
               onDismiss={({ detail: { itemIndex } }) => {
-                const newEnum = [...(attribute.enum || [])];
+                const newEnum = [...(currentEnum || [])];
                 newEnum.splice(itemIndex, 1);
-                onUpdate({ enum: newEnum.length > 0 ? newEnum : undefined });
+                updateValueConstraint({ enum: newEnum.length > 0 ? newEnum : undefined });
               }}
             />
             <Button
               variant="link"
               onClick={() => {
-                onUpdate({ enum: undefined });
+                updateValueConstraint({ enum: undefined });
               }}
             >
               Clear all enum values
@@ -91,11 +149,11 @@ const ValueConstraints = ({ attribute, onUpdate }) => {
           </SpaceBetween>
         ) : (
           <Input
-            placeholder="value1, value2, value3"
+            placeholder={getEnumPlaceholder()}
             value={enumInput}
             onChange={({ detail }) => setEnumInput(detail.value)}
             onBlur={handleEnumBlur}
-            disabled={attribute.const !== undefined}
+            disabled={currentConst !== undefined}
           />
         )}
       </FormField>
@@ -108,6 +166,12 @@ ValueConstraints.propTypes = {
     type: PropTypes.string,
     const: PropTypes.oneOfType([PropTypes.string, PropTypes.number, PropTypes.bool, PropTypes.object, PropTypes.array]),
     enum: PropTypes.arrayOf(PropTypes.oneOfType([PropTypes.string, PropTypes.number, PropTypes.bool, PropTypes.object, PropTypes.array])),
+    items: PropTypes.shape({
+      type: PropTypes.string,
+      $ref: PropTypes.string,
+      const: PropTypes.oneOfType([PropTypes.string, PropTypes.number, PropTypes.bool, PropTypes.object, PropTypes.array]),
+      enum: PropTypes.arrayOf(PropTypes.oneOfType([PropTypes.string, PropTypes.number, PropTypes.bool, PropTypes.object, PropTypes.array])),
+    }),
   }).isRequired,
   onUpdate: PropTypes.func.isRequired,
 };

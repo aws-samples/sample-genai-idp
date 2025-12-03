@@ -97,12 +97,16 @@ const SortableAttributeItem = ({
   };
 
   const getConstBadge = () => {
-    if (attribute.const === undefined) return null;
+    // Check both attribute level and items level (for simple arrays)
+    const hasConst = attribute.const !== undefined || (attribute.type === 'array' && attribute.items?.const !== undefined);
+    if (!hasConst) return null;
     return <Badge color="blue">const</Badge>;
   };
 
   const getEnumBadge = () => {
-    if (!attribute.enum) return null;
+    // Check both attribute level and items level (for simple arrays)
+    const hasEnum = attribute.enum || (attribute.type === 'array' && attribute.items?.enum);
+    if (!hasEnum) return null;
     return <Badge color="blue">enum</Badge>;
   };
 
