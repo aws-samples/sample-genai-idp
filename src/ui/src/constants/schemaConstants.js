@@ -242,29 +242,30 @@ export const ATTRIBUTE_TYPE_OPTIONS = [
 ];
 
 // ============================================================================
-// JSON Schema Format Options
+// JSON Schema Format Options (with examples for UI display)
+// See: https://json-schema.org/understanding-json-schema/reference/string#built-in-formats
 // ============================================================================
 export const FORMAT_OPTIONS = [
-  { label: 'None', value: '' },
-  { label: 'Date', value: 'date' },
-  { label: 'Time', value: 'time' },
-  { label: 'Date-Time', value: 'date-time' },
-  { label: 'Duration', value: 'duration' },
-  { label: 'Email', value: 'email' },
-  { label: 'IDN Email', value: 'idn-email' },
-  { label: 'Hostname', value: 'hostname' },
-  { label: 'IDN Hostname', value: 'idn-hostname' },
-  { label: 'IPv4', value: 'ipv4' },
-  { label: 'IPv6', value: 'ipv6' },
-  { label: 'URI', value: 'uri' },
-  { label: 'URI Reference', value: 'uri-reference' },
-  { label: 'IRI', value: 'iri' },
-  { label: 'IRI Reference', value: 'iri-reference' },
-  { label: 'URI Template', value: 'uri-template' },
-  { label: 'JSON Pointer', value: 'json-pointer' },
-  { label: 'Relative JSON Pointer', value: 'relative-json-pointer' },
-  { label: 'Regex', value: 'regex' },
-  { label: 'UUID', value: 'uuid' },
+  { label: 'None', value: '', description: 'No format validation' },
+  { label: 'Date (e.g., 2024-12-25)', value: 'date', description: 'ISO 8601 date: YYYY-MM-DD' },
+  { label: 'Time (e.g., 14:30:00)', value: 'time', description: 'ISO 8601 time: HH:MM:SS' },
+  { label: 'Date-Time (e.g., 2024-12-25T14:30:00Z)', value: 'date-time', description: 'ISO 8601 date-time' },
+  { label: 'Duration (e.g., P3Y6M4D)', value: 'duration', description: 'ISO 8601 duration' },
+  { label: 'Email (e.g., user@example.com)', value: 'email', description: 'RFC 5321 email address' },
+  { label: 'IDN Email (e.g., user@example.com)', value: 'idn-email', description: 'Internationalized email' },
+  { label: 'Hostname (e.g., example.com)', value: 'hostname', description: 'RFC 1123 hostname' },
+  { label: 'IDN Hostname (e.g., example.com)', value: 'idn-hostname', description: 'Internationalized hostname' },
+  { label: 'IPv4 (e.g., 192.168.1.1)', value: 'ipv4', description: 'IPv4 address' },
+  { label: 'IPv6 (e.g., 2001:db8::1)', value: 'ipv6', description: 'IPv6 address' },
+  { label: 'URI (e.g., https://example.com/path)', value: 'uri', description: 'RFC 3986 URI' },
+  { label: 'URI Reference (e.g., /path/to/resource)', value: 'uri-reference', description: 'URI or relative reference' },
+  { label: 'IRI (e.g., https://example.com/path)', value: 'iri', description: 'Internationalized URI' },
+  { label: 'IRI Reference', value: 'iri-reference', description: 'IRI or relative reference' },
+  { label: 'URI Template (e.g., /users/{id})', value: 'uri-template', description: 'RFC 6570 URI template' },
+  { label: 'JSON Pointer (e.g., /foo/bar)', value: 'json-pointer', description: 'RFC 6901 JSON pointer' },
+  { label: 'Relative JSON Pointer (e.g., 1/foo)', value: 'relative-json-pointer', description: 'Relative JSON pointer' },
+  { label: 'Regex (e.g., ^[a-z]+$)', value: 'regex', description: 'ECMA-262 regular expression' },
+  { label: 'UUID (e.g., 550e8400-e29b-41d4-a716-446655440000)', value: 'uuid', description: 'RFC 4122 UUID' },
 ];
 
 // ============================================================================

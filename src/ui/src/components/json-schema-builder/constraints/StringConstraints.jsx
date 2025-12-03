@@ -8,7 +8,7 @@ const StringConstraints = ({ attribute, onUpdate }) => {
 
   return (
     <>
-      <Header variant="h4">String Constraints</Header>
+      <Header variant="h4">String Constraints (JSON Schema)</Header>
 
       <FormField label="Pattern (regex)" description="Regular expression pattern to validate the extracted string format">
         <Input
@@ -18,7 +18,11 @@ const StringConstraints = ({ attribute, onUpdate }) => {
         />
       </FormField>
 
-      <FormField label="Format" description="Standard format to validate against (e.g., date, email, uri)">
+      <FormField
+        label="Format (JSON Schema)"
+        description="JSON Schema built-in format validation. Values must match the specified format exactly."
+        constraintText="Select a format to enforce validation on extracted values"
+      >
         <Select
           selectedOption={FORMAT_OPTIONS.find((opt) => opt.value === (attribute.format || '')) || FORMAT_OPTIONS[0]}
           onChange={({ detail }) => onUpdate({ format: detail.selectedOption.value || undefined })}
