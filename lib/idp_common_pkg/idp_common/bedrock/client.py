@@ -733,6 +733,7 @@ class BedrockClient:
         Returns:
             List of floats representing the embedding vector
         """
+        # requires PIL
         from idp_common.image import (
             prepare_image,
             prepare_bedrock_image_attachment
