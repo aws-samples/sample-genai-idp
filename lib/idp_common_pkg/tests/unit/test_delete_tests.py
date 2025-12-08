@@ -14,13 +14,19 @@ from botocore.exceptions import ClientError
 sys.modules["idp_common_pkg"] = Mock()
 sys.modules["idp_common_pkg.logger"] = Mock()
 
-# Add the lambda directory to the path for importing
-lambda_path = os.path.join(
-    os.path.dirname(__file__), "../../../../src/lambda/delete_tests"
-)
-sys.path.insert(0, lambda_path)
+# Mock boto3 before importing the Lambda module to prevent NoRegionError
+# The Lambda creates boto3 clients at module level which requires AWS region
+with patch("boto3.resource") as mock_resource, patch("boto3.client") as mock_client:
+    mock_resource.return_value = Mock()
+    mock_client.return_value = Mock()
 
-import index  # type: ignore[import-untyped]  # noqa: E402
+    # Add the lambda directory to the path for importing
+    lambda_path = os.path.join(
+        os.path.dirname(__file__), "../../../../src/lambda/delete_tests"
+    )
+    sys.path.insert(0, lambda_path)
+
+    import index  # type: ignore[import-untyped]  # noqa: E402
 
 
 @pytest.mark.unit

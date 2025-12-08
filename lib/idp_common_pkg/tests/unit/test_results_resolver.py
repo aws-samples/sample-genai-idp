@@ -8,18 +8,24 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-# Import the specific lambda module using importlib to avoid conflicts
-spec = importlib.util.spec_from_file_location(
-    "results_index",
-    os.path.join(
-        os.path.dirname(__file__),
-        "../../../../src/lambda/test_results_resolver/index.py",
-    ),
-)
-if spec is None or spec.loader is None:
-    raise ImportError("Could not load test_results_resolver module")
-index = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(index)
+# Mock boto3 before importing the Lambda module to prevent NoRegionError
+# The Lambda creates boto3 clients at module level which requires AWS region
+with patch("boto3.resource") as mock_resource, patch("boto3.client") as mock_client:
+    mock_resource.return_value = Mock()
+    mock_client.return_value = Mock()
+
+    # Import the specific lambda module using importlib to avoid conflicts
+    spec = importlib.util.spec_from_file_location(
+        "results_index",
+        os.path.join(
+            os.path.dirname(__file__),
+            "../../../../src/lambda/test_results_resolver/index.py",
+        ),
+    )
+    if spec is None or spec.loader is None:
+        raise ImportError("Could not load test_results_resolver module")
+    index = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(index)
 
 
 @pytest.mark.unit
