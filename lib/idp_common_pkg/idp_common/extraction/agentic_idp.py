@@ -47,6 +47,33 @@ from idp_common.utils.strands_agent_tools.todo_list import (
     view_todo_list,
 )
 
+# Supported image formats for Bedrock API
+SUPPORTED_IMAGE_FORMATS = {"jpeg", "png", "gif", "webp"}
+
+
+def detect_image_format(image_bytes: bytes) -> str:
+    """
+    Detect the image format from raw bytes.
+
+    Args:
+        image_bytes: Raw image bytes
+
+    Returns:
+        Image format string suitable for Bedrock API ('jpeg', 'png', 'gif', 'webp')
+
+    Raises:
+        ValueError: If the image format is unsupported or cannot be detected
+    """
+    img = Image.open(io.BytesIO(image_bytes))
+
+    if not img.format or img.format.lower() not in SUPPORTED_IMAGE_FORMATS:
+        raise ValueError(
+            f"Unsupported image format: {img.format}. "
+            f"Supported formats: {', '.join(SUPPORTED_IMAGE_FORMATS)}"
+        )
+    return img.format.lower()
+
+
 # Use AWS Lambda Powertools Logger for structured logging
 # Automatically logs as JSON with Lambda context, request_id, timestamp, etc.
 # In Lambda: Full JSON structured logs
@@ -207,11 +234,15 @@ def create_view_image_tool(page_images: list[bytes]) -> Any:
         # Get the base image (already has grid overlay)
         img_bytes = page_images[image_index]
 
+        # Detect actual image format from bytes
+        img_format = detect_image_format(img_bytes)
+
         logger.info(
             "Returning image to agent",
             extra={
                 "image_index": image_index,
                 "image_size_bytes": len(img_bytes),
+                "image_format": img_format,
             },
         )
 
@@ -220,7 +251,7 @@ def create_view_image_tool(page_images: list[bytes]) -> Any:
             "content": [
                 {
                     "image": {
-                        "format": "png",
+                        "format": img_format,
                         "source": {
                             "bytes": img_bytes,
                         },
@@ -775,12 +806,17 @@ def _prepare_prompt_content(
             extra={"image_count": len(page_images)},
         )
 
-        prompt_content += [
-            ContentBlock(
-                image=ImageContent(format="png", source=ImageSource(bytes=img_bytes))
+        for img_bytes in page_images:
+            # Detect actual image format from bytes
+            img_format = detect_image_format(img_bytes)
+            prompt_content.append(
+                ContentBlock(
+                    image=ImageContent(
+                        format=img_format,  # pyright: ignore[reportArgumentType]
+                        source=ImageSource(bytes=img_bytes),
+                    )
+                )
             )
-            for img_bytes in page_images
-        ]
 
     # Add existing data context if provided
     if existing_data:
