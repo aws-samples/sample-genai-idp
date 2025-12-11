@@ -194,7 +194,7 @@ def _extract_metadata(metadata, distance):
         image_data = _get_image_data_from_s3_path(image_path)
         encoded_images = _encode_images(image_data)
         attributes["image_content"] = encoded_images
-    
+
     return attributes
 
 def _get_image_data_from_s3_path(image_path):
@@ -227,7 +227,7 @@ def _get_image_data_from_s3_path(image_path):
         except Exception as e:
             logger.warning(f"Failed to load image {image_file_path}: {e}")
             continue
-    
+
     return image_content
 
 def _get_image_files_from_s3_path(image_path):

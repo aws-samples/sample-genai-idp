@@ -26,7 +26,7 @@ flowchart TD
     A[Document Processing] --> B{Dynamic-few shot configured?}
     B -->|No| C[Use Default Extraction]
     B -->|Yes| D[Invoke Dynamic-few shot Lambda]
-    
+
     subgraph Lambda
         D --> E[Receive Document Images]
         E --> F[Generate Embeddings with Nova]
@@ -35,27 +35,27 @@ flowchart TD
         H --> I[Load Example Images from S3]
         I --> J[Format Examples for Bedrock]
     end
-    
+
     J --> K[Use Examples in Extraction Prompt]
     C --> L[Continue with Standard Extraction]
     K --> L
-    
+
     subgraph Input
         M[Document Class]
         N[Document Text]
         O[Document Images]
     end
-    
+
     subgraph Output
         P[Example Attributes Prompts]
         Q[Example Images]
         R[Similarity Distances]
     end
-    
+
     D -.-> M
     D -.-> N
     D -.-> O
-    
+
     J -.-> P
     J -.-> Q
     J -.-> R
@@ -163,7 +163,7 @@ def merge_examples(combined_examples, new_examples):
         if combined_examples.get(key):
             # Keep the better (lower) distance score
             combined_examples[key]["distance"] = min(
-                new_example.get("distance"), 
+                new_example.get("distance"),
                 combined_examples[key]["distance"]
             )
 ```
