@@ -46,6 +46,14 @@ Parameters:
     Type: String
     Default: "GENAIIDP-dynamic-few-shot"
 
+  GenAIIDPS3OutputBucketName:
+    Type: String
+    Description: "GenAIIDP S3OutputBucketName"
+
+  GenAIIDPCustomerManagedEncryptionKeyArn:
+    Type: String
+    Description: "GenAIIDP CustomerManagedEncryptionKey ARN"
+
 Conditions:
   HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
 
@@ -69,7 +77,7 @@ Resources:
     Properties:
       FunctionName: !Ref LambdaFunctionName
       PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
-      CodeUri: ./
+      CodeUri: ./src
       Handler: GENAIIDP-dynamic-few-shot.lambda_handler
       Runtime: python3.12
       Architectures:
@@ -92,6 +100,8 @@ Resources:
       Policies:
         - AWSLambdaBasicExecutionRole
         - S3ReadPolicy:
+            BucketName: !Ref GenAIIDPS3OutputBucketName
+        - S3ReadPolicy:
             BucketName: !Ref DynamicFewShotDatasetBucket
         - Statement:
             - Effect: Allow
@@ -110,6 +120,15 @@ Resources:
                 - s3vectors:QueryVectors
               Resource:
                 - !Ref DynamicFewShotVectorIndex
+            - Effect: Allow
+              Action:
+                - kms:Encrypt
+                - kms:Decrypt
+                - kms:ReEncrypt*
+                - kms:GenerateDataKey*
+                - kms:DescribeKey
+              Resource:
+                - !Ref GenAIIDPCustomerManagedEncryptionKeyArn
 
   DynamicFewShotLogGroup:
     Type: AWS::Logs::LogGroup

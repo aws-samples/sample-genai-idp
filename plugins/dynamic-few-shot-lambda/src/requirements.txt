@@ -1,0 +1,1 @@
+../../lib/idp_common_pkg[extraction,docs_service]  # extraction module and document service with dependencies

@@ -67,7 +67,7 @@ flowchart TD
 
 ```bash
 # Navigate to the dynamic-few-shot-lambda directory
-cd notebooks/examples/dynamic-few-shot-lambda
+cd plugins/dynamic-few-shot-lambda
 
 # Deploy using AWS SAM
 sam deploy --guided
@@ -86,7 +86,7 @@ aws cloudformation describe-stacks \
 
 ### Step 3: Populate the Examples Dataset
 
-Use the [fewshot_dataset_import.ipynb](../../misc/fewshot_dataset_import.ipynb) notebook to import a dataset into S3 Vectors, or manually upload your example documents and metadata to the S3 bucket and vector index created by the stack.
+Use the [fewshot_dataset_import.ipynb](notebooks/fewshot_dataset_import.ipynb) notebook to import a dataset into S3 Vectors, or manually upload your example documents and metadata to the S3 bucket and vector index created by the stack.
 
 ### Step 4: Configure IDP to Use Dynamic-few shot
 
@@ -94,7 +94,7 @@ Add the Lambda ARN to your IDP extraction configuration:
 
 ```yaml
 extraction:
-  dynamic_few_shot_lambda_arn: "arn:aws:lambda:region:account:function:GENAIIDP-dynamic-few-shot"
+  custom_prompt_lambda_arn: "arn:aws:lambda:region:account:function:GENAIIDP-dynamic-few-shot"
 ```
 
 ## Lambda Interface
