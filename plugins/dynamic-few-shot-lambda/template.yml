@@ -46,6 +46,10 @@ Parameters:
     Type: String
     Default: "GENAIIDP-dynamic-few-shot"
 
+  LogLevel:
+    Type: String
+    Default: INFO
+
   GenAIIDPS3OutputBucketName:
     Type: String
     Description: "GenAIIDP S3OutputBucketName"
@@ -87,7 +91,7 @@ Resources:
       Description: Demo Lambda function for GenAI IDP dynamic few-shot prompting
       Environment:
         Variables:
-          LOG_LEVEL: INFO
+          LOG_LEVEL: !Ref LogLevel
           S3VECTOR_BUCKET: !Ref VectorBucketName
           S3VECTOR_INDEX: !Ref VectorIndexName
           S3VECTOR_DIMENSIONS: !Ref VectorDimensions
