@@ -39,7 +39,7 @@ Parameters:
 
   Threshold:
     Type: Number
-    Default: 0.2
+    Default: 0.5
     Description: Filter results exceeding this similarity threshold (lower is more similar)
 
   LambdaFunctionName:
@@ -53,6 +53,10 @@ Parameters:
   GenAIIDPS3OutputBucketName:
     Type: String
     Description: "GenAIIDP S3OutputBucketName"
+
+  GenAIIDPS3WorkingBucketName:
+    Type: String
+    Description: "GenAIIDP WorkingBucket Name"
 
   GenAIIDPCustomerManagedEncryptionKeyArn:
     Type: String
@@ -106,7 +110,7 @@ Resources:
         - S3ReadPolicy:
             BucketName: !Ref GenAIIDPS3OutputBucketName
         - S3ReadPolicy:
-            BucketName: !Ref DynamicFewShotDatasetBucket
+            BucketName: !Ref GenAIIDPS3WorkingBucketName
         - Statement:
             - Effect: Allow
               Action: cloudwatch:PutMetricData
@@ -172,28 +176,6 @@ Resources:
           - "attributesPrompt"
           - "imagePath"
       VectorBucketArn: !Ref DynamicFewShotVectorBucket
-
-  DynamicFewShotDatasetBucket:
-    Type: AWS::S3::Bucket
-    DeletionPolicy: RetainExceptOnCreate
-    Metadata:
-      cfn_nag:
-        rules_to_suppress:
-          - id: W84
-            reason: "Demo function - KMS CMK not required, but can be added by customer for production use cases"
-    # checkov:skip=CKV_AWS_158: "Demo function - KMS CMK not required, but can be added by customer for production use cases"
-    Properties:
-      BucketEncryption:
-        ServerSideEncryptionConfiguration:
-          - ServerSideEncryptionByDefault:
-              SSEAlgorithm: "AES256"
-      PublicAccessBlockConfiguration:
-        BlockPublicAcls: true
-        BlockPublicPolicy: true
-        IgnorePublicAcls: true
-        RestrictPublicBuckets: true
-      VersioningConfiguration:
-        Status: Enabled
 
 Outputs:
 
