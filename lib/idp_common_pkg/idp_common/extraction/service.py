@@ -433,6 +433,46 @@ class ExtractionService:
                 # Convert non-serializable objects to string representation
                 return str(obj)
 
+    def _convert_image_uris_to_bytes_in_content(
+        self, content: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        """
+        Convert image URIs back to bytes in content array after Lambda processing.
+
+        Args:
+            content: Content array from Lambda that may contain image URIs
+
+        Returns:
+            Content array with image bytes restored
+        """
+        converted_content = []
+
+        for item in content:
+            if "image_uri" in item:
+                image_uri = item["image_uri"]
+
+                # Load image content
+                if image_uri.startswith("s3://"):
+                    # Direct S3 URI
+                    logger.info(f"Retrieving image {image_uri}")
+                    image_bytes = s3.get_binary_content(image_uri)
+                else:
+                    raise ValueError(
+                        f"Invalid file path {image_uri} - expecting S3 path"
+                    )
+
+                converted_item = image.prepare_bedrock_image_attachment(image_bytes)
+            elif "image" in item:
+                # Keep existing image objects as-is
+                converted_item = item.copy()
+            else:
+                # Keep non-image items as-is
+                converted_item = item.copy()
+
+            converted_content.append(converted_item)
+
+        return converted_content
+
     def _invoke_custom_prompt_lambda(
         self, lambda_arn: str, payload: dict[str, Any]
     ) -> dict[str, Any]:
@@ -485,6 +525,13 @@ class ExtractionService:
                 error_msg = "Custom prompt Lambda response missing required field: task_prompt_content"
                 logger.error(error_msg)
                 raise Exception(error_msg)
+
+            # Convert image URIs to bytes in the response
+            result["task_prompt_content"] = (
+                self._convert_image_uris_to_bytes_in_content(
+                    result["task_prompt_content"]
+                )
+            )
 
             return result
 
