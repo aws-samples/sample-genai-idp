@@ -46,9 +46,16 @@ Parameters:
     Type: String
     Default: "GENAIIDP-dynamic-few-shot"
 
+  # Logging configuration
   LogLevel:
     Type: String
     Default: INFO
+    AllowedValues:
+      - DEBUG
+      - INFO
+      - WARN
+      - ERROR
+    Description: Default logging level
 
   GenAIIDPS3OutputBucketName:
     Type: String
