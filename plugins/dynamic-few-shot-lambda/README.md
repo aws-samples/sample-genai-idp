@@ -115,7 +115,7 @@ extraction:
 ### Step 5: Run the Demo Notebook
 
 0. Run `notebooks/examples` steps 0, 1, 2
-1. Open `plugins/dynamic-few-shot-lambda/notebooks/step3_extraction_with_custom_lambda.ipynb`
+1. Open `notebooks/examples/step3_extraction_with_custom_lambda.ipynb`. In section 3, set `DEMO_LAMBDA_ARN` to `arn:aws:lambda:region:account:function:GENAIIDP-dynamic-few-shot`
 2. Run all cells to see the comparison
 
 ## Lambda Interface
