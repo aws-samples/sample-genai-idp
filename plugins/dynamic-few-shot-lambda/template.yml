@@ -57,6 +57,31 @@ Parameters:
       - ERROR
     Description: Default logging level
 
+  LogRetentionDays:
+    Type: Number
+    Default: 30
+    Description: Number of days to retain CloudWatch logs
+    AllowedValues:
+      [
+        1,
+        3,
+        5,
+        7,
+        14,
+        30,
+        60,
+        90,
+        120,
+        150,
+        180,
+        365,
+        400,
+        545,
+        731,
+        1827,
+        3653,
+      ]
+
   GenAIIDPS3OutputBucketName:
     Type: String
     Description: "GenAIIDP S3OutputBucketName"
@@ -157,7 +182,7 @@ Resources:
     # checkov:skip=CKV_AWS_158: "Demo function - KMS CMK not required, but can be added by customer for production use cases"
     Properties:
       LogGroupName: !Sub "/aws/lambda/${LambdaFunctionName}"
-      RetentionInDays: 7  # Short retention for demo purposes
+      RetentionInDays: !Ref LogRetentionDays
 
   DynamicFewShotVectorBucket:
     Type: AWS::S3Vectors::VectorBucket
