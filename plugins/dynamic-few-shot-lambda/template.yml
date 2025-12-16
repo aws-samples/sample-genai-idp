@@ -78,6 +78,8 @@ Resources:
             reason: "Demo function - does not require reserved concurrency as it scales based on demand"
           - id: W58
             reason: "Demo function - DLQ not required"
+          - id: W11
+            reason: "Demo function - allow * resource on its permissions policy"
     # checkov:skip=CKV_AWS_116: "DLQ not required for AppSync resolver function as GraphQL handles retries"
     # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
     # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
