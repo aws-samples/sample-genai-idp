@@ -174,15 +174,10 @@ Resources:
 
   DynamicFewShotLogGroup:
     Type: AWS::Logs::LogGroup
-    Metadata:
-      cfn_nag:
-        rules_to_suppress:
-          - id: W84
-            reason: "Demo function - KMS CMK not required, but can be added by customer for production use cases"
-    # checkov:skip=CKV_AWS_158: "Demo function - KMS CMK not required, but can be added by customer for production use cases"
     Properties:
       LogGroupName: !Sub "/aws/lambda/${LambdaFunctionName}"
       RetentionInDays: !Ref LogRetentionDays
+      KmsKeyId: !GetAtt GenAIIDPCustomerManagedEncryptionKeyArn
 
   DynamicFewShotVectorBucket:
     Type: AWS::S3Vectors::VectorBucket
