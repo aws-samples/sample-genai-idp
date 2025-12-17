@@ -201,8 +201,8 @@ Resources:
                   - !Ref DocumentsIndex
                   - !If
                     - ShouldCreateVectorBucket
-                    - !Sub "${VectorBucket}/index/${DocumentsIndex}"
-                    - !Sub "arn:${AWS::Partition}:s3vectors:${AWS::Region}:${AWS::AccountId}:bucket/${VectorBucketName}/index/${DocumentsIndex}"
+                    - !Sub "${VectorBucket}/index/${VectorIndexName}"
+                    - !Sub "arn:${AWS::Partition}:s3vectors:${AWS::Region}:${AWS::AccountId}:bucket/${VectorBucketName}/index/${VectorIndexName}"
             - Effect: Allow
               Action:
                 - kms:Decrypt
