@@ -218,7 +218,16 @@ def _build_text_and_image_content(
             # Add images
             if image_content:
                 for image_uri in image_content:
-                    content.append({"image_uri": image_uri})
+                    # Load image content
+                    if image_uri.startswith("s3://"):
+                        # Direct S3 URI
+                        image_bytes = s3.get_binary_content(image_uri)
+                    else:
+                        raise ValueError(f"Invalid file path {image_path} - expecting S3 path")
+
+                    # Convert bytes to base64 string
+                    image_base64 = base64.b64encode(image_bytes).decode("utf-8")
+                    content.append({"image_base64": image_base64})
 
             # Add text after image
             after_text = _prepare_prompt_from_template(

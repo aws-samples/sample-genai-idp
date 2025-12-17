@@ -148,7 +148,7 @@ Resources:
         - arm64
       Timeout: 300
       MemorySize: 512
-      Description: Demo Lambda function for GenAI IDP dynamic few-shot prompting using S3 Vectors
+      Description: Lambda function for GenAI IDP dynamic few-shot prompting using S3 Vectors
       Environment:
         Variables:
           LOG_LEVEL: !Ref LogLevel
