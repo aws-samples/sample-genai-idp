@@ -18,19 +18,27 @@ Parameters:
 
   VectorBucketName:
     Type: String
-    Default: "genaiidp-dynamic-few-shot"
+    Default: ""
+    Description: >-
+      (Optional) Existing S3 vectors bucket used. Provide the name of an existing S3 vectors
+      bucket here or leave blank to automatically create a new S3 vectors bucket.
 
   VectorIndexName:
     Type: String
-    Default: "documents"
-
-  VectorDimensions:
-    Type: Number
-    Default: 3072
+    Default: ""
+    Description: >-
+      (Optional) Existing S3 vectors index used. Provide the name of an existing S3 vectors
+      index here or leave blank to automatically create a new S3 vectors index.
 
   ModelId:
     Type: String
     Default: "amazon.nova-2-multimodal-embeddings-v1:0"
+    Description: Vector embedding model to use to create meaningful vector representations of documents
+
+  VectorDimensions:
+    Type: Number
+    Default: 3072
+    Description: Vector embedding length to use, as defined by the embedding model in use
 
   TopK:
     Type: Number
@@ -44,7 +52,14 @@ Parameters:
 
   LambdaFunctionName:
     Type: String
-    Default: "GENAIIDP-dynamic-few-shot"
+    Default: "IDP-dynamic-few-shot"
+
+  DatasetBucketName:
+    Type: String
+    Default: ""
+    Description: >-
+      (Optional) Existing bucket used for dynamic few-shot datasets. Provide the name of
+      an existing bucket here or leave blank to automatically create a new bucket.
 
   # Logging configuration
   LogLevel:
@@ -82,20 +97,16 @@ Parameters:
         3653,
       ]
 
-  GenAIIDPS3OutputBucketName:
+  # GenAI IDP parameters
+  IDPS3LoggingBucketName:
     Type: String
-    Description: "GenAIIDP S3OutputBucketName"
-
-  GenAIIDPS3WorkingBucketName:
-    Type: String
-    Description: "GenAIIDP WorkingBucket Name"
-
-  GenAIIDPCustomerManagedEncryptionKeyArn:
-    Type: String
-    Description: "GenAIIDP CustomerManagedEncryptionKey ARN"
+    Description: "IDP LoggingBucket Name"
 
 Conditions:
   HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
+  ShouldCreateVectorBucket: !Equals [ !Ref VectorBucketName, "" ]
+  ShouldCreateVectorIndex: !Equals [ !Ref VectorIndexName, "" ]
+  ShouldCreateDatasetBucket: !Equals [ !Ref DatasetBucketName, "" ]
 
 Resources:
 
@@ -126,12 +137,22 @@ Resources:
         - arm64
       Timeout: 300
       MemorySize: 512
-      Description: Demo Lambda function for GenAI IDP dynamic few-shot prompting
+      Description: Demo Lambda function for GenAI IDP dynamic few-shot prompting using S3 Vectors
       Environment:
         Variables:
           LOG_LEVEL: !Ref LogLevel
-          S3VECTOR_BUCKET: !Ref VectorBucketName
-          S3VECTOR_INDEX: !Ref VectorIndexName
+          S3VECTOR_BUCKET: !If
+            - ShouldCreateVectorBucket
+            # Error: Requested attribute VectorBucketName must be a readonly property in schema for AWS::S3Vectors::VectorBucket
+            # - !GetAtt DynamicFewShotVectorBucket.VectorBucketName
+            - !Select [1, !Split ["/", !Ref DynamicFewShotVectorBucket]]
+            - !Ref VectorBucketName
+          S3VECTOR_INDEX: !If
+            - ShouldCreateVectorIndex
+            # Error: Requested attribute IndexName must be a readonly property in schema for AWS::S3Vectors::Index
+            # - !GetAtt DocumentsIndex.IndexName
+            - !Select [3, !Split ["/", !Ref DocumentsIndex]]
+            - !Ref VectorIndexName
           S3VECTOR_DIMENSIONS: !Ref VectorDimensions
           MODEL_ID: !Ref ModelId
           TOP_K: !Ref TopK
@@ -142,9 +163,10 @@ Resources:
       Policies:
         - AWSLambdaBasicExecutionRole
         - S3ReadPolicy:
-            BucketName: !Ref GenAIIDPS3OutputBucketName
-        - S3ReadPolicy:
-            BucketName: !Ref GenAIIDPS3WorkingBucketName
+            BucketName: !If
+              - ShouldCreateDatasetBucket
+              - !Ref DatasetBucket
+              - !Ref DatasetBucketName
         - Statement:
             - Effect: Allow
               Action: cloudwatch:PutMetricData
@@ -161,7 +183,13 @@ Resources:
                 - s3vectors:GetVectors
                 - s3vectors:QueryVectors
               Resource:
-                - !Ref DynamicFewShotVectorIndex
+                - !If
+                  - ShouldCreateVectorIndex
+                  - !Ref DocumentsIndex
+                  - !If
+                    - ShouldCreateVectorBucket
+                    - !Sub "${DynamicFewShotVectorBucket}/index/${DocumentsIndex}"
+                    - !Sub "arn:${AWS::Partition}:s3vectors:${AWS::Region}:${AWS::AccountId}:bucket/${VectorBucketName}/index/${DocumentsIndex}"
             - Effect: Allow
               Action:
                 - kms:Encrypt
@@ -170,32 +198,27 @@ Resources:
                 - kms:GenerateDataKey*
                 - kms:DescribeKey
               Resource:
-                - !Ref GenAIIDPCustomerManagedEncryptionKeyArn
+                - !GetAtt CustomerManagedEncryptionKey.Arn
 
   DynamicFewShotLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
       LogGroupName: !Sub "/aws/lambda/${LambdaFunctionName}"
       RetentionInDays: !Ref LogRetentionDays
-      KmsKeyId: !GetAtt GenAIIDPCustomerManagedEncryptionKeyArn
+      KmsKeyId: !GetAtt CustomerManagedEncryptionKey.Arn
 
   DynamicFewShotVectorBucket:
     Type: AWS::S3Vectors::VectorBucket
-    Metadata:
-      cfn_nag:
-        rules_to_suppress:
-          - id: W84
-            reason: "Demo function - KMS CMK not required, but can be added by customer for production use cases"
-    # checkov:skip=CKV_AWS_158: "Demo function - KMS CMK not required, but can be added by customer for production use cases"
+    Condition: ShouldCreateVectorBucket
     Properties:
-      VectorBucketName: !Ref VectorBucketName
       EncryptionConfiguration:
-        SseType: "AES256"
+        SseType: "aws:kms"
+        KmsKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
 
-  DynamicFewShotVectorIndex:
+  DocumentsIndex:
     Type: AWS::S3Vectors::Index
+    Condition: ShouldCreateVectorIndex
     Properties:
-      IndexName: !Ref VectorIndexName
       DataType: "float32"
       Dimension: !Ref VectorDimensions
       DistanceMetric: "cosine"
@@ -204,7 +227,111 @@ Resources:
           - "classPrompt"
           - "attributesPrompt"
           - "imagePath"
-      VectorBucketArn: !Ref DynamicFewShotVectorBucket
+      VectorBucketName: !If
+        - ShouldCreateVectorBucket
+        - !Ref AWS::NoValue
+        - VectorBucketName
+      VectorBucketArn: !If
+        - ShouldCreateVectorBucket
+        - !Ref DynamicFewShotVectorBucket
+        - !Ref AWS::NoValue
+
+  DatasetBucket:
+    Type: AWS::S3::Bucket
+    Condition: ShouldCreateDatasetBucket
+    DeletionPolicy: RetainExceptOnCreate
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: aws:kms
+              KMSMasterKeyID: !Ref CustomerManagedEncryptionKey
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: Enabled
+      LoggingConfiguration:
+        DestinationBucketName: !Ref IDPS3LoggingBucketName
+        LogFilePrefix: fewshot-dataset-bucket-logs/
+
+  DatasetBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Condition: ShouldCreateDatasetBucket
+    Properties:
+      Bucket: !Ref DatasetBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: EnforceSSLOnly
+            Effect: Deny
+            Principal: "*"
+            Action: "s3:*"
+            Resource:
+              - !Sub "${DatasetBucket.Arn}/*"
+              - !Sub "${DatasetBucket.Arn}"
+            Condition:
+              Bool:
+                "aws:SecureTransport": false
+
+  CustomerManagedEncryptionKey:
+    Type: AWS::KMS::Key
+    Metadata:
+      security-matrix:
+        rules_to_suppress:
+          - id: IAM-005
+            reason: "No cross-account access - only same account root and AWS services"
+          - id: KMS-007
+            reason: "KMS monitoring not required for this IDP solution - comprehensive CloudWatch monitoring already in place"
+          - id: KMS-002
+            reason: "kms:* permission for account root is standard pattern for administrative access to KMS keys"
+    Properties:
+      Description: KMS key for encryption of dynamic few-shot resources
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: Enable IAM User Permissions
+            Effect: Allow
+            Principal:
+              AWS: !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:root"
+            Action: kms:*
+            Resource: "*"
+          - Sid: Allow lambda to access the Keys
+            Effect: Allow
+            Principal:
+              AWS: !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:root"
+            Action:
+              - kms:Encrypt
+              - kms:Decrypt
+              - kms:ReEncrypt*
+              - kms:GenerateDataKey*
+              - kms:DescribeKey
+            Resource: "*"
+          - Sid: Allow CloudWatch Logs to use the key
+            Effect: Allow
+            Principal:
+              Service: !Sub "logs.${AWS::URLSuffix}"
+            Action:
+              - kms:Encrypt
+              - kms:Decrypt
+              - kms:ReEncrypt*
+              - kms:GenerateDataKey*
+              - kms:DescribeKey
+            Resource: "*"
+          - Sid: Allow S3 Vectors indexing service to use the key
+            Effect: Allow
+            Principal:
+              Service: !Sub "indexing.s3vectors.${AWS::URLSuffix}"
+            Action:
+              - kms:Encrypt
+              - kms:Decrypt
+              - kms:ReEncrypt*
+              - kms:GenerateDataKey*
+              - kms:DescribeKey
+            Resource: "*"
 
 Outputs:
 
@@ -220,17 +347,26 @@ Outputs:
     Description: CloudWatch Log Group for monitoring demo Lambda execution
     Value: !Ref DynamicFewShotLogGroup
 
-  DynamicFewShotVectorBucketArn:
+  VectorBucketName:
     Description: S3 Vectors bucket for dynamic few-shot examples
-    Value: !Ref DynamicFewShotVectorBucket
+    Value: !If
+      - ShouldCreateVectorBucket
+      - !Select [1, !Split ["/", !Ref DynamicFewShotVectorBucket]]
+      - !Ref VectorBucketName
 
-  DynamicFewShotVectorIndexArn:
+  VectorIndexName:
     Description: S3 Vectors index for dynamic few-shot examples
-    Value: !Ref DynamicFewShotVectorIndex
+    Value: !If
+      - ShouldCreateVectorIndex
+      - !Select [3, !Split ["/", !Ref DocumentsIndex]]
+      - !Ref VectorIndexName
 
-  DynamicFewShotDatasetBucket:
-    Description: S3 Bucket for example data sets
-    Value: !Ref DynamicFewShotDatasetBucket
+  DatasetBucket:
+    Description: S3 bucket for example data sets
+    Value: !If
+      - ShouldCreateDatasetBucket
+      - !Ref DatasetBucket
+      - !Ref DatasetBucketName
 
   UsageInstructions:
     Description: How to use this Lambda in your IDP configuration
