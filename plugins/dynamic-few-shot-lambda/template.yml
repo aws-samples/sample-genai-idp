@@ -100,7 +100,18 @@ Parameters:
   # GenAI IDP parameters
   IDPS3LoggingBucketName:
     Type: String
-    Description: "IDP LoggingBucket Name"
+    Description:
+      IDP LoggingBucket Name, to store access logs for the dataset bucket
+
+  IDPS3OutputBucketName:
+    Type: String
+    Description: >-
+      IDP S3OutputBucketName, to read the documents being processed
+
+  IDPCustomerManagedEncryptionKeyArn:
+    Type: String
+    Description: >-
+      IDP CustomerManagedEncryptionKey ARN, to decrypt documents being read from the output bucket
 
 Conditions:
   HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
@@ -131,7 +142,7 @@ Resources:
       FunctionName: !Ref LambdaFunctionName
       PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
       CodeUri: ./src
-      Handler: GENAIIDP-dynamic-few-shot.lambda_handler
+      Handler: IDP-dynamic-few-shot.lambda_handler
       Runtime: python3.12
       Architectures:
         - arm64
@@ -144,8 +155,8 @@ Resources:
           S3VECTOR_BUCKET: !If
             - ShouldCreateVectorBucket
             # Error: Requested attribute VectorBucketName must be a readonly property in schema for AWS::S3Vectors::VectorBucket
-            # - !GetAtt DynamicFewShotVectorBucket.VectorBucketName
-            - !Select [1, !Split ["/", !Ref DynamicFewShotVectorBucket]]
+            # - !GetAtt VectorBucket.VectorBucketName
+            - !Select [1, !Split ["/", !Ref VectorBucket]]
             - !Ref VectorBucketName
           S3VECTOR_INDEX: !If
             - ShouldCreateVectorIndex
@@ -167,6 +178,8 @@ Resources:
               - ShouldCreateDatasetBucket
               - !Ref DatasetBucket
               - !Ref DatasetBucketName
+        - S3ReadPolicy:
+            BucketName: !Ref IDPS3OutputBucketName
         - Statement:
             - Effect: Allow
               Action: cloudwatch:PutMetricData
@@ -188,17 +201,14 @@ Resources:
                   - !Ref DocumentsIndex
                   - !If
                     - ShouldCreateVectorBucket
-                    - !Sub "${DynamicFewShotVectorBucket}/index/${DocumentsIndex}"
+                    - !Sub "${VectorBucket}/index/${DocumentsIndex}"
                     - !Sub "arn:${AWS::Partition}:s3vectors:${AWS::Region}:${AWS::AccountId}:bucket/${VectorBucketName}/index/${DocumentsIndex}"
             - Effect: Allow
               Action:
-                - kms:Encrypt
                 - kms:Decrypt
-                - kms:ReEncrypt*
-                - kms:GenerateDataKey*
-                - kms:DescribeKey
               Resource:
                 - !GetAtt CustomerManagedEncryptionKey.Arn
+                - !Ref IDPCustomerManagedEncryptionKeyArn
 
   DynamicFewShotLogGroup:
     Type: AWS::Logs::LogGroup
@@ -207,7 +217,7 @@ Resources:
       RetentionInDays: !Ref LogRetentionDays
       KmsKeyId: !GetAtt CustomerManagedEncryptionKey.Arn
 
-  DynamicFewShotVectorBucket:
+  VectorBucket:
     Type: AWS::S3Vectors::VectorBucket
     Condition: ShouldCreateVectorBucket
     Properties:
@@ -229,12 +239,8 @@ Resources:
           - "imagePath"
       VectorBucketName: !If
         - ShouldCreateVectorBucket
-        - !Ref AWS::NoValue
+        - !Select [1, !Split ["/", !Ref VectorBucket]]
         - VectorBucketName
-      VectorBucketArn: !If
-        - ShouldCreateVectorBucket
-        - !Ref DynamicFewShotVectorBucket
-        - !Ref AWS::NoValue
 
   DatasetBucket:
     Type: AWS::S3::Bucket
@@ -351,7 +357,7 @@ Outputs:
     Description: S3 Vectors bucket for dynamic few-shot examples
     Value: !If
       - ShouldCreateVectorBucket
-      - !Select [1, !Split ["/", !Ref DynamicFewShotVectorBucket]]
+      - !Select [1, !Split ["/", !Ref VectorBucket]]
       - !Ref VectorBucketName
 
   VectorIndexName:
