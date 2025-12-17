@@ -10,6 +10,7 @@ using LLMs, with support for text and image content.
 
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import os
@@ -460,6 +461,13 @@ class ExtractionService:
                     raise ValueError(
                         f"Invalid file path {image_uri} - expecting S3 path"
                     )
+
+                converted_item = image.prepare_bedrock_image_attachment(image_bytes)
+            elif "image_base64" in item:
+                image_base64 = item["image_base64"]
+
+                # Decode image content
+                image_bytes = base64.b64decode(image_base64)
 
                 converted_item = image.prepare_bedrock_image_attachment(image_bytes)
             elif "image" in item:
