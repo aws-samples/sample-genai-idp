@@ -134,7 +134,7 @@ Resources:
             reason: "Function does not require DLQ as processing and retries are handled by the IDP framework"
           - id: W11
             reason: "Allow * resource on its permissions policy for CloudWatch metrics"
-    # checkov:skip=CKV_AWS_116: "Function does not require DLQ"
+    # checkov:skip=CKV_AWS_116: "Function does not require DLQ as processing and retries are handled by the IDP framework"
     # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
     # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
     # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only configuration values like feature flags and non-sensitive settings"
