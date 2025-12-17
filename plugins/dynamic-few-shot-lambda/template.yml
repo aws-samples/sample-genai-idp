@@ -127,14 +127,14 @@ Resources:
       cfn_nag:
         rules_to_suppress:
           - id: W89
-            reason: "Demo function - does not require VPC access"
+            reason: "Function does not require VPC access as it only interacts with AWS services via APIs"
           - id: W92
-            reason: "Demo function - does not require reserved concurrency as it scales based on demand"
+            reason: "Function does not require reserved concurrency as it scales based on demand"
           - id: W58
-            reason: "Demo function - DLQ not required"
+            reason: "Function does not require DLQ as processing and retries are handled by the IDP framework"
           - id: W11
-            reason: "Demo function - allow * resource on its permissions policy"
-    # checkov:skip=CKV_AWS_116: "DLQ not required for AppSync resolver function as GraphQL handles retries"
+            reason: "Allow * resource on its permissions policy for CloudWatch metrics"
+    # checkov:skip=CKV_AWS_116: "Function does not require DLQ"
     # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
     # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
     # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only configuration values like feature flags and non-sensitive settings"
