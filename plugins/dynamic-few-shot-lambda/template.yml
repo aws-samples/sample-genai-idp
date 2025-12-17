@@ -379,7 +379,7 @@ Outputs:
     Value: !Sub |
       Add this ARN to your extraction config:
       extraction:
-        dynamic_few_shot_lambda_arn: "${DynamicFewShotFunction.Arn}"
+        custom_prompt_lambda_arn: "${DynamicFewShotFunction.Arn}"
         
   MonitoringLink:
     Description: Direct link to CloudWatch logs for this function
