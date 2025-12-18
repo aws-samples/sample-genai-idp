@@ -385,3 +385,11 @@ Outputs:
     Description: Direct link to CloudWatch logs for this function
     Value: !Sub |
       https://console.aws.amazon.com/cloudwatch/home?region=${AWS::Region}#logsV2:log-groups/log-group/$252Faws$252Flambda$252F${LambdaFunctionName}
+
+  ModelId:
+    Description: Vector embedding model to use to create meaningful vector representations of documents
+    Value: !Ref ModelId
+
+  VectorDimensions:
+    Description: Vector embedding length to use, as defined by the embedding model in use
+    Value: !Ref VectorDimensions
