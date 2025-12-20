@@ -2,7 +2,7 @@
 huggingface-hub==0.20.0
 
 # For image handling
-Pillow==10.0.0
+Pillow==10.3.0
 
 # AWS SDK (boto3 is already available in Lambda runtime, but specified for local testing)
 boto3==1.34.0
