@@ -43,7 +43,7 @@
     "immer": "^10.1.3",
     "js-yaml": "^4.1.1",
     "json-schema-traverse": "^1.0.0",
-    "lodash-es": "^4.17.21",
+    "lodash-es": "^4.17.23",
     "mammoth": "^1.9.1",
     "postcss": "^8.5.6",
     "prop-types": "^15.8.1",
