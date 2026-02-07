@@ -16,6 +16,10 @@ SPDX-License-Identifier: MIT-0
 
 ### Fixed
 
+- **Schema Builder Few-Shot Examples Input Focus Loss** - [GitHub Issue #174](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues/174)
+  - Fixed cursor jumping out of input fields after each keystroke when editing few-shot examples in the Schema Builder
+
+
 - **Code Intelligence Agent - DeepWiki MCP Transport Migration**
   - Fixed "client initialization failed" error when using Code Intelligence Agent in Agent Companion Chat
   - **Root Cause**: DeepWiki deprecated their SSE transport endpoint (`/sse`) and now returns HTTP 410 Gone

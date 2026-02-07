@@ -29,6 +29,7 @@ const ExamplesEditor = ({ examples = [], onChange }) => {
 
   const handleAddExample = () => {
     const newExample = {
+      id: crypto.randomUUID(),
       name: `Example ${examples.length + 1}`,
       classPrompt: '',
       attributesPrompt: '',
@@ -93,13 +94,11 @@ const ExamplesEditor = ({ examples = [], onChange }) => {
       </Box>
 
       {examples.map((example, index) => {
-        // Generate a stable unique key from example properties
-        const uniqueKey = `${example.name || 'unnamed'}-${example.imagePath || 'noimage'}-${
-          example.classPrompt?.substring(0, 20) || 'noprompt'
-        }`;
+        // Use stable ID as key to prevent focus loss on content changes
+        const stableKey = example.id || `example-${index}`;
         return (
           <ExpandableSection
-            key={uniqueKey}
+            key={stableKey}
             headerText={example.name || `Example ${index + 1}`}
             expanded={expandedSections[index] || false}
             onChange={() => toggleSection(index)}
