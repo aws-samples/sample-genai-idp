@@ -7,6 +7,7 @@ import { ConsoleLogger } from 'aws-amplify/utils';
 import useAppContext from '../contexts/app';
 import listDocumentsDateShard from '../graphql/queries/listDocumentsDateShard';
 import listDocumentsDateHour from '../graphql/queries/listDocumentsDateHour';
+import listDocumentsByDateRangeQuery from '../graphql/queries/listDocumentsByDateRange';
 import getDocument from '../graphql/queries/getDocument';
 import deleteDocument from '../graphql/queries/deleteDocument';
 import reprocessDocument from '../graphql/queries/reprocessDocument';
@@ -23,6 +24,8 @@ const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2
   const [periodsToLoad, setPeriodsToLoad] = useState(initialPeriodsToLoad);
   const [isDocumentsListLoading, setIsDocumentsListLoading] = useState(false);
   const [documents, setDocuments] = useState([]);
+  const [customDateRange, setCustomDateRange] = useState(null); // { startDateTime, endDateTime }
+  const [dateRangeNextToken, setDateRangeNextToken] = useState(null);
   const { setErrorMessage } = useAppContext();
 
   const subscriptionsRef = useRef({ onCreate: null, onUpdate: null });
@@ -226,6 +229,51 @@ const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2
     return documentData;
   };
 
+  const sendSetDocumentsForDateRange = async (dateRange, nextToken = null) => {
+    // Server-side paginated query for custom date ranges
+    try {
+      logger.info('Fetching documents by date range', dateRange);
+      const allDocuments = [];
+      let currentToken = nextToken;
+
+      // Fetch all pages (server-side pagination)
+      do {
+        const response = await client.graphql({
+          query: listDocumentsByDateRangeQuery,
+          variables: {
+            startDateTime: dateRange.startDateTime,
+            endDateTime: dateRange.endDateTime,
+            limit: 200,
+            nextToken: currentToken,
+          },
+        });
+
+        const result = response?.data?.listDocumentsByDateRange;
+        if (result?.Documents) {
+          allDocuments.push(...result.Documents);
+        }
+        currentToken = result?.nextToken;
+        logger.debug(`Fetched ${result?.Documents?.length || 0} documents, hasMore=${!!currentToken}`);
+      } while (currentToken);
+
+      logger.info(`Total documents fetched for date range: ${allDocuments.length}`);
+
+      // Transform to match existing document format expected by the UI
+      const documentValues = allDocuments.map((doc) => ({
+        ...doc,
+        ListPK: doc.ListPK || doc.PK,
+        ListSK: doc.ListSK || doc.SK,
+      }));
+
+      setDocumentsDeduped(documentValues);
+      setIsDocumentsListLoading(false);
+    } catch (error) {
+      setIsDocumentsListLoading(false);
+      setErrorMessage('Failed to list documents for date range - please try again later');
+      logger.error('Error fetching documents by date range', error);
+    }
+  };
+
   const sendSetDocumentsForPeriod = async () => {
     // XXX this logic should be moved to the API
     try {
@@ -342,15 +390,30 @@ const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2
       // send in a timeout to avoid blocking rendering
       setTimeout(() => {
         setDocuments([]);
-        sendSetDocumentsForPeriod();
+        if (customDateRange) {
+          // Use server-side paginated query for custom date ranges
+          sendSetDocumentsForDateRange(customDateRange);
+        } else {
+          // Use existing shard-based client-side mechanism for relative periods
+          sendSetDocumentsForPeriod();
+        }
       }, 1);
     }
   }, [isDocumentsListLoading]);
 
   useEffect(() => {
     logger.debug('list period changed', periodsToLoad);
-    setIsDocumentsListLoading(true);
+    if (!customDateRange) {
+      setIsDocumentsListLoading(true);
+    }
   }, [periodsToLoad]);
+
+  useEffect(() => {
+    if (customDateRange) {
+      logger.debug('custom date range changed', customDateRange);
+      setIsDocumentsListLoading(true);
+    }
+  }, [customDateRange]);
 
   const deleteDocuments = async (objectKeys) => {
     try {
@@ -416,6 +479,8 @@ const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2
     setIsDocumentsListLoading,
     setPeriodsToLoad,
     periodsToLoad,
+    customDateRange,
+    setCustomDateRange,
     deleteDocuments,
     reprocessDocuments,
     abortWorkflows,

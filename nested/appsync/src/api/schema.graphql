@@ -568,6 +568,11 @@ type Mutation {
   releaseReview(objectKey: String!): Document @aws_cognito_user_pools
 }
 
+type DocumentPage @aws_cognito_user_pools @aws_iam {
+  Documents: [Document]
+  nextToken: String
+}
+
 type Query @aws_cognito_user_pools @aws_iam {
   getDocument(ObjectKey: ID!): Document
   listDocuments(
@@ -576,6 +581,12 @@ type Query @aws_cognito_user_pools @aws_iam {
   ): DocumentList
   listDocumentsDateHour(date: AWSDate, hour: Int): DocumentList
   listDocumentsDateShard(date: AWSDate, shard: Int): DocumentList
+  listDocumentsByDateRange(
+    startDateTime: AWSDateTime!
+    endDateTime: AWSDateTime!
+    limit: Int
+    nextToken: String
+  ): DocumentPage
   getFileContents(s3Uri: String!): FileContentsResponse
   getConfiguration: ConfigurationResponse
   getPricing: PricingResponse
@@ -604,7 +615,7 @@ type Query @aws_cognito_user_pools @aws_iam {
     @aws_cognito_user_pools
     @aws_iam
   getTestRun(testRunId: String!): TestRun @aws_cognito_user_pools
-  getTestRuns(timePeriodHours: Int): [TestRun] @aws_cognito_user_pools
+  getTestRuns(timePeriodHours: Int, startDateTime: AWSDateTime, endDateTime: AWSDateTime): [TestRun] @aws_cognito_user_pools
   getTestRunStatus(testRunId: String!): TestRunStatus @aws_cognito_user_pools
   compareTestRuns(testRunIds: [String!]!): TestRunComparison @aws_cognito_user_pools
   getTestSets: [TestSet] @aws_cognito_user_pools

@@ -1,6 +1,6 @@
 const GET_TEST_RUNS = `
-  query GetTestRuns($timePeriodHours: Int) {
-    getTestRuns(timePeriodHours: $timePeriodHours) {
+  query GetTestRuns($timePeriodHours: Int, $startDateTime: AWSDateTime, $endDateTime: AWSDateTime) {
+    getTestRuns(timePeriodHours: $timePeriodHours, startDateTime: $startDateTime, endDateTime: $endDateTime) {
       testRunId
       testSetId
       testSetName

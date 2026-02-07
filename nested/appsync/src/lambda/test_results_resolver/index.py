@@ -37,9 +37,17 @@ def handler(event, context):
     field_name = event['info']['fieldName']
     
     if field_name == 'getTestRuns':
-        time_period_hours = event.get('arguments', {}).get('timePeriodHours', 2)  # Default 2 hours
-        logger.info(f"Processing getTestRuns request with timePeriodHours: {time_period_hours}")
-        return get_test_runs(time_period_hours)
+        args = event.get('arguments', {})
+        start_date_time = args.get('startDateTime')
+        end_date_time = args.get('endDateTime')
+        time_period_hours = args.get('timePeriodHours', 2)  # Default 2 hours
+        
+        if start_date_time and end_date_time:
+            logger.info(f"Processing getTestRuns request with date range: {start_date_time} → {end_date_time}")
+            return get_test_runs_by_date_range(start_date_time, end_date_time)
+        else:
+            logger.info(f"Processing getTestRuns request with timePeriodHours: {time_period_hours}")
+            return get_test_runs(time_period_hours)
     elif field_name == 'getTestRun':
         test_run_id = event['arguments']['testRunId']
         logger.info(f"Processing getTestRun request for test run: {test_run_id}")
@@ -268,6 +276,72 @@ def get_test_results(test_run_id):
         logger.warning(f"Failed to cache results for {test_run_id}: {e}")
     
     return result
+
+def get_test_runs_by_date_range(start_date_time, end_date_time):
+    """Get list of test runs within a specific date range (startDateTime to endDateTime)"""
+    table = dynamodb.Table(os.environ['TRACKING_TABLE'])
+    
+    logger.info(f"Fetching test runs between: {start_date_time} and {end_date_time}")
+    
+    # Handle pagination for DynamoDB scan
+    items = []
+    scan_kwargs = {
+        'FilterExpression': 'begins_with(PK, :pk) AND SK = :sk AND CreatedAt >= :start AND CreatedAt <= :end',
+        'ExpressionAttributeValues': {
+            ':pk': 'testrun#',
+            ':sk': 'metadata',
+            ':start': start_date_time,
+            ':end': end_date_time
+        }
+    }
+    
+    while True:
+        response = table.scan(**scan_kwargs)
+        items.extend(response.get('Items', []))
+        
+        if 'LastEvaluatedKey' not in response:
+            break
+        scan_kwargs['ExclusiveStartKey'] = response['LastEvaluatedKey']
+    
+    logger.info(f"DynamoDB scan completed. Items found: {len(items)}")
+    
+    test_runs = []
+    for item in items:
+        # If completedAt is missing, call get_test_run_status to update it
+        status_result = None
+        if not item.get('CompletedAt'):
+            status_result = get_test_run_status(item['TestRunId'])
+            # Refresh item from database to get updated CompletedAt
+            updated_response = table.get_item(
+                Key={'PK': f'testrun#{item["TestRunId"]}', 'SK': 'metadata'}
+            )
+            if 'Item' in updated_response:
+                item = updated_response['Item']
+        
+        test_runs.append({
+            'testRunId': item['TestRunId'],
+            'testSetId': item.get('TestSetId'),
+            'testSetName': item.get('TestSetName'),
+            'status': status_result.get('status') if status_result else item.get('Status'),
+            'filesCount': item.get('FilesCount', 0),
+            'completedFiles': status_result.get('completedFiles') if status_result else item.get('CompletedFiles', 0),
+            'failedFiles': status_result.get('failedFiles') if status_result else item.get('FailedFiles', 0),
+            'createdAt': _format_datetime(item.get('CreatedAt')),
+            'completedAt': _format_datetime(item.get('CompletedAt')),
+            'context': item.get('Context')
+        })
+    
+    # Sort by createdAt descending (most recent first)
+    def sort_key(test_run):
+        created_at = test_run.get('createdAt')
+        if not created_at:
+            return '1970-01-01T00:00:00Z'
+        return created_at
+    
+    test_runs.sort(key=sort_key, reverse=True)
+    
+    return test_runs
+
 
 def get_test_runs(time_period_hours=2):
     """Get list of test runs within specified time period"""

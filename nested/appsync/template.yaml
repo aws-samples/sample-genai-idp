@@ -289,6 +289,7 @@ Resources:
                   - !GetAtt ListAgentChatSessionsFunction.Arn
                   - !GetAtt GetAgentChatMessagesFunction.Arn
                   - !GetAtt DeleteAgentChatSessionFunction.Arn
+                  - !GetAtt ListDocumentsByDateRangeResolverFunction.Arn
                   - !If
                     - IsPattern1Enabled
                     - !GetAtt SyncBdaIdpResolverFunction.Arn
@@ -3472,6 +3473,95 @@ Resources:
             "Documents": $util.toJson($ctx.result.items),
             "nextToken": $util.toJson($ctx.result.nextToken)
         }
+
+
+  ##########################################################################
+  # ListDocumentsByDateRangeResolverFunctionLogGroup
+  ##########################################################################
+  ListDocumentsByDateRangeResolverFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+      RetentionInDays: !Ref LogRetentionDays
+
+
+  ##########################################################################
+  # ListDocumentsByDateRangeResolverFunction
+  ##########################################################################
+  ListDocumentsByDateRangeResolverFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: "Function does not require VPC access as it only interacts with AWS services via APIs"
+          - id: W92
+            reason: "Function does not require reserved concurrency as it scales based on demand"
+          - id: W12
+            reason: "Lambda requires CloudWatch logs permissions"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for AppSync resolver function"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only configuration values"
+    Properties:
+      PermissionsBoundary:
+        !If [
+          HasPermissionsBoundary,
+          !Ref PermissionsBoundaryArn,
+          !Ref AWS::NoValue,
+        ]
+      Handler: index.handler
+      Runtime: python3.12
+      CodeUri: ./src/lambda/list_documents_range_resolver
+      Description: Lambda function to list documents by date range via GraphQL API
+      MemorySize: 512
+      Timeout: 120
+      Environment:
+        Variables:
+          LOG_LEVEL: !Ref LogLevel
+          TRACKING_TABLE_NAME: !Ref TrackingTableName
+      LoggingConfig:
+        LogGroup: !Ref ListDocumentsByDateRangeResolverFunctionLogGroup
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref TrackingTableName
+        - Statement:
+            - Effect: Allow
+              Action:
+                - kms:Encrypt
+                - kms:Decrypt
+                - kms:ReEncrypt*
+                - kms:GenerateDataKey*
+                - kms:DescribeKey
+              Resource: !Ref CustomerManagedEncryptionKeyArn
+
+
+  ##########################################################################
+  # ListDocumentsByDateRangeDataSource
+  ##########################################################################
+  ListDocumentsByDateRangeDataSource:
+    Type: AWS::AppSync::DataSource
+    Properties:
+      ApiId: !Ref GraphQLApiId
+      Name: ListDocumentsByDateRangeDataSource
+      Description: Lambda function for listing documents by date range
+      Type: AWS_LAMBDA
+      ServiceRoleArn: !GetAtt AppSyncServiceRole.Arn
+      LambdaConfig:
+        LambdaFunctionArn: !GetAtt ListDocumentsByDateRangeResolverFunction.Arn
+
+
+  ##########################################################################
+  # ListDocumentsByDateRangeResolver
+  ##########################################################################
+  ListDocumentsByDateRangeResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: GraphQLSchema
+    Properties:
+      ApiId: !Ref GraphQLApiId
+      DataSourceName: !GetAtt ListDocumentsByDateRangeDataSource.Name
+      TypeName: Query
+      FieldName: listDocumentsByDateRange
 
 
   ##########################################################################

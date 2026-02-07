@@ -169,6 +169,7 @@ const TIME_PERIOD_DROPDOWN_CONFIG = {
   'refresh-1w': { count: 7 * DOCUMENT_LIST_SHARDS_PER_DAY, text: '1 week' },
   'refresh-2w': { count: 14 * DOCUMENT_LIST_SHARDS_PER_DAY, text: '2 weeks' },
   'refresh-1m': { count: 30 * DOCUMENT_LIST_SHARDS_PER_DAY, text: '30 days' },
+  'custom-range': { count: -1, text: 'Custom range...' },
 };
 const TIME_PERIOD_DROPDOWN_ITEMS = Object.keys(TIME_PERIOD_DROPDOWN_CONFIG).map((k) => ({
   id: k,
@@ -177,6 +178,9 @@ const TIME_PERIOD_DROPDOWN_ITEMS = Object.keys(TIME_PERIOD_DROPDOWN_CONFIG).map(
 
 // local storage key to persist the last periods to load
 export const PERIODS_TO_LOAD_STORAGE_KEY = 'periodsToLoad';
+
+// local storage key to persist custom date range
+export const CUSTOM_DATE_RANGE_STORAGE_KEY = 'customDateRange';
 
 // Statuses that can be aborted
 const ABORTABLE_STATUSES = [
@@ -205,13 +209,36 @@ export const DocumentsCommonHeader = ({
 }) => {
   const onPeriodToLoadChange = ({ detail }) => {
     const { id } = detail;
+    if (id === 'custom-range') {
+      // Signal parent to show date range picker
+      if (props.onCustomDateRange) {
+        props.onCustomDateRange();
+      }
+      return;
+    }
     const shardCount = TIME_PERIOD_DROPDOWN_CONFIG[id].count;
+    // Clear any custom date range when switching to relative period
+    if (props.setCustomDateRange) {
+      props.setCustomDateRange(null);
+      localStorage.removeItem(CUSTOM_DATE_RANGE_STORAGE_KEY);
+    }
     props.setPeriodsToLoad(shardCount);
     localStorage.setItem(PERIODS_TO_LOAD_STORAGE_KEY, JSON.stringify(shardCount));
   };
 
+  // Determine display text
+  const getDisplayText = () => {
+    if (props.customDateRange) {
+      const start = new Date(props.customDateRange.startDateTime);
+      const end = new Date(props.customDateRange.endDateTime);
+      const formatDate = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      return `${formatDate(start)} → ${formatDate(end)}`;
+    }
+    return TIME_PERIOD_DROPDOWN_ITEMS.filter((i) => i.count === props.periodsToLoad)[0]?.text || '';
+  };
+
   // eslint-disable-next-line
-  const periodText = TIME_PERIOD_DROPDOWN_ITEMS.filter((i) => i.count === props.periodsToLoad)[0]?.text || '';
+  const periodText = getDisplayText();
 
   const hasSelectedItems = selectedItems.length > 0;
   // Check if any selected items can be aborted
