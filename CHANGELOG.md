@@ -5,6 +5,14 @@ SPDX-License-Identifier: MIT-0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Code Intelligence Agent - DeepWiki MCP Transport Migration**
+  - Fixed "client initialization failed" error when using Code Intelligence Agent in Agent Companion Chat
+  - **Root Cause**: DeepWiki deprecated their SSE transport endpoint (`/sse`) and now returns HTTP 410 Gone
+  - **Solution**: Migrated from SSE (`sse_client`) to Streamable HTTP (`streamablehttp_client`) transport using the new `/mcp` endpoint
+  - See DeepWiki documentation: https://docs.devin.ai/work-with-devin/deepwiki-mcp
+
 ## [0.4.14]
 
 ### Added

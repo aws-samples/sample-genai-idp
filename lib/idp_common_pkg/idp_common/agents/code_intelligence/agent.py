@@ -9,7 +9,7 @@ import logging
 from typing import Any, Dict, Tuple
 
 import boto3
-from mcp.client.sse import sse_client
+from mcp.client.streamable_http import streamablehttp_client
 from strands import Agent
 from strands.tools.mcp import MCPClient
 
@@ -18,7 +18,9 @@ from ..common.strands_bedrock_model import create_strands_bedrock_model
 logger = logging.getLogger(__name__)
 
 # Hardcoded configuration for DeepWiki MCP
-DEEPWIKI_MCP_URL = "https://mcp.deepwiki.com/sse"
+# Note: DeepWiki deprecated SSE transport in favor of Streamable HTTP
+# See: https://docs.devin.ai/work-with-devin/deepwiki-mcp
+DEEPWIKI_MCP_URL = "https://mcp.deepwiki.com/mcp"
 REPO_NAME = (
     "aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws"
 )
@@ -37,8 +39,8 @@ def create_code_intelligence_agent(
     external setup.
 
     Hardcoded configuration:
-    - MCP URL: https://mcp.deepwiki.com/sse
-    - Transport: SSE (no authentication)
+    - MCP URL: https://mcp.deepwiki.com/mcp
+    - Transport: Streamable HTTP (no authentication)
     - Repository: aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws
 
     Args:
@@ -59,9 +61,9 @@ def create_code_intelligence_agent(
     logger.info("Creating Code Intelligence Agent with DeepWiki MCP")
 
     try:
-        # Create SSE MCP client (no authentication needed for DeepWiki)
+        # Create Streamable HTTP MCP client (no authentication needed for DeepWiki)
         logger.info(f"Connecting to DeepWiki MCP at {DEEPWIKI_MCP_URL}")
-        mcp_client = MCPClient(lambda: sse_client(DEEPWIKI_MCP_URL))
+        mcp_client = MCPClient(lambda: streamablehttp_client(DEEPWIKI_MCP_URL))
 
         # Discover tools and create agent within MCP context
         with mcp_client:
@@ -77,7 +79,7 @@ def create_code_intelligence_agent(
                 else:
                     logger.warning(f"Unable to extract tool name from MCP tool: {tool}")
 
-            logger.info("Connected to DeepWiki via SSE transport (no authentication)")
+            logger.info("Connected to DeepWiki via Streamable HTTP transport")
             logger.info(f"Discovered {len(tools)} tools from DeepWiki: {tool_names}")
 
             # Get model ID using configuration system (reads user-changed values from DynamoDB)
