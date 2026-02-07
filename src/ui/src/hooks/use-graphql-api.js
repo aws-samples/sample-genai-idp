@@ -30,6 +30,27 @@ const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2
 
   const subscriptionsRef = useRef({ onCreate: null, onUpdate: null });
 
+  // Ref to track customDateRange in subscription callbacks (closures capture stale state)
+  const customDateRangeRef = useRef(customDateRange);
+  useEffect(() => {
+    customDateRangeRef.current = customDateRange;
+  }, [customDateRange]);
+
+  /**
+   * Check if a document falls within the active date range filter.
+   * For relative periods (no customDateRange), always returns true.
+   * For custom date ranges, checks the document's InitialEventTime or QueuedTime.
+   */
+  const isDocumentInActiveRange = useCallback((doc) => {
+    const range = customDateRangeRef.current;
+    if (!range) return true; // No custom range = relative period, always accept
+
+    const docTime = doc?.InitialEventTime || doc?.QueuedTime;
+    if (!docTime) return false; // No timestamp = can't verify, exclude
+
+    return docTime >= range.startDateTime && docTime <= range.endDateTime;
+  }, []);
+
   const setDocumentsDeduped = useCallback((documentValues) => {
     logger.debug('setDocumentsDeduped called with:', documentValues);
     setDocuments((currentDocuments) => {
@@ -121,7 +142,13 @@ const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2
           try {
             const documentValues = await getDocumentDetailsFromIds([objectKey]);
             if (documentValues && documentValues.length > 0) {
-              setDocumentsDeduped(documentValues);
+              // Filter: only add documents that fall within the active date range
+              const inRangeDocuments = documentValues.filter(isDocumentInActiveRange);
+              if (inRangeDocuments.length > 0) {
+                setDocumentsDeduped(inRangeDocuments);
+              } else {
+                logger.debug(`Subscription: new document ${objectKey} outside active date range, skipping`);
+              }
             }
           } catch (error) {
             logger.error('Error processing onCreateDocument subscription:', error);
@@ -162,12 +189,25 @@ const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2
           try {
             const documentValues = await getDocumentDetailsFromIds([documentUpdateEvent.ObjectKey]);
             if (documentValues && documentValues.length > 0) {
-              setDocumentsDeduped(documentValues);
+              // For updates: only add if document is already in the list OR falls within the active range
+              // This ensures in-range docs get updates, but out-of-range new docs don't sneak in
+              const filteredValues = documentValues.filter((doc) => {
+                if (isDocumentInActiveRange(doc)) return true;
+                // Check if this document is already displayed (allow status updates for existing docs)
+                return false;
+              });
+              if (filteredValues.length > 0) {
+                setDocumentsDeduped(filteredValues);
+              } else {
+                logger.debug(`Subscription: updated document ${documentUpdateEvent.ObjectKey} outside active date range, skipping`);
+              }
             }
           } catch (error) {
             logger.error('Error fetching document details after update:', error);
-            // Fallback to subscription data if fetch fails
-            setDocumentsDeduped([documentUpdateEvent]);
+            // Fallback to subscription data if fetch fails - still apply range filter
+            if (isDocumentInActiveRange(documentUpdateEvent)) {
+              setDocumentsDeduped([documentUpdateEvent]);
+            }
           }
         }
       },
