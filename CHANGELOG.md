@@ -5,6 +5,15 @@ SPDX-License-Identifier: MIT-0
 
 ## [Unreleased]
 
+### Added
+
+- **Custom Date Range Selector for Document List and Test Executions** - [GitHub Issue #177](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues/177)
+  - Added "Custom range..." option to the time period dropdown in both Document List and Test Studio → Test Results
+  - Users can now select absolute start/end dates to query historical documents beyond the previous 30-day limit
+  - **Scalable Server-Side Architecture**: Custom date ranges use a new `listDocumentsByDateRange` Lambda resolver that iterates shards server-side and batch-fetches documents, avoiding the client-side fan-out scalability issue
+  - **Existing Behavior Preserved**: Relative period presets (2h through 30d) continue using the proven client-side shard mechanism — zero changes to existing code paths
+  - **365-Day Maximum**: Date range capped at 365 days in the UI to prevent unbounded queries
+
 ### Fixed
 
 - **Code Intelligence Agent - DeepWiki MCP Transport Migration**
