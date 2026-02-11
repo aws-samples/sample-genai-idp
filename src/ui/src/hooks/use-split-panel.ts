@@ -2,16 +2,23 @@
 // SPDX-License-Identifier: Apache-2.0
 import { useEffect, useState } from 'react';
 
-const useSplitPanel = (selectedItems) => {
+interface SplitPanelReturn {
+  splitPanelOpen: boolean;
+  onSplitPanelToggle: (event: { detail: { open: boolean } }) => void;
+  splitPanelSize: number;
+  onSplitPanelResize: (event: { detail: { size: number } }) => void;
+}
+
+const useSplitPanel = (selectedItems: unknown[]): SplitPanelReturn => {
   const [splitPanelSize, setSplitPanelSize] = useState(300);
   const [splitPanelOpen, setSplitPanelOpen] = useState(false);
   const [hasManuallyClosedOnce, setHasManuallyClosedOnce] = useState(false);
 
-  const onSplitPanelResize = ({ detail: { size } }) => {
+  const onSplitPanelResize = ({ detail: { size } }: { detail: { size: number } }) => {
     setSplitPanelSize(size);
   };
 
-  const onSplitPanelToggle = ({ detail: { open } }) => {
+  const onSplitPanelToggle = ({ detail: { open } }: { detail: { open: boolean } }) => {
     setSplitPanelOpen(open);
 
     if (!open) {

@@ -10,10 +10,14 @@ const DEFAULT_CREDS_REFRESH_INTERVAL_IN_MS = 60 * 15 * 1000;
 
 const logger = new ConsoleLogger('useCurrentSessionCreds');
 
-const useCurrentSessionCreds = ({ credsIntervalInMs = DEFAULT_CREDS_REFRESH_INTERVAL_IN_MS }) => {
+const useCurrentSessionCreds = ({
+  credsIntervalInMs = DEFAULT_CREDS_REFRESH_INTERVAL_IN_MS,
+}: {
+  credsIntervalInMs?: number;
+}): { currentSession: unknown; currentCredentials: unknown } => {
   const { authStatus } = useAuthenticator((context) => [context.authStatus]);
-  const [currentSession, setCurrentSession] = useState();
-  const [currentCredentials, setCurrentCredentials] = useState();
+  const [currentSession, setCurrentSession] = useState<unknown>();
+  const [currentCredentials, setCurrentCredentials] = useState<unknown>();
   let interval;
 
   const refreshCredentials = async () => {
@@ -48,8 +52,8 @@ const useCurrentSessionCreds = ({ credsIntervalInMs = DEFAULT_CREDS_REFRESH_INTE
     }
     if (authStatus === 'unauthenticated') {
       clearRefreshInterval();
-      setCurrentSession();
-      setCurrentCredentials();
+      setCurrentSession(undefined);
+      setCurrentCredentials(undefined);
     }
 
     return () => {

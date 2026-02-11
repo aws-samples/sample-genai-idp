@@ -4,11 +4,12 @@ import { useEffect, useState } from 'react';
 import { ConsoleLogger } from 'aws-amplify/utils';
 
 import useAppContext from '../contexts/app';
+import { Notification } from '../types/common';
 
 const logger = new ConsoleLogger('useNotifications');
 
 const dismissedInitialNotificationsStorageKey = 'dismissedInitialNotifications';
-const initialNotifications = [
+const initialNotifications: Omit<Notification, 'onDismiss'>[] = [
   {
     type: 'info',
     content: 'Welcome to GenAI IDP (GenAIIDP)',
@@ -18,16 +19,16 @@ const initialNotifications = [
   },
 ];
 
-const useNotifications = () => {
-  const { errorMessage, setErrorMessage } = useAppContext();
+const useNotifications = (): Notification[] => {
+  const { errorMessage, setErrorMessage } = useAppContext()!;
 
-  const [notifications, setNotifications] = useState([]);
+  const [notifications, setNotifications] = useState<Notification[]>([]);
 
   useEffect(() => {
     // sets initial notifications and persists state of dismissed notifications in local storage
 
     const getDissmissedNotificationIdsFromStorage = () => {
-      let dismissedInitialNotificationIds = [];
+      let dismissedInitialNotificationIds: string[] = [];
       try {
         const dismissedStored = JSON.parse(localStorage.getItem(dismissedInitialNotificationsStorageKey) || '[]');
         if (!Array.isArray(dismissedStored)) {
@@ -44,7 +45,7 @@ const useNotifications = () => {
     };
 
     const dismissedInitialNotificationIds = getDissmissedNotificationIdsFromStorage();
-    const initialNotificationsNotDismissed = initialNotifications.filter((n) => !dismissedInitialNotificationIds.includes(n.id));
+    const initialNotificationsNotDismissed = initialNotifications.filter((n) => !dismissedInitialNotificationIds.includes(String(n.id)));
 
     const notificationIds = notifications.map((n) => n.id);
     // prettier-ignore
@@ -82,18 +83,18 @@ const useNotifications = () => {
 
     // limit the number of same error
     const sameErrorMessage = notifications.filter((i) => i.content === errorMessage);
-    if (sameErrorMessage.lenth > maxSameError) {
+    if (sameErrorMessage.length > maxSameError) {
       return;
     }
     // limit the number of errors within a time range
-    const sameErrorInMs = sameErrorMessage.filter((i) => id - i.id > maxSameErrorInMs);
+    const sameErrorInMs = sameErrorMessage.filter((i) => id - (i.id as number) > maxSameErrorInMs);
     if (sameErrorInMs.length) {
       return;
     }
 
     logger.debug('setting error notification', errorMessage);
 
-    const errorNotification = {
+    const errorNotification: Notification = {
       type: 'error',
       content: errorMessage,
       dismissible: true,

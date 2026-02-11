@@ -1,22 +1,22 @@
 import { TYPE_COLORS } from '../../../constants/schemaConstants';
 
-const typeColorCache = new Map();
+const typeColorCache = new Map<string, string>();
 
-export const getTypeColor = (type) => {
+export const getTypeColor = (type: string): string => {
   if (typeColorCache.has(type)) {
-    return typeColorCache.get(type);
+    return typeColorCache.get(type)!;
   }
-  const color = TYPE_COLORS[type] || 'grey';
+  const color = TYPE_COLORS[type as keyof typeof TYPE_COLORS] || 'grey';
   typeColorCache.set(type, color);
   return color;
 };
 
-export const sanitizeAttribute = (attr) => {
+export const sanitizeAttribute = (attr: unknown): unknown => {
   if (!attr || typeof attr !== 'object') {
     return attr;
   }
 
-  const cleaned = { ...attr };
+  const cleaned: Record<string, unknown> = { ...(attr as Record<string, unknown>) };
   delete cleaned.id;
   delete cleaned.name;
 
@@ -25,8 +25,8 @@ export const sanitizeAttribute = (attr) => {
   }
 
   if (cleaned.properties) {
-    const cleanedProperties = {};
-    Object.entries(cleaned.properties).forEach(([key, value]) => {
+    const cleanedProperties: Record<string, unknown> = {};
+    Object.entries(cleaned.properties as Record<string, unknown>).forEach(([key, value]) => {
       cleanedProperties[key] = sanitizeAttribute(value);
     });
     cleaned.properties = cleanedProperties;
@@ -35,11 +35,11 @@ export const sanitizeAttribute = (attr) => {
   return cleaned;
 };
 
-export const generateUniqueId = (prefix = 'item') => {
+export const generateUniqueId = (prefix = 'item'): string => {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 };
 
-export const isValidJSON = (str) => {
+export const isValidJSON = (str: string): boolean => {
   try {
     JSON.parse(str);
     return true;
@@ -48,7 +48,7 @@ export const isValidJSON = (str) => {
   }
 };
 
-export const safeParseJSON = (str, fallback = null) => {
+export const safeParseJSON = (str: string, fallback: unknown = null): unknown => {
   try {
     return JSON.parse(str);
   } catch {
@@ -56,11 +56,20 @@ export const safeParseJSON = (str, fallback = null) => {
   }
 };
 
-export const buildJSONSchema = (classObj, allClasses = []) => {
-  const defs = {};
+interface SchemaClassObj {
+  name: string;
+  description?: string;
+  attributes: {
+    properties?: Record<string, unknown>;
+    required?: string[];
+  };
+}
+
+export const buildJSONSchema = (classObj: SchemaClassObj, allClasses: SchemaClassObj[] = []): Record<string, unknown> => {
+  const defs: Record<string, unknown> = {};
 
   allClasses.forEach((cls) => {
-    const sanitizedProperties = {};
+    const sanitizedProperties: Record<string, unknown> = {};
     Object.entries(cls.attributes?.properties || {}).forEach(([key, value]) => {
       sanitizedProperties[key] = sanitizeAttribute(value);
     });
@@ -73,7 +82,7 @@ export const buildJSONSchema = (classObj, allClasses = []) => {
     };
   });
 
-  const sanitizedProperties = {};
+  const sanitizedProperties: Record<string, unknown> = {};
   Object.entries(classObj.attributes?.properties || {}).forEach(([key, value]) => {
     sanitizedProperties[key] = sanitizeAttribute(value);
   });
@@ -89,13 +98,13 @@ export const buildJSONSchema = (classObj, allClasses = []) => {
   };
 };
 
-export const formatValueForInput = (value) => {
+export const formatValueForInput = (value: unknown): string => {
   if (value === undefined || value === null) return '';
   if (typeof value === 'object') return JSON.stringify(value);
   return String(value);
 };
 
-export const parseInputValue = (input, originalType = 'string') => {
+export const parseInputValue = (input: string, originalType = 'string'): unknown => {
   if (!input || !input.trim()) return undefined;
 
   if (originalType === 'object' || originalType === 'array') {

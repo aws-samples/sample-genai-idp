@@ -9,14 +9,14 @@ import awsExports from '../aws-exports';
 
 const PARAMETER_NAME = import.meta.env.VITE_SETTINGS_PARAMETER;
 
-const useParameterStore = (creds) => {
+const useParameterStore = (creds: unknown): Record<string, unknown> => {
   const [settings, setSettings] = useState({});
 
-  const refreshSettings = async (credentials) => {
+  const refreshSettings = async (credentials: any) => {
     let idpSettings = {};
 
     if (credentials) {
-      const ssmClient = new SSMClient({ credentials, region: awsExports.aws_project_region });
+      const ssmClient = new SSMClient({ credentials, region: awsExports.aws_project_region as string });
       const getParameterCmd = new GetParameterCommand({ Name: PARAMETER_NAME });
       const response = await ssmClient.send(getParameterCmd);
       if (response.Parameter?.Value) {

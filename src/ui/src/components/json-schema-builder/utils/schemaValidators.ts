@@ -1,5 +1,36 @@
-export const validateStringConstraints = (attribute) => {
-  const errors = [];
+export interface SchemaValidationError {
+  field: string;
+  message: string;
+}
+
+interface SchemaAttribute {
+  type?: string;
+  $ref?: string;
+  oneOf?: unknown[];
+  anyOf?: unknown[];
+  allOf?: unknown[];
+  minLength?: number;
+  maxLength?: number;
+  minimum?: number;
+  maximum?: number;
+  exclusiveMinimum?: number;
+  exclusiveMaximum?: number;
+  multipleOf?: number;
+  minItems?: number;
+  maxItems?: number;
+  minContains?: number;
+  maxContains?: number;
+  minProperties?: number;
+  maxProperties?: number;
+  const?: unknown;
+  enum?: unknown[];
+  readOnly?: boolean;
+  writeOnly?: boolean;
+  [key: string]: unknown;
+}
+
+export const validateStringConstraints = (attribute: SchemaAttribute): SchemaValidationError[] => {
+  const errors: SchemaValidationError[] = [];
 
   if (attribute.minLength !== undefined && attribute.maxLength !== undefined) {
     if (attribute.minLength > attribute.maxLength) {
@@ -18,8 +49,8 @@ export const validateStringConstraints = (attribute) => {
   return errors;
 };
 
-export const validateNumberConstraints = (attribute) => {
-  const errors = [];
+export const validateNumberConstraints = (attribute: SchemaAttribute): SchemaValidationError[] => {
+  const errors: SchemaValidationError[] = [];
 
   if (attribute.minimum !== undefined && attribute.exclusiveMinimum !== undefined) {
     errors.push({ field: 'minimum', message: 'Cannot have both minimum and exclusiveMinimum' });
@@ -43,8 +74,8 @@ export const validateNumberConstraints = (attribute) => {
   return errors;
 };
 
-export const validateArrayConstraints = (attribute) => {
-  const errors = [];
+export const validateArrayConstraints = (attribute: SchemaAttribute): SchemaValidationError[] => {
+  const errors: SchemaValidationError[] = [];
 
   if (attribute.minItems !== undefined && attribute.maxItems !== undefined) {
     if (attribute.minItems > attribute.maxItems) {
@@ -69,8 +100,8 @@ export const validateArrayConstraints = (attribute) => {
   return errors;
 };
 
-export const validateObjectConstraints = (attribute) => {
-  const errors = [];
+export const validateObjectConstraints = (attribute: SchemaAttribute): SchemaValidationError[] => {
+  const errors: SchemaValidationError[] = [];
 
   if (attribute.minProperties !== undefined && attribute.maxProperties !== undefined) {
     if (attribute.minProperties > attribute.maxProperties) {
@@ -89,8 +120,8 @@ export const validateObjectConstraints = (attribute) => {
   return errors;
 };
 
-export const validateValueConstraints = (attribute) => {
-  const errors = [];
+export const validateValueConstraints = (attribute: SchemaAttribute): SchemaValidationError[] => {
+  const errors: SchemaValidationError[] = [];
 
   if (attribute.const !== undefined && attribute.enum !== undefined) {
     errors.push({ field: 'const', message: 'Cannot have both const and enum' });
@@ -99,8 +130,8 @@ export const validateValueConstraints = (attribute) => {
   return errors;
 };
 
-export const validateMetadata = (attribute) => {
-  const errors = [];
+export const validateMetadata = (attribute: SchemaAttribute): SchemaValidationError[] => {
+  const errors: SchemaValidationError[] = [];
 
   if (attribute.readOnly && attribute.writeOnly) {
     errors.push({ field: 'readOnly', message: 'Cannot be both readOnly and writeOnly' });
@@ -109,35 +140,36 @@ export const validateMetadata = (attribute) => {
   return errors;
 };
 
-export const validateAttribute = (attribute) => {
+export const validateAttribute = (attribute: unknown): { valid: boolean; errors: SchemaValidationError[] } => {
   if (!attribute || typeof attribute !== 'object') {
     return { valid: false, errors: [{ field: 'attribute', message: 'Attribute must be an object' }] };
   }
 
-  const allErrors = [];
+  const attr = attribute as SchemaAttribute;
+  const allErrors: SchemaValidationError[] = [];
 
-  if (!attribute.type && !attribute.$ref && !attribute.oneOf && !attribute.anyOf && !attribute.allOf) {
+  if (!attr.type && !attr.$ref && !attr.oneOf && !attr.anyOf && !attr.allOf) {
     allErrors.push({ field: 'type', message: 'Attribute must have a type, $ref, or composition keyword' });
   }
 
-  if (attribute.type === 'string') {
-    allErrors.push(...validateStringConstraints(attribute));
+  if (attr.type === 'string') {
+    allErrors.push(...validateStringConstraints(attr));
   }
 
-  if (attribute.type === 'number' || attribute.type === 'integer') {
-    allErrors.push(...validateNumberConstraints(attribute));
+  if (attr.type === 'number' || attr.type === 'integer') {
+    allErrors.push(...validateNumberConstraints(attr));
   }
 
-  if (attribute.type === 'array') {
-    allErrors.push(...validateArrayConstraints(attribute));
+  if (attr.type === 'array') {
+    allErrors.push(...validateArrayConstraints(attr));
   }
 
-  if (attribute.type === 'object') {
-    allErrors.push(...validateObjectConstraints(attribute));
+  if (attr.type === 'object') {
+    allErrors.push(...validateObjectConstraints(attr));
   }
 
-  allErrors.push(...validateValueConstraints(attribute));
-  allErrors.push(...validateMetadata(attribute));
+  allErrors.push(...validateValueConstraints(attr));
+  allErrors.push(...validateMetadata(attr));
 
   return {
     valid: allErrors.length === 0,

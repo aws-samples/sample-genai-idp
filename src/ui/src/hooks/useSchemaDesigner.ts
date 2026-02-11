@@ -8,8 +8,59 @@ import {
   X_AWS_IDP_PAGE_CONTENT_REGEX,
 } from '../constants/schemaConstants';
 
-const extractInlineObjectsToClasses = (properties, extractedClasses, timestamp) => {
-  const updatedProperties = {};
+interface SchemaClass {
+  id: string;
+  name: string;
+  description?: string;
+  attributes: {
+    type: string;
+    properties: Record<string, any>;
+    required: string[];
+  };
+  [key: string]: any;
+}
+
+interface SchemaAttribute {
+  id: string;
+  name: string;
+  type: string;
+  description: string;
+  properties?: Record<string, any>;
+  required?: string[];
+  items?: Record<string, any>;
+  $ref?: string;
+  [key: string]: any;
+}
+
+interface UseSchemaDesignerReturn {
+  classes: SchemaClass[];
+  selectedClassId: string | null;
+  setSelectedClassId: React.Dispatch<React.SetStateAction<string | null>>;
+  selectedAttributeId: string | null;
+  setSelectedAttributeId: React.Dispatch<React.SetStateAction<string | null>>;
+  isDirty: boolean;
+  addClass: (name: string, description?: string) => SchemaClass;
+  updateClass: (classId: string, updates: Record<string, any>) => void;
+  removeClass: (classId: string) => void;
+  addAttribute: (classId: string, attributeName: string, attributeType: string) => SchemaAttribute;
+  updateAttribute: (classId: string, attributeName: string, updates: Record<string, any>) => void;
+  renameAttribute: (classId: string, oldName: string, newName: string) => boolean;
+  removeAttribute: (classId: string, attributeName: string) => void;
+  reorderAttributes: (classId: string, oldIndex: number, newIndex: number) => void;
+  exportSchema: () => Record<string, any>[] | null;
+  importSchema: (importedClasses: SchemaClass[]) => void;
+  resetDirty: () => void;
+  getSelectedClass: () => SchemaClass | undefined;
+  getSelectedAttribute: () => any;
+  clearAllClasses: () => void;
+}
+
+const extractInlineObjectsToClasses = (
+  properties: Record<string, any>,
+  extractedClasses: Map<string, SchemaClass>,
+  timestamp: number,
+): Record<string, any> => {
+  const updatedProperties: Record<string, any> = {};
 
   Object.entries(properties).forEach(([propName, propSchema]) => {
     // Check if this is an inline object with properties (not a $ref)
@@ -35,7 +86,7 @@ const extractInlineObjectsToClasses = (properties, extractedClasses, timestamp) 
 
       // Replace inline object with $ref
       // Keep type: 'object' for UI purposes, but remove properties and required
-      const { properties: _, required: __, ...otherProps } = propSchema;
+      const { properties: _props, required: _required, ...otherProps } = propSchema;
       updatedProperties[propName] = {
         ...otherProps,
         $ref: `#/$defs/${className}`,
@@ -85,7 +136,7 @@ const extractInlineObjectsToClasses = (properties, extractedClasses, timestamp) 
   return updatedProperties;
 };
 
-const convertJsonSchemaToClasses = (jsonSchema) => {
+const convertJsonSchemaToClasses = (jsonSchema: any): SchemaClass[] => {
   if (!jsonSchema) return [];
 
   // Handle array input
@@ -104,28 +155,28 @@ const convertJsonSchemaToClasses = (jsonSchema) => {
     }
 
     // Handle array of JSON schemas (multi-document-type format)
-    const allClasses = [];
-    const processedDefs = new Map();
-    const extractedClasses = new Map();
+    const allClasses: SchemaClass[] = [];
+    const processedDefs = new Map<string, SchemaClass>();
+    const extractedClasses = new Map<string, SchemaClass>();
     const timestamp = Date.now();
 
     // First pass: collect all document type names
-    const docTypeNames = new Set();
-    jsonSchema.forEach((schema) => {
+    const docTypeNames = new Set<string>();
+    jsonSchema.forEach((schema: any) => {
       const docTypeName = schema.$id || schema[X_AWS_IDP_DOCUMENT_TYPE] || null;
       if (docTypeName) {
         docTypeNames.add(docTypeName);
       }
     });
 
-    jsonSchema.forEach((schema, schemaIndex) => {
+    jsonSchema.forEach((schema: any, schemaIndex: number) => {
       // Extract inline objects to classes before creating document type
       // Handle both standard 'properties' and 'rule_properties' fields
       const schemaProperties = schema.rule_properties || schema.properties || {};
       const extractedProperties = extractInlineObjectsToClasses(schemaProperties, extractedClasses, timestamp);
 
       // Convert root schema to document type class
-      const docTypeClass = {
+      const docTypeClass: SchemaClass = {
         id: `class-${timestamp}-doc-${schemaIndex}`,
         name: schema.$id || schema[X_AWS_IDP_DOCUMENT_TYPE] || `DocumentType${schemaIndex + 1}`,
         description: schema.description,
@@ -145,7 +196,7 @@ const convertJsonSchemaToClasses = (jsonSchema) => {
 
       // Process $defs (non-document-type classes)
       if (schema.$defs) {
-        Object.entries(schema.$defs).forEach(([defName, defSchema]) => {
+        Object.entries(schema.$defs).forEach(([defName, defSchema]: [string, any]) => {
           // Skip if this def is already a document type (prevents duplicates)
           if (docTypeNames.has(defName)) {
             console.log(`Skipping $def "${defName}" because it's already imported as a document type`);
@@ -156,7 +207,7 @@ const convertJsonSchemaToClasses = (jsonSchema) => {
             // Extract inline objects from $def properties
             const extractedDefProperties = extractInlineObjectsToClasses(defSchema.properties || {}, extractedClasses, timestamp);
 
-            const defClass = {
+            const defClass: SchemaClass = {
               id: `class-${timestamp}-def-${defName}`,
               name: defName,
               description: defSchema.description,
@@ -183,8 +234,8 @@ const convertJsonSchemaToClasses = (jsonSchema) => {
   }
 
   // Handle single JSON schema (legacy format)
-  const classes = [];
-  const extractedClasses = new Map();
+  const classes: SchemaClass[] = [];
+  const extractedClasses = new Map<string, SchemaClass>();
   const timestamp = Date.now();
 
   // Extract inline objects from main schema
@@ -193,7 +244,7 @@ const convertJsonSchemaToClasses = (jsonSchema) => {
   const extractedProperties = extractInlineObjectsToClasses(schemaProperties, extractedClasses, timestamp);
 
   const mainClassId = `class-${timestamp}`;
-  const mainClass = {
+  const mainClass: SchemaClass = {
     id: mainClassId,
     name: jsonSchema.$id || 'MainClass',
     description: jsonSchema.description,
@@ -213,7 +264,7 @@ const convertJsonSchemaToClasses = (jsonSchema) => {
 
   if (jsonSchema.$defs) {
     let defIndex = 0;
-    Object.entries(jsonSchema.$defs).forEach(([defName, defSchema]) => {
+    Object.entries(jsonSchema.$defs).forEach(([defName, defSchema]: [string, any]) => {
       defIndex += 1;
 
       // Extract inline objects from $def properties
@@ -239,10 +290,10 @@ const convertJsonSchemaToClasses = (jsonSchema) => {
   return classes;
 };
 
-export const useSchemaDesigner = (initialSchema = [], isRuleSchema = false) => {
-  const [classes, setClasses] = useState([]);
-  const [selectedClassId, setSelectedClassId] = useState(null);
-  const [selectedAttributeId, setSelectedAttributeId] = useState(null);
+export const useSchemaDesigner = (initialSchema: any = [], isRuleSchema: boolean = false): UseSchemaDesignerReturn => {
+  const [classes, setClasses] = useState<SchemaClass[]>([]);
+  const [selectedClassId, setSelectedClassId] = useState<string | null>(null);
+  const [selectedAttributeId, setSelectedAttributeId] = useState<string | null>(null);
   const [isDirty, setIsDirty] = useState(false);
   const [initialized, setInitialized] = useState(false);
 
@@ -257,8 +308,8 @@ export const useSchemaDesigner = (initialSchema = [], isRuleSchema = false) => {
     }
   }, [initialSchema, initialized]);
 
-  const addClass = useCallback((name, description) => {
-    const newClass = {
+  const addClass = useCallback((name: string, description?: string): SchemaClass => {
+    const newClass: SchemaClass = {
       id: `class-${Date.now()}`,
       name,
       ...(description ? { description } : {}),
@@ -274,7 +325,7 @@ export const useSchemaDesigner = (initialSchema = [], isRuleSchema = false) => {
     return newClass;
   }, []);
 
-  const updateClass = useCallback((classId, updates) => {
+  const updateClass = useCallback((classId: string, updates: Record<string, any>) => {
     setClasses((prev) =>
       produce(prev, (draft) => {
         const cls = draft.find((c) => c.id === classId);
@@ -302,7 +353,7 @@ export const useSchemaDesigner = (initialSchema = [], isRuleSchema = false) => {
   }, []);
 
   const removeClass = useCallback(
-    (classId) => {
+    (classId: string) => {
       setClasses((prev) => prev.filter((cls) => cls.id !== classId));
       if (selectedClassId === classId) {
         setSelectedClassId(null);
@@ -312,8 +363,8 @@ export const useSchemaDesigner = (initialSchema = [], isRuleSchema = false) => {
     [selectedClassId],
   );
 
-  const addAttribute = useCallback((classId, attributeName, attributeType) => {
-    const newAttribute = {
+  const addAttribute = useCallback((classId: string, attributeName: string, attributeType: string): SchemaAttribute => {
+    const newAttribute: SchemaAttribute = {
       id: `attr-${Date.now()}`,
       name: attributeName,
       type: attributeType,
@@ -346,7 +397,7 @@ export const useSchemaDesigner = (initialSchema = [], isRuleSchema = false) => {
     return newAttribute;
   }, []);
 
-  const updateAttribute = useCallback((classId, attributeName, updates) => {
+  const updateAttribute = useCallback((classId: string, attributeName: string, updates: Record<string, any>) => {
     setClasses((prev) =>
       produce(prev, (draft) => {
         const cls = draft.find((c) => c.id === classId);
@@ -372,7 +423,7 @@ export const useSchemaDesigner = (initialSchema = [], isRuleSchema = false) => {
   }, []);
 
   const renameAttribute = useCallback(
-    (classId, oldName, newName) => {
+    (classId: string, oldName: string, newName: string): boolean => {
       const trimmedName = newName.trim();
       if (!trimmedName || trimmedName === oldName) {
         return false;
@@ -416,7 +467,7 @@ export const useSchemaDesigner = (initialSchema = [], isRuleSchema = false) => {
   );
 
   const removeAttribute = useCallback(
-    (classId, attributeName) => {
+    (classId: string, attributeName: string) => {
       setClasses((prev) =>
         produce(prev, (draft) => {
           const cls = draft.find((c) => c.id === classId);
@@ -436,7 +487,7 @@ export const useSchemaDesigner = (initialSchema = [], isRuleSchema = false) => {
     [selectedAttributeId],
   );
 
-  const reorderAttributes = useCallback((classId, oldIndex, newIndex) => {
+  const reorderAttributes = useCallback((classId: string, oldIndex: number, newIndex: number) => {
     setClasses((prev) =>
       produce(prev, (draft) => {
         const cls = draft.find((c) => c.id === classId);
@@ -451,12 +502,12 @@ export const useSchemaDesigner = (initialSchema = [], isRuleSchema = false) => {
     setIsDirty(true);
   }, []);
 
-  const sanitizeAttributeSchema = useCallback((attribute) => {
+  const sanitizeAttributeSchema = useCallback((attribute: any): any => {
     if (!attribute || typeof attribute !== 'object') {
       return attribute;
     }
 
-    const { id, name, ...rest } = attribute;
+    const { id: _id, name: _name, ...rest } = attribute;
     const sanitized = { ...rest };
 
     // CRITICAL FIX: Remove 'type' when '$ref' is present (invalid JSON Schema)
@@ -472,7 +523,7 @@ export const useSchemaDesigner = (initialSchema = [], isRuleSchema = false) => {
     }
 
     if (sanitized.properties) {
-      const sanitizedProperties = Object.entries(sanitized.properties).reduce((acc, [propName, propValue]) => {
+      const sanitizedProperties = Object.entries(sanitized.properties).reduce((acc: Record<string, any>, [propName, propValue]) => {
         acc[propName] = sanitizeAttributeSchema(propValue);
         return acc;
       }, {});
@@ -484,11 +535,11 @@ export const useSchemaDesigner = (initialSchema = [], isRuleSchema = false) => {
 
   // Helper: Find all classes referenced by a class (recursively)
   const findReferencedClasses = useCallback(
-    (rootClass, visited = new Set()) => {
+    (rootClass: SchemaClass, visited: Set<string> = new Set()): SchemaClass[] => {
       console.log(`  findReferencedClasses for: ${rootClass.name}`);
-      const referenced = [];
+      const referenced: SchemaClass[] = [];
 
-      const processProperties = (properties) => {
+      const processProperties = (properties: Record<string, any>) => {
         Object.entries(properties || {}).forEach(([attrName, attr]) => {
           // Check direct $ref
           if (attr.$ref) {
@@ -555,7 +606,7 @@ export const useSchemaDesigner = (initialSchema = [], isRuleSchema = false) => {
     [classes],
   );
 
-  const exportSchema = useCallback(() => {
+  const exportSchema = useCallback((): Record<string, any>[] | null => {
     if (classes.length === 0) {
       return null;
     }
@@ -593,10 +644,10 @@ export const useSchemaDesigner = (initialSchema = [], isRuleSchema = false) => {
       );
 
       // Build $defs only for referenced classes
-      const defs = {};
+      const defs: Record<string, any> = {};
       referencedClasses.forEach((cls) => {
         console.log(`Adding to $defs: ${cls.name}`);
-        const sanitizedProps = Object.entries(cls.attributes.properties || {}).reduce((acc, [attrName, attrValue]) => {
+        const sanitizedProps = Object.entries(cls.attributes.properties || {}).reduce((acc: Record<string, any>, [attrName, attrValue]) => {
           acc[attrName] = sanitizeAttributeSchema(attrValue);
           return acc;
         }, {});
@@ -613,23 +664,26 @@ export const useSchemaDesigner = (initialSchema = [], isRuleSchema = false) => {
       console.log('$defs will be added?', Object.keys(defs).length > 0);
 
       // Build main schema properties
-      const sanitizedProps = Object.entries(docTypeClass.attributes.properties || {}).reduce((acc, [attrName, attrValue]) => {
-        // Check if this attribute has a $ref
-        if (attrValue.$ref) {
-          console.log(`Property "${attrName}" has $ref: ${attrValue.$ref}`);
-        }
-        if (attrValue.items?.$ref) {
-          console.log(`Property "${attrName}" array items has $ref: ${attrValue.items.$ref}`);
-        }
-        acc[attrName] = sanitizeAttributeSchema(attrValue);
-        return acc;
-      }, {});
+      const sanitizedProps = Object.entries(docTypeClass.attributes.properties || {}).reduce(
+        (acc: Record<string, any>, [attrName, attrValue]) => {
+          // Check if this attribute has a $ref
+          if (attrValue.$ref) {
+            console.log(`Property "${attrName}" has $ref: ${attrValue.$ref}`);
+          }
+          if (attrValue.items?.$ref) {
+            console.log(`Property "${attrName}" array items has $ref: ${attrValue.items.$ref}`);
+          }
+          acc[attrName] = sanitizeAttributeSchema(attrValue);
+          return acc;
+        },
+        {},
+      );
 
       // Use conditional field names based on schema type
       const typeField = isRuleSchema ? X_AWS_IDP_RULE_TYPE : X_AWS_IDP_DOCUMENT_TYPE;
       const propertiesField = isRuleSchema ? 'rule_properties' : 'properties';
 
-      const result = {
+      const result: Record<string, any> = {
         $schema: 'https://json-schema.org/draft/2020-12/schema',
         $id: docTypeClass.name,
         [typeField]: docTypeClass.name,
@@ -659,7 +713,7 @@ export const useSchemaDesigner = (initialSchema = [], isRuleSchema = false) => {
     return schemas;
   }, [classes, sanitizeAttributeSchema, findReferencedClasses, isRuleSchema]);
 
-  const importSchema = useCallback((importedClasses) => {
+  const importSchema = useCallback((importedClasses: SchemaClass[]) => {
     setClasses(importedClasses);
     setSelectedClassId(importedClasses.length > 0 ? importedClasses[0].id : null);
     setSelectedAttributeId(null);
@@ -670,7 +724,7 @@ export const useSchemaDesigner = (initialSchema = [], isRuleSchema = false) => {
     setIsDirty(false);
   }, []);
 
-  const getSelectedClass = useCallback(() => {
+  const getSelectedClass = useCallback((): SchemaClass | undefined => {
     return classes.find((cls) => cls.id === selectedClassId);
   }, [classes, selectedClassId]);
 

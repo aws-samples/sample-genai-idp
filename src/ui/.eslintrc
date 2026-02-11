@@ -1,9 +1,0 @@
-{
-  "extends": [
-    "react-app",
-    "react-app/jest"
-  ],
-  "rules": {
-    "import/no-extraneous-dependencies": "off"
-  }
-}

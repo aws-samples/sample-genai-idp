@@ -17,4 +17,6 @@ export const CONFIG_TYPE_DEFAULT = 'Default';
 export const CONFIG_TYPE_CUSTOM = 'Custom';
 
 // All valid configuration types
-export const VALID_CONFIG_TYPES = [CONFIG_TYPE_SCHEMA, CONFIG_TYPE_DEFAULT, CONFIG_TYPE_CUSTOM];
+export const VALID_CONFIG_TYPES = [CONFIG_TYPE_SCHEMA, CONFIG_TYPE_DEFAULT, CONFIG_TYPE_CUSTOM] as const;
+
+export type ConfigType = (typeof VALID_CONFIG_TYPES)[number];

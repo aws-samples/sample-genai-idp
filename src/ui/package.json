@@ -72,11 +72,6 @@
     "lint": "eslint \"src/**/*.{js,jsx,ts,tsx}\"",
     "typecheck": "tsc --noEmit"
   },
-  "eslintConfig": {
-    "extends": [
-      "prettier"
-    ]
-  },
   "browserslist": {
     "production": [
       ">0.2%",

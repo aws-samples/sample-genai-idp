@@ -15,23 +15,46 @@ import abortWorkflow from '../graphql/queries/abortWorkflow';
 import onCreateDocument from '../graphql/queries/onCreateDocument';
 import onUpdateDocument from '../graphql/queries/onUpdateDocument';
 import { DOCUMENT_LIST_SHARDS_PER_DAY } from '../components/document-list/documents-table-config';
+import { Document } from '../types/documents';
 
 const client = generateClient();
 
 const logger = new ConsoleLogger('useGraphQlApi');
 
-const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2 } = {}) => {
-  const [periodsToLoad, setPeriodsToLoad] = useState(initialPeriodsToLoad);
-  const [isDocumentsListLoading, setIsDocumentsListLoading] = useState(false);
-  const [documents, setDocuments] = useState([]);
-  const [customDateRange, setCustomDateRange] = useState(null); // { startDateTime, endDateTime }
-  const [dateRangeNextToken, setDateRangeNextToken] = useState(null);
-  const { setErrorMessage } = useAppContext();
+interface DateRange {
+  startDateTime: string;
+  endDateTime: string;
+}
 
-  const subscriptionsRef = useRef({ onCreate: null, onUpdate: null });
+interface UseGraphQlApiParams {
+  initialPeriodsToLoad?: number;
+}
+
+interface UseGraphQlApiReturn {
+  documents: Document[];
+  isDocumentsListLoading: boolean;
+  getDocumentDetailsFromIds: (objectKeys: string[]) => Promise<Document[]>;
+  setIsDocumentsListLoading: React.Dispatch<React.SetStateAction<boolean>>;
+  setPeriodsToLoad: React.Dispatch<React.SetStateAction<number>>;
+  periodsToLoad: number;
+  customDateRange: DateRange | null;
+  setCustomDateRange: React.Dispatch<React.SetStateAction<DateRange | null>>;
+  deleteDocuments: (objectKeys: string[]) => Promise<any>;
+  reprocessDocuments: (objectKeys: string[]) => Promise<any>;
+  abortWorkflows: (objectKeys: string[]) => Promise<any>;
+}
+
+const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2 }: UseGraphQlApiParams = {}): UseGraphQlApiReturn => {
+  const [periodsToLoad, setPeriodsToLoad] = useState<number>(initialPeriodsToLoad);
+  const [isDocumentsListLoading, setIsDocumentsListLoading] = useState<boolean>(false);
+  const [documents, setDocuments] = useState<Document[]>([]);
+  const [customDateRange, setCustomDateRange] = useState<DateRange | null>(null); // { startDateTime, endDateTime }
+  const { setErrorMessage } = useAppContext()!;
+
+  const subscriptionsRef = useRef<{ onCreate: any; onUpdate: any }>({ onCreate: null, onUpdate: null });
 
   // Ref to track customDateRange in subscription callbacks (closures capture stale state)
-  const customDateRangeRef = useRef(customDateRange);
+  const customDateRangeRef = useRef<DateRange | null>(customDateRange);
   useEffect(() => {
     customDateRangeRef.current = customDateRange;
   }, [customDateRange]);
@@ -41,7 +64,7 @@ const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2
    * For relative periods (no customDateRange), always returns true.
    * For custom date ranges, checks the document's InitialEventTime or QueuedTime.
    */
-  const isDocumentInActiveRange = useCallback((doc) => {
+  const isDocumentInActiveRange = useCallback((doc: any): boolean => {
     const range = customDateRangeRef.current;
     if (!range) return true; // No custom range = relative period, always accept
 
@@ -51,7 +74,7 @@ const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2
     return docTime >= range.startDateTime && docTime <= range.endDateTime;
   }, []);
 
-  const setDocumentsDeduped = useCallback((documentValues) => {
+  const setDocumentsDeduped = useCallback((documentValues: Document[]): void => {
     logger.debug('setDocumentsDeduped called with:', documentValues);
     setDocuments((currentDocuments) => {
       const documentValuesdocumentIds = documentValues.map((c) => c.ObjectKey);
@@ -69,7 +92,7 @@ const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2
       // Combine and deduplicate by ObjectKey, keeping only the latest entry per ObjectKey
       const allDocuments = [...filteredCurrentDocuments, ...newDocuments];
       const deduplicatedByObjectKey = Object.values(
-        allDocuments.reduce((acc, doc) => {
+        allDocuments.reduce((acc: Record<string, Document>, doc) => {
           const existing = acc[doc.ObjectKey];
           // Keep the document with the most recent CompletionTime or InitialEventTime
           if (!existing) {
@@ -90,17 +113,17 @@ const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2
   }, []);
 
   const getDocumentDetailsFromIds = useCallback(
-    async (objectKeys) => {
+    async (objectKeys: string[]): Promise<Document[]> => {
       // prettier-ignore
       logger.debug('getDocumentDetailsFromIds', objectKeys);
-      const getDocumentPromises = objectKeys.map((objectKey) => client.graphql({ query: getDocument, variables: { objectKey } }));
+      const getDocumentPromises = objectKeys.map((objectKey) => client.graphql({ query: getDocument as any, variables: { objectKey } }));
       const getDocumentResolutions = await Promise.allSettled(getDocumentPromises);
 
       // Separate rejected promises from null/undefined results
       const getDocumentRejected = getDocumentResolutions.filter((r) => r.status === 'rejected');
       const fulfilledResults = getDocumentResolutions.filter((r) => r.status === 'fulfilled');
       const getDocumentNull = fulfilledResults
-        .map((r, idx) => ({ doc: r.value?.data?.getDocument, key: objectKeys[idx] }))
+        .map((r, idx) => ({ doc: (r as any).value?.data?.getDocument, key: objectKeys[idx] }))
         .filter((item) => !item.doc)
         .map((item) => item.key);
 
@@ -117,8 +140,8 @@ const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2
       // Filter out null/undefined documents to prevent downstream errors
       const documentValues = getDocumentResolutions
         .filter((r) => r.status === 'fulfilled')
-        .map((r) => r.value?.data?.getDocument)
-        .filter((doc) => doc != null);
+        .map((r) => (r as any).value?.data?.getDocument)
+        .filter((doc: any) => doc != null);
 
       logger.debug(`Successfully loaded ${documentValues.length} of ${objectKeys.length} requested documents`);
       return documentValues;
@@ -133,8 +156,8 @@ const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2
     }
 
     logger.debug('onCreateDocument subscription');
-    const subscription = client.graphql({ query: onCreateDocument }).subscribe({
-      next: async (subscriptionData) => {
+    const subscription = (client.graphql({ query: onCreateDocument as any }) as any).subscribe({
+      next: async (subscriptionData: any) => {
         logger.debug('document list subscription update', subscriptionData);
         const data = subscriptionData?.data;
         const objectKey = data?.onCreateDocument?.ObjectKey || '';
@@ -155,7 +178,7 @@ const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2
           }
         }
       },
-      error: (error) => {
+      error: (error: any) => {
         logger.error('onCreateDocument subscription error:', error);
         setErrorMessage('document list network subscription failed - please reload the page');
       },
@@ -179,8 +202,8 @@ const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2
     }
 
     logger.debug('onUpdateDocument subscription setup');
-    const subscription = client.graphql({ query: onUpdateDocument }).subscribe({
-      next: async (subscriptionData) => {
+    const subscription = (client.graphql({ query: onUpdateDocument as any }) as any).subscribe({
+      next: async (subscriptionData: any) => {
         logger.debug('document update subscription received', subscriptionData);
         const data = subscriptionData?.data;
         const documentUpdateEvent = data?.onUpdateDocument;
@@ -211,7 +234,7 @@ const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2
           }
         }
       },
-      error: (error) => {
+      error: (error: any) => {
         logger.error('onUpdateDocument subscription error:', error);
         setErrorMessage('document update network request failed - please reload the page');
       },
@@ -228,10 +251,10 @@ const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2
     };
   }, [setDocumentsDeduped, setErrorMessage, getDocumentDetailsFromIds]);
 
-  const listDocumentIdsByDateShards = async ({ date, shards }) => {
+  const listDocumentIdsByDateShards = async ({ date, shards }: { date: string; shards: number[] }): Promise<any[]> => {
     const listDocumentsDateShardPromises = shards.map((i) => {
       logger.debug('sending list document date shard', date, i);
-      return client.graphql({ query: listDocumentsDateShard, variables: { date, shard: i } });
+      return client.graphql({ query: listDocumentsDateShard as any, variables: { date, shard: i } });
     });
     const listDocumentsDateShardResolutions = await Promise.allSettled(listDocumentsDateShardPromises);
 
@@ -242,16 +265,16 @@ const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2
     }
     const documentData = listDocumentsDateShardResolutions
       .filter((r) => r.status === 'fulfilled')
-      .map((r) => r.value?.data?.listDocumentsDateShard?.Documents || [])
-      .reduce((pv, cv) => [...cv, ...pv], []);
+      .map((r) => (r as any).value?.data?.listDocumentsDateShard?.Documents || [])
+      .reduce((pv: any[], cv: any[]) => [...cv, ...pv], []);
 
     return documentData;
   };
 
-  const listDocumentIdsByDateHours = async ({ date, hours }) => {
+  const listDocumentIdsByDateHours = async ({ date, hours }: { date: string; hours: number[] }): Promise<any[]> => {
     const listDocumentsDateHourPromises = hours.map((i) => {
       logger.debug('sending list document date hour', date, i);
-      return client.graphql({ query: listDocumentsDateHour, variables: { date, hour: i } });
+      return client.graphql({ query: listDocumentsDateHour as any, variables: { date, hour: i } });
     });
     const listDocumentsDateHourResolutions = await Promise.allSettled(listDocumentsDateHourPromises);
 
@@ -263,23 +286,23 @@ const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2
 
     const documentData = listDocumentsDateHourResolutions
       .filter((r) => r.status === 'fulfilled')
-      .map((r) => r.value?.data?.listDocumentsDateHour?.Documents || [])
-      .reduce((pv, cv) => [...cv, ...pv], []);
+      .map((r) => (r as any).value?.data?.listDocumentsDateHour?.Documents || [])
+      .reduce((pv: any[], cv: any[]) => [...cv, ...pv], []);
 
     return documentData;
   };
 
-  const sendSetDocumentsForDateRange = async (dateRange, nextToken = null) => {
+  const sendSetDocumentsForDateRange = async (dateRange: DateRange, nextToken: string | null = null): Promise<void> => {
     // Server-side paginated query for custom date ranges
     try {
       logger.info('Fetching documents by date range', dateRange);
-      const allDocuments = [];
+      const allDocuments: any[] = [];
       let currentToken = nextToken;
 
       // Fetch all pages (server-side pagination)
       do {
         const response = await client.graphql({
-          query: listDocumentsByDateRangeQuery,
+          query: listDocumentsByDateRangeQuery as any,
           variables: {
             startDateTime: dateRange.startDateTime,
             endDateTime: dateRange.endDateTime,
@@ -288,7 +311,7 @@ const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2
           },
         });
 
-        const result = response?.data?.listDocumentsByDateRange;
+        const result = (response as any)?.data?.listDocumentsByDateRange;
         if (result?.Documents) {
           allDocuments.push(...result.Documents);
         }
@@ -299,7 +322,7 @@ const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2
       logger.info(`Total documents fetched for date range: ${allDocuments.length}`);
 
       // Transform to match existing document format expected by the UI
-      const documentValues = allDocuments.map((doc) => ({
+      const documentValues = allDocuments.map((doc: any) => ({
         ...doc,
         ListPK: doc.ListPK || doc.PK,
         ListSK: doc.ListSK || doc.SK,
@@ -314,7 +337,7 @@ const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2
     }
   };
 
-  const sendSetDocumentsForPeriod = async () => {
+  const sendSetDocumentsForPeriod = async (): Promise<void> => {
     // XXX this logic should be moved to the API
     try {
       const now = new Date();
@@ -323,19 +346,19 @@ const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2
       // e.g. 2 periods to on load 2021-01-01T:20:00:00.000Z ->
       // [ [ '2021-01-01', 3 ], [ '2021-01-01', 4 ] ]
       const hoursInShard = 24 / DOCUMENT_LIST_SHARDS_PER_DAY;
-      const dateShardPairs = [...Array(parseInt(periodsToLoad, 10)).keys()].map((p) => {
+      const dateShardPairs = [...Array(Math.floor(periodsToLoad)).keys()].map((p) => {
         const deltaInHours = p * hoursInShard;
-        const relativeDate = new Date(now - deltaInHours * 3600 * 1000);
+        const relativeDate = new Date(now.getTime() - deltaInHours * 3600 * 1000);
 
         const relativeDateString = relativeDate.toISOString().split('T')[0];
         const shard = Math.floor(relativeDate.getUTCHours() / hoursInShard);
 
-        return [relativeDateString, shard];
+        return [relativeDateString, shard] as [string, number];
       });
 
       // reduce array of date/shard pairs into object of shards by date
       // e.g. [ [ '2021-01-01', 3 ], [ '2021-01-01', 4 ] ] -> { '2021-01-01': [ 3, 4 ] }
-      const dateShards = dateShardPairs.reduce((p, c) => ({ ...p, [c[0]]: [...(p[c[0]] || []), c[1]] }), {});
+      const dateShards = dateShardPairs.reduce((p: Record<string, number[]>, c) => ({ ...p, [c[0]]: [...(p[c[0]] || []), c[1]] }), {});
       logger.debug('document list date shards', dateShards);
 
       // parallelizes listDocuments and getDocumentDetails
@@ -351,10 +374,10 @@ const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2
       let residualHours;
       if (periodsToLoad < 1) {
         baseDate = new Date(now);
-        const numHours = parseInt(periodsToLoad * hoursInShard, 10);
+        const numHours = Math.floor(periodsToLoad * hoursInShard);
         residualHours = [...Array(numHours).keys()].map((h) => (((baseDate.getUTCHours() - h) % 24) + 24) % 24);
       } else {
-        baseDate = new Date(now - periodsToLoad * hoursInShard * 3600 * 1000);
+        baseDate = new Date(now.getTime() - periodsToLoad * hoursInShard * 3600 * 1000);
         const residualBaseHour = baseDate.getUTCHours() % hoursInShard;
         residualHours = [...Array(hoursInShard - residualBaseHour).keys()].map((h) => (baseDate.getUTCHours() + h) % 24);
       }
@@ -368,14 +391,14 @@ const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2
       const documentDataPromises = [...documentDataDateShardPromises, documentDataDateHourPromise];
       const documentDetailsPromises = documentDataPromises.map(async (documentDataPromise) => {
         const documentData = await documentDataPromise;
-        const objectKeys = documentData.map((item) => item.ObjectKey);
+        const objectKeys = documentData.map((item: any) => item.ObjectKey);
         const documentDetails = await getDocumentDetailsFromIds(objectKeys);
 
         // Log orphaned list entries with full PK/SK details for debugging
         const retrievedKeys = new Set(documentDetails.map((d) => d.ObjectKey));
-        const missingDocs = documentData.filter((item) => !retrievedKeys.has(item.ObjectKey));
+        const missingDocs = documentData.filter((item: any) => !retrievedKeys.has(item.ObjectKey));
         if (missingDocs.length > 0) {
-          missingDocs.forEach((item) => {
+          missingDocs.forEach((item: any) => {
             logger.warn(`Orphaned list entry detected:`);
             logger.warn(`  - List entry: PK="${item.PK}", SK="${item.SK}"`);
             logger.warn(`  - Expected doc entry: PK="doc#${item.ObjectKey}", SK="none"`);
@@ -387,7 +410,7 @@ const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2
         return documentDetails
           .filter((detail) => detail != null)
           .map((detail) => {
-            const matchingData = documentData.find((item) => item.ObjectKey === detail.ObjectKey);
+            const matchingData = documentData.find((item: any) => item.ObjectKey === detail.ObjectKey);
             return { ...detail, ListPK: matchingData.PK, ListSK: matchingData.SK };
           });
       });
@@ -402,7 +425,7 @@ const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2
       logger.debug('getDocumentsPromiseResolutions', getDocumentsPromiseResolutions);
       const documentValuesReduced = getDocumentsPromiseResolutions
         .filter((r) => r.status === 'fulfilled')
-        .map((r) => r.value)
+        .map((r) => (r as PromiseFulfilledResult<Document[]>).value)
         .reduce((previous, current) => [...previous, ...current], []);
       logger.debug('documentValuesReduced', documentValuesReduced);
       setDocumentsDeduped(documentValuesReduced);
@@ -455,16 +478,16 @@ const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2
     }
   }, [customDateRange]);
 
-  const deleteDocuments = async (objectKeys) => {
+  const deleteDocuments = async (objectKeys: string[]): Promise<any> => {
     try {
       logger.debug('Deleting documents', objectKeys);
-      const result = await client.graphql({ query: deleteDocument, variables: { objectKeys } });
+      const result = await client.graphql({ query: deleteDocument as any, variables: { objectKeys } });
       logger.debug('Delete documents result', result);
 
       // Refresh the document list after deletion
       setIsDocumentsListLoading(true);
 
-      return result.data.deleteDocument;
+      return (result as any).data.deleteDocument;
     } catch (error) {
       setErrorMessage('Failed to delete document(s) - please try again later');
       logger.error('Error deleting documents', error);
@@ -472,14 +495,14 @@ const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2
     }
   };
 
-  const reprocessDocuments = async (objectKeys) => {
+  const reprocessDocuments = async (objectKeys: string[]): Promise<any> => {
     try {
       logger.debug('Reprocessing documents', objectKeys);
-      const result = await client.graphql({ query: reprocessDocument, variables: { objectKeys } });
+      const result = await client.graphql({ query: reprocessDocument as any, variables: { objectKeys } });
       logger.debug('Reprocess documents result', result);
       // Refresh the document list after reprocessing
       setIsDocumentsListLoading(true);
-      return result.data.reprocessDocument;
+      return (result as any).data.reprocessDocument;
     } catch (error) {
       setErrorMessage('Failed to reprocess document(s) - please try again later');
       logger.error('Error reprocessing documents', error);
@@ -487,12 +510,12 @@ const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2
     }
   };
 
-  const abortWorkflows = async (objectKeys) => {
+  const abortWorkflows = async (objectKeys: string[]): Promise<any> => {
     try {
       logger.debug('Aborting workflows for documents', objectKeys);
-      const result = await client.graphql({ query: abortWorkflow, variables: { objectKeys } });
+      const result = await client.graphql({ query: abortWorkflow as any, variables: { objectKeys } });
       logger.debug('Abort workflows result', result);
-      const response = result.data.abortWorkflow;
+      const response = (result as any).data.abortWorkflow;
 
       // Refresh the document list after aborting
       setIsDocumentsListLoading(true);
@@ -505,7 +528,7 @@ const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2
       }
 
       return response;
-    } catch (error) {
+    } catch (error: any) {
       setErrorMessage('Failed to abort workflow(s) - please try again later');
       logger.error('Error aborting workflows', error);
       return { success: false, abortedCount: 0, failedCount: objectKeys.length, errors: [error.message] };

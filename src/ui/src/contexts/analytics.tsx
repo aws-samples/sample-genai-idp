@@ -1,13 +1,17 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: MIT-0
 import React, { createContext, useContext, useState, useCallback, useMemo } from 'react';
-import PropTypes from 'prop-types';
+import type { AnalyticsState, AnalyticsContextValue } from '../types/analytics';
 
-const AnalyticsContext = createContext(null);
+const AnalyticsContext = createContext<AnalyticsContextValue | null>(null);
 
-export const AnalyticsProvider = ({ children }) => {
+interface AnalyticsProviderProps {
+  children: React.ReactNode;
+}
+
+export const AnalyticsProvider = ({ children }: AnalyticsProviderProps): React.JSX.Element => {
   // State for the analytics page
-  const [analyticsState, setAnalyticsState] = useState({
+  const [analyticsState, setAnalyticsState] = useState<AnalyticsState>({
     queryText: '', // The submitted/executed query
     currentInputText: '', // The current text in the input box
     jobId: null,
@@ -20,7 +24,7 @@ export const AnalyticsProvider = ({ children }) => {
   });
 
   // Function to update analytics state
-  const updateAnalyticsState = useCallback((updates) => {
+  const updateAnalyticsState = useCallback((updates: Partial<AnalyticsState>) => {
     setAnalyticsState((prevState) => ({
       ...prevState,
       ...updates,
@@ -69,11 +73,7 @@ export const AnalyticsProvider = ({ children }) => {
   return <AnalyticsContext.Provider value={contextValue}>{children}</AnalyticsContext.Provider>;
 };
 
-AnalyticsProvider.propTypes = {
-  children: PropTypes.node.isRequired,
-};
-
-export const useAnalyticsContext = () => {
+export const useAnalyticsContext = (): AnalyticsContextValue => {
   const context = useContext(AnalyticsContext);
   if (!context) {
     throw new Error('useAnalyticsContext must be used within an AnalyticsProvider');

@@ -5,15 +5,16 @@ import { ConsoleLogger } from 'aws-amplify/utils';
 
 const logger = new ConsoleLogger('useUserAuthState');
 
-const useUserAuthState = () => {
+const useUserAuthState = (): { authState: string; user: any } => {
   const { authStatus, user } = useAuthenticator((context) => [context.authStatus, context.user]);
 
   logger.debug('auth status:', authStatus);
   logger.debug('auth user:', user);
 
-  if (user?.signInUserSession) {
-    const { clientId } = user.pool;
-    const { idToken, accessToken, refreshToken } = user.signInUserSession;
+  const userAny = user as any;
+  if (userAny?.signInUserSession) {
+    const { clientId } = userAny.pool;
+    const { idToken, accessToken, refreshToken } = userAny.signInUserSession;
 
     // prettier-ignore
     localStorage.setItem(`${clientId}idtokenjwt`, idToken.jwtToken);

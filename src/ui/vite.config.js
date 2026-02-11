@@ -66,7 +66,7 @@ export default defineConfig(({ mode }) => ({
       '@': resolve(__dirname, './src'),
     },
     // Ensure proper module resolution
-    extensions: ['.mjs', '.js', '.ts', '.jsx', '.tsx', '.json'],
+    extensions: ['.mjs', '.ts', '.tsx', '.js', '.jsx', '.json'],
   },
 
   // Define global constants

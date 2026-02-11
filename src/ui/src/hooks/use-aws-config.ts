@@ -4,8 +4,8 @@ import { useState, useEffect } from 'react';
 import { Amplify } from 'aws-amplify';
 import awsExports from '../aws-exports';
 
-const useAwsConfig = () => {
-  const [awsConfig, setAwsConfig] = useState();
+const useAwsConfig = (): Record<string, unknown> | undefined => {
+  const [awsConfig, setAwsConfig] = useState<Record<string, unknown>>();
   useEffect(() => {
     Amplify.configure(awsExports);
     setAwsConfig(awsExports);

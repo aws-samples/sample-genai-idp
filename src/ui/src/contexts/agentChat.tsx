@@ -1,14 +1,18 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 import React, { createContext, useContext, useState, useCallback, useMemo } from 'react';
-import PropTypes from 'prop-types';
 import { v4 as uuidv4 } from 'uuid';
+import type { AgentChatState, AgentChatContextValue, ChatMessage } from '../types/agent-chat';
 
-const AgentChatContext = createContext(null);
+const AgentChatContext = createContext<AgentChatContextValue | null>(null);
 
-export const AgentChatProvider = ({ children }) => {
+interface AgentChatProviderProps {
+  children: React.ReactNode;
+}
+
+export const AgentChatProvider = ({ children }: AgentChatProviderProps): React.JSX.Element => {
   // State for the agent chat
-  const [agentChatState, setAgentChatState] = useState({
+  const [agentChatState, setAgentChatState] = useState<AgentChatState>({
     messages: [], // Current chat messages
     sessionId: uuidv4(), // Current session ID
     isLoading: false,
@@ -21,7 +25,7 @@ export const AgentChatProvider = ({ children }) => {
   });
 
   // Function to update agent chat state
-  const updateAgentChatState = useCallback((updates) => {
+  const updateAgentChatState = useCallback((updates: Partial<AgentChatState>) => {
     setAgentChatState((prevState) => ({
       ...prevState,
       ...updates,
@@ -44,7 +48,7 @@ export const AgentChatProvider = ({ children }) => {
   }, []);
 
   // Function to load a specific session
-  const loadAgentChatSession = useCallback((sessionId, messages) => {
+  const loadAgentChatSession = useCallback((sessionId: string, messages: ChatMessage[]) => {
     setAgentChatState((prevState) => ({
       ...prevState,
       messages,
@@ -58,7 +62,7 @@ export const AgentChatProvider = ({ children }) => {
   }, []);
 
   // Function to add a message to the current session
-  const addMessageToSession = useCallback((message) => {
+  const addMessageToSession = useCallback((message: ChatMessage) => {
     setAgentChatState((prevState) => ({
       ...prevState,
       messages: [...prevState.messages, message],
@@ -66,7 +70,7 @@ export const AgentChatProvider = ({ children }) => {
   }, []);
 
   // Function to update messages (for streaming updates)
-  const updateMessages = useCallback((updaterFunction) => {
+  const updateMessages = useCallback((updaterFunction: (messages: ChatMessage[]) => ChatMessage[]) => {
     setAgentChatState((prevState) => ({
       ...prevState,
       messages: updaterFunction(prevState.messages),
@@ -88,11 +92,7 @@ export const AgentChatProvider = ({ children }) => {
   return <AgentChatContext.Provider value={contextValue}>{children}</AgentChatContext.Provider>;
 };
 
-AgentChatProvider.propTypes = {
-  children: PropTypes.node.isRequired,
-};
-
-export const useAgentChatContext = () => {
+export const useAgentChatContext = (): AgentChatContextValue => {
   const context = useContext(AgentChatContext);
   if (!context) {
     throw new Error('useAgentChatContext must be used within an AgentChatProvider');

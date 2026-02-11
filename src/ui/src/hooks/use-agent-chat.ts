@@ -1,9 +1,8 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useRef } from 'react';
 import { generateClient } from 'aws-amplify/api';
 import { ConsoleLogger } from 'aws-amplify/utils';
-import { v4 as uuidv4 } from 'uuid';
 
 import { SEND_AGENT_MESSAGE, ON_AGENT_MESSAGE_UPDATE } from '../graphql/queries/agentChatQueries';
 import { GET_AGENT_CHAT_MESSAGES } from '../graphql/queries/agentChatSessionQueries';
@@ -12,27 +11,51 @@ import { useAgentChatContext } from '../contexts/agentChat';
 const logger = new ConsoleLogger('useAgentChat');
 const client = generateClient();
 
-const useAgentChat = (config = {}) => {
+interface AgentChatConfig {
+  agentType: string;
+  mutation: string;
+  subscription: string;
+  method: string;
+}
+
+interface UseAgentChatReturn {
+  messages: any[];
+  isLoading: boolean;
+  waitingForResponse: boolean;
+  error: string | null;
+  sessionId: string;
+  sendMessage: (prompt: string, options?: { enableCodeIntelligence?: boolean }) => Promise<any>;
+  cancelResponse: () => void;
+  clearError: () => void;
+  clearChat: () => void;
+  loadChatSession: (targetSessionId: string, existingMessages?: any[] | null) => Promise<void>;
+  agentConfig: AgentChatConfig;
+}
+
+const useAgentChat = (config: Partial<AgentChatConfig> = {}): UseAgentChatReturn => {
   // Default configuration for backward compatibility
-  const defaultConfig = {
+  const defaultConfig: AgentChatConfig = {
     agentType: 'idp-help',
     mutation: SEND_AGENT_MESSAGE,
     subscription: ON_AGENT_MESSAGE_UPDATE,
     method: 'chat',
   };
 
-  const agentConfig = { ...defaultConfig, ...config };
+  const agentConfig: AgentChatConfig = { ...defaultConfig, ...config };
 
   // Use context for persistent state
-  const { agentChatState, updateAgentChatState, resetAgentChatState, updateMessages } = useAgentChatContext();
+  const { agentChatState, updateAgentChatState, resetAgentChatState, updateMessages: updateMessagesTyped } = useAgentChatContext();
+  // Cast updateMessages to work with permissive `any[]` message arrays used throughout this hook.
+  // The streaming message objects have many dynamic shapes that don't conform to the strict ChatMessage interface.
+  const updateMessages = updateMessagesTyped as (updater: (messages: any[]) => any[]) => void;
 
   // Extract state from context
   const { messages, isLoading, waitingForResponse, error, sessionId } = agentChatState;
 
-  const sentMessagesRef = useRef(new Set());
+  const sentMessagesRef = useRef(new Set<string>());
 
   // Handle tool execution start messages - creates standalone tool message chronologically
-  const handleToolExecutionStart = (newMessage) => {
+  const handleToolExecutionStart = (newMessage: any): void => {
     const toolMetadata = newMessage.toolMetadata || {};
 
     updateMessages((prevMessages) => {
@@ -101,7 +124,7 @@ const useAgentChat = (config = {}) => {
   };
 
   // Handle tool execution complete messages - updates execution phase
-  const handleToolExecutionComplete = (newMessage) => {
+  const handleToolExecutionComplete = (newMessage: any): void => {
     const toolMetadata = newMessage.toolMetadata || {};
 
     updateMessages((prevMessages) => {
@@ -118,7 +141,7 @@ const useAgentChat = (config = {}) => {
 
         // Check tools within agent sessionMessages
         if (msg.messageType === 'tool_use' && msg.toolUseData?.sessionMessages) {
-          const updatedSessionMessages = msg.toolUseData.sessionMessages.map((sessionMsg) => {
+          const updatedSessionMessages = msg.toolUseData.sessionMessages.map((sessionMsg: any) => {
             if (sessionMsg.messageType === 'unified_tool' && sessionMsg.toolUseId === toolMetadata.toolUseId) {
               return {
                 ...sessionMsg,
@@ -141,7 +164,7 @@ const useAgentChat = (config = {}) => {
 
         // Check nested tools within agents (legacy)
         if (msg.messageType === 'tool_use' && msg.toolUseData?.tools) {
-          const updatedTools = msg.toolUseData.tools.map((tool) => {
+          const updatedTools = msg.toolUseData.tools.map((tool: any) => {
             if (tool.toolUseId === toolMetadata.toolUseId) {
               return {
                 ...tool,
@@ -168,7 +191,7 @@ const useAgentChat = (config = {}) => {
   };
 
   // Handle tool result start messages - updates result loading phase
-  const handleToolResultStart = (newMessage) => {
+  const handleToolResultStart = (newMessage: any): void => {
     const toolMetadata = newMessage.toolMetadata || {};
 
     updateMessages((prevMessages) => {
@@ -184,7 +207,7 @@ const useAgentChat = (config = {}) => {
 
         // Check tools within agent sessionMessages
         if (msg.messageType === 'tool_use' && msg.toolUseData?.sessionMessages) {
-          const updatedSessionMessages = msg.toolUseData.sessionMessages.map((sessionMsg) => {
+          const updatedSessionMessages = msg.toolUseData.sessionMessages.map((sessionMsg: any) => {
             if (sessionMsg.messageType === 'unified_tool' && sessionMsg.toolUseId === toolMetadata.toolUseId) {
               return {
                 ...sessionMsg,
@@ -206,7 +229,7 @@ const useAgentChat = (config = {}) => {
 
         // Check nested tools within agents (legacy)
         if (msg.messageType === 'tool_use' && msg.toolUseData?.tools) {
-          const updatedTools = msg.toolUseData.tools.map((tool) => {
+          const updatedTools = msg.toolUseData.tools.map((tool: any) => {
             if (tool.toolUseId === toolMetadata.toolUseId) {
               return {
                 ...tool,
@@ -232,7 +255,7 @@ const useAgentChat = (config = {}) => {
   };
 
   // Handle tool result complete messages - completes result phase
-  const handleToolResultComplete = (newMessage) => {
+  const handleToolResultComplete = (newMessage: any): void => {
     const toolMetadata = newMessage.toolMetadata || {};
 
     updateMessages((prevMessages) => {
@@ -249,7 +272,7 @@ const useAgentChat = (config = {}) => {
 
         // Check tools within agent sessionMessages
         if (msg.messageType === 'tool_use' && msg.toolUseData?.sessionMessages) {
-          const updatedSessionMessages = msg.toolUseData.sessionMessages.map((sessionMsg) => {
+          const updatedSessionMessages = msg.toolUseData.sessionMessages.map((sessionMsg: any) => {
             if (sessionMsg.messageType === 'unified_tool' && sessionMsg.toolUseId === toolMetadata.toolUseId) {
               return {
                 ...sessionMsg,
@@ -272,7 +295,7 @@ const useAgentChat = (config = {}) => {
 
         // Check nested tools within agents (legacy)
         if (msg.messageType === 'tool_use' && msg.toolUseData?.tools) {
-          const updatedTools = msg.toolUseData.tools.map((tool) => {
+          const updatedTools = msg.toolUseData.tools.map((tool: any) => {
             if (tool.toolUseId === toolMetadata.toolUseId) {
               return {
                 ...tool,
@@ -299,10 +322,10 @@ const useAgentChat = (config = {}) => {
   };
 
   // Parse JSON from message content and extract responseType
-  const parseResponseData = (content) => {
+  const parseResponseData = (content: string): { responseType: string; data: any; textContent: string } | null => {
     try {
       // Look for JSON objects containing responseType with proper bracket matching
-      const findJsonWithResponseType = (text) => {
+      const findJsonWithResponseType = (text: string): string | null => {
         const startIndex = text.indexOf('"responseType"');
         if (startIndex === -1) return null;
 
@@ -389,7 +412,7 @@ const useAgentChat = (config = {}) => {
   const structuredDataModeRef = useRef(false);
 
   // Parse Bedrock error information from message content
-  const parseBedrockerrorInfo = (content) => {
+  const parseBedrockerrorInfo = (content: string): Record<string, any> | null => {
     try {
       const parsed = JSON.parse(content);
       if (parsed.type === 'bedrock_error' && parsed.errorInfo) {
@@ -402,7 +425,7 @@ const useAgentChat = (config = {}) => {
   };
 
   // Handle streaming messages with proper phase management
-  const handleStreamingMessage = (newMessage) => {
+  const handleStreamingMessage = (newMessage: any): void => {
     // Handle new tool message types using the messageType field from GraphQL
     if (newMessage.messageType === 'tool_execution_start') {
       return handleToolExecutionStart(newMessage);
@@ -452,7 +475,7 @@ const useAgentChat = (config = {}) => {
         const parsedData = parseResponseData(newMessage.content);
 
         // Create the final message
-        const finalMessage = {
+        const finalMessage: Record<string, any> = {
           role: 'assistant',
           content: newMessage.content,
           messageType: bedrockErrorInfo ? 'bedrock_error' : 'text',
@@ -487,7 +510,7 @@ const useAgentChat = (config = {}) => {
 
         // Check if we already have a final message with the same timestamp to prevent duplicates
         const existingFinalIndex = updatedMessages.findIndex(
-          (msg) =>
+          (msg: any) =>
             msg.role === 'assistant' &&
             !msg.isProcessing &&
             msg.sessionId === newMessage.sessionId &&
@@ -737,7 +760,7 @@ const useAgentChat = (config = {}) => {
     });
   };
 
-  const addMessage = (newMessage) => {
+  const addMessage = (newMessage: any): void => {
     // Filter out messages with isProcessing=true and content containing responseType (JSON data)
     // BUT allow structured_data_start messages through
     if (
@@ -778,13 +801,13 @@ const useAgentChat = (config = {}) => {
     logger.info('Setting up GraphQL subscription for session:', sessionId);
     logger.info('Using agent config:', agentConfig);
 
-    const subscription = client
+    const subscription = (client as any)
       .graphql({
         query: agentConfig.subscription,
         variables: { sessionId },
       })
       .subscribe({
-        next: ({ data }) => {
+        next: ({ data }: { data: any }) => {
           const chatMessage = data?.onAgentChatMessageUpdate;
 
           if (chatMessage) {
@@ -793,7 +816,7 @@ const useAgentChat = (config = {}) => {
             console.log('No chat message in subscription data:', data);
           }
         },
-        error: (err) => {
+        error: (err: any) => {
           logger.error('Subscription error:', err);
           updateAgentChatState({ error: 'Connection to chat service lost. Please refresh the page.' });
         },
@@ -807,7 +830,7 @@ const useAgentChat = (config = {}) => {
   }, [sessionId, agentConfig.subscription]);
 
   // Send a chat message
-  const sendMessage = async (prompt, options = {}) => {
+  const sendMessage = async (prompt: string, options: { enableCodeIntelligence?: boolean } = {}): Promise<any> => {
     if (!prompt.trim()) return undefined;
 
     updateAgentChatState({
@@ -841,7 +864,7 @@ const useAgentChat = (config = {}) => {
           method: agentConfig.method,
           enableCodeIntelligence: options.enableCodeIntelligence,
         },
-      });
+      } as any);
 
       return response;
     } catch (err) {
@@ -857,24 +880,24 @@ const useAgentChat = (config = {}) => {
   };
 
   // Cancel waiting for response
-  const cancelResponse = () => {
+  const cancelResponse = (): void => {
     updateAgentChatState({ waitingForResponse: false });
     logger.info('Response cancelled by user');
   };
 
   // Clear error
-  const clearError = () => {
+  const clearError = (): void => {
     updateAgentChatState({ error: null });
   };
 
   // Clear chat
-  const clearChat = () => {
+  const clearChat = (): void => {
     resetAgentChatState();
     sentMessagesRef.current = new Set();
   };
 
   // Load a previous chat session
-  const loadChatSession = async (targetSessionId, existingMessages = null) => {
+  const loadChatSession = async (targetSessionId: string, existingMessages: any[] | null = null): Promise<void> => {
     try {
       updateAgentChatState({
         isLoading: true,
@@ -889,13 +912,13 @@ const useAgentChat = (config = {}) => {
         const response = await client.graphql({
           query: GET_AGENT_CHAT_MESSAGES,
           variables: { sessionId: targetSessionId },
-        });
-        messagesToLoad = response?.data?.getChatMessages || [];
+        } as any);
+        messagesToLoad = (response as any)?.data?.getChatMessages || [];
       }
 
       // Convert messages to the format expected by the UI
-      const formattedMessages = messagesToLoad.map((msg, index) => {
-        const baseMessage = {
+      const formattedMessages = messagesToLoad.map((msg: any, index: number) => {
+        const baseMessage: Record<string, any> = {
           role: msg.role,
           content: msg.content,
           messageType: 'text',
@@ -923,7 +946,7 @@ const useAgentChat = (config = {}) => {
 
       // Update context with loaded session
       updateAgentChatState({
-        messages: formattedMessages,
+        messages: formattedMessages as any,
         sessionId: targetSessionId,
         waitingForResponse: false,
         lastMessageCount: formattedMessages.length,

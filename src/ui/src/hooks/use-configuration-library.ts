@@ -5,6 +5,33 @@ import { useState } from 'react';
 import { generateClient } from 'aws-amplify/api';
 import { ConsoleLogger } from 'aws-amplify/utils';
 
+interface ConfigLibraryItem {
+  name: string;
+  hasReadme: boolean;
+  path: string;
+  configFileType: string;
+}
+
+interface ListConfigurationLibraryResponse {
+  success: boolean;
+  items: ConfigLibraryItem[];
+  error?: string;
+}
+
+interface GetConfigurationLibraryFileResponse {
+  success: boolean;
+  content: string;
+  contentType: string;
+  error?: string;
+}
+
+interface UseConfigurationLibraryReturn {
+  loading: boolean;
+  error: string | null;
+  listConfigurations: (pattern: string) => Promise<ConfigLibraryItem[]>;
+  getFile: (pattern: string, configName: string, fileName: string) => Promise<{ content: string; contentType: string } | null>;
+}
+
 const client = generateClient();
 const logger = new ConsoleLogger('useConfigurationLibrary');
 
@@ -42,11 +69,11 @@ const GET_CONFIG_LIBRARY_FILE = `
   }
 `;
 
-const useConfigurationLibrary = () => {
+const useConfigurationLibrary = (): UseConfigurationLibraryReturn => {
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
+  const [error, setError] = useState<string | null>(null);
 
-  const listConfigurations = async (pattern) => {
+  const listConfigurations = async (pattern: string): Promise<ConfigLibraryItem[]> => {
     setLoading(true);
     setError(null);
 
@@ -57,7 +84,7 @@ const useConfigurationLibrary = () => {
         variables: { pattern },
       });
 
-      const response = result.data.listConfigurationLibrary;
+      const response = (result as any).data.listConfigurationLibrary as ListConfigurationLibraryResponse;
 
       if (!response.success) {
         throw new Error(response.error || 'Failed to list configurations');
@@ -65,7 +92,7 @@ const useConfigurationLibrary = () => {
 
       logger.debug('Configurations listed successfully:', response.items);
       return response.items || [];
-    } catch (err) {
+    } catch (err: any) {
       logger.error('Error listing configurations:', err);
       setError(err.message);
       return [];
@@ -74,7 +101,11 @@ const useConfigurationLibrary = () => {
     }
   };
 
-  const getFile = async (pattern, configName, fileName) => {
+  const getFile = async (
+    pattern: string,
+    configName: string,
+    fileName: string,
+  ): Promise<{ content: string; contentType: string } | null> => {
     setLoading(true);
     setError(null);
 
@@ -85,7 +116,7 @@ const useConfigurationLibrary = () => {
         variables: { pattern, configName, fileName },
       });
 
-      const response = result.data.getConfigurationLibraryFile;
+      const response = (result as any).data.getConfigurationLibraryFile as GetConfigurationLibraryFileResponse;
 
       if (!response.success) {
         throw new Error(response.error || 'Failed to get file');
@@ -96,7 +127,7 @@ const useConfigurationLibrary = () => {
         content: response.content,
         contentType: response.contentType,
       };
-    } catch (err) {
+    } catch (err: any) {
       logger.error('Error getting file:', err);
       setError(err.message);
       return null;
