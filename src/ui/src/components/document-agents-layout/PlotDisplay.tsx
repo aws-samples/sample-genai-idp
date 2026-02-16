@@ -91,7 +91,7 @@ const PlotDisplay = ({ plotData = null }: PlotDisplayProps): React.JSX.Element |
   const prepareChartData = (originalData: ChartData, chartType: string) => {
     const { datasets, labels } = originalData;
 
-    // Ensure labels are strings to avoid PropTypes warnings
+    // Ensure labels are strings to avoid type warnings
     const stringLabels = labels ? labels.map((label) => String(label)) : [];
 
     // For pie and doughnut charts, we might need to aggregate data if there are multiple datasets

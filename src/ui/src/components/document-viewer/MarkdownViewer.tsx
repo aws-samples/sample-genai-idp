@@ -164,7 +164,7 @@ const MarkdownViewer = ({
     // Create a temporary link element
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${documentName || title.toLowerCase().replace(/\s+/g, '-') || 'report'}.md`;
+    a.download = `${documentName || title?.toLowerCase().replace(/\s+/g, '-') || 'report'}.md`;
 
     // Append, click, and remove
     document.body.appendChild(a);
