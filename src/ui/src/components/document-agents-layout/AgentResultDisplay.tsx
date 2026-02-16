@@ -1,7 +1,6 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: MIT-0
 import React from 'react';
-import PropTypes from 'prop-types';
 import { Box, Container, Header, SpaceBetween, Alert } from '@cloudscape-design/components';
 import { ConsoleLogger } from 'aws-amplify/utils';
 
@@ -11,7 +10,12 @@ import TextDisplay from './TextDisplay';
 
 const logger = new ConsoleLogger('AgentResultDisplay');
 
-const AgentResultDisplay = ({ result = null, query = '' }) => {
+interface AgentResultDisplayProps {
+  result?: string | Record<string, unknown> | null;
+  query?: string;
+}
+
+const AgentResultDisplay = ({ result = null, query = '' }: AgentResultDisplayProps): React.JSX.Element | null => {
   if (!result) {
     return null;
   }
@@ -20,7 +24,7 @@ const AgentResultDisplay = ({ result = null, query = '' }) => {
   logger.debug('Result type:', typeof result);
 
   // Helper function to safely parse JSON strings with multiple levels
-  const safeJsonParse = (data, fallback = null) => {
+  const safeJsonParse = (data: unknown, fallback: unknown = null): unknown => {
     if (data === null || data === undefined) {
       return fallback;
     }
@@ -55,20 +59,20 @@ const AgentResultDisplay = ({ result = null, query = '' }) => {
   };
 
   // Parse the result with enhanced logic
-  let parsedResult = safeJsonParse(result, result);
+  let parsedResult = safeJsonParse(result, result) as Record<string, unknown>;
 
   logger.debug('Parsed result:', parsedResult);
 
   // Handle case where result might be wrapped in a "result" property (from DynamoDB)
   if (parsedResult && typeof parsedResult === 'object' && parsedResult.result) {
     logger.debug('Found nested result property, extracting...');
-    parsedResult = safeJsonParse(parsedResult.result, parsedResult.result);
+    parsedResult = safeJsonParse(parsedResult.result, parsedResult.result) as Record<string, unknown>;
     logger.debug('Extracted nested result:', parsedResult);
   }
 
   logger.debug('Parsed result:', parsedResult);
 
-  const renderResultContent = () => {
+  const renderResultContent = (): React.JSX.Element => {
     const { responseType } = parsedResult;
 
     logger.debug('Rendering result with responseType:', responseType);
@@ -77,21 +81,22 @@ const AgentResultDisplay = ({ result = null, query = '' }) => {
       case 'plotData': {
         logger.debug('Rendering plot data:', parsedResult);
         // Extract the first plot data item from the array
-        const plotData = parsedResult.plotData && parsedResult.plotData.length > 0 ? parsedResult.plotData[0] : null;
+        const plotDataArray = parsedResult.plotData as Array<Record<string, unknown>> | undefined;
+        const plotData = plotDataArray && plotDataArray.length > 0 ? plotDataArray[0] : null;
         return plotData ? <PlotDisplay plotData={plotData} /> : <div>No plot data available</div>;
       }
 
       case 'table': {
         logger.debug('Rendering table data:', parsedResult);
         // Extract the nested tableData
-        const tableData = parsedResult.tableData || parsedResult;
+        const tableData = (parsedResult.tableData || parsedResult) as Record<string, unknown>;
         return tableData ? <TableDisplay tableData={tableData} /> : <div>No table data available</div>;
       }
 
       case 'text': {
         logger.debug('Rendering text data:', parsedResult);
         // Extract the nested textData or use the whole object if it has content
-        const textData = parsedResult.textData || parsedResult;
+        const textData = (parsedResult.textData || parsedResult) as Record<string, unknown>;
         return textData ? <TextDisplay textData={textData} /> : <div>No text data available</div>;
       }
 
@@ -102,9 +107,9 @@ const AgentResultDisplay = ({ result = null, query = '' }) => {
         return (
           <Box padding="m">
             <Header variant="h3">Raw Response</Header>
-            <Alert type="warning">Unknown response type: {responseType || 'undefined'}</Alert>
+            <Alert type="warning">Unknown response type: {(responseType as string) || 'undefined'}</Alert>
             <Box padding="s">
-              <Header variant="h4">Debug Information:</Header>
+              <Header variant="h3">Debug Information:</Header>
               <pre style={{ fontSize: '12px', maxHeight: '300px', overflow: 'auto' }}>{JSON.stringify(parsedResult, null, 2)}</pre>
             </Box>
           </Box>
@@ -122,21 +127,13 @@ const AgentResultDisplay = ({ result = null, query = '' }) => {
     >
       <SpaceBetween size="m">
         <Alert type="info">
-          Response type: <strong>{parsedResult.responseType || 'Unknown'}</strong>
+          Response type: <strong>{(parsedResult.responseType as string) || 'Unknown'}</strong>
         </Alert>
 
         {renderResultContent()}
       </SpaceBetween>
     </Container>
   );
-};
-
-AgentResultDisplay.propTypes = {
-  result: PropTypes.oneOfType([
-    PropTypes.string, // For JSON strings
-    PropTypes.object, // For parsed objects
-  ]),
-  query: PropTypes.string,
 };
 
 export default AgentResultDisplay;

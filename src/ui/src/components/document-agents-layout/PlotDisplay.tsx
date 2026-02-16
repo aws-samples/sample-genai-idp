@@ -1,7 +1,6 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: MIT-0
 import React, { useState, useEffect } from 'react';
-import PropTypes from 'prop-types';
 import { Box, Container, Header, Select, SpaceBetween } from '@cloudscape-design/components';
 import {
   Chart as ChartJS,
@@ -21,9 +20,38 @@ import { Bar, Line, Pie, Doughnut } from 'react-chartjs-2';
 // Register Chart.js components
 ChartJS.register(CategoryScale, LinearScale, BarElement, LineElement, PointElement, Title, Tooltip, Legend, ArcElement, Filler);
 
-const PlotDisplay = ({ plotData = null }) => {
+interface ChartDataset {
+  data: number[];
+  label?: string;
+  backgroundColor?: string | string[];
+  borderColor?: string | string[];
+  borderWidth?: number;
+  [key: string]: unknown;
+}
+
+interface ChartData {
+  datasets: ChartDataset[];
+  labels?: (string | number)[];
+}
+
+interface PlotDataType {
+  type?: string;
+  data: ChartData;
+  options?: Record<string, unknown>;
+}
+
+interface PlotDisplayProps {
+  plotData?: PlotDataType | Record<string, unknown> | null;
+}
+
+interface ChartTypeOption {
+  label: string;
+  value: string;
+}
+
+const PlotDisplay = ({ plotData = null }: PlotDisplayProps): React.JSX.Element | null => {
   // Chart type options for the dropdown
-  const chartTypeOptions = [
+  const chartTypeOptions: ChartTypeOption[] = [
     { label: 'Bar Chart', value: 'bar' },
     { label: 'Line Chart', value: 'line' },
     { label: 'Pie Chart', value: 'pie' },
@@ -31,13 +59,14 @@ const PlotDisplay = ({ plotData = null }) => {
   ];
 
   // State to track the current chart type, initialized with the type from JSON
-  const [currentChartType, setCurrentChartType] = useState(null);
-  const [selectedOption, setSelectedOption] = useState(null);
+  const [currentChartType, setCurrentChartType] = useState<string | null>(null);
+  const [selectedOption, setSelectedOption] = useState<ChartTypeOption | null>(null);
 
   // Initialize chart type when plotData changes
   useEffect(() => {
-    if (plotData?.type) {
-      const initialType = plotData.type.toLowerCase();
+    const typedPlotData = plotData as PlotDataType | null;
+    if (typedPlotData?.type) {
+      const initialType = typedPlotData.type.toLowerCase();
       setCurrentChartType(initialType);
 
       // Find the matching option for the Select component
@@ -50,14 +79,16 @@ const PlotDisplay = ({ plotData = null }) => {
     return null;
   }
 
+  const typedPlotData = plotData as PlotDataType;
+
   // Handle chart type change from dropdown
-  const handleChartTypeChange = ({ detail }) => {
-    setCurrentChartType(detail.selectedOption.value);
-    setSelectedOption(detail.selectedOption);
+  const handleChartTypeChange = ({ detail }: { detail: { selectedOption: { label?: string; value?: string } } }) => {
+    setCurrentChartType(detail.selectedOption.value || null);
+    setSelectedOption(detail.selectedOption as ChartTypeOption);
   };
 
   // Prepare chart data with potential modifications for different chart types
-  const prepareChartData = (originalData, chartType) => {
+  const prepareChartData = (originalData: ChartData, chartType: string) => {
     const { datasets, labels } = originalData;
 
     // Ensure labels are strings to avoid PropTypes warnings
@@ -159,8 +190,8 @@ const PlotDisplay = ({ plotData = null }) => {
   };
 
   // Prepare chart options with potential modifications for different chart types
-  const prepareChartOptions = (originalOptions, chartType) => {
-    const baseOptions = {
+  const prepareChartOptions = (originalOptions: Record<string, unknown> | undefined, chartType: string) => {
+    const baseOptions: Record<string, unknown> = {
       responsive: true,
       maintainAspectRatio: false,
       ...originalOptions,
@@ -170,6 +201,8 @@ const PlotDisplay = ({ plotData = null }) => {
     if (!baseOptions.plugins) {
       baseOptions.plugins = {};
     }
+
+    const plugins = baseOptions.plugins as Record<string, unknown>;
 
     // For pie and doughnut charts, we typically don't need scales
     if (chartType === 'pie' || chartType === 'doughnut') {
@@ -190,29 +223,30 @@ const PlotDisplay = ({ plotData = null }) => {
       };
 
       // Safely merge tooltip configuration
-      const existingTooltip = baseOptions.plugins?.tooltip || {};
-      const existingCallbacks = existingTooltip.callbacks || {};
+      const existingTooltip = (plugins?.tooltip || {}) as Record<string, unknown>;
+      const existingCallbacks = (existingTooltip.callbacks || {}) as Record<string, unknown>;
 
       return {
         ...optionsWithoutScales,
         plugins: {
-          ...baseOptions.plugins,
+          ...plugins,
           legend: legendConfig,
           tooltip: {
             enabled: true,
             ...existingTooltip,
             callbacks: {
               ...existingCallbacks,
-              label(context) {
+              label(context: Record<string, unknown>) {
                 try {
-                  const label = context.label || '';
-                  const value = context.parsed || 0;
-                  const total = context.dataset.data.reduce((sum, val) => sum + val, 0);
+                  const label = (context.label as string) || '';
+                  const value = (context.parsed as number) || 0;
+                  const dataset = context.dataset as { data: number[] };
+                  const total = dataset.data.reduce((sum: number, val: number) => sum + val, 0);
                   const percentage = total > 0 ? ((value / total) * 100).toFixed(1) : 0;
                   return `${label}: ${value} (${percentage}%)`;
                 } catch (error) {
                   console.error('Error in tooltip callback:', error);
-                  return context.label || 'Unknown';
+                  return (context.label as string) || 'Unknown';
                 }
               },
             },
@@ -222,8 +256,9 @@ const PlotDisplay = ({ plotData = null }) => {
     }
 
     // For other chart types, ensure tooltip callbacks are properly structured
-    if (baseOptions.plugins?.tooltip?.callbacks) {
-      const existingCallbacks = baseOptions.plugins.tooltip.callbacks;
+    const tooltip = plugins?.tooltip as Record<string, unknown> | undefined;
+    if (tooltip?.callbacks) {
+      const existingCallbacks = tooltip.callbacks as Record<string, unknown>;
 
       // Validate that callbacks are functions
       Object.keys(existingCallbacks).forEach((callbackName) => {
@@ -237,10 +272,10 @@ const PlotDisplay = ({ plotData = null }) => {
     return baseOptions;
   };
 
-  const renderChart = () => {
+  const renderChart = (): React.JSX.Element | null => {
     if (!currentChartType) return null;
 
-    const { data, options } = plotData;
+    const { data, options } = typedPlotData;
 
     // Validate data structure
     if (!data || !data.datasets || !Array.isArray(data.datasets) || data.datasets.length === 0) {
@@ -282,22 +317,22 @@ const PlotDisplay = ({ plotData = null }) => {
     try {
       switch (currentChartType) {
         case 'bar':
-          return <Bar data={chartProps.data} options={chartProps.options} />;
+          return <Bar data={chartProps.data as never} options={chartProps.options as never} />;
         case 'line':
-          return <Line data={chartProps.data} options={chartProps.options} />;
+          return <Line data={chartProps.data as never} options={chartProps.options as never} />;
         case 'pie':
-          return <Pie data={chartProps.data} options={chartProps.options} />;
+          return <Pie data={chartProps.data as never} options={chartProps.options as never} />;
         case 'doughnut':
-          return <Doughnut data={chartProps.data} options={chartProps.options} />;
+          return <Doughnut data={chartProps.data as never} options={chartProps.options as never} />;
         default:
-          return <Bar data={chartProps.data} options={chartProps.options} />; // Default to bar chart
+          return <Bar data={chartProps.data as never} options={chartProps.options as never} />; // Default to bar chart
       }
     } catch (error) {
       console.error('Chart rendering error:', error);
       return (
         <div style={{ padding: '20px', textAlign: 'center', color: 'red' }}>
           <p>Error rendering {currentChartType} chart</p>
-          <p>{error.message}</p>
+          <p>{(error as Error).message}</p>
           <details style={{ marginTop: '10px', textAlign: 'left' }}>
             <summary>Debug Information</summary>
             <pre style={{ fontSize: '10px', maxHeight: '200px', overflow: 'auto' }}>
@@ -309,8 +344,10 @@ const PlotDisplay = ({ plotData = null }) => {
     }
   };
 
+  const titleText = (typedPlotData.options as Record<string, unknown> | undefined)?.title as Record<string, unknown> | undefined;
+
   return (
-    <Container header={<Header variant="h3">{plotData.options?.title?.text || 'Chart'}</Header>}>
+    <Container header={<Header variant="h3">{(titleText?.text as string) || 'Chart'}</Header>}>
       <Box padding="m">
         <SpaceBetween direction="vertical" size="m">
           {/* Chart type selector */}
@@ -330,21 +367,6 @@ const PlotDisplay = ({ plotData = null }) => {
       </Box>
     </Container>
   );
-};
-
-PlotDisplay.propTypes = {
-  plotData: PropTypes.shape({
-    type: PropTypes.string,
-    data: PropTypes.shape({
-      datasets: PropTypes.arrayOf(PropTypes.shape({})),
-      labels: PropTypes.arrayOf(PropTypes.oneOfType([PropTypes.string, PropTypes.number])),
-    }),
-    options: PropTypes.shape({
-      title: PropTypes.shape({
-        text: PropTypes.string,
-      }),
-    }),
-  }),
 };
 
 export default PlotDisplay;

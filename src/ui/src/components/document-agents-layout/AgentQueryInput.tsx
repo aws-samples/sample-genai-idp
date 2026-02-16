@@ -1,7 +1,6 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: MIT-0
 import React, { useState, useEffect, useRef } from 'react';
-import PropTypes from 'prop-types';
 import { generateClient } from 'aws-amplify/api';
 import { ConsoleLogger } from 'aws-amplify/utils';
 import {
@@ -17,11 +16,44 @@ import {
   Header,
   Link,
 } from '@cloudscape-design/components';
+import type { ButtonDropdownProps } from '@cloudscape-design/components';
 
 import listAgentJobs from '../../graphql/queries/listAgentJobs';
 import deleteAgentJob from '../../graphql/queries/deleteAgentJob';
 import listAvailableAgents from '../../graphql/queries/listAvailableAgents';
 import { useAnalyticsContext } from '../../contexts/analytics';
+
+interface AvailableAgent {
+  agent_id: string;
+  agent_name: string;
+  agent_description?: string;
+  sample_queries?: string[];
+}
+
+interface AgentJob {
+  jobId: string;
+  query: string;
+  status: string;
+  createdAt?: string;
+  agentIds?: string;
+  [key: string]: unknown;
+}
+
+interface SelectedOption {
+  value: string;
+  label: string;
+}
+
+interface SelectedResult {
+  query: string;
+  jobId?: string;
+}
+
+interface AgentQueryInputProps {
+  onSubmit: (query: string, agents: string[], jobId?: string) => void;
+  isSubmitting?: boolean;
+  selectedResult?: SelectedResult | null;
+}
 
 const client = generateClient();
 
@@ -36,24 +68,24 @@ const textareaStyles = `
 
 const logger = new ConsoleLogger('AgentQueryInput');
 
-const AgentQueryInput = ({ onSubmit, isSubmitting = false, selectedResult = null }) => {
+const AgentQueryInput = ({ onSubmit, isSubmitting = false, selectedResult = null }: AgentQueryInputProps): React.JSX.Element => {
   const { analyticsState, updateAnalyticsState, resetAnalyticsState } = useAnalyticsContext();
   const { currentInputText } = analyticsState;
 
-  const [queryHistory, setQueryHistory] = useState([]);
+  const [queryHistory, setQueryHistory] = useState<AgentJob[]>([]);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
-  const [selectedOption, setSelectedOption] = useState(null);
+  const [selectedOption, setSelectedOption] = useState<SelectedOption | null>(null);
   const [isDeletingJob, setIsDeletingJob] = useState(false);
-  const [availableAgents, setAvailableAgents] = useState([]);
-  const [selectedAgents, setSelectedAgents] = useState([]);
+  const [availableAgents, setAvailableAgents] = useState<AvailableAgent[]>([]);
+  const [selectedAgents, setSelectedAgents] = useState<string[]>([]);
   const [isLoadingAgents, setIsLoadingAgents] = useState(false);
   const [showMcpInfoModal, setShowMcpInfoModal] = useState(false);
-  const [hoveredAgent, setHoveredAgent] = useState(null);
-  const [hoverTimeout, setHoverTimeout] = useState(null);
+  const [hoveredAgent, setHoveredAgent] = useState<string | null>(null);
+  const [hoverTimeout, setHoverTimeout] = useState<ReturnType<typeof setTimeout> | null>(null);
   const [mousePosition, setMousePosition] = useState({ x: 0, y: 0 });
   const lastFetchTimeRef = useRef(0);
 
-  const handleMouseEnter = (agentId, event) => {
+  const handleMouseEnter = (agentId: string, event: React.MouseEvent): void => {
     setMousePosition({ x: event.clientX, y: event.clientY });
 
     // If a tooltip is already showing, switch instantly
@@ -69,11 +101,11 @@ const AgentQueryInput = ({ onSubmit, isSubmitting = false, selectedResult = null
     setHoverTimeout(timeout);
   };
 
-  const handleMouseMove = (event) => {
+  const handleMouseMove = (event: React.MouseEvent): void => {
     setMousePosition({ x: event.clientX, y: event.clientY });
   };
 
-  const handleMouseLeave = () => {
+  const handleMouseLeave = (): void => {
     if (hoverTimeout) {
       clearTimeout(hoverTimeout);
       setHoverTimeout(null);
@@ -81,7 +113,7 @@ const AgentQueryInput = ({ onSubmit, isSubmitting = false, selectedResult = null
     setHoveredAgent(null);
   };
 
-  const handleAgentSelection = (agentId, isSelected) => {
+  const handleAgentSelection = (agentId: string, isSelected: boolean): void => {
     if (isSelected) {
       setSelectedAgents((prev) => [...prev, agentId]);
     } else {
@@ -89,9 +121,7 @@ const AgentQueryInput = ({ onSubmit, isSubmitting = false, selectedResult = null
     }
   };
 
-  const handleSelectAllAgents = (e) => {
-    e.preventDefault();
-    e.stopPropagation();
+  const handleSelectAllAgents = (): void => {
     const allSelected = selectedAgents.length === availableAgents.length;
     if (allSelected) {
       setSelectedAgents([]);
@@ -100,14 +130,14 @@ const AgentQueryInput = ({ onSubmit, isSubmitting = false, selectedResult = null
     }
   };
 
-  const fetchAvailableAgents = async () => {
+  const fetchAvailableAgents = async (): Promise<void> => {
     try {
       setIsLoadingAgents(true);
       const response = await client.graphql({
-        query: listAvailableAgents,
+        query: listAvailableAgents as unknown as string,
       });
 
-      const agents = response?.data?.listAvailableAgents || [];
+      const agents = (response as unknown as { data: { listAvailableAgents: AvailableAgent[] } })?.data?.listAvailableAgents || [];
       setAvailableAgents(agents);
     } catch (err) {
       logger.error('Error fetching available agents:', err);
@@ -117,7 +147,7 @@ const AgentQueryInput = ({ onSubmit, isSubmitting = false, selectedResult = null
     }
   };
 
-  const fetchQueryHistory = async (force = false) => {
+  const fetchQueryHistory = async (force = false): Promise<void> => {
     // Don't fetch if we're already loading
     if (isLoadingHistory) return;
 
@@ -133,22 +163,23 @@ const AgentQueryInput = ({ onSubmit, isSubmitting = false, selectedResult = null
       setIsLoadingHistory(true);
       lastFetchTimeRef.current = now;
 
-      let response;
+      let response: Record<string, unknown>;
       try {
-        response = await client.graphql({
-          query: listAgentJobs,
+        response = (await client.graphql({
+          query: listAgentJobs as unknown as string,
           variables: { limit: 20 }, // Limit to most recent 20 queries
-        });
-      } catch (amplifyError) {
+        })) as unknown as Record<string, unknown>;
+      } catch (amplifyError: unknown) {
         // Amplify throws an exception when there are GraphQL errors, but the response might still contain valid data
         logger.warn('Amplify threw an exception due to GraphQL errors, checking for valid data:', amplifyError);
 
+        const errRecord = amplifyError as Record<string, unknown>;
         // Check if the error object contains the actual response data
-        if (amplifyError.data && amplifyError.data.listAgentJobs) {
+        if (errRecord.data && (errRecord.data as Record<string, unknown>).listAgentJobs) {
           logger.info('Found valid data in the error response, proceeding with processing');
           response = {
-            data: amplifyError.data,
-            errors: amplifyError.errors || [],
+            data: errRecord.data,
+            errors: (errRecord.errors as unknown[]) || [],
           };
         } else {
           // If there's no data in the error, re-throw to be handled by outer catch
@@ -157,14 +188,17 @@ const AgentQueryInput = ({ onSubmit, isSubmitting = false, selectedResult = null
       }
 
       // Handle GraphQL errors gracefully - log them but continue processing valid data
-      if (response.errors && response.errors.length > 0) {
-        logger.warn(`Received ${response.errors.length} GraphQL errors in listAgentJobs response:`, response.errors);
+      const errors = response.errors as unknown[] | undefined;
+      if (errors && errors.length > 0) {
+        logger.warn(`Received ${errors.length} GraphQL errors in listAgentJobs response:`, errors);
         logger.warn('Continuing to process valid data despite errors...');
       }
 
       // Get items array and filter out null values (corrupted items)
-      const rawItems = response?.data?.listAgentJobs?.items || [];
-      const nonNullJobs = rawItems.filter((job) => job !== null);
+      const data = response?.data as Record<string, unknown> | undefined;
+      const listResult = data?.listAgentJobs as { items?: unknown[] } | undefined;
+      const rawItems = listResult?.items || [];
+      const nonNullJobs = rawItems.filter((job): job is AgentJob => job !== null);
 
       logger.debug(`Raw response: ${rawItems.length} total items, ${nonNullJobs.length} non-null items`);
       logger.debug('Non-null jobs data:', nonNullJobs);
@@ -214,9 +248,9 @@ const AgentQueryInput = ({ onSubmit, isSubmitting = false, selectedResult = null
       setQueryHistory(sortedJobs);
 
       // Log summary of what we processed
-      if (response.errors && response.errors.length > 0) {
+      if (errors && errors.length > 0) {
         logger.info(
-          `Successfully processed ${sortedJobs.length} valid queries despite ${response.errors.length} GraphQL errors from corrupted items`,
+          `Successfully processed ${sortedJobs.length} valid queries despite ${errors.length} GraphQL errors from corrupted items`,
         );
       } else {
         logger.info(`Successfully processed ${sortedJobs.length} queries with no errors`);
@@ -245,7 +279,7 @@ const AgentQueryInput = ({ onSubmit, isSubmitting = false, selectedResult = null
     }
   }, [selectedResult, updateAnalyticsState]);
 
-  const handleSubmit = (e) => {
+  const handleSubmit = (e: React.FormEvent): void => {
     e.preventDefault();
     if (currentInputText.trim() && selectedAgents.length > 0 && !isSubmitting) {
       onSubmit(currentInputText, selectedAgents);
@@ -258,10 +292,10 @@ const AgentQueryInput = ({ onSubmit, isSubmitting = false, selectedResult = null
     }
   };
 
-  const handleClearQuery = () => {
+  const handleClearQuery = (): void => {
     // Clean up any existing subscription before resetting state
     if (analyticsState.subscription) {
-      analyticsState.subscription.unsubscribe();
+      (analyticsState.subscription as { unsubscribe: () => void }).unsubscribe();
     }
 
     // Reset all analytics state to initial values
@@ -270,7 +304,7 @@ const AgentQueryInput = ({ onSubmit, isSubmitting = false, selectedResult = null
     setSelectedOption(null);
   };
 
-  const handleDropdownItemClick = ({ detail }) => {
+  const handleDropdownItemClick = ({ detail }: { detail: { id: string } }): void => {
     console.log('Previous query clicked, detail:', detail);
 
     // Prevent dropdown item selection if a delete operation is in progress
@@ -296,7 +330,7 @@ const AgentQueryInput = ({ onSubmit, isSubmitting = false, selectedResult = null
       if (selectedJob.agentIds) {
         console.log('Job has agentIds:', selectedJob.agentIds);
         try {
-          const agentIds = JSON.parse(selectedJob.agentIds);
+          const agentIds = JSON.parse(selectedJob.agentIds) as string[];
           console.log('Parsed agentIds:', agentIds);
 
           if (agentIds.length > 0) {
@@ -320,9 +354,9 @@ const AgentQueryInput = ({ onSubmit, isSubmitting = false, selectedResult = null
   };
 
   // Format date for display in dropdown
-  const formatDate = (dateString) => {
+  const formatDate = (dateString: string | undefined): string => {
     try {
-      const date = new Date(dateString);
+      const date = new Date(dateString as string);
       // Check if date is valid
       if (Number.isNaN(date.getTime())) {
         return 'Unknown date';
@@ -335,7 +369,7 @@ const AgentQueryInput = ({ onSubmit, isSubmitting = false, selectedResult = null
   };
 
   // Create dropdown items with delete functionality
-  const createDropdownItems = () => {
+  const createDropdownItems = (): { id?: string; text: string | React.ReactNode; disabled: boolean }[] => {
     if (queryHistory.length === 0) {
       return [{ text: 'No previous questions found', disabled: true }];
     }
@@ -366,7 +400,7 @@ const AgentQueryInput = ({ onSubmit, isSubmitting = false, selectedResult = null
 
                 try {
                   await client.graphql({
-                    query: deleteAgentJob,
+                    query: deleteAgentJob as unknown as string,
                     variables: {
                       jobId: job.jobId,
                     },
@@ -410,7 +444,7 @@ const AgentQueryInput = ({ onSubmit, isSubmitting = false, selectedResult = null
               <Box fontSize="heading-xs" fontWeight="bold">
                 Select from available agents
               </Box>
-              <Button variant="normal" onClick={() => setShowMcpInfoModal(true)} fontSize="body-s">
+              <Button variant="normal" onClick={() => setShowMcpInfoModal(true)}>
                 🚀 NEW: Integrate your own systems with MCP!
               </Button>
             </div>
@@ -475,11 +509,7 @@ const AgentQueryInput = ({ onSubmit, isSubmitting = false, selectedResult = null
             </div>
             {!isLoadingAgents && availableAgents.length > 0 && (
               <Box padding={{ top: 's' }}>
-                <Button
-                  type="button"
-                  variant={selectedAgents.length === availableAgents.length ? 'normal' : 'primary'}
-                  onClick={handleSelectAllAgents}
-                >
+                <Button variant={selectedAgents.length === availableAgents.length ? 'normal' : 'primary'} onClick={handleSelectAllAgents}>
                   {selectedAgents.length === availableAgents.length ? 'Deselect All Agents' : 'Select All Agents'}
                 </Button>
               </Box>
@@ -552,7 +582,7 @@ const AgentQueryInput = ({ onSubmit, isSubmitting = false, selectedResult = null
               <SpaceBetween size="s">
                 <Button
                   variant="primary"
-                  type="submit"
+                  formAction="submit"
                   disabled={!currentInputText.trim() || selectedAgents.length === 0 || isSubmitting}
                   fullWidth
                 >
@@ -566,21 +596,22 @@ const AgentQueryInput = ({ onSubmit, isSubmitting = false, selectedResult = null
           </Grid>
 
           <FormField>
-            <ButtonDropdown
-              items={createDropdownItems()}
-              onItemClick={handleDropdownItemClick}
-              onFocus={() => fetchQueryHistory()}
-              loading={isLoadingHistory}
-              disabled={isSubmitting}
-            >
-              {(() => {
-                if (!selectedOption) return 'Select a previous question';
-                if (selectedOption.label?.length > 40) {
-                  return `${selectedOption.label.substring(0, 40)}...`;
-                }
-                return selectedOption.label || 'Selected question';
-              })()}
-            </ButtonDropdown>
+            <div onFocus={() => fetchQueryHistory()}>
+              <ButtonDropdown
+                items={createDropdownItems() as unknown as ButtonDropdownProps.ItemOrGroup[]}
+                onItemClick={handleDropdownItemClick}
+                loading={isLoadingHistory}
+                disabled={isSubmitting}
+              >
+                {(() => {
+                  if (!selectedOption) return 'Select a previous question';
+                  if (selectedOption.label?.length > 40) {
+                    return `${selectedOption.label.substring(0, 40)}...`;
+                  }
+                  return selectedOption.label || 'Selected question';
+                })()}
+              </ButtonDropdown>
+            </div>
           </FormField>
         </SpaceBetween>
       </form>
@@ -636,15 +667,6 @@ const AgentQueryInput = ({ onSubmit, isSubmitting = false, selectedResult = null
       </Modal>
     </>
   );
-};
-
-AgentQueryInput.propTypes = {
-  onSubmit: PropTypes.func.isRequired,
-  isSubmitting: PropTypes.bool,
-  selectedResult: PropTypes.shape({
-    query: PropTypes.string,
-    jobId: PropTypes.string,
-  }),
 };
 
 export default AgentQueryInput;

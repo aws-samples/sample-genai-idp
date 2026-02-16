@@ -1,7 +1,6 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 import React, { useState, useRef, useMemo, useEffect, useCallback } from 'react';
-import PropTypes from 'prop-types';
 import {
   Container,
   Alert,
@@ -28,6 +27,24 @@ import AgentToolComponent from './AgentToolComponent';
 import BedrockErrorMessage from './BedrockErrorMessage';
 import './AgentChatLayout.css';
 
+import type { ChatMessage } from '../../types/agent-chat';
+
+interface AgentConfig {
+  agentType?: string;
+  mutation?: Record<string, unknown> | ((...args: unknown[]) => unknown);
+  subscription?: Record<string, unknown> | ((...args: unknown[]) => unknown);
+  method?: string;
+}
+
+interface AgentChatLayoutProps {
+  title?: string;
+  placeholder?: string;
+  agentConfig?: AgentConfig;
+  className?: string;
+  showHeader?: boolean;
+  customStyles?: React.CSSProperties;
+}
+
 const AgentChatLayout = ({
   title = 'AI Assistant',
   placeholder = 'Ask me anything about documents, errors, or IDP code base',
@@ -35,22 +52,25 @@ const AgentChatLayout = ({
   className = '',
   showHeader = true,
   customStyles = {},
-}) => {
+}: AgentChatLayoutProps): React.JSX.Element => {
   const [welcomeAnimated, setWelcomeAnimated] = useState(false);
   const [isLoadingSession, setIsLoadingSession] = useState(false);
-  const [collapsedSections, setCollapsedSections] = useState(new Set());
-  const chatMessagesRef = useRef(null);
+  const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set());
+  const chatMessagesRef = useRef<HTMLDivElement>(null);
 
   // Get persistent state from context
   const { agentChatState, updateAgentChatState } = useAgentChatContext();
   const { inputValue, lastMessageCount, enableCodeIntelligence } = agentChatState;
 
-  const { messages, isLoading, waitingForResponse, error, sendMessage, clearError, clearChat, loadChatSession } = useAgentChat(agentConfig);
-  const { user } = useAppContext();
+  const { messages, isLoading, waitingForResponse, error, sendMessage, clearError, clearChat, loadChatSession } = useAgentChat(
+    agentConfig as Record<string, unknown>,
+  );
+  const appContext = useAppContext() || ({} as Record<string, unknown>);
+  const user = (appContext as Record<string, unknown>).user as Record<string, unknown> | undefined;
 
   const userInitial = useMemo(() => {
-    if (!user?.username) return 'U';
-    return user.username.charAt(0).toUpperCase();
+    if (!(user as Record<string, unknown>)?.username) return 'U';
+    return ((user as Record<string, unknown>).username as string).charAt(0).toUpperCase();
   }, [user]);
 
   useEffect(() => {
@@ -63,15 +83,15 @@ const AgentChatLayout = ({
 
   // Listen for sample query insertion events from the tools panel
   useEffect(() => {
-    const handleSampleQueryInsert = (event) => {
+    const handleSampleQueryInsert = (event: CustomEvent<{ query: string }>) => {
       const { query } = event.detail;
       updateAgentChatState({ inputValue: query });
     };
 
-    window.addEventListener('insertSampleQuery', handleSampleQueryInsert);
+    window.addEventListener('insertSampleQuery', handleSampleQueryInsert as EventListener);
 
     return () => {
-      window.removeEventListener('insertSampleQuery', handleSampleQueryInsert);
+      window.removeEventListener('insertSampleQuery', handleSampleQueryInsert as EventListener);
     };
   }, [updateAgentChatState]);
 
@@ -80,7 +100,7 @@ const AgentChatLayout = ({
     if (messages.length > lastMessageCount) {
       const newMessages = messages.slice(lastMessageCount);
 
-      const newAssistantMessage = newMessages.find((msg) => msg.role === 'assistant' && msg.isProcessing === true);
+      const newAssistantMessage = newMessages.find((msg: ChatMessage) => msg.role === 'assistant' && msg.isProcessing === true);
 
       if (newAssistantMessage) {
         setTimeout(() => {
@@ -120,19 +140,19 @@ const AgentChatLayout = ({
     }
   };
 
-  const handleInputChange = (event) => {
+  const handleInputChange = (event: { detail: { value: string } }) => {
     updateAgentChatState({ inputValue: event.detail.value });
   };
 
-  const handleKeyDown = (event) => {
-    if (event.key === 'Enter' && !event.shiftKey) {
+  const handleKeyDown = (event: { detail: { key: string; shiftKey: boolean }; preventDefault: () => void }) => {
+    if (event.detail.key === 'Enter' && !event.detail.shiftKey) {
       event.preventDefault();
       handlePromptSubmit();
     }
   };
 
   // Handle expandable section state changes
-  const handleExpandedChange = useCallback((messageId, expanded) => {
+  const handleExpandedChange = useCallback((messageId: string | number, expanded: boolean) => {
     const collapsedKey = `collapsed-${messageId}`;
 
     setCollapsedSections((prev) => {
@@ -147,7 +167,7 @@ const AgentChatLayout = ({
   }, []);
 
   // Handle session selection from dropdown
-  const handleSessionSelect = async (session, sessionMessages) => {
+  const handleSessionSelect = async (session: { sessionId: string }, sessionMessages: ChatMessage[]) => {
     try {
       setIsLoadingSession(true);
       console.log('Loading chat session:', session.sessionId);
@@ -168,7 +188,7 @@ const AgentChatLayout = ({
   };
 
   // Handle session deletion
-  const handleSessionDeleted = (sessionId) => {
+  const handleSessionDeleted = (sessionId: string) => {
     console.log('Session deleted:', sessionId);
     // If the deleted session was the current one, clear the chat
     // Note: We can't easily check if it's the current session since sessionId might be different
@@ -196,16 +216,16 @@ const AgentChatLayout = ({
   ];
 
   const renderedMessages = useMemo(() => {
-    return messages.map((message) => {
+    return messages.map((message: ChatMessage) => {
       let contentText = '';
       if (typeof message.content === 'string') {
         contentText = message.content;
-      } else if (Array.isArray(message.content) && message.content[0]) {
-        const content = message.content[0];
+      } else if (Array.isArray(message.content) && (message.content as unknown[])[0]) {
+        const content = (message.content as unknown[])[0] as Record<string, unknown>;
         if (content?.error) {
           contentText = `Error: ${content.error}`;
         } else {
-          contentText = content?.text || '';
+          contentText = (content?.text as string) || '';
         }
       }
 
@@ -231,21 +251,26 @@ const AgentChatLayout = ({
                       headingTagOverride="h5"
                       expanded={isExpanded}
                       onChange={({ detail }) => handleExpandedChange(agentMessageId, detail.expanded)}
-                      headerText={`${message.toolUseData.agent_name}${message.isProcessing ? ' - Thinking...' : ''}`}
+                      headerText={`${(message.toolUseData as Record<string, unknown>).agent_name}${
+                        message.isProcessing ? ' - Thinking...' : ''
+                      }`}
                     >
                       <div className="tool-usage-container">
-                        {sessionMessages.map((sessionMsg) => {
+                        {sessionMessages.map((sessionMsg: ChatMessage) => {
                           if (sessionMsg.messageType === 'text') {
                             return (
-                              <Box
+                              <div
                                 key={sessionMsg.id}
-                                padding={{ right: 's', top: 's', bottom: 'n' }}
-                                backgroundColor="background-container-content"
+                                style={{
+                                  paddingRight: '12px',
+                                  paddingTop: '12px',
+                                  backgroundColor: 'var(--color-background-container-content)',
+                                }}
                               >
                                 <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>
-                                  {sessionMsg.content}
+                                  {sessionMsg.content as string}
                                 </ReactMarkdown>
-                              </Box>
+                              </div>
                             );
                           }
 
@@ -253,13 +278,13 @@ const AgentChatLayout = ({
                             return (
                               <Box padding={{ right: 's', bottom: 'n' }} key={`tool-${sessionMsg.toolUseId}`}>
                                 <AgentToolComponent
-                                  toolName={sessionMsg.toolName}
-                                  toolUseId={sessionMsg.toolUseId}
+                                  toolName={sessionMsg.toolName || ''}
+                                  toolUseId={sessionMsg.toolUseId || ''}
                                   executionLoading={sessionMsg.executionLoading}
                                   executionDetails={sessionMsg.executionDetails}
                                   resultLoading={sessionMsg.resultLoading}
                                   resultDetails={sessionMsg.resultDetails}
-                                  timestamp={sessionMsg.timestamp}
+                                  timestamp={String(sessionMsg.timestamp)}
                                   parentProcessing={message.isProcessing}
                                 />
                               </Box>
@@ -296,13 +321,13 @@ const AgentChatLayout = ({
                 if (message.messageType === 'unified_tool') {
                   return (
                     <AgentToolComponent
-                      toolName={message.toolName}
-                      toolUseId={message.toolUseId}
+                      toolName={message.toolName || ''}
+                      toolUseId={message.toolUseId || ''}
                       executionLoading={message.executionLoading}
                       executionDetails={message.executionDetails}
                       resultLoading={message.resultLoading}
                       resultDetails={message.resultDetails}
-                      timestamp={message.timestamp}
+                      timestamp={String(message.timestamp)}
                       parentProcessing={message.isProcessing}
                     />
                   );
@@ -312,17 +337,15 @@ const AgentChatLayout = ({
                 if (message.messageType === 'bedrock_error' && message.bedrockErrorInfo) {
                   return (
                     <BedrockErrorMessage
-                      errorInfo={message.bedrockErrorInfo}
-                      onRetry={() => {
-                        // Retry the last user message
-                        const lastUserMessage = messages
-                          .slice()
-                          .reverse()
-                          .find((msg) => msg.role === 'user');
-                        if (lastUserMessage) {
-                          handlePromptSubmit();
+                      errorInfo={
+                        message.bedrockErrorInfo as {
+                          errorType: string;
+                          message: string;
+                          technicalDetails?: string;
+                          actionRecommendations?: string[];
+                          retryAttempts?: number;
                         }
-                      }}
+                      }
                     />
                   );
                 }
@@ -337,9 +360,13 @@ const AgentChatLayout = ({
                         </ReactMarkdown>
                       )}
 
-                      {message.parsedData.responseType === 'plotData' && <PlotDisplay plotData={message.parsedData.data} />}
+                      {message.parsedData.responseType === 'plotData' && (
+                        <PlotDisplay plotData={message.parsedData.data as Record<string, unknown>} />
+                      )}
 
-                      {message.parsedData.responseType === 'table' && <TableDisplay tableData={message.parsedData.data} />}
+                      {message.parsedData.responseType === 'table' && (
+                        <TableDisplay tableData={message.parsedData.data as Record<string, unknown>} />
+                      )}
                     </SpaceBetween>
                   );
                 }
@@ -421,8 +448,9 @@ const AgentChatLayout = ({
         <SpaceBetween direction="vertical" size="m">
           {messages.length === 0 && (
             <SpaceBetween direction="horizontal" size="s" alignItems="center">
-              <Box flex="1">
+              <div style={{ flex: 1 }}>
                 <SupportPromptGroup
+                  ariaLabel="Sample prompts"
                   alignment="horizontal"
                   items={supportPrompts.map((item) => ({
                     text: item.prompt,
@@ -435,7 +463,7 @@ const AgentChatLayout = ({
                     }
                   }}
                 />{' '}
-              </Box>
+              </div>
             </SpaceBetween>
           )}
           <Box>
@@ -451,9 +479,9 @@ const AgentChatLayout = ({
                 minRows={3}
               />
               <SpaceBetween direction="horizontal" size="m" alignItems="center">
-                <Box fontSize="body-s" color="text-status-info" flex="1">
+                <div style={{ flex: 1, fontSize: '14px', color: 'var(--color-text-status-info)' }}>
                   Avoid sharing sensitive information, the Code Intelligence Agent may use third-party services.
-                </Box>
+                </div>
                 <Checkbox
                   checked={enableCodeIntelligence}
                   onChange={({ detail }) => updateAgentChatState({ enableCodeIntelligence: detail.checked })}
@@ -465,13 +493,13 @@ const AgentChatLayout = ({
             </SpaceBetween>
           </Box>
           <SpaceBetween direction="horizontal" size="s" alignItems="center">
-            <Box flex="1">
+            <div style={{ flex: 1 }}>
               <AgentChatHistoryDropdown
                 onSessionSelect={handleSessionSelect}
                 onSessionDeleted={handleSessionDeleted}
                 disabled={waitingForResponse || isLoadingSession}
               />
-            </Box>
+            </div>
             {messages.length > 0 && (
               <Button
                 variant="normal"
@@ -507,20 +535,6 @@ const AgentChatLayout = ({
       {chatContent}
     </div>
   );
-};
-
-AgentChatLayout.propTypes = {
-  title: PropTypes.string,
-  placeholder: PropTypes.string,
-  agentConfig: PropTypes.shape({
-    agentType: PropTypes.string,
-    mutation: PropTypes.oneOfType([PropTypes.object, PropTypes.func]),
-    subscription: PropTypes.oneOfType([PropTypes.object, PropTypes.func]),
-    method: PropTypes.string,
-  }),
-  className: PropTypes.string,
-  showHeader: PropTypes.bool,
-  customStyles: PropTypes.objectOf(PropTypes.oneOfType([PropTypes.string, PropTypes.number])),
 };
 
 export default AgentChatLayout;

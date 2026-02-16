@@ -1,14 +1,17 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: MIT-0
 import React from 'react';
-import PropTypes from 'prop-types';
 import { Box, Container, Header } from '@cloudscape-design/components';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
 
+interface ChildrenProps {
+  children: React.ReactNode;
+}
+
 // Custom heading components with stronger inline styles
-const H1Component = ({ children }) => (
+const H1Component = ({ children }: ChildrenProps): React.JSX.Element => (
   <h1
     style={{
       fontSize: '1.75em',
@@ -23,7 +26,7 @@ const H1Component = ({ children }) => (
   </h1>
 );
 
-const H2Component = ({ children }) => (
+const H2Component = ({ children }: ChildrenProps): React.JSX.Element => (
   <h2
     style={{
       fontSize: '1.5em',
@@ -38,7 +41,7 @@ const H2Component = ({ children }) => (
   </h2>
 );
 
-const H3Component = ({ children }) => (
+const H3Component = ({ children }: ChildrenProps): React.JSX.Element => (
   <h3
     style={{
       fontSize: '1.25em',
@@ -53,7 +56,7 @@ const H3Component = ({ children }) => (
   </h3>
 );
 
-const H4Component = ({ children }) => (
+const H4Component = ({ children }: ChildrenProps): React.JSX.Element => (
   <h4
     style={{
       fontSize: '1.1em',
@@ -68,7 +71,7 @@ const H4Component = ({ children }) => (
   </h4>
 );
 
-const ParagraphComponent = ({ children }) => (
+const ParagraphComponent = ({ children }: ChildrenProps): React.JSX.Element => (
   <p
     style={{
       marginBottom: '1em',
@@ -80,7 +83,12 @@ const ParagraphComponent = ({ children }) => (
   </p>
 );
 
-const CodeComponent = ({ inline = false, children }) => {
+interface CodeComponentProps {
+  inline?: boolean;
+  children: React.ReactNode;
+}
+
+const CodeComponent = ({ inline = false, children }: CodeComponentProps): React.JSX.Element => {
   if (inline) {
     return (
       <code
@@ -109,7 +117,7 @@ const CodeComponent = ({ inline = false, children }) => {
   );
 };
 
-const PreComponent = ({ children }) => (
+const PreComponent = ({ children }: ChildrenProps): React.JSX.Element => (
   <pre
     style={{
       backgroundColor: '#f8f9fa',
@@ -126,13 +134,17 @@ const PreComponent = ({ children }) => (
   </pre>
 );
 
-const UlComponent = ({ children }) => <ul style={{ marginBottom: '1em', paddingLeft: '2em' }}>{children}</ul>;
+const UlComponent = ({ children }: ChildrenProps): React.JSX.Element => (
+  <ul style={{ marginBottom: '1em', paddingLeft: '2em' }}>{children}</ul>
+);
 
-const OlComponent = ({ children }) => <ol style={{ marginBottom: '1em', paddingLeft: '2em' }}>{children}</ol>;
+const OlComponent = ({ children }: ChildrenProps): React.JSX.Element => (
+  <ol style={{ marginBottom: '1em', paddingLeft: '2em' }}>{children}</ol>
+);
 
-const LiComponent = ({ children }) => <li style={{ marginBottom: '0.25em' }}>{children}</li>;
+const LiComponent = ({ children }: ChildrenProps): React.JSX.Element => <li style={{ marginBottom: '0.25em' }}>{children}</li>;
 
-const BlockquoteComponent = ({ children }) => (
+const BlockquoteComponent = ({ children }: ChildrenProps): React.JSX.Element => (
   <blockquote
     style={{
       borderLeft: '4px solid #0073bb',
@@ -147,7 +159,7 @@ const BlockquoteComponent = ({ children }) => (
   </blockquote>
 );
 
-const TableComponent = ({ children }) => (
+const TableComponent = ({ children }: ChildrenProps): React.JSX.Element => (
   <table
     style={{
       borderCollapse: 'collapse',
@@ -160,7 +172,7 @@ const TableComponent = ({ children }) => (
   </table>
 );
 
-const ThComponent = ({ children }) => (
+const ThComponent = ({ children }: ChildrenProps): React.JSX.Element => (
   <th
     style={{
       border: '1px solid #ddd',
@@ -174,7 +186,7 @@ const ThComponent = ({ children }) => (
   </th>
 );
 
-const TdComponent = ({ children }) => (
+const TdComponent = ({ children }: ChildrenProps): React.JSX.Element => (
   <td
     style={{
       border: '1px solid #ddd',
@@ -186,7 +198,12 @@ const TdComponent = ({ children }) => (
   </td>
 );
 
-const LinkComponent = ({ children, href = '#' }) => (
+interface LinkComponentProps {
+  children: React.ReactNode;
+  href?: string;
+}
+
+const LinkComponent = ({ children, href = '#' }: LinkComponentProps): React.JSX.Element => (
   <a
     href={href}
     style={{
@@ -194,93 +211,31 @@ const LinkComponent = ({ children, href = '#' }) => (
       textDecoration: 'none',
     }}
     onMouseEnter={(e) => {
-      e.target.style.textDecoration = 'underline';
+      (e.target as HTMLAnchorElement).style.textDecoration = 'underline';
     }}
     onMouseLeave={(e) => {
-      e.target.style.textDecoration = 'none';
+      (e.target as HTMLAnchorElement).style.textDecoration = 'none';
     }}
   >
     {children}
   </a>
 );
 
-const StrongComponent = ({ children }) => <strong style={{ fontWeight: 'bold' }}>{children}</strong>;
+const StrongComponent = ({ children }: ChildrenProps): React.JSX.Element => <strong style={{ fontWeight: 'bold' }}>{children}</strong>;
 
-const EmComponent = ({ children }) => <em style={{ fontStyle: 'italic' }}>{children}</em>;
+const EmComponent = ({ children }: ChildrenProps): React.JSX.Element => <em style={{ fontStyle: 'italic' }}>{children}</em>;
 
-// PropTypes for all components
-H1Component.propTypes = {
-  children: PropTypes.node.isRequired,
-};
+interface TextData {
+  content: string;
+  responseType?: string;
+}
 
-H2Component.propTypes = {
-  children: PropTypes.node.isRequired,
-};
+interface TextDisplayProps {
+  textData?: TextData | Record<string, unknown> | null;
+}
 
-H3Component.propTypes = {
-  children: PropTypes.node.isRequired,
-};
-
-H4Component.propTypes = {
-  children: PropTypes.node.isRequired,
-};
-
-ParagraphComponent.propTypes = {
-  children: PropTypes.node.isRequired,
-};
-
-CodeComponent.propTypes = {
-  inline: PropTypes.bool,
-  children: PropTypes.node.isRequired,
-};
-
-PreComponent.propTypes = {
-  children: PropTypes.node.isRequired,
-};
-
-UlComponent.propTypes = {
-  children: PropTypes.node.isRequired,
-};
-
-OlComponent.propTypes = {
-  children: PropTypes.node.isRequired,
-};
-
-LiComponent.propTypes = {
-  children: PropTypes.node.isRequired,
-};
-
-BlockquoteComponent.propTypes = {
-  children: PropTypes.node.isRequired,
-};
-
-TableComponent.propTypes = {
-  children: PropTypes.node.isRequired,
-};
-
-ThComponent.propTypes = {
-  children: PropTypes.node.isRequired,
-};
-
-TdComponent.propTypes = {
-  children: PropTypes.node.isRequired,
-};
-
-LinkComponent.propTypes = {
-  children: PropTypes.node.isRequired,
-  href: PropTypes.string,
-};
-
-StrongComponent.propTypes = {
-  children: PropTypes.node.isRequired,
-};
-
-EmComponent.propTypes = {
-  children: PropTypes.node.isRequired,
-};
-
-const TextDisplay = ({ textData = null }) => {
-  if (!textData || !textData.content) {
+const TextDisplay = ({ textData = null }: TextDisplayProps): React.JSX.Element | null => {
+  if (!textData || !(textData as TextData).content) {
     return null;
   }
 
@@ -307,30 +262,21 @@ const TextDisplay = ({ textData = null }) => {
   return (
     <Container header={<Header variant="h3">Text Response</Header>}>
       <Box padding="m">
-        <Box variant="div" fontSize="body-m" padding="s" backgroundColor="background-container-content">
+        <Box
+          variant="div"
+          fontSize="body-m"
+          padding="s"
+          {...({ backgroundColor: 'background-container-content' } as Record<string, unknown>)}
+        >
           <div style={{ lineHeight: '1.6' }}>
             <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]} components={markdownComponents}>
-              {textData.content}
+              {(textData as TextData).content}
             </ReactMarkdown>
           </div>
         </Box>
       </Box>
     </Container>
   );
-};
-
-TextDisplay.propTypes = {
-  textData: PropTypes.shape({
-    content: PropTypes.string.isRequired,
-    responseType: PropTypes.string,
-  }),
-};
-
-TextDisplay.propTypes = {
-  textData: PropTypes.shape({
-    content: PropTypes.string.isRequired,
-    responseType: PropTypes.string,
-  }),
 };
 
 export default TextDisplay;

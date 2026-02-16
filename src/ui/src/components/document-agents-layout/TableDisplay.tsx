@@ -1,11 +1,35 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: MIT-0
 import React, { useState } from 'react';
-import PropTypes from 'prop-types';
 import { Table, Box, Container, Header, Pagination, CollectionPreferences } from '@cloudscape-design/components';
 
-const TableDisplay = ({ tableData = null }) => {
-  const [preferences, setPreferences] = useState({
+interface TableHeader {
+  id: string;
+  label: string;
+  sortable?: boolean;
+}
+
+interface TableRow {
+  id: string;
+  data: Record<string, unknown>;
+}
+
+interface TableDataType {
+  headers: TableHeader[];
+  rows: TableRow[];
+}
+
+interface TableDisplayProps {
+  tableData?: TableDataType | Record<string, unknown> | null;
+}
+
+interface TablePreferences {
+  pageSize: number;
+  visibleContent: string[];
+}
+
+const TableDisplay = ({ tableData = null }: TableDisplayProps): React.JSX.Element | null => {
+  const [preferences, setPreferences] = useState<TablePreferences>({
     pageSize: 10,
     visibleContent: ['all'],
   });
@@ -15,13 +39,14 @@ const TableDisplay = ({ tableData = null }) => {
     return null;
   }
 
-  const { headers, rows } = tableData;
+  const typedTableData = tableData as TableDataType;
+  const { headers, rows } = typedTableData;
 
   // Convert headers to AWS UI table format
   const columnDefinitions = headers.map((header) => ({
     id: header.id,
     header: header.label,
-    cell: (item) => item.data[header.id],
+    cell: (item: TableRow) => item.data[header.id] as React.ReactNode,
     sortingField: header.sortable ? header.id : undefined,
   }));
 
@@ -58,7 +83,7 @@ const TableDisplay = ({ tableData = null }) => {
             confirmLabel="Confirm"
             cancelLabel="Cancel"
             preferences={preferences}
-            onConfirm={({ detail }) => setPreferences(detail)}
+            onConfirm={({ detail }) => setPreferences(detail as TablePreferences)}
             pageSizePreference={{
               title: 'Page size',
               options: [
@@ -85,27 +110,6 @@ const TableDisplay = ({ tableData = null }) => {
       />
     </Container>
   );
-};
-
-TableDisplay.propTypes = {
-  tableData: PropTypes.shape({
-    headers: PropTypes.arrayOf(
-      PropTypes.shape({
-        id: PropTypes.string.isRequired,
-        label: PropTypes.string.isRequired,
-        sortable: PropTypes.bool,
-      }),
-    ),
-    rows: PropTypes.arrayOf(
-      PropTypes.shape({
-        id: PropTypes.string.isRequired,
-        data: PropTypes.shape({
-          processing_date: PropTypes.string,
-          documents_processed: PropTypes.number,
-        }).isRequired,
-      }),
-    ),
-  }),
 };
 
 export default TableDisplay;

@@ -1,7 +1,6 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 import React, { useState } from 'react';
-import PropTypes from 'prop-types';
 import { Box, Spinner, Button, Modal, Header, SpaceBetween, Tabs } from '@cloudscape-design/components';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -9,13 +8,19 @@ import rehypeRaw from 'rehype-raw';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { atelierLakesideLight } from 'react-syntax-highlighter/dist/esm/styles/hljs';
 
+interface CodeBlockProps {
+  language: string;
+  content: string;
+  label?: string | null;
+}
+
 /**
  * CodeBlock sub-component for consistent syntax highlighting
  */
-const CodeBlock = ({ language, content, label = null }) => (
+const CodeBlock = ({ language, content, label = null }: CodeBlockProps): React.JSX.Element => (
   <Box>
     {label && (
-      <Box marginBottom="s">
+      <Box margin={{ bottom: 's' }}>
         <Box fontSize="body-s" color="text-status-info">
           {label}
         </Box>
@@ -27,21 +32,36 @@ const CodeBlock = ({ language, content, label = null }) => (
   </Box>
 );
 
-CodeBlock.propTypes = {
-  language: PropTypes.string.isRequired,
-  content: PropTypes.string.isRequired,
-  label: PropTypes.string,
-};
+interface CloudWatchLogsData {
+  stack_name: string;
+  filter_pattern: string;
+  log_groups_searched: number;
+  total_log_groups_found: number;
+  total_events_found: number;
+  results?: Array<{
+    log_group: string;
+    events_found: number;
+    events: Array<{
+      timestamp: string;
+      log_stream: string;
+      message: string;
+    }>;
+  }>;
+}
+
+interface CloudWatchLogsDisplayProps {
+  data: CloudWatchLogsData;
+}
 
 /**
  * CloudWatchLogsDisplay sub-component for structured log display
  */
-const CloudWatchLogsDisplay = ({ data }) => {
-  const formatTimestamp = (timestamp) => {
+const CloudWatchLogsDisplay = ({ data }: CloudWatchLogsDisplayProps): React.JSX.Element => {
+  const formatTimestamp = (timestamp: string): string => {
     return new Date(timestamp).toLocaleString();
   };
 
-  const formatLogMessage = (message) => {
+  const formatLogMessage = (message: string): string => {
     // Clean up the message by removing AWS Lambda prefixes and formatting
     return message
       .replace(/^\[ERROR\]\t\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z\t[\w-]+\t/, '') // Remove AWS Lambda prefix
@@ -51,63 +71,66 @@ const CloudWatchLogsDisplay = ({ data }) => {
 
   return (
     <Box>
-      <Box marginBottom="l">
-        <Box fontSize="heading-s" marginBottom="s">
+      <Box margin={{ bottom: 'l' }}>
+        <Box fontSize="heading-s" margin={{ bottom: 's' }}>
           Search Summary
         </Box>
         <SpaceBetween direction="vertical" size="xs">
-          <Box display="flex" justifyContent="space-between">
+          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
             <Box>Stack:</Box>
             <Box fontWeight="bold">{data.stack_name}</Box>
-          </Box>
-          <Box display="flex" justifyContent="space-between">
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
             <Box>Filter Pattern:</Box>
             <Box fontWeight="bold">{data.filter_pattern}</Box>
-          </Box>
-          <Box display="flex" justifyContent="space-between">
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
             <Box>Log Groups Searched:</Box>
             <Box fontWeight="bold">
               {data.log_groups_searched} / {data.total_log_groups_found}
             </Box>
-          </Box>
-          <Box display="flex" justifyContent="space-between">
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
             <Box>Total Events Found:</Box>
             <Box fontWeight="bold" color={data.total_events_found > 0 ? 'text-status-error' : 'text-status-success'}>
               {data.total_events_found}
             </Box>
-          </Box>
+          </div>
         </SpaceBetween>
       </Box>
 
       {/* Log Events */}
       {data.results && data.results.length > 0 && (
         <Box>
-          <Box fontSize="heading-s" marginBottom="s">
+          <Box fontSize="heading-s" margin={{ bottom: 's' }}>
             Log Events
           </Box>
           <SpaceBetween direction="vertical" size="m">
             {data.results.map((logGroup) => (
               <Box key={logGroup.log_group}>
-                <Box fontSize="body-m" fontWeight="bold" marginBottom="s" color="text-status-info">
+                <Box fontSize="body-m" fontWeight="bold" margin={{ bottom: 's' }} color="text-status-info">
                   {logGroup.log_group} ({logGroup.events_found} events)
                 </Box>
                 <SpaceBetween direction="vertical" size="s">
                   {logGroup.events.map((event) => (
-                    <Box key={`${event.timestamp}-${event.log_stream}`} padding="s" backgroundColor="background-container-content">
+                    <div
+                      key={`${event.timestamp}-${event.log_stream}`}
+                      style={{ padding: '8px', backgroundColor: 'var(--color-background-container-content)' }}
+                    >
                       <SpaceBetween direction="vertical" size="xs">
-                        <Box display="flex" justifyContent="space-between" alignItems="center">
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                           <Box fontSize="body-s" color="text-status-info">
                             {formatTimestamp(event.timestamp)}
                           </Box>
                           <Box fontSize="body-s" color="text-status-info">
                             {event.log_stream.split('/').pop()}
                           </Box>
-                        </Box>
-                        <Box fontSize="body-s" fontFamily="monospace" whiteSpace="pre-wrap">
+                        </div>
+                        <div style={{ fontSize: '14px', fontFamily: 'monospace', whiteSpace: 'pre-wrap' }}>
                           {formatLogMessage(event.message)}
-                        </Box>
+                        </div>
                       </SpaceBetween>
-                    </Box>
+                    </div>
                   ))}
                 </SpaceBetween>
               </Box>
@@ -125,23 +148,20 @@ const CloudWatchLogsDisplay = ({ data }) => {
   );
 };
 
-CloudWatchLogsDisplay.propTypes = {
-  data: PropTypes.object.isRequired,
-};
+interface AgentToolComponentProps {
+  toolName: string;
+  toolUseId: string;
+  executionLoading?: boolean;
+  executionDetails?: string | null;
+  resultLoading?: boolean;
+  resultDetails?: string | null;
+  timestamp: string;
+  onToggle?: ((isOpen: boolean) => void) | null;
+  parentProcessing?: boolean;
+}
 
 /**
  * AgentToolComponent displays both tool execution and results in a single component
- *
- * @param {Object} props - Component props
- * @param {string} props.toolName - Name of the tool
- * @param {string} props.toolUseId - Unique identifier for this tool usage
- * @param {boolean} props.executionLoading - Whether the tool execution is still in progress
- * @param {string} [props.executionDetails] - Complete execution details content (markdown)
- * @param {boolean} props.resultLoading - Whether the tool results are still being processed
- * @param {string} [props.resultDetails] - Complete result details content (markdown)
- * @param {string} props.timestamp - Timestamp of when the tool started
- * @param {Function} [props.onToggle] - Callback when modal state changes
- * @returns {JSX.Element} The AgentToolComponent
  */
 const AgentToolComponentBase = ({
   toolName,
@@ -153,7 +173,7 @@ const AgentToolComponentBase = ({
   timestamp,
   onToggle = null,
   parentProcessing = false,
-}) => {
+}: AgentToolComponentProps): React.JSX.Element => {
   const [isModalVisible, setIsModalVisible] = useState(false);
   const [activeTabId, setActiveTabId] = useState('execution');
 
@@ -171,7 +191,7 @@ const AgentToolComponentBase = ({
     }
   };
 
-  const formatToolName = (name) => {
+  const formatToolName = (name: string): string => {
     // Convert snake_case or camelCase to readable format
     return name
       .replace(/([A-Z])/g, ' $1')
@@ -181,8 +201,8 @@ const AgentToolComponentBase = ({
   };
 
   // Detect content type based on tool name
-  const detectByToolName = (currentToolName) => {
-    const toolMappings = {
+  const detectByToolName = (currentToolName: string | null): string | null => {
+    const toolMappings: Record<string, string> = {
       // Analytics Agent Tools
       get_table_info: 'markdown',
       get_database_overview: 'markdown',
@@ -217,11 +237,11 @@ const AgentToolComponentBase = ({
       parse_json: 'json',
     };
 
-    return toolMappings[currentToolName?.toLowerCase()] || null;
+    return toolMappings[currentToolName?.toLowerCase() ?? ''] || null;
   };
 
   // Detect content type based on content analysis
-  const detectContentType = (content) => {
+  const detectContentType = (content: string | null): string => {
     if (!content || typeof content !== 'string') return 'text';
 
     const trimmed = content.trim();
@@ -270,7 +290,7 @@ const AgentToolComponentBase = ({
   };
 
   // Smart content formatter
-  const formatContent = (content, currentToolName) => {
+  const formatContent = (content: string | null, currentToolName: string): React.JSX.Element | null => {
     if (!content) return null;
 
     // Clean up Python string representation artifacts
@@ -319,7 +339,7 @@ const AgentToolComponentBase = ({
     if (cleanedContent.includes("'") && (cleanedContent.includes('stack_name') || cleanedContent.includes('analysis_type'))) {
       try {
         // More robust Python dict to JSON conversion
-        let jsonContent = cleanedContent
+        const jsonContent = cleanedContent
           // Handle escaped quotes in strings first
           .replace(/\\"/g, '\\"') // Preserve already escaped quotes
           .replace(/\\'/g, "\\'") // Preserve already escaped single quotes
@@ -417,22 +437,22 @@ const AgentToolComponentBase = ({
   return (
     <div className="agent-tool-component" data-tool-use-id={toolUseId}>
       <SpaceBetween direction="horizontal" size="xs" alignItems="center">
-        <Box fontSize="10px">
+        <div style={{ fontSize: '10px' }}>
           <strong>{formatToolName(toolName)}</strong>
-        </Box>
+        </div>
 
-        <Box display="flex" alignItems="center">
+        <div style={{ display: 'flex', alignItems: 'center' }}>
           {showSpinner && (
-            <Box marginRight="s">
+            <div style={{ marginRight: '8px' }}>
               <Spinner />
-            </Box>
+            </div>
           )}
           {hasContent && (
             <button onClick={handleViewDetails} style={{ fontSize: '12px' }}>
               View Details
             </button>
           )}
-        </Box>
+        </div>
       </SpaceBetween>
 
       {/* Modal for displaying execution and result details */}
@@ -459,10 +479,10 @@ const AgentToolComponentBase = ({
               content: (
                 <Box padding={{ top: 's' }}>
                   {executionLoading ? (
-                    <Box display="flex" alignItems="center">
+                    <div style={{ display: 'flex', alignItems: 'center' }}>
                       <Spinner />
-                      <Box marginLeft="s">Executing tool...</Box>
-                    </Box>
+                      <div style={{ marginLeft: '8px' }}>Executing tool...</div>
+                    </div>
                   ) : executionDetails ? (
                     formatContent(executionDetails, toolName)
                   ) : (
@@ -481,10 +501,10 @@ const AgentToolComponentBase = ({
                     content: (
                       <Box padding={{ top: 's' }}>
                         {resultLoading ? (
-                          <Box display="flex" alignItems="center">
+                          <div style={{ display: 'flex', alignItems: 'center' }}>
                             <Spinner />
-                            <Box marginLeft="s">Processing results...</Box>
-                          </Box>
+                            <div style={{ marginLeft: '8px' }}>Processing results...</div>
+                          </div>
                         ) : resultDetails ? (
                           formatContent(resultDetails, toolName)
                         ) : (
@@ -501,20 +521,8 @@ const AgentToolComponentBase = ({
   );
 };
 
-AgentToolComponentBase.propTypes = {
-  toolName: PropTypes.string.isRequired,
-  toolUseId: PropTypes.string.isRequired,
-  executionLoading: PropTypes.bool,
-  executionDetails: PropTypes.string,
-  resultLoading: PropTypes.bool,
-  resultDetails: PropTypes.string,
-  timestamp: PropTypes.string.isRequired,
-  onToggle: PropTypes.func,
-  parentProcessing: PropTypes.bool,
-};
-
 // Wrap with React.memo to prevent re-renders when props haven't changed
 // This ensures the modal stays open during message streaming
-const AgentToolComponent = React.memo(AgentToolComponentBase);
+const AgentToolComponent = React.memo<AgentToolComponentProps>(AgentToolComponentBase);
 
 export default AgentToolComponent;

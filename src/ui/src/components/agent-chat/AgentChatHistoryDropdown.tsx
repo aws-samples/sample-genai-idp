@@ -1,7 +1,6 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 import React, { useState, useEffect, useRef } from 'react';
-import PropTypes from 'prop-types';
 import { generateClient } from 'aws-amplify/api';
 import { ConsoleLogger } from 'aws-amplify/utils';
 import { ButtonDropdown, Button, Box } from '@cloudscape-design/components';
@@ -12,13 +11,37 @@ import {
   GET_AGENT_CHAT_MESSAGES,
 } from '../../graphql/queries/agentChatSessionQueries';
 
+import type { ChatMessage } from '../../types/agent-chat';
+
 const client = generateClient();
 const logger = new ConsoleLogger('AgentChatHistoryDropdown');
 
-const AgentChatHistoryDropdown = ({ onSessionSelect, disabled = false, onSessionDeleted = () => {} }) => {
-  const [chatSessions, setChatSessions] = useState([]);
+interface ChatSession {
+  sessionId: string;
+  title: string;
+  updatedAt?: string;
+  messageCount?: number;
+}
+
+interface SelectedOption {
+  value: string;
+  label: string;
+}
+
+interface AgentChatHistoryDropdownProps {
+  onSessionSelect: (session: ChatSession, messages: ChatMessage[]) => void;
+  disabled?: boolean;
+  onSessionDeleted?: (sessionId: string) => void;
+}
+
+const AgentChatHistoryDropdown = ({
+  onSessionSelect,
+  disabled = false,
+  onSessionDeleted = () => {},
+}: AgentChatHistoryDropdownProps): React.JSX.Element => {
+  const [chatSessions, setChatSessions] = useState<ChatSession[]>([]);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
-  const [selectedOption, setSelectedOption] = useState(null);
+  const [selectedOption, setSelectedOption] = useState<SelectedOption | null>(null);
   const [isDeletingSession, setIsDeletingSession] = useState(false);
   const lastFetchTimeRef = useRef(0);
 
@@ -44,16 +67,17 @@ const AgentChatHistoryDropdown = ({ onSessionSelect, disabled = false, onSession
           query: LIST_AGENT_CHAT_SESSIONS,
           variables: { limit: 20 }, // Limit to most recent 20 sessions
         });
-      } catch (amplifyError) {
+      } catch (amplifyError: unknown) {
         // Amplify throws an exception when there are GraphQL errors, but the response might still contain valid data
         logger.warn('Amplify threw an exception due to GraphQL errors, checking for valid data:', amplifyError);
 
+        const err = amplifyError as Record<string, unknown>;
         // Check if the error object contains the actual response data
-        if (amplifyError.data && amplifyError.data.listChatSessions) {
+        if (err.data && (err.data as Record<string, unknown>).listChatSessions) {
           logger.info('Found valid data in the error response, proceeding with processing');
           response = {
-            data: amplifyError.data,
-            errors: amplifyError.errors || [],
+            data: err.data,
+            errors: (err.errors as Array<Record<string, unknown>>) || [],
           };
         } else {
           // If there's no data in the error, re-throw to be handled by outer catch
@@ -62,13 +86,17 @@ const AgentChatHistoryDropdown = ({ onSessionSelect, disabled = false, onSession
       }
 
       // Handle GraphQL errors gracefully - log them but continue processing valid data
-      if (response.errors && response.errors.length > 0) {
-        logger.warn(`Received ${response.errors.length} GraphQL errors in listChatSessions response:`, response.errors);
+      const responseWithErrors = response as Record<string, unknown>;
+      const errors = responseWithErrors.errors as Array<Record<string, unknown>> | undefined;
+      if (errors && errors.length > 0) {
+        logger.warn(`Received ${errors.length} GraphQL errors in listChatSessions response:`, errors);
         logger.warn('Continuing to process valid data despite errors...');
       }
 
       // Get items array and filter out null values (corrupted items)
-      const rawItems = response?.data?.listChatSessions?.items || [];
+      const data = responseWithErrors.data as Record<string, unknown> | undefined;
+      const listChatSessions = data?.listChatSessions as Record<string, unknown> | undefined;
+      const rawItems = (listChatSessions?.items as ChatSession[]) || [];
       const nonNullSessions = rawItems.filter((session) => session !== null);
 
       logger.debug(`Raw response: ${rawItems.length} total items, ${nonNullSessions.length} non-null items`);
@@ -117,9 +145,9 @@ const AgentChatHistoryDropdown = ({ onSessionSelect, disabled = false, onSession
       setChatSessions(sortedSessions);
 
       // Log summary of what we processed
-      if (response.errors && response.errors.length > 0) {
+      if (errors && errors.length > 0) {
         logger.info(
-          `Successfully processed ${sortedSessions.length} valid sessions despite ${response.errors.length} GraphQL errors from corrupted items`,
+          `Successfully processed ${sortedSessions.length} valid sessions despite ${errors.length} GraphQL errors from corrupted items`,
         );
       } else {
         logger.info(`Successfully processed ${sortedSessions.length} sessions with no errors`);
@@ -139,7 +167,7 @@ const AgentChatHistoryDropdown = ({ onSessionSelect, disabled = false, onSession
     fetchChatSessions(true);
   }, []);
 
-  const handleDropdownItemClick = async ({ detail }) => {
+  const handleDropdownItemClick = async ({ detail }: { detail: { id: string } }) => {
     console.log('Previous chat session clicked, detail:', detail);
 
     // Prevent dropdown item selection if a delete operation is in progress
@@ -161,7 +189,9 @@ const AgentChatHistoryDropdown = ({ onSessionSelect, disabled = false, onSession
           variables: { sessionId: selectedSession.sessionId },
         });
 
-        const messages = messagesResponse?.data?.getChatMessages || [];
+        const responseData = messagesResponse as unknown as Record<string, unknown>;
+        const msgData = responseData?.data as Record<string, unknown> | undefined;
+        const messages = (msgData?.getChatMessages as ChatMessage[]) || [];
         console.log('Loaded messages for session:', messages);
 
         // Call the parent callback with session data and messages
@@ -174,9 +204,9 @@ const AgentChatHistoryDropdown = ({ onSessionSelect, disabled = false, onSession
   };
 
   // Format date for display in dropdown
-  const formatDate = (dateString) => {
+  const formatDate = (dateString: string | undefined): string => {
     try {
-      const date = new Date(dateString);
+      const date = new Date(dateString as string);
       // Check if date is valid
       if (Number.isNaN(date.getTime())) {
         return 'Unknown date';
@@ -258,9 +288,9 @@ const AgentChatHistoryDropdown = ({ onSessionSelect, disabled = false, onSession
 
   return (
     <ButtonDropdown
-      items={createDropdownItems()}
+      items={createDropdownItems() as import('@cloudscape-design/components').ButtonDropdownProps.ItemOrGroup[]}
       onItemClick={handleDropdownItemClick}
-      onFocus={() => fetchChatSessions()}
+      {...({ onFocus: () => fetchChatSessions() } as Record<string, unknown>)}
       loading={isLoadingHistory}
       disabled={disabled}
     >
@@ -273,12 +303,6 @@ const AgentChatHistoryDropdown = ({ onSessionSelect, disabled = false, onSession
       })()}
     </ButtonDropdown>
   );
-};
-
-AgentChatHistoryDropdown.propTypes = {
-  onSessionSelect: PropTypes.func.isRequired,
-  disabled: PropTypes.bool,
-  onSessionDeleted: PropTypes.func,
 };
 
 export default AgentChatHistoryDropdown;

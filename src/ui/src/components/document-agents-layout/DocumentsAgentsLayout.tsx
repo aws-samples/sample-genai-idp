@@ -19,76 +19,77 @@ const client = generateClient();
 
 const logger = new ConsoleLogger('DocumentsAgentsLayout');
 
-const DocumentsAgentsLayout = () => {
+const DocumentsAgentsLayout = (): React.JSX.Element => {
   const { analyticsState, updateAnalyticsState } = useAnalyticsContext();
   const { queryText, jobId, jobStatus, jobResult, agentMessages, error, isSubmitting, subscription } = analyticsState;
 
-  const subscribeToJobCompletion = (id) => {
+  const subscribeToJobCompletion = (id: string) => {
     try {
       logger.debug('Subscribing to job completion for job ID:', id);
-      const sub = client
-        .graphql({
-          query: onAgentJobComplete,
+      const sub = (
+        client.graphql({
+          query: onAgentJobComplete as unknown as string,
           variables: { jobId: id },
-        })
-        .subscribe({
-          next: async (subscriptionData) => {
-            const data = subscriptionData?.data;
-            const jobCompleted = data?.onAgentJobComplete;
-            logger.debug('Job completion notification:', jobCompleted);
+        }) as unknown as { subscribe: (callbacks: Record<string, unknown>) => { unsubscribe: () => void } }
+      ).subscribe({
+        next: async (subscriptionData: Record<string, unknown>) => {
+          const data = (subscriptionData as Record<string, unknown>)?.data as Record<string, unknown> | undefined;
+          const jobCompleted = data?.onAgentJobComplete as Record<string, unknown> | undefined;
+          logger.debug('Job completion notification:', jobCompleted);
 
-            if (jobCompleted) {
-              // Job completed, now fetch the actual job details
-              try {
-                logger.debug('Fetching job details after completion notification');
-                const jobResponse = await client.graphql({
-                  query: getAgentJobStatus,
-                  variables: { jobId: id },
-                });
+          if (jobCompleted) {
+            // Job completed, now fetch the actual job details
+            try {
+              logger.debug('Fetching job details after completion notification');
+              const jobResponse = await client.graphql({
+                query: getAgentJobStatus as unknown as string,
+                variables: { jobId: id },
+              });
 
-                const job = jobResponse?.data?.getAgentJobStatus;
-                logger.debug('Fetched job details:', job);
+              const jobResponseData = (jobResponse as unknown as Record<string, unknown>)?.data as Record<string, unknown> | undefined;
+              const job = jobResponseData?.getAgentJobStatus as Record<string, unknown> | undefined;
+              logger.debug('Fetched job details:', job);
 
-                if (job) {
-                  updateAnalyticsState({
-                    jobStatus: job.status,
-                    agentMessages: job.agent_messages,
-                  });
-
-                  if (job.status === 'COMPLETED') {
-                    updateAnalyticsState({ jobResult: job.result });
-                  } else if (job.status === 'FAILED') {
-                    updateAnalyticsState({ error: job.error || 'Job processing failed' });
-                  }
-                } else {
-                  logger.error('Failed to fetch job details after completion notification');
-                  updateAnalyticsState({ error: 'Failed to fetch job details after completion' });
-                }
-              } catch (fetchError) {
-                logger.error('Error fetching job details:', fetchError);
+              if (job) {
                 updateAnalyticsState({
-                  error: `Failed to fetch job details: ${fetchError.message || 'Unknown error'}`,
+                  jobStatus: job.status as string,
+                  agentMessages: job.agent_messages as string,
                 });
+
+                if (job.status === 'COMPLETED') {
+                  updateAnalyticsState({ jobResult: job.result as string });
+                } else if (job.status === 'FAILED') {
+                  updateAnalyticsState({ error: (job.error as string) || 'Job processing failed' });
+                }
+              } else {
+                logger.error('Failed to fetch job details after completion notification');
+                updateAnalyticsState({ error: 'Failed to fetch job details after completion' });
               }
-            } else {
-              logger.error('Received invalid completion notification. Full response:', JSON.stringify(subscriptionData, null, 2));
+            } catch (fetchError) {
+              logger.error('Error fetching job details:', fetchError);
               updateAnalyticsState({
-                error: 'Received invalid completion notification. Check console logs for details.',
+                error: `Failed to fetch job details: ${(fetchError as Error).message || 'Unknown error'}`,
               });
             }
-          },
-          error: (err) => {
-            logger.error('Subscription error:', err);
-            logger.error('Error details:', JSON.stringify(err, null, 2));
-            updateAnalyticsState({ error: `Subscription error: ${err.message || 'Unknown error'}` });
-          },
-        });
+          } else {
+            logger.error('Received invalid completion notification. Full response:', JSON.stringify(subscriptionData, null, 2));
+            updateAnalyticsState({
+              error: 'Received invalid completion notification. Check console logs for details.',
+            });
+          }
+        },
+        error: (err: Record<string, unknown>) => {
+          logger.error('Subscription error:', err);
+          logger.error('Error details:', JSON.stringify(err, null, 2));
+          updateAnalyticsState({ error: `Subscription error: ${(err as unknown as Error).message || 'Unknown error'}` });
+        },
+      });
 
       updateAnalyticsState({ subscription: sub });
       return sub;
     } catch (err) {
       logger.error('Error setting up subscription:', err);
-      updateAnalyticsState({ error: `Failed to set up job status subscription: ${err.message || 'Unknown error'}` });
+      updateAnalyticsState({ error: `Failed to set up job status subscription: ${(err as Error).message || 'Unknown error'}` });
       return null;
     }
   };
@@ -98,12 +99,12 @@ const DocumentsAgentsLayout = () => {
     return () => {
       if (subscription) {
         logger.debug('Cleaning up subscription');
-        subscription.unsubscribe();
+        (subscription as { unsubscribe: () => void }).unsubscribe();
       }
     };
   }, [subscription]);
 
-  const handleSubmitQuery = async (query, agentIds, existingJobId = null) => {
+  const handleSubmitQuery = async (query: string, agentIds: string | string[], existingJobId: string | null = null) => {
     try {
       updateAnalyticsState({
         queryText: query,
@@ -117,20 +118,21 @@ const DocumentsAgentsLayout = () => {
 
         // Fetch the job status and result
         const response = await client.graphql({
-          query: getAgentJobStatus,
+          query: getAgentJobStatus as unknown as string,
           variables: { jobId: existingJobId },
         });
 
-        const job = response?.data?.getAgentJobStatus;
+        const responseData = (response as unknown as Record<string, unknown>)?.data as Record<string, unknown> | undefined;
+        const job = responseData?.getAgentJobStatus as Record<string, unknown> | undefined;
         if (job) {
           updateAnalyticsState({
-            jobStatus: job.status,
-            agentMessages: job.agent_messages,
+            jobStatus: job.status as string,
+            agentMessages: job.agent_messages as string,
           });
           if (job.status === 'COMPLETED') {
-            updateAnalyticsState({ jobResult: job.result });
+            updateAnalyticsState({ jobResult: job.result as string });
           } else if (job.status === 'FAILED') {
-            updateAnalyticsState({ error: job.error || 'Job processing failed' });
+            updateAnalyticsState({ error: (job.error as string) || 'Job processing failed' });
           } else {
             // If job is still processing, subscribe to updates
             subscribeToJobCompletion(existingJobId);
@@ -149,16 +151,17 @@ const DocumentsAgentsLayout = () => {
 
       // Clean up previous subscription if exists
       if (subscription) {
-        subscription.unsubscribe();
+        (subscription as { unsubscribe: () => void }).unsubscribe();
       }
 
       logger.debug('Submitting agent query:', query, 'with agents:', agentIds);
       const response = await client.graphql({
-        query: submitAgentQuery,
+        query: submitAgentQuery as unknown as string,
         variables: { query, agentIds: Array.isArray(agentIds) ? agentIds : [agentIds] },
       });
 
-      const job = response?.data?.submitAgentQuery;
+      const responseData = (response as unknown as Record<string, unknown>)?.data as Record<string, unknown> | undefined;
+      const job = responseData?.submitAgentQuery as Record<string, unknown> | undefined;
       logger.debug('Job created:', job);
 
       if (!job) {
@@ -166,35 +169,36 @@ const DocumentsAgentsLayout = () => {
       }
 
       updateAnalyticsState({
-        jobId: job.jobId,
-        jobStatus: job.status,
+        jobId: job.jobId as string,
+        jobStatus: job.status as string,
       });
 
       // Subscribe to job completion
-      subscribeToJobCompletion(job.jobId);
+      subscribeToJobCompletion(job.jobId as string);
 
       // Add immediate poll after 1 second for quick feedback
       setTimeout(async () => {
         try {
           logger.debug('Immediate poll for job ID:', job.jobId);
           const pollResponse = await client.graphql({
-            query: getAgentJobStatus,
+            query: getAgentJobStatus as unknown as string,
             variables: { jobId: job.jobId },
           });
 
-          const polledJob = pollResponse?.data?.getAgentJobStatus;
+          const pollResponseData = (pollResponse as unknown as Record<string, unknown>)?.data as Record<string, unknown> | undefined;
+          const polledJob = pollResponseData?.getAgentJobStatus as Record<string, unknown> | undefined;
           logger.debug('Immediate poll result:', polledJob);
 
           if (polledJob && polledJob.status !== job.status) {
             updateAnalyticsState({
-              jobStatus: polledJob.status,
-              agentMessages: polledJob.agent_messages,
+              jobStatus: polledJob.status as string,
+              agentMessages: polledJob.agent_messages as string,
             });
 
             if (polledJob.status === 'COMPLETED') {
-              updateAnalyticsState({ jobResult: polledJob.result });
+              updateAnalyticsState({ jobResult: polledJob.result as string });
             } else if (polledJob.status === 'FAILED') {
-              updateAnalyticsState({ error: polledJob.error || 'Job processing failed' });
+              updateAnalyticsState({ error: (polledJob.error as string) || 'Job processing failed' });
             }
           }
         } catch (pollErr) {
@@ -208,13 +212,21 @@ const DocumentsAgentsLayout = () => {
 
       let errorMessage = 'Failed to submit query';
 
+      const typedErr = err as Record<string, unknown>;
       // Extract error message from GraphQL error structure
-      if (err.errors && err.errors.length > 0 && err.errors[0].message) {
-        errorMessage = err.errors[0].message;
-      } else if (err.message) {
-        errorMessage = err.message;
-      } else if (err.data && err.data.errors && err.data.errors.length > 0 && err.data.errors[0].message) {
-        errorMessage = err.data.errors[0].message;
+      if (
+        typedErr.errors &&
+        (typedErr.errors as Array<Record<string, unknown>>).length > 0 &&
+        (typedErr.errors as Array<Record<string, unknown>>)[0].message
+      ) {
+        errorMessage = (typedErr.errors as Array<Record<string, unknown>>)[0].message as string;
+      } else if (typedErr.message) {
+        errorMessage = typedErr.message as string;
+      } else if (typedErr.data && (typedErr.data as Record<string, unknown>).errors) {
+        const dataErrors = (typedErr.data as Record<string, unknown>).errors as Array<Record<string, unknown>>;
+        if (dataErrors.length > 0 && dataErrors[0].message) {
+          errorMessage = dataErrors[0].message as string;
+        }
       } else if (typeof err === 'string') {
         errorMessage = err;
       }
@@ -230,32 +242,33 @@ const DocumentsAgentsLayout = () => {
 
   // Poll for job status as a fallback in case subscription fails
   useEffect(() => {
-    let intervalId;
+    let intervalId: ReturnType<typeof setInterval>;
 
     if (jobId && jobStatus && (jobStatus === 'PENDING' || jobStatus === 'PROCESSING')) {
       intervalId = setInterval(async () => {
         try {
           logger.debug('Polling job status for job ID:', jobId);
           const response = await client.graphql({
-            query: getAgentJobStatus,
+            query: getAgentJobStatus as unknown as string,
             variables: { jobId },
           });
 
-          const job = response?.data?.getAgentJobStatus;
+          const responseData = (response as unknown as Record<string, unknown>)?.data as Record<string, unknown> | undefined;
+          const job = responseData?.getAgentJobStatus as Record<string, unknown> | undefined;
           logger.debug('Polled job status:', job);
 
           if (job) {
             // Always update agent messages, even if status hasn't changed
-            updateAnalyticsState({ agentMessages: job.agent_messages });
+            updateAnalyticsState({ agentMessages: job.agent_messages as string });
 
             if (job.status !== jobStatus) {
-              updateAnalyticsState({ jobStatus: job.status });
+              updateAnalyticsState({ jobStatus: job.status as string });
 
               if (job.status === 'COMPLETED') {
-                updateAnalyticsState({ jobResult: job.result });
+                updateAnalyticsState({ jobResult: job.result as string });
                 clearInterval(intervalId);
               } else if (job.status === 'FAILED') {
-                updateAnalyticsState({ error: job.error || 'Job processing failed' });
+                updateAnalyticsState({ error: (job.error as string) || 'Job processing failed' });
                 clearInterval(intervalId);
               }
             }
@@ -288,11 +301,11 @@ const DocumentsAgentsLayout = () => {
 
         <AgentJobStatus jobId={jobId} status={jobStatus} error={error} />
 
-        {jobResult && <AgentResultDisplay result={jobResult} query={queryText} />}
+        {jobResult && <AgentResultDisplay result={jobResult as string | Record<string, unknown>} query={queryText as string} />}
 
         {/* Show agent messages at the bottom when available */}
         {(agentMessages || jobStatus === 'PROCESSING') && (
-          <AgentMessagesDisplay agentMessages={agentMessages} isProcessing={jobStatus === 'PROCESSING'} />
+          <AgentMessagesDisplay agentMessages={agentMessages as string} isProcessing={jobStatus === 'PROCESSING'} />
         )}
       </SpaceBetween>
     </Container>

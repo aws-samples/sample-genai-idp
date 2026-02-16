@@ -1,10 +1,9 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: MIT-0
 import React from 'react';
-import PropTypes from 'prop-types';
 import { StatusIndicator, Box, SpaceBetween } from '@cloudscape-design/components';
 
-const getStatusIndicator = (status) => {
+const getStatusIndicator = (status: string | null): React.JSX.Element | null => {
   switch (status) {
     case 'PENDING':
       return <StatusIndicator type="pending">Job created, waiting to start processing</StatusIndicator>;
@@ -19,7 +18,13 @@ const getStatusIndicator = (status) => {
   }
 };
 
-const AgentJobStatus = ({ jobId = null, status = null, error = null }) => {
+interface AgentJobStatusProps {
+  jobId?: string | null;
+  status?: string | null;
+  error?: string | null;
+}
+
+const AgentJobStatus = ({ jobId = null, status = null, error = null }: AgentJobStatusProps): React.JSX.Element | null => {
   // Show error even if there's no jobId (for validation errors)
   if (error && !jobId) {
     return (
@@ -47,12 +52,6 @@ const AgentJobStatus = ({ jobId = null, status = null, error = null }) => {
       </SpaceBetween>
     </Box>
   );
-};
-
-AgentJobStatus.propTypes = {
-  jobId: PropTypes.string,
-  status: PropTypes.string,
-  error: PropTypes.string,
 };
 
 export default AgentJobStatus;

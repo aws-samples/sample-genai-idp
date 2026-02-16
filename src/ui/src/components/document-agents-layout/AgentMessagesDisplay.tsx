@@ -2,12 +2,30 @@
 // SPDX-License-Identifier: MIT-0
 
 import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react';
-import PropTypes from 'prop-types';
 import { Container, Header, Box, Spinner, SpaceBetween, Button, Modal } from '@cloudscape-design/components';
 
-const AgentMessagesDisplay = ({ agentMessages = null, isProcessing = false }) => {
-  const messagesEndRef = useRef(null);
-  const messagesContainerRef = useRef(null);
+interface AgentMessage {
+  role: string;
+  content: string | Array<Record<string, unknown>> | Record<string, unknown>;
+  message_type?: string;
+  timestamp?: string;
+  sequence_number?: number;
+  tool_name?: string;
+  originalMessage?: AgentMessage;
+  throttling_details?: {
+    error_code: string;
+  };
+  [key: string]: unknown;
+}
+
+interface AgentMessagesDisplayProps {
+  agentMessages?: string | null;
+  isProcessing?: boolean;
+}
+
+const AgentMessagesDisplay = ({ agentMessages = null, isProcessing = false }: AgentMessagesDisplayProps): React.JSX.Element | null => {
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
   const [sqlModalVisible, setSqlModalVisible] = useState(false);
   const [currentSqlQuery, setCurrentSqlQuery] = useState('');
   const [codeModalVisible, setCodeModalVisible] = useState(false);
@@ -17,7 +35,7 @@ const AgentMessagesDisplay = ({ agentMessages = null, isProcessing = false }) =>
 
   // Suppress ResizeObserver errors in development
   useEffect(() => {
-    const handleResizeObserverError = (e) => {
+    const handleResizeObserverError = (e: ErrorEvent) => {
       if (e.message === 'ResizeObserver loop completed with undelivered notifications.') {
         e.stopImmediatePropagation();
         return false;
@@ -25,45 +43,59 @@ const AgentMessagesDisplay = ({ agentMessages = null, isProcessing = false }) =>
       return true;
     };
 
-    window.addEventListener('error', handleResizeObserverError);
+    window.addEventListener('error', handleResizeObserverError as EventListener);
     return () => {
-      window.removeEventListener('error', handleResizeObserverError);
+      window.removeEventListener('error', handleResizeObserverError as EventListener);
     };
   }, []);
 
   // Extract SQL query from tool use content
-  const extractSqlQuery = (originalMessage) => {
+  const extractSqlQuery = (originalMessage: AgentMessage | undefined): string | null => {
     if (!originalMessage || !originalMessage.content) return null;
 
     // Handle array content format
     if (Array.isArray(originalMessage.content)) {
-      const sqlItem = originalMessage.content.find((item) => item && item.toolUse && item.toolUse.name === 'run_athena_query_with_config');
-      return sqlItem?.toolUse?.input?.query || null;
+      const sqlItem = (originalMessage.content as Array<Record<string, unknown>>).find(
+        (item) =>
+          item &&
+          (item.toolUse as Record<string, unknown>) &&
+          (item.toolUse as Record<string, unknown>).name === 'run_athena_query_with_config',
+      );
+      const toolUse = sqlItem?.toolUse as Record<string, unknown> | undefined;
+      const input = toolUse?.input as Record<string, unknown> | undefined;
+      return (input?.query as string) || null;
     }
 
     return null;
   };
 
   // Extract Python code from tool use content
-  const extractPythonCode = (originalMessage) => {
+  const extractPythonCode = (originalMessage: AgentMessage | undefined): string | null => {
     if (!originalMessage || !originalMessage.content) return null;
 
     // Handle array content format
     if (Array.isArray(originalMessage.content)) {
-      const codeItem = originalMessage.content.find((item) => item && item.toolUse && item.toolUse.name === 'execute_python');
-      return codeItem?.toolUse?.input?.code || null;
+      const codeItem = (originalMessage.content as Array<Record<string, unknown>>).find(
+        (item) => item && (item.toolUse as Record<string, unknown>) && (item.toolUse as Record<string, unknown>).name === 'execute_python',
+      );
+      const toolUse = codeItem?.toolUse as Record<string, unknown> | undefined;
+      const input = toolUse?.input as Record<string, unknown> | undefined;
+      return (input?.code as string) || null;
     }
 
     return null;
   };
 
   // Extract database info from tool use content (for get_database_info tool)
-  const extractDatabaseInfo = (originalMessage) => {
+  const extractDatabaseInfo = (originalMessage: AgentMessage | undefined): string | null => {
     if (!originalMessage || !originalMessage.content) return null;
 
     // Handle array content format
     if (Array.isArray(originalMessage.content)) {
-      const dbInfoItem = originalMessage.content.find((item) => item && item.toolUse && item.toolUse.name === 'get_database_info');
+      const dbInfoItem = (originalMessage.content as Array<Record<string, unknown>>).find(
+        (item) =>
+          item && (item.toolUse as Record<string, unknown>) && (item.toolUse as Record<string, unknown>).name === 'get_database_info',
+      );
       // For get_database_info, there typically isn't input data, but we can check for tool result
       return dbInfoItem ? 'Database schema information was retrieved by the agent' : null;
     }
@@ -72,7 +104,7 @@ const AgentMessagesDisplay = ({ agentMessages = null, isProcessing = false }) =>
   };
 
   // Show SQL query modal with error handling
-  const showSqlQuery = useCallback((originalMessage) => {
+  const showSqlQuery = useCallback((originalMessage: AgentMessage | undefined) => {
     try {
       const sqlQuery = extractSqlQuery(originalMessage);
       if (sqlQuery) {
@@ -88,7 +120,7 @@ const AgentMessagesDisplay = ({ agentMessages = null, isProcessing = false }) =>
   }, []);
 
   // Show Python code modal with error handling
-  const showPythonCode = useCallback((originalMessage) => {
+  const showPythonCode = useCallback((originalMessage: AgentMessage | undefined) => {
     try {
       const pythonCode = extractPythonCode(originalMessage);
       if (pythonCode) {
@@ -106,9 +138,6 @@ const AgentMessagesDisplay = ({ agentMessages = null, isProcessing = false }) =>
   // Show database info modal with error handling
   const showDatabaseInfo = useCallback(async () => {
     try {
-      // Show deployment-specific database schema information matching what the agent receives
-      // NOTE: In a real implementation, this would call the backend to get the actual schema
-      // For now, we simulate the deployment-specific output based on the configuration
       const databaseSchemaInfo = `# Comprehensive Athena Database Schema
 
 ## Overview
@@ -116,7 +145,7 @@ const AgentMessagesDisplay = ({ agentMessages = null, isProcessing = false }) =>
 This database contains three main categories of tables for document processing analytics:
 
 1. **Metering Table**: Usage metrics, costs, and consumption data
-2. **Evaluation Tables**: Accuracy assessment data (typically empty unless evaluation jobs are run)  
+2. **Evaluation Tables**: Accuracy assessment data (typically empty unless evaluation jobs are run)
 3. **Document Sections Tables**: Extracted content from processed documents (dynamically created)
 
 ## Important Notes
@@ -126,304 +155,7 @@ This database contains three main categories of tables for document processing a
 - **Timestamps**: All date/timestamp columns refer to processing time, not document content dates
 - **Case Sensitivity**: Use LOWER() functions when comparing string values as case may vary
 
----
-
-## Metering Table (metering)
-
-**Purpose**: Captures detailed usage metrics and cost information for document processing operations
-
-**Key Usage**: Always use this table for questions about:
-- Volume of documents processed
-- Models used and their consumption patterns  
-- Units of consumption (tokens, pages) for each processing step
-- Costs and spending analysis
-- Processing patterns and trends
-
-**Important**: Each document has multiple rows in this table - one for each context/service/unit combination.
-
-### Schema:
-- \`document_id\` (string): Unique identifier for the document
-- \`context\` (string): Processing context (OCR, Classification, Extraction, Assessment, Summarization, Evaluation)
-- \`service_api\` (string): Specific API or model used (e.g., textract/analyze_document, bedrock/claude-3-sonnet)
-- \`unit\` (string): Unit of measurement (pages, inputTokens, outputTokens, totalTokens)
-- \`value\` (double): Quantity of the unit consumed
-- \`number_of_pages\` (int): Number of pages in the document (replicated across all rows for same document)
-- \`unit_cost\` (double): Cost per unit in USD
-- \`estimated_cost\` (double): Calculated total cost (value × unit_cost)
-- \`timestamp\` (timestamp): When the operation was performed
-
-**Partitioned by**: date (YYYY-MM-DD format)
-
-### Critical Aggregation Patterns:
-- **For document page counts**: Use \`MAX("number_of_pages")\` per document (NOT SUM, as this value is replicated)
-- **For total pages across documents**: Use \`SUM\` of per-document MAX values:
-  \`\`\`sql
-  SELECT SUM(max_pages) FROM (
-    SELECT "document_id", MAX("number_of_pages") as max_pages 
-    FROM metering 
-    GROUP BY "document_id"
-  )
-  \`\`\`
-- **For costs**: Use \`SUM("estimated_cost")\` for totals, \`GROUP BY "context"\` for breakdowns
-- **For token usage**: Use \`SUM("value")\` when \`"unit"\` IN ('inputTokens', 'outputTokens', 'totalTokens')
-
-### Sample Queries:
-\`\`\`sql
--- Total documents processed
-SELECT COUNT(DISTINCT "document_id") FROM metering
-
--- Total pages processed (correct aggregation)
-SELECT SUM(max_pages) FROM (
-  SELECT "document_id", MAX("number_of_pages") as max_pages 
-  FROM metering 
-  GROUP BY "document_id"
-)
-
--- Cost breakdown by processing context
-SELECT "context", SUM("estimated_cost") as total_cost
-FROM metering 
-GROUP BY "context"
-ORDER BY total_cost DESC
-
--- Token usage by model
-SELECT "service_api", 
-       SUM(CASE WHEN "unit" = 'inputTokens' THEN "value" ELSE 0 END) as input_tokens,
-       SUM(CASE WHEN "unit" = 'outputTokens' THEN "value" ELSE 0 END) as output_tokens
-FROM metering 
-WHERE "unit" IN ('inputTokens', 'outputTokens')
-GROUP BY "service_api"
-\`\`\`
-
----
-
-## Evaluation Tables
-
-**Purpose**: Store accuracy metrics from comparing extracted document data against ground truth baselines
-
-**Key Usage**: Always use these tables for questions about accuracy for documents that have ground truth data
-
-**Important**: These tables are typically empty unless users have run separate evaluation jobs (not run by default)
-
-### Document Evaluations Table (document_evaluations)
-
-**Purpose**: Document-level evaluation metrics and overall accuracy scores
-
-#### Schema:
-- \`document_id\` (string): Unique identifier for the document
-- \`input_key\` (string): S3 key of the input document  
-- \`evaluation_date\` (timestamp): When the evaluation was performed
-- \`accuracy\` (double): Overall accuracy score (0-1)
-- \`precision\` (double): Precision score (0-1)
-- \`recall\` (double): Recall score (0-1)
-- \`f1_score\` (double): F1 score (0-1)
-- \`false_alarm_rate\` (double): False alarm rate (0-1)
-- \`false_discovery_rate\` (double): False discovery rate (0-1)
-- \`execution_time\` (double): Time taken to evaluate (seconds)
-
-**Partitioned by**: date (YYYY-MM-DD format)
-
-### Section Evaluations Table (section_evaluations)
-
-**Purpose**: Section-level evaluation metrics grouped by document type/classification
-
-#### Schema:
-- \`document_id\` (string): Unique identifier for the document
-- \`section_id\` (string): Identifier for the section
-- \`section_type\` (string): Type/class of the section (e.g., 'invoice', 'receipt', 'w2')
-- \`accuracy\` (double): Section accuracy score (0-1)
-- \`precision\` (double): Section precision score (0-1)
-- \`recall\` (double): Recall score (0-1)
-- \`f1_score\` (double): Section F1 score (0-1)
-- \`false_alarm_rate\` (double): Section false alarm rate (0-1)
-- \`false_discovery_rate\` (double): Section false discovery rate (0-1)
-- \`evaluation_date\` (timestamp): When the evaluation was performed
-
-**Partitioned by**: date (YYYY-MM-DD format)
-
-### Attribute Evaluations Table (attribute_evaluations)
-
-**Purpose**: Detailed attribute-level comparison results showing expected vs actual extracted values
-
-#### Schema:
-- \`document_id\` (string): Unique identifier for the document
-- \`section_id\` (string): Identifier for the section
-- \`section_type\` (string): Type/class of the section
-- \`attribute_name\` (string): Name of the extracted attribute
-- \`expected\` (string): Expected (ground truth) value
-- \`actual\` (string): Actual extracted value
-- \`matched\` (boolean): Whether the values matched according to evaluation method
-- \`score\` (double): Match score (0-1)
-- \`reason\` (string): Explanation for the match result
-- \`evaluation_method\` (string): Method used for comparison (EXACT, FUZZY, SEMANTIC, etc.)
-- \`confidence\` (string): Confidence score from extraction process
-- \`confidence_threshold\` (string): Confidence threshold used for evaluation
-- \`evaluation_date\` (timestamp): When the evaluation was performed
-
-**Partitioned by**: date (YYYY-MM-DD format)
-
----
-
-## Document Sections Tables (Configuration-Based)
-
-**Purpose**: Store actual extracted data from document sections in structured format for analytics
-
-**Key Usage**: Use these tables to query the actual extracted content and attributes from processed documents
-
-**IMPORTANT**: Based on your current configuration, the following tables DEFINITELY exist. Do NOT use discovery queries (SHOW TABLES, DESCRIBE) for these - use them directly.
-
-### Known Document Sections Tables:
-
-- \`document_sections_payslip\`
-- \`document_sections_us_drivers_licenses\`  
-- \`document_sections_bank_checks\`
-- \`document_sections_bank_statement\`
-- \`document_sections_w2\`
-- \`document_sections_homeowners_insurance_application\`
-
-### Complete Table Schemas:
-
-Each table has the following structure:
-
-**\`document_sections_payslip\`** (Class: "Payslip"):
-- **Description**: An employee wage statement showing earnings, deductions, taxes, and net pay for a specific pay period, typically issued by employers to document compensation details including gross pay, various tax withholdings, and year-to-date totals.
-- **Standard Columns**:
-  - \`document_class.type\` (string): Document classification type
-  - \`document_id\` (string): Unique identifier for the document
-  - \`section_id\` (string): Unique identifier for the section
-  - \`section_classification\` (string): Type/class of the section
-  - \`section_confidence\` (string): Confidence score for the section classification
-  - \`explainability_info\` (string): JSON containing explanation of extraction decisions
-  - \`timestamp\` (timestamp): When the document was processed
-  - \`date\` (string): Partition key in YYYY-MM-DD format
-  - Various \`metadata.*\` columns (strings): Processing metadata
-- **Configuration-Specific Columns**:
-  - \`"inference_result.ytdnetpay"\` (string): Year-to-date net pay amount representing cumulative take-home earnings after all deductions from the beginning of the year to the current pay period.
-  - \`"inference_result.companyaddress.state"\` (string): The state or province portion of the company's business address.
-  - \`"inference_result.employeename.firstname"\` (string): The given name of the employee.
-  - \`"inference_result.federaltaxes"\` (string): JSON list of federal tax withholdings showing different types of federal taxes deducted, with both current period and year-to-date amounts.
-
-**\`document_sections_w2\`** (Class: "W2"):
-- **Description**: An annual tax document provided by employers to employees reporting wages earned and taxes withheld during the tax year for federal and state income tax filing purposes, containing comprehensive compensation and withholding information.
-- **Standard Columns**: (Same as above)
-- **Configuration-Specific Columns**:
-  - \`"inference_result.employer_info.employer_name"\` (string): The legal name of the employing company or organization.
-  - \`"inference_result.employee_general_info.ssn"\` (string): The Social Security Number of the employee.
-  - \`"inference_result.federal_wage_info.wages_tips_other_compensation"\` (string): Total wages, tips, and other compensation paid to the employee.
-  - \`"inference_result.state_taxes_table"\` (string): JSON array containing state and local tax information for specific jurisdictions.
-
-**\`document_sections_us_drivers_licenses\`** (Class: "US-drivers-licenses"):
-- **Description**: An official government-issued identification document that authorizes an individual to operate motor vehicles, containing personal information, physical characteristics, address details, and driving privileges with restrictions and endorsements.
-- **Standard Columns**: (Same as above)
-- **Configuration-Specific Columns**:
-  - \`"inference_result.state_name"\` (string): The state or jurisdiction that issued the driver's license, typically shown as a two-letter state abbreviation.
-  - \`"inference_result.id_number"\` (string): The unique driver's license identification number assigned by the issuing state.
-  - \`"inference_result.name_details.first_name"\` (string): The given name of the license holder.
-  - \`"inference_result.name_details.last_name"\` (string): The family name or surname of the license holder.
-  - \`"inference_result.personal_details.height"\` (string): The physical height of the license holder.
-  - \`"inference_result.address_details.city"\` (string): The city of residence for the license holder.
-
-**\`document_sections_bank_checks\`** (Class: "Bank-checks"):
-- **Description**: A written financial instrument directing a bank to pay a specific amount of money from the account holder's account to a designated payee, containing payment details, account information, and verification elements.
-- **Standard Columns**: (Same as above)
-- **Configuration-Specific Columns**:
-  - \`"inference_result.date"\` (string): The date when the check was written, typically handwritten or printed in the date field.
-  - \`"inference_result.dollar_amount"\` (string): The numerical amount to be paid as specified on the check.
-  - \`"inference_result.check_number"\` (string): The unique sequential number identifying this specific check.
-  - \`"inference_result.account_holder_name"\` (string): The name of the person or entity who owns the bank account and wrote the check.
-  - \`"inference_result.payee_name"\` (string): The name of the person or entity receiving the payment.
-  - \`"inference_result.bank_name"\` (string): The name of the financial institution where the account is held.
-
-**\`document_sections_bank_statement\`** (Class: "Bank-Statement"):
-- **Description**: A periodic financial document issued by banks detailing account activity, balances, and transactions over a specific time period, providing account holders with a summary of their financial activity and current account status.
-- **Standard Columns**: (Same as above)
-- **Configuration-Specific Columns**:
-  - \`"inference_result.account_holder_name"\` (string): The name of the person or entity who owns the bank account.
-  - \`"inference_result.account_number"\` (string): The unique identifier for the bank account, often partially masked for security.
-  - \`"inference_result.bank_name"\` (string): The name of the financial institution issuing the statement.
-  - \`"inference_result.statement_start_date"\` (string): The beginning date of the statement period.
-  - \`"inference_result.statement_end_date"\` (string): The ending date of the statement period.
-  - \`"inference_result.transaction_details"\` (string): JSON array containing detailed listing of all transactions during the statement period.
-
-**\`document_sections_homeowners_insurance_application\`** (Class: "Homeowners-Insurance-Application"):
-- **Description**: An application form for homeowners insurance coverage containing applicant personal information, property details, coverage requirements, existing insurance history, and underwriting data necessary for evaluating risk and determining appropriate coverage terms.
-- **Standard Columns**: (Same as above)
-- **Configuration-Specific Columns**:
-  - \`"inference_result.policy number"\` (string): The unique identifier assigned to the insurance policy for tracking and reference purposes.
-  - \`"inference_result.effective date"\` (string): The date when the insurance coverage begins and becomes active.
-  - \`"inference_result.expiration date"\` (string): The date when the insurance policy expires and requires renewal.
-  - \`"inference_result.named insured(s) and mailing address"\` (string): The complete name and mailing address of the primary insured party.
-  - \`"inference_result.primary applicant information.name"\` (string): The full name of the primary applicant.
-  - \`"inference_result.co-applicant information.name"\` (string): The full name of the co-applicant if applicable.
-
-### Column Naming Patterns:
-- **Simple attributes**: \`inference_result.{attribute_name_lowercase}\` (all strings)
-- **Group attributes**: \`inference_result.{group_name_lowercase}.{sub_attribute_lowercase}\` (all strings)
-- **List attributes**: \`inference_result.{list_name_lowercase}\` (JSON string containing array data)
-
-### CRITICAL: Dot-Notation Column Names
-**These are SINGLE column identifiers containing dots, NOT table.column references:**
-- ✅ **CORRECT**: \`"document_class.type"\` (single column name containing a dot)
-- ❌ **WRONG**: \`"document_class"."type"\` (table.column syntax - this will FAIL)
-- ✅ **CORRECT**: \`"inference_result.ytdnetpay"\` (single column name containing dots)
-- ❌ **WRONG**: \`"inference_result"."ytdnetpay"\` (table.column syntax - this will FAIL)
-
-### Important Querying Notes:
-- **All \`inference_result.*\` columns are string type** - even numeric data is stored as strings
-- **Always use double quotes** around column names: \`"inference_result.companyaddress.state"\`
-- **Dot notation columns**: Names like \`document_class.type\` are SINGLE column names with dots inside quotes
-- **List data is stored as JSON strings** - use JSON parsing functions to extract array elements
-- **Case sensitivity**: Column names are lowercase, use LOWER() for string comparisons
-- **Partitioning**: All tables partitioned by \`date\` in YYYY-MM-DD format
-
-### Sample Queries:
-\`\`\`sql
--- Query specific attributes (example for Payslip)
-SELECT "document_id", 
-       "inference_result.ytdnetpay",
-       "inference_result.employeename.firstname",
-       "inference_result.companyaddress.state"
-FROM document_sections_payslip
-WHERE date >= '2024-01-01'
-
--- Parse JSON list data (example for FederalTaxes)
-SELECT "document_id",
-       json_extract_scalar(tax_item, '$.ItemDescription') as tax_type,
-       json_extract_scalar(tax_item, '$.YTD') as ytd_amount
-FROM document_sections_payslip
-CROSS JOIN UNNEST(json_parse("inference_result.federaltaxes")) as t(tax_item)
-
--- Join with metering for cost analysis
-SELECT ds."section_classification",
-       COUNT(DISTINCT ds."document_id") as document_count,
-       AVG(CAST(m."estimated_cost" AS double)) as avg_processing_cost
-FROM document_sections_w2 ds
-JOIN metering m ON ds."document_id" = m."document_id"
-GROUP BY ds."section_classification"
-\`\`\`
-
-**This schema information is generated from your actual configuration and shows exactly what tables and columns exist in your deployment.**
-
----
-
-## General Query Tips
-
-### Performance Optimization:
-- Use date partitioning in WHERE clauses when possible: \`WHERE date >= '2024-01-01'\`
-- Use LIMIT for exploratory queries to avoid large result sets
-- Consider using approximate functions like \`approx_distinct()\` for large datasets
-
-### Common Joins:
-\`\`\`sql
--- Join metering with evaluations for cost vs accuracy analysis
-SELECT m."document_id", m."estimated_cost", e."accuracy"
-FROM metering m
-JOIN document_evaluations e ON m."document_id" = e."document_id"
-
--- Join document sections with metering for content analysis with costs
-SELECT ds.*, m."estimated_cost"
-FROM document_sections_payslip ds  
-JOIN metering m ON ds."document_id" = m."document_id"
-\`\`\``;
+**This schema information is generated from your actual configuration and shows exactly what tables and columns exist in your deployment.**`;
 
       setCurrentDatabaseInfo(databaseSchemaInfo);
       // Use setTimeout to avoid ResizeObserver issues
@@ -531,10 +263,10 @@ JOIN metering m ON ds."document_id" = m."document_id"
 
     try {
       const parsed = JSON.parse(agentMessages);
-      const rawMessages = Array.isArray(parsed) ? parsed : [];
+      const rawMessages: AgentMessage[] = Array.isArray(parsed) ? parsed : [];
 
       // Split assistant messages that contain both text and tool use
-      const splitAssistantMessage = (message) => {
+      const splitAssistantMessage = (message: AgentMessage): AgentMessage[] => {
         const { content } = message;
 
         // If content is a string, check if it contains tool use JSON
@@ -544,7 +276,7 @@ JOIN metering m ON ds."document_id" = m."document_id"
           const matches = content.match(toolUseRegex);
 
           if (matches && matches.length > 0) {
-            const splitMessages = [];
+            const splitMessages: AgentMessage[] = [];
             let remainingContent = content;
 
             matches.forEach((match) => {
@@ -562,7 +294,7 @@ JOIN metering m ON ds."document_id" = m."document_id"
               // Parse and add tool use message
               try {
                 const toolUse = JSON.parse(match);
-                const toolName = toolUse.toolUse?.name || 'unknown';
+                const toolName = ((toolUse.toolUse as Record<string, unknown>)?.name as string) || 'unknown';
                 splitMessages.push({
                   ...message,
                   role: 'tool',
@@ -596,15 +328,15 @@ JOIN metering m ON ds."document_id" = m."document_id"
 
         // If content is an array, process each item
         if (Array.isArray(content)) {
-          const splitMessages = [];
-          let textParts = [];
+          const splitMessages: AgentMessage[] = [];
+          let textParts: string[] = [];
 
-          content.forEach((item) => {
+          (content as Array<string | Record<string, unknown>>).forEach((item) => {
             if (typeof item === 'string') {
               textParts.push(item);
-            } else if (item && typeof item === 'object' && item.text) {
-              textParts.push(item.text);
-            } else if (item && typeof item === 'object' && item.toolUse) {
+            } else if (item && typeof item === 'object' && (item as Record<string, unknown>).text) {
+              textParts.push((item as Record<string, unknown>).text as string);
+            } else if (item && typeof item === 'object' && (item as Record<string, unknown>).toolUse) {
               // Add text content if we have any
               if (textParts.length > 0) {
                 const textContent = textParts.join('\n').trim();
@@ -618,7 +350,7 @@ JOIN metering m ON ds."document_id" = m."document_id"
               }
 
               // Add tool use message
-              const toolName = item.toolUse?.name || 'unknown';
+              const toolName = (((item as Record<string, unknown>).toolUse as Record<string, unknown>)?.name as string) || 'unknown';
               splitMessages.push({
                 ...message,
                 role: 'tool',
@@ -649,7 +381,7 @@ JOIN metering m ON ds."document_id" = m."document_id"
       };
 
       // Process messages to split assistant messages that contain tool use
-      const processedMessages = [];
+      const processedMessages: AgentMessage[] = [];
 
       rawMessages.forEach((message) => {
         // Skip messages with empty or invalid content
@@ -662,8 +394,8 @@ JOIN metering m ON ds."document_id" = m."document_id"
         }
 
         if (message.role === 'assistant' && message.content) {
-          const splitMessages = splitAssistantMessage(message);
-          processedMessages.push(...splitMessages);
+          const splitMsgs = splitAssistantMessage(message);
+          processedMessages.push(...splitMsgs);
         } else {
           processedMessages.push(message);
         }
@@ -683,7 +415,7 @@ JOIN metering m ON ds."document_id" = m."document_id"
   }, [messages, isProcessing]);
 
   // Format timestamp for display
-  const formatTimestamp = (timestamp) => {
+  const formatTimestamp = (timestamp: string | undefined): string => {
     if (!timestamp) return '';
     try {
       const date = new Date(timestamp);
@@ -694,7 +426,7 @@ JOIN metering m ON ds."document_id" = m."document_id"
   };
 
   // Get role display name and styling
-  const getRoleInfo = (role, messageType) => {
+  const getRoleInfo = (role: string, messageType?: string) => {
     switch (role) {
       case 'user':
         return { display: 'User', color: '#0073bb', icon: '👤' };
@@ -713,7 +445,7 @@ JOIN metering m ON ds."document_id" = m."document_id"
   };
 
   // Extract text content from message content (handles both string and object formats)
-  const extractTextContent = (content) => {
+  const extractTextContent = (content: string | Array<Record<string, unknown>> | Record<string, unknown> | null | undefined): string => {
     if (!content) return '<No content>';
 
     // If content is a string, return it directly
@@ -723,14 +455,14 @@ JOIN metering m ON ds."document_id" = m."document_id"
 
     // If content is an array, extract text from each item
     if (Array.isArray(content)) {
-      const textParts = [];
+      const textParts: string[] = [];
 
-      content.forEach((item) => {
+      (content as Array<string | Record<string, unknown>>).forEach((item) => {
         if (typeof item === 'string') {
           textParts.push(item);
-        } else if (item && typeof item === 'object' && item.text) {
-          textParts.push(item.text);
-        } else if (item && typeof item === 'object' && !item.toolUse) {
+        } else if (item && typeof item === 'object' && (item as Record<string, unknown>).text) {
+          textParts.push((item as Record<string, unknown>).text as string);
+        } else if (item && typeof item === 'object' && !(item as Record<string, unknown>).toolUse) {
           // For other objects that aren't toolUse, stringify them
           textParts.push(JSON.stringify(item));
         }
@@ -742,8 +474,8 @@ JOIN metering m ON ds."document_id" = m."document_id"
     }
 
     // If content is an object with a text property, extract it
-    if (typeof content === 'object' && content.text) {
-      return content.text;
+    if (typeof content === 'object' && (content as Record<string, unknown>).text) {
+      return (content as Record<string, unknown>).text as string;
     }
 
     // For any other object, stringify it
@@ -755,7 +487,7 @@ JOIN metering m ON ds."document_id" = m."document_id"
   };
 
   // Render individual message
-  const renderMessage = (message, index) => {
+  const renderMessage = (message: AgentMessage, index: number): React.JSX.Element => {
     const roleInfo = getRoleInfo(message.role, message.message_type);
     const timestamp = formatTimestamp(message.timestamp);
     let textContent = extractTextContent(message.content);
@@ -787,7 +519,7 @@ JOIN metering m ON ds."document_id" = m."document_id"
     const messageKey = `${message.role}-${message.sequence_number}-${index}-${message.timestamp}`;
 
     // Apply styling for throttling messages
-    const messageStyle = isThrottlingMessage
+    const messageStyle: React.CSSProperties = isThrottlingMessage
       ? {
           opacity: 0.7,
           backgroundColor: '#fff8f0',
@@ -879,12 +611,12 @@ JOIN metering m ON ds."document_id" = m."document_id"
                   fontFamily: 'inherit',
                 }}
                 onMouseEnter={(e) => {
-                  e.target.style.backgroundColor = '#005a9e';
-                  e.target.style.borderColor = '#005a9e';
+                  (e.target as HTMLButtonElement).style.backgroundColor = '#005a9e';
+                  (e.target as HTMLButtonElement).style.borderColor = '#005a9e';
                 }}
                 onMouseLeave={(e) => {
-                  e.target.style.backgroundColor = '#0073bb';
-                  e.target.style.borderColor = '#0073bb';
+                  (e.target as HTMLButtonElement).style.backgroundColor = '#0073bb';
+                  (e.target as HTMLButtonElement).style.borderColor = '#0073bb';
                 }}
               >
                 View SQL
@@ -908,12 +640,12 @@ JOIN metering m ON ds."document_id" = m."document_id"
                   fontFamily: 'inherit',
                 }}
                 onMouseEnter={(e) => {
-                  e.target.style.backgroundColor = '#005a9e';
-                  e.target.style.borderColor = '#005a9e';
+                  (e.target as HTMLButtonElement).style.backgroundColor = '#005a9e';
+                  (e.target as HTMLButtonElement).style.borderColor = '#005a9e';
                 }}
                 onMouseLeave={(e) => {
-                  e.target.style.backgroundColor = '#0073bb';
-                  e.target.style.borderColor = '#0073bb';
+                  (e.target as HTMLButtonElement).style.backgroundColor = '#0073bb';
+                  (e.target as HTMLButtonElement).style.borderColor = '#0073bb';
                 }}
               >
                 View Code
@@ -937,12 +669,12 @@ JOIN metering m ON ds."document_id" = m."document_id"
                   fontFamily: 'inherit',
                 }}
                 onMouseEnter={(e) => {
-                  e.target.style.backgroundColor = '#005a9e';
-                  e.target.style.borderColor = '#005a9e';
+                  (e.target as HTMLButtonElement).style.backgroundColor = '#005a9e';
+                  (e.target as HTMLButtonElement).style.borderColor = '#005a9e';
                 }}
                 onMouseLeave={(e) => {
-                  e.target.style.backgroundColor = '#0073bb';
-                  e.target.style.borderColor = '#0073bb';
+                  (e.target as HTMLButtonElement).style.backgroundColor = '#0073bb';
+                  (e.target as HTMLButtonElement).style.borderColor = '#0073bb';
                 }}
               >
                 View Info
@@ -993,7 +725,7 @@ JOIN metering m ON ds."document_id" = m."document_id"
             padding: '4px',
           }}
         >
-          <SpaceBetween size="none">
+          <SpaceBetween size="xxxs">
             {messages.length > 0 ? (
               messages.map((message, index) => renderMessage(message, index))
             ) : (
@@ -1152,11 +884,6 @@ JOIN metering m ON ds."document_id" = m."document_id"
       )}
     </>
   );
-};
-
-AgentMessagesDisplay.propTypes = {
-  agentMessages: PropTypes.string,
-  isProcessing: PropTypes.bool,
 };
 
 export default AgentMessagesDisplay;
