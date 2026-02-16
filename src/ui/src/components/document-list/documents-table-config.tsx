@@ -2,16 +2,73 @@
 // SPDX-License-Identifier: Apache-2.0
 import React from 'react';
 import { Button, ButtonDropdown, CollectionPreferences, Link, SpaceBetween } from '@cloudscape-design/components';
+import type { CollectionPreferencesProps } from '@cloudscape-design/components';
+import type { TableProps } from '@cloudscape-design/components';
 
 import { TableHeader } from '../common/table';
 import { DOCUMENTS_PATH } from '../../routes/constants';
 import { renderHitlStatus } from '../common/hitl-status-renderer';
 import { formatConfigVersionLink } from '../test-studio/utils/configVersionUtils';
+import type { ConfigVersion } from '../test-studio/utils/configVersionUtils';
+
+export type { ConfigVersion };
+
+export interface MappedDocument {
+  objectKey: string;
+  objectStatus: string;
+  initialEventTime: string;
+  completionTime: string;
+  duration: string;
+  configVersion: string;
+  evaluationStatus: string;
+  confidenceAlertCount: number;
+  hitlStatus: string;
+  hitlReviewOwner: string;
+  hitlReviewOwnerEmail: string;
+  hitlReviewedBy: string;
+  hitlReviewedByEmail: string;
+  hitlTriggered: boolean;
+  hitlCompleted: boolean;
+  [key: string]: unknown;
+}
+
+interface TimePeriodConfig {
+  count: number;
+  text: string;
+}
+
+interface DocumentsPreferencesProps {
+  preferences: CollectionPreferencesProps.Preferences;
+  setPreferences: (prefs: CollectionPreferencesProps.Preferences) => void;
+  disabled?: boolean;
+  pageSizeOptions?: CollectionPreferencesProps.PageSizePreference['options'];
+  visibleContentOptions?: CollectionPreferencesProps.VisibleContentPreference['options'];
+}
+
+interface DocumentsCommonHeaderProps {
+  resourceName?: string;
+  selectedItems?: MappedDocument[];
+  onDelete?: (() => void) | null;
+  onReprocess?: (() => void) | null;
+  onAbort?: (() => void) | null;
+  onClaimReview?: (() => void) | null;
+  onReleaseReview?: (() => void) | null;
+  currentUsername?: string;
+  loading?: boolean;
+  setIsLoading?: (loading: boolean) => void;
+  periodsToLoad?: number;
+  setPeriodsToLoad?: (periods: number) => void;
+  customDateRange?: { startDateTime: string; endDateTime: string } | null;
+  setCustomDateRange?: (range: { startDateTime: string; endDateTime: string } | null) => void;
+  onCustomDateRange?: () => void;
+  downloadToExcel?: () => void;
+  [key: string]: unknown;
+}
 
 export const KEY_COLUMN_ID = 'objectKey';
 export const UNIQUE_TRACK_ID = 'uniqueId';
 
-export const COLUMN_DEFINITIONS_MAIN = (versions = []) => [
+export const COLUMN_DEFINITIONS_MAIN = (versions: ConfigVersion[] = []): TableProps.ColumnDefinition<MappedDocument>[] => [
   {
     id: KEY_COLUMN_ID,
     header: 'Document ID',
@@ -33,7 +90,7 @@ export const COLUMN_DEFINITIONS_MAIN = (versions = []) => [
   {
     id: 'configVersion',
     header: 'Config Version',
-    cell: (item) => formatConfigVersionLink(item.configVersion, versions),
+    cell: (item) => formatConfigVersionLink(item.configVersion, versions as unknown as ConfigVersion[]),
     sortingField: 'configVersion',
     width: 150,
   },
@@ -42,7 +99,6 @@ export const COLUMN_DEFINITIONS_MAIN = (versions = []) => [
     header: 'Submitted',
     cell: (item) => item.initialEventTime,
     sortingField: 'initialEventTime',
-    isDescending: false,
     width: 225,
   },
   {
@@ -99,7 +155,7 @@ export const COLUMN_DEFINITIONS_MAIN = (versions = []) => [
 export const DEFAULT_SORT_COLUMN = { sortingField: 'initialEventTime' };
 
 export const SELECTION_LABELS = {
-  itemSelectionLabel: (data, row) => `select ${row.objectKey}`,
+  itemSelectionLabel: (_data: unknown, row: MappedDocument) => `select ${row.objectKey}`,
   allItemsSelectionLabel: () => 'select all',
   selectionGroupLabel: 'Document selection',
 };
@@ -145,14 +201,13 @@ export const DEFAULT_PREFERENCES = {
   wraplines: false,
 };
 
-/* eslint-disable react/prop-types, react/jsx-props-no-spreading */
 export const DocumentsPreferences = ({
   preferences,
   setPreferences,
   disabled,
   pageSizeOptions = PAGE_SIZE_OPTIONS,
   visibleContentOptions = VISIBLE_CONTENT_OPTIONS,
-}) => (
+}: DocumentsPreferencesProps): React.JSX.Element => (
   <CollectionPreferences
     title="Preferences"
     confirmLabel="Confirm"
@@ -177,7 +232,7 @@ export const DocumentsPreferences = ({
 
 // number of shards per day used by the list documents API
 export const DOCUMENT_LIST_SHARDS_PER_DAY = 6;
-const TIME_PERIOD_DROPDOWN_CONFIG = {
+const TIME_PERIOD_DROPDOWN_CONFIG: Record<string, TimePeriodConfig> = {
   'refresh-2h': { count: 0.5, text: '2 hrs' },
   'refresh-4h': { count: 1, text: '4 hrs' },
   'refresh-8h': { count: DOCUMENT_LIST_SHARDS_PER_DAY / 3, text: '8 hrs' },
@@ -223,8 +278,8 @@ export const DocumentsCommonHeader = ({
   onReleaseReview,
   currentUsername,
   ...props
-}) => {
-  const onPeriodToLoadChange = ({ detail }) => {
+}: DocumentsCommonHeaderProps): React.JSX.Element => {
+  const onPeriodToLoadChange = ({ detail }: { detail: { id: string } }) => {
     const { id } = detail;
     if (id === 'custom-range') {
       // Signal parent to show date range picker
@@ -244,11 +299,11 @@ export const DocumentsCommonHeader = ({
   };
 
   // Determine display text
-  const getDisplayText = () => {
+  const getDisplayText = (): string => {
     if (props.customDateRange) {
       const start = new Date(props.customDateRange.startDateTime);
       const end = new Date(props.customDateRange.endDateTime);
-      const formatDate = (d) =>
+      const formatDate = (d: Date): string =>
         `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
       return `${formatDate(start)} → ${formatDate(end)}`;
     }

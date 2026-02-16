@@ -8,6 +8,11 @@ import { generateClient } from 'aws-amplify/api';
 import { fetchAuthSession } from 'aws-amplify/auth';
 import { useNavigate } from 'react-router-dom';
 
+interface DateRange {
+  startDateTime: string;
+  endDateTime: string;
+}
+
 import useDocumentsContext from '../../contexts/documents';
 import useSettingsContext from '../../contexts/settings';
 import useUserRole from '../../hooks/use-user-role';
@@ -23,6 +28,7 @@ import DateRangeModal from '../common/DateRangeModal';
 import claimReviewMutation from '../../graphql/mutations/claimReview';
 import releaseReviewMutation from '../../graphql/mutations/releaseReview';
 
+import type { MappedDocument, ConfigVersion } from './documents-table-config';
 import {
   DocumentsPreferences,
   DocumentsCommonHeader,
@@ -42,9 +48,9 @@ import '@cloudscape-design/global-styles/index.css';
 
 const logger = new ConsoleLogger('DocumentList');
 
-const DocumentList = () => {
+const DocumentList = (): React.JSX.Element => {
   const { versions } = useConfigurationVersions();
-  const [documentList, setDocumentList] = useState([]);
+  const [documentList, setDocumentList] = useState<MappedDocument[]>([]);
   const [isDeleteModalVisible, setIsDeleteModalVisible] = useState(false);
   const [isReprocessModalVisible, setIsReprocessModalVisible] = useState(false);
   const [isAbortModalVisible, setIsAbortModalVisible] = useState(false);
@@ -53,7 +59,7 @@ const DocumentList = () => {
   const [isAbortLoading, setIsAbortLoading] = useState(false);
   const [isDateRangeModalVisible, setIsDateRangeModalVisible] = useState(false);
   const [currentUsername, setCurrentUsername] = useState('');
-  const { settings } = useSettingsContext();
+  const { settings } = useSettingsContext() as Record<string, unknown>;
   const { isReviewer, isAdmin } = useUserRole();
   const navigate = useNavigate();
 
@@ -62,7 +68,7 @@ const DocumentList = () => {
     const getUsername = async () => {
       try {
         const session = await fetchAuthSession();
-        setCurrentUsername(session?.tokens?.idToken?.payload?.['cognito:username'] || '');
+        setCurrentUsername((session?.tokens?.idToken?.payload?.['cognito:username'] as string) || '');
       } catch (e) {
         logger.error('Error getting username', e);
       }
@@ -70,21 +76,20 @@ const DocumentList = () => {
     getUsername();
   }, []);
 
-  const {
-    documents,
-    isDocumentsListLoading,
-    setIsDocumentsListLoading,
-    setPeriodsToLoad,
-    setSelectedItems,
-    setToolsOpen,
-    periodsToLoad,
-    customDateRange,
-    setCustomDateRange,
-    getDocumentDetailsFromIds,
-    deleteDocuments,
-    reprocessDocuments,
-    abortWorkflows,
-  } = useDocumentsContext();
+  const documentsContext = useDocumentsContext() as Record<string, unknown>;
+  const documents = documentsContext.documents as Record<string, unknown>[];
+  const isDocumentsListLoading = documentsContext.isDocumentsListLoading as boolean;
+  const setIsDocumentsListLoading = documentsContext.setIsDocumentsListLoading as (loading: boolean) => void;
+  const setPeriodsToLoad = documentsContext.setPeriodsToLoad as (periods: number) => void;
+  const setSelectedItems = documentsContext.setSelectedItems as (items: unknown) => void;
+  const setToolsOpen = documentsContext.setToolsOpen as (open: boolean) => void;
+  const periodsToLoad = documentsContext.periodsToLoad as number;
+  const customDateRange = documentsContext.customDateRange as { startDateTime: string; endDateTime: string };
+  const setCustomDateRange = documentsContext.setCustomDateRange as (range: { startDateTime: string; endDateTime: string }) => void;
+  const getDocumentDetailsFromIds = documentsContext.getDocumentDetailsFromIds as (ids: string[]) => Promise<unknown>;
+  const deleteDocuments = documentsContext.deleteDocuments as (ids: string[]) => Promise<unknown>;
+  const reprocessDocuments = documentsContext.reprocessDocuments as (ids: string[], version?: string) => Promise<unknown>;
+  const abortWorkflows = documentsContext.abortWorkflows as (ids: string[]) => Promise<unknown>;
 
   const [preferences, setPreferences] = useLocalStorage('documents-list-preferences', DEFAULT_PREFERENCES);
 
@@ -144,7 +149,7 @@ const DocumentList = () => {
   useEffect(() => {
     if (!isDocumentsListLoading) {
       logger.debug('setting documents list', documents);
-      setDocumentList(mapDocumentsAttributes(documents, settings));
+      setDocumentList(mapDocumentsAttributes(documents as unknown as { ObjectKey: string }[]) as MappedDocument[]);
     } else {
       logger.debug('documents list is loading');
     }
@@ -156,7 +161,7 @@ const DocumentList = () => {
   }, [collectionProps.selectedItems]);
 
   const handleDeleteConfirm = async () => {
-    const objectKeys = collectionProps.selectedItems.map((item) => item.objectKey);
+    const objectKeys = (collectionProps.selectedItems as MappedDocument[]).map((item) => item.objectKey);
     logger.debug('Deleting documents', objectKeys);
 
     setIsDeleteLoading(true);
@@ -174,8 +179,8 @@ const DocumentList = () => {
     }
   };
 
-  const handleReprocessConfirm = async (version) => {
-    const objectKeys = collectionProps.selectedItems.map((item) => item.objectKey);
+  const handleReprocessConfirm = async (version: string) => {
+    const objectKeys = (collectionProps.selectedItems as MappedDocument[]).map((item) => item.objectKey);
     logger.debug('Reprocessing documents', objectKeys, 'with version', version);
 
     setIsReprocessLoading(true);
@@ -193,7 +198,7 @@ const DocumentList = () => {
     }
   };
 
-  const handleAbortConfirm = async (abortableItems) => {
+  const handleAbortConfirm = async (abortableItems: MappedDocument[]) => {
     const objectKeys = abortableItems.map((item) => item.objectKey);
     logger.debug('Aborting workflows', objectKeys);
 
@@ -214,7 +219,7 @@ const DocumentList = () => {
 
   const handleClaimReview = async () => {
     const client = generateClient();
-    const selectedItems = collectionProps.selectedItems;
+    const selectedItems = collectionProps.selectedItems as MappedDocument[];
     const isSingleSelection = selectedItems.length === 1;
 
     // Claim reviews for all selected documents
@@ -224,6 +229,9 @@ const DocumentList = () => {
           query: claimReviewMutation,
           variables: { objectKey: item.objectKey },
         });
+        const claimData = (
+          result as { data: { claimReview: { HITLReviewOwner: string; HITLReviewOwnerEmail: string; HITLStatus: string } } }
+        ).data.claimReview;
         logger.debug('Claimed review for', item.objectKey, result);
 
         // Update the document in the list immediately
@@ -232,9 +240,9 @@ const DocumentList = () => {
             doc.objectKey === item.objectKey
               ? {
                   ...doc,
-                  hitlReviewOwner: result.data.claimReview.HITLReviewOwner,
-                  hitlReviewOwnerEmail: result.data.claimReview.HITLReviewOwnerEmail,
-                  hitlStatus: result.data.claimReview.HITLStatus,
+                  hitlReviewOwner: claimData.HITLReviewOwner,
+                  hitlReviewOwnerEmail: claimData.HITLReviewOwnerEmail,
+                  hitlStatus: claimData.HITLStatus,
                 }
               : doc,
           ),
@@ -257,12 +265,13 @@ const DocumentList = () => {
 
   const handleReleaseReview = async () => {
     const client = generateClient();
-    for (const item of collectionProps.selectedItems) {
+    for (const item of collectionProps.selectedItems as MappedDocument[]) {
       try {
         const result = await client.graphql({
           query: releaseReviewMutation,
           variables: { objectKey: item.objectKey },
         });
+        const releaseData = (result as { data: { releaseReview: { HITLStatus: string } } }).data.releaseReview;
         logger.debug('Released review for', item.objectKey, result);
 
         // Update the document in the list immediately
@@ -273,7 +282,7 @@ const DocumentList = () => {
                   ...doc,
                   hitlReviewOwner: null,
                   hitlReviewOwnerEmail: null,
-                  hitlStatus: result.data.releaseReview.HITLStatus,
+                  hitlStatus: releaseData.HITLStatus,
                 }
               : doc,
           ),
@@ -296,7 +305,7 @@ const DocumentList = () => {
           <DocumentsCommonHeader
             resourceName="Documents"
             documents={documents}
-            selectedItems={collectionProps.selectedItems}
+            selectedItems={[...collectionProps.selectedItems]}
             totalItems={filteredDocumentList}
             updateTools={() => setToolsOpen(true)}
             loading={isDocumentsListLoading}
@@ -336,9 +345,9 @@ const DocumentList = () => {
             countText={getFilterCounterText(filteredItemsCount)}
           />
         }
-        wrapLines={preferences.wrapLines}
+        wrapLines={preferences.wraplines}
         pagination={<Pagination {...paginationProps} ariaLabels={paginationLabels} />}
-        preferences={<DocumentsPreferences preferences={preferences} setPreferences={setPreferences} />}
+        preferences={<DocumentsPreferences preferences={preferences} setPreferences={setPreferences as (prefs: unknown) => void} />}
         trackBy={UNIQUE_TRACK_ID}
         visibleColumns={[KEY_COLUMN_ID, ...preferences.visibleContent]}
         resizableColumns
@@ -348,7 +357,7 @@ const DocumentList = () => {
         visible={isDeleteModalVisible}
         onDismiss={() => setIsDeleteModalVisible(false)}
         onConfirm={handleDeleteConfirm}
-        selectedItems={collectionProps.selectedItems}
+        selectedItems={[...collectionProps.selectedItems]}
         isLoading={isDeleteLoading}
       />
 
@@ -356,7 +365,7 @@ const DocumentList = () => {
         visible={isReprocessModalVisible}
         onDismiss={() => setIsReprocessModalVisible(false)}
         onConfirm={handleReprocessConfirm}
-        selectedItems={collectionProps.selectedItems}
+        selectedItems={[...collectionProps.selectedItems]}
         isLoading={isReprocessLoading}
       />
 
@@ -364,14 +373,14 @@ const DocumentList = () => {
         visible={isAbortModalVisible}
         onDismiss={() => setIsAbortModalVisible(false)}
         onConfirm={handleAbortConfirm}
-        selectedItems={collectionProps.selectedItems}
+        selectedItems={[...collectionProps.selectedItems]}
         isLoading={isAbortLoading}
       />
 
       <DateRangeModal
         visible={isDateRangeModalVisible}
         onDismiss={() => setIsDateRangeModalVisible(false)}
-        onApply={(dateRange) => {
+        onApply={(dateRange: DateRange) => {
           setIsDateRangeModalVisible(false);
           setCustomDateRange(dateRange);
           localStorage.setItem('customDateRange', JSON.stringify(dateRange));

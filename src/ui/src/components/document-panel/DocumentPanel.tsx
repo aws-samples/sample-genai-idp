@@ -1,7 +1,6 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: MIT-0
 
-/* eslint-disable react/prop-types */
 import React, { useState, useEffect } from 'react';
 import {
   Box,
@@ -17,6 +16,7 @@ import {
 import { generateClient } from 'aws-amplify/api';
 import useConfigurationVersions from '../../hooks/use-configuration-versions';
 import { formatConfigVersionLink } from '../test-studio/utils/configVersionUtils';
+import type { ConfigVersion } from '../test-studio/utils/configVersionUtils';
 import { ConsoleLogger } from 'aws-amplify/utils';
 import './DocumentPanel.css';
 import DocumentViewers from '../document-viewers/DocumentViewers';
@@ -34,11 +34,112 @@ import claimReviewMutation from '../../graphql/mutations/claimReview';
 // Uncomment the line below to enable debugging
 // import { debugDocumentStructure } from '../common/debug-utils';
 
+interface MappedDocument {
+  objectKey: string;
+  objectStatus: string;
+  initialEventTime?: string;
+  completionTime?: string;
+  duration?: string;
+  configVersion?: string;
+  pageCount?: number;
+  evaluationStatus?: string;
+  evaluationReportUri?: string;
+  summaryReportUri?: string;
+  ruleValidationResultUri?: string;
+  sections?: Record<string, unknown>[];
+  pages?: Record<string, unknown>[];
+  metering?: Record<string, Record<string, unknown>> | null;
+  executionArn?: string;
+  hitlStatus?: string;
+  hitlTriggered?: boolean;
+  hitlCompleted?: boolean;
+  hitlReviewOwner?: string;
+  hitlReviewOwnerEmail?: string;
+  hitlReviewedBy?: string;
+  hitlReviewedByEmail?: string;
+  mergedConfig?: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
+interface MeteringRowItem {
+  context: string;
+  serviceApi: string;
+  unit: string;
+  value: string;
+  unitCost: string;
+  cost: string;
+  costValue: number;
+  isTotal: boolean;
+  isSubtotal: boolean;
+  note?: string;
+}
+
+interface PricingUnit {
+  name: string;
+  price: number;
+}
+
+interface PricingItem {
+  name: string;
+  units: PricingUnit[];
+}
+
+interface PricingData {
+  pricing: PricingItem[];
+}
+
+interface PricingLookup {
+  [serviceName: string]: {
+    [unitName: string]: number;
+  };
+}
+
+interface ConfidenceAlertsSectionProps {
+  sections: Record<string, unknown>[] | undefined;
+  mergedConfig: Record<string, unknown> | undefined;
+}
+
+interface MeteringTableProps {
+  meteringData: Record<string, Record<string, unknown>> | null;
+  preCalculatedTotals?: { totalCost: number; costPerPage: number };
+}
+
+interface MeteringExpandableSectionProps {
+  meteringData: Record<string, Record<string, unknown>> | null;
+  documentItem: MappedDocument;
+}
+
+interface DocumentAttributesProps {
+  item: MappedDocument;
+  versions: ConfigVersion[];
+  setToolsOpen?: (open: boolean) => void;
+  getDocumentDetailsFromIds?: (ids: string[]) => Promise<unknown>;
+}
+
+interface DocumentPanelProps {
+  item: MappedDocument;
+  setToolsOpen?: (open: boolean) => void;
+  getDocumentDetailsFromIds?: (ids: string[]) => Promise<unknown>;
+  onDelete?: (() => void) | null;
+  onReprocess?: (() => void) | null;
+  onAbort?: (() => void) | null;
+}
+
+interface TroubleshootJobData {
+  jobId: string;
+  status: string;
+  result: unknown;
+  agentMessages: unknown;
+  error: string | null;
+  timestamp: number;
+  documentKey: string;
+}
+
 const client = generateClient();
 const logger = new ConsoleLogger('DocumentPanel');
 
 // Component to display confidence alerts count only
-const ConfidenceAlertsSection = ({ sections, mergedConfig }) => {
+const ConfidenceAlertsSection = ({ sections, mergedConfig }: ConfidenceAlertsSectionProps): React.JSX.Element => {
   // Uncomment the line below to enable debugging
   // debugDocumentStructure({ sections, mergedConfig });
 
@@ -56,7 +157,7 @@ const ConfidenceAlertsSection = ({ sections, mergedConfig }) => {
 };
 
 // Helper function to parse serviceApi key into context and service
-const parseServiceApiKey = (serviceApiKey) => {
+const parseServiceApiKey = (serviceApiKey: string): { context: string; serviceApi: string } => {
   const parts = serviceApiKey.split('/');
   if (parts.length >= 3) {
     const context = parts[0];
@@ -68,7 +169,7 @@ const parseServiceApiKey = (serviceApiKey) => {
 };
 
 // Helper function to format cost cells
-const formatCostCell = (rowItem) => {
+const formatCostCell = (rowItem: MeteringRowItem): React.JSX.Element | string => {
   if (rowItem.isTotal) {
     return <Box fontWeight="bold">{`${rowItem.note}: ${rowItem.cost}`}</Box>;
   }
@@ -79,17 +180,17 @@ const formatCostCell = (rowItem) => {
 };
 
 // Component to display metering information in a table
-const MeteringTable = ({ meteringData, preCalculatedTotals }) => {
+const MeteringTable = ({ meteringData, preCalculatedTotals }: MeteringTableProps): React.JSX.Element | null => {
   // Use usePricing hook to get pricing data from the new separate pricing config
   const { pricing, loading } = usePricing();
-  const [pricingData, setPricingData] = useState({});
+  const [pricingData, setPricingData] = useState<PricingLookup>({});
   // We no longer use a default unit cost, showing "None" instead
 
   useEffect(() => {
-    if (pricing && pricing.pricing) {
+    if (pricing && (pricing as PricingData).pricing) {
       // Convert pricing array to lookup object for easier access
-      const pricingLookup = {};
-      pricing.pricing.forEach((item) => {
+      const pricingLookup: PricingLookup = {};
+      (pricing as PricingData).pricing.forEach((item) => {
         if (item.name && item.units) {
           pricingLookup[item.name] = {};
           item.units.forEach((unitItem) => {
@@ -114,18 +215,18 @@ const MeteringTable = ({ meteringData, preCalculatedTotals }) => {
   }
 
   // Transform metering data into table rows with context parsing
-  const rawTableItems = [];
-  const contextTotals = {};
+  const rawTableItems: MeteringRowItem[] = [];
+  const contextTotals: Record<string, number> = {};
   let totalCost = 0;
 
   Object.entries(meteringData).forEach(([originalServiceApiKey, metrics]) => {
     const { context, serviceApi } = parseServiceApiKey(originalServiceApiKey);
 
-    Object.entries(metrics).forEach(([unit, value]) => {
+    Object.entries(metrics as Record<string, unknown>).forEach(([unit, value]) => {
       const numericValue = Number(value);
 
       // Look up the unit price from the pricing data using the parsed serviceApi
-      let unitPrice = null;
+      let unitPrice: number | null = null;
       let unitPriceDisplayValue = 'None';
       let cost = 0;
       if (pricingData[serviceApi] && pricingData[serviceApi][unit] !== undefined) {
@@ -164,8 +265,8 @@ const MeteringTable = ({ meteringData, preCalculatedTotals }) => {
   });
 
   // Group items by context and add subtotals
-  const tableItems = [];
-  const contextGroups = {};
+  const tableItems: MeteringRowItem[] = [];
+  const contextGroups: Record<string, MeteringRowItem[]> = {};
 
   // Group raw items by context
   rawTableItems.forEach((item) => {
@@ -237,27 +338,27 @@ const MeteringTable = ({ meteringData, preCalculatedTotals }) => {
         {
           id: 'context',
           header: 'Context',
-          cell: (rowItem) => rowItem.context,
+          cell: (rowItem: MeteringRowItem) => rowItem.context,
         },
         {
           id: 'serviceApi',
           header: 'Service/Api',
-          cell: (rowItem) => rowItem.serviceApi,
+          cell: (rowItem: MeteringRowItem) => rowItem.serviceApi,
         },
         {
           id: 'unit',
           header: 'Unit',
-          cell: (rowItem) => rowItem.unit,
+          cell: (rowItem: MeteringRowItem) => rowItem.unit,
         },
         {
           id: 'value',
           header: 'Value',
-          cell: (rowItem) => rowItem.value,
+          cell: (rowItem: MeteringRowItem) => rowItem.value,
         },
         {
           id: 'unitCost',
           header: 'Unit Cost',
-          cell: (rowItem) => rowItem.unitCost,
+          cell: (rowItem: MeteringRowItem) => rowItem.unitCost,
         },
         {
           id: 'cost',
@@ -283,7 +384,11 @@ const MeteringTable = ({ meteringData, preCalculatedTotals }) => {
 };
 
 // Helper function to calculate total costs using pricing data
-const calculateTotalCosts = (meteringData, documentItem, pricingData) => {
+const calculateTotalCosts = (
+  meteringData: Record<string, Record<string, unknown>> | null,
+  documentItem: MappedDocument,
+  pricingData: PricingLookup | null,
+): { totalCost: number; costPerPage: number } => {
   if (!meteringData) return { totalCost: 0, costPerPage: 0 };
 
   let totalCost = 0;
@@ -312,16 +417,16 @@ const calculateTotalCosts = (meteringData, documentItem, pricingData) => {
 };
 
 // Expandable section containing the metering table
-const MeteringExpandableSection = ({ meteringData, documentItem }) => {
+const MeteringExpandableSection = ({ meteringData, documentItem }: MeteringExpandableSectionProps): React.JSX.Element => {
   const [expanded, setExpanded] = useState(false);
   const { pricing } = usePricing();
-  const [pricingData, setPricingData] = useState(null);
+  const [pricingData, setPricingData] = useState<PricingLookup | null>(null);
 
   // Convert pricing data to lookup format
   useEffect(() => {
-    if (pricing && pricing.pricing) {
-      const pricingLookup = {};
-      pricing.pricing.forEach((item) => {
+    if (pricing && (pricing as PricingData).pricing) {
+      const pricingLookup: PricingLookup = {};
+      (pricing as PricingData).pricing.forEach((item) => {
         if (item.name && item.units) {
           pricingLookup[item.name] = {};
           item.units.forEach((unitItem) => {
@@ -347,14 +452,14 @@ const MeteringExpandableSection = ({ meteringData, documentItem }) => {
         onChange={({ detail }) => setExpanded(detail.expanded)}
       >
         <div style={{ width: '100%' }}>
-          <MeteringTable meteringData={meteringData} documentItem={documentItem} preCalculatedTotals={{ totalCost, costPerPage }} />
+          <MeteringTable meteringData={meteringData} preCalculatedTotals={{ totalCost, costPerPage }} />
         </div>
       </ExpandableSection>
     </Box>
   );
 };
 
-const DocumentAttributes = ({ item, versions }) => {
+const DocumentAttributes = ({ item, versions }: DocumentAttributesProps): React.JSX.Element => {
   return (
     <Container>
       <ColumnLayout columns={8} variant="text-grid">
@@ -493,7 +598,14 @@ const ABORTABLE_STATUSES = [
   'EVALUATING',
 ];
 
-export const DocumentPanel = ({ item, setToolsOpen, getDocumentDetailsFromIds, onDelete, onReprocess, onAbort }) => {
+export const DocumentPanel = ({
+  item,
+  setToolsOpen,
+  getDocumentDetailsFromIds,
+  onDelete,
+  onReprocess,
+  onAbort,
+}: DocumentPanelProps): React.JSX.Element => {
   const { versions } = useConfigurationVersions();
   logger.debug('DocumentPanel item', item);
 
@@ -502,7 +614,7 @@ export const DocumentPanel = ({ item, setToolsOpen, getDocumentDetailsFromIds, o
   // State for Troubleshoot modal
   const [isTroubleshootModalVisible, setIsTroubleshootModalVisible] = useState(false);
   // State for tracking troubleshoot jobs per document
-  const [troubleshootJobs, setTroubleshootJobs] = useState({});
+  const [troubleshootJobs, setTroubleshootJobs] = useState<Record<string, TroubleshootJobData>>({});
   // State for Start Review button
   const [isClaimingReview, setIsClaimingReview] = useState(false);
   // Local state for document item to enable real-time updates
@@ -533,19 +645,19 @@ export const DocumentPanel = ({ item, setToolsOpen, getDocumentDetailsFromIds, o
     setIsClaimingReview(true);
     try {
       const result = await client.graphql({
-        query: claimReviewMutation,
+        query: claimReviewMutation as unknown as string,
         variables: { objectKey: localItem.objectKey },
       });
 
       logger.info('Review claimed successfully:', result);
 
       // Update local item immediately with the response data
-      const claimedData = result.data.claimReview;
+      const claimedData = (result as unknown as Record<string, Record<string, Record<string, unknown>>>).data.claimReview;
       setLocalItem((prev) => ({
         ...prev,
-        hitlReviewOwner: claimedData.HITLReviewOwner,
-        hitlReviewOwnerEmail: claimedData.HITLReviewOwnerEmail,
-        hitlStatus: claimedData.HITLStatus,
+        hitlReviewOwner: claimedData.HITLReviewOwner as string,
+        hitlReviewOwnerEmail: claimedData.HITLReviewOwnerEmail as string,
+        hitlStatus: claimedData.HITLStatus as string,
       }));
 
       // Also refresh document details in the background
@@ -554,7 +666,7 @@ export const DocumentPanel = ({ item, setToolsOpen, getDocumentDetailsFromIds, o
       }
     } catch (error) {
       logger.error('Failed to claim review:', error);
-      alert(`Failed to start review: ${error.message || 'Unknown error'}`);
+      alert(`Failed to start review: ${(error as Error).message || 'Unknown error'}`);
     } finally {
       setIsClaimingReview(false);
     }
@@ -652,13 +764,15 @@ export const DocumentPanel = ({ item, setToolsOpen, getDocumentDetailsFromIds, o
         ruleValidationResultUri={localItem.ruleValidationResultUri}
       />
       <SectionsPanel
-        sections={localItem.sections}
-        pages={localItem.pages}
-        documentItem={localItem}
-        mergedConfig={mergedConfig}
-        onDocumentUpdate={setLocalItem}
+        {...({
+          sections: localItem.sections,
+          pages: localItem.pages,
+          documentItem: localItem,
+          mergedConfig,
+          onDocumentUpdate: setLocalItem,
+        } as Record<string, unknown>)}
       />
-      <PagesPanel pages={localItem.pages} documentItem={localItem} />
+      <PagesPanel {...({ pages: localItem.pages, documentItem: localItem } as Record<string, unknown>)} />
       <ChatPanel objectKey={localItem.objectKey} />
 
       {/* Step Function Flow Viewer */}
@@ -676,8 +790,8 @@ export const DocumentPanel = ({ item, setToolsOpen, getDocumentDetailsFromIds, o
         visible={isTroubleshootModalVisible}
         onDismiss={() => setIsTroubleshootModalVisible(false)}
         documentItem={localItem}
-        existingJob={troubleshootJobs[localItem?.objectKey]}
-        onJobUpdate={(jobData) => {
+        existingJob={troubleshootJobs[localItem?.objectKey] as unknown as { jobId: string; status: string }}
+        onJobUpdate={(jobData: TroubleshootJobData) => {
           setTroubleshootJobs((prev) => ({
             ...prev,
             [localItem.objectKey]: jobData,

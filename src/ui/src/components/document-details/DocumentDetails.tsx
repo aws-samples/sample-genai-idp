@@ -18,9 +18,20 @@ import '@cloudscape-design/global-styles/index.css';
 
 import DocumentPanel from '../document-panel';
 
+interface MappedDocument {
+  objectKey: string;
+  objectStatus: string;
+  [key: string]: unknown;
+}
+
+interface AbortableItem {
+  objectKey: string;
+  [key: string]: unknown;
+}
+
 const logger = new ConsoleLogger('documentDetails');
 
-const DocumentDetails = () => {
+const DocumentDetails = (): React.JSX.Element => {
   const params = useParams();
   const navigate = useNavigate();
 
@@ -37,12 +48,18 @@ const DocumentDetails = () => {
     logger.debug('Error decoding objectKey, using as is', e);
   }
 
-  const { documents, getDocumentDetailsFromIds, setToolsOpen, deleteDocuments, reprocessDocuments, abortWorkflows } = useDocumentsContext();
-  const { settings } = useSettingsContext();
+  const documentsContext = useDocumentsContext() as Record<string, unknown>;
+  const documents = documentsContext.documents as Record<string, unknown>[];
+  const getDocumentDetailsFromIds = documentsContext.getDocumentDetailsFromIds as (ids: string[]) => Promise<Record<string, unknown>[]>;
+  const setToolsOpen = documentsContext.setToolsOpen as (open: boolean) => void;
+  const deleteDocuments = documentsContext.deleteDocuments as (ids: string[]) => Promise<unknown>;
+  const reprocessDocuments = documentsContext.reprocessDocuments as (ids: string[], version?: string) => Promise<unknown>;
+  const abortWorkflows = documentsContext.abortWorkflows as (ids: string[]) => Promise<unknown>;
+  const { settings } = useSettingsContext() as Record<string, unknown>;
   const { isReviewer, isAdmin } = useUserRole();
   const isReviewerOnly = isReviewer && !isAdmin;
 
-  const [document, setDocument] = useState(null);
+  const [document, setDocument] = useState<MappedDocument | null>(null);
   const [isDeleteModalVisible, setIsDeleteModalVisible] = useState(false);
   const [isReprocessModalVisible, setIsReprocessModalVisible] = useState(false);
   const [isAbortModalVisible, setIsAbortModalVisible] = useState(false);
@@ -50,10 +67,10 @@ const DocumentDetails = () => {
   const [isReprocessLoading, setIsReprocessLoading] = useState(false);
   const [isAbortLoading, setIsAbortLoading] = useState(false);
 
-  const sendInitDocumentRequests = async () => {
+  const sendInitDocumentRequests = async (): Promise<void> => {
     const response = await getDocumentDetailsFromIds([objectKey]);
     logger.debug('document detail response', response);
-    const documentsMap = mapDocumentsAttributes(response, settings);
+    const documentsMap = mapDocumentsAttributes(response as unknown as { ObjectKey: string }[]) as MappedDocument[];
     const documentDetails = documentsMap[0];
     if (documentDetails) {
       setDocument(documentDetails);
@@ -71,13 +88,13 @@ const DocumentDetails = () => {
 
   // Handle updates from subscription
   useEffect(() => {
-    if (!objectKey || !documents?.length) {
+    if (!objectKey || !(documents as unknown[])?.length) {
       return;
     }
 
-    const documentsFiltered = documents.filter((c) => c.ObjectKey === objectKey);
+    const documentsFiltered = (documents as Record<string, unknown>[]).filter((c: Record<string, unknown>) => c.ObjectKey === objectKey);
     if (documentsFiltered && documentsFiltered?.length) {
-      const documentsMap = mapDocumentsAttributes([documentsFiltered[0]], settings);
+      const documentsMap = mapDocumentsAttributes([documentsFiltered[0]] as unknown as { ObjectKey: string }[]) as MappedDocument[];
       const documentDetails = documentsMap[0];
 
       // Check if document content has changed by comparing stringified versions
@@ -138,7 +155,7 @@ const DocumentDetails = () => {
   };
 
   // Function to handle abort confirmation
-  const handleAbortConfirm = async (abortableItems) => {
+  const handleAbortConfirm = async (abortableItems: AbortableItem[]) => {
     const keys = abortableItems.map((item) => item.objectKey);
     logger.debug('Aborting workflow', keys);
     setIsAbortLoading(true);
