@@ -1,6 +1,6 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { HashRouter } from 'react-router-dom';
 import { Authenticator, ThemeProvider, useAuthenticator } from '@aws-amplify/ui-react';
 import { ConsoleLogger } from 'aws-amplify/utils';
@@ -16,21 +16,30 @@ import Routes from './routes/Routes';
 
 import './App.css';
 
+interface AppActiveTestRun {
+  testRunId: string;
+  testSetName: string;
+  context: string;
+  filesCount: number;
+  configVersion: string;
+  startTime: Date;
+}
+
 const logger = new ConsoleLogger('App', import.meta.env.DEV ? 'DEBUG' : 'WARN');
 
-const AppContent = () => {
+const AppContent = (): React.JSX.Element => {
   const awsConfig = useAwsConfig();
   const { authStatus: authState, user } = useAuthenticator((context) => [context.authStatus, context.user]);
-  const { currentSession, currentCredentials } = useCurrentSessionCreds({ authState });
-  const [errorMessage, setErrorMessage] = useState();
-  const [navigationOpen, setNavigationOpen] = useState(true);
-  const [activeTestRuns, setActiveTestRuns] = useState([]);
+  const { currentSession, currentCredentials } = useCurrentSessionCreds({});
+  const [errorMessage, setErrorMessage] = useState<string | undefined>();
+  const [navigationOpen, setNavigationOpen] = useState<boolean>(true);
+  const [activeTestRuns, setActiveTestRuns] = useState<AppActiveTestRun[]>([]);
 
-  const addTestRun = (testRunId, testSetName, context, filesCount, configVersion) => {
+  const addTestRun = (testRunId: string, testSetName: string, context: string, filesCount: number, configVersion: string): void => {
     setActiveTestRuns((prev) => [...prev, { testRunId, testSetName, context, filesCount, configVersion, startTime: new Date() }]);
   };
 
-  const removeTestRun = (testRunId) => {
+  const removeTestRun = (testRunId: string): void => {
     setActiveTestRuns((prev) => prev.filter((run) => run.testRunId !== testRunId));
   };
 
@@ -66,7 +75,7 @@ const AppContent = () => {
   );
 };
 
-const App = () => {
+const App = (): React.JSX.Element => {
   return (
     <ThemeProvider>
       <Authenticator.Provider>

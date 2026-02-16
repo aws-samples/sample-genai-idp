@@ -8,15 +8,22 @@ import App from './App';
 
 // Suppress ResizeObserver loop error - this is a benign browser timing issue
 const originalConsoleError = console.error;
-console.error = (...args) => {
-  if (args[0]?.includes?.('ResizeObserver loop') || args[0]?.message?.includes?.('ResizeObserver loop')) {
+console.error = (...args: unknown[]): void => {
+  const first = args[0] as Record<string, unknown> | string | undefined;
+  if (
+    (typeof first === 'string' && first.includes('ResizeObserver loop')) ||
+    (typeof first === 'object' &&
+      first !== null &&
+      typeof (first as Record<string, unknown>).message === 'string' &&
+      ((first as Record<string, unknown>).message as string).includes('ResizeObserver loop'))
+  ) {
     return;
   }
   originalConsoleError(...args);
 };
 
 // Catch ResizeObserver errors at the window level
-window.addEventListener('error', (e) => {
+window.addEventListener('error', (e: ErrorEvent): boolean => {
   if (e.message?.includes('ResizeObserver loop')) {
     e.stopImmediatePropagation();
     e.preventDefault();
@@ -25,7 +32,7 @@ window.addEventListener('error', (e) => {
 });
 
 // Catch unhandled promise rejections
-window.addEventListener('unhandledrejection', (e) => {
+window.addEventListener('unhandledrejection', (e: PromiseRejectionEvent): boolean => {
   if (e.reason?.message?.includes('ResizeObserver loop')) {
     e.stopImmediatePropagation();
     e.preventDefault();
@@ -33,7 +40,8 @@ window.addEventListener('unhandledrejection', (e) => {
   return true;
 });
 
-const root = createRoot(document.getElementById('root'));
+const rootElement = document.getElementById('root');
+const root = createRoot(rootElement!);
 root.render(
   <React.StrictMode>
     <App />
