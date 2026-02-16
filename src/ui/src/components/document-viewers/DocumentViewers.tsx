@@ -1,7 +1,6 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: MIT-0
 
-/* eslint-disable react/prop-types */
 import React, { useState, useEffect } from 'react';
 import { SpaceBetween, Box, Button, StatusIndicator } from '@cloudscape-design/components';
 import { generateClient } from 'aws-amplify/api';
@@ -10,6 +9,42 @@ import { ConsoleLogger } from 'aws-amplify/utils';
 import copyToBaselineMutation from '../../graphql/queries/copyToBaseline';
 import FileViewer from '../document-viewer/FileViewer';
 import { MarkdownReport } from '../document-viewer/MarkdownViewer';
+
+interface ViewerControlsProps {
+  onViewSource: () => void;
+  onViewReport: () => void;
+  onViewSummary: () => void;
+  onViewRuleValidation: () => void;
+  onSetAsBaseline: () => void;
+  isSourceVisible: boolean;
+  isReportVisible: boolean;
+  isSummaryVisible: boolean;
+  isRuleValidationVisible: boolean;
+  evaluationReportUri?: string;
+  summaryReportUri?: string;
+  ruleValidationResultUri?: string;
+  copyStatus: string | null;
+  evaluationStatus?: string;
+}
+
+interface ViewerContentProps {
+  isSourceVisible: boolean;
+  isReportVisible: boolean;
+  isSummaryVisible: boolean;
+  isRuleValidationVisible: boolean;
+  objectKey: string;
+  evaluationReportUri?: string;
+  summaryReportUri?: string;
+  ruleValidationResultUri?: string;
+}
+
+interface DocumentViewersProps {
+  objectKey: string;
+  evaluationReportUri?: string;
+  summaryReportUri?: string;
+  ruleValidationResultUri?: string;
+  evaluationStatus?: string;
+}
 
 const client = generateClient();
 const logger = new ConsoleLogger('DocumentViewers');
@@ -29,7 +64,7 @@ const ViewerControls = ({
   ruleValidationResultUri,
   copyStatus,
   evaluationStatus,
-}) => (
+}: ViewerControlsProps): React.JSX.Element => (
   <SpaceBetween direction="horizontal" size="xs">
     <Button onClick={onViewSource} variant={isSourceVisible ? 'primary' : 'normal'}>
       {isSourceVisible ? 'Close Source Document' : 'View Source Document'}
@@ -68,7 +103,7 @@ const ViewerContent = ({
   evaluationReportUri,
   summaryReportUri,
   ruleValidationResultUri,
-}) => {
+}: ViewerContentProps): React.JSX.Element | null => {
   if (!isSourceVisible && !isReportVisible && !isSummaryVisible && !isRuleValidationVisible) {
     return null;
   }
@@ -77,7 +112,7 @@ const ViewerContent = ({
     <div className="flex flex-col lg:flex-row gap-4 mt-4">
       {isSourceVisible && (
         <div className="flex-1 min-w-0">
-          <FileViewer objectKey={objectKey} showControls={false} />
+          <FileViewer objectKey={objectKey} {...({ showControls: false } as Record<string, unknown>)} />
         </div>
       )}
       {isReportVisible && (
@@ -114,16 +149,22 @@ const ViewerContent = ({
   );
 };
 
-const DocumentViewers = ({ objectKey, evaluationReportUri, summaryReportUri, ruleValidationResultUri, evaluationStatus }) => {
+const DocumentViewers = ({
+  objectKey,
+  evaluationReportUri,
+  summaryReportUri,
+  ruleValidationResultUri,
+  evaluationStatus,
+}: DocumentViewersProps): React.JSX.Element => {
   const [isSourceVisible, setIsSourceVisible] = useState(false);
   const [isReportVisible, setIsReportVisible] = useState(false);
   const [isSummaryVisible, setIsSummaryVisible] = useState(false);
   const [isRuleValidationVisible, setIsRuleValidationVisible] = useState(false);
-  const [copyStatus, setCopyStatus] = useState(null);
+  const [copyStatus, setCopyStatus] = useState<string | null>(null);
 
   // Show temporary message when copy is initiated, then clear it
   useEffect(() => {
-    let messageTimer;
+    let messageTimer: ReturnType<typeof setTimeout>;
 
     if (copyStatus === 'show-message') {
       // Clear the message after 5 seconds
@@ -169,14 +210,17 @@ const DocumentViewers = ({ objectKey, evaluationReportUri, summaryReportUri, rul
       });
 
       // The Lambda returns immediately, so check the result
-      if (result.data.copyToBaseline.success) {
+      if ((result as { data: { copyToBaseline: { success: boolean; message: string } } }).data.copyToBaseline.success) {
         // Operation started successfully, show temporary message
         setCopyStatus('show-message');
-        logger.info('Copy operation started:', result.data.copyToBaseline.message);
+        logger.info('Copy operation started:', (result as { data: { copyToBaseline: { message: string } } }).data.copyToBaseline.message);
       } else {
         // Immediate failure (e.g., file not found)
         setCopyStatus('error');
-        logger.error('Failed to start copy operation:', result.data.copyToBaseline.message);
+        logger.error(
+          'Failed to start copy operation:',
+          (result as { data: { copyToBaseline: { message: string } } }).data.copyToBaseline.message,
+        );
 
         // Clear error status after 5 seconds
         setTimeout(() => setCopyStatus(null), 5000);

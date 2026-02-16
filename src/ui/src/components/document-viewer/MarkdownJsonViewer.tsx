@@ -1,26 +1,59 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: MIT-0
 
-/* eslint-disable react/prop-types, react/destructuring-assignment, no-nested-ternary, no-use-before-define */
+/* eslint-disable react/destructuring-assignment, no-nested-ternary, no-use-before-define */
 import React, { useState, useEffect } from 'react';
+import type { SegmentedControlProps, ToggleProps } from '@cloudscape-design/components';
 import { Box, SpaceBetween, Button, Toggle, Alert, SegmentedControl } from '@cloudscape-design/components';
 import { generateClient } from 'aws-amplify/api';
 import { ConsoleLogger } from 'aws-amplify/utils';
 import { Editor } from '@monaco-editor/react';
+import type * as Monaco from 'monaco-editor';
 import getFileContents from '../../graphql/queries/getFileContents';
 import uploadDocument from '../../graphql/queries/uploadDocument';
 import MarkdownViewer from './MarkdownViewer';
+
+interface TextEditorViewProps {
+  fileContent: string | null;
+  onChange?: (value: string | undefined) => void;
+  isReadOnly: boolean;
+  fileType: string;
+}
+
+interface FileEditorViewProps {
+  fileContent: string | null;
+  onChange?: (value: string) => void;
+  isReadOnly?: boolean;
+  fileType?: string;
+  viewMode: string;
+  onViewModeChange: (event: { detail: SegmentedControlProps.ChangeDetail }) => void;
+  isConfidenceAvailable: boolean;
+}
+
+interface MarkdownJsonViewerProps {
+  fileUri: string;
+  textConfidenceUri?: string;
+  fileType?: string;
+  buttonText?: string;
+}
 
 const client = generateClient();
 const logger = new ConsoleLogger('MarkdownJsonViewer');
 
 const EDITOR_DEFAULT_HEIGHT = '600px';
 
-const TextEditorView = ({ fileContent, onChange, isReadOnly, fileType }) => {
-  const [isEditorReady, setIsEditorReady] = useState(false);
+declare global {
+  interface Window {
+    monacoEditor: Monaco.editor.IStandaloneCodeEditor | null;
+    editorResizeTimeout: ReturnType<typeof setTimeout> | null;
+  }
+}
+
+const TextEditorView = ({ fileContent, onChange, isReadOnly, fileType }: TextEditorViewProps): React.JSX.Element => {
+  const [isEditorReady, setIsEditorReady] = useState<boolean>(false);
 
   useEffect(() => {
-    let timeoutId;
+    let timeoutId: ReturnType<typeof setTimeout>;
     if (isEditorReady) {
       timeoutId = setTimeout(() => {
         if (window.monacoEditor) {
@@ -38,7 +71,7 @@ const TextEditorView = ({ fileContent, onChange, isReadOnly, fileType }) => {
     };
   }, [isEditorReady]);
 
-  const handleEditorDidMount = (editor) => {
+  const handleEditorDidMount = (editor: Monaco.editor.IStandaloneCodeEditor) => {
     window.monacoEditor = editor;
     editor.layout();
     setIsEditorReady(true);
@@ -62,7 +95,7 @@ const TextEditorView = ({ fileContent, onChange, isReadOnly, fileType }) => {
   };
 
   return (
-    <Box className="file-editor-container" style={{ border: '2px solid #e9ebed', width: '100%', minWidth: '600px' }}>
+    <div className="file-editor-container" style={{ border: '2px solid #e9ebed', width: '100%', minWidth: '600px' }}>
       <div style={{ height: EDITOR_DEFAULT_HEIGHT, position: 'relative', overflow: 'hidden', width: '100%' }}>
         <Editor
           height="100%"
@@ -90,7 +123,7 @@ const TextEditorView = ({ fileContent, onChange, isReadOnly, fileType }) => {
           loading={<Box padding="s">Loading editor...</Box>}
         />
       </div>
-    </Box>
+    </div>
   );
 };
 
@@ -102,9 +135,9 @@ const FileEditorView = ({
   viewMode,
   onViewModeChange,
   isConfidenceAvailable,
-}) => {
-  const [isValid, setIsValid] = useState(true);
-  const [jsonData, setJsonData] = useState(null);
+}: FileEditorViewProps): React.JSX.Element => {
+  const [isValid, setIsValid] = useState<boolean>(true);
+  const [jsonData, setJsonData] = useState<Record<string, unknown> | null>(null);
 
   useEffect(() => {
     if (fileType === 'json') {
@@ -119,8 +152,8 @@ const FileEditorView = ({
     }
   }, [fileContent, fileType]);
 
-  const handleTextEditorChange = (value) => {
-    if (fileType === 'json') {
+  const handleTextEditorChange = (value: string | undefined) => {
+    if (fileType === 'json' && value) {
       try {
         const parsed = JSON.parse(value);
         setJsonData(parsed);
@@ -132,7 +165,7 @@ const FileEditorView = ({
         setIsValid(false);
         logger.error('Invalid JSON:', error);
       }
-    } else if (onChange) {
+    } else if (onChange && value) {
       onChange(value);
     }
   };
@@ -191,16 +224,21 @@ const FileEditorView = ({
   );
 };
 
-const MarkdownJsonViewer = ({ fileUri, textConfidenceUri, fileType = 'text', buttonText = 'View File' }) => {
-  const [fileContent, setFileContent] = useState(null);
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState(null);
-  const [success, setSuccess] = useState(null);
-  const [isEditing, setIsEditing] = useState(false);
-  const [editedContent, setEditedContent] = useState(null);
-  const [viewMode, setViewMode] = useState('markdown');
-  const [loadedUri, setLoadedUri] = useState(null);
-  const [isViewerOpen, setIsViewerOpen] = useState(false);
+const MarkdownJsonViewer = ({
+  fileUri,
+  textConfidenceUri,
+  fileType = 'text',
+  buttonText = 'View File',
+}: MarkdownJsonViewerProps): React.JSX.Element => {
+  const [fileContent, setFileContent] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+  const [isEditing, setIsEditing] = useState<boolean>(false);
+  const [editedContent, setEditedContent] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<string>('markdown');
+  const [loadedUri, setLoadedUri] = useState<string | null>(null);
+  const [isViewerOpen, setIsViewerOpen] = useState<boolean>(false);
 
   const fetchContent = async (forceRefetch = false) => {
     // Determine which URI to fetch based on view mode
@@ -224,12 +262,13 @@ const MarkdownJsonViewer = ({ fileUri, textConfidenceUri, fileType = 'text', but
       logger.info('Fetching content:', uriToFetch);
 
       const response = await client.graphql({
-        query: getFileContents,
+        query: getFileContents as unknown as string,
         variables: { s3Uri: uriToFetch },
       });
 
       // Handle the updated response structure
-      const result = response.data.getFileContents;
+      const result = (response as { data: { getFileContents: { content: string; contentType: string; isBinary: boolean } } }).data
+        .getFileContents;
       const fetchedContent = result.content;
       logger.debug('Received content type:', result.contentType);
       logger.debug('Binary content?', result.isBinary);
@@ -248,14 +287,14 @@ const MarkdownJsonViewer = ({ fileUri, textConfidenceUri, fileType = 'text', but
     }
   };
 
-  const handleEditToggle = ({ detail }) => {
+  const handleEditToggle = ({ detail }: { detail: ToggleProps.ChangeDetail }) => {
     setIsEditing(detail.checked);
     if (detail.checked && !editedContent) {
       setEditedContent(fileContent);
     }
   };
 
-  const handleContentChange = (newContent) => {
+  const handleContentChange = (newContent: string) => {
     setEditedContent(newContent);
   };
 
@@ -275,7 +314,7 @@ const MarkdownJsonViewer = ({ fileUri, textConfidenceUri, fileType = 'text', but
 
       // Get presigned URL
       const response = await client.graphql({
-        query: uploadDocument,
+        query: uploadDocument as unknown as string,
         variables: {
           fileName,
           contentType: 'application/json',
@@ -284,7 +323,8 @@ const MarkdownJsonViewer = ({ fileUri, textConfidenceUri, fileType = 'text', but
         },
       });
 
-      const { presignedUrl, usePostMethod } = response.data.uploadDocument;
+      const { presignedUrl, usePostMethod } = (response as { data: { uploadDocument: { presignedUrl: string; usePostMethod: boolean } } })
+        .data.uploadDocument;
 
       if (!usePostMethod) {
         throw new Error('Server returned PUT method which is not supported');
@@ -297,7 +337,7 @@ const MarkdownJsonViewer = ({ fileUri, textConfidenceUri, fileType = 'text', but
       const formData = new FormData();
 
       // Add all fields from presigned POST data
-      Object.entries(presignedPostData.fields).forEach(([key, value]) => {
+      Object.entries(presignedPostData.fields as Record<string, string>).forEach(([key, value]) => {
         formData.append(key, value);
       });
 
@@ -328,7 +368,7 @@ const MarkdownJsonViewer = ({ fileUri, textConfidenceUri, fileType = 'text', but
       }, 3000);
     } catch (err) {
       logger.error('Error saving changes:', err);
-      setError(`Failed to save changes: ${err.message}`);
+      setError(`Failed to save changes: ${(err as Error).message}`);
     }
   };
 
@@ -348,7 +388,7 @@ const MarkdownJsonViewer = ({ fileUri, textConfidenceUri, fileType = 'text', but
     );
   }
 
-  const handleViewModeChange = ({ detail }) => {
+  const handleViewModeChange = ({ detail }: { detail: SegmentedControlProps.ChangeDetail }) => {
     const newMode = detail.selectedId;
     setViewMode(newMode);
 
@@ -393,32 +433,34 @@ const MarkdownJsonViewer = ({ fileUri, textConfidenceUri, fileType = 'text', but
       )}
 
       {isViewerOpen && (
-        <SpaceBetween size="s" className="json-viewer-container" style={{ width: '100%', minWidth: '700px' }}>
-          <Box>
-            <SpaceBetween direction="horizontal" size="xs">
-              <Button onClick={closeViewer}>Close</Button>
-              <Toggle onChange={handleEditToggle} checked={isEditing}>
-                Edit mode
-              </Toggle>
-              {isEditing && (
-                <Button variant="primary" onClick={handleSave} disabled={!editedContent || editedContent === fileContent}>
-                  Save Changes
-                </Button>
-              )}
-            </SpaceBetween>
-          </Box>
-          <div style={{ width: '100%' }}>
-            <FileEditorView
-              fileContent={isLoading ? null : isEditing ? editedContent : fileContent}
-              onChange={handleContentChange}
-              isReadOnly={!isEditing}
-              fileType={fileType}
-              viewMode={viewMode}
-              onViewModeChange={handleViewModeChange}
-              isConfidenceAvailable={!!textConfidenceUri}
-            />
-          </div>
-        </SpaceBetween>
+        <div className="json-viewer-container" style={{ width: '100%', minWidth: '700px' }}>
+          <SpaceBetween size="s">
+            <Box>
+              <SpaceBetween direction="horizontal" size="xs">
+                <Button onClick={closeViewer}>Close</Button>
+                <Toggle onChange={handleEditToggle} checked={isEditing}>
+                  Edit mode
+                </Toggle>
+                {isEditing && (
+                  <Button variant="primary" onClick={handleSave} disabled={!editedContent || editedContent === fileContent}>
+                    Save Changes
+                  </Button>
+                )}
+              </SpaceBetween>
+            </Box>
+            <div style={{ width: '100%' }}>
+              <FileEditorView
+                fileContent={isLoading ? null : isEditing ? editedContent : fileContent}
+                onChange={handleContentChange}
+                isReadOnly={!isEditing}
+                fileType={fileType}
+                viewMode={viewMode}
+                onViewModeChange={handleViewModeChange}
+                isConfidenceAvailable={!!textConfidenceUri}
+              />
+            </div>
+          </SpaceBetween>
+        </div>
       )}
     </Box>
   );

@@ -1,7 +1,6 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: MIT-0
 
-/* eslint-disable react/prop-types */
 import React, { useState, useEffect, useRef } from 'react';
 import { Box, Button, SpaceBetween } from '@cloudscape-design/components';
 import { generateClient } from 'aws-amplify/api';
@@ -12,14 +11,35 @@ import rehypeRaw from 'rehype-raw';
 import getFileContents from '../../graphql/queries/getFileContents';
 import './MarkdownViewer.css';
 
+interface MarkdownViewerProps {
+  content: string;
+  documentName?: string;
+  title?: string;
+  simple?: boolean;
+  height?: string;
+}
+
+interface MarkdownReportProps {
+  reportUri: string;
+  documentId?: string;
+  title?: string;
+  emptyMessage?: string;
+}
+
 const client = generateClient();
 const logger = new ConsoleLogger('MarkdownViewer');
 
 // Default height for the simple mode
 const MARKDOWN_DEFAULT_HEIGHT = '600px';
 
-const MarkdownViewer = ({ content, documentName, title, simple = false, height = MARKDOWN_DEFAULT_HEIGHT }) => {
-  const contentRef = useRef(null);
+const MarkdownViewer = ({
+  content,
+  documentName,
+  title,
+  simple = false,
+  height = MARKDOWN_DEFAULT_HEIGHT,
+}: MarkdownViewerProps): React.JSX.Element => {
+  const contentRef = useRef<HTMLDivElement>(null);
   const [showOnlyUnmatched, setShowOnlyUnmatched] = useState(false);
   const [detailsExpanded, setDetailsExpanded] = useState(false);
 
@@ -31,7 +51,7 @@ const MarkdownViewer = ({ content, documentName, title, simple = false, height =
     const newState = !showOnlyUnmatched;
 
     matchedRows.forEach((row) => {
-      row.style.display = newState ? 'none' : '';
+      (row as HTMLElement).style.display = newState ? 'none' : '';
     });
 
     setShowOnlyUnmatched(newState);
@@ -50,10 +70,10 @@ const MarkdownViewer = ({ content, documentName, title, simple = false, height =
   };
 
   // Handle anchor link clicks for smooth scrolling within the document
-  const handleAnchorClick = (event) => {
-    const { target } = event;
-    if (target.tagName === 'A' && target.href && target.href.includes('#')) {
-      const url = new URL(target.href);
+  const handleAnchorClick = (event: MouseEvent) => {
+    const target = event.target as HTMLElement;
+    if (target.tagName === 'A' && (target as HTMLAnchorElement).href && (target as HTMLAnchorElement).href.includes('#')) {
+      const url = new URL((target as HTMLAnchorElement).href);
       // Check if this is an internal anchor link (same origin + hash)
       if (url.origin === window.location.origin && url.hash) {
         event.preventDefault();
@@ -103,7 +123,7 @@ const MarkdownViewer = ({ content, documentName, title, simple = false, height =
   }, [content]);
 
   const handlePrint = () => {
-    const printWindow = window.open('', '_blank');
+    const printWindow = window.open('', '_blank') as Window | null;
     const printContent = `
       <!DOCTYPE html>
       <html>
@@ -126,12 +146,14 @@ const MarkdownViewer = ({ content, documentName, title, simple = false, height =
       </html>
     `;
 
-    printWindow.document.open();
-    printWindow.document.write(printContent);
-    printWindow.document.close();
-    printWindow.onload = () => {
-      printWindow.print();
-    };
+    if (printWindow) {
+      printWindow.document.open();
+      printWindow.document.write(printContent);
+      printWindow.document.close();
+      printWindow.onload = () => {
+        printWindow.print();
+      };
+    }
   };
 
   const handleDownload = () => {
@@ -156,7 +178,7 @@ const MarkdownViewer = ({ content, documentName, title, simple = false, height =
   // For simple mode, just show the markdown content without the controls
   if (simple) {
     return (
-      <Box
+      <div
         style={{
           height,
           position: 'relative',
@@ -178,7 +200,7 @@ const MarkdownViewer = ({ content, documentName, title, simple = false, height =
             No content to display
           </Box>
         )}
-      </Box>
+      </div>
     );
   }
 
@@ -187,7 +209,7 @@ const MarkdownViewer = ({ content, documentName, title, simple = false, height =
 
   // Standard mode with controls and improved styling
   return (
-    <Box
+    <div
       className="markdown-viewer"
       style={{
         border: '1px solid #e9ebed',
@@ -241,14 +263,14 @@ const MarkdownViewer = ({ content, documentName, title, simple = false, height =
           {content}
         </ReactMarkdown>
       </div>
-    </Box>
+    </div>
   );
 };
 
-const MarkdownReport = ({ reportUri, documentId, title = 'Report', emptyMessage }) => {
-  const [reportContent, setReportContent] = useState(null);
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState(null);
+const MarkdownReport = ({ reportUri, documentId, title = 'Report', emptyMessage }: MarkdownReportProps): React.JSX.Element | null => {
+  const [reportContent, setReportContent] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchReport = async () => {
@@ -260,12 +282,13 @@ const MarkdownReport = ({ reportUri, documentId, title = 'Report', emptyMessage 
         logger.info(`Fetching ${title}:`, reportUri);
 
         const response = await client.graphql({
-          query: getFileContents,
+          query: getFileContents as unknown as string,
           variables: { s3Uri: reportUri },
         });
 
         // Get content from the updated response structure
-        const result = response.data.getFileContents;
+        const result = (response as { data: { getFileContents: { content: string; contentType: string; isBinary: boolean } } }).data
+          .getFileContents;
         const { content } = result;
         logger.debug(`Received ${title} content type:`, result.contentType);
         logger.debug(`Binary content?`, result.isBinary);

@@ -1,7 +1,6 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: MIT-0
 
-/* eslint-disable react/prop-types */
 import React, { useState, useMemo, Suspense, useEffect } from 'react';
 import { Box, Button, Spinner } from '@cloudscape-design/components';
 import { generateClient } from 'aws-amplify/api';
@@ -10,7 +9,24 @@ import getFileContents from '../../graphql/queries/getFileContents';
 import uploadDocument from '../../graphql/queries/uploadDocument';
 
 // Lazy load VisualEditorModal for better performance
-const VisualEditorModal = React.lazy(() => import('./VisualEditorModal'));
+const VisualEditorModal = React.lazy(
+  () => import('./VisualEditorModal') as unknown as Promise<{ default: React.ComponentType<Record<string, unknown>> }>,
+);
+
+interface JSONViewerProps {
+  fileUri: string;
+  fileType?: string;
+  buttonText?: string;
+  sectionData?: Record<string, unknown>;
+  onOpen?: () => void;
+  onClose?: () => void;
+  disabled?: boolean;
+  isReadOnly?: boolean;
+  allSections?: Record<string, unknown>[];
+  currentSectionIndex?: number;
+  onNavigateToSection?: (index: number) => void;
+  isExternallyOpen?: boolean;
+}
 
 const client = generateClient();
 const logger = new ConsoleLogger('JSONViewer');
@@ -30,12 +46,12 @@ const JSONViewer = ({
   onNavigateToSection,
   // External control props for navigation
   isExternallyOpen = false,
-}) => {
-  const [jsonData, setJsonData] = useState(null);
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState(null);
-  const [showVisualEditor, setShowVisualEditor] = useState(false);
-  const [originalContent, setOriginalContent] = useState(null);
+}: JSONViewerProps): React.JSX.Element => {
+  const [jsonData, setJsonData] = useState<Record<string, unknown> | null>(null);
+  const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [error, setError] = useState<string | null>(null);
+  const [showVisualEditor, setShowVisualEditor] = useState<boolean>(false);
+  const [originalContent, setOriginalContent] = useState<string | null>(null);
 
   // Handle external open request (for section navigation)
   useEffect(() => {
@@ -65,11 +81,11 @@ const JSONViewer = ({
       logger.info('Fetching content:', fileUri);
 
       const response = await client.graphql({
-        query: getFileContents,
+        query: getFileContents as unknown as string,
         variables: { s3Uri: fileUri },
       });
 
-      const result = response.data.getFileContents;
+      const result = (response as { data: { getFileContents: { isBinary: boolean; content: string } } }).data.getFileContents;
 
       if (result.isBinary === true) {
         setError('This file contains binary content that cannot be viewed.');
@@ -100,7 +116,7 @@ const JSONViewer = ({
   };
 
   // Handle JSON data changes from the Visual Editor
-  const handleJsonChange = (jsonString) => {
+  const handleJsonChange = (jsonString: string) => {
     try {
       const parsed = JSON.parse(jsonString);
       setJsonData(parsed);
@@ -110,7 +126,7 @@ const JSONViewer = ({
   };
 
   // Handle saving changes
-  const handleSave = async (editedJsonData) => {
+  const handleSave = async (editedJsonData: Record<string, unknown>) => {
     try {
       const editedContent = JSON.stringify(editedJsonData, null, 2);
 
@@ -128,7 +144,7 @@ const JSONViewer = ({
 
       // Get presigned URL
       const response = await client.graphql({
-        query: uploadDocument,
+        query: uploadDocument as unknown as string,
         variables: {
           fileName,
           contentType: 'application/json',
@@ -137,7 +153,8 @@ const JSONViewer = ({
         },
       });
 
-      const { presignedUrl, usePostMethod } = response.data.uploadDocument;
+      const { presignedUrl, usePostMethod } = (response as { data: { uploadDocument: { presignedUrl: string; usePostMethod: boolean } } })
+        .data.uploadDocument;
 
       if (!usePostMethod) {
         throw new Error('Server returned PUT method which is not supported');
@@ -150,7 +167,7 @@ const JSONViewer = ({
       const formData = new FormData();
 
       // Add all fields from presigned POST data
-      Object.entries(presignedPostData.fields).forEach(([key, value]) => {
+      Object.entries(presignedPostData.fields as Record<string, string>).forEach(([key, value]) => {
         formData.append(key, value);
       });
 

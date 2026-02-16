@@ -29,15 +29,46 @@ import { getFieldConfidenceInfo } from '../common/confidence-alerts-utils';
 import getFileContents from '../../graphql/queries/getFileContents';
 import uploadDocument from '../../graphql/queries/uploadDocument';
 import JSONEditorTab from './JSONEditorTab';
+import type { BoxProps } from '@cloudscape-design/components';
 import EditHistoryTab from './EditHistoryTab';
+
+// Extended Box props to allow native HTML attributes that Cloudscape passes through at runtime
+type ExtendedBoxProps = BoxProps & React.HTMLAttributes<HTMLDivElement>;
+const ExtBox = Box as React.ComponentType<ExtendedBoxProps>;
+
+interface BoundingBoxDimensions {
+  width?: number;
+  height?: number;
+  transformedWidth?: number;
+  transformedHeight?: number;
+  transformedOffsetX?: number;
+  transformedOffsetY?: number;
+}
+
+type FileContentsResponse = {
+  data: { getFileContents: { isBinary: boolean; content: string } };
+};
+type UploadDocResponse = {
+  data: { uploadDocument: { presignedUrl: string; usePostMethod: boolean } };
+};
 
 const client = generateClient();
 
 const logger = new ConsoleLogger('VisualEditorModal');
 
 // Memoized component to render a bounding box on an image
-const BoundingBox = memo(({ box, page, currentPage, imageRef, zoomLevel = 1, panOffset = { x: 0, y: 0 } }) => {
-  const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
+interface BoundingBoxProps {
+  box: Record<string, unknown> | null;
+  page: string;
+  currentPage: string;
+  imageRef: React.RefObject<HTMLImageElement | null>;
+  zoomLevel?: number;
+  panOffset?: { x: number; y: number };
+}
+const BoundingBox = memo(({
+  box, page, currentPage, imageRef, zoomLevel = 1, panOffset = { x: 0, y: 0 },
+}: BoundingBoxProps) => {
+  const [dimensions, setDimensions] = useState<BoundingBoxDimensions>({ width: 0, height: 0 });
 
   useEffect(() => {
     if (imageRef.current && page === currentPage) {
@@ -130,7 +161,7 @@ const BoundingBox = memo(({ box, page, currentPage, imageRef, zoomLevel = 1, pan
   }
 
   const padding = 5;
-  const bbox = box.boundingBox;
+  const bbox = box.boundingBox as { left: number; top: number; width: number; height: number };
 
   // Calculate position and size directly on the transformed image
   const finalLeft = bbox.left * dimensions.transformedWidth + dimensions.transformedOffsetX - padding;
@@ -161,13 +192,14 @@ const BoundingBox = memo(({ box, page, currentPage, imageRef, zoomLevel = 1, pan
     style,
   });
 
-  return <div style={style} />;
+  return <div style={style as React.CSSProperties} />;
 });
 
 BoundingBox.displayName = 'BoundingBox';
 
 // Memoized component to render a form field based on its type
-const FormFieldRenderer = memo(
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const FormFieldRenderer = memo<Record<string, any>>(
   ({
     fieldKey,
     value,
@@ -413,7 +445,7 @@ const FormFieldRenderer = memo(
     const evalReason = evalResult?.reason;
     
     // Determine field type
-    let fieldType = typeof value;
+    let fieldType: string = typeof value;
     if (Array.isArray(value)) {
       fieldType = 'array';
     } else if (value === null || value === undefined) {
@@ -580,54 +612,54 @@ const FormFieldRenderer = memo(
           >
             <FormField
               label={
-                <Box>
+                <ExtBox>
                   <SpaceBetween direction="horizontal" size="xs">
                     <span>{fieldKey}:</span>
                     {isPredictionChanged && (
-                      <Box color="text-status-info" fontSize="body-s" fontWeight="bold">
+                      <ExtBox color="text-status-info" fontSize="body-s" fontWeight="bold">
                         ✏️ Edited
-                      </Box>
+                      </ExtBox>
                     )}
                     {isBaselineChanged && !isPredictionChanged && (
-                      <Box color="text-status-warning" fontSize="body-s" fontWeight="bold">
+                      <ExtBox color="text-status-warning" fontSize="body-s" fontWeight="bold">
                         ✏️ Baseline Edited
-                      </Box>
+                      </ExtBox>
                     )}
                     {hasMismatch && !hasLocalEdit && (
-                      <Box color="text-status-warning" fontSize="body-s" fontWeight="bold">
+                      <ExtBox color="text-status-warning" fontSize="body-s" fontWeight="bold">
                         ⚠ Mismatch
-                      </Box>
+                      </ExtBox>
                     )}
                     {!hasMismatch && !hasLocalEdit && showComparison && baselineValue !== null && (
-                      <Box color="text-status-success" fontSize="body-s">
+                      <ExtBox color="text-status-success" fontSize="body-s">
                         ✓ Match
-                      </Box>
+                      </ExtBox>
                     )}
                   </SpaceBetween>
                   {confidenceInfo.hasConfidenceInfo && (
-                    <Box fontSize="body-s" padding={{ top: 'xxxs' }} color={confidenceColor} style={confidenceStyle}>
+                    <ExtBox fontSize="body-s" padding={{ top: 'xxxs' }} color={confidenceColor} style={confidenceStyle}>
                       {confidenceInfo.displayMode === 'with-threshold'
                         ? `Confidence: ${(confidenceInfo.confidence * 100).toFixed(1)}% / Threshold: ${(
                             confidenceInfo.confidenceThreshold * 100
                           ).toFixed(1)}%`
                         : `Confidence: ${(confidenceInfo.confidence * 100).toFixed(1)}%`}
-                    </Box>
+                    </ExtBox>
                   )}
                   {showComparison && evalScore !== undefined && (
-                    <Box fontSize="body-s" padding={{ top: 'xxxs' }} color={hasMismatch ? 'text-status-warning' : 'text-status-success'}>
+                    <ExtBox fontSize="body-s" padding={{ top: 'xxxs' }} color={hasMismatch ? 'text-status-warning' : 'text-status-success'}>
                       {`Eval Score: ${(evalScore * 100).toFixed(1)}%`}
                       {evalReason && ` - ${evalReason}`}
-                    </Box>
+                    </ExtBox>
                   )}
-                </Box>
+                </ExtBox>
               }
             >
               <SpaceBetween size="xxs">
-                <Box onClick={handleClick} style={{ cursor: 'pointer' }}>
+                <ExtBox onClick={handleClick} style={{ cursor: 'pointer' }}>
                   <SpaceBetween direction="horizontal" size="xxs" alignItems="center">
-                    <Box fontSize="body-s" color="text-body-secondary">Predicted:</Box>
+                    <ExtBox fontSize="body-s" color="text-body-secondary">Predicted:</ExtBox>
                     {isPredictionChanged && (
-                      <Box fontSize="body-s" color="text-status-info" fontWeight="bold">✏️</Box>
+                      <ExtBox fontSize="body-s" color="text-status-info" fontWeight="bold">✏️</ExtBox>
                     )}
                   </SpaceBetween>
                   <div style={{ 
@@ -679,13 +711,13 @@ const FormFieldRenderer = memo(
                       />
                     )}
                   </div>
-                </Box>
+                </ExtBox>
                 {showComparison && baselineValue !== null && (
-                  <Box onClick={handleClick} style={{ cursor: 'pointer' }}>
+                  <ExtBox onClick={handleClick} style={{ cursor: 'pointer' }}>
                     <SpaceBetween direction="horizontal" size="xxs" alignItems="center">
-                      <Box fontSize="body-s" color="text-body-secondary">Expected (baseline):</Box>
+                      <ExtBox fontSize="body-s" color="text-body-secondary">Expected (baseline):</ExtBox>
                       {isBaselineChanged && (
-                        <Box fontSize="body-s" color="text-status-warning" fontWeight="bold">✏️</Box>
+                        <ExtBox fontSize="body-s" color="text-status-warning" fontWeight="bold">✏️</ExtBox>
                       )}
                     </SpaceBetween>
                     <div style={{ 
@@ -738,7 +770,7 @@ const FormFieldRenderer = memo(
                         />
                       )}
                     </div>
-                  </Box>
+                  </ExtBox>
                 )}
               </SpaceBetween>
             </FormField>
@@ -768,54 +800,54 @@ const FormFieldRenderer = memo(
           >
             <FormField
               label={
-                <Box>
+                <ExtBox>
                   <SpaceBetween direction="horizontal" size="xs">
                     <span>{fieldKey}:</span>
                     {isPredictionChanged && (
-                      <Box color="text-status-info" fontSize="body-s" fontWeight="bold">
+                      <ExtBox color="text-status-info" fontSize="body-s" fontWeight="bold">
                         ✏️ Edited
-                      </Box>
+                      </ExtBox>
                     )}
                     {isBaselineChanged && !isPredictionChanged && (
-                      <Box color="text-status-warning" fontSize="body-s" fontWeight="bold">
+                      <ExtBox color="text-status-warning" fontSize="body-s" fontWeight="bold">
                         ✏️ Baseline Edited
-                      </Box>
+                      </ExtBox>
                     )}
                     {hasMismatch && !hasLocalEdit && (
-                      <Box color="text-status-warning" fontSize="body-s" fontWeight="bold">
+                      <ExtBox color="text-status-warning" fontSize="body-s" fontWeight="bold">
                         ⚠ Mismatch
-                      </Box>
+                      </ExtBox>
                     )}
                     {!hasMismatch && !hasLocalEdit && showComparison && baselineValue !== null && (
-                      <Box color="text-status-success" fontSize="body-s">
+                      <ExtBox color="text-status-success" fontSize="body-s">
                         ✓ Match
-                      </Box>
+                      </ExtBox>
                     )}
                   </SpaceBetween>
                   {confidenceInfo.hasConfidenceInfo && (
-                    <Box fontSize="body-s" padding={{ top: 'xxxs' }} color={confidenceColor} style={confidenceStyle}>
+                    <ExtBox fontSize="body-s" padding={{ top: 'xxxs' }} color={confidenceColor} style={confidenceStyle}>
                       {confidenceInfo.displayMode === 'with-threshold'
                         ? `Confidence: ${(confidenceInfo.confidence * 100).toFixed(1)}% / Threshold: ${(
                             confidenceInfo.confidenceThreshold * 100
                           ).toFixed(1)}%`
                         : `Confidence: ${(confidenceInfo.confidence * 100).toFixed(1)}%`}
-                    </Box>
+                    </ExtBox>
                   )}
                   {showComparison && evalScore !== undefined && (
-                    <Box fontSize="body-s" padding={{ top: 'xxxs' }} color={hasMismatch ? 'text-status-warning' : 'text-status-success'}>
+                    <ExtBox fontSize="body-s" padding={{ top: 'xxxs' }} color={hasMismatch ? 'text-status-warning' : 'text-status-success'}>
                       {`Eval Score: ${(evalScore * 100).toFixed(1)}%`}
                       {evalReason && ` - ${evalReason}`}
-                    </Box>
+                    </ExtBox>
                   )}
-                </Box>
+                </ExtBox>
               }
             >
               <SpaceBetween size="xxs">
-                <Box onClick={handleClick} style={{ cursor: 'pointer' }}>
+                <ExtBox onClick={handleClick} style={{ cursor: 'pointer' }}>
                   <SpaceBetween direction="horizontal" size="xxs" alignItems="center">
-                    <Box fontSize="body-s" color="text-body-secondary">Predicted:</Box>
+                    <ExtBox fontSize="body-s" color="text-body-secondary">Predicted:</ExtBox>
                     {isPredictionChanged && (
-                      <Box fontSize="body-s" color="text-status-info" fontWeight="bold">✏️</Box>
+                      <ExtBox fontSize="body-s" color="text-status-info" fontWeight="bold">✏️</ExtBox>
                     )}
                   </SpaceBetween>
                   <div style={{ 
@@ -871,13 +903,13 @@ const FormFieldRenderer = memo(
                       />
                     )}
                   </div>
-                </Box>
+                </ExtBox>
                 {showComparison && baselineValue !== null && (
-                  <Box onClick={handleClick} style={{ cursor: 'pointer' }}>
+                  <ExtBox onClick={handleClick} style={{ cursor: 'pointer' }}>
                     <SpaceBetween direction="horizontal" size="xxs" alignItems="center">
-                      <Box fontSize="body-s" color="text-body-secondary">Expected (baseline):</Box>
+                      <ExtBox fontSize="body-s" color="text-body-secondary">Expected (baseline):</ExtBox>
                       {isBaselineChanged && (
-                        <Box fontSize="body-s" color="text-status-warning" fontWeight="bold">✏️</Box>
+                        <ExtBox fontSize="body-s" color="text-status-warning" fontWeight="bold">✏️</ExtBox>
                       )}
                     </SpaceBetween>
                     <div style={{ 
@@ -932,7 +964,7 @@ const FormFieldRenderer = memo(
                         />
                       )}
                     </div>
-                  </Box>
+                  </ExtBox>
                 )}
               </SpaceBetween>
             </FormField>
@@ -962,54 +994,54 @@ const FormFieldRenderer = memo(
           >
             <FormField
               label={
-                <Box>
+                <ExtBox>
                   <SpaceBetween direction="horizontal" size="xs">
                     <span>{fieldKey}:</span>
                     {isPredictionChanged && (
-                      <Box color="text-status-info" fontSize="body-s" fontWeight="bold">
+                      <ExtBox color="text-status-info" fontSize="body-s" fontWeight="bold">
                         ✏️ Edited
-                      </Box>
+                      </ExtBox>
                     )}
                     {isBaselineChanged && !isPredictionChanged && (
-                      <Box color="text-status-warning" fontSize="body-s" fontWeight="bold">
+                      <ExtBox color="text-status-warning" fontSize="body-s" fontWeight="bold">
                         ✏️ Baseline Edited
-                      </Box>
+                      </ExtBox>
                     )}
                     {hasMismatch && !hasLocalEdit && (
-                      <Box color="text-status-warning" fontSize="body-s" fontWeight="bold">
+                      <ExtBox color="text-status-warning" fontSize="body-s" fontWeight="bold">
                         ⚠ Mismatch
-                      </Box>
+                      </ExtBox>
                     )}
                     {!hasMismatch && !hasLocalEdit && showComparison && baselineValue !== null && (
-                      <Box color="text-status-success" fontSize="body-s">
+                      <ExtBox color="text-status-success" fontSize="body-s">
                         ✓ Match
-                      </Box>
+                      </ExtBox>
                     )}
                   </SpaceBetween>
                   {confidenceInfo.hasConfidenceInfo && (
-                    <Box fontSize="body-s" padding={{ top: 'xxxs' }} color={confidenceColor} style={confidenceStyle}>
+                    <ExtBox fontSize="body-s" padding={{ top: 'xxxs' }} color={confidenceColor} style={confidenceStyle}>
                       {confidenceInfo.displayMode === 'with-threshold'
                         ? `Confidence: ${(confidenceInfo.confidence * 100).toFixed(1)}% / Threshold: ${(
                             confidenceInfo.confidenceThreshold * 100
                           ).toFixed(1)}%`
                         : `Confidence: ${(confidenceInfo.confidence * 100).toFixed(1)}%`}
-                    </Box>
+                    </ExtBox>
                   )}
                   {showComparison && evalScore !== undefined && (
-                    <Box fontSize="body-s" padding={{ top: 'xxxs' }} color={hasMismatch ? 'text-status-warning' : 'text-status-success'}>
+                    <ExtBox fontSize="body-s" padding={{ top: 'xxxs' }} color={hasMismatch ? 'text-status-warning' : 'text-status-success'}>
                       {`Eval Score: ${(evalScore * 100).toFixed(1)}%`}
                       {evalReason && ` - ${evalReason}`}
-                    </Box>
+                    </ExtBox>
                   )}
-                </Box>
+                </ExtBox>
               }
             >
               <SpaceBetween size="xxs">
-                <Box onClick={handleClick} style={{ cursor: 'pointer' }}>
+                <ExtBox onClick={handleClick} style={{ cursor: 'pointer' }}>
                   <SpaceBetween direction="horizontal" size="xxs" alignItems="center">
-                    <Box fontSize="body-s" color="text-body-secondary">Predicted:</Box>
+                    <ExtBox fontSize="body-s" color="text-body-secondary">Predicted:</ExtBox>
                     {isPredictionChanged && (
-                      <Box fontSize="body-s" color="text-status-info" fontWeight="bold">✏️</Box>
+                      <ExtBox fontSize="body-s" color="text-status-info" fontWeight="bold">✏️</ExtBox>
                     )}
                   </SpaceBetween>
                   <div style={{ 
@@ -1063,13 +1095,13 @@ const FormFieldRenderer = memo(
                       />
                     )}
                   </div>
-                </Box>
+                </ExtBox>
                 {showComparison && baselineValue !== null && (
-                  <Box onClick={handleClick} style={{ cursor: 'pointer' }}>
+                  <ExtBox onClick={handleClick} style={{ cursor: 'pointer' }}>
                     <SpaceBetween direction="horizontal" size="xxs" alignItems="center">
-                      <Box fontSize="body-s" color="text-body-secondary">Expected (baseline):</Box>
+                      <ExtBox fontSize="body-s" color="text-body-secondary">Expected (baseline):</ExtBox>
                       {isBaselineChanged && (
-                        <Box fontSize="body-s" color="text-status-warning" fontWeight="bold">✏️</Box>
+                        <ExtBox fontSize="body-s" color="text-status-warning" fontWeight="bold">✏️</ExtBox>
                       )}
                     </SpaceBetween>
                     <div style={{ 
@@ -1124,7 +1156,7 @@ const FormFieldRenderer = memo(
                         />
                       )}
                     </div>
-                  </Box>
+                  </ExtBox>
                 )}
               </SpaceBetween>
             </FormField>
@@ -1187,11 +1219,11 @@ const FormFieldRenderer = memo(
         }
 
         return (
-          <Box padding="xs" style={{
+          <ExtBox padding="xs" style={{
             backgroundColor: groupEvalResult && !groupEvalResult.matched ? 'rgba(255, 153, 0, 0.08)' : 'transparent',
             borderRadius: '4px',
           }}>
-            <Box fontSize="body-m" fontWeight="bold" padding="xxxs" onFocus={handleFocus}>
+            <ExtBox fontSize="body-m" fontWeight="bold" padding="xxxs" onFocus={handleFocus}>
               <SpaceBetween direction="horizontal" size="xs">
                 {onToggleCollapse && (
                   <span 
@@ -1206,21 +1238,21 @@ const FormFieldRenderer = memo(
                 )}
                 <span>{label}</span>
                 {groupEvalResult && !groupEvalResult.matched && (
-                  <Box color="text-status-warning" fontSize="body-s">⚠</Box>
+                  <ExtBox color="text-status-warning" fontSize="body-s">⚠</ExtBox>
                 )}
                 {groupEvalResult && groupEvalResult.matched && showComparison && (
-                  <Box color="text-status-success" fontSize="body-s">✓</Box>
+                  <ExtBox color="text-status-success" fontSize="body-s">✓</ExtBox>
                 )}
               </SpaceBetween>
               {showComparison && groupEvalResult && (
-                <Box fontSize="body-s" color={groupEvalResult.matched ? 'text-status-success' : 'text-status-warning'}>
+                <ExtBox fontSize="body-s" color={groupEvalResult.matched ? 'text-status-success' : 'text-status-warning'}>
                   {`Group Score: ${(groupEvalResult.score * 100).toFixed(1)}%`}
                   {groupEvalResult.reason && ` - ${groupEvalResult.reason}`}
-                </Box>
+                </ExtBox>
               )}
-            </Box>
+            </ExtBox>
             {!isCollapsed && (
-              <Box padding={{ left: 'l' }}>
+              <ExtBox padding={{ left: 'l' }}>
                 <SpaceBetween size="xs">
                   {Object.entries(value).map(([key, val]) => {
                   // Get confidence and geometry for this field from explainability_info
@@ -1309,9 +1341,9 @@ const FormFieldRenderer = memo(
                   );
                 })}
                 </SpaceBetween>
-              </Box>
+              </ExtBox>
             )}
-          </Box>
+          </ExtBox>
         );
 
       case 'null':
@@ -1333,54 +1365,54 @@ const FormFieldRenderer = memo(
           >
             <FormField
               label={
-                <Box>
+                <ExtBox>
                   <SpaceBetween direction="horizontal" size="xs">
                     <span>{fieldKey}:</span>
                     {isPredictionChanged && (
-                      <Box color="text-status-info" fontSize="body-s" fontWeight="bold">
+                      <ExtBox color="text-status-info" fontSize="body-s" fontWeight="bold">
                         ✏️ Edited
-                      </Box>
+                      </ExtBox>
                     )}
                     {isBaselineChanged && !isPredictionChanged && (
-                      <Box color="text-status-warning" fontSize="body-s" fontWeight="bold">
+                      <ExtBox color="text-status-warning" fontSize="body-s" fontWeight="bold">
                         ✏️ Baseline Edited
-                      </Box>
+                      </ExtBox>
                     )}
                     {hasMismatch && !hasLocalEdit && (
-                      <Box color="text-status-warning" fontSize="body-s" fontWeight="bold">
+                      <ExtBox color="text-status-warning" fontSize="body-s" fontWeight="bold">
                         ⚠ Mismatch
-                      </Box>
+                      </ExtBox>
                     )}
                     {!hasMismatch && !hasLocalEdit && showComparison && baselineValue !== null && (
-                      <Box color="text-status-success" fontSize="body-s">
+                      <ExtBox color="text-status-success" fontSize="body-s">
                         ✓ Match
-                      </Box>
+                      </ExtBox>
                     )}
                   </SpaceBetween>
                   {confidenceInfo.hasConfidenceInfo && (
-                    <Box fontSize="body-s" padding={{ top: 'xxxs' }} color={confidenceColor} style={confidenceStyle}>
+                    <ExtBox fontSize="body-s" padding={{ top: 'xxxs' }} color={confidenceColor} style={confidenceStyle}>
                       {confidenceInfo.displayMode === 'with-threshold'
                         ? `Confidence: ${(confidenceInfo.confidence * 100).toFixed(1)}% / Threshold: ${(
                             confidenceInfo.confidenceThreshold * 100
                           ).toFixed(1)}%`
                         : `Confidence: ${(confidenceInfo.confidence * 100).toFixed(1)}%`}
-                    </Box>
+                    </ExtBox>
                   )}
                   {showComparison && evalScore !== undefined && (
-                    <Box fontSize="body-s" padding={{ top: 'xxxs' }} color={hasMismatch ? 'text-status-warning' : 'text-status-success'}>
+                    <ExtBox fontSize="body-s" padding={{ top: 'xxxs' }} color={hasMismatch ? 'text-status-warning' : 'text-status-success'}>
                       {`Eval Score: ${(evalScore * 100).toFixed(1)}%`}
                       {evalReason && ` - ${evalReason}`}
-                    </Box>
+                    </ExtBox>
                   )}
-                </Box>
+                </ExtBox>
               }
             >
               <SpaceBetween size="xxs">
-                <Box onClick={handleClick} style={{ cursor: 'pointer' }}>
+                <ExtBox onClick={handleClick} style={{ cursor: 'pointer' }}>
                   <SpaceBetween direction="horizontal" size="xxs" alignItems="center">
-                    <Box fontSize="body-s" color="text-body-secondary">Predicted:</Box>
+                    <ExtBox fontSize="body-s" color="text-body-secondary">Predicted:</ExtBox>
                     {isPredictionChanged && (
-                      <Box fontSize="body-s" color="text-status-info" fontWeight="bold">✏️</Box>
+                      <ExtBox fontSize="body-s" color="text-status-info" fontWeight="bold">✏️</ExtBox>
                     )}
                   </SpaceBetween>
                   <div style={{ 
@@ -1437,13 +1469,13 @@ const FormFieldRenderer = memo(
                       />
                     )}
                   </div>
-                </Box>
+                </ExtBox>
                 {showComparison && (
-                  <Box onClick={handleClick} style={{ cursor: 'pointer' }}>
+                  <ExtBox onClick={handleClick} style={{ cursor: 'pointer' }}>
                     <SpaceBetween direction="horizontal" size="xxs" alignItems="center">
-                      <Box fontSize="body-s" color="text-body-secondary">Expected (baseline):</Box>
+                      <ExtBox fontSize="body-s" color="text-body-secondary">Expected (baseline):</ExtBox>
                       {isBaselineChanged && (
-                        <Box fontSize="body-s" color="text-status-warning" fontWeight="bold">✏️</Box>
+                        <ExtBox fontSize="body-s" color="text-status-warning" fontWeight="bold">✏️</ExtBox>
                       )}
                     </SpaceBetween>
                     <div style={{ 
@@ -1499,7 +1531,7 @@ const FormFieldRenderer = memo(
                         />
                       )}
                     </div>
-                  </Box>
+                  </ExtBox>
                 )}
               </SpaceBetween>
             </FormField>
@@ -1533,11 +1565,11 @@ const FormFieldRenderer = memo(
         }
 
         return (
-          <Box padding="xs" style={{
+          <ExtBox padding="xs" style={{
             backgroundColor: arrayEvalResult && !arrayEvalResult.matched ? 'rgba(255, 153, 0, 0.08)' : 'transparent',
             borderRadius: '4px',
           }}>
-            <Box fontSize="body-m" fontWeight="bold" padding="xxxs" onFocus={handleFocus}>
+            <ExtBox fontSize="body-m" fontWeight="bold" padding="xxxs" onFocus={handleFocus}>
               <SpaceBetween direction="horizontal" size="xs">
                 {onToggleCollapse && (
                   <span 
@@ -1552,26 +1584,26 @@ const FormFieldRenderer = memo(
                 )}
                 <span>{label} ({value.length} items)</span>
                 {arrayEvalResult && !arrayEvalResult.matched && (
-                  <Box color="text-status-warning" fontSize="body-s">⚠</Box>
+                  <ExtBox color="text-status-warning" fontSize="body-s">⚠</ExtBox>
                 )}
                 {arrayEvalResult && arrayEvalResult.matched && showComparison && (
-                  <Box color="text-status-success" fontSize="body-s">✓</Box>
+                  <ExtBox color="text-status-success" fontSize="body-s">✓</ExtBox>
                 )}
               </SpaceBetween>
               {showComparison && arrayEvalResult && (
-                <Box fontSize="body-s" color={arrayEvalResult.matched ? 'text-status-success' : 'text-status-warning'}>
+                <ExtBox fontSize="body-s" color={arrayEvalResult.matched ? 'text-status-success' : 'text-status-warning'}>
                   {`List Score: ${(arrayEvalResult.score * 100).toFixed(1)}%`}
                   {arrayEvalResult.reason && ` - ${arrayEvalResult.reason}`}
                   {arrayEvalResult.evaluationMethod && (
-                    <Box fontSize="body-s" color="text-body-secondary">
+                    <ExtBox fontSize="body-s" color="text-body-secondary">
                       Method: {arrayEvalResult.evaluationMethod}
-                    </Box>
+                    </ExtBox>
                   )}
-                </Box>
+                </ExtBox>
               )}
-            </Box>
+            </ExtBox>
             {!isCollapsed && (
-              <Box padding={{ left: 'l' }}>
+              <ExtBox padding={{ left: 'l' }}>
                 <SpaceBetween size="xs">
                   {value.map((item, index) => {
                   // Create a stable unique key for each array item
@@ -1664,9 +1696,9 @@ const FormFieldRenderer = memo(
                   );
                 })}
                 </SpaceBetween>
-              </Box>
+              </ExtBox>
             )}
-          </Box>
+          </ExtBox>
         );
       }
 
@@ -1687,18 +1719,18 @@ const FormFieldRenderer = memo(
           >
             <FormField
               label={
-                <Box>
+                <ExtBox>
                   {fieldKey}:
                   {confidenceInfo.hasConfidenceInfo && (
-                    <Box fontSize="body-s" padding={{ top: 'xxxs' }} color={confidenceColor} style={confidenceStyle}>
+                    <ExtBox fontSize="body-s" padding={{ top: 'xxxs' }} color={confidenceColor} style={confidenceStyle}>
                       {confidenceInfo.displayMode === 'with-threshold'
                         ? `Confidence: ${(confidenceInfo.confidence * 100).toFixed(1)}% / Threshold: ${(
                             confidenceInfo.confidenceThreshold * 100
                           ).toFixed(1)}%`
                         : `Confidence: ${(confidenceInfo.confidence * 100).toFixed(1)}%`}
-                    </Box>
+                    </ExtBox>
                   )}
-                </Box>
+                </ExtBox>
               }
             >
               {isReadOnly ? (
@@ -1858,8 +1890,8 @@ const VisualEditorModal = ({
       logger.debug('constructBaselineUri: No output URI provided');
       return null;
     }
-    const outputBucketName = settings?.OutputBucket;
-    const baselineBucketName = settings?.EvaluationBaselineBucket;
+    const outputBucketName = (settings as Record<string, unknown>)?.OutputBucket as string | undefined;
+    const baselineBucketName = (settings as Record<string, unknown>)?.EvaluationBaselineBucket as string | undefined;
     
     logger.debug('constructBaselineUri:', { outputUri, outputBucketName, baselineBucketName });
     
@@ -1904,7 +1936,9 @@ const VisualEditorModal = ({
       const outputUri = sectionData?.OutputJSONUri;
       // inputKey can be objectKey or inputKey depending on context
       const inputKey = sectionData?.documentItem?.objectKey || sectionData?.documentItem?.inputKey || sectionData?.documentItem?.InputKey;
-      const outputBucket = sectionData?.documentItem?.outputBucket || sectionData?.documentItem?.OutputBucket || settings?.OutputBucket;
+      const outputBucket = sectionData?.documentItem?.outputBucket
+        || sectionData?.documentItem?.OutputBucket
+        || (settings as Record<string, unknown>)?.OutputBucket;
       
       setLoadingEvaluation(true);
       try {
@@ -1913,10 +1947,10 @@ const VisualEditorModal = ({
         if (baselineUri && !baselineData) {
           try {
             const baselineResponse = await client.graphql({
-              query: getFileContents,
+              query: getFileContents as unknown as string,
               variables: { s3Uri: baselineUri },
             });
-            const baselineResult = baselineResponse.data.getFileContents;
+            const baselineResult = (baselineResponse as FileContentsResponse).data.getFileContents;
             if (!baselineResult.isBinary && baselineResult.content) {
               const parsed = JSON.parse(baselineResult.content);
               setBaselineData(parsed);
@@ -1932,17 +1966,17 @@ const VisualEditorModal = ({
         if (evalResultsUri && !evaluationResults) {
           try {
             const evalResponse = await client.graphql({
-              query: getFileContents,
+              query: getFileContents as unknown as string,
               variables: { s3Uri: evalResultsUri },
             });
-            const evalResult = evalResponse.data.getFileContents;
+            const evalResult = (evalResponse as { data: { getFileContents: { isBinary: boolean; content: string } } }).data.getFileContents;
             if (!evalResult.isBinary && evalResult.content) {
               const parsed = JSON.parse(evalResult.content);
               setEvaluationResults(parsed);
               logger.info('Evaluation results loaded successfully:', parsed);
             }
           } catch (error) {
-            logger.warn('Failed to load evaluation results:', error.message);
+            logger.warn('Failed to load evaluation results:', (error as Error).message);
           }
         }
       } finally {
@@ -2067,7 +2101,7 @@ const VisualEditorModal = ({
       const results = { predictions: null, baseline: null };
       
       // Build combined edit entry for both files
-      const username = user?.username || 'unknown';
+      const username = (user as Record<string, unknown>)?.username as string || 'unknown';
       const timestamp = new Date().toISOString();
       
       // Build prediction diffs
@@ -2122,7 +2156,7 @@ const VisualEditorModal = ({
         const predictionFilename = outputFileKey.split('/').pop();
         
         const predictionUploadResponse = await client.graphql({
-          query: uploadDocument,
+          query: uploadDocument as unknown as string,
           variables: {
             fileName: predictionFilename,
             prefix: predictionPrefix,
@@ -2131,8 +2165,9 @@ const VisualEditorModal = ({
           },
         });
         
-        const predictionPresignedUrl = predictionUploadResponse.data.uploadDocument.presignedUrl;
-        const predictionUsePost = predictionUploadResponse.data.uploadDocument.usePostMethod;
+        const predUploadData = (predictionUploadResponse as UploadDocResponse).data.uploadDocument;
+        const predictionPresignedUrl = predUploadData.presignedUrl;
+        const predictionUsePost = predUploadData.usePostMethod;
         
         // Upload the JSON data
         const predictionContent = JSON.stringify(dataToSave, null, 2);
@@ -2144,12 +2179,12 @@ const VisualEditorModal = ({
           
           // Add all required fields from presigned POST data
           Object.entries(presignedPostData.fields).forEach(([key, fieldValue]) => {
-            formData.append(key, fieldValue);
+            formData.append(key, fieldValue as string);
           });
           
           // Append the file content as last field (required for S3 presigned POST)
           const blob = new Blob([predictionContent], { type: 'application/json' });
-          formData.append('file', blob, predictionFilename);
+          formData.append('file', blob, predictionFilename as string);
           
           logger.info('📤 Uploading predictions via presigned POST to:', presignedPostData.url);
           const uploadResponse = await fetch(presignedPostData.url, { 
@@ -2186,7 +2221,7 @@ const VisualEditorModal = ({
         
         // Get presigned URL for baseline (EvaluationBaselineBucket)
         // Baseline uses the same path as predictions, just in a different bucket
-        const baselineBucket = settings?.EvaluationBaselineBucket;
+        const baselineBucket = (settings as Record<string, unknown>)?.EvaluationBaselineBucket as string | undefined;
         if (!baselineBucket) {
           throw new Error('EvaluationBaselineBucket not configured in settings');
         }
@@ -2199,7 +2234,7 @@ const VisualEditorModal = ({
         const baselineFilename = outputFileKey.split('/').pop();
         
         const baselineUploadResponse = await client.graphql({
-          query: uploadDocument,
+          query: uploadDocument as unknown as string,
           variables: {
             fileName: baselineFilename,
             prefix: baselinePrefix,
@@ -2208,8 +2243,9 @@ const VisualEditorModal = ({
           },
         });
         
-        const baselinePresignedUrl = baselineUploadResponse.data.uploadDocument.presignedUrl;
-        const baselineUsePost = baselineUploadResponse.data.uploadDocument.usePostMethod;
+        const baseUploadData = (baselineUploadResponse as UploadDocResponse).data.uploadDocument;
+        const baselinePresignedUrl = baseUploadData.presignedUrl;
+        const baselineUsePost = baseUploadData.usePostMethod;
         
         // Upload the JSON data
         const baselineContent = JSON.stringify(baselineToSave, null, 2);
@@ -2221,12 +2257,12 @@ const VisualEditorModal = ({
           
           // Add all required fields from presigned POST data
           Object.entries(presignedPostData.fields).forEach(([key, fieldValue]) => {
-            formData.append(key, fieldValue);
+            formData.append(key, fieldValue as string);
           });
           
           // Append the file content as last field (required for S3 presigned POST)
           const blob = new Blob([baselineContent], { type: 'application/json' });
-          formData.append('file', blob, baselineFilename);
+          formData.append('file', blob, baselineFilename as string);
           
           logger.info('📤 Uploading baseline via presigned POST to:', presignedPostData.url);
           const uploadResponse = await fetch(presignedPostData.url, { 
@@ -2358,7 +2394,7 @@ const VisualEditorModal = ({
             if (page?.ImageUri) {
               try {
                 logger.debug(`VisualEditorModal - generating presigned URL for page ${pageId}`);
-                const url = await generateS3PresignedUrl(page.ImageUri, currentCredentials);
+                const url = await generateS3PresignedUrl(page.ImageUri as string, currentCredentials as Record<string, unknown>);
                 images[pageId] = url;
               } catch (err) {
                 logger.error(`Error generating presigned URL for page ${pageId}:`, err);
@@ -2629,7 +2665,7 @@ const VisualEditorModal = ({
                   'Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMjAwIiBoZWlnaHQ9IjIwMCIgZmlsbD0iI2Yw' +
                   'ZjBmMCIvPjx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBmb250LWZhbWlseT0iQXJpYWwiIGZvbnQtc2l6ZT0iMjAi' +
                   'IHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiM5OTkiPkltYWdlIGxvYWQgZXJyb3I8L3RleHQ+PC9zdmc+';
-                e.target.src = fallbackImage;
+                (e.target as HTMLImageElement).src = fallbackImage;
               }}
             />
             {activeFieldGeometry && (
@@ -2644,10 +2680,10 @@ const VisualEditorModal = ({
             )}
           </>
         ) : (
-          <Box padding="xl" textAlign="center">
+          <ExtBox padding="xl" textAlign="center">
             <Spinner />
             <div>Loading image...</div>
-          </Box>
+          </ExtBox>
         )}
       </div>
     ),
@@ -2688,23 +2724,23 @@ const VisualEditorModal = ({
         header="Visual Document Editor"
         size="max"
       footer={
-        <Box>
+        <ExtBox>
           <SpaceBetween direction="horizontal" size="xs" alignItems="center">
             {/* Left side - Section info */}
-            <Box>
+            <ExtBox>
               <SpaceBetween direction="horizontal" size="m">
-                <Box>
+                <ExtBox>
                   <strong>Section:</strong> {sectionData?.Id || sectionData?.SectionId || 'N/A'}
-                </Box>
-                <Box>
+                </ExtBox>
+                <ExtBox>
                   <strong>Type:</strong> {localJsonData?.document_class?.type || 'N/A'}
-                </Box>
+                </ExtBox>
               </SpaceBetween>
-            </Box>
+            </ExtBox>
             
             {/* Change indicator */}
             {!isReadOnly && hasUnsavedChanges && (
-              <Box color="text-status-warning">
+              <ExtBox color="text-status-warning">
                 <SpaceBetween direction="horizontal" size="xs">
                   <span>📝</span>
                   <span>
@@ -2713,11 +2749,11 @@ const VisualEditorModal = ({
                     {baselineChangeCount > 0 && `${baselineChangeCount} baseline`}
                   </span>
                 </SpaceBetween>
-              </Box>
+              </ExtBox>
             )}
             
             {/* Spacer */}
-            <Box style={{ flex: 1 }} />
+            <ExtBox style={{ flex: 1 }} />
             
             {/* Right side - buttons */}
             <SpaceBetween direction="horizontal" size="xs">
@@ -2802,7 +2838,7 @@ const VisualEditorModal = ({
               </Button>
             </SpaceBetween>
           </SpaceBetween>
-        </Box>
+        </ExtBox>
       }
     >
       <Tabs
@@ -2843,22 +2879,22 @@ const VisualEditorModal = ({
             {(() => {
               if (loadingImages) {
                 return (
-                  <Box padding="xl" textAlign="center">
+                  <ExtBox padding="xl" textAlign="center">
                     <Spinner />
                     <div>Loading page images...</div>
-                  </Box>
+                  </ExtBox>
                 );
               }
               if (carouselItems.length > 0) {
                 return (
                   <SpaceBetween size="xs">
                     {/* Image display area */}
-                    <Box style={{ position: 'relative', overflow: 'hidden', height: '450px', minHeight: '300px' }}>
+                    <ExtBox style={{ position: 'relative', overflow: 'hidden', height: '450px', minHeight: '300px' }}>
                       {/* Display current page */}
                       {carouselItems.find((item) => item.id === currentPage)?.content}
 
                       {/* Simple navigation arrows */}
-                      <Box
+                      <ExtBox
                         style={{
                           display: 'flex',
                           justifyContent: 'space-between',
@@ -2893,11 +2929,11 @@ const VisualEditorModal = ({
                           }}
                           disabled={pageIds.indexOf(currentPage) === pageIds.length - 1}
                         />
-                      </Box>
-                    </Box>
+                      </ExtBox>
+                    </ExtBox>
                     
                     {/* Controls area - outside of image area in normal flow */}
-                    <Box
+                    <ExtBox
                       style={{
                         display: 'flex',
                         flexDirection: 'column',
@@ -2907,7 +2943,7 @@ const VisualEditorModal = ({
                       }}
                     >
                       {/* Page indicator */}
-                      <Box
+                      <ExtBox
                         style={{
                           backgroundColor: 'rgba(240, 240, 240, 0.9)',
                           padding: '4px 12px',
@@ -2915,10 +2951,10 @@ const VisualEditorModal = ({
                         }}
                       >
                         Page {pageIds.indexOf(currentPage) + 1} of {pageIds.length}
-                      </Box>
+                      </ExtBox>
 
                       {/* Zoom and Pan Controls */}
-                      <Box
+                      <ExtBox
                         style={{
                           backgroundColor: 'rgba(240, 240, 240, 0.9)',
                           padding: '6px 12px',
@@ -3049,15 +3085,15 @@ const VisualEditorModal = ({
                         >
                           ⟲
                         </span>
-                      </Box>
-                    </Box>
+                      </ExtBox>
+                    </ExtBox>
                   </SpaceBetween>
                 );
               }
               return (
-                <Box padding="xl" textAlign="center">
+                <ExtBox padding="xl" textAlign="center">
                   No page images available
-                </Box>
+                </ExtBox>
               );
             })()}
             </div>
@@ -3103,7 +3139,7 @@ const VisualEditorModal = ({
                     {/* Evaluation toggle */}
                     {(isBaselineAvailable || loadingEvaluation) && (
                       <>
-                        {loadingEvaluation && <Spinner size="small" />}
+                        {loadingEvaluation && <Spinner size="normal" />}
                         <Toggle
                           checked={showEvaluation}
                           onChange={({ detail }) => {
@@ -3137,7 +3173,7 @@ const VisualEditorModal = ({
                 minHeight: '350px',
               }}
             >
-              <Box style={{ minHeight: 'fit-content' }}>
+              <ExtBox style={{ minHeight: 'fit-content' }}>
                 {showEvaluation && baselineData && (
                   <Alert type="info" header="Evaluation Comparison Mode">
                     Showing predicted values with evaluation baseline. Fields with
@@ -3318,11 +3354,11 @@ const VisualEditorModal = ({
                     baselineChanges={baselineChanges}
                   />
                 ) : (
-                  <Box padding="xl" textAlign="center">
+                  <ExtBox padding="xl" textAlign="center">
                     No data available
-                  </Box>
+                  </ExtBox>
                 )}
-              </Box>
+              </ExtBox>
             </div>
           </Container>
         </div>

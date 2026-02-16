@@ -1,8 +1,8 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: MIT-0
 
-/* eslint-disable react/prop-types */
 import React, { useState, useMemo } from 'react';
+import type { MultiselectProps } from '@cloudscape-design/components';
 import {
   Box,
   SpaceBetween,
@@ -18,6 +18,18 @@ import {
   Multiselect,
 } from '@cloudscape-design/components';
 import { ConsoleLogger } from 'aws-amplify/utils';
+
+interface JSONEditorTabProps {
+  predictionData: Record<string, unknown> | null;
+  baselineData: Record<string, unknown> | null;
+  isReadOnly: boolean;
+  onPredictionChange?: (data: Record<string, unknown>) => void;
+  onBaselineChange?: (data: Record<string, unknown>) => void;
+  showBaseline: boolean;
+  onShowBaselineChange?: (checked: boolean) => void;
+  isBaselineAvailable: boolean;
+  loadingEvaluation: boolean;
+}
 
 const logger = new ConsoleLogger('JSONEditorTab');
 
@@ -44,18 +56,20 @@ const JSONEditorTab = ({
   onShowBaselineChange,
   isBaselineAvailable,
   loadingEvaluation,
-}) => {
-  const [predictionError, setPredictionError] = useState(null);
-  const [baselineError, setBaselineError] = useState(null);
-  const [copySuccess, setCopySuccess] = useState(null);
+}: JSONEditorTabProps): React.JSX.Element => {
+  const [predictionError, setPredictionError] = useState<string | null>(null);
+  const [baselineError, setBaselineError] = useState<string | null>(null);
+  const [copySuccess, setCopySuccess] = useState<string | null>(null);
 
   // Section selection state - default to inference_result only
-  const [selectedSections, setSelectedSections] = useState([{ label: 'inference_result', value: 'inference_result' }]);
+  const [selectedSections, setSelectedSections] = useState<MultiselectProps.Option[]>([
+    { label: 'inference_result', value: 'inference_result' },
+  ]);
 
   // Determine which sections are available in the data
-  const availableSections = useMemo(() => {
-    const available = [];
-    const data = predictionData || {};
+  const availableSections = useMemo((): MultiselectProps.Option[] => {
+    const available: MultiselectProps.Option[] = [];
+    const data = (predictionData || {}) as Record<string, unknown>;
 
     // Check for each possible section (handle both naming conventions)
     if (data.inference_result || data.inferenceResult) {
@@ -81,9 +95,9 @@ const JSONEditorTab = ({
   }, [predictionData]);
 
   // Format JSON for display based on selected sections
-  const formattedPrediction = useMemo(() => {
+  const formattedPrediction = useMemo((): string => {
     try {
-      const data = predictionData || {};
+      const data = (predictionData || {}) as Record<string, unknown>;
       const selectedValues = selectedSections.map((s) => s.value);
 
       // If only one section selected, show just that section's content
@@ -101,16 +115,16 @@ const JSONEditorTab = ({
       }
 
       // Multiple sections selected - build combined object
-      const combinedData = {};
+      const combinedData: Record<string, unknown> = {};
       selectedValues.forEach((section) => {
         const sectionData =
-          data[section] ||
+          data[section as string] ||
           (section === 'inference_result' ? data.inferenceResult : null) ||
           (section === 'document_class' ? data.documentClass : null) ||
           (section === 'split_document' ? data.splitDocument : null) ||
           (section === 'explainability_info' ? data.explainabilityInfo : null);
         if (sectionData !== undefined) {
-          combinedData[section] = sectionData;
+          combinedData[section as string] = sectionData;
         }
       });
 
@@ -120,10 +134,10 @@ const JSONEditorTab = ({
     }
   }, [predictionData, selectedSections]);
 
-  const formattedBaseline = useMemo(() => {
+  const formattedBaseline = useMemo((): string => {
     if (!baselineData) return '';
     try {
-      const data = baselineData || {};
+      const data = (baselineData || {}) as Record<string, unknown>;
       const selectedValues = selectedSections.map((s) => s.value);
 
       // If only one section selected, show just that section's content
@@ -139,16 +153,16 @@ const JSONEditorTab = ({
       }
 
       // Multiple sections - build combined object
-      const combinedData = {};
+      const combinedData: Record<string, unknown> = {};
       selectedValues.forEach((section) => {
         const sectionData =
-          data[section] ||
+          data[section as string] ||
           (section === 'inference_result' ? data.inferenceResult : null) ||
           (section === 'document_class' ? data.documentClass : null) ||
           (section === 'split_document' ? data.splitDocument : null) ||
           (section === 'explainability_info' ? data.explainabilityInfo : null);
         if (sectionData !== undefined) {
-          combinedData[section] = sectionData;
+          combinedData[section as string] = sectionData;
         }
       });
 
@@ -172,7 +186,7 @@ const JSONEditorTab = ({
   }, [formattedBaseline]);
 
   // Handle prediction JSON change
-  const handlePredictionChange = (value) => {
+  const handlePredictionChange = (value: string) => {
     setLocalPrediction(value);
     setPredictionError(null);
 
@@ -182,12 +196,12 @@ const JSONEditorTab = ({
         onPredictionChange(parsed);
       }
     } catch (e) {
-      setPredictionError(`Invalid JSON: ${e.message}`);
+      setPredictionError(`Invalid JSON: ${(e as Error).message}`);
     }
   };
 
   // Handle baseline JSON change
-  const handleBaselineChange = (value) => {
+  const handleBaselineChange = (value: string) => {
     setLocalBaseline(value);
     setBaselineError(null);
 
@@ -197,12 +211,12 @@ const JSONEditorTab = ({
         onBaselineChange(parsed);
       }
     } catch (e) {
-      setBaselineError(`Invalid JSON: ${e.message}`);
+      setBaselineError(`Invalid JSON: ${(e as Error).message}`);
     }
   };
 
   // Copy to clipboard
-  const handleCopy = async (text, label) => {
+  const handleCopy = async (text: string, label: string) => {
     try {
       await navigator.clipboard.writeText(text);
       setCopySuccess(label);
@@ -213,7 +227,7 @@ const JSONEditorTab = ({
   };
 
   // Format JSON button
-  const handleFormat = (type) => {
+  const handleFormat = (type: 'prediction' | 'baseline') => {
     try {
       if (type === 'prediction') {
         const parsed = JSON.parse(localPrediction);
@@ -226,9 +240,9 @@ const JSONEditorTab = ({
       }
     } catch (e) {
       if (type === 'prediction') {
-        setPredictionError(`Cannot format: ${e.message}`);
+        setPredictionError(`Cannot format: ${(e as Error).message}`);
       } else {
-        setBaselineError(`Cannot format: ${e.message}`);
+        setBaselineError(`Cannot format: ${(e as Error).message}`);
       }
     }
   };
@@ -246,7 +260,7 @@ const JSONEditorTab = ({
             <Box>
               <strong>JSON {isReadOnly ? 'Viewer' : 'Editor'}</strong> - {isReadOnly ? 'View' : 'View and edit'} the raw JSON data.
             </Box>
-            <Box style={{ marginLeft: 'auto' }}>
+            <div style={{ marginLeft: 'auto' }}>
               <SpaceBetween direction="horizontal" size="m" alignItems="center">
                 {/* Section selector */}
                 <div style={{ minWidth: '280px' }}>
@@ -255,7 +269,7 @@ const JSONEditorTab = ({
                     onChange={({ detail }) => {
                       // Ensure at least one section is selected
                       if (detail.selectedOptions.length > 0) {
-                        setSelectedSections(detail.selectedOptions);
+                        setSelectedSections(detail.selectedOptions as import('@cloudscape-design/components').MultiselectProps.Option[]);
                       }
                     }}
                     options={availableSections}
@@ -265,7 +279,7 @@ const JSONEditorTab = ({
                   />
                 </div>
                 {/* Evaluation toggle */}
-                {loadingEvaluation && <Spinner size="small" />}
+                {loadingEvaluation && <Spinner size="normal" />}
                 {(isBaselineAvailable || loadingEvaluation) && (
                   <Toggle
                     checked={showBaseline}
@@ -280,7 +294,7 @@ const JSONEditorTab = ({
                   </Toggle>
                 )}
               </SpaceBetween>
-            </Box>
+            </div>
           </SpaceBetween>
         </Box>
 

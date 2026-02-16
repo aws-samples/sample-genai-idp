@@ -1,7 +1,6 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: MIT-0
 
-/* eslint-disable react/prop-types */
 import React, { useState, useMemo } from 'react';
 import {
   Box,
@@ -15,26 +14,60 @@ import {
   StatusIndicator,
 } from '@cloudscape-design/components';
 
+interface DiffChange {
+  originalValue: unknown;
+  newValue: unknown;
+}
+
+interface EditEntry {
+  timestamp: string;
+  editedBy?: string;
+  predictionEdits?: {
+    changeCount: number;
+    diffs?: Record<string, DiffChange>;
+  };
+  baselineEdits?: {
+    changeCount: number;
+    diffs?: Record<string, DiffChange>;
+  };
+}
+
+interface CombinedHistoryEntry extends EditEntry {
+  source: 'prediction' | 'baseline';
+  id: string;
+}
+
+interface DiffItem {
+  fieldPath: string;
+  originalValue: unknown;
+  newValue: unknown;
+}
+
+interface EditHistoryTabProps {
+  predictionData: Record<string, unknown> | null;
+  baselineData: Record<string, unknown> | null;
+}
+
 /**
  * EditHistoryTab - Shows timeline of all edits made to this document section
  * Parses _editHistory array from the saved JSON files
  */
-const EditHistoryTab = ({ predictionData, baselineData }) => {
-  const [expandedEntries, setExpandedEntries] = useState(new Set());
+const EditHistoryTab = ({ predictionData, baselineData }: EditHistoryTabProps): React.JSX.Element => {
+  const [expandedEntries, setExpandedEntries] = useState<Set<string>>(new Set());
 
   // Extract edit history from prediction data
-  const predictionHistory = useMemo(() => {
-    return predictionData?._editHistory || [];
+  const predictionHistory = useMemo((): EditEntry[] => {
+    return (predictionData?._editHistory as EditEntry[]) || [];
   }, [predictionData]);
 
   // Extract edit history from baseline data
-  const baselineHistory = useMemo(() => {
-    return baselineData?._editHistory || [];
+  const baselineHistory = useMemo((): EditEntry[] => {
+    return (baselineData?._editHistory as EditEntry[]) || [];
   }, [baselineData]);
 
   // Merge and sort all history entries by timestamp
-  const combinedHistory = useMemo(() => {
-    const allEntries = [];
+  const combinedHistory = useMemo((): CombinedHistoryEntry[] => {
+    const allEntries: CombinedHistoryEntry[] = [];
 
     // Add prediction history entries
     predictionHistory.forEach((entry, index) => {
@@ -63,7 +96,7 @@ const EditHistoryTab = ({ predictionData, baselineData }) => {
   }, [predictionHistory, baselineHistory]);
 
   // Toggle expanded state
-  const toggleExpanded = (id) => {
+  const toggleExpanded = (id: string) => {
     setExpandedEntries((prev) => {
       const newSet = new Set(prev);
       if (newSet.has(id)) {
@@ -76,7 +109,7 @@ const EditHistoryTab = ({ predictionData, baselineData }) => {
   };
 
   // Format timestamp for display
-  const formatTimestamp = (timestamp) => {
+  const formatTimestamp = (timestamp: string): string => {
     try {
       const date = new Date(timestamp);
       return date.toLocaleString('en-US', {
@@ -93,12 +126,12 @@ const EditHistoryTab = ({ predictionData, baselineData }) => {
   };
 
   // Render diff table for changes
-  const renderDiffTable = (diffs, type) => {
+  const renderDiffTable = (diffs: Record<string, DiffChange> | undefined, type: string): React.JSX.Element => {
     if (!diffs || Object.keys(diffs).length === 0) {
       return <Box color="text-body-secondary">No {type} changes</Box>;
     }
 
-    const items = Object.entries(diffs).map(([fieldPath, change]) => ({
+    const items: DiffItem[] = Object.entries(diffs).map(([fieldPath, change]) => ({
       fieldPath,
       originalValue: change.originalValue,
       newValue: change.newValue,

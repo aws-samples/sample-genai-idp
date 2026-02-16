@@ -1,7 +1,6 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: MIT-0
 
-/* eslint-disable react/prop-types */
 import React, { useState } from 'react';
 import { Box } from '@cloudscape-design/components';
 import { generateClient } from 'aws-amplify/api';
@@ -13,11 +12,15 @@ import generateS3PresignedUrl from '../common/generate-s3-presigned-url';
 import useAppContext from '../../contexts/app';
 import getFileContents from '../../graphql/queries/getFileContents';
 
+interface FileViewerProps {
+  objectKey: string;
+}
+
 const client = generateClient();
 const logger = new ConsoleLogger('FileViewer');
 
 // Helper function to create a safe data URL for HTML content
-const createSafeDataUrl = (content, contentType) => {
+const createSafeDataUrl = (content: string, contentType: string): string => {
   // For HTML content, sanitize with DOMPurify
   if (contentType.includes('html')) {
     const sanitizedContent = DOMPurify.sanitize(content, {
@@ -38,7 +41,7 @@ const createSafeDataUrl = (content, contentType) => {
 };
 
 // Helper function to detect file type from object key or content type
-const detectFileType = (objectKey, contentType) => {
+const detectFileType = (objectKey: string, contentType: string | null): string => {
   // First check content type if available
   if (contentType) {
     if (contentType.includes('pdf')) return 'pdf';
@@ -51,7 +54,7 @@ const detectFileType = (objectKey, contentType) => {
   }
   // Fallback to checking file extension
   if (objectKey) {
-    const extension = objectKey.split('.').pop().toLowerCase();
+    const extension = objectKey.split('.').pop()?.toLowerCase();
     if (extension === 'pdf') return 'pdf';
     if (['jpg', 'jpeg', 'png', 'gif', 'svg', 'webp'].includes(extension)) return 'image';
     if (extension === 'html' || extension === 'htm') return 'html';
@@ -63,28 +66,29 @@ const detectFileType = (objectKey, contentType) => {
   return 'unknown';
 };
 
-const FileViewer = ({ objectKey }) => {
-  const [presignedUrl, setPresignedUrl] = useState(null);
-  const [fileContent, setFileContent] = useState(null);
-  const [contentType, setContentType] = useState(null);
+const FileViewer = ({ objectKey }: FileViewerProps): React.JSX.Element => {
+  const [presignedUrl, setPresignedUrl] = useState<string | null>(null);
+  const [fileContent, setFileContent] = useState<string | null>(null);
+  const [contentType, setContentType] = useState<string | null>(null);
   const { settings } = useSettingsContext();
   const { currentCredentials } = useAppContext();
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState(null);
-  const [viewMethod, setViewMethod] = useState('presigned'); // 'presigned' or 'content'
+  const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [error, setError] = useState<string | null>(null);
+  const [viewMethod, setViewMethod] = useState<'presigned' | 'content'>('presigned');
   const [imageError, setImageError] = useState(false);
   const [imageErrorUrl, setImageErrorUrl] = useState('');
 
   // Fetch file contents via GraphQL API and process special file types
-  const fetchFileContents = async (s3Url) => {
+  const fetchFileContents = async (s3Url: string) => {
     try {
       logger.info('Fetching file contents via GraphQL for:', s3Url);
       const response = await client.graphql({
-        query: getFileContents,
+        query: getFileContents as unknown as string,
         variables: { s3Uri: s3Url },
       });
 
-      const result = response.data.getFileContents;
+      const result = (response as { data: { getFileContents: { contentType: string; isBinary: boolean; content: string } } }).data
+        .getFileContents;
       logger.info('Content type received:', result.contentType);
       logger.info('Binary content?', result.isBinary);
       logger.info('Content length:', result.content ? result.content.length : 'null');
@@ -137,12 +141,12 @@ const FileViewer = ({ objectKey }) => {
     setIsLoading(true);
     setError(null);
     try {
-      if (!settings.InputBucket) {
+      if (!(settings as Record<string, unknown>).InputBucket) {
         throw new Error('Input bucket not configured');
       }
 
       const region = import.meta.env.VITE_AWS_REGION;
-      const s3Url = `https://${settings.InputBucket}.s3.${region}.amazonaws.com/${objectKey}`;
+      const s3Url = `https://${(settings as Record<string, unknown>).InputBucket}.s3.${region}.amazonaws.com/${objectKey}`;
 
       // First fetch the content via GraphQL to determine content type
       const result = await fetchFileContents(s3Url);
@@ -160,7 +164,7 @@ const FileViewer = ({ objectKey }) => {
       // Generate presigned URL only if needed
       if (needsPresignedUrl) {
         logger.info('Generating presigned URL for:', s3Url);
-        const url = await generateS3PresignedUrl(s3Url, currentCredentials);
+        const url = await generateS3PresignedUrl(s3Url, currentCredentials as Record<string, unknown>);
         setPresignedUrl(url);
       } else {
         logger.info('Using content-based viewing, no presigned URL needed');
