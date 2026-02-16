@@ -678,6 +678,7 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
   const downloadButton = (
     <ButtonDropdown
       variant="normal"
+      {...({ iconName: 'download' } as Record<string, unknown>)}
       items={[
         { id: 'csv', text: 'CSV' },
         { id: 'json', text: 'JSON' },
@@ -689,9 +690,7 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
           downloadToJson();
         }
       }}
-    >
-      Download
-    </ButtonDropdown>
+    ></ButtonDropdown>
   );
 
   return (

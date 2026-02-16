@@ -109,7 +109,7 @@ const AgentResultDisplay = ({ result = null, query = '' }: AgentResultDisplayPro
             <Header variant="h3">Raw Response</Header>
             <Alert type="warning">Unknown response type: {(responseType as string) || 'undefined'}</Alert>
             <Box padding="s">
-              <Header variant="h3">Debug Information:</Header>
+              <Header {...({ variant: 'h4' } as Record<string, unknown>)}>Debug Information:</Header>
               <pre style={{ fontSize: '12px', maxHeight: '300px', overflow: 'auto' }}>{JSON.stringify(parsedResult, null, 2)}</pre>
             </Box>
           </Box>

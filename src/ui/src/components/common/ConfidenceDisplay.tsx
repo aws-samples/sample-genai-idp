@@ -81,19 +81,22 @@ const ConfidenceDisplay = ({
     case 'detailed':
     default:
       return (
-        <div
-          style={{
-            color: colors.textColor,
-            backgroundColor: colors.backgroundColor,
-            padding: '4px 8px',
-            borderRadius: '4px',
-            display: 'inline-block',
-            marginTop: '2px',
-            fontSize: '0.875rem',
-          }}
+        <Box
+          fontSize="body-s"
+          padding={{ top: 'xxxs' }}
+          {...({
+            style: {
+              color: colors.textColor,
+              backgroundColor: colors.backgroundColor,
+              padding: '4px 8px',
+              borderRadius: '4px',
+              display: 'inline-block',
+              marginTop: '2px',
+            },
+          } as Record<string, unknown>)}
         >
           Confidence: {confidencePercent}%{thresholdText}
-        </div>
+        </Box>
       );
   }
 };

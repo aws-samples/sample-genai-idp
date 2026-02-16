@@ -207,7 +207,7 @@ const SchemaInspector = ({
                 />
               </FormField>
 
-              <Header variant="h3">Evaluation Configuration</Header>
+              <Header {...({ variant: 'h5' } as Record<string, unknown>)}>Evaluation Configuration</Header>
 
               <FormField
                 label="Overall Match Threshold"
@@ -215,7 +215,7 @@ const SchemaInspector = ({
               >
                 <Input
                   type="number"
-                  inputMode="decimal"
+                  {...({ step: '0.01', min: '0', max: '1' } as Record<string, unknown>)}
                   value={(selectedClass[X_AWS_IDP_EVALUATION_MATCH_THRESHOLD] as number)?.toString() || '0.8'}
                   onChange={({ detail }) => {
                     const value = detail.value ? parseFloat(detail.value) : 0.8;
@@ -486,7 +486,7 @@ const SchemaInspector = ({
 
         {!isRuleSchema && (
           <>
-            <Header variant="h3">Assessment Configuration</Header>
+            <Header {...({ variant: 'h4' } as Record<string, unknown>)}>Assessment Configuration</Header>
 
             <FormField
               label="Confidence Threshold"
@@ -494,7 +494,7 @@ const SchemaInspector = ({
             >
               <Input
                 type="number"
-                inputMode="decimal"
+                {...({ step: '0.01', min: '0', max: '1' } as Record<string, unknown>)}
                 value={(selectedAttribute[X_AWS_IDP_CONFIDENCE_THRESHOLD] as number)?.toString() || ''}
                 onChange={({ detail }) =>
                   onUpdate({
@@ -505,7 +505,7 @@ const SchemaInspector = ({
               />
             </FormField>
 
-            <Header variant="h3">Evaluation Configuration (Baseline Accuracy)</Header>
+            <Header {...({ variant: 'h4' } as Record<string, unknown>)}>Evaluation Configuration (Baseline Accuracy)</Header>
           </>
         )}
 
@@ -588,7 +588,7 @@ const SchemaInspector = ({
                   >
                     <Input
                       type="number"
-                      inputMode="decimal"
+                      {...({ step: '0.01', min: '0', max: '1' } as Record<string, unknown>)}
                       value={(selectedAttribute[X_AWS_IDP_EVALUATION_MATCH_THRESHOLD] as number)?.toString() || ''}
                       onChange={({ detail }) =>
                         onUpdate({
@@ -605,7 +605,7 @@ const SchemaInspector = ({
                   <FormField label="Evaluation Threshold" description="Minimum similarity score to consider a baseline match (0-1)">
                     <Input
                       type="number"
-                      inputMode="decimal"
+                      {...({ step: '0.01', min: '0', max: '1' } as Record<string, unknown>)}
                       value={(selectedAttribute[X_AWS_IDP_EVALUATION_THRESHOLD] as number)?.toString() || ''}
                       onChange={({ detail }) =>
                         onUpdate({

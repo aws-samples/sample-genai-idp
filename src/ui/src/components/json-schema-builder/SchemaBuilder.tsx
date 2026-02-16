@@ -372,7 +372,7 @@ const SchemaBuilder = ({
                   )}
 
                   <Box>
-                    {!isRuleSchema && <Header variant="h3">{TypesLabel} Types</Header>}
+                    {!isRuleSchema && <Header {...({ variant: 'h4' } as Record<string, unknown>)}>{TypesLabel} Types</Header>}
                     <SpaceBetween size="s">
                       {classes.filter((c) => c[X_AWS_IDP_DOCUMENT_TYPE]).length === 0 && (
                         <Box fontSize="body-s" color="text-body-secondary" padding="s">
@@ -449,7 +449,7 @@ const SchemaBuilder = ({
 
                   {!isRuleSchema && (
                     <Box>
-                      <Header variant="h3">{sharedLabel}</Header>
+                      <Header {...({ variant: 'h4' } as Record<string, unknown>)}>{sharedLabel}</Header>
                       <SpaceBetween size="s">
                         {classes.filter((c) => !c[X_AWS_IDP_DOCUMENT_TYPE]).length === 0 && (
                           <Box fontSize="body-s" color="text-body-secondary" padding="s">

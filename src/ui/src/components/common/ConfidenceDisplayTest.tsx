@@ -55,7 +55,11 @@ const ConfidenceDisplayTest = (): React.JSX.Element => {
       <h3>Confidence Display Test</h3>
       <SpaceBetween size="m">
         {testScenarios.map((scenario) => (
-          <div key={scenario.name} style={{ border: '1px solid #ccc', borderRadius: '4px', padding: '8px' }}>
+          <Box
+            key={scenario.name}
+            padding="s"
+            {...({ style: { border: '1px solid #ccc', borderRadius: '4px' } } as Record<string, unknown>)}
+          >
             <Box fontWeight="bold" margin={{ bottom: 'xs' }}>
               {scenario.name}
             </Box>
@@ -68,7 +72,7 @@ const ConfidenceDisplayTest = (): React.JSX.Element => {
             <Box margin={{ top: 'xs' }}>
               Badge: <ConfidenceDisplay confidenceInfo={scenario.confidenceInfo} variant="badge" showThreshold />
             </Box>
-          </div>
+          </Box>
         ))}
       </SpaceBetween>
     </Box>

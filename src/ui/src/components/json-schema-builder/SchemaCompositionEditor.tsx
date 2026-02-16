@@ -217,12 +217,16 @@ const SchemaCompositionEditor = ({
                 <>
                   {(((selectedAttribute as Record<string, unknown>)[currentComposition] as Array<Record<string, unknown>>) || []).map(
                     (schema, idx) => (
-                      <div
+                      <Box
                         key={(schema.schemaId as string | number) || `${currentComposition}-fallback-${idx}`}
-                        style={{ border: '1px solid #ddd', borderRadius: '4px', padding: '8px' }}
+                        padding="s"
+                        {...({ style: { border: '1px solid #ddd', borderRadius: '4px' } } as Record<string, unknown>)}
                       >
                         <SpaceBetween size="s">
-                          <Header variant="h3" actions={<Button variant="icon" iconName="close" onClick={() => handleRemoveSchema(idx)} />}>
+                          <Header
+                            {...({ variant: 'h4' } as Record<string, unknown>)}
+                            actions={<Button variant="icon" iconName="close" onClick={() => handleRemoveSchema(idx)} />}
+                          >
                             Schema {idx + 1}
                           </Header>
                           <FormField label="Type">
@@ -236,7 +240,7 @@ const SchemaCompositionEditor = ({
                             />
                           </FormField>
                         </SpaceBetween>
-                      </div>
+                      </Box>
                     ),
                   )}
                   <Button onClick={handleAddSchema} variant="normal">

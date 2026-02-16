@@ -20,7 +20,7 @@ interface CodeBlockProps {
 const CodeBlock = ({ language, content, label = null }: CodeBlockProps): React.JSX.Element => (
   <Box>
     {label && (
-      <Box margin={{ bottom: 's' }}>
+      <Box {...({ marginBottom: 's' } as Record<string, unknown>)}>
         <Box fontSize="body-s" color="text-status-info">
           {label}
         </Box>
@@ -71,66 +71,67 @@ const CloudWatchLogsDisplay = ({ data }: CloudWatchLogsDisplayProps): React.JSX.
 
   return (
     <Box>
-      <Box margin={{ bottom: 'l' }}>
-        <Box fontSize="heading-s" margin={{ bottom: 's' }}>
+      <Box {...({ marginBottom: 'l' } as Record<string, unknown>)}>
+        <Box fontSize="heading-s" {...({ marginBottom: 's' } as Record<string, unknown>)}>
           Search Summary
         </Box>
         <SpaceBetween direction="vertical" size="xs">
-          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+          <Box {...({ display: 'flex', justifyContent: 'space-between' } as Record<string, unknown>)}>
             <Box>Stack:</Box>
             <Box fontWeight="bold">{data.stack_name}</Box>
-          </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+          </Box>
+          <Box {...({ display: 'flex', justifyContent: 'space-between' } as Record<string, unknown>)}>
             <Box>Filter Pattern:</Box>
             <Box fontWeight="bold">{data.filter_pattern}</Box>
-          </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+          </Box>
+          <Box {...({ display: 'flex', justifyContent: 'space-between' } as Record<string, unknown>)}>
             <Box>Log Groups Searched:</Box>
             <Box fontWeight="bold">
               {data.log_groups_searched} / {data.total_log_groups_found}
             </Box>
-          </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+          </Box>
+          <Box {...({ display: 'flex', justifyContent: 'space-between' } as Record<string, unknown>)}>
             <Box>Total Events Found:</Box>
             <Box fontWeight="bold" color={data.total_events_found > 0 ? 'text-status-error' : 'text-status-success'}>
               {data.total_events_found}
             </Box>
-          </div>
+          </Box>
         </SpaceBetween>
       </Box>
 
       {/* Log Events */}
       {data.results && data.results.length > 0 && (
         <Box>
-          <Box fontSize="heading-s" margin={{ bottom: 's' }}>
+          <Box fontSize="heading-s" {...({ marginBottom: 's' } as Record<string, unknown>)}>
             Log Events
           </Box>
           <SpaceBetween direction="vertical" size="m">
             {data.results.map((logGroup) => (
               <Box key={logGroup.log_group}>
-                <Box fontSize="body-m" fontWeight="bold" margin={{ bottom: 's' }} color="text-status-info">
+                <Box fontSize="body-m" fontWeight="bold" {...({ marginBottom: 's' } as Record<string, unknown>)} color="text-status-info">
                   {logGroup.log_group} ({logGroup.events_found} events)
                 </Box>
                 <SpaceBetween direction="vertical" size="s">
                   {logGroup.events.map((event) => (
-                    <div
+                    <Box
                       key={`${event.timestamp}-${event.log_stream}`}
-                      style={{ padding: '8px', backgroundColor: 'var(--color-background-container-content)' }}
+                      padding="s"
+                      {...({ backgroundColor: 'background-container-content' } as Record<string, unknown>)}
                     >
                       <SpaceBetween direction="vertical" size="xs">
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <Box {...({ display: 'flex', justifyContent: 'space-between', alignItems: 'center' } as Record<string, unknown>)}>
                           <Box fontSize="body-s" color="text-status-info">
                             {formatTimestamp(event.timestamp)}
                           </Box>
                           <Box fontSize="body-s" color="text-status-info">
                             {event.log_stream.split('/').pop()}
                           </Box>
-                        </div>
-                        <div style={{ fontSize: '14px', fontFamily: 'monospace', whiteSpace: 'pre-wrap' }}>
+                        </Box>
+                        <Box fontSize="body-s" {...({ fontFamily: 'monospace', whiteSpace: 'pre-wrap' } as Record<string, unknown>)}>
                           {formatLogMessage(event.message)}
-                        </div>
+                        </Box>
                       </SpaceBetween>
-                    </div>
+                    </Box>
                   ))}
                 </SpaceBetween>
               </Box>
@@ -437,22 +438,22 @@ const AgentToolComponentBase = ({
   return (
     <div className="agent-tool-component" data-tool-use-id={toolUseId}>
       <SpaceBetween direction="horizontal" size="xs" alignItems="center">
-        <div style={{ fontSize: '10px' }}>
+        <Box {...({ fontSize: '10px' } as Record<string, unknown>)}>
           <strong>{formatToolName(toolName)}</strong>
-        </div>
+        </Box>
 
-        <div style={{ display: 'flex', alignItems: 'center' }}>
+        <Box {...({ display: 'flex', alignItems: 'center' } as Record<string, unknown>)}>
           {showSpinner && (
-            <div style={{ marginRight: '8px' }}>
+            <Box {...({ marginRight: 's' } as Record<string, unknown>)}>
               <Spinner />
-            </div>
+            </Box>
           )}
           {hasContent && (
             <button onClick={handleViewDetails} style={{ fontSize: '12px' }}>
               View Details
             </button>
           )}
-        </div>
+        </Box>
       </SpaceBetween>
 
       {/* Modal for displaying execution and result details */}
@@ -479,10 +480,10 @@ const AgentToolComponentBase = ({
               content: (
                 <Box padding={{ top: 's' }}>
                   {executionLoading ? (
-                    <div style={{ display: 'flex', alignItems: 'center' }}>
+                    <Box {...({ display: 'flex', alignItems: 'center' } as Record<string, unknown>)}>
                       <Spinner />
-                      <div style={{ marginLeft: '8px' }}>Executing tool...</div>
-                    </div>
+                      <Box {...({ marginLeft: 's' } as Record<string, unknown>)}>Executing tool...</Box>
+                    </Box>
                   ) : executionDetails ? (
                     formatContent(executionDetails, toolName)
                   ) : (
@@ -501,10 +502,10 @@ const AgentToolComponentBase = ({
                     content: (
                       <Box padding={{ top: 's' }}>
                         {resultLoading ? (
-                          <div style={{ display: 'flex', alignItems: 'center' }}>
+                          <Box {...({ display: 'flex', alignItems: 'center' } as Record<string, unknown>)}>
                             <Spinner />
-                            <div style={{ marginLeft: '8px' }}>Processing results...</div>
-                          </div>
+                            <Box {...({ marginLeft: 's' } as Record<string, unknown>)}>Processing results...</Box>
+                          </Box>
                         ) : resultDetails ? (
                           formatContent(resultDetails, toolName)
                         ) : (

@@ -119,7 +119,7 @@ const SchemaConditionalEditor = ({
     return (
       <Container>
         <SpaceBetween size="m">
-          <Header variant="h3">{label}</Header>
+          <Header {...({ variant: 'h4' } as Record<string, unknown>)}>{label}</Header>
           <Alert type="info">{description}</Alert>
 
           <FormField label="Schema Type">
