@@ -1548,7 +1548,7 @@ class ClassificationService:
         self, content: List[Dict[str, Any]], config: Dict[str, Any]
     ) -> Dict[str, Any]:
         """
-        Invoke Bedrock model with standard parameters.
+        Invoke Bedrock model (or LambdaHook) with standard parameters.
 
         Args:
             content: Content to send to the model
@@ -1566,6 +1566,7 @@ class ClassificationService:
             top_p=config["top_p"],
             max_tokens=config["max_tokens"],
             context="Classification",
+            model_lambda_hook_arn=self.config.classification.model_lambda_hook_arn,
         )
 
     def _create_unclassified_result(

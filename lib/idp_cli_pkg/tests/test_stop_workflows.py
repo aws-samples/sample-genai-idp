@@ -16,7 +16,7 @@ class TestWorkflowStopper:
     @pytest.fixture
     def mock_stack_info(self):
         """Mock StackInfo to return test resources"""
-        with patch("idp_cli.stop_workflows.StackInfo") as mock:
+        with patch("idp_sdk.core.stop_workflows.StackInfo") as mock:
             mock_instance = Mock()
             mock_instance.get_resources.return_value = {
                 "DocumentQueueUrl": "https://sqs.us-east-1.amazonaws.com/123456789/test-queue",
@@ -29,7 +29,7 @@ class TestWorkflowStopper:
     @pytest.fixture
     def mock_boto_clients(self):
         """Mock boto3 clients"""
-        with patch("idp_cli.stop_workflows.boto3.Session") as mock_session:
+        with patch("idp_sdk.core.stop_workflows.boto3.Session") as mock_session:
             mock_sqs = Mock()
             mock_sfn = Mock()
 
@@ -44,7 +44,7 @@ class TestWorkflowStopper:
 
     def test_init_loads_resources(self, mock_stack_info, mock_boto_clients):
         """Test that initialization loads stack resources"""
-        from idp_cli.stop_workflows import WorkflowStopper
+        from idp_sdk.core.stop_workflows import WorkflowStopper
 
         stopper = WorkflowStopper("test-stack", region="us-east-1")
 
@@ -61,7 +61,7 @@ class TestWorkflowStopper:
 
     def test_purge_queue_success(self, mock_stack_info, mock_boto_clients):
         """Test successful queue purge"""
-        from idp_cli.stop_workflows import WorkflowStopper
+        from idp_sdk.core.stop_workflows import WorkflowStopper
 
         stopper = WorkflowStopper("test-stack")
         result = stopper.purge_queue()
@@ -75,10 +75,10 @@ class TestWorkflowStopper:
 
     def test_purge_queue_no_url(self, mock_boto_clients):
         """Test purge queue when URL not found"""
-        with patch("idp_cli.stop_workflows.StackInfo") as mock_si:
+        with patch("idp_sdk.core.stop_workflows.StackInfo") as mock_si:
             mock_si.return_value.get_resources.return_value = {}
 
-            from idp_cli.stop_workflows import WorkflowStopper
+            from idp_sdk.core.stop_workflows import WorkflowStopper
 
             stopper = WorkflowStopper("test-stack")
             result = stopper.purge_queue()
@@ -89,7 +89,7 @@ class TestWorkflowStopper:
     def test_purge_queue_error(self, mock_stack_info, mock_boto_clients):
         """Test purge queue handles errors"""
         from botocore.exceptions import ClientError
-        from idp_cli.stop_workflows import WorkflowStopper
+        from idp_sdk.core.stop_workflows import WorkflowStopper
 
         mock_boto_clients["sqs"].purge_queue.side_effect = ClientError(
             {"Error": {"Code": "AWS.SimpleQueueService.PurgeQueueInProgress"}},
@@ -104,7 +104,7 @@ class TestWorkflowStopper:
 
     def test_count_running_executions(self, mock_stack_info, mock_boto_clients):
         """Test counting running executions"""
-        from idp_cli.stop_workflows import WorkflowStopper
+        from idp_sdk.core.stop_workflows import WorkflowStopper
 
         # Mock paginator
         mock_paginator = Mock()
@@ -121,7 +121,7 @@ class TestWorkflowStopper:
 
     def test_stop_executions_no_running(self, mock_stack_info, mock_boto_clients):
         """Test stop executions when none are running"""
-        from idp_cli.stop_workflows import WorkflowStopper
+        from idp_sdk.core.stop_workflows import WorkflowStopper
 
         # Mock paginator returning empty
         mock_paginator = Mock()
@@ -137,7 +137,7 @@ class TestWorkflowStopper:
 
     def test_stop_executions_stops_all(self, mock_stack_info, mock_boto_clients):
         """Test stopping all executions"""
-        from idp_cli.stop_workflows import WorkflowStopper
+        from idp_sdk.core.stop_workflows import WorkflowStopper
 
         # First call returns executions, second call returns empty
         call_count = [0]
@@ -170,14 +170,14 @@ class TestWorkflowStopper:
 
     def test_stop_all_calls_all_methods(self, mock_stack_info, mock_boto_clients):
         """Test stop_all calls all component methods"""
-        from idp_cli.stop_workflows import WorkflowStopper
+        from idp_sdk.core.stop_workflows import WorkflowStopper
 
         # Mock empty responses
         mock_paginator = Mock()
         mock_paginator.paginate.return_value = [{"executions": []}]
         mock_boto_clients["sfn"].get_paginator.return_value = mock_paginator
 
-        with patch("idp_cli.stop_workflows.DocumentDynamoDBService"):
+        with patch("idp_sdk.core.stop_workflows.DocumentDynamoDBService"):
             stopper = WorkflowStopper("test-stack")
 
             with patch.object(
@@ -199,7 +199,7 @@ class TestWorkflowStopper:
 
     def test_stop_all_skip_purge(self, mock_stack_info, mock_boto_clients):
         """Test stop_all with skip_purge flag"""
-        from idp_cli.stop_workflows import WorkflowStopper
+        from idp_sdk.core.stop_workflows import WorkflowStopper
 
         mock_paginator = Mock()
         mock_paginator.paginate.return_value = [{"executions": []}]
@@ -218,7 +218,7 @@ class TestWorkflowStopper:
 
     def test_stop_all_skip_stop(self, mock_stack_info, mock_boto_clients):
         """Test stop_all with skip_stop flag"""
-        from idp_cli.stop_workflows import WorkflowStopper
+        from idp_sdk.core.stop_workflows import WorkflowStopper
 
         stopper = WorkflowStopper("test-stack")
 
@@ -238,7 +238,7 @@ class TestAbortQueuedDocuments:
     @pytest.fixture
     def mock_stack_info(self):
         """Mock StackInfo"""
-        with patch("idp_cli.stop_workflows.StackInfo") as mock:
+        with patch("idp_sdk.core.stop_workflows.StackInfo") as mock:
             mock.return_value.get_resources.return_value = {
                 "DocumentQueueUrl": "https://sqs.example.com/queue",
                 "StateMachineArn": "arn:aws:states:us-east-1:123:stateMachine:sm",
@@ -249,16 +249,16 @@ class TestAbortQueuedDocuments:
     @pytest.fixture
     def mock_boto(self):
         """Mock boto3"""
-        with patch("idp_cli.stop_workflows.boto3.Session") as mock:
+        with patch("idp_sdk.core.stop_workflows.boto3.Session") as mock:
             mock.return_value.client.return_value = Mock()
             yield mock
 
     def test_abort_no_documents_table(self, mock_boto):
         """Test abort when no documents table configured"""
-        with patch("idp_cli.stop_workflows.StackInfo") as mock_si:
+        with patch("idp_sdk.core.stop_workflows.StackInfo") as mock_si:
             mock_si.return_value.get_resources.return_value = {}
 
-            from idp_cli.stop_workflows import WorkflowStopper
+            from idp_sdk.core.stop_workflows import WorkflowStopper
 
             stopper = WorkflowStopper("test-stack")
             result = stopper.abort_queued_documents()
@@ -268,9 +268,11 @@ class TestAbortQueuedDocuments:
 
     def test_abort_no_queued_documents(self, mock_stack_info, mock_boto):
         """Test abort when no queued documents exist"""
-        from idp_cli.stop_workflows import WorkflowStopper
+        from idp_sdk.core.stop_workflows import WorkflowStopper
 
-        with patch("idp_cli.stop_workflows.DocumentDynamoDBService") as mock_service:
+        with patch(
+            "idp_sdk.core.stop_workflows.DocumentDynamoDBService"
+        ) as mock_service:
             mock_service.return_value.client.scan.return_value = {"Items": []}
 
             stopper = WorkflowStopper("test-stack")
@@ -281,11 +283,11 @@ class TestAbortQueuedDocuments:
 
     def test_abort_updates_documents(self, mock_stack_info, mock_boto):
         """Test abort updates queued documents to ABORTED status"""
-        from idp_cli.stop_workflows import WorkflowStopper
         from idp_common.models import Status
+        from idp_sdk.core.stop_workflows import WorkflowStopper
 
         with patch(
-            "idp_cli.stop_workflows.DocumentDynamoDBService"
+            "idp_sdk.core.stop_workflows.DocumentDynamoDBService"
         ) as mock_service_class:
             mock_service = Mock()
             mock_service_class.return_value = mock_service
@@ -316,11 +318,11 @@ class TestAbortQueuedDocuments:
 
     def test_abort_handles_errors(self, mock_stack_info, mock_boto):
         """Test abort handles individual document errors gracefully"""
-        from idp_cli.stop_workflows import WorkflowStopper
         from idp_common.models import Status
+        from idp_sdk.core.stop_workflows import WorkflowStopper
 
         with patch(
-            "idp_cli.stop_workflows.DocumentDynamoDBService"
+            "idp_sdk.core.stop_workflows.DocumentDynamoDBService"
         ) as mock_service_class:
             mock_service = Mock()
             mock_service_class.return_value = mock_service

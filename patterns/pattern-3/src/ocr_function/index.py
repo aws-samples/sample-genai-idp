@@ -89,8 +89,9 @@ def handler(event, context):
     
     t0 = time.time()
     
-    # Load configuration and initialize the OCR service using new simplified pattern
-    config = get_config(as_model=True)
+    # Load configuration - use document's version if specified, otherwise use active version
+    config_version = getattr(document, 'config_version', None)
+    config = get_config(as_model=True, version=config_version)
     backend = config.ocr.backend
     
     logger.info(f"Initializing OCR with backend: {backend}")

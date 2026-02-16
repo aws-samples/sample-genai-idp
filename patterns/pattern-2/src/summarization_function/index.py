@@ -71,8 +71,16 @@ def handler(event, context):
         logger.info(f"Updating document status to {document.status}")
         document_service.update_document(document)
         
-        # Load configuration and create the summarization service
-        config = get_config(as_model=True)
+        # Load configuration - use document's version if specified, otherwise use active version
+        config_version = getattr(document, 'config_version', None)
+        config = get_config(as_model=True, version=config_version)
+        
+        if config_version:
+            logger.info(f"Using configuration version {config_version} for document {document.id}")
+        else:
+            logger.info(f"Using active configuration for document {document.id}")
+        
+        # Create the summarization service
         summarization_service = summarization.SummarizationService(
             config=config
         )        

@@ -9,6 +9,7 @@ const GET_TEST_RUNS = `
       createdAt
       completedAt
       context
+      configVersion
     }
   }
 `;

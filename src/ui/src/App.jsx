@@ -26,8 +26,8 @@ const AppContent = () => {
   const [navigationOpen, setNavigationOpen] = useState(true);
   const [activeTestRuns, setActiveTestRuns] = useState([]);
 
-  const addTestRun = (testRunId, testSetName, context, filesCount) => {
-    setActiveTestRuns((prev) => [...prev, { testRunId, testSetName, context, filesCount, startTime: new Date() }]);
+  const addTestRun = (testRunId, testSetName, context, filesCount, configVersion) => {
+    setActiveTestRuns((prev) => [...prev, { testRunId, testSetName, context, filesCount, configVersion, startTime: new Date() }]);
   };
 
   const removeTestRun = (testRunId) => {

@@ -21,6 +21,26 @@ import {
 } from '@cloudscape-design/components';
 import SchemaBuilder from '../json-schema-builder/SchemaBuilder';
 
+// Numeric-aware value comparison: treats "5" and "5.0" as equal, "0" and "0.0" as equal, etc.
+const areValuesEqual = (val1, val2) => {
+  // Fast path: strict equality
+  if (val1 === val2) return true;
+  // JSON.stringify equality for objects/arrays
+  const str1 = JSON.stringify(val1);
+  const str2 = JSON.stringify(val2);
+  if (str1 === str2) return true;
+  // Numeric comparison: if both can be parsed as numbers, compare numerically
+  const isNumeric = (v) => {
+    if (typeof v === 'number') return true;
+    if (typeof v === 'string' && v.trim() !== '') return !Number.isNaN(Number(v));
+    return false;
+  };
+  if (isNumeric(val1) && isNumeric(val2)) {
+    return Number(val1) === Number(val2);
+  }
+  return false;
+};
+
 // Add custom styles for compact form layout
 const customStyles = `
   .expandable-textarea {
@@ -57,6 +77,24 @@ const customStyles = `
   .restore-default-button {
     margin-left: 8px;
     font-size: 12px;
+  }
+
+  /* Unsaved change indicator dot */
+  .unsaved-change-dot {
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background-color: #0073bb;
+    margin-left: 6px;
+    vertical-align: middle;
+  }
+
+  /* Unsaved change field highlight */
+  .unsaved-field {
+    border-left: 3px solid #0073bb !important;
+    padding-left: 8px !important;
+    border-radius: 4px !important;
   }
   
   /* More compact list and nested list styling */
@@ -332,10 +370,12 @@ const ConfigBuilder = ({
   schema = { properties: {} },
   formValues = {},
   defaultConfig = null,
+  mergedConfig = null,
   isCustomized = null,
   onResetToDefault = null,
   onChange,
   extractionSchema = null,
+  currentVersionName = null,
   onSchemaChange = null,
   onSchemaValidate = null,
   activeTabId: controlledActiveTabId = 'configuration',
@@ -344,6 +384,8 @@ const ConfigBuilder = ({
   ruleSchema = null,
   onRuleSchemaChange = null,
   onRuleSchemaValidate = null,
+  versionDescription = '',
+  onDescriptionChange = null,
 }) => {
   // Track expanded state for all list items across the form - default to collapsed
   const [expandedItems, setExpandedItems] = useState({});
@@ -554,6 +596,9 @@ const ConfigBuilder = ({
     current[lastSegment] = value;
     onChange(newValues);
   };
+
+  // Debug: Check if isCustomized function is properly passed
+  console.log('ConfigBuilder received isCustomized:', typeof isCustomized, !!isCustomized);
 
   // Define renderField first as a function declaration
   function renderField(key, property, path = '') {
@@ -1267,9 +1312,30 @@ const ConfigBuilder = ({
       return renderListField(key, property, path);
     }
 
-    // Check if this field is customized (different from default)
+    // Check if this field is customized (different from default) using saved config
     let isFieldCustomized = false;
     isFieldCustomized = isCustomized(path);
+
+    // Check if current form value differs from default (for "Restore to default" button visibility)
+    // This uses formValues (live edits) vs defaultConfig, so the button hides immediately after restoring
+    // Uses numeric-aware comparison so "5" and "5.0" are treated as equal
+    let isFormValueDifferentFromDefault = false;
+    if (defaultConfig) {
+      const defaultValue = getValueAtPath(defaultConfig, path);
+      const formValue = getValueAtPath(formValues, path);
+      isFormValueDifferentFromDefault = !areValuesEqual(formValue, defaultValue);
+    }
+
+    // Check if current form value differs from last-saved config (for unsaved change indicator)
+    let hasUnsavedChange = false;
+    if (mergedConfig) {
+      const savedValue = getValueAtPath(mergedConfig, path);
+      const formValue = getValueAtPath(formValues, path);
+      hasUnsavedChange = !areValuesEqual(formValue, savedValue);
+    }
+
+    // Show "Restore to default" only if form value currently differs from default
+    const showRestoreDefault = isFormValueDifferentFromDefault && onResetToDefault;
 
     // Check if this is a 'name' field inside an array item by looking for array indices in path
     const isNameInArray =
@@ -1278,32 +1344,28 @@ const ConfigBuilder = ({
         /\.\d+\./.test(path) || // Dot notation with property after - array.0.property
         /\.\d+$/.test(path)); // Dot notation at end - array.0
 
-    // Create a handler for restoring default value
+    // Create a handler for restoring default value (LOCAL ONLY - requires Save to persist)
     const handleRestoreDefault = () => {
       if (onResetToDefault) {
-        // Use the provided onResetToDefault function if available
-        onResetToDefault(path)
-          .then(() => {
-            console.log(`Restored default value for ${path} using onResetToDefault`); // nosemgrep: javascript.lang.security.audit.unsafe-formatstring.unsafe-formatstring - Data from trusted internal source only
-          })
-          .catch((error) => {
-            console.error(`Error restoring default value: ${error.message}`);
-
-            // Fallback to manual restore if onResetToDefault fails
-            if (defaultConfig) {
-              const defaultValue = getValueAtPath(defaultConfig, path);
-              if (defaultValue !== undefined) {
-                updateValue(path, defaultValue);
-                console.log(`Manually restored default value for ${path}: ${defaultValue}`); // nosemgrep: javascript.lang.security.audit.unsafe-formatstring.unsafe-formatstring - Data from trusted internal source only
-              }
-            }
-          });
+        // resetToDefault returns { path, defaultValue } synchronously
+        const result = onResetToDefault(path);
+        if (result && result.defaultValue !== undefined) {
+          updateValue(result.path, result.defaultValue);
+          console.log(`Restored default value for ${path} (unsaved - click Save to persist)`); // nosemgrep: javascript.lang.security.audit.unsafe-formatstring.unsafe-formatstring - Data from trusted internal source only
+        } else if (defaultConfig) {
+          // Fallback: get default value directly
+          const defaultValue = getValueAtPath(defaultConfig, path);
+          if (defaultValue !== undefined) {
+            updateValue(path, defaultValue);
+            console.log(`Restored default value for ${path} from defaultConfig`); // nosemgrep: javascript.lang.security.audit.unsafe-formatstring.unsafe-formatstring - Data from trusted internal source only
+          }
+        }
       } else if (defaultConfig) {
         // Manual restore if onResetToDefault is not provided
         const defaultValue = getValueAtPath(defaultConfig, path);
         if (defaultValue !== undefined) {
           updateValue(path, defaultValue);
-          console.log(`Manually restored default value for ${path}: ${defaultValue}`); // nosemgrep: javascript.lang.security.audit.unsafe-formatstring.unsafe-formatstring - Data from trusted internal source only
+          console.log(`Restored default value for ${path} from defaultConfig`); // nosemgrep: javascript.lang.security.audit.unsafe-formatstring.unsafe-formatstring - Data from trusted internal source only
         }
       }
     };
@@ -1372,29 +1434,41 @@ const ConfigBuilder = ({
     const displayText = property.description || key;
     const constraints = getConstraintText(property);
 
-    // Create a wrapper for the input with restore button if customized
-    const inputWithRestoreButton = isFieldCustomized ? (
+    // Stable flex wrapper prevents input remount/focus loss
+    // Input is always inside <Box flex="1"> — adding/removing sibling Button
+    // doesn't unmount the input, just changes siblings
+    const inputWithActions = (
       <Box display="flex" alignItems="center">
         <Box flex="1">{input}</Box>
-        <Button variant="link" onClick={handleRestoreDefault} className="restore-default-button" iconName="undo">
-          Restore default
-        </Button>
+        {showRestoreDefault && (
+          <Button variant="link" onClick={handleRestoreDefault} className="restore-default-button" iconName="undo">
+            Restore default
+          </Button>
+        )}
       </Box>
-    ) : (
-      input
     );
 
     // Use standard constraints
     const finalConstraints = constraints.length > 0 ? constraints : undefined;
 
+    // Build CSS class: modified-field (different from default), unsaved-field (unsaved edit)
+    const fieldClasses = ['compact-form-field'];
+    if (isFieldCustomized) fieldClasses.push('modified-field');
+    if (hasUnsavedChange) fieldClasses.push('unsaved-field');
+
+    // Build label with unsaved change dot indicator
+    const labelContent = hasUnsavedChange ? (
+      <span>
+        {displayText}
+        <span className="unsaved-change-dot" title="Unsaved change" />
+      </span>
+    ) : (
+      displayText
+    );
+
     return (
-      <FormField
-        label={displayText}
-        constraintText={finalConstraints}
-        stretch
-        className={`compact-form-field ${isFieldCustomized ? 'modified-field' : ''}`}
-      >
-        {inputWithRestoreButton}
+      <FormField label={labelContent} constraintText={finalConstraints} stretch className={fieldClasses.join(' ')}>
+        {inputWithActions}
       </FormField>
     );
   }
@@ -1461,7 +1535,23 @@ const ConfigBuilder = ({
             label: 'Configuration',
             content: (
               <Box style={{ height: 'calc(70vh - 60px)', overflow: 'auto' }} padding="s">
-                <SpaceBetween size="l">{getSortedProperties().map(renderTopLevelProperty)}</SpaceBetween>
+                <SpaceBetween size="l">
+                  {/* Version Description Field */}
+                  <FormField
+                    label="Version Description"
+                    description="Optional description for this configuration version (max 200 characters)"
+                    errorText={versionDescription && versionDescription.length > 200 ? 'Description cannot exceed 200 characters' : ''}
+                  >
+                    <Input
+                      value={versionDescription}
+                      onChange={({ detail }) => onDescriptionChange?.(detail.value)}
+                      placeholder="Enter a description for this configuration version..."
+                      invalid={versionDescription && versionDescription.length > 200}
+                    />
+                  </FormField>
+
+                  {getSortedProperties().map(renderTopLevelProperty)}
+                </SpaceBetween>
               </Box>
             ),
           },
@@ -1470,7 +1560,12 @@ const ConfigBuilder = ({
             label: 'Document Schema',
             content: (
               <Box style={{ height: 'calc(70vh - 60px)' }}>
-                <SchemaBuilder initialSchema={extractionSchema} onChange={onSchemaChange} onValidate={onSchemaValidate} />
+                <SchemaBuilder
+                  key={`schema-${currentVersionName || 'default'}`}
+                  initialSchema={extractionSchema}
+                  onChange={onSchemaChange}
+                  onValidate={onSchemaValidate}
+                />
               </Box>
             ),
           },
@@ -1571,10 +1666,12 @@ ConfigBuilder.propTypes = {
     classes: PropTypes.oneOfType([PropTypes.object, PropTypes.array]),
   }),
   defaultConfig: PropTypes.shape({}),
+  mergedConfig: PropTypes.shape({}),
   isCustomized: PropTypes.func,
   onResetToDefault: PropTypes.func,
   onChange: PropTypes.func.isRequired,
   extractionSchema: PropTypes.oneOfType([PropTypes.object, PropTypes.array]),
+  currentVersionName: PropTypes.string,
   onSchemaChange: PropTypes.func,
   onSchemaValidate: PropTypes.func,
   activeTabId: PropTypes.string,
@@ -1583,6 +1680,8 @@ ConfigBuilder.propTypes = {
   ruleSchema: PropTypes.oneOfType([PropTypes.object, PropTypes.array]),
   onRuleSchemaChange: PropTypes.func,
   onRuleSchemaValidate: PropTypes.func,
+  versionDescription: PropTypes.string,
+  onDescriptionChange: PropTypes.func,
 };
 
 export default ConfigBuilder;

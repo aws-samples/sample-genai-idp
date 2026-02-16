@@ -100,6 +100,7 @@ query GetDocument($objectKey: ID!) {
         ExpiresAfter
         HITLStatus
         HITLReviewURL
+        ConfigVersion
         TraceId
     }
 }

@@ -972,6 +972,7 @@ class ExtractionService:
                 top_p=top_p,
                 max_tokens=max_tokens,
                 context="Extraction",
+                model_lambda_hook_arn=self.config.extraction.model_lambda_hook_arn,
             )
 
             extracted_text = bedrock.extract_text_from_response(

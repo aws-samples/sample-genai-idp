@@ -271,6 +271,39 @@ class TestDocumentAppSyncService:
             == "s3://bucket/test-document.pdf/evaluation/report.md"
         )
 
+    def test_document_to_update_input_with_config_version(self):
+        """Test conversion of Document to UpdateDocumentInput with config version."""
+        # Create a document with config version
+        doc = Document(
+            id="test-doc",
+            input_key="test-document.pdf",
+            status=Status.COMPLETED,
+            config_version="v1.2.3",
+        )
+
+        # Create service and convert document
+        service = DocumentAppSyncService(appsync_client=MagicMock())
+        input_data = service._document_to_update_input(doc)
+
+        # Verify config version conversion
+        assert input_data["ConfigVersion"] == "v1.2.3"
+
+    def test_document_to_update_input_without_config_version(self):
+        """Test conversion of Document to UpdateDocumentInput without config version."""
+        # Create a document without config version
+        doc = Document(
+            id="test-doc",
+            input_key="test-document.pdf",
+            status=Status.COMPLETED,
+        )
+
+        # Create service and convert document
+        service = DocumentAppSyncService(appsync_client=MagicMock())
+        input_data = service._document_to_update_input(doc)
+
+        # Verify config version is not included when None
+        assert "ConfigVersion" not in input_data
+
     def test_appsync_to_document_basic(self):
         """Test conversion from AppSync data to Document with basic fields."""
         # Create AppSync data
@@ -427,6 +460,37 @@ class TestDocumentAppSyncService:
         assert doc.metering["textract"]["cost"] == 0.015
         assert doc.metering["bedrock"]["tokens"] == 5000
         assert doc.metering["bedrock"]["cost"] == 0.025
+
+    def test_appsync_to_document_with_config_version(self):
+        """Test conversion from AppSync data to Document with config version."""
+        # Create AppSync data with config version
+        appsync_data = {
+            "ObjectKey": "test-document.pdf",
+            "ObjectStatus": "COMPLETED",
+            "ConfigVersion": "v1.2.3",
+        }
+
+        # Create service and convert data
+        service = DocumentAppSyncService(appsync_client=MagicMock())
+        doc = service._appsync_to_document(appsync_data)
+
+        # Verify config version conversion
+        assert doc.config_version == "v1.2.3"
+
+    def test_appsync_to_document_without_config_version(self):
+        """Test conversion from AppSync data to Document without config version."""
+        # Create AppSync data without config version
+        appsync_data = {
+            "ObjectKey": "test-document.pdf",
+            "ObjectStatus": "COMPLETED",
+        }
+
+        # Create service and convert data
+        service = DocumentAppSyncService(appsync_client=MagicMock())
+        doc = service._appsync_to_document(appsync_data)
+
+        # Verify config version is None when not provided
+        assert doc.config_version is None
 
     @patch(
         "idp_common.appsync.service.DocumentAppSyncService._document_to_create_input"

@@ -21,6 +21,7 @@ const GET_TEST_RUN = `
       createdAt
       completedAt
       context
+      configVersion
       config
     }
   }

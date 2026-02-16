@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import React, { useState, useEffect } from 'react';
 import PropTypes from 'prop-types';
-import { Table, Button, SpaceBetween, ButtonDropdown, Pagination, Box, TextFilter, Flashbar } from '@cloudscape-design/components';
+import { Table, Button, SpaceBetween, ButtonDropdown, Pagination, Box, TextFilter, Flashbar, Link } from '@cloudscape-design/components';
 import { useCollection } from '@cloudscape-design/collection-hooks';
 import { generateClient } from 'aws-amplify/api';
 import GET_TEST_RUNS from '../../graphql/queries/getTestRuns';
@@ -12,6 +12,8 @@ import DateRangeModal from '../common/DateRangeModal';
 import { paginationLabels } from '../common/labels';
 import TestRunnerStatus from './TestRunnerStatus';
 import { TableHeader } from '../common/table';
+import useConfigurationVersions from '../../hooks/use-configuration-versions';
+import { formatConfigVersionLink, formatConfigVersionText } from './utils/configVersionUtils';
 
 const client = generateClient();
 
@@ -81,6 +83,7 @@ TextCell.propTypes = {
 const TIME_PERIOD_STORAGE_KEY = 'testResultsTimePeriodHours';
 
 const TestResultsList = ({ timePeriodHours, setTimePeriodHours, selectedItems, setSelectedItems, activeTestRuns = [], onTestComplete }) => {
+  const { versions } = useConfigurationVersions();
   const [testRuns, setTestRuns] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -169,6 +172,7 @@ const TestResultsList = ({ timePeriodHours, setTimePeriodHours, selectedItems, s
         createdAt: run.startTime.toISOString(),
         completedAt: null,
         context: run.context || 'N/A',
+        configVersion: run.configVersion || null,
       }));
 
       // Filter out completed runs that match active run IDs to avoid duplicates
@@ -194,10 +198,12 @@ const TestResultsList = ({ timePeriodHours, setTimePeriodHours, selectedItems, s
 
   const downloadToExcel = () => {
     // Convert test runs data to CSV format
-    const headers = ['Test Run ID', 'Test Set', 'Status', 'Files Count', 'Created At', 'Completed At'];
+    const headers = ['Test Run ID', 'Test Set', 'Context', 'Config Version', 'Status', 'Files Count', 'Created At', 'Completed At'];
     const csvData = testRuns.map((run) => [
       run.testRunId,
       run.testSetName || '',
+      run.context || '',
+      formatConfigVersionText(run.configVersion, versions),
       run.status,
       run.filesCount || 0,
       run.createdAt || '',
@@ -310,6 +316,7 @@ const TestResultsList = ({ timePeriodHours, setTimePeriodHours, selectedItems, s
         }
       />
       <Table
+        resizableColumns
         items={items}
         selectedItems={selectedItems}
         onSelectionChange={({ detail }) => setSelectedItems(detail.selectedItems)}
@@ -334,11 +341,18 @@ const TestResultsList = ({ timePeriodHours, setTimePeriodHours, selectedItems, s
             width: 150,
           },
           {
-            id: 'context',
-            header: 'Context',
-            cell: getContextCell,
-            sortingField: 'context',
-            width: 300,
+            id: 'filesCount',
+            header: 'Files Count',
+            cell: (item) => item.filesCount,
+            sortingField: 'filesCount',
+            width: 100,
+          },
+          {
+            id: 'configVersion',
+            header: 'Config Version',
+            cell: (item) => formatConfigVersionLink(item.configVersion, versions),
+            sortingField: 'configVersion',
+            width: 150,
           },
           {
             id: 'status',
@@ -348,10 +362,11 @@ const TestResultsList = ({ timePeriodHours, setTimePeriodHours, selectedItems, s
             width: 200,
           },
           {
-            id: 'filesCount',
-            header: 'Files Count',
-            cell: (item) => item.filesCount,
-            sortingField: 'filesCount',
+            id: 'context',
+            header: 'Context',
+            cell: getContextCell,
+            sortingField: 'context',
+            width: 200,
           },
           {
             id: 'createdAt',

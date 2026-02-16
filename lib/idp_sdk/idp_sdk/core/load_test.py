@@ -27,7 +27,7 @@ from rich.progress import (
     TimeElapsedColumn,
 )
 
-from .stack_info import StackInfo
+from idp_sdk.core.stack_info import StackInfo
 
 logger = logging.getLogger(__name__)
 console = Console()

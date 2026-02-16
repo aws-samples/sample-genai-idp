@@ -231,7 +231,7 @@ class TestBdaBlueprintService:
 
         # This should not raise an exception but should handle empty classes gracefully
         # Test with default bidirectional sync - returns empty list
-        result = service.create_blueprints_from_custom_configuration()
+        result = service.create_blueprints_from_custom_configuration("test-version")
 
         # Should complete without processing any classes - returns empty list
         assert isinstance(result, list)
@@ -242,7 +242,7 @@ class TestBdaBlueprintService:
         # Test with explicit sync directions - all return empty list
         for direction in ["bda_to_idp", "idp_to_bda", "bidirectional"]:
             result = service.create_blueprints_from_custom_configuration(
-                sync_direction=direction
+                version="test-version", sync_direction=direction
             )
             assert isinstance(result, list)
             assert len(result) == 0  # No classes processed
@@ -255,7 +255,7 @@ class TestBdaBlueprintService:
         }
 
         # Should handle missing classes key gracefully - returns empty list
-        result = service.create_blueprints_from_custom_configuration()
+        result = service.create_blueprints_from_custom_configuration("test-version")
 
         assert isinstance(result, list)
         assert len(result) == 0
@@ -273,7 +273,7 @@ class TestBdaBlueprintService:
 
         # Should raise exception on DynamoDB error
         with pytest.raises(Exception, match="Failed to process blueprint creation"):
-            service.create_blueprints_from_custom_configuration()
+            service.create_blueprints_from_custom_configuration("test-version")
 
     def test_create_blueprints_invalid_sync_direction(self, service):
         """Test handling of invalid sync direction parameter."""
@@ -285,7 +285,7 @@ class TestBdaBlueprintService:
         # Should raise Exception (not ValueError) for invalid direction
         with pytest.raises(Exception, match="Invalid sync_direction"):
             service.create_blueprints_from_custom_configuration(
-                sync_direction="invalid_direction"
+                version="test-version", sync_direction="invalid_direction"
             )
 
     def test_create_blueprints_from_custom_configuration_partial_failure(
@@ -329,7 +329,7 @@ class TestBdaBlueprintService:
 
         # Should continue processing despite individual failures
         # The method should complete and return status for all classes
-        result = service.create_blueprints_from_custom_configuration()
+        result = service.create_blueprints_from_custom_configuration("test-version")
 
         # Verify result is a list
         assert isinstance(result, list)
@@ -783,7 +783,7 @@ class TestBdaBlueprintService:
         service._blueprint_lookup = MagicMock(side_effect=mock_blueprint_lookup)
 
         # Execute the method with bidirectional sync (default)
-        result = service.create_blueprints_from_custom_configuration()
+        result = service.create_blueprints_from_custom_configuration("test-version")
 
         # Verify the result - only the existing W-4 class should be processed
         # Orphaned blueprints (I-9, 1099) are NOT synced because that code is commented out
@@ -799,7 +799,7 @@ class TestBdaBlueprintService:
         service.config_manager.handle_update_custom_configuration.assert_not_called()
 
     def test_sync_direction_bda_to_idp_only(self, service):
-        """Test that sync_direction='bda_to_idp' only syncs from BDA to IDP."""
+        """Test that version="test-version", sync_direction='bda_to_idp' only syncs from BDA to IDP."""
         # Mock configuration
         config_obj = MagicMock()
         config_obj.classes = [build_json_schema(doc_id="W-4")]
@@ -816,14 +816,16 @@ class TestBdaBlueprintService:
         )
 
         # Execute with bda_to_idp direction
-        service.create_blueprints_from_custom_configuration(sync_direction="bda_to_idp")
+        service.create_blueprints_from_custom_configuration(
+            version="test-version", sync_direction="bda_to_idp"
+        )
 
         # Should not create or update blueprints (Phase 2 skipped)
         service.blueprint_creator.create_blueprint.assert_not_called()
         service.blueprint_creator.update_blueprint.assert_not_called()
 
     def test_sync_direction_idp_to_bda_only(self, service):
-        """Test that sync_direction='idp_to_bda' only syncs from IDP to BDA."""
+        """Test that version="test-version", sync_direction='idp_to_bda' only syncs from IDP to BDA."""
         # Mock configuration
         config_obj = MagicMock()
         config_obj.classes = [build_json_schema(doc_id="W-4")]
@@ -843,7 +845,9 @@ class TestBdaBlueprintService:
         }
 
         # Execute with idp_to_bda direction
-        service.create_blueprints_from_custom_configuration(sync_direction="idp_to_bda")
+        service.create_blueprints_from_custom_configuration(
+            version="test-version", sync_direction="idp_to_bda"
+        )
 
         # Should not call convert_aws_standard_blueprints_to_custom (Phase 1 skipped)
         # But should create blueprints (Phase 2 executed)
@@ -913,7 +917,7 @@ class TestBdaBlueprintService:
         service._blueprint_lookup = MagicMock(side_effect=mock_blueprint_lookup)
 
         # Execute the method
-        result = service.create_blueprints_from_custom_configuration()
+        result = service.create_blueprints_from_custom_configuration("test-version")
 
         # Verify result is a list
         assert isinstance(result, list)
@@ -957,7 +961,7 @@ class TestBdaBlueprintService:
         }
 
         # Execute the method
-        result = service.create_blueprints_from_custom_configuration()
+        result = service.create_blueprints_from_custom_configuration("test-version")
 
         # Verify result is a list
         assert isinstance(result, list)
@@ -1044,7 +1048,7 @@ class TestBdaBlueprintService:
         }
 
         # Execute the method
-        result = service._convert_aws_standard_blueprints_to_custom()
+        result = service._convert_aws_standard_blueprints_to_custom("test-version")
 
         # Verify the result
         assert result["status"] == "success"
@@ -1059,10 +1063,9 @@ class TestBdaBlueprintService:
 
         # Verify configuration was updated with new IDP classes
         service.config_manager.handle_update_custom_configuration.assert_called_once()
-        call_args = service.config_manager.handle_update_custom_configuration.call_args[
-            0
-        ][0]
-        updated_classes = call_args["classes"]
+        call_args = service.config_manager.handle_update_custom_configuration.call_args
+        # Access keyword arguments
+        updated_classes = call_args.kwargs["custom_config"]["classes"]
 
         # Should have 2 new IDP classes
         assert len(updated_classes) == 2
@@ -1095,7 +1098,7 @@ class TestBdaBlueprintService:
         }
 
         # Execute the method
-        result = service._convert_aws_standard_blueprints_to_custom()
+        result = service._convert_aws_standard_blueprints_to_custom("test-version")
 
         # Verify the method completes but reports failures for non-AWS blueprints
         assert result["status"] == "success"
@@ -1177,7 +1180,7 @@ class TestBdaBlueprintService:
         }
 
         # Execute the method
-        result = service._convert_aws_standard_blueprints_to_custom()
+        result = service._convert_aws_standard_blueprints_to_custom("test-version")
 
         # Verify partial success (method returns success even with failures)
         assert result["status"] == "success"
@@ -1245,7 +1248,7 @@ class TestBdaBlueprintService:
         )
 
         # Execute the method
-        result = service._convert_aws_standard_blueprints_to_custom()
+        result = service._convert_aws_standard_blueprints_to_custom("test-version")
 
         # Verify conversion still marked as success (project update failure is logged but not critical)
         assert result["status"] == "success"
@@ -1273,7 +1276,7 @@ class TestBdaBlueprintService:
         )
 
         # Execute the method
-        result = service._convert_aws_standard_blueprints_to_custom()
+        result = service._convert_aws_standard_blueprints_to_custom("test-version")
 
         # Verify failure was handled (method returns success even with failures)
         assert result["status"] == "success"
@@ -1667,7 +1670,9 @@ class TestBdaBlueprintService:
         )
 
         # Execute synchronization
-        service.create_blueprints_from_custom_configuration(sync_direction="idp_to_bda")
+        service.create_blueprints_from_custom_configuration(
+            version="test-version", sync_direction="idp_to_bda"
+        )
 
         # Verify blueprint was created
         assert service.blueprint_creator.create_blueprint.called
@@ -1686,11 +1691,9 @@ class TestBdaBlueprintService:
 
         # Verify the configuration was updated with sanitized class
         assert service.config_manager.handle_update_custom_configuration.called
-        updated_classes = (
-            service.config_manager.handle_update_custom_configuration.call_args[0][0][
-                "classes"
-            ]
-        )
+        call_args = service.config_manager.handle_update_custom_configuration.call_args
+        # Access keyword arguments
+        updated_classes = call_args.kwargs["custom_config"]["classes"]
 
         # Verify the class in configuration has sanitized property names
         assert "PropertyWithAmpersand" in updated_classes[0]["properties"]

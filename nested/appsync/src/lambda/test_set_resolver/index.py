@@ -4,6 +4,7 @@ import logging
 from datetime import datetime
 import os
 import boto3
+import re
 from botocore.config import Config
 from idp_common.s3 import find_matching_files  # type: ignore
 from idp_common.dynamodb import DynamoDBClient  # type: ignore
@@ -13,6 +14,22 @@ MAX_ZIP_SIZE_BYTES = 1073741824  # 1 GB
 
 logger = logging.getLogger()
 logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
+
+
+def validate_test_set_name(name):
+    """Validate test set name: alphanumeric, spaces, hyphens, underscores only, max 50 chars"""
+    if not name or not isinstance(name, str):
+        return False
+    return re.match(r'^[a-zA-Z0-9\s_-]+$', name) and len(name) <= 50
+
+
+def validate_description(description):
+    """Validate description: max 200 chars only"""
+    if description is None or description == "":
+        return True  # Optional field
+    if not isinstance(description, str):
+        return False
+    return len(description) <= 200
 
 # Configure S3 client with S3v4 signature
 s3_config = Config(
@@ -54,6 +71,15 @@ def add_test_set_from_upload(args):
     
     # Extract test set name from filename (remove .zip extension)
     test_set_name = zip_filename.replace('.zip', '').replace('.ZIP', '')
+    
+    # Validate test set name
+    if not validate_test_set_name(test_set_name):
+        raise Exception("Test set name can only contain letters, numbers, spaces, hyphens, and underscores (max 50 characters)")
+    
+    # Validate description
+    if description and not validate_description(description):
+        raise Exception("Description cannot exceed 200 characters")
+    
     test_set_id = f"{test_set_name.replace(' ', '-').lower()}"
     
     test_set_bucket = os.environ['TEST_SET_BUCKET']
@@ -109,6 +135,14 @@ def add_test_set(args):
     test_set_name = args['name']
     description = args.get('description', '')  # Optional field
     file_count = args['fileCount']
+    
+    # Validate test set name
+    if not validate_test_set_name(test_set_name):
+        raise Exception("Test set name can only contain letters, numbers, spaces, hyphens, and underscores (max 50 characters)")
+    
+    # Validate description
+    if description and not validate_description(description):
+        raise Exception("Description cannot exceed 200 characters")
     
     # Generate test set ID with name format, replace spaces with dashes
     test_set_id = f"{test_set_name.replace(' ', '-').lower()}"

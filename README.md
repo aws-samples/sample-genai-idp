@@ -49,6 +49,7 @@ Concierge support for customization, deployment, and integration of production u
 - **Cost Optimization**: Pay-per-use pricing model with built-in controls
 - **Comprehensive Monitoring**: Rich CloudWatch dashboard with detailed metrics and logs
 - **Web User Interface**: Modern UI for inspecting document workflow status and results
+- **Configuration Versioning**: Support for multiple configuration versions with version-specific processing and test comparison
 - **Human-in-the-Loop (HITL)**: Built-in review system for human validation workflows (Pattern 1 & Pattern 2)
   - **Note**: When deploying multiple patterns with HITL, reuse existing private workteam ARN due to AWS account limits
 - **AI-Powered Evaluation**: Framework to assess accuracy against baseline data

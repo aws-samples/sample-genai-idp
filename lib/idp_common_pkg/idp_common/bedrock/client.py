@@ -28,6 +28,9 @@ from urllib3.exceptions import ReadTimeoutError as Urllib3ReadTimeoutError
 
 from .model_utils import parse_model_id
 
+# Sentinel value for LambdaHook model selection
+LAMBDA_HOOK_MODEL_ID = "LambdaHook"
+
 
 # Dummy exception classes for requests timeouts if requests is not available
 class _RequestsReadTimeout(Exception):
@@ -102,7 +105,7 @@ CACHEPOINT_SUPPORTED_MODELS = [
 
 
 class BedrockClient:
-    """Client for interacting with Amazon Bedrock models."""
+    """Client for interacting with Amazon Bedrock models and custom Lambda hooks."""
 
     def __init__(
         self,
@@ -128,6 +131,8 @@ class BedrockClient:
         self.max_backoff = max_backoff
         self.metrics_enabled = metrics_enabled
         self._client = None
+        self._lambda_client = None
+        self._s3_client = None
 
     @property
     def client(self):
@@ -142,6 +147,24 @@ class BedrockClient:
             )
         return self._client
 
+    @property
+    def lambda_client(self):
+        """Lazy-loaded Lambda client for LambdaHook invocations."""
+        if self._lambda_client is None:
+            self._lambda_client = boto3.client(
+                "lambda", region_name=self.region
+            )
+        return self._lambda_client
+
+    @property
+    def s3_client(self):
+        """Lazy-loaded S3 client for LambdaHook image uploads."""
+        if self._s3_client is None:
+            self._s3_client = boto3.client(
+                "s3", region_name=self.region
+            )
+        return self._s3_client
+
     def __call__(
         self,
         model_id: str,
@@ -154,6 +177,7 @@ class BedrockClient:
         max_retries: Optional[int] = None,
         context: str = "Unspecified",
         service_tier: Optional[str] = None,
+        model_lambda_hook_arn: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Make the instance callable with the same signature as the original function.
@@ -190,6 +214,7 @@ class BedrockClient:
             max_retries=effective_max_retries,
             context=context,
             service_tier=service_tier,
+            model_lambda_hook_arn=model_lambda_hook_arn,
         )
 
     def _preprocess_content_for_cachepoint(
@@ -280,12 +305,18 @@ class BedrockClient:
         max_retries: Optional[int] = None,
         context: str = "Unspecified",
         service_tier: Optional[str] = None,
+        model_lambda_hook_arn: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
-        Invoke a Bedrock model with retry logic.
+        Invoke a Bedrock model or custom Lambda hook with retry logic.
+
+        When model_id is 'LambdaHook', the request is routed to the specified
+        Lambda function instead of Bedrock. The Lambda receives a Converse API-compatible
+        payload and must return a Converse API-compatible response.
 
         Args:
             model_id: The Bedrock model ID (e.g., 'anthropic.claude-3-sonnet-20240229-v1:0')
+                      Use 'LambdaHook' to invoke a custom Lambda function instead.
             system_prompt: The system prompt as string or list of content objects
             content: The content for the user message (can include text and images)
             temperature: The temperature parameter for model inference (float or string)
@@ -294,10 +325,25 @@ class BedrockClient:
             max_tokens: Optional max_tokens parameter (int or string)
             max_retries: Optional override for the instance's max_retries setting
             service_tier: Optional service tier (priority, standard, flex)
+            model_lambda_hook_arn: Lambda function ARN (required when model_id is 'LambdaHook')
 
         Returns:
-            Bedrock response object with metering information
+            Response object with metering information (same format for both Bedrock and Lambda)
         """
+        # Route to Lambda hook if model_id is LambdaHook
+        if model_id == LAMBDA_HOOK_MODEL_ID:
+            return self._invoke_lambda_hook(
+                lambda_arn=model_lambda_hook_arn,
+                system_prompt=system_prompt,
+                content=content,
+                temperature=temperature,
+                top_k=top_k,
+                top_p=top_p,
+                max_tokens=max_tokens,
+                max_retries=max_retries,
+                context=context,
+            )
+
         # Track total requests
         self._put_metric("BedrockRequestsTotal", 1)
 
@@ -981,6 +1027,432 @@ class BedrockClient:
 
         # Apply substitutions using % operator which is safer than .format()
         return prompt_template % substitutions
+
+    def _invoke_lambda_hook(
+        self,
+        lambda_arn: Optional[str],
+        system_prompt: Union[str, List[Dict[str, str]]],
+        content: List[Dict[str, Any]],
+        temperature: Union[float, str] = 0.0,
+        top_k: Optional[Union[float, str]] = None,
+        top_p: Optional[Union[float, str]] = None,
+        max_tokens: Optional[Union[int, str]] = None,
+        max_retries: Optional[int] = None,
+        context: str = "Unspecified",
+    ) -> Dict[str, Any]:
+        """
+        Invoke a custom Lambda function instead of Bedrock for LLM inference.
+
+        The Lambda receives a Converse API-compatible payload with images converted
+        to S3 references (to avoid Lambda's 6MB payload limit). The Lambda must
+        return a Converse API-compatible response.
+
+        Args:
+            lambda_arn: ARN of the Lambda function to invoke
+            system_prompt: The system prompt as string or list of content objects
+            content: The content for the user message (can include text and images)
+            temperature: The temperature parameter for model inference
+            top_k: Optional top_k parameter
+            top_p: Optional top_p parameter
+            max_tokens: Optional max_tokens parameter
+            max_retries: Optional override for retry count
+            context: Context prefix for metering key
+
+        Returns:
+            Response object with metering information (same format as Bedrock responses)
+
+        Raises:
+            ValueError: If lambda_arn is not provided or invalid
+            Exception: If Lambda invocation fails after retries
+        """
+        if not lambda_arn:
+            raise ValueError(
+                "model_lambda_hook_arn is required when model is 'LambdaHook'. "
+                "Configure the Lambda function ARN in the configuration."
+            )
+
+        # Validate Lambda function name starts with GENAIIDP-
+        # Extract function name from ARN (last segment after ':function:')
+        if ":function:" in lambda_arn:
+            func_name_part = lambda_arn.split(":function:")[-1]
+            # Handle alias/version suffix (function:name:alias)
+            func_name = func_name_part.split(":")[0]
+            if not func_name.startswith("GENAIIDP-"):
+                raise ValueError(
+                    f"Lambda function name must start with 'GENAIIDP-'. "
+                    f"Got function name: '{func_name}' from ARN: '{lambda_arn}'"
+                )
+
+        self._put_metric("LambdaHookRequestsTotal", 1)
+
+        # Format system prompt
+        if isinstance(system_prompt, str):
+            formatted_system_prompt = [{"text": system_prompt}]
+        else:
+            formatted_system_prompt = system_prompt
+
+        # Strip <<CACHEPOINT>> tags from content (not applicable to custom Lambda)
+        processed_content = []
+        for item in content:
+            if (
+                "text" in item
+                and isinstance(item["text"], str)
+                and "<<CACHEPOINT>>" in item["text"]
+            ):
+                clean_text = item["text"].replace("<<CACHEPOINT>>", "")
+                processed_content.append({"text": clean_text})
+            else:
+                processed_content.append(item)
+
+        # Convert inline image bytes to S3 references to avoid 6MB Lambda payload limit
+        processed_content = self._convert_images_to_s3_refs(processed_content)
+
+        # Convert temperature to float
+        if isinstance(temperature, str):
+            try:
+                temperature = float(temperature)
+            except ValueError:
+                temperature = 0.0
+
+        # Build inference config
+        inference_config: Dict[str, Any] = {"temperature": temperature}
+
+        if top_p is not None:
+            if isinstance(top_p, str):
+                try:
+                    top_p = float(top_p)
+                except ValueError:
+                    top_p = None
+            if top_p is not None and top_p > 0:
+                inference_config["topP"] = top_p
+
+        if top_k is not None:
+            if isinstance(top_k, str):
+                try:
+                    top_k = float(top_k)
+                except ValueError:
+                    top_k = None
+            if top_k is not None:
+                inference_config["topK"] = int(top_k)
+
+        if max_tokens is not None:
+            if isinstance(max_tokens, str):
+                try:
+                    max_tokens = int(max_tokens)
+                except ValueError:
+                    max_tokens = None
+            if max_tokens is not None:
+                inference_config["maxTokens"] = max_tokens
+
+        # Build the Converse API-compatible payload for the Lambda
+        message = {"role": "user", "content": processed_content}
+        lambda_payload = {
+            "modelId": LAMBDA_HOOK_MODEL_ID,
+            "messages": [message],
+            "system": formatted_system_prompt,
+            "inferenceConfig": inference_config,
+            "context": context,
+        }
+
+        # Invoke Lambda with retry logic
+        effective_max_retries = max_retries if max_retries is not None else self.max_retries
+        request_start_time = time.time()
+
+        return self._invoke_lambda_hook_with_retry(
+            lambda_arn=lambda_arn,
+            lambda_payload=lambda_payload,
+            retry_count=0,
+            max_retries=effective_max_retries,
+            request_start_time=request_start_time,
+            context=context,
+        )
+
+    def _convert_images_to_s3_refs(
+        self, content: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """
+        Convert inline image bytes in content to S3 references.
+
+        This prevents hitting the Lambda 6MB payload limit when documents
+        contain multiple page images. Images are uploaded to the working
+        bucket under a temp/lambdahook/ prefix.
+
+        Images that already use s3Location references are passed through unchanged.
+
+        Args:
+            content: Content list with potential inline image bytes
+
+        Returns:
+            Content list with images converted to S3 references
+        """
+        import base64
+        import uuid
+
+        working_bucket = os.environ.get("WORKING_BUCKET")
+        if not working_bucket:
+            logger.warning(
+                "WORKING_BUCKET not set - cannot convert images to S3 refs for LambdaHook. "
+                "Images will be sent inline (may hit 6MB Lambda payload limit)."
+            )
+            return content
+
+        converted_content = []
+        image_count = 0
+
+        for item in content:
+            if "image" not in item:
+                converted_content.append(item)
+                continue
+
+            image_data = item["image"]
+            source = image_data.get("source", {})
+            img_format = image_data.get("format", "jpeg")
+
+            # Skip if already an S3 reference
+            if "s3Location" in source:
+                converted_content.append(item)
+                continue
+
+            # Get the inline bytes
+            img_bytes = source.get("bytes")
+            if img_bytes is None:
+                converted_content.append(item)
+                continue
+
+            # Handle base64-encoded strings (from serialized payloads)
+            if isinstance(img_bytes, str):
+                try:
+                    img_bytes = base64.b64decode(img_bytes)
+                except Exception:
+                    logger.warning("Failed to decode base64 image data, passing through")
+                    converted_content.append(item)
+                    continue
+
+            # Upload to S3
+            image_key = f"temp/lambdahook/{uuid.uuid4().hex}.{img_format}"
+            try:
+                content_type_map = {
+                    "jpeg": "image/jpeg",
+                    "png": "image/png",
+                    "gif": "image/gif",
+                    "webp": "image/webp",
+                }
+                content_type = content_type_map.get(img_format, "application/octet-stream")
+
+                self.s3_client.put_object(
+                    Bucket=working_bucket,
+                    Key=image_key,
+                    Body=img_bytes,
+                    ContentType=content_type,
+                )
+
+                s3_uri = f"s3://{working_bucket}/{image_key}"
+                image_count += 1
+
+                # Replace inline bytes with S3 reference
+                s3_location = {"uri": s3_uri}
+                # Only include bucketOwner if AWS_ACCOUNT_ID is set (Bedrock requires valid 12-digit ID or omit)
+                account_id = os.environ.get("AWS_ACCOUNT_ID", "")
+                if account_id and len(account_id) == 12:
+                    s3_location["bucketOwner"] = account_id
+
+                converted_content.append({
+                    "image": {
+                        "format": img_format,
+                        "source": {
+                            "s3Location": s3_location,
+                        },
+                    }
+                })
+
+                logger.debug(f"Uploaded image to S3: {s3_uri} ({len(img_bytes)} bytes)")
+
+            except Exception as e:
+                logger.warning(
+                    f"Failed to upload image to S3 for LambdaHook: {str(e)}. "
+                    "Falling back to inline bytes (may hit payload limit)."
+                )
+                converted_content.append(item)
+
+        if image_count > 0:
+            logger.info(
+                f"Converted {image_count} inline image(s) to S3 references for LambdaHook"
+            )
+
+        return converted_content
+
+    def _invoke_lambda_hook_with_retry(
+        self,
+        lambda_arn: str,
+        lambda_payload: Dict[str, Any],
+        retry_count: int,
+        max_retries: int,
+        request_start_time: float,
+        last_exception: Optional[Exception] = None,
+        context: str = "Unspecified",
+    ) -> Dict[str, Any]:
+        """
+        Invoke Lambda hook with retry logic for transient failures.
+
+        Args:
+            lambda_arn: ARN of the Lambda function
+            lambda_payload: Converse API-compatible payload
+            retry_count: Current retry attempt
+            max_retries: Maximum retry attempts
+            request_start_time: When the original request started
+            last_exception: Last exception for error reporting
+            context: Context for metering
+
+        Returns:
+            Response with metering information
+
+        Raises:
+            Exception: If invocation fails after all retries
+        """
+        try:
+            logger.info(
+                f"LambdaHook request attempt {retry_count + 1}/{max_retries}: "
+                f"ARN={lambda_arn}, context={context}"
+            )
+
+            attempt_start_time = time.time()
+
+            # Serialize payload - handle bytes by converting to base64
+            payload_json = json.dumps(lambda_payload, default=str)
+
+            # Invoke Lambda synchronously
+            response = self.lambda_client.invoke(
+                FunctionName=lambda_arn,
+                InvocationType="RequestResponse",
+                Payload=payload_json.encode("utf-8"),
+            )
+
+            duration = time.time() - attempt_start_time
+
+            # Check for Lambda-level errors
+            function_error = response.get("FunctionError")
+
+            if function_error:
+                error_payload = json.loads(response["Payload"].read().decode("utf-8"))
+                error_message = error_payload.get("errorMessage", str(error_payload))
+                logger.error(
+                    f"LambdaHook function error ({function_error}): {error_message}"
+                )
+
+                # Retry on unhandled errors (transient issues)
+                if function_error == "Unhandled" and retry_count < max_retries:
+                    backoff = self._calculate_backoff(retry_count)
+                    logger.warning(
+                        f"LambdaHook transient error, retrying in {backoff:.2f}s"
+                    )
+                    time.sleep(backoff)
+                    return self._invoke_lambda_hook_with_retry(
+                        lambda_arn=lambda_arn,
+                        lambda_payload=lambda_payload,
+                        retry_count=retry_count + 1,
+                        max_retries=max_retries,
+                        request_start_time=request_start_time,
+                        context=context,
+                    )
+
+                self._put_metric("LambdaHookRequestsFailed", 1)
+                raise RuntimeError(
+                    f"LambdaHook function error: {error_message}"
+                )
+
+            # Parse response payload
+            response_payload = json.loads(response["Payload"].read().decode("utf-8"))
+
+            logger.info(
+                f"LambdaHook request successful after {retry_count + 1} attempts. "
+                f"Duration: {duration:.2f}s"
+            )
+
+            # Extract usage/metering from the Lambda response
+            usage = response_payload.get("usage", {})
+            if not usage:
+                # Provide default metering if Lambda doesn't return usage
+                usage = {
+                    "inputTokens": 0,
+                    "outputTokens": 0,
+                    "totalTokens": 0,
+                }
+
+            # Track metrics
+            self._put_metric("LambdaHookRequestsSucceeded", 1)
+            self._put_metric("LambdaHookRequestLatency", duration * 1000, "Milliseconds")
+
+            total_duration = time.time() - request_start_time
+            self._put_metric("LambdaHookTotalLatency", total_duration * 1000, "Milliseconds")
+
+            # Build response in the same format as Bedrock responses
+            response_with_metering = {
+                "response": response_payload,
+                "metering": {
+                    f"{context}/lambda_hook/{lambda_arn}": {
+                        **usage,
+                        "requests": 1,
+                    }
+                },
+            }
+
+            return response_with_metering
+
+        except ClientError as e:
+            error_code = e.response["Error"]["Code"]
+            error_message = e.response["Error"]["Message"]
+
+            retryable_errors = [
+                "TooManyRequestsException",
+                "ServiceException",
+                "EC2ThrottledException",
+                "ResourceConflictException",
+            ]
+
+            if error_code in retryable_errors and retry_count < max_retries:
+                self._put_metric("LambdaHookThrottles", 1)
+                backoff = self._calculate_backoff(retry_count)
+                logger.warning(
+                    f"LambdaHook throttled ({error_code}), retrying in {backoff:.2f}s"
+                )
+                time.sleep(backoff)
+                return self._invoke_lambda_hook_with_retry(
+                    lambda_arn=lambda_arn,
+                    lambda_payload=lambda_payload,
+                    retry_count=retry_count + 1,
+                    max_retries=max_retries,
+                    request_start_time=request_start_time,
+                    last_exception=e,
+                    context=context,
+                )
+            else:
+                logger.error(
+                    f"LambdaHook error: {error_code} - {error_message}"
+                )
+                self._put_metric("LambdaHookRequestsFailed", 1)
+                raise
+
+        except Exception as e:
+            error_message = str(e)
+            if "RuntimeError" not in type(e).__name__ and retry_count < max_retries:
+                backoff = self._calculate_backoff(retry_count)
+                logger.warning(
+                    f"LambdaHook unexpected error, retrying in {backoff:.2f}s: {error_message}"
+                )
+                time.sleep(backoff)
+                return self._invoke_lambda_hook_with_retry(
+                    lambda_arn=lambda_arn,
+                    lambda_payload=lambda_payload,
+                    retry_count=retry_count + 1,
+                    max_retries=max_retries,
+                    request_start_time=request_start_time,
+                    last_exception=e,
+                    context=context,
+                )
+
+            logger.error(f"LambdaHook failed: {error_message}", exc_info=True)
+            self._put_metric("LambdaHookRequestsFailed", 1)
+            raise
 
     def _calculate_backoff(self, retry_count: int) -> float:
         """

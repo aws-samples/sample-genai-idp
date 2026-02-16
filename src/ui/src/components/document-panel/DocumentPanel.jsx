@@ -15,6 +15,8 @@ import {
   StatusIndicator,
 } from '@cloudscape-design/components';
 import { generateClient } from 'aws-amplify/api';
+import useConfigurationVersions from '../../hooks/use-configuration-versions';
+import { formatConfigVersionLink } from '../test-studio/utils/configVersionUtils';
 import { ConsoleLogger } from 'aws-amplify/utils';
 import './DocumentPanel.css';
 import DocumentViewers from '../document-viewers/DocumentViewers';
@@ -352,10 +354,10 @@ const MeteringExpandableSection = ({ meteringData, documentItem }) => {
   );
 };
 
-const DocumentAttributes = ({ item }) => {
+const DocumentAttributes = ({ item, versions }) => {
   return (
     <Container>
-      <ColumnLayout columns={7} variant="text-grid">
+      <ColumnLayout columns={8} variant="text-grid">
         <SpaceBetween size="xs">
           <div>
             <Box margin={{ bottom: 'xxxs' }} color="text-label">
@@ -398,6 +400,15 @@ const DocumentAttributes = ({ item }) => {
               <strong>Duration</strong>
             </Box>
             <div>{item.duration}</div>
+          </div>
+        </SpaceBetween>
+
+        <SpaceBetween size="xs">
+          <div>
+            <Box margin={{ bottom: 'xxxs' }} color="text-label">
+              <strong>Config Version</strong>
+            </Box>
+            <div>{formatConfigVersionLink(item.configVersion, versions)}</div>
           </div>
         </SpaceBetween>
 
@@ -483,6 +494,7 @@ const ABORTABLE_STATUSES = [
 ];
 
 export const DocumentPanel = ({ item, setToolsOpen, getDocumentDetailsFromIds, onDelete, onReprocess, onAbort }) => {
+  const { versions } = useConfigurationVersions();
   logger.debug('DocumentPanel item', item);
 
   // State for Step Function flow viewer
@@ -619,7 +631,12 @@ export const DocumentPanel = ({ item, setToolsOpen, getDocumentDetailsFromIds, o
         }
       >
         <SpaceBetween size="l">
-          <DocumentAttributes item={enhancedItem} setToolsOpen={setToolsOpen} getDocumentDetailsFromIds={getDocumentDetailsFromIds} />
+          <DocumentAttributes
+            item={enhancedItem}
+            versions={versions}
+            setToolsOpen={setToolsOpen}
+            getDocumentDetailsFromIds={getDocumentDetailsFromIds}
+          />
 
           {localItem.metering && (
             <div>

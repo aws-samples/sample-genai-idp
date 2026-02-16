@@ -29,6 +29,7 @@ def handler(event, context):
             test_run_id = message['testRunId']
             test_set_id = message['testSetId']
             number_of_files = message.get('numberOfFiles')  # Optional parameter
+            config_version = message.get('configVersion')  # Optional parameter
             tracking_table = message['trackingTable']
             
             # Get environment variables
@@ -62,7 +63,7 @@ def handler(event, context):
             successful_input_files = _copy_files_to_bucket(
                 test_set_bucket, f"{test_set_id}/input/", 
                 input_bucket, f"{test_run_id}/", 
-                input_files
+                input_files, config_version
             )
             
             # Copy baseline files from test set bucket to baseline bucket with test_run_id prefix
@@ -120,7 +121,7 @@ def _list_test_set_files(test_set_bucket, test_set_id, folder_type):
         logger.error(f"Error listing {folder_type} files for test set {test_set_id}: {e}")
         return []
 
-def _copy_files_to_bucket(source_bucket, source_prefix, dest_bucket, dest_prefix, files):
+def _copy_files_to_bucket(source_bucket, source_prefix, dest_bucket, dest_prefix, files, config_version=None):
     """Copy files from source bucket to destination bucket - track failures"""
     successful_files = []
     
@@ -130,12 +131,18 @@ def _copy_files_to_bucket(source_bucket, source_prefix, dest_bucket, dest_prefix
             source_key = f"{source_prefix}{filename}"
             dest_key = f"{dest_prefix}{filename}"
             
-            # Copy file
-            s3.copy_object(
-                CopySource={'Bucket': source_bucket, 'Key': source_key},
-                Bucket=dest_bucket,
-                Key=dest_key
-            )
+            # Copy file with config version as S3 metadata instead of filename suffix
+            copy_args = {
+                'CopySource': {'Bucket': source_bucket, 'Key': source_key},
+                'Bucket': dest_bucket,
+                'Key': dest_key
+            }
+            
+            if config_version:
+                copy_args['Metadata'] = {'config-version': config_version}
+                copy_args['MetadataDirective'] = 'REPLACE'
+            
+            s3.copy_object(**copy_args)
             
             logger.info(f"Copied file: {source_key} -> {dest_bucket}/{dest_key}")
             return filename, None

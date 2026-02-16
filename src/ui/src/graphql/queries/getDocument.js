@@ -49,6 +49,7 @@ export default gql`
       HITLReviewedBy
       HITLReviewedByEmail
       HITLReviewHistory
+      ConfigVersion
     }
   }
 `;

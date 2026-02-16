@@ -365,11 +365,21 @@ my-test-set/
 
 ### Running Tests
 1. Select test set from dropdown
-2. **Optional**: Enter number of files to limit processing (useful for quick testing)
-3. **Optional**: Add context description for the test run
-4. Click "Run Test" (single test execution only)
-5. Monitor progress via TestRunnerStatus
-6. View results in integrated listing
+2. **Optional**: Select configuration version to use for processing
+3. **Optional**: Enter number of files to limit processing (useful for quick testing)
+4. **Optional**: Add context description for the test run
+5. Click "Run Test" (single test execution only)
+6. Monitor progress via TestRunnerStatus
+7. View results in integrated listing
+
+### Configuration Versioning
+The Test Studio supports running tests with specific configuration versions:
+- **Version Selection**: Choose from available configuration versions (e.g., `default`, `Production`, `v1`)
+- **Version Tracking**: Test results display which configuration version was used
+- **Version Comparison**: Compare test runs across different configuration versions
+- **Context Generation**: Test context automatically includes the selected version information
+
+For full details on configuration versioning, see [configuration-versions.md](configuration-versions.md).
 
 ### Test States
 - **QUEUED**: File copying jobs queued in SQS
@@ -402,6 +412,7 @@ my-test-set/
 
 ### Results Analysis
 - Comprehensive metrics display including:
+  - **Test run metadata**: Configuration version, duration, context, file counts
   - **Overall accuracy and confidence metrics**
   - **Accuracy breakdown** (precision, recall, F1-score, false alarm rate, false discovery rate)
   - **Average Document Split Classification Metrics**:
@@ -411,6 +422,6 @@ my-test-set/
     - Total Pages, Total Splits (sums across documents)
     - Correctly Classified Pages, Correctly Split counts (sums across documents)
   - **Cost breakdown** by service and context
-- Side-by-side test comparison with all metrics
+- Side-by-side test comparison with all metrics including configuration versions
 - Export capabilities (JSON/CSV downloads include all metrics)
 - Integrated delete operations

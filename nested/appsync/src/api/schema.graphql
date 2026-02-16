@@ -36,6 +36,7 @@ type Document implements DynamoDbBase @aws_cognito_user_pools @aws_iam {
   HITLReviewedBy: String
   HITLReviewedByEmail: String
   HITLReviewHistory: AWSJSON
+  ConfigVersion: String
   TraceId: String
 }
 
@@ -111,9 +112,24 @@ type ConfigurationResponse @aws_cognito_user_pools @aws_iam {
   error: ConfigurationError
 }
 
+type ConfigurationVersion @aws_cognito_user_pools @aws_iam {
+  versionName: String!
+  isActive: Boolean
+  createdAt: AWSDateTime
+  updatedAt: AWSDateTime
+  description: String
+}
+
+type ConfigurationVersionsResponse @aws_cognito_user_pools @aws_iam {
+  success: Boolean!
+  versions: [ConfigurationVersion]
+  error: ConfigurationError
+}
+
 type UpdateConfigurationResponse @aws_cognito_user_pools @aws_iam {
   success: Boolean!
   message: String
+  versionName: String
   error: ConfigurationError
 }
 
@@ -171,6 +187,7 @@ type DiscoveryJobListItem @aws_cognito_user_pools @aws_iam {
   createdAt: String
   updatedAt: String
   errorMessage: String
+  version: String
 }
 
 input CreateDocumentInput {
@@ -179,6 +196,7 @@ input CreateDocumentInput {
   InitialEventTime: AWSDateTime
   QueuedTime: AWSDateTime
   ExpiresAfter: AWSTimestamp
+  ConfigVersion: String
   TraceId: String
 }
 
@@ -227,6 +245,7 @@ input UpdateDocumentInput {
   HITLReviewedBy: String
   HITLReviewedByEmail: String
   HITLReviewHistory: AWSJSON
+  ConfigVersion: String
   TraceId: String
 }
 
@@ -391,6 +410,7 @@ type TestRun @aws_cognito_user_pools @aws_iam {
   createdAt: AWSDateTime
   completedAt: AWSDateTime
   context: String
+  configVersion: String
   config: AWSJSON
 }
 
@@ -449,6 +469,7 @@ input TestRunInput {
   testSetId: String!
   context: String
   numberOfFiles: Int
+  configVersion: String
 }
 
 type AgentChatMessage @aws_cognito_user_pools @aws_iam {
@@ -497,9 +518,13 @@ type Mutation {
   # Atomic section-level update for parallel Map operations (extraction/assessment)
   updateDocumentSection(input: UpdateDocumentSectionInput!): Document @aws_iam
   deleteDocument(objectKeys: [String!]!): Boolean! @aws_cognito_user_pools
-  updateConfiguration(customConfig: AWSJSON!): UpdateConfigurationResponse
+  updateConfiguration(versionName: String!, customConfig: AWSJSON!, description: String): UpdateConfigurationResponse
     @aws_cognito_user_pools
-  syncBdaIdp(direction: String): SyncBdaIdpResponse @aws_cognito_user_pools
+  setActiveVersion(versionName: String!): UpdateConfigurationResponse
+    @aws_cognito_user_pools
+  deleteConfigVersion(versionName: String!): UpdateConfigurationResponse
+    @aws_cognito_user_pools
+  syncBdaIdp(direction: String, versionName: String): SyncBdaIdpResponse @aws_cognito_user_pools
   updatePricing(pricingConfig: AWSJSON!): UpdatePricingResponse
     @aws_cognito_user_pools
   restoreDefaultPricing: UpdatePricingResponse
@@ -509,6 +534,7 @@ type Mutation {
     contentType: String
     prefix: String
     bucket: String
+    version: String
   ): PresignedUrlResponse! @aws_cognito_user_pools
   uploadDiscoveryDocument(
     fileName: String!
@@ -516,10 +542,11 @@ type Mutation {
     prefix: String
     bucket: String
     groundTruthFileName: String
+    version: String
   ): DisPresignedUrlResponse! @aws_cognito_user_pools
   copyToBaseline(objectKey: String!): CopyToBaselineResponse!
     @aws_cognito_user_pools
-  reprocessDocument(objectKeys: [String!]!): Boolean! @aws_cognito_user_pools
+  reprocessDocument(objectKeys: [String!]!, version: String): Boolean! @aws_cognito_user_pools
   abortWorkflow(objectKeys: [String!]!): AbortWorkflowResponse! @aws_cognito_user_pools
   processChanges(
     objectKey: String!
@@ -588,7 +615,8 @@ type Query @aws_cognito_user_pools @aws_iam {
     nextToken: String
   ): DocumentPage
   getFileContents(s3Uri: String!): FileContentsResponse
-  getConfiguration: ConfigurationResponse
+  getConfigVersions: ConfigurationVersionsResponse
+  getConfigVersion(versionName: String!): ConfigurationResponse
   getPricing: PricingResponse
   listDiscoveryJobs: DiscoveryJobList
   queryKnowledgeBase(input: String!, sessionId: String): String

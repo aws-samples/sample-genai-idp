@@ -5,21 +5,38 @@ from idp_common.config.configuration_manager import ConfigurationManager
 from idp_common.config.models import SchemaConfig, IDPConfig, PricingConfig
 from idp_common.config.constants import (
     CONFIG_TYPE_SCHEMA,
-    CONFIG_TYPE_DEFAULT,
-    CONFIG_TYPE_CUSTOM,
     CONFIG_TYPE_DEFAULT_PRICING,
     CONFIG_TYPE_CUSTOM_PRICING,
+    CONFIG_TYPE_CONFIG,
+    DEFAULT_VERSION,
 )
 from pydantic import ValidationError
 import os
 import json
 import logging
+import re
 
 logger = logging.getLogger()
 logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 logging.getLogger("idp_common.bedrock.client").setLevel(
     os.environ.get("BEDROCK_LOG_LEVEL", "INFO")
 )
+
+
+def validate_version_name(name):
+    """Validate version name: alphanumeric, hyphens, underscores only, max 50 chars"""
+    if not name or not isinstance(name, str):
+        return False
+    return re.match(r'^[a-zA-Z0-9-_]+$', name) and len(name) <= 50
+
+
+def validate_description(description):
+    """Validate description: max 200 chars only"""
+    if description is None or description == "":
+        return True  # Optional field
+    if not isinstance(description, str):
+        return False
+    return len(description) <= 200
 
 
 def handler(event, context):
@@ -55,18 +72,56 @@ def handler(event, context):
     manager = ConfigurationManager()
 
     try:
-        if operation == "getConfiguration":
-            return handle_get_configuration(manager)
+        if operation == "getConfigVersions":
+            return handle_get_config_versions(manager)
+        elif operation == "getConfigVersion":
+            return handle_get_configuration(manager, event["arguments"].get("versionName"))
         elif operation == "updateConfiguration":
             args = event["arguments"]
+            version = args.get("versionName")
             custom_config = args.get("customConfig")
-            success = manager.handle_update_custom_configuration(custom_config)
+            description = args.get("description")
+            if not version:
+                return {
+                    "success": False,
+                    "error": {
+                        "type": "ValidationError",
+                        "message": "versionId is required",
+                    },
+                }
+            # Validate version name if provided
+            if not validate_version_name(version):
+                return {
+                    "success": False,
+                    "error": {
+                        "type": "ValidationError",
+                        "message": "Version name can only contain letters, numbers, hyphens, and underscores (max 50 characters)",
+                    },
+                }
+            # Validate description if provided
+            if description and not validate_description(description):
+                return {
+                    "success": False,
+                    "error": {
+                        "type": "ValidationError",
+                        "message": "Description cannot exceed 200 characters",
+                    },
+                }
+            success = manager.handle_update_custom_configuration(custom_config, version, description)
             return {
                 "success": success,
                 "message": "Configuration updated successfully"
                 if success
                 else "Configuration update failed",
             }
+        elif operation == "setActiveVersion":
+            args = event["arguments"]
+            version = args.get("versionName")
+            return handle_set_active_version(manager, version)
+        elif operation == "deleteConfigVersion":
+            args = event["arguments"]
+            version = args.get("versionName")
+            return handle_delete_config_version(manager, version)
         elif operation == "getPricing":
             return handle_get_pricing(manager)
         elif operation == "updatePricing":
@@ -129,25 +184,25 @@ def handler(event, context):
         }
 
 
-def handle_get_configuration(manager):
+def handle_get_configuration(manager, version: str):
     """
     Handle the getConfiguration GraphQL query
-    Returns Schema, Default, and Custom configuration items.
+    Returns Schema and version configuration items.
     
     DESIGN PATTERN (CRITICAL):
     - Default: Full stack baseline (Pydantic validated)
-    - Custom: SPARSE DELTAS ONLY (raw from DynamoDB, NO Pydantic defaults!)
-    - Frontend merges Default + Custom for display
+    - Version: SPARSE DELTAS ONLY (raw from DynamoDB, NO Pydantic defaults!)
+    - Frontend merges Default + Version for display
     - Runtime uses get_merged_configuration() for processing
     
     This design allows:
     - Stack upgrades to safely update Default without losing user customizations
-    - Empty Custom = all defaults (clean reset)
+    - Empty Version = all defaults (clean reset)
     - User customizations survive stack updates
     
     ANTI-PATTERNS TO AVOID:
-    - DO NOT auto-copy Default → Custom when Custom is empty
-    - DO NOT use Pydantic validation on Custom (fills in defaults)
+    - DO NOT auto-copy default → version when version is empty
+    - DO NOT use Pydantic validation on version (fills in defaults)
     """
     try:
         # Get Schema configuration (Pydantic validated - this is correct for Schema)
@@ -161,7 +216,7 @@ def handle_get_configuration(manager):
             schema_dict = {}
 
         # Get Default configuration (Pydantic validated - full stack baseline)
-        default_config = manager.get_configuration(CONFIG_TYPE_DEFAULT)
+        default_config = manager.get_configuration(CONFIG_TYPE_CONFIG, DEFAULT_VERSION)
         if default_config and isinstance(default_config, IDPConfig):
             default_dict = default_config.model_dump(
                 mode="python", exclude={"config_type"}
@@ -169,25 +224,29 @@ def handle_get_configuration(manager):
         else:
             default_dict = {}
 
-        # Get Custom configuration as RAW dict (NO Pydantic defaults!)
-        # This is critical for the sparse delta pattern to work correctly
-        custom_dict = manager.get_raw_configuration(CONFIG_TYPE_CUSTOM)
+        if not version:
+            raise ValueError("version is missing")
         
-        # If Custom doesn't exist or is empty, return empty dict
+        
+        # Get Version configuration as RAW dict (NO Pydantic defaults!)
+        # This is critical for the sparse delta pattern to work correctly
+        version_dict = manager.get_raw_configuration(CONFIG_TYPE_CONFIG, version)
+        
+        # If version dict doesn't exist or is empty, return empty dict
         # DO NOT auto-copy Default → Custom (this breaks the delta pattern)
-        if not custom_dict:
+        if not version_dict:
             logger.info("Custom config is empty or not found - returning empty dict (expected behavior)")
-            custom_dict = {}
+            version_dict = {}
 
         # Return all configurations as dicts (GraphQL requires JSON-serializable)
         result = {
             "success": True,
             "Schema": schema_dict,
             "Default": default_dict,
-            "Custom": custom_dict,
+            "Custom": {} if version == "default" else version_dict,
         }
 
-        logger.info("Returning configuration (Default=full, Custom=deltas only)")
+        logger.info("Returning configuration (default=full, Version=deltas only)")
         return result
 
     except Exception as e:
@@ -552,5 +611,117 @@ def handle_restore_default_pricing(manager):
             "error": {
                 "type": "Error",
                 "message": f"Failed to restore default pricing: {str(e)}",
+            },
+        }
+
+
+def handle_get_config_versions(manager):
+    """
+    Handle the getConfigVersions GraphQL query
+    Returns list of all available configuration versions
+    """
+    try:
+        versions = manager.list_config_versions()
+        
+        return {
+            "success": True,
+            "versions": versions
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in getConfigVersions: {str(e)}")
+        return {
+            "success": False,
+            "error": {
+                "type": "Error",
+                "message": f"Failed to get configuration versions: {str(e)}",
+            },
+        }
+
+
+def handle_set_active_version(manager, version):
+    """
+    Handle the setActiveVersion GraphQL mutation
+    Sets a specific version as active and deactivates others
+    """
+    try:
+        if not version:
+            return {
+                "success": False,
+                "error": {
+                    "type": "ValidationError",
+                    "message": "versionId is required",
+                },
+            }
+        
+        # Check if the version exists
+        config = manager.get_configuration("Config", version)
+        if not config:
+            return {
+                "success": False,
+                "error": {
+                    "type": "NotFoundError",
+                    "message": f"Configuration version '{version}' not found",
+                },
+            }
+        
+        # Set the version as active
+        manager.activate_version(version)
+        
+        return {
+            "success": True,
+            "message": f"Configuration version {version} set as active",
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in setActiveVersion: {str(e)}")
+        return {
+            "success": False,
+            "error": {
+                "type": "Error",
+                "message": f"Failed to set active version: {str(e)}",
+            },
+        }
+    
+
+def handle_delete_config_version(manager, version):
+    """
+    Handle the deleteConfigVersion GraphQL mutation
+    Deletes a specific configuration version
+    """
+    try:
+        if not version:
+            return {
+                "success": False,
+                "error": {
+                    "type": "ValidationError",
+                    "message": "versionId is required",
+                },
+            }
+        
+        # Prevent deletion of system default version
+        if version == "default":
+            return {
+                "success": False,
+                "error": {
+                    "type": "ValidationError",
+                    "message": "Cannot delete system default version",
+                },
+            }
+        # Delete the version
+        manager.delete_configuration("Config", version)
+        
+        return {
+            "success": True,
+            "message": f"Configuration version {version} deleted successfully",
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in deleteConfigVersion: {str(e)}")
+        return {
+            "success": False,
+            "error": {
+                "type": "Error",
+                "message": f"Failed to delete configuration version: {str(e)}",
             },
         }

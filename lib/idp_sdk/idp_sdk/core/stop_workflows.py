@@ -19,7 +19,7 @@ from idp_common.models import Status
 from rich.console import Console
 from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn
 
-from .stack_info import StackInfo
+from idp_sdk.core.stack_info import StackInfo
 
 logger = logging.getLogger(__name__)
 console = Console()

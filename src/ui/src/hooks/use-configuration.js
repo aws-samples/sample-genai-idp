@@ -4,7 +4,7 @@
 import { useState, useEffect } from 'react';
 import { generateClient } from 'aws-amplify/api';
 import { ConsoleLogger } from 'aws-amplify/utils';
-import getConfigurationQuery from '../graphql/queries/getConfiguration';
+import getConfigVersionQuery from '../graphql/queries/getConfigVersion';
 import updateConfigurationMutation from '../graphql/queries/updateConfiguration';
 import { deepMerge } from '../utils/configUtils';
 
@@ -197,7 +197,7 @@ const getDiff = (oldConfig, newConfig) => {
   return diff;
 };
 
-const useConfiguration = () => {
+const useConfiguration = (versionName = 'default') => {
   const [schema, setSchema] = useState(null);
   const [defaultConfig, setDefaultConfig] = useState(null);
   const [customConfig, setCustomConfig] = useState(null);
@@ -206,7 +206,7 @@ const useConfiguration = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState(null);
 
-  const fetchConfiguration = async (silent = false) => {
+  const fetchConfiguration = async (fetchVersionName = 'default', silent = false) => {
     // Use different loading states for initial load vs background refresh
     if (silent) {
       setRefreshing(true);
@@ -215,11 +215,14 @@ const useConfiguration = () => {
     }
     setError(null);
     try {
-      logger.debug('Fetching configuration...');
-      const result = await client.graphql({ query: getConfigurationQuery });
-      logger.debug('API response:', result);
+      logger.debug('Fetching configuration for versionName:', fetchVersionName);
+      const result = await client.graphql({
+        query: getConfigVersionQuery,
+        variables: { versionName: fetchVersionName },
+      });
+      logger.debug('API response version', fetchVersionName, result);
 
-      const response = result.data.getConfiguration;
+      const response = result.data.getConfigVersion;
 
       if (!response.success) {
         const errorMsg = response.error?.message || 'Failed to load configuration';
@@ -268,24 +271,24 @@ const useConfiguration = () => {
         }
       }
 
-      // Parse custom config if it's a string and not null/empty
+      // Parse version config - use empty object if missing
       if (typeof Custom === 'string' && Custom) {
         try {
           customObj = JSON.parse(Custom);
-          logger.debug('Custom config parsed from string successfully');
+          logger.debug('Version config parsed from string successfully');
         } catch (e) {
-          logger.error('Error parsing custom config string:', e);
-          // Don't throw here, just log the error and use empty object
-          customObj = {};
+          logger.error('Error parsing version config string:', e);
+          throw new Error(`Failed to parse version configuration: ${e.message}`);
         }
       } else if (!Custom) {
+        logger.warn('Version configuration is empty or missing, using empty object');
         customObj = {};
       }
 
       // Debug the parsed objects
       logger.debug('Parsed schema:', schemaObj);
       logger.debug('Parsed default config:', defaultObj);
-      logger.debug('Parsed custom config:', customObj);
+      logger.debug('Parsed version config:', customObj);
 
       // Validate the parsed objects
       if (!schemaObj || typeof schemaObj !== 'object') {
@@ -298,7 +301,7 @@ const useConfiguration = () => {
 
       setSchema(schemaObj);
 
-      // Normalize boolean values in both default and custom configs
+      // Normalize boolean values in both default and version configs
       const normalizedDefaultObj = normalizeBooleans(defaultObj, schemaObj);
       const normalizedCustomObj = normalizeBooleans(customObj, schemaObj);
 
@@ -341,10 +344,10 @@ const useConfiguration = () => {
     }
   };
 
-  const updateConfiguration = async (newCustomConfig) => {
+  const updateConfiguration = async (targetVersionName, newCustomConfig, description = null) => {
     setError(null);
     try {
-      logger.debug('Updating config with:', newCustomConfig);
+      logger.debug('Updating config - versionName:', targetVersionName, 'description:', description, 'config:', newCustomConfig);
 
       // Make sure we have a valid object to update with
       const configToUpdate =
@@ -359,11 +362,15 @@ const useConfiguration = () => {
       // Ensure we're sending a JSON string
       const configString = typeof configToUpdate === 'string' ? configToUpdate : JSON.stringify(configToUpdate);
 
-      logger.debug('Sending customConfig string:', configString);
+      logger.debug('Sending customConfig string for version', targetVersionName, ':', configString);
 
       const result = await client.graphql({
         query: updateConfigurationMutation,
-        variables: { customConfig: configString },
+        variables: {
+          versionName: targetVersionName,
+          customConfig: configString,
+          description,
+        },
       });
 
       const response = result.data.updateConfiguration;
@@ -376,65 +383,39 @@ const useConfiguration = () => {
       // Refetch silently to ensure backend and frontend are in sync
       // Silent mode prevents loading state changes that cause re-renders
       // The component will handle rehydration without full re-render
-      await fetchConfiguration(true);
+      await fetchConfiguration(targetVersionName, true);
 
       return true;
     } catch (err) {
-      logger.error('Error updating configuration', err);
-      setError(`Failed to update configuration: ${err.message}`);
+      logger.error('Error updating configuration for version', targetVersionName, ':', err);
+      setError(`Failed to update configuration for version ${targetVersionName}: ${err.message}`);
       return false;
     }
   };
 
-  // Reset a specific configuration path back to default
-  // DESIGN: Set the default value - backend auto-cleans matching defaults from Custom
-  // The strip_matching_defaults function on backend removes values matching Default
-  const resetToDefault = async (path) => {
-    if (!path || !customConfig || !defaultConfig) return false;
+  // Reset a specific configuration path back to its default value (LOCAL ONLY)
+  // This updates local form state only - user must click Save to persist.
+  // This makes "Restore to default" consistent with all other field edits.
+  const resetToDefault = (path) => {
+    if (!path || !defaultConfig) return false;
 
-    setError(null);
     try {
-      logger.debug(`Resetting path to default: ${path}`);
+      logger.debug(`Restoring path to default value (local): ${path}`);
 
       // Get the default value for this path
       const defaultValue = getValueAtPath(defaultConfig, path);
       logger.debug(`Default value at ${path}:`, defaultValue);
 
-      // Create a delta with the default value
-      // Backend will auto-clean this (strip_matching_defaults removes values that match Default)
-      const updatePayload = setValueAtPath({}, path, defaultValue);
-      logger.debug('Sending update payload (backend will auto-clean):', updatePayload);
-
-      // Send the default value to backend
-      const result = await client.graphql({
-        query: updateConfigurationMutation,
-        variables: { customConfig: JSON.stringify(updatePayload) },
-      });
-
-      const response = result.data.updateConfiguration;
-
-      if (!response.success) {
-        const errorMsg = response.error?.message || 'Failed to reset to default';
-        throw new Error(errorMsg);
+      if (defaultValue === undefined) {
+        logger.warn(`No default value found for path: ${path}`);
+        return false;
       }
 
-      logger.debug(`Successfully reset path ${path} to default (backend auto-cleaned)`);
-
-      // Optimistic update: remove the field from local custom config
-      // (Backend's auto-cleanup will have removed it since it matches Default)
-      const newCustomConfig = removeValueAtPath(customConfig, path);
-
-      // Update local state
-      setCustomConfig(newCustomConfig);
-      // mergedConfig = Default + Custom (with field removed, Default value shows)
-      setMergedConfig(deepMerge(defaultConfig, newCustomConfig));
-
-      return true;
+      // Return the default value - the caller (ConfigBuilder) will call updateValue()
+      // to set it in formValues, which triggers hasUnsavedChanges detection
+      return { path, defaultValue };
     } catch (err) {
-      logger.error('Error resetting to default', err);
-      setError(`Failed to reset to default: ${err.message}`);
-      // Refetch on error to ensure consistency
-      await fetchConfiguration(true);
+      logger.error('Error getting default value for path', err);
       return false;
     }
   };
@@ -462,11 +443,11 @@ const useConfiguration = () => {
         }, obj);
       };
 
-      // Get values from both custom and default configs
+      // Get values from both version and default configs
       const customValue = getValueAtPathSegments(customConfig, pathSegments);
       const defaultValue = getValueAtPathSegments(defaultConfig, pathSegments);
 
-      // First check if the custom value exists
+      // First check if the version value exists
       const customValueExists = customValue !== undefined;
 
       // Special case for empty objects - they should count as not customized
@@ -495,7 +476,7 @@ const useConfiguration = () => {
           }
           return false; // Arrays are identical
         }
-        return true; // Custom is array, default isn't or is undefined
+        return true; // Version is array, default isn't or is undefined
       }
 
       // Deep compare objects
@@ -524,8 +505,8 @@ const useConfiguration = () => {
   };
 
   useEffect(() => {
-    fetchConfiguration();
-  }, []);
+    fetchConfiguration(versionName);
+  }, [versionName]); // Re-fetch when version changes
 
   return {
     schema,

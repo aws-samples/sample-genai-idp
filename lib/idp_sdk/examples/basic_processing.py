@@ -46,7 +46,7 @@ def main():
     print(f"Processing documents from: {args.directory}")
 
     # Submit batch for processing
-    batch_result = client.run_inference(
+    batch_result = client.batch.run(
         source=args.directory,
         batch_prefix="sdk-example",
         file_pattern="*.pdf",
@@ -54,13 +54,13 @@ def main():
     )
 
     print(f"Batch submitted: {batch_result.batch_id}")
-    print(f"Documents queued: {batch_result.documents_queued}")
+    print(f"Documents queued: {batch_result.queued}")
     print(f"Document IDs: {batch_result.document_ids[:5]}...")  # Show first 5
 
     # Monitor progress
     print("\nMonitoring progress...")
     while True:
-        status = client.get_status(batch_id=batch_result.batch_id)
+        status = client.batch.get_status(batch_id=batch_result.batch_id)
 
         print(
             f"  Completed: {status.completed}/{status.total} "
@@ -75,7 +75,7 @@ def main():
 
     # Download results
     print(f"\nDownloading results to: {args.output_dir}")
-    download_result = client.download_results(
+    download_result = client.batch.download_results(
         batch_id=batch_result.batch_id,
         output_dir=args.output_dir,
         file_types=["summary", "sections"],

@@ -100,10 +100,10 @@ def main():
         print(f"Listing recent batches from: {args.stack_name}")
         print(f"  Limit: {args.limit}")
 
-        batches = client.list_batches(limit=args.limit)
+        batches = client.batch.list(limit=args.limit)
 
-        print(f"\nFound {len(batches)} batches:")
-        for batch in batches:
+        print(f"\nFound {batches.count} batches:")
+        for batch in batches.batches:
             print(f"\n  Batch: {batch.batch_id}")
             print(f"    Documents: {len(batch.document_ids)}")
             print(f"    Queued: {batch.queued}")
@@ -119,13 +119,26 @@ def main():
 
         if args.batch_id:
             print(f"Getting status for batch: {args.batch_id}")
+            status = client.batch.get_status(batch_id=args.batch_id)
         else:
             print(f"Getting status for document: {args.document_id}")
+            status = client.document.get_status(document_id=args.document_id)
+            # Convert single document status to batch-like format for display
+            from idp_sdk.models import BatchStatus
 
-        status = client.get_status(
-            batch_id=args.batch_id,
-            document_id=args.document_id,
-        )
+            status = BatchStatus(
+                batch_id="single-doc",
+                documents=[status],
+                total=1,
+                completed=1 if status.status.value == "COMPLETED" else 0,
+                failed=1 if status.status.value == "FAILED" else 0,
+                in_progress=1
+                if status.status.value in ["PROCESSING", "RUNNING"]
+                else 0,
+                queued=1 if status.status.value == "QUEUED" else 0,
+                success_rate=1.0 if status.status.value == "COMPLETED" else 0.0,
+                all_complete=status.status.value in ["COMPLETED", "FAILED"],
+            )
 
         print("\nBatch Status:")
         print(f"  Total: {status.total}")
@@ -162,7 +175,7 @@ def main():
         else:
             print(f"  Documents: {len(args.document_ids)}")
 
-        result = client.rerun_inference(
+        result = client.batch.rerun(
             step=RerunStep(args.step),
             batch_id=args.batch_id,
             document_ids=args.document_ids,
@@ -184,7 +197,7 @@ def main():
         print(f"  Skip Purge: {args.skip_purge}")
         print(f"  Skip Stop: {args.skip_stop}")
 
-        result = client.stop_workflows(
+        result = client.batch.stop_workflows(
             skip_purge=args.skip_purge,
             skip_stop=args.skip_stop,
         )
@@ -201,7 +214,7 @@ def main():
     elif args.command == "resources":
         print(f"Getting resources for stack: {args.stack_name}")
 
-        resources = client.get_resources()
+        resources = client.stack.get_resources()
 
         print("\nStack Resources:")
         print(f"  Input Bucket: {resources.input_bucket}")

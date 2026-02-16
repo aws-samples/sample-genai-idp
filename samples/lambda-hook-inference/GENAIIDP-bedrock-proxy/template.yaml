@@ -1,0 +1,74 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  GENAIIDP-bedrock-proxy: Sample Lambda Hook that proxies LambdaHook payloads
+  to Amazon Bedrock Converse API. Use as a starting template for custom hooks.
+
+Parameters:
+  IDPWorkingBucket:
+    Type: String
+    Description: >
+      Name of the IDP stack's working S3 bucket. Required for reading images
+      that are uploaded as S3 references in the LambdaHook payload.
+
+  CustomerManagedEncryptionKeyArn:
+    Type: String
+    Default: ""
+    Description: >
+      (Optional) ARN of the KMS key used to encrypt the IDP working bucket.
+      Required if the working bucket uses customer-managed KMS encryption.
+
+  TargetModelId:
+    Type: String
+    Default: "us.amazon.nova-pro-v1:0"
+    Description: Bedrock model ID to proxy requests to.
+
+Conditions:
+  HasKMSKey: !Not [!Equals [!Ref CustomerManagedEncryptionKeyArn, ""]]
+
+Resources:
+  BedrockProxyFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: GENAIIDP-bedrock-proxy
+      Runtime: python3.12
+      Handler: index.lambda_handler
+      CodeUri: .
+      Timeout: 300
+      MemorySize: 512
+      Environment:
+        Variables:
+          TARGET_MODEL_ID: !Ref TargetModelId
+          LOG_LEVEL: INFO
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - s3:GetObject
+              Resource:
+                - !Sub "arn:${AWS::Partition}:s3:::${IDPWorkingBucket}/temp/lambdahook/*"
+            - Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+                - bedrock:InvokeModelWithResponseStream
+              Resource:
+                - !Sub "arn:${AWS::Partition}:bedrock:*::foundation-model/*"
+                - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
+            - !If
+              - HasKMSKey
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:GenerateDataKey
+                Resource: !Ref CustomerManagedEncryptionKeyArn
+              - !Ref AWS::NoValue
+
+Outputs:
+  FunctionArn:
+    Description: ARN of the Bedrock proxy Lambda hook function
+    Value: !GetAtt BedrockProxyFunction.Arn
+
+  Usage:
+    Description: How to use in IDP configuration
+    Value: !Sub |
+      Set model to "LambdaHook" and model_lambda_hook_arn to "${BedrockProxyFunction.Arn}"

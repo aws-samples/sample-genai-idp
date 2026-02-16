@@ -4,8 +4,8 @@
 import gql from 'graphql-tag';
 
 export default gql`
-  mutation SyncBdaIdp($direction: String) {
-    syncBdaIdp(direction: $direction) {
+  mutation SyncBdaIdp($direction: String, $versionName: String) {
+    syncBdaIdp(direction: $direction, versionName: $versionName) {
       success
       message
       processedClasses

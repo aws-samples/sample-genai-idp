@@ -472,10 +472,14 @@ const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2
     }
   };
 
-  const reprocessDocuments = async (objectKeys) => {
+  const reprocessDocuments = async (objectKeys, version) => {
     try {
-      logger.debug('Reprocessing documents', objectKeys);
-      const result = await client.graphql({ query: reprocessDocument, variables: { objectKeys } });
+      logger.debug('Reprocessing documents', objectKeys, 'with version', version);
+      const variables = { objectKeys };
+      if (version) {
+        variables.version = version;
+      }
+      const result = await client.graphql({ query: reprocessDocument, variables });
       logger.debug('Reprocess documents result', result);
       // Refresh the document list after reprocessing
       setIsDocumentsListLoading(true);

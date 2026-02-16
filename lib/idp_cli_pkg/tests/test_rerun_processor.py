@@ -12,12 +12,12 @@ class TestRerunProcessor:
     """Test rerun processing functionality"""
 
     @patch.dict("os.environ", {"AWS_DEFAULT_REGION": "us-east-1"})
-    @patch("idp_cli.stack_info.StackInfo")
+    @patch("idp_sdk.core.stack_info.StackInfo")
     @patch("boto3.client")
     @patch.dict("os.environ", {"AWS_DEFAULT_REGION": "us-east-1"})
     def test_init_success(self, mock_boto_client, mock_stack_info_class):
         """Test successful initialization"""
-        from idp_cli.rerun_processor import RerunProcessor
+        from idp_sdk.core.rerun_processor import RerunProcessor
 
         mock_stack_info = MagicMock()
         mock_stack_info.validate_stack.return_value = True
@@ -34,15 +34,15 @@ class TestRerunProcessor:
         assert processor.resources["DocumentQueue"] is not None
 
     @patch.dict("os.environ", {"AWS_DEFAULT_REGION": "us-east-1"})
-    @patch("idp_cli.stack_info.StackInfo")
+    @patch("idp_sdk.core.stack_info.StackInfo")
     @patch("boto3.client")
     @patch.dict("os.environ", {"AWS_DEFAULT_REGION": "us-east-1"})
     def test_prepare_for_classification_rerun(
         self, mock_boto_client, mock_stack_info_class
     ):
         """Test document preparation for classification rerun"""
-        from idp_cli.rerun_processor import RerunProcessor
         from idp_common.models import Document, Page, Section, Status
+        from idp_sdk.core.rerun_processor import RerunProcessor
 
         mock_stack_info = MagicMock()
         mock_stack_info.validate_stack.return_value = True
@@ -90,14 +90,14 @@ class TestRerunProcessor:
         assert result.start_time is None
 
     @patch.dict("os.environ", {"AWS_DEFAULT_REGION": "us-east-1"})
-    @patch("idp_cli.stack_info.StackInfo")
+    @patch("idp_sdk.core.stack_info.StackInfo")
     @patch("boto3.client")
     def test_prepare_for_extraction_rerun(
         self, mock_boto_client, mock_stack_info_class
     ):
         """Test document preparation for extraction rerun"""
-        from idp_cli.rerun_processor import RerunProcessor
         from idp_common.models import Document, Page, Section, Status
+        from idp_sdk.core.rerun_processor import RerunProcessor
 
         mock_stack_info = MagicMock()
         mock_stack_info.validate_stack.return_value = True
@@ -147,12 +147,12 @@ class TestRerunProcessor:
         assert result.status == Status.QUEUED
 
     @patch.dict("os.environ", {"AWS_DEFAULT_REGION": "us-east-1"})
-    @patch("idp_cli.stack_info.StackInfo")
+    @patch("idp_sdk.core.stack_info.StackInfo")
     @patch("boto3.client")
     def test_send_to_queue(self, mock_boto_client, mock_stack_info_class):
         """Test sending document to SQS queue"""
-        from idp_cli.rerun_processor import RerunProcessor
         from idp_common.models import Document, Status
+        from idp_sdk.core.rerun_processor import RerunProcessor
 
         mock_stack_info = MagicMock()
         mock_stack_info.validate_stack.return_value = True
@@ -183,9 +183,9 @@ class TestRerunProcessor:
         assert "test-doc" in call_args[1]["MessageBody"]
 
     @patch.dict("os.environ", {"AWS_DEFAULT_REGION": "us-east-1"})
-    @patch("idp_cli.stack_info.StackInfo")
-    @patch("idp_cli.rerun_processor.RerunProcessor._get_document")
-    @patch("idp_cli.rerun_processor.RerunProcessor._send_to_queue")
+    @patch("idp_sdk.core.stack_info.StackInfo")
+    @patch("idp_sdk.core.rerun_processor.RerunProcessor._get_document")
+    @patch("idp_sdk.core.rerun_processor.RerunProcessor._send_to_queue")
     @patch("boto3.client")
     def test_rerun_documents_classification(
         self,
@@ -195,7 +195,7 @@ class TestRerunProcessor:
         mock_stack_info_class,
     ):
         """Test rerun documents for classification"""
-        from idp_cli.rerun_processor import RerunProcessor
+        from idp_sdk.core.rerun_processor import RerunProcessor
 
         mock_stack_info = MagicMock()
         mock_stack_info.validate_stack.return_value = True
@@ -233,14 +233,14 @@ class TestRerunProcessor:
         mock_send_to_queue.assert_called_once()
 
     @patch.dict("os.environ", {"AWS_DEFAULT_REGION": "us-east-1"})
-    @patch("idp_cli.stack_info.StackInfo")
-    @patch("idp_cli.rerun_processor.RerunProcessor._get_document")
+    @patch("idp_sdk.core.stack_info.StackInfo")
+    @patch("idp_sdk.core.rerun_processor.RerunProcessor._get_document")
     @patch("boto3.client")
     def test_rerun_documents_document_not_found(
         self, mock_boto_client, mock_get_document, mock_stack_info_class
     ):
         """Test rerun when document not found"""
-        from idp_cli.rerun_processor import RerunProcessor
+        from idp_sdk.core.rerun_processor import RerunProcessor
 
         mock_stack_info = MagicMock()
         mock_stack_info.validate_stack.return_value = True
@@ -266,14 +266,14 @@ class TestRerunProcessor:
         assert results["failed_documents"][0]["object_key"] == "missing-doc"
 
     @patch.dict("os.environ", {"AWS_DEFAULT_REGION": "us-east-1"})
-    @patch("idp_cli.stack_info.StackInfo")
-    @patch("idp_cli.batch_processor.BatchProcessor")
+    @patch("idp_sdk.core.stack_info.StackInfo")
+    @patch("idp_sdk.core.batch_processor.BatchProcessor")
     @patch("boto3.client")
     def test_get_batch_document_ids(
         self, mock_boto_client, mock_batch_processor_class, mock_stack_info_class
     ):
         """Test getting document IDs from batch"""
-        from idp_cli.rerun_processor import RerunProcessor
+        from idp_sdk.core.rerun_processor import RerunProcessor
 
         mock_stack_info = MagicMock()
         mock_stack_info.validate_stack.return_value = True

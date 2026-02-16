@@ -59,14 +59,15 @@ def handler(event, context):
             document_key = message_body.get('documentKey')
             ground_truth_key = message_body.get('groundTruthKey')
             bucket = message_body.get('bucket')
+            version = message_body.get('version')
 
-            logger.info(f"Processing discovery job: {job_id}")
+            logger.info(f"Processing discovery job: {job_id} with version: {version}")
 
             # Update job status to IN_PROGRESS
             update_job_status(job_id, 'IN_PROGRESS')
 
             # Process the discovery job
-            result = process_discovery_job(job_id, document_key, ground_truth_key, bucket)
+            result = process_discovery_job(job_id, document_key, ground_truth_key, bucket, version)
             results.append(result)
 
         except Exception as e:
@@ -83,7 +84,7 @@ def handler(event, context):
     return sqs_batch_response
 
 
-def process_discovery_job(job_id, document_key, ground_truth_key, bucket):
+def process_discovery_job(job_id, document_key, ground_truth_key, bucket, version):
     """
     Process a single discovery job using ClassesDiscovery.
 
@@ -92,6 +93,7 @@ def process_discovery_job(job_id, document_key, ground_truth_key, bucket):
         document_key (str): S3 key for the document file
         ground_truth_key (str): S3 key for the ground truth file
         bucket (str): S3 bucket name
+        version (str): Configuration version to save to
 
     Returns:
         dict: Processing result
@@ -106,7 +108,8 @@ def process_discovery_job(job_id, document_key, ground_truth_key, bucket):
         classes_discovery = ClassesDiscovery(
             input_bucket=bucket,
             input_prefix=document_key,
-            region=region
+            region=region,
+            version=version
         )
 
         # Process the discovery job based on whether ground truth is provided

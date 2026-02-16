@@ -16,15 +16,15 @@ from typing import Optional
 
 import boto3
 import click
+from idp_sdk.core.batch_processor import BatchProcessor
+from idp_sdk.core.manifest_parser import validate_manifest
+from idp_sdk.core.progress_monitor import ProgressMonitor
+from idp_sdk.core.stack import StackDeployer, build_parameters
 from rich.console import Console
 from rich.live import Live
 from rich.table import Table
 
 from . import display
-from .batch_processor import BatchProcessor
-from .deployer import StackDeployer, build_parameters
-from .manifest_parser import validate_manifest
-from .progress_monitor import ProgressMonitor
 
 # Configure logging
 logging.basicConfig(
@@ -961,7 +961,7 @@ def delete_documents_cmd(
             sys.exit(1)
 
         # Get stack resources
-        from .stack_info import StackInfo
+        from idp_sdk.core.stack_info import StackInfo
 
         console.print(f"[bold blue]Connecting to stack: {stack_name}[/bold blue]")
         stack_info = StackInfo(stack_name, region)
@@ -1159,7 +1159,7 @@ def rerun_inference(
             )
             sys.exit(1)
 
-        from .rerun_processor import RerunProcessor
+        from idp_sdk.core.rerun_processor import RerunProcessor
 
         # Initialize processor
         console.print(
@@ -1308,6 +1308,10 @@ def rerun_inference(
     type=int,
     help="Limit number of files to process (for testing purposes)",
 )
+@click.option(
+    "--config-version",
+    help="Configuration version to use for processing (e.g., v1, v2)",
+)
 def run_inference(
     stack_name: str,
     manifest: Optional[str],
@@ -1324,6 +1328,7 @@ def run_inference(
     refresh_interval: int,
     region: Optional[str],
     number_of_files: Optional[int],
+    config_version: Optional[str],
 ):
     """
     Run inference on a batch of documents
@@ -1368,6 +1373,9 @@ def run_inference(
       # Process test set with limited files for quick testing
       idp-cli run-inference --stack-name my-stack --test-set fcc-example-test --number-of-files 5 --monitor
 
+      # Process with specific configuration version
+      idp-cli run-inference --stack-name my-stack --dir ./documents/ --config-version v2 --monitor
+
       # Process manifest with baselines (automatically creates "idp-cli" test set for Test Studio integration)
       idp-cli run-inference --stack-name my-stack --manifest docs_with_baselines.csv --monitor
     """
@@ -1405,7 +1413,7 @@ def run_inference(
 
             # Validate number_of_files against manifest size
             if number_of_files is not None:
-                from .manifest_parser import parse_manifest
+                from idp_sdk.core.manifest_parser import parse_manifest
 
                 documents = parse_manifest(manifest)
                 if number_of_files > len(documents):
@@ -1423,11 +1431,60 @@ def run_inference(
             stack_name=stack_name, config_path=config, region=region
         )
 
+        # Validate config_version if specified
+        if config_version:
+            console.print(
+                f"[blue]Validating configuration version: {config_version}[/blue]"
+            )
+            try:
+                import os
+
+                from idp_common.config.configuration_manager import ConfigurationManager
+
+                # Get the configuration table name from processor resources
+                config_table = processor.resources.get("ConfigurationTable")
+                if not config_table:
+                    console.print(
+                        "[red]✗ Could not find ConfigurationTable in stack resources[/red]"
+                    )
+                    sys.exit(1)
+
+                # Set env var and check if version exists
+                os.environ["CONFIGURATION_TABLE_NAME"] = config_table
+                manager = ConfigurationManager()
+                existing_config = manager.get_configuration(
+                    "Config", version=config_version
+                )
+
+                if not existing_config:
+                    console.print(
+                        f"[red]✗ Configuration version '{config_version}' does not exist[/red]"
+                    )
+                    console.print(
+                        f"Use 'idp-cli config-download --stack-name {stack_name}' to see available versions"
+                    )
+                    sys.exit(1)
+
+                console.print(
+                    f"[green]✓ Configuration version '{config_version}' validated[/green]"
+                )
+            except Exception as e:
+                console.print(
+                    f"[red]✗ Failed to validate configuration version: {e}[/red]"
+                )
+                sys.exit(1)
+
         # Process batch based on source type
         with console.status("[bold green]Processing batch..."):
             if test_set:
                 batch_result = _process_test_set(
-                    stack_name, test_set, context, region, processor, number_of_files
+                    stack_name,
+                    test_set,
+                    context,
+                    region,
+                    processor,
+                    number_of_files,
+                    config_version,
                 )
             elif manifest:
                 # Check if manifest has baselines for test studio integration
@@ -1448,6 +1505,7 @@ def run_inference(
                         region,
                         processor,
                         number_of_files,
+                        config_version,
                     )
                 else:
                     # Normal manifest processing without test studio
@@ -1456,6 +1514,7 @@ def run_inference(
                         output_prefix=batch_prefix,
                         batch_id=batch_id,
                         number_of_files=number_of_files,
+                        config_version=config_version,
                     )
             elif directory:
                 batch_result = processor.process_batch_from_directory(
@@ -1465,6 +1524,7 @@ def run_inference(
                     output_prefix=batch_prefix,
                     batch_id=batch_id,
                     number_of_files=number_of_files,
+                    config_version=config_version,
                 )
             else:  # s3_uri
                 batch_result = processor.process_batch_from_s3_uri(
@@ -1867,8 +1927,7 @@ def generate_manifest(
         s3_client = None
         if test_set:
             import boto3
-
-            from .stack_info import StackInfo
+            from idp_sdk.core.stack_info import StackInfo
 
             stack_info = StackInfo(stack_name, region)
             resources = stack_info.get_resources()
@@ -2252,6 +2311,7 @@ def _process_test_set(
     region: Optional[str],
     processor,
     number_of_files: Optional[int] = None,
+    config_version: Optional[str] = None,
 ):
     """Common function to process test sets"""
     # Auto-detect test set using test_set_resolver lambda
@@ -2259,7 +2319,13 @@ def _process_test_set(
 
     # Invoke test runner lambda
     test_run_result = _invoke_test_runner(
-        stack_name, test_set_name, context, region, processor.resources, number_of_files
+        stack_name,
+        test_set_name,
+        context,
+        region,
+        processor.resources,
+        number_of_files,
+        config_version,
     )
     batch_id = test_run_result["testRunId"]
 
@@ -2352,6 +2418,7 @@ def _invoke_test_runner(
     region: Optional[str],
     resources: dict,
     number_of_files: Optional[int] = None,
+    config_version: Optional[str] = None,
 ):
     """Invoke test runner lambda to start test set processing"""
     import json
@@ -2396,6 +2463,10 @@ def _invoke_test_runner(
     # Add numberOfFiles if provided
     if number_of_files is not None:
         payload["arguments"]["input"]["numberOfFiles"] = number_of_files
+
+    # Add configVersion if provided
+    if config_version:
+        payload["arguments"]["input"]["configVersion"] = config_version
 
     console.print(f"[bold blue]Starting test run for test set: {test_set}[/bold blue]")
     if number_of_files:
@@ -2603,7 +2674,7 @@ def stop_workflows(
       idp-cli stop-workflows --stack-name my-stack --skip-purge
     """
     try:
-        from .stop_workflows import WorkflowStopper
+        from idp_sdk.core.stop_workflows import WorkflowStopper
 
         console.print(
             f"[bold blue]Stopping workflows for stack: {stack_name}[/bold blue]"
@@ -2730,7 +2801,7 @@ def load_test(
       3,500
     """
     try:
-        from .load_test import LoadTester
+        from idp_sdk.core.load_test import LoadTester
 
         tester = LoadTester(stack_name=stack_name, region=region)
 
@@ -2850,7 +2921,7 @@ def remove_residual_resources_from_deleted_stacks(
       idp-cli remove-deleted-stack-resources --check-stack-regions us-east-1,us-west-2,eu-central-1,eu-west-1
     """
     try:
-        from .cleanup_orphaned import OrphanedResourceCleanup
+        from idp_sdk.core.cleanup_orphaned import OrphanedResourceCleanup
 
         # Parse regions list
         regions_list = [r.strip() for r in check_stack_regions.split(",")]
@@ -3223,12 +3294,23 @@ def config_validate(
     type=click.Choice(["pattern-1", "pattern-2", "pattern-3"]),
     help="Pattern for validation (auto-detected if not specified)",
 )
+@click.option(
+    "--config-version",
+    required=True,
+    help="Configuration version to update (e.g., v1, v2). If version doesn't exist, it will be created.",
+)
+@click.option(
+    "--version-description",
+    help="Description for the configuration version (used when creating new versions)",
+)
 @click.option("--region", help="AWS region (optional)")
 def config_upload(
     stack_name: str,
     config_file: str,
     validate: bool,
     pattern: Optional[str],
+    config_version: Optional[str],
+    version_description: Optional[str],
     region: Optional[str],
 ):
     """
@@ -3238,10 +3320,19 @@ def config_upload(
     stack's ConfigurationTable in DynamoDB. The config is merged with
     system defaults just like configurations saved through the Web UI.
 
+    Supports configuration versioning - can update existing versions or
+    create new versions with optional descriptions.
+
     Examples:
 
-      # Upload config with validation
+      # Upload config with validation (updates active version)
       idp-cli config-upload --stack-name my-stack --config-file ./config.yaml
+
+      # Update existing version
+      idp-cli config-upload --stack-name my-stack --config-file ./config.yaml --config-version Production
+
+      # Create new version with description
+      idp-cli config-upload --stack-name my-stack --config-file ./config.yaml --config-version NewVersion --version-description "Test configuration for new feature"
 
       # Skip validation (use with caution)
       idp-cli config-upload --stack-name my-stack --config-file ./config.yaml --no-validate
@@ -3347,10 +3438,44 @@ def config_upload(
 
             manager = ConfigurationManager()
 
+            # If config_version specified, check if it exists
+            version_exists = False
+            if config_version:
+                # Check for default version update (warn user)
+                if config_version.lower() == "default":
+                    console.print(
+                        "[yellow]⚠️  Warning: This will update the default [system default] config version[/yellow]"
+                    )
+
+                try:
+                    existing_config = manager.get_configuration(
+                        "Config", version=config_version
+                    )
+                    version_exists = existing_config is not None
+                except Exception:
+                    version_exists = False
+
+                if version_exists:
+                    console.print(
+                        f"[blue]Updating existing configuration version: {config_version}[/blue]"
+                    )
+                else:
+                    console.print(
+                        f"[blue]Creating new configuration version: {config_version}[/blue]"
+                    )
+                    if version_description:
+                        console.print(f"[dim]Description: {version_description}[/dim]")
+                    # Add saveAsVersion flag for new versions
+                    user_config["saveAsVersion"] = True
+            else:
+                console.print("[blue]Updating active configuration version[/blue]")
+
             # Convert to JSON string (the method expects JSON string or dict)
             config_json = json.dumps(user_config)
 
-            success = manager.handle_update_custom_configuration(config_json)
+            success = manager.handle_update_custom_configuration(
+                config_json, version=config_version, description=version_description
+            )
 
             if success:
                 console.print("[green]✓ Configuration uploaded successfully[/green]")
@@ -3397,12 +3522,17 @@ def config_upload(
     type=click.Choice(["pattern-1", "pattern-2", "pattern-3"]),
     help="Pattern for minimal diff (auto-detected if not specified)",
 )
+@click.option(
+    "--config-version",
+    help="Configuration version to download (e.g., v1, v2). If not specified, downloads active version.",
+)
 @click.option("--region", help="AWS region (optional)")
 def config_download(
     stack_name: str,
     output: Optional[str],
     output_format: str,
     pattern: Optional[str],
+    config_version: Optional[str],
     region: Optional[str],
 ):
     """
@@ -3458,7 +3588,9 @@ def config_download(
             from idp_common.config import ConfigurationReader
 
             reader = ConfigurationReader(table_name=config_table)
-            config_data = reader.get_merged_configuration(as_model=False)
+            config_data = reader.get_configuration(
+                "Config", version=config_version, as_model=False
+            )
             console.print("[green]✓ Configuration retrieved[/green]")
 
         except ImportError:

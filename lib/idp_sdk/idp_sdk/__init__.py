@@ -9,15 +9,18 @@ Provides programmatic access to document processing capabilities.
 Example:
     >>> from idp_sdk import IDPClient
     >>>
-    >>> # For stack-dependent operations
-    >>> client = IDPClient(stack_name="my-idp-stack", region="us-west-2")
-    >>> result = client.run_inference(source="./documents/")
-    >>> status = client.get_status(batch_id=result.batch_id)
-    >>>
-    >>> # For stack-independent operations
+    >>> # Stack operations
     >>> client = IDPClient()
-    >>> manifest = client.generate_manifest(directory="./docs/")
-    >>> config = client.config_create(features="min")
+    >>> client.stack.deploy(stack_name="my-stack", pattern="pattern-2")
+    >>>
+    >>> # Batch operations
+    >>> client = IDPClient(stack_name="my-stack", region="us-west-2")
+    >>> result = client.batch.run(source="./documents/")
+    >>> status = client.batch.get_status(batch_id=result.batch_id)
+    >>>
+    >>> # Config operations (no stack required)
+    >>> client = IDPClient()
+    >>> client.config.create(features="min", output="config.yaml")
 """
 
 from .client import IDPClient
@@ -31,30 +34,58 @@ from .exceptions import (
     IDPValidationError,
 )
 from .models import (
+    # Assessment models
+    AssessmentConfidenceResult,
+    AssessmentFieldConfidence,
+    AssessmentFieldGeometry,
+    AssessmentGeometryResult,
+    AssessmentMetrics,
+    # Batch models
+    BatchDeletionResult,
+    BatchDownloadResult,
     BatchInfo,
+    BatchListResult,
+    BatchRerunResult,
     BatchResult,
-    BatchStatusResult,
+    BatchStatus,
+    # Config models
     ConfigCreateResult,
     ConfigDownloadResult,
     ConfigUploadResult,
     ConfigValidationResult,
-    DeletionResult,
-    DeploymentResult,
+    # Document models
     DocumentDeletionResult,
+    DocumentDownloadResult,
+    DocumentInfo,
+    DocumentListResult,
+    DocumentMetadata,
+    DocumentRerunResult,
+    DocumentState,
     DocumentStatus,
-    DocumentStatusInfo,
-    DownloadResult,
+    DocumentUploadResult,
+    # Evaluation models
+    EvaluationBaselineListResult,
+    EvaluationMetrics,
+    EvaluationReport,
+    # Manifest models
     LoadTestResult,
     ManifestDocument,
     ManifestResult,
+    ManifestValidationResult,
+    # Enums
     Pattern,
-    RerunResult,
     RerunStep,
-    SingleDocumentDeletionResult,
+    # Search models
+    SearchCitation,
+    SearchDocumentReference,
+    SearchResult,
+    # Stack models
+    StackDeletionResult,
+    StackDeploymentResult,
     StackResources,
-    StackStatus,
+    StackState,
+    # Testing models
     StopWorkflowsResult,
-    ValidationResult,
 )
 
 __version__ = "0.1.0"
@@ -71,29 +102,55 @@ __all__ = [
     "IDPResourceNotFoundError",
     "IDPTimeoutError",
     # Enums
-    "StackStatus",
-    "DocumentStatus",
+    "StackState",
+    "DocumentState",
     "Pattern",
     "RerunStep",
-    # Models
-    "DeploymentResult",
-    "DeletionResult",
+    # Stack models
+    "StackDeploymentResult",
+    "StackDeletionResult",
+    "StackResources",
+    # Batch models
     "BatchResult",
-    "BatchStatusResult",
-    "DocumentStatusInfo",
-    "DocumentDeletionResult",
-    "SingleDocumentDeletionResult",
-    "RerunResult",
-    "DownloadResult",
-    "ManifestDocument",
-    "ManifestResult",
-    "ValidationResult",
+    "BatchStatus",
     "BatchInfo",
-    "StopWorkflowsResult",
-    "LoadTestResult",
+    "BatchListResult",
+    "BatchRerunResult",
+    "BatchDownloadResult",
+    "BatchDeletionResult",
+    # Document models
+    "DocumentStatus",
+    "DocumentUploadResult",
+    "DocumentDownloadResult",
+    "DocumentRerunResult",
+    "DocumentDeletionResult",
+    "DocumentMetadata",
+    "DocumentInfo",
+    "DocumentListResult",
+    # Evaluation models
+    "EvaluationReport",
+    "EvaluationMetrics",
+    "EvaluationBaselineListResult",
+    # Assessment models
+    "AssessmentConfidenceResult",
+    "AssessmentFieldConfidence",
+    "AssessmentGeometryResult",
+    "AssessmentFieldGeometry",
+    "AssessmentMetrics",
+    # Search models
+    "SearchResult",
+    "SearchCitation",
+    "SearchDocumentReference",
+    # Config models
     "ConfigCreateResult",
     "ConfigValidationResult",
     "ConfigDownloadResult",
     "ConfigUploadResult",
-    "StackResources",
+    # Manifest models
+    "ManifestDocument",
+    "ManifestResult",
+    "ManifestValidationResult",
+    # Testing models
+    "StopWorkflowsResult",
+    "LoadTestResult",
 ]

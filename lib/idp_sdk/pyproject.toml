@@ -30,8 +30,10 @@ dependencies = [
     "boto3>=1.28.0",
     "botocore>=1.31.0",
     "pydantic>=2.0.0",
-    "idp_common",  # Core utilities
-    "idp-cli",     # CLI components we wrap
+    "idp_common",
+    "click>=8.0.0",
+    "rich>=13.0.0",
+    "pyyaml>=6.0",
 ]
 
 [project.optional-dependencies]

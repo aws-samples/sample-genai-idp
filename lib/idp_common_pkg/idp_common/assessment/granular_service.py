@@ -852,7 +852,7 @@ class GranularAssessmentService:
                 f"Processing assessment task {task.task_id} with {len(task.attributes)} attributes"
             )
 
-            # Invoke Bedrock
+            # Invoke Bedrock (or LambdaHook)
             response_with_metering = bedrock.invoke_model(
                 model_id=model_id,
                 system_prompt=system_prompt,
@@ -862,6 +862,7 @@ class GranularAssessmentService:
                 top_p=top_p,
                 max_tokens=max_tokens,
                 context="GranularAssessment",
+                model_lambda_hook_arn=self.config.assessment.model_lambda_hook_arn,
             )
 
             # Extract text from response

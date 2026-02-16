@@ -40,6 +40,7 @@ def handler(event, context):
         file_name = arguments.get('fileName')
         content_type = arguments.get('contentType', 'application/octet-stream')
         prefix = arguments.get('prefix', '')
+        version = arguments.get('version')  # Optional version parameter
         
         if not file_name:
             raise ValueError("fileName is required")
@@ -66,16 +67,23 @@ def handler(event, context):
         # Generate a presigned POST URL for uploading
         logger.info(f"Generating presigned POST data for: {object_key} with content type: {content_type}")
         
+        # Prepare fields and conditions
+        fields = {'Content-Type': content_type}
+        conditions = [
+            ['content-length-range', 1, 104857600],  # 1 Byte to 100 MB
+            {'Content-Type': content_type}
+        ]
+        
+        # Add version as metadata
+        if version:
+            fields['x-amz-meta-config-version'] = version
+            conditions.append({'x-amz-meta-config-version': version})
+        
         presigned_post = s3_client.generate_presigned_post(
             Bucket=bucket_name,
             Key=object_key,
-            Fields={
-                'Content-Type': content_type
-            },
-            Conditions=[
-                ['content-length-range', 1, 104857600],  # 1 Byte to 100 MB
-                {'Content-Type': content_type}
-            ],
+            Fields=fields,
+            Conditions=conditions,
             ExpiresIn=900  # 15 minutes
         )
         

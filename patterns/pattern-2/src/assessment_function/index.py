@@ -101,11 +101,6 @@ def handler(event, context):
     start_time = time.time()  # Capture start time for Lambda metering
     logger.info(f"Starting assessment processing for event: {json.dumps(event, default=str)}")
 
-    # Load configuration
-    config = get_config(as_model=True)
-    # Use default=str to handle Decimal and other non-serializable types
-    logger.info(f"Config: {json.dumps(config.model_dump(), default=str)}")
-    
     # Extract input from event - handle both compressed and uncompressed
     document_data = event.get('document', {})
     section_id = event.get('section_id')
@@ -120,6 +115,19 @@ def handler(event, context):
     # Convert document data to Document object - handle compression
     working_bucket = os.environ.get('WORKING_BUCKET')
     document = Document.load_document(document_data, working_bucket, logger)
+    
+    # Load configuration - use document's version if specified, otherwise use active version
+    config_version = getattr(document, 'config_version', None)
+    config = get_config(as_model=True, version=config_version)
+    
+    if config_version:
+        logger.info(f"Using configuration version {config_version} for document {document.id}")
+    else:
+        logger.info(f"Using active configuration for document {document.id}")
+    
+    # Use default=str to handle Decimal and other non-serializable types
+    logger.info(f"Config: {json.dumps(config.model_dump(), default=str)}")
+    
     logger.info(f"Processing assessment for document {document.id}, section {section_id}")
 
     # X-Ray annotations

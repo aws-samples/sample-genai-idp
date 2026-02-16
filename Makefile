@@ -51,7 +51,7 @@ ui-start:
 test:
 	$(MAKE) -C lib/idp_common_pkg test
 	cd lib/idp_cli_pkg && python -m pytest -v
-	cd lib/idp_sdk && python -m pytest -v
+	cd lib/idp_sdk && python -m pytest -m "not integration" -v
 
 # Run both linting and formatting in one command
 lint: ruff-lint format check-arn-partitions validate-buildspec ui-lint

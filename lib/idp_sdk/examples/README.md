@@ -23,19 +23,19 @@ Demonstrates the most common workflow: submit documents, monitor progress, downl
 ```bash
 # Process local directory
 python basic_processing.py \
-    --stack-name IDP-Nova-1 \
+    --stack-name idp-stack-01 \
     --directory ./samples \
     --output-dir /tmp/results
 
 # Process from S3
 python basic_processing.py \
-    --stack-name IDP-Nova-1 \
+    --stack-name idp-stack-01 \
     --s3-uri s3://my-bucket/documents/ \
     --output-dir /tmp/results
 
 # Process from manifest
 python basic_processing.py \
-    --stack-name IDP-Nova-1 \
+    --stack-name idp-stack-01 \
     --manifest ./my-manifest.csv \
     --output-dir /tmp/results
 ```
@@ -77,10 +77,10 @@ python config_operations.py create --features all --output my-config.yaml
 python config_operations.py validate my-config.yaml --pattern pattern-2
 
 # Download config from deployed stack
-python config_operations.py download --stack-name IDP-Nova-1 --output current-config.yaml
+python config_operations.py download --stack-name idp-stack-01 --output current-config.yaml
 
 # Upload config to deployed stack
-python config_operations.py upload my-config.yaml --stack-name IDP-Nova-1
+python config_operations.py upload my-config.yaml --stack-name idp-stack-01
 ```
 
 ### 4. Workflow Control (`workflow_control.py`)
@@ -91,22 +91,22 @@ Demonstrates workflow management: listing batches, getting status, rerunning doc
 
 ```bash
 # List recent batches
-python workflow_control.py --stack-name IDP-Nova-1 list --limit 10
+python workflow_control.py --stack-name idp-stack-01 list --limit 10
 
 # Get batch status
-python workflow_control.py --stack-name IDP-Nova-1 status --batch-id my-batch-123
+python workflow_control.py --stack-name idp-stack-01 status --batch-id my-batch-123
 
 # Get single document status
-python workflow_control.py --stack-name IDP-Nova-1 status --document-id "batch/doc.pdf"
+python workflow_control.py --stack-name idp-stack-01 status --document-id "batch/doc.pdf"
 
 # Rerun a batch from extraction step
-python workflow_control.py --stack-name IDP-Nova-1 rerun --batch-id my-batch-123 --step extraction
+python workflow_control.py --stack-name idp-stack-01 rerun --batch-id my-batch-123 --step extraction
 
 # Stop all running workflows
-python workflow_control.py --stack-name IDP-Nova-1 stop
+python workflow_control.py --stack-name idp-stack-01 stop
 
 # Show stack resources
-python workflow_control.py --stack-name IDP-Nova-1 resources
+python workflow_control.py --stack-name idp-stack-01 resources
 ```
 
 ### 5. Lambda Function (`lambda_function.py`)
@@ -126,15 +126,17 @@ client = IDPClient(stack_name="my-stack", region="us-west-2")
 # Or create client and specify stack per-operation
 client = IDPClient()
 
-# Stack-dependent operations
-result = client.run_inference(source="./documents/")
-status = client.get_status(batch_id=result.batch_id)
-client.download_results(batch_id=result.batch_id, output_dir="./results")
+# Batch operations (require stack)
+result = client.batch.run(source="./documents/")
+status = client.batch.get_status(batch_id=result.batch_id)
+client.batch.download_results(batch_id=result.batch_id, output_dir="./results")
 
-# Stack-independent operations
-manifest = client.generate_manifest(directory="./docs/")
-config = client.config_create(features="min")
-validation = client.config_validate(config_file="my-config.yaml")
+# Config operations (no stack required)
+config = client.config.create(features="min")
+validation = client.config.validate(config_file="my-config.yaml")
+
+# Manifest operations (no stack required)
+manifest = client.manifest.generate(directory="./docs/")
 ```
 
 ## Common Patterns
@@ -146,11 +148,11 @@ import time
 from idp_sdk import IDPClient
 
 client = IDPClient(stack_name="my-stack")
-result = client.run_inference(source="./documents/")
+result = client.batch.run(source="./documents/")
 
 # Poll until complete
 while True:
-    status = client.get_status(batch_id=result.batch_id)
+    status = client.batch.get_status(batch_id=result.batch_id)
     print(f"Progress: {status.completed}/{status.total}")
     
     if status.all_complete:
@@ -160,7 +162,7 @@ while True:
     time.sleep(10)
 
 # Download results
-client.download_results(batch_id=result.batch_id, output_dir="./results")
+client.batch.download_results(batch_id=result.batch_id, output_dir="./results")
 ```
 
 ### Process with Custom Configuration
@@ -171,10 +173,10 @@ from idp_sdk import IDPClient
 client = IDPClient(stack_name="my-stack")
 
 # Upload custom config first
-client.config_upload(config_file="my-config.yaml")
+client.config.upload(config_file="my-config.yaml")
 
 # Then process documents (they will use the uploaded config)
-result = client.run_inference(directory="./documents/")
+result = client.batch.run(directory="./documents/")
 ```
 
 ### Error Handling
@@ -191,7 +193,7 @@ from idp_sdk import (
 client = IDPClient(stack_name="my-stack")
 
 try:
-    result = client.run_inference(source="./documents/")
+    result = client.batch.run(source="./documents/")
 except IDPConfigurationError as e:
     print(f"Configuration error: {e}")
 except IDPProcessingError as e:
@@ -206,21 +208,27 @@ except IDPResourceNotFoundError as e:
 
 | Method | Requires Stack | Description |
 |--------|----------------|-------------|
-| `run_inference()` | Yes | Submit documents for processing |
-| `get_status()` | Yes | Get batch/document status |
-| `list_batches()` | Yes | List recent batch jobs |
-| `download_results()` | Yes | Download processing results |
-| `rerun_inference()` | Yes | Rerun documents from a step |
-| `stop_workflows()` | Yes | Stop all running workflows |
-| `get_resources()` | Yes | Get stack resource details |
-| `config_download()` | Yes | Download configuration |
-| `config_upload()` | Yes | Upload configuration |
-| `deploy()` | Optional* | Deploy/update stack |
-| `delete()` | Yes | Delete stack |
-| `generate_manifest()` | No | Generate manifest from files |
-| `validate_manifest()` | No | Validate manifest file |
-| `config_create()` | No | Create config template |
-| `config_validate()` | No | Validate config file |
-| `load_test()` | Yes | Run load test |
+| `batch.run()` | Yes | Submit documents for processing |
+| `batch.get_status()` | Yes | Get batch/document status |
+| `batch.list()` | Yes | List recent batch jobs |
+| `batch.download_results()` | Yes | Download processing results |
+| `batch.rerun()` | Yes | Rerun documents from a step |
+| `batch.stop_workflows()` | Yes | Stop all running workflows |
+| `document.get_status()` | Yes | Get single document status |
+| `document.get_metadata()` | Yes | Get document metadata |
+| `document.delete()` | Yes | Delete document and data |
+| `stack.get_resources()` | Yes | Get stack resource details |
+| `stack.deploy()` | Optional* | Deploy/update stack |
+| `stack.delete()` | Yes | Delete stack |
+| `config.create()` | No | Create config template |
+| `config.validate()` | No | Validate config file |
+| `config.download()` | Yes | Download configuration |
+| `config.upload()` | Yes | Upload configuration |
+| `manifest.generate()` | No | Generate manifest from files |
+| `manifest.validate()` | No | Validate manifest file |
+| `search.query()` | Yes | Query knowledge base |
+| `evaluation.run()` | Yes | Run evaluation against baselines |
+| `assessment.get_confidence()` | Yes | Get extraction confidence |
+| `testing.load_test()` | Yes | Run load test |
 
 *Deploy can create a new stack (no existing stack required)

@@ -1,7 +1,7 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: MIT-0
 
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import {
   Container,
   Header,
@@ -16,6 +16,7 @@ import {
   FormField,
   Input,
   RadioGroup,
+  ExpandableSection,
   Icon,
 } from '@cloudscape-design/components';
 import Editor from '@monaco-editor/react';
@@ -25,14 +26,58 @@ import ReactMarkdown from 'react-markdown';
 import { generateClient } from 'aws-amplify/api';
 import { ConsoleLogger } from 'aws-amplify/utils';
 import useConfiguration from '../../hooks/use-configuration';
+import useConfigurationVersions from '../../hooks/use-configuration-versions';
 import useConfigurationLibrary from '../../hooks/use-configuration-library';
 import useSettingsContext from '../../contexts/settings';
 import ConfigBuilder from './ConfigBuilder';
+import ConfigurationVersionsTable from './ConfigurationVersionsTable';
+import ConfigurationComparison from './ConfigurationComparison';
 import { deepMerge } from '../../utils/configUtils';
 import syncBdaIdpMutation from '../../graphql/queries/syncBdaIdp';
 
 const client = generateClient();
 const logger = new ConsoleLogger('ConfigurationLayout');
+
+// Utility function to normalize boolean values from strings (same as use-configuration.js)
+const normalizeBooleans = (obj, schema) => {
+  if (!obj || !schema) return obj;
+
+  const normalizeValue = (value, propertySchema) => {
+    if (propertySchema?.type === 'boolean') {
+      if (typeof value === 'string') {
+        if (value.toLowerCase() === 'true') return true;
+        if (value.toLowerCase() === 'false') return false;
+      }
+      return value;
+    }
+
+    if (value && typeof value === 'object' && !Array.isArray(value) && propertySchema?.properties) {
+      const normalized = { ...value };
+      Object.keys(normalized).forEach((key) => {
+        if (propertySchema.properties[key]) {
+          normalized[key] = normalizeValue(normalized[key], propertySchema.properties[key]);
+        }
+      });
+      return normalized;
+    }
+
+    if (Array.isArray(value) && propertySchema?.items) {
+      return value.map((item) => normalizeValue(item, propertySchema.items));
+    }
+
+    return value;
+  };
+
+  const normalized = { ...obj };
+  if (schema.properties) {
+    Object.keys(normalized).forEach((key) => {
+      if (schema.properties[key]) {
+        normalized[key] = normalizeValue(normalized[key], schema.properties[key]);
+      }
+    });
+  }
+  return normalized;
+};
 
 // Utility function to check if two values are numerically equivalent
 // Handles cases where 5 and 5.0, or "5" and 5 should be considered equal
@@ -64,6 +109,68 @@ const isNumericValue = (val) => {
 };
 
 const ConfigurationLayout = () => {
+  // Version selection state - declare first
+  const [selectedVersionsForCompare, setSelectedVersionsForCompare] = useState([]);
+  const [selectedVersion, setSelectedVersion] = useState(null);
+  const [versionsTableExpanded, setVersionsTableExpanded] = useState(false);
+
+  // Import as new version state
+  const [importedConfigForNewVersion, setImportedConfigForNewVersion] = useState(null);
+  const [newVersionName, setNewVersionName] = useState('');
+  const [newVersionDescription, setNewVersionDescription] = useState('');
+  const [importSource, setImportSource] = useState(null); // Track import source: 'file', 'library', 'migration'
+
+  // Configuration Library state
+  const [showLibraryBrowserModal, setShowLibraryBrowserModal] = useState(false);
+  const [showReadmeModal, setShowReadmeModal] = useState(false);
+  const [libraryConfigs, setLibraryConfigs] = useState([]);
+  const [selectedLibraryConfig, setSelectedLibraryConfig] = useState(null);
+  const [readmeContent, setReadmeContent] = useState('');
+  const [libraryLoading, setLibraryLoading] = useState(false);
+
+  // Add versions hook for the table
+  const {
+    versions,
+    loading: versionsLoading,
+    fetchVersions,
+    fetchVersion,
+    setActiveVersion,
+    deleteVersion,
+    saveAsNewVersion,
+  } = useConfigurationVersions();
+
+  // Get active version name
+  const activeVersionName = useMemo(() => {
+    const activeVersion = versions.find((v) => v.isActive);
+    return activeVersion?.versionName || 'default';
+  }, [versions]);
+
+  // Version description state
+  const currentVersionName = selectedVersion || activeVersionName;
+  const currentVersion = versions.find((v) => v.versionName === currentVersionName);
+  const [versionDescription, setVersionDescription] = useState(currentVersion?.description || '');
+
+  // Update description when version changes
+  useEffect(() => {
+    setVersionDescription(currentVersion?.description || '');
+    setExportFileName(currentVersionName || 'configuration'); // Update export filename when version changes
+  }, [currentVersion?.description, currentVersionName]);
+
+  // Handle URL query parameter for version selection
+  useEffect(() => {
+    // For hash routing, get parameters from the hash part
+    const hash = window.location.hash;
+    const urlParams = new URLSearchParams(hash.split('?')[1] || '');
+    const versionParam = urlParams.get('version');
+
+    if (versionParam && versions.length > 0 && !selectedVersion) {
+      const versionExists = versions.some((v) => v.versionName === versionParam);
+      if (versionExists) {
+        setSelectedVersion(versionParam);
+      }
+    }
+  }, [versions, selectedVersion]);
+
   const {
     schema,
     mergedConfig,
@@ -76,7 +183,214 @@ const ConfigurationLayout = () => {
     fetchConfiguration,
     isCustomized,
     resetToDefault,
-  } = useConfiguration();
+  } = useConfiguration(selectedVersion || activeVersionName); // Pass version to hook
+
+  // Handle version selection
+  const handleVersionSelect = async (versionName) => {
+    logger.info('Selecting version:', versionName);
+    setSelectedVersion(versionName);
+    await fetchConfiguration(versionName); // Load selected version data into form
+  };
+
+  // Handle version selection for comparison
+  const handleVersionSelectForCompare = (versionName, selected) => {
+    if (selected) {
+      setSelectedVersionsForCompare((prev) => [...prev, versionName]);
+    } else {
+      setSelectedVersionsForCompare((prev) => prev.filter((v) => v !== versionName));
+    }
+  };
+
+  // Version comparison state
+  const [showCompareModal, setShowCompareModal] = useState(false);
+  const [compareData, setCompareData] = useState(null);
+  const [comparingVersions, setComparingVersions] = useState(false);
+
+  // Handle version comparison
+  const handleCompareVersions = async () => {
+    if (selectedVersionsForCompare.length < 2) return;
+
+    setComparingVersions(true);
+    try {
+      // Fetch raw configurations and merge them using same logic as fetchConfiguration
+      const configPromises = selectedVersionsForCompare.map(async (versionName) => {
+        const rawConfig = await fetchVersion(versionName);
+
+        // Parse the configs (same logic as fetchConfiguration)
+        let schemaObj = rawConfig.schema;
+        let defaultObj = rawConfig.default;
+        let customObj = rawConfig.custom;
+
+        // Parse schema if it's a string
+        if (typeof rawConfig.schema === 'string') {
+          schemaObj = JSON.parse(rawConfig.schema);
+        }
+
+        // Unwrap nested Schema object if present
+        if (schemaObj && schemaObj.Schema) {
+          schemaObj = schemaObj.Schema;
+        }
+
+        // Parse default config if it's a string
+        if (typeof rawConfig.default === 'string') {
+          defaultObj = JSON.parse(rawConfig.default);
+        }
+
+        // Parse custom config if it's a string
+        if (typeof rawConfig.custom === 'string' && rawConfig.custom) {
+          customObj = JSON.parse(rawConfig.custom);
+        } else if (!rawConfig.custom) {
+          customObj = {};
+        }
+
+        // Normalize boolean values (same as fetchConfiguration)
+        const normalizedDefaultObj = normalizeBooleans(defaultObj, schemaObj);
+        const normalizedCustomObj = normalizeBooleans(customObj, schemaObj);
+
+        // Return merged config (same as fetchConfiguration)
+        return deepMerge(normalizedDefaultObj, normalizedCustomObj);
+      });
+
+      const configs = await Promise.all(configPromises);
+
+      // Create comparison data
+      const comparisonData = {
+        versions: selectedVersionsForCompare,
+        configs: configs.reduce((acc, config, index) => {
+          acc[selectedVersionsForCompare[index]] = config;
+          return acc;
+        }, {}),
+      };
+
+      setCompareData(comparisonData);
+      setShowCompareModal(true);
+    } catch (err) {
+      console.error('Failed to fetch configurations for comparison:', err);
+    } finally {
+      setComparingVersions(false);
+    }
+  };
+
+  // Handle activate version
+  const handleActivateVersion = async (versionName, skipSyncConfirmation = false) => {
+    // Validate versionName
+    if (!versionName) {
+      console.error('Cannot activate version: versionName is null or undefined');
+      return;
+    }
+
+    // Check if Pattern 1 and show confirmation for auto-sync to BDA (unless skipping)
+    if (isPattern1 && !skipSyncConfirmation) {
+      setShowActivateVersionConfirmModal(true);
+      return;
+    }
+
+    // Direct activation for non-Pattern 1 or when skipping confirmation
+    await performActivateVersion(versionName);
+  };
+
+  // Perform the actual activation
+  const performActivateVersion = async (versionName) => {
+    if (!versionName) {
+      console.error('Cannot activate version: versionName is null or undefined');
+      return;
+    }
+
+    try {
+      await setActiveVersion(versionName);
+
+      // Small delay to ensure backend consistency before fetching config
+      await new Promise((resolve) => setTimeout(resolve, 500));
+
+      setSelectedVersion(versionName); // Select the activated version (useEffect will fetch config)
+    } catch (err) {
+      console.error('Failed to activate version:', err);
+    }
+  };
+
+  // Perform sync to BDA then activate version
+  const performSyncThenActivate = async (versionName) => {
+    if (!versionName) {
+      console.error('Cannot sync and activate: versionName is null or undefined');
+      return;
+    }
+
+    try {
+      // First sync to BDA
+      await handleSyncBdaIdp('idp_to_bda');
+      logger.debug(`Synced to BDA before activating version ${versionName}`);
+
+      // Then activate the version (but don't sync again since we just did)
+      await setActiveVersion(versionName);
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      setSelectedVersion(versionName);
+    } catch (err) {
+      console.error('Failed to sync and activate version:', err);
+    }
+  };
+
+  // Handle import as new version
+  const handleImportAsNewVersion = () => {
+    setImportError(null); // Clear any previous errors
+    setShowImportSourceModal(true);
+  };
+
+  // Handle creating new version from imported config
+  const handleCreateVersionFromImport = async () => {
+    if (!importedConfigForNewVersion) {
+      return;
+    }
+
+    try {
+      const versionName = newVersionName.trim() || 'New imported version';
+      const description = newVersionDescription.trim();
+
+      logger.info(`Creating version from ${importSource || 'unknown'}: ${versionName} with description: "${description}"`);
+      logger.info('Version creation params:', { versionName, description, hasConfig: !!importedConfigForNewVersion });
+
+      const result = await saveAsNewVersion(importedConfigForNewVersion, versionName, description);
+
+      if (!result.success) {
+        setImportError(result.error || 'Failed to create version from import');
+        return;
+      }
+
+      // Small delay to ensure backend consistency before fetching
+      await new Promise((resolve) => setTimeout(resolve, 500));
+
+      setSelectedVersion(versionName); // Highlight the new version in table
+      await fetchVersions();
+      logger.info(`Version ${versionName} created successfully from ${importSource}`);
+
+      // Force close modal after all operations complete
+      setImportedConfigForNewVersion(null);
+      setImportSource(null);
+      setNewVersionName('');
+      setNewVersionDescription('');
+      setShowImportSourceModal(false); // Also close import source modal
+    } catch (err) {
+      logger.error('Create version error:', err);
+      console.error('Create version error:', err);
+    }
+  };
+
+  // Handle delete versions
+  const handleDeleteVersions = async (versionNames) => {
+    try {
+      for (const versionName of versionNames) {
+        await deleteVersion(versionName, true); // Skip individual refresh
+      }
+      await fetchVersions(); // Single refresh after all deletions
+      setSelectedVersionsForCompare([]); // Clear selection
+
+      // If currently selected version was deleted, clear selection
+      if (selectedVersion && versionNames.includes(selectedVersion)) {
+        setSelectedVersion(null);
+      }
+    } catch (err) {
+      console.error('Failed to delete versions:', err);
+    }
+  };
 
   const [formValues, setFormValues] = useState({});
   const [jsonContent, setJsonContent] = useState('');
@@ -89,23 +403,22 @@ const ConfigurationLayout = () => {
   const [viewMode, setViewMode] = useState('form'); // Form view as default
   const [showResetModal, setShowResetModal] = useState(false);
   const [showSaveAsDefaultModal, setShowSaveAsDefaultModal] = useState(false);
+  const [showSaveAsVersionModal, setShowSaveAsVersionModal] = useState(false);
+  const [saveAsVersionName, setSaveAsVersionName] = useState('');
+  const [saveAsVersionDescription, setSaveAsVersionDescription] = useState('');
+  const [saveAsVersionError, setSaveAsVersionError] = useState(null);
   const [showExportModal, setShowExportModal] = useState(false);
   const [exportFormat, setExportFormat] = useState('json');
-  const [exportFileName, setExportFileName] = useState('configuration');
+  const [exportFileName, setExportFileName] = useState(currentVersionName || 'configuration');
   const [importError, setImportError] = useState(null);
   const [extractionSchema, setExtractionSchema] = useState(null);
   const [ruleSchema, setRuleSchema] = useState(null);
   const [showMigrationModal, setShowMigrationModal] = useState(false);
   const [pendingImportConfig, setPendingImportConfig] = useState(null);
+  const [pendingImportSource, setPendingImportSource] = useState(null); // Track import source for version naming
 
   // Configuration Library state
   const [showImportSourceModal, setShowImportSourceModal] = useState(false);
-  const [showLibraryBrowserModal, setShowLibraryBrowserModal] = useState(false);
-  const [showReadmeModal, setShowReadmeModal] = useState(false);
-  const [libraryConfigs, setLibraryConfigs] = useState([]);
-  const [selectedLibraryConfig, setSelectedLibraryConfig] = useState(null);
-  const [readmeContent, setReadmeContent] = useState('');
-  const [libraryLoading, setLibraryLoading] = useState(false);
 
   // ConfigBuilder tab state - lifted up to preserve across refreshes
   const [configBuilderActiveTab, setConfigBuilderActiveTab] = useState('configuration');
@@ -115,6 +428,8 @@ const ConfigurationLayout = () => {
   const [syncSuccess, setSyncSuccess] = useState(false);
   const [syncSuccessMessage, setSyncSuccessMessage] = useState('');
   const [syncError, setSyncError] = useState(null);
+  const [showSyncToBdaConfirmModal, setShowSyncToBdaConfirmModal] = useState(false);
+  const [showActivateVersionConfirmModal, setShowActivateVersionConfirmModal] = useState(false);
 
   const editorRef = useRef(null);
 
@@ -123,9 +438,47 @@ const ConfigurationLayout = () => {
     if (!mergedConfig || !formValues || Object.keys(formValues).length === 0) {
       return false;
     }
-    // Deep comparison using JSON serialization
-    return JSON.stringify(formValues) !== JSON.stringify(mergedConfig);
-  }, [formValues, mergedConfig]);
+    // Check if form values changed
+    const formChanged = JSON.stringify(formValues) !== JSON.stringify(mergedConfig);
+    // Check if version description changed
+    const descriptionChanged = versionDescription !== (currentVersion?.description || '');
+
+    return formChanged || descriptionChanged;
+  }, [formValues, mergedConfig, versionDescription, currentVersion?.description]);
+
+  // Warn user before leaving page with unsaved changes
+  // Both beforeunload (browser close/refresh) and hashchange (SPA navigation)
+  useEffect(() => {
+    const handleBeforeUnload = (e) => {
+      if (hasUnsavedChanges) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    };
+    const handleHashChange = () => {
+      // For SPA hash-based routing, intercept navigation when there are unsaved changes
+      if (hasUnsavedChanges) {
+        // eslint-disable-next-line no-alert
+        const confirmed = window.confirm('You have unsaved configuration changes. Are you sure you want to leave?');
+        if (!confirmed) {
+          // Restore the hash to the config page
+          window.history.pushState(null, '', `${window.location.pathname}#/documents/config`);
+        }
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    window.addEventListener('hashchange', handleHashChange);
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      window.removeEventListener('hashchange', handleHashChange);
+    };
+  }, [hasUnsavedChanges]);
+
+  // Discard unsaved changes by re-loading the current config from server
+  const handleDiscardChanges = useCallback(async () => {
+    await fetchConfiguration(currentVersionName, false);
+    setVersionDescription(currentVersion?.description || '');
+  }, [currentVersionName, currentVersion?.description, fetchConfiguration]);
 
   // Hooks for configuration library
   const { listConfigurations, getFile } = useConfigurationLibrary();
@@ -166,6 +519,13 @@ const ConfigurationLayout = () => {
       console.log('Setting form values from mergedConfig:', mergedConfig);
 
       // Make a deep copy to ensure we're not dealing with references
+      // Clear schemas first to ensure clean state
+      setExtractionSchema(null);
+      setRuleSchema(null);
+
+      // Switch to configuration tab when version changes to avoid stale schema display
+      setConfigBuilderActiveTab('configuration');
+
       const formData = JSON.parse(JSON.stringify(mergedConfig));
       setFormValues(formData);
 
@@ -623,7 +983,7 @@ const ConfigurationLayout = () => {
 
     try {
       // Simpler approach: Just compare the current form values with default values
-      // and only include differences in our custom config
+      // and only include differences in our version config
       const customConfigToSave = {};
 
       // Helper function to compare values - returns a new object
@@ -918,13 +1278,19 @@ const ConfigurationLayout = () => {
           console.log('DEBUG: Including rule schema (rule_classes) in save:', formValues.rule_classes);
         }
 
-        // CRITICAL: If there are no differences AND no schema changes, don't send update to backend
+        // CRITICAL: If there are no differences AND no schema changes AND no description changes, don't send update to backend
         // This prevents unnecessary API calls and potential data issues
-        if (Object.keys(builtObject).length === 0) {
+        const descriptionChanged = versionDescription !== (currentVersion?.description || '');
+        if (Object.keys(builtObject).length === 0 && !descriptionChanged) {
           console.log('No changes detected, skipping save');
           setSaveSuccess(true);
           setTimeout(() => setSaveSuccess(false), 3000);
           return;
+        }
+
+        // If only description changed, ensure we still send an update
+        if (Object.keys(builtObject).length === 0 && descriptionChanged) {
+          console.log('Only description changed, proceeding with save');
         }
 
         Object.assign(customConfigToSave, builtObject);
@@ -932,18 +1298,62 @@ const ConfigurationLayout = () => {
         console.log('Saving customized config:', configToSave);
       }
 
-      const success = await updateConfiguration(configToSave);
+      console.log('Save parameters:', { currentVersionName, configToSave, versionDescription });
+      const success = await updateConfiguration(currentVersionName, configToSave, versionDescription);
 
       if (success) {
         setSaveSuccess(true);
         if (saveAsDefault) {
           setShowSaveAsDefaultModal(false);
         }
+        // Refresh versions list after successful save
+        await fetchVersions();
       } else {
         setSaveError('Failed to save configuration. Please try again.');
       }
     } catch (err) {
       console.error('Save error:', err);
+      setSaveError(`Error: ${err.message}`);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleSaveAsVersion = async () => {
+    // Validate content before saving
+    const currentErrors = validateCurrentContent();
+
+    if (currentErrors.length > 0) {
+      setValidationErrors(currentErrors);
+      setSaveError('Cannot save: Configuration contains validation errors');
+      return;
+    }
+
+    setIsSaving(true);
+    setSaveSuccess(false);
+    setSaveError(null);
+
+    try {
+      // Send merged config like "Save as default" - ensures all fields are captured
+      const builtObject = deepMerge(customConfig || {}, formValues);
+
+      const result = await saveAsNewVersion(builtObject, saveAsVersionName, saveAsVersionDescription);
+
+      if (result.success) {
+        setSaveSuccess(true);
+        setShowSaveAsVersionModal(false);
+        setSaveAsVersionName('');
+        setSaveAsVersionDescription('');
+
+        // Select the new version and refresh
+        setSelectedVersion(saveAsVersionName);
+        await fetchVersions();
+        await fetchConfiguration(saveAsVersionName);
+      } else {
+        setSaveAsVersionError(result.error || 'Failed to save as version. Please try again.');
+      }
+    } catch (err) {
+      console.error('Save as version error:', err);
       setSaveError(`Error: ${err.message}`);
     } finally {
       setIsSaving(false);
@@ -996,13 +1406,15 @@ const ConfigurationLayout = () => {
     try {
       // Reset custom configuration by sending a special reset flag
       // Backend will clear Custom, and on next read it will copy Default -> Custom
-      const success = await updateConfiguration({ resetToDefault: true });
+      const success = await updateConfiguration(currentVersionName, { resetToDefault: true });
 
       if (success) {
         setSaveSuccess(true);
         setShowResetModal(false);
         // Refresh to show the restored default configuration
-        await fetchConfiguration();
+        await fetchConfiguration(currentVersionName);
+        // Reset description to current version's description
+        setVersionDescription(currentVersion?.description || '');
       } else {
         setSaveError('Failed to reset configuration. Please try again.');
       }
@@ -1027,7 +1439,10 @@ const ConfigurationLayout = () => {
 
       const result = await client.graphql({
         query: syncBdaIdpMutation,
-        variables: { direction },
+        variables: {
+          versionName: currentVersionName,
+          direction,
+        },
       });
 
       logger.debug('Sync API response:', result);
@@ -1053,7 +1468,7 @@ const ConfigurationLayout = () => {
         }
 
         // Refresh configuration to show any new classes
-        await fetchConfiguration();
+        await fetchConfiguration(currentVersionName);
 
         // Only auto-dismiss if there are no warnings in the message
         // Warnings indicate BDA limitations that users should read
@@ -1065,6 +1480,17 @@ const ConfigurationLayout = () => {
           }, 5000);
         }
         logger.debug('BDA/IDP sync completed successfully');
+
+        // If this was sync to BDA, activate the version (skip confirmation to prevent circular call)
+        if (direction === 'idp_to_bda') {
+          try {
+            await handleActivateVersion(currentVersionName, true); // Skip confirmation
+            logger.debug(`Activated version ${currentVersionName} after sync to BDA`);
+          } catch (activateErr) {
+            logger.error('Failed to activate version after sync:', activateErr);
+            // Don't fail the sync, just log the error
+          }
+        }
       } else {
         const errorMsg = response.error?.message || response.message || 'Sync operation failed';
         setSyncError(errorMsg);
@@ -1126,27 +1552,15 @@ const ConfigurationLayout = () => {
           if (isLegacyFormat(importedConfig)) {
             // Show migration modal and store config for later
             setPendingImportConfig(importedConfig);
+            setPendingImportSource({ type: 'file', name: file.name });
             setShowMigrationModal(true);
           } else {
-            // Modern format - auto-save and refresh to get merged config with system defaults
-            // Use replaceCustom flag to replace existing Custom entirely (not merge)
-            setIsSaving(true);
-            try {
-              const success = await updateConfiguration({ ...importedConfig, replaceCustom: true });
-              if (success) {
-                if (importedConfig.rule_classes) {
-                  setRuleSchema(importedConfig.rule_classes);
-                }
-                await fetchConfiguration();
-                setSaveSuccess(true);
-              } else {
-                setImportError('Failed to import configuration');
-              }
-            } catch (err) {
-              setImportError(`Import failed: ${err.message}`);
-            } finally {
-              setIsSaving(false);
-            }
+            // Set imported config for new version creation
+            setImportedConfigForNewVersion(importedConfig);
+            setImportSource('file');
+            const baseName = file.name.replace(/\.(json|yaml|yml)$/, '');
+            setNewVersionName(baseName);
+            setNewVersionDescription('');
           }
         } else {
           setImportError('Invalid configuration file format');
@@ -1161,48 +1575,46 @@ const ConfigurationLayout = () => {
   };
 
   const handleMigrationConfirm = async () => {
-    if (!pendingImportConfig) return;
+    if (!pendingImportConfig || !pendingImportSource) return;
 
-    setIsSaving(true);
-    try {
-      // Send to backend for migration, then reload to get migrated version
-      const success = await updateConfiguration(pendingImportConfig);
-
-      if (success) {
-        await fetchConfiguration();
-        setShowMigrationModal(false);
-        setPendingImportConfig(null);
-      } else {
-        setImportError('Failed to import configuration');
-        setShowMigrationModal(false);
-      }
-    } catch (err) {
-      setImportError(`Import failed: ${err.message}`);
-      setShowMigrationModal(false);
-    } finally {
-      setIsSaving(false);
+    // Generate version name based on import source
+    let baseName;
+    if (pendingImportSource.type === 'file') {
+      baseName = pendingImportSource.name.replace(/\.(json|yaml|yml)$/, '');
+    } else {
+      baseName = pendingImportSource.name.split('/').pop();
     }
+
+    // Set up for new version creation with migration
+    setImportedConfigForNewVersion(pendingImportConfig);
+    setImportSource('migration');
+    setNewVersionName(baseName);
+    setNewVersionDescription('Migrated from legacy format');
+    setShowMigrationModal(false);
+    setPendingImportConfig(null);
+    setPendingImportSource(null);
   };
 
   const handleMigrationCancel = () => {
     setShowMigrationModal(false);
     setPendingImportConfig(null);
+    setPendingImportSource(null);
   };
 
   // Handler for Import button click - show source selection modal
   const handleImportClick = () => {
-    setShowImportSourceModal(true);
+    setImportedConfigForNewVersion(importedConfig);
+    setNewVersionName(baseName);
+    setNewVersionDescription('');
   };
 
   // Handler for local file import
   const handleLocalFileImport = () => {
-    setShowImportSourceModal(false);
     document.getElementById('import-file').click();
   };
 
   // Handler for library import
   const handleLibraryImport = async () => {
-    setShowImportSourceModal(false);
     setLibraryLoading(true);
 
     try {
@@ -1215,6 +1627,7 @@ const ConfigurationLayout = () => {
 
       const configs = await listConfigurations(patternDir);
       setLibraryConfigs(configs);
+      setShowImportSourceModal(false);
       setShowLibraryBrowserModal(true);
     } catch (err) {
       setImportError(`Failed to load library: ${err.message}`);
@@ -1267,26 +1680,18 @@ const ConfigurationLayout = () => {
       const importedConfig = fileName.endsWith('.json') ? JSON.parse(file.content) : yaml.load(file.content);
 
       if (importedConfig && typeof importedConfig === 'object') {
+        // Check if config is in legacy format
         if (isLegacyFormat(importedConfig)) {
           setPendingImportConfig(importedConfig);
+          setPendingImportSource({ type: 'library', name: config.name });
           setShowMigrationModal(true);
         } else {
-          // Modern format - auto-save and refresh to get merged config with system defaults
-          // Use replaceCustom flag to replace existing Custom entirely (not merge)
-          setIsSaving(true);
-          try {
-            const success = await updateConfiguration({ ...importedConfig, replaceCustom: true });
-            if (success) {
-              await fetchConfiguration();
-              setSaveSuccess(true);
-            } else {
-              setImportError('Failed to import configuration');
-            }
-          } catch (importErr) {
-            setImportError(`Import failed: ${importErr.message}`);
-          } finally {
-            setIsSaving(false);
-          }
+          // Set imported config for new version creation
+          setImportedConfigForNewVersion(importedConfig);
+          setImportSource('library');
+          const baseName = config.name.split('/').pop();
+          setNewVersionName(baseName);
+          setNewVersionDescription('');
         }
       } else {
         setImportError('Invalid configuration format');
@@ -1342,7 +1747,28 @@ const ConfigurationLayout = () => {
   }
 
   return (
-    <>
+    <SpaceBetween size="s">
+      {/* Configuration Versions Table */}
+      <ExpandableSection
+        headerText="Configuration Versions"
+        headerTextTagOverride="h1"
+        expanded={versionsTableExpanded}
+        onChange={({ detail }) => setVersionsTableExpanded(detail.expanded)}
+      >
+        <ConfigurationVersionsTable
+          versions={versions}
+          loading={versionsLoading}
+          onVersionSelect={handleVersionSelect}
+          selectedVersionsForCompare={selectedVersionsForCompare}
+          currentlyOpenVersion={selectedVersion || activeVersionName}
+          onVersionSelectForCompare={handleVersionSelectForCompare}
+          onCompareVersions={handleCompareVersions}
+          onActivateVersion={handleActivateVersion}
+          onDeleteVersions={handleDeleteVersions}
+          onImportAsNewVersion={handleImportAsNewVersion}
+        />
+      </ExpandableSection>
+
       <Modal
         visible={showResetModal}
         onDismiss={() => setShowResetModal(false)}
@@ -1393,6 +1819,58 @@ const ConfigurationLayout = () => {
       </Modal>
 
       <Modal
+        visible={showSaveAsVersionModal}
+        onDismiss={() => setShowSaveAsVersionModal(false)}
+        header="Save as New Version"
+        footer={
+          <Box float="right">
+            <SpaceBetween direction="horizontal" size="xs">
+              <Button variant="link" onClick={() => setShowSaveAsVersionModal(false)}>
+                Cancel
+              </Button>
+              <Button variant="primary" onClick={handleSaveAsVersion} loading={isSaving} disabled={!saveAsVersionName.trim()}>
+                Save as Version
+              </Button>
+            </SpaceBetween>
+          </Box>
+        }
+      >
+        <SpaceBetween size="m">
+          {saveAsVersionError && (
+            <Alert type="error" dismissible onDismiss={() => setSaveAsVersionError(null)} header="Error">
+              {saveAsVersionError}
+            </Alert>
+          )}
+          <FormField
+            label="Version Name"
+            description="Enter a unique name for this configuration version"
+            errorText={
+              saveAsVersionName && !/^[a-zA-Z0-9_-]+$/.test(saveAsVersionName)
+                ? 'Version name can only contain letters, numbers, hyphens, and underscores'
+                : ''
+            }
+          >
+            <Input
+              value={saveAsVersionName}
+              onChange={({ detail }) => setSaveAsVersionName(detail.value)}
+              placeholder="e.g., my-custom-config"
+            />
+          </FormField>
+          <FormField
+            label="Version Description (Optional)"
+            description="Optional description for this version (max 200 characters)"
+            errorText={saveAsVersionDescription && saveAsVersionDescription.length > 200 ? 'Description cannot exceed 200 characters' : ''}
+          >
+            <Input
+              value={saveAsVersionDescription}
+              onChange={({ detail }) => setSaveAsVersionDescription(detail.value)}
+              placeholder="Enter a description for this version..."
+            />
+          </FormField>
+        </SpaceBetween>
+      </Modal>
+
+      <Modal
         visible={showExportModal}
         onDismiss={() => setShowExportModal(false)}
         header="Export Configuration"
@@ -1421,7 +1899,11 @@ const ConfigurationLayout = () => {
             />
           </FormField>
           <FormField label="File name">
-            <Input value={exportFileName} onChange={({ detail }) => setExportFileName(detail.value)} placeholder="configuration" />
+            <Input
+              value={exportFileName}
+              onChange={({ detail }) => setExportFileName(detail.value)}
+              placeholder={currentVersionName || 'configuration'}
+            />
           </FormField>
         </SpaceBetween>
       </Modal>
@@ -1464,8 +1946,11 @@ const ConfigurationLayout = () => {
       {/* Import Source Selection Modal */}
       <Modal
         visible={showImportSourceModal}
-        onDismiss={() => setShowImportSourceModal(false)}
-        header="Choose Import Source"
+        onDismiss={() => {
+          setImportError(null);
+          setShowImportSourceModal(false);
+        }}
+        header="Import as New Version"
         footer={
           <Box float="right">
             <Button variant="link" onClick={() => setShowImportSourceModal(false)}>
@@ -1563,7 +2048,7 @@ const ConfigurationLayout = () => {
       <Container
         header={
           <Header
-            variant="h2"
+            variant="h3"
             actions={
               <SpaceBetween direction="horizontal" size="xs">
                 <SegmentedControl
@@ -1588,11 +2073,8 @@ const ConfigurationLayout = () => {
                 <Button variant="normal" onClick={() => setShowExportModal(true)}>
                   Export
                 </Button>
-                <Button variant="normal" onClick={handleImportClick}>
-                  Import
-                </Button>
                 <input id="import-file" type="file" accept=".json,.yaml,.yml" style={{ display: 'none' }} onChange={handleImport} />
-                <Button variant="normal" onClick={() => fetchConfiguration()} loading={refreshing} iconName="refresh">
+                <Button variant="normal" onClick={() => fetchConfiguration(currentVersionName)} loading={refreshing} iconName="refresh">
                   Refresh
                 </Button>
                 {isPattern1 && (
@@ -1600,29 +2082,36 @@ const ConfigurationLayout = () => {
                     <Button variant="normal" onClick={() => handleSyncBdaIdp('bda_to_idp')} loading={syncingDirection === 'bda_to_idp'}>
                       Sync from BDA
                     </Button>
-                    <Button variant="normal" onClick={() => handleSyncBdaIdp('idp_to_bda')} loading={syncingDirection === 'idp_to_bda'}>
+                    <Button variant="normal" onClick={() => setShowSyncToBdaConfirmModal(true)} loading={syncingDirection === 'idp_to_bda'}>
                       Sync to BDA
                     </Button>
                   </>
                 )}
-                <Button variant="normal" onClick={() => setShowResetModal(true)}>
+                <Button variant="normal" onClick={() => setShowResetModal(true)} disabled={currentVersionName === 'default'}>
                   Restore default (All)
                 </Button>
-                <Button variant="normal" onClick={() => setShowSaveAsDefaultModal(true)}>
+                {/* Disable Save as default when already on default version */}
+                <Button variant="normal" onClick={() => setShowSaveAsDefaultModal(true)} disabled={currentVersionName === 'default'}>
                   Save as default
                 </Button>
+                <Button variant="normal" onClick={() => setShowSaveAsVersionModal(true)} disabled={validationErrors.length > 0}>
+                  Save as Version
+                </Button>
+                {/* Disable Save changes when on default version */}
                 <Button
                   variant="primary"
                   onClick={() => handleSave(false)}
                   loading={isSaving}
-                  disabled={!hasUnsavedChanges || validationErrors.length > 0}
+                  disabled={!hasUnsavedChanges || validationErrors.length > 0 || currentVersionName === 'default'}
                 >
                   Save changes
                 </Button>
               </SpaceBetween>
             }
           >
-            Configuration
+            Configuration:{' '}
+            {selectedVersion || (activeVersionName && currentVersion?.isActive ? `${activeVersionName} (Active)` : activeVersionName)}
+            {currentVersion?.description ? ` - ${currentVersion.description}` : ''}
           </Header>
         }
       >
@@ -1651,12 +2140,6 @@ const ConfigurationLayout = () => {
           {saveError && (
             <Alert type="error" dismissible onDismiss={() => setSaveError(null)} header="Error saving configuration">
               {saveError}
-            </Alert>
-          )}
-
-          {importError && (
-            <Alert type="error" dismissible onDismiss={() => setImportError(null)} header="Import error">
-              {importError}
             </Alert>
           )}
 
@@ -1709,6 +2192,19 @@ const ConfigurationLayout = () => {
             </Alert>
           )}
 
+          {hasUnsavedChanges && currentVersionName !== 'default' && (
+            <Alert
+              type="info"
+              action={
+                <Button variant="normal" onClick={handleDiscardChanges} loading={refreshing}>
+                  Discard changes
+                </Button>
+              }
+            >
+              You have unsaved changes. Click <strong>Save changes</strong> to persist, or <strong>Discard changes</strong> to revert.
+            </Alert>
+          )}
+
           <Box padding="s">
             {viewMode === 'form' && (
               <SpaceBetween size="l">
@@ -1719,13 +2215,17 @@ const ConfigurationLayout = () => {
                   }}
                   formValues={formValues}
                   defaultConfig={defaultConfig}
+                  mergedConfig={mergedConfig}
                   isCustomized={isCustomized}
-                  onResetToDefault={resetToDefault}
+                  onResetToDefault={currentVersionName === 'default' ? null : resetToDefault}
                   onChange={handleFormChange}
                   extractionSchema={extractionSchema}
+                  currentVersionName={currentVersionName}
                   activeTabId={configBuilderActiveTab}
                   onTabChange={setConfigBuilderActiveTab}
                   showRuleSchema={isPattern2}
+                  versionDescription={versionDescription}
+                  onDescriptionChange={setVersionDescription}
                   onSchemaChange={(schemaData, isDirty) => {
                     setExtractionSchema(schemaData);
                     if (isDirty) {
@@ -1832,7 +2332,179 @@ const ConfigurationLayout = () => {
           </Box>
         </Form>
       </Container>
-    </>
+
+      {/* Version Form Modal */}
+      <Modal
+        visible={!!importedConfigForNewVersion}
+        onDismiss={() => {
+          setImportedConfigForNewVersion(null);
+          setImportSource(null);
+          setNewVersionName('');
+          setNewVersionDescription('');
+        }}
+        header="Create New Version"
+        footer={
+          <Box float="right">
+            <SpaceBetween direction="horizontal" size="xs">
+              <Button
+                variant="link"
+                onClick={() => {
+                  setImportedConfigForNewVersion(null);
+                  setImportSource(null);
+                  setNewVersionName('');
+                  setNewVersionDescription('');
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                onClick={handleCreateVersionFromImport}
+                disabled={
+                  !newVersionName.trim() ||
+                  newVersionName.length > 50 ||
+                  !/^[a-zA-Z0-9_-]+$/.test(newVersionName) ||
+                  (newVersionDescription && newVersionDescription.length > 200)
+                }
+              >
+                Create Version
+              </Button>
+            </SpaceBetween>
+          </Box>
+        }
+      >
+        <SpaceBetween size="m">
+          {importError && (
+            <Alert type="error" dismissible onDismiss={() => setImportError(null)} header="Import Error">
+              {importError}
+            </Alert>
+          )}
+          <Alert type="success" header="Configuration Loaded">
+            Configuration successfully loaded and ready to be saved as a new version.
+          </Alert>
+
+          <FormField
+            label="Version Name"
+            errorText={
+              newVersionName &&
+              (newVersionName.length > 50
+                ? 'Version name cannot exceed 50 characters'
+                : !/^[a-zA-Z0-9_-]+$/.test(newVersionName)
+                ? 'Version name can only contain letters, numbers, hyphens, and underscores'
+                : '')
+            }
+          >
+            <Input
+              value={newVersionName}
+              onChange={({ detail }) => setNewVersionName(detail.value)}
+              placeholder="Version name"
+              invalid={newVersionName && (newVersionName.length > 50 || !/^[a-zA-Z0-9_-]+$/.test(newVersionName))}
+            />
+          </FormField>
+          <FormField
+            label="Description (Optional)"
+            errorText={newVersionDescription && newVersionDescription.length > 200 ? 'Description cannot exceed 200 characters' : ''}
+          >
+            <Input
+              value={newVersionDescription}
+              onChange={({ detail }) => setNewVersionDescription(detail.value)}
+              placeholder="Optional description"
+              invalid={newVersionDescription && newVersionDescription.length > 200}
+            />
+          </FormField>
+        </SpaceBetween>
+      </Modal>
+
+      {/* Configuration Comparison Modal */}
+      <Modal
+        visible={showCompareModal}
+        onDismiss={() => setShowCompareModal(false)}
+        header="Configuration Comparison"
+        size="max"
+        footer={
+          <Box float="right">
+            <Button onClick={() => setShowCompareModal(false)}>Close</Button>
+          </Box>
+        }
+      >
+        {showCompareModal && compareData && <ConfigurationComparison versions={compareData.versions} configs={compareData.configs} />}
+      </Modal>
+
+      {/* Sync to BDA Confirmation Modal */}
+      <Modal
+        visible={showSyncToBdaConfirmModal}
+        onDismiss={() => setShowSyncToBdaConfirmModal(false)}
+        header="Confirm Sync to BDA"
+        footer={
+          <Box float="right">
+            <SpaceBetween direction="horizontal" size="xs">
+              <Button variant="link" onClick={() => setShowSyncToBdaConfirmModal(false)}>
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                onClick={() => {
+                  setShowSyncToBdaConfirmModal(false);
+                  handleSyncBdaIdp('idp_to_bda');
+                }}
+                loading={syncingDirection === 'idp_to_bda'}
+              >
+                Confirm Sync
+              </Button>
+            </SpaceBetween>
+          </Box>
+        }
+      >
+        <SpaceBetween size="m">
+          <Alert type="warning">
+            This will sync your IDP document classes to BDA blueprints and set <strong>{currentVersionName}</strong> as the active
+            configuration version.
+          </Alert>
+        </SpaceBetween>
+      </Modal>
+
+      {/* Activate Version Confirmation Modal */}
+      <Modal
+        visible={showActivateVersionConfirmModal}
+        onDismiss={() => setShowActivateVersionConfirmModal(false)}
+        header="Confirm Activate Version"
+        footer={
+          <Box float="right">
+            <SpaceBetween direction="horizontal" size="xs">
+              <Button variant="link" onClick={() => setShowActivateVersionConfirmModal(false)}>
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                onClick={() => {
+                  setShowActivateVersionConfirmModal(false);
+                  if (selectedVersionsForCompare[0]) {
+                    performSyncThenActivate(selectedVersionsForCompare[0]);
+                  }
+                }}
+                loading={syncingDirection === 'idp_to_bda'}
+                disabled={!selectedVersionsForCompare[0]}
+              >
+                Confirm Activate
+              </Button>
+            </SpaceBetween>
+          </Box>
+        }
+      >
+        <SpaceBetween size="m">
+          <Alert type="warning">
+            {selectedVersionsForCompare[0] ? (
+              <>
+                Activating version <strong>{selectedVersionsForCompare[0]}</strong> will first sync your IDP document classes to BDA
+                blueprints, then set it as the active configuration version.
+              </>
+            ) : (
+              <>No version selected. Please select a version to activate.</>
+            )}
+          </Alert>
+        </SpaceBetween>
+      </Modal>
+    </SpaceBetween>
   );
 };
 

@@ -23,16 +23,20 @@ class ClassesDiscovery:
         input_bucket: str,
         input_prefix: str,
         region: Optional[str] = None,
+        version: Optional[str] = None,
     ):
         self.input_bucket = input_bucket
         self.input_prefix = input_prefix
         self.region = region or os.environ.get("AWS_REGION")
-
+        self.version = version
         try:
             self.config_reader = ConfigurationReader()
             self.config_manager = ConfigurationManager()
             self.config: IDPConfig = cast(
-                IDPConfig, self.config_reader.get_merged_configuration(as_model=True)
+                IDPConfig,
+                self.config_reader.get_merged_configuration(
+                    as_model=True, version=self.version
+                ),
             )
         except Exception as e:
             logger.error(f"Failed to load configuration from DynamoDB: {e}")
@@ -183,7 +187,7 @@ class ClassesDiscovery:
         logger.info(f"Merging discovered class: {new_class_id}")
 
         # Step 1: Read Default classes (base classes from deployment)
-        default_config = self.config_manager.get_configuration("Default")
+        default_config = self.config_manager.get_configuration("Config", "default")
         default_classes: list = []
         if (
             default_config
@@ -202,7 +206,10 @@ class ClassesDiscovery:
         logger.info(f"Found {len(default_classes)} classes in Default config")
 
         # Step 2: Read existing Custom config (raw, no Pydantic defaults)
-        existing_custom = self.config_manager.get_raw_configuration("Custom") or {}
+        existing_custom = (
+            self.config_manager.get_raw_configuration("Config", version=self.version)
+            or {}
+        )
         custom_classes = list(existing_custom.get("classes", []))
         logger.info(f"Found {len(custom_classes)} classes in Custom config")
 
@@ -234,7 +241,9 @@ class ClassesDiscovery:
         # The merged list will replace Default.classes during runtime merge,
         # ensuring all classes (Default + Custom + new) are preserved
         existing_custom["classes"] = merged_classes
-        self.config_manager.save_raw_configuration("Custom", existing_custom)
+        self.config_manager.save_raw_configuration(
+            "Config", existing_custom, version=self.version
+        )
         logger.info(f"Saved {len(merged_classes)} classes to Custom config")
 
     def _validate_json_schema(self, schema: Dict[str, Any]) -> tuple[bool, str]:

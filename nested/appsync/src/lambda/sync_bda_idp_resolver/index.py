@@ -33,6 +33,7 @@ def handler(event: Dict[str, Any], context) -> Dict[str, Any]:
         # Get sync direction from arguments (default to bidirectional for backward compatibility)
         arguments = event.get('arguments', {})
         sync_direction = arguments.get('direction', 'bidirectional')
+        versionName = arguments.get('versionName', 'default')
         
         logger.info(f"Sync direction: {sync_direction}")
         
@@ -50,7 +51,7 @@ def handler(event: Dict[str, Any], context) -> Dict[str, Any]:
                 "direction": sync_direction
             }
         
-        logger.info(f"Using BDA project ARN: {bda_project_arn}")
+        logger.info(f"Using BDA project ARN: {bda_project_arn}, config version : {versionName}")
         
         # Initialize BDA service
         bda_service = BdaBlueprintService(dataAutomationProjectArn=bda_project_arn)
@@ -58,7 +59,7 @@ def handler(event: Dict[str, Any], context) -> Dict[str, Any]:
         # Handle cleanup_orphaned direction separately
         if sync_direction == "cleanup_orphaned":
             logger.info("Executing orphaned blueprint cleanup")
-            cleanup_result = bda_service.cleanup_orphaned_blueprints()
+            cleanup_result = bda_service.cleanup_orphaned_blueprints(version=versionName)
             
             return {
                 "success": cleanup_result.get("success", False),
@@ -74,7 +75,7 @@ def handler(event: Dict[str, Any], context) -> Dict[str, Any]:
         
         # Execute the sync operation with direction parameter
         result = bda_service.create_blueprints_from_custom_configuration(
-            sync_direction=sync_direction
+            sync_direction=sync_direction, version=versionName
         )
 
         logger.info(f"BDA Service results: {result}")
