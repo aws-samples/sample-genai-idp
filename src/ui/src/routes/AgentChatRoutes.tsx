@@ -7,7 +7,7 @@ import AgentChatPageLayout from '../components/agent-chat/AgentChatPageLayout';
 
 const logger = new ConsoleLogger('AgentChatRoutes');
 
-const AgentChatRoutes = () => {
+const AgentChatRoutes = (): React.JSX.Element => {
   logger.info('AgentChatRoutes component loaded');
 
   return (

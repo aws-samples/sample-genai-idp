@@ -1,7 +1,6 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 import React from 'react';
-import PropTypes from 'prop-types';
 import { Navigate, Route, Routes } from 'react-router-dom';
 
 import { Authenticator } from '@aws-amplify/ui-react';
@@ -11,9 +10,18 @@ import { LOGIN_PATH, LOGOUT_PATH, REDIRECT_URL_PARAM } from './constants';
 // this is set at build time depending on the AllowedSignUpEmailDomain CloudFormation parameter
 const VITE_SHOULD_HIDE_SIGN_UP = import.meta.env.VITE_SHOULD_HIDE_SIGN_UP ?? 'true';
 
-const AuthHeader = () => <h1 style={{ textAlign: 'center', margin: '2rem 0' }}>Welcome to GenAI Intelligent Document Processing!</h1>;
+const AuthHeader = (): React.JSX.Element => (
+  <h1 style={{ textAlign: 'center', margin: '2rem 0' }}>Welcome to GenAI Intelligent Document Processing!</h1>
+);
 
-const UnauthRoutes = ({ location }) => (
+interface UnauthRoutesProps {
+  location: {
+    pathname: string;
+    search: string;
+  };
+}
+
+const UnauthRoutes = ({ location }: UnauthRoutesProps): React.JSX.Element => (
   <Routes>
     <Route
       path={LOGIN_PATH}
@@ -53,12 +61,5 @@ const UnauthRoutes = ({ location }) => (
     />
   </Routes>
 );
-
-UnauthRoutes.propTypes = {
-  location: PropTypes.shape({
-    pathname: PropTypes.string,
-    search: PropTypes.string,
-  }).isRequired,
-};
 
 export default UnauthRoutes;

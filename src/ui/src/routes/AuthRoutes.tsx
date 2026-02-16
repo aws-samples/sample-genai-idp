@@ -1,7 +1,6 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 import React from 'react';
-import PropTypes from 'prop-types';
 import { ConsoleLogger } from 'aws-amplify/utils';
 import { Navigate, Route, Routes } from 'react-router-dom';
 
@@ -30,7 +29,11 @@ import {
 
 const logger = new ConsoleLogger('AuthRoutes');
 
-const AuthRoutes = ({ redirectParam }) => {
+interface AuthRoutesProps {
+  redirectParam: string;
+}
+
+const AuthRoutes = ({ redirectParam }: AuthRoutesProps): React.JSX.Element => {
   const { currentCredentials } = useAppContext();
   const settings = useParameterStore(currentCredentials);
   const { signOut } = useAuthenticator();
@@ -58,10 +61,6 @@ const AuthRoutes = ({ redirectParam }) => {
       </Routes>
     </SettingsContext.Provider>
   );
-};
-
-AuthRoutes.propTypes = {
-  redirectParam: PropTypes.string.isRequired,
 };
 
 export default AuthRoutes;

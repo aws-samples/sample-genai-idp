@@ -1,18 +1,17 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
-// SPDX-License-Identifier: MIT-0
+// SPDX-License-Identifier: Apache-2.0
 import React from 'react';
 import { Route, Routes } from 'react-router-dom';
 import { ConsoleLogger } from 'aws-amplify/utils';
 
-// Import the component directly from the file instead of the directory
-import DocumentsAgentsLayout from '../components/document-agents-layout/DocumentsAgentsLayout';
+import DocumentsQueryLayout from '../components/document-kb-query-layout';
 import GenAIIDPLayout from '../components/genaiidp-layout';
 import GenAIIDPTopNavigation from '../components/genai-idp-top-navigation';
 
-const logger = new ConsoleLogger('DocumentsAnalyticsRoutes');
+const logger = new ConsoleLogger('DocumentsQueryRoutes');
 
-const DocumentsAnalyticsRoutes = () => {
-  logger.info('DocumentsAnalyticsRoutes');
+const DocumentsQueryRoutes = (): React.JSX.Element => {
+  logger.info('DocumentsQueryRoutes');
 
   return (
     <Routes>
@@ -22,7 +21,7 @@ const DocumentsAnalyticsRoutes = () => {
           <div>
             <GenAIIDPTopNavigation />
             <GenAIIDPLayout>
-              <DocumentsAgentsLayout />
+              <DocumentsQueryLayout />
             </GenAIIDPLayout>
           </div>
         }
@@ -31,4 +30,4 @@ const DocumentsAnalyticsRoutes = () => {
   );
 };
 
-export default DocumentsAnalyticsRoutes;
+export default DocumentsQueryRoutes;

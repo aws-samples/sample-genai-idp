@@ -2,14 +2,20 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import React from 'react';
-import PropTypes from 'prop-types';
 import { FiSmile, FiMeh, FiFrown } from 'react-icons/fi';
 
 const style = {
   verticalAlign: 'middle',
 };
 
-export const SentimentIcon = ({ sentiment = 'NEUTRAL', size = '1.5em' }) => {
+type Sentiment = 'POSITIVE' | 'NEGATIVE' | 'NEUTRAL' | 'MIXED';
+
+interface SentimentIconProps {
+  sentiment?: Sentiment;
+  size?: string;
+}
+
+export const SentimentIcon = ({ sentiment = 'NEUTRAL', size = '1.5em' }: SentimentIconProps): React.JSX.Element => {
   if (sentiment === 'POSITIVE') {
     return <FiSmile style={style} color="green" size={size} title="positive" />;
   }
@@ -18,15 +24,10 @@ export const SentimentIcon = ({ sentiment = 'NEUTRAL', size = '1.5em' }) => {
     return <FiFrown style={style} color="red" size={size} title="negative" />;
   }
 
-  return <FiMeh style={style} color="grey" size={size} tille={sentiment.toLowerCase()} />;
+  return <FiMeh style={style} color="grey" size={size} title={sentiment.toLowerCase()} />;
 };
 
-SentimentIcon.propTypes = {
-  sentiment: PropTypes.oneOf(['POSITIVE', 'NEGATIVE', 'NEUTRAL', 'MIXED']),
-  size: PropTypes.string,
-};
-
-const getSentimentColor = (sentiment) => {
+const getSentimentColor = (sentiment: Sentiment): string => {
   if (sentiment === 'POSITIVE') {
     return 'green';
   }
@@ -36,7 +37,11 @@ const getSentimentColor = (sentiment) => {
   return 'gray';
 };
 
-export const SentimentIndicator = ({ sentiment = 'NEUTRAL' }) => (
+interface SentimentIndicatorProps {
+  sentiment?: Sentiment;
+}
+
+export const SentimentIndicator = ({ sentiment = 'NEUTRAL' }: SentimentIndicatorProps): React.JSX.Element => (
   <div>
     <span>
       <SentimentIcon size="1.25em" sentiment={sentiment} />
@@ -46,7 +51,3 @@ export const SentimentIndicator = ({ sentiment = 'NEUTRAL' }) => (
     </span>
   </div>
 );
-
-SentimentIndicator.propTypes = {
-  sentiment: PropTypes.oneOf(['POSITIVE', 'NEGATIVE', 'NEUTRAL', 'MIXED']),
-};

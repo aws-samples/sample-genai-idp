@@ -14,7 +14,7 @@ import { REDIRECT_URL_PARAM } from './constants';
 
 const logger = new ConsoleLogger('Routes');
 
-const Routes = () => {
+const Routes = (): React.JSX.Element => {
   const { user, currentCredentials } = useAppContext();
   const { authStatus } = useAuthenticator((context) => [context.authStatus]);
   const location = useLocation();

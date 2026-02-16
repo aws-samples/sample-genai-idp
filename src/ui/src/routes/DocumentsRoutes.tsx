@@ -9,7 +9,7 @@ import GenAIIDPTopNavigation from '../components/genai-idp-top-navigation';
 
 const logger = new ConsoleLogger('DocumentsRoutes');
 
-const DocumentsRoutes = () => {
+const DocumentsRoutes = (): React.JSX.Element => {
   logger.info('DocumentsRoutes');
 
   return (

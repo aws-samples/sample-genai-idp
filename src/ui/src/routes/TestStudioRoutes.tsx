@@ -5,7 +5,7 @@ import { Routes, Route } from 'react-router-dom';
 
 import TestStudioLayout from '../components/test-studio/TestStudioLayout';
 
-const TestStudioRoutes = () => {
+const TestStudioRoutes = (): React.JSX.Element => {
   return (
     <Routes>
       <Route path="*" element={<TestStudioLayout />} />
