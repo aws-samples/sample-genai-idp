@@ -1,6 +1,7 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 import React, { useState } from 'react';
+import type { SelectProps } from '@cloudscape-design/components';
 import {
   Container,
   Header,
@@ -26,19 +27,33 @@ import GET_TEST_SETS from '../../graphql/queries/getTestSets';
 import LIST_BUCKET_FILES from '../../graphql/queries/listBucketFiles';
 import VALIDATE_TEST_FILE_NAME from '../../graphql/queries/checkTestSetFiles';
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type GqlResult = { data: Record<string, any> };
+
 const client = generateClient();
 
 // Constants
 const MAX_ZIP_SIZE_BYTES = 1073741824; // 1 GB
 
-const BUCKET_OPTIONS = [
+const BUCKET_OPTIONS: SelectProps.Option[] = [
   { label: 'Input Bucket', value: 'input' },
   { label: 'Test Set Bucket', value: 'testset' },
 ];
 
-const TestSets = () => {
-  const [testSets, setTestSets] = useState([]);
-  const [selectedItems, setSelectedItems] = useState([]);
+interface TestSetItem {
+  id: string;
+  name: string;
+  description?: string;
+  filePattern?: string | null;
+  fileCount: number | null;
+  status: string;
+  createdAt: string;
+  error?: string;
+}
+
+const TestSets = (): React.JSX.Element => {
+  const [testSets, setTestSets] = useState<TestSetItem[]>([]);
+  const [selectedItems, setSelectedItems] = useState<TestSetItem[]>([]);
   const [showAddPatternModal, setShowAddPatternModal] = useState(false);
   const [showAddUploadModal, setShowAddUploadModal] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
@@ -46,8 +61,8 @@ const TestSets = () => {
   const [newTestSetDescription, setNewTestSetDescription] = useState('');
   const [filePattern, setFilePattern] = useState('');
   const [selectedBucket, setSelectedBucket] = useState(BUCKET_OPTIONS[0]);
-  const [zipFile, setZipFile] = useState(null);
-  const [matchingFiles, setMatchingFiles] = useState([]);
+  const [zipFile, setZipFile] = useState<File | null>(null);
+  const [matchingFiles, setMatchingFiles] = useState<string[]>([]);
   const [fileCount, setFileCount] = useState(0);
   const [showFilesModal, setShowFilesModal] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -60,12 +75,12 @@ const TestSets = () => {
   const [showFileStructure, setShowFileStructure] = useState(() => {
     return localStorage.getItem('testset-show-file-structure') !== 'false';
   });
-  const fileInputRef = React.useRef(null);
+  const fileInputRef = React.useRef<HTMLInputElement | null>(null);
 
   const loadTestSets = async () => {
     try {
       console.log('TestSets: Loading test sets...');
-      const result = await client.graphql({ query: GET_TEST_SETS });
+      const result = (await client.graphql({ query: GET_TEST_SETS })) as GqlResult;
       console.log('TestSets: GraphQL result:', result);
       const backendTestSets = result.data.getTestSets || [];
 
@@ -141,13 +156,13 @@ const TestSets = () => {
 
     setLoading(true);
     try {
-      const result = await client.graphql({
+      const result = (await client.graphql({
         query: LIST_BUCKET_FILES,
         variables: {
           bucketType: selectedBucket.value,
           filePattern: filePattern.trim(),
         },
-      });
+      })) as GqlResult;
 
       const files = result.data.listBucketFiles || [];
       setMatchingFiles(files);
@@ -161,12 +176,12 @@ const TestSets = () => {
     }
   };
 
-  const validateTestSetName = (name) => {
+  const validateTestSetName = (name: string): boolean => {
     const validPattern = /^[a-zA-Z0-9\s-_]+$/;
     return validPattern.test(name) && name.length <= 50;
   };
 
-  const validateDescription = (desc) => {
+  const validateDescription = (desc: string): boolean => {
     return desc.length <= 200;
   };
 
@@ -190,10 +205,10 @@ const TestSets = () => {
 
     // 2. Backend validation using VALIDATE_TEST_FILE_NAME
     try {
-      const validationResult = await client.graphql({
+      const validationResult = (await client.graphql({
         query: VALIDATE_TEST_FILE_NAME,
         variables: { fileName: newTestSetName.trim() },
-      });
+      })) as GqlResult;
 
       const validation = validationResult.data.validateTestFileName;
       if (validation && validation.exists) {
@@ -218,7 +233,7 @@ const TestSets = () => {
 
     setLoading(true);
     try {
-      const result = await client.graphql({
+      const result = (await client.graphql({
         query: ADD_TEST_SET,
         variables: {
           name: newTestSetName.trim(),
@@ -227,7 +242,7 @@ const TestSets = () => {
           bucketType: selectedBucket.value,
           fileCount,
         },
-      });
+      })) as GqlResult;
 
       console.log('GraphQL result:', result);
       const newTestSet = result.data.addTestSet;
@@ -286,10 +301,10 @@ const TestSets = () => {
     }
 
     try {
-      const validationResult = await client.graphql({
+      const validationResult = (await client.graphql({
         query: VALIDATE_TEST_FILE_NAME,
         variables: { fileName: newTestSetName.trim() },
-      });
+      })) as GqlResult;
 
       const validation = validationResult.data.validateTestFileName;
       if (validation && validation.exists) {
@@ -319,7 +334,7 @@ const TestSets = () => {
 
     setLoading(true);
     try {
-      const result = await client.graphql({
+      const result = (await client.graphql({
         query: ADD_TEST_SET_FROM_UPLOAD,
         variables: {
           input: {
@@ -328,7 +343,7 @@ const TestSets = () => {
             description: newTestSetDescription.trim(),
           },
         },
-      });
+      })) as GqlResult;
 
       const response = result.data.addTestSetFromUpload;
 
@@ -340,7 +355,7 @@ const TestSets = () => {
       const formData = new FormData();
 
       Object.entries(presignedPostData.fields).forEach(([key, value]) => {
-        formData.append(key, value);
+        formData.append(key, value as string);
       });
       formData.append('file', zipFile);
 
@@ -401,7 +416,7 @@ const TestSets = () => {
     setWarningMessage('');
     setSuccessMessage('');
     try {
-      const result = await client.graphql({ query: GET_TEST_SETS });
+      const result = (await client.graphql({ query: GET_TEST_SETS })) as GqlResult;
       setTestSets(result.data.getTestSets || []);
     } catch (err) {
       console.error('Error refreshing test sets:', err);
@@ -435,7 +450,9 @@ const TestSets = () => {
     }
   };
 
-  const filteredTestSets = testSets.filter((item) => item != null).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  const filteredTestSets = testSets
+    .filter((item) => item != null)
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   console.log('Filtered testSets for Table:', filteredTestSets);
 
   const columnDefinitions = [
@@ -884,10 +901,10 @@ const TestSets = () => {
 
                   // Check if test set already exists
                   try {
-                    const validationResult = await client.graphql({
+                    const validationResult = (await client.graphql({
                       query: VALIDATE_TEST_FILE_NAME,
                       variables: { fileName },
-                    });
+                    })) as GqlResult;
 
                     const validation = validationResult.data.validateTestFileName;
                     if (validation && validation.exists) {

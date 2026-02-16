@@ -1,7 +1,6 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 import React, { useState, useEffect, useMemo } from 'react';
-import PropTypes from 'prop-types';
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import {
   Container,
@@ -35,9 +34,20 @@ import TestStudioHeader from './TestStudioHeader';
 import useAppContext from '../../contexts/app';
 import { formatConfigVersionLink } from './utils/configVersionUtils';
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type GqlResult = { data: Record<string, any> };
+
 const client = generateClient();
 
-/* eslint-disable react/prop-types */
+interface ComprehensiveBreakdownProps {
+  costBreakdown: Record<string, Record<string, Record<string, unknown>>> | null;
+  accuracyBreakdown: Record<string, number> | null;
+  splitClassificationMetrics: Record<string, unknown> | null;
+  averageWeightedScore: number | null;
+  preferences: { wrapLines: boolean };
+  setPreferences: (prefs: { wrapLines: boolean }) => void;
+}
+
 const ComprehensiveBreakdown = ({
   costBreakdown,
   accuracyBreakdown,
@@ -45,7 +55,7 @@ const ComprehensiveBreakdown = ({
   averageWeightedScore,
   preferences,
   setPreferences,
-}) => {
+}: ComprehensiveBreakdownProps): React.JSX.Element => {
   if (!costBreakdown && !accuracyBreakdown && !splitClassificationMetrics) {
     return <Box>No breakdown data available</Box>;
   }
@@ -54,10 +64,7 @@ const ComprehensiveBreakdown = ({
     <SpaceBetween direction="vertical" size="l">
       {/* Combined Accuracy and Split Classification Metrics */}
       {(accuracyBreakdown || splitClassificationMetrics) && (
-        <Container
-          header={<Header variant="h3">Average Accuracy and Split Metrics</Header>}
-          preferences={<TestResultsPreferences preferences={preferences} setPreferences={setPreferences} />}
-        >
+        <Container header={<Header variant="h3">Average Accuracy and Split Metrics</Header>}>
           <SpaceBetween direction="vertical" size="m">
             {/* Main metrics */}
             <Table
@@ -193,14 +200,14 @@ const ComprehensiveBreakdown = ({
                   const unit = serviceUnit.substring(lastUnderscoreIndex + 1);
                   const [service, api] = serviceApi.split('/');
 
-                  const cost = details.estimated_cost || 0;
+                  const cost = (details.estimated_cost as number) || 0;
                   contextSubtotal += cost;
 
                   costItems.push({
                     context,
                     serviceApi: `${service}/${api}`,
-                    unit: details.unit || unit,
-                    value: details.value || 'N/A',
+                    unit: (details.unit as string) || unit,
+                    value: (details.value as string) || 'N/A',
                     unitCost: details.unit_cost ? `$${details.unit_cost}` : 'None',
                     estimatedCost: cost > 0 ? `$${cost.toFixed(4)}` : 'N/A',
                     sortOrder: 0, // Regular items
@@ -221,7 +228,7 @@ const ComprehensiveBreakdown = ({
 
               // Second pass: insert subtotal rows after each context group
               const finalItems = [];
-              let currentContext = null;
+              const currentContext = null;
 
               costItems.forEach((item, index) => {
                 // Add the regular item
@@ -325,14 +332,18 @@ const ComprehensiveBreakdown = ({
   );
 };
 
-// Preferences component
-const TestResultsPreferences = ({ preferences, setPreferences }) => (
+interface TestResultsPreferencesProps {
+  preferences: { wrapLines: boolean };
+  setPreferences: (prefs: { wrapLines: boolean }) => void;
+}
+
+const TestResultsPreferences = ({ preferences, setPreferences }: TestResultsPreferencesProps): React.JSX.Element => (
   <CollectionPreferences
     title="Preferences"
     confirmLabel="Confirm"
     cancelLabel="Cancel"
     preferences={preferences}
-    onConfirm={({ detail }) => setPreferences(detail)}
+    onConfirm={({ detail }) => setPreferences(detail as { wrapLines: boolean })}
     wrapLinesPreference={{
       label: 'Wrap lines',
       description: 'Check to see all the text and wrap the lines',
@@ -340,38 +351,57 @@ const TestResultsPreferences = ({ preferences, setPreferences }) => (
   />
 );
 
-TestResultsPreferences.propTypes = {
-  preferences: PropTypes.object.isRequired,
-  setPreferences: PropTypes.func.isRequired,
-};
+interface TestResultsProps {
+  testRunId: string;
+  setSelectedTestRunId?: ((id: string | null) => void) | null;
+}
 
-const TestResults = ({ testRunId, setSelectedTestRunId }) => {
-  const { addTestRun } = useAppContext();
+interface RangeDoc {
+  docId: string;
+  score: number;
+}
+
+interface SelectedRange {
+  range: string;
+  docs: RangeDoc[];
+}
+
+const TestResults = ({ testRunId, setSelectedTestRunId }: TestResultsProps): React.JSX.Element => {
+  const { addTestRun: addTestRunRaw } = useAppContext();
+  const addTestRun = addTestRunRaw as (
+    testRunId: string,
+    testSetName: string,
+    context: string,
+    filesCount: number,
+    configVersion?: string,
+  ) => void;
   const { versions } = useConfigurationVersions();
-  const [results, setResults] = useState(null);
+  const [results, setResults] = useState<Record<string, unknown> | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const [error, setError] = useState<string | null>(null);
   const [currentAttempt, setCurrentAttempt] = useState(1);
   const [reRunLoading, setReRunLoading] = useState(false);
   const [showReRunModal, setShowReRunModal] = useState(false);
   const [reRunContext, setReRunContext] = useState('');
   const [reRunNumberOfFiles, setReRunNumberOfFiles] = useState('');
-  const [testSetFileCount, setTestSetFileCount] = useState(null);
-  const [testSetStatus, setTestSetStatus] = useState(null);
-  const [testSetFilePattern, setTestSetFilePattern] = useState(null);
-  const [chartType, setChartType] = useState({ label: 'Bar Chart', value: 'bar' });
+  const [testSetFileCount, setTestSetFileCount] = useState<number | null>(null);
+  const [testSetStatus, setTestSetStatus] = useState<string | null>(null);
+  const [testSetFilePattern, setTestSetFilePattern] = useState<string | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [chartType, setChartType] = useState<any>({ label: 'Bar Chart', value: 'bar' });
   const [retryMessage, setRetryMessage] = useState('');
   const [preferences, setPreferences] = useState({ wrapLines: false });
   const [showDocumentsModal, setShowDocumentsModal] = useState(false);
-  const [selectedRangeData, setSelectedRangeData] = useState(null);
-  const [lowestScoreCount, setLowestScoreCount] = useState({ label: '5', value: 5 });
+  const [selectedRangeData, setSelectedRangeData] = useState<SelectedRange | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [lowestScoreCount, setLowestScoreCount] = useState<any>({ label: '5', value: '5' });
 
   // Config export modal state
   const [showConfigExportModal, setShowConfigExportModal] = useState(false);
   const [configExportFormat, setConfigExportFormat] = useState('json');
   const [configExportFileName, setConfigExportFileName] = useState('');
 
-  const getProgressMessage = (progressLevel) => {
+  const getProgressMessage = (progressLevel: number): string => {
     if (progressLevel <= 1) return 'Initializing test results...';
     if (progressLevel <= 2) return 'Processing evaluation data...';
     if (progressLevel <= 3) return 'Calculating accuracy metrics...';
@@ -383,9 +413,9 @@ const TestResults = ({ testRunId, setSelectedTestRunId }) => {
     if (!results?.testSetId) return;
 
     try {
-      const testSetsResult = await client.graphql({
+      const testSetsResult = (await client.graphql({
         query: GET_TEST_SETS,
-      });
+      })) as GqlResult;
 
       const testSets = testSetsResult.data.getTestSets || [];
       const testSet = testSets.find((ts) => ts.id === results.testSetId);
@@ -462,10 +492,10 @@ const TestResults = ({ testRunId, setSelectedTestRunId }) => {
 
             if (isCancelled) return;
 
-            result = await client.graphql({
+            result = (await client.graphql({
               query: GET_TEST_RUN,
               variables: { testRunId },
-            });
+            })) as GqlResult;
 
             if (isCancelled) return;
 
@@ -564,7 +594,7 @@ const TestResults = ({ testRunId, setSelectedTestRunId }) => {
     );
   }
 
-  const getStatusColor = (status) => {
+  const getStatusColor = (status: string): string => {
     if (status === 'COMPLETE') return 'green';
     if (status === 'RUNNING') return 'blue';
     return 'red';
@@ -577,7 +607,7 @@ const TestResults = ({ testRunId, setSelectedTestRunId }) => {
     if (!results.weightedOverallScores) return null;
     const scores =
       typeof results.weightedOverallScores === 'string' ? JSON.parse(results.weightedOverallScores) : results.weightedOverallScores;
-    const values = Object.values(scores);
+    const values = Object.values(scores) as number[];
     return values.length > 0 ? values.reduce((sum, score) => sum + score, 0) / values.length : null;
   })();
 
@@ -604,7 +634,7 @@ const TestResults = ({ testRunId, setSelectedTestRunId }) => {
 
   // Helper function to get merged config from results.config
   // The config may be stored as a JSON string (possibly double-stringified) with {Default: {...}, Custom: {...}} or already merged
-  const getMergedConfig = (config) => {
+  const getMergedConfig = (config: unknown): Record<string, unknown> | null => {
     if (!config) return null;
 
     // Parse if it's a string (may be double-stringified)
@@ -619,20 +649,21 @@ const TestResults = ({ testRunId, setSelectedTestRunId }) => {
     }
 
     // If config is wrapped in a "Config" object, extract it
-    if (parsedConfig && parsedConfig.Config && typeof parsedConfig.Config === 'object') {
-      parsedConfig = parsedConfig.Config;
+    const configObj = parsedConfig as Record<string, unknown>;
+    if (configObj && configObj.Config && typeof configObj.Config === 'object') {
+      parsedConfig = configObj.Config;
     }
 
     // Deep merge helper function
-    const deepMerge = (target, source) => {
+    const deepMerge = (target: Record<string, unknown>, source: Record<string, unknown>): Record<string, unknown> => {
       const output = { ...target };
       if (source && typeof source === 'object' && !Array.isArray(source)) {
         Object.keys(source).forEach((key) => {
           if (source[key] && typeof source[key] === 'object' && !Array.isArray(source[key])) {
             if (target[key] && typeof target[key] === 'object' && !Array.isArray(target[key])) {
-              output[key] = deepMerge(target[key], source[key]);
+              output[key] = deepMerge(target[key] as Record<string, unknown>, source[key] as Record<string, unknown>);
             } else {
-              output[key] = { ...source[key] };
+              output[key] = { ...(source[key] as Record<string, unknown>) };
             }
           } else {
             output[key] = source[key];
@@ -643,9 +674,10 @@ const TestResults = ({ testRunId, setSelectedTestRunId }) => {
     };
 
     // If config has Default and Custom properties, merge them
-    if (parsedConfig && parsedConfig.Default && typeof parsedConfig.Default === 'object') {
-      const defaultConfig = parsedConfig.Default;
-      const customConfig = parsedConfig.Custom || {};
+    const parsed = parsedConfig as Record<string, unknown>;
+    if (parsed && parsed.Default && typeof parsed.Default === 'object') {
+      const defaultConfig = parsed.Default as Record<string, unknown>;
+      const customConfig = (parsed.Custom || {}) as Record<string, unknown>;
 
       console.log('Merging Default and Custom configs');
       return deepMerge(defaultConfig, customConfig);
@@ -653,7 +685,7 @@ const TestResults = ({ testRunId, setSelectedTestRunId }) => {
 
     // Config is already in merged format
     console.log('Config already in merged format or no Default/Custom found');
-    return parsedConfig;
+    return parsed as Record<string, unknown>;
   };
 
   // Open config export modal
@@ -743,10 +775,10 @@ const TestResults = ({ testRunId, setSelectedTestRunId }) => {
 
       console.log('About to call GraphQL with input:', input);
 
-      const result = await client.graphql({
+      const result = (await client.graphql({
         query: START_TEST_RUN,
         variables: { input },
-      });
+      })) as GqlResult;
 
       console.log('GraphQL call completed, result:', result);
 
@@ -754,7 +786,7 @@ const TestResults = ({ testRunId, setSelectedTestRunId }) => {
         console.log('Success! Closing modal and redirecting...');
         const newTestRun = result.data.startTestRun;
         // Add to active test runs
-        addTestRun(newTestRun.testRunId, newTestRun.testSetName, reRunContext, newTestRun.filesCount);
+        addTestRun(newTestRun.testRunId as string, newTestRun.testSetName as string, reRunContext, newTestRun.filesCount as number);
         setShowReRunModal(false);
         setReRunContext('');
         setReRunNumberOfFiles('');
@@ -796,7 +828,7 @@ const TestResults = ({ testRunId, setSelectedTestRunId }) => {
 
   const contextDescription = results.context ? (
     <Box variant="p" color="text-body-secondary" margin={{ top: 'xs' }}>
-      Context: {results.context}
+      Context: {String(results.context)}
     </Box>
   ) : null;
 
@@ -823,9 +855,9 @@ const TestResults = ({ testRunId, setSelectedTestRunId }) => {
       <SpaceBetween direction="vertical" size="l">
         {/* Overall Status */}
         <Box>
-          <Badge color={getStatusColor(results.status)}>{results.status}</Badge>
+          <Badge color={getStatusColor(results.status as string) as 'blue' | 'green' | 'grey' | 'red'}>{String(results.status)}</Badge>
           <Box margin={{ left: 's' }} display="inline">
-            {results.completedFiles}/{results.filesCount} files processed
+            {String(results.completedFiles)}/{String(results.filesCount)} files processed
           </Box>
         </Box>
 
@@ -847,21 +879,23 @@ const TestResults = ({ testRunId, setSelectedTestRunId }) => {
           <Box>
             <Box variant="awsui-key-label">Total Cost</Box>
             <Box fontSize="heading-l">
-              {results.totalCost !== null && results.totalCost !== undefined ? `$${results.totalCost.toFixed(4)}` : 'N/A'}
+              {results.totalCost !== null && results.totalCost !== undefined ? `$${(results.totalCost as number).toFixed(4)}` : 'N/A'}
             </Box>
           </Box>
           <Box>
             <Box variant="awsui-key-label">Avg Confidence</Box>
             <Box fontSize="heading-l">
               {results.averageConfidence !== null && results.averageConfidence !== undefined
-                ? `${(results.averageConfidence * 100).toFixed(1)}%`
+                ? `${((results.averageConfidence as number) * 100).toFixed(1)}%`
                 : 'N/A'}
             </Box>
           </Box>
           <Box>
             <Box variant="awsui-key-label">Avg Accuracy</Box>
             <Box fontSize="heading-l">
-              {results.overallAccuracy !== null && results.overallAccuracy !== undefined ? results.overallAccuracy.toFixed(3) : 'N/A'}
+              {results.overallAccuracy !== null && results.overallAccuracy !== undefined
+                ? (results.overallAccuracy as number).toFixed(3)
+                : 'N/A'}
             </Box>
           </Box>
           <Box>
@@ -873,7 +907,7 @@ const TestResults = ({ testRunId, setSelectedTestRunId }) => {
             <Box fontSize="heading-l">
               {results.createdAt && results.completedAt
                 ? (() => {
-                    const duration = new Date(results.completedAt) - new Date(results.createdAt);
+                    const duration = new Date(results.completedAt as string).getTime() - new Date(results.createdAt as string).getTime();
                     const minutes = Math.floor(duration / 60000);
                     const seconds = Math.floor((duration % 60000) / 1000);
                     return minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
@@ -884,7 +918,7 @@ const TestResults = ({ testRunId, setSelectedTestRunId }) => {
           {results.configVersion && (
             <Box>
               <Box variant="awsui-key-label">Config Version</Box>
-              <Box fontSize="heading-l">{formatConfigVersionLink(results.configVersion, versions)}</Box>
+              <Box fontSize="heading-l">{formatConfigVersionLink(results.configVersion as string, versions)}</Box>
             </Box>
           )}
         </ColumnLayout>
@@ -907,7 +941,7 @@ const TestResults = ({ testRunId, setSelectedTestRunId }) => {
                   />
                 }
               >
-                Weighted Overall Score Distribution ({results.testRunId})
+                Weighted Overall Score Distribution ({String(results.testRunId)})
               </Header>
             }
           >
@@ -933,7 +967,7 @@ const TestResults = ({ testRunId, setSelectedTestRunId }) => {
                 };
 
                 // Count documents and collect IDs in each bucket
-                Object.entries(scores).forEach(([docId, score]) => {
+                Object.entries(scores as Record<string, number>).forEach(([docId, score]) => {
                   let bucket;
                   if (score < 0.1) bucket = '0.0-0.1';
                   else if (score < 0.2) bucket = '0.1-0.2';
@@ -1008,8 +1042,9 @@ const TestResults = ({ testRunId, setSelectedTestRunId }) => {
                       <Bar
                         dataKey="count"
                         fill="#0073bb"
-                        onClick={(data) => {
-                          const range = data.range;
+                        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                        onClick={(data: any) => {
+                          const range = data.range as string;
                           if (range && buckets[range] && buckets[range].docs.length > 0) {
                             const docs = buckets[range].docs.sort((a, b) => b.score - a.score);
                             setSelectedRangeData({ range, docs });
@@ -1077,10 +1112,10 @@ const TestResults = ({ testRunId, setSelectedTestRunId }) => {
                     selectedOption={lowestScoreCount}
                     onChange={({ detail }) => setLowestScoreCount(detail.selectedOption)}
                     options={[
-                      { label: '5', value: 5 },
-                      { label: '10', value: 10 },
-                      { label: '20', value: 20 },
-                      { label: '50', value: 50 },
+                      { label: '5', value: '5' },
+                      { label: '10', value: '10' },
+                      { label: '20', value: '20' },
+                      { label: '50', value: '50' },
                     ]}
                     placeholder="Select count"
                   />
@@ -1096,10 +1131,10 @@ const TestResults = ({ testRunId, setSelectedTestRunId }) => {
                   ? JSON.parse(results.weightedOverallScores)
                   : results.weightedOverallScores;
 
-              const sortedDocs = Object.entries(scores)
+              const sortedDocs = Object.entries(scores as Record<string, number>)
                 .map(([docId, score]) => ({ docId, score }))
                 .sort((a, b) => a.score - b.score)
-                .slice(0, lowestScoreCount.value);
+                .slice(0, Number(lowestScoreCount.value));
 
               return (
                 <Table
@@ -1125,7 +1160,7 @@ const TestResults = ({ testRunId, setSelectedTestRunId }) => {
                     {
                       id: 'score',
                       header: 'Weighted Overall Score',
-                      cell: (item) => item.score.toFixed(3),
+                      cell: (item) => (item.score as number).toFixed(3),
                     },
                   ]}
                   variant="embedded"
@@ -1179,7 +1214,7 @@ const TestResults = ({ testRunId, setSelectedTestRunId }) => {
       >
         <SpaceBetween size="m">
           <Box>
-            <strong>Test Set:</strong> {results?.testSetName || 'N/A'}
+            <strong>Test Set:</strong> {String(results?.testSetName || 'N/A')}
             <br />
             <strong>Pattern:</strong> {testSetStatus === 'NOT_FOUND' ? 'Test set not found' : testSetFilePattern || 'Uploaded files'}
             <br />
@@ -1308,10 +1343,6 @@ const TestResults = ({ testRunId, setSelectedTestRunId }) => {
       </Modal>
     </Container>
   );
-};
-
-TestResults.propTypes = {
-  testRunId: PropTypes.string.isRequired,
 };
 
 export default TestResults;

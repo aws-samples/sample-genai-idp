@@ -1,8 +1,8 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 import React, { useState, useEffect } from 'react';
-import PropTypes from 'prop-types';
 import { Table, Button, SpaceBetween, ButtonDropdown, Pagination, Box, TextFilter, Flashbar, Link } from '@cloudscape-design/components';
+import type { IconProps } from '@cloudscape-design/components';
 import { useCollection } from '@cloudscape-design/collection-hooks';
 import { generateClient } from 'aws-amplify/api';
 import GET_TEST_RUNS from '../../graphql/queries/getTestRuns';
@@ -14,6 +14,9 @@ import TestRunnerStatus from './TestRunnerStatus';
 import { TableHeader } from '../common/table';
 import useConfigurationVersions from '../../hooks/use-configuration-versions';
 import { formatConfigVersionLink, formatConfigVersionText } from './utils/configVersionUtils';
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type GqlResult = { data: Record<string, any> };
 
 const client = generateClient();
 
@@ -27,9 +30,46 @@ const TIME_PERIOD_OPTIONS = [
   { id: 'refresh-2w', hours: 336, text: '2 weeks' },
   { id: 'refresh-1m', hours: 720, text: '30 days' },
   { id: 'custom-range', hours: -1, text: 'Custom range...' },
-].map((option) => ({ ...option, text: option.text })); // Ensure text is the display text
+].map((option) => ({ ...option, text: option.text }));
 
-const TestRunIdCell = ({ item, onSelect }) => (
+interface TestRunItem {
+  testRunId: string;
+  testSetName: string;
+  status: string;
+  isActive?: boolean;
+  progress?: number;
+  filesCount: number;
+  createdAt: string;
+  completedAt: string | null;
+  context: string;
+  configVersion?: string | null;
+}
+
+interface ActiveTestRun {
+  testRunId: string;
+  testSetName: string;
+  startTime: Date;
+  filesCount?: number;
+  context?: string;
+  configVersion?: string;
+}
+
+interface DateRange {
+  startDateTime: string;
+  endDateTime: string;
+}
+
+interface TestResultsListProps {
+  timePeriodHours: number;
+  setTimePeriodHours: (hours: number) => void;
+  selectedItems: TestRunItem[];
+  setSelectedItems: (items: TestRunItem[]) => void;
+  preSelectedTestRunId?: string | null;
+  activeTestRuns?: ActiveTestRun[];
+  onTestComplete: (testRunId: string) => void;
+}
+
+const TestRunIdCell = ({ item, onSelect }: { item: TestRunItem; onSelect: (testRunId: string) => void }): React.JSX.Element => (
   <button
     type="button"
     style={{
@@ -54,7 +94,7 @@ const TestRunIdCell = ({ item, onSelect }) => (
   </button>
 );
 
-const TextCell = ({ text }) => (
+const TextCell = ({ text }: { text: string }): React.JSX.Element => (
   <span
     style={{
       overflow: 'hidden',
@@ -69,28 +109,24 @@ const TextCell = ({ text }) => (
   </span>
 );
 
-TestRunIdCell.propTypes = {
-  item: PropTypes.shape({
-    testRunId: PropTypes.string.isRequired,
-  }).isRequired,
-  onSelect: PropTypes.func.isRequired,
-};
-
-TextCell.propTypes = {
-  text: PropTypes.string.isRequired,
-};
-
 const TIME_PERIOD_STORAGE_KEY = 'testResultsTimePeriodHours';
 
-const TestResultsList = ({ timePeriodHours, setTimePeriodHours, selectedItems, setSelectedItems, activeTestRuns = [], onTestComplete }) => {
+const TestResultsList = ({
+  timePeriodHours,
+  setTimePeriodHours,
+  selectedItems,
+  setSelectedItems,
+  activeTestRuns = [],
+  onTestComplete,
+}: TestResultsListProps): React.JSX.Element => {
   const { versions } = useConfigurationVersions();
-  const [testRuns, setTestRuns] = useState([]);
+  const [testRuns, setTestRuns] = useState<TestRunItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [successMessage, setSuccessMessage] = useState(null);
+  const [error, setError] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [isDeleteModalVisible, setIsDeleteModalVisible] = useState(false);
   const [isDateRangeModalVisible, setIsDateRangeModalVisible] = useState(false);
-  const [customDateRange, setCustomDateRange] = useState(null);
+  const [customDateRange, setCustomDateRange] = useState<DateRange | null>(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [pageSize, setPageSize] = useState(10);
 
@@ -105,7 +141,7 @@ const TestResultsList = ({ timePeriodHours, setTimePeriodHours, selectedItems, s
     }
   }, []);
 
-  const handleTimePeriodChange = ({ detail }) => {
+  const handleTimePeriodChange = ({ detail }: { detail: { id: string } }): void => {
     if (detail.id === 'custom-range') {
       setIsDateRangeModalVisible(true);
       return;
@@ -129,7 +165,7 @@ const TestResultsList = ({ timePeriodHours, setTimePeriodHours, selectedItems, s
     sorting: { defaultState: { sortingColumn: { sortingField: 'createdAt' }, isDescending: true } },
   });
 
-  const handleTestRunSelect = (testRunId) => {
+  const handleTestRunSelect = (testRunId: string): void => {
     window.location.hash = `#/test-studio?tab=results&testRunId=${testRunId}`;
   };
 
@@ -151,10 +187,10 @@ const TestResultsList = ({ timePeriodHours, setTimePeriodHours, selectedItems, s
         ? { startDateTime: customDateRange.startDateTime, endDateTime: customDateRange.endDateTime }
         : { timePeriodHours };
       console.log('Fetching test runs with variables:', variables);
-      const result = await client.graphql({
+      const result = (await client.graphql({
         query: GET_TEST_RUNS,
         variables,
-      });
+      })) as GqlResult;
       console.log('Raw GraphQL result:', result);
       console.log('getTestRuns data:', result.data.getTestRuns);
       console.log('Number of test runs returned:', result.data.getTestRuns?.length || 0);
@@ -241,10 +277,10 @@ const TestResultsList = ({ timePeriodHours, setTimePeriodHours, selectedItems, s
       const testRunIds = selectedItems.map((item) => item.testRunId);
       console.log('Attempting to delete test runs:', testRunIds);
 
-      const result = await client.graphql({
+      const result = (await client.graphql({
         query: DELETE_TESTS,
         variables: { testRunIds },
-      });
+      })) as GqlResult;
       console.log('Delete result:', result);
 
       const count = selectedItems.length;
@@ -292,7 +328,7 @@ const TestResultsList = ({ timePeriodHours, setTimePeriodHours, selectedItems, s
                 ? (() => {
                     const s = new Date(customDateRange.startDateTime);
                     const e = new Date(customDateRange.endDateTime);
-                    const fmt = (d) =>
+                    const fmt = (d: Date) =>
                       `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
                     return `Load: ${fmt(s)} → ${fmt(e)}`;
                   })()
@@ -308,7 +344,7 @@ const TestResultsList = ({ timePeriodHours, setTimePeriodHours, selectedItems, s
               loading={deleteLoading}
             />
             {selectedItems.length > 1 && (
-              <Button iconName="compare" variant="normal" onClick={handleCompare}>
+              <Button iconName={'compare' as unknown as IconProps.Name} variant="normal" onClick={handleCompare}>
                 Test Comparison ({selectedItems.length})
               </Button>
             )}
@@ -442,27 +478,5 @@ const TestResultsList = ({ timePeriodHours, setTimePeriodHours, selectedItems, s
     </SpaceBetween>
   );
 };
-
-TestResultsList.propTypes = {
-  timePeriodHours: PropTypes.number.isRequired,
-  setTimePeriodHours: PropTypes.func.isRequired,
-  selectedItems: PropTypes.arrayOf(
-    PropTypes.shape({
-      testRunId: PropTypes.string,
-      testSetName: PropTypes.string,
-    }),
-  ).isRequired,
-  setSelectedItems: PropTypes.func.isRequired,
-  activeTestRuns: PropTypes.arrayOf(
-    PropTypes.shape({
-      testRunId: PropTypes.string.isRequired,
-      testSetName: PropTypes.string.isRequired,
-      startTime: PropTypes.instanceOf(Date).isRequired,
-    }),
-  ),
-  onTestComplete: PropTypes.func.isRequired,
-};
-
-TestResultsList.defaultProps = {};
 
 export default TestResultsList;

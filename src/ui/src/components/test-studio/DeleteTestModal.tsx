@@ -1,14 +1,37 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 import React from 'react';
-import PropTypes from 'prop-types';
 import { Modal, Box, SpaceBetween, Button } from '@cloudscape-design/components';
 
-const DeleteTestModal = ({ visible, onDismiss, onConfirm, selectedItems, itemType, loading = false }) => {
+interface DeleteTestItem {
+  testRunId?: string;
+  testSetName?: string;
+  name?: string;
+  id?: string;
+  filePattern?: string;
+}
+
+interface DeleteTestModalProps {
+  visible: boolean;
+  onDismiss: () => void;
+  onConfirm: () => void;
+  selectedItems: DeleteTestItem[];
+  itemType: 'test run' | 'test set';
+  loading?: boolean;
+}
+
+const DeleteTestModal = ({
+  visible,
+  onDismiss,
+  onConfirm,
+  selectedItems,
+  itemType,
+  loading = false,
+}: DeleteTestModalProps): React.JSX.Element => {
   const itemCount = selectedItems.length;
   const isMultiple = itemCount > 1;
 
-  const getItemDisplay = (item) => {
+  const getItemDisplay = (item: DeleteTestItem): React.JSX.Element => {
     if (itemType === 'test run') {
       return (
         <>
@@ -57,19 +80,6 @@ const DeleteTestModal = ({ visible, onDismiss, onConfirm, selectedItems, itemTyp
       </Box>
     </Modal>
   );
-};
-
-DeleteTestModal.propTypes = {
-  visible: PropTypes.bool.isRequired,
-  onDismiss: PropTypes.func.isRequired,
-  onConfirm: PropTypes.func.isRequired,
-  selectedItems: PropTypes.arrayOf(
-    PropTypes.shape({
-      testRunId: PropTypes.string,
-    }),
-  ).isRequired,
-  itemType: PropTypes.oneOf(['test run', 'test set']).isRequired,
-  loading: PropTypes.bool,
 };
 
 export default DeleteTestModal;

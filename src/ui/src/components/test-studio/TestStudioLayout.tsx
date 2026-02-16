@@ -12,8 +12,28 @@ import TestComparison from './TestComparison';
 import { appLayoutLabels } from '../common/labels';
 import useAppContext from '../../contexts/app';
 
-const TestStudioLayout = () => {
-  const { navigationOpen, setNavigationOpen, activeTestRuns, addTestRun, removeTestRun } = useAppContext();
+interface TestRunItem {
+  testRunId: string;
+  testSetName: string;
+  context?: string;
+  startTime: Date;
+  filesCount?: number;
+  configVersion?: string;
+}
+
+const TestStudioLayout = (): React.JSX.Element => {
+  const ctx = useAppContext();
+  const navigationOpen = ctx?.navigationOpen as boolean;
+  const setNavigationOpen = ctx?.setNavigationOpen as (open: boolean) => void;
+  const activeTestRuns = (ctx?.activeTestRuns ?? []) as TestRunItem[];
+  const addTestRun = ctx?.addTestRun as (
+    testRunId: string,
+    testSetName: string,
+    context: string,
+    filesCount: number,
+    configVersion?: string,
+  ) => void;
+  const removeTestRun = ctx?.removeTestRun as (testRunId: string) => void;
   const location = useLocation();
   const [activeTabId, setActiveTabId] = useState('sets');
   const [timePeriodHours, setTimePeriodHours] = useState(2);
@@ -28,15 +48,15 @@ const TestStudioLayout = () => {
     }
   }, [location.search]);
 
-  const handleTestStart = (testRunId, testSetName, context, filesCount, configVersion) => {
+  const handleTestStart = (testRunId: string, testSetName: string, context: string, filesCount: number, configVersion?: string): void => {
     addTestRun(testRunId, testSetName, context, filesCount, configVersion);
   };
 
-  const handleTestComplete = (testRunId) => {
+  const handleTestComplete = (testRunId: string): void => {
     removeTestRun(testRunId);
   };
 
-  const renderContent = () => {
+  const renderContent = (): React.JSX.Element => {
     switch (activeTabId) {
       case 'sets':
         return <TestSets />;

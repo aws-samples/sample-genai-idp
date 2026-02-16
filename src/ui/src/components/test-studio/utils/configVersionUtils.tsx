@@ -3,14 +3,20 @@
 import React from 'react';
 import { Link } from '@cloudscape-design/components';
 
-/**
- * Format config version with clickable link and truncated description
- * @param {string} configVersion - The version ID (e.g., 'v21')
- * @param {Array} versions - Array of version objects with versionId and description
- * @param {number} maxDescLength - Maximum description length before truncation (default: 10)
- * @returns {JSX.Element|string} Formatted config version with link or 'N/A'
- */
-export const formatConfigVersionLink = (configVersion, versions, maxDescLength = 10) => {
+export interface ConfigVersion {
+  version?: string;
+  versionName: string;
+  description?: string;
+  created?: string;
+  isActive?: boolean;
+  [key: string]: unknown;
+}
+
+export const formatConfigVersionLink = (
+  configVersion: string | null | undefined,
+  versions: ConfigVersion[],
+  maxDescLength = 10,
+): React.JSX.Element | string => {
   if (!configVersion) return 'N/A';
 
   const versionFromList = versions.find((v) => v.versionName === configVersion);
@@ -23,13 +29,7 @@ export const formatConfigVersionLink = (configVersion, versions, maxDescLength =
   return <Link href={`#/documents/config?version=${configVersion}`}>{configVersion}</Link>;
 };
 
-/**
- * Format config version for text export (CSV, etc.) with full description
- * @param {string} configVersion - The version ID (e.g., 'v21')
- * @param {Array} versions - Array of version objects with versionId and description
- * @returns {string} Formatted config version text or 'N/A'
- */
-export const formatConfigVersionText = (configVersion, versions) => {
+export const formatConfigVersionText = (configVersion: string | null | undefined, versions: ConfigVersion[]): string => {
   if (!configVersion) return 'N/A';
 
   const versionFromList = versions.find((v) => v.versionName === configVersion);

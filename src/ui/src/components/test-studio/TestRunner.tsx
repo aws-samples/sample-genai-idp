@@ -1,7 +1,7 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 import React, { useState } from 'react';
-import PropTypes from 'prop-types';
+import type { SelectProps, IconProps } from '@cloudscape-design/components';
 import { Container, Header, SpaceBetween, Button, FormField, Select, Alert, Textarea, Input } from '@cloudscape-design/components';
 import { generateClient } from 'aws-amplify/api';
 import { ConsoleLogger } from 'aws-amplify/utils';
@@ -10,13 +10,36 @@ import GET_TEST_SETS from '../../graphql/queries/getTestSets';
 import handlePrint from './PrintUtils';
 import useConfigurationVersions from '../../hooks/use-configuration-versions';
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type GqlResult = { data: Record<string, any> };
+
 const client = generateClient();
 const logger = new ConsoleLogger('TestRunner');
 
-const TestRunner = ({ onTestStart, onTestComplete, activeTestRuns }) => {
-  const [testSets, setTestSets] = useState([]);
-  const [selectedTestSet, setSelectedTestSet] = useState(null);
-  const [selectedVersion, setSelectedVersion] = useState(null);
+interface ActiveTestRun {
+  testRunId: string;
+  testSetName: string;
+  startTime: Date;
+}
+
+interface TestSetData {
+  id: string;
+  name: string;
+  filePattern?: string;
+  fileCount: number;
+  status: string;
+}
+
+interface TestRunnerProps {
+  onTestStart: (testRunId: string, testSetName: string, context: string, filesCount: number, configVersion?: string) => void;
+  onTestComplete: (testRunId: string) => void;
+  activeTestRuns: ActiveTestRun[];
+}
+
+const TestRunner = ({ onTestStart, onTestComplete, activeTestRuns }: TestRunnerProps): React.JSX.Element => {
+  const [testSets, setTestSets] = useState<TestSetData[]>([]);
+  const [selectedTestSet, setSelectedTestSet] = useState<SelectProps.Option | null>(null);
+  const [selectedVersion, setSelectedVersion] = useState<SelectProps.Option | null>(null);
   const [numberOfFiles, setNumberOfFiles] = useState('');
   const [context, setContext] = useState('');
   const [error, setError] = useState('');
@@ -55,7 +78,7 @@ const TestRunner = ({ onTestStart, onTestComplete, activeTestRuns }) => {
   const loadTestSets = async () => {
     try {
       console.log('TestRunner: Loading test sets...');
-      const result = await client.graphql({ query: GET_TEST_SETS });
+      const result = (await client.graphql({ query: GET_TEST_SETS })) as GqlResult;
       console.log('TestRunner: GraphQL result:', result);
       const testSetsData = result.data.getTestSets || [];
       console.log('TestRunner: Test sets data:', testSetsData);
@@ -104,10 +127,10 @@ const TestRunner = ({ onTestStart, onTestComplete, activeTestRuns }) => {
       };
       console.log('TestRunner: Starting test run with input:', input);
 
-      const result = await client.graphql({
+      const result = (await client.graphql({
         query: START_TEST_RUN,
         variables: { input },
-      });
+      })) as GqlResult;
 
       console.log('TestRunner: GraphQL result:', result);
 
@@ -166,7 +189,7 @@ const TestRunner = ({ onTestStart, onTestComplete, activeTestRuns }) => {
               <Button variant="primary" onClick={handleRunTest} loading={loading} disabled={!selectedTestSet}>
                 Run Test
               </Button>
-              <Button onClick={handlePrint} iconName="print">
+              <Button onClick={handlePrint} iconName={'print' as unknown as IconProps.Name}>
                 Print
               </Button>
             </SpaceBetween>
@@ -268,19 +291,5 @@ const TestRunner = ({ onTestStart, onTestComplete, activeTestRuns }) => {
     </Container>
   );
 };
-
-TestRunner.propTypes = {
-  onTestStart: PropTypes.func.isRequired,
-  onTestComplete: PropTypes.func.isRequired,
-  activeTestRuns: PropTypes.arrayOf(
-    PropTypes.shape({
-      testRunId: PropTypes.string.isRequired,
-      testSetName: PropTypes.string.isRequired,
-      startTime: PropTypes.instanceOf(Date).isRequired,
-    }),
-  ).isRequired,
-};
-
-TestRunner.defaultProps = {};
 
 export default TestRunner;

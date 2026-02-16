@@ -1,7 +1,7 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 import React, { useState, useEffect } from 'react';
-import PropTypes from 'prop-types';
+import type { SelectProps } from '@cloudscape-design/components';
 import {
   Container,
   Header,
@@ -21,26 +21,39 @@ import COMPARE_TEST_RUNS from '../../graphql/queries/compareTestRuns';
 import TestStudioHeader from './TestStudioHeader';
 import useLocalStorage from '../common/local-storage';
 import useConfigurationVersions from '../../hooks/use-configuration-versions';
-import { formatConfigVersionLink, formatConfigVersionText } from './utils/configVersionUtils';
+import { formatConfigVersionLink, formatConfigVersionText, type ConfigVersion as UtilsConfigVersion } from './utils/configVersionUtils';
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type GqlResult = { data: Record<string, any> };
 
 const client = generateClient();
 
-const TestComparison = ({ preSelectedTestRunIds = [] }) => {
+interface TestComparisonProps {
+  preSelectedTestRunIds?: string[];
+}
+
+interface ComparisonData {
+  metrics?: Record<string, Record<string, unknown>>;
+  configs?: Array<{ setting: string; values: string | Record<string, string> }>;
+  error?: string;
+}
+
+const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): React.JSX.Element => {
   const { versions } = useConfigurationVersions();
-  const [comparisonData, setComparisonData] = useState(null);
+  const [comparisonData, setComparisonData] = useState<ComparisonData | null>(null);
   const [comparing, setComparing] = useState(false);
   const [currentAttempt, setCurrentAttempt] = useState(1);
-  const [lowestScoreCount, setLowestScoreCount] = useState({ label: '5', value: 5 });
+  const [lowestScoreCount, setLowestScoreCount] = useState<Record<string, unknown>>({ label: '5', value: '5' });
   const [preferences, setPreferences] = useLocalStorage('test-comparison-preferences', { wrapLines: false });
 
   // Color grading functions
-  const getCostColorGrade = (cost, allCosts) => {
+  const getCostColorGrade = (cost: unknown, allCosts: unknown[]): React.CSSProperties => {
     if (!cost || cost === 'N/A') return {};
     const numCost = typeof cost === 'string' ? parseFloat(cost.replace('$', '')) : cost;
     const validCosts = allCosts.filter((c) => c && c !== 'N/A').map((c) => (typeof c === 'string' ? parseFloat(c.replace('$', '')) : c));
     if (validCosts.length === 0) return {};
 
-    const sortedCosts = [...validCosts].sort((a, b) => a - b);
+    const sortedCosts = [...validCosts].sort((a, b) => Number(a) - Number(b));
     const index = sortedCosts.indexOf(numCost);
     const ratio = validCosts.length === 1 ? 0 : index / (validCosts.length - 1);
 
@@ -66,13 +79,13 @@ const TestComparison = ({ preSelectedTestRunIds = [] }) => {
     return { backgroundColor: `rgb(${r}, ${g}, ${b})`, color: textColor };
   };
 
-  const getScoreColorGrade = (score, allScores) => {
+  const getScoreColorGrade = (score: unknown, allScores: unknown[]): React.CSSProperties => {
     if (!score || score === 'N/A') return {};
     const numScore = typeof score === 'string' ? parseFloat(score) : score;
     const validScores = allScores.filter((s) => s && s !== 'N/A').map((s) => (typeof s === 'string' ? parseFloat(s) : s));
     if (validScores.length === 0) return {};
 
-    const sortedScores = [...validScores].sort((a, b) => b - a); // Highest to lowest
+    const sortedScores = [...validScores].sort((a, b) => Number(b) - Number(a)); // Highest to lowest
     const index = sortedScores.indexOf(numScore);
     const ratio = validScores.length === 1 ? 0 : index / (validScores.length - 1);
 
@@ -98,25 +111,25 @@ const TestComparison = ({ preSelectedTestRunIds = [] }) => {
     return { backgroundColor: `rgb(${r}, ${g}, ${b})`, color: textColor };
   };
 
-  // Preferences component
-  const TestComparisonPreferences = ({ preferences: prefs, setPreferences: setPrefs }) => (
+  const TestComparisonPreferences = ({
+    preferences: prefs,
+    setPreferences: setPrefs,
+  }: {
+    preferences: { wrapLines: boolean };
+    setPreferences: (prefs: { wrapLines: boolean }) => void;
+  }): React.JSX.Element => (
     <CollectionPreferences
       title="Preferences"
       confirmLabel="Confirm"
       cancelLabel="Cancel"
       preferences={prefs}
-      onConfirm={({ detail }) => setPrefs(detail)}
+      onConfirm={({ detail }) => setPrefs(detail as { wrapLines: boolean })}
       wrapLinesPreference={{
         label: 'Wrap lines',
         description: 'Check to see all the text and wrap the lines',
       }}
     />
   );
-
-  TestComparisonPreferences.propTypes = {
-    preferences: PropTypes.object.isRequired,
-    setPreferences: PropTypes.func.isRequired,
-  };
 
   useEffect(() => {
     const fetchComparison = async () => {
@@ -134,10 +147,10 @@ const TestComparison = ({ preSelectedTestRunIds = [] }) => {
           while (attempt <= maxRetries) {
             try {
               setCurrentAttempt(attempt);
-              result = await client.graphql({
+              result = (await client.graphql({
                 query: COMPARE_TEST_RUNS,
                 variables: { testRunIds: preSelectedTestRunIds },
-              });
+              })) as GqlResult;
               setCurrentAttempt(5); // Set to 100% before completing
               await new Promise((resolve) => setTimeout(resolve, 500)); // Brief pause to show 100%
               break;
@@ -173,7 +186,7 @@ const TestComparison = ({ preSelectedTestRunIds = [] }) => {
                   setTimeout(() => {
                     clearInterval(progressInterval);
                     setCurrentAttempt(attempt);
-                    resolve();
+                    resolve(undefined as unknown as void);
                   }, waitTime),
                 );
 
@@ -207,7 +220,7 @@ const TestComparison = ({ preSelectedTestRunIds = [] }) => {
   }, [preSelectedTestRunIds]);
 
   // Helper function to create clickable test run ID headers
-  const createTestRunHeader = (testRunId, truncate = false) => {
+  const createTestRunHeader = (testRunId: string, truncate = false): React.JSX.Element => {
     const displayId = testRunId;
     const testSetName = truncate ? completeTestRuns[testRunId]?.testSetName : null;
 
@@ -238,7 +251,7 @@ const TestComparison = ({ preSelectedTestRunIds = [] }) => {
         onClick={() => {
           window.location.hash = `#/test-studio?tab=results&testRunId=${testRunId}`;
         }}
-        title={testRunId}
+        aria-label={testRunId}
       >
         {displayId}
       </Button>
@@ -261,26 +274,33 @@ const TestComparison = ({ preSelectedTestRunIds = [] }) => {
     const performanceRows = [
       ['Test Set', ...Object.values(completeTestRuns).map((run) => run.testSetName || 'N/A')],
       ['Context', ...Object.values(completeTestRuns).map((run) => run.context || 'N/A')],
-      ['Config Version', ...Object.values(completeTestRuns).map((run) => formatConfigVersionText(run.configVersion, versions))],
+      [
+        'Config Version',
+        ...Object.values(completeTestRuns).map((run) =>
+          formatConfigVersionText(run.configVersion as string | undefined, versions as unknown as UtilsConfigVersion[]),
+        ),
+      ],
       ['Files Processed', ...Object.values(completeTestRuns).map((run) => run.filesCount || 'N/A')],
       ['Files Completed', ...Object.values(completeTestRuns).map((run) => run.completedFiles || 'N/A')],
       ['Files Failed', ...Object.values(completeTestRuns).map((run) => run.failedFiles || 'N/A')],
       [
         'Total Cost',
         ...Object.values(completeTestRuns).map((run) =>
-          run.totalCost !== null && run.totalCost !== undefined ? `$${run.totalCost.toFixed(4)}` : 'N/A',
+          run.totalCost !== null && run.totalCost !== undefined ? `$${Number(run.totalCost).toFixed(4)}` : 'N/A',
         ),
       ],
       [
         'Average Accuracy',
         ...Object.values(completeTestRuns).map((run) =>
-          run.overallAccuracy !== null && run.overallAccuracy !== undefined ? run.overallAccuracy.toFixed(3) : 'N/A',
+          run.overallAccuracy !== null && run.overallAccuracy !== undefined ? Number(run.overallAccuracy).toFixed(3) : 'N/A',
         ),
       ],
       [
         'Average Confidence',
         ...Object.values(completeTestRuns).map((run) =>
-          run.averageConfidence !== null && run.averageConfidence !== undefined ? `${(run.averageConfidence * 100).toFixed(1)}%` : 'N/A',
+          run.averageConfidence !== null && run.averageConfidence !== undefined
+            ? `${(Number(run.averageConfidence) * 100).toFixed(1)}%`
+            : 'N/A',
         ),
       ],
       [
@@ -289,9 +309,9 @@ const TestComparison = ({ preSelectedTestRunIds = [] }) => {
           if (run.weightedOverallScores) {
             const scores =
               typeof run.weightedOverallScores === 'string' ? JSON.parse(run.weightedOverallScores) : run.weightedOverallScores;
-            const values = Object.values(scores);
+            const values = Object.values(scores) as number[];
             if (values.length > 0) {
-              const avg = values.reduce((sum, score) => sum + score, 0) / values.length;
+              const avg = values.reduce((sum: number, score: unknown) => sum + Number(score), 0) / values.length;
               return avg.toFixed(3);
             }
           }
@@ -302,7 +322,7 @@ const TestComparison = ({ preSelectedTestRunIds = [] }) => {
         'Duration',
         ...Object.values(completeTestRuns).map((run) => {
           if (run.createdAt && run.completedAt) {
-            const duration = new Date(run.completedAt) - new Date(run.createdAt);
+            const duration = new Date(run.completedAt as string).getTime() - new Date(run.createdAt as string).getTime();
             const minutes = Math.floor(duration / 60000);
             const seconds = Math.floor((duration % 60000) / 1000);
             return minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
@@ -313,7 +333,7 @@ const TestComparison = ({ preSelectedTestRunIds = [] }) => {
     ];
 
     // Add cost breakdown rows
-    const costRows = [];
+    const costRows: string[][] = [];
     const allCostItems = new Set();
 
     Object.values(completeTestRuns).forEach((testRun) => {
@@ -335,14 +355,14 @@ const TestComparison = ({ preSelectedTestRunIds = [] }) => {
     costRows.push(['Context', 'Service/Api', 'Unit', ...Object.keys(completeTestRuns)]);
 
     const sortedCostItems = Array.from(allCostItems).sort();
-    const contexts = [...new Set(sortedCostItems.map((item) => item.split('|')[0]))];
+    const contexts = [...new Set(sortedCostItems.map((item) => String(item).split('|')[0]))];
 
     contexts.forEach((context) => {
-      const contextItems = sortedCostItems.filter((item) => item.startsWith(`${context}|`));
+      const contextItems = sortedCostItems.filter((item) => String(item).startsWith(`${context}|`));
 
       // Add context items
       contextItems.forEach((itemKey) => {
-        const [ctx, serviceApi, unit] = itemKey.split('|');
+        const [ctx, serviceApi, unit] = String(itemKey).split('|');
         const row = [ctx, serviceApi, unit];
 
         Object.entries(completeTestRuns).forEach(([testRunId, testRun]) => {
@@ -366,7 +386,7 @@ const TestComparison = ({ preSelectedTestRunIds = [] }) => {
       const subtotalRow = ['', `${context} Subtotal`, ''];
       Object.keys(completeTestRuns).forEach((testRunId) => {
         const contextTotal = contextItems.reduce((sum, itemKey) => {
-          const [ctx, serviceApi, unit] = itemKey.split('|');
+          const [ctx, serviceApi, unit] = String(itemKey).split('|');
           const services = completeTestRuns[testRunId].costBreakdown?.[ctx] || {};
           const serviceKey = Object.keys(services).find((key) => {
             const lastUnderscoreIndex = key.lastIndexOf('_');
@@ -378,7 +398,7 @@ const TestComparison = ({ preSelectedTestRunIds = [] }) => {
           const estimatedCost = details.estimated_cost || 0;
           return sum + estimatedCost;
         }, 0);
-        subtotalRow.push(`$${contextTotal.toFixed(4)}`);
+        subtotalRow.push(`$${Number(contextTotal).toFixed(4)}`);
       });
       costRows.push(subtotalRow);
     });
@@ -387,7 +407,7 @@ const TestComparison = ({ preSelectedTestRunIds = [] }) => {
     const totalRow = ['', 'Total', ''];
     Object.keys(completeTestRuns).forEach((testRunId) => {
       const grandTotal = sortedCostItems.reduce((sum, itemKey) => {
-        const [context, serviceApi, unit] = itemKey.split('|');
+        const [context, serviceApi, unit] = String(itemKey).split('|');
         const services = completeTestRuns[testRunId].costBreakdown?.[context] || {};
         const serviceKey = Object.keys(services).find((key) => {
           const lastUnderscoreIndex = key.lastIndexOf('_');
@@ -399,7 +419,7 @@ const TestComparison = ({ preSelectedTestRunIds = [] }) => {
         const estimatedCost = details.estimated_cost || 0;
         return sum + estimatedCost;
       }, 0);
-      totalRow.push(`$${grandTotal.toFixed(4)}`);
+      totalRow.push(`$${Number(grandTotal).toFixed(4)}`);
     });
     costRows.push(totalRow);
 
@@ -410,7 +430,7 @@ const TestComparison = ({ preSelectedTestRunIds = [] }) => {
     Array.from(allCostItems)
       .sort()
       .forEach((itemKey) => {
-        const [context, serviceApi, unit] = itemKey.split('|');
+        const [context, serviceApi, unit] = String(itemKey).split('|');
         const row = [context, serviceApi, unit];
 
         Object.entries(completeTestRuns).forEach(([testRunId, testRun]) => {
@@ -446,11 +466,15 @@ const TestComparison = ({ preSelectedTestRunIds = [] }) => {
 
     // Add accuracy breakdown metrics
     Array.from(allAccuracyMetrics).forEach((metricKey) => {
-      const row = [metricKey.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase())];
+      const row = [
+        String(metricKey)
+          .replace(/_/g, ' ')
+          .replace(/\b\w/g, (l) => l.toUpperCase()),
+      ];
       Object.entries(completeTestRuns).forEach(([testRunId, testRun]) => {
         const accuracyBreakdown = testRun.accuracyBreakdown || {};
-        const value = accuracyBreakdown[metricKey];
-        const displayValue = value !== null && value !== undefined ? value.toFixed(3) : '0.000';
+        const value = accuracyBreakdown[metricKey as string];
+        const displayValue = value !== null && value !== undefined ? Number(value).toFixed(3) : '0.000';
         row.push(displayValue);
       });
       accuracyRows.push(row);
@@ -462,9 +486,9 @@ const TestComparison = ({ preSelectedTestRunIds = [] }) => {
       if (testRun.weightedOverallScores) {
         const scores =
           typeof testRun.weightedOverallScores === 'string' ? JSON.parse(testRun.weightedOverallScores) : testRun.weightedOverallScores;
-        const values = Object.values(scores);
+        const values = Object.values(scores) as number[];
         if (values.length > 0) {
-          const avg = values.reduce((sum, score) => sum + score, 0) / values.length;
+          const avg = values.reduce((sum: number, score: unknown) => sum + Number(score), 0) / values.length;
           weightedRow.push(avg.toFixed(3));
         } else {
           weightedRow.push('N/A');
@@ -543,7 +567,7 @@ const TestComparison = ({ preSelectedTestRunIds = [] }) => {
           {
             testSetName: testRun.testSetName,
             context: testRun.context,
-            configVersion: formatConfigVersionText(testRun.configVersion, versions),
+            configVersion: formatConfigVersionText(testRun.configVersion as string | undefined, versions),
             filesCount: testRun.filesCount,
             completedFiles: testRun.completedFiles,
             failedFiles: testRun.failedFiles,
@@ -556,15 +580,15 @@ const TestComparison = ({ preSelectedTestRunIds = [] }) => {
                   typeof testRun.weightedOverallScores === 'string'
                     ? JSON.parse(testRun.weightedOverallScores)
                     : testRun.weightedOverallScores;
-                const values = Object.values(scores);
-                return values.length > 0 ? values.reduce((sum, score) => sum + score, 0) / values.length : null;
+                const values = Object.values(scores) as number[];
+                return values.length > 0 ? values.reduce((sum: number, score: unknown) => sum + Number(score), 0) / values.length : null;
               }
               return null;
             })(),
             duration:
               testRun.createdAt && testRun.completedAt
                 ? (() => {
-                    const duration = new Date(testRun.completedAt) - new Date(testRun.createdAt);
+                    const duration = new Date(testRun.completedAt as string).getTime() - new Date(testRun.createdAt as string).getTime();
                     const minutes = Math.floor(duration / 60000);
                     const seconds = Math.floor((duration % 60000) / 1000);
                     return minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
@@ -576,14 +600,14 @@ const TestComparison = ({ preSelectedTestRunIds = [] }) => {
       configurationDifferences: comparisonData.configs || [],
       accuracyBreakdown: Object.fromEntries(
         Object.entries(completeTestRuns).map(([testRunId, testRun]) => {
-          const breakdown = { ...(testRun.accuracyBreakdown || {}) };
+          const breakdown = { ...((testRun.accuracyBreakdown || {}) as Record<string, unknown>) };
           // Add weighted overall score to accuracy breakdown
           if (testRun.weightedOverallScores) {
             const scores =
               typeof testRun.weightedOverallScores === 'string' ? JSON.parse(testRun.weightedOverallScores) : testRun.weightedOverallScores;
-            const values = Object.values(scores);
+            const values = Object.values(scores) as number[];
             if (values.length > 0) {
-              breakdown.weightedOverallScore = values.reduce((sum, score) => sum + score, 0) / values.length;
+              breakdown.weightedOverallScore = values.reduce((sum: number, score: unknown) => sum + Number(score), 0) / values.length;
             }
           }
           return [testRunId, breakdown];
@@ -653,7 +677,6 @@ const TestComparison = ({ preSelectedTestRunIds = [] }) => {
 
   const downloadButton = (
     <ButtonDropdown
-      iconName="download"
       variant="normal"
       items={[
         { id: 'csv', text: 'CSV' },
@@ -666,7 +689,9 @@ const TestComparison = ({ preSelectedTestRunIds = [] }) => {
           downloadToJson();
         }
       }}
-    ></ButtonDropdown>
+    >
+      Download
+    </ButtonDropdown>
   );
 
   return (
@@ -712,7 +737,7 @@ const TestComparison = ({ preSelectedTestRunIds = [] }) => {
                   ...Object.fromEntries(
                     Object.entries(completeTestRuns).map(([testRunId, testRun]) => [
                       testRunId,
-                      formatConfigVersionLink(testRun.configVersion, versions),
+                      formatConfigVersionLink(testRun.configVersion as string | undefined, versions as unknown as UtilsConfigVersion[]),
                     ]),
                   ),
                 },
@@ -739,7 +764,7 @@ const TestComparison = ({ preSelectedTestRunIds = [] }) => {
                   ...Object.fromEntries(
                     Object.entries(completeTestRuns).map(([testRunId, testRun]) => [
                       testRunId,
-                      testRun.totalCost !== null && testRun.totalCost !== undefined ? `$${testRun.totalCost.toFixed(4)}` : 'N/A',
+                      testRun.totalCost !== null && testRun.totalCost !== undefined ? `$${Number(testRun.totalCost).toFixed(4)}` : 'N/A',
                     ]),
                   ),
                 },
@@ -749,7 +774,7 @@ const TestComparison = ({ preSelectedTestRunIds = [] }) => {
                     Object.entries(completeTestRuns).map(([testRunId, testRun]) => [
                       testRunId,
                       testRun.overallAccuracy !== null && testRun.overallAccuracy !== undefined
-                        ? testRun.overallAccuracy.toFixed(3)
+                        ? Number(testRun.overallAccuracy).toFixed(3)
                         : 'N/A',
                     ]),
                   ),
@@ -763,9 +788,9 @@ const TestComparison = ({ preSelectedTestRunIds = [] }) => {
                           typeof testRun.weightedOverallScores === 'string'
                             ? JSON.parse(testRun.weightedOverallScores)
                             : testRun.weightedOverallScores;
-                        const values = Object.values(scores);
+                        const values = Object.values(scores) as number[];
                         if (values.length > 0) {
-                          const avg = values.reduce((sum, score) => sum + score, 0) / values.length;
+                          const avg = values.reduce((sum: number, score: unknown) => sum + Number(score), 0) / values.length;
                           return [testRunId, avg.toFixed(3)];
                         }
                       }
@@ -779,7 +804,7 @@ const TestComparison = ({ preSelectedTestRunIds = [] }) => {
                     Object.entries(completeTestRuns).map(([testRunId, testRun]) => [
                       testRunId,
                       testRun.averageConfidence !== null && testRun.averageConfidence !== undefined
-                        ? `${(testRun.averageConfidence * 100).toFixed(1)}%`
+                        ? `${(Number(testRun.averageConfidence) * 100).toFixed(1)}%`
                         : 'N/A',
                     ]),
                   ),
@@ -789,7 +814,8 @@ const TestComparison = ({ preSelectedTestRunIds = [] }) => {
                   ...Object.fromEntries(
                     Object.entries(completeTestRuns).map(([testRunId, testRun]) => {
                       if (testRun.createdAt && testRun.completedAt) {
-                        const duration = new Date(testRun.completedAt) - new Date(testRun.createdAt);
+                        const duration =
+                          new Date(testRun.completedAt as string).getTime() - new Date(testRun.createdAt as string).getTime();
                         const minutes = Math.floor(duration / 60000);
                         const seconds = Math.floor((duration % 60000) / 1000);
                         return [testRunId, minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`];
@@ -834,12 +860,12 @@ const TestComparison = ({ preSelectedTestRunIds = [] }) => {
               actions={
                 <Select
                   selectedOption={lowestScoreCount}
-                  onChange={({ detail }) => setLowestScoreCount(detail.selectedOption)}
+                  onChange={({ detail }) => setLowestScoreCount(detail.selectedOption as Record<string, unknown>)}
                   options={[
-                    { label: '5', value: 5 },
-                    { label: '10', value: 10 },
-                    { label: '20', value: 20 },
-                    { label: '50', value: 50 },
+                    { label: '5', value: '5' },
+                    { label: '10', value: '10' },
+                    { label: '20', value: '20' },
+                    { label: '50', value: '50' },
                   ]}
                   placeholder="Select count"
                 />
@@ -853,7 +879,7 @@ const TestComparison = ({ preSelectedTestRunIds = [] }) => {
             const testRunIds = Object.keys(completeTestRuns);
 
             // Get lowest scoring documents from each test run
-            const getLowestDocs = (testRun) => {
+            const getLowestDocs = (testRun: Record<string, unknown>) => {
               if (!testRun?.weightedOverallScores) return [];
 
               const scores =
@@ -863,8 +889,8 @@ const TestComparison = ({ preSelectedTestRunIds = [] }) => {
 
               return Object.entries(scores)
                 .map(([docId, score]) => ({ docId, score }))
-                .sort((a, b) => a.score - b.score)
-                .slice(0, lowestScoreCount.value);
+                .sort((a, b) => Number(a.score) - Number(b.score))
+                .slice(0, Number(lowestScoreCount.value));
             };
 
             const allTestDocs = testRunIds.map((testRunId) => getLowestDocs(completeTestRuns[testRunId]));
@@ -880,12 +906,12 @@ const TestComparison = ({ preSelectedTestRunIds = [] }) => {
             });
 
             // Helper function to extract filename from document ID
-            const getDocumentFilename = (docId) => {
+            const getDocumentFilename = (docId: string): string => {
               return docId.split('/').pop().split('\\').pop(); // Handle both / and \ separators
             };
 
             // Create color mapping for matching document filenames
-            const getDocumentColor = (docId) => {
+            const getDocumentColor = (docId: string): string => {
               const filename = getDocumentFilename(docId);
 
               // Count how many test runs have this filename
@@ -1038,9 +1064,9 @@ const TestComparison = ({ preSelectedTestRunIds = [] }) => {
                         typeof testRun.weightedOverallScores === 'string'
                           ? JSON.parse(testRun.weightedOverallScores)
                           : testRun.weightedOverallScores;
-                      const values = Object.values(scores);
+                      const values = Object.values(scores) as number[];
                       if (values.length > 0) {
-                        const avg = values.reduce((sum, score) => sum + score, 0) / values.length;
+                        const avg = (values as number[]).reduce((sum, score) => sum + score, 0) / values.length;
                         return [testRunId, avg.toFixed(3)];
                       }
                     }
@@ -1060,7 +1086,7 @@ const TestComparison = ({ preSelectedTestRunIds = [] }) => {
                   ...Object.fromEntries(
                     Object.entries(completeTestRuns).map(([testRunId, testRun]) => {
                       const splitMetrics = testRun.splitClassificationMetrics || {};
-                      const value = splitMetrics.page_level_accuracy;
+                      const value = (splitMetrics as Record<string, unknown>).page_level_accuracy;
                       const displayValue = typeof value === 'number' ? value.toFixed(3) : value?.toString() || '0';
                       return [testRunId, displayValue];
                     }),
@@ -1076,7 +1102,7 @@ const TestComparison = ({ preSelectedTestRunIds = [] }) => {
                   ...Object.fromEntries(
                     Object.entries(completeTestRuns).map(([testRunId, testRun]) => {
                       const splitMetrics = testRun.splitClassificationMetrics || {};
-                      const value = splitMetrics.split_accuracy_with_order;
+                      const value = (splitMetrics as Record<string, unknown>).split_accuracy_with_order;
                       const displayValue = typeof value === 'number' ? value.toFixed(3) : value?.toString() || '0';
                       return [testRunId, displayValue];
                     }),
@@ -1127,13 +1153,15 @@ const TestComparison = ({ preSelectedTestRunIds = [] }) => {
                                   metric: (
                                     <>
                                       <span style={{ color: '#687078' }}>Extraction:</span>{' '}
-                                      {metricKey.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase())}
+                                      {String(metricKey)
+                                        .replace(/_/g, ' ')
+                                        .replace(/\b\w/g, (l) => l.toUpperCase())}
                                     </>
                                   ),
                                   ...Object.fromEntries(
                                     Object.entries(completeTestRuns).map(([testRunId, testRun]) => {
                                       const accuracyBreakdown = testRun.accuracyBreakdown || {};
-                                      const value = accuracyBreakdown[metricKey];
+                                      const value = accuracyBreakdown[metricKey as string];
                                       const displayValue = value !== null && value !== undefined ? value.toFixed(3) : '0.000';
                                       return [testRunId, displayValue];
                                     }),
@@ -1159,15 +1187,17 @@ const TestComparison = ({ preSelectedTestRunIds = [] }) => {
                                   metric: (
                                     <>
                                       <span style={{ color: '#687078' }}>Classification:</span>{' '}
-                                      {metricKey.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase())}
+                                      {String(metricKey)
+                                        .replace(/_/g, ' ')
+                                        .replace(/\b\w/g, (l) => l.toUpperCase())}
                                     </>
                                   ),
                                   ...Object.fromEntries(
                                     Object.entries(completeTestRuns).map(([testRunId, testRun]) => {
                                       const splitMetrics = testRun.splitClassificationMetrics || {};
-                                      const value = splitMetrics[metricKey];
+                                      const value = (splitMetrics as Record<string, unknown>)[metricKey as string];
                                       const displayValue =
-                                        typeof value === 'number' && metricKey.includes('accuracy')
+                                        typeof value === 'number' && String(metricKey).includes('accuracy')
                                           ? value.toFixed(3)
                                           : value !== null && value !== undefined
                                           ? value.toString()
@@ -1218,7 +1248,7 @@ const TestComparison = ({ preSelectedTestRunIds = [] }) => {
               });
 
               const tableItems = Array.from(allCostItems).map((itemKey) => {
-                const [context, serviceApi, unit] = itemKey.split('|');
+                const [context, serviceApi, unit] = String(itemKey).split('|');
                 const row = {
                   context,
                   serviceApi,
@@ -1371,7 +1401,7 @@ const TestComparison = ({ preSelectedTestRunIds = [] }) => {
               });
 
               const tableItems = Array.from(allUsageItems).map((itemKey) => {
-                const [context, serviceApi, unit] = itemKey.split('|');
+                const [context, serviceApi, unit] = String(itemKey).split('|');
                 const row = {
                   context,
                   serviceApi,
@@ -1430,15 +1460,6 @@ const TestComparison = ({ preSelectedTestRunIds = [] }) => {
       </SpaceBetween>
     </Container>
   );
-};
-
-TestComparison.propTypes = {
-  preSelectedTestRunIds: PropTypes.arrayOf(PropTypes.string),
-};
-
-TestComparison.defaultProps = {
-  preSelectedTestRunIds: [],
-  onTestRunSelect: null,
 };
 
 export default TestComparison;

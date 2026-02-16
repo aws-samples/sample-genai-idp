@@ -1,9 +1,19 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 import React from 'react';
-import PropTypes from 'prop-types';
 import { Header, SpaceBetween, Button } from '@cloudscape-design/components';
+import type { IconProps } from '@cloudscape-design/components';
 import handlePrint from './PrintUtils';
+
+interface TestStudioHeaderProps {
+  title: string;
+  description?: React.ReactNode;
+  showBackButton?: boolean;
+  showPrintButton?: boolean;
+  additionalActions?: React.ReactNode[];
+  onBackClick?: () => void;
+  preferences?: React.ReactNode;
+}
 
 const TestStudioHeader = ({
   title,
@@ -13,7 +23,7 @@ const TestStudioHeader = ({
   additionalActions = [],
   onBackClick,
   preferences,
-}) => {
+}: TestStudioHeaderProps): React.JSX.Element => {
   const actions = [];
 
   if (showBackButton) {
@@ -30,7 +40,7 @@ const TestStudioHeader = ({
 
   if (showPrintButton) {
     actions.push(
-      <Button key="print" onClick={handlePrint} iconName="print">
+      <Button key="print" onClick={handlePrint} iconName={'print' as unknown as IconProps.Name}>
         Print
       </Button>,
     );
@@ -51,16 +61,6 @@ const TestStudioHeader = ({
       {description}
     </Header>
   );
-};
-
-TestStudioHeader.propTypes = {
-  title: PropTypes.string.isRequired,
-  description: PropTypes.node,
-  showBackButton: PropTypes.bool,
-  showPrintButton: PropTypes.bool,
-  additionalActions: PropTypes.arrayOf(PropTypes.node),
-  onBackClick: PropTypes.func,
-  preferences: PropTypes.node,
 };
 
 export default TestStudioHeader;
