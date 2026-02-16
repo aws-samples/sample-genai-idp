@@ -1,7 +1,6 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 import React from 'react';
-import PropTypes from 'prop-types';
 import { Box, Modal, SpaceBetween, Button, Alert } from '@cloudscape-design/components';
 import { ConsoleLogger } from 'aws-amplify/utils';
 
@@ -21,7 +20,26 @@ const ABORTABLE_STATUSES = [
   'EVALUATING',
 ];
 
-const AbortWorkflowModal = ({ visible, onDismiss, onConfirm, selectedItems = [], isLoading = false }) => {
+interface AbortWorkflowItem {
+  objectKey: string;
+  objectStatus?: string;
+}
+
+interface AbortWorkflowModalProps {
+  visible: boolean;
+  onDismiss: () => void;
+  onConfirm: (items: AbortWorkflowItem[]) => void;
+  selectedItems?: AbortWorkflowItem[];
+  isLoading?: boolean;
+}
+
+const AbortWorkflowModal = ({
+  visible,
+  onDismiss,
+  onConfirm,
+  selectedItems = [],
+  isLoading = false,
+}: AbortWorkflowModalProps): React.JSX.Element => {
   // Filter to only include items that can be aborted
   const abortableItems = selectedItems.filter((item) => ABORTABLE_STATUSES.includes(item.objectStatus));
   const nonAbortableItems = selectedItems.filter((item) => !ABORTABLE_STATUSES.includes(item.objectStatus));
@@ -100,19 +118,6 @@ const AbortWorkflowModal = ({ visible, onDismiss, onConfirm, selectedItems = [],
       )}
     </Modal>
   );
-};
-
-AbortWorkflowModal.propTypes = {
-  visible: PropTypes.bool.isRequired,
-  onDismiss: PropTypes.func.isRequired,
-  onConfirm: PropTypes.func.isRequired,
-  selectedItems: PropTypes.arrayOf(
-    PropTypes.shape({
-      objectKey: PropTypes.string.isRequired,
-      objectStatus: PropTypes.string,
-    }),
-  ),
-  isLoading: PropTypes.bool,
 };
 
 export default AbortWorkflowModal;

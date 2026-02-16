@@ -1,7 +1,6 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: MIT-0
 
-/* eslint-disable react/prop-types */
 import React, { useState, useEffect, useRef, memo, useCallback } from 'react';
 import { Box, Spinner, Button } from '@cloudscape-design/components';
 import { ConsoleLogger } from 'aws-amplify/utils';
@@ -10,13 +9,41 @@ import useAppContext from '../../contexts/app';
 
 const logger = new ConsoleLogger('PageImageViewer');
 
-/**
- * Memoized component to render a bounding box on an image
- * Extracted from VisualEditorModal for reuse
- */
+interface BoundingBoxGeometry {
+  boundingBox?: {
+    left: number;
+    top: number;
+    width: number;
+    height: number;
+  };
+  page?: number;
+}
+
+interface BoundingBoxProps {
+  box: BoundingBoxGeometry | null;
+  page: string | null;
+  currentPage: string | null;
+  imageRef: React.RefObject<HTMLImageElement | null>;
+  containerRef?: React.RefObject<HTMLDivElement | null>;
+  zoomLevel?: number;
+  panOffset?: { x: number; y: number };
+  color?: string;
+  label?: string | null;
+}
+
 export const BoundingBox = memo(
-  ({ box, page, currentPage, imageRef, containerRef, zoomLevel = 1, panOffset = { x: 0, y: 0 }, color = 'red', label = null }) => {
-    const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
+  ({
+    box,
+    page,
+    currentPage,
+    imageRef,
+    containerRef,
+    zoomLevel = 1,
+    panOffset = { x: 0, y: 0 },
+    color = 'red',
+    label = null,
+  }: BoundingBoxProps): React.JSX.Element | null => {
+    const [dimensions, setDimensions] = useState<Record<string, number>>({ width: 0, height: 0 });
 
     useEffect(() => {
       if (imageRef.current && page === currentPage) {
@@ -128,7 +155,7 @@ export const BoundingBox = memo(
     });
 
     // Position the bounding box directly without additional transforms
-    const style = {
+    const style: React.CSSProperties = {
       position: 'absolute',
       left: `${finalLeft}px`,
       top: `${finalTop}px`,
@@ -166,10 +193,28 @@ export const BoundingBox = memo(
 
 BoundingBox.displayName = 'BoundingBox';
 
-/**
- * PageImageViewer - Reusable component for displaying document page images
- * with zoom, pan, and bounding box overlay capabilities
- */
+interface DocumentPage {
+  Id: string;
+  ImageUri?: string;
+}
+
+interface BoundingBoxOverlay {
+  geometry: BoundingBoxGeometry;
+  color?: string;
+  label?: string;
+}
+
+interface PageImageViewerProps {
+  pageIds?: string[];
+  documentPages?: DocumentPage[];
+  activeFieldGeometry?: BoundingBoxGeometry | null;
+  onPageChange?: ((pageId: string) => void) | null;
+  initialPage?: string | null;
+  height?: string;
+  showControls?: boolean;
+  boundingBoxes?: BoundingBoxOverlay[];
+}
+
 const PageImageViewer = ({
   pageIds = [],
   documentPages = [],
@@ -178,16 +223,16 @@ const PageImageViewer = ({
   initialPage = null,
   height = '700px',
   showControls = true,
-  boundingBoxes = [], // Array of { geometry, color, label } for multiple bounding boxes
-}) => {
+  boundingBoxes = [],
+}: PageImageViewerProps): React.JSX.Element => {
   const { currentCredentials } = useAppContext();
-  const [pageImages, setPageImages] = useState({});
+  const [pageImages, setPageImages] = useState<Record<string, string>>({});
   const [loadingImages, setLoadingImages] = useState(true);
-  const [currentPage, setCurrentPage] = useState(initialPage || (pageIds.length > 0 ? pageIds[0] : null));
+  const [currentPage, setCurrentPage] = useState<string | null>(initialPage || (pageIds.length > 0 ? pageIds[0] : null));
   const [zoomLevel, setZoomLevel] = useState(1);
   const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
-  const imageRef = useRef(null);
-  const imageContainerRef = useRef(null);
+  const imageRef = useRef<HTMLImageElement | null>(null);
+  const imageContainerRef = useRef<HTMLDivElement | null>(null);
 
   // Load page images
   useEffect(() => {
@@ -201,7 +246,7 @@ const PageImageViewer = ({
 
       try {
         logger.debug('PageImageViewer - Loading images for pageIds:', pageIds);
-        const images = {};
+        const images: Record<string, string> = {};
 
         await Promise.all(
           pageIds.map(async (pageId) => {
@@ -210,7 +255,7 @@ const PageImageViewer = ({
             if (page?.ImageUri) {
               try {
                 logger.debug(`PageImageViewer - generating presigned URL for page ${pageId}`);
-                const url = await generateS3PresignedUrl(page.ImageUri, currentCredentials);
+                const url = await generateS3PresignedUrl(page.ImageUri, currentCredentials as Record<string, unknown>);
                 images[pageId] = url;
               } catch (err) {
                 logger.error(`Error generating presigned URL for page ${pageId}:`, err);
@@ -272,7 +317,7 @@ const PageImageViewer = ({
   }, []);
 
   // Handle mouse wheel for zoom
-  const handleWheel = useCallback((e) => {
+  const handleWheel = useCallback((e: React.WheelEvent) => {
     if (e.ctrlKey || e.metaKey) {
       e.preventDefault();
       const delta = e.deltaY < 0 ? 1.1 : 0.9;
@@ -304,7 +349,7 @@ const PageImageViewer = ({
   }, [currentPage, pageIds, onPageChange]);
 
   // Public method to zoom to a specific field
-  const zoomToField = useCallback((geometry) => {
+  const zoomToField = useCallback((geometry: BoundingBoxGeometry) => {
     if (geometry && imageRef.current && imageContainerRef.current) {
       const targetZoom = 2.0;
       setZoomLevel(targetZoom);
@@ -348,7 +393,7 @@ const PageImageViewer = ({
   // Expose zoomToField method
   useEffect(() => {
     if (imageContainerRef.current) {
-      imageContainerRef.current.zoomToField = zoomToField;
+      (imageContainerRef.current as unknown as Record<string, unknown>).zoomToField = zoomToField;
     }
   }, [zoomToField]);
 
@@ -416,7 +461,7 @@ const PageImageViewer = ({
               }}
               onError={(e) => {
                 logger.error(`Error loading image for page ${currentPage}:`, e);
-                e.target.src = fallbackImage;
+                (e.target as HTMLImageElement).src = fallbackImage;
               }}
             />
             {/* Active field bounding box - matching the VisualEditorModal pattern exactly:

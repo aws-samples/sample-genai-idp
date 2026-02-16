@@ -3,12 +3,13 @@
 import React from 'react';
 import { StatusIndicator } from '@cloudscape-design/components';
 
-/**
- * Render Review Status consistently across all components
- * @param {Object} item - Document item with HITL fields
- * @returns {string|JSX.Element} - Rendered Review Status
- */
-export const renderHitlStatus = (item) => {
+interface HitlItem {
+  hitlTriggered?: boolean;
+  hitlStatus?: string;
+  hitlCompleted?: boolean;
+}
+
+export const renderHitlStatus = (item: HitlItem): React.JSX.Element => {
   if (!item.hitlTriggered) {
     return <StatusIndicator type="stopped">N/A</StatusIndicator>;
   }

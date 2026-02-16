@@ -1,18 +1,30 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 import React from 'react';
+import type { LinkProps } from '@cloudscape-design/components';
 import { Box, Button, Header, SpaceBetween } from '@cloudscape-design/components';
 
 import { InfoLink } from './info-link';
 
-export const getFilterCounterText = (count) => `${count} ${count === 1 ? 'match' : 'matches'}`;
+export const getFilterCounterText = (count: number): string => `${count} ${count === 1 ? 'match' : 'matches'}`;
 /* prettier-ignore */
-const getHeaderCounterText = (items = [], selectedItems = []) => (
+const getHeaderCounterText = (items: unknown[] = [], selectedItems: unknown[] = []): string => (
   selectedItems && selectedItems.length > 0
     ? `(${selectedItems.length}/${items.length})`
     : `(${items.length})`
 );
-const getCounter = (props) => {
+
+interface TableHeaderProps {
+  counter?: string;
+  totalItems?: unknown[];
+  selectedItems?: unknown[];
+  updateTools?: LinkProps['onFollow'];
+  description?: string;
+  actionButtons?: React.ReactNode;
+  title?: React.ReactNode;
+}
+
+const getCounter = (props: TableHeaderProps): string | null => {
   if (props.counter) {
     return props.counter;
   }
@@ -22,8 +34,7 @@ const getCounter = (props) => {
   return getHeaderCounterText(props.totalItems, props.selectedItems);
 };
 
-/* eslint-disable react/prop-types, react/destructuring-assignment */
-export const TableHeader = (props) => (
+export const TableHeader = (props: TableHeaderProps): React.JSX.Element => (
   <Header
     counter={getCounter(props)}
     info={props.updateTools && <InfoLink onFollow={props.updateTools} />}
@@ -34,7 +45,11 @@ export const TableHeader = (props) => (
   </Header>
 );
 
-export const TableEmptyState = ({ resourceName }) => (
+interface TableEmptyStateProps {
+  resourceName: string;
+}
+
+export const TableEmptyState = ({ resourceName }: TableEmptyStateProps): React.JSX.Element => (
   <Box margin={{ vertical: 'xs' }} textAlign="center" color="inherit">
     <SpaceBetween size="xxs">
       <div>
@@ -47,7 +62,11 @@ export const TableEmptyState = ({ resourceName }) => (
   </Box>
 );
 
-export const TableNoMatchState = (props) => (
+interface TableNoMatchStateProps {
+  onClearFilter?: () => void;
+}
+
+export const TableNoMatchState = (props: TableNoMatchStateProps): React.JSX.Element => (
   <Box margin={{ vertical: 'xs' }} textAlign="center" color="inherit">
     <SpaceBetween size="xxs">
       <div>

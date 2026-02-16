@@ -1,7 +1,7 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 import React, { useState, useEffect } from 'react';
-import PropTypes from 'prop-types';
+import type { SelectProps } from '@cloudscape-design/components';
 import { Box, Modal, SpaceBetween, Button, Select, FormField, Alert } from '@cloudscape-design/components';
 import { ConsoleLogger } from 'aws-amplify/utils';
 import useConfigurationVersions from '../../hooks/use-configuration-versions';
@@ -9,13 +9,31 @@ import useSettingsContext from '../../contexts/settings';
 
 const logger = new ConsoleLogger('ReprocessDocumentModal');
 
-const ReprocessDocumentModal = ({ visible, onDismiss, onConfirm, selectedItems = [], isLoading = false }) => {
-  const [selectedVersion, setSelectedVersion] = useState(null);
+interface ReprocessDocumentItem {
+  objectKey: string;
+}
+
+interface ReprocessDocumentModalProps {
+  visible: boolean;
+  onDismiss: () => void;
+  onConfirm: (versionName?: string) => void;
+  selectedItems?: ReprocessDocumentItem[];
+  isLoading?: boolean;
+}
+
+const ReprocessDocumentModal = ({
+  visible,
+  onDismiss,
+  onConfirm,
+  selectedItems = [],
+  isLoading = false,
+}: ReprocessDocumentModalProps): React.JSX.Element => {
+  const [selectedVersion, setSelectedVersion] = useState<SelectProps.Option | null>(null);
   const { versions, getVersionOptions } = useConfigurationVersions();
   const { settings } = useSettingsContext();
 
   // Helper function to check if Pattern-1 is selected
-  const isPattern1 = settings?.IDPPattern?.includes('Pattern1');
+  const isPattern1 = ((settings as Record<string, unknown>)?.IDPPattern as string)?.includes('Pattern1');
 
   // Set default to active version when modal opens
   useEffect(() => {
@@ -93,18 +111,6 @@ const ReprocessDocumentModal = ({ visible, onDismiss, onConfirm, selectedItems =
       </SpaceBetween>
     </Modal>
   );
-};
-
-ReprocessDocumentModal.propTypes = {
-  visible: PropTypes.bool.isRequired,
-  onDismiss: PropTypes.func.isRequired,
-  onConfirm: PropTypes.func.isRequired,
-  selectedItems: PropTypes.arrayOf(
-    PropTypes.shape({
-      objectKey: PropTypes.string.isRequired,
-    }),
-  ),
-  isLoading: PropTypes.bool,
 };
 
 export default ReprocessDocumentModal;

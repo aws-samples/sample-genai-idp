@@ -2,18 +2,27 @@
 // SPDX-License-Identifier: MIT-0
 
 import React from 'react';
-import PropTypes from 'prop-types';
 import { Box, Badge } from '@cloudscape-design/components';
 
-/**
- * Enhanced confidence display component with color coding and threshold information
- * @param {Object} props - Component props
- * @param {Object} props.confidenceInfo - Confidence information from getFieldConfidenceInfo
- * @param {string} props.variant - Display variant: 'inline', 'badge', or 'detailed'
- * @param {boolean} props.showThreshold - Whether to show the threshold value
- * @returns {JSX.Element} Confidence display component
- */
-const ConfidenceDisplay = ({ confidenceInfo = null, variant = 'detailed', showThreshold = true }) => {
+interface ConfidenceInfo {
+  hasConfidenceInfo: boolean;
+  confidence?: number;
+  confidenceThreshold?: number;
+  isAboveThreshold?: boolean;
+  displayMode?: string;
+}
+
+interface ConfidenceDisplayProps {
+  confidenceInfo?: ConfidenceInfo | null;
+  variant?: 'inline' | 'badge' | 'detailed';
+  showThreshold?: boolean;
+}
+
+const ConfidenceDisplay = ({
+  confidenceInfo = null,
+  variant = 'detailed',
+  showThreshold = true,
+}: ConfidenceDisplayProps): React.JSX.Element | null => {
   if (!confidenceInfo || !confidenceInfo.hasConfidenceInfo) {
     return null;
   }
@@ -64,7 +73,7 @@ const ConfidenceDisplay = ({ confidenceInfo = null, variant = 'detailed', showTh
 
     case 'badge':
       return (
-        <Badge color={colors.badgeColor}>
+        <Badge color={colors.badgeColor as 'blue' | 'green' | 'grey' | 'red'}>
           {confidencePercent}%{thresholdText}
         </Badge>
       );
@@ -72,9 +81,7 @@ const ConfidenceDisplay = ({ confidenceInfo = null, variant = 'detailed', showTh
     case 'detailed':
     default:
       return (
-        <Box
-          fontSize="body-s"
-          padding={{ top: 'xxxs' }}
+        <div
           style={{
             color: colors.textColor,
             backgroundColor: colors.backgroundColor,
@@ -82,24 +89,13 @@ const ConfidenceDisplay = ({ confidenceInfo = null, variant = 'detailed', showTh
             borderRadius: '4px',
             display: 'inline-block',
             marginTop: '2px',
+            fontSize: '0.875rem',
           }}
         >
           Confidence: {confidencePercent}%{thresholdText}
-        </Box>
+        </div>
       );
   }
-};
-
-ConfidenceDisplay.propTypes = {
-  confidenceInfo: PropTypes.shape({
-    hasConfidenceInfo: PropTypes.bool,
-    confidence: PropTypes.number,
-    confidenceThreshold: PropTypes.number,
-    isAboveThreshold: PropTypes.bool,
-    displayMode: PropTypes.string,
-  }),
-  variant: PropTypes.oneOf(['inline', 'badge', 'detailed']),
-  showThreshold: PropTypes.bool,
 };
 
 export default ConfidenceDisplay;

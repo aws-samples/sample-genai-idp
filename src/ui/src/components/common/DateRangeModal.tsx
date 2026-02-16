@@ -1,14 +1,15 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 import React, { useState } from 'react';
-import PropTypes from 'prop-types';
 import { Modal, Box, SpaceBetween, Button, FormField, DatePicker, TimeInput, Alert } from '@cloudscape-design/components';
 
-/**
- * Modal for selecting a custom date range (start/end date+time).
- * Used when user selects "Custom range..." from the time period dropdown.
- */
-const DateRangeModal = ({ visible, onDismiss, onApply }) => {
+interface DateRangeModalProps {
+  visible: boolean;
+  onDismiss: () => void;
+  onApply: (range: { startDateTime: string; endDateTime: string }) => void;
+}
+
+const DateRangeModal = ({ visible, onDismiss, onApply }: DateRangeModalProps): React.JSX.Element => {
   // Default to last 7 days
   const now = new Date();
   const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
@@ -17,7 +18,7 @@ const DateRangeModal = ({ visible, onDismiss, onApply }) => {
   const [startTime, setStartTime] = useState('00:00:00');
   const [endDate, setEndDate] = useState(now.toISOString().split('T')[0]);
   const [endTime, setEndTime] = useState('23:59:59');
-  const [error, setError] = useState(null);
+  const [error, setError] = useState<string | null>(null);
 
   const handleApply = () => {
     setError(null);
@@ -100,12 +101,6 @@ const DateRangeModal = ({ visible, onDismiss, onApply }) => {
       </SpaceBetween>
     </Modal>
   );
-};
-
-DateRangeModal.propTypes = {
-  visible: PropTypes.bool.isRequired,
-  onDismiss: PropTypes.func.isRequired,
-  onApply: PropTypes.func.isRequired,
 };
 
 export default DateRangeModal;

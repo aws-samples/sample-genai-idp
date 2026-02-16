@@ -9,7 +9,7 @@ import ConfidenceDisplay from './ConfidenceDisplay';
  * Test component to verify ConfidenceDisplay color coding functionality
  * This component can be temporarily added to any page to test the confidence display
  */
-const ConfidenceDisplayTest = () => {
+const ConfidenceDisplayTest = (): React.JSX.Element => {
   // Test scenarios
   const testScenarios = [
     {
@@ -55,7 +55,7 @@ const ConfidenceDisplayTest = () => {
       <h3>Confidence Display Test</h3>
       <SpaceBetween size="m">
         {testScenarios.map((scenario) => (
-          <Box key={scenario.name} padding="s" style={{ border: '1px solid #ccc', borderRadius: '4px' }}>
+          <div key={scenario.name} style={{ border: '1px solid #ccc', borderRadius: '4px', padding: '8px' }}>
             <Box fontWeight="bold" margin={{ bottom: 'xs' }}>
               {scenario.name}
             </Box>
@@ -68,7 +68,7 @@ const ConfidenceDisplayTest = () => {
             <Box margin={{ top: 'xs' }}>
               Badge: <ConfidenceDisplay confidenceInfo={scenario.confidenceInfo} variant="badge" showThreshold />
             </Box>
-          </Box>
+          </div>
         ))}
       </SpaceBetween>
     </Box>

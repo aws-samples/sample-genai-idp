@@ -1,10 +1,28 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 import React from 'react';
-import PropTypes from 'prop-types';
 import { Modal, Box, SpaceBetween, Button } from '@cloudscape-design/components';
 
-const DeleteDocumentModal = ({ visible, onDismiss, onConfirm, selectedItems, isLoading = false }) => {
+interface DeleteDocumentItem {
+  objectKey: string;
+  name?: string;
+}
+
+interface DeleteDocumentModalProps {
+  visible: boolean;
+  onDismiss: () => void;
+  onConfirm: () => void;
+  selectedItems: DeleteDocumentItem[];
+  isLoading?: boolean;
+}
+
+const DeleteDocumentModal = ({
+  visible,
+  onDismiss,
+  onConfirm,
+  selectedItems,
+  isLoading = false,
+}: DeleteDocumentModalProps): React.JSX.Element => {
   const documentCount = selectedItems.length;
   const isMultiple = documentCount > 1;
 
@@ -38,19 +56,6 @@ const DeleteDocumentModal = ({ visible, onDismiss, onConfirm, selectedItems, isL
       )}
     </Modal>
   );
-};
-
-DeleteDocumentModal.propTypes = {
-  visible: PropTypes.bool.isRequired,
-  onDismiss: PropTypes.func.isRequired,
-  onConfirm: PropTypes.func.isRequired,
-  selectedItems: PropTypes.arrayOf(
-    PropTypes.shape({
-      objectKey: PropTypes.string.isRequired,
-      name: PropTypes.string,
-    }),
-  ).isRequired,
-  isLoading: PropTypes.bool,
 };
 
 export default DeleteDocumentModal;

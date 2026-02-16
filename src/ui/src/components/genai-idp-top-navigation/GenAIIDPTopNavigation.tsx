@@ -10,8 +10,12 @@ import useUserRole from '../../hooks/use-user-role';
 
 const logger = new ConsoleLogger('TopNavigation');
 
-/* eslint-disable react/prop-types */
-const SignOutModal = ({ visible, setVisible }) => {
+interface SignOutModalProps {
+  visible: boolean;
+  setVisible: (visible: boolean) => void;
+}
+
+const SignOutModal = ({ visible, setVisible }: SignOutModalProps): React.JSX.Element => {
   async function handleSignOut() {
     try {
       await signOut();
@@ -46,14 +50,14 @@ const SignOutModal = ({ visible, setVisible }) => {
   );
 };
 
-const GenAIIDPTopNavigation = () => {
+const GenAIIDPTopNavigation = (): React.JSX.Element => {
   const { user } = useAppContext();
   const { isAdmin, isReviewer, loading: roleLoading } = useUserRole();
-  const userId = user?.username || 'user';
+  const userId = ((user as Record<string, unknown>)?.username as string) || 'user';
   const [isSignOutModalVisible, setIsSignOutModalVisiblesetVisible] = useState(false);
 
   // Determine role display
-  const getRoleDisplay = () => {
+  const getRoleDisplay = (): string => {
     if (roleLoading) return '';
     if (isAdmin) return 'Admin';
     if (isReviewer) return 'Reviewer';
@@ -73,24 +77,17 @@ const GenAIIDPTopNavigation = () => {
             {
               type: 'menu-dropdown',
               text: userDisplayText,
-              description: roleDisplay ? (
-                <SpaceBetween direction="horizontal" size="xs">
-                  <span>{userId}</span>
-                  <Badge color={isAdmin ? 'blue' : 'grey'}>{roleDisplay}</Badge>
-                </SpaceBetween>
-              ) : (
-                userId
-              ),
+              description: roleDisplay ? `${userId} [${roleDisplay}]` : userId,
               iconName: 'user-profile',
+              onItemClick: ({ detail }) => {
+                if (detail.id === 'signout') {
+                  setIsSignOutModalVisiblesetVisible(true);
+                }
+              },
               items: [
                 {
                   id: 'signout',
-                  type: 'button',
-                  text: (
-                    <Button variant="primary" onClick={() => setIsSignOutModalVisiblesetVisible(true)}>
-                      Sign out
-                    </Button>
-                  ),
+                  text: 'Sign out',
                 },
                 {
                   id: 'support-group',
