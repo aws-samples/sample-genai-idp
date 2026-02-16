@@ -69,7 +69,7 @@ class RerunProcessor:
         self.sqs_client = boto3.client("sqs", region_name=region)
 
         # Import here to avoid circular dependency
-        from .stack_info import StackInfo
+        from idp_sdk.core.stack_info import StackInfo
 
         # Get stack resources
         stack_info = StackInfo(stack_name, region)
@@ -467,7 +467,7 @@ class RerunProcessor:
         Returns:
             List of document object keys
         """
-        from .batch_processor import BatchProcessor
+        from idp_sdk.core.batch_processor import BatchProcessor
 
         processor = BatchProcessor(stack_name=self.stack_name, region=self.region)
         batch_info = processor.get_batch_info(batch_id)

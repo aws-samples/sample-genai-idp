@@ -133,6 +133,7 @@ class SummarizationService:
             top_p=config["top_p"],
             max_tokens=config["max_tokens"],
             context="Summarization",
+            model_lambda_hook_arn=self.config.summarization.model_lambda_hook_arn,
         )
 
     def _create_error_summary(self, error_message: str) -> DocumentSummary:

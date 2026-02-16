@@ -81,7 +81,13 @@ def handler(event, context):
         if config_table_name:
             try:
                 logger.info(f"Loading configuration from table: {config_table_name}")
-                config = get_config(table_name=config_table_name, as_model=True)
+                
+                # Extract config_version from document if available
+                config_version = document_dict.get('config_version') if document_dict else None
+                if config_version:
+                    logger.info(f"Using document config_version: {config_version}")
+                
+                config = get_config(table_name=config_table_name, as_model=True, version=config_version)
 
                 # Also load pricing separately and attach it to the config
                 config_manager = ConfigurationManager(table_name=config_table_name)

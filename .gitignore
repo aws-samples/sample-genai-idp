@@ -46,3 +46,7 @@ output/*
 dataset
 venv-*/
 notebooks/doc-split-metrics-exp/
+# SAM CLI config (may contain sensitive ARNs)
+samconfig.toml
+..bfg-report
+.git-rewrite

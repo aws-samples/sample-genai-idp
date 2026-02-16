@@ -35,14 +35,15 @@ def handler(event, context):
     start_time = time.time()  # Capture start time for Lambda metering
     logger.info(f"Event: {json.dumps(event)}")
     
-    # Load configuration
-    config = get_config(as_model=True)
-    # Use default=str to handle Decimal and other non-serializable types
-    logger.info(f"Config: {json.dumps(config.model_dump(), default=str)}")
-    
     # Extract document from the OCR result - handle both compressed and uncompressed
     working_bucket = os.environ.get('WORKING_BUCKET')
     document = Document.load_document(event["OCRResult"]["document"], working_bucket, logger)
+    
+    # Load configuration - use document's version if specified, otherwise use active version
+    config_version = getattr(document, 'config_version', None)
+    config = get_config(as_model=True, version = config_version)
+    # Use default=str to handle Decimal and other non-serializable types
+    logger.info(f"Config: {json.dumps(config.model_dump(), default=str)}, version name: {config_version}")
     
     # Log loaded document for troubleshooting
     logger.info(f"Loaded document - ID: {document.id}, input_key: {document.input_key}")

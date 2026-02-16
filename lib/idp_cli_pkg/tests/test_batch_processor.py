@@ -9,13 +9,13 @@ import json
 from unittest.mock import MagicMock, patch
 
 import pytest
-from idp_cli.batch_processor import BatchProcessor
+from idp_sdk.core.batch_processor import BatchProcessor
 
 
 class TestBatchProcessor:
     """Test batch processing functionality"""
 
-    @patch("idp_cli.batch_processor.StackInfo")
+    @patch("idp_sdk.core.batch_processor.StackInfo")
     @patch("boto3.client")
     @patch("boto3.resource")
     def test_init_success(self, mock_resource, mock_client, mock_stack_info_class):
@@ -33,7 +33,7 @@ class TestBatchProcessor:
         assert processor.stack_name == "test-stack"
         assert processor.resources["InputBucket"] == "input-bucket"
 
-    @patch("idp_cli.batch_processor.StackInfo")
+    @patch("idp_sdk.core.batch_processor.StackInfo")
     @patch("boto3.client")
     @patch("boto3.resource")
     def test_init_invalid_stack(
@@ -47,8 +47,8 @@ class TestBatchProcessor:
         with pytest.raises(ValueError, match="not in a valid state"):
             BatchProcessor("test-stack")
 
-    @patch("idp_cli.batch_processor.StackInfo")
-    @patch("idp_cli.batch_processor.parse_manifest")
+    @patch("idp_sdk.core.batch_processor.StackInfo")
+    @patch("idp_sdk.core.batch_processor.parse_manifest")
     @patch("boto3.client")
     @patch("boto3.resource")
     def test_process_batch(
@@ -97,7 +97,7 @@ class TestBatchProcessor:
 
         # Note: S3 copy_object is called for S3 URIs (not head_object)
 
-    @patch("idp_cli.batch_processor.StackInfo")
+    @patch("idp_sdk.core.batch_processor.StackInfo")
     @patch("boto3.client")
     @patch("boto3.resource")
     def test_upload_local_file(self, mock_resource, mock_client, mock_stack_info_class):
@@ -130,7 +130,7 @@ class TestBatchProcessor:
         assert "batch-123" in s3_key
         assert "test.pdf" in s3_key
 
-    @patch("idp_cli.batch_processor.StackInfo")
+    @patch("idp_sdk.core.batch_processor.StackInfo")
     @patch("boto3.client")
     @patch("boto3.resource")
     def test_validate_s3_key_exists(
@@ -155,7 +155,7 @@ class TestBatchProcessor:
         processor._validate_s3_key("doc1.pdf")
         mock_s3.head_object.assert_called_once()
 
-    @patch("idp_cli.batch_processor.StackInfo")
+    @patch("idp_sdk.core.batch_processor.StackInfo")
     @patch("boto3.client")
     @patch("boto3.resource")
     def test_validate_s3_key_not_found(
@@ -186,7 +186,7 @@ class TestBatchProcessor:
         with pytest.raises(ValueError, match="Document not found"):
             processor._validate_s3_key("nonexistent.pdf")
 
-    @patch("idp_cli.batch_processor.StackInfo")
+    @patch("idp_sdk.core.batch_processor.StackInfo")
     @patch("boto3.client")
     @patch("boto3.resource")
     def test_generate_batch_id(self, mock_resource, mock_client, mock_stack_info_class):
@@ -217,7 +217,7 @@ class TestBatchProcessor:
         # Note: prefix itself may contain hyphens
         assert len(batch_id1.split("-")) >= 3  # At least prefix, date, time
 
-    @patch("idp_cli.batch_processor.StackInfo")
+    @patch("idp_sdk.core.batch_processor.StackInfo")
     @patch("boto3.client")
     @patch("boto3.resource")
     def test_store_and_retrieve_batch_metadata(
@@ -259,7 +259,7 @@ class TestBatchProcessor:
 
         assert retrieved == stored_metadata
 
-    @patch("idp_cli.batch_processor.StackInfo")
+    @patch("idp_sdk.core.batch_processor.StackInfo")
     @patch("boto3.client")
     @patch("boto3.resource")
     def test_get_batch_info_not_found(

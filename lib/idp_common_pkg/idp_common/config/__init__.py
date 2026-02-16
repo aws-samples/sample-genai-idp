@@ -48,16 +48,16 @@ class ConfigurationReader:
 
     @overload
     def get_configuration(
-        self, config_type: str, *, as_dict: Literal[True]
+        self, config_type: str, *, as_dict: Literal[True], version: Optional[str] = None
     ) -> Optional[Dict[str, Any]]: ...
 
     @overload
     def get_configuration(
-        self, config_type: str, *, as_dict: Literal[False]
+        self, config_type: str, *, as_dict: Literal[False], version: Optional[str] = None
     ) -> Optional[Union[IDPConfig, SchemaConfig, PricingConfig]]: ...
 
     def get_configuration(
-        self, config_type: str, *, as_dict: bool = True
+        self, config_type: str, *, as_dict: bool = True, as_model: bool = False, version: Optional[str] = None
     ) -> Optional[Union[Dict[str, Any], IDPConfig, SchemaConfig, PricingConfig]]:
         """
         Retrieve a configuration item from DynamoDB with automatic migration
@@ -65,12 +65,18 @@ class ConfigurationReader:
         Args:
             config_type: The configuration type to retrieve ('Default' or 'Custom')
             as_dict: If True (default), return raw dictionary for backward compatibility
+            as_model: If True, return model object (overrides as_dict)
+            version: Optional version to retrieve
 
         Returns:
             Configuration dictionary if found (auto-migrated if needed), None otherwise
         """
+        # Handle parameter precedence: as_model overrides as_dict
+        if as_model:
+            as_dict = False
+        
         # ConfigurationManager now returns IDPConfig by default
-        idp_config = self.manager.get_configuration(config_type)
+        idp_config = self.manager.get_configuration(config_type, version=version)
 
         if idp_config is None:
             return None
@@ -83,6 +89,7 @@ class ConfigurationReader:
             return config_dict
 
         return idp_config
+
 
     def simple_merge(
         self, default: Dict[str, Any], custom: Dict[str, Any]
@@ -104,73 +111,55 @@ class ConfigurationReader:
 
         merged = deepcopy(default)
         return deep_update(merged, custom)
-
+    
     @overload
-    def get_merged_configuration(self, *, as_model: Literal[True]) -> IDPConfig: ...
+    def get_merged_configuration(self, *, as_model: Literal[True], version: Optional[str] = None) -> IDPConfig: ...
 
     @overload
     def get_merged_configuration(
-        self, *, as_model: Literal[False]
+        self, *, as_model: Literal[False], version: Optional[str] = None
     ) -> Dict[str, Any]: ...
 
     def get_merged_configuration(
-        self, *, as_model: bool = False
+        self, *, as_model: bool = False, version: Optional[str] = None
     ) -> Union[IDPConfig, Dict[str, Any]]:
         """
-        Get and merge Default and Custom configurations for runtime processing.
+        Get the full configuration for a version, ready for runtime processing.
 
-        DESIGN PATTERN (CRITICAL):
-        - Default: Full stack baseline (Pydantic validated)
-        - Custom: SPARSE DELTAS ONLY (raw from DynamoDB, NO Pydantic defaults!)
-        - Merged: Default deep-updated with Custom = final runtime config
+        Each version stores a complete, self-contained configuration.
+        Legacy sparse delta configs are auto-detected and migrated on first read.
 
         This is THE method to use for all runtime document processing.
 
         Args:
             as_model: If True, return IDPConfig Pydantic model. If False (default), return dict.
+            version: Optional version to load. If None, uses active version.
 
         Returns:
-            Merged configuration as IDPConfig or dictionary
+            Full configuration as IDPConfig or dictionary
         """
         try:
-            # Get Default configuration (Pydantic validated - this is correct for Default)
-            default_config = self.get_configuration("Default", as_dict=True)
-            if not default_config:
-                raise ValueError("Default configuration not found")
+            # Use ConfigurationManager.get_merged_configuration which handles:
+            # - Full config format (new): direct read
+            # - Legacy sparse format: merge with default + auto-migrate
+            config = self.manager.get_merged_configuration(version=version)
 
-            # Remove the 'Configuration' key as it's not part of the actual config
-            default_config.pop("Configuration", None)
+            if config is None:
+                raise ValueError(f"Configuration not found for version: {version}")
 
-            # Get Custom configuration as RAW dict (NO Pydantic defaults!)
-            # This is critical for the sparse delta pattern to work correctly
-            custom_config = self.manager.get_raw_configuration("Custom")
-
-            # If no custom config exists, use default as-is
-            if not custom_config:
-                logger.info("No Custom configuration found, using Default only")
-                merged_config = default_config
-            else:
-                # Merge: Default deep-updated with Custom deltas
-                merged_config = self.simple_merge(default_config, custom_config)
-
-            logger.info(
-                "Successfully merged Default + Custom configurations for runtime"
-            )
-
-            # Return Pydantic model if requested
             if as_model:
-                return IDPConfig(**merged_config)
+                return config
 
-            return merged_config
+            # Return as dict
+            return config.model_dump(mode="python")
 
         except Exception as e:
             logger.error(f"Error getting merged configuration: {str(e)}")
             raise
 
-
 @overload
 def get_config(
-    *, table_name: Optional[str] = None, as_model: Literal[True]
+    *, table_name: Optional[str] = None, as_model: Literal[True], version: Optional[str] = None
 ) -> IDPConfig:
     """
     Get configuration as Pydantic model.
@@ -184,14 +173,14 @@ def get_config(
 
 @overload
 def get_config(
-    *, table_name: Optional[str] = None, as_model: Literal[False] = False
+    *, table_name: Optional[str] = None, as_model: Literal[False] = False, version: Optional[str] = None
 ) -> Dict[str, Any]:
     """Get configuration as mutable dictionary."""
     ...
 
 
 def get_config(
-    *, table_name: Optional[str] = None, as_model: bool = False
+    *, table_name: Optional[str] = None, as_model: bool = False, version: Optional[str] = None
 ) -> Union[IDPConfig, Dict[str, Any]]:
     """
     Get the merged configuration using the environment variable for table name.
@@ -199,7 +188,7 @@ def get_config(
     Args:
         table_name: Optional override for configuration table name
         as_model: If True, return IDPConfig Pydantic model. If False (default), return dict.
-
+        version: Optional version to load. If None, uses active version.
     Returns:
         Merged configuration as IDPConfig (with .to_dict() helper) or mutable dictionary.
 
@@ -213,4 +202,4 @@ def get_config(
         config_dict = config.to_dict(sagemaker_endpoint_name=endpoint)
     """
     reader = ConfigurationReader(table_name)
-    return reader.get_merged_configuration(as_model=as_model)
+    return reader.get_merged_configuration(as_model=as_model, version=version)

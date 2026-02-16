@@ -921,6 +921,11 @@ class OcrService:
                 top_k=5,
                 max_tokens=4096,
                 context="OCR",
+                model_lambda_hook_arn=getattr(
+                    self.config.ocr, "model_lambda_hook_arn", None
+                )
+                if hasattr(self, "config")
+                else None,
             )
 
             # Extract text from response
@@ -1359,6 +1364,11 @@ class OcrService:
             top_k=5,
             max_tokens=4096,
             context="OCR",
+            model_lambda_hook_arn=getattr(
+                self.config.ocr, "model_lambda_hook_arn", None
+            )
+            if hasattr(self, "config")
+            else None,
         )
 
         # Extract text from response

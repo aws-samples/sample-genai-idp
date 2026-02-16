@@ -22,15 +22,18 @@ import {
   CollectionPreferences,
   ExpandableSection,
   RadioGroup,
+  Link,
 } from '@cloudscape-design/components';
 // eslint-disable-next-line import/no-extraneous-dependencies
 import yaml from 'js-yaml';
 import { generateClient } from 'aws-amplify/api';
 import GET_TEST_RUN from '../../graphql/queries/getTestResults';
 import START_TEST_RUN from '../../graphql/queries/startTestRun';
+import useConfigurationVersions from '../../hooks/use-configuration-versions';
 import GET_TEST_SETS from '../../graphql/queries/getTestSets';
 import TestStudioHeader from './TestStudioHeader';
 import useAppContext from '../../contexts/app';
+import { formatConfigVersionLink } from './utils/configVersionUtils';
 
 const client = generateClient();
 
@@ -344,6 +347,7 @@ TestResultsPreferences.propTypes = {
 
 const TestResults = ({ testRunId, setSelectedTestRunId }) => {
   const { addTestRun } = useAppContext();
+  const { versions } = useConfigurationVersions();
   const [results, setResults] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -839,7 +843,7 @@ const TestResults = ({ testRunId, setSelectedTestRunId }) => {
         )}
 
         {/* Key Metrics */}
-        <ColumnLayout columns={5} variant="text-grid">
+        <ColumnLayout columns={6} variant="text-grid">
           <Box>
             <Box variant="awsui-key-label">Total Cost</Box>
             <Box fontSize="heading-l">
@@ -847,7 +851,7 @@ const TestResults = ({ testRunId, setSelectedTestRunId }) => {
             </Box>
           </Box>
           <Box>
-            <Box variant="awsui-key-label">Average Confidence</Box>
+            <Box variant="awsui-key-label">Avg Confidence</Box>
             <Box fontSize="heading-l">
               {results.averageConfidence !== null && results.averageConfidence !== undefined
                 ? `${(results.averageConfidence * 100).toFixed(1)}%`
@@ -855,13 +859,13 @@ const TestResults = ({ testRunId, setSelectedTestRunId }) => {
             </Box>
           </Box>
           <Box>
-            <Box variant="awsui-key-label">Average Accuracy</Box>
+            <Box variant="awsui-key-label">Avg Accuracy</Box>
             <Box fontSize="heading-l">
               {results.overallAccuracy !== null && results.overallAccuracy !== undefined ? results.overallAccuracy.toFixed(3) : 'N/A'}
             </Box>
           </Box>
           <Box>
-            <Box variant="awsui-key-label">Average Weighted Overall Score</Box>
+            <Box variant="awsui-key-label">Avg Weighted Score</Box>
             <Box fontSize="heading-l">{averageWeightedScore !== null ? averageWeightedScore.toFixed(3) : 'N/A'}</Box>
           </Box>
           <Box>
@@ -877,6 +881,12 @@ const TestResults = ({ testRunId, setSelectedTestRunId }) => {
                 : 'N/A'}
             </Box>
           </Box>
+          {results.configVersion && (
+            <Box>
+              <Box variant="awsui-key-label">Config Version</Box>
+              <Box fontSize="heading-l">{formatConfigVersionLink(results.configVersion, versions)}</Box>
+            </Box>
+          )}
         </ColumnLayout>
 
         {/* Weighted Overall Scores Distribution Chart */}

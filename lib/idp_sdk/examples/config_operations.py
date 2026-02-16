@@ -5,7 +5,7 @@
 """
 IDP SDK Example: Configuration Operations
 
-Demonstrates configuration creation, validation, download, and upload.
+Demonstrates configuration creation, validation, download, upload, and version management.
 """
 
 import argparse
@@ -94,6 +94,11 @@ def main():
         default="full",
         help="Output format",
     )
+    download_parser.add_argument(
+        "--config-version",
+        type=str,
+        help="Configuration version to download (default: active version)",
+    )
 
     # Upload subcommand
     upload_parser = subparsers.add_parser(
@@ -115,6 +120,16 @@ def main():
         action="store_true",
         help="Skip validation before upload",
     )
+    upload_parser.add_argument(
+        "--config-version",
+        type=str,
+        help="Configuration version to upload to (default: active version)",
+    )
+    upload_parser.add_argument(
+        "--description",
+        type=str,
+        help="Description for the configuration version",
+    )
 
     args = parser.parse_args()
 
@@ -130,7 +145,7 @@ def main():
         print(f"  Features: {args.features}")
         print(f"  Pattern: {args.pattern}")
 
-        result = client.config_create(
+        result = client.config.create(
             features=args.features,
             pattern=args.pattern,
             output=args.output,
@@ -155,7 +170,7 @@ def main():
         print(f"Validating configuration: {args.config_file}")
         print(f"  Pattern: {args.pattern}")
 
-        result = client.config_validate(
+        result = client.config.validate(
             config_file=args.config_file,
             pattern=args.pattern,
             show_merged=args.show_merged,
@@ -186,10 +201,13 @@ def main():
 
         print(f"Downloading configuration from: {args.stack_name}")
         print(f"  Format: {args.format}")
+        if hasattr(args, "config_version") and args.config_version:
+            print(f"  Version: {args.config_version}")
 
-        result = client.config_download(
+        result = client.config.download(
             output=args.output,
             format=args.format,
+            config_version=getattr(args, "config_version", None),
         )
 
         if args.output:
@@ -212,10 +230,16 @@ def main():
         print(f"Uploading configuration to: {args.stack_name}")
         print(f"  Config file: {args.config_file}")
         print(f"  Validate: {not args.no_validate}")
+        if hasattr(args, "config_version") and args.config_version:
+            print(f"  Version: {args.config_version}")
+        if hasattr(args, "description") and args.description:
+            print(f"  Description: {args.description}")
 
-        result = client.config_upload(
+        result = client.config.upload(
             config_file=args.config_file,
             validate=not args.no_validate,
+            config_version=getattr(args, "config_version", None),
+            description=getattr(args, "description", None),
         )
 
         print("\nUpload Result:")

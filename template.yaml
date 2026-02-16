@@ -834,8 +834,8 @@ Resources:
     Properties:
       TemplateURL: ./nested/bda-lending-project/.aws-sam/packaged.yaml
       Parameters:
-        ProjectName: !Sub "${AWS::StackName}-BDA-Lending-Sample-Project"
-        ProjectDescription: !Sub "${AWS::StackName}-BDA-Lending-Sample-Project"
+        ProjectName: !Sub "${AWS::StackName}-Project"
+        ProjectDescription: !Sub "${AWS::StackName}-Project"
         LogLevel: !Ref LogLevel
         PermissionsBoundaryArn: !Ref PermissionsBoundaryArn
 
@@ -1441,6 +1441,7 @@ Resources:
         DiscoveryQueueName: !GetAtt DiscoveryQueue.QueueName
         TestFileCopyQueueName: !GetAtt TestFileCopyQueue.QueueName
         TestSetFileCopyQueueName: !GetAtt TestSetFileCopyQueue.QueueName
+        TestResultCacheUpdateQueueName: !GetAtt TestResultCacheUpdateQueue.QueueName
         
         # Other resources
         CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
@@ -1769,6 +1770,7 @@ Resources:
               - "x-amz-date"
               - "Authorization"
               - "x-amz-security-token"
+              - "x-amz-meta-config-version"
             AllowedMethods:
               - PUT
               - POST
@@ -3439,9 +3441,14 @@ Resources:
           APPSYNC_API_URL: !GetAtt GraphQLApi.GraphQLUrl
           DATA_RETENTION_IN_DAYS: !Ref DataRetentionInDays
           OUTPUT_BUCKET: !Ref OutputBucket
+          CONFIG_TABLE: !Ref ConfigurationTable
       Policies:
         - SQSSendMessagePolicy:
             QueueName: !GetAtt DocumentQueue.QueueName
+        - DynamoDBReadPolicy:
+            TableName: !Ref ConfigurationTable
+        - S3ReadPolicy:
+            BucketName: !Ref InputBucket
         - Statement:
             - Effect: Allow
               Action:
@@ -6796,6 +6803,9 @@ Resources:
       FieldName: releaseReview
 
 Outputs:
+  CustomerManagedEncryptionKeyArn:
+    Description: ARN of the customer-managed KMS encryption key used for S3 buckets. Needed when deploying Lambda Hook functions that read from the working bucket.
+    Value: !GetAtt CustomerManagedEncryptionKey.Arn
   ApplicationWebURL:
     Description: Application Web URL
     Value: !Sub "https://${CloudFrontDistribution.DomainName}/"

@@ -128,7 +128,7 @@ discovery:
             mock_reader_instance = mock_config_reader.return_value
             # Convert dict to IDPConfig model
             idp_config = IDPConfig(**self.config_dict)
-            mock_reader_instance.get_merged_configuration.return_value = idp_config
+            mock_reader_instance.get_configuration.return_value = idp_config
 
             with patch.dict("os.environ", {"CONFIGURATION_TABLE_NAME": "test-table"}):
                 # Initialize ClassesDiscovery with YAML config
@@ -192,7 +192,7 @@ discovery:
         mock_config_manager.return_value = mock_config_manager_instance
 
         # Mock the configuration manager to return empty config
-        mock_config_manager_instance.get_configuration.return_value = None
+        mock_config_manager_instance.get_merged_configuration.return_value = None
 
         mock_bedrock_instance = Mock()
         mock_bedrock_client.return_value = mock_bedrock_instance

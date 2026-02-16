@@ -8,7 +8,7 @@ Tests for stack info module
 import json
 from unittest.mock import MagicMock, patch
 
-from idp_cli.stack_info import StackInfo, get_stack_resources
+from idp_sdk.core.stack_info import StackInfo, get_stack_resources
 
 
 class TestStackInfo:
@@ -216,7 +216,7 @@ class TestStackInfo:
         # Should return empty dict on error
         assert settings == {}
 
-    @patch("idp_cli.stack_info.StackInfo")
+    @patch("idp_sdk.core.stack_info.StackInfo")
     def test_get_stack_resources_convenience(self, mock_stack_info_class):
         """Test convenience function get_stack_resources"""
         mock_instance = MagicMock()

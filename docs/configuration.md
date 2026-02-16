@@ -20,11 +20,26 @@ The web interface allows real-time configuration updates without stack redeploym
 - **Evaluation Methods**: Set evaluation methods and thresholds for each attribute
 - **Summarization**: Configure model, prompts, parameters, and enable/disable document summarization via the `enabled` property
 
+### Configuration Versions
+
+The solution supports **multiple named configuration versions**, enabling you to maintain independent configuration snapshots for A/B testing, environment separation, and iterative prompt tuning — all without redeploying the stack. Each version stores a complete, self-contained configuration. The active version determines which configuration is used for new document processing.
+
+Key capabilities:
+- **Create, edit, and delete** configuration versions with unique names and descriptions
+- **Activate** any version to make it the default for new processing
+- **Compare** versions side-by-side to see differences (exportable as CSV/JSON)
+- **Track** which version was used for each processed document and test run
+- **Select** a specific version when uploading documents, running tests, or using the CLI
+
+For comprehensive documentation, see [configuration-versions.md](configuration-versions.md).
+
 ### Configuration Management Features
 
 - **Save Changes**: Save your current configuration changes. The button is **enabled only when you have unsaved changes** (comparing your edits against the last saved configuration). After a successful save, a confirmation banner is displayed.
-- **Save as Default**: Save your current configuration as the new default baseline. This replaces the existing default configuration and automatically clears custom overrides. **Warning**: Default configurations may be overwritten during solution upgrades - export your configuration first for backup.
-- **Restore Default (All)**: Reset all configuration settings back to the original default values, removing all customizations.
+- **Unsaved Changes Indicator**: Individual fields with unsaved edits display an orange dot next to the field label, and an info banner with a "Discard changes" button appears when the configuration form has unsaved edits.
+- **Browser Navigation Guard**: The browser warns before leaving the page when unsaved configuration changes exist (both on browser close/refresh and SPA navigation).
+- **Save as Default**: Save your current version's configuration as the new default baseline. This replaces the existing default configuration. **Warning**: Default configurations may be overwritten during solution upgrades - export your configuration first for backup.
+- **Restore Default (All)**: Reset the current version's configuration back to the default values, replacing all customizations.
 - **Refresh**: Reload the configuration from the server. Use this to sync your view with the latest saved configuration, discard unsaved local changes, or verify your configuration after external updates.
 - **Export Configuration**: Download your current configuration to local files in JSON or YAML format with customizable filenames. Use this to backup configurations before upgrades or share configurations between environments.
 - **Import Configuration**: Upload configuration files from your local machine OR import from the Configuration Library:

@@ -156,6 +156,7 @@ class TestClassesDiscovery:
                 input_bucket="test-bucket",
                 input_prefix="test-document.pdf",
                 region="us-west-2",
+                version="test-version",
             )
 
             # Store mocks for access in tests
@@ -296,7 +297,7 @@ class TestClassesDiscovery:
         # Verify configuration was saved via raw configuration (sparse delta pattern)
         service.config_manager.save_raw_configuration.assert_called_once()
         call_args = service.config_manager.save_raw_configuration.call_args
-        assert call_args[0][0] == "Custom"  # First arg is config type
+        assert call_args[0][0] == "Config"  # First arg is config type
         assert "classes" in call_args[0][1]  # Second arg is config dict with classes
 
     @patch("idp_common.utils.s3util.S3Util.get_bytes")
@@ -700,7 +701,7 @@ class TestClassesDiscovery:
             # Verify that configuration manager was called with save_raw_configuration
             service.config_manager.save_raw_configuration.assert_called_once()
             call_args = service.config_manager.save_raw_configuration.call_args
-            assert call_args[0][0] == "Custom"  # Config type
+            assert call_args[0][0] == "Config"  # Config type
             updated_classes = call_args[0][1]["classes"]  # Classes from saved config
 
             # Should have 2 classes (Other-Form from Default + updated W-4)
@@ -749,7 +750,7 @@ class TestClassesDiscovery:
             # Verify configuration was saved via save_raw_configuration
             service.config_manager.save_raw_configuration.assert_called_once()
             call_args = service.config_manager.save_raw_configuration.call_args
-            assert call_args[0][0] == "Custom"  # Config type
+            assert call_args[0][0] == "Config"  # Config type
             updated_classes = call_args[0][1]["classes"]  # Classes from saved config
 
             # Should have 1 class (just the new one)

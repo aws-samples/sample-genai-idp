@@ -17,10 +17,28 @@ from typing import Dict, List, Optional
 import boto3
 from botocore.exceptions import ClientError
 
-from .manifest_parser import parse_manifest
-from .stack_info import StackInfo
+from idp_sdk.core.manifest_parser import parse_manifest
+from idp_sdk.core.stack_info import StackInfo
 
 logger = logging.getLogger(__name__)
+
+
+class BatchListDict(dict):
+    """Dict that acts like a list when iterated for backward compatibility"""
+
+    def __iter__(self):
+        """Iterate over batches instead of dict keys"""
+        return iter(self.get("batches", []))
+
+    def __len__(self):
+        """Return count of batches"""
+        return self.get("count", 0)
+
+    def __getitem__(self, key):
+        """Support both dict access and list indexing"""
+        if isinstance(key, int):
+            return self.get("batches", [])[key]
+        return super().__getitem__(key)
 
 
 class BatchProcessor:
@@ -64,6 +82,7 @@ class BatchProcessor:
         output_prefix: str = "cli-batch",
         batch_id: Optional[str] = None,
         number_of_files: Optional[int] = None,
+        config_version: Optional[str] = None,
     ) -> Dict:
         """
         Process batch of documents from manifest
@@ -94,7 +113,7 @@ class BatchProcessor:
 
         # Process documents
         return self._process_documents(
-            documents, batch_id, output_prefix, manifest_path
+            documents, batch_id, output_prefix, manifest_path, config_version
         )
 
     def process_batch_from_directory(
@@ -105,6 +124,7 @@ class BatchProcessor:
         output_prefix: str = "cli-batch",
         batch_id: Optional[str] = None,
         number_of_files: Optional[int] = None,
+        config_version: Optional[str] = None,
     ) -> Dict:
         """
         Process batch of documents from local directory
@@ -142,7 +162,12 @@ class BatchProcessor:
 
         # Process documents
         return self._process_documents(
-            documents, batch_id, output_prefix, dir_path, base_dir=dir_path
+            documents,
+            batch_id,
+            output_prefix,
+            dir_path,
+            config_version,
+            base_dir=dir_path,
         )
 
     def process_batch_from_s3_uri(
@@ -206,6 +231,7 @@ class BatchProcessor:
         batch_id: str,
         output_prefix: str,
         source: str,
+        config_version: Optional[str] = None,
         base_dir: Optional[str] = None,
     ) -> Dict:
         """
@@ -250,7 +276,9 @@ class BatchProcessor:
 
                 # Handle document upload/reference
                 # S3 upload automatically triggers EventBridge -> QueueSender -> SQS
-                s3_key = self._process_document_with_base(doc, batch_id, base_dir)
+                s3_key = self._process_document_with_base(
+                    doc, batch_id, base_dir, config_version
+                )
 
                 results["document_ids"].append(
                     s3_key
@@ -394,7 +422,11 @@ class BatchProcessor:
             raise
 
     def _process_document_with_base(
-        self, doc: Dict, batch_id: str, base_dir: Optional[str] = None
+        self,
+        doc: Dict,
+        batch_id: str,
+        base_dir: Optional[str] = None,
+        config_version: Optional[str] = None,
     ) -> str:
         """
         Process document with optional base directory for path preservation
@@ -409,12 +441,14 @@ class BatchProcessor:
         """
         if doc["type"] == "local":
             # Upload local file with path preservation
-            s3_key = self._upload_local_file_with_path(doc, batch_id, base_dir)
+            s3_key = self._upload_local_file_with_path(
+                doc, batch_id, base_dir, config_version
+            )
             logger.info(f"Uploaded {doc['filename']} to {s3_key}")
             return s3_key
         elif doc["type"] == "s3":
             # Copy from external S3 location to InputBucket
-            s3_key = self._copy_s3_file(doc, batch_id)
+            s3_key = self._copy_s3_file(doc, batch_id, config_version)
             logger.info(f"Copied {doc['filename']} from {doc['path']} to {s3_key}")
             return s3_key
         elif doc["type"] == "s3-key":
@@ -427,7 +461,11 @@ class BatchProcessor:
             raise ValueError(f"Unknown document type: {doc['type']}")
 
     def _upload_local_file_with_path(
-        self, doc: Dict, batch_id: str, base_dir: Optional[str] = None
+        self,
+        doc: Dict,
+        batch_id: str,
+        base_dir: Optional[str] = None,
+        config_version: Optional[str] = None,
     ) -> str:
         """
         Upload local file to S3 InputBucket with path preservation
@@ -452,9 +490,25 @@ class BatchProcessor:
             # Standardized: batch_id/filename
             s3_key = f"{batch_id}/{filename}"
 
-        # Upload file
+        # Upload file with config version as S3 metadata instead of filename suffix
         input_bucket = self.resources["InputBucket"]
-        self.s3.upload_file(Filename=local_path, Bucket=input_bucket, Key=s3_key)
+
+        if config_version:
+            # Use put_object with metadata for config version
+            logger.info(f"Adding config-version metadata: {config_version} to {s3_key}")
+            with open(local_path, "rb") as file_data:
+                self.s3.put_object(
+                    Bucket=input_bucket,
+                    Key=s3_key,
+                    Body=file_data,
+                    Metadata={"config-version": config_version},
+                )
+        else:
+            logger.info(
+                f"No config version specified, uploading without metadata to {s3_key}"
+            )
+            # Use upload_file for files without config version
+            self.s3.upload_file(Filename=local_path, Bucket=input_bucket, Key=s3_key)
 
         return s3_key
 
@@ -471,13 +525,16 @@ class BatchProcessor:
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
         return f"{prefix}-{timestamp}"
 
-    def _copy_s3_file(self, doc: Dict, batch_id: str) -> str:
+    def _copy_s3_file(
+        self, doc: Dict, batch_id: str, config_version: Optional[str] = None
+    ) -> str:
         """
         Copy file from any S3 location to InputBucket
 
         Args:
             doc: Document specification with S3 URI
             batch_id: Batch identifier
+            config_version: Optional config version to add as metadata
 
         Returns:
             S3 key in InputBucket
@@ -497,11 +554,22 @@ class BatchProcessor:
         # Construct destination key: batch_id/filename
         dest_key = f"{batch_id}/{filename}"
 
-        # Copy object
+        # Copy object with config version metadata if provided
         input_bucket = self.resources["InputBucket"]
         copy_source = {"Bucket": source_bucket, "Key": source_key}
 
-        self.s3.copy_object(CopySource=copy_source, Bucket=input_bucket, Key=dest_key)
+        copy_args = {"CopySource": copy_source, "Bucket": input_bucket, "Key": dest_key}
+
+        if config_version:
+            copy_args["Metadata"] = {"config-version": config_version}
+            copy_args["MetadataDirective"] = "REPLACE"
+            logger.info(
+                f"Adding config-version metadata: {config_version} to copied file {dest_key}"
+            )
+        else:
+            logger.info(f"No config version specified for copied file {dest_key}")
+
+        self.s3.copy_object(**copy_args)
 
         return dest_key
 
@@ -681,29 +749,44 @@ class BatchProcessor:
             logger.error(f"Error retrieving batch metadata: {e}")
             return None
 
-    def list_batches(self, limit: int = 10) -> List[Dict]:
+    def list_batches(self, limit: int = 10, next_token: Optional[str] = None):
         """
-        List recent batch jobs
+        List recent batch jobs with pagination
 
         Args:
             limit: Maximum number of batches to return
+            next_token: Pagination token from previous request
 
         Returns:
-            List of batch metadata dictionaries
+            BatchListDict that acts like both dict and list for backward compatibility
         """
         output_bucket = self.resources["OutputBucket"]
         prefix = "cli-batches/"
 
         try:
-            response = self.s3.list_objects_v2(
-                Bucket=output_bucket, Prefix=prefix, Delimiter="/"
-            )
+            # Build list parameters
+            list_params = {
+                "Bucket": output_bucket,
+                "Prefix": prefix,
+                "Delimiter": "/",
+                "MaxKeys": limit,
+            }
+
+            # Add continuation token if provided
+            if next_token:
+                import base64
+
+                decoded = base64.b64decode(next_token).decode("utf-8")
+                list_params["ContinuationToken"] = decoded
+
+            # List batch directories
+            response = self.s3.list_objects_v2(**list_params)
 
             # Get batch directories
             batch_prefixes = [p["Prefix"] for p in response.get("CommonPrefixes", [])]
 
             # Sort by name (which includes timestamp) - most recent first
-            batch_prefixes = sorted(batch_prefixes, reverse=True)[:limit]
+            batch_prefixes = sorted(batch_prefixes, reverse=True)
 
             # Load metadata for each batch
             batches = []
@@ -713,11 +796,23 @@ class BatchProcessor:
                 if batch_info:
                     batches.append(batch_info)
 
-            return batches
+            # Prepare result dict
+            result = {"batches": batches, "count": len(batches)}
+
+            # Add next_token if more results available
+            if response.get("IsTruncated"):
+                import base64
+
+                encoded = base64.b64encode(
+                    response["NextContinuationToken"].encode("utf-8")
+                ).decode("utf-8")
+                result["next_token"] = encoded
+
+            return BatchListDict(result)
 
         except Exception as e:
             logger.error(f"Error listing batches: {e}")
-            return []
+            return BatchListDict({"batches": [], "count": 0})
 
     def download_batch_results(
         self, batch_id: str, output_dir: str, file_types: List[str]

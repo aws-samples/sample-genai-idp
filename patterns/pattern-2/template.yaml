@@ -486,8 +486,9 @@ Resources:
                 order: 3
               model_id:
                 type: string
-                description: "Bedrock model ID (only used if backend is 'bedrock')"
+                description: "Bedrock model ID (only used if backend is 'bedrock'). Select 'LambdaHook' to use a custom Lambda function for inference."
                 enum:
+                  - "LambdaHook"
                   - "us.amazon.nova-lite-v1:0"
                   - "us.amazon.nova-pro-v1:0"
                   - "us.amazon.nova-premier-v1:0"
@@ -529,24 +530,30 @@ Resources:
                   - "global.anthropic.claude-opus-4-5-20251101-v1:0"
                 order: 2
                 dependsOn: { field: "backend", value: "bedrock" }
+              model_lambda_hook_arn:
+                type: string
+                description: "Lambda function ARN for custom inference (used when model_id is 'LambdaHook'). Function name must start with GENAIIDP-."
+                default: ""
+                order: 3
+                dependsOn: { field: "model_id", value: "LambdaHook" }
               system_prompt:
                 type: string
                 description: "System prompt for Bedrock OCR (only used if backend is 'bedrock')"
                 default: "You are an expert OCR system. Extract all text from the provided image accurately, preserving layout where possible."
-                order: 3
+                order: 4
                 dependsOn: { field: "backend", value: "bedrock" }
               task_prompt:
                 type: string
                 description: "Task prompt for Bedrock OCR (only used if backend is 'bedrock')"
                 default: "Extract all text from this document image. Preserve the layout, including paragraphs, tables, and formatting."
-                order: 4
+                order: 5
                 dependsOn: { field: "backend", value: "bedrock" }
               features:
                 type: array
                 listLabel: "Textract Features"
                 itemLabel: "Feature"
                 description: "Textract features (only used if backend is 'textract')"
-                order: 5
+                order: 6
                 dependsOn: { field: "backend", values: ["textract"] }
                 items:
                   type: object
@@ -821,8 +828,9 @@ Resources:
                     order: 1
               model:
                 type: string
-                description: Model identifier
+                description: "Model identifier. Select 'LambdaHook' to use a custom Lambda function for inference."
                 enum:
+                  - "LambdaHook"
                   - !If
                     - HasCustomClassificationModelARN
                     - !Ref CustomClassificationModelARN
@@ -867,6 +875,12 @@ Resources:
                   - "global.anthropic.claude-sonnet-4-5-20250929-v1:0:1m"
                   - "global.anthropic.claude-opus-4-5-20251101-v1:0"
                 order: 1
+              model_lambda_hook_arn:
+                type: string
+                description: "Lambda function ARN for custom inference (used when model is 'LambdaHook'). Function name must start with GENAIIDP-."
+                default: ""
+                order: 2
+                dependsOn: { field: "model", value: "LambdaHook" }
               classificationMethod:
                 type: string
                 description: "Classification methodology to use"
@@ -976,8 +990,9 @@ Resources:
                     order: 1
               model:
                 type: string
-                description: Model identifier
+                description: "Model identifier. Select 'LambdaHook' to use a custom Lambda function for inference."
                 enum:
+                  - "LambdaHook"
                   - !If
                     - HasCustomExtractionModelARN
                     - !Ref CustomExtractionModelARN
@@ -1022,37 +1037,43 @@ Resources:
                   - "global.anthropic.claude-sonnet-4-5-20250929-v1:0:1m"
                   - "global.anthropic.claude-opus-4-5-20251101-v1:0"
                 order: 1
+              model_lambda_hook_arn:
+                type: string
+                description: "Lambda function ARN for custom inference (used when model is 'LambdaHook'). Function name must start with GENAIIDP-."
+                default: ""
+                order: 2
+                dependsOn: { field: "model", value: "LambdaHook" }
               temperature:
                 type: number
                 minimum: 0
                 maximum: 1
                 description: "Sampling temperature: Controls randomness in model output (0.0 = deterministic, higher = more random). Used when top_p is 0. Set temperature=0.0 for consistent, deterministic outputs."
-                order: 2
+                order: 3
               top_k:
                 type: integer
                 minimum: 1
                 description: Sampling Top K
-                order: 3
+                order: 4
               top_p:
                 type: number
                 description: "Sampling Top P: Nucleus sampling threshold (0.0-1.0). When set to a positive value (> 0), overrides temperature parameter. Set to 0 to use temperature instead."
-                order: 4
+                order: 5
               max_tokens:
                 type: number
                 description: "Maximum number of output tokens. Ensure this does not exceed the selected model's limit. See model documentation for details."
-                order: 5
+                order: 6
               system_prompt:
                 type: string
                 description: System prompt
-                order: 6
+                order: 7
               task_prompt:
                 type: string
                 description: Task prompt - supports placeholders {DOCUMENT_CLASS} (replaced with the detected class label), {ATTRIBUTE_NAMES_AND_DESCRIPTIONS} (replaced with the attribute names and descriptions for the detected class), {FEW_SHOT_EXAMPLES} (replaced by classPrompt and image data from examples in class definitions), {DOCUMENT_TEXT} (replaced by the OCR output), and {DOCUMENT_IMAGE} (replaced by the page image attachments for each page). Optionally use <<CACHEPOINT>> to separate static and dynamic elements of prompt for Bedrock prompt caching.
-                order: 7
+                order: 8
               custom_prompt_lambda_arn:
                 type: string
                 description: "(Optional) ARN of a Lambda function to generate custom extraction prompts. Function name must start with 'GENAIIDP-'. If not provided, default prompts will be used. The Lambda function receives the complete config, prompt placeholders, default task prompt content, and serialized document, and returns custom system_prompt and task_prompt_content. Example: arn:partition:lambda:us-east-1:123456789012:function:GENAIIDP-my-extractor"
-                order: 8
+                order: 9
           assessment:
             order: 5
             type: object
@@ -1136,9 +1157,10 @@ Resources:
                 order: 5
               model:
                 type: string
-                description: Bedrock model ID
+                description: "Bedrock model ID. Select 'LambdaHook' to use a custom Lambda function for inference."
                 enum:
                   [
+                    "LambdaHook",
                     "us.amazon.nova-lite-v1:0",
                     "us.amazon.nova-pro-v1:0",
                     "us.amazon.nova-premier-v1:0",
@@ -1173,32 +1195,38 @@ Resources:
                     "global.anthropic.claude-opus-4-5-20251101-v1:0"
                   ]
                 order: 5
+              model_lambda_hook_arn:
+                type: string
+                description: "Lambda function ARN for custom inference (used when model is 'LambdaHook'). Function name must start with GENAIIDP-."
+                default: ""
+                order: 6
+                dependsOn: { field: "model", value: "LambdaHook" }
               temperature:
                 type: number
                 description: "Sampling temperature: Controls randomness in model output (0.0 = deterministic, higher = more random). Used when top_p is 0. Set temperature=0.0 for consistent, deterministic outputs."
-                order: 6
+                order: 7
               top_k:
                 type: number
                 description: Sampling Top K
-                order: 7
+                order: 8
               top_p:
                 type: number
                 description: "Sampling Top P: Nucleus sampling threshold (0.0-1.0). When set to a positive value (> 0), overrides temperature parameter. Set to 0 to use temperature instead."
-                order: 8
+                order: 9
               max_tokens:
                 type: number
                 description: "Maximum number of output tokens. Ensure this does not exceed the selected model's limit. See model documentation for details."
-                order: 9
+                order: 10
               system_prompt:
                 type: string
                 format: textarea
                 description: System prompt
-                order: 10
+                order: 11
               task_prompt:
                 type: string
                 format: textarea
                 description: Task prompt - supports placeholders {DOCUMENT_TEXT} (markdown text), {OCR_TEXT_CONFIDENCE} (OCR text blocks with confidence), {DOCUMENT_CLASS}, {ATTRIBUTE_NAMES_AND_DESCRIPTIONS}, {EXTRACTION_RESULTS}, {GRANULAR_CONTEXT} and {DOCUMENT_IMAGE}. Use <<CACHEPOINT>> to separate static and dynamic elements of prompt for Bedrock prompt caching.
-                order: 11
+                order: 12
           summarization:
             order: 6
             type: object
@@ -1211,9 +1239,10 @@ Resources:
                 order: 0
               model:
                 type: string
-                description: Bedrock model ID
+                description: "Bedrock model ID. Select 'LambdaHook' to use a custom Lambda function for inference."
                 enum:
                   [
+                    "LambdaHook",
                     "us.amazon.nova-lite-v1:0",
                     "us.amazon.nova-pro-v1:0",
                     "us.amazon.nova-premier-v1:0",
@@ -1248,32 +1277,38 @@ Resources:
                     "global.anthropic.claude-opus-4-5-20251101-v1:0"
                   ]
                 order: 1
+              model_lambda_hook_arn:
+                type: string
+                description: "Lambda function ARN for custom inference (used when model is 'LambdaHook'). Function name must start with GENAIIDP-."
+                default: ""
+                order: 2
+                dependsOn: { field: "model", value: "LambdaHook" }
               temperature:
                 type: number
                 description: Sampling temperature
-                order: 2
+                order: 3
               top_k:
                 type: number
                 description: Sampling Top K
-                order: 3
+                order: 4
               top_p:
                 type: number
                 description: Sampling Top P
-                order: 4
+                order: 5
               max_tokens:
                 type: number
                 description: "Maximum number of output tokens. Ensure this does not exceed the selected model's limit. See model documentation for details."
-                order: 5
+                order: 6
               system_prompt:
                 type: string
                 format: textarea
                 description: System prompt
-                order: 6
+                order: 7
               task_prompt:
                 type: string
                 format: textarea
                 description: Task prompt - supports parameters {DOCUMENT_TEXT} and {EXTRACTION_RESULTS}. Optionally use <<CACHEPOINT>> to separate static and dynamic elements of prompt for Bedrock prompt caching.
-                order: 7
+                order: 8
           evaluation:
             order: 7
             type: object
@@ -1912,6 +1947,14 @@ Resources:
                 - aws-marketplace:Unsubscribe
                 - aws-marketplace:ViewSubscriptions
               Resource: "*"
+            # Lambda invoke permission for LambdaHook custom inference
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource:
+                - !Sub "arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:GENAIIDP-*"
+              Condition:
+                StringLike:
+                  "lambda:FunctionName": "GENAIIDP-*"
             # AppSync permissions for updating document status (only if AppSync API is available)
             - !If
               - HasAppSyncApi
@@ -2033,6 +2076,14 @@ Resources:
                 - aws-marketplace:Unsubscribe
                 - aws-marketplace:ViewSubscriptions
               Resource: "*"
+            # Lambda invoke permission for LambdaHook custom inference
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource:
+                - !Sub "arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:GENAIIDP-*"
+              Condition:
+                StringLike:
+                  "lambda:FunctionName": "GENAIIDP-*"
             - !If
               - HasGuardrailConfig
               - Effect: Allow
@@ -2270,6 +2321,14 @@ Resources:
                 - aws-marketplace:Unsubscribe
                 - aws-marketplace:ViewSubscriptions
               Resource: "*"
+            # Lambda invoke permission for LambdaHook custom inference
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource:
+                - !Sub "arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:GENAIIDP-*"
+              Condition:
+                StringLike:
+                  "lambda:FunctionName": "GENAIIDP-*"
             - !If
               - HasGuardrailConfig
               - Effect: Allow
@@ -2468,6 +2527,14 @@ Resources:
                 - aws-marketplace:Unsubscribe
                 - aws-marketplace:ViewSubscriptions
               Resource: "*"
+            # Lambda invoke permission for LambdaHook custom inference
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource:
+                - !Sub "arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:GENAIIDP-*"
+              Condition:
+                StringLike:
+                  "lambda:FunctionName": "GENAIIDP-*"
             - !If
               - HasGuardrailConfig
               - Effect: Allow

@@ -59,7 +59,7 @@ https://github.com/user-attachments/assets/3d448a74-ba5b-4a4a-96ad-ec03ac0b4d7d
 
 ### Prerequisites
 
-- Python 3.9 or higher
+- Python 3.10 or higher
 - AWS credentials configured (via AWS CLI or environment variables)
 - An active IDP Accelerator CloudFormation stack
 
@@ -468,6 +468,7 @@ idp-cli run-inference [OPTIONS]
 - `--recursive/--no-recursive`: Include subdirectories (default: recursive)
 - `--number-of-files`: Limit number of files to process
 - `--config`: Path to configuration YAML file (optional)
+- `--config-version`: Configuration version to use for processing (e.g., v1, v2)
 - `--context`: Context description for test run (used with --test-set, e.g., "Model v2.1", "Production validation")
 - `--monitor`: Monitor progress until completion
 - `--refresh-interval`: Seconds between status checks (default: 5)
@@ -526,6 +527,21 @@ idp-cli run-inference \
 idp-cli run-inference \
     --stack-name my-stack \
     --s3-uri archive/2024/ \
+    --monitor
+
+# Process with specific configuration version
+idp-cli run-inference \
+    --stack-name my-stack \
+    --dir ./documents/ \
+    --config-version v2 \
+    --monitor
+
+# Process test set with configuration version
+idp-cli run-inference \
+    --stack-name my-stack \
+    --test-set fcc-example-test \
+    --config-version v1 \
+    --context "Testing with config v1" \
     --monitor
 ```
 
@@ -1700,13 +1716,17 @@ idp-cli config-download [OPTIONS]
 - `--output`, `-o`: Output file path (default: stdout)
 - `--format`: Output format - `full` (default) or `minimal` (only differences from defaults)
 - `--pattern`: Pattern for minimal diff (auto-detected if not specified)
+- `--config-version`: Configuration version to download (e.g., v1, v2). If not specified, downloads active version
 - `--region`: AWS region (optional)
 
 **Examples:**
 
 ```bash
-# Download full config
+# Download full config from active version
 idp-cli config-download --stack-name my-stack --output config.yaml
+
+# Download specific version
+idp-cli config-download --stack-name my-stack --config-version v2 --output config.yaml
 
 # Download minimal config (only customizations)
 idp-cli config-download --stack-name my-stack --format minimal --output config.yaml
@@ -1731,13 +1751,21 @@ idp-cli config-upload [OPTIONS]
 - `--config-file`, `-f` (required): Path to configuration file (YAML or JSON)
 - `--validate/--no-validate`: Validate config before uploading (default: validate)
 - `--pattern`: Pattern for validation (auto-detected if not specified)
+- `--config-version`: Configuration version to update (e.g., v1, v2). If version doesn't exist, it will be created
+- `--version-description`: Description for the configuration version (used when creating new versions)
 - `--region`: AWS region (optional)
 
 **Examples:**
 
 ```bash
-# Upload config with validation
+# Upload config to active version
 idp-cli config-upload --stack-name my-stack --config-file ./config.yaml
+
+# Update existing version
+idp-cli config-upload --stack-name my-stack --config-file ./config.yaml --config-version Production
+
+# Create new version with description
+idp-cli config-upload --stack-name my-stack --config-file ./config.yaml --config-version NewVersion --version-description "Test configuration for new feature"
 
 # Skip validation (use with caution)
 idp-cli config-upload --stack-name my-stack --config-file ./config.yaml --no-validate
@@ -1749,10 +1777,20 @@ idp-cli config-upload --stack-name my-stack --config-file ./config.yaml --patter
 **What Happens:**
 1. Loads and parses your YAML or JSON config file
 2. Validates against system defaults (unless `--no-validate`)
-3. Uploads to the stack's ConfigurationTable in DynamoDB
-4. Configuration is immediately active for new document processing
+3. If version exists: Updates the existing version with the uploaded configuration (saved as a complete snapshot)
+4. If version doesn't exist: Creates a new version with the uploaded configuration
+5. Uploads to the stack's ConfigurationTable in DynamoDB
+6. Configuration is immediately available for document processing
 
-This uses the same mechanism as the Web UI "Save Configuration" button.
+**Configuration Versioning:**
+- **No version specified**: Updates the currently active version
+- **Existing version**: Saves the uploaded configuration as the full version snapshot
+- **New version**: Creates a new independent version with the uploaded configuration
+- **Version descriptions**: Can be added to new versions for better organization
+
+For full details on configuration versioning, see [configuration-versions.md](configuration-versions.md).
+
+This uses the same mechanism as the Web UI configuration management system.
 
 ---
 

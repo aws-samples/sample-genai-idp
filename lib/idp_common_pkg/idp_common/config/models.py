@@ -98,7 +98,11 @@ class ExtractionConfig(BaseModel):
 
     model: str = Field(
         default="us.amazon.nova-pro-v1:0",
-        description="Bedrock model ID for extraction",
+        description="Bedrock model ID for extraction. Use 'LambdaHook' to invoke a custom Lambda function instead of Bedrock.",
+    )
+    model_lambda_hook_arn: Optional[str] = Field(
+        default=None,
+        description="Lambda function ARN for custom inference (used when model is 'LambdaHook'). Function name must start with GENAIIDP-.",
     )
     system_prompt: str = Field(
         default="",
@@ -152,7 +156,11 @@ class ClassificationConfig(BaseModel):
 
     model: str = Field(
         default="us.amazon.nova-pro-v1:0",
-        description="Bedrock model ID for classification",
+        description="Bedrock model ID for classification. Use 'LambdaHook' to invoke a custom Lambda function instead of Bedrock.",
+    )
+    model_lambda_hook_arn: Optional[str] = Field(
+        default=None,
+        description="Lambda function ARN for custom inference (used when model is 'LambdaHook'). Function name must start with GENAIIDP-.",
     )
     system_prompt: str = Field(
         default="", description="System prompt for classification"
@@ -283,7 +291,12 @@ class AssessmentConfig(BaseModel):
         description="Enable Human-in-the-Loop review for low confidence extractions",
     )
     model: Optional[str] = Field(
-        default=None, description="Bedrock model ID for assessment"
+        default=None,
+        description="Bedrock model ID for assessment. Use 'LambdaHook' to invoke a custom Lambda function instead of Bedrock.",
+    )
+    model_lambda_hook_arn: Optional[str] = Field(
+        default=None,
+        description="Lambda function ARN for custom inference (used when model is 'LambdaHook'). Function name must start with GENAIIDP-.",
     )
     system_prompt: str = Field(
         default="",
@@ -340,7 +353,11 @@ class SummarizationConfig(BaseModel):
     enabled: bool = Field(default=True, description="Enable summarization")
     model: str = Field(
         default="us.amazon.nova-premier-v1:0",
-        description="Bedrock model ID for summarization",
+        description="Bedrock model ID for summarization. Use 'LambdaHook' to invoke a custom Lambda function instead of Bedrock.",
+    )
+    model_lambda_hook_arn: Optional[str] = Field(
+        default=None,
+        description="Lambda function ARN for custom inference (used when model is 'LambdaHook'). Function name must start with GENAIIDP-.",
     )
     system_prompt: str = Field(
         default="", description="System prompt for summarization"
@@ -387,7 +404,12 @@ class OCRConfig(BaseModel):
         default="textract", description="OCR backend (textract or bedrock)"
     )
     model_id: Optional[str] = Field(
-        default=None, description="Bedrock model ID for OCR (if backend=bedrock)"
+        default=None,
+        description="Bedrock model ID for OCR (if backend=bedrock). Use 'LambdaHook' to invoke a custom Lambda function instead of Bedrock.",
+    )
+    model_lambda_hook_arn: Optional[str] = Field(
+        default=None,
+        description="Lambda function ARN for custom inference (used when model_id is 'LambdaHook'). Function name must start with GENAIIDP-.",
     )
     system_prompt: Optional[str] = Field(
         default=None, description="System prompt for Bedrock OCR"
@@ -1047,8 +1069,8 @@ class IDPConfig(BaseModel):
             temperature = config.extraction.temperature
     """
 
-    config_type: Literal["Default", "Custom"] = Field(
-        default="Default", description="Discriminator for config type"
+    config_type: Literal["Config"] = Field(
+        default="Config", description="Configuration type"
     )
 
     notes: Optional[str] = Field(default=None, description="Configuration notes")
@@ -1175,7 +1197,6 @@ class ConfigMetadata(BaseModel):
 
     created_at: Optional[str] = Field(default=None, description="Creation timestamp")
     updated_at: Optional[str] = Field(default=None, description="Update timestamp")
-    version: Optional[str] = Field(default=None, description="Configuration version")
 
 
 class ConfigurationRecord(BaseModel):
@@ -1189,7 +1210,7 @@ class ConfigurationRecord(BaseModel):
         # Create from IDPConfig
         config = IDPConfig(...)
         record = ConfigurationRecord(
-            configuration_type="Default",
+            configuration_type="config",
             config=config
         )
 
@@ -1201,9 +1222,18 @@ class ConfigurationRecord(BaseModel):
         idp_config = record.config
     """
 
-    configuration_type: str = Field(
-        description="Configuration type (Schema, Default, Custom, Pricing)"
-    )
+    configuration_type: str = Field(description="Configuration type (Config, Schema, Pricing)")
+    version: Optional[str] = Field(default=None, description="Version Name")
+    is_active: Optional[bool] = Field(default=None, description="Whether this version is active")
+
+    @field_validator("version", mode="before")
+    @classmethod
+    def validate_version(cls, v: Any) -> Optional[str]:
+        """Ensure version field accepts None or string values"""
+        if v is None:
+            return None
+        return str(v) if v else None
+    description: Optional[str] = Field(default=None, description="Version description")
     config: Annotated[
         Union[SchemaConfig, IDPConfig, PricingConfig], Discriminator("config_type")
     ] = Field(
@@ -1228,6 +1258,7 @@ class ConfigurationRecord(BaseModel):
             - Configuration: str (partition key)
             - All config fields stringified (except booleans)
         """
+
         # Get config as dict using Pydantic's model_dump
         config_dict = self.config.model_dump(mode="python")
 
@@ -1237,8 +1268,24 @@ class ConfigurationRecord(BaseModel):
         # Stringify values (preserve booleans, convert numbers to strings)
         stringified = self._stringify_values(config_dict)
 
+        configuration_type = f"{self.configuration_type}#{self.version}" if self.version else self.configuration_type
+
         # Build DynamoDB item
-        item = {"Configuration": self.configuration_type, **stringified}
+        item = {"Configuration": configuration_type, **stringified}
+
+        # Add ConfigurationRecord level fields
+        if self.is_active is not None:
+            item["IsActive"] = self.is_active
+        if self.description is not None:
+            item["Description"] = self.description
+        
+        # Add metadata fields as separate DynamoDB columns
+        if self.metadata:
+            metadata_dict = self.metadata.model_dump(mode="python", exclude_none=True)
+            if "created_at" in metadata_dict:
+                item["CreatedAt"] = metadata_dict["created_at"]
+            if "updated_at" in metadata_dict:
+                item["UpdatedAt"] = metadata_dict["updated_at"]
 
         return item
 
@@ -1249,9 +1296,8 @@ class ConfigurationRecord(BaseModel):
 
         This method:
         1. Extracts the Configuration key
-        2. Removes DynamoDB metadata
-        3. Auto-migrates legacy format if needed
-        4. Validates into IDPConfig (Pydantic handles type conversions)
+        2. Auto-migrates legacy format if needed
+        3. Validates into IDPConfig (Pydantic handles type conversions)
 
         Args:
             item: Raw DynamoDB item dict
@@ -1266,18 +1312,28 @@ class ConfigurationRecord(BaseModel):
 
         logger = logging.getLogger(__name__)
 
-        # Extract configuration type
-        config_type = item.get("Configuration")
-        if not config_type:
+        # Extract configuration key
+        config_key = item.get("Configuration")
+        if not config_key:
             raise ValueError("DynamoDB item missing 'Configuration' key")
+        
+        # Parse configuration type and version from single key
+        if "#" in config_key:
+            # Versioned format: Config#v0, Config#v1, etc.
+            config_type, version = config_key.split("#", 1)
+        else:
+            # Non-versioned format: Schema, Pricing, Default, Custom
+            config_type = config_key
+            version = ""
 
-        # Remove DynamoDB metadata keys
-        config_data = {k: v for k, v in item.items() if k != "Configuration"}
+        # Remove DynamoDB keys and metadata
+        config_data = {k: v for k, v in item.items() 
+                      if k not in ("Configuration", "IsActive", "CreatedAt", "UpdatedAt", "Description")}
 
         # Set config_type discriminator directly from DynamoDB Configuration key
         # DynamoDB keys match Pydantic discriminators exactly:
         # - "Schema" -> SchemaConfig
-        # - "Default", "Custom" -> IDPConfig
+        # - "Config#version" -> IDPConfig
         # - "DefaultPricing", "CustomPricing" -> PricingConfig
         config_data["config_type"] = config_type
 
@@ -1307,10 +1363,7 @@ class ConfigurationRecord(BaseModel):
 
         # Remove legacy pricing field (now stored separately as DefaultPricing/CustomPricing)
         # This handles migration for existing stacks with old embedded pricing
-        if config_data.get("pricing") is not None and config_type in (
-            "Default",
-            "Custom",
-        ):
+        if config_data.get("pricing") is not None and config_type in ("Config", "Default", "Custom"):
             logger.info(
                 f"Removing legacy pricing field from {config_type} configuration"
             )
@@ -1321,7 +1374,17 @@ class ConfigurationRecord(BaseModel):
             {"configuration_type": config_type, "config": config_data}
         ).config
 
-        return cls(configuration_type=config_type, config=config)
+        return cls(
+            configuration_type=config_type,
+            version=version,
+            is_active=item.get("IsActive"),
+            description=item.get("Description"),
+            config=config,
+            metadata=ConfigMetadata(
+                created_at=item.get("CreatedAt"),
+                updated_at=item.get("UpdatedAt")
+            )
+        )
 
     @staticmethod
     def _stringify_values(obj: Any) -> Any:

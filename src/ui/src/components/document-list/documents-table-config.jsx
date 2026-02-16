@@ -6,11 +6,12 @@ import { Button, ButtonDropdown, CollectionPreferences, Link, SpaceBetween } fro
 import { TableHeader } from '../common/table';
 import { DOCUMENTS_PATH } from '../../routes/constants';
 import { renderHitlStatus } from '../common/hitl-status-renderer';
+import { formatConfigVersionLink } from '../test-studio/utils/configVersionUtils';
 
 export const KEY_COLUMN_ID = 'objectKey';
 export const UNIQUE_TRACK_ID = 'uniqueId';
 
-export const COLUMN_DEFINITIONS_MAIN = [
+export const COLUMN_DEFINITIONS_MAIN = (versions = []) => [
   {
     id: KEY_COLUMN_ID,
     header: 'Document ID',
@@ -27,6 +28,13 @@ export const COLUMN_DEFINITIONS_MAIN = [
     header: 'Status',
     cell: (item) => item.objectStatus,
     sortingField: 'objectStatus',
+    width: 150,
+  },
+  {
+    id: 'configVersion',
+    header: 'Config Version',
+    cell: (item) => formatConfigVersionLink(item.configVersion, versions),
+    sortingField: 'configVersion',
     width: 150,
   },
   {
@@ -88,7 +96,7 @@ export const COLUMN_DEFINITIONS_MAIN = [
   },
 ];
 
-export const DEFAULT_SORT_COLUMN = COLUMN_DEFINITIONS_MAIN[2]; // initialEventTime
+export const DEFAULT_SORT_COLUMN = { sortingField: 'initialEventTime' };
 
 export const SELECTION_LABELS = {
   itemSelectionLabel: (data, row) => `select ${row.objectKey}`,
@@ -111,6 +119,7 @@ const VISIBLE_CONTENT_OPTIONS = [
       { id: 'initialEventTime', label: 'Submitted' },
       { id: 'completionTime', label: 'Completed' },
       { id: 'duration', label: 'Duration' },
+      { id: 'configVersion', label: 'Config Version' },
       { id: 'evaluationStatus', label: 'Evaluation' },
       { id: 'confidenceAlertCount', label: 'Confidence Alerts' },
       { id: 'hitlStatus', label: 'Review Status' },
@@ -120,7 +129,15 @@ const VISIBLE_CONTENT_OPTIONS = [
   },
 ];
 
-const VISIBLE_CONTENT = ['objectKey', 'objectStatus', 'initialEventTime', 'duration', 'confidenceAlertCount', 'hitlStatus'];
+const VISIBLE_CONTENT = [
+  'objectKey',
+  'objectStatus',
+  'configVersion',
+  'initialEventTime',
+  'duration',
+  'confidenceAlertCount',
+  'hitlStatus',
+];
 
 export const DEFAULT_PREFERENCES = {
   pageSize: PAGE_SIZE_OPTIONS[0].value,

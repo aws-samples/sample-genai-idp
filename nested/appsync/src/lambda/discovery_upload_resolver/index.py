@@ -43,6 +43,7 @@ def handler(event, context):
         content_type = arguments.get('contentType', 'application/octet-stream')
         prefix = arguments.get('prefix', '')
         ground_truth_file_name = arguments.get('groundTruthFileName')
+        version = arguments.get('version')
 
         if not file_name:
             raise ValueError("fileName is required")
@@ -68,7 +69,7 @@ def handler(event, context):
         #generate unique job id
         job_id = str(uuid.uuid4())
 
-        create_discovery_job(job_id, object_key, gt_object_key)
+        create_discovery_job(job_id, object_key, gt_object_key, version)
 
         # Return the presigned POST data and object key
         return response
@@ -105,7 +106,7 @@ def create_s3_signed_post_url(bucket_name, content_type, file_name, file_type, p
     return object_key, presigned_post
 
 
-def create_discovery_job(job_id, document_key, ground_truth_key):
+def create_discovery_job(job_id, document_key, ground_truth_key, version):
     """
     Create a new discovery job entry in DynamoDB.
     
@@ -113,6 +114,7 @@ def create_discovery_job(job_id, document_key, ground_truth_key):
         job_id (str): Unique job identifier
         document_key (str): S3 key for the document file
         ground_truth_key (str): S3 key for the ground truth file
+        version (str): Configuration version to use
     """
     try:
         table_name = os.environ.get('DISCOVERY_TRACKING_TABLE')
@@ -141,17 +143,20 @@ def create_discovery_job(job_id, document_key, ground_truth_key):
 
         if ground_truth_key:
             item['groundTruthKey'] = ground_truth_key
+            
+        if version:
+            item['version'] = version
         
         table.put_item(Item=item)
         logger.info(f"Created discovery job: {job_id}")
         
-        send_discovery_message(job_id, document_key, ground_truth_key)
+        send_discovery_message(job_id, document_key, ground_truth_key, version)
         
     except Exception as e:
         logger.error(f"Error creating discovery job: {str(e)}")
         # Don't fail the upload if job tracking fails
 
-def send_discovery_message(job_id, document_key, ground_truth_key):
+def send_discovery_message(job_id, document_key, ground_truth_key, version):
     """
     Send a message to the discovery processing queue.
     
@@ -159,6 +164,7 @@ def send_discovery_message(job_id, document_key, ground_truth_key):
         job_id (str): Unique job identifier
         document_key (str): S3 key for the document file
         ground_truth_key (str): S3 key for the ground truth file
+        version (str): Configuration version to use
     """
     try:
         queue_url = os.environ.get('DISCOVERY_QUEUE_URL')
@@ -171,6 +177,7 @@ def send_discovery_message(job_id, document_key, ground_truth_key):
             'documentKey': document_key,
             'groundTruthKey': ground_truth_key,
             'bucket': os.environ.get('DISCOVERY_BUCKET'),
+            'version': version,
             'timestamp': datetime.now().isoformat()
         }
         

@@ -89,8 +89,9 @@ def handler(event, context):
         # orchestrator must ALWAYS run to make final compliance decision
         logger.info(f"Orchestrator will run for {len(document.sections)} section(s)")
         
-        # Get configuration
-        config = get_config()
+        # Get configuration - use document's version if specified, otherwise use active version
+        config_version = getattr(document, 'config_version', None)
+        config = get_config(version=config_version)
         
         # Create rule validation orchestrator service
         summarization_service = rule_validation.RuleValidationOrchestratorService(

@@ -255,6 +255,10 @@ class EvaluationService:
         # This prevents type mismatch errors when baseline has int but prediction has float
         self._normalize_integer_to_number(schema)
 
+        # Normalize null types to string - genson produces "type": "null" for fields
+        # with null values in baseline data, which Stickler doesn't support
+        self._normalize_null_types(schema)
+
         # Add evaluation method extensions recursively
         self._add_evaluation_extensions_recursive(schema)
 
@@ -268,6 +272,47 @@ class EvaluationService:
         )
 
         return schema
+
+    def _normalize_null_types(self, schema: Dict[str, Any]) -> None:
+        """
+        Recursively convert 'null' types to 'string' in auto-generated schemas.
+
+        The genson library produces "type": "null" for fields where the baseline
+        data has a null/None value. Stickler's JsonSchemaFieldConverter only supports
+        ['string', 'number', 'integer', 'boolean'] and crashes on 'null'.
+
+        By converting to 'string', we allow the field to pass through and be
+        compared as an empty/missing value during evaluation.
+
+        For union types like ["string", "null"] or ["number", "null"], we keep
+        only the non-null type.
+
+        Args:
+            schema: Schema object to modify in-place
+        """
+        schema_type = schema.get("type")
+
+        if schema_type == "null":
+            schema["type"] = "string"
+        elif isinstance(schema_type, list):
+            # Handle union types from genson (e.g., ["string", "null"], ["number", "null"])
+            non_null = [t for t in schema_type if t != "null"]
+            if non_null:
+                # Use the first non-null type (e.g., "string" or "number")
+                schema["type"] = non_null[0] if len(non_null) == 1 else non_null
+            else:
+                # All types are null (shouldn't happen, but be safe)
+                schema["type"] = "string"
+
+        # Recursively process nested structures
+        if "properties" in schema:
+            for prop_schema in schema["properties"].values():
+                self._normalize_null_types(prop_schema)
+
+        if "items" in schema:
+            items = schema["items"]
+            if isinstance(items, dict):
+                self._normalize_null_types(items)
 
     def _normalize_integer_to_number(self, schema: Dict[str, Any]) -> None:
         """
@@ -1270,7 +1315,12 @@ class EvaluationService:
                 or expected_type is float
             ):
                 if isinstance(value, str):
-                    # Try to convert string to number
+                    # Empty strings for numeric fields should be treated as missing (None)
+                    # This prevents Pydantic validation errors like:
+                    # "Input should be a valid number, unable to parse string as a number"
+                    if not value.strip():
+                        return None
+                    # Try to convert non-empty string to number
                     try:
                         return (
                             float(value)
@@ -1281,7 +1331,9 @@ class EvaluationService:
                         logger.warning(
                             f"Could not convert '{value}' to {expected_type} for field {field_name}"
                         )
-                        return value
+                        # Return None instead of original string to prevent Pydantic crash
+                        # The field will be treated as missing/empty during comparison
+                        return None
                 elif isinstance(value, float) and expected_type is int:
                     # Coerce float to int when schema expects int
                     # This handles cases where baseline has int but prediction has float
@@ -1424,6 +1476,12 @@ class EvaluationService:
             # This prevents Pydantic validation errors from type mismatches
             coerced_expected = self._coerce_data_to_schema(cleaned_expected, ModelClass)
             coerced_actual = self._coerce_data_to_schema(cleaned_actual, ModelClass)
+
+            # Remove None values introduced by coercion (e.g., empty strings converted to None
+            # for numeric fields). Without this second pass, Pydantic would reject None for
+            # required numeric fields in nested objects like LineItems[].LineItemRate.
+            coerced_expected = self._remove_none_values(coerced_expected)
+            coerced_actual = self._remove_none_values(coerced_actual)
 
             # Create model instances from coerced data
             # Stickler handles validation and structure

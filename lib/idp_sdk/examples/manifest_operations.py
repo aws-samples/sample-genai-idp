@@ -56,7 +56,7 @@ def main():
     if args.validate_only:
         # Validate existing manifest
         print(f"Validating manifest: {args.validate_only}")
-        result = client.validate_manifest(args.validate_only)
+        result = client.manifest.validate(args.validate_only)
 
         print("\nValidation Result:")
         print(f"  Valid: {result.valid}")
@@ -77,7 +77,7 @@ def main():
     if args.baseline_dir:
         print(f"  Baseline directory: {args.baseline_dir}")
 
-    result = client.generate_manifest(
+    result = client.manifest.generate(
         directory=args.directory,
         baseline_dir=args.baseline_dir,
         output=output_path,
@@ -92,7 +92,7 @@ def main():
 
     # Validate the generated manifest
     print("\nValidating generated manifest...")
-    validation = client.validate_manifest(output_path)
+    validation = client.manifest.validate(output_path)
     print(f"  Valid: {validation.valid}")
 
     # Show first few lines of the manifest

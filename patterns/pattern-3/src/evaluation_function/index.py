@@ -165,8 +165,9 @@ def handler(event, context):
         # Extract document from event
         actual_document = extract_document_from_event(event)
         
-        # Load configuration and check if evaluation is enabled
-        config = get_config(as_model=True)
+        # Load configuration - use document's version if specified, otherwise use active version
+        config_version = getattr(actual_document, 'config_version', None)
+        config = get_config(as_model=True, version=config_version)
         
         if not config.evaluation.enabled:
             logger.info("Evaluation is disabled in configuration, skipping evaluation")

@@ -109,6 +109,10 @@ Parameters:
     Type: String
     Description: Name of the test set file copy SQS queue
   
+  TestResultCacheUpdateQueueName:
+    Type: String
+    Description: Name of the test result cache update SQS queue
+
   # Other resources
   CustomerManagedEncryptionKeyArn:
     Type: String
@@ -990,16 +994,6 @@ Resources:
   ##########################################################################
   # GetConfigurationResolver
   ##########################################################################
-  GetConfigurationResolver:
-    Type: AWS::AppSync::Resolver
-    DependsOn: GraphQLSchema
-    Properties:
-      ApiId: !Ref GraphQLApiId
-      DataSourceName: !GetAtt ConfigurationDataSource.Name
-      TypeName: Query
-      FieldName: getConfiguration
-
-
   ##########################################################################
   # UpdateConfigurationResolver
   ##########################################################################
@@ -1011,6 +1005,56 @@ Resources:
       DataSourceName: !GetAtt ConfigurationDataSource.Name
       TypeName: Mutation
       FieldName: updateConfiguration
+
+
+  ##########################################################################
+  # SetActiveVersionResolver
+  ##########################################################################
+  SetActiveVersionResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: GraphQLSchema
+    Properties:
+      ApiId: !Ref GraphQLApiId
+      DataSourceName: !GetAtt ConfigurationDataSource.Name
+      TypeName: Mutation
+      FieldName: setActiveVersion
+
+  ##########################################################################
+  # DeleteConfigVersionResolver
+  ##########################################################################
+  DeleteConfigVersionResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: GraphQLSchema
+    Properties:
+      ApiId: !Ref GraphQLApiId
+      DataSourceName: !GetAtt ConfigurationDataSource.Name
+      TypeName: Mutation
+      FieldName: deleteConfigVersion
+
+  ##########################################################################
+  # GetConfigVersionsResolver
+  ##########################################################################
+  GetConfigVersionsResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: GraphQLSchema
+    Properties:
+      ApiId: !Ref GraphQLApiId
+      DataSourceName: !GetAtt ConfigurationDataSource.Name
+      TypeName: Query
+      FieldName: getConfigVersions
+
+
+  ##########################################################################
+  # GetConfigVersionResolver
+  ##########################################################################
+  GetConfigVersionResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: GraphQLSchema
+    Properties:
+      ApiId: !Ref GraphQLApiId
+      DataSourceName: !GetAtt ConfigurationDataSource.Name
+      TypeName: Query
+      FieldName: getConfigVersion
 
 
   ##########################################################################
@@ -2783,11 +2827,8 @@ Resources:
                     - ShouldCreateReportingBucket
                     - !Sub "arn:${AWS::Partition}:s3:::${ReportingBucketName}"
                     - !Sub "arn:${AWS::Partition}:s3:::${ReportingBucketName}"
-        - Statement:
-            - Effect: Allow
-              Action:
-                - sqs:SendMessage
-              Resource: !Sub "arn:${AWS::Partition}:sqs:${AWS::Region}:${AWS::AccountId}:${TestResultCacheUpdateQueueUrl}"
+        - SQSSendMessagePolicy:
+            QueueName: !Ref TestResultCacheUpdateQueueName
         - Statement:
             - Effect: Allow
               Action:

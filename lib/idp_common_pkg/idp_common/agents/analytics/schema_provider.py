@@ -478,7 +478,7 @@ GROUP BY ds."section_classification", ds."document_class.type"
             return _get_error_aware_fallback(
                 error_type="MISSING_DEFAULT_CONFIG",
                 error_message="Default configuration not found in the configuration table.",
-                troubleshooting="Ensure your configuration table contains a record with Configuration='Default'.",
+                troubleshooting="Ensure your configuration table contains a record with Configuration= Config#default.",
             )
         else:
             return _get_error_aware_fallback(

@@ -3,20 +3,19 @@
 import gql from 'graphql-tag';
 
 export default gql`
-  query GetConfiguration {
-    getConfiguration {
+  query GetConfigVersions {
+    getConfigVersions {
       success
-      Schema
-      Default
-      Custom
+      versions {
+        versionName
+        isActive
+        createdAt
+        updatedAt
+        description
+      }
       error {
         type
         message
-        validationErrors {
-          field
-          message
-          type
-        }
       }
     }
   }

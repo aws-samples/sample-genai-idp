@@ -8,6 +8,7 @@ import { ConsoleLogger } from 'aws-amplify/utils';
 import START_TEST_RUN from '../../graphql/queries/startTestRun';
 import GET_TEST_SETS from '../../graphql/queries/getTestSets';
 import handlePrint from './PrintUtils';
+import useConfigurationVersions from '../../hooks/use-configuration-versions';
 
 const client = generateClient();
 const logger = new ConsoleLogger('TestRunner');
@@ -15,10 +16,41 @@ const logger = new ConsoleLogger('TestRunner');
 const TestRunner = ({ onTestStart, onTestComplete, activeTestRuns }) => {
   const [testSets, setTestSets] = useState([]);
   const [selectedTestSet, setSelectedTestSet] = useState(null);
+  const [selectedVersion, setSelectedVersion] = useState(null);
   const [numberOfFiles, setNumberOfFiles] = useState('');
   const [context, setContext] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+
+  const { versions, loading: versionsLoading, getVersionOptions } = useConfigurationVersions();
+
+  // Set default to active version when versions are loaded
+  React.useEffect(() => {
+    if (versions.length > 0 && !selectedVersion) {
+      const activeVersion = versions.find((v) => v.isActive);
+      if (activeVersion) {
+        // Use the same logic as getVersionOptions to ensure consistency
+        const versionOptions = getVersionOptions();
+        const activeVersionOption = versionOptions.find((option) => option.value === activeVersion.versionName);
+        if (activeVersionOption) {
+          setSelectedVersion(activeVersionOption);
+        }
+      }
+    }
+  }, [versions, selectedVersion, getVersionOptions]);
+
+  // Set default context when test set, version, or numberOfFiles changes
+  React.useEffect(() => {
+    if (selectedTestSet && selectedVersion) {
+      const testSetName = selectedTestSet.label.split(' - ')[0]; // Extract name without file count
+      const versionName = selectedVersion.value; // Use value instead of label to avoid "(Active)"
+      const testSetData = testSets.find((ts) => ts.id === selectedTestSet.value);
+      const totalFiles = testSetData?.fileCount || 0;
+      const filesToProcess = numberOfFiles.trim() ? parseInt(numberOfFiles.trim(), 10) : totalFiles;
+      const defaultContext = `Test set: ${testSetName} using version (${versionName}) with ${filesToProcess} files`;
+      setContext(defaultContext);
+    }
+  }, [selectedTestSet, selectedVersion, testSets, numberOfFiles]);
 
   const loadTestSets = async () => {
     try {
@@ -68,6 +100,7 @@ const TestRunner = ({ onTestStart, onTestComplete, activeTestRuns }) => {
         testSetId: selectedTestSet.value,
         ...(context && { context }),
         ...(numberOfFiles.trim() && { numberOfFiles: parseInt(numberOfFiles.trim(), 10) }),
+        ...(selectedVersion && { configVersion: selectedVersion.value }),
       };
       console.log('TestRunner: Starting test run with input:', input);
 
@@ -83,7 +116,13 @@ const TestRunner = ({ onTestStart, onTestComplete, activeTestRuns }) => {
       }
 
       logger.info('Test run started:', result.data.startTestRun);
-      onTestStart(result.data.startTestRun.testRunId, result.data.startTestRun.testSetName, context, result.data.startTestRun.filesCount);
+      onTestStart(
+        result.data.startTestRun.testRunId,
+        result.data.startTestRun.testSetName,
+        context,
+        result.data.startTestRun.filesCount,
+        selectedVersion?.value,
+      );
       setError('');
     } catch (err) {
       logger.error('Failed to start test run:', err);
@@ -158,6 +197,20 @@ const TestRunner = ({ onTestStart, onTestComplete, activeTestRuns }) => {
         </FormField>
 
         <FormField
+          label="Configuration Version"
+          description="Select which configuration version to use for processing these test documents"
+        >
+          <Select
+            selectedOption={selectedVersion}
+            onChange={({ detail }) => setSelectedVersion(detail.selectedOption)}
+            options={getVersionOptions()}
+            placeholder={versions.length === 0 ? 'Loading versions...' : 'Select configuration version'}
+            disabled={loading || versions.length === 0}
+            loadingText="Loading versions..."
+          />
+        </FormField>
+
+        <FormField
           label="Number of Files"
           description={`Optional: Limit the number of files to process (max: ${
             selectedTestSet ? testSets.find((ts) => ts.id === selectedTestSet.value)?.fileCount || 0 : 0
@@ -198,12 +251,17 @@ const TestRunner = ({ onTestStart, onTestComplete, activeTestRuns }) => {
           />
         </FormField>
 
-        <FormField label="Context" description="Optional context information for this test run">
+        <FormField
+          label="Context"
+          description="Optional context information for this test run"
+          errorText={context && context.length > 500 ? 'Context cannot exceed 500 characters' : ''}
+        >
           <Textarea
             value={context}
             onChange={({ detail }) => setContext(detail.value)}
             placeholder="Enter context information..."
             rows={2}
+            invalid={context && context.length > 500}
           />
         </FormField>
       </SpaceBetween>

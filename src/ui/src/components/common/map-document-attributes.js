@@ -43,6 +43,7 @@ const mapDocumentsAttributes = (documents) => {
       ListSK: listSK,
       HITLStatus: hitlStatus,
       HITLReviewURL: hitlReviewURL,
+      ConfigVersion: configVersion,
     } = item;
 
     // Extract HITL sections arrays
@@ -132,6 +133,7 @@ const mapDocumentsAttributes = (documents) => {
       hitlReviewedBy,
       hitlReviewedByEmail,
       hitlReviewHistory,
+      configVersion,
     };
 
     console.log('mapped-document-attributes', mapping);

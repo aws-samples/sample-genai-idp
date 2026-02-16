@@ -35,6 +35,35 @@ client.download_results(
 )
 ```
 
+## Configuration Version Management
+
+The SDK supports configuration versioning for better deployment control:
+
+```python
+from idp_sdk import IDPClient
+
+client = IDPClient(stack_name="my-idp-stack")
+
+# Upload configuration to specific version
+client.config_upload(
+    config_file="config.yaml",
+    config_version="production-v2",
+    description="Updated model settings for new document types"
+)
+
+# Download specific configuration version
+client.config_download(
+    config_version="production-v2",
+    output="downloaded-config.yaml"
+)
+
+# Process documents using specific version
+result = client.run_inference(
+    source="./documents/",
+    config_version="production-v2"
+)
+```
+
 ## Stack-Independent Operations
 
 Some operations don't require a deployed stack:
@@ -70,4 +99,5 @@ See [docs/idp-sdk.md](../../docs/idp-sdk.md) for complete documentation.
 ## Examples
 
 - [basic_processing.py](examples/basic_processing.py) - Basic document processing workflow
+- [config_operations.py](examples/config_operations.py) - Configuration management with versioning
 - [lambda_function/](examples/lambda_function/) - Complete Lambda function example with SAM template

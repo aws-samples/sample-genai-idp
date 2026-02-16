@@ -162,8 +162,12 @@ const TestSets = () => {
   };
 
   const validateTestSetName = (name) => {
-    const validPattern = /^[a-zA-Z0-9 _-]+$/;
-    return validPattern.test(name);
+    const validPattern = /^[a-zA-Z0-9\s-_]+$/;
+    return validPattern.test(name) && name.length <= 50;
+  };
+
+  const validateDescription = (desc) => {
+    return desc.length <= 200;
   };
 
   const handleAddTestSet = async () => {
@@ -174,7 +178,13 @@ const TestSets = () => {
 
     // 1. UI validation using existing validateTestSetName
     if (!validateTestSetName(newTestSetName.trim())) {
-      setError('Test set name can only contain letters, numbers, spaces, underscores, and dashes');
+      setError('Test set name can only contain letters, numbers, spaces, hyphens, and underscores (max 50 characters)');
+      return;
+    }
+
+    // Validate description
+    if (newTestSetDescription && !validateDescription(newTestSetDescription.trim())) {
+      setError('Description cannot exceed 200 characters');
       return;
     }
 
@@ -265,7 +275,13 @@ const TestSets = () => {
     }
 
     if (!validateTestSetName(newTestSetName.trim())) {
-      setError('Test set name can only contain letters, numbers, spaces, underscores, and dashes');
+      setError('Test set name can only contain letters, numbers, spaces, hyphens, and underscores (max 50 characters)');
+      return;
+    }
+
+    // Validate description
+    if (newTestSetDescription && !validateDescription(newTestSetDescription.trim())) {
+      setError('Description cannot exceed 200 characters');
       return;
     }
 
@@ -596,7 +612,14 @@ const TestSets = () => {
           {error && <Alert type="error">{error}</Alert>}
           {warningMessage && <Alert type="warning">{warningMessage}</Alert>}
 
-          <FormField label="Test Set Name">
+          <FormField
+            label="Test Set Name"
+            errorText={
+              newTestSetName && !validateTestSetName(newTestSetName)
+                ? 'Test set name can only contain letters, numbers, spaces, hyphens, and underscores (max 50 characters)'
+                : ''
+            }
+          >
             <Input
               value={newTestSetName}
               onChange={({ detail }) => {
@@ -605,14 +628,22 @@ const TestSets = () => {
                 setWarningMessage('');
               }}
               placeholder="e.g., lending-package-v1"
+              invalid={newTestSetName && !validateTestSetName(newTestSetName)}
             />
           </FormField>
 
-          <FormField label="Description" description="Optional description for this test set">
+          <FormField
+            label="Description"
+            description="Optional description for this test set"
+            errorText={
+              newTestSetDescription && !validateDescription(newTestSetDescription) ? 'Description cannot exceed 200 characters' : ''
+            }
+          >
             <Input
               value={newTestSetDescription}
               onChange={({ detail }) => setNewTestSetDescription(detail.value)}
               placeholder="Test set description"
+              invalid={newTestSetDescription && !validateDescription(newTestSetDescription)}
             />
           </FormField>
 
@@ -768,11 +799,18 @@ const TestSets = () => {
           {error && <Alert type="error">{error}</Alert>}
           {warningMessage && <Alert type="warning">{warningMessage}</Alert>}
 
-          <FormField label="Description" description="Optional description for this test set">
+          <FormField
+            label="Description"
+            description="Optional description for this test set"
+            errorText={
+              newTestSetDescription && !validateDescription(newTestSetDescription) ? 'Description cannot exceed 200 characters' : ''
+            }
+          >
             <Input
               value={newTestSetDescription}
               onChange={({ detail }) => setNewTestSetDescription(detail.value)}
               placeholder="Test set description"
+              invalid={newTestSetDescription && !validateDescription(newTestSetDescription)}
             />
           </FormField>
 
@@ -839,7 +877,7 @@ const TestSets = () => {
 
                   // Validate the filename
                   if (!validateTestSetName(fileName)) {
-                    setError('Zip filename can only contain letters, numbers, spaces, underscores, and dashes');
+                    setError('Zip filename can only contain letters, numbers, spaces, hyphens, and underscores (max 50 characters)');
                     setNewTestSetName('');
                     return;
                   }

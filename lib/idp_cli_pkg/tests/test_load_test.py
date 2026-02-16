@@ -18,7 +18,7 @@ class TestLoadTester:
     @pytest.fixture
     def mock_stack_info(self):
         """Mock StackInfo to return test resources"""
-        with patch("idp_cli.load_test.StackInfo") as mock:
+        with patch("idp_sdk.core.load_test.StackInfo") as mock:
             mock_instance = Mock()
             mock_instance.get_resources.return_value = {
                 "InputBucket": "test-input-bucket",
@@ -29,7 +29,7 @@ class TestLoadTester:
     @pytest.fixture
     def mock_boto_clients(self):
         """Mock boto3 clients"""
-        with patch("idp_cli.load_test.boto3.Session") as mock_session:
+        with patch("idp_sdk.core.load_test.boto3.Session") as mock_session:
             mock_s3 = Mock()
 
             mock_session_instance = Mock()
@@ -40,7 +40,7 @@ class TestLoadTester:
 
     def test_init_loads_resources(self, mock_stack_info, mock_boto_clients):
         """Test that initialization loads stack resources"""
-        from idp_cli.load_test import LoadTester
+        from idp_sdk.core.load_test import LoadTester
 
         tester = LoadTester("test-stack", region="us-east-1")
 
@@ -49,10 +49,10 @@ class TestLoadTester:
 
     def test_init_no_bucket_sets_none(self, mock_boto_clients):
         """Test initialization sets input_bucket to None when not found"""
-        with patch("idp_cli.load_test.StackInfo") as mock_si:
+        with patch("idp_sdk.core.load_test.StackInfo") as mock_si:
             mock_si.return_value.get_resources.return_value = {}
 
-            from idp_cli.load_test import LoadTester
+            from idp_sdk.core.load_test import LoadTester
 
             tester = LoadTester("test-stack")
 
@@ -61,10 +61,10 @@ class TestLoadTester:
 
     def test_run_constant_load_no_bucket(self, mock_boto_clients):
         """Test run_constant_load returns error when no bucket"""
-        with patch("idp_cli.load_test.StackInfo") as mock_si:
+        with patch("idp_sdk.core.load_test.StackInfo") as mock_si:
             mock_si.return_value.get_resources.return_value = {}
 
-            from idp_cli.load_test import LoadTester
+            from idp_sdk.core.load_test import LoadTester
 
             tester = LoadTester("test-stack")
 
@@ -77,7 +77,7 @@ class TestLoadTester:
 
     def test_run_constant_load_file_not_found(self, mock_stack_info, mock_boto_clients):
         """Test run_constant_load returns error when file not found"""
-        from idp_cli.load_test import LoadTester
+        from idp_sdk.core.load_test import LoadTester
 
         tester = LoadTester("test-stack")
 
@@ -93,7 +93,7 @@ class TestLoadTester:
 
     def test_run_constant_load_success(self, mock_stack_info, mock_boto_clients):
         """Test successful constant rate load test"""
-        from idp_cli.load_test import LoadTester
+        from idp_sdk.core.load_test import LoadTester
 
         tester = LoadTester("test-stack")
 
@@ -119,7 +119,7 @@ class TestLoadTester:
 
     def test_run_constant_load_s3_source(self, mock_stack_info, mock_boto_clients):
         """Test constant load with S3 source file"""
-        from idp_cli.load_test import LoadTester
+        from idp_sdk.core.load_test import LoadTester
 
         tester = LoadTester("test-stack")
 
@@ -135,10 +135,10 @@ class TestLoadTester:
 
     def test_run_scheduled_load_no_bucket(self, mock_boto_clients):
         """Test run_scheduled_load returns error when no bucket"""
-        with patch("idp_cli.load_test.StackInfo") as mock_si:
+        with patch("idp_sdk.core.load_test.StackInfo") as mock_si:
             mock_si.return_value.get_resources.return_value = {}
 
-            from idp_cli.load_test import LoadTester
+            from idp_sdk.core.load_test import LoadTester
 
             tester = LoadTester("test-stack")
 
@@ -164,7 +164,7 @@ class TestLoadTester:
         self, mock_stack_info, mock_boto_clients
     ):
         """Test run_scheduled_load with invalid schedule"""
-        from idp_cli.load_test import LoadTester
+        from idp_sdk.core.load_test import LoadTester
 
         tester = LoadTester("test-stack")
 
@@ -190,7 +190,7 @@ class TestCopyStats:
 
     def test_increment(self):
         """Test increment counter"""
-        from idp_cli.load_test import CopyStats
+        from idp_sdk.core.load_test import CopyStats
 
         stats = CopyStats()
         assert stats.get_total() == 0
@@ -204,7 +204,7 @@ class TestCopyStats:
 
     def test_increment_by_minute(self):
         """Test increment with minute tracking"""
-        from idp_cli.load_test import CopyStats
+        from idp_sdk.core.load_test import CopyStats
 
         stats = CopyStats()
 
@@ -220,7 +220,7 @@ class TestCopyStats:
         """Test rate calculation"""
         import time
 
-        from idp_cli.load_test import CopyStats
+        from idp_sdk.core.load_test import CopyStats
 
         stats = CopyStats()
 
@@ -239,7 +239,7 @@ class TestCopyStats:
         """Test elapsed time calculation"""
         import time
 
-        from idp_cli.load_test import CopyStats
+        from idp_sdk.core.load_test import CopyStats
 
         stats = CopyStats()
         time.sleep(0.1)
@@ -255,7 +255,7 @@ class TestLoadTestInternal:
     @pytest.fixture
     def mock_stack_info(self):
         """Mock StackInfo"""
-        with patch("idp_cli.load_test.StackInfo") as mock:
+        with patch("idp_sdk.core.load_test.StackInfo") as mock:
             mock.return_value.get_resources.return_value = {
                 "InputBucket": "test-bucket",
             }
@@ -264,13 +264,13 @@ class TestLoadTestInternal:
     @pytest.fixture
     def mock_boto(self):
         """Mock boto3"""
-        with patch("idp_cli.load_test.boto3.Session") as mock:
+        with patch("idp_sdk.core.load_test.boto3.Session") as mock:
             mock.return_value.client.return_value = Mock()
             yield mock
 
     def test_copy_file_success(self, mock_stack_info, mock_boto):
         """Test _copy_file method"""
-        from idp_cli.load_test import CopyStats, LoadTester
+        from idp_sdk.core.load_test import CopyStats, LoadTester
 
         tester = LoadTester("test-stack")
         stats = CopyStats()
@@ -289,7 +289,7 @@ class TestLoadTestInternal:
     def test_copy_file_error(self, mock_stack_info, mock_boto):
         """Test _copy_file handles errors"""
         from botocore.exceptions import ClientError
-        from idp_cli.load_test import CopyStats, LoadTester
+        from idp_sdk.core.load_test import CopyStats, LoadTester
 
         tester = LoadTester("test-stack")
         tester.s3.copy_object.side_effect = ClientError(
@@ -308,7 +308,7 @@ class TestLoadTestInternal:
 
     def test_upload_local_file_success(self, mock_stack_info, mock_boto):
         """Test _upload_local_file method"""
-        from idp_cli.load_test import CopyStats, LoadTester
+        from idp_sdk.core.load_test import CopyStats, LoadTester
 
         tester = LoadTester("test-stack")
         stats = CopyStats()
@@ -329,7 +329,7 @@ class TestLoadTestInternal:
     def test_upload_local_file_error(self, mock_stack_info, mock_boto):
         """Test _upload_local_file handles errors"""
         from botocore.exceptions import ClientError
-        from idp_cli.load_test import CopyStats, LoadTester
+        from idp_sdk.core.load_test import CopyStats, LoadTester
 
         tester = LoadTester("test-stack")
         tester.s3.upload_file.side_effect = ClientError(

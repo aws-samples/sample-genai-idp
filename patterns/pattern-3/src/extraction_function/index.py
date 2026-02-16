@@ -32,14 +32,21 @@ def handler(event, context):
     start_time = time.time()  # Capture start time for Lambda metering
     logger.info(f"Event: {json.dumps(event)}")
 
-    # Load configuration
-    config = get_config(as_model=True)
-    logger.info(f"Config: {json.dumps(config.model_dump(), default=str)}")
-    
     # For Map state, we get just one section from the document
     # Extract the document and section from the event - handle both compressed and uncompressed
     working_bucket = os.environ.get('WORKING_BUCKET')
     full_document = Document.load_document(event.get("document", {}), working_bucket, logger)
+    
+    # Load configuration - use document's version if specified, otherwise use active version
+    config_version = getattr(full_document, 'config_version', None)
+    config = get_config(as_model=True, version=config_version)
+    
+    if config_version:
+        logger.info(f"Using configuration version {config_version} for document {full_document.id}")
+    else:
+        logger.info(f"Using active configuration for document {full_document.id}")
+    
+    logger.info(f"Config: {json.dumps(config.model_dump(), default=str)}")
     
     # Log loaded document for troubleshooting
     logger.info(f"Loaded document - ID: {full_document.id}, input_key: {full_document.input_key}")

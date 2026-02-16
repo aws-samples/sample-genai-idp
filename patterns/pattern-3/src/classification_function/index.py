@@ -39,6 +39,15 @@ def handler(event, context):
     document = Document.load_document(
         event["OCRResult"]["document"], working_bucket, logger
     )
+    
+    # Load configuration - use document's version if specified, otherwise use active version
+    config_version = getattr(document, 'config_version', None)
+    config = get_config(as_model=True, version=config_version)
+    
+    if config_version:
+        logger.info(f"Using configuration version {config_version} for document {document.id}")
+    else:
+        logger.info(f"Using active configuration for document {document.id}")
 
     # Log loaded document for troubleshooting
     logger.info(f"Loaded document - ID: {document.id}, input_key: {document.input_key}")
@@ -114,9 +123,6 @@ def handler(event, context):
     # Track pages processed for metrics
     total_pages = len(document.pages)
     metrics.put_metric("ClassificationRequestsTotal", total_pages)
-
-    # Load configuration - SageMaker endpoint is read from environment variable
-    config = get_config(as_model=True)
 
     # Initialize classification service with SageMaker backend and DynamoDB caching
     cache_table = os.environ.get("TRACKING_TABLE")

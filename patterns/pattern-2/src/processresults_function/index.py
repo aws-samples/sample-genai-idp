@@ -23,10 +23,10 @@ logging.getLogger("idp_common.bedrock.client").setLevel(
 s3_client = boto3.client("s3")
 
 
-def is_hitl_enabled():
+def is_hitl_enabled(config_version=None):
     """Check if HITL is enabled from configuration."""
     try:
-        config = get_config(as_model=True)
+        config = get_config(as_model=True, version=config_version)
         return config.assessment.hitl_enabled
     except Exception as e:
         logger.warning(f"Failed to get HITL config: {e}")
@@ -46,7 +46,6 @@ def handler(event, context):
     """
     logger.info(f"Processing event: {json.dumps(event)}")
 
-    config = get_config(as_model=True)
     # Get the base document from the original classification result - handle both compressed and uncompressed
     working_bucket = os.environ.get("WORKING_BUCKET")
     classification_document_data = event.get("ClassificationResult", {}).get(
@@ -55,6 +54,10 @@ def handler(event, context):
     document = Document.load_document(
         classification_document_data, working_bucket, logger
     )
+
+    # Load configuration - use document's version if specified, otherwise use active version
+    config_version = getattr(document, 'config_version', None)
+    config = get_config(as_model=True, version=config_version)
 
     extraction_results = event.get("ExtractionResults", [])
     execution_arn = event.get("execution_arn", "")
@@ -97,7 +100,7 @@ def handler(event, context):
                 logger.info(
                     f"section.confidence_threshold_alerts: {section.confidence_threshold_alerts}"
                 )
-                hitl_enabled = is_hitl_enabled()
+                hitl_enabled = is_hitl_enabled(config_version)
                 logger.info(f"is_hitl_enabled: {hitl_enabled}")
                 document.sections.append(section)
 

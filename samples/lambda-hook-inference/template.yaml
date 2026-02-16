@@ -1,0 +1,110 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  Sample Lambda Hook functions for GenAI IDP Accelerator's LambdaHook custom inference feature.
+  Deploy these to test and illustrate the LambdaHook integration pattern.
+
+Parameters:
+  IDPWorkingBucket:
+    Type: String
+    Description: >
+      Name of the IDP stack's working S3 bucket. Required for reading images
+      that are uploaded as S3 references in the LambdaHook payload.
+
+  TargetModelId:
+    Type: String
+    Default: "us.amazon.nova-pro-v1:0"
+    Description: Bedrock model ID for the bedrock-proxy sample function.
+
+  SageMakerEndpointName:
+    Type: String
+    Default: ""
+    Description: >
+      SageMaker endpoint name for the sagemaker-hook sample function.
+      Leave empty if not using the SageMaker sample.
+
+Resources:
+  # =========================================================================
+  # GENAIIDP-bedrock-proxy
+  # Forwards LambdaHook payloads to Amazon Bedrock Converse API
+  # =========================================================================
+  BedrockProxyFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: GENAIIDP-bedrock-proxy
+      Runtime: python3.12
+      Handler: index.lambda_handler
+      CodeUri: GENAIIDP-bedrock-proxy/
+      Timeout: 300
+      MemorySize: 512
+      Environment:
+        Variables:
+          TARGET_MODEL_ID: !Ref TargetModelId
+          LOG_LEVEL: INFO
+      Policies:
+        - Statement:
+            # Read images from IDP working bucket
+            - Effect: Allow
+              Action:
+                - s3:GetObject
+              Resource:
+                - !Sub "arn:${AWS::Partition}:s3:::${IDPWorkingBucket}/temp/lambdahook/*"
+            # Invoke Bedrock models
+            - Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+                - bedrock:InvokeModelWithResponseStream
+              Resource:
+                - !Sub "arn:${AWS::Partition}:bedrock:*::foundation-model/*"
+                - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
+
+  # =========================================================================
+  # GENAIIDP-sagemaker-hook
+  # Forwards LambdaHook payloads to a SageMaker real-time inference endpoint
+  # =========================================================================
+  SageMakerHookFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: GENAIIDP-sagemaker-hook
+      Runtime: python3.12
+      Handler: index.lambda_handler
+      CodeUri: GENAIIDP-sagemaker-hook/
+      Timeout: 300
+      MemorySize: 512
+      Environment:
+        Variables:
+          SAGEMAKER_ENDPOINT_NAME: !Ref SageMakerEndpointName
+          LOG_LEVEL: INFO
+      Policies:
+        - Statement:
+            # Read images from IDP working bucket
+            - Effect: Allow
+              Action:
+                - s3:GetObject
+              Resource:
+                - !Sub "arn:${AWS::Partition}:s3:::${IDPWorkingBucket}/temp/lambdahook/*"
+            # Invoke SageMaker endpoint
+            - Effect: Allow
+              Action:
+                - sagemaker:InvokeEndpoint
+              Resource:
+                - !Sub "arn:${AWS::Partition}:sagemaker:${AWS::Region}:${AWS::AccountId}:endpoint/*"
+
+Outputs:
+  BedrockProxyFunctionArn:
+    Description: ARN of the Bedrock proxy Lambda hook function
+    Value: !GetAtt BedrockProxyFunction.Arn
+
+  SageMakerHookFunctionArn:
+    Description: ARN of the SageMaker Lambda hook function
+    Value: !GetAtt SageMakerHookFunction.Arn
+
+  BedrockProxyUsage:
+    Description: How to use the Bedrock proxy in IDP configuration
+    Value: !Sub |
+      Set model to "LambdaHook" and model_lambda_hook_arn to "${BedrockProxyFunction.Arn}"
+
+  SageMakerHookUsage:
+    Description: How to use the SageMaker hook in IDP configuration
+    Value: !Sub |
+      Set model to "LambdaHook" and model_lambda_hook_arn to "${SageMakerHookFunction.Arn}"

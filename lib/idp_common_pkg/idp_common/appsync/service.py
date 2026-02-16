@@ -73,6 +73,10 @@ class DocumentAppSyncService:
         if document.trace_id:
             input_data["TraceId"] = document.trace_id
 
+        # Add config_version if available
+        if document.config_version:
+            input_data["ConfigVersion"] = document.config_version
+
         return input_data
 
     def _document_to_update_input(self, document: Document) -> Dict[str, Any]:
@@ -234,6 +238,10 @@ class DocumentAppSyncService:
         if document.trace_id:
             input_data["TraceId"] = document.trace_id
 
+        # Add config_version if available
+        if document.config_version:
+            input_data["ConfigVersion"] = document.config_version
+
         return input_data
 
     def _appsync_to_document(self, appsync_data: Dict[str, Any]) -> Document:
@@ -258,6 +266,7 @@ class DocumentAppSyncService:
             evaluation_report_uri=appsync_data.get("EvaluationReportUri"),
             summary_report_uri=appsync_data.get("SummaryReportUri"),
             trace_id=appsync_data.get("TraceId"),
+            config_version=appsync_data.get("ConfigVersion"),
         )
 
         # Handle rule validation result URI if present

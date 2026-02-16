@@ -40,7 +40,7 @@ interface UseGraphQlApiReturn {
   customDateRange: DateRange | null;
   setCustomDateRange: React.Dispatch<React.SetStateAction<DateRange | null>>;
   deleteDocuments: (objectKeys: string[]) => Promise<any>;
-  reprocessDocuments: (objectKeys: string[]) => Promise<any>;
+  reprocessDocuments: (objectKeys: string[], version?: string) => Promise<any>;
   abortWorkflows: (objectKeys: string[]) => Promise<any>;
 }
 
@@ -49,6 +49,7 @@ const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2
   const [isDocumentsListLoading, setIsDocumentsListLoading] = useState<boolean>(false);
   const [documents, setDocuments] = useState<Document[]>([]);
   const [customDateRange, setCustomDateRange] = useState<DateRange | null>(null); // { startDateTime, endDateTime }
+  const [dateRangeNextToken, setDateRangeNextToken] = useState<string | null>(null);
   const { setErrorMessage } = useAppContext()!;
 
   const subscriptionsRef = useRef<{ onCreate: any; onUpdate: any }>({ onCreate: null, onUpdate: null });
@@ -495,10 +496,14 @@ const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2
     }
   };
 
-  const reprocessDocuments = async (objectKeys: string[]): Promise<any> => {
+  const reprocessDocuments = async (objectKeys: string[], version?: string): Promise<any> => {
     try {
-      logger.debug('Reprocessing documents', objectKeys);
-      const result = await client.graphql({ query: reprocessDocument as any, variables: { objectKeys } });
+      logger.debug('Reprocessing documents', objectKeys, 'with version', version);
+      const variables: { objectKeys: string[]; version?: string } = { objectKeys };
+      if (version) {
+        variables.version = version;
+      }
+      const result = await client.graphql({ query: reprocessDocument as any, variables });
       logger.debug('Reprocess documents result', result);
       // Refresh the document list after reprocessing
       setIsDocumentsListLoading(true);

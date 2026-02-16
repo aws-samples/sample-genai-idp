@@ -1,0 +1,124 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: MIT-0
+
+"""Batch processing models."""
+
+from datetime import datetime
+from typing import Dict, List, Optional
+
+from pydantic import BaseModel, ConfigDict, Field
+
+from .base import RerunStep
+from .document import DocumentDeletionResult, DocumentStatus
+
+
+class BatchDeletionResult(BaseModel):
+    """Result of a batch document deletion operation."""
+
+    success: bool = Field(description="Whether all deletions succeeded")
+    deleted_count: int = Field(description="Number of documents successfully deleted")
+    failed_count: int = Field(description="Number of documents that failed to delete")
+    total_count: int = Field(description="Total number of documents attempted")
+    dry_run: bool = Field(
+        default=False, description="Whether this was a dry run (no actual deletions)"
+    )
+    results: List[DocumentDeletionResult] = Field(
+        default_factory=list, description="Per-document deletion results"
+    )
+
+
+class BatchResult(BaseModel):
+    """Result of a batch processing operation."""
+
+    batch_id: str = Field(description="Unique batch identifier")
+    document_ids: List[str] = Field(description="List of document IDs in the batch")
+    documents_queued: int = Field(
+        alias="queued", description="Number of documents queued"
+    )
+    documents_uploaded: int = Field(
+        alias="uploaded", description="Number of files uploaded"
+    )
+    documents_failed: int = Field(
+        alias="failed", description="Number of documents that failed to queue"
+    )
+    baselines_uploaded: int = Field(
+        default=0, description="Number of baseline files uploaded for evaluation"
+    )
+    source: str = Field(description="Source path (manifest, directory, or S3 URI)")
+    output_prefix: str = Field(description="Output prefix for results")
+    timestamp: datetime = Field(description="Batch submission timestamp")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class BatchStatus(BaseModel):
+    """Status information for a batch of documents."""
+
+    batch_id: str = Field(description="Batch identifier")
+    documents: List[DocumentStatus] = Field(description="Status of each document")
+    total: int = Field(description="Total number of documents")
+    completed: int = Field(description="Number of completed documents")
+    failed: int = Field(description="Number of failed documents")
+    in_progress: int = Field(description="Number of documents in progress")
+    queued: int = Field(description="Number of queued documents")
+    success_rate: float = Field(description="Completion success rate (0-1)")
+    all_complete: bool = Field(description="Whether all documents are complete")
+    elapsed_seconds: Optional[float] = Field(
+        default=None, description="Total elapsed time"
+    )
+
+
+class BatchInfo(BaseModel):
+    """Information about a batch."""
+
+    batch_id: str = Field(description="Batch identifier")
+    document_ids: List[str] = Field(description="Document IDs in the batch")
+    queued: int = Field(description="Number of documents queued")
+    failed: int = Field(description="Number of documents failed")
+    timestamp: str = Field(description="Batch creation timestamp")
+
+
+class BatchRerunResult(BaseModel):
+    """Result of a batch rerun operation."""
+
+    documents_queued: int = Field(description="Number of documents queued for rerun")
+    documents_failed: int = Field(
+        description="Number of documents that failed to queue"
+    )
+    failed_documents: List[Dict[str, str]] = Field(
+        default_factory=list, description="Details of failed documents"
+    )
+    step: RerunStep = Field(description="Pipeline step being rerun")
+
+
+class BatchDownloadResult(BaseModel):
+    """Result of a batch download operation."""
+
+    files_downloaded: int = Field(description="Number of files downloaded")
+    documents_downloaded: int = Field(description="Number of documents with downloads")
+    output_dir: str = Field(description="Local output directory path")
+
+
+class BatchListResult(BaseModel):
+    """Result of a batch list operation with pagination.
+
+    This class is backward compatible - can be used as a list or access pagination.
+    """
+
+    batches: List[BatchInfo] = Field(description="List of batch information")
+    count: int = Field(description="Number of batches in this response")
+    next_token: Optional[str] = Field(
+        default=None, description="Token for retrieving next page of results"
+    )
+
+    def __iter__(self):
+        """Allow iteration over batches directly for backward compatibility."""
+        return iter(self.batches)
+
+    def __len__(self):
+        """Allow len() for backward compatibility."""
+        return len(self.batches)
+
+    def __getitem__(self, index):
+        """Allow indexing for backward compatibility."""
+        return self.batches[index]

@@ -1457,7 +1457,7 @@ class BdaBlueprintService:
                 return blueprint
         return None
 
-    def _convert_aws_standard_blueprints_to_custom(self):
+    def _convert_aws_standard_blueprints_to_custom(self, version: str):
         """
         Convert all AWS standard blueprints in the project to custom blueprints.
 
@@ -1467,14 +1467,20 @@ class BdaBlueprintService:
         3. Creates new custom blueprints from the schemas
         4. Removes AWS standard blueprints from the project
         5. Saves the new IDP classes to configuration
-
+        Args:
+            version: config version name
         Returns:
             dict: Status information with converted blueprints
 
         Raises:
             Exception: If conversion fails
         """
-        logger.info("Converting AWS standard blueprints to custom blueprints")
+        if not version:
+            raise ValueError("Converting AWS standard blueprints error missing version")
+
+        logger.info(
+            f"Converting AWS standard blueprints to custom blueprints for version {version}"
+        )
 
         try:
             # Retrieve ALL blueprints including AWS standard ones
@@ -1486,7 +1492,9 @@ class BdaBlueprintService:
                 return []  # Return empty list for consistency
 
             # Get existing custom configuration
-            config_item = self.config_manager.get_configuration(config_type="Custom")
+            config_item = self.config_manager.get_configuration(
+                config_type="Config", version=version
+            )
             existing_classes = (
                 getattr(config_item, "classes", []) if config_item else []
             )
@@ -1505,7 +1513,7 @@ class BdaBlueprintService:
             # Remove AWS standard blueprints from project if any were converted
             if aws_blueprint_arns_to_remove:
                 logger.info(
-                    f"Removing {len(aws_blueprint_arns_to_remove)} AWS standard blueprints from project"
+                    f"Removing {len(aws_blueprint_arns_to_remove)} AWS standard blueprints from project version: {version}"
                 )
 
                 try:
@@ -1535,7 +1543,7 @@ class BdaBlueprintService:
             if converted_classes:
                 all_classes = existing_classes + converted_classes
                 self.config_manager.handle_update_custom_configuration(
-                    {"classes": all_classes}
+                    custom_config={"classes": all_classes}, version=version
                 )
 
             return {
@@ -1551,13 +1559,14 @@ class BdaBlueprintService:
             raise Exception(f"Failed to convert AWS standard blueprints: {str(e)}")
 
     def create_blueprints_from_custom_configuration(
-        self, sync_direction: str = "bidirectional"
+        self, version: str, sync_direction: str = "bidirectional"
     ):
         """
         Synchronize blueprints between BDA and IDP based on the specified direction.
         Uses parallel processing for improved performance.
 
         Args:
+            version: config version
             sync_direction: Direction of synchronization
                 - "bda_to_idp": Sync from BDA blueprints to IDP classes (read BDA, update IDP)
                 - "idp_to_bda": Sync from IDP classes to BDA blueprints (read IDP, update BDA)
@@ -1578,7 +1587,9 @@ class BdaBlueprintService:
                     f"Invalid sync_direction: {sync_direction}. Must be one of {valid_directions}"
                 )
 
-            config_item = self.config_manager.get_configuration(config_type="Custom")
+            config_item = self.config_manager.get_configuration(
+                config_type="Config", version=version
+            )
             classess = getattr(config_item, "classes", []) if config_item else []
 
             classess_status = []
@@ -1593,8 +1604,8 @@ class BdaBlueprintService:
 
                 # Convert AWS standard blueprints to custom blueprints (in parallel)
                 try:
-                    conversion_result = (
-                        self._convert_aws_standard_blueprints_to_custom()
+                    conversion_result = self._convert_aws_standard_blueprints_to_custom(
+                        version=version
                     )
 
                     if (
@@ -1606,7 +1617,7 @@ class BdaBlueprintService:
                         )
                         # Refresh classes list as new classes were added
                         config_item = self.config_manager.get_configuration(
-                            config_type="Custom"
+                            config_type="Config", version=version
                         )
                         classess_status.extend(
                             conversion_result.get("conversion_details", [])
@@ -1635,8 +1646,8 @@ class BdaBlueprintService:
                 if not config_item:
                     return []  # Return empty list for consistency
 
-                if not classess or len(classess) == 0:
-                    return []  # Return empty list for consistency
+                # version is stored as sparse so it wont have class for default clone versions
+                # Let empty versions proceed to _synchronize_deletes to clear BDA
 
                 # Process classes in parallel
                 status, updated, modified = self._process_classes_parallel(
@@ -1660,7 +1671,7 @@ class BdaBlueprintService:
                     f"Saving updated classes (added: {len(classess_added)}, modified: {classes_modified})"
                 )
                 self.config_manager.handle_update_custom_configuration(
-                    {"classes": classess}
+                    custom_config={"classes": classess}, version=version
                 )
 
             return classess_status
@@ -1669,13 +1680,14 @@ class BdaBlueprintService:
             logger.error(f"Error processing blueprint creation: {e}", exc_info=True)
             raise Exception(f"Failed to process blueprint creation: {str(e)}")
 
-    def cleanup_orphaned_blueprints(self) -> dict:
+    def cleanup_orphaned_blueprints(self, version: str) -> dict:
         """
         Delete all BDA blueprints with the stack prefix that are NOT in current IDP config.
 
         This is useful for cleaning up orphaned blueprints that remain in BDA after
         document classes have been removed from the IDP configuration.
-
+        Args:
+            version: config version name
         Returns:
             dict: Status information with deleted_count, failed_count, and details
         """
@@ -1700,7 +1712,9 @@ class BdaBlueprintService:
                 }
 
             # Get current IDP configuration classes
-            config_item = self.config_manager.get_configuration(config_type="Custom")
+            config_item = self.config_manager.get_configuration(
+                config_type="Config", version=version
+            )
             current_classes = getattr(config_item, "classes", []) if config_item else []
 
             # Build set of expected blueprint name prefixes from current config

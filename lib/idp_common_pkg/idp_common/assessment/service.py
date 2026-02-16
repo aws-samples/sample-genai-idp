@@ -852,7 +852,7 @@ class AssessmentService:
             # Time the model invocation
             request_start_time = time.time()
 
-            # Invoke Bedrock with the common library
+            # Invoke Bedrock (or LambdaHook) with the common library
             response_with_metering = bedrock.invoke_model(
                 model_id=model_id,
                 system_prompt=system_prompt,
@@ -862,6 +862,7 @@ class AssessmentService:
                 top_p=top_p,
                 max_tokens=max_tokens,
                 context="Assessment",
+                model_lambda_hook_arn=self.config.assessment.model_lambda_hook_arn,
             )
 
             total_duration = time.time() - request_start_time

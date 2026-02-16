@@ -32,10 +32,10 @@ ssm_client = boto3.client("ssm")
 bedrock_client = boto3.client("bedrock-data-automation")
 
 
-def is_hitl_enabled():
+def is_hitl_enabled(config_version=None):
     """Check if HITL is enabled from configuration."""
     try:
-        config = get_config(as_model=True)
+        config = get_config(as_model=True, version=config_version)
         hitl_enabled = config.assessment.hitl_enabled
         logger.info(f"HITL enabled check: {hitl_enabled}")
         return hitl_enabled
@@ -772,6 +772,7 @@ def process_segments(
     confidence_threshold: float,
     execution_id: str,
     document,
+    config_version: str = None,
 ):
     """
     Process each segment, extract key-value details, and invoke human review if needed.
@@ -841,7 +842,7 @@ def process_segments(
 
             # Check if any key-value or blueprint confidence is below threshold
             # Use confidence_threshold_alerts to determine if HITL should be triggered
-            if is_hitl_enabled():
+            if is_hitl_enabled(config_version):
                 low_confidence = (
                     len(confidence_threshold_alerts) > 0
                     or float(bp_confidence) < confidence_threshold
@@ -882,7 +883,7 @@ def process_segments(
                 # HITL review will be handled via portal, not A2I
                 item.update({"hitl_corrected_result": custom_decimal_output})
         else:
-            if is_hitl_enabled():
+            if is_hitl_enabled(config_version):
                 std_hitl = "true"
                 # std_hitl = None # HITL for standard output blueprint match is disabled until we have option to choose Blueprint in A2I
             else:
@@ -948,7 +949,7 @@ def process_segments(
     return document, overall_hitl_triggered
 
 
-def handle_skip_bda(event, config):
+def handle_skip_bda(event):
     """
     Handle the skip_bda scenario where document already has pages/sections data.
     This is used for reprocessing documents to re-run summarization and evaluation
@@ -956,7 +957,6 @@ def handle_skip_bda(event, config):
 
     Args:
         event: Event containing document data
-        config: Configuration object
 
     Returns:
         Dict containing the processed document ready for summarization/evaluation
@@ -966,6 +966,10 @@ def handle_skip_bda(event, config):
     # Load the document from the event
     working_bucket = os.environ.get("WORKING_BUCKET")
     document = Document.load_document(event.get("document"), working_bucket, logger)
+    
+    # Load configuration - use document's version if specified, otherwise use active version
+    config_version = getattr(document, 'config_version', None)
+    config = get_config(as_model=True, version=config_version)
     
     # Update document status to POSTPROCESSING
     document.status = Status.POSTPROCESSING
@@ -989,7 +993,7 @@ def handle_skip_bda(event, config):
     
     # Check if HITL should be triggered based on existing confidence alerts
     hitl_triggered = False
-    if is_hitl_enabled():
+    if is_hitl_enabled(config_version):
         # Check each section for confidence alerts below threshold
         for section in document.sections:
             alerts = section.confidence_threshold_alerts or []
@@ -1035,12 +1039,10 @@ def handler(event, context):
         Dict containing the processed document
     """
     logger.info(f"Processing event: {json.dumps(event)}")
-
-    config = get_config(as_model=True)
     
     # Check if this is a skip_bda scenario (reprocessing with existing data)
     if event.get("skip_bda"):
-        return handle_skip_bda(event, config)
+        return handle_skip_bda(event)
 
     # Check if we have a single BDA response or an array of responses
     bda_responses = []
@@ -1064,7 +1066,8 @@ def handler(event, context):
         document = Document.load_document(first_response.get("document", {}), working_bucket, logger)
         
         # Check if HITL review is needed
-        hitl_triggered = is_hitl_enabled() and any(
+        config_version = getattr(document, 'config_version', None)
+        hitl_triggered = is_hitl_enabled(config_version) and any(
             section.confidence_threshold_alerts for section in document.sections
         )
         
@@ -1105,6 +1108,17 @@ def handler(event, context):
         status=Status.POSTPROCESSING,
         workflow_execution_arn=first_response.get("execution_arn"),
     )
+
+    # Get existing document record to extract config version
+    document_service = create_document_service()
+    existing_document = document_service.get_document(object_key)
+    input_config_version = getattr(existing_document, 'config_version', None) if existing_document else None
+
+    # Set config version on the new document object
+    document.config_version = input_config_version
+
+    # Load configuration using the input document's version
+    config = get_config(as_model=True, version=input_config_version)
 
     # Get confidence threshold from configuration
     # Used for both creating confidence alerts and triggering HITL
@@ -1240,6 +1254,7 @@ def handler(event, context):
                             confidence_threshold,
                             execution_id,
                             document,
+                            config_version,
                         )
                         logger.info(f"process_segments returned hitl_result: {hitl_result}")
                         if hitl_result or hitl_triggered:
@@ -1254,6 +1269,7 @@ def handler(event, context):
                             confidence_threshold,
                             execution_id,
                             document,
+                            config_version,
                         )
                         logger.info(f"process_segments returned hitl_result: {hitl_result}")
                         if hitl_result or hitl_triggered:

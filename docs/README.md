@@ -16,6 +16,7 @@ This folder contains detailed documentation on various aspects of the GenAI Inte
 - [Evaluation Framework](./evaluation.md) - Accuracy assessment system powered by Stickler
 - [Assessment Feature](./assessment.md) - Extraction confidence evaluation using LLMs
 - [Configuration](./configuration.md) - Configuration and customization options
+- [Configuration Versions](./configuration-versions.md) - Managing multiple configuration versions
 - [Classification](./classification.md) - Customizing document classification
 - [Extraction](./extraction.md) - Customizing information extraction
 - [Criteria Validation](./criteria-validation.md) - Document validation against business rules using LLMs
