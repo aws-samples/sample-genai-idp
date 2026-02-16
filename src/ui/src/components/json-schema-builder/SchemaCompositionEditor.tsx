@@ -1,8 +1,30 @@
 import React, { useState, useRef } from 'react';
-import PropTypes from 'prop-types';
 import { Box, SpaceBetween, Header, FormField, Select, Button, Container, ExpandableSection, Alert } from '@cloudscape-design/components';
 
-const SchemaCompositionEditor = ({ selectedAttribute = null, availableClasses = [], onUpdate }) => {
+interface SchemaAttribute {
+  oneOf?: Array<Record<string, unknown>>;
+  anyOf?: Array<Record<string, unknown>>;
+  allOf?: Array<Record<string, unknown>>;
+  not?: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
+interface AvailableClass {
+  name: string;
+  id?: string;
+}
+
+interface SchemaCompositionEditorProps {
+  selectedAttribute?: SchemaAttribute | null;
+  availableClasses?: AvailableClass[];
+  onUpdate: (updates: SchemaAttribute) => void;
+}
+
+const SchemaCompositionEditor = ({
+  selectedAttribute = null,
+  availableClasses = [],
+  onUpdate,
+}: SchemaCompositionEditorProps): React.JSX.Element | null => {
   const [compositionType, setCompositionType] = useState('');
   const schemaIdCounterRef = useRef(0);
 
@@ -30,10 +52,10 @@ const SchemaCompositionEditor = ({ selectedAttribute = null, availableClasses = 
     }
   }
 
-  const handleAddComposition = () => {
-    if (!compositionType) return;
+  const handleAddComposition = (): void => {
+    if (!compositionType || !selectedAttribute) return;
 
-    const updates = { ...selectedAttribute };
+    const updates = { ...selectedAttribute } as Record<string, unknown>;
 
     if (compositionType === 'not') {
       const schemaId = schemaIdCounterRef.current;
@@ -50,11 +72,12 @@ const SchemaCompositionEditor = ({ selectedAttribute = null, availableClasses = 
       ];
     }
 
-    onUpdate(updates);
+    onUpdate(updates as SchemaAttribute);
     setCompositionType('');
   };
 
-  const handleRemoveComposition = () => {
+  const handleRemoveComposition = (): void => {
+    if (!selectedAttribute) return;
     const updates = { ...selectedAttribute };
     delete updates.oneOf;
     delete updates.anyOf;
@@ -63,21 +86,24 @@ const SchemaCompositionEditor = ({ selectedAttribute = null, availableClasses = 
     onUpdate(updates);
   };
 
-  const handleAddSchema = () => {
-    if (!currentComposition || currentComposition === 'not') return;
+  const handleAddSchema = (): void => {
+    if (!currentComposition || currentComposition === 'not' || !selectedAttribute) return;
 
-    const updates = { ...selectedAttribute };
+    const updates = { ...selectedAttribute } as Record<string, unknown>;
     const schemaId = schemaIdCounterRef.current;
     schemaIdCounterRef.current += 1;
-    updates[currentComposition] = [...(updates[currentComposition] || []), { type: 'string', schemaId }];
-    onUpdate(updates);
+    updates[currentComposition] = [
+      ...((updates[currentComposition] as Array<Record<string, unknown>>) || []),
+      { type: 'string', schemaId },
+    ];
+    onUpdate(updates as SchemaAttribute);
   };
 
-  const handleRemoveSchema = (index) => {
-    if (!currentComposition || currentComposition === 'not') return;
+  const handleRemoveSchema = (index: number): void => {
+    if (!currentComposition || currentComposition === 'not' || !selectedAttribute) return;
 
-    const updates = { ...selectedAttribute };
-    const schemas = [...(updates[currentComposition] || [])];
+    const updates = { ...selectedAttribute } as Record<string, unknown>;
+    const schemas = [...((updates[currentComposition] as Array<Record<string, unknown>>) || [])];
     schemas.splice(index, 1);
 
     if (schemas.length === 0) {
@@ -86,15 +112,15 @@ const SchemaCompositionEditor = ({ selectedAttribute = null, availableClasses = 
       updates[currentComposition] = schemas;
     }
 
-    onUpdate(updates);
+    onUpdate(updates as SchemaAttribute);
   };
 
-  const handleUpdateSchema = (index, newType) => {
-    if (!currentComposition || currentComposition === 'not') return;
+  const handleUpdateSchema = (index: number, newType: string): void => {
+    if (!currentComposition || currentComposition === 'not' || !selectedAttribute) return;
 
-    const updates = { ...selectedAttribute };
-    const schemas = [...(updates[currentComposition] || [])];
-    const existingSchemaId = schemas[index].schemaId;
+    const updates = { ...selectedAttribute } as Record<string, unknown>;
+    const schemas = [...((updates[currentComposition] as Array<Record<string, unknown>>) || [])];
+    const existingSchemaId = (schemas[index] as Record<string, unknown>).schemaId;
 
     if (newType.startsWith('#/$defs/')) {
       schemas[index] = { $ref: newType, schemaId: existingSchemaId };
@@ -103,10 +129,11 @@ const SchemaCompositionEditor = ({ selectedAttribute = null, availableClasses = 
     }
 
     updates[currentComposition] = schemas;
-    onUpdate(updates);
+    onUpdate(updates as SchemaAttribute);
   };
 
-  const handleUpdateNotSchema = (newType) => {
+  const handleUpdateNotSchema = (newType: string): void => {
+    if (!selectedAttribute) return;
     const updates = { ...selectedAttribute };
 
     if (newType.startsWith('#/$defs/')) {
@@ -177,7 +204,9 @@ const SchemaCompositionEditor = ({ selectedAttribute = null, availableClasses = 
                   <Select
                     selectedOption={
                       schemaTypeOptions.find(
-                        (opt) => selectedAttribute.not?.$ref === opt.value || selectedAttribute.not?.type === opt.value,
+                        (opt) =>
+                          (selectedAttribute.not as Record<string, unknown>)?.$ref === opt.value ||
+                          (selectedAttribute.not as Record<string, unknown>)?.type === opt.value,
                       ) || schemaTypeOptions[0]
                     }
                     onChange={({ detail }) => handleUpdateNotSchema(detail.selectedOption.value)}
@@ -186,29 +215,30 @@ const SchemaCompositionEditor = ({ selectedAttribute = null, availableClasses = 
                 </FormField>
               ) : (
                 <>
-                  {(selectedAttribute[currentComposition] || []).map((schema, idx) => (
-                    <Box
-                      key={schema.schemaId || `${currentComposition}-fallback-${idx}`}
-                      padding="s"
-                      style={{ border: '1px solid #ddd', borderRadius: '4px' }}
-                    >
-                      <SpaceBetween size="s">
-                        <Header variant="h4" actions={<Button variant="icon" iconName="close" onClick={() => handleRemoveSchema(idx)} />}>
-                          Schema {idx + 1}
-                        </Header>
-                        <FormField label="Type">
-                          <Select
-                            selectedOption={
-                              schemaTypeOptions.find((opt) => schema.$ref === opt.value || schema.type === opt.value) ||
-                              schemaTypeOptions[0]
-                            }
-                            onChange={({ detail }) => handleUpdateSchema(idx, detail.selectedOption.value)}
-                            options={schemaTypeOptions}
-                          />
-                        </FormField>
-                      </SpaceBetween>
-                    </Box>
-                  ))}
+                  {(((selectedAttribute as Record<string, unknown>)[currentComposition] as Array<Record<string, unknown>>) || []).map(
+                    (schema, idx) => (
+                      <div
+                        key={(schema.schemaId as string | number) || `${currentComposition}-fallback-${idx}`}
+                        style={{ border: '1px solid #ddd', borderRadius: '4px', padding: '8px' }}
+                      >
+                        <SpaceBetween size="s">
+                          <Header variant="h3" actions={<Button variant="icon" iconName="close" onClick={() => handleRemoveSchema(idx)} />}>
+                            Schema {idx + 1}
+                          </Header>
+                          <FormField label="Type">
+                            <Select
+                              selectedOption={
+                                schemaTypeOptions.find((opt) => schema.$ref === opt.value || schema.type === opt.value) ||
+                                schemaTypeOptions[0]
+                              }
+                              onChange={({ detail }) => handleUpdateSchema(idx, detail.selectedOption.value)}
+                              options={schemaTypeOptions}
+                            />
+                          </FormField>
+                        </SpaceBetween>
+                      </div>
+                    ),
+                  )}
                   <Button onClick={handleAddSchema} variant="normal">
                     Add Schema to {currentComposition}
                   </Button>
@@ -220,16 +250,6 @@ const SchemaCompositionEditor = ({ selectedAttribute = null, availableClasses = 
       </SpaceBetween>
     </ExpandableSection>
   );
-};
-
-SchemaCompositionEditor.propTypes = {
-  selectedAttribute: PropTypes.shape({}),
-  availableClasses: PropTypes.arrayOf(
-    PropTypes.shape({
-      name: PropTypes.string,
-    }),
-  ),
-  onUpdate: PropTypes.func.isRequired,
 };
 
 export default SchemaCompositionEditor;

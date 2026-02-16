@@ -1,13 +1,26 @@
 import React from 'react';
-import PropTypes from 'prop-types';
 import { Header, FormField, Input, Checkbox } from '@cloudscape-design/components';
 
-const ObjectConstraints = ({ attribute, onUpdate }) => {
+interface SchemaAttribute {
+  type?: string;
+  $ref?: string;
+  minProperties?: number;
+  maxProperties?: number;
+  additionalProperties?: boolean | Record<string, unknown>;
+  [key: string]: unknown;
+}
+
+interface ObjectConstraintsProps {
+  attribute: SchemaAttribute;
+  onUpdate: (updates: Partial<SchemaAttribute>) => void;
+}
+
+const ObjectConstraints = ({ attribute, onUpdate }: ObjectConstraintsProps): React.JSX.Element | null => {
   if (attribute.type !== 'object' || attribute.$ref) return null;
 
   return (
     <>
-      <Header variant="h4">Object Constraints</Header>
+      <Header variant="h3">Object Constraints</Header>
 
       <FormField label="Min Properties" description="Minimum number of properties">
         <Input
@@ -33,17 +46,6 @@ const ObjectConstraints = ({ attribute, onUpdate }) => {
       </Checkbox>
     </>
   );
-};
-
-ObjectConstraints.propTypes = {
-  attribute: PropTypes.shape({
-    type: PropTypes.string,
-    $ref: PropTypes.string,
-    minProperties: PropTypes.number,
-    maxProperties: PropTypes.number,
-    additionalProperties: PropTypes.oneOfType([PropTypes.bool, PropTypes.object]),
-  }).isRequired,
-  onUpdate: PropTypes.func.isRequired,
 };
 
 export default ObjectConstraints;

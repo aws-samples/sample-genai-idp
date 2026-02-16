@@ -1,9 +1,27 @@
 import React, { useState, useEffect } from 'react';
-import PropTypes from 'prop-types';
 import { Header, FormField, Input, TokenGroup, Button, SpaceBetween } from '@cloudscape-design/components';
 import { formatValueForInput, parseInputValue } from '../utils/schemaHelpers';
 
-const ValueConstraints = ({ attribute, onUpdate }) => {
+interface SchemaAttribute {
+  type?: string;
+  const?: unknown;
+  enum?: unknown[];
+  items?: {
+    type?: string;
+    $ref?: string;
+    const?: unknown;
+    enum?: unknown[];
+    [key: string]: unknown;
+  };
+  [key: string]: unknown;
+}
+
+interface ValueConstraintsProps {
+  attribute: SchemaAttribute;
+  onUpdate: (updates: Partial<SchemaAttribute>) => void;
+}
+
+const ValueConstraints = ({ attribute, onUpdate }: ValueConstraintsProps): React.JSX.Element => {
   // Local state for buffering user input without immediate parsing
   const [constInput, setConstInput] = useState('');
   const [enumInput, setEnumInput] = useState('');
@@ -29,11 +47,11 @@ const ValueConstraints = ({ attribute, onUpdate }) => {
   }, [currentEnum]);
 
   // Helper to update enum/const at the correct level (items for simple arrays)
-  const updateValueConstraint = (updates) => {
+  const updateValueConstraint = (updates: Record<string, unknown>): void => {
     if (isSimpleArray) {
       // Place enum/const inside items for simple arrays
       // Need to handle undefined values by explicitly removing keys
-      const newItems = { ...attribute.items };
+      const newItems = { ...attribute.items } as Record<string, unknown>;
       Object.keys(updates).forEach((key) => {
         if (updates[key] === undefined) {
           delete newItems[key];
@@ -41,14 +59,14 @@ const ValueConstraints = ({ attribute, onUpdate }) => {
           newItems[key] = updates[key];
         }
       });
-      onUpdate({ items: newItems });
+      onUpdate({ items: newItems as SchemaAttribute['items'] });
     } else {
       onUpdate(updates);
     }
   };
 
   // Handle Const field blur - parse and update parent state
-  const handleConstBlur = () => {
+  const handleConstBlur = (): void => {
     if (!constInput) {
       updateValueConstraint({ const: undefined });
       return;
@@ -58,11 +76,11 @@ const ValueConstraints = ({ attribute, onUpdate }) => {
   };
 
   // Handle Enum field blur - parse and update parent state
-  const handleEnumBlur = () => {
+  const handleEnumBlur = (): void => {
     const value = enumInput.trim();
     if (value) {
       try {
-        const parsed = JSON.parse(`[${value}]`);
+        const parsed = JSON.parse(`[${value}]`) as unknown[];
         updateValueConstraint({ enum: parsed });
       } catch {
         const enumValues = value
@@ -77,7 +95,7 @@ const ValueConstraints = ({ attribute, onUpdate }) => {
   };
 
   // Get placeholder examples based on effective type
-  const getEnumPlaceholder = () => {
+  const getEnumPlaceholder = (): string => {
     switch (effectiveType) {
       case 'number':
       case 'integer':
@@ -89,7 +107,7 @@ const ValueConstraints = ({ attribute, onUpdate }) => {
     }
   };
 
-  const getConstPlaceholder = () => {
+  const getConstPlaceholder = (): string => {
     switch (effectiveType) {
       case 'number':
       case 'integer':
@@ -112,7 +130,7 @@ const ValueConstraints = ({ attribute, onUpdate }) => {
 
   return (
     <>
-      <Header variant="h4">Value Constraints (JSON Schema)</Header>
+      <Header variant="h3">Value Constraints (JSON Schema)</Header>
 
       <FormField label="Const (Single Constant Value)" description={constDescription} constraintText={`Example: ${getConstPlaceholder()}`}>
         <Input
@@ -120,7 +138,7 @@ const ValueConstraints = ({ attribute, onUpdate }) => {
           onChange={({ detail }) => setConstInput(detail.value)}
           onBlur={handleConstBlur}
           placeholder={getConstPlaceholder()}
-          disabled={currentEnum && currentEnum.length > 0}
+          disabled={currentEnum !== undefined && currentEnum.length > 0}
         />
       </FormField>
 
@@ -163,21 +181,6 @@ const ValueConstraints = ({ attribute, onUpdate }) => {
       </FormField>
     </>
   );
-};
-
-ValueConstraints.propTypes = {
-  attribute: PropTypes.shape({
-    type: PropTypes.string,
-    const: PropTypes.oneOfType([PropTypes.string, PropTypes.number, PropTypes.bool, PropTypes.object, PropTypes.array]),
-    enum: PropTypes.arrayOf(PropTypes.oneOfType([PropTypes.string, PropTypes.number, PropTypes.bool, PropTypes.object, PropTypes.array])),
-    items: PropTypes.shape({
-      type: PropTypes.string,
-      $ref: PropTypes.string,
-      const: PropTypes.oneOfType([PropTypes.string, PropTypes.number, PropTypes.bool, PropTypes.object, PropTypes.array]),
-      enum: PropTypes.arrayOf(PropTypes.oneOfType([PropTypes.string, PropTypes.number, PropTypes.bool, PropTypes.object, PropTypes.array])),
-    }),
-  }).isRequired,
-  onUpdate: PropTypes.func.isRequired,
 };
 
 export default ValueConstraints;

@@ -1,5 +1,4 @@
 import React from 'react';
-import PropTypes from 'prop-types';
 import {
   Box,
   SpaceBetween,
@@ -13,7 +12,29 @@ import {
   Alert,
 } from '@cloudscape-design/components';
 
-const SchemaConditionalEditor = ({ selectedAttribute, availableClasses, onUpdate }) => {
+interface SchemaAttribute {
+  if?: Record<string, unknown>;
+  then?: Record<string, unknown>;
+  else?: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
+interface AvailableClass {
+  name: string;
+  id?: string;
+}
+
+interface SchemaConditionalEditorProps {
+  selectedAttribute?: SchemaAttribute | null;
+  availableClasses?: AvailableClass[];
+  onUpdate: (updates: SchemaAttribute) => void;
+}
+
+const SchemaConditionalEditor = ({
+  selectedAttribute = null,
+  availableClasses = [],
+  onUpdate,
+}: SchemaConditionalEditorProps): React.JSX.Element | null => {
   const hasConditional = selectedAttribute && selectedAttribute.if;
 
   const schemaTypeOptions = [
@@ -30,7 +51,8 @@ const SchemaConditionalEditor = ({ selectedAttribute, availableClasses, onUpdate
     })),
   ];
 
-  const handleAddConditional = () => {
+  const handleAddConditional = (): void => {
+    if (!selectedAttribute) return;
     const updates = {
       ...selectedAttribute,
       if: { type: 'string' },
@@ -39,7 +61,8 @@ const SchemaConditionalEditor = ({ selectedAttribute, availableClasses, onUpdate
     onUpdate(updates);
   };
 
-  const handleRemoveConditional = () => {
+  const handleRemoveConditional = (): void => {
+    if (!selectedAttribute) return;
     const updates = { ...selectedAttribute };
     delete updates.if;
     delete updates.then;
@@ -47,7 +70,8 @@ const SchemaConditionalEditor = ({ selectedAttribute, availableClasses, onUpdate
     onUpdate(updates);
   };
 
-  const handleAddElse = () => {
+  const handleAddElse = (): void => {
+    if (!selectedAttribute) return;
     const updates = {
       ...selectedAttribute,
       else: { type: 'string' },
@@ -55,14 +79,16 @@ const SchemaConditionalEditor = ({ selectedAttribute, availableClasses, onUpdate
     onUpdate(updates);
   };
 
-  const handleRemoveElse = () => {
+  const handleRemoveElse = (): void => {
+    if (!selectedAttribute) return;
     const updates = { ...selectedAttribute };
     delete updates.else;
     onUpdate(updates);
   };
 
-  const handleUpdateSchema = (key, field, value) => {
-    const updates = { ...selectedAttribute };
+  const handleUpdateSchema = (key: string, field: string, value: string): void => {
+    if (!selectedAttribute) return;
+    const updates = { ...selectedAttribute } as Record<string, unknown>;
 
     if (!updates[key]) {
       updates[key] = {};
@@ -76,24 +102,24 @@ const SchemaConditionalEditor = ({ selectedAttribute, availableClasses, onUpdate
       }
     } else if (field === 'const') {
       try {
-        updates[key].const = JSON.parse(value);
+        (updates[key] as Record<string, unknown>).const = JSON.parse(value);
       } catch {
-        updates[key].const = value;
+        (updates[key] as Record<string, unknown>).const = value;
       }
     } else {
-      updates[key][field] = value;
+      (updates[key] as Record<string, unknown>)[field] = value;
     }
 
-    onUpdate(updates);
+    onUpdate(updates as SchemaAttribute);
   };
 
-  const renderSchemaEditor = (key, label, description) => {
-    const schema = selectedAttribute?.[key] || {};
+  const renderSchemaEditor = (key: string, label: string, description: string): React.JSX.Element => {
+    const schema = (selectedAttribute?.[key] as Record<string, unknown>) || {};
 
     return (
       <Container>
         <SpaceBetween size="m">
-          <Header variant="h4">{label}</Header>
+          <Header variant="h3">{label}</Header>
           <Alert type="info">{description}</Alert>
 
           <FormField label="Schema Type">
@@ -167,21 +193,6 @@ const SchemaConditionalEditor = ({ selectedAttribute, availableClasses, onUpdate
       </SpaceBetween>
     </ExpandableSection>
   );
-};
-
-SchemaConditionalEditor.propTypes = {
-  selectedAttribute: PropTypes.shape({}),
-  availableClasses: PropTypes.arrayOf(
-    PropTypes.shape({
-      name: PropTypes.string,
-    }),
-  ),
-  onUpdate: PropTypes.func.isRequired,
-};
-
-SchemaConditionalEditor.defaultProps = {
-  selectedAttribute: null,
-  availableClasses: [],
 };
 
 export default SchemaConditionalEditor;

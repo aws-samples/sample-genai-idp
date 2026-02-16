@@ -1,5 +1,4 @@
 import React, { useState } from 'react';
-import PropTypes from 'prop-types';
 import {
   Box,
   SpaceBetween,
@@ -14,6 +13,19 @@ import {
   ColumnLayout,
 } from '@cloudscape-design/components';
 
+interface Example {
+  id?: string;
+  name: string;
+  classPrompt: string;
+  attributesPrompt: string;
+  imagePath: string;
+}
+
+interface ExamplesEditorProps {
+  examples?: Example[];
+  onChange: (examples: Example[]) => void;
+}
+
 /**
  * ExamplesEditor Component
  *
@@ -24,11 +36,11 @@ import {
  * - attributesPrompt: Extraction prompt (used by extraction service)
  * - imagePath: S3 path or local path to example image(s)
  */
-const ExamplesEditor = ({ examples = [], onChange }) => {
-  const [expandedSections, setExpandedSections] = useState({});
+const ExamplesEditor = ({ examples = [], onChange }: ExamplesEditorProps): React.JSX.Element => {
+  const [expandedSections, setExpandedSections] = useState<Record<number, boolean>>({});
 
-  const handleAddExample = () => {
-    const newExample = {
+  const handleAddExample = (): void => {
+    const newExample: Example = {
       id: crypto.randomUUID(),
       name: `Example ${examples.length + 1}`,
       classPrompt: '',
@@ -43,7 +55,7 @@ const ExamplesEditor = ({ examples = [], onChange }) => {
     });
   };
 
-  const handleUpdateExample = (index, field, value) => {
+  const handleUpdateExample = (index: number, field: keyof Example, value: string): void => {
     const updated = [...examples];
     updated[index] = {
       ...updated[index],
@@ -52,7 +64,7 @@ const ExamplesEditor = ({ examples = [], onChange }) => {
     onChange(updated);
   };
 
-  const handleDeleteExample = (index) => {
+  const handleDeleteExample = (index: number): void => {
     const updated = examples.filter((_, i) => i !== index);
     onChange(updated);
     // Clean up expanded state
@@ -61,7 +73,7 @@ const ExamplesEditor = ({ examples = [], onChange }) => {
     setExpandedSections(newExpanded);
   };
 
-  const toggleSection = (index) => {
+  const toggleSection = (index: number): void => {
     setExpandedSections({
       ...expandedSections,
       [index]: !expandedSections[index],
@@ -73,7 +85,7 @@ const ExamplesEditor = ({ examples = [], onChange }) => {
       <Box>
         <SpaceBetween size="xs">
           <Header
-            variant="h4"
+            variant="h3"
             description="Add few-shot examples to improve classification and extraction accuracy"
             actions={
               <Button iconName="add-plus" onClick={handleAddExample}>
@@ -184,18 +196,6 @@ const ExamplesEditor = ({ examples = [], onChange }) => {
       })}
     </SpaceBetween>
   );
-};
-
-ExamplesEditor.propTypes = {
-  examples: PropTypes.arrayOf(
-    PropTypes.shape({
-      name: PropTypes.string,
-      classPrompt: PropTypes.string,
-      attributesPrompt: PropTypes.string,
-      imagePath: PropTypes.string,
-    }),
-  ),
-  onChange: PropTypes.func.isRequired,
 };
 
 export default ExamplesEditor;

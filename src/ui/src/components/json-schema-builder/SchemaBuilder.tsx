@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import PropTypes from 'prop-types';
 import {
   Container,
   SpaceBetween,
@@ -23,7 +22,42 @@ import SchemaInspector from './SchemaInspector';
 import SchemaPreviewTabs from './SchemaPreviewTabs';
 import { formatTypeBadge, DocumentTypeBadge } from './utils/badgeHelpers';
 
-const SchemaBuilder = ({ initialSchema, onChange, onValidate, isRuleSchema = false }) => {
+interface SchemaClass {
+  id: string;
+  name: string;
+  description?: string;
+  attributes?: {
+    properties?: Record<string, Record<string, unknown>>;
+    required?: string[];
+  };
+  [key: string]: unknown;
+}
+
+interface ValidationError {
+  path: string;
+  message: string;
+  keyword?: string;
+  className?: string;
+}
+
+interface TypeOption {
+  label: string;
+  value: string;
+}
+
+interface SchemaBuilderProps {
+  initialSchema?: SchemaClass[] | Record<string, unknown> | null;
+  onChange?: ((schema: unknown, isDirty: boolean) => void) | null;
+  onValidate?: ((isValid: boolean, errors: ValidationError[]) => void) | null;
+  isRuleSchema?: boolean;
+}
+
+const SchemaBuilder = ({
+  initialSchema = null,
+  onChange = null,
+  onValidate = null,
+  isRuleSchema = false,
+}: SchemaBuilderProps): React.JSX.Element => {
   const {
     classes,
     selectedClassId,
@@ -53,17 +87,17 @@ const SchemaBuilder = ({ initialSchema, onChange, onValidate, isRuleSchema = fal
   const [newClassName, setNewClassName] = useState('');
   const [newClassDescription, setNewClassDescription] = useState('');
   const [newAttributeName, setNewAttributeName] = useState('');
-  const [newAttributeType, setNewAttributeType] = useState({ label: 'String', value: 'string' });
+  const [newAttributeType, setNewAttributeType] = useState<TypeOption>({ label: 'String', value: 'string' });
   const [newAttributeDescription, setNewAttributeDescription] = useState('');
-  const [newAttributeReferenceClass, setNewAttributeReferenceClass] = useState(null);
+  const [newAttributeReferenceClass, setNewAttributeReferenceClass] = useState<TypeOption | null>(null);
   const [showEditClassModal, setShowEditClassModal] = useState(false);
-  const [editingClass, setEditingClass] = useState(null);
+  const [editingClass, setEditingClass] = useState<SchemaClass | null>(null);
   const [showDeleteConfirmModal, setShowDeleteConfirmModal] = useState(false);
-  const [classToDelete, setClassToDelete] = useState(null);
+  const [classToDelete, setClassToDelete] = useState<SchemaClass | null>(null);
   const [showWipeAllModal, setShowWipeAllModal] = useState(false);
-  const [aggregatedValidationErrors, setAggregatedValidationErrors] = useState([]);
-  const lastExportedSchemaRef = useRef(null);
-  const lastValidationResultRef = useRef(null);
+  const [aggregatedValidationErrors, setAggregatedValidationErrors] = useState<ValidationError[]>([]);
+  const lastExportedSchemaRef = useRef<string | null>(null);
+  const lastValidationResultRef = useRef<string | null>(null);
 
   // Debounce classes changes to reduce validation frequency
   const debouncedClasses = useDebounce(classes, 300);
@@ -83,14 +117,14 @@ const SchemaBuilder = ({ initialSchema, onChange, onValidate, isRuleSchema = fal
 
   useEffect(() => {
     if (onValidate && debouncedClasses.length > 0) {
-      const allErrors = [];
+      const allErrors: ValidationError[] = [];
       let allValid = true;
 
       debouncedClasses.forEach((cls) => {
         const result = validateSchema(cls);
         if (!result.valid) {
           allValid = false;
-          allErrors.push(...result.errors.map((err) => ({ ...err, className: cls.name })));
+          allErrors.push(...result.errors.map((err: ValidationError) => ({ ...err, className: cls.name })));
         }
       });
 
@@ -109,11 +143,11 @@ const SchemaBuilder = ({ initialSchema, onChange, onValidate, isRuleSchema = fal
     }
   }, [debouncedClasses, onValidate, validateSchema]);
 
-  const handleAddClass = () => {
+  const handleAddClass = (): void => {
     setShowAddClassModal(true);
   };
 
-  const handleAddAttribute = () => {
+  const handleAddAttribute = (): void => {
     if (!selectedClassId) {
       alert('Please select a class first');
       return;
@@ -121,7 +155,7 @@ const SchemaBuilder = ({ initialSchema, onChange, onValidate, isRuleSchema = fal
     setShowAddAttributeModal(true);
   };
 
-  const handleConfirmAddClass = () => {
+  const handleConfirmAddClass = (): void => {
     if (newClassName.trim()) {
       addClass(newClassName.trim(), newClassDescription.trim() || undefined);
       setNewClassName('');
@@ -130,12 +164,12 @@ const SchemaBuilder = ({ initialSchema, onChange, onValidate, isRuleSchema = fal
     }
   };
 
-  const handleConfirmAddAttribute = () => {
+  const handleConfirmAddAttribute = (): void => {
     if (newAttributeName.trim() && newAttributeType.value) {
       const attrName = newAttributeName.trim();
       addAttribute(selectedClassId, attrName, newAttributeType.value);
 
-      const updates = {};
+      const updates: Record<string, unknown> = {};
       if (newAttributeDescription.trim()) {
         updates.description = newAttributeDescription.trim();
       }
@@ -168,14 +202,14 @@ const SchemaBuilder = ({ initialSchema, onChange, onValidate, isRuleSchema = fal
   // Use TYPE_OPTIONS from constants, filtering to commonly used types
   const attributeTypeOptions = TYPE_OPTIONS.filter((opt) => ['string', 'number', 'boolean', 'object', 'array'].includes(opt.value));
 
-  const handleEditClass = (cls) => {
+  const handleEditClass = (cls: SchemaClass): void => {
     setEditingClass(cls);
     setNewClassName(cls.name);
     setNewClassDescription(cls.description || '');
     setShowEditClassModal(true);
   };
 
-  const handleConfirmEditClass = () => {
+  const handleConfirmEditClass = (): void => {
     if (editingClass && newClassName.trim()) {
       updateClass(editingClass.id, {
         name: newClassName.trim(),
@@ -188,11 +222,11 @@ const SchemaBuilder = ({ initialSchema, onChange, onValidate, isRuleSchema = fal
     }
   };
 
-  const handleWipeAll = () => {
+  const handleWipeAll = (): void => {
     setShowWipeAllModal(true);
   };
 
-  const handleConfirmWipeAll = () => {
+  const handleConfirmWipeAll = (): void => {
     clearAllClasses();
     setShowWipeAllModal(false);
   };
@@ -247,7 +281,7 @@ const SchemaBuilder = ({ initialSchema, onChange, onValidate, isRuleSchema = fal
                 {getSelectedAttribute() && formatTypeBadge(getSelectedAttribute())}
               </>
             )}
-            <Box flex="1" />
+            <div style={{ flex: 1 }} />
             <Button
               variant="inline-link"
               iconName="close"
@@ -338,7 +372,7 @@ const SchemaBuilder = ({ initialSchema, onChange, onValidate, isRuleSchema = fal
                   )}
 
                   <Box>
-                    {!isRuleSchema && <Header variant="h4">{TypesLabel} Types</Header>}
+                    {!isRuleSchema && <Header variant="h3">{TypesLabel} Types</Header>}
                     <SpaceBetween size="s">
                       {classes.filter((c) => c[X_AWS_IDP_DOCUMENT_TYPE]).length === 0 && (
                         <Box fontSize="body-s" color="text-body-secondary" padding="s">
@@ -415,7 +449,7 @@ const SchemaBuilder = ({ initialSchema, onChange, onValidate, isRuleSchema = fal
 
                   {!isRuleSchema && (
                     <Box>
-                      <Header variant="h4">{sharedLabel}</Header>
+                      <Header variant="h3">{sharedLabel}</Header>
                       <SpaceBetween size="s">
                         {classes.filter((c) => !c[X_AWS_IDP_DOCUMENT_TYPE]).length === 0 && (
                           <Box fontSize="body-s" color="text-body-secondary" padding="s">
@@ -527,7 +561,7 @@ const SchemaBuilder = ({ initialSchema, onChange, onValidate, isRuleSchema = fal
                       if (!selectedClass || !selectedClass.attributes) return;
 
                       const currentRequired = selectedClass.attributes.required || [];
-                      let newRequired;
+                      let newRequired: string[];
 
                       if (checked) {
                         if (!currentRequired.includes(selectedAttributeId)) {
@@ -663,7 +697,7 @@ const SchemaBuilder = ({ initialSchema, onChange, onValidate, isRuleSchema = fal
             >
               <Select
                 selectedOption={newAttributeType}
-                onChange={({ detail }) => setNewAttributeType(detail.selectedOption)}
+                onChange={({ detail }) => setNewAttributeType(detail.selectedOption as TypeOption)}
                 options={attributeTypeOptions}
               />
             </FormField>
@@ -693,7 +727,7 @@ const SchemaBuilder = ({ initialSchema, onChange, onValidate, isRuleSchema = fal
               >
                 <Select
                   selectedOption={newAttributeReferenceClass}
-                  onChange={({ detail }) => setNewAttributeReferenceClass(detail.selectedOption)}
+                  onChange={({ detail }) => setNewAttributeReferenceClass(detail.selectedOption as TypeOption)}
                   options={[
                     {
                       label: newAttributeType.value === 'object' ? '⚙️ Inline properties' : '📝 Simple values (string)',
@@ -810,7 +844,7 @@ const SchemaBuilder = ({ initialSchema, onChange, onValidate, isRuleSchema = fal
             </Alert>
             {classToDelete && Object.keys(classToDelete.attributes?.properties || {}).length > 0 && (
               <Alert type="info">
-                This class has {Object.keys(classToDelete.attributes.properties).length} attribute(s) that will also be deleted.
+                This class has {Object.keys(classToDelete.attributes!.properties!).length} attribute(s) that will also be deleted.
               </Alert>
             )}
           </SpaceBetween>
@@ -850,20 +884,6 @@ const SchemaBuilder = ({ initialSchema, onChange, onValidate, isRuleSchema = fal
       </SpaceBetween>
     </>
   );
-};
-
-SchemaBuilder.propTypes = {
-  initialSchema: PropTypes.oneOfType([PropTypes.arrayOf(PropTypes.shape({})), PropTypes.shape({})]),
-  onChange: PropTypes.func,
-  onValidate: PropTypes.func,
-  isRuleSchema: PropTypes.bool,
-};
-
-SchemaBuilder.defaultProps = {
-  initialSchema: null,
-  onChange: null,
-  onValidate: null,
-  isRuleSchema: false,
 };
 
 export default SchemaBuilder;

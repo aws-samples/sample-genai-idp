@@ -1,8 +1,33 @@
 import React, { useState, useEffect } from 'react';
-import PropTypes from 'prop-types';
 import { FormField, Select, Input, RadioGroup, SpaceBetween, Textarea, ExpandableSection } from '@cloudscape-design/components';
 
-const CONDITION_OPTIONS = [
+interface ContainsSchema {
+  $ref?: string;
+  type?: string;
+  properties?: Record<string, Record<string, unknown>>;
+  required?: string[];
+  [key: string]: unknown;
+}
+
+interface AvailableClass {
+  name: string;
+  id?: string;
+  description?: string;
+}
+
+interface ConditionOption {
+  label: string;
+  value: string;
+  description: string;
+}
+
+interface ContainsSchemaBuilderProps {
+  containsSchema?: ContainsSchema | null;
+  onChange: (schema: ContainsSchema | null) => void;
+  availableClasses?: AvailableClass[];
+}
+
+const CONDITION_OPTIONS: ConditionOption[] = [
   { label: 'Equals (const)', value: 'const', description: 'Exact value match' },
   { label: 'Minimum', value: 'minimum', description: 'Minimum value (for numbers)' },
   { label: 'Maximum', value: 'maximum', description: 'Maximum value (for numbers)' },
@@ -10,10 +35,10 @@ const CONDITION_OPTIONS = [
   { label: 'One of (enum)', value: 'enum', description: 'Comma-separated list of values' },
 ];
 
-const buildConditionSchema = (property, condition, value) => {
+const buildConditionSchema = (property: string, condition: string, value: string): ContainsSchema | null => {
   if (!property || !value) return null;
 
-  const baseSchema = {
+  const baseSchema: ContainsSchema = {
     type: 'object',
     properties: {},
     required: [property],
@@ -21,19 +46,19 @@ const buildConditionSchema = (property, condition, value) => {
 
   switch (condition) {
     case 'const':
-      baseSchema.properties[property] = { const: value };
+      baseSchema.properties![property] = { const: value };
       break;
     case 'minimum':
-      baseSchema.properties[property] = { type: 'number', minimum: parseFloat(value) };
+      baseSchema.properties![property] = { type: 'number', minimum: parseFloat(value) };
       break;
     case 'maximum':
-      baseSchema.properties[property] = { type: 'number', maximum: parseFloat(value) };
+      baseSchema.properties![property] = { type: 'number', maximum: parseFloat(value) };
       break;
     case 'pattern':
-      baseSchema.properties[property] = { type: 'string', pattern: value };
+      baseSchema.properties![property] = { type: 'string', pattern: value };
       break;
     case 'enum':
-      baseSchema.properties[property] = {
+      baseSchema.properties![property] = {
         enum: value
           .split(',')
           .map((v) => v.trim())
@@ -41,13 +66,13 @@ const buildConditionSchema = (property, condition, value) => {
       };
       break;
     default:
-      baseSchema.properties[property] = { const: value };
+      baseSchema.properties![property] = { const: value };
   }
 
   return baseSchema;
 };
 
-const detectMode = (containsSchema) => {
+const detectMode = (containsSchema: ContainsSchema | null | undefined): string => {
   if (!containsSchema) return 'property';
   if (containsSchema.$ref) return 'class';
 
@@ -59,14 +84,18 @@ const detectMode = (containsSchema) => {
   return 'custom';
 };
 
-const ContainsSchemaBuilder = ({ containsSchema, onChange, availableClasses }) => {
+const ContainsSchemaBuilder = ({
+  containsSchema = null,
+  onChange,
+  availableClasses = [],
+}: ContainsSchemaBuilderProps): React.JSX.Element => {
   const existingContains = containsSchema;
   const initialMode = detectMode(existingContains);
 
   const [mode, setMode] = useState(initialMode);
-  const [selectedClass, setSelectedClass] = useState(null);
+  const [selectedClass, setSelectedClass] = useState<string | null>(null);
   const [propertyName, setPropertyName] = useState('');
-  const [condition, setCondition] = useState(CONDITION_OPTIONS[0]);
+  const [condition, setCondition] = useState<ConditionOption>(CONDITION_OPTIONS[0]);
   const [propertyValue, setPropertyValue] = useState('');
   const [customSchema, setCustomSchema] = useState(
     existingContains && initialMode === 'custom' ? JSON.stringify(existingContains, null, 2) : '',
@@ -84,7 +113,7 @@ const ContainsSchemaBuilder = ({ containsSchema, onChange, availableClasses }) =
         Object.keys(existingContains.properties).length === 1
       ) {
         const propName = Object.keys(existingContains.properties)[0];
-        const propSchema = existingContains.properties[propName];
+        const propSchema = existingContains.properties[propName] as Record<string, unknown>;
         setPropertyName(propName);
 
         if (propSchema.const !== undefined) {
@@ -98,34 +127,34 @@ const ContainsSchemaBuilder = ({ containsSchema, onChange, availableClasses }) =
           setPropertyValue(String(propSchema.maximum));
         } else if (propSchema.pattern) {
           setCondition(CONDITION_OPTIONS[3]);
-          setPropertyValue(propSchema.pattern);
+          setPropertyValue(propSchema.pattern as string);
         } else if (propSchema.enum) {
           setCondition(CONDITION_OPTIONS[4]);
-          setPropertyValue(propSchema.enum.join(', '));
+          setPropertyValue((propSchema.enum as unknown[]).join(', '));
         }
       }
     }
   }, [existingContains]);
 
-  const handleModeChange = ({ detail }) => {
+  const handleModeChange = ({ detail }: { detail: { value: string } }): void => {
     setMode(detail.value);
     // Clear contains when switching modes
     onChange(null);
   };
 
-  const handleClassSelect = ({ detail }) => {
-    setSelectedClass(detail.selectedOption.value);
+  const handleClassSelect = ({ detail }: { detail: { selectedOption: { value?: string | null } } }): void => {
+    setSelectedClass(detail.selectedOption.value || '');
     onChange({ $ref: `#/$defs/${detail.selectedOption.value}` });
   };
 
-  const handlePropertyUpdate = () => {
+  const handlePropertyUpdate = (): void => {
     const schema = buildConditionSchema(propertyName, condition.value, propertyValue);
     if (schema) {
       onChange(schema);
     }
   };
 
-  const handleCustomSchemaChange = (value) => {
+  const handleCustomSchemaChange = (value: string): void => {
     setCustomSchema(value);
     if (!value.trim()) {
       onChange(null);
@@ -133,9 +162,9 @@ const ContainsSchemaBuilder = ({ containsSchema, onChange, availableClasses }) =
     }
 
     try {
-      const parsed = JSON.parse(value);
+      const parsed = JSON.parse(value) as ContainsSchema;
       onChange(parsed);
-    } catch (e) {
+    } catch {
       // Invalid JSON, don't update
     }
   };
@@ -200,7 +229,7 @@ const ContainsSchemaBuilder = ({ containsSchema, onChange, availableClasses }) =
             <Select
               selectedOption={condition}
               onChange={({ detail }) => {
-                setCondition(detail.selectedOption);
+                setCondition(detail.selectedOption as ConditionOption);
                 handlePropertyUpdate();
               }}
               options={CONDITION_OPTIONS}
@@ -242,23 +271,6 @@ const ContainsSchemaBuilder = ({ containsSchema, onChange, availableClasses }) =
       )}
     </SpaceBetween>
   );
-};
-
-ContainsSchemaBuilder.propTypes = {
-  containsSchema: PropTypes.shape({}),
-  onChange: PropTypes.func.isRequired,
-  availableClasses: PropTypes.arrayOf(
-    PropTypes.shape({
-      name: PropTypes.string.isRequired,
-      id: PropTypes.string,
-      description: PropTypes.string,
-    }),
-  ),
-};
-
-ContainsSchemaBuilder.defaultProps = {
-  containsSchema: null,
-  availableClasses: [],
 };
 
 export default ContainsSchemaBuilder;

@@ -1,14 +1,66 @@
 import React, { useState, useMemo } from 'react';
-import PropTypes from 'prop-types';
 import { Box, Tabs, SpaceBetween, Alert, Container, Header } from '@cloudscape-design/components';
 import Editor from '@monaco-editor/react';
 import { X_AWS_IDP_DOCUMENT_TYPE } from '../../constants/schemaConstants';
 
-const getSchemaStats = (schema) => {
-  if (!schema) return {};
+interface SchemaClass {
+  id: string;
+  name: string;
+  attributes?: {
+    properties?: Record<string, SchemaAttribute>;
+    required?: string[];
+  };
+  [key: string]: unknown;
+}
+
+interface SchemaAttribute {
+  type?: string;
+  pattern?: string;
+  format?: string;
+  minLength?: number;
+  maxLength?: number;
+  minimum?: number;
+  maximum?: number;
+  enum?: unknown[];
+  const?: unknown;
+  oneOf?: unknown[];
+  anyOf?: unknown[];
+  allOf?: unknown[];
+  not?: unknown;
+  if?: unknown;
+  [key: string]: unknown;
+}
+
+interface SchemaStats {
+  totalAttributes: number;
+  requiredAttributes: number;
+  stringAttributes: number;
+  numberAttributes: number;
+  booleanAttributes: number;
+  objectAttributes: number;
+  arrayAttributes: number;
+  withConstraints: number;
+  withComposition: number;
+  withConditional: number;
+}
+
+interface ExportedSchema {
+  $id?: string;
+  $defs?: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
+interface SchemaPreviewTabsProps {
+  classes: SchemaClass[];
+  selectedClassId?: string | null;
+  exportedSchemas?: ExportedSchema | ExportedSchema[] | null;
+}
+
+const getSchemaStats = (schema: SchemaClass | undefined): SchemaStats => {
+  if (!schema) return {} as SchemaStats;
 
   const props = schema.attributes?.properties || {};
-  const stats = {
+  const stats: SchemaStats = {
     totalAttributes: Object.keys(props).length,
     requiredAttributes: (schema.attributes?.required || []).length,
     stringAttributes: 0,
@@ -50,7 +102,11 @@ const getSchemaStats = (schema) => {
   return stats;
 };
 
-const SchemaStatsContent = ({ stats }) => (
+interface SchemaStatsContentProps {
+  stats: SchemaStats;
+}
+
+const SchemaStatsContent = ({ stats }: SchemaStatsContentProps): React.JSX.Element => (
   <Box>
     <SpaceBetween size="m">
       <Container header={<Header variant="h3">Attribute Overview</Header>}>
@@ -104,22 +160,7 @@ const SchemaStatsContent = ({ stats }) => (
   </Box>
 );
 
-SchemaStatsContent.propTypes = {
-  stats: PropTypes.shape({
-    totalAttributes: PropTypes.number,
-    requiredAttributes: PropTypes.number,
-    stringAttributes: PropTypes.number,
-    numberAttributes: PropTypes.number,
-    booleanAttributes: PropTypes.number,
-    objectAttributes: PropTypes.number,
-    arrayAttributes: PropTypes.number,
-    withConstraints: PropTypes.number,
-    withComposition: PropTypes.number,
-    withConditional: PropTypes.number,
-  }).isRequired,
-};
-
-const SchemaPreviewTabs = ({ classes, selectedClassId, exportedSchemas }) => {
+const SchemaPreviewTabs = ({ classes, selectedClassId = null, exportedSchemas = null }: SchemaPreviewTabsProps): React.JSX.Element => {
   const [activeTabId, setActiveTabId] = useState('schema-0');
 
   // Memoize selected class with shallow comparison
@@ -138,12 +179,15 @@ const SchemaPreviewTabs = ({ classes, selectedClassId, exportedSchemas }) => {
   const schemaTabs = useMemo(() => {
     return schemas.map((schema, index) => ({
       id: `schema-${index}`,
-      label: schemas.length > 1 ? `${schema[X_AWS_IDP_DOCUMENT_TYPE] || schema.$id || `Schema ${index + 1}`}` : 'JSON Schema',
+      label:
+        schemas.length > 1
+          ? `${(schema as Record<string, unknown>)[X_AWS_IDP_DOCUMENT_TYPE] || schema.$id || `Schema ${index + 1}`}`
+          : 'JSON Schema',
       content: (
         <SpaceBetween size="m">
           <Alert type="info">
             {schemas.length > 1
-              ? `JSON Schema for document type: ${schema[X_AWS_IDP_DOCUMENT_TYPE] || schema.$id}`
+              ? `JSON Schema for document type: ${(schema as Record<string, unknown>)[X_AWS_IDP_DOCUMENT_TYPE] || schema.$id}`
               : 'JSON Schema draft 2020-12 representation'}
             <br />
             {schema.$defs && Object.keys(schema.$defs).length > 0 && (
@@ -204,14 +248,3 @@ const SchemaPreviewTabs = ({ classes, selectedClassId, exportedSchemas }) => {
 
 // Memoize the component to prevent re-renders when props haven't changed
 export default React.memo(SchemaPreviewTabs);
-
-SchemaPreviewTabs.propTypes = {
-  classes: PropTypes.arrayOf(PropTypes.shape({})).isRequired,
-  selectedClassId: PropTypes.string,
-  exportedSchemas: PropTypes.oneOfType([PropTypes.shape({}), PropTypes.arrayOf(PropTypes.shape({}))]),
-};
-
-SchemaPreviewTabs.defaultProps = {
-  selectedClassId: null,
-  exportedSchemas: null,
-};

@@ -1,9 +1,21 @@
 import React, { useState, useEffect } from 'react';
-import PropTypes from 'prop-types';
 import { FormField, Textarea, Input } from '@cloudscape-design/components';
 import { formatValueForInput, parseInputValue } from '../utils/schemaHelpers';
 
-const MetadataFields = ({ attribute, onUpdate }) => {
+interface SchemaAttribute {
+  type?: string;
+  description?: string;
+  default?: unknown;
+  examples?: unknown[];
+  [key: string]: unknown;
+}
+
+interface MetadataFieldsProps {
+  attribute: SchemaAttribute;
+  onUpdate: (updates: Partial<SchemaAttribute>) => void;
+}
+
+const MetadataFields = ({ attribute, onUpdate }: MetadataFieldsProps): React.JSX.Element => {
   // Local state for buffering user input without immediate parsing
   const [examplesInput, setExamplesInput] = useState('');
   const [defaultValueInput, setDefaultValueInput] = useState('');
@@ -22,7 +34,7 @@ const MetadataFields = ({ attribute, onUpdate }) => {
   }, [attribute.default]);
 
   // Handle Examples field blur - parse and update parent state
-  const handleExamplesBlur = () => {
+  const handleExamplesBlur = (): void => {
     if (!examplesInput.trim()) {
       const updates = { ...attribute };
       delete updates.examples;
@@ -30,7 +42,7 @@ const MetadataFields = ({ attribute, onUpdate }) => {
       return;
     }
     try {
-      const parsed = JSON.parse(`[${examplesInput}]`);
+      const parsed = JSON.parse(`[${examplesInput}]`) as unknown[];
       onUpdate({ examples: parsed });
     } catch {
       const examples = examplesInput
@@ -42,7 +54,7 @@ const MetadataFields = ({ attribute, onUpdate }) => {
   };
 
   // Handle Default Value field blur - parse and update parent state
-  const handleDefaultValueBlur = () => {
+  const handleDefaultValueBlur = (): void => {
     if (!defaultValueInput) {
       const updates = { ...attribute };
       delete updates.default;
@@ -93,18 +105,6 @@ const MetadataFields = ({ attribute, onUpdate }) => {
       </FormField>
     </>
   );
-};
-
-MetadataFields.propTypes = {
-  attribute: PropTypes.shape({
-    type: PropTypes.string,
-    description: PropTypes.string,
-    default: PropTypes.oneOfType([PropTypes.string, PropTypes.number, PropTypes.bool, PropTypes.object, PropTypes.array]),
-    examples: PropTypes.arrayOf(
-      PropTypes.oneOfType([PropTypes.string, PropTypes.number, PropTypes.bool, PropTypes.object, PropTypes.array]),
-    ),
-  }).isRequired,
-  onUpdate: PropTypes.func.isRequired,
 };
 
 export default MetadataFields;

@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import PropTypes from 'prop-types';
 import { Box, SpaceBetween, Header, FormField, Input, Select, Textarea, Checkbox, Button, Alert } from '@cloudscape-design/components';
 import StringConstraints from './constraints/StringConstraints';
 import NumberConstraints from './constraints/NumberConstraints';
@@ -27,20 +26,79 @@ import {
   X_AWS_IDP_PAGE_CONTENT_REGEX,
 } from '../../constants/schemaConstants';
 
+interface SchemaAttribute {
+  type?: string;
+  $ref?: string;
+  description?: string;
+  properties?: Record<string, unknown>;
+  required?: string[];
+  minProperties?: number;
+  maxProperties?: number;
+  additionalProperties?: boolean | Record<string, unknown>;
+  items?: {
+    type?: string;
+    $ref?: string;
+    properties?: Record<string, unknown>;
+    [key: string]: unknown;
+  };
+  [key: string]: unknown;
+}
+
+interface Example {
+  id?: string;
+  name: string;
+  classPrompt: string;
+  attributesPrompt: string;
+  imagePath: string;
+}
+
+interface SchemaClass {
+  id: string;
+  name: string;
+  description?: string;
+  attributes?: {
+    properties?: Record<string, SchemaAttribute>;
+    required?: string[];
+  };
+  [key: string]: unknown;
+}
+
+interface UsageInfo {
+  className: string;
+  classId: string;
+  attributeName: string;
+  type: string;
+}
+
+interface SchemaInspectorProps {
+  selectedClass?: SchemaClass | null;
+  selectedAttribute?: SchemaAttribute | null;
+  selectedAttributeName?: string | null;
+  onUpdate: (updates: Partial<SchemaAttribute>) => void;
+  onUpdateClass?: (updates: Record<string, unknown>) => void;
+  onRenameAttribute?: (newName: string) => boolean;
+  availableClasses?: SchemaClass[];
+  isRequired?: boolean;
+  onToggleRequired?: (checked: boolean) => void;
+  onNavigateToClass?: ((classId: string) => void) | null;
+  onNavigateToAttribute?: ((classId: string, attributeName: string | null) => void) | null;
+  isRuleSchema?: boolean;
+}
+
 const SchemaInspector = ({
-  selectedClass,
-  selectedAttribute,
-  selectedAttributeName,
+  selectedClass = null,
+  selectedAttribute = null,
+  selectedAttributeName = null,
   onUpdate,
-  onUpdateClass,
-  onRenameAttribute,
-  availableClasses,
-  isRequired,
-  onToggleRequired,
-  onNavigateToClass,
-  onNavigateToAttribute,
+  onUpdateClass = () => {},
+  onRenameAttribute = () => true,
+  availableClasses = [],
+  isRequired = false,
+  onToggleRequired = () => {},
+  onNavigateToClass = null,
+  onNavigateToAttribute = null,
   isRuleSchema = false,
-}) => {
+}: SchemaInspectorProps): React.JSX.Element => {
   // Dynamic labels based on schema type
   const typeLabel = isRuleSchema ? 'rule' : 'document';
   const TypeLabel = isRuleSchema ? 'Rule' : 'Document';
@@ -48,7 +106,7 @@ const SchemaInspector = ({
   // Show class-level settings when class is selected but no attribute is selected
   if (selectedClass && (!selectedAttribute || !selectedAttributeName)) {
     // Find where this class is being used
-    const usedIn = [];
+    const usedIn: UsageInfo[] = [];
     if (availableClasses) {
       availableClasses.forEach((cls) => {
         if (cls.id === selectedClass.id) return; // Skip self
@@ -86,7 +144,7 @@ const SchemaInspector = ({
             }`}
           >
             <Checkbox
-              checked={selectedClass[X_AWS_IDP_DOCUMENT_TYPE] || false}
+              checked={(selectedClass[X_AWS_IDP_DOCUMENT_TYPE] as boolean) || false}
               onChange={({ detail }) => onUpdateClass({ [X_AWS_IDP_DOCUMENT_TYPE]: detail.checked })}
             >
               This is a {typeLabel} type
@@ -123,7 +181,7 @@ const SchemaInspector = ({
           {selectedClass[X_AWS_IDP_DOCUMENT_TYPE] && !isRuleSchema && (
             <>
               <ExamplesEditor
-                examples={selectedClass[X_AWS_IDP_EXAMPLES] || []}
+                examples={(selectedClass[X_AWS_IDP_EXAMPLES] as Example[]) || []}
                 onChange={(examples) => onUpdateClass({ [X_AWS_IDP_EXAMPLES]: examples })}
               />
 
@@ -132,7 +190,7 @@ const SchemaInspector = ({
                 description={`Pattern to match ${typeLabel} ID/name. When matched, instantly classifies all pages as this type (single-class configs only). Use case-insensitive patterns like (?i).*(invoice|bill).*`}
               >
                 <Input
-                  value={selectedClass[X_AWS_IDP_DOCUMENT_NAME_REGEX] || ''}
+                  value={(selectedClass[X_AWS_IDP_DOCUMENT_NAME_REGEX] as string) || ''}
                   onChange={({ detail }) => onUpdateClass({ [X_AWS_IDP_DOCUMENT_NAME_REGEX]: detail.value || undefined })}
                   placeholder="e.g., (?i).*(invoice|bill).*"
                 />
@@ -143,13 +201,13 @@ const SchemaInspector = ({
                 description="Pattern to match page text content. When matched during page-level classification, classifies the page as this type. Use case-insensitive patterns like (?i)(invoice\\s+number|amount\\s+due)"
               >
                 <Input
-                  value={selectedClass[X_AWS_IDP_PAGE_CONTENT_REGEX] || ''}
+                  value={(selectedClass[X_AWS_IDP_PAGE_CONTENT_REGEX] as string) || ''}
                   onChange={({ detail }) => onUpdateClass({ [X_AWS_IDP_PAGE_CONTENT_REGEX]: detail.value || undefined })}
                   placeholder="e.g., (?i)(invoice\\s+number|bill\\s+to)"
                 />
               </FormField>
 
-              <Header variant="h5">Evaluation Configuration</Header>
+              <Header variant="h3">Evaluation Configuration</Header>
 
               <FormField
                 label="Overall Match Threshold"
@@ -157,10 +215,8 @@ const SchemaInspector = ({
               >
                 <Input
                   type="number"
-                  step="0.01"
-                  min="0"
-                  max="1"
-                  value={selectedClass[X_AWS_IDP_EVALUATION_MATCH_THRESHOLD]?.toString() || '0.8'}
+                  inputMode="decimal"
+                  value={(selectedClass[X_AWS_IDP_EVALUATION_MATCH_THRESHOLD] as number)?.toString() || '0.8'}
                   onChange={({ detail }) => {
                     const value = detail.value ? parseFloat(detail.value) : 0.8;
                     if (value >= 0 && value <= 1) {
@@ -220,7 +276,7 @@ const SchemaInspector = ({
     setAttributeLabel(selectedAttributeName || '');
   }, [selectedAttributeName]);
 
-  const handleRenameSubmit = () => {
+  const handleRenameSubmit = (): void => {
     const trimmed = attributeLabel.trim();
     if (!trimmed || trimmed === selectedAttributeName) {
       setAttributeLabel(selectedAttributeName || '');
@@ -242,7 +298,7 @@ const SchemaInspector = ({
             onChange={({ detail }) => setAttributeLabel(detail.value)}
             onBlur={handleRenameSubmit}
             onKeyDown={(event) => {
-              if (event.key === 'Enter') {
+              if (event.detail.key === 'Enter') {
                 event.preventDefault();
                 handleRenameSubmit();
               }
@@ -267,7 +323,7 @@ const SchemaInspector = ({
             }
             onChange={({ detail }) => {
               // When changing type, remove $ref if it exists (it's incompatible with inline type)
-              const updates = { type: detail.selectedOption.value };
+              const updates: Record<string, unknown> = { type: detail.selectedOption.value };
               if (selectedAttribute.$ref) {
                 updates.$ref = undefined;
               }
@@ -298,7 +354,7 @@ const SchemaInspector = ({
                     }
                     onChange={({ detail }) => {
                       if (detail.selectedOption.value) {
-                        const updates = { ...selectedAttribute, $ref: detail.selectedOption.value };
+                        const updates: Record<string, unknown> = { ...selectedAttribute, $ref: detail.selectedOption.value };
                         // Remove inline object properties as they conflict with $ref
                         delete updates.properties;
                         delete updates.required;
@@ -311,7 +367,7 @@ const SchemaInspector = ({
                         }
                         onUpdate(updates);
                       } else {
-                        const updates = { ...selectedAttribute, $ref: undefined };
+                        const updates: Record<string, unknown> = { ...selectedAttribute, $ref: undefined };
                         // Restore type to object when removing $ref
                         if (!updates.type) {
                           updates.type = 'object';
@@ -332,7 +388,7 @@ const SchemaInspector = ({
                     <Button
                       iconName="external"
                       onClick={() => {
-                        const className = selectedAttribute.$ref.replace('#/$defs/', '');
+                        const className = selectedAttribute.$ref!.replace('#/$defs/', '');
                         const referencedClass = availableClasses.find((cls) => cls.name === className);
                         if (referencedClass) {
                           if (onNavigateToAttribute) {
@@ -388,7 +444,7 @@ const SchemaInspector = ({
                   <Button
                     iconName="external"
                     onClick={() => {
-                      const className = selectedAttribute.items.$ref.replace('#/$defs/', '');
+                      const className = selectedAttribute.items!.$ref!.replace('#/$defs/', '');
                       const referencedClass = availableClasses.find((cls) => cls.name === className);
                       if (referencedClass) {
                         if (onNavigateToAttribute) {
@@ -430,7 +486,7 @@ const SchemaInspector = ({
 
         {!isRuleSchema && (
           <>
-            <Header variant="h4">Assessment Configuration</Header>
+            <Header variant="h3">Assessment Configuration</Header>
 
             <FormField
               label="Confidence Threshold"
@@ -438,10 +494,8 @@ const SchemaInspector = ({
             >
               <Input
                 type="number"
-                step="0.01"
-                min="0"
-                max="1"
-                value={selectedAttribute[X_AWS_IDP_CONFIDENCE_THRESHOLD]?.toString() || ''}
+                inputMode="decimal"
+                value={(selectedAttribute[X_AWS_IDP_CONFIDENCE_THRESHOLD] as number)?.toString() || ''}
                 onChange={({ detail }) =>
                   onUpdate({
                     [X_AWS_IDP_CONFIDENCE_THRESHOLD]: detail.value ? parseFloat(detail.value) : undefined,
@@ -451,7 +505,7 @@ const SchemaInspector = ({
               />
             </FormField>
 
-            <Header variant="h4">Evaluation Configuration (Baseline Accuracy)</Header>
+            <Header variant="h3">Evaluation Configuration (Baseline Accuracy)</Header>
           </>
         )}
 
@@ -481,13 +535,13 @@ const SchemaInspector = ({
                   return opt.validFor.includes('array');
                 }
                 // For other types, check directly
-                return opt.validFor.includes(selectedAttribute.type);
+                return opt.validFor.includes(selectedAttribute.type as string);
               }
               // Default: allow for non-structured-arrays
               return !isStructuredArray;
             });
 
-            const currentMethod = selectedAttribute[X_AWS_IDP_EVALUATION_METHOD];
+            const currentMethod = selectedAttribute[X_AWS_IDP_EVALUATION_METHOD] as string | undefined;
 
             return (
               <>
@@ -496,22 +550,24 @@ const SchemaInspector = ({
                     selectedOption={availableMethods.find((opt) => opt.value === currentMethod) || null}
                     onChange={({ detail }) => {
                       const method = detail.selectedOption.value;
-                      const updates = {
+                      const updates: Record<string, unknown> = {
                         [X_AWS_IDP_EVALUATION_METHOD]: method,
                       };
 
                       // Auto-set appropriate threshold based on field type
                       if (isStructuredArray) {
                         // For structured arrays, use match_threshold
-                        if (EVALUATION_MATCH_THRESHOLD_DEFAULTS[method]) {
-                          updates[X_AWS_IDP_EVALUATION_MATCH_THRESHOLD] = EVALUATION_MATCH_THRESHOLD_DEFAULTS[method];
+                        if ((EVALUATION_MATCH_THRESHOLD_DEFAULTS as Record<string, number>)[method]) {
+                          updates[X_AWS_IDP_EVALUATION_MATCH_THRESHOLD] = (EVALUATION_MATCH_THRESHOLD_DEFAULTS as Record<string, number>)[
+                            method
+                          ];
                         }
                         // Clear regular threshold if present
                         updates[X_AWS_IDP_EVALUATION_THRESHOLD] = undefined;
                       } else {
                         // For regular fields, use threshold
-                        if (EVALUATION_THRESHOLD_DEFAULTS[method]) {
-                          updates[X_AWS_IDP_EVALUATION_THRESHOLD] = EVALUATION_THRESHOLD_DEFAULTS[method];
+                        if ((EVALUATION_THRESHOLD_DEFAULTS as Record<string, number>)[method]) {
+                          updates[X_AWS_IDP_EVALUATION_THRESHOLD] = (EVALUATION_THRESHOLD_DEFAULTS as Record<string, number>)[method];
                         }
                         // Clear match_threshold if present
                         updates[X_AWS_IDP_EVALUATION_MATCH_THRESHOLD] = undefined;
@@ -532,16 +588,14 @@ const SchemaInspector = ({
                   >
                     <Input
                       type="number"
-                      step="0.01"
-                      min="0"
-                      max="1"
-                      value={selectedAttribute[X_AWS_IDP_EVALUATION_MATCH_THRESHOLD]?.toString() || ''}
+                      inputMode="decimal"
+                      value={(selectedAttribute[X_AWS_IDP_EVALUATION_MATCH_THRESHOLD] as number)?.toString() || ''}
                       onChange={({ detail }) =>
                         onUpdate({
                           [X_AWS_IDP_EVALUATION_MATCH_THRESHOLD]: detail.value ? parseFloat(detail.value) : undefined,
                         })
                       }
-                      placeholder={`Default: ${EVALUATION_MATCH_THRESHOLD_DEFAULTS[currentMethod] || '0.8'}`}
+                      placeholder={`Default: ${(EVALUATION_MATCH_THRESHOLD_DEFAULTS as Record<string, number>)[currentMethod] || '0.8'}`}
                     />
                   </FormField>
                 )}
@@ -551,16 +605,14 @@ const SchemaInspector = ({
                   <FormField label="Evaluation Threshold" description="Minimum similarity score to consider a baseline match (0-1)">
                     <Input
                       type="number"
-                      step="0.01"
-                      min="0"
-                      max="1"
-                      value={selectedAttribute[X_AWS_IDP_EVALUATION_THRESHOLD]?.toString() || ''}
+                      inputMode="decimal"
+                      value={(selectedAttribute[X_AWS_IDP_EVALUATION_THRESHOLD] as number)?.toString() || ''}
                       onChange={({ detail }) =>
                         onUpdate({
                           [X_AWS_IDP_EVALUATION_THRESHOLD]: detail.value ? parseFloat(detail.value) : undefined,
                         })
                       }
-                      placeholder={`Default: ${EVALUATION_THRESHOLD_DEFAULTS[currentMethod] || ''}`}
+                      placeholder={`Default: ${(EVALUATION_THRESHOLD_DEFAULTS as Record<string, number>)[currentMethod] || ''}`}
                     />
                   </FormField>
                 )}
@@ -573,9 +625,8 @@ const SchemaInspector = ({
                   >
                     <Input
                       type="number"
-                      step="0.1"
-                      min="0.1"
-                      value={selectedAttribute[X_AWS_IDP_EVALUATION_WEIGHT]?.toString() || '1.0'}
+                      inputMode="decimal"
+                      value={(selectedAttribute[X_AWS_IDP_EVALUATION_WEIGHT] as number)?.toString() || '1.0'}
                       onChange={({ detail }) => {
                         const value = detail.value ? parseFloat(detail.value) : 1.0;
                         // Validate minimum
@@ -609,41 +660,3 @@ const SchemaInspector = ({
 
 // Memoize the component to prevent re-renders when props haven't changed
 export default React.memo(SchemaInspector);
-
-SchemaInspector.propTypes = {
-  selectedClass: PropTypes.shape({
-    name: PropTypes.string,
-    description: PropTypes.string,
-    X_AWS_IDP_DOCUMENT_TYPE: PropTypes.bool,
-  }),
-  selectedAttribute: PropTypes.shape({}),
-  selectedAttributeName: PropTypes.string,
-  onUpdate: PropTypes.func.isRequired,
-  onUpdateClass: PropTypes.func,
-  availableClasses: PropTypes.arrayOf(
-    PropTypes.shape({
-      name: PropTypes.string,
-      id: PropTypes.string,
-    }),
-  ),
-  isRequired: PropTypes.bool,
-  onToggleRequired: PropTypes.func,
-  onRenameAttribute: PropTypes.func,
-  onNavigateToClass: PropTypes.func,
-  onNavigateToAttribute: PropTypes.func,
-  isRuleSchema: PropTypes.bool,
-};
-
-SchemaInspector.defaultProps = {
-  selectedClass: null,
-  selectedAttribute: null,
-  selectedAttributeName: null,
-  availableClasses: [],
-  isRequired: false,
-  onToggleRequired: () => {},
-  onRenameAttribute: () => true,
-  onUpdateClass: () => {},
-  onNavigateToClass: null,
-  onNavigateToAttribute: null,
-  isRuleSchema: false,
-};

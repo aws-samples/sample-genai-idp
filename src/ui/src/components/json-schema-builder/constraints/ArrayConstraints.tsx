@@ -1,12 +1,34 @@
 import React from 'react';
-import PropTypes from 'prop-types';
 import { Header, FormField, Input, Checkbox, ExpandableSection, SpaceBetween } from '@cloudscape-design/components';
 import ContainsSchemaBuilder from './ContainsSchemaBuilder';
 
-const ArrayConstraints = ({ attribute, onUpdate, availableClasses }) => {
+interface SchemaAttribute {
+  type?: string;
+  minItems?: number;
+  maxItems?: number;
+  uniqueItems?: boolean;
+  contains?: Record<string, unknown>;
+  minContains?: number;
+  maxContains?: number;
+  [key: string]: unknown;
+}
+
+interface AvailableClass {
+  name: string;
+  id?: string;
+  description?: string;
+}
+
+interface ArrayConstraintsProps {
+  attribute: SchemaAttribute;
+  onUpdate: (updates: Partial<SchemaAttribute>) => void;
+  availableClasses?: AvailableClass[];
+}
+
+const ArrayConstraints = ({ attribute, onUpdate, availableClasses = [] }: ArrayConstraintsProps): React.JSX.Element | null => {
   if (attribute.type !== 'array') return null;
 
-  const handleContainsSchemaChange = (schema) => {
+  const handleContainsSchemaChange = (schema: Record<string, unknown> | null): void => {
     if (!schema || Object.keys(schema).length === 0) {
       const updates = { ...attribute };
       delete updates.contains;
@@ -21,7 +43,7 @@ const ArrayConstraints = ({ attribute, onUpdate, availableClasses }) => {
 
   return (
     <>
-      <Header variant="h4">Array Constraints</Header>
+      <Header variant="h3">Array Constraints</Header>
 
       <FormField label="Min Items" description="Minimum number of items expected in the array. Use 1 to require at least one item.">
         <Input
@@ -92,29 +114,6 @@ const ArrayConstraints = ({ attribute, onUpdate, availableClasses }) => {
       </ExpandableSection>
     </>
   );
-};
-
-ArrayConstraints.propTypes = {
-  attribute: PropTypes.shape({
-    type: PropTypes.string,
-    minItems: PropTypes.number,
-    maxItems: PropTypes.number,
-    uniqueItems: PropTypes.bool,
-    contains: PropTypes.shape({}),
-    minContains: PropTypes.number,
-    maxContains: PropTypes.number,
-  }).isRequired,
-  onUpdate: PropTypes.func.isRequired,
-  availableClasses: PropTypes.arrayOf(
-    PropTypes.shape({
-      name: PropTypes.string,
-      id: PropTypes.string,
-    }),
-  ),
-};
-
-ArrayConstraints.defaultProps = {
-  availableClasses: [],
 };
 
 export default ArrayConstraints;

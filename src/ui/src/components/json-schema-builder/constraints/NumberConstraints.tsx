@@ -1,13 +1,27 @@
 import React from 'react';
-import PropTypes from 'prop-types';
 import { Header, FormField, Input } from '@cloudscape-design/components';
 
-const NumberConstraints = ({ attribute, onUpdate }) => {
+interface SchemaAttribute {
+  type?: string;
+  minimum?: number;
+  maximum?: number;
+  exclusiveMinimum?: number;
+  exclusiveMaximum?: number;
+  multipleOf?: number;
+  [key: string]: unknown;
+}
+
+interface NumberConstraintsProps {
+  attribute: SchemaAttribute;
+  onUpdate: (updates: Partial<SchemaAttribute>) => void;
+}
+
+const NumberConstraints = ({ attribute, onUpdate }: NumberConstraintsProps): React.JSX.Element | null => {
   if (attribute.type !== 'number' && attribute.type !== 'integer') return null;
 
   return (
     <>
-      <Header variant="h4">Number Constraints</Header>
+      <Header variant="h3">Number Constraints</Header>
 
       <FormField label="Minimum" description="Minimum value (inclusive)">
         <Input
@@ -15,7 +29,7 @@ const NumberConstraints = ({ attribute, onUpdate }) => {
           step="any"
           value={attribute.minimum?.toString() || ''}
           onChange={({ detail }) => {
-            const updates = { minimum: detail.value ? parseFloat(detail.value) : undefined };
+            const updates: Partial<SchemaAttribute> = { minimum: detail.value ? parseFloat(detail.value) : undefined };
             if (detail.value && attribute.exclusiveMinimum !== undefined) {
               updates.exclusiveMinimum = undefined;
             }
@@ -31,7 +45,7 @@ const NumberConstraints = ({ attribute, onUpdate }) => {
           step="any"
           value={attribute.exclusiveMinimum?.toString() || ''}
           onChange={({ detail }) => {
-            const updates = { exclusiveMinimum: detail.value ? parseFloat(detail.value) : undefined };
+            const updates: Partial<SchemaAttribute> = { exclusiveMinimum: detail.value ? parseFloat(detail.value) : undefined };
             if (detail.value && attribute.minimum !== undefined) {
               updates.minimum = undefined;
             }
@@ -47,7 +61,7 @@ const NumberConstraints = ({ attribute, onUpdate }) => {
           step="any"
           value={attribute.maximum?.toString() || ''}
           onChange={({ detail }) => {
-            const updates = { maximum: detail.value ? parseFloat(detail.value) : undefined };
+            const updates: Partial<SchemaAttribute> = { maximum: detail.value ? parseFloat(detail.value) : undefined };
             if (detail.value && attribute.exclusiveMaximum !== undefined) {
               updates.exclusiveMaximum = undefined;
             }
@@ -63,7 +77,7 @@ const NumberConstraints = ({ attribute, onUpdate }) => {
           step="any"
           value={attribute.exclusiveMaximum?.toString() || ''}
           onChange={({ detail }) => {
-            const updates = { exclusiveMaximum: detail.value ? parseFloat(detail.value) : undefined };
+            const updates: Partial<SchemaAttribute> = { exclusiveMaximum: detail.value ? parseFloat(detail.value) : undefined };
             if (detail.value && attribute.maximum !== undefined) {
               updates.maximum = undefined;
             }
@@ -84,18 +98,6 @@ const NumberConstraints = ({ attribute, onUpdate }) => {
       </FormField>
     </>
   );
-};
-
-NumberConstraints.propTypes = {
-  attribute: PropTypes.shape({
-    type: PropTypes.string,
-    minimum: PropTypes.number,
-    maximum: PropTypes.number,
-    exclusiveMinimum: PropTypes.number,
-    exclusiveMaximum: PropTypes.number,
-    multipleOf: PropTypes.number,
-  }).isRequired,
-  onUpdate: PropTypes.func.isRequired,
 };
 
 export default NumberConstraints;

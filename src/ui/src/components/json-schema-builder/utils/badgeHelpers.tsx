@@ -3,11 +3,33 @@ import { Badge } from '@cloudscape-design/components';
 
 export const DOCUMENT_TYPE_BADGE_COLOR = 'blue';
 
-export const DocumentTypeBadge = ({ isRuleSchema = false }) => (
+interface DocumentTypeBadgeProps {
+  isRuleSchema?: boolean;
+}
+
+interface BadgeInfo {
+  text: string;
+  color: string;
+  className: string | null;
+}
+
+interface SchemaAttribute {
+  type?: string;
+  $ref?: string;
+  items?: {
+    type?: string;
+    $ref?: string;
+    properties?: Record<string, unknown>;
+    [key: string]: unknown;
+  };
+  [key: string]: unknown;
+}
+
+export const DocumentTypeBadge = ({ isRuleSchema = false }: DocumentTypeBadgeProps): React.JSX.Element => (
   <Badge color={DOCUMENT_TYPE_BADGE_COLOR}>{isRuleSchema ? 'Rule Type' : 'Document Type'}</Badge>
 );
 
-export const getTypeColor = (type) => {
+export const getTypeColor = (type: string | undefined): string => {
   switch (type) {
     case 'string':
       return 'blue';
@@ -24,7 +46,7 @@ export const getTypeColor = (type) => {
   }
 };
 
-export const getTypeBadgeText = (attribute) => {
+export const getTypeBadgeText = (attribute: SchemaAttribute | null | undefined): BadgeInfo | null => {
   if (!attribute) return null;
 
   // Object with reference: show as "ClassName" (without object prefix)
@@ -60,8 +82,8 @@ export const getTypeBadgeText = (attribute) => {
   return { text: typeValue, color: getTypeColor(typeValue), className: null };
 };
 
-export const formatTypeBadge = (attribute) => {
+export const formatTypeBadge = (attribute: SchemaAttribute | null | undefined): React.JSX.Element | null => {
   const badgeInfo = getTypeBadgeText(attribute);
   if (!badgeInfo) return null;
-  return <Badge color={badgeInfo.color}>{badgeInfo.text}</Badge>;
+  return <Badge color={badgeInfo.color as 'blue' | 'green' | 'grey' | 'red'}>{badgeInfo.text}</Badge>;
 };

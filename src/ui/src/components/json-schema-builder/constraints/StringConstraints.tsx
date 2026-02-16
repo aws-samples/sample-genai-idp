@@ -1,14 +1,27 @@
 import React from 'react';
-import PropTypes from 'prop-types';
 import { Header, FormField, Input, Select } from '@cloudscape-design/components';
 import { FORMAT_OPTIONS } from '../../../constants/schemaConstants';
 
-const StringConstraints = ({ attribute, onUpdate }) => {
+interface SchemaAttribute {
+  type?: string;
+  pattern?: string;
+  format?: string;
+  minLength?: number;
+  maxLength?: number;
+  [key: string]: unknown;
+}
+
+interface StringConstraintsProps {
+  attribute: SchemaAttribute;
+  onUpdate: (updates: Partial<SchemaAttribute>) => void;
+}
+
+const StringConstraints = ({ attribute, onUpdate }: StringConstraintsProps): React.JSX.Element | null => {
   if (attribute.type !== 'string') return null;
 
   return (
     <>
-      <Header variant="h4">String Constraints (JSON Schema)</Header>
+      <Header variant="h3">String Constraints (JSON Schema)</Header>
 
       <FormField label="Pattern (regex)" description="Regular expression pattern to validate the extracted string format">
         <Input
@@ -49,17 +62,6 @@ const StringConstraints = ({ attribute, onUpdate }) => {
       </FormField>
     </>
   );
-};
-
-StringConstraints.propTypes = {
-  attribute: PropTypes.shape({
-    type: PropTypes.string,
-    pattern: PropTypes.string,
-    format: PropTypes.string,
-    minLength: PropTypes.number,
-    maxLength: PropTypes.number,
-  }).isRequired,
-  onUpdate: PropTypes.func.isRequired,
 };
 
 export default StringConstraints;
