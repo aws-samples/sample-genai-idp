@@ -24,26 +24,51 @@ import Editor from '@monaco-editor/react';
 import yaml from 'js-yaml';
 import usePricing from '../../hooks/use-pricing';
 
-const PricingLayout = () => {
+interface PricingUnit {
+  name: string;
+  price: string;
+}
+
+interface PricingEntry {
+  name: string;
+  units: PricingUnit[];
+}
+
+interface PricingFormValues {
+  pricing: PricingEntry[];
+}
+
+interface ValidationError {
+  message: string;
+}
+
+interface PricingTableItem {
+  apiName: string;
+  displayName: string;
+  unitName: string;
+  price: string;
+}
+
+const PricingLayout = (): React.JSX.Element => {
   const { pricing, defaultPricing, loading, refreshing, error, updatePricing, fetchPricing, restoreDefaultPricing } = usePricing();
 
-  const [formValues, setFormValues] = useState({ pricing: [] });
+  const [formValues, setFormValues] = useState<PricingFormValues>({ pricing: [] });
   const [jsonContent, setJsonContent] = useState('');
   const [yamlContent, setYamlContent] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
-  const [saveError, setSaveError] = useState(null);
-  const [validationErrors, setValidationErrors] = useState([]);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [validationErrors, setValidationErrors] = useState<ValidationError[]>([]);
   const [viewMode, setViewMode] = useState('form');
   const [showExportModal, setShowExportModal] = useState(false);
   const [exportFormat, setExportFormat] = useState('json');
   const [exportFileName, setExportFileName] = useState('pricing');
-  const [importError, setImportError] = useState(null);
+  const [importError, setImportError] = useState<string | null>(null);
   const [showRestoreModal, setShowRestoreModal] = useState(false);
   const [isRestoring, setIsRestoring] = useState(false);
   const [showAddServiceModal, setShowAddServiceModal] = useState(false);
   const [newServiceName, setNewServiceName] = useState('');
-  const [newServiceUnits, setNewServiceUnits] = useState([{ name: '', price: '' }]);
+  const [newServiceUnits, setNewServiceUnits] = useState<{ name: string; price: string }[]>([{ name: '', price: '' }]);
 
   // Service display names mapping
   const serviceDisplayNames = {
@@ -64,15 +89,15 @@ const PricingLayout = () => {
   };
 
   // Get display name for a service
-  const getServiceDisplayName = (service) => {
+  const getServiceDisplayName = (service: string): string => {
     return serviceDisplayNames[service] || service.charAt(0).toUpperCase() + service.slice(1);
   };
 
   // Group pricing entries by service (extracted from name before "/")
-  const groupPricingByService = (pricingArray) => {
+  const groupPricingByService = (pricingArray: PricingEntry[]): Record<string, PricingEntry[]> => {
     if (!Array.isArray(pricingArray)) return {};
 
-    const grouped = {};
+    const grouped: Record<string, PricingEntry[]> = {};
     pricingArray.forEach((entry) => {
       if (entry.name && entry.name.includes('/')) {
         const [service] = entry.name.split('/');
@@ -106,12 +131,12 @@ const PricingLayout = () => {
   }, [pricing]);
 
   // Check if any pricing values are customized
-  const hasCustomizations = () => {
-    if (!defaultPricing || !formValues || !defaultPricing.pricing || !formValues.pricing) return false;
+  const hasCustomizations = (): boolean => {
+    if (!defaultPricing || !formValues || !(defaultPricing as PricingFormValues).pricing || !formValues.pricing) return false;
 
     // Compare pricing arrays
     const defaultMap = new Map();
-    defaultPricing.pricing.forEach((entry) => {
+    (defaultPricing as PricingFormValues).pricing.forEach((entry) => {
       if (entry.name && entry.units) {
         entry.units.forEach((unit) => {
           defaultMap.set(`${entry.name}:${unit.name}`, unit.price);
@@ -134,7 +159,7 @@ const PricingLayout = () => {
   };
 
   // Handle changes in the JSON editor
-  const handleJsonEditorChange = (value) => {
+  const handleJsonEditorChange = (value: string | undefined): void => {
     setJsonContent(value);
     try {
       const parsedValue = JSON.parse(value);
@@ -154,7 +179,7 @@ const PricingLayout = () => {
   };
 
   // Handle changes in the YAML editor
-  const handleYamlEditorChange = (value) => {
+  const handleYamlEditorChange = (value: string | undefined): void => {
     setYamlContent(value);
     try {
       const parsedValue = yaml.load(value);
@@ -267,13 +292,13 @@ const PricingLayout = () => {
     setNewServiceUnits([...newServiceUnits, { name: '', price: '' }]);
   };
 
-  const handleRemoveUnit = (index) => {
+  const handleRemoveUnit = (index: number): void => {
     if (newServiceUnits.length > 1) {
       setNewServiceUnits(newServiceUnits.filter((_, i) => i !== index));
     }
   };
 
-  const handleUpdateUnit = (index, field, value) => {
+  const handleUpdateUnit = (index: number, field: 'name' | 'price', value: string): void => {
     const updated = [...newServiceUnits];
     updated[index][field] = value;
     setNewServiceUnits(updated);
@@ -310,15 +335,15 @@ const PricingLayout = () => {
     }
   };
 
-  const handleImport = (event) => {
-    const file = event.target.files[0];
+  const handleImport = (event: React.ChangeEvent<HTMLInputElement>): void => {
+    const file = event.target.files?.[0];
     if (!file) return;
 
     const reader = new FileReader();
-    reader.onload = (e) => {
+    reader.onload = (e: ProgressEvent<FileReader>) => {
       try {
         setImportError(null);
-        const content = e.target.result;
+        const content = e.target?.result as string;
 
         const importedPricing = file.name.endsWith('.yaml') || file.name.endsWith('.yml') ? yaml.load(content) : JSON.parse(content);
 
@@ -344,7 +369,7 @@ const PricingLayout = () => {
   };
 
   // Update a specific unit price
-  const updateUnitPrice = (apiName, unitName, newPrice) => {
+  const updateUnitPrice = (apiName: string, unitName: string, newPrice: string): void => {
     const newFormValues = JSON.parse(JSON.stringify(formValues));
     const entry = newFormValues.pricing.find((e) => e.name === apiName);
     if (entry && entry.units) {
@@ -363,7 +388,7 @@ const PricingLayout = () => {
   };
 
   // Delete a specific unit
-  const handleDeleteUnit = (apiName, unitName) => {
+  const handleDeleteUnit = (apiName: string, unitName: string): void => {
     const newFormValues = JSON.parse(JSON.stringify(formValues));
     const entry = newFormValues.pricing.find((e) => e.name === apiName);
     if (entry && entry.units) {
@@ -383,7 +408,7 @@ const PricingLayout = () => {
   };
 
   // Delete an entire API/service entry
-  const handleDeleteService = (apiName) => {
+  const handleDeleteService = (apiName: string): void => {
     const newFormValues = JSON.parse(JSON.stringify(formValues));
     newFormValues.pricing = newFormValues.pricing.filter((e) => e.name !== apiName);
     setFormValues(newFormValues);
@@ -396,13 +421,13 @@ const PricingLayout = () => {
   };
 
   // Render pricing table for a service
-  const renderServiceTable = (serviceEntries) => {
+  const renderServiceTable = (serviceEntries: PricingEntry[]): React.JSX.Element | null => {
     if (!serviceEntries || serviceEntries.length === 0) {
       return <Box color="text-status-inactive">No pricing data configured</Box>;
     }
 
     // Flatten entries into rows: API name + each unit as a row
-    const items = [];
+    const items: PricingTableItem[] = [];
     serviceEntries.forEach((entry) => {
       if (entry.units && Array.isArray(entry.units)) {
         entry.units.forEach((unit) => {
@@ -470,7 +495,7 @@ const PricingLayout = () => {
   };
 
   // Render a service section
-  const renderServiceSection = (service, serviceEntries) => {
+  const renderServiceSection = (service: string, serviceEntries: PricingEntry[]): React.JSX.Element => {
     return (
       <ExpandableSection headerText={`${getServiceDisplayName(service)} Pricing`} defaultExpanded={false} key={service}>
         <Box padding="s">{renderServiceTable(serviceEntries)}</Box>
@@ -496,7 +521,7 @@ const PricingLayout = () => {
           <SpaceBetween size="s">
             <div>{error}</div>
             <Box>
-              <Button onClick={fetchPricing} variant="primary">
+              <Button onClick={() => fetchPricing()} variant="primary">
                 Retry
               </Button>
             </Box>
@@ -513,7 +538,7 @@ const PricingLayout = () => {
           <SpaceBetween size="s">
             <div>Unable to load pricing data.</div>
             <Box>
-              <Button onClick={fetchPricing} variant="primary">
+              <Button onClick={() => fetchPricing()} variant="primary">
                 Retry
               </Button>
             </Box>
@@ -719,10 +744,10 @@ const PricingLayout = () => {
         <Form>
           {refreshing && (
             <Alert type="info" header="Syncing pricing...">
-              <Box display="flex" alignItems="center">
+              <div style={{ display: 'flex', alignItems: 'center' }}>
                 <Spinner size="normal" />
                 <Box margin={{ left: 's' }}>Refreshing data from server</Box>
-              </Box>
+              </div>
             </Alert>
           )}
 

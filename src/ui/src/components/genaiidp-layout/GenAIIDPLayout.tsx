@@ -1,7 +1,6 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 import React, { useState } from 'react';
-import PropTypes from 'prop-types';
 import { Routes, Route } from 'react-router-dom';
 import { AppLayout, Flashbar } from '@cloudscape-design/components';
 
@@ -34,7 +33,11 @@ import { DOCUMENT_LIST_SHARDS_PER_DAY, PERIODS_TO_LOAD_STORAGE_KEY } from '../do
 
 const logger = new ConsoleLogger('GenAIIDPLayout');
 
-const GenAIIDPLayout = ({ children }) => {
+interface GenAIIDPLayoutProps {
+  children?: React.ReactNode;
+}
+
+const GenAIIDPLayout = ({ children }: GenAIIDPLayoutProps): React.JSX.Element => {
   const { navigationOpen, setNavigationOpen } = useAppContext();
 
   const notifications = useNotifications();
@@ -106,10 +109,10 @@ const GenAIIDPLayout = ({ children }) => {
       <AppLayout
         headerSelector="#top-navigation"
         navigation={<Navigation />}
-        navigationOpen={navigationOpen}
-        onNavigationChange={({ detail }) => setNavigationOpen(detail.open)}
+        navigationOpen={navigationOpen as boolean}
+        onNavigationChange={({ detail }) => (setNavigationOpen as (open: boolean) => void)(detail.open)}
         breadcrumbs={<Breadcrumbs />}
-        notifications={<Flashbar items={notifications} />}
+        notifications={<Flashbar items={notifications as import('@cloudscape-design/components').FlashbarProps.MessageDefinition[]} />}
         tools={<ToolsPanel />}
         toolsOpen={toolsOpen}
         onToolsChange={({ detail }) => setToolsOpen(detail.open)}
@@ -137,10 +140,6 @@ const GenAIIDPLayout = ({ children }) => {
       />
     </DocumentsContext.Provider>
   );
-};
-
-GenAIIDPLayout.propTypes = {
-  children: PropTypes.node,
 };
 
 export default GenAIIDPLayout;

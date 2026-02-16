@@ -2,10 +2,14 @@
 // SPDX-License-Identifier: MIT-0
 
 import React from 'react';
-import PropTypes from 'prop-types';
 import { Table, Box, SpaceBetween, Badge, Header, ButtonDropdown } from '@cloudscape-design/components';
 
-const ConfigurationComparison = ({ versions, configs }) => {
+interface ConfigurationComparisonProps {
+  versions: string[];
+  configs: Record<string, unknown>;
+}
+
+const ConfigurationComparison = ({ versions, configs }: ConfigurationComparisonProps): React.JSX.Element => {
   // Safety checks
   if (!versions || !Array.isArray(versions) || !configs) {
     return (
@@ -19,18 +23,18 @@ const ConfigurationComparison = ({ versions, configs }) => {
   }
 
   // Find differences between configurations with deep diff support for classes and rules
-  const findDifferences = (configsToCompare) => {
-    const differences = [];
+  const findDifferences = (configsToCompare: Record<string, unknown>) => {
+    const differences: { field: string; values: Record<string, string> }[] = [];
     const ignoredFields = new Set(['UpdatedAt', 'Description', 'CreatedAt', 'IsActive', 'Configuration', 'version_name']);
 
     // Check if an array contains identity-keyed objects (e.g., classes, rule_classes with $id fields)
-    const isIdentityKeyedArray = (arr) => {
+    const isIdentityKeyedArray = (arr: unknown): boolean => {
       return Array.isArray(arr) && arr.length > 0 && arr.every((item) => typeof item === 'object' && item !== null && '$id' in item);
     };
 
     // Recursively extract all leaf paths from a value, using $id-based keys for identity arrays
-    const getPathsFromValue = (value, currentPath) => {
-      const paths = [];
+    const getPathsFromValue = (value: unknown, currentPath: string): string[] => {
+      const paths: string[] = [];
 
       if (Array.isArray(value)) {
         if (isIdentityKeyedArray(value)) {
@@ -61,9 +65,9 @@ const ConfigurationComparison = ({ versions, configs }) => {
 
     // Get nested value using dot notation path with identity-keyed array bracket support
     // Supports paths like: "classes[Payslip].description" or "rule_classes[global_periods].rule_properties.field"
-    const getNestedValue = (dictionary, path) => {
+    const getNestedValue = (dictionary: Record<string, unknown>, path: string): unknown => {
       const parts = path.split('.');
-      let current = dictionary;
+      let current: Record<string, unknown> | null = dictionary;
 
       for (const part of parts) {
         if (current === null || current === undefined) return null;
@@ -75,9 +79,9 @@ const ConfigurationComparison = ({ versions, configs }) => {
           const id = bracketMatch[2];
           const arr = current[arrayKey];
           if (!Array.isArray(arr)) return null;
-          current = arr.find((item) => item && item['$id'] === id) || null;
+          current = (arr.find((item) => item && item['$id'] === id) || null) as Record<string, unknown> | null;
         } else if (typeof current === 'object' && current !== null && part in current) {
-          current = current[part];
+          current = current[part] as Record<string, unknown> | null;
         } else {
           return null;
         }
@@ -86,7 +90,7 @@ const ConfigurationComparison = ({ versions, configs }) => {
     };
 
     // Get all possible paths from all configs
-    const allPaths = new Set();
+    const allPaths = new Set<string>();
     Object.values(configsToCompare).forEach((config) => {
       getPathsFromValue(config || {}, '').forEach((path) => {
         if (path) allPaths.add(path);
@@ -97,7 +101,7 @@ const ConfigurationComparison = ({ versions, configs }) => {
     const sortedPaths = Array.from(allPaths).sort();
 
     // Stringify a value for comparison (handles arrays, objects, primitives)
-    const stringifyValue = (value) => {
+    const stringifyValue = (value: unknown): string => {
       if (value === null || value === undefined) return '<missing>';
       if (typeof value === 'string') return value.trim();
       if (typeof value === 'object') return JSON.stringify(value);
@@ -105,13 +109,13 @@ const ConfigurationComparison = ({ versions, configs }) => {
     };
 
     // Numeric-aware comparison: treats "5" and "5.0" as equal
-    const isNumeric = (v) => {
+    const isNumeric = (v: unknown): boolean => {
       if (v === '<missing>') return false;
       if (typeof v === 'number') return true;
       if (typeof v === 'string' && v.trim() !== '') return !Number.isNaN(Number(v));
       return false;
     };
-    const areStrValuesEqual = (a, b) => {
+    const areStrValuesEqual = (a: string, b: string): boolean => {
       if (a === b) return true;
       if (isNumeric(a) && isNumeric(b)) return Number(a) === Number(b);
       return false;
@@ -119,14 +123,14 @@ const ConfigurationComparison = ({ versions, configs }) => {
 
     // Check each path for differences
     sortedPaths.forEach((path) => {
-      const values = {};
+      const values: Record<string, string> = {};
       let hasDifferences = false;
-      let firstValue = null;
+      let firstValue: string | null = null;
       let firstValueSet = false;
 
       versions.forEach((version) => {
         const config = configsToCompare[version];
-        const value = getNestedValue(config || {}, path);
+        const value = getNestedValue((config || {}) as Record<string, unknown>, path);
         const strValue = stringifyValue(value);
 
         values[version] = strValue;
@@ -153,7 +157,7 @@ const ConfigurationComparison = ({ versions, configs }) => {
   };
 
   // Format value for display
-  const formatValue = (value) => {
+  const formatValue = (value: unknown): React.ReactNode => {
     if (value === '<missing>') return <Badge color="grey">Missing</Badge>;
     if (value === undefined) return <Badge color="grey">Not set</Badge>;
     if (value === null) return <Badge color="grey">null</Badge>;
@@ -288,11 +292,6 @@ const ConfigurationComparison = ({ versions, configs }) => {
       )}
     </SpaceBetween>
   );
-};
-
-ConfigurationComparison.propTypes = {
-  versions: PropTypes.arrayOf(PropTypes.string).isRequired,
-  configs: PropTypes.object.isRequired,
 };
 
 export default ConfigurationComparison;

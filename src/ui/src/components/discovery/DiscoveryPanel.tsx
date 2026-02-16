@@ -21,6 +21,7 @@ import {
   ColumnLayout,
   Select,
 } from '@cloudscape-design/components';
+import type { SelectProps } from '@cloudscape-design/components';
 import { generateClient } from 'aws-amplify/api';
 
 import uploadDiscoveryDocument from '../../graphql/queries/uploadDiscoveryDocument';
@@ -32,19 +33,38 @@ import { getJsonValidationError } from '../common/utilities';
 
 const client = generateClient();
 
-const DiscoveryPanel = () => {
-  const { settings } = useSettingsContext();
+interface UploadStatusItem {
+  file: string;
+  type: string;
+  status: 'success' | 'error';
+  objectKey?: string;
+  error?: string;
+}
+
+interface DiscoveryJob {
+  jobId: string;
+  documentKey?: string;
+  groundTruthKey?: string;
+  version?: string;
+  status: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+const DiscoveryPanel = (): React.JSX.Element => {
+  const { settings: rawSettings } = useSettingsContext() || {};
+  const settings = rawSettings as Record<string, unknown> | undefined;
   const { versions, loading: versionsLoading, getVersionOptions } = useConfigurationVersions();
-  const [documentFile, setDocumentFile] = useState(null);
-  const [groundTruthFile, setGroundTruthFile] = useState(null);
+  const [documentFile, setDocumentFile] = useState<File | null>(null);
+  const [groundTruthFile, setGroundTruthFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
-  const [uploadStatus, setUploadStatus] = useState([]);
-  const [error, setError] = useState(null);
+  const [uploadStatus, setUploadStatus] = useState<UploadStatusItem[]>([]);
+  const [error, setError] = useState<string | null>(null);
   const [prefix, setPrefix] = useState('');
-  const [discoveryJobs, setDiscoveryJobs] = useState([]);
+  const [discoveryJobs, setDiscoveryJobs] = useState<DiscoveryJob[]>([]);
   const [isLoadingJobs, setIsLoadingJobs] = useState(false);
   const [isValidatingJson, setIsValidatingJson] = useState(false);
-  const [selectedVersion, setSelectedVersion] = useState(null);
+  const [selectedVersion, setSelectedVersion] = useState<SelectProps.Option | null>(null);
   // Remove unused activeSubscriptions state since we manage subscriptions locally in useEffect
 
   // Set default active version when versions load
@@ -63,7 +83,7 @@ const DiscoveryPanel = () => {
   }, [versions, selectedVersion, getVersionOptions]);
 
   // Debounced status update to prevent rapid DOM changes
-  const debouncedSetUploadStatus = useCallback((statusArray) => {
+  const debouncedSetUploadStatus = useCallback((statusArray: UploadStatusItem[]) => {
     setTimeout(() => {
       setUploadStatus([...statusArray]);
     }, 50);
@@ -72,15 +92,17 @@ const DiscoveryPanel = () => {
   const loadDiscoveryJobs = async () => {
     setIsLoadingJobs(true);
     try {
-      const response = await client.graphql({ query: listDiscoveryJobs });
+      const response = await client.graphql({ query: listDiscoveryJobs as unknown as string });
       // Access the DiscoveryJobs array from the response
       console.log('loadDiscoveryJobs done');
       console.log(response);
-      setDiscoveryJobs(response.data.listDiscoveryJobs?.DiscoveryJobs || []);
+      type ListJobsResp = Record<string, Record<string, Record<string, DiscoveryJob[]>>>;
+      const jobs = (response as unknown as ListJobsResp).data.listDiscoveryJobs?.DiscoveryJobs || [];
+      setDiscoveryJobs(jobs);
     } catch (err) {
       console.error(err);
       console.error('Error loading discovery jobs:', err);
-      setError(`Failed to load discovery jobs: ${err.message}`);
+      setError(`Failed to load discovery jobs: ${(err as Error).message}`);
     } finally {
       setIsLoadingJobs(false);
     }
@@ -101,7 +123,7 @@ const DiscoveryPanel = () => {
 
     // Suppress window errors
     window.onerror = (message, source, lineno, colno, errorObj) => {
-      if (message?.includes?.('ResizeObserver loop completed with undelivered notifications')) {
+      if (typeof message === 'string' && message?.includes?.('ResizeObserver loop completed with undelivered notifications')) {
         return true; // Prevent default error handling
       }
       if (originalWindowError) {
@@ -111,7 +133,7 @@ const DiscoveryPanel = () => {
     };
 
     // Also handle unhandled promise rejections
-    const handleUnhandledRejection = (event) => {
+    const handleUnhandledRejection = (event: PromiseRejectionEvent) => {
       if (event.reason?.message?.includes?.('ResizeObserver loop completed with undelivered notifications')) {
         event.preventDefault();
       }
@@ -136,7 +158,7 @@ const DiscoveryPanel = () => {
   // For now, we'll rely on the upload process to refresh the list
 
   // Update a specific job in the list
-  const updateDiscoveryJob = useCallback((updatedJob) => {
+  const updateDiscoveryJob = useCallback((updatedJob: DiscoveryJob) => {
     console.log('Updating discovery job status:', updatedJob);
     setDiscoveryJobs((currentJobs) => {
       const jobIndex = currentJobs.findIndex((job) => job.jobId === updatedJob.jobId);
@@ -167,9 +189,14 @@ const DiscoveryPanel = () => {
       if (job.status === 'PENDING' || job.status === 'IN_PROGRESS') {
         console.log(`Setting up subscription for discovery job: ${job.jobId}`);
 
-        const subscription = client
-          .graphql({ query: onDiscoveryJobStatusChange, variables: { jobId: job.jobId } })
-          .subscribe({
+        type GqlSubscription = {
+          subscribe: (callbacks: Record<string, unknown>) => { unsubscribe: () => void };
+        };
+        const observable = client.graphql({
+          query: onDiscoveryJobStatusChange as unknown as string,
+          variables: { jobId: job.jobId },
+        }) as unknown as GqlSubscription;
+        const subscription = observable.subscribe({
             next: (data) => {
               console.log('Discovery job status changed:', data);
               const updatedJob = data?.data?.onDiscoveryJobStatusChange;
@@ -209,15 +236,15 @@ const DiscoveryPanel = () => {
     );
   }
 
-  const handleDocumentFileChange = (e) => {
-    const file = e.target.files[0];
+  const handleDocumentFileChange = (e: React.ChangeEvent<HTMLInputElement>): void => {
+    const file = e.target.files?.[0] || null;
     setDocumentFile(file);
     setUploadStatus([]);
     setError(null);
   };
 
-  const handleGroundTruthFileChange = (e) => {
-    const file = e.target.files[0];
+  const handleGroundTruthFileChange = (e: React.ChangeEvent<HTMLInputElement>): void => {
+    const file = e.target.files?.[0];
     if (!file) {
       setGroundTruthFile(null);
       setUploadStatus([]);
@@ -238,9 +265,9 @@ const DiscoveryPanel = () => {
 
     // Validate JSON content
     const reader = new FileReader();
-    reader.onload = (event) => {
+    reader.onload = (event: ProgressEvent<FileReader>) => {
       try {
-        const content = event.target.result;
+        const content = event.target?.result as string;
 
         // Check if file is empty
         if (!content || content.trim().length === 0) {
@@ -278,11 +305,13 @@ const DiscoveryPanel = () => {
     reader.readAsText(file);
   };
 
-  const handlePrefixChange = (e) => {
-    setPrefix(e.detail.value);
+  const handlePrefixChange = ({ detail }: { detail: { value: string } }): void => {
+    setPrefix(detail.value);
   };
 
-  const uploadFileToS3 = async (file, presignedUrl, objectKey, fileType, statusArray) => {
+  const uploadFileToS3 = async (
+    file: File, presignedUrl: string, objectKey: string, fileType: string, statusArray: UploadStatusItem[],
+  ): Promise<void> => {
     try {
       const presignedPostData = JSON.parse(presignedUrl);
       console.log(`Parsed presigned POST data for ${fileType}:`, presignedPostData);
@@ -291,7 +320,7 @@ const DiscoveryPanel = () => {
 
       // Add all the fields from the presigned POST data to the form
       Object.entries(presignedPostData.fields).forEach(([key, value]) => {
-        formData.append(key, value);
+        formData.append(key, value as string);
       });
 
       // Append the file last
@@ -325,7 +354,7 @@ const DiscoveryPanel = () => {
         file: file.name,
         type: fileType,
         status: 'error',
-        error: err.message,
+        error: (err as Error).message,
       });
     }
 
@@ -343,7 +372,7 @@ const DiscoveryPanel = () => {
     setUploadStatus([]);
     setError(null);
 
-    const newUploadStatus = [];
+    const newUploadStatus: UploadStatusItem[] = [];
 
     try {
       // Upload document file
@@ -355,7 +384,7 @@ const DiscoveryPanel = () => {
       }
 
       const documentResponse = await client.graphql({
-        query: uploadDiscoveryDocument,
+        query: uploadDiscoveryDocument as unknown as string,
         variables: {
           fileName: documentFile.name,
           contentType: documentFile.type,
@@ -366,13 +395,13 @@ const DiscoveryPanel = () => {
         },
       });
 
-      const {
-        presignedUrl: docPresignedUrl,
-        objectKey: docObjectKey,
-        usePostMethod: docUsePostMethod,
-        groundTruthObjectKey: docGroundTruthObjectKey,
-        groundTruthPresignedUrl: docGroundTruthPresignedUrl,
-      } = documentResponse.data.uploadDiscoveryDocument;
+      type UploadResp = Record<string, Record<string, Record<string, unknown>>>;
+      const uploadResult = (documentResponse as unknown as UploadResp).data.uploadDiscoveryDocument;
+      const docPresignedUrl = uploadResult.presignedUrl as string;
+      const docObjectKey = uploadResult.objectKey as string;
+      const docUsePostMethod = uploadResult.usePostMethod as boolean;
+      const docGroundTruthObjectKey = uploadResult.groundTruthObjectKey as string;
+      const docGroundTruthPresignedUrl = uploadResult.groundTruthPresignedUrl as string;
 
       if (!docUsePostMethod) {
         throw new Error('Server returned PUT method which is not supported. Please update your backend code.');
@@ -399,7 +428,7 @@ const DiscoveryPanel = () => {
       await loadDiscoveryJobs();
     } catch (err) {
       console.error('Error in overall upload process:', err);
-      setError(`Upload process failed: ${err.message}`);
+      setError(`Upload process failed: ${(err as Error).message}`);
     } finally {
       setIsUploading(false);
     }
@@ -411,7 +440,7 @@ const DiscoveryPanel = () => {
   };
  */
 
-  const getStatusIcon = (status) => {
+  const getStatusIcon = (status: string): React.JSX.Element => {
     switch (status) {
       case 'COMPLETED':
         return <StatusIndicator type="success">Completed</StatusIndicator>;
@@ -430,43 +459,43 @@ const DiscoveryPanel = () => {
     {
       id: 'jobId',
       header: 'Job ID',
-      cell: (item) => item.jobId || 'N/A',
+      cell: (item: DiscoveryJob) => item.jobId || 'N/A',
       sortingField: 'jobId',
     },
     {
       id: 'documentKey',
       header: 'Document',
-      cell: (item) => (item.documentKey ? item.documentKey.split('/').pop() : 'N/A'),
+      cell: (item: DiscoveryJob) => (item.documentKey ? item.documentKey.split('/').pop() : 'N/A'),
       sortingField: 'documentKey',
     },
     {
       id: 'groundTruthKey',
       header: 'Ground Truth',
-      cell: (item) => (item.groundTruthKey ? item.groundTruthKey.split('/').pop() : 'N/A'),
+      cell: (item: DiscoveryJob) => (item.groundTruthKey ? item.groundTruthKey.split('/').pop() : 'N/A'),
       sortingField: 'groundTruthKey',
     },
     {
       id: 'version',
       header: 'Version',
-      cell: (item) => item.version || 'N/A',
+      cell: (item: DiscoveryJob) => item.version || 'N/A',
       sortingField: 'version',
     },
     {
       id: 'status',
       header: 'Status',
-      cell: (item) => getStatusIcon(item.status),
+      cell: (item: DiscoveryJob) => getStatusIcon(item.status),
       sortingField: 'status',
     },
     {
       id: 'createdAt',
       header: 'Created At',
-      cell: (item) => item.createdAt || 'N/A',
+      cell: (item: DiscoveryJob) => item.createdAt || 'N/A',
       sortingField: 'createdAt',
     },
     {
       id: 'updatedAt',
       header: 'Updated At',
-      cell: (item) => item.updatedAt || 'N/A',
+      cell: (item: DiscoveryJob) => item.updatedAt || 'N/A',
       sortingField: 'updatedAt',
     },
   ];

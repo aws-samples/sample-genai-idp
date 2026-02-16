@@ -29,11 +29,19 @@ import deleteUserMutation from '../../graphql/mutations/deleteUser';
 
 const logger = new ConsoleLogger('UserManagementLayout');
 
-const UserManagementLayout = () => {
+interface User {
+  userId: string;
+  email: string;
+  persona: string;
+  status?: string;
+  createdAt?: string;
+}
+
+const UserManagementLayout = (): React.JSX.Element => {
   const { awsConfig } = useAppContext();
   const { settings } = useSettingsContext();
   const { isAdmin, loading: roleLoading } = useUserRole();
-  const [users, setUsers] = useState([]);
+  const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -44,7 +52,7 @@ const UserManagementLayout = () => {
   const [emailError, setEmailError] = useState('');
 
   const allowedDomains = useMemo(() => {
-    const domains = settings?.AllowedSignUpEmailDomains || '';
+    const domains = ((settings as Record<string, unknown>)?.AllowedSignUpEmailDomains as string) || '';
     return domains
       ? domains
           .split(',')
@@ -59,7 +67,7 @@ const UserManagementLayout = () => {
   ];
 
   const validateEmail = useCallback(
-    (emailValue) => {
+    (emailValue: string): string => {
       if (!emailValue) {
         return '';
       }
@@ -78,7 +86,7 @@ const UserManagementLayout = () => {
     [allowedDomains],
   );
 
-  const handleEmailChange = ({ detail }) => {
+  const handleEmailChange = ({ detail }: { detail: { value: string } }): void => {
     setEmail(detail.value);
     setEmailError(validateEmail(detail.value));
   };
@@ -100,8 +108,9 @@ const UserManagementLayout = () => {
       try {
         const client = generateClient();
         logger.debug('Loading users...');
-        const result = await client.graphql({ query: listUsers });
-        const usersList = result.data?.listUsers?.users || [];
+        const result = await client.graphql({ query: listUsers as unknown as string });
+        const usersList =
+          (((result as { data: Record<string, unknown> }).data?.listUsers as Record<string, unknown>)?.users as User[]) || [];
         logger.debug(`Loaded ${usersList.length} users`);
         setUsers(usersList);
       } catch (err) {
@@ -161,7 +170,7 @@ const UserManagementLayout = () => {
     }
   };
 
-  const deleteUser = async (userId, userEmail) => {
+  const deleteUser = async (userId: string, userEmail: string): Promise<void> => {
     if (!window.confirm(`Are you sure you want to delete user ${userEmail}?`)) {
       return;
     }
@@ -243,7 +252,7 @@ const UserManagementLayout = () => {
     {
       id: 'persona',
       header: 'Role',
-      cell: (item) => <Box color={item.persona === 'Admin' ? 'text-status-info' : 'text-body-default'}>{item.persona}</Box>,
+      cell: (item) => <Box color={item.persona === 'Admin' ? 'text-status-info' : 'inherit'}>{item.persona}</Box>,
       sortingField: 'persona',
     },
     {

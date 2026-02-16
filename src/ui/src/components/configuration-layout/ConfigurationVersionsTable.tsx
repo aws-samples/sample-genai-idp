@@ -2,9 +2,29 @@
 // SPDX-License-Identifier: MIT-0
 
 import React, { useState } from 'react';
-import PropTypes from 'prop-types';
 import { Table, Box, SpaceBetween, Badge, Link, Button, Header, Pagination, TextFilter, Alert } from '@cloudscape-design/components';
 import { useCollection } from '@cloudscape-design/collection-hooks';
+
+interface ConfigVersion {
+  versionName: string;
+  isActive?: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+  description?: string;
+}
+
+interface ConfigurationVersionsTableProps {
+  versions?: ConfigVersion[];
+  loading?: boolean;
+  onVersionSelect?: (versionName: string) => void;
+  selectedVersionsForCompare?: string[];
+  currentlyOpenVersion?: string | null;
+  onVersionSelectForCompare?: (versionName: string, selected: boolean) => void;
+  onCompareVersions?: () => void;
+  onActivateVersion?: (versionName: string) => void;
+  onDeleteVersions?: (versionNames: string[]) => void;
+  onImportAsNewVersion?: () => void;
+}
 
 const ConfigurationVersionsTable = ({
   versions = [],
@@ -17,12 +37,12 @@ const ConfigurationVersionsTable = ({
   onActivateVersion,
   onDeleteVersions,
   onImportAsNewVersion,
-}) => {
+}: ConfigurationVersionsTableProps): React.JSX.Element => {
   // Log the versions data to console for debugging
   console.log('ConfigurationVersionsTable - versions data:', versions);
   console.log('ConfigurationVersionsTable - loading:', loading);
 
-  const [deleteError, setDeleteError] = useState(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const columnDefinitions = [
     {
@@ -163,7 +183,7 @@ const ConfigurationVersionsTable = ({
         }
         header={
           <SpaceBetween size="s">
-            <Header variant="h4">Configuration Versions ({filteredItemsCount})</Header>
+            <Header variant="h3">Configuration Versions ({filteredItemsCount})</Header>
             {/* Action buttons row */}
             <SpaceBetween direction="horizontal" size="xs">
               <Button onClick={onCompareVersions} disabled={selectedVersionsForCompare.length < 2}>
@@ -204,32 +224,11 @@ const ConfigurationVersionsTable = ({
             </SpaceBetween>
           </SpaceBetween>
         }
-        filter={<TextFilter {...filterProps} placeholder="Search versions..." />}
+        filter={<TextFilter {...filterProps} filteringPlaceholder="Search versions..." />}
         pagination={<Pagination {...paginationProps} />}
       />
     </SpaceBetween>
   );
-};
-
-ConfigurationVersionsTable.propTypes = {
-  versions: PropTypes.arrayOf(
-    PropTypes.shape({
-      versionName: PropTypes.string.isRequired,
-      isActive: PropTypes.bool,
-      createdAt: PropTypes.string,
-      updatedAt: PropTypes.string,
-      description: PropTypes.string,
-    }),
-  ),
-  loading: PropTypes.bool,
-  onVersionSelect: PropTypes.func,
-  selectedVersionsForCompare: PropTypes.arrayOf(PropTypes.string),
-  currentlyOpenVersion: PropTypes.string,
-  onVersionSelectForCompare: PropTypes.func,
-  onCompareVersions: PropTypes.func,
-  onActivateVersion: PropTypes.func,
-  onDeleteVersions: PropTypes.func,
-  onImportAsNewVersion: PropTypes.func,
 };
 
 export default ConfigurationVersionsTable;

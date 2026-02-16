@@ -39,10 +39,35 @@ const client = generateClient();
 const logger = new ConsoleLogger('ConfigurationLayout');
 
 // Utility function to normalize boolean values from strings (same as use-configuration.js)
-const normalizeBooleans = (obj, schema) => {
+interface SchemaProperty {
+  type?: string;
+  properties?: Record<string, SchemaProperty>;
+  items?: SchemaProperty;
+}
+
+interface ConfigSchema {
+  properties?: Record<string, SchemaProperty>;
+  [key: string]: unknown;
+}
+
+interface LibraryConfigItem {
+  name: string;
+  description?: string;
+  readme?: string;
+  config?: Record<string, unknown>;
+  hasReadme?: boolean;
+  path?: string;
+  configFileType?: string;
+  [key: string]: unknown;
+}
+
+const normalizeBooleans = (
+  obj: Record<string, unknown> | null | undefined,
+  schema: ConfigSchema | null | undefined,
+): Record<string, unknown> | null | undefined => {
   if (!obj || !schema) return obj;
 
-  const normalizeValue = (value, propertySchema) => {
+  const normalizeValue = (value: unknown, propertySchema: SchemaProperty | undefined): unknown => {
     if (propertySchema?.type === 'boolean') {
       if (typeof value === 'string') {
         if (value.toLowerCase() === 'true') return true;
@@ -81,15 +106,15 @@ const normalizeBooleans = (obj, schema) => {
 
 // Utility function to check if two values are numerically equivalent
 // Handles cases where 5 and 5.0, or "5" and 5 should be considered equal
-const areNumericValuesEqual = (val1, val2) => {
+const areNumericValuesEqual = (val1: unknown, val2: unknown): boolean => {
   // If both are numbers, direct comparison
   if (typeof val1 === 'number' && typeof val2 === 'number') {
     return val1 === val2;
   }
 
   // Try to parse both as numbers
-  const num1 = typeof val1 === 'number' ? val1 : parseFloat(val1);
-  const num2 = typeof val2 === 'number' ? val2 : parseFloat(val2);
+  const num1 = typeof val1 === 'number' ? val1 : parseFloat(String(val1));
+  const num2 = typeof val2 === 'number' ? val2 : parseFloat(String(val2));
 
   // Both must be valid numbers for numeric comparison
   if (!Number.isNaN(num1) && !Number.isNaN(num2)) {
@@ -100,31 +125,31 @@ const areNumericValuesEqual = (val1, val2) => {
 };
 
 // Check if a value could be interpreted as a number
-const isNumericValue = (val) => {
+const isNumericValue = (val: unknown): boolean => {
   if (typeof val === 'number') return true;
   if (typeof val === 'string' && val.trim() !== '') {
-    return !Number.isNaN(parseFloat(val)) && isFinite(val);
+    return !Number.isNaN(parseFloat(val)) && isFinite(Number(val));
   }
   return false;
 };
 
-const ConfigurationLayout = () => {
+const ConfigurationLayout = (): React.JSX.Element => {
   // Version selection state - declare first
-  const [selectedVersionsForCompare, setSelectedVersionsForCompare] = useState([]);
-  const [selectedVersion, setSelectedVersion] = useState(null);
+  const [selectedVersionsForCompare, setSelectedVersionsForCompare] = useState<string[]>([]);
+  const [selectedVersion, setSelectedVersion] = useState<string | null>(null);
   const [versionsTableExpanded, setVersionsTableExpanded] = useState(false);
 
   // Import as new version state
-  const [importedConfigForNewVersion, setImportedConfigForNewVersion] = useState(null);
+  const [importedConfigForNewVersion, setImportedConfigForNewVersion] = useState<Record<string, unknown> | null>(null);
   const [newVersionName, setNewVersionName] = useState('');
   const [newVersionDescription, setNewVersionDescription] = useState('');
-  const [importSource, setImportSource] = useState(null); // Track import source: 'file', 'library', 'migration'
+  const [importSource, setImportSource] = useState<string | null>(null); // Track import source: 'file', 'library', 'migration'
 
   // Configuration Library state
   const [showLibraryBrowserModal, setShowLibraryBrowserModal] = useState(false);
   const [showReadmeModal, setShowReadmeModal] = useState(false);
-  const [libraryConfigs, setLibraryConfigs] = useState([]);
-  const [selectedLibraryConfig, setSelectedLibraryConfig] = useState(null);
+  const [libraryConfigs, setLibraryConfigs] = useState<LibraryConfigItem[]>([]);
+  const [selectedLibraryConfig, setSelectedLibraryConfig] = useState<LibraryConfigItem | null>(null);
   const [readmeContent, setReadmeContent] = useState('');
   const [libraryLoading, setLibraryLoading] = useState(false);
 
@@ -186,14 +211,14 @@ const ConfigurationLayout = () => {
   } = useConfiguration(selectedVersion || activeVersionName); // Pass version to hook
 
   // Handle version selection
-  const handleVersionSelect = async (versionName) => {
+  const handleVersionSelect = async (versionName: string): Promise<void> => {
     logger.info('Selecting version:', versionName);
     setSelectedVersion(versionName);
     await fetchConfiguration(versionName); // Load selected version data into form
   };
 
   // Handle version selection for comparison
-  const handleVersionSelectForCompare = (versionName, selected) => {
+  const handleVersionSelectForCompare = (versionName: string, selected: boolean): void => {
     if (selected) {
       setSelectedVersionsForCompare((prev) => [...prev, versionName]);
     } else {
@@ -203,7 +228,7 @@ const ConfigurationLayout = () => {
 
   // Version comparison state
   const [showCompareModal, setShowCompareModal] = useState(false);
-  const [compareData, setCompareData] = useState(null);
+  const [compareData, setCompareData] = useState<{ versions: string[]; configs: Record<string, Record<string, unknown>> } | null>(null);
   const [comparingVersions, setComparingVersions] = useState(false);
 
   // Handle version comparison
@@ -227,8 +252,8 @@ const ConfigurationLayout = () => {
         }
 
         // Unwrap nested Schema object if present
-        if (schemaObj && schemaObj.Schema) {
-          schemaObj = schemaObj.Schema;
+        if (schemaObj && (schemaObj as Record<string, unknown>).Schema) {
+          schemaObj = (schemaObj as Record<string, unknown>).Schema;
         }
 
         // Parse default config if it's a string
@@ -244,8 +269,8 @@ const ConfigurationLayout = () => {
         }
 
         // Normalize boolean values (same as fetchConfiguration)
-        const normalizedDefaultObj = normalizeBooleans(defaultObj, schemaObj);
-        const normalizedCustomObj = normalizeBooleans(customObj, schemaObj);
+        const normalizedDefaultObj = normalizeBooleans(defaultObj as Record<string, unknown>, schemaObj as ConfigSchema);
+        const normalizedCustomObj = normalizeBooleans(customObj as Record<string, unknown>, schemaObj as ConfigSchema);
 
         // Return merged config (same as fetchConfiguration)
         return deepMerge(normalizedDefaultObj, normalizedCustomObj);
@@ -256,8 +281,8 @@ const ConfigurationLayout = () => {
       // Create comparison data
       const comparisonData = {
         versions: selectedVersionsForCompare,
-        configs: configs.reduce((acc, config, index) => {
-          acc[selectedVersionsForCompare[index]] = config;
+        configs: configs.reduce<Record<string, Record<string, unknown>>>((acc, config, index) => {
+          acc[selectedVersionsForCompare[index]] = config as Record<string, unknown>;
           return acc;
         }, {}),
       };
@@ -272,7 +297,7 @@ const ConfigurationLayout = () => {
   };
 
   // Handle activate version
-  const handleActivateVersion = async (versionName, skipSyncConfirmation = false) => {
+  const handleActivateVersion = async (versionName: string, skipSyncConfirmation = false): Promise<void> => {
     // Validate versionName
     if (!versionName) {
       console.error('Cannot activate version: versionName is null or undefined');
@@ -290,7 +315,7 @@ const ConfigurationLayout = () => {
   };
 
   // Perform the actual activation
-  const performActivateVersion = async (versionName) => {
+  const performActivateVersion = async (versionName: string): Promise<void> => {
     if (!versionName) {
       console.error('Cannot activate version: versionName is null or undefined');
       return;
@@ -309,7 +334,7 @@ const ConfigurationLayout = () => {
   };
 
   // Perform sync to BDA then activate version
-  const performSyncThenActivate = async (versionName) => {
+  const performSyncThenActivate = async (versionName: string): Promise<void> => {
     if (!versionName) {
       console.error('Cannot sync and activate: versionName is null or undefined');
       return;
@@ -375,7 +400,7 @@ const ConfigurationLayout = () => {
   };
 
   // Handle delete versions
-  const handleDeleteVersions = async (versionNames) => {
+  const handleDeleteVersions = async (versionNames: string[]): Promise<void> => {
     try {
       for (const versionName of versionNames) {
         await deleteVersion(versionName, true); // Skip individual refresh
@@ -392,30 +417,30 @@ const ConfigurationLayout = () => {
     }
   };
 
-  const [formValues, setFormValues] = useState({});
+  const [formValues, setFormValues] = useState<Record<string, unknown>>({});
   const [jsonContent, setJsonContent] = useState('');
   const [yamlContent, setYamlContent] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
-  const [saveError, setSaveError] = useState(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [importSuccess, setImportSuccess] = useState(false);
-  const [validationErrors, setValidationErrors] = useState([]);
+  const [validationErrors, setValidationErrors] = useState<{ message: string; path?: string }[]>([]);
   const [viewMode, setViewMode] = useState('form'); // Form view as default
   const [showResetModal, setShowResetModal] = useState(false);
   const [showSaveAsDefaultModal, setShowSaveAsDefaultModal] = useState(false);
   const [showSaveAsVersionModal, setShowSaveAsVersionModal] = useState(false);
   const [saveAsVersionName, setSaveAsVersionName] = useState('');
   const [saveAsVersionDescription, setSaveAsVersionDescription] = useState('');
-  const [saveAsVersionError, setSaveAsVersionError] = useState(null);
+  const [saveAsVersionError, setSaveAsVersionError] = useState<string | null>(null);
   const [showExportModal, setShowExportModal] = useState(false);
   const [exportFormat, setExportFormat] = useState('json');
   const [exportFileName, setExportFileName] = useState(currentVersionName || 'configuration');
-  const [importError, setImportError] = useState(null);
-  const [extractionSchema, setExtractionSchema] = useState(null);
-  const [ruleSchema, setRuleSchema] = useState(null);
+  const [importError, setImportError] = useState<string | null>(null);
+  const [extractionSchema, setExtractionSchema] = useState<unknown[] | null>(null);
+  const [ruleSchema, setRuleSchema] = useState<unknown[] | null>(null);
   const [showMigrationModal, setShowMigrationModal] = useState(false);
-  const [pendingImportConfig, setPendingImportConfig] = useState(null);
-  const [pendingImportSource, setPendingImportSource] = useState(null); // Track import source for version naming
+  const [pendingImportConfig, setPendingImportConfig] = useState<Record<string, unknown> | null>(null);
+  const [pendingImportSource, setPendingImportSource] = useState<{ type: string; name: string } | null>(null); // Track import source for version naming
 
   // Configuration Library state
   const [showImportSourceModal, setShowImportSourceModal] = useState(false);
@@ -424,14 +449,15 @@ const ConfigurationLayout = () => {
   const [configBuilderActiveTab, setConfigBuilderActiveTab] = useState('configuration');
 
   // BDA/IDP Sync state
-  const [syncingDirection, setSyncingDirection] = useState(null); // Track which sync is running
+  const [syncingDirection, setSyncingDirection] = useState<string | null>(null); // Track which sync is running
   const [syncSuccess, setSyncSuccess] = useState(false);
   const [syncSuccessMessage, setSyncSuccessMessage] = useState('');
-  const [syncError, setSyncError] = useState(null);
+  const [syncError, setSyncError] = useState<string | null>(null);
   const [showSyncToBdaConfirmModal, setShowSyncToBdaConfirmModal] = useState(false);
   const [showActivateVersionConfirmModal, setShowActivateVersionConfirmModal] = useState(false);
 
-  const editorRef = useRef(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const editorRef = useRef<any>(null);
 
   // Compute whether there are unsaved changes by comparing formValues with mergedConfig
   const hasUnsavedChanges = useMemo(() => {
@@ -449,13 +475,13 @@ const ConfigurationLayout = () => {
   // Warn user before leaving page with unsaved changes
   // Both beforeunload (browser close/refresh) and hashchange (SPA navigation)
   useEffect(() => {
-    const handleBeforeUnload = (e) => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent): void => {
       if (hasUnsavedChanges) {
         e.preventDefault();
         e.returnValue = '';
       }
     };
-    const handleHashChange = () => {
+    const handleHashChange = (): void => {
       // For SPA hash-based routing, intercept navigation when there are unsaved changes
       if (hasUnsavedChanges) {
         // eslint-disable-next-line no-alert
@@ -482,10 +508,11 @@ const ConfigurationLayout = () => {
 
   // Hooks for configuration library
   const { listConfigurations, getFile } = useConfigurationLibrary();
-  const { settings } = useSettingsContext();
+  const settingsContext = useSettingsContext() as Record<string, unknown> | null;
+  const settings = settingsContext?.settings as Record<string, unknown> | undefined;
 
   // Helper function to map IDPPattern to directory name
-  const getPatternDirectory = (idpPattern) => {
+  const getPatternDirectory = (idpPattern: string | undefined): string | null => {
     if (!idpPattern) return null;
 
     // Extract pattern number from string like "Pattern1 - Description" or "Pattern2 - Description"
@@ -498,7 +525,7 @@ const ConfigurationLayout = () => {
   };
 
   // Helper function to detect legacy format
-  const isLegacyFormat = (config) => {
+  const isLegacyFormat = (config: Record<string, unknown>): boolean => {
     if (!config || !config.classes || !Array.isArray(config.classes)) return false;
     if (config.classes.length === 0) return false;
 
@@ -508,10 +535,10 @@ const ConfigurationLayout = () => {
   };
 
   // Helper function to check if Pattern-1 is selected
-  const isPattern1 = settings?.IDPPattern?.includes('Pattern1');
+  const isPattern1 = (settings?.IDPPattern as string | undefined)?.includes('Pattern1');
 
   // Helper function to check if Pattern-2 is selected (for Rule Schema feature)
-  const isPattern2 = settings?.IDPPattern?.includes('Pattern2');
+  const isPattern2 = (settings?.IDPPattern as string | undefined)?.includes('Pattern2');
 
   // Initialize form values from merged config
   useEffect(() => {
@@ -531,12 +558,12 @@ const ConfigurationLayout = () => {
 
       // Initialize extraction schema from config (stored in classes field)
       if (mergedConfig.classes) {
-        setExtractionSchema(mergedConfig.classes);
+        setExtractionSchema(mergedConfig.classes as unknown[]);
       }
 
       // Initialize rule schema from config (stored in rule_classes field)
       if (mergedConfig.rule_classes) {
-        setRuleSchema(mergedConfig.rule_classes);
+        setRuleSchema(mergedConfig.rule_classes as unknown[]);
       }
 
       // Set both JSON and YAML content
@@ -554,7 +581,7 @@ const ConfigurationLayout = () => {
   }, [mergedConfig]);
 
   // Process schema to convert custom types to standard JSON Schema format
-  const processSchema = (inputSchema) => {
+  const processSchema = (inputSchema: Record<string, unknown>): Record<string, unknown> | null => {
     try {
       const processedSchema = {
         type: 'object',
@@ -564,22 +591,23 @@ const ConfigurationLayout = () => {
 
       // Process schema properties to handle custom types like 'list'
       if (inputSchema.properties) {
-        Object.entries(inputSchema.properties).forEach(([key, prop]) => {
+        Object.entries(inputSchema.properties as Record<string, Record<string, unknown>>).forEach(([key, prop]) => {
           // Convert 'list' type to proper JSON Schema array type (for backwards compatibility)
           if (prop.type === 'list' || prop.type === 'array') {
             processedSchema.properties[key] = {
               type: 'array',
-              items: prop.items || {},
+              items: (prop.items as Record<string, unknown>) || {},
             };
 
             // Process nested items if they have custom types
-            if (prop.items && prop.items.type === 'object' && prop.items.properties) {
-              const itemProps = {};
-              Object.entries(prop.items.properties).forEach(([itemKey, itemProp]) => {
+            const items = prop.items as Record<string, unknown> | undefined;
+            if (items && items.type === 'object' && items.properties) {
+              const itemProps: Record<string, Record<string, unknown>> = {};
+              Object.entries(items.properties as Record<string, Record<string, unknown>>).forEach(([itemKey, itemProp]) => {
                 if (itemProp.type === 'list' || itemProp.type === 'array') {
                   itemProps[itemKey] = {
                     type: 'array',
-                    items: itemProp.items || {},
+                    items: (itemProp.items as Record<string, unknown>) || {},
                   };
                 } else if (itemProp.type === 'number' || itemProp.type === 'integer') {
                   // For number types, we'll use a more flexible approach
@@ -601,7 +629,7 @@ const ConfigurationLayout = () => {
                 }
               });
               processedSchema.properties[key].items.properties = itemProps;
-              processedSchema.properties[key].items.required = prop.items.required || [];
+              processedSchema.properties[key].items.required = (items as Record<string, unknown>).required || [];
             }
           } else if (prop.type === 'number' || prop.type === 'integer') {
             // For number types, we'll use a more flexible approach
@@ -633,7 +661,7 @@ const ConfigurationLayout = () => {
   };
 
   // Validate YAML content against the schema
-  const validateYamlContent = (yamlString) => {
+  const validateYamlContent = (yamlString: string): { message: string }[] => {
     if (!schema) return [];
 
     try {
@@ -646,8 +674,8 @@ const ConfigurationLayout = () => {
 
       // Check required fields
       if (schema.required) {
-        schema.required.forEach((field) => {
-          if (parsedYaml[field] === undefined) {
+        (schema.required as string[]).forEach((field) => {
+          if ((parsedYaml as Record<string, unknown>)[field] === undefined) {
             errors.push({ message: `Required field '${field}' is missing` });
           }
         });
@@ -655,8 +683,8 @@ const ConfigurationLayout = () => {
 
       // Validate property types and constraints
       if (schema.properties && parsedYaml) {
-        Object.entries(schema.properties).forEach(([key, prop]) => {
-          const value = parsedYaml[key];
+        Object.entries(schema.properties as Record<string, Record<string, unknown>>).forEach(([key, prop]) => {
+          const value = (parsedYaml as Record<string, unknown>)[key];
 
           // Skip validation if value is undefined (already handled by required check)
           if (value === undefined) return;
@@ -693,10 +721,10 @@ const ConfigurationLayout = () => {
 
               // Only check constraints if it's a valid number
               if (isValidNumber) {
-                if (prop.minimum !== undefined && numValue < prop.minimum) {
+                if (prop.minimum !== undefined && numValue < Number(prop.minimum)) {
                   errors.push({ message: `Field '${key}' must be at least ${prop.minimum}` });
                 }
-                if (prop.maximum !== undefined && numValue > prop.maximum) {
+                if (prop.maximum !== undefined && numValue > Number(prop.maximum)) {
                   errors.push({ message: `Field '${key}' must be at most ${prop.maximum}` });
                 }
               }
@@ -706,13 +734,13 @@ const ConfigurationLayout = () => {
               errors.push({ message: `Field '${key}' must be a string` });
             } else {
               // Check string constraints
-              if (prop.minLength !== undefined && value.length < prop.minLength) {
+              if (prop.minLength !== undefined && value.length < Number(prop.minLength)) {
                 errors.push({ message: `Field '${key}' must be at least ${prop.minLength} characters` });
               }
-              if (prop.maxLength !== undefined && value.length > prop.maxLength) {
+              if (prop.maxLength !== undefined && value.length > Number(prop.maxLength)) {
                 errors.push({ message: `Field '${key}' must be at most ${prop.maxLength} characters` });
               }
-              if (prop.pattern && !new RegExp(prop.pattern).test(value)) {
+              if (prop.pattern && !new RegExp(String(prop.pattern)).test(value)) {
                 errors.push({ message: `Field '${key}' does not match required pattern` });
               }
             }
@@ -725,23 +753,24 @@ const ConfigurationLayout = () => {
               errors.push({ message: `Field '${key}' must be an array` });
             } else {
               // Check array constraints
-              if (prop.minItems !== undefined && value.length < prop.minItems) {
+              if (prop.minItems !== undefined && value.length < Number(prop.minItems)) {
                 errors.push({ message: `Field '${key}' must have at least ${prop.minItems} items` });
               }
-              if (prop.maxItems !== undefined && value.length > prop.maxItems) {
+              if (prop.maxItems !== undefined && value.length > Number(prop.maxItems)) {
                 errors.push({ message: `Field '${key}' must have at most ${prop.maxItems} items` });
               }
 
               // Validate array items if schema is provided
-              if (prop.items && prop.items.type && value.length > 0) {
+              const propItems = prop.items as Record<string, unknown> | undefined;
+              if (propItems && propItems.type && value.length > 0) {
                 value.forEach((item, index) => {
-                  if (prop.items.type === 'object' && prop.items.properties) {
+                  if (propItems.type === 'object' && propItems.properties) {
                     // Validate object properties in array items
-                    Object.entries(prop.items.properties).forEach(([itemKey, itemProp]) => {
-                      const itemValue = item[itemKey];
+                    Object.entries(propItems.properties as Record<string, Record<string, unknown>>).forEach(([itemKey, itemProp]) => {
+                      const itemValue = (item as Record<string, unknown>)[itemKey];
 
                       // Check if required
-                      if (prop.items.required && prop.items.required.includes(itemKey) && itemValue === undefined) {
+                      if (propItems.required && (propItems.required as string[]).includes(itemKey) && itemValue === undefined) {
                         errors.push({ message: `Item ${index} in '${key}' is missing required field '${itemKey}'` });
                       }
 
@@ -786,9 +815,9 @@ const ConfigurationLayout = () => {
                         }
                       }
                     });
-                  } else if (prop.items.type === 'string' && typeof item !== 'string') {
+                  } else if (propItems.type === 'string' && typeof item !== 'string') {
                     errors.push({ message: `Item ${index} in '${key}' must be a string` });
-                  } else if (prop.items.type === 'number' || prop.items.type === 'integer') {
+                  } else if (propItems.type === 'number' || propItems.type === 'integer') {
                     // For YAML validation, we'll be more permissive
                     if (typeof item !== 'number' && typeof item !== 'string') {
                       errors.push({
@@ -809,18 +838,26 @@ const ConfigurationLayout = () => {
                       }
 
                       // Only check constraints if it's a valid number
-                      if (isValidNumber && prop.items.minimum !== undefined && numValue < prop.items.minimum) {
+                      if (
+                        isValidNumber &&
+                        (propItems as Record<string, unknown>).minimum !== undefined &&
+                        numValue < Number((propItems as Record<string, unknown>).minimum)
+                      ) {
                         errors.push({
-                          message: `Item ${index} in '${key}' must be at least ${prop.items.minimum}`,
+                          message: `Item ${index} in '${key}' must be at least ${(propItems as Record<string, unknown>).minimum}`,
                         });
                       }
-                      if (isValidNumber && prop.items.maximum !== undefined && numValue > prop.items.maximum) {
+                      if (
+                        isValidNumber &&
+                        (propItems as Record<string, unknown>).maximum !== undefined &&
+                        numValue > Number((propItems as Record<string, unknown>).maximum)
+                      ) {
                         errors.push({
-                          message: `Item ${index} in '${key}' must be at most ${prop.items.maximum}`,
+                          message: `Item ${index} in '${key}' must be at most ${(propItems as Record<string, unknown>).maximum}`,
                         });
                       }
                     }
-                  } else if (prop.items.type === 'boolean' && typeof item !== 'boolean') {
+                  } else if (propItems?.type === 'boolean' && typeof item !== 'boolean') {
                     errors.push({ message: `Item ${index} in '${key}' must be a boolean` });
                   }
                 });
@@ -835,7 +872,7 @@ const ConfigurationLayout = () => {
                 const nestedValue = value[nestedKey];
 
                 // Check if required
-                if (prop.required && prop.required.includes(nestedKey) && nestedValue === undefined) {
+                if (prop.required && (prop.required as string[]).includes(nestedKey) && nestedValue === undefined) {
                   errors.push({ message: `Object '${key}' is missing required field '${nestedKey}'` });
                 }
               });
@@ -843,19 +880,20 @@ const ConfigurationLayout = () => {
           }
 
           // Check enum values
-          if (prop.enum && !prop.enum.includes(value)) {
-            errors.push({ message: `Field '${key}' must be one of: ${prop.enum.join(', ')}` });
+          if (prop.enum && !(prop.enum as unknown[]).includes(value)) {
+            errors.push({ message: `Field '${key}' must be one of: ${(prop.enum as string[]).join(', ')}` });
           }
         });
       }
 
       return errors;
     } catch (e) {
-      return [{ message: `Invalid YAML: ${e.message}` }];
+      return [{ message: `Invalid YAML: ${(e as Error).message}` }];
     }
   };
 
-  const handleEditorDidMount = (editor, monaco) => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const handleEditorDidMount = (editor: any, monaco: any): void => {
     editorRef.current = editor;
 
     // Set up JSON schema validation if schema is available
@@ -899,7 +937,7 @@ const ConfigurationLayout = () => {
   };
 
   // Handle changes in the JSON editor
-  const handleJsonEditorChange = (value) => {
+  const handleJsonEditorChange = (value: string | undefined): void => {
     setJsonContent(value);
     try {
       const parsedValue = JSON.parse(value);
@@ -915,12 +953,12 @@ const ConfigurationLayout = () => {
 
       setValidationErrors([]);
     } catch (e) {
-      setValidationErrors([{ message: `Invalid JSON: ${e.message}` }]);
+      setValidationErrors([{ message: `Invalid JSON: ${(e as Error).message}` }]);
     }
   };
 
   // Handle changes in the YAML editor
-  const handleYamlEditorChange = (value) => {
+  const handleYamlEditorChange = (value: string | undefined): void => {
     setYamlContent(value);
     try {
       const parsedValue = yaml.load(value);
@@ -942,7 +980,7 @@ const ConfigurationLayout = () => {
         setValidationErrors([]);
       }
     } catch (e) {
-      setValidationErrors([{ message: `Invalid YAML: ${e.message}` }]);
+      setValidationErrors([{ message: `Invalid YAML: ${(e as Error).message}` }]);
     }
   };
 
@@ -963,11 +1001,11 @@ const ConfigurationLayout = () => {
       }
       return [];
     } catch (e) {
-      return [{ message: `Invalid ${viewMode.toUpperCase()}: ${e.message}` }];
+      return [{ message: `Invalid ${viewMode.toUpperCase()}: ${(e as Error).message}` }];
     }
   };
 
-  const handleSave = async (saveAsDefault = false) => {
+  const handleSave = async (saveAsDefault = false): Promise<void> => {
     // Validate content before saving
     const currentErrors = validateCurrentContent();
 
@@ -1165,16 +1203,16 @@ const ConfigurationLayout = () => {
         console.log('DEBUG: About to compare formValues with mergedConfig:', {
           formValues,
           mergedConfig,
-          granularInFormValues: formValues?.assessment?.granular,
-          granularInMergedConfig: mergedConfig?.assessment?.granular,
+          granularInFormValues: (formValues?.assessment as Record<string, unknown> | undefined)?.granular,
+          granularInMergedConfig: (mergedConfig?.assessment as Record<string, unknown> | undefined)?.granular,
         });
         const differences = compareWithDefault(formValues, mergedConfig);
         console.log('DEBUG: Differences found by compareWithDefault:', differences);
 
         // Flatten path results into a proper object structure - revised to avoid ESLint errors
-        const buildObjectFromPaths = (paths) => {
+        const buildObjectFromPaths = (paths: Record<string, unknown>): Record<string, unknown> => {
           // Create a fresh result object
-          const newResult = {};
+          const newResult: Record<string, unknown> = {};
 
           Object.entries(paths).forEach(([path, value]) => {
             if (!path) return; // Skip empty paths
@@ -1313,7 +1351,7 @@ const ConfigurationLayout = () => {
       }
     } catch (err) {
       console.error('Save error:', err);
-      setSaveError(`Error: ${err.message}`);
+      setSaveError(`Error: ${(err as Error).message}`);
     } finally {
       setIsSaving(false);
     }
@@ -1354,13 +1392,13 @@ const ConfigurationLayout = () => {
       }
     } catch (err) {
       console.error('Save as version error:', err);
-      setSaveError(`Error: ${err.message}`);
+      setSaveError(`Error: ${(err as Error).message}`);
     } finally {
       setIsSaving(false);
     }
   };
 
-  const handleFormChange = (newValues) => {
+  const handleFormChange = (newValues: Record<string, unknown>): void => {
     setFormValues(newValues);
     try {
       // Update both JSON and YAML content
@@ -1376,7 +1414,7 @@ const ConfigurationLayout = () => {
 
       setValidationErrors([]);
     } catch (e) {
-      setValidationErrors([{ message: `Error converting form values to JSON: ${e.message}` }]);
+      setValidationErrors([{ message: `Error converting form values to JSON: ${(e as Error).message}` }]);
     }
   };
 
@@ -1420,7 +1458,7 @@ const ConfigurationLayout = () => {
       }
     } catch (err) {
       console.error('Reset error:', err);
-      setSaveError(`Error: ${err.message}`);
+      setSaveError(`Error: ${(err as Error).message}`);
     } finally {
       setIsSaving(false);
     }
@@ -1428,7 +1466,7 @@ const ConfigurationLayout = () => {
 
   // Handler for BDA/IDP sync
   // Handler for BDA/IDP sync with direction support
-  const handleSyncBdaIdp = async (direction = 'bidirectional') => {
+  const handleSyncBdaIdp = async (direction = 'bidirectional'): Promise<void> => {
     setSyncingDirection(direction);
     setSyncSuccess(false);
     setSyncSuccessMessage('');
@@ -1438,7 +1476,7 @@ const ConfigurationLayout = () => {
       logger.debug(`Starting BDA/IDP sync with direction: ${direction}...`);
 
       const result = await client.graphql({
-        query: syncBdaIdpMutation,
+        query: syncBdaIdpMutation as unknown as string,
         variables: {
           versionName: currentVersionName,
           direction,
@@ -1447,23 +1485,27 @@ const ConfigurationLayout = () => {
 
       logger.debug('Sync API response:', result);
 
-      const response = result.data.syncBdaIdp;
+      const resultData = (result as unknown as Record<string, Record<string, unknown>>).data;
+      const response = (resultData.syncBdaIdp || {}) as Record<string, unknown>;
 
       if (response.success) {
         setSyncSuccess(true);
         const directionLabel =
-          {
-            bda_to_idp: 'from BDA to IDP',
-            idp_to_bda: 'from IDP to BDA',
-            bidirectional: 'bidirectionally',
-          }[direction] || direction;
-        setSyncSuccessMessage(response.message || `Document classes have been synchronized ${directionLabel}.`);
+          (
+            {
+              bda_to_idp: 'from BDA to IDP',
+              idp_to_bda: 'from IDP to BDA',
+              bidirectional: 'bidirectionally',
+            } as Record<string, string>
+          )[direction] || direction;
+        setSyncSuccessMessage(String(response.message || `Document classes have been synchronized ${directionLabel}.`));
 
         // If there are partial failures, also show the error details
-        if (response.error && response.error.type === 'PARTIAL_SYNC_ERROR') {
+        const syncError = response.error as Record<string, unknown> | undefined;
+        if (syncError && syncError.type === 'PARTIAL_SYNC_ERROR') {
           // Show both success and error for partial failures
           setTimeout(() => {
-            setSyncError(response.error.message);
+            setSyncError(syncError.message as string);
           }, 100); // Small delay to show success first
         }
 
@@ -1472,7 +1514,8 @@ const ConfigurationLayout = () => {
 
         // Only auto-dismiss if there are no warnings in the message
         // Warnings indicate BDA limitations that users should read
-        const hasWarnings = response.message?.includes('WARNING') || response.warnings?.length > 0;
+        const hasWarnings =
+          (response.message as string | undefined)?.includes('WARNING') || (response.warnings as unknown[] | undefined)?.length > 0;
         if (!hasWarnings) {
           setTimeout(() => {
             setSyncSuccess(false);
@@ -1492,13 +1535,15 @@ const ConfigurationLayout = () => {
           }
         }
       } else {
-        const errorMsg = response.error?.message || response.message || 'Sync operation failed';
+        const errorMsg = String(
+          (response.error as Record<string, unknown> | undefined)?.message || response.message || 'Sync operation failed',
+        );
         setSyncError(errorMsg);
         logger.error('Sync failed:', errorMsg);
       }
     } catch (err) {
       logger.error('Sync error:', err);
-      setSyncError(`Sync failed: ${err.message}`);
+      setSyncError(`Sync failed: ${(err as Error).message}`);
     } finally {
       setSyncingDirection(null);
     }
@@ -1531,11 +1576,11 @@ const ConfigurationLayout = () => {
       URL.revokeObjectURL(url);
       setShowExportModal(false);
     } catch (err) {
-      setSaveError(`Export failed: ${err.message}`);
+      setSaveError(`Export failed: ${(err as Error).message}`);
     }
   };
 
-  const handleImport = (event) => {
+  const handleImport = (event: React.ChangeEvent<HTMLInputElement>): void => {
     const file = event.target.files[0];
     if (!file) return;
 
@@ -1543,7 +1588,7 @@ const ConfigurationLayout = () => {
     reader.onload = async (e) => {
       try {
         setImportError(null);
-        const content = e.target.result;
+        const content = e.target.result as string;
 
         const importedConfig = file.name.endsWith('.yaml') || file.name.endsWith('.yml') ? yaml.load(content) : JSON.parse(content);
 
@@ -1566,7 +1611,7 @@ const ConfigurationLayout = () => {
           setImportError('Invalid configuration file format');
         }
       } catch (err) {
-        setImportError(`Import failed: ${err.message}`);
+        setImportError(`Import failed: ${(err as Error).message}`);
       }
     };
     reader.readAsText(file);
@@ -1603,9 +1648,7 @@ const ConfigurationLayout = () => {
 
   // Handler for Import button click - show source selection modal
   const handleImportClick = () => {
-    setImportedConfigForNewVersion(importedConfig);
-    setNewVersionName(baseName);
-    setNewVersionDescription('');
+    setShowImportSourceModal(true);
   };
 
   // Handler for local file import
@@ -1618,7 +1661,7 @@ const ConfigurationLayout = () => {
     setLibraryLoading(true);
 
     try {
-      const patternDir = getPatternDirectory(settings?.IDPPattern);
+      const patternDir = getPatternDirectory(settings?.IDPPattern as string | undefined);
       if (!patternDir) {
         setImportError('Pattern not configured in settings');
         setLibraryLoading(false);
@@ -1626,23 +1669,23 @@ const ConfigurationLayout = () => {
       }
 
       const configs = await listConfigurations(patternDir);
-      setLibraryConfigs(configs);
+      setLibraryConfigs(configs as LibraryConfigItem[]);
       setShowImportSourceModal(false);
       setShowLibraryBrowserModal(true);
     } catch (err) {
-      setImportError(`Failed to load library: ${err.message}`);
+      setImportError(`Failed to load library: ${(err as Error).message}`);
     } finally {
       setLibraryLoading(false);
     }
   };
 
   // Handler for selecting a library config
-  const handleSelectLibraryConfig = async (config) => {
+  const handleSelectLibraryConfig = async (config: LibraryConfigItem): Promise<void> => {
     setSelectedLibraryConfig(config);
 
     if (config.hasReadme) {
       // Fetch and show README
-      const patternDir = getPatternDirectory(settings?.IDPPattern);
+      const patternDir = getPatternDirectory(settings?.IDPPattern as string | undefined);
       const file = await getFile(patternDir, config.name, 'README.md');
 
       if (file) {
@@ -1660,12 +1703,12 @@ const ConfigurationLayout = () => {
   };
 
   // Handler to import configuration from library
-  const importFromLibrary = async (config) => {
+  const importFromLibrary = async (config: LibraryConfigItem): Promise<void> => {
     setShowReadmeModal(false);
     setShowLibraryBrowserModal(false);
 
     try {
-      const patternDir = getPatternDirectory(settings?.IDPPattern);
+      const patternDir = getPatternDirectory(settings?.IDPPattern as string | undefined);
 
       // Use the detected file type from the config object
       const fileName = config.configFileType === 'json' ? 'config.json' : 'config.yaml';
@@ -1697,7 +1740,7 @@ const ConfigurationLayout = () => {
         setImportError('Invalid configuration format');
       }
     } catch (err) {
-      setImportError(`Import failed: ${err.message}`);
+      setImportError(`Import failed: ${(err as Error).message}`);
     }
   };
 
@@ -1719,7 +1762,7 @@ const ConfigurationLayout = () => {
           <SpaceBetween size="s">
             <div>{error}</div>
             <Box>
-              <Button onClick={fetchConfiguration} variant="primary">
+              <Button onClick={() => fetchConfiguration()} variant="primary">
                 Retry
               </Button>
             </Box>
@@ -1736,7 +1779,7 @@ const ConfigurationLayout = () => {
           <SpaceBetween size="s">
             <div>Unable to load configuration schema or values.</div>
             <Box>
-              <Button onClick={fetchConfiguration} variant="primary">
+              <Button onClick={() => fetchConfiguration()} variant="primary">
                 Retry
               </Button>
             </Box>
@@ -1751,7 +1794,7 @@ const ConfigurationLayout = () => {
       {/* Configuration Versions Table */}
       <ExpandableSection
         headerText="Configuration Versions"
-        headerTextTagOverride="h1"
+        headingTagOverride="h1"
         expanded={versionsTableExpanded}
         onChange={({ detail }) => setVersionsTableExpanded(detail.expanded)}
       >
@@ -1973,7 +2016,7 @@ const ConfigurationLayout = () => {
       <Modal
         visible={showLibraryBrowserModal}
         onDismiss={() => setShowLibraryBrowserModal(false)}
-        header={`Configuration Library - ${settings?.IDPPattern || 'Pattern'}`}
+        header={`Configuration Library - ${(settings?.IDPPattern as string) || 'Pattern'}`}
         size="large"
         footer={
           <Box float="right">
@@ -1985,7 +2028,7 @@ const ConfigurationLayout = () => {
       >
         <SpaceBetween size="m">
           {libraryConfigs.length === 0 && (
-            <Alert type="info">No configurations found for {settings?.IDPPattern} in the Config Library</Alert>
+            <Alert type="info">No configurations found for {settings?.IDPPattern as string} in the Config Library</Alert>
           )}
 
           {libraryConfigs.map((config) => (
@@ -2118,10 +2161,10 @@ const ConfigurationLayout = () => {
         <Form>
           {refreshing && (
             <Alert type="info" header="Syncing configuration...">
-              <Box display="flex" alignItems="center">
+              <div style={{ display: 'flex', alignItems: 'center' }}>
                 <Spinner size="normal" />
                 <Box margin={{ left: 's' }}>Refreshing data from server</Box>
-              </Box>
+              </div>
             </Alert>
           )}
 
@@ -2226,8 +2269,8 @@ const ConfigurationLayout = () => {
                   showRuleSchema={isPattern2}
                   versionDescription={versionDescription}
                   onDescriptionChange={setVersionDescription}
-                  onSchemaChange={(schemaData, isDirty) => {
-                    setExtractionSchema(schemaData);
+                  onSchemaChange={(schemaData: unknown, isDirty: boolean) => {
+                    setExtractionSchema(schemaData as unknown[] | null);
                     if (isDirty) {
                       const updatedConfig = { ...formValues };
                       // CRITICAL: Always set classes, even if empty array (to support wipe all functionality)
@@ -2247,16 +2290,20 @@ const ConfigurationLayout = () => {
                       }
                     }
                   }}
-                  onSchemaValidate={(valid, errors) => {
+                  onSchemaValidate={(valid: boolean, errors: unknown[]) => {
                     if (!valid) {
-                      setValidationErrors(errors.map((e) => ({ message: `Document Schema: ${e.path} - ${e.message}` })));
+                      setValidationErrors(
+                        errors.map((e) => ({
+                          message: `Document Schema: ${(e as Record<string, string>).path} - ${(e as Record<string, string>).message}`,
+                        })),
+                      );
                     } else {
                       setValidationErrors([]);
                     }
                   }}
                   ruleSchema={ruleSchema}
-                  onRuleSchemaChange={(schemaData, isDirty) => {
-                    setRuleSchema(schemaData);
+                  onRuleSchemaChange={(schemaData: unknown, isDirty: boolean) => {
+                    setRuleSchema(schemaData as unknown[] | null);
                     if (isDirty) {
                       const updatedConfig = { ...formValues };
                       // CRITICAL: Always set rule_classes, even if empty array
@@ -2275,9 +2322,13 @@ const ConfigurationLayout = () => {
                       }
                     }
                   }}
-                  onRuleSchemaValidate={(valid, errors) => {
+                  onRuleSchemaValidate={(valid: boolean, errors: unknown[]) => {
                     if (!valid) {
-                      setValidationErrors(errors.map((e) => ({ message: `Rule Schema: ${e.path} - ${e.message}` })));
+                      setValidationErrors(
+                        errors.map((e) => ({
+                          message: `Rule Schema: ${(e as Record<string, string>).path} - ${(e as Record<string, string>).message}`,
+                        })),
+                      );
                     } else {
                       setValidationErrors([]);
                     }

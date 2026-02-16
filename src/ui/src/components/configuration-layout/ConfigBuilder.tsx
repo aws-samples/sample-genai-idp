@@ -4,7 +4,6 @@
 /* eslint-disable react/no-array-index-key */
 /* eslint-disable no-use-before-define */
 import React, { useState, useRef, useEffect } from 'react';
-import PropTypes from 'prop-types';
 import {
   Box,
   SpaceBetween,
@@ -19,10 +18,54 @@ import {
   Modal,
   Tabs,
 } from '@cloudscape-design/components';
+import type { BoxProps } from '@cloudscape-design/components';
 import SchemaBuilder from '../json-schema-builder/SchemaBuilder';
 
+// Type for schema property definitions used throughout the config builder
+interface SchemaProperty {
+  type?: string;
+  properties?: Record<string, SchemaProperty>;
+  items?: SchemaProperty;
+  enum?: string[];
+  default?: unknown;
+  order?: string | number;
+  description?: string;
+  dependsOn?: { field: string; values?: unknown[]; value?: unknown };
+  sectionLabel?: string;
+  nestLevel?: number;
+  columns?: string | number;
+  listLabel?: string;
+  itemLabel?: string;
+  minimum?: number;
+  maximum?: number;
+  format?: string;
+  [key: string]: unknown;
+}
+
+// Extended Box props that allow style, className, event handlers, and relaxed spacing values.
+// Cloudscape Box doesn't type these but passes them through to the DOM element.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type ExtendedBoxProps = Omit<BoxProps, 'padding' | 'margin' | 'display' | 'color'> & {
+  [key: string]: unknown;
+  style?: React.CSSProperties;
+  className?: string;
+  onMouseDown?: React.MouseEventHandler;
+  onClick?: React.MouseEventHandler;
+  children?: React.ReactNode;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  padding?: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  margin?: any;
+  display?: string;
+  color?: string;
+};
+
+// Cast Box to accept extended props (style, className, event handlers, etc.)
+// Cloudscape Box doesn't type these but passes them through to the DOM element
+const ExtBox = Box as unknown as React.FC<ExtendedBoxProps>;
+
 // Numeric-aware value comparison: treats "5" and "5.0" as equal, "0" and "0.0" as equal, etc.
-const areValuesEqual = (val1, val2) => {
+const areValuesEqual = (val1: unknown, val2: unknown): boolean => {
   // Fast path: strict equality
   if (val1 === val2) return true;
   // JSON.stringify equality for objects/arrays
@@ -30,7 +73,7 @@ const areValuesEqual = (val1, val2) => {
   const str2 = JSON.stringify(val2);
   if (str1 === str2) return true;
   // Numeric comparison: if both can be parsed as numbers, compare numerically
-  const isNumeric = (v) => {
+  const isNumeric = (v: unknown): boolean => {
     if (typeof v === 'number') return true;
     if (typeof v === 'string' && v.trim() !== '') return !Number.isNaN(Number(v));
     return false;
@@ -199,8 +242,8 @@ const customStyles = `
 `;
 
 // Helper functions outside the component to avoid hoisting issues
-const getConstraintText = (property) => {
-  const constraints = [];
+const getConstraintText = (property: Record<string, unknown>): string => {
+  const constraints: string[] = [];
   if (property.minimum !== undefined) {
     constraints.push(`Min: ${property.minimum}`);
   }
@@ -211,10 +254,16 @@ const getConstraintText = (property) => {
 };
 
 // Resizable Columns Component
-const ResizableColumns = ({ columns, children = null, columnSpacing = '8px' }) => {
-  const [columnWidths, setColumnWidths] = useState([]);
-  const containerRef = useRef(null);
-  const resizingRef = useRef(null);
+interface ResizableColumnsProps {
+  columns: number;
+  children?: React.ReactNode;
+  columnSpacing?: string;
+}
+
+const ResizableColumns = ({ columns, children = null, columnSpacing = '8px' }: ResizableColumnsProps): React.JSX.Element => {
+  const [columnWidths, setColumnWidths] = useState<string[]>([]);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const resizingRef = useRef<{ index: number; startX: number; initialWidths: string[] } | null>(null);
 
   // Initialize column widths
   useEffect(() => {
@@ -226,7 +275,7 @@ const ResizableColumns = ({ columns, children = null, columnSpacing = '8px' }) =
   }, [columns]);
 
   // Start resizing
-  const startResize = (index, e) => {
+  const startResize = (index: number, e: React.MouseEvent): void => {
     e.preventDefault();
     resizingRef.current = {
       index,
@@ -239,7 +288,7 @@ const ResizableColumns = ({ columns, children = null, columnSpacing = '8px' }) =
   };
 
   // Handle resize
-  const handleResize = (e) => {
+  const handleResize = (e: MouseEvent): void => {
     if (!resizingRef.current || !containerRef.current) return;
 
     const { index, startX, initialWidths } = resizingRef.current;
@@ -282,7 +331,7 @@ const ResizableColumns = ({ columns, children = null, columnSpacing = '8px' }) =
 
     // Only create columns that have children or are the first column
     columnElements.push(
-      <Box
+      <ExtBox
         key={i}
         style={{
           width: columnWidths[i] || `${100 / columns}%`,
@@ -294,7 +343,7 @@ const ResizableColumns = ({ columns, children = null, columnSpacing = '8px' }) =
         {columnChildren}
 
         {i < columns - 1 && (
-          <Box
+          <ExtBox
             style={{
               position: 'absolute',
               right: '0',
@@ -307,7 +356,7 @@ const ResizableColumns = ({ columns, children = null, columnSpacing = '8px' }) =
             }}
             onMouseDown={(e) => startResize(i, e)}
           >
-            <Box
+            <ExtBox
               style={{
                 position: 'absolute',
                 right: '3px',
@@ -318,7 +367,7 @@ const ResizableColumns = ({ columns, children = null, columnSpacing = '8px' }) =
               }}
             />
             {/* Visual indicator on hover */}
-            <Box
+            <ExtBox
               style={{
                 position: 'absolute',
                 right: '3px',
@@ -333,9 +382,9 @@ const ResizableColumns = ({ columns, children = null, columnSpacing = '8px' }) =
               }}
               className="resize-handle-indicator"
             />
-          </Box>
+          </ExtBox>
         )}
-      </Box>,
+      </ExtBox>,
     );
   }
 
@@ -359,12 +408,27 @@ const ResizableColumns = ({ columns, children = null, columnSpacing = '8px' }) =
   );
 };
 
-// PropTypes for ResizableColumns
-ResizableColumns.propTypes = {
-  columns: PropTypes.number.isRequired,
-  children: PropTypes.node,
-  columnSpacing: PropTypes.string,
-};
+interface ConfigBuilderProps {
+  schema?: Record<string, unknown>;
+  formValues?: Record<string, unknown>;
+  defaultConfig?: Record<string, unknown> | null;
+  mergedConfig?: Record<string, unknown> | null;
+  isCustomized?: ((key: string) => boolean) | null;
+  onResetToDefault?: ((key: string) => void) | null;
+  onChange: (values: Record<string, unknown>) => void;
+  extractionSchema?: Record<string, unknown> | unknown[] | null;
+  currentVersionName?: string | null;
+  onSchemaChange?: ((schema: unknown, isDirty: boolean) => void) | null;
+  onSchemaValidate?: ((isValid: boolean, errors: unknown[]) => void) | null;
+  activeTabId?: string;
+  onTabChange?: ((tabId: string) => void) | null;
+  showRuleSchema?: boolean;
+  ruleSchema?: Record<string, unknown> | unknown[] | null;
+  onRuleSchemaChange?: ((schema: unknown, isDirty: boolean) => void) | null;
+  onRuleSchemaValidate?: ((isValid: boolean, errors: unknown[]) => void) | null;
+  versionDescription?: string;
+  onDescriptionChange?: ((description: string) => void) | null;
+}
 
 const ConfigBuilder = ({
   schema = { properties: {} },
@@ -386,12 +450,12 @@ const ConfigBuilder = ({
   onRuleSchemaValidate = null,
   versionDescription = '',
   onDescriptionChange = null,
-}) => {
+}: ConfigBuilderProps): React.JSX.Element => {
   // Track expanded state for all list items across the form - default to collapsed
-  const [expandedItems, setExpandedItems] = useState({});
+  const [expandedItems, setExpandedItems] = useState<Record<string, boolean>>({});
 
   // State for add item modals
-  const [activeAddModal, setActiveAddModal] = useState(null); // Path of the list currently showing add modal
+  const [activeAddModal, setActiveAddModal] = useState<string | null>(null); // Path of the list currently showing add modal
   const [newItemName, setNewItemName] = useState('');
   const [nameError, setNameError] = useState('');
   // For handling dropdown selection in modal
@@ -403,7 +467,7 @@ const ConfigBuilder = ({
   const setActiveTabId = onTabChange || setLocalActiveTabId;
 
   // Component-level function to add a new item with a name
-  const addNewItem = (path, name) => {
+  const addNewItem = (path: string, name: string): void => {
     // Get current values
     const values = getValueAtPath(formValues, path) || [];
     const property = getPropertyFromPath(path);
@@ -415,38 +479,39 @@ const ConfigBuilder = ({
     }
 
     // Check if name already exists
-    if (values.some((item) => item && item.name === name.trim())) {
+    if ((values as Record<string, unknown>[]).some((item) => item && (item as Record<string, unknown>).name === name.trim())) {
       setNameError('An item with this name already exists');
       return;
     }
 
     // Create a new item with only required properties and meaningful defaults
-    let newItem;
+    let newItem: unknown;
     if (property && property.items && property.items.type === 'object') {
-      newItem = {};
+      const newItemObj: Record<string, unknown> = {};
       if (property.items.properties) {
         Object.entries(property.items.properties).forEach(([propKey, propSchema]) => {
+          const ps = propSchema as SchemaProperty;
           if (propKey === 'name') {
             // Always include the name
-            newItem[propKey] = name.trim();
-          } else if (propSchema.enum && propSchema.enum.length > 0) {
+            newItemObj[propKey] = name.trim();
+          } else if (ps.enum && ps.enum.length > 0) {
             // Include enum properties with their first option as default
-            const [firstEnumValue] = propSchema.enum;
-            newItem[propKey] = firstEnumValue;
+            const [firstEnumValue] = ps.enum;
+            newItemObj[propKey] = firstEnumValue;
           } else if (
-            propSchema.default !== undefined &&
-            propSchema.default !== '' &&
-            propSchema.default !== null &&
-            !(Array.isArray(propSchema.default) && propSchema.default.length === 0) &&
+            ps.default !== undefined &&
+            ps.default !== '' &&
+            ps.default !== null &&
+            !(Array.isArray(ps.default) && (ps.default as unknown[]).length === 0) &&
             !(
-              typeof propSchema.default === 'object' &&
-              propSchema.default !== null &&
-              !Array.isArray(propSchema.default) &&
-              Object.keys(propSchema.default).length === 0
+              typeof ps.default === 'object' &&
+              ps.default !== null &&
+              !Array.isArray(ps.default) &&
+              Object.keys(ps.default as Record<string, unknown>).length === 0
             )
           ) {
             // Only include properties with meaningful non-empty default values
-            newItem[propKey] = propSchema.default;
+            newItemObj[propKey] = ps.default;
           }
           // Skip ALL other properties including:
           // - Empty strings, arrays, objects
@@ -455,12 +520,13 @@ const ConfigBuilder = ({
           // They will be added later when the user actually fills them in
         });
       }
+      newItem = newItemObj;
     } else {
       newItem = name.trim();
     }
 
     // Add to values and update
-    updateValue(path, [...values, newItem]);
+    updateValue(path, [...(values as unknown[]), newItem]);
 
     // Close modal and reset
     setActiveAddModal(null);
@@ -469,12 +535,12 @@ const ConfigBuilder = ({
   };
 
   // Helper to get property definition from path
-  const getPropertyFromPath = (path) => {
+  const getPropertyFromPath = (path: string): SchemaProperty | null => {
     if (!schema || !schema.properties) return null;
 
     const pathParts = path.split(/[.[\]]+/).filter(Boolean);
-    let current = schema.properties;
-    let property = null;
+    let current = schema.properties as Record<string, SchemaProperty>;
+    let property: SchemaProperty | null = null;
 
     // Find the property by traversing the schema
     for (let i = 0; i < pathParts.length; i += 1) {
@@ -494,29 +560,29 @@ const ConfigBuilder = ({
 
       // Navigate deeper if there are properties
       if (property.properties) {
-        current = property.properties;
+        current = property.properties as Record<string, SchemaProperty>;
       } else if (property.items && property.items.properties) {
-        current = property.items.properties;
+        current = property.items.properties as Record<string, SchemaProperty>;
       }
     }
 
     return property;
   };
 
-  const getValueAtPath = (obj, path) => {
+  const getValueAtPath = (obj: Record<string, unknown>, path: string): unknown => {
     const segments = path.split(/[.[\]]+/).filter(Boolean);
 
-    const result = segments.reduce((acc, segment) => {
+    const result = segments.reduce((acc: Record<string, unknown> | undefined, segment: string) => {
       if (acc === null || acc === undefined) {
         return undefined;
       }
-      return acc[segment];
-    }, obj);
+      return (acc as Record<string, unknown>)[segment] as Record<string, unknown> | undefined;
+    }, obj as Record<string, unknown> | undefined);
 
     return result;
   };
 
-  const updateValue = (path, value) => {
+  const updateValue = (path: string, value: unknown): void => {
     // Don't create properties for empty/meaningless values, BUT preserve empty arrays
     // as they represent intentional user deletions of list items
     // IMPORTANT: Don't filter out boolean false values - they are meaningful!
@@ -526,9 +592,9 @@ const ConfigBuilder = ({
       (typeof value === 'object' && value !== null && !Array.isArray(value) && Object.keys(value).length === 0)
     ) {
       // Instead of setting empty values, check if we should remove the property entirely
-      const newValues = { ...formValues };
+      const newValues: Record<string, unknown> = { ...formValues };
       const segments = path.split(/[.[\]]+/).filter(Boolean);
-      let current = newValues;
+      let current: Record<string, unknown> = newValues;
 
       // Navigate to the parent of the property we want to delete
       for (let i = 0; i < segments.length - 1; i += 1) {
@@ -536,7 +602,7 @@ const ConfigBuilder = ({
           // Parent doesn't exist, so we can't delete anything
           return;
         }
-        current = current[segments[i]]; // nosemgrep: javascript.lang.security.audit.prototype-pollution.prototype-pollution-loop.prototype-pollution-loop - Index from controlled array iteration
+        current = current[segments[i]] as Record<string, unknown>; // nosemgrep: javascript.lang.security.audit.prototype-pollution.prototype-pollution-loop.prototype-pollution-loop - Index from controlled array iteration
       }
 
       const [lastSegment] = segments.slice(-1);
@@ -552,9 +618,9 @@ const ConfigBuilder = ({
     if (Array.isArray(value) && value.length === 0) {
       // Check if this path represents a list field that the user has interacted with
       // We always want to preserve empty arrays as they represent intentional deletions
-      const newValues = { ...formValues };
+      const newValues: Record<string, unknown> = { ...formValues };
       const segments = path.split(/[.[\]]+/).filter(Boolean);
-      let current = newValues;
+      let current: Record<string, unknown> = newValues;
 
       segments.slice(0, -1).forEach((segment) => {
         if (!current[segment]) {
@@ -566,7 +632,7 @@ const ConfigBuilder = ({
             current[segment] = {};
           }
         }
-        current = current[segment]; // nosemgrep: javascript.lang.security.audit.prototype-pollution.prototype-pollution-loop.prototype-pollution-loop - Index from controlled array iteration
+        current = current[segment] as Record<string, unknown>; // nosemgrep: javascript.lang.security.audit.prototype-pollution.prototype-pollution-loop.prototype-pollution-loop - Index from controlled array iteration
       });
 
       const [lastSegment] = segments.slice(-1);
@@ -575,9 +641,9 @@ const ConfigBuilder = ({
       return;
     }
 
-    const newValues = { ...formValues };
+    const newValues: Record<string, unknown> = { ...formValues };
     const segments = path.split(/[.[\]]+/).filter(Boolean);
-    let current = newValues;
+    let current: Record<string, unknown> = newValues;
 
     segments.slice(0, -1).forEach((segment) => {
       if (!current[segment]) {
@@ -589,7 +655,7 @@ const ConfigBuilder = ({
           current[segment] = {};
         }
       }
-      current = current[segment]; // nosemgrep: javascript.lang.security.audit.prototype-pollution.prototype-pollution-loop.prototype-pollution-loop - Index from controlled array iteration
+      current = current[segment] as Record<string, unknown>; // nosemgrep: javascript.lang.security.audit.prototype-pollution.prototype-pollution-loop.prototype-pollution-loop - Index from controlled array iteration
     });
 
     const [lastSegment] = segments.slice(-1);
@@ -601,7 +667,7 @@ const ConfigBuilder = ({
   console.log('ConfigBuilder received isCustomized:', typeof isCustomized, !!isCustomized);
 
   // Define renderField first as a function declaration
-  function renderField(key, property, path = '') {
+  function renderField(key: string, property: SchemaProperty, path = ''): React.JSX.Element | null {
     const currentPath = path ? `${path}.${key}` : key;
     const value = getValueAtPath(formValues, currentPath);
 
@@ -728,7 +794,7 @@ const ConfigBuilder = ({
     return renderInputField(key, property, value, currentPath);
   }
 
-  function renderObjectField(key, property, path) {
+  function renderObjectField(key: string, property: SchemaProperty, path: string): React.JSX.Element {
     if (!property.properties) {
       return null;
     }
@@ -737,19 +803,19 @@ const ConfigBuilder = ({
     const fullPath = path ? `${path}.${key}` : key;
 
     // Calculate nesting level for indentation
-    const nestLevel = property.nestLevel || 0;
+    const nestLevel = Number(property.nestLevel) || 0;
 
     // Check if this is a top-level object (path is empty)
     const isTopLevel = path === '';
 
     // Sort properties by their order attribute if present
-    const getSortedObjectProperties = (properties) => {
+    const getSortedObjectProperties = (properties: Record<string, SchemaProperty>) => {
       const entries = Object.entries(properties);
       // Add an order property if not present (default to 999)
       const withOrder = entries.map(([propKey, propSchema]) => ({
         propKey,
         propSchema,
-        order: propSchema.order !== undefined ? parseInt(propSchema.order, 10) : 999,
+        order: propSchema.order !== undefined ? parseInt(String(propSchema.order), 10) : 999,
       }));
       // Sort by order
       return withOrder.sort((a, b) => a.order - b.order);
@@ -761,7 +827,7 @@ const ConfigBuilder = ({
       return (
         <SpaceBetween size="s">
           {getSortedObjectProperties(property.properties).map(({ propKey, propSchema }) => {
-            return <Box key={propKey}>{renderField(propKey, propSchema, fullPath)}</Box>;
+            return <ExtBox key={propKey}>{renderField(propKey, propSchema, fullPath)}</ExtBox>;
           })}
         </SpaceBetween>
       );
@@ -769,7 +835,7 @@ const ConfigBuilder = ({
 
     // For nested objects with sectionLabel, use the same styling as list headers
     if (property.sectionLabel && !isTopLevel) {
-      const sectionTitle = property.sectionLabel;
+      const sectionTitle = property.sectionLabel as string;
       const objectKey = `object:${fullPath}`;
 
       // Toggle expansion state
@@ -785,21 +851,21 @@ const ConfigBuilder = ({
 
       // Object header similar to list header
       const objectHeader = (
-        <Box
+        <ExtBox
           padding={{ left: `${nestLevel * 16}px`, top: '0', bottom: '0' }}
           borderBottom="divider-light"
           backgroundColor="background-paper-default"
           borderRadius="xs"
           style={{ minHeight: '24px', marginBottom: '2px' }}
         >
-          <Box
+          <ExtBox
             display="flex"
             alignItems="center"
             justifyContent="space-between"
             onClick={toggleExpand}
             style={{ cursor: 'pointer', padding: '2px 0' }}
           >
-            <Box display="flex" alignItems="center" flexDirection="row" className="awsui-box-inline">
+            <ExtBox display="flex" alignItems="center" flexDirection="row" className="awsui-box-inline">
               <Button
                 variant="icon"
                 iconName={isExpanded ? 'caret-down-filled' : 'caret-right-filled'}
@@ -809,70 +875,70 @@ const ConfigBuilder = ({
                 }}
                 ariaLabel={isExpanded ? 'Collapse section' : 'Expand section'}
               />
-              <Box fontWeight="bold" fontSize="body-m" marginLeft="xxs" display="inline-block">
+              <ExtBox fontWeight="bold" fontSize="body-m" marginLeft="xxs" display="inline-block">
                 {sectionTitle}
-              </Box>
-            </Box>
-          </Box>
-        </Box>
+              </ExtBox>
+            </ExtBox>
+          </ExtBox>
+        </ExtBox>
       );
 
       // Object content - only shown when expanded
       const objectContent = isExpanded && (
-        <Box padding={{ left: `${nestLevel * 50 + 200}px`, top: '0' }} className="list-content-indented">
+        <ExtBox padding={{ left: `${nestLevel * 50 + 200}px`, top: '0' }} className="list-content-indented">
           <SpaceBetween size="s">
             {getSortedObjectProperties(property.properties).map(({ propKey, propSchema }) => {
-              return <Box key={propKey}>{renderField(propKey, propSchema, fullPath)}</Box>;
+              return <ExtBox key={propKey}>{renderField(propKey, propSchema, fullPath)}</ExtBox>;
             })}
           </SpaceBetween>
-        </Box>
+        </ExtBox>
       );
 
       return (
-        <Box margin={{ top: '8px', bottom: '8px' }}>
+        <ExtBox margin={{ top: '8px', bottom: '8px' }}>
           {objectHeader}
           {objectContent}
-        </Box>
+        </ExtBox>
       );
     }
 
     // Default compact layout for objects without sectionLabel
     return (
-      <Box padding="s">
+      <ExtBox padding="s">
         <SpaceBetween size="xs">
           {getSortedObjectProperties(property.properties).map(({ propKey, propSchema }) => {
-            const nestedPropSchema =
+            const nestedPropSchema: SchemaProperty =
               propSchema.type === 'list' || propSchema.type === 'array' ? { ...propSchema, nestLevel: nestLevel + 1 } : propSchema;
-            return <Box key={propKey}>{renderField(propKey, nestedPropSchema, fullPath)}</Box>;
+            return <ExtBox key={propKey}>{renderField(propKey, nestedPropSchema, fullPath)}</ExtBox>;
           })}
         </SpaceBetween>
-      </Box>
+      </ExtBox>
     );
   }
 
-  function renderListField(key, property, path) {
+  function renderListField(key: string, property: SchemaProperty, path: string): React.JSX.Element {
     // Dependencies are now checked in the main renderField function
 
-    const values = getValueAtPath(formValues, path) || [];
+    const values = (getValueAtPath(formValues, path) || []) as Record<string, unknown>[];
 
     // Add debug info
     console.log(`Rendering list field: ${key}, type: ${property.type}, path: ${path}`, property, values); // nosemgrep: javascript.lang.security.audit.unsafe-formatstring.unsafe-formatstring - Debug logging with controlled internal data
 
     // Get list item display settings from schema metadata
-    const columnCount = property.columns ? parseInt(property.columns, 10) : 2;
-    const nestLevel = property.nestLevel || 0;
+    const columnCount = property.columns ? parseInt(String(property.columns), 10) : 2;
+    const nestLevel = Number(property.nestLevel) || 0;
     const nextNestLevel = nestLevel + 1;
 
     // Get list labels
-    const listLabel = property.listLabel || key.charAt(0).toUpperCase() + key.slice(1);
-    const itemLabel = property.itemLabel || key.charAt(0).toUpperCase() + key.slice(1).replace(/s$/, '');
+    const listLabel = (property.listLabel as string) || key.charAt(0).toUpperCase() + key.slice(1);
+    const itemLabel = (property.itemLabel as string) || key.charAt(0).toUpperCase() + key.slice(1).replace(/s$/, '');
 
     // Check if any item in this list is customized
-    const hasCustomizedItems = values.some((item, index) => {
-      if (!item || !item.name) return false;
+    const hasCustomizedItems = values.some((item: Record<string, unknown>, index: number) => {
+      if (!item || !(item as Record<string, unknown>).name) return false;
       const itemPath = `${path}[${index}]`;
       // Check if the item itself or any of its properties are customized
-      return isCustomized(itemPath);
+      return isCustomized?.(itemPath);
     });
 
     // Create unique key for this list's expanded state
@@ -891,21 +957,21 @@ const ConfigBuilder = ({
 
     // List header with expand/collapse icon and label in the same row
     const listHeader = (
-      <Box
+      <ExtBox
         padding={{ left: `${nestLevel * 16}px`, top: '0', bottom: '0' }}
         borderBottom="divider-light"
         backgroundColor={hasCustomizedItems ? 'background-paper-info-emphasis' : 'background-paper-default'}
         borderRadius="xs"
         style={{ minHeight: '24px', marginBottom: '2px' }}
       >
-        <Box
+        <ExtBox
           display="flex"
           alignItems="center"
           justifyContent="space-between"
           onClick={toggleListExpand}
           style={{ cursor: 'pointer', padding: '2px 0' }}
         >
-          <Box display="flex" alignItems="center" flexDirection="row" className="awsui-box-inline">
+          <ExtBox display="flex" alignItems="center" flexDirection="row" className="awsui-box-inline">
             <Button
               variant="icon"
               iconName={isListExpanded ? 'caret-down-filled' : 'caret-right-filled'}
@@ -916,27 +982,27 @@ const ConfigBuilder = ({
               }}
               ariaLabel={isListExpanded ? 'Collapse list' : 'Expand list'}
             />
-            <Box fontWeight="bold" fontSize="body-m" marginLeft="xxs" display="inline-block">
+            <ExtBox fontWeight="bold" fontSize="body-m" marginLeft="xxs" display="inline-block">
               {`${listLabel} (${values.length})`}
               {hasCustomizedItems && (
-                <Box as="span" color="text-status-info" fontSize="body-s" fontWeight="normal" marginLeft="xs">
+                <ExtBox as="span" color="text-status-info" fontSize="body-s" fontWeight="normal" marginLeft="xs">
                   (customized)
-                </Box>
+                </ExtBox>
               )}
-            </Box>
-          </Box>
-        </Box>
-      </Box>
+            </ExtBox>
+          </ExtBox>
+        </ExtBox>
+      </ExtBox>
     );
 
     // List content with items - only shown when expanded
     const itemsContent = isListExpanded && (
-      <Box padding={{ left: `${nestLevel * 50 + 200}px`, top: '0' }} className="list-content-indented">
-        <SpaceBetween size="none">
+      <ExtBox padding={{ left: `${nestLevel * 50 + 200}px`, top: '0' }} className="list-content-indented">
+        <SpaceBetween size="xxxs">
           {values.length === 0 && (
-            <Box fontStyle="italic" color="text-body-secondary" padding="xs">
+            <ExtBox fontStyle="italic" color="text-body-secondary" padding="xs">
               No items added yet
-            </Box>
+            </ExtBox>
           )}
 
           {values.map((item, index) => {
@@ -944,7 +1010,7 @@ const ConfigBuilder = ({
             const isLastItem = index === values.length - 1;
 
             return (
-              <Box
+              <ExtBox
                 key={`${itemPath}-${index}`}
                 borderBottom="divider-light"
                 padding={{ bottom: 'none', top: '0' }}
@@ -954,7 +1020,7 @@ const ConfigBuilder = ({
                 }}
               >
                 {/* Item header showing the item name prominently */}
-                <Box
+                <ExtBox
                   padding={{ top: '0', bottom: '0', left: '4px', right: '4px' }}
                   backgroundColor="background-paper-default"
                   borderBottom="divider-light"
@@ -965,8 +1031,8 @@ const ConfigBuilder = ({
                     minHeight: '22px',
                   }}
                 >
-                  <Box display="flex" alignItems="center" style={{ padding: '1px 0' }}>
-                    <Box display="flex" alignItems="center" className="awsui-box-inline">
+                  <ExtBox display="flex" alignItems="center" style={{ padding: '1px 0' }}>
+                    <ExtBox display="flex" alignItems="center" className="awsui-box-inline">
                       {/* Delete button - moved to the left of the label */}
                       <Button
                         variant="icon"
@@ -979,40 +1045,40 @@ const ConfigBuilder = ({
                         ariaLabel="Remove item"
                       />
 
-                      <Box
+                      <ExtBox
                         fontWeight="bold"
                         fontSize="body-m"
-                        color={isCustomized(`${itemPath}`) ? 'text-status-info' : 'text-body-default'}
+                        color={isCustomized?.(`${itemPath}`) ? 'text-status-info' : 'text-body-default'}
                         display="inline-block"
                       >
-                        {item.name || `${itemLabel} ${index + 1}`}
-                        {isCustomized(`${itemPath}`) && (
-                          <Box as="span" fontSize="body-s" fontWeight="normal" marginLeft="xs" color="text-status-info">
+                        {String((item as Record<string, unknown>).name || `${itemLabel} ${index + 1}`)}
+                        {isCustomized?.(`${itemPath}`) && (
+                          <ExtBox as="span" fontSize="body-s" fontWeight="normal" marginLeft="xs" color="text-status-info">
                             (customized)
-                          </Box>
+                          </ExtBox>
                         )}
-                      </Box>
-                    </Box>
-                  </Box>
-                </Box>
+                      </ExtBox>
+                    </ExtBox>
+                  </ExtBox>
+                </ExtBox>
 
                 {/* Content area with property fields and nested lists - no extra row for delete button */}
-                <Box padding={{ top: 'none', bottom: 'none', left: '40px' }} className="property-content-indented">
-                  <Box flex="1">
-                    {property.items.type === 'object' ? (
+                <ExtBox padding={{ top: 'none', bottom: 'none', left: '40px' }} className="property-content-indented">
+                  <ExtBox flex="1">
+                    {property.items?.type === 'object' ? (
                       (() => {
                         // First, get all property entries sorted by their order if available
-                        const propEntries = Object.entries(property.items.properties || {})
+                        const propEntries = Object.entries((property.items?.properties || {}) as Record<string, SchemaProperty>)
                           .map(([propKey, prop]) => ({
                             propKey,
                             prop,
                             // Use the specific order if provided, otherwise default to 999
-                            order: prop.order !== undefined ? parseInt(prop.order, 10) : 999,
+                            order: prop.order !== undefined ? parseInt(String(prop.order), 10) : 999,
                           }))
                           .sort((a, b) => a.order - b.order);
 
                         // Function to check if a field should be visible (not hidden by dependencies)
-                        const isFieldVisible = (propKey, propSchema) => {
+                        const isFieldVisible = (propKey: string, propSchema: SchemaProperty) => {
                           if (!propSchema.dependsOn) return true;
 
                           const dependencyField = propSchema.dependsOn.field;
@@ -1051,7 +1117,7 @@ const ConfigBuilder = ({
                         const specialProps = []; // For lists, objects with dependsOn, or objects with sectionLabel
 
                         // Identify and separate the fields, filtering out hidden ones
-                        propEntries.forEach(({ propKey, prop: propSchema }) => {
+                        propEntries.forEach(({ propKey, prop: propSchema }: { propKey: string; prop: SchemaProperty }) => {
                           if (
                             propSchema.type === 'list' ||
                             propSchema.type === 'array' ||
@@ -1075,7 +1141,10 @@ const ConfigBuilder = ({
                         });
 
                         // Enhanced column distribution algorithm - only for visible fields
-                        const distributeFieldsToColumns = (fields, numColumns) => {
+                        const distributeFieldsToColumns = (
+                          fields: { propKey: string; propSchema: SchemaProperty }[],
+                          numColumns: number,
+                        ) => {
                           // Create columns array
                           const columns = Array.from({ length: numColumns }, () => []);
 
@@ -1123,14 +1192,16 @@ const ConfigBuilder = ({
 
                         // Render the regular fields using HTML table for guaranteed columns
                         const renderedRegularFields = (
-                          <Box padding="0" style={{ margin: 0 }}>
+                          <ExtBox padding="0" style={{ margin: 0 }}>
                             <table style={{ width: '100%', borderCollapse: 'separate', borderSpacing: '4px 0', margin: 0 }}>
                               <tbody style={{ margin: 0, padding: 0 }}>
                                 {/* Render description field first if it exists, spanning full width */}
                                 {descriptionField && (
                                   <tr key="description-row">
                                     <td colSpan={actualColumnCount} style={{ verticalAlign: 'top' }}>
-                                      <Box padding="0">{renderField(descriptionField.propKey, descriptionField.propSchema, itemPath)}</Box>
+                                      <ExtBox padding="0">
+                                        {renderField(descriptionField.propKey, descriptionField.propSchema, itemPath)}
+                                      </ExtBox>
                                     </td>
                                   </tr>
                                 )}
@@ -1177,7 +1248,7 @@ const ConfigBuilder = ({
                                                     padding: '0 4px',
                                                   }}
                                                 >
-                                                  <Box padding="0">{renderField(propKey, propSchema, itemPath)}</Box>
+                                                  <ExtBox padding="0">{renderField(propKey, propSchema, itemPath)}</ExtBox>
                                                 </td>
                                               );
                                             })
@@ -1188,52 +1259,56 @@ const ConfigBuilder = ({
                                     .filter(Boolean)}
                               </tbody>
                             </table>
-                          </Box>
+                          </ExtBox>
                         );
 
                         // Render any special fields (lists, objects with dependencies)
-                        const renderedSpecialFields = specialProps.map(({ propKey, propSchema }) => {
-                          // Configure nested field with proper indentation
-                          const nestedProps = {
-                            ...propSchema,
-                            // Add 1 to nestLevel for each nesting level with higher multiplier
-                            nestLevel: nextNestLevel + 1, // Increase nesting level for better visual distinction
-                            // Explicitly set columns for nested fields
-                            columns: propSchema.columns || 2,
-                          };
+                        const renderedSpecialFields = specialProps.map(
+                          ({ propKey, propSchema }: { propKey: string; propSchema: SchemaProperty }) => {
+                            // Configure nested field with proper indentation
+                            const nestedProps: SchemaProperty = {
+                              ...propSchema,
+                              // Add 1 to nestLevel for each nesting level with higher multiplier
+                              nestLevel: nextNestLevel + 1, // Increase nesting level for better visual distinction
+                              // Explicitly set columns for nested fields
+                              columns: propSchema.columns || 2,
+                            };
 
-                          return (
-                            <Box key={propKey} padding={{ top: '0', bottom: '8px' }} width="100%" margin={{ bottom: '4px' }}>
-                              {renderField(propKey, nestedProps, itemPath)}
-                            </Box>
-                          );
-                        });
+                            return (
+                              <ExtBox key={propKey} padding={{ top: '0', bottom: '8px' }} width="100%" margin={{ bottom: '4px' }}>
+                                {renderField(propKey, nestedProps, itemPath)}
+                              </ExtBox>
+                            );
+                          },
+                        );
 
                         // Return both the regular fields and any special fields
                         return (
-                          <Box style={{ margin: 0, padding: 0 }}>
+                          <ExtBox style={{ margin: 0, padding: 0 }}>
                             {renderedRegularFields}
                             {renderedSpecialFields.length > 0 && (
                               <>
-                                {regularProps.length > 0 && <Box padding="4px 0" margin="4px 0" />}
-                                <Box padding="0">{renderedSpecialFields}</Box>
+                                {regularProps.length > 0 && <ExtBox padding="4px 0" margin="4px 0" />}
+                                <ExtBox padding="0">{renderedSpecialFields}</ExtBox>
                               </>
                             )}
-                          </Box>
+                          </ExtBox>
                         );
                       })()
                     ) : (
                       // Simple list item (non-object)
-                      <Box padding="xs">{renderInputField(`${key}[${index}]`, property.items, values[index], itemPath)}</Box>
+                      <ExtBox padding="xs">
+                        {renderInputField(`${key}[${index}]`, property.items as SchemaProperty, values[index], itemPath)}
+                      </ExtBox>
                     )}
-                  </Box>
-                </Box>
-              </Box>
+                  </ExtBox>
+                </ExtBox>
+              </ExtBox>
             );
           })}
 
           {/* Space before add button - only use visual separator for top-level lists */}
-          <Box
+          <ExtBox
             className="list-separator"
             padding="0"
             margin="16px 0"
@@ -1241,10 +1316,10 @@ const ConfigBuilder = ({
           />
 
           {/* Add new item button */}
-          <Box className="list-add-button-container" display="flex" alignItems="center">
-            <Box style={{ width: '24px', display: 'inline-block' }}>
+          <ExtBox className="list-add-button-container" display="flex" alignItems="center">
+            <ExtBox style={{ width: '24px', display: 'inline-block' }}>
               {/* This empty box provides the same spacing as the delete button */}
-            </Box>
+            </ExtBox>
             <Button
               iconName="add-plus"
               onClick={() => {
@@ -1265,21 +1340,21 @@ const ConfigBuilder = ({
             >
               Add {itemLabel}
             </Button>
-          </Box>
+          </ExtBox>
         </SpaceBetween>
-      </Box>
+      </ExtBox>
     );
 
     // Combine header and content
     return (
-      <Box margin={{ top: '8px', bottom: '8px' }}>
+      <ExtBox margin={{ top: '8px', bottom: '8px' }}>
         {listHeader}
         {itemsContent}
-      </Box>
+      </ExtBox>
     );
   }
 
-  function renderInputField(key, property, value, path) {
+  function renderInputField(key: string, property: SchemaProperty, value: unknown, path: string): React.JSX.Element {
     // Special handling for fields with default values
     let displayValue = value;
 
@@ -1314,7 +1389,7 @@ const ConfigBuilder = ({
 
     // Check if this field is customized (different from default) using saved config
     let isFieldCustomized = false;
-    isFieldCustomized = isCustomized(path);
+    isFieldCustomized = isCustomized?.(path) ?? false;
 
     // Check if current form value differs from default (for "Restore to default" button visibility)
     // This uses formValues (live edits) vs defaultConfig, so the button hides immediately after restoring
@@ -1348,9 +1423,9 @@ const ConfigBuilder = ({
     const handleRestoreDefault = () => {
       if (onResetToDefault) {
         // resetToDefault returns { path, defaultValue } synchronously
-        const result = onResetToDefault(path);
-        if (result && result.defaultValue !== undefined) {
-          updateValue(result.path, result.defaultValue);
+        const result = onResetToDefault(path) as unknown as { path: string; defaultValue: unknown } | void;
+        if (result && (result as { defaultValue: unknown }).defaultValue !== undefined) {
+          updateValue((result as { path: string }).path, (result as { defaultValue: unknown }).defaultValue);
           console.log(`Restored default value for ${path} (unsaved - click Save to persist)`); // nosemgrep: javascript.lang.security.audit.unsafe-formatstring.unsafe-formatstring - Data from trusted internal source only
         } else if (defaultConfig) {
           // Fallback: get default value directly
@@ -1373,7 +1448,7 @@ const ConfigBuilder = ({
     // For name fields inside arrays, use a read-only display instead of an editable input
     if (isNameInArray) {
       input = (
-        <Box
+        <ExtBox
           padding="s"
           style={{
             border: '1px solid #ccc',
@@ -1386,14 +1461,14 @@ const ConfigBuilder = ({
           }}
         >
           <span>{value !== undefined && value !== null ? String(value) : ''}</span>
-        </Box>
+        </ExtBox>
       );
     } else if (property.enum) {
       input = (
         <Select
-          selectedOption={{ value: displayValue || '', label: displayValue || '' }}
+          selectedOption={{ value: String(displayValue || ''), label: String(displayValue || '') }}
           onChange={({ detail }) => updateValue(path, detail.selectedOption.value)}
-          options={property.enum.map((opt) => ({ value: opt, label: opt }))}
+          options={(property.enum as string[]).map((opt: string) => ({ value: opt, label: opt }))}
         />
       );
     } else if (property.format === 'text-area' || path.toLowerCase().includes('prompt') || path.toLowerCase().includes('description')) {
@@ -1416,10 +1491,9 @@ const ConfigBuilder = ({
         <Input
           value={displayValue !== undefined && displayValue !== null ? String(displayValue) : ''}
           type={property.type === 'number' ? 'number' : 'text'}
-          min={property.minimum}
-          max={property.maximum}
+          inputMode={property.type === 'number' ? 'numeric' : undefined}
           onChange={({ detail }) => {
-            let finalValue = detail.value;
+            let finalValue: string | number = detail.value;
             if (property.type === 'number' && detail.value !== '') {
               finalValue = Number(detail.value);
             }
@@ -1431,21 +1505,21 @@ const ConfigBuilder = ({
     }
 
     // Use description as the label
-    const displayText = property.description || key;
+    const displayText = (property.description as string) || key;
     const constraints = getConstraintText(property);
 
     // Stable flex wrapper prevents input remount/focus loss
-    // Input is always inside <Box flex="1"> — adding/removing sibling Button
+    // Input is always inside <ExtBox flex="1"> — adding/removing sibling Button
     // doesn't unmount the input, just changes siblings
     const inputWithActions = (
-      <Box display="flex" alignItems="center">
-        <Box flex="1">{input}</Box>
+      <ExtBox display="flex" alignItems="center">
+        <ExtBox flex="1">{input}</ExtBox>
         {showRestoreDefault && (
           <Button variant="link" onClick={handleRestoreDefault} className="restore-default-button" iconName="undo">
             Restore default
           </Button>
         )}
-      </Box>
+      </ExtBox>
     );
 
     // Use standard constraints
@@ -1475,14 +1549,14 @@ const ConfigBuilder = ({
 
   // Create a sorted list of properties based on their order attribute
   const getSortedProperties = () => {
-    const entries = Object.entries(schema?.properties || {});
+    const entries = Object.entries((schema?.properties || {}) as Record<string, SchemaProperty>);
 
     // Add an order property if not present (default to 999)
     const withOrder = entries.map(([key, prop]) => ({
       key,
       property: prop,
       // Use the specific order if provided, otherwise default to 999
-      order: prop.order !== undefined ? parseInt(prop.order, 10) : 999,
+      order: prop.order !== undefined ? parseInt(String(prop.order), 10) : 999,
     }));
 
     // Sort by order
@@ -1490,12 +1564,12 @@ const ConfigBuilder = ({
   };
 
   // Check if a property needs a container with section header
-  const shouldUseContainer = (key, property) => {
+  const shouldUseContainer = (_key: string, property: SchemaProperty) => {
     return property.sectionLabel && (property.type === 'object' || property.type === 'list' || property.type === 'array');
   };
 
   // Render each top-level property
-  const renderTopLevelProperty = ({ key, property }) => {
+  const renderTopLevelProperty = ({ key, property }: { key: string; property: SchemaProperty }) => {
     // Debug info for sections
     console.log(
       `Rendering top level property: ${key}, type: ${property.type}, sectionLabel: ${property.sectionLabel}`, // nosemgrep: javascript.lang.security.audit.unsafe-formatstring.unsafe-formatstring - Debug logging with controlled internal data
@@ -1504,12 +1578,12 @@ const ConfigBuilder = ({
 
     // If property should have a section container, wrap it
     if (shouldUseContainer(key, property)) {
-      const sectionTitle = property.sectionLabel;
+      const sectionTitle = property.sectionLabel as string;
       console.log(`Creating section container for ${key} with title: ${sectionTitle}`); // nosemgrep: javascript.lang.security.audit.unsafe-formatstring.unsafe-formatstring - Debug logging with controlled internal data
 
       return (
         <Container key={key} header={<Header variant="h3">{sectionTitle}</Header>}>
-          <Box padding="s">{renderField(key, property)}</Box>
+          <ExtBox padding="s">{renderField(key, property)}</ExtBox>
         </Container>
       );
     }
@@ -1520,11 +1594,11 @@ const ConfigBuilder = ({
     }
 
     // Default rendering
-    return <Box key={key}>{renderField(key, property)}</Box>;
+    return <ExtBox key={key}>{renderField(key, property)}</ExtBox>;
   };
 
   return (
-    <Box style={{ height: '70vh' }} padding="s">
+    <ExtBox style={{ height: '70vh' }} padding="s">
       <style>{customStyles}</style>
       <Tabs
         activeTabId={activeTabId}
@@ -1534,7 +1608,7 @@ const ConfigBuilder = ({
             id: 'configuration',
             label: 'Configuration',
             content: (
-              <Box style={{ height: 'calc(70vh - 60px)', overflow: 'auto' }} padding="s">
+              <ExtBox style={{ height: 'calc(70vh - 60px)', overflow: 'auto' }} padding="s">
                 <SpaceBetween size="l">
                   {/* Version Description Field */}
                   <FormField
@@ -1552,21 +1626,21 @@ const ConfigBuilder = ({
 
                   {getSortedProperties().map(renderTopLevelProperty)}
                 </SpaceBetween>
-              </Box>
+              </ExtBox>
             ),
           },
           {
             id: 'extraction-schema',
             label: 'Document Schema',
             content: (
-              <Box style={{ height: 'calc(70vh - 60px)' }}>
+              <ExtBox style={{ height: 'calc(70vh - 60px)' }}>
                 <SchemaBuilder
                   key={`schema-${currentVersionName || 'default'}`}
-                  initialSchema={extractionSchema}
+                  initialSchema={extractionSchema as Record<string, unknown> | null}
                   onChange={onSchemaChange}
                   onValidate={onSchemaValidate}
                 />
-              </Box>
+              </ExtBox>
             ),
           },
           // Only show Rule Schema tab for Pattern2
@@ -1576,14 +1650,14 @@ const ConfigBuilder = ({
                   id: 'rule-schema',
                   label: 'Rule Schema',
                   content: (
-                    <Box style={{ height: 'calc(70vh - 60px)' }}>
+                    <ExtBox style={{ height: 'calc(70vh - 60px)' }}>
                       <SchemaBuilder
-                        initialSchema={ruleSchema}
+                        initialSchema={ruleSchema as Record<string, unknown> | null}
                         onChange={onRuleSchemaChange}
                         onValidate={onRuleSchemaValidate}
                         isRuleSchema={true}
                       />
-                    </Box>
+                    </ExtBox>
                   ),
                 },
               ]
@@ -1597,7 +1671,7 @@ const ConfigBuilder = ({
         onDismiss={() => setActiveAddModal(null)}
         header={activeAddModal ? `Add new ${getPropertyFromPath(activeAddModal)?.itemLabel || 'Item'}` : 'Add Item'}
         footer={
-          <Box float="right">
+          <ExtBox float="right">
             <SpaceBetween direction="horizontal" size="xs">
               <Button variant="link" onClick={() => setActiveAddModal(null)}>
                 Cancel
@@ -1606,7 +1680,7 @@ const ConfigBuilder = ({
                 Add
               </Button>
             </SpaceBetween>
-          </Box>
+          </ExtBox>
         }
       >
         {activeAddModal && (
@@ -1649,39 +1723,8 @@ const ConfigBuilder = ({
           </FormField>
         )}
       </Modal>
-    </Box>
+    </ExtBox>
   );
-};
-
-ConfigBuilder.propTypes = {
-  schema: PropTypes.shape({
-    properties: PropTypes.objectOf(
-      PropTypes.shape({
-        type: PropTypes.string,
-        description: PropTypes.string,
-      }),
-    ),
-  }),
-  formValues: PropTypes.shape({
-    classes: PropTypes.oneOfType([PropTypes.object, PropTypes.array]),
-  }),
-  defaultConfig: PropTypes.shape({}),
-  mergedConfig: PropTypes.shape({}),
-  isCustomized: PropTypes.func,
-  onResetToDefault: PropTypes.func,
-  onChange: PropTypes.func.isRequired,
-  extractionSchema: PropTypes.oneOfType([PropTypes.object, PropTypes.array]),
-  currentVersionName: PropTypes.string,
-  onSchemaChange: PropTypes.func,
-  onSchemaValidate: PropTypes.func,
-  activeTabId: PropTypes.string,
-  onTabChange: PropTypes.func,
-  showRuleSchema: PropTypes.bool,
-  ruleSchema: PropTypes.oneOfType([PropTypes.object, PropTypes.array]),
-  onRuleSchemaChange: PropTypes.func,
-  onRuleSchemaValidate: PropTypes.func,
-  versionDescription: PropTypes.string,
-  onDescriptionChange: PropTypes.func,
 };
 
 export default ConfigBuilder;

@@ -15,6 +15,7 @@ import {
   FileUpload,
   Select,
 } from '@cloudscape-design/components';
+import type { SelectProps } from '@cloudscape-design/components';
 import { generateClient } from 'aws-amplify/api';
 
 import uploadDocument from '../../graphql/queries/uploadDocument';
@@ -25,15 +26,22 @@ import useSettingsContext from '../../contexts/settings';
 
 const client = generateClient();
 
-const UploadDocumentPanel = () => {
+interface UploadStatusItem {
+  file: string;
+  status: 'success' | 'error';
+  objectKey?: string;
+  error?: string;
+}
+
+const UploadDocumentPanel = (): React.JSX.Element => {
   const { settings } = useSettingsContext();
   const { versions, getVersionOptions } = useConfigurationVersions();
-  const [selectedFiles, setSelectedFiles] = useState([]);
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [isUploading, setIsUploading] = useState(false);
-  const [uploadStatus, setUploadStatus] = useState([]);
-  const [error, setError] = useState(null);
+  const [uploadStatus, setUploadStatus] = useState<UploadStatusItem[]>([]);
+  const [error, setError] = useState<string | null>(null);
   const [prefix, setPrefix] = useState('');
-  const [selectedVersion, setSelectedVersion] = useState(null);
+  const [selectedVersion, setSelectedVersion] = useState<SelectProps.Option | null>(null);
 
   // Set default to active version when versions are loaded
   useEffect(() => {
@@ -50,7 +58,7 @@ const UploadDocumentPanel = () => {
     }
   }, [versions, selectedVersion, getVersionOptions]);
 
-  if (!settings.InputBucket) {
+  if (!(settings as Record<string, unknown>).InputBucket) {
     return (
       <Container header={<Header variant="h2">Upload Documents</Header>}>
         <Alert type="error">Input bucket not configured</Alert>
@@ -58,14 +66,14 @@ const UploadDocumentPanel = () => {
     );
   }
 
-  const handleFileChange = (files) => {
+  const handleFileChange = (files: File[]): void => {
     setSelectedFiles(files);
     setUploadStatus([]);
     setError(null);
   };
 
-  const handlePrefixChange = (e) => {
-    setPrefix(e.detail.value);
+  const handlePrefixChange = ({ detail }: { detail: { value: string } }): void => {
+    setPrefix(detail.value);
   };
 
   const uploadFiles = async () => {
@@ -78,11 +86,11 @@ const UploadDocumentPanel = () => {
     setUploadStatus([]);
     setError(null);
 
-    const newUploadStatus = [];
+    const newUploadStatus: UploadStatusItem[] = [];
 
     try {
       // Use array reduce to process files sequentially
-      await selectedFiles.reduce(async (previousPromise, file) => {
+      await selectedFiles.reduce(async (previousPromise: Promise<void>, file: File) => {
         // Wait for the previous file to finish
         await previousPromise;
 
@@ -92,17 +100,21 @@ const UploadDocumentPanel = () => {
           console.log(`Using prefix: ${prefix || 'none'}`);
 
           const response = await client.graphql({
-            query: uploadDocument,
+            query: uploadDocument as unknown as string,
             variables: {
               fileName: file.name,
               contentType: file.type,
               prefix: prefix || '', // Use the user-provided prefix or empty string
-              bucket: settings.InputBucket, // Explicitly pass the input bucket
+              bucket: (settings as Record<string, unknown>).InputBucket as string, // Explicitly pass the input bucket
               version: selectedVersion?.value, // Pass selected version (optional)
             },
           });
 
-          const { presignedUrl, objectKey, usePostMethod } = response.data.uploadDocument;
+          const { presignedUrl, objectKey, usePostMethod } = (response as { data: Record<string, unknown> }).data.uploadDocument as {
+            presignedUrl: string;
+            objectKey: string;
+            usePostMethod: boolean;
+          };
 
           if (!usePostMethod) {
             throw new Error('Server returned PUT method which is not supported. Please update your backend code.');
@@ -121,7 +133,7 @@ const UploadDocumentPanel = () => {
 
           // Add all the fields from the presigned POST data to the form
           Object.entries(presignedPostData.fields).forEach(([key, value]) => {
-            formData.append(key, value);
+            formData.append(key, value as string);
           });
 
           // Append the file last
@@ -160,7 +172,7 @@ const UploadDocumentPanel = () => {
 
         // Update status after each file
         setUploadStatus([...newUploadStatus]);
-      }, Promise.resolve());
+      }, Promise.resolve() as Promise<void>);
     } catch (err) {
       console.error('Error in overall upload process:', err);
       setError(`Upload process failed: ${err.message}`);
@@ -198,9 +210,9 @@ const UploadDocumentPanel = () => {
             onChange={({ detail }) => handleFileChange(detail.value)}
             value={selectedFiles}
             i18nStrings={{
-              uploadButtonText: (multiple) => (multiple ? 'Choose files' : 'Choose file'),
-              dropzoneText: (multiple) => (multiple ? 'Drop files to upload' : 'Drop file to upload'),
-              removeFileAriaLabel: (fileIndex) => `Remove file ${fileIndex + 1}`,
+              uploadButtonText: (multiple: boolean) => (multiple ? 'Choose files' : 'Choose file'),
+              dropzoneText: (multiple: boolean) => (multiple ? 'Drop files to upload' : 'Drop file to upload'),
+              removeFileAriaLabel: (fileIndex: number) => `Remove file ${fileIndex + 1}`,
               errorIconAriaLabel: 'Error',
               warningIconAriaLabel: 'Warning',
             }}
@@ -208,9 +220,7 @@ const UploadDocumentPanel = () => {
             multiple
             showFileSize
             showFileLastModified
-            showFileThumbnail
-            tokenLimit={10}
-            disabled={isUploading}
+            {...({ showFileThumbnail: true, tokenLimit: 10, disabled: isUploading } as Record<string, unknown>)}
           />
         </FormField>
 

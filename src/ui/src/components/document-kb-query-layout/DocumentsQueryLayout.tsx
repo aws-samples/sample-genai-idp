@@ -6,7 +6,6 @@ import React, { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import rehypeRaw from 'rehype-raw';
 import { Box, Button, Spinner, Header, Grid, Container, SpaceBetween, Input, Link } from '@cloudscape-design/components';
-import PropTypes from 'prop-types';
 import { generateClient } from 'aws-amplify/api';
 import { ConsoleLogger } from 'aws-amplify/utils';
 
@@ -17,7 +16,18 @@ import useSettingsContext from '../../contexts/settings';
 const client = generateClient();
 const logger = new ConsoleLogger('queryKnowledgeBase');
 
-const ValueWithLabel = ({ label, index, children }) => (
+interface ValueWithLabelProps {
+  label: string;
+  index: number;
+  children: React.ReactNode;
+}
+
+interface KbQuery {
+  label: string;
+  value: string;
+}
+
+const ValueWithLabel = ({ label, index, children }: ValueWithLabelProps): React.JSX.Element => (
   <>
     <Box variant="awsui-key-label">
       <span tabIndex={index}>
@@ -28,14 +38,13 @@ const ValueWithLabel = ({ label, index, children }) => (
   </>
 );
 
-ValueWithLabel.propTypes = {
-  label: PropTypes.string.isRequired,
-  index: PropTypes.number.isRequired,
-  children: PropTypes.node.isRequired,
-};
+interface CustomLinkProps {
+  href?: string;
+  children: React.ReactNode;
+}
 
-const CustomLink = ({ href, children }) => {
-  const handleClick = (e) => {
+const CustomLink = ({ href, children }: CustomLinkProps): React.JSX.Element => {
+  const handleClick = (e: CustomEvent): void => {
     e.preventDefault();
     // Handle the link click here
     console.log('Link clicked:', href);
@@ -43,24 +52,19 @@ const CustomLink = ({ href, children }) => {
   };
 
   return (
-    <Link href={`#${DOCUMENTS_PATH}/${href}`} onClick={handleClick}>
+    <Link href={`#${DOCUMENTS_PATH}/${href}`} onClick={handleClick as unknown as (event: CustomEvent) => void}>
       {children}
     </Link>
   );
 };
-CustomLink.propTypes = {
-  href: PropTypes.string.isRequired,
-  children: PropTypes.node.isRequired,
-};
-
-export const DocumentsQueryLayout = () => {
+export const DocumentsQueryLayout = (): React.JSX.Element => {
   const [inputQuery, setInputQuery] = useState('');
-  const [meetingKbQueries, setMeetingKbQueries] = useState([]);
+  const [meetingKbQueries, setMeetingKbQueries] = useState<KbQuery[]>([]);
   const [meetingKbQueryStatus, setMeetingKbQueryStatus] = useState(false);
   const [kbSessionId, setKbSessionId] = useState('');
   const { settings } = useSettingsContext();
 
-  const getElementByIdAsync = (id) =>
+  const getElementByIdAsync = (id: string): Promise<HTMLElement> =>
     // eslint-disable-next-line
     new Promise((resolve) => {
       const getElement = () => {
@@ -74,20 +78,20 @@ export const DocumentsQueryLayout = () => {
       getElement();
     });
 
-  const scrollToBottomOfChat = async () => {
+  const scrollToBottomOfChat = async (): Promise<void> => {
     const chatDiv = await getElementByIdAsync('chatDiv');
     chatDiv.scrollTop = chatDiv.scrollHeight + 200;
   };
 
-  const getDocumentsQueryResponseFromKB = async (input, sessionId) => {
+  const getDocumentsQueryResponseFromKB = async (input: string, sessionId: string) => {
     const response = await client.graphql({
-      query: queryKnowledgeBase,
+      query: queryKnowledgeBase as unknown as string,
       variables: { input, sessionId },
     });
     return response;
   };
 
-  const submitQuery = (query) => {
+  const submitQuery = (query: string): void => {
     if (meetingKbQueryStatus === true) {
       return;
     }
@@ -106,7 +110,7 @@ export const DocumentsQueryLayout = () => {
     const queryResponse = getDocumentsQueryResponseFromKB(query, kbSessionId);
 
     queryResponse.then((r) => {
-      const kbResponse = JSON.parse(r.data.queryKnowledgeBase);
+      const kbResponse = JSON.parse((r as { data: Record<string, unknown> }).data.queryKnowledgeBase as string);
       const kbanswer = kbResponse.markdown;
       setKbSessionId(kbResponse.sessionId);
       const queries = currentQueries.map((q) => {
@@ -124,7 +128,7 @@ export const DocumentsQueryLayout = () => {
     setMeetingKbQueryStatus(false);
   };
 
-  const onSubmit = (e) => {
+  const onSubmit = (e: React.FormEvent): boolean => {
     submitQuery(inputQuery);
     setInputQuery('');
     e.preventDefault();
@@ -133,12 +137,12 @@ export const DocumentsQueryLayout = () => {
 
   // eslint-disable-next-line
   const placeholder =
-    settings.ShouldUseDocumentKnowledgeBase === 'true'
+    (settings as Record<string, unknown>).ShouldUseDocumentKnowledgeBase === 'true'
       ? 'Enter a question to query your document knowledge base.'
       : 'Document Knowledge Base is set to DISABLED for this GenAIIDP deployment.';
   // eslint-disable-next-line
   const initialMsg =
-    settings.ShouldUseDocumentKnowledgeBase === 'true'
+    (settings as Record<string, unknown>).ShouldUseDocumentKnowledgeBase === 'true'
       ? 'Ask a question below.'
       : 'Document Knowledge Base queries are not enabled. Document Knowledge Base is set to DISABLED for this GenAIIDP deployment.';
   return (
@@ -148,9 +152,9 @@ export const DocumentsQueryLayout = () => {
       /* For future use. :) */
       footer={
         <form onSubmit={onSubmit}>
-          <Grid gridDefinition={[{ colspan: { default: 12, xxs: 9 } }, { default: 12, xxs: 3 }]}>
+          <Grid gridDefinition={[{ colspan: { default: 12, xxs: 9 } }, { colspan: { default: 12, xxs: 3 } }] as Record<string, unknown>[]}>
             <Input placeholder={`${placeholder}`} onChange={({ detail }) => setInputQuery(detail.value)} value={inputQuery} />
-            <Button type="submit">Submit</Button>
+            <Button {...({ type: 'submit' } as Record<string, unknown>)}>Submit</Button>
           </Grid>
         </form>
       }
@@ -168,9 +172,11 @@ export const DocumentsQueryLayout = () => {
                 ) : (
                   <ReactMarkdown
                     rehypePlugins={[rehypeRaw]}
-                    components={{
-                      documentid: CustomLink,
-                    }}
+                    components={
+                      {
+                        documentid: CustomLink,
+                      } as Record<string, unknown>
+                    }
                   >
                     {entry.value}
                   </ReactMarkdown>
