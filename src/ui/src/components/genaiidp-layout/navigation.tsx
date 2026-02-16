@@ -1,7 +1,8 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
-import { React, useMemo } from 'react';
+import React, { useMemo } from 'react';
 import { useLocation } from 'react-router-dom';
+import type { SideNavigationProps } from '@cloudscape-design/components';
 import { SideNavigation } from '@cloudscape-design/components';
 import useSettingsContext from '../../contexts/settings';
 import useUserRole from '../../hooks/use-user-role';
@@ -71,7 +72,7 @@ export const reviewerNavItems = [{ type: 'link', text: 'Document List', href: `#
 // Keep for backward compatibility
 export const documentsNavItems = adminNavItems;
 
-const defaultOnFollowHandler = (ev) => {
+const defaultOnFollowHandler = (ev: CustomEvent<SideNavigationProps.FollowDetail>): void => {
   if (ev.detail.href === '#deployment-info') {
     ev.preventDefault();
     return;
@@ -79,12 +80,22 @@ const defaultOnFollowHandler = (ev) => {
   console.log(ev);
 };
 
-/* eslint-disable react/prop-types */
-const Navigation = ({ header = documentsNavHeader, items, onFollowHandler = defaultOnFollowHandler }) => {
+interface NavigationProps {
+  header?: { text: string; href: string };
+  items?: SideNavigationProps.Item[];
+  onFollowHandler?: (ev: CustomEvent<SideNavigationProps.FollowDetail>) => void;
+}
+
+const Navigation = ({
+  header = documentsNavHeader,
+  items,
+  onFollowHandler = defaultOnFollowHandler,
+}: NavigationProps): React.JSX.Element => {
   const location = useLocation();
   const path = location.pathname;
   let activeHref = `#${DEFAULT_PATH}`;
-  const { settings } = useSettingsContext() || {};
+  const { settings: rawSettings } = useSettingsContext() || {};
+  const settings = rawSettings as Record<string, unknown> | undefined;
   const { isReviewer, isAdmin } = useUserRole();
 
   // Select navigation items based on user role
@@ -117,10 +128,10 @@ const Navigation = ({ header = documentsNavHeader, items, onFollowHandler = defa
   }
 
   // Create navigation items with deployment info
-  const navigationItems = [...baseItems];
+  const navigationItems: SideNavigationProps.Item[] = [...baseItems] as SideNavigationProps.Item[];
 
   if (settings?.Version || settings?.StackName || settings?.BuildDateTime || settings?.IDPPattern) {
-    const deploymentInfoItems = [];
+    const deploymentInfoItems: SideNavigationProps.Item[] = [];
 
     if (settings?.StackName) {
       deploymentInfoItems.push({ type: 'link', text: `Stack Name: ${settings.StackName}`, href: '#stackname' });
@@ -132,7 +143,7 @@ const Navigation = ({ header = documentsNavHeader, items, onFollowHandler = defa
       deploymentInfoItems.push({ type: 'link', text: `Build: ${settings.BuildDateTime}`, href: '#builddatetime' });
     }
     if (settings?.IDPPattern) {
-      const pattern = settings.IDPPattern.split(' ')[0];
+      const pattern = (settings.IDPPattern as string).split(' ')[0];
       deploymentInfoItems.push({ type: 'link', text: `Pattern: ${pattern}`, href: '#idppattern' });
     }
 
@@ -140,7 +151,7 @@ const Navigation = ({ header = documentsNavHeader, items, onFollowHandler = defa
       type: 'section',
       text: 'Deployment Info',
       items: deploymentInfoItems,
-    });
+    } as SideNavigationProps.Item);
   }
 
   return (

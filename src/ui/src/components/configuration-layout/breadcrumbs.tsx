@@ -12,6 +12,6 @@ export const configurationBreadcrumbItems = [
   { text: 'Configuration', href: `#${CONFIGURATION_PATH}` },
 ];
 
-const Breadcrumbs = () => <BreadcrumbGroup ariaLabel="Breadcrumbs" items={configurationBreadcrumbItems} />;
+const Breadcrumbs = (): React.JSX.Element => <BreadcrumbGroup ariaLabel="Breadcrumbs" items={configurationBreadcrumbItems} />;
 
 export default Breadcrumbs;

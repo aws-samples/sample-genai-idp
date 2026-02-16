@@ -8,7 +8,7 @@ import { BreadcrumbGroup } from '@cloudscape-design/components';
 import { DOCUMENTS_PATH } from '../../routes/constants';
 import { documentListBreadcrumbItems } from '../document-list/breadcrumbs';
 
-const Breadcrumbs = () => {
+const Breadcrumbs = (): React.JSX.Element => {
   const { objectKey } = useParams();
   const decodedDocumentId = decodeURIComponent(objectKey);
   // Always ensure the objectKey in the URL is properly encoded to handle slashes correctly

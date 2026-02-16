@@ -1,15 +1,16 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 import React from 'react';
-import { BreadcrumbGroup } from '@cloudscape-design/components';
-import { DOCUMENTS_PATH, UPLOAD_DOCUMENT_PATH, DEFAULT_PATH } from '../../routes/constants';
 
-export const uploadDocumentBreadcrumbItems = [
+import { BreadcrumbGroup } from '@cloudscape-design/components';
+
+import { DOCUMENTS_PATH, DEFAULT_PATH } from '../../routes/constants';
+
+export const documentListBreadcrumbItems = [
   { text: 'Document Processing', href: `#${DEFAULT_PATH}` },
   { text: 'Documents', href: `#${DOCUMENTS_PATH}` },
-  { text: 'Upload Documents', href: `#${UPLOAD_DOCUMENT_PATH}` },
 ];
 
-const Breadcrumbs = () => <BreadcrumbGroup ariaLabel="Breadcrumbs" items={uploadDocumentBreadcrumbItems} />;
+const Breadcrumbs = (): React.JSX.Element => <BreadcrumbGroup ariaLabel="Breadcrumbs" items={documentListBreadcrumbItems} />;
 
 export default Breadcrumbs;

@@ -6,6 +6,6 @@ import { HelpPanel } from '@cloudscape-design/components';
 const header = <h2>Document Details</h2>;
 const content = <p>View document details and transcriptions.</p>;
 
-const ToolsPanel = () => <HelpPanel header={header}>{content}</HelpPanel>;
+const ToolsPanel = (): React.JSX.Element => <HelpPanel header={header}>{content}</HelpPanel>;
 
 export default ToolsPanel;

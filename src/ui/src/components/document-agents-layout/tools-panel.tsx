@@ -3,7 +3,7 @@
 import React from 'react';
 import { HelpPanel, Icon } from '@cloudscape-design/components';
 
-const ToolsPanel = () => {
+const ToolsPanel = (): React.JSX.Element => {
   return (
     <HelpPanel
       header={<h2>Agent Analysis</h2>}

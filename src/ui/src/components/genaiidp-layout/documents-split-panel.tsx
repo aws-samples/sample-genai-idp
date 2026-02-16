@@ -5,7 +5,7 @@ import { Route, Routes } from 'react-router-dom';
 
 import DocumentListSplitPanel from '../document-list/DocumentListSplitPanel';
 
-const CallsSplitPanel = () => {
+const CallsSplitPanel = (): React.JSX.Element => {
   return (
     <Routes>
       <Route index element={<DocumentListSplitPanel />} />

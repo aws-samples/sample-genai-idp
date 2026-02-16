@@ -9,7 +9,7 @@ import ConfigurationToolsPanel from '../configuration-layout/tools-panel';
 import UploadDocumentToolsPanel from '../upload-document/tools-panel';
 import DocumentsQueryToolsPanel from '../document-kb-query-layout/tools-panel';
 
-const ToolsPanel = () => {
+const ToolsPanel = (): React.JSX.Element => {
   return (
     <Routes>
       <Route index element={<DocumentListToolsPanel />} />

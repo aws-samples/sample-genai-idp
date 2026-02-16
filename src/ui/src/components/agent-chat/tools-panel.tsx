@@ -20,11 +20,18 @@ import listAvailableAgents from '../../graphql/queries/listAvailableAgents';
 const client = generateClient();
 const logger = new ConsoleLogger('AgentChatToolsPanel');
 
-const ToolsPanel = () => {
-  const [agents, setAgents] = useState([]);
+interface Agent {
+  agent_id: string;
+  agent_name?: string;
+  agent_description?: string;
+  sample_queries?: string[];
+}
+
+const ToolsPanel = (): React.JSX.Element => {
+  const [agents, setAgents] = useState<Agent[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [expandedAgents, setExpandedAgents] = useState({});
+  const [error, setError] = useState<string | null>(null);
+  const [expandedAgents, setExpandedAgents] = useState<Record<string, boolean>>({});
   const [showMcpInfoModal, setShowMcpInfoModal] = useState(false);
 
   useEffect(() => {
@@ -32,10 +39,10 @@ const ToolsPanel = () => {
       try {
         setLoading(true);
         const response = await client.graphql({
-          query: listAvailableAgents,
+          query: listAvailableAgents as unknown as string,
         });
 
-        const agentsList = response?.data?.listAvailableAgents || [];
+        const agentsList = ((response as { data: Record<string, unknown> })?.data?.listAvailableAgents as Agent[]) || [];
         logger.debug('Fetched agents:', agentsList);
         setAgents(agentsList);
         setError(null);
@@ -50,12 +57,12 @@ const ToolsPanel = () => {
     fetchAgents();
   }, []);
 
-  const handleSampleQueryClick = (query) => {
+  const handleSampleQueryClick = (query: string): void => {
     // Dispatch a custom event that the chat input can listen to
     window.dispatchEvent(new CustomEvent('insertSampleQuery', { detail: { query } }));
   };
 
-  const handleAgentToggle = (agentId, expanded) => {
+  const handleAgentToggle = (agentId: string, expanded: boolean): void => {
     setExpandedAgents((prev) => ({
       ...prev,
       [agentId]: expanded,
@@ -132,7 +139,7 @@ const ToolsPanel = () => {
           )}
         </Box>
 
-        <Button variant="inline-link" onClick={() => setShowMcpInfoModal(true)} fontSize="body-s">
+        <Button variant="inline-link" onClick={() => setShowMcpInfoModal(true)} {...({ fontSize: 'body-s' } as Record<string, unknown>)}>
           🚀 NEW: Integrate your own systems with MCP!
         </Button>
 

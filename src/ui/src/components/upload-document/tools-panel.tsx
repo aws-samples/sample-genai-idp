@@ -20,6 +20,6 @@ const content = (
   </>
 );
 
-const ToolsPanel = () => <HelpPanel header={header}>{content}</HelpPanel>;
+const ToolsPanel = (): React.JSX.Element => <HelpPanel header={header}>{content}</HelpPanel>;
 
 export default ToolsPanel;

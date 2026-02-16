@@ -8,7 +8,7 @@ import DocumentDetailsBreadCrumbs from '../document-details/breadcrumbs';
 import ConfigurationBreadCrumbs from '../configuration-layout/breadcrumbs';
 import UploadDocumentBreadCrumbs from '../upload-document/breadcrumbs';
 
-const Breadcrumbs = () => {
+const Breadcrumbs = (): React.JSX.Element => {
   return (
     <Routes>
       <Route index element={<DocumentListBreadCrumbs />} />
