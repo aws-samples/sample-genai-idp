@@ -5,18 +5,18 @@
 import * as XLSX from 'xlsx';
 
 // eslint-disable-next-line prettier/prettier
-export const onImportExcelAsync = (file) =>
+export const onImportExcelAsync = (file: Event): Promise<Record<string, unknown>[]> =>
   new Promise((resolve, reject) => {
     // Obtener el objeto del archivo cargado
-    const { files } = file.target;
+    const { files } = file.target as HTMLInputElement;
     // Leer el archivo a través del objeto FileReader
 
     const fileReader = new FileReader();
     fileReader.onload = (event) => {
-      const { result } = event.target;
+      const { result } = event.target as FileReader;
       // Leer en secuencia binaria para obtener todo el objeto de tabla de Excel
       const workbook = XLSX.read(result, { type: 'binary' });
-      let data = []; // almacena los datos obtenidos
+      let data: Record<string, unknown>[] = []; // almacena los datos obtenidos
       // recorre cada hoja de trabajo para leer (aquí solo se lee la primera tabla por defecto)
       // eslint-disable-next-line no-restricted-syntax
       for (const sheet in workbook.Sheets) {
@@ -33,10 +33,10 @@ export const onImportExcelAsync = (file) =>
     };
     fileReader.onerror = reject;
     // Abre el archivo en modo binario
-    fileReader.readAsBinaryString(files[0]);
+    fileReader.readAsBinaryString(files![0]);
   });
 
-export const exportToExcel = async (data, nameFile) => {
+export const exportToExcel = async (data: Record<string, unknown>[], nameFile: string): Promise<void> => {
   if (data.length > 0) {
     const wb = XLSX.utils.book_new();
 
@@ -49,7 +49,7 @@ export const exportToExcel = async (data, nameFile) => {
   }
 };
 
-export const exportToTextFile = async (text, nameFile) => {
+export const exportToTextFile = async (text: string, nameFile: string): Promise<void> => {
   const blob = new Blob([text], { type: 'text/plain' });
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');

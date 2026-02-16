@@ -3,7 +3,7 @@
 
 // eslint-disable import/prefer-default-export
 
-export const SYSTEM = 'System';
+export const SYSTEM = 'System' as const;
 
 export const LANGUAGE_CODES = [
   { value: '', label: 'Choose a Language' },
@@ -82,4 +82,4 @@ export const LANGUAGE_CODES = [
   { value: 'uz', label: 'Uzbek' },
   { value: 'vi', label: 'Vietnamese' },
   { value: 'cy', label: 'Welsh' },
-];
+] as const;

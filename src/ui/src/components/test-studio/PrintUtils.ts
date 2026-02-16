@@ -1,7 +1,7 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-const handlePrint = () => {
+const handlePrint = (): void => {
   const printStyles = `
     @media print {
       /* Hide all possible sidebar elements */

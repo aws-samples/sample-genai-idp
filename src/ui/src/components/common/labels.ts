@@ -8,10 +8,10 @@ export const appLayoutLabels = {
   tools: 'Help panel',
   toolsToggle: 'Open help panel',
   toolsClose: 'Close help panel',
-};
+} as const;
 
 export const paginationLabels = {
   nextPageLabel: 'Next page',
   previousPageLabel: 'Previous page',
-  pageLabel: (pageNumber) => `Page ${pageNumber} of all pages`,
+  pageLabel: (pageNumber: number): string => `Page ${pageNumber} of all pages`,
 };

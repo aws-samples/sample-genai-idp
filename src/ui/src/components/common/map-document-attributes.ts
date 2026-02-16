@@ -3,8 +3,41 @@
 
 import { getDocumentConfidenceAlertCount } from './confidence-alerts-utils';
 
+interface DocumentApiItem {
+  ObjectKey: string;
+  ObjectStatus?: string;
+  InitialEventTime?: string;
+  QueuedTime?: string;
+  WorkflowStartTime?: string;
+  CompletionTime?: string;
+  WorkflowExecutionArn?: string;
+  WorkflowStatus?: string;
+  Sections?: Record<string, unknown>[];
+  Pages?: Record<string, unknown>[];
+  PageCount?: number;
+  Metering?: string;
+  EvaluationReportUri?: string;
+  EvaluationStatus?: string;
+  SummaryReportUri?: string;
+  RuleValidationResultUri?: string;
+  ListPK?: string;
+  ListSK?: string;
+  HITLStatus?: string;
+  HITLReviewURL?: string;
+  HITLTriggered?: boolean;
+  HITLSectionsPending?: string[];
+  HITLSectionsCompleted?: string[];
+  HITLSectionsSkipped?: string[];
+  HITLReviewOwner?: string;
+  HITLReviewOwnerEmail?: string;
+  HITLReviewedBy?: string;
+  HITLReviewedByEmail?: string;
+  HITLReviewHistory?: string | Record<string, unknown>[];
+  ConfigVersion?: string;
+}
+
 // Helper function to determine Review Status without nested ternaries
-const getHitlStatus = (status) => {
+const getHitlStatus = (status: string | undefined): string => {
   if (!status || status === 'N/A') {
     return 'N/A';
   }
@@ -12,7 +45,7 @@ const getHitlStatus = (status) => {
 };
 
 // Helper function to check if HITL is completed (includes skipped as review is done)
-const isHitlCompleted = (status) => {
+const isHitlCompleted = (status: string | undefined): boolean => {
   if (!status) return false;
   const statusLower = status.toLowerCase();
   return statusLower === 'completed' || statusLower === 'skipped' || statusLower.includes('complete') || statusLower.includes('skipped');
@@ -20,7 +53,7 @@ const isHitlCompleted = (status) => {
 
 /* Maps document attributes from API to a format that can be used in tables and panel */
 // eslint-disable-next-line arrow-body-style
-const mapDocumentsAttributes = (documents) => {
+const mapDocumentsAttributes = (documents: DocumentApiItem[]): Record<string, unknown>[] => {
   return documents.map((item) => {
     const {
       ObjectKey: objectKey,
@@ -64,18 +97,18 @@ const mapDocumentsAttributes = (documents) => {
       }
     }
 
-    const formatDate = (timestamp) => {
+    const formatDate = (timestamp: string | undefined): string => {
       return timestamp && timestamp !== '0' ? new Date(timestamp).toISOString() : '';
     };
 
-    const getDuration = (end, start) => {
+    const getDuration = (end: string | undefined, start: string | undefined): string => {
       if (!end || end === '0' || !start || start === '0') return '';
-      const duration = new Date(end) - new Date(start);
+      const duration = new Date(end).getTime() - new Date(start).getTime();
       return `${Math.floor(duration / 60000)}:${String(Math.floor((duration / 1000) % 60)).padStart(2, '0')}`;
     };
 
     // Parse metering data if available
-    let metering = null;
+    let metering: Record<string, unknown> | null = null;
     if (meteringJson) {
       try {
         metering = JSON.parse(meteringJson);

@@ -5,12 +5,57 @@
  * Utility functions for handling confidence threshold alerts
  */
 
-/**
- * Get the HITL confidence threshold from configuration
- * @param {Object} mergedConfig - Merged configuration object
- * @returns {number} HITL confidence threshold as decimal (0.0-1.0)
- */
-export const getHitlConfidenceThreshold = (mergedConfig) => {
+interface MergedConfig {
+  assessment?: {
+    hitl_confidence_score?: string;
+    default_confidence_threshold?: number;
+  };
+}
+
+interface ConfidenceFieldData {
+  confidence?: number;
+  confidence_threshold?: number;
+  [key: string]: unknown;
+}
+
+interface FieldBelowThreshold {
+  fieldName: string;
+  fieldPath: string;
+  confidence: number;
+  confidenceThreshold: number;
+}
+
+interface ConfidenceThresholdAlert {
+  attributeName: string;
+  confidence: number;
+  confidenceThreshold: number;
+}
+
+interface DocumentSection {
+  explainabilityData?: Record<string, unknown>;
+  Output?: Record<string, unknown>;
+  ConfidenceThresholdAlerts?: ConfidenceThresholdAlert[];
+  Id?: string;
+}
+
+interface FieldHighlightInfo {
+  shouldHighlight: boolean;
+  confidence?: number;
+  confidenceThreshold?: number;
+  alert?: ConfidenceThresholdAlert;
+}
+
+interface FieldConfidenceInfo {
+  hasConfidenceInfo: boolean;
+  confidence?: number;
+  confidenceThreshold?: number;
+  isAboveThreshold?: boolean;
+  shouldHighlight?: boolean;
+  textColor?: string;
+  displayMode?: string;
+}
+
+export const getHitlConfidenceThreshold = (mergedConfig: MergedConfig | null): number => {
   if (!mergedConfig || !mergedConfig.assessment || !mergedConfig.assessment.hitl_confidence_score) {
     return 0.8; // Default threshold of 80%
   }
@@ -25,7 +70,7 @@ export const getHitlConfidenceThreshold = (mergedConfig) => {
  * @param {Object} section - Document section
  * @returns {Object|null} Explainability data if found, null otherwise
  */
-const findExplainabilityData = (section) => {
+const findExplainabilityData = (section: DocumentSection | null): Record<string, unknown> | null => {
   if (!section || typeof section !== 'object') {
     return null;
   }
@@ -37,7 +82,7 @@ const findExplainabilityData = (section) => {
 
   // Check Output.explainabilityData
   if (section.Output && section.Output.explainabilityData) {
-    return section.Output.explainabilityData;
+    return section.Output.explainabilityData as Record<string, unknown>;
   }
 
   // Check if Output itself contains confidence data
@@ -54,7 +99,7 @@ const findExplainabilityData = (section) => {
     );
 
     if (explainabilityKey && section.Output[explainabilityKey]) {
-      return section.Output[explainabilityKey];
+      return section.Output[explainabilityKey] as Record<string, unknown>;
     }
 
     // If no specific explainability key found, check if Output contains field-level confidence data
@@ -65,12 +110,14 @@ const findExplainabilityData = (section) => {
       const value = section.Output[key];
       if (value && typeof value === 'object' && !Array.isArray(value)) {
         // Check if this object contains fields with confidence scores
-        const hasConfidenceData = Object.values(value).some(
-          (fieldValue) => fieldValue && typeof fieldValue === 'object' && typeof fieldValue.confidence === 'number',
+        const valueRecord = value as Record<string, unknown>;
+        const hasConfidenceData = Object.values(valueRecord).some(
+          (fieldValue) =>
+            fieldValue && typeof fieldValue === 'object' && typeof (fieldValue as Record<string, unknown>).confidence === 'number',
         );
 
         if (hasConfidenceData) {
-          return value;
+          return valueRecord;
         }
       }
     }
@@ -86,8 +133,12 @@ const findExplainabilityData = (section) => {
  * @param {string} path - Current path in the data structure
  * @returns {Array} Array of field objects with confidence below threshold
  */
-export const getFieldsBelowThreshold = (explainabilityData, hitlThreshold, path = '') => {
-  const fieldsBelow = [];
+export const getFieldsBelowThreshold = (
+  explainabilityData: Record<string, unknown> | null,
+  hitlThreshold: number,
+  path: string = '',
+): FieldBelowThreshold[] => {
+  const fieldsBelow: FieldBelowThreshold[] = [];
 
   if (!explainabilityData || typeof explainabilityData !== 'object') {
     return fieldsBelow;
@@ -95,7 +146,7 @@ export const getFieldsBelowThreshold = (explainabilityData, hitlThreshold, path 
 
   Object.entries(explainabilityData).forEach(([fieldName, fieldData]) => {
     if (fieldData && typeof fieldData === 'object') {
-      const { confidence } = fieldData;
+      const { confidence } = fieldData as ConfidenceFieldData;
 
       if (typeof confidence === 'number') {
         const fieldPath = path ? `${path}.${fieldName}` : fieldName;
@@ -122,7 +173,7 @@ export const getFieldsBelowThreshold = (explainabilityData, hitlThreshold, path 
       } else if (typeof fieldData === 'object' && fieldData !== null && !('confidence' in fieldData)) {
         // This is a nested object without confidence, recurse into it
         const nestedPath = path ? `${path}.${fieldName}` : fieldName;
-        const nestedFields = getFieldsBelowThreshold(fieldData, hitlThreshold, nestedPath);
+        const nestedFields = getFieldsBelowThreshold(fieldData as Record<string, unknown>, hitlThreshold, nestedPath);
         fieldsBelow.push(...nestedFields);
       }
     }
@@ -137,7 +188,7 @@ export const getFieldsBelowThreshold = (explainabilityData, hitlThreshold, path 
  * @param {Object} mergedConfig - Merged configuration object
  * @returns {number} Total count of confidence threshold alerts
  */
-export const getDocumentConfidenceAlertCount = (sections, mergedConfig = null) => {
+export const getDocumentConfidenceAlertCount = (sections: DocumentSection[] | null, mergedConfig: MergedConfig | null = null): number => {
   if (!sections || !Array.isArray(sections)) {
     return 0;
   }
@@ -178,7 +229,7 @@ export const getDocumentConfidenceAlertCount = (sections, mergedConfig = null) =
  * @param {Object} mergedConfig - Merged configuration object
  * @returns {number} Count of confidence threshold alerts for the section
  */
-export const getSectionConfidenceAlertCount = (section, mergedConfig = null) => {
+export const getSectionConfidenceAlertCount = (section: DocumentSection | null, mergedConfig: MergedConfig | null = null): number => {
   if (!section) {
     return 0;
   }
@@ -207,7 +258,10 @@ export const getSectionConfidenceAlertCount = (section, mergedConfig = null) => 
  * @param {Object} mergedConfig - Merged configuration object
  * @returns {Array} Array of detailed confidence alert objects
  */
-export const getSectionConfidenceAlerts = (section, mergedConfig = null) => {
+export const getSectionConfidenceAlerts = (
+  section: DocumentSection | null,
+  mergedConfig: MergedConfig | null = null,
+): FieldBelowThreshold[] => {
   if (!section) {
     return [];
   }
@@ -243,7 +297,11 @@ export const getSectionConfidenceAlerts = (section, mergedConfig = null) => {
  * @param {Array} confidenceThresholdAlerts - Array of confidence threshold alerts
  * @returns {Object} Object with highlight flag and threshold info
  */
-export const getFieldHighlightInfo = (fieldName, fieldConfidence, confidenceThresholdAlerts) => {
+export const getFieldHighlightInfo = (
+  fieldName: string,
+  fieldConfidence: number | undefined,
+  confidenceThresholdAlerts: ConfidenceThresholdAlert[] | null,
+): FieldHighlightInfo => {
   if (!confidenceThresholdAlerts || !Array.isArray(confidenceThresholdAlerts) || !fieldName) {
     return { shouldHighlight: false };
   }
@@ -271,7 +329,12 @@ export const getFieldHighlightInfo = (fieldName, fieldConfidence, confidenceThre
  * @returns {Object} Object with confidence info and display properties
  */
 
-export const getFieldConfidenceInfo = (fieldName, explainabilityInfo, path = [], mergedConfig = null) => {
+export const getFieldConfidenceInfo = (
+  fieldName: string,
+  explainabilityInfo: Record<string, unknown> | Record<string, unknown>[] | null,
+  path: (string | number)[] = [],
+  mergedConfig: MergedConfig | null = null,
+): FieldConfidenceInfo => {
   if (!explainabilityInfo || !fieldName) {
     return { hasConfidenceInfo: false };
   }
@@ -284,7 +347,7 @@ export const getFieldConfidenceInfo = (fieldName, explainabilityInfo, path = [],
   }
 
   // Navigate to the nested location in explainabilityData using the path
-  let currentExplainabilityData = explainabilityData;
+  let currentExplainabilityData: Record<string, unknown> = explainabilityData;
 
   // Traverse the path to find the nested explainability data
   // eslint-disable-next-line no-restricted-syntax
@@ -292,17 +355,17 @@ export const getFieldConfidenceInfo = (fieldName, explainabilityInfo, path = [],
     if (currentExplainabilityData && typeof currentExplainabilityData === 'object') {
       if (Array.isArray(currentExplainabilityData)) {
         // Handle array indices
-        const index = parseInt(pathSegment, 10);
+        const index = parseInt(String(pathSegment), 10);
         if (!Number.isNaN(index) && index >= 0 && index < currentExplainabilityData.length) {
           // nosemgrep: javascript.lang.security.audit.prototype-pollution.prototype-pollution-loop - Controlled data source, input validation performed upstream
-          currentExplainabilityData = currentExplainabilityData[index];
+          currentExplainabilityData = currentExplainabilityData[index] as Record<string, unknown>;
         } else {
           return { hasConfidenceInfo: false };
         }
       } else {
         // Handle object properties
         // nosemgrep: javascript.lang.security.audit.prototype-pollution.prototype-pollution-loop - Controlled data source, input validation performed upstream
-        currentExplainabilityData = currentExplainabilityData[pathSegment];
+        currentExplainabilityData = currentExplainabilityData[pathSegment] as Record<string, unknown>;
       }
     } else {
       return { hasConfidenceInfo: false };
@@ -314,7 +377,7 @@ export const getFieldConfidenceInfo = (fieldName, explainabilityInfo, path = [],
     return { hasConfidenceInfo: false };
   }
 
-  const fieldData = currentExplainabilityData[fieldName];
+  const fieldData = currentExplainabilityData[fieldName] as ConfidenceFieldData | null | undefined;
   if (!fieldData || typeof fieldData !== 'object') {
     return { hasConfidenceInfo: false };
   }
@@ -372,13 +435,13 @@ export const getFieldConfidenceInfo = (fieldName, explainabilityInfo, path = [],
  * @param {Object} section - Document section
  * @returns {Object} Map of attribute names to alert objects
  */
-export const getConfidenceAlertsMap = (section) => {
+export const getConfidenceAlertsMap = (section: DocumentSection | null): Record<string, ConfidenceThresholdAlert> => {
   if (!section || !section.ConfidenceThresholdAlerts || !Array.isArray(section.ConfidenceThresholdAlerts)) {
     return {};
   }
 
-  const alertsMap = {};
-  section.ConfidenceThresholdAlerts.forEach((alert) => {
+  const alertsMap: Record<string, ConfidenceThresholdAlert> = {};
+  section.ConfidenceThresholdAlerts.forEach((alert: ConfidenceThresholdAlert) => {
     if (alert.attributeName) {
       alertsMap[alert.attributeName] = alert;
     }

@@ -9,7 +9,16 @@ import { ConsoleLogger } from 'aws-amplify/utils';
 
 const logger = new ConsoleLogger('generate-s3-presigned-url');
 
-const parseS3Url = (s3Url) => {
+interface S3ParsedUrl {
+  bucket: string;
+  key: string;
+}
+
+interface PresignedUrlOptions {
+  forceInline?: boolean;
+}
+
+const parseS3Url = (s3Url: string): S3ParsedUrl | null => {
   if (!s3Url || typeof s3Url !== 'string' || !s3Url.startsWith('s3://')) {
     return null;
   }
@@ -34,7 +43,11 @@ const parseS3Url = (s3Url) => {
   return { bucket, key };
 };
 
-const generateS3PresignedUrl = async (url, credentials, options = {}) => {
+const generateS3PresignedUrl = async (
+  url: string,
+  credentials: Record<string, unknown>,
+  options: PresignedUrlOptions = {},
+): Promise<string> => {
   // If it's already a special URL (like detailType), return as is
   if (url.includes('detailType')) {
     return url;
@@ -74,7 +87,7 @@ const generateS3PresignedUrl = async (url, credentials, options = {}) => {
     const s3ObjectUrl = parseUrl(newUrl);
 
     // Determine file type from key to set appropriate content disposition
-    const fileExtension = key.split('.').pop().toLowerCase();
+    const fileExtension = key.split('.').pop()?.toLowerCase() ?? '';
     const isDisplayableFile = ['pdf', 'jpg', 'jpeg', 'png', 'gif', 'svg', 'webp'].includes(fileExtension);
 
     // Add query parameters for inline display if it's a displayable file type
@@ -93,7 +106,7 @@ const generateS3PresignedUrl = async (url, credentials, options = {}) => {
 
     // Create presigner instance
     const presigner = new S3RequestPresigner({
-      credentials,
+      credentials: credentials as unknown as import('@aws-sdk/types').AwsCredentialIdentity,
       region,
       sha256: Sha256,
     });
@@ -104,7 +117,7 @@ const generateS3PresignedUrl = async (url, credentials, options = {}) => {
 
     return presignedUrl;
   } catch (error) {
-    throw new Error(`Failed to generate presigned URL: ${error.message}`);
+    throw new Error(`Failed to generate presigned URL: ${(error as Error).message}`);
   }
 };
 

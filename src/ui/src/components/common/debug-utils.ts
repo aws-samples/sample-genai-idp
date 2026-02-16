@@ -10,7 +10,7 @@
  * @param {Object} section - Document section
  * @param {string} sectionId - Section identifier for logging
  */
-export const debugSectionStructure = (section, sectionId = 'Unknown') => {
+export const debugSectionStructure = (section: Record<string, unknown>, sectionId: string = 'Unknown'): void => {
   if (typeof console !== 'undefined' && console.log) {
     console.log(`=== Section ${sectionId} Debug Info ===`);
     console.log('Section keys:', Object.keys(section));
@@ -25,7 +25,8 @@ export const debugSectionStructure = (section, sectionId = 'Unknown') => {
         const value = section.Output[key];
         if (value && typeof value === 'object' && !Array.isArray(value)) {
           const hasConfidenceFields = Object.values(value).some(
-            (fieldValue) => fieldValue && typeof fieldValue === 'object' && typeof fieldValue.confidence === 'number',
+            (fieldValue) =>
+              fieldValue && typeof fieldValue === 'object' && typeof (fieldValue as Record<string, unknown>).confidence === 'number',
           );
 
           if (hasConfidenceFields) {
@@ -37,7 +38,7 @@ export const debugSectionStructure = (section, sectionId = 'Unknown') => {
 
     console.log('Has ConfidenceThresholdAlerts:', !!section.ConfidenceThresholdAlerts);
     if (section.ConfidenceThresholdAlerts) {
-      console.log('ConfidenceThresholdAlerts count:', section.ConfidenceThresholdAlerts.length);
+      console.log('ConfidenceThresholdAlerts count:', (section.ConfidenceThresholdAlerts as unknown[]).length);
       console.log('ConfidenceThresholdAlerts:', section.ConfidenceThresholdAlerts);
     }
 
@@ -49,7 +50,7 @@ export const debugSectionStructure = (section, sectionId = 'Unknown') => {
  * Log document structure for debugging
  * @param {Object} document - Document object
  */
-export const debugDocumentStructure = (document) => {
+export const debugDocumentStructure = (document: Record<string, unknown>): void => {
   if (typeof console !== 'undefined' && console.log) {
     console.log('=== Document Debug Info ===');
     console.log('Document keys:', Object.keys(document));
@@ -63,8 +64,11 @@ export const debugDocumentStructure = (document) => {
       });
     }
 
-    if (document.mergedConfig && document.mergedConfig.assessment) {
-      console.log('Default confidence threshold from config:', document.mergedConfig.assessment.default_confidence_threshold);
+    if (document.mergedConfig && (document.mergedConfig as Record<string, unknown>).assessment) {
+      console.log(
+        'Default confidence threshold from config:',
+        ((document.mergedConfig as Record<string, unknown>).assessment as Record<string, unknown>).default_confidence_threshold,
+      );
     }
 
     console.log('=== End Document Debug ===');

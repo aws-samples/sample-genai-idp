@@ -6,7 +6,13 @@ import { useState, useCallback } from 'react';
  * Custom hook to manage modal visibility
  * @returns {Object} Modal state and handler functions
  */
-const useModal = () => {
+interface UseModalReturn {
+  visible: boolean;
+  show: () => void;
+  hide: () => void;
+}
+
+const useModal = (): UseModalReturn => {
   const [visible, setVisible] = useState(false);
 
   const show = useCallback(() => {

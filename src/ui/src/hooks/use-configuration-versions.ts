@@ -9,25 +9,51 @@ import getConfigVersionQuery from '../graphql/queries/getConfigVersion';
 import useConfiguration from './use-configuration';
 import setActiveVersionMutation from '../graphql/queries/setActiveVersion';
 import deleteConfigVersionMutation from '../graphql/queries/deleteConfigVersion';
+import type { ConfigVersion } from '../components/test-studio/utils/configVersionUtils';
 
 const client = generateClient();
 const logger = new ConsoleLogger('useConfigurationVersions');
 
-const useConfigurationVersions = () => {
-  const [versions, setVersions] = useState([]);
+interface VersionOption {
+  label: string;
+  value: string;
+}
+
+interface UseConfigurationVersionsReturn {
+  versions: ConfigVersion[];
+  loading: boolean;
+  error: string | null;
+  fetchVersions: () => Promise<void>;
+  fetchVersion: (versionName: string) => Promise<{ schema: unknown; default: unknown; custom: unknown }>;
+  setActiveVersion: (versionName: string) => Promise<Record<string, unknown>>;
+  saveAsNewVersion: (
+    configuration: Record<string, unknown>,
+    versionName: string,
+    description: string,
+  ) => Promise<{ success: boolean; error?: string }>;
+  getVersionOptions: () => VersionOption[];
+  deleteVersion: (versionName: string, skipRefresh?: boolean) => Promise<Record<string, unknown>>;
+}
+
+const useConfigurationVersions = (): UseConfigurationVersionsReturn => {
+  const [versions, setVersions] = useState<ConfigVersion[]>([]);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
+  const [error, setError] = useState<string | null>(null);
 
   // Get updateConfiguration from useConfiguration hook
   const { updateConfiguration } = useConfiguration();
 
-  const fetchVersions = async () => {
+  const fetchVersions = async (): Promise<void> => {
     setLoading(true);
     setError(null);
 
     try {
-      const result = await client.graphql({ query: getConfigVersionsQuery });
-      const response = result.data.getConfigVersions;
+      const result = await client.graphql({ query: getConfigVersionsQuery as unknown as string });
+      const response = (result as { data: Record<string, unknown> }).data.getConfigVersions as Record<string, unknown> & {
+        success: boolean;
+        error?: { message: string };
+        versions?: ConfigVersion[];
+      };
 
       // Handle null response
       if (!response) {
@@ -44,28 +70,35 @@ const useConfigurationVersions = () => {
         fetchedVersions.map((v) => ({ name: v.versionName, description: v.description, created: v.created, isActive: v.isActive })),
       );
       setVersions(fetchedVersions);
-    } catch (err) {
+    } catch (err: unknown) {
       logger.error('Error fetching configuration versions:', err);
       console.error('Full error object:', err);
-      if (err.errors) {
-        console.error('GraphQL errors:', err.errors);
-        err.errors.forEach((gqlError, index) => {
+      const graphqlErr = err as { errors?: { message: string }[]; message?: string };
+      if (graphqlErr.errors) {
+        console.error('GraphQL errors:', graphqlErr.errors);
+        graphqlErr.errors.forEach((gqlError, index) => {
           console.error(`Error ${index + 1}:`, gqlError.message);
         });
       }
-      setError(err.message || 'Failed to fetch versions');
+      setError(graphqlErr.message || 'Failed to fetch versions');
     } finally {
       setLoading(false);
     }
   };
 
-  const fetchVersion = async (versionName) => {
+  const fetchVersion = async (versionName: string): Promise<{ schema: unknown; default: unknown; custom: unknown }> => {
     try {
       const result = await client.graphql({
-        query: getConfigVersionQuery,
+        query: getConfigVersionQuery as unknown as string,
         variables: { versionName },
       });
-      const response = result.data.getConfigVersion;
+      const response = (result as { data: Record<string, unknown> }).data.getConfigVersion as Record<string, unknown> & {
+        success: boolean;
+        error?: { message: string };
+        Schema?: unknown;
+        Default?: unknown;
+        Custom?: unknown;
+      };
 
       if (!response.success) {
         throw new Error(response.error?.message || 'Failed to fetch version');
@@ -82,13 +115,16 @@ const useConfigurationVersions = () => {
     }
   };
 
-  const setActiveVersion = async (versionName) => {
+  const setActiveVersion = async (versionName: string): Promise<Record<string, unknown>> => {
     try {
       const result = await client.graphql({
-        query: setActiveVersionMutation,
+        query: setActiveVersionMutation as unknown as string,
         variables: { versionName },
       });
-      const response = result.data.setActiveVersion;
+      const response = (result as { data: Record<string, unknown> }).data.setActiveVersion as Record<string, unknown> & {
+        success: boolean;
+        error?: { message: string };
+      };
 
       if (!response.success) {
         throw new Error(response.error?.message || 'Failed to set active version');
@@ -104,7 +140,11 @@ const useConfigurationVersions = () => {
     }
   };
 
-  const saveAsNewVersion = async (configuration, versionName, description) => {
+  const saveAsNewVersion = async (
+    configuration: Record<string, unknown>,
+    versionName: string,
+    description: string,
+  ): Promise<{ success: boolean; error?: string }> => {
     try {
       // Check if version name is "default"
       if (versionName === 'default') {
@@ -146,13 +186,15 @@ const useConfigurationVersions = () => {
     }
   };
 
-  const deleteVersion = async (versionName, skipRefresh = false) => {
+  const deleteVersion = async (versionName: string, skipRefresh: boolean = false): Promise<Record<string, unknown>> => {
     try {
       const result = await client.graphql({
-        query: deleteConfigVersionMutation,
+        query: deleteConfigVersionMutation as unknown as string,
         variables: { versionName },
       });
-      const response = result.data?.deleteConfigVersion;
+      const response = (result as { data: Record<string, unknown> }).data?.deleteConfigVersion as
+        | (Record<string, unknown> & { success: boolean; error?: { message: string } })
+        | undefined;
 
       if (!response) {
         throw new Error('No response received from delete operation');
@@ -179,7 +221,7 @@ const useConfigurationVersions = () => {
   }, []);
 
   // Utility function to generate version options for Select components
-  const getVersionOptions = () => {
+  const getVersionOptions = (): VersionOption[] => {
     return versions.map((version) => {
       const truncatedDescription =
         version.description && version.description.length > 50 ? `${version.description.substring(0, 50)}...` : version.description;

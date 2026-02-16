@@ -3,7 +3,7 @@
 
 /* eslint-disable import/prefer-default-export */
 
-export const getTimestampStr = () => {
+export const getTimestampStr = (): string => {
   const now = new Date();
   const year = now.getFullYear();
   const month = String(now.getMonth() + 1).padStart(2, '0');
@@ -16,7 +16,7 @@ export const getTimestampStr = () => {
   return formattedDate;
 };
 
-export const getJsonValidationError = (error) => {
+export const getJsonValidationError = (error: { message?: string; toString: () => string }): string => {
   const message = error.message || error.toString();
 
   // Common JSON syntax errors with user-friendly messages
