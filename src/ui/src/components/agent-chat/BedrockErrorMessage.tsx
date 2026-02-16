@@ -14,10 +14,11 @@ interface BedrockErrorInfo {
 
 interface BedrockErrorMessageProps {
   errorInfo: BedrockErrorInfo;
+  onRetry?: () => void;
   className?: string;
 }
 
-const BedrockErrorMessage = ({ errorInfo, className = '' }: BedrockErrorMessageProps): React.JSX.Element => {
+const BedrockErrorMessage = ({ errorInfo, onRetry, className = '' }: BedrockErrorMessageProps): React.JSX.Element => {
   const [showTechnicalDetails, setShowTechnicalDetails] = useState(false);
 
   // Map error types to appropriate alert types and status indicators

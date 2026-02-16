@@ -121,7 +121,9 @@ const AgentQueryInput = ({ onSubmit, isSubmitting = false, selectedResult = null
     }
   };
 
-  const handleSelectAllAgents = (): void => {
+  const handleSelectAllAgents = (e: CustomEvent | React.MouseEvent): void => {
+    e.preventDefault();
+    e.stopPropagation();
     const allSelected = selectedAgents.length === availableAgents.length;
     if (allSelected) {
       setSelectedAgents([]);
@@ -582,7 +584,7 @@ const AgentQueryInput = ({ onSubmit, isSubmitting = false, selectedResult = null
               <SpaceBetween size="s">
                 <Button
                   variant="primary"
-                  formAction="submit"
+                  {...({ type: 'submit' } as Record<string, unknown>)}
                   disabled={!currentInputText.trim() || selectedAgents.length === 0 || isSubmitting}
                   fullWidth
                 >
