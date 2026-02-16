@@ -1,9 +1,8 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: MIT-0
 
-/* eslint-disable react/prop-types */
 import React, { useState, useEffect } from 'react';
-import { Modal, Box, SpaceBetween, Button, SegmentedControl, FormField, Alert, Spinner } from '@cloudscape-design/components';
+import { Modal, Box, SpaceBetween, Button, SegmentedControl, Alert, Spinner } from '@cloudscape-design/components';
 import { generateClient } from 'aws-amplify/api';
 import { ConsoleLogger } from 'aws-amplify/utils';
 import { Editor } from '@monaco-editor/react';
@@ -16,11 +15,21 @@ const logger = new ConsoleLogger('PageTextEditorModal');
 
 const EDITOR_HEIGHT = '600px';
 
+interface PageTextEditorModalProps {
+  visible: boolean;
+  pageId?: string | number;
+  textUri?: string;
+  confidenceUri?: string;
+  isReadOnly?: boolean;
+  onSave?: (pageId: string | number | undefined, newTextUri: string | null, newConfidenceUri: string | null) => void;
+  onClose?: () => void;
+}
+
 /**
  * Extract plain text from JSON-wrapped content
  * Handles both {"text": "..."} and plain text formats
  */
-const extractPlainText = (content) => {
+const extractPlainText = (content: string): string => {
   if (!content) return '';
 
   try {
@@ -35,11 +44,19 @@ const extractPlainText = (content) => {
 /**
  * Wrap plain text in JSON structure for backward compatibility
  */
-const wrapInJson = (text) => {
+const wrapInJson = (text: string): string => {
   return JSON.stringify({ text: text || '' }, null, 2);
 };
 
-const PageTextEditorModal = ({ visible, pageId, textUri, confidenceUri, isReadOnly = true, onSave, onClose }) => {
+const PageTextEditorModal = ({
+  visible,
+  pageId,
+  textUri,
+  confidenceUri,
+  isReadOnly = true,
+  onSave,
+  onClose,
+}: PageTextEditorModalProps): React.JSX.Element => {
   const [viewMode, setViewMode] = useState('text-markdown');
   const [textContent, setTextContent] = useState('');
   const [confidenceContent, setConfidenceContent] = useState('');
@@ -47,7 +64,7 @@ const PageTextEditorModal = ({ visible, pageId, textUri, confidenceUri, isReadOn
   const [originalConfidenceContent, setOriginalConfidenceContent] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-  const [error, setError] = useState(null);
+  const [error, setError] = useState<string | null>(null);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [showCloseWarning, setShowCloseWarning] = useState(false);
 
@@ -72,11 +89,11 @@ const PageTextEditorModal = ({ visible, pageId, textUri, confidenceUri, isReadOn
     try {
       // Fetch text content
       const textResponse = await client.graphql({
-        query: getFileContents,
+        query: getFileContents as unknown as string,
         variables: { s3Uri: textUri },
       });
 
-      const textResult = textResponse.data.getFileContents;
+      const textResult = (textResponse as { data: Record<string, unknown> }).data.getFileContents as { isBinary: boolean; content: string };
       if (textResult.isBinary) {
         throw new Error('Text file contains binary content');
       }
@@ -90,11 +107,14 @@ const PageTextEditorModal = ({ visible, pageId, textUri, confidenceUri, isReadOn
       if (confidenceUri) {
         try {
           const confResponse = await client.graphql({
-            query: getFileContents,
+            query: getFileContents as unknown as string,
             variables: { s3Uri: confidenceUri },
           });
 
-          const confResult = confResponse.data.getFileContents;
+          const confResult = (confResponse as { data: Record<string, unknown> }).data.getFileContents as {
+            isBinary: boolean;
+            content: string;
+          };
           if (!confResult.isBinary) {
             // Extract markdown from JSON wrapper for confidence content
             const confidenceMarkdown = extractPlainText(confResult.content);
@@ -108,17 +128,17 @@ const PageTextEditorModal = ({ visible, pageId, textUri, confidenceUri, isReadOn
       }
     } catch (err) {
       logger.error('Error fetching content:', err);
-      setError(`Failed to load page content: ${err.message}`);
+      setError(`Failed to load page content: ${(err as Error).message}`);
     } finally {
       setIsLoading(false);
     }
   };
 
-  const handleTextChange = (value) => {
+  const handleTextChange = (value: string | undefined): void => {
     setTextContent(value || '');
   };
 
-  const handleConfidenceChange = (value) => {
+  const handleConfidenceChange = (value: string | undefined): void => {
     // Store the raw markdown - will wrap in JSON when saving
     setConfidenceContent(value || '');
   };
@@ -156,13 +176,13 @@ const PageTextEditorModal = ({ visible, pageId, textUri, confidenceUri, isReadOn
       handleCloseModal();
     } catch (err) {
       logger.error('Error saving content:', err);
-      setError(`Failed to save changes: ${err.message}`);
+      setError(`Failed to save changes: ${(err as Error).message}`);
     } finally {
       setIsSaving(false);
     }
   };
 
-  const saveToS3 = async (s3Uri, content, contentType) => {
+  const saveToS3 = async (s3Uri: string, content: string, contentType: string): Promise<string> => {
     // Parse S3 URI to get bucket and key
     const match = s3Uri.match(/^s3:\/\/([^/]+)\/(.+)$/);
     if (!match) {
@@ -175,7 +195,7 @@ const PageTextEditorModal = ({ visible, pageId, textUri, confidenceUri, isReadOn
 
     // Get presigned URL
     const response = await client.graphql({
-      query: uploadDocument,
+      query: uploadDocument as unknown as string,
       variables: {
         fileName,
         contentType,
@@ -184,7 +204,10 @@ const PageTextEditorModal = ({ visible, pageId, textUri, confidenceUri, isReadOn
       },
     });
 
-    const { presignedUrl, usePostMethod } = response.data.uploadDocument;
+    const { presignedUrl, usePostMethod } = (response as { data: Record<string, unknown> }).data.uploadDocument as {
+      presignedUrl: string;
+      usePostMethod: boolean;
+    };
 
     if (!usePostMethod) {
       throw new Error('Server returned PUT method which is not supported');
@@ -196,7 +219,7 @@ const PageTextEditorModal = ({ visible, pageId, textUri, confidenceUri, isReadOn
     // Create form data
     const formData = new FormData();
     Object.entries(presignedPostData.fields).forEach(([key, value]) => {
-      formData.append(key, value);
+      formData.append(key, value as string);
     });
 
     // Add file

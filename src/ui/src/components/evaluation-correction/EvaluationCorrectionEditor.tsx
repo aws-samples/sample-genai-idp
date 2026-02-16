@@ -1,7 +1,6 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: MIT-0
 
-/* eslint-disable react/prop-types */
 import React, { useState, useEffect, useCallback } from 'react';
 import { Modal, Box, SpaceBetween, Container, Header, Spinner, Button, Alert } from '@cloudscape-design/components';
 import { generateClient } from 'aws-amplify/api';
@@ -16,10 +15,49 @@ import useSettingsContext from '../../contexts/settings';
 const client = generateClient();
 const logger = new ConsoleLogger('EvaluationCorrectionEditor');
 
+interface Correction {
+  path: (string | number)[];
+  pathString: string;
+  fieldName: string;
+  source: string;
+  originalValue: unknown;
+  newValue: string;
+}
+
+interface FieldGeometry {
+  boundingBox: Record<string, number>;
+  page: number;
+  vertices?: Record<string, number>[];
+}
+
+interface SectionData {
+  documentItem?: {
+    objectKey?: string;
+    ObjectKey?: string;
+    pages?: Record<string, unknown>[];
+  };
+  PageIds?: string[];
+  OutputJSONUri?: string;
+  Id?: string;
+  Class?: string;
+}
+
+interface SaveResult {
+  type: string;
+  corrections: Correction[];
+}
+
+interface EvaluationCorrectionEditorProps {
+  visible: boolean;
+  onDismiss: () => void;
+  sectionData?: SectionData | null;
+  onSaveComplete?: ((result: SaveResult) => void) | null;
+}
+
 /**
  * Applies corrections to a JSON object at specified paths
  */
-const applyCorrections = (data, corrections) => {
+const applyCorrections = (data: Record<string, unknown> | null, corrections: Correction[]): Record<string, unknown> | null => {
   if (!data || corrections.length === 0) return data;
 
   const result = JSON.parse(JSON.stringify(data)); // Deep clone
@@ -47,7 +85,11 @@ const applyCorrections = (data, corrections) => {
 /**
  * Constructs baseline URI from output URI by replacing bucket names
  */
-const constructBaselineUri = (outputUri, outputBucket, baselineBucket) => {
+const constructBaselineUri = (
+  outputUri: string | undefined,
+  outputBucket: string | undefined,
+  baselineBucket: string | undefined,
+): string | null => {
   if (!outputUri || !outputBucket || !baselineBucket) return null;
 
   const match = outputUri.match(/^s3:\/\/([^/]+)\/(.+)$/);
@@ -64,18 +106,23 @@ const constructBaselineUri = (outputUri, outputBucket, baselineBucket) => {
 /**
  * EvaluationCorrectionEditor - Main modal for correcting evaluation mismatches
  */
-const EvaluationCorrectionEditor = ({ visible, onDismiss, sectionData, onSaveComplete }) => {
+const EvaluationCorrectionEditor = ({
+  visible,
+  onDismiss,
+  sectionData,
+  onSaveComplete,
+}: EvaluationCorrectionEditorProps): React.JSX.Element => {
   const { settings } = useSettingsContext();
 
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [predictedData, setPredictedData] = useState(null);
-  const [expectedData, setExpectedData] = useState(null);
-  const [corrections, setCorrections] = useState([]);
+  const [error, setError] = useState<string | null>(null);
+  const [predictedData, setPredictedData] = useState<Record<string, unknown> | null>(null);
+  const [expectedData, setExpectedData] = useState<Record<string, unknown> | null>(null);
+  const [corrections, setCorrections] = useState<Correction[]>([]);
   const [showMismatchesOnly, setShowMismatchesOnly] = useState(true);
-  const [activeFieldGeometry, setActiveFieldGeometry] = useState(null);
+  const [activeFieldGeometry, setActiveFieldGeometry] = useState<FieldGeometry | null>(null);
   const [isSaving, setIsSaving] = useState(false);
-  const [saveSuccess, setSaveSuccess] = useState(null);
+  const [saveSuccess, setSaveSuccess] = useState<string | null>(null);
 
   const documentItem = sectionData?.documentItem;
   const pageIds = sectionData?.PageIds || [];
@@ -110,24 +157,30 @@ const EvaluationCorrectionEditor = ({ visible, onDismiss, sectionData, onSaveCom
         // Load predicted data
         logger.info('Loading predicted data from:', outputUri);
         const predictedResponse = await client.graphql({
-          query: getFileContents,
+          query: getFileContents as unknown as string,
           variables: { s3Uri: outputUri },
         });
-        const predictedContent = predictedResponse.data.getFileContents.content;
+        const predictedContent = (predictedResponse as unknown as Record<string, Record<string, Record<string, unknown>>>).data
+          .getFileContents.content as string;
         const parsedPredicted = JSON.parse(predictedContent);
         setPredictedData(parsedPredicted);
 
         // Construct and load baseline data
-        const baselineUri = constructBaselineUri(outputUri, settings?.OutputBucket, settings?.EvaluationBaselineBucket);
+        const baselineUri = constructBaselineUri(
+          outputUri,
+          (settings as Record<string, unknown>)?.OutputBucket as string,
+          (settings as Record<string, unknown>)?.EvaluationBaselineBucket as string,
+        );
 
         if (baselineUri) {
           logger.info('Loading baseline data from:', baselineUri);
           try {
             const baselineResponse = await client.graphql({
-              query: getFileContents,
+              query: getFileContents as unknown as string,
               variables: { s3Uri: baselineUri },
             });
-            const baselineContent = baselineResponse.data.getFileContents.content;
+            const baselineContent = (baselineResponse as unknown as Record<string, Record<string, Record<string, unknown>>>).data
+              .getFileContents.content as string;
             const parsedBaseline = JSON.parse(baselineContent);
             setExpectedData(parsedBaseline);
           } catch (baselineErr) {
@@ -137,7 +190,7 @@ const EvaluationCorrectionEditor = ({ visible, onDismiss, sectionData, onSaveCom
         }
       } catch (err) {
         logger.error('Error loading data:', err);
-        setError(`Failed to load data: ${err.message}`);
+        setError(`Failed to load data: ${(err as Error).message}`);
       } finally {
         setLoading(false);
       }
@@ -147,7 +200,7 @@ const EvaluationCorrectionEditor = ({ visible, onDismiss, sectionData, onSaveCom
   }, [visible, outputUri, settings]);
 
   // Handle expected value change
-  const handleExpectedChange = useCallback((correction) => {
+  const handleExpectedChange = useCallback((correction: Correction) => {
     setCorrections((prev) => {
       // Remove any existing correction for this field/source
       const filtered = prev.filter((c) => !(c.pathString === correction.pathString && c.source === 'baseline'));
@@ -157,7 +210,7 @@ const EvaluationCorrectionEditor = ({ visible, onDismiss, sectionData, onSaveCom
   }, []);
 
   // Handle predicted value change
-  const handlePredictedChange = useCallback((correction) => {
+  const handlePredictedChange = useCallback((correction: Correction) => {
     setCorrections((prev) => {
       const filtered = prev.filter((c) => !(c.pathString === correction.pathString && c.source === 'prediction'));
       return [...filtered, correction];
@@ -166,12 +219,12 @@ const EvaluationCorrectionEditor = ({ visible, onDismiss, sectionData, onSaveCom
   }, []);
 
   // Remove a correction
-  const handleRemoveCorrection = useCallback((correction) => {
+  const handleRemoveCorrection = useCallback((correction: Correction) => {
     setCorrections((prev) => prev.filter((c) => !(c.pathString === correction.pathString && c.source === correction.source)));
   }, []);
 
   // Handle field focus for bounding box display
-  const handleFieldFocus = useCallback((geometry) => {
+  const handleFieldFocus = useCallback((geometry: FieldGeometry) => {
     setActiveFieldGeometry(geometry);
   }, []);
 
@@ -188,7 +241,11 @@ const EvaluationCorrectionEditor = ({ visible, onDismiss, sectionData, onSaveCom
       const correctedData = applyCorrections(expectedData, baselineCorrections);
 
       // Construct baseline URI
-      const baselineUri = constructBaselineUri(outputUri, settings?.OutputBucket, settings?.EvaluationBaselineBucket);
+      const baselineUri = constructBaselineUri(
+        outputUri,
+        (settings as Record<string, unknown>)?.OutputBucket as string,
+        (settings as Record<string, unknown>)?.EvaluationBaselineBucket as string,
+      );
 
       if (!baselineUri) {
         throw new Error('Could not construct baseline URI');
@@ -219,7 +276,7 @@ const EvaluationCorrectionEditor = ({ visible, onDismiss, sectionData, onSaveCom
       }
     } catch (err) {
       logger.error('Error saving baseline corrections:', err);
-      setError(`Failed to save baseline corrections: ${err.message}`);
+      setError(`Failed to save baseline corrections: ${(err as Error).message}`);
     } finally {
       setIsSaving(false);
     }
@@ -252,7 +309,7 @@ const EvaluationCorrectionEditor = ({ visible, onDismiss, sectionData, onSaveCom
       }
     } catch (err) {
       logger.error('Error saving prediction corrections:', err);
-      setError(`Failed to save prediction corrections: ${err.message}`);
+      setError(`Failed to save prediction corrections: ${(err as Error).message}`);
     } finally {
       setIsSaving(false);
     }
@@ -287,10 +344,7 @@ const EvaluationCorrectionEditor = ({ visible, onDismiss, sectionData, onSaveCom
         <div style={{ width: '40%', minWidth: '400px' }}>
           <Container header={<Header variant="h3">Document Pages ({pageIds.length})</Header>}>
             <PageImageViewer
-              pageIds={pageIds}
-              documentPages={documentPages}
-              activeFieldGeometry={activeFieldGeometry}
-              height="calc(100vh - 350px)"
+              {...({ pageIds, documentPages, activeFieldGeometry, height: 'calc(100vh - 350px)' } as Record<string, unknown>)}
             />
           </Container>
         </div>
@@ -325,7 +379,7 @@ const EvaluationCorrectionEditor = ({ visible, onDismiss, sectionData, onSaveCom
                   <FieldComparisonTable
                     expectedData={expectedData}
                     predictedData={predictedData}
-                    explainabilityInfo={predictedData?.explainability_info}
+                    explainabilityInfo={predictedData?.explainability_info as unknown[] | null}
                     onExpectedChange={handleExpectedChange}
                     onPredictedChange={handlePredictedChange}
                     onFieldFocus={handleFieldFocus}

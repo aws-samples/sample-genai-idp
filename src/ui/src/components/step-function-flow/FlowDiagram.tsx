@@ -2,13 +2,38 @@
 // SPDX-License-Identifier: MIT-0
 
 import React from 'react';
-import PropTypes from 'prop-types';
 import { Box, Badge } from '@cloudscape-design/components';
 import useConfiguration from '../../hooks/use-configuration';
 import './FlowDiagram.css';
 
+interface StepConfig {
+  summarization?: { enabled?: boolean };
+  assessment?: { enabled?: boolean };
+  evaluation?: { enabled?: boolean };
+}
+
+interface Step {
+  name: string;
+  type: string;
+  status: string;
+  startDate?: string;
+  stopDate?: string;
+  error?: string;
+  isMapIteration?: boolean;
+  parentMapName?: string;
+  mapIterations?: number;
+  mapIterationDetails?: Step[];
+}
+
+interface FlowDiagramProps {
+  steps?: Step[];
+  onStepClick: (step: Step) => void;
+  selectedStep?: Step | null;
+  getStepIcon: (name: string, type: string, status: string) => React.ReactNode;
+}
+
 // Helper function to check if a step is disabled based on configuration
-const isStepDisabled = (stepName, config) => {
+const isStepDisabled = (stepName: string, config: StepConfig | null): boolean => {
   if (!config) return false;
 
   const stepNameLower = stepName.toLowerCase();
@@ -31,7 +56,7 @@ const isStepDisabled = (stepName, config) => {
   return false;
 };
 
-const FlowDiagram = ({ steps = [], onStepClick, selectedStep = null, getStepIcon }) => {
+const FlowDiagram = ({ steps = [], onStepClick, selectedStep = null, getStepIcon }: FlowDiagramProps): React.JSX.Element => {
   // Use the configuration hook to get mergedConfig
   const { mergedConfig } = useConfiguration();
 
@@ -49,18 +74,18 @@ const FlowDiagram = ({ steps = [], onStepClick, selectedStep = null, getStepIcon
   const mainSteps = steps.filter((step) => !step.isMapIteration);
   const mapIterations = steps.filter((step) => step.isMapIteration);
 
-  const getStepStatus = (step) => {
+  const getStepStatus = (step: Step): string => {
     return step.status.toLowerCase();
   };
 
-  const getProgressPercentage = (step) => {
+  const getProgressPercentage = (step: Step): number => {
     if (step.status === 'SUCCEEDED') return 100;
     if (step.status === 'FAILED') return 100;
     if (step.status === 'RUNNING') return 75; // Assume 75% for running steps
     return 0;
   };
 
-  const getProgressBarStyle = (step) => {
+  const getProgressBarStyle = (step: Step): React.CSSProperties => {
     const width = `${getProgressPercentage(step)}%`;
 
     // Add specific styling for failed steps
@@ -75,7 +100,7 @@ const FlowDiagram = ({ steps = [], onStepClick, selectedStep = null, getStepIcon
   };
 
   // Group Map iterations by their parent Map state
-  const mapIterationsByParent = mapIterations.reduce((acc, iteration) => {
+  const mapIterationsByParent = mapIterations.reduce<Record<string, Step[]>>((acc, iteration) => {
     const parentName = iteration.parentMapName || 'Unknown';
     if (!acc[parentName]) {
       acc[parentName] = [];
@@ -203,48 +228,6 @@ const FlowDiagram = ({ steps = [], onStepClick, selectedStep = null, getStepIcon
       </div>
     </div>
   );
-};
-
-FlowDiagram.propTypes = {
-  steps: PropTypes.arrayOf(
-    PropTypes.shape({
-      name: PropTypes.string.isRequired,
-      type: PropTypes.string.isRequired,
-      status: PropTypes.string.isRequired,
-      startDate: PropTypes.string,
-      stopDate: PropTypes.string,
-      error: PropTypes.string,
-      isMapIteration: PropTypes.bool,
-      parentMapName: PropTypes.string,
-      mapIterations: PropTypes.number,
-      mapIterationDetails: PropTypes.arrayOf(
-        PropTypes.shape({
-          name: PropTypes.string.isRequired,
-          type: PropTypes.string.isRequired,
-          status: PropTypes.string.isRequired,
-          startDate: PropTypes.string,
-          stopDate: PropTypes.string,
-          error: PropTypes.string,
-        }),
-      ),
-    }),
-  ),
-  onStepClick: PropTypes.func.isRequired,
-  selectedStep: PropTypes.shape({
-    name: PropTypes.string,
-  }),
-  getStepIcon: PropTypes.func.isRequired,
-  mergedConfig: PropTypes.shape({
-    summarization: PropTypes.shape({
-      enabled: PropTypes.bool,
-    }),
-    assessment: PropTypes.shape({
-      enabled: PropTypes.bool,
-    }),
-    evaluation: PropTypes.shape({
-      enabled: PropTypes.bool,
-    }),
-  }),
 };
 
 export default FlowDiagram;

@@ -1,7 +1,6 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: MIT-0
 
-/* eslint-disable react/prop-types */
 import React, { useState, useRef } from 'react';
 import { generateClient } from 'aws-amplify/api';
 import { ConsoleLogger } from 'aws-amplify/utils';
@@ -10,10 +9,26 @@ import { Button, Container, SpaceBetween, FormField, Alert } from '@cloudscape-d
 import chatWithDocument from '../../graphql/queries/chatWithDocument';
 import './ChatPanel.css';
 
+interface ChatMessage {
+  role: string;
+  content: string;
+  dt?: string;
+  type?: string;
+}
+
+interface ChatHistoryItem {
+  ask: string;
+  response: string;
+}
+
+interface ChatPanelProps {
+  objectKey: string;
+}
+
 const client = generateClient();
 const logger = new ConsoleLogger('chatWithDocument');
 
-const getChatResponse = async (s3Uri, prompt, history) => {
+const getChatResponse = async (s3Uri: string, prompt: string, history: ChatHistoryItem[]) => {
   logger.debug('s3URI:', s3Uri);
   logger.debug('history:', history);
   // commenting this out until model selection for chat is available again on this screen
@@ -21,7 +36,7 @@ const getChatResponse = async (s3Uri, prompt, history) => {
   const modelId = 'us.amazon.nova-pro-v1:0';
   const strHistory = JSON.stringify(history);
   const response = await client.graphql({
-    query: chatWithDocument,
+    query: chatWithDocument as unknown as string,
     variables: { s3Uri, prompt, history: strHistory, modelId },
   });
   // logger.debug('response:', response);
@@ -38,12 +53,12 @@ const getChatResponse = async (s3Uri, prompt, history) => {
 //   { value: 'us.anthropic.claude-sonnet-4-20250514-v1:0', label: 'Claude Sonnet 4' },
 // ];
 
-const ChatPanel = (item) => {
-  const [error, setError] = useState(null);
+const ChatPanel = (item: ChatPanelProps): React.JSX.Element => {
+  const [error, setError] = useState<string | null>(null);
   // const [modelId, setModelId] = useState(modelOptions[0].value);
-  const [chatQueries, setChatQueries] = useState([]);
-  const [jsonChatHistory, setJsonChatHistory] = useState([]);
-  const textareaRef = useRef(null);
+  const [chatQueries, setChatQueries] = useState<ChatMessage[]>([]);
+  const [jsonChatHistory, setJsonChatHistory] = useState<ChatHistoryItem[]>([]);
+  const textareaRef = useRef<HTMLInputElement>(null);
   const { objectKey } = item;
   let rowId = 0;
 
@@ -58,7 +73,7 @@ const ChatPanel = (item) => {
   // }
 
   const handlePromptSubmit = () => {
-    const prompt = textareaRef.current.value;
+    const prompt = textareaRef.current!.value;
 
     // logger.debug('selectedModelId:', modelId);
 
@@ -76,20 +91,21 @@ const ChatPanel = (item) => {
 
     setChatQueries((prevChatQueries) => [...prevChatQueries, chatRequestData, loadingData]);
 
-    textareaRef.current.value = '';
+    textareaRef.current!.value = '';
 
     // comment out sending the model ID until model selection is available again on this screen
     // const chatResponse = getChatResponse(objectKey, prompt, history, modelId);
     const chatResponse = getChatResponse(objectKey, prompt, jsonChatHistory);
 
-    let chatResponseData = {};
-    let chatItem = {};
+    let chatResponseData: ChatMessage = {} as ChatMessage;
+    let chatItem: ChatHistoryItem = {} as ChatHistoryItem;
 
     chatResponse
       .then((r) => {
-        if (r.data.chatWithDocument && r.data.chatWithDocument != null) {
+        const data = (r as { data: { chatWithDocument: string | null } }).data;
+        if (data.chatWithDocument && data.chatWithDocument != null) {
           console.log('in the chat with doc response');
-          const cResponse = JSON.parse(r.data.chatWithDocument);
+          const cResponse = JSON.parse(data.chatWithDocument);
           chatResponseData = {
             role: 'ai',
             content: cResponse.cr.content[0].text,
@@ -103,7 +119,7 @@ const ChatPanel = (item) => {
           };
         }
       })
-      .catch((r) => {
+      .catch((r: { errors?: { message: string }[] }) => {
         if (r.errors) {
           chatResponseData = {
             role: 'ai',
@@ -177,7 +193,7 @@ const ChatPanel = (item) => {
           </FormField> */}
 
           <SpaceBetween size="m">
-            <FormField label="Your message" style={{ flex: 8 }}>
+            <FormField label="Your message">
               <input
                 type="text"
                 name="postContent"

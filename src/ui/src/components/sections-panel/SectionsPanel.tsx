@@ -1,7 +1,6 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: MIT-0
 
-/* eslint-disable react/prop-types */
 import React, { useState, useEffect } from 'react';
 import {
   Box,
@@ -19,6 +18,7 @@ import {
   Modal,
   Alert,
 } from '@cloudscape-design/components';
+import type { ButtonDropdownProps } from '@cloudscape-design/components';
 import { generateClient } from 'aws-amplify/api';
 import { ConsoleLogger } from 'aws-amplify/utils';
 
@@ -34,13 +34,62 @@ import skipAllSectionsReviewMutation from '../../graphql/mutations/skipAllSectio
 const client = generateClient();
 const logger = new ConsoleLogger('SectionsPanel');
 
+interface SectionItem {
+  Id: string;
+  Class: string;
+  PageIds: number[];
+  OutputJSONUri?: string;
+  OriginalId?: string | null;
+  isModified?: boolean;
+  isNew?: boolean;
+}
+
+interface PageItem {
+  Id: number;
+  ImageUri?: string;
+  TextUri?: string;
+}
+
+interface DocumentItem {
+  hitlReviewOwner?: string;
+  hitlReviewOwnerEmail?: string;
+  hitlTriggered?: boolean;
+  hitlStatus?: string;
+  hitlSectionsCompleted?: string[];
+  hitlSectionsPending?: string[];
+  hitlSectionsSkipped?: string[];
+  objectStatus?: string;
+  ObjectKey?: string;
+  objectKey?: string;
+  key?: string;
+  Key?: string;
+  id?: string;
+  Id?: string;
+  evaluationStatus?: string;
+  pages?: Record<string, unknown>[];
+}
+
+interface SectionsPanelProps {
+  sections?: SectionItem[];
+  pages?: PageItem[];
+  documentItem?: DocumentItem;
+  mergedConfig?: Record<string, unknown> | null;
+  onDocumentUpdate?: (updater: (prev: Record<string, unknown>) => Record<string, unknown>) => void;
+}
+
 // Cell renderer components
-const IdCell = ({ item }) => <span>{item.Id}</span>;
-const ClassCell = ({ item }) => <span>{item.Class}</span>;
-const PageIdsCell = ({ item }) => <span>{item.PageIds.join(', ')}</span>;
+const IdCell = ({ item }: { item: SectionItem }): React.JSX.Element => <span>{item.Id}</span>;
+const ClassCell = ({ item }: { item: SectionItem }): React.JSX.Element => <span>{item.Class}</span>;
+const PageIdsCell = ({ item }: { item: SectionItem }): React.JSX.Element => <span>{item.PageIds.join(', ')}</span>;
 
 // Confidence alerts cell showing only count
-const ConfidenceAlertsCell = ({ item, mergedConfig }) => {
+const ConfidenceAlertsCell = ({
+  item,
+  mergedConfig,
+}: {
+  item: SectionItem;
+  mergedConfig: Record<string, unknown> | null | undefined;
+}): React.JSX.Element => {
   if (!mergedConfig) {
     // Fallback to original behavior - just show the count as a number
     const count = getSectionConfidenceAlertCount(item);
@@ -74,7 +123,8 @@ const ActionsCell = ({
   isViewerOpen = false,
 }) => {
   const [isDownloading, setIsDownloading] = React.useState(false);
-  const { settings } = useSettingsContext();
+  const { settings: rawSettings } = useSettingsContext() || {};
+  const settings = rawSettings as Record<string, unknown> | undefined;
 
   // Disable View/Edit only if reviewer and no review owner (review not claimed)
   // View Data should always be enabled, Edit Mode requires claimed review
@@ -146,11 +196,11 @@ const ActionsCell = ({
 
       // Fetch file contents using GraphQL
       const response = await client.graphql({
-        query: getFileContents,
+        query: getFileContents as unknown as string,
         variables: { s3Uri: fileUri },
       });
 
-      const result = response.data.getFileContents;
+      const result = (response as unknown as Record<string, Record<string, Record<string, unknown>>>).data.getFileContents;
 
       if (result.isBinary) {
         alert('This file contains binary content that cannot be downloaded');
@@ -160,7 +210,7 @@ const ActionsCell = ({
       const content = result.content;
 
       // Create blob and download
-      const blob = new Blob([content], { type: 'application/json' });
+      const blob = new Blob([content as string], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
 
@@ -194,7 +244,7 @@ const ActionsCell = ({
   };
 
   // Build dropdown menu items
-  const downloadMenuItems = [
+  const downloadMenuItems: ButtonDropdownProps.ItemOrGroup[] = [
     {
       id: 'prediction',
       text: 'Download Data',
@@ -244,7 +294,15 @@ const ActionsCell = ({
 };
 
 // Editable cell components for edit mode (moved outside render)
-const EditableIdCell = ({ item, validationErrors, updateSectionId }) => (
+const EditableIdCell = ({
+  item,
+  validationErrors,
+  updateSectionId,
+}: {
+  item: SectionItem;
+  validationErrors: Record<string, string[]>;
+  updateSectionId: (oldId: string, newId: string) => void;
+}): React.JSX.Element => (
   <FormField errorText={validationErrors[item.Id]?.find((err) => err.includes('Section ID'))}>
     <Input
       value={item.Id}
@@ -255,7 +313,17 @@ const EditableIdCell = ({ item, validationErrors, updateSectionId }) => (
   </FormField>
 );
 
-const EditableClassCell = ({ item, validationErrors, updateSection, getAvailableClasses }) => (
+const EditableClassCell = ({
+  item,
+  validationErrors,
+  updateSection,
+  getAvailableClasses,
+}: {
+  item: SectionItem;
+  validationErrors: Record<string, string[]>;
+  updateSection: (id: string, field: string, value: string) => void;
+  getAvailableClasses: () => { value: string; label: string }[];
+}): React.JSX.Element => (
   <FormField errorText={validationErrors[item.Id]?.find((err) => err.includes('class'))}>
     <Select
       selectedOption={getAvailableClasses().find((option) => option.value === item.Class) || null}
@@ -267,7 +335,15 @@ const EditableClassCell = ({ item, validationErrors, updateSection, getAvailable
   </FormField>
 );
 
-const EditablePageIdsCell = ({ item, validationErrors, updateSection }) => {
+const EditablePageIdsCell = ({
+  item,
+  validationErrors,
+  updateSection,
+}: {
+  item: SectionItem;
+  validationErrors: Record<string, string[]>;
+  updateSection: (id: string, field: string, value: number[]) => void;
+}): React.JSX.Element => {
   // Store the raw input value separately from the parsed PageIds
   const [inputValue, setInputValue] = React.useState(item.PageIds && item.PageIds.length > 0 ? item.PageIds.join(', ') : '');
 
@@ -326,10 +402,8 @@ const EditablePageIdsCell = ({ item, validationErrors, updateSection }) => {
         onChange={handleInputChange}
         onBlur={handleBlur}
         placeholder="1, 2, 3"
-        autoComplete="off"
-        spellCheck={false}
         rows={1}
-        invalid={validationErrors[item.Id]?.some((err) => err.includes('Page') || err.includes('page'))}
+        invalid={validationErrors[item.Id]?.some((err: string) => err.includes('Page') || err.includes('page'))}
       />
     </FormField>
   );
@@ -621,24 +695,25 @@ const createEditColumnDefinitions = (
   },
 ];
 
-const SectionsPanel = ({ sections, pages, documentItem, mergedConfig, onDocumentUpdate }) => {
+const SectionsPanel = ({ sections, pages, documentItem, mergedConfig, onDocumentUpdate }: SectionsPanelProps): React.JSX.Element => {
   const [isEditMode, setIsEditMode] = useState(false);
-  const [editedSections, setEditedSections] = useState([]);
-  const [validationErrors, setValidationErrors] = useState({});
+  const [editedSections, setEditedSections] = useState<SectionItem[]>([]);
+  const [validationErrors, setValidationErrors] = useState<Record<string, string[]>>({});
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [showSkipAllModal, setShowSkipAllModal] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isSkipping, setIsSkipping] = useState(false);
   // Track which section's viewer is open for navigation
-  const [openViewerSectionIndex, setOpenViewerSectionIndex] = useState(null);
+  const [openViewerSectionIndex, setOpenViewerSectionIndex] = useState<number | null>(null);
   const { mergedConfig: configuration } = useConfiguration();
-  const { settings } = useSettingsContext();
+  const { settings: rawSettings2 } = useSettingsContext() || {};
+  const settings2 = rawSettings2 as Record<string, unknown> | undefined;
   const { isReviewer, isAdmin } = useUserRole();
   const isReviewerOnly = isReviewer && !isAdmin;
 
   // Check if current pattern is Pattern-1 (for data-only edit mode)
   const isPattern1 = () => {
-    const pattern = settings?.IDPPattern;
+    const pattern = settings2?.IDPPattern as string | undefined;
     return pattern && pattern.toLowerCase().includes('pattern1');
   };
 
@@ -700,14 +775,14 @@ const SectionsPanel = ({ sections, pages, documentItem, mergedConfig, onDocument
       }
 
       const result = await client.graphql({
-        query: skipAllSectionsReviewMutation,
+        query: skipAllSectionsReviewMutation as unknown as string,
         variables: { objectKey },
       });
 
       logger.info('All sections review skipped successfully', result);
 
       // Update document state immediately with mutation response
-      const updatedData = result.data?.skipAllSectionsReview;
+      const updatedData = (result as unknown as Record<string, Record<string, Record<string, unknown>>>).data?.skipAllSectionsReview;
       if (updatedData && onDocumentUpdate) {
         // Parse HITLReviewHistory if it's a string (AWSJSON type)
         let reviewHistory = updatedData.HITLReviewHistory;
@@ -767,8 +842,8 @@ const SectionsPanel = ({ sections, pages, documentItem, mergedConfig, onDocument
   // Get available classes from configuration
   const getAvailableClasses = () => {
     if (!configuration?.classes) return [];
-    return configuration.classes
-      .map((cls) => {
+    return (configuration.classes as Record<string, unknown>[])
+      .map((cls: Record<string, unknown>) => {
         // Support both JSON Schema and legacy formats
         // JSON Schema: $id or x-aws-idp-document-type
         // Legacy: name
@@ -819,8 +894,8 @@ const SectionsPanel = ({ sections, pages, documentItem, mergedConfig, onDocument
   };
 
   // Validate page ID overlaps and section ID uniqueness
-  const validateSections = (sectionsToValidate) => {
-    const errors = {};
+  const validateSections = (sectionsToValidate: SectionItem[]): boolean => {
+    const errors: Record<string, string[]> = {};
     const pageIdMap = new Map();
     const sectionIdMap = new Map();
 
@@ -888,7 +963,7 @@ const SectionsPanel = ({ sections, pages, documentItem, mergedConfig, onDocument
   };
 
   // Handle section modifications
-  const updateSection = (sectionId, field, value) => {
+  const updateSection = (sectionId: string, field: string, value: unknown): void => {
     const updatedSections = editedSections.map((section) => {
       if (section.Id === sectionId) {
         const updated = {
@@ -908,7 +983,7 @@ const SectionsPanel = ({ sections, pages, documentItem, mergedConfig, onDocument
   };
 
   // Handle section ID updates
-  const updateSectionId = (oldId, newId) => {
+  const updateSectionId = (oldId: string, newId: string): void => {
     const updatedSections = editedSections.map((section) => {
       if (section.Id === oldId) {
         return {
@@ -951,7 +1026,7 @@ const SectionsPanel = ({ sections, pages, documentItem, mergedConfig, onDocument
   };
 
   // Delete section
-  const deleteSection = (sectionId) => {
+  const deleteSection = (sectionId: string): void => {
     const updatedSections = editedSections.filter((section) => section.Id !== sectionId);
     setEditedSections(updatedSections);
 
@@ -1087,7 +1162,7 @@ const SectionsPanel = ({ sections, pages, documentItem, mergedConfig, onDocument
       // Call the GraphQL API with timeout
       const result = await Promise.race([
         client.graphql({
-          query: processChanges,
+          query: processChanges as unknown as string,
           variables: {
             objectKey,
             modifiedSections: allChanges,
@@ -1098,10 +1173,10 @@ const SectionsPanel = ({ sections, pages, documentItem, mergedConfig, onDocument
         }),
       ]);
 
-      const response = result.data?.processChanges;
+      const response = (result as unknown as Record<string, Record<string, Record<string, unknown>>>).data?.processChanges;
 
       if (!response?.success) {
-        throw new Error(response?.message || 'Failed to process changes - no response received');
+        throw new Error((response?.message as string) || 'Failed to process changes - no response received');
       }
 
       // Update document state with new HITL status (review completed via Save and Reprocess)
@@ -1149,7 +1224,7 @@ const SectionsPanel = ({ sections, pages, documentItem, mergedConfig, onDocument
 
   // Handle section navigation - just update the open section index
   // The FileViewer will close current viewer and open the new one based on the new index
-  const handleNavigateToSection = (newIndex) => {
+  const handleNavigateToSection = (newIndex: number): void => {
     logger.info('Section navigation requested:', { from: openViewerSectionIndex, to: newIndex });
     // Update the open viewer index - this triggers the FileViewer to close and re-open with new section
     setOpenViewerSectionIndex(newIndex);

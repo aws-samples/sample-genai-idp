@@ -1,10 +1,61 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: MIT-0
 
-/* eslint-disable react/prop-types */
 import React, { useState, useMemo } from 'react';
 import { Table, Box, Input, StatusIndicator, Toggle, SpaceBetween, Button } from '@cloudscape-design/components';
 import { ConsoleLogger } from 'aws-amplify/utils';
+
+interface FlatField {
+  path: (string | number)[];
+  pathString: string;
+  fieldName: string;
+  value: unknown;
+  type: string;
+}
+
+interface BoundingBoxGeometry {
+  boundingBox?: Record<string, number>;
+  page?: number | string;
+  vertices?: unknown;
+}
+
+interface FieldExplainabilityResult {
+  confidence: number | null;
+  geometry: BoundingBoxGeometry | null;
+}
+
+interface ComparisonItem extends FlatField {
+  expectedValue: unknown;
+  predictedValue: unknown;
+  displayExpected: unknown;
+  displayPredicted: unknown;
+  isMatch: boolean;
+  hasExpectedCorrection: boolean;
+  hasPredictedCorrection: boolean;
+  confidence: number | null;
+  geometry: BoundingBoxGeometry | null;
+}
+
+interface CorrectionItem {
+  path: (string | number)[];
+  pathString: string;
+  fieldName: string;
+  originalValue: unknown;
+  newValue: string;
+  source: string;
+}
+
+interface FieldComparisonTableProps {
+  expectedData: Record<string, unknown> | null;
+  predictedData: Record<string, unknown> | null;
+  explainabilityInfo?: unknown[] | null;
+  onExpectedChange?: ((correction: CorrectionItem) => void) | null;
+  onPredictedChange?: ((correction: CorrectionItem) => void) | null;
+  onFieldFocus?: ((geometry: BoundingBoxGeometry) => void) | null;
+  corrections?: CorrectionItem[];
+  showMismatchesOnly?: boolean;
+  onShowMismatchesOnlyChange?: ((checked: boolean) => void) | null;
+}
 
 const logger = new ConsoleLogger('FieldComparisonTable');
 
@@ -12,7 +63,7 @@ const logger = new ConsoleLogger('FieldComparisonTable');
  * Flattens nested JSON objects into a flat array of field entries
  * Each entry has: path, fieldName, value
  */
-const flattenObject = (obj, path = [], results = []) => {
+const flattenObject = (obj: unknown, path: (string | number)[] = [], results: FlatField[] = []): FlatField[] => {
   if (obj === null || obj === undefined) {
     return results;
   }
@@ -71,17 +122,17 @@ const flattenObject = (obj, path = [], results = []) => {
  * Gets a value from a nested object using a path array
  * Filters out structural keys like 'inference_result' for explainability lookups
  */
-const getValueByPath = (obj, path, filterStructural = false) => {
+const getValueByPath = (obj: unknown, path: (string | number)[], filterStructural = false): unknown => {
   if (!obj || !path || path.length === 0) return undefined;
 
   // Filter out structural keys from the path for explainability lookup
   const structuralKeys = ['inference_result', 'inferenceResult', 'explainability_info'];
-  const filteredPath = filterStructural ? path.filter((p) => !structuralKeys.includes(p)) : path;
+  const filteredPath = filterStructural ? path.filter((p) => !structuralKeys.includes(String(p))) : path;
 
-  let current = obj;
+  let current: unknown = obj;
   for (const key of filteredPath) {
     if (current === null || current === undefined) return undefined;
-    current = current[key];
+    current = (current as Record<string | number, unknown>)[key];
   }
   return current;
 };
@@ -90,28 +141,32 @@ const getValueByPath = (obj, path, filterStructural = false) => {
  * Gets confidence and geometry info for a field from explainability_info
  * Handles the nested structure of explainability data
  */
-const getFieldExplainabilityInfo = (path, explainabilityInfo) => {
+const getFieldExplainabilityInfo = (
+  path: (string | number)[],
+  explainabilityInfo: unknown[] | null | undefined,
+): FieldExplainabilityResult => {
   if (!explainabilityInfo || !Array.isArray(explainabilityInfo) || !explainabilityInfo[0]) {
     return { confidence: null, geometry: null };
   }
 
   // Filter out structural keys from the path
   const structuralKeys = ['inference_result', 'inferenceResult', 'explainability_info'];
-  const filteredPath = path.filter((p) => !structuralKeys.includes(p) && typeof p !== 'undefined');
+  const filteredPath = path.filter((p) => !structuralKeys.includes(String(p)) && typeof p !== 'undefined');
 
   // Navigate to the field in explainability data
-  let fieldInfo = explainabilityInfo[0];
+  let fieldInfo: unknown = explainabilityInfo[0];
   for (const pathPart of filteredPath) {
     if (fieldInfo && typeof fieldInfo === 'object') {
-      if (Array.isArray(fieldInfo) && !Number.isNaN(parseInt(pathPart, 10))) {
-        const arrayIndex = parseInt(pathPart, 10);
+      const info = fieldInfo as Record<string | number, unknown>;
+      if (Array.isArray(fieldInfo) && !Number.isNaN(parseInt(String(pathPart), 10))) {
+        const arrayIndex = parseInt(String(pathPart), 10);
         if (arrayIndex >= 0 && arrayIndex < fieldInfo.length) {
           fieldInfo = fieldInfo[arrayIndex];
         } else {
           fieldInfo = null;
         }
-      } else if (fieldInfo[pathPart] !== undefined) {
-        fieldInfo = fieldInfo[pathPart];
+      } else if (info[pathPart] !== undefined) {
+        fieldInfo = info[pathPart];
       } else {
         fieldInfo = null;
       }
@@ -120,22 +175,23 @@ const getFieldExplainabilityInfo = (path, explainabilityInfo) => {
     }
   }
 
-  let confidence = null;
-  let geometry = null;
+  let confidence: number | null = null;
+  let geometry: BoundingBoxGeometry | null = null;
 
   if (fieldInfo) {
+    const info = fieldInfo as Record<string, unknown>;
     // Get confidence
-    if (typeof fieldInfo.confidence === 'number') {
-      confidence = fieldInfo.confidence;
+    if (typeof info.confidence === 'number') {
+      confidence = info.confidence;
     }
 
     // Get geometry
-    if (fieldInfo.geometry && Array.isArray(fieldInfo.geometry) && fieldInfo.geometry.length > 0) {
-      const geomData = fieldInfo.geometry[0];
+    if (info.geometry && Array.isArray(info.geometry) && (info.geometry as unknown[]).length > 0) {
+      const geomData = (info.geometry as Record<string, unknown>[])[0];
       if (geomData.boundingBox && geomData.page !== undefined) {
         geometry = {
-          boundingBox: geomData.boundingBox,
-          page: geomData.page,
+          boundingBox: geomData.boundingBox as Record<string, number>,
+          page: geomData.page as number | string,
           vertices: geomData.vertices,
         };
       }
@@ -148,9 +204,9 @@ const getFieldExplainabilityInfo = (path, explainabilityInfo) => {
 /**
  * Formats a value for display
  */
-const formatValue = (value) => {
+const formatValue = (value: unknown): string => {
   if (value === null || value === undefined) return '';
-  if (Array.isArray(value)) return value.join(', ');
+  if (Array.isArray(value)) return (value as unknown[]).join(', ');
   if (typeof value === 'boolean') return value ? 'true' : 'false';
   return String(value);
 };
@@ -158,7 +214,7 @@ const formatValue = (value) => {
 /**
  * Compares two values for equality
  */
-const valuesMatch = (expected, predicted) => {
+const valuesMatch = (expected: unknown, predicted: unknown): boolean => {
   const expectedStr = formatValue(expected).toLowerCase().trim();
   const predictedStr = formatValue(predicted).toLowerCase().trim();
   return expectedStr === predictedStr;
@@ -177,9 +233,9 @@ const FieldComparisonTable = ({
   corrections = [],
   showMismatchesOnly = false,
   onShowMismatchesOnlyChange,
-}) => {
-  const [editingField, setEditingField] = useState(null);
-  const [editingSource, setEditingSource] = useState(null);
+}: FieldComparisonTableProps): React.JSX.Element => {
+  const [editingField, setEditingField] = useState<string | null>(null);
+  const [editingSource, setEditingSource] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
 
   // Build comparison data from flattened expected and predicted objects
@@ -249,14 +305,14 @@ const FieldComparisonTable = ({
   }, [expectedData, predictedData, explainabilityInfo, corrections, showMismatchesOnly]);
 
   // Start editing a field
-  const handleStartEdit = (pathString, source, currentValue) => {
+  const handleStartEdit = (pathString: string, source: string, currentValue: unknown) => {
     setEditingField(pathString);
     setEditingSource(source);
     setEditValue(formatValue(currentValue));
   };
 
   // Save edit
-  const handleSaveEdit = (item) => {
+  const handleSaveEdit = (item: ComparisonItem) => {
     if (editingSource === 'baseline' && onExpectedChange) {
       onExpectedChange({
         path: item.path,
@@ -289,7 +345,7 @@ const FieldComparisonTable = ({
   };
 
   // Handle row click to focus on field in image
-  const handleRowClick = (item) => {
+  const handleRowClick = (item: ComparisonItem) => {
     if (item.geometry && onFieldFocus) {
       onFieldFocus(item.geometry);
     }
@@ -299,7 +355,7 @@ const FieldComparisonTable = ({
     {
       id: 'field',
       header: 'Field',
-      cell: (item) => (
+      cell: (item: ComparisonItem) => (
         <Box fontWeight={item.isMatch ? 'normal' : 'bold'} color={item.isMatch ? 'text-body-secondary' : 'text-status-warning'}>
           {item.pathString}
         </Box>
@@ -310,7 +366,7 @@ const FieldComparisonTable = ({
     {
       id: 'expected',
       header: 'Expected (Baseline)',
-      cell: (item) => {
+      cell: (item: ComparisonItem) => {
         const isEditing = editingField === item.pathString && editingSource === 'baseline';
         const displayValue = formatValue(item.displayExpected);
 
@@ -354,7 +410,7 @@ const FieldComparisonTable = ({
     {
       id: 'predicted',
       header: 'Predicted (Output)',
-      cell: (item) => {
+      cell: (item: ComparisonItem) => {
         const isEditing = editingField === item.pathString && editingSource === 'prediction';
         const displayValue = formatValue(item.displayPredicted);
 
@@ -398,7 +454,7 @@ const FieldComparisonTable = ({
     {
       id: 'confidence',
       header: 'Confidence',
-      cell: (item) => {
+      cell: (item: ComparisonItem) => {
         if (item.confidence === null) return '-';
         const percentage = (item.confidence * 100).toFixed(1);
         const color = item.confidence >= 0.9 ? 'text-status-success' : item.confidence >= 0.7 ? 'text-status-warning' : 'text-status-error';
@@ -409,13 +465,15 @@ const FieldComparisonTable = ({
     {
       id: 'match',
       header: 'Match',
-      cell: (item) => <StatusIndicator type={item.isMatch ? 'success' : 'error'}>{item.isMatch ? 'Match' : 'Mismatch'}</StatusIndicator>,
+      cell: (item: ComparisonItem) => (
+        <StatusIndicator type={item.isMatch ? 'success' : 'error'}>{item.isMatch ? 'Match' : 'Mismatch'}</StatusIndicator>
+      ),
       width: 100,
     },
     {
       id: 'actions',
       header: 'Actions',
-      cell: (item) => (
+      cell: (item: ComparisonItem) => (
         <Button
           variant="icon"
           iconName="zoom-to-fit"

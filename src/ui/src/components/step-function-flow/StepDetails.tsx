@@ -2,14 +2,43 @@
 // SPDX-License-Identifier: MIT-0
 
 import React, { useState } from 'react';
-import PropTypes from 'prop-types';
 import { Box, SpaceBetween, ExpandableSection, Button, Alert, Container } from '@cloudscape-design/components';
 import './StepDetails.css';
 
-const JsonDisplay = ({ data = null }) => {
+interface StepConfig {
+  summarization?: { enabled?: boolean };
+  assessment?: { enabled?: boolean };
+  evaluation?: { enabled?: boolean };
+}
+
+interface Step {
+  name: string;
+  type: string;
+  status: string;
+  startDate?: string;
+  stopDate?: string;
+  input?: string;
+  output?: string;
+  error?: string;
+  mapIterations?: number;
+  mapIterationDetails?: Step[];
+}
+
+interface JsonDisplayProps {
+  data?: string | Record<string, unknown> | null;
+}
+
+interface StepDetailsProps {
+  step: Step;
+  formatDuration: (startDate?: string, stopDate?: string) => string;
+  getStepIcon: (name: string, type: string, status: string) => React.ReactNode;
+  mergedConfig?: StepConfig | null;
+}
+
+const JsonDisplay = ({ data = null }: JsonDisplayProps): React.JSX.Element | null => {
   if (!data) return null;
 
-  const formatJson = (jsonString) => {
+  const formatJson = (jsonString: string | Record<string, unknown> | null | undefined): string => {
     if (!jsonString) return 'No data available';
 
     // Handle different data types
@@ -46,12 +75,8 @@ const JsonDisplay = ({ data = null }) => {
   );
 };
 
-JsonDisplay.propTypes = {
-  data: PropTypes.oneOfType([PropTypes.string, PropTypes.object]),
-};
-
 // Helper function to check if a step is disabled based on configuration
-const isStepDisabled = (stepName, config) => {
+const isStepDisabled = (stepName: string, config: StepConfig | null | undefined): boolean => {
   if (!config) return false;
 
   const stepNameLower = stepName.toLowerCase();
@@ -74,14 +99,14 @@ const isStepDisabled = (stepName, config) => {
   return false;
 };
 
-const StepDetails = ({ step, formatDuration, getStepIcon, mergedConfig }) => {
+const StepDetails = ({ step, formatDuration, getStepIcon, mergedConfig = null }: StepDetailsProps): React.JSX.Element => {
   const [inputExpanded, setInputExpanded] = useState(false);
   const [outputExpanded, setOutputExpanded] = useState(false);
   const [errorExpanded, setErrorExpanded] = useState(true); // Default to expanded for errors
 
   const stepDisabled = isStepDisabled(step.name, mergedConfig);
 
-  const formatJson = (jsonString) => {
+  const formatJson = (jsonString: string | undefined): string => {
     if (!jsonString) return '';
     try {
       return JSON.stringify(JSON.parse(jsonString), null, 2);
@@ -90,7 +115,7 @@ const StepDetails = ({ step, formatDuration, getStepIcon, mergedConfig }) => {
     }
   };
 
-  const copyToClipboard = (text) => {
+  const copyToClipboard = (text: string): void => {
     try {
       if (navigator.clipboard && navigator.clipboard.writeText) {
         navigator.clipboard.writeText(text);
@@ -161,7 +186,7 @@ const StepDetails = ({ step, formatDuration, getStepIcon, mergedConfig }) => {
         {step.error && (
           <ExpandableSection
             headerText="Step Error"
-            variant="error"
+            variant="default"
             expanded={errorExpanded}
             onChange={({ detail }) => setErrorExpanded(detail.expanded)}
             headerActions={
@@ -265,47 +290,6 @@ const StepDetails = ({ step, formatDuration, getStepIcon, mergedConfig }) => {
       </SpaceBetween>
     </div>
   );
-};
-
-StepDetails.propTypes = {
-  step: PropTypes.shape({
-    name: PropTypes.string.isRequired,
-    type: PropTypes.string.isRequired,
-    status: PropTypes.string.isRequired,
-    startDate: PropTypes.string,
-    stopDate: PropTypes.string,
-    input: PropTypes.string,
-    output: PropTypes.string,
-    error: PropTypes.string,
-    mapIterations: PropTypes.number,
-    mapIterationDetails: PropTypes.arrayOf(
-      PropTypes.shape({
-        name: PropTypes.string.isRequired,
-        type: PropTypes.string.isRequired,
-        status: PropTypes.string.isRequired,
-        startDate: PropTypes.string,
-        stopDate: PropTypes.string,
-        error: PropTypes.string,
-      }),
-    ),
-  }).isRequired,
-  formatDuration: PropTypes.func.isRequired,
-  getStepIcon: PropTypes.func.isRequired,
-  mergedConfig: PropTypes.shape({
-    summarization: PropTypes.shape({
-      enabled: PropTypes.bool,
-    }),
-    assessment: PropTypes.shape({
-      enabled: PropTypes.bool,
-    }),
-    evaluation: PropTypes.shape({
-      enabled: PropTypes.bool,
-    }),
-  }),
-};
-
-StepDetails.defaultProps = {
-  mergedConfig: null,
 };
 
 export default StepDetails;

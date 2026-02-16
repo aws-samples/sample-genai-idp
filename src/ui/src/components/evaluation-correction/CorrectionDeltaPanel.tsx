@@ -1,17 +1,50 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: MIT-0
 
-/* eslint-disable react/prop-types */
 import React from 'react';
 import { Box, Container, Header, SpaceBetween, Button, Table, StatusIndicator, Alert } from '@cloudscape-design/components';
 import { ConsoleLogger } from 'aws-amplify/utils';
+
+interface CorrectionItem {
+  path: (string | number)[];
+  pathString: string;
+  fieldName: string;
+  source: string;
+  originalValue: unknown;
+  newValue: unknown;
+}
+
+interface ExportData {
+  documentId: string;
+  sectionId: string;
+  timestamp: string;
+  corrections: {
+    field: string;
+    path: (string | number)[];
+    pathString: string;
+    source: string;
+    originalValue: unknown;
+    correctedValue: unknown;
+  }[];
+}
+
+interface CorrectionDeltaPanelProps {
+  corrections?: CorrectionItem[];
+  onRemoveCorrection?: ((item: CorrectionItem) => void) | null;
+  onSaveBaselineCorrections?: (() => void) | null;
+  onSavePredictionCorrections?: (() => void) | null;
+  onExportPatches?: ((data: ExportData) => void) | null;
+  isSaving?: boolean;
+  documentId?: string;
+  sectionId?: string;
+}
 
 const logger = new ConsoleLogger('CorrectionDeltaPanel');
 
 /**
  * Formats a value for display, truncating if too long
  */
-const formatValue = (value, maxLength = 30) => {
+const formatValue = (value: unknown, maxLength = 30): string => {
   if (value === null || value === undefined) return '(empty)';
   const str = String(value);
   if (str.length > maxLength) {
@@ -32,12 +65,12 @@ const CorrectionDeltaPanel = ({
   isSaving = false,
   documentId = '',
   sectionId = '',
-}) => {
+}: CorrectionDeltaPanelProps): React.JSX.Element => {
   const baselineCorrections = corrections.filter((c) => c.source === 'baseline');
   const predictionCorrections = corrections.filter((c) => c.source === 'prediction');
 
   const handleExport = () => {
-    const exportData = {
+    const exportData: ExportData = {
       documentId,
       sectionId,
       timestamp: new Date().toISOString(),
@@ -70,7 +103,7 @@ const CorrectionDeltaPanel = ({
     {
       id: 'source',
       header: 'Source',
-      cell: (item) => (
+      cell: (item: CorrectionItem) => (
         <StatusIndicator type={item.source === 'baseline' ? 'info' : 'pending'}>
           {item.source === 'baseline' ? 'Baseline' : 'Prediction'}
         </StatusIndicator>
@@ -80,13 +113,13 @@ const CorrectionDeltaPanel = ({
     {
       id: 'field',
       header: 'Field',
-      cell: (item) => <Box fontWeight="bold">{item.pathString}</Box>,
+      cell: (item: CorrectionItem) => <Box fontWeight="bold">{item.pathString}</Box>,
       width: 180,
     },
     {
       id: 'original',
       header: 'Original',
-      cell: (item) => (
+      cell: (item: CorrectionItem) => (
         <Box color="text-status-error">
           <s>{formatValue(item.originalValue)}</s>
         </Box>
@@ -96,7 +129,7 @@ const CorrectionDeltaPanel = ({
     {
       id: 'corrected',
       header: 'Corrected',
-      cell: (item) => (
+      cell: (item: CorrectionItem) => (
         <Box color="text-status-success" fontWeight="bold">
           {formatValue(item.newValue)}
         </Box>
@@ -106,7 +139,7 @@ const CorrectionDeltaPanel = ({
     {
       id: 'actions',
       header: 'Actions',
-      cell: (item) => (
+      cell: (item: CorrectionItem) => (
         <Button
           variant="icon"
           iconName="remove"

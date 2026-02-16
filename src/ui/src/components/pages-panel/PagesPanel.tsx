@@ -1,7 +1,6 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: MIT-0
 
-/* eslint-disable react/prop-types */
 import React, { useState, useEffect } from 'react';
 import {
   Box,
@@ -27,10 +26,37 @@ import processChanges from '../../graphql/queries/processChanges';
 const client = generateClient();
 const logger = new ConsoleLogger('PagesPanel');
 
+interface PageItem {
+  Id: string;
+  Class?: string | null;
+  ImageUri?: string;
+  TextUri?: string;
+  TextConfidenceUri?: string;
+  classReset?: boolean;
+  textModified?: boolean;
+  newTextUri?: string | null;
+  newConfidenceUri?: string | null;
+}
+
+interface DocumentItem {
+  hitlReviewOwner?: string;
+  hitlReviewOwnerEmail?: string;
+  hitlTriggered?: boolean;
+  hitlStatus?: string;
+  objectStatus?: string;
+  ObjectKey?: string;
+  objectKey?: string;
+}
+
+interface PagesPanelProps {
+  pages?: PageItem[];
+  documentItem?: DocumentItem;
+}
+
 // Cell renderer components
-const IdCell = ({ item }) => <span>{item.Id}</span>;
-const ClassCell = ({ item }) => <span>{item.Class || '-'}</span>;
-const ThumbnailCell = ({ imageUrl }) => (
+const IdCell = ({ item }: { item: PageItem }): React.JSX.Element => <span>{item.Id}</span>;
+const ClassCell = ({ item }: { item: PageItem }): React.JSX.Element => <span>{item.Class || '-'}</span>;
+const ThumbnailCell = ({ imageUrl }: { imageUrl?: string | null }): React.JSX.Element => (
   <div style={{ width: '100px', height: '100px' }}>
     {imageUrl ? (
       <a href={imageUrl} target="_blank" rel="noopener noreferrer" style={{ cursor: 'pointer' }}>
@@ -42,9 +68,6 @@ const ThumbnailCell = ({ imageUrl }) => (
             maxHeight: '100%',
             objectFit: 'contain',
             transition: 'transform 0.2s',
-            ':hover': {
-              transform: 'scale(1.05)',
-            },
           }}
           title="Click to view full size image"
         />
@@ -57,7 +80,15 @@ const ThumbnailCell = ({ imageUrl }) => (
   </div>
 );
 
-const ActionsCell = ({ item, isEditMode, onViewEditClick }) =>
+const ActionsCell = ({
+  item,
+  isEditMode,
+  onViewEditClick,
+}: {
+  item: PageItem;
+  isEditMode: boolean;
+  onViewEditClick: (item: PageItem) => void;
+}): React.JSX.Element =>
   item.TextUri ? (
     <Button onClick={() => onViewEditClick(item)}>{isEditMode ? 'Edit Page Text' : 'View Page Text'}</Button>
   ) : (
@@ -65,7 +96,7 @@ const ActionsCell = ({ item, isEditMode, onViewEditClick }) =>
   );
 
 // Edit mode: Class/Type column
-const EditableClassCell = ({ item, onResetClass }) => (
+const EditableClassCell = ({ item, onResetClass }: { item: PageItem; onResetClass: (id: string) => void }): React.JSX.Element => (
   <FormField>
     {item.Class ? (
       <SpaceBetween direction="horizontal" size="xs">
@@ -79,7 +110,7 @@ const EditableClassCell = ({ item, onResetClass }) => (
 );
 
 // Column definitions for view mode
-const createViewColumnDefinitions = (thumbnailUrls, onViewEditClick) => [
+const createViewColumnDefinitions = (thumbnailUrls: Record<string, string | null>, onViewEditClick: (item: PageItem) => void) => [
   {
     id: 'id',
     header: 'Page ID',
@@ -117,7 +148,11 @@ const createViewColumnDefinitions = (thumbnailUrls, onViewEditClick) => [
 ];
 
 // Column definitions for edit mode
-const createEditColumnDefinitions = (thumbnailUrls, onResetClass, onViewEditClick) => [
+const createEditColumnDefinitions = (
+  thumbnailUrls: Record<string, string | null>,
+  onResetClass: (id: string) => void,
+  onViewEditClick: (item: PageItem) => void,
+) => [
   {
     id: 'id',
     header: 'Page ID',
@@ -153,12 +188,12 @@ const createEditColumnDefinitions = (thumbnailUrls, onResetClass, onViewEditClic
   },
 ];
 
-const PagesPanel = ({ pages, documentItem }) => {
-  const [thumbnailUrls, setThumbnailUrls] = useState({});
+const PagesPanel = ({ pages, documentItem }: PagesPanelProps): React.JSX.Element => {
+  const [thumbnailUrls, setThumbnailUrls] = useState<Record<string, string | null>>({});
   const [isEditMode, setIsEditMode] = useState(false);
-  const [editedPages, setEditedPages] = useState([]);
-  const [modifiedPageIds, setModifiedPageIds] = useState(new Set());
-  const [selectedPage, setSelectedPage] = useState(null);
+  const [editedPages, setEditedPages] = useState<PageItem[]>([]);
+  const [modifiedPageIds, setModifiedPageIds] = useState<Set<string>>(new Set());
+  const [selectedPage, setSelectedPage] = useState<PageItem | null>(null);
   const [showModalEditor, setShowModalEditor] = useState(false);
   const [showPattern1Modal, setShowPattern1Modal] = useState(false);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
@@ -221,7 +256,7 @@ const PagesPanel = ({ pages, documentItem }) => {
       pages.map(async (page) => {
         if (page.ImageUri) {
           try {
-            const url = await generateS3PresignedUrl(page.ImageUri, currentCredentials);
+            const url = await generateS3PresignedUrl(page.ImageUri, currentCredentials as Record<string, unknown>);
             urls[page.Id] = url;
           } catch (err) {
             logger.error('Error generating presigned URL for thumbnail:', err);
@@ -254,7 +289,7 @@ const PagesPanel = ({ pages, documentItem }) => {
 
   // Check if current pattern is Pattern-1
   const isPattern1 = () => {
-    const pattern = settings?.IDPPattern;
+    const pattern = (settings as Record<string, unknown>)?.IDPPattern as string | undefined;
     return pattern && pattern.toLowerCase().includes('pattern1');
   };
 
@@ -268,7 +303,7 @@ const PagesPanel = ({ pages, documentItem }) => {
   };
 
   // Handle reset class
-  const handleResetClass = (pageId) => {
+  const handleResetClass = (pageId: string): void => {
     const updatedPages = editedPages.map((page) => {
       if (page.Id === pageId) {
         // Mark as modified
@@ -285,18 +320,18 @@ const PagesPanel = ({ pages, documentItem }) => {
   };
 
   // Handle view/edit page text
-  const handleViewEditClick = (page) => {
+  const handleViewEditClick = (page: PageItem): void => {
     setSelectedPage(page);
     setShowModalEditor(true);
   };
 
   // Handle modal save
-  const handleModalSave = (pageId, newTextUri, newConfidenceUri) => {
+  const handleModalSave = (pageId: string | number | undefined, newTextUri: string | null, newConfidenceUri: string | null): void => {
     logger.info(`handleModalSave called: pageId=${pageId}, newTextUri=${newTextUri}, newConfidenceUri=${newConfidenceUri}`);
 
     // Mark page as text modified using functional update
     setModifiedPageIds((prev) => {
-      const updated = new Set([...prev, pageId]);
+      const updated = new Set([...prev, String(pageId)]);
       logger.info(`Updated modifiedPageIds:`, Array.from(updated));
       return updated;
     });
@@ -414,7 +449,7 @@ const PagesPanel = ({ pages, documentItem }) => {
       }
 
       const result = await client.graphql({
-        query: processChanges,
+        query: processChanges as unknown as string,
         variables: {
           objectKey,
           modifiedSections: [], // Empty for page-only changes
@@ -422,7 +457,9 @@ const PagesPanel = ({ pages, documentItem }) => {
         },
       });
 
-      const response = result.data?.processChanges;
+      const response = (result as { data: Record<string, unknown> }).data?.processChanges as
+        | { success: boolean; message?: string }
+        | undefined;
 
       if (!response?.success) {
         throw new Error(response?.message || 'Failed to process changes');
@@ -436,7 +473,7 @@ const PagesPanel = ({ pages, documentItem }) => {
       alert('Page changes submitted for reprocessing!');
     } catch (error) {
       logger.error('Error processing changes:', error);
-      alert(`Error processing changes: ${error.message}`);
+      alert(`Error processing changes: ${(error as Error).message}`);
     } finally {
       setIsProcessing(false);
     }

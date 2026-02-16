@@ -3,7 +3,6 @@
  * SPDX-License-Identifier: MIT-0
  */
 import React, { useState, useEffect, useRef } from 'react';
-import PropTypes from 'prop-types';
 import { Container, Header, SpaceBetween, Box, Alert, Spinner, Button, Modal, Badge } from '@cloudscape-design/components';
 import {
   FaPlay,
@@ -30,8 +29,48 @@ import './StepFunctionFlowViewer.css';
 const client = generateClient();
 const logger = new ConsoleLogger('StepFunctionFlowViewer');
 
+interface StepConfig {
+  summarization?: { enabled?: boolean };
+  assessment?: { enabled?: boolean };
+  evaluation?: { enabled?: boolean };
+}
+
+interface Step {
+  name: string;
+  type: string;
+  status: string;
+  startDate?: string;
+  stopDate?: string;
+  input?: string;
+  output?: string;
+  error?: string;
+  isMainStep?: boolean;
+  isMapIteration?: boolean;
+  parentMapName?: string;
+  iterationIndex?: number;
+  mapIterations?: number;
+  mapIterationDetails?: Step[];
+}
+
+interface ExecutionData {
+  getStepFunctionExecution: {
+    status: string;
+    startDate?: string;
+    stopDate?: string;
+    error?: string;
+    steps?: Step[];
+  };
+}
+
+interface StepFunctionFlowViewerProps {
+  executionArn: string;
+  visible: boolean;
+  onDismiss: () => void;
+  mergedConfig?: StepConfig | null;
+}
+
 // Helper function to check if a step is disabled based on configuration
-const isStepDisabled = (stepName, config) => {
+const isStepDisabled = (stepName: string, config: StepConfig | null | undefined): boolean => {
   if (!config) return false;
 
   const stepNameLower = stepName.toLowerCase();
@@ -54,19 +93,24 @@ const isStepDisabled = (stepName, config) => {
   return false;
 };
 
-const StepFunctionFlowViewer = ({ executionArn, visible, onDismiss, mergedConfig }) => {
-  const [selectedStep, setSelectedStep] = useState(null);
-  const [data, setData] = useState(null);
+const StepFunctionFlowViewer = ({
+  executionArn,
+  visible,
+  onDismiss,
+  mergedConfig = null,
+}: StepFunctionFlowViewerProps): React.JSX.Element => {
+  const [selectedStep, setSelectedStep] = useState<Step | null>(null);
+  const [data, setData] = useState<ExecutionData | null>(null);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
+  const [error, setError] = useState<Record<string, unknown> | null>(null);
   const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(false);
-  const [lastRefreshTime, setLastRefreshTime] = useState(null);
-  const autoRefreshIntervalRef = useRef(null);
+  const [lastRefreshTime, setLastRefreshTime] = useState<Date | null>(null);
+  const autoRefreshIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const AUTO_REFRESH_INTERVAL = 10000; // 10 seconds
-  const [processedSteps, setProcessedSteps] = useState([]);
+  const [processedSteps, setProcessedSteps] = useState<Step[]>([]);
 
   // Function to process Step Function steps for better visualization
-  const processStepFunctionStepsData = (steps) => {
+  const processStepFunctionStepsData = (steps: Step[]): Step[] => {
     if (!steps || !Array.isArray(steps)) return [];
 
     // Create a flattened list of all steps including Map iterations
@@ -96,7 +140,7 @@ const StepFunctionFlowViewer = ({ executionArn, visible, onDismiss, mergedConfig
     return allSteps.sort((a, b) => {
       if (!a.startDate) return 1;
       if (!b.startDate) return -1;
-      return new Date(a.startDate) - new Date(b.startDate);
+      return new Date(a.startDate).getTime() - new Date(b.startDate).getTime();
     });
   };
 
@@ -111,17 +155,23 @@ const StepFunctionFlowViewer = ({ executionArn, visible, onDismiss, mergedConfig
       logger.info('Fetching Step Function execution with ARN:', executionArn);
       console.log('Fetching Step Function execution with ARN:', executionArn);
 
-      const result = await client.graphql({ query: getStepFunctionExecution, variables: { executionArn } });
+      const result = await client.graphql({ query: getStepFunctionExecution as unknown as string, variables: { executionArn } });
+      const resultData = (result as { data: Record<string, unknown> }).data;
       logger.info('GraphQL response received:', result);
       console.log('GraphQL response received:', result);
 
-      setData(result.data);
+      setData(resultData as unknown as ExecutionData);
       setLastRefreshTime(new Date());
-      logger.debug('Step Functions execution data:', result.data);
+      logger.debug('Step Functions execution data:', resultData);
 
       // Process the steps to handle Map state visualization
-      if (result.data?.getStepFunctionExecution?.steps) {
-        const enhancedSteps = processStepFunctionStepsData(result.data.getStepFunctionExecution.steps);
+      if (
+        (resultData as Record<string, unknown>)?.getStepFunctionExecution &&
+        ((resultData as Record<string, unknown>).getStepFunctionExecution as Record<string, unknown>)?.steps
+      ) {
+        const enhancedSteps = processStepFunctionStepsData(
+          ((resultData as Record<string, unknown>).getStepFunctionExecution as Record<string, unknown>).steps as Step[],
+        );
         setProcessedSteps(enhancedSteps);
 
         // If there's a failed step and no step is currently selected, select the first failed step
@@ -138,14 +188,15 @@ const StepFunctionFlowViewer = ({ executionArn, visible, onDismiss, mergedConfig
       console.error('Error fetching Step Functions execution:', err);
 
       // Enhanced error details for debugging
-      if (err.errors) {
-        err.errors.forEach((errorItem, index) => {
+      const graphqlErr = err as Record<string, unknown>;
+      if (Array.isArray(graphqlErr.errors)) {
+        graphqlErr.errors.forEach((errorItem: unknown, index: number) => {
           logger.error(`GraphQL Error ${index + 1}:`, errorItem);
           console.error(`GraphQL Error ${index + 1}:`, errorItem);
         });
       }
 
-      setError(err);
+      setError(graphqlErr);
     } finally {
       setLoading(false);
     }
@@ -228,7 +279,7 @@ const StepFunctionFlowViewer = ({ executionArn, visible, onDismiss, mergedConfig
     }
   }, [data]);
 
-  const getStepIcon = (stepName, stepType, status) => {
+  const getStepIcon = (stepName: string, stepType: string, status: string): React.JSX.Element => {
     const iconProps = { size: 24, className: `step-icon step-icon-${status.toLowerCase()}` };
 
     if (stepName.toLowerCase().includes('upload') || stepName.toLowerCase().includes('input')) {
@@ -284,11 +335,11 @@ const StepFunctionFlowViewer = ({ executionArn, visible, onDismiss, mergedConfig
     }
   };
 
-  const formatDuration = (startDate, stopDate) => {
+  const formatDuration = (startDate?: string, stopDate?: string): string => {
     if (!startDate) return 'N/A';
     const start = new Date(startDate);
     const end = stopDate ? new Date(stopDate) : new Date();
-    const duration = Math.floor((end - start) / 1000);
+    const duration = Math.floor((end.getTime() - start.getTime()) / 1000);
 
     const minutes = Math.floor(duration / 60);
     const seconds = duration % 60;
@@ -312,7 +363,7 @@ const StepFunctionFlowViewer = ({ executionArn, visible, onDismiss, mergedConfig
     return (
       <Modal visible={visible} onDismiss={onDismiss} header="Document Processing Flow" size="max">
         <Alert type="error" header="Error loading processing flow">
-          {error.message || 'An error occurred while loading the processing flow.'}
+          {String(error.message || 'An error occurred while loading the processing flow.')}
         </Alert>
       </Modal>
     );
@@ -411,7 +462,7 @@ const StepFunctionFlowViewer = ({ executionArn, visible, onDismiss, mergedConfig
             onStepClick={setSelectedStep}
             selectedStep={selectedStep}
             getStepIcon={getStepIcon}
-            mergedConfig={mergedConfig}
+            {...({ mergedConfig } as Record<string, unknown>)}
           />
         </Container>
 
@@ -470,27 +521,6 @@ const StepFunctionFlowViewer = ({ executionArn, visible, onDismiss, mergedConfig
       </SpaceBetween>
     </Modal>
   );
-};
-
-StepFunctionFlowViewer.propTypes = {
-  executionArn: PropTypes.string.isRequired,
-  visible: PropTypes.bool.isRequired,
-  onDismiss: PropTypes.func.isRequired,
-  mergedConfig: PropTypes.shape({
-    summarization: PropTypes.shape({
-      enabled: PropTypes.bool,
-    }),
-    assessment: PropTypes.shape({
-      enabled: PropTypes.bool,
-    }),
-    evaluation: PropTypes.shape({
-      enabled: PropTypes.bool,
-    }),
-  }),
-};
-
-StepFunctionFlowViewer.defaultProps = {
-  mergedConfig: null,
 };
 
 export default StepFunctionFlowViewer;
