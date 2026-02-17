@@ -7,7 +7,7 @@ test('renders app div element', () => {
   render(<App />);
   const divElement = screen.getByText(
     // eslint-disable-next-line prettier/prettier
-    (_content: string, element: Element | null) => element !== null && element.tagName.toLowerCase() === 'div' && element.className.includes('App'),
+    (_content: string, element: Element | null) => element!.tagName.toLowerCase() === 'div' && element!.className.includes('App'),
   );
   expect(divElement).toBeInTheDocument();
 });

@@ -9,14 +9,8 @@ import App from './App';
 // Suppress ResizeObserver loop error - this is a benign browser timing issue
 const originalConsoleError = console.error;
 console.error = (...args: unknown[]): void => {
-  const first = args[0] as Record<string, unknown> | string | undefined;
-  if (
-    (typeof first === 'string' && first.includes('ResizeObserver loop')) ||
-    (typeof first === 'object' &&
-      first !== null &&
-      typeof (first as Record<string, unknown>).message === 'string' &&
-      ((first as Record<string, unknown>).message as string).includes('ResizeObserver loop'))
-  ) {
+  const first = args[0] as { includes?: (s: string) => boolean; message?: { includes?: (s: string) => boolean } } | undefined;
+  if (first?.includes?.('ResizeObserver loop') || first?.message?.includes?.('ResizeObserver loop')) {
     return;
   }
   originalConsoleError(...args);
