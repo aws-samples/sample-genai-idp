@@ -14,11 +14,10 @@ interface BedrockErrorInfo {
 
 interface BedrockErrorMessageProps {
   errorInfo: BedrockErrorInfo;
-  onRetry?: () => void;
   className?: string;
 }
 
-const BedrockErrorMessage = ({ errorInfo, onRetry, className = '' }: BedrockErrorMessageProps): React.JSX.Element => {
+const BedrockErrorMessage = ({ errorInfo, className = '' }: BedrockErrorMessageProps): React.JSX.Element => {
   const [showTechnicalDetails, setShowTechnicalDetails] = useState(false);
 
   // Map error types to appropriate alert types and status indicators
@@ -94,7 +93,7 @@ const BedrockErrorMessage = ({ errorInfo, onRetry, className = '' }: BedrockErro
         header={
           <SpaceBetween direction="horizontal" size="xs" alignItems="center">
             <span>{displayInfo.title}</span>
-            {errorInfo.retryAttempts != null && errorInfo.retryAttempts > 0 && (
+            {errorInfo.retryAttempts > 0 && (
               <Box fontSize="body-s" color="text-status-inactive">
                 (After {errorInfo.retryAttempts} retry attempt{errorInfo.retryAttempts > 1 ? 's' : ''})
               </Box>
@@ -139,7 +138,7 @@ const BedrockErrorMessage = ({ errorInfo, onRetry, className = '' }: BedrockErro
                 <Box color="text-body-secondary" margin={{ top: 'xs' }}>
                   Details: {errorInfo.technicalDetails}
                 </Box>
-                {errorInfo.retryAttempts != null && errorInfo.retryAttempts > 0 && (
+                {errorInfo.retryAttempts > 0 && (
                   <Box color="text-body-secondary" margin={{ top: 'xs' }}>
                     Retry Attempts: {errorInfo.retryAttempts}
                   </Box>

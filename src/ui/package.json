@@ -69,6 +69,7 @@
     "preview": "vite preview",
     "test": "vitest",
     "lint": "eslint \"src/**/*.{js,jsx,ts,tsx}\"",
+    "format": "prettier --write .",
     "typecheck": "tsc --noEmit"
   },
   "browserslist": {

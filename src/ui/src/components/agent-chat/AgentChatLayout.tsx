@@ -344,16 +344,6 @@ const AgentChatLayout = ({
                           retryAttempts?: number;
                         }
                       }
-                      onRetry={() => {
-                        // Retry the last user message
-                        const lastUserMessage = messages
-                          .slice()
-                          .reverse()
-                          .find((msg: ChatMessage) => msg.role === 'user');
-                        if (lastUserMessage) {
-                          handlePromptSubmit();
-                        }
-                      }}
                     />
                   );
                 }

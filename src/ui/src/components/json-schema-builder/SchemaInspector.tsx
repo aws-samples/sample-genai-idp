@@ -626,7 +626,7 @@ const SchemaInspector = ({
                   >
                     <Input
                       type="number"
-                      inputMode="decimal"
+                      {...({ step: '0.1', min: '0.1' } as Record<string, unknown>)}
                       value={(selectedAttribute[X_AWS_IDP_EVALUATION_WEIGHT] as number)?.toString() || '1.0'}
                       onChange={({ detail }) => {
                         const value = detail.value ? parseFloat(detail.value) : 1.0;
