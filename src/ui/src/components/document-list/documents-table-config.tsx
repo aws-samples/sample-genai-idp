@@ -198,7 +198,7 @@ const VISIBLE_CONTENT = [
 export const DEFAULT_PREFERENCES = {
   pageSize: PAGE_SIZE_OPTIONS[0].value,
   visibleContent: VISIBLE_CONTENT,
-  wraplines: false,
+  wrapLines: false,
 };
 
 export const DocumentsPreferences = ({

@@ -345,7 +345,7 @@ const DocumentList = (): React.JSX.Element => {
             countText={getFilterCounterText(filteredItemsCount)}
           />
         }
-        wrapLines={preferences.wraplines}
+        wrapLines={preferences.wrapLines}
         pagination={<Pagination {...paginationProps} ariaLabels={paginationLabels} />}
         preferences={<DocumentsPreferences preferences={preferences} setPreferences={setPreferences as (prefs: unknown) => void} />}
         trackBy={UNIQUE_TRACK_ID}

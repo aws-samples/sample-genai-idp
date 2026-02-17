@@ -446,7 +446,7 @@ const AgentQueryInput = ({ onSubmit, isSubmitting = false, selectedResult = null
               <Box fontSize="heading-xs" fontWeight="bold">
                 Select from available agents
               </Box>
-              <Button variant="normal" onClick={() => setShowMcpInfoModal(true)}>
+              <Button variant="normal" onClick={() => setShowMcpInfoModal(true)} {...({ fontSize: 'body-s' } as Record<string, unknown>)}>
                 🚀 NEW: Integrate your own systems with MCP!
               </Button>
             </div>
