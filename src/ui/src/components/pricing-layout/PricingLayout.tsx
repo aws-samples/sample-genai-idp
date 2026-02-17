@@ -521,7 +521,7 @@ const PricingLayout = (): React.JSX.Element => {
           <SpaceBetween size="s">
             <div>{error}</div>
             <Box>
-              <Button onClick={() => fetchPricing()} variant="primary">
+              <Button {...({ onClick: fetchPricing } as Record<string, unknown>)} variant="primary">
                 Retry
               </Button>
             </Box>
@@ -538,7 +538,7 @@ const PricingLayout = (): React.JSX.Element => {
           <SpaceBetween size="s">
             <div>Unable to load pricing data.</div>
             <Box>
-              <Button onClick={() => fetchPricing()} variant="primary">
+              <Button {...({ onClick: fetchPricing } as Record<string, unknown>)} variant="primary">
                 Retry
               </Button>
             </Box>
@@ -744,10 +744,10 @@ const PricingLayout = (): React.JSX.Element => {
         <Form>
           {refreshing && (
             <Alert type="info" header="Syncing pricing...">
-              <div style={{ display: 'flex', alignItems: 'center' }}>
-                <Spinner size="normal" />
+              <Box {...({ display: 'flex', alignItems: 'center' } as Record<string, unknown>)}>
+                <Spinner {...({ size: 'normal' } as Record<string, unknown>)} />
                 <Box margin={{ left: 's' }}>Refreshing data from server</Box>
-              </div>
+              </Box>
             </Alert>
           )}
 

@@ -193,7 +193,7 @@ const ChatPanel = (item: ChatPanelProps): React.JSX.Element => {
           </FormField> */}
 
           <SpaceBetween size="m">
-            <FormField label="Your message">
+            <FormField label="Your message" {...({ style: { flex: 8 } } as Record<string, unknown>)}>
               <input
                 type="text"
                 name="postContent"

@@ -402,6 +402,7 @@ const EditablePageIdsCell = ({
         onChange={handleInputChange}
         onBlur={handleBlur}
         placeholder="1, 2, 3"
+        {...({ autoComplete: 'off', spellCheck: false } as Record<string, unknown>)}
         rows={1}
         invalid={validationErrors[item.Id]?.some((err: string) => err.includes('Page') || err.includes('page'))}
       />

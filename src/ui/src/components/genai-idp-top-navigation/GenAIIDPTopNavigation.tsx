@@ -77,17 +77,29 @@ const GenAIIDPTopNavigation = (): React.JSX.Element => {
             {
               type: 'menu-dropdown',
               text: userDisplayText,
-              description: roleDisplay ? `${userId} [${roleDisplay}]` : userId,
+              ...({
+                description: roleDisplay ? (
+                  <SpaceBetween direction="horizontal" size="xs">
+                    <span>{userId}</span>
+                    <Badge color={isAdmin ? 'blue' : 'grey'}>{roleDisplay}</Badge>
+                  </SpaceBetween>
+                ) : (
+                  userId
+                ),
+              } as Record<string, unknown>),
               iconName: 'user-profile',
-              onItemClick: ({ detail }) => {
-                if (detail.id === 'signout') {
-                  setIsSignOutModalVisiblesetVisible(true);
-                }
-              },
               items: [
                 {
                   id: 'signout',
                   text: 'Sign out',
+                  ...({ type: 'button' } as Record<string, unknown>),
+                  ...({
+                    text: (
+                      <Button variant="primary" onClick={() => setIsSignOutModalVisiblesetVisible(true)}>
+                        Sign out
+                      </Button>
+                    ),
+                  } as Record<string, unknown>),
                 },
                 {
                   id: 'support-group',

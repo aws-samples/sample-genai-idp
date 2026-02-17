@@ -43,7 +43,7 @@ const ArrayConstraints = ({ attribute, onUpdate, availableClasses = [] }: ArrayC
 
   return (
     <>
-      <Header variant="h3">Array Constraints</Header>
+      <Header {...({ variant: 'h4' } as Record<string, unknown>)}>Array Constraints</Header>
 
       <FormField label="Min Items" description="Minimum number of items expected in the array. Use 1 to require at least one item.">
         <Input

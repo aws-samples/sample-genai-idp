@@ -20,7 +20,7 @@ const ObjectConstraints = ({ attribute, onUpdate }: ObjectConstraintsProps): Rea
 
   return (
     <>
-      <Header variant="h3">Object Constraints</Header>
+      <Header {...({ variant: 'h4' } as Record<string, unknown>)}>Object Constraints</Header>
 
       <FormField label="Min Properties" description="Minimum number of properties">
         <Input

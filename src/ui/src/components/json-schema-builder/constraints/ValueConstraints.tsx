@@ -130,7 +130,7 @@ const ValueConstraints = ({ attribute, onUpdate }: ValueConstraintsProps): React
 
   return (
     <>
-      <Header variant="h3">Value Constraints (JSON Schema)</Header>
+      <Header {...({ variant: 'h4' } as Record<string, unknown>)}>Value Constraints (JSON Schema)</Header>
 
       <FormField label="Const (Single Constant Value)" description={constDescription} constraintText={`Example: ${getConstPlaceholder()}`}>
         <Input

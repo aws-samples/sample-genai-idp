@@ -1022,7 +1022,7 @@ JOIN metering m ON ds."document_id" = m."document_id"
             padding: '4px',
           }}
         >
-          <SpaceBetween size="xxxs">
+          <SpaceBetween size="xs" {...({ size: 'none' } as Record<string, unknown>)}>
             {messages.length > 0 ? (
               messages.map((message, index) => renderMessage(message, index))
             ) : (

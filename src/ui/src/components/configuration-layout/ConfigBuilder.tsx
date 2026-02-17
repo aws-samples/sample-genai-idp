@@ -998,7 +998,7 @@ const ConfigBuilder = ({
     // List content with items - only shown when expanded
     const itemsContent = isListExpanded && (
       <ExtBox padding={{ left: `${nestLevel * 50 + 200}px`, top: '0' }} className="list-content-indented">
-        <SpaceBetween size="xxxs">
+        <SpaceBetween size="xs" {...({ size: 'none' } as Record<string, unknown>)}>
           {values.length === 0 && (
             <ExtBox fontStyle="italic" color="text-body-secondary" padding="xs">
               No items added yet
@@ -1491,7 +1491,7 @@ const ConfigBuilder = ({
         <Input
           value={displayValue !== undefined && displayValue !== null ? String(displayValue) : ''}
           type={property.type === 'number' ? 'number' : 'text'}
-          inputMode={property.type === 'number' ? 'numeric' : undefined}
+          {...({ min: property.minimum, max: property.maximum } as Record<string, unknown>)}
           onChange={({ detail }) => {
             let finalValue: string | number = detail.value;
             if (property.type === 'number' && detail.value !== '') {

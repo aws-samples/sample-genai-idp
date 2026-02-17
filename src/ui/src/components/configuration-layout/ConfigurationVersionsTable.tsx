@@ -183,7 +183,7 @@ const ConfigurationVersionsTable = ({
         }
         header={
           <SpaceBetween size="s">
-            <Header variant="h3">Configuration Versions ({filteredItemsCount})</Header>
+            <Header {...({ variant: 'h4' } as Record<string, unknown>)}>Configuration Versions ({filteredItemsCount})</Header>
             {/* Action buttons row */}
             <SpaceBetween direction="horizontal" size="xs">
               <Button onClick={onCompareVersions} disabled={selectedVersionsForCompare.length < 2}>
@@ -224,7 +224,7 @@ const ConfigurationVersionsTable = ({
             </SpaceBetween>
           </SpaceBetween>
         }
-        filter={<TextFilter {...filterProps} filteringPlaceholder="Search versions..." />}
+        filter={<TextFilter {...filterProps} {...({ placeholder: 'Search versions...' } as Record<string, unknown>)} />}
         pagination={<Pagination {...paginationProps} />}
       />
     </SpaceBetween>

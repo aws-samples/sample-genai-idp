@@ -281,7 +281,7 @@ const SchemaBuilder = ({
                 {getSelectedAttribute() && formatTypeBadge(getSelectedAttribute())}
               </>
             )}
-            <div style={{ flex: 1 }} />
+            <Box {...({ flex: '1' } as Record<string, unknown>)} />
             <Button
               variant="inline-link"
               iconName="close"

@@ -43,7 +43,7 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
   const [comparisonData, setComparisonData] = useState<ComparisonData | null>(null);
   const [comparing, setComparing] = useState(false);
   const [currentAttempt, setCurrentAttempt] = useState(1);
-  const [lowestScoreCount, setLowestScoreCount] = useState<Record<string, unknown>>({ label: '5', value: '5' });
+  const [lowestScoreCount, setLowestScoreCount] = useState<Record<string, unknown>>({ label: '5', value: 5 });
   const [preferences, setPreferences] = useLocalStorage('test-comparison-preferences', { wrapLines: false });
 
   // Color grading functions
@@ -251,7 +251,7 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
         onClick={() => {
           window.location.hash = `#/test-studio?tab=results&testRunId=${testRunId}`;
         }}
-        aria-label={testRunId}
+        {...({ title: testRunId } as Record<string, unknown>)}
       >
         {displayId}
       </Button>

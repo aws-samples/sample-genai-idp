@@ -260,7 +260,7 @@ const JSONEditorTab = ({
             <Box>
               <strong>JSON {isReadOnly ? 'Viewer' : 'Editor'}</strong> - {isReadOnly ? 'View' : 'View and edit'} the raw JSON data.
             </Box>
-            <div style={{ marginLeft: 'auto' }}>
+            <Box {...({ style: { marginLeft: 'auto' } } as Record<string, unknown>)}>
               <SpaceBetween direction="horizontal" size="m" alignItems="center">
                 {/* Section selector */}
                 <div style={{ minWidth: '280px' }}>
@@ -279,7 +279,7 @@ const JSONEditorTab = ({
                   />
                 </div>
                 {/* Evaluation toggle */}
-                {loadingEvaluation && <Spinner size="normal" />}
+                {loadingEvaluation && <Spinner {...({ size: 'small' } as Record<string, unknown>)} />}
                 {(isBaselineAvailable || loadingEvaluation) && (
                   <Toggle
                     checked={showBaseline}
@@ -294,7 +294,7 @@ const JSONEditorTab = ({
                   </Toggle>
                 )}
               </SpaceBetween>
-            </div>
+            </Box>
           </SpaceBetween>
         </Box>
 

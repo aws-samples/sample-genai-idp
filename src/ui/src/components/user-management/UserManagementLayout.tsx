@@ -252,7 +252,11 @@ const UserManagementLayout = (): React.JSX.Element => {
     {
       id: 'persona',
       header: 'Role',
-      cell: (item) => <Box color={item.persona === 'Admin' ? 'text-status-info' : 'inherit'}>{item.persona}</Box>,
+      cell: (item) => (
+        <Box {...({ color: item.persona === 'Admin' ? 'text-status-info' : 'text-body-default' } as Record<string, unknown>)}>
+          {item.persona}
+        </Box>
+      ),
       sortingField: 'persona',
     },
     {

@@ -178,18 +178,20 @@ const MarkdownViewer = ({
   // For simple mode, just show the markdown content without the controls
   if (simple) {
     return (
-      <div
-        style={{
-          height,
-          position: 'relative',
-          overflow: 'auto',
-          padding: '16px',
-          backgroundColor: '#ffffff',
-          border: '2px solid #e9ebed',
-          borderRadius: '4px',
-          width: '100%',
-          minWidth: '600px',
-        }}
+      <Box
+        {...({
+          style: {
+            height,
+            position: 'relative',
+            overflow: 'auto',
+            padding: '16px',
+            backgroundColor: '#ffffff',
+            border: '2px solid #e9ebed',
+            borderRadius: '4px',
+            width: '100%',
+            minWidth: '600px',
+          },
+        } as Record<string, unknown>)}
       >
         {content ? (
           <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>
@@ -200,7 +202,7 @@ const MarkdownViewer = ({
             No content to display
           </Box>
         )}
-      </div>
+      </Box>
     );
   }
 
@@ -209,14 +211,16 @@ const MarkdownViewer = ({
 
   // Standard mode with controls and improved styling
   return (
-    <div
-      className="markdown-viewer"
-      style={{
-        border: '1px solid #e9ebed',
-        borderRadius: '8px',
-        backgroundColor: '#ffffff',
-        padding: '0',
-      }}
+    <Box
+      {...({
+        className: 'markdown-viewer',
+        style: {
+          border: '1px solid #e9ebed',
+          borderRadius: '8px',
+          backgroundColor: '#ffffff',
+          padding: '0',
+        },
+      } as Record<string, unknown>)}
     >
       {/* Sticky toolbar container */}
       <div
@@ -263,7 +267,7 @@ const MarkdownViewer = ({
           {content}
         </ReactMarkdown>
       </div>
-    </div>
+    </Box>
   );
 };
 

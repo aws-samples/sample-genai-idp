@@ -65,9 +65,7 @@ interface BoundingBoxProps {
   zoomLevel?: number;
   panOffset?: { x: number; y: number };
 }
-const BoundingBox = memo(({
-  box, page, currentPage, imageRef, zoomLevel = 1, panOffset = { x: 0, y: 0 },
-}: BoundingBoxProps) => {
+const BoundingBox = memo(({ box, page, currentPage, imageRef, zoomLevel = 1, panOffset = { x: 0, y: 0 } }: BoundingBoxProps) => {
   const [dimensions, setDimensions] = useState<BoundingBoxDimensions>({ width: 0, height: 0 });
 
   useEffect(() => {
@@ -230,7 +228,7 @@ const FormFieldRenderer = memo<Record<string, any>>(
     // Calculate path key for collapse state using displayPath
     const pathKey = [...displayPath, fieldKey].join('.');
     const isCollapsed = collapsedPaths.has(pathKey);
-    
+
     // Helper to check if a value has confidence alerts (recursively)
     const hasConfidenceAlertInTree = (val, currentFilteredPath, explainInfo, config) => {
       // Handle null/undefined values - they can still have low confidence in explainability_info
@@ -241,7 +239,7 @@ const FormFieldRenderer = memo<Record<string, any>>(
         }
         return false;
       }
-      
+
       // For primitives, check if this field has low confidence
       if (typeof val === 'string' || typeof val === 'number' || typeof val === 'boolean') {
         const fieldInfo = getFieldConfidenceInfo(fieldKey, explainInfo, currentFilteredPath, config);
@@ -249,7 +247,7 @@ const FormFieldRenderer = memo<Record<string, any>>(
           return true;
         }
       }
-      
+
       // For objects, check each property
       if (typeof val === 'object' && val !== null && !Array.isArray(val)) {
         return Object.entries(val).some(([k, v]) => {
@@ -257,7 +255,7 @@ const FormFieldRenderer = memo<Record<string, any>>(
           return hasConfidenceAlertInTreeDeep(v, k, nestedPath, explainInfo, config);
         });
       }
-      
+
       // For arrays, check each item
       if (Array.isArray(val)) {
         return val.some((item, idx) => {
@@ -265,10 +263,10 @@ const FormFieldRenderer = memo<Record<string, any>>(
           return hasConfidenceAlertInTreeDeep(item, `[${idx}]`, nestedPath, explainInfo, config);
         });
       }
-      
+
       return false;
     };
-    
+
     // Deep helper that takes fieldKey as parameter
     const hasConfidenceAlertInTreeDeep = (val, fKey, currentFilteredPath, explainInfo, config) => {
       // Handle null/undefined values - they can still have low confidence in explainability_info
@@ -279,42 +277,42 @@ const FormFieldRenderer = memo<Record<string, any>>(
         }
         return false;
       }
-      
+
       if (typeof val === 'string' || typeof val === 'number' || typeof val === 'boolean') {
         const fieldInfo = getFieldConfidenceInfo(fKey, explainInfo, currentFilteredPath.slice(0, -1), config);
         if (fieldInfo.hasConfidenceInfo && fieldInfo.displayMode === 'with-threshold' && !fieldInfo.isAboveThreshold) {
           return true;
         }
       }
-      
+
       if (typeof val === 'object' && val !== null && !Array.isArray(val)) {
         return Object.entries(val).some(([k, v]) => {
           const nestedPath = [...currentFilteredPath, k];
           return hasConfidenceAlertInTreeDeep(v, k, nestedPath, explainInfo, config);
         });
       }
-      
+
       if (Array.isArray(val)) {
         return val.some((item, idx) => {
           const nestedPath = [...currentFilteredPath, idx];
           return hasConfidenceAlertInTreeDeep(item, `[${idx}]`, nestedPath, explainInfo, config);
         });
       }
-      
+
       return false;
     };
-    
+
     // Helper to check if a value has eval mismatches (recursively)
     const hasEvalMismatchInTree = (val, baseval, evalResults, secId) => {
       if (!evalResults?.section_results) return false;
-      
+
       // For primitives, check direct mismatch
       if (typeof val === 'string' || typeof val === 'number' || typeof val === 'boolean') {
         if (baseval !== null && JSON.stringify(val) !== JSON.stringify(baseval)) {
           return true;
         }
       }
-      
+
       // For objects, check each property
       if (typeof val === 'object' && val !== null && !Array.isArray(val)) {
         return Object.entries(val).some(([k, v]) => {
@@ -322,7 +320,7 @@ const FormFieldRenderer = memo<Record<string, any>>(
           return hasEvalMismatchInTree(v, nestedBaseline, evalResults, secId);
         });
       }
-      
+
       // For arrays, check each item
       if (Array.isArray(val)) {
         return val.some((item, idx) => {
@@ -330,30 +328,28 @@ const FormFieldRenderer = memo<Record<string, any>>(
           return hasEvalMismatchInTree(item, nestedBaseline, evalResults, secId);
         });
       }
-      
+
       return false;
     };
-    
+
     // Get confidence information from explainability data (for all fields)
     // Filter out structural keys from the path for explainability lookup
     // We need to remove top-level keys like 'inference_result', 'explainability_info', 'Document Data', etc.
     const structuralKeys = ['inference_result', 'inferenceResult', 'explainability_info', 'Document Data'];
-    let filteredPath = path.filter(
-      (pathSegment) => !structuralKeys.includes(pathSegment) && typeof pathSegment !== 'undefined',
-    );
+    let filteredPath = path.filter((pathSegment) => !structuralKeys.includes(pathSegment) && typeof pathSegment !== 'undefined');
 
     // Remove the field name itself from the path if it's the last element
     // The path should point to the parent container, not include the field name
     if (filteredPath.length > 0 && filteredPath[filteredPath.length - 1] === fieldKey) {
       filteredPath = filteredPath.slice(0, -1);
     }
-    
+
     // Check if this field should be filtered out
     const shouldFilterEval = filterMode === 'eval-mismatches' && showComparison;
     const shouldFilterConfidence = filterMode === 'confidence-alerts';
-    
+
     const hasMismatchInSubtree = shouldFilterEval ? hasEvalMismatchInTree(value, baselineValue, evaluationResults, sectionId) : true;
-    
+
     // When checking for confidence alerts in a subtree, we need to include the current fieldKey in the path
     // so that the recursive check can properly navigate the explainability data structure.
     // Without this, paths like "ServiceInformation.[1].Charges" would incorrectly try to navigate
@@ -365,13 +361,12 @@ const FormFieldRenderer = memo<Record<string, any>>(
     //    separately when calling getFieldConfidenceInfo - adding it would cause duplication.
     const isArrayItemDisplay = fieldKey.startsWith('[') && fieldKey.endsWith(']');
     const isPrimitiveValue = typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean' || value === null;
-    const pathForAlertCheck = structuralKeys.includes(fieldKey) || isArrayItemDisplay || isPrimitiveValue
-      ? filteredPath 
-      : [...filteredPath, fieldKey];
+    const pathForAlertCheck =
+      structuralKeys.includes(fieldKey) || isArrayItemDisplay || isPrimitiveValue ? filteredPath : [...filteredPath, fieldKey];
     const hasConfidenceAlertInSubtree = shouldFilterConfidence
       ? hasConfidenceAlertInTree(value, pathForAlertCheck, explainabilityInfo, mergedConfig)
       : true;
-    
+
     // If filter is active and no matches in subtree, hide this field (except root)
     if (shouldFilterEval && !hasMismatchInSubtree && fieldKey !== 'Document Data') {
       return null;
@@ -379,24 +374,22 @@ const FormFieldRenderer = memo<Record<string, any>>(
     if (shouldFilterConfidence && !hasConfidenceAlertInSubtree && fieldKey !== 'Document Data') {
       return null;
     }
-    
+
     // Look up evaluation result for this field from evaluationResults
     let evalResult = null;
     if (showComparison && evaluationResults?.section_results) {
       // Get section result (use first if only one)
-      let sectionResult = evaluationResults.section_results.find(
-        (sr) => String(sr.section_id) === String(sectionId)
-      );
+      let sectionResult = evaluationResults.section_results.find((sr) => String(sr.section_id) === String(sectionId));
       if (!sectionResult && evaluationResults.section_results.length === 1) {
         sectionResult = evaluationResults.section_results[0];
       }
-      
+
       if (sectionResult?.attributes?.length > 0) {
         // Build the path string from current path and fieldKey
         // path is like [index, "bankInfo"] and fieldKey is like "bank"
         // We need to match against field_comparison_details paths like "checks[0].bankInfo.bank"
-        const fullPath = [...path, fieldKey].filter(p => p !== undefined && p !== 'Document Data');
-        
+        const fullPath = [...path, fieldKey].filter((p) => p !== undefined && p !== 'Document Data');
+
         // Look through all attributes' field_comparison_details to find a match
         for (const attr of sectionResult.attributes) {
           if (attr.field_comparison_details && Array.isArray(attr.field_comparison_details)) {
@@ -406,7 +399,7 @@ const FormFieldRenderer = memo<Record<string, any>>(
               // Check if this detail matches our path
               // For nested paths like "checks[0].bankInfo" when looking at "bank" field
               // We check if the actual/expected values contain our field
-              
+
               // Also extract leaf-level field values from actual_value/expected_value
               if (detail.actual_value && typeof detail.actual_value === 'object') {
                 // Check if our fieldKey is a property in actual_value
@@ -418,7 +411,7 @@ const FormFieldRenderer = memo<Record<string, any>>(
                     reason: detail.reason,
                     expected: detail.expected_value?.[fieldKey],
                     actual: detail.actual_value?.[fieldKey],
-                    parentPath: expectedKey
+                    parentPath: expectedKey,
                   };
                   break;
                 }
@@ -427,23 +420,22 @@ const FormFieldRenderer = memo<Record<string, any>>(
             if (evalResult) break;
           }
         }
-        
       }
     }
-    
+
     // Use evaluation result for match status if available, otherwise compare values
     const hasEvalResult = evalResult !== null && evalResult !== undefined;
     const isMatchedFromEval = hasEvalResult ? evalResult.matched : null;
-    const valuesMatch = hasEvalResult 
-      ? isMatchedFromEval 
-      : (!showComparison || baselineValue === null || JSON.stringify(value) === JSON.stringify(baselineValue));
+    const valuesMatch = hasEvalResult
+      ? isMatchedFromEval
+      : !showComparison || baselineValue === null || JSON.stringify(value) === JSON.stringify(baselineValue);
     const hasMismatch = showComparison && baselineValue !== null && !valuesMatch;
-    
+
     // Extract score, threshold, and reason from evaluation result
     const evalScore = evalResult?.score;
     const evalThreshold = evalResult?.threshold;
     const evalReason = evalResult?.reason;
-    
+
     // Determine field type
     let fieldType: string = typeof value;
     if (Array.isArray(value)) {
@@ -572,23 +564,23 @@ const FormFieldRenderer = memo<Record<string, any>>(
     // Check if this specific field has been edited (for visual highlighting)
     // Note: path already INCLUDES the current field key (from recursive calls like path={[...path, key]})
     // So we should NOT add fieldKey again - just filter the path to exclude array indices and structural keys
-    const trackingPath = path.filter(p => typeof p !== 'number' && p !== undefined && p !== 'Document Data');
+    const trackingPath = path.filter((p) => typeof p !== 'number' && p !== undefined && p !== 'Document Data');
     const fieldPathStr = trackingPath.join('.');
     const isPredictionChanged = predictionChanges.has(fieldPathStr);
     const isBaselineChanged = baselineChanges.has(fieldPathStr);
     const hasLocalEdit = isPredictionChanged || isBaselineChanged;
-    
+
     // Debug logging for change tracking - only for leaf fields (strings/numbers)
     if ((predictionChanges.size > 0 || baselineChanges.size > 0) && (typeof value === 'string' || typeof value === 'number')) {
-      logger.debug('🔍 Change tracking check:', { 
-        fieldKey, 
+      logger.debug('🔍 Change tracking check:', {
+        fieldKey,
         path,
         trackingPath,
-        fieldPathStr, 
-        isPredictionChanged, 
+        fieldPathStr,
+        isPredictionChanged,
         isBaselineChanged,
         predictionKeys: [...predictionChanges.keys()],
-        fieldType: typeof value
+        fieldType: typeof value,
       });
     }
 
@@ -602,7 +594,7 @@ const FormFieldRenderer = memo<Record<string, any>>(
             onKeyDown={(e) => e.key === 'Enter' && handleClick(e)}
             role="button"
             tabIndex={0}
-            style={{ 
+            style={{
               cursor: geometry ? 'pointer' : 'default',
               backgroundColor: hasMismatch && !hasLocalEdit ? 'rgba(255, 153, 0, 0.05)' : 'transparent',
               padding: '4px',
@@ -657,25 +649,31 @@ const FormFieldRenderer = memo<Record<string, any>>(
               <SpaceBetween size="xxs">
                 <ExtBox onClick={handleClick} style={{ cursor: 'pointer' }}>
                   <SpaceBetween direction="horizontal" size="xxs" alignItems="center">
-                    <ExtBox fontSize="body-s" color="text-body-secondary">Predicted:</ExtBox>
+                    <ExtBox fontSize="body-s" color="text-body-secondary">
+                      Predicted:
+                    </ExtBox>
                     {isPredictionChanged && (
-                      <ExtBox fontSize="body-s" color="text-status-info" fontWeight="bold">✏️</ExtBox>
+                      <ExtBox fontSize="body-s" color="text-status-info" fontWeight="bold">
+                        ✏️
+                      </ExtBox>
                     )}
                   </SpaceBetween>
-                  <div style={{ 
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '4px',
-                    pointerEvents: isReadOnly ? 'none' : 'auto',
-                    borderLeft: isPredictionChanged ? '3px solid #0073bb' : '3px solid transparent',
-                    paddingLeft: '4px',
-                    backgroundColor: isPredictionChanged ? 'rgba(0, 115, 187, 0.08)' : 'transparent',
-                    borderRadius: '2px',
-                  }}>
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                      pointerEvents: isReadOnly ? 'none' : 'auto',
+                      borderLeft: isPredictionChanged ? '3px solid #0073bb' : '3px solid transparent',
+                      paddingLeft: '4px',
+                      backgroundColor: isPredictionChanged ? 'rgba(0, 115, 187, 0.08)' : 'transparent',
+                      borderRadius: '2px',
+                    }}
+                  >
                     <div style={{ flex: 1 }}>
                       {isReadOnly ? (
-                        <div 
-                          style={{ 
+                        <div
+                          style={{
                             backgroundColor: '#e9ebed',
                             border: '1px solid #d5dbdb',
                             borderRadius: '4px',
@@ -690,11 +688,7 @@ const FormFieldRenderer = memo<Record<string, any>>(
                           {value || ''}
                         </div>
                       ) : (
-                        <Input
-                          value={value || ''}
-                          onChange={({ detail }) => onChange(detail.value)}
-                          onFocus={handleFocus}
-                        />
+                        <Input value={value || ''} onChange={({ detail }) => onChange(detail.value)} onFocus={handleFocus} />
                       )}
                     </div>
                     {!isReadOnly && showComparison && baselineValue !== null && (
@@ -715,25 +709,31 @@ const FormFieldRenderer = memo<Record<string, any>>(
                 {showComparison && baselineValue !== null && (
                   <ExtBox onClick={handleClick} style={{ cursor: 'pointer' }}>
                     <SpaceBetween direction="horizontal" size="xxs" alignItems="center">
-                      <ExtBox fontSize="body-s" color="text-body-secondary">Expected (baseline):</ExtBox>
+                      <ExtBox fontSize="body-s" color="text-body-secondary">
+                        Expected (baseline):
+                      </ExtBox>
                       {isBaselineChanged && (
-                        <ExtBox fontSize="body-s" color="text-status-warning" fontWeight="bold">✏️</ExtBox>
+                        <ExtBox fontSize="body-s" color="text-status-warning" fontWeight="bold">
+                          ✏️
+                        </ExtBox>
                       )}
                     </SpaceBetween>
-                    <div style={{ 
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '4px',
-                      pointerEvents: isReadOnly ? 'none' : 'auto',
-                      borderLeft: isBaselineChanged ? '3px solid #ff9900' : '3px solid transparent',
-                      paddingLeft: '4px',
-                      backgroundColor: isBaselineChanged ? 'rgba(255, 153, 0, 0.08)' : 'transparent',
-                      borderRadius: '2px',
-                    }}>
+                    <div
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                        pointerEvents: isReadOnly ? 'none' : 'auto',
+                        borderLeft: isBaselineChanged ? '3px solid #ff9900' : '3px solid transparent',
+                        paddingLeft: '4px',
+                        backgroundColor: isBaselineChanged ? 'rgba(255, 153, 0, 0.08)' : 'transparent',
+                        borderRadius: '2px',
+                      }}
+                    >
                       <div style={{ flex: 1 }}>
                         {isReadOnly ? (
-                          <div 
-                            style={{ 
+                          <div
+                            style={{
                               backgroundColor: '#e9ebed',
                               border: '1px solid #d5dbdb',
                               borderRadius: '4px',
@@ -790,7 +790,7 @@ const FormFieldRenderer = memo<Record<string, any>>(
             }}
             role="button"
             tabIndex={0}
-            style={{ 
+            style={{
               cursor: geometry ? 'pointer' : 'default',
               backgroundColor: hasMismatch && !hasLocalEdit ? 'rgba(255, 153, 0, 0.05)' : 'transparent',
               padding: '4px',
@@ -845,25 +845,31 @@ const FormFieldRenderer = memo<Record<string, any>>(
               <SpaceBetween size="xxs">
                 <ExtBox onClick={handleClick} style={{ cursor: 'pointer' }}>
                   <SpaceBetween direction="horizontal" size="xxs" alignItems="center">
-                    <ExtBox fontSize="body-s" color="text-body-secondary">Predicted:</ExtBox>
+                    <ExtBox fontSize="body-s" color="text-body-secondary">
+                      Predicted:
+                    </ExtBox>
                     {isPredictionChanged && (
-                      <ExtBox fontSize="body-s" color="text-status-info" fontWeight="bold">✏️</ExtBox>
+                      <ExtBox fontSize="body-s" color="text-status-info" fontWeight="bold">
+                        ✏️
+                      </ExtBox>
                     )}
                   </SpaceBetween>
-                  <div style={{ 
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '4px',
-                    pointerEvents: isReadOnly ? 'none' : 'auto',
-                    borderLeft: isPredictionChanged ? '3px solid #0073bb' : '3px solid transparent',
-                    paddingLeft: '4px',
-                    backgroundColor: isPredictionChanged ? 'rgba(0, 115, 187, 0.08)' : 'transparent',
-                    borderRadius: '2px',
-                  }}>
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                      pointerEvents: isReadOnly ? 'none' : 'auto',
+                      borderLeft: isPredictionChanged ? '3px solid #0073bb' : '3px solid transparent',
+                      paddingLeft: '4px',
+                      backgroundColor: isPredictionChanged ? 'rgba(0, 115, 187, 0.08)' : 'transparent',
+                      borderRadius: '2px',
+                    }}
+                  >
                     <div style={{ flex: 1 }}>
                       {isReadOnly ? (
-                        <div 
-                          style={{ 
+                        <div
+                          style={{
                             backgroundColor: '#e9ebed',
                             border: '1px solid #d5dbdb',
                             borderRadius: '4px',
@@ -907,25 +913,31 @@ const FormFieldRenderer = memo<Record<string, any>>(
                 {showComparison && baselineValue !== null && (
                   <ExtBox onClick={handleClick} style={{ cursor: 'pointer' }}>
                     <SpaceBetween direction="horizontal" size="xxs" alignItems="center">
-                      <ExtBox fontSize="body-s" color="text-body-secondary">Expected (baseline):</ExtBox>
+                      <ExtBox fontSize="body-s" color="text-body-secondary">
+                        Expected (baseline):
+                      </ExtBox>
                       {isBaselineChanged && (
-                        <ExtBox fontSize="body-s" color="text-status-warning" fontWeight="bold">✏️</ExtBox>
+                        <ExtBox fontSize="body-s" color="text-status-warning" fontWeight="bold">
+                          ✏️
+                        </ExtBox>
                       )}
                     </SpaceBetween>
-                    <div style={{ 
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '4px',
-                      pointerEvents: isReadOnly ? 'none' : 'auto',
-                      borderLeft: isBaselineChanged ? '3px solid #ff9900' : '3px solid transparent',
-                      paddingLeft: '4px',
-                      backgroundColor: isBaselineChanged ? 'rgba(255, 153, 0, 0.08)' : 'transparent',
-                      borderRadius: '2px',
-                    }}>
+                    <div
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                        pointerEvents: isReadOnly ? 'none' : 'auto',
+                        borderLeft: isBaselineChanged ? '3px solid #ff9900' : '3px solid transparent',
+                        paddingLeft: '4px',
+                        backgroundColor: isBaselineChanged ? 'rgba(255, 153, 0, 0.08)' : 'transparent',
+                        borderRadius: '2px',
+                      }}
+                    >
                       <div style={{ flex: 1 }}>
                         {isReadOnly ? (
-                          <div 
-                            style={{ 
+                          <div
+                            style={{
                               backgroundColor: '#e9ebed',
                               border: '1px solid #d5dbdb',
                               borderRadius: '4px',
@@ -984,7 +996,7 @@ const FormFieldRenderer = memo<Record<string, any>>(
             }}
             role="button"
             tabIndex={0}
-            style={{ 
+            style={{
               cursor: geometry ? 'pointer' : 'default',
               backgroundColor: hasMismatch && !hasLocalEdit ? 'rgba(255, 153, 0, 0.05)' : 'transparent',
               padding: '4px',
@@ -1039,25 +1051,31 @@ const FormFieldRenderer = memo<Record<string, any>>(
               <SpaceBetween size="xxs">
                 <ExtBox onClick={handleClick} style={{ cursor: 'pointer' }}>
                   <SpaceBetween direction="horizontal" size="xxs" alignItems="center">
-                    <ExtBox fontSize="body-s" color="text-body-secondary">Predicted:</ExtBox>
+                    <ExtBox fontSize="body-s" color="text-body-secondary">
+                      Predicted:
+                    </ExtBox>
                     {isPredictionChanged && (
-                      <ExtBox fontSize="body-s" color="text-status-info" fontWeight="bold">✏️</ExtBox>
+                      <ExtBox fontSize="body-s" color="text-status-info" fontWeight="bold">
+                        ✏️
+                      </ExtBox>
                     )}
                   </SpaceBetween>
-                  <div style={{ 
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '4px',
-                    pointerEvents: isReadOnly ? 'none' : 'auto',
-                    borderLeft: isPredictionChanged ? '3px solid #0073bb' : '3px solid transparent',
-                    paddingLeft: '4px',
-                    backgroundColor: isPredictionChanged ? 'rgba(0, 115, 187, 0.08)' : 'transparent',
-                    borderRadius: '2px',
-                  }}>
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                      pointerEvents: isReadOnly ? 'none' : 'auto',
+                      borderLeft: isPredictionChanged ? '3px solid #0073bb' : '3px solid transparent',
+                      paddingLeft: '4px',
+                      backgroundColor: isPredictionChanged ? 'rgba(0, 115, 187, 0.08)' : 'transparent',
+                      borderRadius: '2px',
+                    }}
+                  >
                     <div style={{ flex: 1 }}>
                       {isReadOnly ? (
-                        <div 
-                          style={{ 
+                        <div
+                          style={{
                             backgroundColor: '#e9ebed',
                             border: '1px solid #d5dbdb',
                             borderRadius: '4px',
@@ -1072,11 +1090,7 @@ const FormFieldRenderer = memo<Record<string, any>>(
                           {String(value)}
                         </div>
                       ) : (
-                        <Checkbox
-                          checked={Boolean(value)}
-                          onChange={({ detail }) => onChange(detail.checked)}
-                          onFocus={handleFocus}
-                        >
+                        <Checkbox checked={Boolean(value)} onChange={({ detail }) => onChange(detail.checked)} onFocus={handleFocus}>
                           {String(value)}
                         </Checkbox>
                       )}
@@ -1099,25 +1113,31 @@ const FormFieldRenderer = memo<Record<string, any>>(
                 {showComparison && baselineValue !== null && (
                   <ExtBox onClick={handleClick} style={{ cursor: 'pointer' }}>
                     <SpaceBetween direction="horizontal" size="xxs" alignItems="center">
-                      <ExtBox fontSize="body-s" color="text-body-secondary">Expected (baseline):</ExtBox>
+                      <ExtBox fontSize="body-s" color="text-body-secondary">
+                        Expected (baseline):
+                      </ExtBox>
                       {isBaselineChanged && (
-                        <ExtBox fontSize="body-s" color="text-status-warning" fontWeight="bold">✏️</ExtBox>
+                        <ExtBox fontSize="body-s" color="text-status-warning" fontWeight="bold">
+                          ✏️
+                        </ExtBox>
                       )}
                     </SpaceBetween>
-                    <div style={{ 
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '4px',
-                      pointerEvents: isReadOnly ? 'none' : 'auto',
-                      borderLeft: isBaselineChanged ? '3px solid #ff9900' : '3px solid transparent',
-                      paddingLeft: '4px',
-                      backgroundColor: isBaselineChanged ? 'rgba(255, 153, 0, 0.08)' : 'transparent',
-                      borderRadius: '2px',
-                    }}>
+                    <div
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                        pointerEvents: isReadOnly ? 'none' : 'auto',
+                        borderLeft: isBaselineChanged ? '3px solid #ff9900' : '3px solid transparent',
+                        paddingLeft: '4px',
+                        backgroundColor: isBaselineChanged ? 'rgba(255, 153, 0, 0.08)' : 'transparent',
+                        borderRadius: '2px',
+                      }}
+                    >
                       <div style={{ flex: 1 }}>
                         {isReadOnly ? (
-                          <div 
-                            style={{ 
+                          <div
+                            style={{
                               backgroundColor: '#e9ebed',
                               border: '1px solid #d5dbdb',
                               borderRadius: '4px',
@@ -1167,8 +1187,8 @@ const FormFieldRenderer = memo<Record<string, any>>(
         if (value === null) {
           return (
             <FormField label={label}>
-              <div 
-                style={{ 
+              <div
+                style={{
                   backgroundColor: '#e9ebed',
                   border: '1px solid #d5dbdb',
                   borderRadius: '4px',
@@ -1190,9 +1210,7 @@ const FormFieldRenderer = memo<Record<string, any>>(
         // Look for group-level eval result (e.g., for bankInfo, personalInfo)
         let groupEvalResult = null;
         if (showComparison && evaluationResults?.section_results) {
-          let sectionResult = evaluationResults.section_results.find(
-            (sr) => String(sr.section_id) === String(sectionId)
-          );
+          let sectionResult = evaluationResults.section_results.find((sr) => String(sr.section_id) === String(sectionId));
           if (!sectionResult && evaluationResults.section_results.length === 1) {
             sectionResult = evaluationResults.section_results[0];
           }
@@ -1200,7 +1218,7 @@ const FormFieldRenderer = memo<Record<string, any>>(
             for (const attr of sectionResult.attributes) {
               if (attr.field_comparison_details) {
                 // Find detail that matches this object path (e.g., checks[0].bankInfo)
-                const detail = attr.field_comparison_details.find(d => {
+                const detail = attr.field_comparison_details.find((d) => {
                   const key = d.expected_key || '';
                   // Check if the detail's expected_key ends with our fieldKey
                   return key.endsWith(`.${fieldKey}`) || key === fieldKey;
@@ -1209,7 +1227,7 @@ const FormFieldRenderer = memo<Record<string, any>>(
                   groupEvalResult = {
                     matched: detail.match,
                     score: detail.score,
-                    reason: detail.reason
+                    reason: detail.reason,
                   };
                   break;
                 }
@@ -1219,17 +1237,20 @@ const FormFieldRenderer = memo<Record<string, any>>(
         }
 
         return (
-          <ExtBox padding="xs" style={{
-            backgroundColor: groupEvalResult && !groupEvalResult.matched ? 'rgba(255, 153, 0, 0.08)' : 'transparent',
-            borderRadius: '4px',
-          }}>
+          <ExtBox
+            padding="xs"
+            style={{
+              backgroundColor: groupEvalResult && !groupEvalResult.matched ? 'rgba(255, 153, 0, 0.08)' : 'transparent',
+              borderRadius: '4px',
+            }}
+          >
             <ExtBox fontSize="body-m" fontWeight="bold" padding="xxxs" onFocus={handleFocus}>
               <SpaceBetween direction="horizontal" size="xs">
                 {onToggleCollapse && (
-                  <span 
-                    onClick={() => onToggleCollapse(pathKey)} 
+                  <span
+                    onClick={() => onToggleCollapse(pathKey)}
                     onKeyDown={(e) => e.key === 'Enter' && onToggleCollapse(pathKey)}
-                    role="button" 
+                    role="button"
                     tabIndex={0}
                     style={{ cursor: 'pointer', userSelect: 'none' }}
                   >
@@ -1238,10 +1259,14 @@ const FormFieldRenderer = memo<Record<string, any>>(
                 )}
                 <span>{label}</span>
                 {groupEvalResult && !groupEvalResult.matched && (
-                  <ExtBox color="text-status-warning" fontSize="body-s">⚠</ExtBox>
+                  <ExtBox color="text-status-warning" fontSize="body-s">
+                    ⚠
+                  </ExtBox>
                 )}
                 {groupEvalResult && groupEvalResult.matched && showComparison && (
-                  <ExtBox color="text-status-success" fontSize="body-s">✓</ExtBox>
+                  <ExtBox color="text-status-success" fontSize="body-s">
+                    ✓
+                  </ExtBox>
                 )}
               </SpaceBetween>
               {showComparison && groupEvalResult && (
@@ -1255,91 +1280,94 @@ const FormFieldRenderer = memo<Record<string, any>>(
               <ExtBox padding={{ left: 'l' }}>
                 <SpaceBetween size="xs">
                   {Object.entries(value).map(([key, val]) => {
-                  // Get confidence and geometry for this field from explainability_info
-                  let fieldConfidence;
-                  let fieldGeometry;
+                    // Get confidence and geometry for this field from explainability_info
+                    let fieldConfidence;
+                    let fieldGeometry;
 
-                  // Try to get from explainability_info if available
-                  if (explainabilityInfo && Array.isArray(explainabilityInfo)) {
-                    // Handle nested structure like explainabilityInfo[0].NAME_DETAILS.LAST_NAME
-                    const currentPath = [...path, key];
-                    const [firstExplainabilityItem] = explainabilityInfo;
-                    // eslint-disable-next-line prefer-destructuring
-                    let fieldInfo = firstExplainabilityItem;
+                    // Try to get from explainability_info if available
+                    if (explainabilityInfo && Array.isArray(explainabilityInfo)) {
+                      // Handle nested structure like explainabilityInfo[0].NAME_DETAILS.LAST_NAME
+                      const currentPath = [...path, key];
+                      const [firstExplainabilityItem] = explainabilityInfo;
+                      // eslint-disable-next-line prefer-destructuring
+                      let fieldInfo = firstExplainabilityItem;
 
-                    // Navigate through the path to find the field info
-                    let pathFieldInfo = fieldInfo;
-                    currentPath.forEach((pathPart) => {
-                      if (pathFieldInfo && typeof pathFieldInfo === 'object' && pathFieldInfo[pathPart]) {
-                        pathFieldInfo = pathFieldInfo[pathPart];
-                      } else {
-                        pathFieldInfo = null;
-                      }
-                    });
-                    fieldInfo = pathFieldInfo;
+                      // Navigate through the path to find the field info
+                      let pathFieldInfo = fieldInfo;
+                      currentPath.forEach((pathPart) => {
+                        if (pathFieldInfo && typeof pathFieldInfo === 'object' && pathFieldInfo[pathPart]) {
+                          pathFieldInfo = pathFieldInfo[pathPart];
+                        } else {
+                          pathFieldInfo = null;
+                        }
+                      });
+                      fieldInfo = pathFieldInfo;
 
-                    if (fieldInfo) {
-                      fieldConfidence = fieldInfo.confidence;
+                      if (fieldInfo) {
+                        fieldConfidence = fieldInfo.confidence;
 
-                      // Extract geometry - handle both direct geometry and geometry arrays
-                      if (fieldInfo.geometry && Array.isArray(fieldInfo.geometry) && fieldInfo.geometry.length > 0) {
-                        const geomData = fieldInfo.geometry[0];
-                        if (geomData.boundingBox && geomData.page !== undefined) {
-                          fieldGeometry = {
-                            boundingBox: geomData.boundingBox,
-                            page: geomData.page,
-                            vertices: geomData.vertices,
-                          };
+                        // Extract geometry - handle both direct geometry and geometry arrays
+                        if (fieldInfo.geometry && Array.isArray(fieldInfo.geometry) && fieldInfo.geometry.length > 0) {
+                          const geomData = fieldInfo.geometry[0];
+                          if (geomData.boundingBox && geomData.page !== undefined) {
+                            fieldGeometry = {
+                              boundingBox: geomData.boundingBox,
+                              page: geomData.page,
+                              vertices: geomData.vertices,
+                            };
+                          }
                         }
                       }
                     }
-                  }
 
-                  // Get baseline value for this nested field
-                  const nestedBaselineValue = showComparison && baselineValue !== null && typeof baselineValue === 'object'
-                    ? baselineValue[key]
-                    : null;
+                    // Get baseline value for this nested field
+                    const nestedBaselineValue =
+                      showComparison && baselineValue !== null && typeof baselineValue === 'object' ? baselineValue[key] : null;
 
-                  return (
-                    <FormFieldRenderer
-                      key={`obj-${fieldKey}-${path.join('.')}-${key}`}
-                      fieldKey={key}
-                      value={val}
-                      onChange={(newVal) => {
-                        if (!isReadOnly) {
-                          const newObj = { ...value };
-                          newObj[key] = newVal;
-                          onChange(newObj);
+                    return (
+                      <FormFieldRenderer
+                        key={`obj-${fieldKey}-${path.join('.')}-${key}`}
+                        fieldKey={key}
+                        value={val}
+                        onChange={(newVal) => {
+                          if (!isReadOnly) {
+                            const newObj = { ...value };
+                            newObj[key] = newVal;
+                            onChange(newObj);
+                          }
+                        }}
+                        onBaselineChange={
+                          onBaselineChange
+                            ? (newVal) => {
+                                if (!isReadOnly && baselineValue) {
+                                  const newObj = { ...baselineValue };
+                                  newObj[key] = newVal;
+                                  onBaselineChange(newObj);
+                                }
+                              }
+                            : undefined
                         }
-                      }}
-                      onBaselineChange={onBaselineChange ? (newVal) => {
-                        if (!isReadOnly && baselineValue) {
-                          const newObj = { ...baselineValue };
-                          newObj[key] = newVal;
-                          onBaselineChange(newObj);
-                        }
-                      } : undefined}
-                      isReadOnly={isReadOnly}
-                      confidence={fieldConfidence}
-                      geometry={fieldGeometry}
-                      onFieldFocus={onFieldFocus}
-                      onFieldDoubleClick={onFieldDoubleClick}
-                      path={[...path, key]}
-                      explainabilityInfo={explainabilityInfo}
-                      mergedConfig={mergedConfig}
-                      baselineValue={nestedBaselineValue}
-                      showComparison={showComparison}
-                      evaluationResults={evaluationResults}
-                      sectionId={sectionId}
-                      collapsedPaths={collapsedPaths}
-                      onToggleCollapse={onToggleCollapse}
-                      filterMode={filterMode}
-                      displayPath={[...displayPath, fieldKey]}
-                      predictionChanges={predictionChanges}
-                      baselineChanges={baselineChanges}
-                    />
-                  );
-                })}
+                        isReadOnly={isReadOnly}
+                        confidence={fieldConfidence}
+                        geometry={fieldGeometry}
+                        onFieldFocus={onFieldFocus}
+                        onFieldDoubleClick={onFieldDoubleClick}
+                        path={[...path, key]}
+                        explainabilityInfo={explainabilityInfo}
+                        mergedConfig={mergedConfig}
+                        baselineValue={nestedBaselineValue}
+                        showComparison={showComparison}
+                        evaluationResults={evaluationResults}
+                        sectionId={sectionId}
+                        collapsedPaths={collapsedPaths}
+                        onToggleCollapse={onToggleCollapse}
+                        filterMode={filterMode}
+                        displayPath={[...displayPath, fieldKey]}
+                        predictionChanges={predictionChanges}
+                        baselineChanges={baselineChanges}
+                      />
+                    );
+                  })}
                 </SpaceBetween>
               </ExtBox>
             )}
@@ -1355,7 +1383,7 @@ const FormFieldRenderer = memo<Record<string, any>>(
             onKeyDown={(e) => e.key === 'Enter' && handleClick(e)}
             role="button"
             tabIndex={0}
-            style={{ 
+            style={{
               cursor: geometry ? 'pointer' : 'default',
               backgroundColor: hasMismatch && !hasLocalEdit ? 'rgba(255, 153, 0, 0.05)' : 'transparent',
               padding: '4px',
@@ -1410,25 +1438,31 @@ const FormFieldRenderer = memo<Record<string, any>>(
               <SpaceBetween size="xxs">
                 <ExtBox onClick={handleClick} style={{ cursor: 'pointer' }}>
                   <SpaceBetween direction="horizontal" size="xxs" alignItems="center">
-                    <ExtBox fontSize="body-s" color="text-body-secondary">Predicted:</ExtBox>
+                    <ExtBox fontSize="body-s" color="text-body-secondary">
+                      Predicted:
+                    </ExtBox>
                     {isPredictionChanged && (
-                      <ExtBox fontSize="body-s" color="text-status-info" fontWeight="bold">✏️</ExtBox>
+                      <ExtBox fontSize="body-s" color="text-status-info" fontWeight="bold">
+                        ✏️
+                      </ExtBox>
                     )}
                   </SpaceBetween>
-                  <div style={{ 
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '4px',
-                    pointerEvents: isReadOnly ? 'none' : 'auto',
-                    borderLeft: isPredictionChanged ? '3px solid #0073bb' : '3px solid transparent',
-                    paddingLeft: '4px',
-                    backgroundColor: isPredictionChanged ? 'rgba(0, 115, 187, 0.08)' : 'transparent',
-                    borderRadius: '2px',
-                  }}>
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                      pointerEvents: isReadOnly ? 'none' : 'auto',
+                      borderLeft: isPredictionChanged ? '3px solid #0073bb' : '3px solid transparent',
+                      paddingLeft: '4px',
+                      backgroundColor: isPredictionChanged ? 'rgba(0, 115, 187, 0.08)' : 'transparent',
+                      borderRadius: '2px',
+                    }}
+                  >
                     <div style={{ flex: 1 }}>
                       {isReadOnly ? (
-                        <div 
-                          style={{ 
+                        <div
+                          style={{
                             backgroundColor: '#e9ebed',
                             border: '1px solid #d5dbdb',
                             borderRadius: '4px',
@@ -1473,25 +1507,31 @@ const FormFieldRenderer = memo<Record<string, any>>(
                 {showComparison && (
                   <ExtBox onClick={handleClick} style={{ cursor: 'pointer' }}>
                     <SpaceBetween direction="horizontal" size="xxs" alignItems="center">
-                      <ExtBox fontSize="body-s" color="text-body-secondary">Expected (baseline):</ExtBox>
+                      <ExtBox fontSize="body-s" color="text-body-secondary">
+                        Expected (baseline):
+                      </ExtBox>
                       {isBaselineChanged && (
-                        <ExtBox fontSize="body-s" color="text-status-warning" fontWeight="bold">✏️</ExtBox>
+                        <ExtBox fontSize="body-s" color="text-status-warning" fontWeight="bold">
+                          ✏️
+                        </ExtBox>
                       )}
                     </SpaceBetween>
-                    <div style={{ 
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '4px',
-                      pointerEvents: isReadOnly ? 'none' : 'auto',
-                      borderLeft: isBaselineChanged ? '3px solid #ff9900' : '3px solid transparent',
-                      paddingLeft: '4px',
-                      backgroundColor: isBaselineChanged ? 'rgba(255, 153, 0, 0.08)' : 'transparent',
-                      borderRadius: '2px',
-                    }}>
+                    <div
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                        pointerEvents: isReadOnly ? 'none' : 'auto',
+                        borderLeft: isBaselineChanged ? '3px solid #ff9900' : '3px solid transparent',
+                        paddingLeft: '4px',
+                        backgroundColor: isBaselineChanged ? 'rgba(255, 153, 0, 0.08)' : 'transparent',
+                        borderRadius: '2px',
+                      }}
+                    >
                       <div style={{ flex: 1 }}>
                         {isReadOnly ? (
-                          <div 
-                            style={{ 
+                          <div
+                            style={{
                               backgroundColor: '#e9ebed',
                               border: '1px solid #d5dbdb',
                               borderRadius: '4px',
@@ -1515,7 +1555,7 @@ const FormFieldRenderer = memo<Record<string, any>>(
                                 onBaselineChange(detail.value === '' ? null : detail.value);
                               }
                             }}
-                            placeholder={baselineValue === null ? "null (enter value to change)" : undefined}
+                            placeholder={baselineValue === null ? 'null (enter value to change)' : undefined}
                           />
                         )}
                       </div>
@@ -1542,52 +1582,57 @@ const FormFieldRenderer = memo<Record<string, any>>(
         // Look for array-level eval result (e.g., for checks array)
         let arrayEvalResult = null;
         if (showComparison && evaluationResults?.section_results) {
-          let sectionResult = evaluationResults.section_results.find(
-            (sr) => String(sr.section_id) === String(sectionId)
-          );
+          let sectionResult = evaluationResults.section_results.find((sr) => String(sr.section_id) === String(sectionId));
           if (!sectionResult && evaluationResults.section_results.length === 1) {
             sectionResult = evaluationResults.section_results[0];
           }
           if (sectionResult?.attributes?.length > 0) {
             // Look for top-level attribute that matches our array name
-            const attr = sectionResult.attributes.find(a => 
-              a.name === fieldKey || a.name?.toLowerCase() === fieldKey?.toLowerCase()
-            );
+            const attr = sectionResult.attributes.find((a) => a.name === fieldKey || a.name?.toLowerCase() === fieldKey?.toLowerCase());
             if (attr) {
               arrayEvalResult = {
                 matched: attr.matched,
                 score: attr.score,
                 reason: attr.reason,
-                evaluationMethod: attr.evaluation_method
+                evaluationMethod: attr.evaluation_method,
               };
             }
           }
         }
 
         return (
-          <ExtBox padding="xs" style={{
-            backgroundColor: arrayEvalResult && !arrayEvalResult.matched ? 'rgba(255, 153, 0, 0.08)' : 'transparent',
-            borderRadius: '4px',
-          }}>
+          <ExtBox
+            padding="xs"
+            style={{
+              backgroundColor: arrayEvalResult && !arrayEvalResult.matched ? 'rgba(255, 153, 0, 0.08)' : 'transparent',
+              borderRadius: '4px',
+            }}
+          >
             <ExtBox fontSize="body-m" fontWeight="bold" padding="xxxs" onFocus={handleFocus}>
               <SpaceBetween direction="horizontal" size="xs">
                 {onToggleCollapse && (
-                  <span 
-                    onClick={() => onToggleCollapse(pathKey)} 
+                  <span
+                    onClick={() => onToggleCollapse(pathKey)}
                     onKeyDown={(e) => e.key === 'Enter' && onToggleCollapse(pathKey)}
-                    role="button" 
+                    role="button"
                     tabIndex={0}
                     style={{ cursor: 'pointer', userSelect: 'none' }}
                   >
                     {isCollapsed ? '▶' : '▼'}
                   </span>
                 )}
-                <span>{label} ({value.length} items)</span>
+                <span>
+                  {label} ({value.length} items)
+                </span>
                 {arrayEvalResult && !arrayEvalResult.matched && (
-                  <ExtBox color="text-status-warning" fontSize="body-s">⚠</ExtBox>
+                  <ExtBox color="text-status-warning" fontSize="body-s">
+                    ⚠
+                  </ExtBox>
                 )}
                 {arrayEvalResult && arrayEvalResult.matched && showComparison && (
-                  <ExtBox color="text-status-success" fontSize="body-s">✓</ExtBox>
+                  <ExtBox color="text-status-success" fontSize="body-s">
+                    ✓
+                  </ExtBox>
                 )}
               </SpaceBetween>
               {showComparison && arrayEvalResult && (
@@ -1606,95 +1651,98 @@ const FormFieldRenderer = memo<Record<string, any>>(
               <ExtBox padding={{ left: 'l' }}>
                 <SpaceBetween size="xs">
                   {value.map((item, index) => {
-                  // Create a stable unique key for each array item
-                  const itemKey = `arr-${fieldKey}-${path.join('.')}-${index}`;
+                    // Create a stable unique key for each array item
+                    const itemKey = `arr-${fieldKey}-${path.join('.')}-${index}`;
 
-                  // Extract confidence and geometry for array items
-                  let itemConfidence;
-                  let itemGeometry;
+                    // Extract confidence and geometry for array items
+                    let itemConfidence;
+                    let itemGeometry;
 
-                  // Try to get from explainability_info if available
-                  if (explainabilityInfo && Array.isArray(explainabilityInfo)) {
-                    const [firstExplainabilityItem] = explainabilityInfo;
+                    // Try to get from explainability_info if available
+                    if (explainabilityInfo && Array.isArray(explainabilityInfo)) {
+                      const [firstExplainabilityItem] = explainabilityInfo;
 
-                    // Handle nested structure - navigate to the array field first
-                    let arrayFieldInfo = firstExplainabilityItem;
-                    path.forEach((pathPart) => {
-                      if (arrayFieldInfo && typeof arrayFieldInfo === 'object' && arrayFieldInfo[pathPart]) {
-                        arrayFieldInfo = arrayFieldInfo[pathPart];
-                      } else {
-                        arrayFieldInfo = null;
-                      }
-                    });
+                      // Handle nested structure - navigate to the array field first
+                      let arrayFieldInfo = firstExplainabilityItem;
+                      path.forEach((pathPart) => {
+                        if (arrayFieldInfo && typeof arrayFieldInfo === 'object' && arrayFieldInfo[pathPart]) {
+                          arrayFieldInfo = arrayFieldInfo[pathPart];
+                        } else {
+                          arrayFieldInfo = null;
+                        }
+                      });
 
-                    // For arrays, the explainability info structure can be:
-                    // 1. An array where each element has confidence/geometry (e.g., ENDORSEMENTS, RESTRICTIONS)
-                    // 2. An object with nested structure
-                    if (arrayFieldInfo && Array.isArray(arrayFieldInfo) && arrayFieldInfo[index]) {
-                      const itemInfo = arrayFieldInfo[index];
-                      if (itemInfo) {
-                        itemConfidence = itemInfo.confidence;
+                      // For arrays, the explainability info structure can be:
+                      // 1. An array where each element has confidence/geometry (e.g., ENDORSEMENTS, RESTRICTIONS)
+                      // 2. An object with nested structure
+                      if (arrayFieldInfo && Array.isArray(arrayFieldInfo) && arrayFieldInfo[index]) {
+                        const itemInfo = arrayFieldInfo[index];
+                        if (itemInfo) {
+                          itemConfidence = itemInfo.confidence;
 
-                        // Extract geometry
-                        if (itemInfo.geometry && Array.isArray(itemInfo.geometry) && itemInfo.geometry.length > 0) {
-                          const geomData = itemInfo.geometry[0];
-                          if (geomData.boundingBox && geomData.page !== undefined) {
-                            itemGeometry = {
-                              boundingBox: geomData.boundingBox,
-                              page: geomData.page,
-                              vertices: geomData.vertices,
-                            };
+                          // Extract geometry
+                          if (itemInfo.geometry && Array.isArray(itemInfo.geometry) && itemInfo.geometry.length > 0) {
+                            const geomData = itemInfo.geometry[0];
+                            if (geomData.boundingBox && geomData.page !== undefined) {
+                              itemGeometry = {
+                                boundingBox: geomData.boundingBox,
+                                page: geomData.page,
+                                vertices: geomData.vertices,
+                              };
+                            }
                           }
                         }
                       }
                     }
-                  }
 
-                  // Get baseline value for this array item
-                  const arrayBaselineValue = showComparison && baselineValue !== null && Array.isArray(baselineValue)
-                    ? baselineValue[index]
-                    : null;
+                    // Get baseline value for this array item
+                    const arrayBaselineValue =
+                      showComparison && baselineValue !== null && Array.isArray(baselineValue) ? baselineValue[index] : null;
 
-                  return (
-                    <FormFieldRenderer
-                      key={itemKey}
-                      fieldKey={`[${index}]`}
-                      value={item}
-                      onChange={(newVal) => {
-                        if (!isReadOnly) {
-                          const newArray = [...value];
-                          newArray[index] = newVal;
-                          onChange(newArray);
+                    return (
+                      <FormFieldRenderer
+                        key={itemKey}
+                        fieldKey={`[${index}]`}
+                        value={item}
+                        onChange={(newVal) => {
+                          if (!isReadOnly) {
+                            const newArray = [...value];
+                            newArray[index] = newVal;
+                            onChange(newArray);
+                          }
+                        }}
+                        onBaselineChange={
+                          onBaselineChange
+                            ? (newVal) => {
+                                if (!isReadOnly && baselineValue && Array.isArray(baselineValue)) {
+                                  const newArray = [...baselineValue];
+                                  newArray[index] = newVal;
+                                  onBaselineChange(newArray);
+                                }
+                              }
+                            : undefined
                         }
-                      }}
-                      onBaselineChange={onBaselineChange ? (newVal) => {
-                        if (!isReadOnly && baselineValue && Array.isArray(baselineValue)) {
-                          const newArray = [...baselineValue];
-                          newArray[index] = newVal;
-                          onBaselineChange(newArray);
-                        }
-                      } : undefined}
-                      isReadOnly={isReadOnly}
-                      confidence={itemConfidence}
-                      geometry={itemGeometry}
-                      onFieldFocus={onFieldFocus}
-                      onFieldDoubleClick={onFieldDoubleClick}
-                      path={[...path, index]}
-                      explainabilityInfo={explainabilityInfo}
-                      mergedConfig={mergedConfig}
-                      baselineValue={arrayBaselineValue}
-                      showComparison={showComparison}
-                      evaluationResults={evaluationResults}
-                      sectionId={sectionId}
-                      collapsedPaths={collapsedPaths}
-                      onToggleCollapse={onToggleCollapse}
-                      filterMode={filterMode}
-                      displayPath={[...displayPath, fieldKey]}
-                      predictionChanges={predictionChanges}
-                      baselineChanges={baselineChanges}
-                    />
-                  );
-                })}
+                        isReadOnly={isReadOnly}
+                        confidence={itemConfidence}
+                        geometry={itemGeometry}
+                        onFieldFocus={onFieldFocus}
+                        onFieldDoubleClick={onFieldDoubleClick}
+                        path={[...path, index]}
+                        explainabilityInfo={explainabilityInfo}
+                        mergedConfig={mergedConfig}
+                        baselineValue={arrayBaselineValue}
+                        showComparison={showComparison}
+                        evaluationResults={evaluationResults}
+                        sectionId={sectionId}
+                        collapsedPaths={collapsedPaths}
+                        onToggleCollapse={onToggleCollapse}
+                        filterMode={filterMode}
+                        displayPath={[...displayPath, fieldKey]}
+                        predictionChanges={predictionChanges}
+                        baselineChanges={baselineChanges}
+                      />
+                    );
+                  })}
                 </SpaceBetween>
               </ExtBox>
             )}
@@ -1734,8 +1782,8 @@ const FormFieldRenderer = memo<Record<string, any>>(
               }
             >
               {isReadOnly ? (
-                <div 
-                  style={{ 
+                <div
+                  style={{
                     backgroundColor: '#e9ebed',
                     border: '1px solid #d5dbdb',
                     borderRadius: '4px',
@@ -1750,11 +1798,7 @@ const FormFieldRenderer = memo<Record<string, any>>(
                   {String(value)}
                 </div>
               ) : (
-                <Input
-                  value={String(value)}
-                  onChange={({ detail }) => onChange(detail.value)}
-                  onFocus={handleFocus}
-                />
+                <Input value={String(value)} onChange={({ detail }) => onChange(detail.value)} onFocus={handleFocus} />
               )}
             </FormField>
           </div>
@@ -1765,16 +1809,16 @@ const FormFieldRenderer = memo<Record<string, any>>(
 
 FormFieldRenderer.displayName = 'FormFieldRenderer';
 
-const VisualEditorModal = ({ 
-  visible, 
-  onDismiss, 
-  jsonData, 
-  onChange, 
-  isReadOnly, 
-  sectionData, 
+const VisualEditorModal = ({
+  visible,
+  onDismiss,
+  jsonData,
+  onChange,
+  isReadOnly,
+  sectionData,
   // Section navigation props
-  allSections = [], 
-  currentSectionIndex = 0, 
+  allSections = [],
+  currentSectionIndex = 0,
   onNavigateToSection,
 }) => {
   const { currentCredentials, user } = useAppContext();
@@ -1795,7 +1839,7 @@ const VisualEditorModal = ({
   const [collapsedPaths, setCollapsedPaths] = useState(new Set());
   // Filter mode state
   const [filterMode, setFilterMode] = useState('none'); // 'none', 'confidence-alerts', 'eval-mismatches'
-  
+
   // Change tracking state for saving edits
   const [predictionChanges, setPredictionChanges] = useState(new Map()); // Map<fieldPath, { original, current }>
   const [baselineChanges, setBaselineChanges] = useState(new Map()); // Map<fieldPath, { original, current }>
@@ -1808,16 +1852,16 @@ const VisualEditorModal = ({
   const [pendingDismiss, setPendingDismiss] = useState(false);
   // Tab navigation state
   const [activeTabId, setActiveTabId] = useState('visual');
-  
+
   // Drag-to-pan state
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
-  
+
   const imageRef = useRef(null);
-  
+
   // Toggle collapse handler
   const handleToggleCollapse = (pathKey) => {
-    setCollapsedPaths(prev => {
+    setCollapsedPaths((prev) => {
       const newSet = new Set(prev);
       if (newSet.has(pathKey)) {
         newSet.delete(pathKey);
@@ -1827,18 +1871,18 @@ const VisualEditorModal = ({
       return newSet;
     });
   };
-  
+
   // Expand all handler
   const handleExpandAll = () => {
     setCollapsedPaths(new Set());
   };
-  
+
   // Collapse all handler - recursively collapse ALL arrays and objects at every level
   const handleCollapseAll = () => {
     // Get inferenceResult from jsonData - same logic used later in component
     const result = localJsonData?.inference_result || localJsonData?.inferenceResult || localJsonData;
     const allPaths = new Set();
-    
+
     // Recursive function to add all collapsible paths
     const addCollapsiblePaths = (obj, currentPath) => {
       if (obj && typeof obj === 'object') {
@@ -1864,7 +1908,7 @@ const VisualEditorModal = ({
         }
       }
     };
-    
+
     if (result && typeof result === 'object') {
       Object.entries(result).forEach(([key, val]) => {
         if (Array.isArray(val) || (typeof val === 'object' && val !== null)) {
@@ -1872,17 +1916,15 @@ const VisualEditorModal = ({
         }
       });
     }
-    
+
     setCollapsedPaths(allPaths);
   };
   const imageContainerRef = useRef(null);
   const debounceTimerRef = useRef(null);
 
   // Check if baseline is available - check multiple possible paths
-  const evaluationStatus = sectionData?.documentItem?.evaluationStatus || 
-    sectionData?.documentItem?.EvaluationStatus;
-  const isBaselineAvailable = evaluationStatus === 'BASELINE_AVAILABLE' || 
-    evaluationStatus === 'COMPLETED';
+  const evaluationStatus = sectionData?.documentItem?.evaluationStatus || sectionData?.documentItem?.EvaluationStatus;
+  const isBaselineAvailable = evaluationStatus === 'BASELINE_AVAILABLE' || evaluationStatus === 'COMPLETED';
 
   // Construct baseline URI from output URI
   const constructBaselineUri = (outputUri) => {
@@ -1892,9 +1934,9 @@ const VisualEditorModal = ({
     }
     const outputBucketName = (settings as Record<string, unknown>)?.OutputBucket as string | undefined;
     const baselineBucketName = (settings as Record<string, unknown>)?.EvaluationBaselineBucket as string | undefined;
-    
+
     logger.debug('constructBaselineUri:', { outputUri, outputBucketName, baselineBucketName });
-    
+
     if (!outputBucketName || !baselineBucketName) {
       logger.warn('Bucket names not available in settings:', { outputBucketName, baselineBucketName });
       return null;
@@ -1920,26 +1962,27 @@ const VisualEditorModal = ({
 
   // Load baseline data and evaluation results when modal opens
   useEffect(() => {
-    logger.debug('Evaluation load effect:', { 
-      visible, 
-      isBaselineAvailable, 
+    logger.debug('Evaluation load effect:', {
+      visible,
+      isBaselineAvailable,
       evaluationStatus,
       hasBaselineData: !!baselineData,
       hasEvaluationResults: !!evaluationResults,
-      outputUri: sectionData?.OutputJSONUri 
+      outputUri: sectionData?.OutputJSONUri,
     });
-    
+
     if (!visible || !isBaselineAvailable) return;
     if (baselineData && evaluationResults) return; // Already loaded
-    
+
     const loadEvaluationData = async () => {
       const outputUri = sectionData?.OutputJSONUri;
       // inputKey can be objectKey or inputKey depending on context
       const inputKey = sectionData?.documentItem?.objectKey || sectionData?.documentItem?.inputKey || sectionData?.documentItem?.InputKey;
-      const outputBucket = sectionData?.documentItem?.outputBucket
-        || sectionData?.documentItem?.OutputBucket
-        || (settings as Record<string, unknown>)?.OutputBucket;
-      
+      const outputBucket =
+        sectionData?.documentItem?.outputBucket ||
+        sectionData?.documentItem?.OutputBucket ||
+        (settings as Record<string, unknown>)?.OutputBucket;
+
       setLoadingEvaluation(true);
       try {
         // Load baseline data
@@ -1960,7 +2003,7 @@ const VisualEditorModal = ({
             logger.warn('Failed to load baseline data:', error.message);
           }
         }
-        
+
         // Load evaluation results
         const evalResultsUri = constructEvaluationResultsUri(inputKey, outputBucket);
         if (evalResultsUri && !evaluationResults) {
@@ -1983,7 +2026,7 @@ const VisualEditorModal = ({
         setLoadingEvaluation(false);
       }
     };
-    
+
     loadEvaluationData();
   }, [visible, isBaselineAvailable, sectionData?.OutputJSONUri, sectionData?.documentItem?.inputKey, settings]);
 
@@ -1998,12 +2041,12 @@ const VisualEditorModal = ({
   }, [visible]);
 
   // Check if section needs review (either low confidence or HITL triggered)
-  const needsReview = sectionData?.confidenceAlertCount > 0 || 
-    (sectionData?.documentItem?.hitlTriggered && !sectionData?.documentItem?.hitlCompleted);
+  const needsReview =
+    sectionData?.confidenceAlertCount > 0 || (sectionData?.documentItem?.hitlTriggered && !sectionData?.documentItem?.hitlCompleted);
 
   // Check if this specific section is already completed
   const isSectionCompleted = sectionData?.isSectionCompleted || false;
-  
+
   // Check if user is reviewer only (not admin)
   const isReviewerOnly = sectionData?.isReviewerOnly || false;
 
@@ -2021,7 +2064,7 @@ const VisualEditorModal = ({
       }
     }
   }, [jsonData]);
-  
+
   // Initialize localBaselineData when baselineData loads
   useEffect(() => {
     if (baselineData && !localBaselineData) {
@@ -2029,16 +2072,16 @@ const VisualEditorModal = ({
       setOriginalBaselineData(JSON.parse(JSON.stringify(baselineData)));
     }
   }, [baselineData]);
-  
+
   // Calculate change counts for display
   const predictionChangeCount = predictionChanges.size;
   const baselineChangeCount = baselineChanges.size;
   const hasUnsavedChanges = predictionChangeCount > 0 || baselineChangeCount > 0;
-  
+
   // Track a field change
   const trackPredictionChange = (fieldPath, originalValue, newValue) => {
     logger.info('📝 TRACK PREDICTION CHANGE:', { fieldPath, originalValue, newValue });
-    setPredictionChanges(prev => {
+    setPredictionChanges((prev) => {
       const newMap = new Map(prev);
       if (JSON.stringify(originalValue) === JSON.stringify(newValue)) {
         // Value reverted to original, remove from changes
@@ -2051,9 +2094,9 @@ const VisualEditorModal = ({
       return newMap;
     });
   };
-  
+
   const trackBaselineChange = (fieldPath, originalValue, newValue) => {
-    setBaselineChanges(prev => {
+    setBaselineChanges((prev) => {
       const newMap = new Map(prev);
       if (JSON.stringify(originalValue) === JSON.stringify(newValue)) {
         newMap.delete(fieldPath);
@@ -2063,7 +2106,7 @@ const VisualEditorModal = ({
       return newMap;
     });
   };
-  
+
   // Discard all changes
   const handleDiscardAllChanges = () => {
     if (originalPredictionData) {
@@ -2075,21 +2118,21 @@ const VisualEditorModal = ({
     setPredictionChanges(new Map());
     setBaselineChanges(new Map());
   };
-  
+
   // Save changes to S3
   const handleSaveChanges = async () => {
     setIsSaving(true);
     setSaveError(null);
-    
+
     try {
       // Extract the actual file path from OutputJSONUri to ensure we save to the exact same location
       const outputUri = sectionData?.OutputJSONUri;
       logger.info('💾 handleSaveChanges - outputUri:', outputUri);
-      
+
       if (!outputUri) {
         throw new Error('Cannot determine output URI for saving');
       }
-      
+
       // Parse the S3 URI to get bucket and key
       const outputUriMatch = outputUri.match(/^s3:\/\/([^/]+)\/(.+)$/);
       if (!outputUriMatch) {
@@ -2097,13 +2140,13 @@ const VisualEditorModal = ({
       }
       const [, outputBucketFromUri, outputFileKey] = outputUriMatch;
       logger.info('💾 Parsed output URI:', { bucket: outputBucketFromUri, key: outputFileKey });
-      
+
       const results = { predictions: null, baseline: null };
-      
+
       // Build combined edit entry for both files
-      const username = (user as Record<string, unknown>)?.username as string || 'unknown';
+      const username = ((user as Record<string, unknown>)?.username as string) || 'unknown';
       const timestamp = new Date().toISOString();
-      
+
       // Build prediction diffs
       const predictionDiffs = {};
       predictionChanges.forEach((change, fieldPath) => {
@@ -2112,7 +2155,7 @@ const VisualEditorModal = ({
           newValue: change.current,
         };
       });
-      
+
       // Build baseline diffs
       const baselineDiffs = {};
       baselineChanges.forEach((change, fieldPath) => {
@@ -2121,7 +2164,7 @@ const VisualEditorModal = ({
           newValue: change.current,
         };
       });
-      
+
       // Combined edit entry that will be saved to both files
       const editEntry = {
         timestamp,
@@ -2137,24 +2180,24 @@ const VisualEditorModal = ({
           diffs: baselineDiffs,
         },
       };
-      
+
       // Save predictions if changed
       if (predictionChangeCount > 0) {
         logger.info('💾 Saving prediction changes...', { count: predictionChangeCount });
-        
+
         // Add edit history metadata with combined changes
         const dataToSave = { ...localJsonData };
         const editHistory = dataToSave._editHistory || [];
         editHistory.push(editEntry);
         dataToSave._editHistory = editHistory;
-        
+
         // Use the exact same path from the original output URI
         logger.info('💾 Prediction file path:', outputFileKey);
-        
+
         // Extract prefix (directory) and filename for uploadDocument
         const predictionPrefix = outputFileKey.substring(0, outputFileKey.lastIndexOf('/'));
         const predictionFilename = outputFileKey.split('/').pop();
-        
+
         const predictionUploadResponse = await client.graphql({
           query: uploadDocument as unknown as string,
           variables: {
@@ -2164,34 +2207,34 @@ const VisualEditorModal = ({
             bucket: outputBucketFromUri,
           },
         });
-        
+
         const predUploadData = (predictionUploadResponse as UploadDocResponse).data.uploadDocument;
         const predictionPresignedUrl = predUploadData.presignedUrl;
         const predictionUsePost = predUploadData.usePostMethod;
-        
+
         // Upload the JSON data
         const predictionContent = JSON.stringify(dataToSave, null, 2);
-        
+
         if (predictionUsePost) {
           // POST method using presigned POST data (contains url + fields)
           const presignedPostData = JSON.parse(predictionPresignedUrl);
           const formData = new FormData();
-          
+
           // Add all required fields from presigned POST data
           Object.entries(presignedPostData.fields).forEach(([key, fieldValue]) => {
             formData.append(key, fieldValue as string);
           });
-          
+
           // Append the file content as last field (required for S3 presigned POST)
           const blob = new Blob([predictionContent], { type: 'application/json' });
           formData.append('file', blob, predictionFilename as string);
-          
+
           logger.info('📤 Uploading predictions via presigned POST to:', presignedPostData.url);
-          const uploadResponse = await fetch(presignedPostData.url, { 
-            method: 'POST', 
-            body: formData 
+          const uploadResponse = await fetch(presignedPostData.url, {
+            method: 'POST',
+            body: formData,
           });
-          
+
           if (!uploadResponse.ok) {
             const errorText = await uploadResponse.text().catch(() => 'Could not read error response');
             throw new Error(`Prediction upload failed: ${errorText}`);
@@ -2204,35 +2247,35 @@ const VisualEditorModal = ({
             body: predictionContent,
           });
         }
-        
+
         results.predictions = { success: true, changedFields: [...predictionChanges.keys()] };
         logger.info('✅ Predictions saved successfully');
       }
-      
+
       // Save baseline if changed
       if (baselineChangeCount > 0 && localBaselineData) {
         logger.info('💾 Saving baseline changes...', { count: baselineChangeCount });
-        
+
         // Add edit history metadata with combined changes (same as predictions)
         const baselineToSave = { ...localBaselineData };
         const baselineEditHistory = baselineToSave._editHistory || [];
         baselineEditHistory.push(editEntry);
         baselineToSave._editHistory = baselineEditHistory;
-        
+
         // Get presigned URL for baseline (EvaluationBaselineBucket)
         // Baseline uses the same path as predictions, just in a different bucket
         const baselineBucket = (settings as Record<string, unknown>)?.EvaluationBaselineBucket as string | undefined;
         if (!baselineBucket) {
           throw new Error('EvaluationBaselineBucket not configured in settings');
         }
-        
+
         // Use the same file path as predictions (outputFileKey) since baseline mirrors the structure
         logger.info('💾 Baseline file path:', outputFileKey);
-        
-        // Extract prefix (directory) and filename for uploadDocument  
+
+        // Extract prefix (directory) and filename for uploadDocument
         const baselinePrefix = outputFileKey.substring(0, outputFileKey.lastIndexOf('/'));
         const baselineFilename = outputFileKey.split('/').pop();
-        
+
         const baselineUploadResponse = await client.graphql({
           query: uploadDocument as unknown as string,
           variables: {
@@ -2242,34 +2285,34 @@ const VisualEditorModal = ({
             bucket: baselineBucket,
           },
         });
-        
+
         const baseUploadData = (baselineUploadResponse as UploadDocResponse).data.uploadDocument;
         const baselinePresignedUrl = baseUploadData.presignedUrl;
         const baselineUsePost = baseUploadData.usePostMethod;
-        
+
         // Upload the JSON data
         const baselineContent = JSON.stringify(baselineToSave, null, 2);
-        
+
         if (baselineUsePost) {
           // POST method using presigned POST data (contains url + fields)
           const presignedPostData = JSON.parse(baselinePresignedUrl);
           const formData = new FormData();
-          
+
           // Add all required fields from presigned POST data
           Object.entries(presignedPostData.fields).forEach(([key, fieldValue]) => {
             formData.append(key, fieldValue as string);
           });
-          
+
           // Append the file content as last field (required for S3 presigned POST)
           const blob = new Blob([baselineContent], { type: 'application/json' });
           formData.append('file', blob, baselineFilename as string);
-          
+
           logger.info('📤 Uploading baseline via presigned POST to:', presignedPostData.url);
-          const uploadResponse = await fetch(presignedPostData.url, { 
-            method: 'POST', 
-            body: formData 
+          const uploadResponse = await fetch(presignedPostData.url, {
+            method: 'POST',
+            body: formData,
           });
-          
+
           if (!uploadResponse.ok) {
             const errorText = await uploadResponse.text().catch(() => 'Could not read error response');
             throw new Error(`Baseline upload failed: ${errorText}`);
@@ -2282,11 +2325,11 @@ const VisualEditorModal = ({
             body: baselineContent,
           });
         }
-        
+
         results.baseline = { success: true, changedFields: [...baselineChanges.keys()] };
         logger.info('✅ Baseline saved successfully');
       }
-      
+
       // Success! Reset change tracking and update originals
       setOriginalPredictionData(JSON.parse(JSON.stringify(localJsonData)));
       if (localBaselineData) {
@@ -2294,14 +2337,13 @@ const VisualEditorModal = ({
       }
       setPredictionChanges(new Map());
       setBaselineChanges(new Map());
-      
+
       // Show success message
       const savedItems = [];
       if (results.predictions) savedItems.push(`${results.predictions.changedFields.length} prediction field(s)`);
       if (results.baseline) savedItems.push(`${results.baseline.changedFields.length} baseline field(s)`);
-      
+
       alert(`✅ Successfully saved:\n${savedItems.join('\n')}`);
-      
     } catch (error) {
       logger.error('❌ Error saving changes:', error);
       setSaveError(error.message || 'Failed to save changes');
@@ -2466,7 +2508,7 @@ const VisualEditorModal = ({
   const handleMouseDown = (e) => {
     // Only pan when zoomed in
     if (zoomLevel <= 1) return;
-    
+
     // Prevent default to avoid text selection
     e.preventDefault();
     setIsDragging(true);
@@ -2476,7 +2518,7 @@ const VisualEditorModal = ({
   // Handle drag-to-pan - mouse move updates pan offset
   const handleMouseMove = (e) => {
     if (!isDragging) return;
-    
+
     e.preventDefault();
     const newX = e.clientX - dragStart.x;
     const newY = e.clientY - dragStart.y;
@@ -2630,7 +2672,7 @@ const VisualEditorModal = ({
           justifyContent: 'center',
           alignItems: 'center',
           overflow: 'hidden',
-          cursor: isDragging ? 'grabbing' : (zoomLevel > 1 ? 'grab' : 'default'),
+          cursor: isDragging ? 'grabbing' : zoomLevel > 1 ? 'grab' : 'default',
           backgroundColor: '#f5f5f5', // Light background to show container bounds
           userSelect: 'none', // Prevent text selection during drag
           outline: 'none', // Remove focus outline for cleaner look
@@ -2696,33 +2738,33 @@ const VisualEditorModal = ({
     handleDiscardAllChanges();
     onDismiss();
   };
-  
+
   const handleReturnToEditor = () => {
     setShowUnsavedChangesModal(false);
     setPendingDismiss(false);
   };
 
   return (
-      <Modal
-        onDismiss={() => {
-          if (hasUnsavedChanges) {
-            const confirmDiscard = window.confirm(
-              `You have unsaved changes:\n` +
+    <Modal
+      onDismiss={() => {
+        if (hasUnsavedChanges) {
+          const confirmDiscard = window.confirm(
+            `You have unsaved changes:\n` +
               `• ${predictionChangeCount} prediction edit(s)\n` +
               `• ${baselineChangeCount} baseline edit(s)\n\n` +
-              `Discard changes and close?`
-            );
-            if (confirmDiscard) {
-              handleDiscardAllChanges();
-              onDismiss();
-            }
-          } else {
+              `Discard changes and close?`,
+          );
+          if (confirmDiscard) {
+            handleDiscardAllChanges();
             onDismiss();
           }
-        }}
-        visible={visible}
-        header="Visual Document Editor"
-        size="max"
+        } else {
+          onDismiss();
+        }
+      }}
+      visible={visible}
+      header="Visual Document Editor"
+      size="max"
       footer={
         <ExtBox>
           <SpaceBetween direction="horizontal" size="xs" alignItems="center">
@@ -2737,7 +2779,7 @@ const VisualEditorModal = ({
                 </ExtBox>
               </SpaceBetween>
             </ExtBox>
-            
+
             {/* Change indicator */}
             {!isReadOnly && hasUnsavedChanges && (
               <ExtBox color="text-status-warning">
@@ -2751,34 +2793,26 @@ const VisualEditorModal = ({
                 </SpaceBetween>
               </ExtBox>
             )}
-            
+
             {/* Spacer */}
             <ExtBox style={{ flex: 1 }} />
-            
+
             {/* Right side - buttons */}
             <SpaceBetween direction="horizontal" size="xs">
               {/* Discard button - only when there are changes */}
               {!isReadOnly && hasUnsavedChanges && (
-                <Button
-                  variant="link"
-                  onClick={handleDiscardAllChanges}
-                >
+                <Button variant="link" onClick={handleDiscardAllChanges}>
                   Discard All Changes
                 </Button>
               )}
-              
+
               {/* Save button - only when there are unsaved changes */}
               {!isReadOnly && hasUnsavedChanges && (
-                <Button
-                  variant="primary"
-                  onClick={handleSaveChanges}
-                  loading={isSaving}
-                  disabled={isSaving}
-                >
+                <Button variant="primary" onClick={handleSaveChanges} loading={isSaving} disabled={isSaving}>
                   {isSaving ? 'Saving...' : 'Save All Changes'}
                 </Button>
               )}
-              
+
               {/* Section Navigation buttons */}
               {allSections.length > 1 && onNavigateToSection && (
                 <>
@@ -2813,7 +2847,7 @@ const VisualEditorModal = ({
                   </Button>
                 </>
               )}
-              
+
               {/* Close button */}
               <Button
                 variant={hasUnsavedChanges ? 'normal' : 'primary'}
@@ -2821,9 +2855,9 @@ const VisualEditorModal = ({
                   if (hasUnsavedChanges) {
                     const confirmDiscard = window.confirm(
                       `You have unsaved changes:\n` +
-                      `• ${predictionChangeCount} prediction edit(s)\n` +
-                      `• ${baselineChangeCount} baseline edit(s)\n\n` +
-                      `Discard changes and close?`
+                        `• ${predictionChangeCount} prediction edit(s)\n` +
+                        `• ${baselineChangeCount} baseline edit(s)\n\n` +
+                        `Discard changes and close?`,
                     );
                     if (confirmDiscard) {
                       handleDiscardAllChanges();
@@ -2862,506 +2896,508 @@ const VisualEditorModal = ({
                 }}
               >
                 {/* Left side - Page images carousel - Fixed height, non-scrollable */}
-        <div
-          style={{
-            width: '50%',
-            minWidth: '50%',
-            maxWidth: '50%',
-            height: '100%',
-            display: 'flex',
-            flexDirection: 'column',
-            flex: '0 0 50%',
-            overflow: 'hidden',
-          }}
-        >
-          <Container header={<Header variant="h3">Document Pages ({pageIds.length})</Header>}>
-            <div style={{ height: '550px', display: 'flex', flexDirection: 'column' }}>
-            {(() => {
-              if (loadingImages) {
-                return (
-                  <ExtBox padding="xl" textAlign="center">
-                    <Spinner />
-                    <div>Loading page images...</div>
-                  </ExtBox>
-                );
-              }
-              if (carouselItems.length > 0) {
-                return (
-                  <SpaceBetween size="xs">
-                    {/* Image display area */}
-                    <ExtBox style={{ position: 'relative', overflow: 'hidden', height: '450px', minHeight: '300px' }}>
-                      {/* Display current page */}
-                      {carouselItems.find((item) => item.id === currentPage)?.content}
+                <div
+                  style={{
+                    width: '50%',
+                    minWidth: '50%',
+                    maxWidth: '50%',
+                    height: '100%',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    flex: '0 0 50%',
+                    overflow: 'hidden',
+                  }}
+                >
+                  <Container header={<Header variant="h3">Document Pages ({pageIds.length})</Header>}>
+                    <div style={{ height: '550px', display: 'flex', flexDirection: 'column' }}>
+                      {(() => {
+                        if (loadingImages) {
+                          return (
+                            <ExtBox padding="xl" textAlign="center">
+                              <Spinner />
+                              <div>Loading page images...</div>
+                            </ExtBox>
+                          );
+                        }
+                        if (carouselItems.length > 0) {
+                          return (
+                            <SpaceBetween size="xs">
+                              {/* Image display area */}
+                              <ExtBox style={{ position: 'relative', overflow: 'hidden', height: '450px', minHeight: '300px' }}>
+                                {/* Display current page */}
+                                {carouselItems.find((item) => item.id === currentPage)?.content}
 
-                      {/* Simple navigation arrows */}
-                      <ExtBox
-                        style={{
-                          display: 'flex',
-                          justifyContent: 'space-between',
-                          position: 'absolute',
-                          width: '100%',
-                          top: '50%',
-                          transform: 'translateY(-50%)',
-                          pointerEvents: 'none',
-                        }}
-                      >
-                        <Button
-                          iconName="angle-left"
-                          variant="icon"
-                          onClick={() => {
-                            const currentIndex = pageIds.indexOf(currentPage);
-                            if (currentIndex > 0) {
-                              setCurrentPage(pageIds[currentIndex - 1]);
-                              setActiveFieldGeometry(null);
-                            }
-                          }}
-                          disabled={pageIds.indexOf(currentPage) === 0}
-                        />
-                        <Button
-                          iconName="angle-right"
-                          variant="icon"
-                          onClick={() => {
-                            const currentIndex = pageIds.indexOf(currentPage);
-                            if (currentIndex < pageIds.length - 1) {
-                              setCurrentPage(pageIds[currentIndex + 1]);
-                              setActiveFieldGeometry(null);
-                            }
-                          }}
-                          disabled={pageIds.indexOf(currentPage) === pageIds.length - 1}
-                        />
-                      </ExtBox>
-                    </ExtBox>
-                    
-                    {/* Controls area - outside of image area in normal flow */}
-                    <ExtBox
-                      style={{
-                        display: 'flex',
-                        flexDirection: 'column',
-                        alignItems: 'center',
-                        gap: '8px',
-                        padding: '8px 0',
-                      }}
-                    >
-                      {/* Page indicator */}
-                      <ExtBox
-                        style={{
-                          backgroundColor: 'rgba(240, 240, 240, 0.9)',
-                          padding: '4px 12px',
-                          borderRadius: '4px',
-                        }}
-                      >
-                        Page {pageIds.indexOf(currentPage) + 1} of {pageIds.length}
-                      </ExtBox>
+                                {/* Simple navigation arrows */}
+                                <ExtBox
+                                  style={{
+                                    display: 'flex',
+                                    justifyContent: 'space-between',
+                                    position: 'absolute',
+                                    width: '100%',
+                                    top: '50%',
+                                    transform: 'translateY(-50%)',
+                                    pointerEvents: 'none',
+                                  }}
+                                >
+                                  <Button
+                                    iconName="angle-left"
+                                    variant="icon"
+                                    onClick={() => {
+                                      const currentIndex = pageIds.indexOf(currentPage);
+                                      if (currentIndex > 0) {
+                                        setCurrentPage(pageIds[currentIndex - 1]);
+                                        setActiveFieldGeometry(null);
+                                      }
+                                    }}
+                                    disabled={pageIds.indexOf(currentPage) === 0}
+                                  />
+                                  <Button
+                                    iconName="angle-right"
+                                    variant="icon"
+                                    onClick={() => {
+                                      const currentIndex = pageIds.indexOf(currentPage);
+                                      if (currentIndex < pageIds.length - 1) {
+                                        setCurrentPage(pageIds[currentIndex + 1]);
+                                        setActiveFieldGeometry(null);
+                                      }
+                                    }}
+                                    disabled={pageIds.indexOf(currentPage) === pageIds.length - 1}
+                                  />
+                                </ExtBox>
+                              </ExtBox>
 
-                      {/* Zoom and Pan Controls */}
-                      <ExtBox
-                        style={{
-                          backgroundColor: 'rgba(240, 240, 240, 0.9)',
-                          padding: '6px 12px',
-                          borderRadius: '4px',
-                          boxShadow: '0 1px 4px rgba(0, 0, 0, 0.1)',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '8px',
-                          fontSize: '12px',
-                        }}
-                      >
-                        <span style={{ fontWeight: 'bold' }}>Zoom:</span>
-                        <span
-                          onClick={handleZoomOut}
-                          onKeyDown={(e) => e.key === 'Enter' && handleZoomOut()}
-                          role="button"
-                          tabIndex={0}
-                          style={{
-                            cursor: zoomLevel <= 0.25 ? 'not-allowed' : 'pointer',
-                            opacity: zoomLevel <= 0.25 ? 0.5 : 1,
-                            fontSize: '14px',
-                            fontWeight: 'bold',
-                            userSelect: 'none',
-                            padding: '2px 4px',
-                          }}
-                          title="Zoom Out"
-                        >
-                          −
-                        </span>
-                        <span style={{ fontSize: '12px', minWidth: '30px', textAlign: 'center' }}>
-                          {Math.round(zoomLevel * 100)}%
-                        </span>
-                        <span
-                          onClick={handleZoomIn}
-                          onKeyDown={(e) => e.key === 'Enter' && handleZoomIn()}
-                          role="button"
-                          tabIndex={0}
-                          style={{
-                            cursor: zoomLevel >= 4 ? 'not-allowed' : 'pointer',
-                            opacity: zoomLevel >= 4 ? 0.5 : 1,
-                            fontSize: '14px',
-                            fontWeight: 'bold',
-                            userSelect: 'none',
-                            padding: '2px 4px',
-                          }}
-                          title="Zoom In"
-                        >
-                          +
-                        </span>
-                        <span style={{ fontWeight: 'bold', marginLeft: '8px' }}>Pan:</span>
-                        <span
-                          onClick={handlePanLeft}
-                          onKeyDown={(e) => e.key === 'Enter' && handlePanLeft()}
-                          role="button"
-                          tabIndex={0}
-                          style={{
-                            cursor: zoomLevel <= 1 ? 'not-allowed' : 'pointer',
-                            opacity: zoomLevel <= 1 ? 0.5 : 1,
-                            fontSize: '14px',
-                            userSelect: 'none',
-                            padding: '2px 4px',
-                          }}
-                          title="Pan Left"
-                        >
-                          ←
-                        </span>
-                        <span
-                          onClick={handlePanRight}
-                          onKeyDown={(e) => e.key === 'Enter' && handlePanRight()}
-                          role="button"
-                          tabIndex={0}
-                          style={{
-                            cursor: zoomLevel <= 1 ? 'not-allowed' : 'pointer',
-                            opacity: zoomLevel <= 1 ? 0.5 : 1,
-                            fontSize: '14px',
-                            userSelect: 'none',
-                            padding: '2px 4px',
-                          }}
-                          title="Pan Right"
-                        >
-                          →
-                        </span>
-                        <span
-                          onClick={handlePanUp}
-                          onKeyDown={(e) => e.key === 'Enter' && handlePanUp()}
-                          role="button"
-                          tabIndex={0}
-                          style={{
-                            cursor: zoomLevel <= 1 ? 'not-allowed' : 'pointer',
-                            opacity: zoomLevel <= 1 ? 0.5 : 1,
-                            fontSize: '14px',
-                            userSelect: 'none',
-                            padding: '2px 4px',
-                          }}
-                          title="Pan Up"
-                        >
-                          ↑
-                        </span>
-                        <span
-                          onClick={handlePanDown}
-                          onKeyDown={(e) => e.key === 'Enter' && handlePanDown()}
-                          role="button"
-                          tabIndex={0}
-                          style={{
-                            cursor: zoomLevel <= 1 ? 'not-allowed' : 'pointer',
-                            opacity: zoomLevel <= 1 ? 0.5 : 1,
-                            fontSize: '14px',
-                            userSelect: 'none',
-                            padding: '2px 4px',
-                          }}
-                          title="Pan Down"
-                        >
-                          ↓
-                        </span>
-                        <span
-                          onClick={handleResetView}
-                          onKeyDown={(e) => e.key === 'Enter' && handleResetView()}
-                          role="button"
-                          tabIndex={0}
-                          style={{
-                            cursor: 'pointer',
-                            fontSize: '12px',
-                            userSelect: 'none',
-                            padding: '2px 4px',
-                            marginLeft: '4px',
-                          }}
-                          title="Reset View"
-                        >
-                          ⟲
-                        </span>
-                      </ExtBox>
-                    </ExtBox>
-                  </SpaceBetween>
-                );
-              }
-              return (
-                <ExtBox padding="xl" textAlign="center">
-                  No page images available
-                </ExtBox>
-              );
-            })()}
-            </div>
-          </Container>
-        </div>
+                              {/* Controls area - outside of image area in normal flow */}
+                              <ExtBox
+                                style={{
+                                  display: 'flex',
+                                  flexDirection: 'column',
+                                  alignItems: 'center',
+                                  gap: '8px',
+                                  padding: '8px 0',
+                                }}
+                              >
+                                {/* Page indicator */}
+                                <ExtBox
+                                  style={{
+                                    backgroundColor: 'rgba(240, 240, 240, 0.9)',
+                                    padding: '4px 12px',
+                                    borderRadius: '4px',
+                                  }}
+                                >
+                                  Page {pageIds.indexOf(currentPage) + 1} of {pageIds.length}
+                                </ExtBox>
 
-        {/* Right side - Form fields - Independently scrollable */}
-        <div
-          style={{
-            width: '50%',
-            minWidth: '50%',
-            maxWidth: '50%',
-            height: '100%',
-            display: 'flex',
-            flexDirection: 'column',
-            flex: '0 0 50%',
-            overflow: 'hidden',
-          }}
-        >
-          <Container
-            header={
-              <Header
-                variant="h3"
-                actions={
-                  <SpaceBetween direction="horizontal" size="xs" alignItems="center">
-                    {/* Expand/Collapse controls */}
-                    <Button variant="normal" onClick={handleExpandAll}>+ Expand All</Button>
-                    <Button variant="normal" onClick={handleCollapseAll}>− Collapse All</Button>
-                    {/* Filter dropdown */}
-                    <select
-                      value={filterMode}
-                      onChange={(e) => setFilterMode(e.target.value)}
-                      style={{ 
-                        padding: '4px 8px', 
-                        borderRadius: '4px', 
-                        border: '1px solid #ccc',
-                      }}
-                    >
-                      <option value="none">Show All</option>
-                      <option value="confidence-alerts">Confidence Alerts Only</option>
-                      <option value="eval-mismatches" disabled={!showEvaluation}>Eval Mismatches Only</option>
-                    </select>
-                    {/* Evaluation toggle */}
-                    {(isBaselineAvailable || loadingEvaluation) && (
-                      <>
-                        {loadingEvaluation && <Spinner size="normal" />}
-                        <Toggle
-                          checked={showEvaluation}
-                          onChange={({ detail }) => {
-                            setShowEvaluation(detail.checked);
-                            // Reset filter when turning off evaluation
-                            if (!detail.checked) {
-                              setFilterMode('none');
-                            }
-                          }}
-                          disabled={loadingEvaluation || !baselineData}
-                        >
-                          Show Evaluation
-                        </Toggle>
-                      </>
-                    )}
-                  </SpaceBetween>
-                }
-              >
-                Document Data
-              </Header>
-            }
-          >
-            <div
-              style={{
-                flex: 1,
-                overflowY: 'auto',
-                overflowX: 'hidden',
-                padding: '16px',
-                boxSizing: 'border-box',
-                maxHeight: '550px',
-                minHeight: '350px',
-              }}
-            >
-              <ExtBox style={{ minHeight: 'fit-content' }}>
-                {showEvaluation && baselineData && (
-                  <Alert type="info" header="Evaluation Comparison Mode">
-                    Showing predicted values with evaluation baseline. Fields with
-                    mismatches are highlighted with evaluation scores and reasons.
-                  </Alert>
-                )}
-                {inferenceResult ? (
-                  <FormFieldRenderer
-                    fieldKey="Document Data"
-                    value={inferenceResult}
-                    baselineValue={
-                      showEvaluation
-                        ? (localBaselineData?.inference_result ||
-                            localBaselineData?.inferenceResult ||
-                            localBaselineData)
-                        : null
+                                {/* Zoom and Pan Controls */}
+                                <ExtBox
+                                  style={{
+                                    backgroundColor: 'rgba(240, 240, 240, 0.9)',
+                                    padding: '6px 12px',
+                                    borderRadius: '4px',
+                                    boxShadow: '0 1px 4px rgba(0, 0, 0, 0.1)',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '8px',
+                                    fontSize: '12px',
+                                  }}
+                                >
+                                  <span style={{ fontWeight: 'bold' }}>Zoom:</span>
+                                  <span
+                                    onClick={handleZoomOut}
+                                    onKeyDown={(e) => e.key === 'Enter' && handleZoomOut()}
+                                    role="button"
+                                    tabIndex={0}
+                                    style={{
+                                      cursor: zoomLevel <= 0.25 ? 'not-allowed' : 'pointer',
+                                      opacity: zoomLevel <= 0.25 ? 0.5 : 1,
+                                      fontSize: '14px',
+                                      fontWeight: 'bold',
+                                      userSelect: 'none',
+                                      padding: '2px 4px',
+                                    }}
+                                    title="Zoom Out"
+                                  >
+                                    −
+                                  </span>
+                                  <span style={{ fontSize: '12px', minWidth: '30px', textAlign: 'center' }}>
+                                    {Math.round(zoomLevel * 100)}%
+                                  </span>
+                                  <span
+                                    onClick={handleZoomIn}
+                                    onKeyDown={(e) => e.key === 'Enter' && handleZoomIn()}
+                                    role="button"
+                                    tabIndex={0}
+                                    style={{
+                                      cursor: zoomLevel >= 4 ? 'not-allowed' : 'pointer',
+                                      opacity: zoomLevel >= 4 ? 0.5 : 1,
+                                      fontSize: '14px',
+                                      fontWeight: 'bold',
+                                      userSelect: 'none',
+                                      padding: '2px 4px',
+                                    }}
+                                    title="Zoom In"
+                                  >
+                                    +
+                                  </span>
+                                  <span style={{ fontWeight: 'bold', marginLeft: '8px' }}>Pan:</span>
+                                  <span
+                                    onClick={handlePanLeft}
+                                    onKeyDown={(e) => e.key === 'Enter' && handlePanLeft()}
+                                    role="button"
+                                    tabIndex={0}
+                                    style={{
+                                      cursor: zoomLevel <= 1 ? 'not-allowed' : 'pointer',
+                                      opacity: zoomLevel <= 1 ? 0.5 : 1,
+                                      fontSize: '14px',
+                                      userSelect: 'none',
+                                      padding: '2px 4px',
+                                    }}
+                                    title="Pan Left"
+                                  >
+                                    ←
+                                  </span>
+                                  <span
+                                    onClick={handlePanRight}
+                                    onKeyDown={(e) => e.key === 'Enter' && handlePanRight()}
+                                    role="button"
+                                    tabIndex={0}
+                                    style={{
+                                      cursor: zoomLevel <= 1 ? 'not-allowed' : 'pointer',
+                                      opacity: zoomLevel <= 1 ? 0.5 : 1,
+                                      fontSize: '14px',
+                                      userSelect: 'none',
+                                      padding: '2px 4px',
+                                    }}
+                                    title="Pan Right"
+                                  >
+                                    →
+                                  </span>
+                                  <span
+                                    onClick={handlePanUp}
+                                    onKeyDown={(e) => e.key === 'Enter' && handlePanUp()}
+                                    role="button"
+                                    tabIndex={0}
+                                    style={{
+                                      cursor: zoomLevel <= 1 ? 'not-allowed' : 'pointer',
+                                      opacity: zoomLevel <= 1 ? 0.5 : 1,
+                                      fontSize: '14px',
+                                      userSelect: 'none',
+                                      padding: '2px 4px',
+                                    }}
+                                    title="Pan Up"
+                                  >
+                                    ↑
+                                  </span>
+                                  <span
+                                    onClick={handlePanDown}
+                                    onKeyDown={(e) => e.key === 'Enter' && handlePanDown()}
+                                    role="button"
+                                    tabIndex={0}
+                                    style={{
+                                      cursor: zoomLevel <= 1 ? 'not-allowed' : 'pointer',
+                                      opacity: zoomLevel <= 1 ? 0.5 : 1,
+                                      fontSize: '14px',
+                                      userSelect: 'none',
+                                      padding: '2px 4px',
+                                    }}
+                                    title="Pan Down"
+                                  >
+                                    ↓
+                                  </span>
+                                  <span
+                                    onClick={handleResetView}
+                                    onKeyDown={(e) => e.key === 'Enter' && handleResetView()}
+                                    role="button"
+                                    tabIndex={0}
+                                    style={{
+                                      cursor: 'pointer',
+                                      fontSize: '12px',
+                                      userSelect: 'none',
+                                      padding: '2px 4px',
+                                      marginLeft: '4px',
+                                    }}
+                                    title="Reset View"
+                                  >
+                                    ⟲
+                                  </span>
+                                </ExtBox>
+                              </ExtBox>
+                            </SpaceBetween>
+                          );
+                        }
+                        return (
+                          <ExtBox padding="xl" textAlign="center">
+                            No page images available
+                          </ExtBox>
+                        );
+                      })()}
+                    </div>
+                  </Container>
+                </div>
+
+                {/* Right side - Form fields - Independently scrollable */}
+                <div
+                  style={{
+                    width: '50%',
+                    minWidth: '50%',
+                    maxWidth: '50%',
+                    height: '100%',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    flex: '0 0 50%',
+                    overflow: 'hidden',
+                  }}
+                >
+                  <Container
+                    header={
+                      <Header
+                        variant="h3"
+                        actions={
+                          <SpaceBetween direction="horizontal" size="xs" alignItems="center">
+                            {/* Expand/Collapse controls */}
+                            <Button variant="normal" onClick={handleExpandAll}>
+                              + Expand All
+                            </Button>
+                            <Button variant="normal" onClick={handleCollapseAll}>
+                              − Collapse All
+                            </Button>
+                            {/* Filter dropdown */}
+                            <select
+                              value={filterMode}
+                              onChange={(e) => setFilterMode(e.target.value)}
+                              style={{
+                                padding: '4px 8px',
+                                borderRadius: '4px',
+                                border: '1px solid #ccc',
+                              }}
+                            >
+                              <option value="none">Show All</option>
+                              <option value="confidence-alerts">Confidence Alerts Only</option>
+                              <option value="eval-mismatches" disabled={!showEvaluation}>
+                                Eval Mismatches Only
+                              </option>
+                            </select>
+                            {/* Evaluation toggle */}
+                            {(isBaselineAvailable || loadingEvaluation) && (
+                              <>
+                                {loadingEvaluation && <Spinner {...({ size: 'small' } as Record<string, unknown>)} />}
+                                <Toggle
+                                  checked={showEvaluation}
+                                  onChange={({ detail }) => {
+                                    setShowEvaluation(detail.checked);
+                                    // Reset filter when turning off evaluation
+                                    if (!detail.checked) {
+                                      setFilterMode('none');
+                                    }
+                                  }}
+                                  disabled={loadingEvaluation || !baselineData}
+                                >
+                                  Show Evaluation
+                                </Toggle>
+                              </>
+                            )}
+                          </SpaceBetween>
+                        }
+                      >
+                        Document Data
+                      </Header>
                     }
-                    showComparison={showEvaluation}
-                    evaluationResults={showEvaluation ? evaluationResults : null}
-                    sectionId={sectionData?.Id || sectionData?.SectionId}
-                    onBaselineChange={(newBaselineValue) => {
-                      if (!isReadOnly && localBaselineData) {
-                        const updatedBaseline = { ...localBaselineData };
-                        if (updatedBaseline.inference_result) {
-                          updatedBaseline.inference_result = newBaselineValue;
-                        } else if (updatedBaseline.inferenceResult) {
-                          updatedBaseline.inferenceResult = newBaselineValue;
-                        } else {
-                          Object.keys(updatedBaseline).forEach((key) => {
-                            delete updatedBaseline[key];
-                          });
-                          Object.keys(newBaselineValue).forEach((key) => {
-                            updatedBaseline[key] = newBaselineValue[key];
-                          });
-                        }
-                        setLocalBaselineData(updatedBaseline);
-                        
-                        // Track baseline changes at field level
-                        if (originalBaselineData) {
-                          const originalBaselineResult =
-                            originalBaselineData.inference_result ||
-                            originalBaselineData.inferenceResult ||
-                            originalBaselineData;
-                          // Find what changed by comparing (excluding array indices from path)
-                          const findBaselineChanges = (original, current, pathParts = []) => {
-                            if (typeof current !== 'object' || current === null) {
-                              const pathStr = pathParts.join('.') || 'root';
-                              if (JSON.stringify(original) !== JSON.stringify(current)) {
-                                trackBaselineChange(pathStr, original, current);
-                              } else {
-                                // Value reverted to original
-                                setBaselineChanges(prev => {
-                                  const newMap = new Map(prev);
-                                  newMap.delete(pathStr);
-                                  return newMap;
-                                });
-                              }
-                              return;
+                  >
+                    <div
+                      style={{
+                        flex: 1,
+                        overflowY: 'auto',
+                        overflowX: 'hidden',
+                        padding: '16px',
+                        boxSizing: 'border-box',
+                        maxHeight: '550px',
+                        minHeight: '350px',
+                      }}
+                    >
+                      <ExtBox style={{ minHeight: 'fit-content' }}>
+                        {showEvaluation && baselineData && (
+                          <Alert type="info" header="Evaluation Comparison Mode">
+                            Showing predicted values with evaluation baseline. Fields with mismatches are highlighted with evaluation scores
+                            and reasons.
+                          </Alert>
+                        )}
+                        {inferenceResult ? (
+                          <FormFieldRenderer
+                            fieldKey="Document Data"
+                            value={inferenceResult}
+                            baselineValue={
+                              showEvaluation
+                                ? localBaselineData?.inference_result || localBaselineData?.inferenceResult || localBaselineData
+                                : null
                             }
-                            if (Array.isArray(current)) {
-                              current.forEach((item, idx) => {
-                                const origItem = original && Array.isArray(original) ? original[idx] : undefined;
-                                // Don't add index to path - just recurse into item
-                                findBaselineChanges(origItem, item, pathParts);
-                              });
-                            } else {
-                              Object.keys(current).forEach(key => {
-                                const origVal = original ? original[key] : undefined;
-                                findBaselineChanges(origVal, current[key], [...pathParts, key]);
-                              });
-                            }
-                          };
-                          findBaselineChanges(originalBaselineResult, newBaselineValue);
-                        }
-                      }
-                    }}
-                    onChange={(newValue) => {
-                      if (!isReadOnly) {
-                        // Update local state immediately for responsive UI
-                        const updatedData = { ...localJsonData };
-                        if (updatedData.inference_result) {
-                          updatedData.inference_result = newValue;
-                        } else if (updatedData.inferenceResult) {
-                          updatedData.inferenceResult = newValue;
-                        } else {
-                          // If there's no inference_result field, update the entire object
-                          Object.keys(updatedData).forEach((key) => {
-                            delete updatedData[key];
-                          });
-                          Object.keys(newValue).forEach((key) => {
-                            updatedData[key] = newValue[key];
-                          });
-                        }
-
-                        // Update local state immediately for responsive UI
-                        setLocalJsonData(updatedData);
-                        logger.debug('💨 LOCAL UPDATE - Updated local state immediately');
-                        
-                        // Track prediction changes by comparing with original
-                        logger.info('🔄 onChange called - checking if we have original data:', {
-                          hasOriginalPredictionData: !!originalPredictionData,
-                          isReadOnly,
-                        });
-                        if (originalPredictionData) {
-                          const originalInferenceResult =
-                            originalPredictionData.inference_result ||
-                            originalPredictionData.inferenceResult ||
-                            originalPredictionData;
-                          logger.info('🔄 Comparing values:', {
-                            newValueType: typeof newValue,
-                            originalType: typeof originalInferenceResult,
-                            areDifferent: JSON.stringify(newValue) !== JSON.stringify(originalInferenceResult)
-                          });
-                          // Simple comparison - if different, mark as changed
-                          if (JSON.stringify(newValue) !== JSON.stringify(originalInferenceResult)) {
-                            // Find what changed by comparing
-                            // Note: paths exclude array indices to match FormFieldRenderer's path calculation
-                            const findChanges = (original, current, pathParts = []) => {
-                              if (typeof current !== 'object' || current === null) {
-                                const pathStr = pathParts.join('.') || 'root';
-                                if (JSON.stringify(original) !== JSON.stringify(current)) {
-                                  trackPredictionChange(pathStr, original, current);
+                            showComparison={showEvaluation}
+                            evaluationResults={showEvaluation ? evaluationResults : null}
+                            sectionId={sectionData?.Id || sectionData?.SectionId}
+                            onBaselineChange={(newBaselineValue) => {
+                              if (!isReadOnly && localBaselineData) {
+                                const updatedBaseline = { ...localBaselineData };
+                                if (updatedBaseline.inference_result) {
+                                  updatedBaseline.inference_result = newBaselineValue;
+                                } else if (updatedBaseline.inferenceResult) {
+                                  updatedBaseline.inferenceResult = newBaselineValue;
+                                } else {
+                                  Object.keys(updatedBaseline).forEach((key) => {
+                                    delete updatedBaseline[key];
+                                  });
+                                  Object.keys(newBaselineValue).forEach((key) => {
+                                    updatedBaseline[key] = newBaselineValue[key];
+                                  });
                                 }
-                                return;
+                                setLocalBaselineData(updatedBaseline);
+
+                                // Track baseline changes at field level
+                                if (originalBaselineData) {
+                                  const originalBaselineResult =
+                                    originalBaselineData.inference_result || originalBaselineData.inferenceResult || originalBaselineData;
+                                  // Find what changed by comparing (excluding array indices from path)
+                                  const findBaselineChanges = (original, current, pathParts = []) => {
+                                    if (typeof current !== 'object' || current === null) {
+                                      const pathStr = pathParts.join('.') || 'root';
+                                      if (JSON.stringify(original) !== JSON.stringify(current)) {
+                                        trackBaselineChange(pathStr, original, current);
+                                      } else {
+                                        // Value reverted to original
+                                        setBaselineChanges((prev) => {
+                                          const newMap = new Map(prev);
+                                          newMap.delete(pathStr);
+                                          return newMap;
+                                        });
+                                      }
+                                      return;
+                                    }
+                                    if (Array.isArray(current)) {
+                                      current.forEach((item, idx) => {
+                                        const origItem = original && Array.isArray(original) ? original[idx] : undefined;
+                                        // Don't add index to path - just recurse into item
+                                        findBaselineChanges(origItem, item, pathParts);
+                                      });
+                                    } else {
+                                      Object.keys(current).forEach((key) => {
+                                        const origVal = original ? original[key] : undefined;
+                                        findBaselineChanges(origVal, current[key], [...pathParts, key]);
+                                      });
+                                    }
+                                  };
+                                  findBaselineChanges(originalBaselineResult, newBaselineValue);
+                                }
                               }
-                              if (Array.isArray(current)) {
-                                current.forEach((item, idx) => {
-                                  const origItem = original && Array.isArray(original) ? original[idx] : undefined;
-                                  // Don't add index to path - just recurse into item
-                                  findChanges(origItem, item, pathParts);
+                            }}
+                            onChange={(newValue) => {
+                              if (!isReadOnly) {
+                                // Update local state immediately for responsive UI
+                                const updatedData = { ...localJsonData };
+                                if (updatedData.inference_result) {
+                                  updatedData.inference_result = newValue;
+                                } else if (updatedData.inferenceResult) {
+                                  updatedData.inferenceResult = newValue;
+                                } else {
+                                  // If there's no inference_result field, update the entire object
+                                  Object.keys(updatedData).forEach((key) => {
+                                    delete updatedData[key];
+                                  });
+                                  Object.keys(newValue).forEach((key) => {
+                                    updatedData[key] = newValue[key];
+                                  });
+                                }
+
+                                // Update local state immediately for responsive UI
+                                setLocalJsonData(updatedData);
+                                logger.debug('💨 LOCAL UPDATE - Updated local state immediately');
+
+                                // Track prediction changes by comparing with original
+                                logger.info('🔄 onChange called - checking if we have original data:', {
+                                  hasOriginalPredictionData: !!originalPredictionData,
+                                  isReadOnly,
                                 });
-                              } else {
-                                Object.keys(current).forEach(key => {
-                                  const origVal = original ? original[key] : undefined;
-                                  findChanges(origVal, current[key], [...pathParts, key]);
-                                });
+                                if (originalPredictionData) {
+                                  const originalInferenceResult =
+                                    originalPredictionData.inference_result ||
+                                    originalPredictionData.inferenceResult ||
+                                    originalPredictionData;
+                                  logger.info('🔄 Comparing values:', {
+                                    newValueType: typeof newValue,
+                                    originalType: typeof originalInferenceResult,
+                                    areDifferent: JSON.stringify(newValue) !== JSON.stringify(originalInferenceResult),
+                                  });
+                                  // Simple comparison - if different, mark as changed
+                                  if (JSON.stringify(newValue) !== JSON.stringify(originalInferenceResult)) {
+                                    // Find what changed by comparing
+                                    // Note: paths exclude array indices to match FormFieldRenderer's path calculation
+                                    const findChanges = (original, current, pathParts = []) => {
+                                      if (typeof current !== 'object' || current === null) {
+                                        const pathStr = pathParts.join('.') || 'root';
+                                        if (JSON.stringify(original) !== JSON.stringify(current)) {
+                                          trackPredictionChange(pathStr, original, current);
+                                        }
+                                        return;
+                                      }
+                                      if (Array.isArray(current)) {
+                                        current.forEach((item, idx) => {
+                                          const origItem = original && Array.isArray(original) ? original[idx] : undefined;
+                                          // Don't add index to path - just recurse into item
+                                          findChanges(origItem, item, pathParts);
+                                        });
+                                      } else {
+                                        Object.keys(current).forEach((key) => {
+                                          const origVal = original ? original[key] : undefined;
+                                          findChanges(origVal, current[key], [...pathParts, key]);
+                                        });
+                                      }
+                                    };
+                                    findChanges(originalInferenceResult, newValue);
+                                  } else {
+                                    // No changes - clear tracking
+                                    setPredictionChanges(new Map());
+                                  }
+                                }
+
+                                // Debounce expensive parent call
+                                if (onChange) {
+                                  const jsonStart = performance.now();
+                                  logger.debug('🔄 DEBOUNCED - JSON stringify starting...');
+
+                                  try {
+                                    const jsonString = JSON.stringify(updatedData, null, 2);
+                                    const jsonEnd = performance.now();
+                                    logger.debug('✅ DEBOUNCED - JSON stringify completed:', {
+                                      duration: `${(jsonEnd - jsonStart).toFixed(2)}ms`,
+                                      jsonLength: jsonString.length,
+                                    });
+
+                                    // Call debounced parent onChange
+                                    debouncedParentOnChange(jsonString);
+                                  } catch (error) {
+                                    logger.error('Error stringifying JSON:', error);
+                                  }
+                                }
                               }
-                            };
-                            findChanges(originalInferenceResult, newValue);
-                          } else {
-                            // No changes - clear tracking
-                            setPredictionChanges(new Map());
-                          }
-                        }
-
-                        // Debounce expensive parent call
-                        if (onChange) {
-                          const jsonStart = performance.now();
-                          logger.debug('🔄 DEBOUNCED - JSON stringify starting...');
-
-                          try {
-                            const jsonString = JSON.stringify(updatedData, null, 2);
-                            const jsonEnd = performance.now();
-                            logger.debug('✅ DEBOUNCED - JSON stringify completed:', {
-                              duration: `${(jsonEnd - jsonStart).toFixed(2)}ms`,
-                              jsonLength: jsonString.length,
-                            });
-
-                            // Call debounced parent onChange
-                            debouncedParentOnChange(jsonString);
-                          } catch (error) {
-                            logger.error('Error stringifying JSON:', error);
-                          }
-                        }
-                      }
-                    }}
-                    isReadOnly={isReadOnly}
-                    onFieldFocus={handleFieldFocus}
-                    onFieldDoubleClick={handleFieldDoubleClick}
-                    path={[]}
-                    explainabilityInfo={jsonData?.explainability_info}
-                    mergedConfig={sectionData?.mergedConfig}
-                    collapsedPaths={collapsedPaths}
-                    onToggleCollapse={handleToggleCollapse}
-                    filterMode={filterMode}
-                    displayPath={[]}
-                    predictionChanges={predictionChanges}
-                    baselineChanges={baselineChanges}
-                  />
-                ) : (
-                  <ExtBox padding="xl" textAlign="center">
-                    No data available
-                  </ExtBox>
-                )}
-              </ExtBox>
-            </div>
-          </Container>
-        </div>
+                            }}
+                            isReadOnly={isReadOnly}
+                            onFieldFocus={handleFieldFocus}
+                            onFieldDoubleClick={handleFieldDoubleClick}
+                            path={[]}
+                            explainabilityInfo={jsonData?.explainability_info}
+                            mergedConfig={sectionData?.mergedConfig}
+                            collapsedPaths={collapsedPaths}
+                            onToggleCollapse={handleToggleCollapse}
+                            filterMode={filterMode}
+                            displayPath={[]}
+                            predictionChanges={predictionChanges}
+                            baselineChanges={baselineChanges}
+                          />
+                        ) : (
+                          <ExtBox padding="xl" textAlign="center">
+                            No data available
+                          </ExtBox>
+                        )}
+                      </ExtBox>
+                    </div>
+                  </Container>
+                </div>
               </div>
             ),
           },
@@ -3397,13 +3433,11 @@ const VisualEditorModal = ({
                       });
                     }
                     setLocalJsonData(updatedData);
-                    
+
                     // Track changes
                     if (originalPredictionData) {
                       const originalInferenceResult =
-                        originalPredictionData.inference_result ||
-                        originalPredictionData.inferenceResult ||
-                        originalPredictionData;
+                        originalPredictionData.inference_result || originalPredictionData.inferenceResult || originalPredictionData;
                       if (JSON.stringify(newPredictionValue) !== JSON.stringify(originalInferenceResult)) {
                         trackPredictionChange('json-edit', originalInferenceResult, newPredictionValue);
                       }
@@ -3428,13 +3462,11 @@ const VisualEditorModal = ({
                       });
                     }
                     setLocalBaselineData(updatedBaseline);
-                    
+
                     // Track changes
                     if (originalBaselineData) {
                       const originalBaselineResult =
-                        originalBaselineData.inference_result ||
-                        originalBaselineData.inferenceResult ||
-                        originalBaselineData;
+                        originalBaselineData.inference_result || originalBaselineData.inferenceResult || originalBaselineData;
                       if (JSON.stringify(newBaselineValue) !== JSON.stringify(originalBaselineResult)) {
                         trackBaselineChange('json-edit', originalBaselineResult, newBaselineValue);
                       }
@@ -3447,12 +3479,7 @@ const VisualEditorModal = ({
           {
             id: 'history',
             label: 'Revision History',
-            content: (
-              <EditHistoryTab
-                predictionData={localJsonData}
-                baselineData={localBaselineData}
-              />
-            ),
+            content: <EditHistoryTab predictionData={localJsonData} baselineData={localBaselineData} />,
           },
         ]}
       />

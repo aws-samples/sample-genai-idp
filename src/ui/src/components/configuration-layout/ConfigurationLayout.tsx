@@ -1647,6 +1647,7 @@ const ConfigurationLayout = (): React.JSX.Element => {
   };
 
   // Handler for Import button click - show source selection modal
+  // NOTE: Original JS referenced out-of-scope variables; fixed during TS migration
   const handleImportClick = () => {
     setShowImportSourceModal(true);
   };
@@ -1762,7 +1763,7 @@ const ConfigurationLayout = (): React.JSX.Element => {
           <SpaceBetween size="s">
             <div>{error}</div>
             <Box>
-              <Button onClick={() => fetchConfiguration()} variant="primary">
+              <Button {...({ onClick: fetchConfiguration } as Record<string, unknown>)} variant="primary">
                 Retry
               </Button>
             </Box>
@@ -1779,7 +1780,7 @@ const ConfigurationLayout = (): React.JSX.Element => {
           <SpaceBetween size="s">
             <div>Unable to load configuration schema or values.</div>
             <Box>
-              <Button onClick={() => fetchConfiguration()} variant="primary">
+              <Button {...({ onClick: fetchConfiguration } as Record<string, unknown>)} variant="primary">
                 Retry
               </Button>
             </Box>
@@ -2161,10 +2162,10 @@ const ConfigurationLayout = (): React.JSX.Element => {
         <Form>
           {refreshing && (
             <Alert type="info" header="Syncing configuration...">
-              <div style={{ display: 'flex', alignItems: 'center' }}>
+              <Box {...({ display: 'flex', alignItems: 'center' } as Record<string, unknown>)}>
                 <Spinner size="normal" />
                 <Box margin={{ left: 's' }}>Refreshing data from server</Box>
-              </div>
+              </Box>
             </Alert>
           )}
 

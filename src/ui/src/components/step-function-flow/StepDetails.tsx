@@ -186,7 +186,7 @@ const StepDetails = ({ step, formatDuration, getStepIcon, mergedConfig = null }:
         {step.error && (
           <ExpandableSection
             headerText="Step Error"
-            variant="default"
+            {...({ variant: 'error' } as Record<string, unknown>)}
             expanded={errorExpanded}
             onChange={({ detail }) => setErrorExpanded(detail.expanded)}
             headerActions={

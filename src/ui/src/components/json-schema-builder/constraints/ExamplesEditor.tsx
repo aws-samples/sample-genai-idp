@@ -85,7 +85,7 @@ const ExamplesEditor = ({ examples = [], onChange }: ExamplesEditorProps): React
       <Box>
         <SpaceBetween size="xs">
           <Header
-            variant="h3"
+            {...({ variant: 'h4' } as Record<string, unknown>)}
             description="Add few-shot examples to improve classification and extraction accuracy"
             actions={
               <Button iconName="add-plus" onClick={handleAddExample}>

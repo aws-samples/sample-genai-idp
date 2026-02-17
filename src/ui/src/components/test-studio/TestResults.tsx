@@ -64,7 +64,12 @@ const ComprehensiveBreakdown = ({
     <SpaceBetween direction="vertical" size="l">
       {/* Combined Accuracy and Split Classification Metrics */}
       {(accuracyBreakdown || splitClassificationMetrics) && (
-        <Container header={<Header variant="h3">Average Accuracy and Split Metrics</Header>}>
+        <Container
+          header={<Header variant="h3">Average Accuracy and Split Metrics</Header>}
+          {...({
+            preferences: <TestResultsPreferences preferences={preferences} setPreferences={setPreferences} />,
+          } as Record<string, unknown>)}
+        >
           <SpaceBetween direction="vertical" size="m">
             {/* Main metrics */}
             <Table
@@ -394,7 +399,7 @@ const TestResults = ({ testRunId, setSelectedTestRunId }: TestResultsProps): Rea
   const [showDocumentsModal, setShowDocumentsModal] = useState(false);
   const [selectedRangeData, setSelectedRangeData] = useState<SelectedRange | null>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const [lowestScoreCount, setLowestScoreCount] = useState<any>({ label: '5', value: '5' });
+  const [lowestScoreCount, setLowestScoreCount] = useState<any>({ label: '5', value: 5 });
 
   // Config export modal state
   const [showConfigExportModal, setShowConfigExportModal] = useState(false);

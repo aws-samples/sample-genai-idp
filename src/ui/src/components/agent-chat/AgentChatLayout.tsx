@@ -144,8 +144,9 @@ const AgentChatLayout = ({
     updateAgentChatState({ inputValue: event.detail.value });
   };
 
-  const handleKeyDown = (event: { detail: { key: string; shiftKey: boolean }; preventDefault: () => void }) => {
-    if (event.detail.key === 'Enter' && !event.detail.shiftKey) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const handleKeyDown = (event: any) => {
+    if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
       handlePromptSubmit();
     }
@@ -259,18 +260,15 @@ const AgentChatLayout = ({
                         {sessionMessages.map((sessionMsg: ChatMessage) => {
                           if (sessionMsg.messageType === 'text') {
                             return (
-                              <div
+                              <Box
                                 key={sessionMsg.id}
-                                style={{
-                                  paddingRight: '12px',
-                                  paddingTop: '12px',
-                                  backgroundColor: 'var(--color-background-container-content)',
-                                }}
+                                padding={{ right: 's', top: 's', bottom: 'n' }}
+                                {...({ backgroundColor: 'background-container-content' } as Record<string, unknown>)}
                               >
                                 <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>
                                   {sessionMsg.content as string}
                                 </ReactMarkdown>
-                              </div>
+                              </Box>
                             );
                           }
 
@@ -458,9 +456,9 @@ const AgentChatLayout = ({
         <SpaceBetween direction="vertical" size="m">
           {messages.length === 0 && (
             <SpaceBetween direction="horizontal" size="s" alignItems="center">
-              <div style={{ flex: 1 }}>
+              <Box {...({ flex: '1' } as Record<string, unknown>)}>
                 <SupportPromptGroup
-                  ariaLabel="Sample prompts"
+                  ariaLabel="Suggested prompts"
                   alignment="horizontal"
                   items={supportPrompts.map((item) => ({
                     text: item.prompt,
@@ -473,7 +471,7 @@ const AgentChatLayout = ({
                     }
                   }}
                 />{' '}
-              </div>
+              </Box>
             </SpaceBetween>
           )}
           <Box>
@@ -489,9 +487,9 @@ const AgentChatLayout = ({
                 minRows={3}
               />
               <SpaceBetween direction="horizontal" size="m" alignItems="center">
-                <div style={{ flex: 1, fontSize: '14px', color: 'var(--color-text-status-info)' }}>
+                <Box {...({ fontSize: 'body-s', color: 'text-status-info', flex: '1' } as Record<string, unknown>)}>
                   Avoid sharing sensitive information, the Code Intelligence Agent may use third-party services.
-                </div>
+                </Box>
                 <Checkbox
                   checked={enableCodeIntelligence}
                   onChange={({ detail }) => updateAgentChatState({ enableCodeIntelligence: detail.checked })}
@@ -503,13 +501,13 @@ const AgentChatLayout = ({
             </SpaceBetween>
           </Box>
           <SpaceBetween direction="horizontal" size="s" alignItems="center">
-            <div style={{ flex: 1 }}>
+            <Box {...({ flex: '1' } as Record<string, unknown>)}>
               <AgentChatHistoryDropdown
                 onSessionSelect={handleSessionSelect}
                 onSessionDeleted={handleSessionDeleted}
                 disabled={waitingForResponse || isLoadingSession}
               />
-            </div>
+            </Box>
             {messages.length > 0 && (
               <Button
                 variant="normal"

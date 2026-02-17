@@ -21,7 +21,7 @@ const NumberConstraints = ({ attribute, onUpdate }: NumberConstraintsProps): Rea
 
   return (
     <>
-      <Header variant="h3">Number Constraints</Header>
+      <Header {...({ variant: 'h4' } as Record<string, unknown>)}>Number Constraints</Header>
 
       <FormField label="Minimum" description="Minimum value (inclusive)">
         <Input

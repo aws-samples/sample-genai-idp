@@ -21,7 +21,7 @@ const StringConstraints = ({ attribute, onUpdate }: StringConstraintsProps): Rea
 
   return (
     <>
-      <Header variant="h3">String Constraints (JSON Schema)</Header>
+      <Header {...({ variant: 'h4' } as Record<string, unknown>)}>String Constraints (JSON Schema)</Header>
 
       <FormField label="Pattern (regex)" description="Regular expression pattern to validate the extracted string format">
         <Input

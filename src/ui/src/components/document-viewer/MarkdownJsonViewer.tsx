@@ -95,7 +95,12 @@ const TextEditorView = ({ fileContent, onChange, isReadOnly, fileType }: TextEdi
   };
 
   return (
-    <div className="file-editor-container" style={{ border: '2px solid #e9ebed', width: '100%', minWidth: '600px' }}>
+    <Box
+      {...({ className: 'file-editor-container', style: { border: '2px solid #e9ebed', width: '100%', minWidth: '600px' } } as Record<
+        string,
+        unknown
+      >)}
+    >
       <div style={{ height: EDITOR_DEFAULT_HEIGHT, position: 'relative', overflow: 'hidden', width: '100%' }}>
         <Editor
           height="100%"
@@ -123,7 +128,7 @@ const TextEditorView = ({ fileContent, onChange, isReadOnly, fileType }: TextEdi
           loading={<Box padding="s">Loading editor...</Box>}
         />
       </div>
-    </div>
+    </Box>
   );
 };
 
@@ -433,34 +438,35 @@ const MarkdownJsonViewer = ({
       )}
 
       {isViewerOpen && (
-        <div className="json-viewer-container" style={{ width: '100%', minWidth: '700px' }}>
-          <SpaceBetween size="s">
-            <Box>
-              <SpaceBetween direction="horizontal" size="xs">
-                <Button onClick={closeViewer}>Close</Button>
-                <Toggle onChange={handleEditToggle} checked={isEditing}>
-                  Edit mode
-                </Toggle>
-                {isEditing && (
-                  <Button variant="primary" onClick={handleSave} disabled={!editedContent || editedContent === fileContent}>
-                    Save Changes
-                  </Button>
-                )}
-              </SpaceBetween>
-            </Box>
-            <div style={{ width: '100%' }}>
-              <FileEditorView
-                fileContent={isLoading ? null : isEditing ? editedContent : fileContent}
-                onChange={handleContentChange}
-                isReadOnly={!isEditing}
-                fileType={fileType}
-                viewMode={viewMode}
-                onViewModeChange={handleViewModeChange}
-                isConfidenceAvailable={!!textConfidenceUri}
-              />
-            </div>
-          </SpaceBetween>
-        </div>
+        <SpaceBetween
+          size="s"
+          {...({ className: 'json-viewer-container', style: { width: '100%', minWidth: '700px' } } as Record<string, unknown>)}
+        >
+          <Box>
+            <SpaceBetween direction="horizontal" size="xs">
+              <Button onClick={closeViewer}>Close</Button>
+              <Toggle onChange={handleEditToggle} checked={isEditing}>
+                Edit mode
+              </Toggle>
+              {isEditing && (
+                <Button variant="primary" onClick={handleSave} disabled={!editedContent || editedContent === fileContent}>
+                  Save Changes
+                </Button>
+              )}
+            </SpaceBetween>
+          </Box>
+          <div style={{ width: '100%' }}>
+            <FileEditorView
+              fileContent={isLoading ? null : isEditing ? editedContent : fileContent}
+              onChange={handleContentChange}
+              isReadOnly={!isEditing}
+              fileType={fileType}
+              viewMode={viewMode}
+              onViewModeChange={handleViewModeChange}
+              isConfidenceAvailable={!!textConfidenceUri}
+            />
+          </div>
+        </SpaceBetween>
       )}
     </Box>
   );

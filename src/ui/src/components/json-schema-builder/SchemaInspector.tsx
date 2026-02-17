@@ -297,8 +297,9 @@ const SchemaInspector = ({
             value={attributeLabel}
             onChange={({ detail }) => setAttributeLabel(detail.value)}
             onBlur={handleRenameSubmit}
-            onKeyDown={(event) => {
-              if (event.detail.key === 'Enter') {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            onKeyDown={(event: any) => {
+              if (event.key === 'Enter') {
                 event.preventDefault();
                 handleRenameSubmit();
               }
