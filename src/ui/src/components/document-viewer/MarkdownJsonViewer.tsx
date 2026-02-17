@@ -158,7 +158,7 @@ const FileEditorView = ({
   }, [fileContent, fileType]);
 
   const handleTextEditorChange = (value: string | undefined) => {
-    if (fileType === 'json' && value) {
+    if (fileType === 'json') {
       try {
         const parsed = JSON.parse(value);
         setJsonData(parsed);
@@ -170,7 +170,7 @@ const FileEditorView = ({
         setIsValid(false);
         logger.error('Invalid JSON:', error);
       }
-    } else if (onChange && value) {
+    } else if (onChange) {
       onChange(value);
     }
   };

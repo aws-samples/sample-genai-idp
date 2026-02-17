@@ -138,7 +138,7 @@ const ValueConstraints = ({ attribute, onUpdate }: ValueConstraintsProps): React
           onChange={({ detail }) => setConstInput(detail.value)}
           onBlur={handleConstBlur}
           placeholder={getConstPlaceholder()}
-          disabled={currentEnum !== undefined && currentEnum.length > 0}
+          disabled={!!currentEnum && currentEnum.length > 0}
         />
       </FormField>
 

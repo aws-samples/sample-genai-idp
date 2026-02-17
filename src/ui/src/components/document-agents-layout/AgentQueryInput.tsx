@@ -602,22 +602,21 @@ const AgentQueryInput = ({ onSubmit, isSubmitting = false, selectedResult = null
           </Grid>
 
           <FormField>
-            <div onFocus={() => fetchQueryHistory()}>
-              <ButtonDropdown
-                items={createDropdownItems() as unknown as ButtonDropdownProps.ItemOrGroup[]}
-                onItemClick={handleDropdownItemClick}
-                loading={isLoadingHistory}
-                disabled={isSubmitting}
-              >
-                {(() => {
-                  if (!selectedOption) return 'Select a previous question';
-                  if (selectedOption.label?.length > 40) {
-                    return `${selectedOption.label.substring(0, 40)}...`;
-                  }
-                  return selectedOption.label || 'Selected question';
-                })()}
-              </ButtonDropdown>
-            </div>
+            <ButtonDropdown
+              items={createDropdownItems() as unknown as ButtonDropdownProps.ItemOrGroup[]}
+              onItemClick={handleDropdownItemClick}
+              {...({ onFocus: () => fetchQueryHistory() } as Record<string, unknown>)}
+              loading={isLoadingHistory}
+              disabled={isSubmitting}
+            >
+              {(() => {
+                if (!selectedOption) return 'Select a previous question';
+                if (selectedOption.label?.length > 40) {
+                  return `${selectedOption.label.substring(0, 40)}...`;
+                }
+                return selectedOption.label || 'Selected question';
+              })()}
+            </ButtonDropdown>
           </FormField>
         </SpaceBetween>
       </form>
