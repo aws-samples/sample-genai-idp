@@ -17,7 +17,7 @@ interface ReprocessDocumentModalProps {
   visible: boolean;
   onDismiss: () => void;
   onConfirm: (versionName?: string) => void;
-  selectedItems?: ReprocessDocumentItem[];
+  selectedItems?: readonly ReprocessDocumentItem[];
   isLoading?: boolean;
 }
 

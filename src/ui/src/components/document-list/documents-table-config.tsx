@@ -47,7 +47,7 @@ interface DocumentsPreferencesProps {
 
 interface DocumentsCommonHeaderProps {
   resourceName?: string;
-  selectedItems?: MappedDocument[];
+  selectedItems?: readonly MappedDocument[];
   onDelete?: (() => void) | null;
   onReprocess?: (() => void) | null;
   onAbort?: (() => void) | null;

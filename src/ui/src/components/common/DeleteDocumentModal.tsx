@@ -12,7 +12,7 @@ interface DeleteDocumentModalProps {
   visible: boolean;
   onDismiss: () => void;
   onConfirm: () => void;
-  selectedItems: DeleteDocumentItem[];
+  selectedItems: readonly DeleteDocumentItem[];
   isLoading?: boolean;
 }
 

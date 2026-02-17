@@ -305,7 +305,7 @@ const DocumentList = (): React.JSX.Element => {
           <DocumentsCommonHeader
             resourceName="Documents"
             documents={documents}
-            selectedItems={[...collectionProps.selectedItems]}
+            selectedItems={collectionProps.selectedItems}
             totalItems={filteredDocumentList}
             updateTools={() => setToolsOpen(true)}
             loading={isDocumentsListLoading}
@@ -357,7 +357,7 @@ const DocumentList = (): React.JSX.Element => {
         visible={isDeleteModalVisible}
         onDismiss={() => setIsDeleteModalVisible(false)}
         onConfirm={handleDeleteConfirm}
-        selectedItems={[...collectionProps.selectedItems]}
+        selectedItems={collectionProps.selectedItems}
         isLoading={isDeleteLoading}
       />
 
@@ -365,7 +365,7 @@ const DocumentList = (): React.JSX.Element => {
         visible={isReprocessModalVisible}
         onDismiss={() => setIsReprocessModalVisible(false)}
         onConfirm={handleReprocessConfirm}
-        selectedItems={[...collectionProps.selectedItems]}
+        selectedItems={collectionProps.selectedItems}
         isLoading={isReprocessLoading}
       />
 
@@ -373,7 +373,7 @@ const DocumentList = (): React.JSX.Element => {
         visible={isAbortModalVisible}
         onDismiss={() => setIsAbortModalVisible(false)}
         onConfirm={handleAbortConfirm}
-        selectedItems={[...collectionProps.selectedItems]}
+        selectedItems={collectionProps.selectedItems}
         isLoading={isAbortLoading}
       />
 

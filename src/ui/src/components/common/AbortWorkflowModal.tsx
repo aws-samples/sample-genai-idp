@@ -29,7 +29,7 @@ interface AbortWorkflowModalProps {
   visible: boolean;
   onDismiss: () => void;
   onConfirm: (items: AbortWorkflowItem[]) => void;
-  selectedItems?: AbortWorkflowItem[];
+  selectedItems?: readonly AbortWorkflowItem[];
   isLoading?: boolean;
 }
 

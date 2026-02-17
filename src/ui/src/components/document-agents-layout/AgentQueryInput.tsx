@@ -511,7 +511,11 @@ const AgentQueryInput = ({ onSubmit, isSubmitting = false, selectedResult = null
             </div>
             {!isLoadingAgents && availableAgents.length > 0 && (
               <Box padding={{ top: 's' }}>
-                <Button variant={selectedAgents.length === availableAgents.length ? 'normal' : 'primary'} onClick={handleSelectAllAgents}>
+                <Button
+                  formAction="none"
+                  variant={selectedAgents.length === availableAgents.length ? 'normal' : 'primary'}
+                  onClick={handleSelectAllAgents}
+                >
                   {selectedAgents.length === availableAgents.length ? 'Deselect All Agents' : 'Select All Agents'}
                 </Button>
               </Box>
