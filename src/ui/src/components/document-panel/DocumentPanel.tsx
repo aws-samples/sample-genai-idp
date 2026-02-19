@@ -625,8 +625,10 @@ export const DocumentPanel = ({
     setLocalItem(item);
   }, [item]);
 
-  // Fetch configuration for dynamic confidence threshold
+  // Fetch active configuration for dynamic confidence threshold (used by sections panel, etc.)
   const { mergedConfig } = useConfiguration();
+  // Fetch the specific config version that was used to process this document (for flow viewer)
+  const { mergedConfig: documentVersionConfig } = useConfiguration(localItem?.configVersion || 'default');
   const { isReviewer } = useUserRole();
 
   // Check if document can be aborted
@@ -775,13 +777,13 @@ export const DocumentPanel = ({
       <PagesPanel {...({ pages: localItem.pages, documentItem: localItem } as Record<string, unknown>)} />
       <ChatPanel objectKey={localItem.objectKey} />
 
-      {/* Step Function Flow Viewer */}
+      {/* Step Function Flow Viewer - uses the document's config version, not the active stack config */}
       {localItem?.executionArn && (
         <StepFunctionFlowViewer
           executionArn={localItem.executionArn}
           visible={isFlowViewerVisible}
           onDismiss={() => setIsFlowViewerVisible(false)}
-          mergedConfig={mergedConfig}
+          mergedConfig={documentVersionConfig}
         />
       )}
 
