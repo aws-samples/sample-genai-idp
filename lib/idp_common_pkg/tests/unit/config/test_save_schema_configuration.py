@@ -44,13 +44,16 @@ def test_save_schema_configuration():
         # Verify table.put_item was called
         mock_table.put_item.assert_called_once()
 
-        # Get the item that was saved
+        # Get the item that was saved (compressed format)
         call_args = mock_table.put_item.call_args
         saved_item = call_args[1]["Item"]
 
+        # Decompress to inspect the full item
+        decompressed_item = ConfigurationManager._decompress_item(saved_item)
+
         # Verify the saved item structure
-        assert saved_item["Configuration"] == "Schema"
-        assert "notes" in saved_item
-        assert "classes" in saved_item
-        assert "classification" in saved_item
-        assert "extraction" in saved_item
+        assert decompressed_item["Configuration"] == "Schema"
+        assert "notes" in decompressed_item
+        assert "classes" in decompressed_item
+        assert "classification" in decompressed_item
+        assert "extraction" in decompressed_item

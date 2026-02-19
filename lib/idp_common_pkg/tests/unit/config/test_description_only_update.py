@@ -120,7 +120,9 @@ def test_description_only_update_with_rule_classes():
 
     # In full-config mode, rule_classes is preserved in the saved config
     # (no longer stripped by auto-cleanup since we save complete configs)
-    assert "rule_classes" in saved_item  # Full config preserves all fields
+    # Config data is compressed, so decompress to verify field presence
+    decompressed_item = ConfigurationManager._decompress_item(saved_item)
+    assert "rule_classes" in decompressed_item  # Full config preserves all fields
 
 
 @pytest.mark.unit

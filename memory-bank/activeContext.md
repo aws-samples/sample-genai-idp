@@ -2,6 +2,55 @@
 
 ## Current Work Focus
 
+### DynamoDB Configuration Compression - Issue #200 (February 19, 2026)
+**Status:** ✅ Completed
+
+#### Problem
+DynamoDB enforces a hard 400KB per-item limit. The `ConfigurationManager` stored the entire IDP configuration (all document class schemas, extraction settings, etc.) as a single DynamoDB item. This capped the solution at ~45-47 document classes, blocking enterprise use cases requiring 100-500+ document types.
+
+#### Solution: Gzip Compression
+Added transparent gzip compression to the DynamoDB read/write layer. Config data is compressed into a single Binary attribute, while metadata fields (Configuration, IsActive, Description, CreatedAt, UpdatedAt) remain as top-level DynamoDB attributes for queryability.
+
+```mermaid
+flowchart LR
+    subgraph "Write Path"
+        W1[ConfigurationRecord] --> W2[to_dynamodb_item]
+        W2 --> W3[_compress_item]
+        W3 --> W4["DynamoDB put_item<br>metadata + compressed Binary"]
+    end
+    
+    subgraph "Read Path"
+        R1["DynamoDB get_item"] --> R2{Has _config_storage<br>= compressed?}
+        R2 -->|Yes| R3[_decompress_item<br>gzip decompress Binary]
+        R2 -->|No| R4[Legacy inline<br>return as-is]
+        R3 --> R5[ConfigurationRecord.from_dynamodb_item]
+        R4 --> R5
+    end
+```
+
+#### Compression Results
+- JSON schemas are extremely repetitive → 10-20x compression ratios
+- 100 classes (~800KB raw) → ~60KB compressed ✅
+- 500 classes (~4MB raw) → ~300KB compressed ✅
+- Supports up to ~500 document classes comfortably
+
+#### Backward Compatibility
+- **Reads**: Auto-detects compressed vs legacy inline format via `_config_storage` marker
+- **Writes**: Always uses compressed format (new items)
+- **Upgrades**: Existing deployments continue working; configs auto-migrate to compressed on next write
+- **No infrastructure changes**: Zero new S3 buckets, IAM policies, env vars, or template.yaml changes
+
+#### Files Changed
+
+| File | Change |
+|------|--------|
+| `lib/idp_common_pkg/idp_common/config/configuration_manager.py` | Added `_compress_item()`, `_decompress_item()`, updated `_write_record()`, `_read_record()`, `get_raw_configuration()` |
+| `lib/idp_common_pkg/tests/unit/config/test_compression.py` | New: 18 comprehensive tests for compression |
+| `lib/idp_common_pkg/tests/unit/config/test_save_schema_configuration.py` | Updated to decompress before asserting |
+| `lib/idp_common_pkg/tests/unit/config/test_description_only_update.py` | Updated to decompress before asserting |
+
+---
+
 ### Configuration Storage: Full Configs Per Version (February 14, 2026)
 **Status:** ✅ Completed - Core refactoring done
 
