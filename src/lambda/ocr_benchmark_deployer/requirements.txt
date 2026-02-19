@@ -2,7 +2,7 @@
 huggingface-hub==0.20.0
 
 # For image handling
-Pillow==10.3.0
+Pillow==12.1.1
 
 # For CloudFormation custom resource responses
 cfnresponse
