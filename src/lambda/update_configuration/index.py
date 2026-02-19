@@ -299,6 +299,9 @@ def save_configuration_bypass_manager(config_type: str, config_data: Any, versio
         key = {'Configuration': f"{config_type}#{version}" if version else config_type}
         response = table.get_item(Key=key)
         existing_item = response.get('Item')
+        # Decompress if stored in compressed format
+        if existing_item:
+            existing_item = ConfigurationManager._decompress_item(existing_item)
     except Exception as e:
         logger.warning(f"Could not retrieve existing record: {e}")
     
@@ -338,7 +341,9 @@ def save_configuration_bypass_manager(config_type: str, config_data: Any, versio
         from datetime import datetime
         item['UpdatedAt'] = datetime.utcnow().isoformat() + 'Z'
     
-    table.put_item(Item=item)
+    # Compress config data to match ConfigurationManager storage format
+    compressed_item = ConfigurationManager._compress_item(item)
+    table.put_item(Item=compressed_item)
     logger.info(f"Saved {config_type}{f'#{version}' if version else ''} configuration bypassing ConfigurationManager")
 
 
