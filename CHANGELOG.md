@@ -20,6 +20,7 @@ SPDX-License-Identifier: MIT-0
 
 ### Fixed
 
+- **Fixed DynamoDB 400KB item size limit blocking configs with 45+ document classes** — Configuration data is now gzip-compressed before storing to DynamoDB, achieving 37-95x compression ratios. Supports 3,000+ document classes within the 400KB limit. Fully backward compatible with existing deployments. ([#200](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues/200), [#201](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/pull/201))
 - **Fixed Processing Flow chart using active stack config instead of the document's actual config version** for determining disabled steps (assessment, summarization, etc.)
 
 ## [0.4.15]
