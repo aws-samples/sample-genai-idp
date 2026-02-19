@@ -220,7 +220,7 @@ Configuration versions are stored in the `ConfigurationTable` DynamoDB table:
 
 ### Item Structure
 
-Each version item contains:
+Each version item contains metadata as top-level DynamoDB attributes, plus the configuration data stored as a gzip-compressed Binary attribute:
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -229,8 +229,16 @@ Each version item contains:
 | `Description` | String | Optional version description |
 | `CreatedAt` | String | ISO 8601 creation timestamp |
 | `UpdatedAt` | String | ISO 8601 last-modified timestamp |
-| `_config_format` | String | Set to `"full"` for new-format configs |
-| *(config fields)* | Various | The complete configuration data (ocr, classification, extraction, classes, etc.) |
+| `_compressed_config` | Binary | Gzip-compressed JSON containing all configuration data |
+| `_config_storage` | String | Set to `"compressed"` for compressed format |
+
+### Compressed Storage
+
+Configuration data (ocr, classification, extraction, classes, assessment, summarization, etc.) is gzip-compressed into a single DynamoDB Binary attribute. This overcomes DynamoDB's 400KB item size limit, supporting configurations with **3,000+ document classes**.
+
+- **Write path**: Config data is serialized to JSON and gzip-compressed (achieving 37-95x compression ratios for typical JSON Schema configurations)
+- **Read path**: Compressed items are auto-detected via the `_config_storage: "compressed"` marker and transparently decompressed
+- **Backward compatibility**: Legacy uncompressed items (from older versions) are read as-is — no migration steps needed. On the next write, the config is automatically stored in compressed format.
 
 ### Full Config Format
 

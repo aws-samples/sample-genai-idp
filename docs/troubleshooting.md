@@ -70,6 +70,7 @@ For issues not covered by the Error Analyzer, use the manual troubleshooting ste
 | ------------------------------ | --------------------------------------------------------------------------------------------------------------------- |
 | **Lambda function timeouts**   | Increase function timeout or memory allocation. Consider breaking processing into smaller chunks.                     |
 | **DynamoDB capacity exceeded** | Check CloudWatch metrics for throttling. Consider increasing provisioned capacity or switching to on-demand capacity. |
+| **DynamoDB config upload fails: "Item size has exceeded the maximum allowed size"** | This error occurred in versions prior to the compression fix when configurations had ~45+ document classes, exceeding DynamoDB's 400KB item limit. **Solution**: Upgrade to the latest version, which gzip-compresses configuration data (supporting 3,000+ classes). Existing configs auto-migrate on next write. See [GitHub Issue #200](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues/200). |
 | **S3 permission errors**       | Verify bucket policies and IAM role permissions. Check for cross-account access issues.                               |
 
 ### Agent Processing Issues
