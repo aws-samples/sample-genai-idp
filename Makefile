@@ -17,7 +17,9 @@ setup:
 	pip install -e lib/idp_cli_pkg
 	@echo "Installing idp_sdk package..."
 	pip install -e lib/idp_sdk
-	@echo -e "$(GREEN)✅ Setup complete! idp_common, idp-cli, and idp_sdk are now installed.$(NC)"
+	@echo "Installing capacity planning test dependencies..."
+	pip install -r src/lambda/calculate_capacity/requirements-test.txt
+	@echo -e "$(GREEN)✅ Setup complete! idp_common, idp-cli, idp_sdk, and test dependencies are now installed.$(NC)"
 
 # Start the UI development server
 # Usage: make ui-start [STACK_NAME=<stack-name>]
@@ -47,11 +49,24 @@ ui-start:
 	@echo "Starting UI development server..."
 	cd src/ui && npm run start
 
-# Run tests in idp_common_pkg, idp_cli, and idp_sdk directories
+# Run tests in idp_common_pkg, idp_cli, idp_sdk, and capacity planning Lambda
 test:
 	$(MAKE) -C lib/idp_common_pkg test
 	cd lib/idp_cli_pkg && python -m pytest -v
 	cd lib/idp_sdk && python -m pytest -m "not integration" -v
+	@echo "Running capacity planning Lambda tests..."
+	cd src/lambda/calculate_capacity && python -m pytest -v
+
+# Run only capacity planning tests
+test-capacity:
+	@echo "Running capacity planning Lambda tests..."
+	cd src/lambda/calculate_capacity && python -m pytest -v
+
+# Run capacity planning tests with coverage
+test-capacity-coverage:
+	@echo "Running capacity planning Lambda tests with coverage..."
+	cd src/lambda/calculate_capacity && python -m pytest --cov=. --cov-report=term --cov-report=html -v
+	@echo -e "$(GREEN)✅ Coverage report generated at src/lambda/calculate_capacity/htmlcov/index.html$(NC)"
 
 # Run both linting and formatting in one command
 lint: ruff-lint format check-arn-partitions validate-buildspec ui-lint

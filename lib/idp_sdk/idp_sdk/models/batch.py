@@ -27,7 +27,7 @@ class BatchDeletionResult(BaseModel):
     )
 
 
-class BatchResult(BaseModel):
+class BatchProcessResult(BaseModel):
     """Result of a batch processing operation."""
 
     batch_id: str = Field(description="Unique batch identifier")
@@ -49,6 +49,10 @@ class BatchResult(BaseModel):
     timestamp: datetime = Field(description="Batch submission timestamp")
 
     model_config = ConfigDict(populate_by_name=True)
+
+
+# Backward compatibility alias
+BatchResult = BatchProcessResult
 
 
 class BatchStatus(BaseModel):
@@ -78,17 +82,23 @@ class BatchInfo(BaseModel):
     timestamp: str = Field(description="Batch creation timestamp")
 
 
-class BatchRerunResult(BaseModel):
-    """Result of a batch rerun operation."""
+class BatchReprocessResult(BaseModel):
+    """Result of a batch reprocess operation."""
 
-    documents_queued: int = Field(description="Number of documents queued for rerun")
+    documents_queued: int = Field(
+        description="Number of documents queued for reprocess"
+    )
     documents_failed: int = Field(
         description="Number of documents that failed to queue"
     )
     failed_documents: List[Dict[str, str]] = Field(
         default_factory=list, description="Details of failed documents"
     )
-    step: RerunStep = Field(description="Pipeline step being rerun")
+    step: RerunStep = Field(description="Pipeline step being reprocessed")
+
+
+# Backward compatibility alias
+BatchRerunResult = BatchReprocessResult
 
 
 class BatchDownloadResult(BaseModel):

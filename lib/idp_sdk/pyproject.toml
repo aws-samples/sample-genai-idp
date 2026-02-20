@@ -54,7 +54,11 @@ lambda = [
 "Documentation" = "https://github.com/aws-samples/sample-genai-idp/blob/main/docs/idp-sdk.md"
 
 [tool.setuptools]
-packages = ["idp_sdk"]
+packages = [
+    "idp_sdk",
+    "idp_sdk.core",
+    "idp_sdk.models",
+    "idp_sdk.operations",
+]
 
 [tool.setuptools.package-dir]
-idp_sdk = "idp_sdk"

@@ -28,6 +28,7 @@ import ToolsPanel from './tools-panel';
 import SplitPanel from './documents-split-panel';
 import ConfigurationLayout from '../configuration-layout';
 import PricingLayout from '../pricing-layout';
+import CapacityPlanningLayout from '../capacity-planning/CapacityPlanningLayout';
 
 import { DOCUMENT_LIST_SHARDS_PER_DAY, PERIODS_TO_LOAD_STORAGE_KEY } from '../document-list/documents-table-config';
 
@@ -129,6 +130,7 @@ const GenAIIDPLayout = ({ children }: GenAIIDPLayoutProps): React.JSX.Element =>
               <Route path="agents" element={<DocumentsAgentsLayout />} />
               <Route path="config" element={<ConfigurationLayout />} />
               <Route path="pricing" element={<PricingLayout />} />
+              <Route path="capacity-planning" element={<CapacityPlanningLayout />} />
               <Route path="upload" element={<UploadDocumentPanel />} />
               <Route path="discovery" element={<DiscoveryPanel />} />
               <Route path="users" element={<UserManagementLayout />} />

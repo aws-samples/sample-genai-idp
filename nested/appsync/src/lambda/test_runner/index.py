@@ -112,6 +112,35 @@ def _get_test_set(tracking_table, test_set_id):
         logger.error(f"Error getting test set {test_set_id}: {e}")
         return None
 
+def _decompress_config_item(item):
+    """
+    Decompress a DynamoDB config item if it uses compressed storage format.
+    Inlined here to avoid dependency on idp_common (not available in this Lambda).
+    """
+    import gzip as _gzip
+
+    if item.get('_config_storage') != 'compressed':
+        return item  # Legacy inline format — return as-is
+
+    compressed_data = item.get('_compressed_config')
+    if compressed_data is None:
+        return item
+
+    raw_bytes = bytes(compressed_data) if not isinstance(compressed_data, bytes) else compressed_data
+
+    try:
+        config_data = json.loads(_gzip.decompress(raw_bytes).decode('utf-8'))
+    except Exception as e:
+        logger.error(f"Failed to decompress config data: {e}")
+        return item
+
+    # Reconstruct: metadata fields + decompressed config data
+    metadata_fields = {'Configuration', 'CreatedAt', 'UpdatedAt', 'IsActive', 'Description'}
+    full_item = {k: v for k, v in item.items() if k in metadata_fields}
+    full_item.update(config_data)
+    return full_item
+
+
 def _capture_config(config_table, config_version=None):
     """Capture configuration - specific version or current active config"""
     table = dynamodb.Table(config_table)  # type: ignore[attr-defined]
@@ -125,7 +154,7 @@ def _capture_config(config_table, config_version=None):
             key = f"Config#{config_version}"
             response = table.get_item(Key={'Configuration': key})
             if 'Item' in response:
-                config['Config'] = response['Item']
+                config['Config'] = _decompress_config_item(response['Item'])
             else:
                 logger.warning(f"Config version {config_version} not found")
         else:
@@ -139,7 +168,7 @@ def _capture_config(config_table, config_version=None):
             )
             items = scan_response.get('Items', [])
             if items:
-                config['Config'] = items[0]
+                config['Config'] = _decompress_config_item(items[0])
             
     except Exception as e:
         logger.warning(f"Could not retrieve Config: {e}")

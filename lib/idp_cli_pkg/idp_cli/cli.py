@@ -142,7 +142,7 @@ TEMPLATE_URLS = {
 
 
 @click.group()
-@click.version_option(version="0.4.12")
+@click.version_option(version="0.4.16")
 def cli():
     """
     IDP CLI - Batch document processing for IDP Accelerator
@@ -1083,7 +1083,429 @@ def delete_documents_cmd(
         sys.exit(1)
 
 
+def _process_impl(
+    stack_name: str,
+    manifest: Optional[str],
+    directory: Optional[str],
+    s3_uri: Optional[str],
+    test_set: Optional[str],
+    context: Optional[str],
+    batch_id: Optional[str],
+    file_pattern: str,
+    recursive: bool,
+    config: Optional[str],
+    batch_prefix: str,
+    monitor: bool,
+    refresh_interval: int,
+    region: Optional[str],
+    number_of_files: Optional[int],
+    config_version: Optional[str],
+):
+    """Implementation for process and run_inference commands"""
+    try:
+        # Validate mutually exclusive options
+        if not manifest and not directory and not s3_uri and not test_set:
+            console.print(
+                "[red]✗ Error: Must specify one of: --manifest, --dir, --s3-uri, or --test-set[/red]"
+            )
+            sys.exit(1)
+
+        input_count = sum(
+            1 for x in [manifest, directory, s3_uri, test_set] if x is not None
+        )
+        if input_count > 1:
+            console.print("[red]✗ Error: Cannot specify multiple input sources[/red]")
+            sys.exit(1)
+
+        # Initialize processor
+        processor = BatchProcessor(stack_name=stack_name, region=region)
+
+        # Handle test set processing
+        if test_set:
+            batch_result = _process_test_set(
+                stack_name=stack_name,
+                test_set_name=test_set,
+                context=context,
+                region=region,
+                processor=processor,
+                number_of_files=number_of_files,
+                config_version=config_version,
+            )
+        else:
+            # Handle manifest/directory/S3 processing
+            batch_result = processor.process_batch(
+                manifest_path=manifest,
+                directory=directory,
+                s3_uri=s3_uri,
+                batch_id=batch_id,
+                file_pattern=file_pattern,
+                recursive=recursive,
+                config_path=config,
+                batch_prefix=batch_prefix,
+                number_of_files=number_of_files,
+                config_version=config_version,
+            )
+
+        # Show results
+        console.print()
+        console.print(f"[bold blue]Batch ID: {batch_result['batch_id']}[/bold blue]")
+        console.print(f"Documents queued: {batch_result['documents_queued']}")
+
+        if batch_result.get("uploaded", 0) > 0:
+            console.print(f"Files uploaded: {batch_result['uploaded']}")
+        if batch_result.get("skipped", 0) > 0:
+            console.print(f"Files skipped: {batch_result['skipped']}")
+        if batch_result.get("failed", 0) > 0:
+            console.print(f"[red]Files failed: {batch_result['failed']}[/red]")
+
+        console.print()
+
+        # Monitor if requested
+        if monitor and batch_result["documents_queued"] > 0:
+            _monitor_progress(
+                stack_name=stack_name,
+                batch_id=batch_result["batch_id"],
+                document_ids=batch_result.get("document_ids", []),
+                refresh_interval=refresh_interval,
+                region=region,
+                resources=processor.resources,
+            )
+
+    except Exception as e:
+        logger.error(f"Error processing batch: {e}", exc_info=True)
+        console.print(f"[red]✗ Error: {e}[/red]")
+        sys.exit(1)
+
+
 @cli.command()
+@click.option("--stack-name", required=True, help="CloudFormation stack name")
+@click.option(
+    "--manifest",
+    type=click.Path(exists=True),
+    help="Path to manifest file (CSV or JSON)",
+)
+@click.option(
+    "--dir",
+    "directory",
+    type=click.Path(exists=True, file_okay=False, dir_okay=True),
+    help="Local directory containing documents to process",
+)
+@click.option("--s3-uri", help="S3 URI to process (e.g., s3://bucket/prefix/)")
+@click.option("--test-set", help="Test set ID to process from test set bucket")
+@click.option(
+    "--context", help="Context description for test run (used with --test-set)"
+)
+@click.option(
+    "--batch-id",
+    help="Custom batch ID (auto-generated if not provided, ignored with --test-set)",
+)
+@click.option(
+    "--file-pattern",
+    default="*.pdf",
+    help="File pattern for directory/S3 scanning (default: *.pdf)",
+)
+@click.option(
+    "--recursive/--no-recursive",
+    default=True,
+    help="Include subdirectories when scanning (default: recursive)",
+)
+@click.option(
+    "--config",
+    type=click.Path(exists=True),
+    help="Path to configuration YAML file (optional)",
+)
+@click.option(
+    "--batch-prefix",
+    default="cli-batch",
+    help="Batch ID prefix (used only if --batch-id not provided, default: cli-batch)",
+)
+@click.option("--monitor", is_flag=True, help="Monitor progress until completion")
+@click.option(
+    "--refresh-interval",
+    default=5,
+    type=int,
+    help="Seconds between status checks (default: 5)",
+)
+@click.option("--region", help="AWS region (optional)")
+@click.option(
+    "--number-of-files",
+    type=int,
+    help="Limit number of files to process (for testing purposes)",
+)
+@click.option(
+    "--config-version",
+    help="Configuration version to use for processing (e.g., v1, v2)",
+)
+def process(
+    stack_name: str,
+    manifest: Optional[str],
+    directory: Optional[str],
+    s3_uri: Optional[str],
+    test_set: Optional[str],
+    context: Optional[str],
+    batch_id: Optional[str],
+    file_pattern: str,
+    recursive: bool,
+    config: Optional[str],
+    batch_prefix: str,
+    monitor: bool,
+    refresh_interval: int,
+    region: Optional[str],
+    number_of_files: Optional[int],
+    config_version: Optional[str],
+):
+    """
+    Process documents
+
+    Specify documents using ONE of:
+      --manifest: Explicit manifest file (CSV or JSON)
+                 If manifest contains baseline_source column, automatically creates
+                 "idp-cli" test set for Test Studio integration and evaluation
+      --dir: Local directory (auto-generates manifest)
+      --s3-uri: S3 URI (auto-generates manifest, any bucket)
+      --test-set: Process existing test set from test set bucket (use test set ID)
+
+    Test Studio Integration:
+      - --test-set: Processes existing test sets and tracks results in Test Studio UI
+      - --context: Adds descriptive labels to test runs (e.g., "Model v2.1", "Production validation")
+      - Manifests with baselines: Automatically creates test sets for accuracy evaluation
+      - All processing appears in Test Studio dashboard for analysis and comparison
+
+    Examples:
+
+      # Process from manifest file
+      idp-cli process --stack-name my-stack --manifest docs.csv --monitor
+
+      # Process all PDFs in local directory
+      idp-cli process --stack-name my-stack --dir ./documents/ --monitor
+
+      # Process with custom batch ID
+      idp-cli process --stack-name my-stack --dir ./docs/ --batch-id my-experiment-v1 --monitor
+
+      # Process S3 URI (any bucket)
+      idp-cli process --stack-name my-stack --s3-uri s3://data-lake/archive/2024/ --monitor
+
+      # Process with file pattern
+      idp-cli process --stack-name my-stack --dir ./docs/ --file-pattern "invoice*.pdf"
+
+      # Process test set (integrates with Test Studio UI - use test set ID)
+      idp-cli process --stack-name my-stack --test-set fcc-example-test --monitor
+
+      # Process test set with custom context
+      idp-cli process --stack-name my-stack --test-set fcc-example-test --context "Experiment v2.1" --monitor
+
+      # Process test set with limited files for quick testing
+      idp-cli process --stack-name my-stack --test-set fcc-example-test --number-of-files 5 --monitor
+
+      # Process with specific configuration version
+      idp-cli process --stack-name my-stack --dir ./documents/ --config-version v2 --monitor
+
+      # Process manifest with baselines (automatically creates "idp-cli" test set for Test Studio integration)
+      idp-cli process --stack-name my-stack --manifest docs_with_baselines.csv --monitor
+    """
+    return _process_impl(
+        stack_name,
+        manifest,
+        directory,
+        s3_uri,
+        test_set,
+        context,
+        batch_id,
+        file_pattern,
+        recursive,
+        config,
+        batch_prefix,
+        monitor,
+        refresh_interval,
+        region,
+        number_of_files,
+        config_version,
+    )
+
+
+@cli.command(name="reprocess")
+@click.option("--stack-name", required=True, help="CloudFormation stack name")
+@click.option(
+    "--step",
+    required=True,
+    type=click.Choice(["classification", "extraction"]),
+    help="Pipeline step to rerun from",
+)
+@click.option(
+    "--document-ids",
+    help="Comma-separated list of document IDs to reprocess",
+)
+@click.option(
+    "--batch-id",
+    help="Batch ID to get document IDs from (alternative to --document-ids)",
+)
+@click.option("--force", is_flag=True, help="Skip confirmation prompt")
+@click.option("--monitor", is_flag=True, help="Monitor progress until completion")
+@click.option(
+    "--refresh-interval",
+    default=5,
+    type=int,
+    help="Seconds between status checks (default: 5)",
+)
+@click.option("--region", help="AWS region (optional)")
+def reprocess(
+    stack_name: str,
+    step: str,
+    document_ids: Optional[str],
+    batch_id: Optional[str],
+    force: bool,
+    monitor: bool,
+    refresh_interval: int,
+    region: Optional[str],
+):
+    """
+    Reprocess documents from a specific step
+    
+    Reprocesses documents already in InputBucket, leveraging existing OCR data.
+    
+    Steps:
+      - classification: Reruns classification and all subsequent steps
+      - extraction: Reruns extraction and assessment (keeps classification)
+    
+    Document ID Format: Use the S3 key format (e.g., "batch-id/document.pdf")
+    
+    Examples:
+    
+      # Rerun classification for specific documents
+      idp-cli reprocess \\
+          --stack-name my-stack \\
+          --step classification \\
+          --document-ids "batch-123/doc1.pdf,batch-123/doc2.pdf" \\
+          --monitor
+      
+      # Rerun extraction for all documents in a batch
+      idp-cli reprocess \\
+          --stack-name my-stack \\
+          --step extraction \\
+          --batch-id cli-batch-20251015-143000 \\
+          --monitor
+    """
+    # Call the existing rerun_inference implementation
+    return rerun_inference(
+        stack_name,
+        step,
+        document_ids,
+        batch_id,
+        force,
+        monitor,
+        refresh_interval,
+        region,
+    )
+
+
+# Backward compatibility alias for run_inference
+@cli.command(name="run-inference")
+@click.option("--stack-name", required=True, help="CloudFormation stack name")
+@click.option(
+    "--manifest",
+    type=click.Path(exists=True),
+    help="Path to manifest file (CSV or JSON)",
+)
+@click.option(
+    "--dir",
+    "directory",
+    type=click.Path(exists=True, file_okay=False, dir_okay=True),
+    help="Local directory containing documents to process",
+)
+@click.option("--s3-uri", help="S3 URI to process (e.g., s3://bucket/prefix/)")
+@click.option("--test-set", help="Test set ID to process from test set bucket")
+@click.option(
+    "--context", help="Context description for test run (used with --test-set)"
+)
+@click.option(
+    "--batch-id",
+    help="Custom batch ID (auto-generated if not provided, ignored with --test-set)",
+)
+@click.option(
+    "--file-pattern",
+    default="*.pdf",
+    help="File pattern for directory/S3 scanning (default: *.pdf)",
+)
+@click.option(
+    "--recursive/--no-recursive",
+    default=True,
+    help="Include subdirectories when scanning (default: recursive)",
+)
+@click.option(
+    "--config",
+    type=click.Path(exists=True),
+    help="Path to configuration YAML file (optional)",
+)
+@click.option(
+    "--batch-prefix",
+    default="cli-batch",
+    help="Batch ID prefix (used only if --batch-id not provided, default: cli-batch)",
+)
+@click.option("--monitor", is_flag=True, help="Monitor progress until completion")
+@click.option(
+    "--refresh-interval",
+    default=5,
+    type=int,
+    help="Seconds between status checks (default: 5)",
+)
+@click.option("--region", help="AWS region (optional)")
+@click.option(
+    "--number-of-files",
+    type=int,
+    help="Limit number of files to process (for testing purposes)",
+)
+@click.option(
+    "--config-version",
+    help="Configuration version to use for processing (e.g., v1, v2)",
+)
+def run_inference(
+    stack_name: str,
+    manifest: Optional[str],
+    directory: Optional[str],
+    s3_uri: Optional[str],
+    test_set: Optional[str],
+    context: Optional[str],
+    batch_id: Optional[str],
+    file_pattern: str,
+    recursive: bool,
+    config: Optional[str],
+    batch_prefix: str,
+    monitor: bool,
+    refresh_interval: int,
+    region: Optional[str],
+    number_of_files: Optional[int],
+    config_version: Optional[str],
+):
+    """
+    Run inference on a batch of documents
+
+    ⚠️  DEPRECATED: This command is maintained for backward compatibility.
+    Please use 'idp-cli process' instead for new workflows.
+
+    Equivalent command:
+      idp-cli process --stack-name <stack> --manifest <file> [options]
+    """
+    return _process_impl(
+        stack_name,
+        manifest,
+        directory,
+        s3_uri,
+        test_set,
+        context,
+        batch_id,
+        file_pattern,
+        recursive,
+        config,
+        batch_prefix,
+        monitor,
+        refresh_interval,
+        region,
+        number_of_files,
+        config_version,
+    )
+
+
+@cli.command(name="rerun-inference")
 @click.option("--stack-name", required=True, help="CloudFormation stack name")
 @click.option(
     "--step",
@@ -1119,32 +1541,32 @@ def rerun_inference(
     region: Optional[str],
 ):
     """
-    Rerun processing for existing documents from a specific step
-    
-    Reprocesses documents already in InputBucket, leveraging existing OCR data.
-    
-    Steps:
-      - classification: Reruns classification and all subsequent steps
-      - extraction: Reruns extraction and assessment (keeps classification)
-    
-    Document ID Format: Use the S3 key format (e.g., "batch-id/document.pdf")
-    
-    Examples:
-    
-      # Rerun classification for specific documents
-      idp-cli rerun-inference \\
-          --stack-name my-stack \\
-          --step classification \\
-          --document-ids "batch-123/doc1.pdf,batch-123/doc2.pdf" \\
-          --monitor
-      
-      # Rerun extraction for all documents in a batch
-      idp-cli rerun-inference \\
-          --stack-name my-stack \\
-          --step extraction \\
-          --batch-id cli-batch-20251015-143000 \\
-          --monitor
+    DEPRECATED: Use 'reprocess' instead
     """
+    # Call the new reprocess implementation
+    return _rerun_inference_impl(
+        stack_name,
+        step,
+        document_ids,
+        batch_id,
+        force,
+        monitor,
+        refresh_interval,
+        region,
+    )
+
+
+# Implementation moved from rerun_inference - now used by re_process
+def _rerun_inference_impl(
+    stack_name: str,
+    step: str,
+    document_ids: Optional[str],
+    batch_id: Optional[str],
+    force: bool,
+    monitor: bool,
+    refresh_interval: int,
+    region: Optional[str],
+):
     try:
         # Validate mutually exclusive options
         if not document_ids and not batch_id:
@@ -1249,311 +1671,6 @@ def rerun_inference(
 
     except Exception as e:
         logger.error(f"Error rerunning documents: {e}", exc_info=True)
-        console.print(f"[red]✗ Error: {e}[/red]")
-        sys.exit(1)
-
-
-@cli.command()
-@click.option("--stack-name", required=True, help="CloudFormation stack name")
-@click.option(
-    "--manifest",
-    type=click.Path(exists=True),
-    help="Path to manifest file (CSV or JSON)",
-)
-@click.option(
-    "--dir",
-    "directory",
-    type=click.Path(exists=True, file_okay=False, dir_okay=True),
-    help="Local directory containing documents to process",
-)
-@click.option("--s3-uri", help="S3 URI to process (e.g., s3://bucket/prefix/)")
-@click.option("--test-set", help="Test set ID to process from test set bucket")
-@click.option(
-    "--context", help="Context description for test run (used with --test-set)"
-)
-@click.option(
-    "--batch-id",
-    help="Custom batch ID (auto-generated if not provided, ignored with --test-set)",
-)
-@click.option(
-    "--file-pattern",
-    default="*.pdf",
-    help="File pattern for directory/S3 scanning (default: *.pdf)",
-)
-@click.option(
-    "--recursive/--no-recursive",
-    default=True,
-    help="Include subdirectories when scanning (default: recursive)",
-)
-@click.option(
-    "--config",
-    type=click.Path(exists=True),
-    help="Path to configuration YAML file (optional)",
-)
-@click.option(
-    "--batch-prefix",
-    default="cli-batch",
-    help="Batch ID prefix (used only if --batch-id not provided, default: cli-batch)",
-)
-@click.option("--monitor", is_flag=True, help="Monitor progress until completion")
-@click.option(
-    "--refresh-interval",
-    default=5,
-    type=int,
-    help="Seconds between status checks (default: 5)",
-)
-@click.option("--region", help="AWS region (optional)")
-@click.option(
-    "--number-of-files",
-    type=int,
-    help="Limit number of files to process (for testing purposes)",
-)
-@click.option(
-    "--config-version",
-    help="Configuration version to use for processing (e.g., v1, v2)",
-)
-def run_inference(
-    stack_name: str,
-    manifest: Optional[str],
-    directory: Optional[str],
-    s3_uri: Optional[str],
-    test_set: Optional[str],
-    context: Optional[str],
-    batch_id: Optional[str],
-    file_pattern: str,
-    recursive: bool,
-    config: Optional[str],
-    batch_prefix: str,
-    monitor: bool,
-    refresh_interval: int,
-    region: Optional[str],
-    number_of_files: Optional[int],
-    config_version: Optional[str],
-):
-    """
-    Run inference on a batch of documents
-
-    Specify documents using ONE of:
-      --manifest: Explicit manifest file (CSV or JSON)
-                 If manifest contains baseline_source column, automatically creates
-                 "idp-cli" test set for Test Studio integration and evaluation
-      --dir: Local directory (auto-generates manifest)
-      --s3-uri: S3 URI (auto-generates manifest, any bucket)
-      --test-set: Process existing test set from test set bucket (use test set ID)
-
-    Test Studio Integration:
-      - --test-set: Processes existing test sets and tracks results in Test Studio UI
-      - --context: Adds descriptive labels to test runs (e.g., "Model v2.1", "Production validation")
-      - Manifests with baselines: Automatically creates test sets for accuracy evaluation
-      - All processing appears in Test Studio dashboard for analysis and comparison
-
-    Examples:
-
-      # Process from manifest file
-      idp-cli run-inference --stack-name my-stack --manifest docs.csv --monitor
-
-      # Process all PDFs in local directory
-      idp-cli run-inference --stack-name my-stack --dir ./documents/ --monitor
-
-      # Process with custom batch ID
-      idp-cli run-inference --stack-name my-stack --dir ./docs/ --batch-id my-experiment-v1 --monitor
-
-      # Process S3 URI (any bucket)
-      idp-cli run-inference --stack-name my-stack --s3-uri s3://data-lake/archive/2024/ --monitor
-
-      # Process with file pattern
-      idp-cli run-inference --stack-name my-stack --dir ./docs/ --file-pattern "invoice*.pdf"
-
-      # Process test set (integrates with Test Studio UI - use test set ID)
-      idp-cli run-inference --stack-name my-stack --test-set fcc-example-test --monitor
-
-      # Process test set with custom context
-      idp-cli run-inference --stack-name my-stack --test-set fcc-example-test --context "Experiment v2.1" --monitor
-
-      # Process test set with limited files for quick testing
-      idp-cli run-inference --stack-name my-stack --test-set fcc-example-test --number-of-files 5 --monitor
-
-      # Process with specific configuration version
-      idp-cli run-inference --stack-name my-stack --dir ./documents/ --config-version v2 --monitor
-
-      # Process manifest with baselines (automatically creates "idp-cli" test set for Test Studio integration)
-      idp-cli run-inference --stack-name my-stack --manifest docs_with_baselines.csv --monitor
-    """
-    try:
-        # Validate mutually exclusive options
-        sources = [manifest, directory, s3_uri, test_set]
-        sources_provided = sum(1 for s in sources if s is not None)
-
-        if sources_provided == 0:
-            console.print(
-                "[red]✗ Error: Must specify exactly one source: --manifest, --dir, --s3-uri, or --test-set[/red]"
-            )
-            sys.exit(1)
-        elif sources_provided > 1:
-            console.print(
-                "[red]✗ Error: Cannot specify more than one of: --manifest, --dir, --s3-uri, --test-set[/red]"
-            )
-            sys.exit(1)
-
-        # Validate number_of_files parameter
-        if number_of_files is not None:
-            if number_of_files <= 0:
-                console.print(
-                    "[red]✗ Error: --number-of-files must be greater than 0[/red]"
-                )
-                sys.exit(1)
-
-        # Validate manifest if provided
-        if manifest:
-            console.print("[bold blue]Validating manifest...[/bold blue]")
-            is_valid, error = validate_manifest(manifest)
-            if not is_valid:
-                console.print(f"[red]✗ Manifest validation failed: {error}[/red]")
-                sys.exit(1)
-
-            # Validate number_of_files against manifest size
-            if number_of_files is not None:
-                from idp_sdk.core.manifest_parser import parse_manifest
-
-                documents = parse_manifest(manifest)
-                if number_of_files > len(documents):
-                    console.print(
-                        f"[red]✗ Error: --number-of-files ({number_of_files}) cannot exceed manifest size ({len(documents)})[/red]"
-                    )
-                    sys.exit(1)
-            console.print("[green]✓ Manifest validated successfully[/green]")
-
-        # Initialize processor
-        console.print(
-            f"[bold blue]Initializing batch processor for stack: {stack_name}[/bold blue]"
-        )
-        processor = BatchProcessor(
-            stack_name=stack_name, config_path=config, region=region
-        )
-
-        # Validate config_version if specified
-        if config_version:
-            console.print(
-                f"[blue]Validating configuration version: {config_version}[/blue]"
-            )
-            try:
-                import os
-
-                from idp_common.config.configuration_manager import ConfigurationManager
-
-                # Get the configuration table name from processor resources
-                config_table = processor.resources.get("ConfigurationTable")
-                if not config_table:
-                    console.print(
-                        "[red]✗ Could not find ConfigurationTable in stack resources[/red]"
-                    )
-                    sys.exit(1)
-
-                # Set env var and check if version exists
-                os.environ["CONFIGURATION_TABLE_NAME"] = config_table
-                manager = ConfigurationManager()
-                existing_config = manager.get_configuration(
-                    "Config", version=config_version
-                )
-
-                if not existing_config:
-                    console.print(
-                        f"[red]✗ Configuration version '{config_version}' does not exist[/red]"
-                    )
-                    console.print(
-                        f"Use 'idp-cli config-download --stack-name {stack_name}' to see available versions"
-                    )
-                    sys.exit(1)
-
-                console.print(
-                    f"[green]✓ Configuration version '{config_version}' validated[/green]"
-                )
-            except Exception as e:
-                console.print(
-                    f"[red]✗ Failed to validate configuration version: {e}[/red]"
-                )
-                sys.exit(1)
-
-        # Process batch based on source type
-        with console.status("[bold green]Processing batch..."):
-            if test_set:
-                batch_result = _process_test_set(
-                    stack_name,
-                    test_set,
-                    context,
-                    region,
-                    processor,
-                    number_of_files,
-                    config_version,
-                )
-            elif manifest:
-                # Check if manifest has baselines for test studio integration
-                has_baselines = _manifest_has_baselines(manifest)
-
-                if has_baselines:
-                    # Create test set and copy files for test studio integration
-                    test_set_name = "idp-cli"
-                    _create_test_set_from_manifest(
-                        manifest, test_set_name, stack_name, region, processor.resources
-                    )
-
-                    # Use common test set processing logic
-                    batch_result = _process_test_set(
-                        stack_name,
-                        test_set_name,
-                        context,
-                        region,
-                        processor,
-                        number_of_files,
-                        config_version,
-                    )
-                else:
-                    # Normal manifest processing without test studio
-                    batch_result = processor.process_batch(
-                        manifest_path=manifest,
-                        output_prefix=batch_prefix,
-                        batch_id=batch_id,
-                        number_of_files=number_of_files,
-                        config_version=config_version,
-                    )
-            elif directory:
-                batch_result = processor.process_batch_from_directory(
-                    dir_path=directory,
-                    file_pattern=file_pattern,
-                    recursive=recursive,
-                    output_prefix=batch_prefix,
-                    batch_id=batch_id,
-                    number_of_files=number_of_files,
-                    config_version=config_version,
-                )
-            else:  # s3_uri
-                batch_result = processor.process_batch_from_s3_uri(
-                    s3_uri=s3_uri,
-                    file_pattern=file_pattern,
-                    recursive=recursive,
-                    output_prefix=batch_prefix,
-                    batch_id=batch_id,
-                )
-
-        # Show submission results
-        display.show_batch_submission_summary(batch_result)
-
-        if monitor:
-            # Monitor until completion
-            _monitor_progress(
-                stack_name=stack_name,
-                batch_id=batch_result["batch_id"],
-                document_ids=batch_result["document_ids"],
-                refresh_interval=refresh_interval,
-                region=region,
-                resources=processor.resources,
-            )
-        else:
-            # Show how to monitor later
-            display.show_monitoring_instructions(stack_name, batch_result["batch_id"])
-
-    except Exception as e:
-        logger.error(f"Error processing batch: {e}", exc_info=True)
         console.print(f"[red]✗ Error: {e}[/red]")
         sys.exit(1)
 
@@ -2170,17 +2287,17 @@ def generate_manifest(
             console.print()
             console.print("[bold]Next Steps: Run inference[/bold]")
             console.print(
-                f"  - Using test set: [cyan]idp-cli run-inference --test-set {test_set} --stack-name {stack_name} --monitor[/cyan]"
+                f"  - Using test set: [cyan]idp-cli process --test-set {test_set} --stack-name {stack_name} --monitor[/cyan]"
             )
             console.print(
-                f"  - With limited files: [cyan]idp-cli run-inference --test-set {test_set} --stack-name {stack_name} --number-of-files {{N}} --monitor[/cyan]"
+                f"  - With limited files: [cyan]idp-cli process --test-set {test_set} --stack-name {stack_name} --number-of-files {{N}} --monitor[/cyan]"
             )
             if output:
                 console.print(
-                    f"  - Using manifest: [cyan]idp-cli run-inference --stack-name {stack_name} --manifest {output} --monitor[/cyan]"
+                    f"  - Using manifest: [cyan]idp-cli process --stack-name {stack_name} --manifest {output} --monitor[/cyan]"
                 )
                 console.print(
-                    f"  - With limited files: [cyan]idp-cli run-inference --stack-name {stack_name} --manifest {output} --number-of-files {{N}} --monitor[/cyan]"
+                    f"  - With limited files: [cyan]idp-cli process --stack-name {stack_name} --manifest {output} --number-of-files {{N}} --monitor[/cyan]"
                 )
         elif baseline_map:
             console.print("[bold]Baseline matching complete[/bold]")
@@ -2192,7 +2309,7 @@ def generate_manifest(
             )
             if output:
                 console.print(
-                    f"  2. Process: [cyan]idp-cli run-inference --stack-name <stack> --manifest {output}[/cyan]"
+                    f"  2. Process: [cyan]idp-cli process --stack-name <stack> --manifest {output}[/cyan]"
                 )
         console.print()
 
@@ -3650,6 +3767,302 @@ def config_download(
 
     except Exception as e:
         logger.error(f"Error downloading config: {e}", exc_info=True)
+
+
+@cli.command(name="config-activate")
+@click.option(
+    "--stack-name",
+    required=True,
+    help="CloudFormation stack name",
+)
+@click.option(
+    "--config-version",
+    required=True,
+    help="Configuration version to activate",
+)
+def config_activate(
+    stack_name: str,
+    config_version: str,
+):
+    """
+    Activate a configuration version in a deployed IDP stack
+
+    Sets the specified configuration version as the active version.
+    All new document processing will use this configuration.
+
+    Examples:
+      # Activate a specific version
+      idp-cli config-activate --stack-name my-stack --config-version v2
+
+      # Activate default version
+      idp-cli config-activate --stack-name my-stack --config-version default
+    """
+    try:
+        console.print(
+            f"[bold blue]Activating config version in stack: {stack_name}[/bold blue]"
+        )
+        console.print(f"Version: {config_version}")
+
+        # Get stack resources
+        try:
+            config_table = None
+            cf_client = boto3.client("cloudformation")
+            resources = cf_client.list_stack_resources(StackName=stack_name)
+            for resource in resources["StackResourceSummaries"]:
+                if resource["LogicalResourceId"] == "ConfigurationTable":
+                    config_table = resource.get("PhysicalResourceId")
+                if config_table:
+                    break
+
+        except Exception as e:
+            console.print(f"[red]✗ Failed to get stack resources: {e}[/red]")
+            return
+
+        if not config_table:
+            console.print(
+                "[red]✗ ConfigurationTable not found in stack resources[/red]"
+            )
+            return
+
+        console.print(f"[dim]Using table: {config_table}[/dim]")
+
+        # Activate the version
+        try:
+            from idp_common.config.configuration_manager import ConfigurationManager
+
+            os.environ["CONFIGURATION_TABLE_NAME"] = config_table
+            manager = ConfigurationManager()
+
+            # Check if version exists
+            existing_config = manager.get_configuration(
+                "Config", version=config_version
+            )
+            if not existing_config:
+                console.print(
+                    f"[red]✗ Configuration version '{config_version}' does not exist[/red]"
+                )
+                console.print(
+                    f"Use 'idp-cli config-download --stack-name {stack_name}' to see available versions"
+                )
+                return
+
+            # Activate the version
+            manager.activate_version(config_version)
+            console.print(
+                f"[green]✓ Successfully activated configuration version: {config_version}[/green]"
+            )
+            console.print("New documents will use this configuration immediately.")
+
+        except ValueError as e:
+            console.print(f"[red]✗ {e}[/red]")
+            return
+        except Exception as e:
+            console.print(f"[red]✗ Failed to activate configuration version: {e}[/red]")
+            return
+
+    except Exception as e:
+        console.print(f"[red]✗ Failed to activate configuration: {e}[/red]")
+        return
+
+
+@cli.command(name="config-list")
+@click.option(
+    "--stack-name",
+    required=True,
+    help="CloudFormation stack name",
+)
+def config_list(stack_name: str):
+    """
+    List all configuration versions in a deployed IDP stack
+
+    Shows all available configuration versions with their status,
+    creation dates, and descriptions.
+
+    Examples:
+      # List all configuration versions
+      idp-cli config-list --stack-name my-stack
+    """
+    try:
+        console.print(
+            f"[bold blue]Listing configuration versions in stack: {stack_name}[/bold blue]"
+        )
+
+        # Get stack resources
+        try:
+            config_table = None
+            cf_client = boto3.client("cloudformation")
+            resources = cf_client.list_stack_resources(StackName=stack_name)
+            for resource in resources["StackResourceSummaries"]:
+                if resource["LogicalResourceId"] == "ConfigurationTable":
+                    config_table = resource.get("PhysicalResourceId")
+                if config_table:
+                    break
+
+        except Exception as e:
+            console.print(f"[red]✗ Failed to get stack resources: {e}[/red]")
+            return
+
+        if not config_table:
+            console.print(
+                "[red]✗ ConfigurationTable not found in stack resources[/red]"
+            )
+            return
+
+        console.print(f"[dim]Using table: {config_table}[/dim]")
+
+        # List configuration versions
+        try:
+            from idp_common.config.configuration_manager import ConfigurationManager
+
+            os.environ["CONFIGURATION_TABLE_NAME"] = config_table
+            manager = ConfigurationManager()
+            versions = manager.list_config_versions()
+
+            if not versions:
+                console.print("[yellow]No configuration versions found[/yellow]")
+                return
+
+            console.print(
+                f"\n[bold]Found {len(versions)} configuration version(s):[/bold]\n"
+            )
+
+            # Create table for better formatting
+            from rich.table import Table
+
+            table = Table(show_header=True, header_style="bold blue")
+            table.add_column("Version Name", style="cyan")
+            table.add_column("Status", justify="center")
+            table.add_column("Created", style="dim")
+            table.add_column("Updated", style="dim")
+            table.add_column("Description", style="green")
+
+            for version in sorted(versions, key=lambda x: x.get("versionName", "")):
+                version_name = version.get("versionName", "unknown")
+                status = (
+                    "[bold green]ACTIVE[/bold green]" if version.get("isActive") else ""
+                )
+                created = (
+                    version.get("createdAt", "").replace("T", " ").replace("Z", "")
+                    if version.get("createdAt")
+                    else ""
+                )
+                updated = (
+                    version.get("updatedAt", "").replace("T", " ").replace("Z", "")
+                    if version.get("updatedAt")
+                    else ""
+                )
+                description = version.get("description", "")
+
+                table.add_row(version_name, status, created, updated, description)
+
+            console.print(table)
+
+        except ValueError as e:
+            console.print(f"[red]✗ {e}[/red]")
+            return
+        except Exception as e:
+            console.print(f"[red]✗ Failed to list configuration versions: {e}[/red]")
+            return
+
+    except Exception as e:
+        console.print(f"[red]✗ Failed to list configurations: {e}[/red]")
+        return
+
+
+@cli.command(name="config-delete")
+@click.option(
+    "--stack-name",
+    required=True,
+    help="CloudFormation stack name",
+)
+@click.option(
+    "--config-version",
+    required=True,
+    help="Configuration version to delete",
+)
+@click.option(
+    "--force",
+    is_flag=True,
+    help="Skip confirmation prompt",
+)
+def config_delete(
+    stack_name: str,
+    config_version: str,
+    force: bool,
+):
+    """
+    Delete a configuration version from a deployed IDP stack
+
+    Removes the specified configuration version from DynamoDB.
+    Cannot delete the 'default' version or currently active versions.
+
+    Examples:
+      # Delete a version with confirmation
+      idp-cli config-delete --stack-name my-stack --config-version old-version
+
+      # Delete without confirmation prompt
+      idp-cli config-delete --stack-name my-stack --config-version old-version --force
+    """
+    try:
+        console.print(
+            f"[bold blue]Deleting config version from stack: {stack_name}[/bold blue]"
+        )
+        console.print(f"Version: {config_version}")
+
+        # Get stack resources
+        try:
+            config_table = None
+            cf_client = boto3.client("cloudformation")
+            resources = cf_client.list_stack_resources(StackName=stack_name)
+            for resource in resources["StackResourceSummaries"]:
+                if resource["LogicalResourceId"] == "ConfigurationTable":
+                    config_table = resource.get("PhysicalResourceId")
+                if config_table:
+                    break
+
+        except Exception as e:
+            console.print(f"[red]✗ Failed to get stack resources: {e}[/red]")
+            return
+
+        if not config_table:
+            console.print(
+                "[red]✗ ConfigurationTable not found in stack resources[/red]"
+            )
+            return
+
+        console.print(f"[dim]Using table: {config_table}[/dim]")
+
+        # Delete the version
+        try:
+            from idp_common.config.configuration_manager import ConfigurationManager
+
+            os.environ["CONFIGURATION_TABLE_NAME"] = config_table
+            manager = ConfigurationManager()
+
+            # Confirmation prompt
+            if not force:
+                if not click.confirm(
+                    f"Are you sure you want to delete configuration version '{config_version}'?"
+                ):
+                    console.print("[yellow]Deletion cancelled[/yellow]")
+                    return
+
+            # Delete the version (method handles all validations)
+            manager.delete_configuration("Config", version=config_version)
+            console.print(
+                f"[green]✓ Successfully deleted configuration version: {config_version}[/green]"
+            )
+
+        except ValueError as e:
+            console.print(f"[red]✗ {e}[/red]")
+            return
+        except Exception as e:
+            console.print(f"[red]✗ Failed to delete configuration version: {e}[/red]")
+            return
+
+    except Exception as e:
+        console.print(f"[red]✗ Failed to delete configuration: {e}[/red]")
+        return
         console.print(f"[red]✗ Error: {e}[/red]")
         sys.exit(1)
 

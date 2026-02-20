@@ -56,33 +56,291 @@ When enabled, the stack automatically creates:
 - External App Client in Cognito User Pool
 - Required IAM roles and policies
 - AgentCore Gateway resource
+- MCP Content Bucket for document uploads
 
 When disabled, these resources are not created, reducing deployment complexity and costs.
 
 ## Current Capabilities
 
-### Analytics Agent
+The AgentCore Gateway provides four integrated tools for document processing and analytics:
 
-The current implementation provides an Analytics Agent that processes natural language queries about processed document data. The agent follows the AgentCore schema and provides a single tool interface:
+### search
 
-#### search_genaiidp
-Provides information from the GenAI Intelligent Document Processing System and answers user questions using natural language queries.
+Natural language queries for document analytics and system information.
 
 **Input Schema:**
-- `query` (string, required): Natural language question about processed documents or analytics data
+```json
+{
+  "query": {
+    "type": "string",
+    "description": "Natural language question about processed documents or analytics data"
+  }
+}
+```
 
-**Capabilities:**
-- Query processed document statistics and metadata
-- Analyze document processing trends and patterns
-- Retrieve information about document types, processing status, and results
-- Generate analytics reports based on natural language requests
+**Output Schema:**
+```json
+{
+  "success": "boolean",
+  "query": "string",
+  "result": "string"
+}
+```
 
-**Example Queries:**
-- "How many documents were processed last month?"
-- "What are the most common document types?"
-- "Show me the processing success rate by document type"
-- "Which documents had the lowest confidence scores?"
-- "Generate a report of processing errors from the last week"
+**Example Request:**
+```json
+{
+  "method": "tools/call",
+  "params": {
+    "name": "search",
+    "arguments": {
+      "query": "How many documents were processed last month?"
+    }
+  }
+}
+```
+
+**Example Response:**
+```json
+{
+  "success": true,
+  "query": "How many documents were processed last month?",
+  "result": "1,250 documents were processed in the last month with a 98.5% success rate."
+}
+```
+
+### process
+
+Process documents from S3 or base64 content. To process documents via S3:
+
+1. Upload documents to the `MCPContentBucket` (available in CloudFormation stack outputs):
+   ```bash
+   aws s3 cp documents/ s3://<MCPContentBucket>/documents/ --recursive
+   ```
+2. Call the `process` tool with the S3 URI pointing to your uploaded documents
+3. The tool queues documents for processing through the IDP pipeline
+
+**Alternatively, process documents via base64 content** by providing the encoded content directly to the tool.
+
+**Input Schema:**
+```json
+{
+  "location": {
+    "type": "string",
+    "description": "S3 URI for batch processing (e.g., 's3://mcp-content-bucket/documents/'). Optional if content is provided."
+  },
+  "content": {
+    "type": "string",
+    "description": "Base64-encoded document content for single document processing. Optional if location is provided."
+  },
+  "name": {
+    "type": "string",
+    "description": "Document filename with extension (e.g., 'invoice.pdf'). Required if content is provided."
+  },
+  "prefix": {
+    "type": "string",
+    "description": "Optional batch ID prefix (default: 'mcp-batch')"
+  }
+}
+```
+
+**Output Schema:**
+```json
+{
+  "success": "boolean",
+  "batch_id": "string",
+  "documents_queued": "integer",
+  "message": "string"
+}
+```
+
+**Example Request (S3 Location):**
+```json
+{
+  "method": "tools/call",
+  "params": {
+    "name": "process",
+    "arguments": {
+      "location": "s3://mcp-content-bucket/documents/",
+      "prefix": "batch-001"
+    }
+  }
+}
+```
+
+**Example Request (Base64 Content):**
+```json
+{
+  "method": "tools/call",
+  "params": {
+    "name": "process",
+    "arguments": {
+      "content": "JVBERi0xLjQKJeLjz9MNCjEgMCBvYmo...",
+      "name": "invoice.pdf",
+      "prefix": "mcp-batch"
+    }
+  }
+}
+```
+
+**Example Response:**
+```json
+{
+  "success": true,
+  "batch_id": "mcp-batch-20250124-143000",
+  "documents_queued": 5,
+  "message": "Successfully queued 5 documents for processing"
+}
+```
+
+### reprocess
+
+Reprocess documents from classification or extraction steps.
+
+**Input Schema:**
+```json
+{
+  "step": {
+    "type": "string",
+    "enum": ["classification", "extraction"],
+    "description": "Pipeline step to reprocess from"
+  },
+  "document_ids": {
+    "type": "string",
+    "description": "Comma-separated list of document IDs to reprocess (alternative to batch_id)"
+  },
+  "batch_id": {
+    "type": "string",
+    "description": "Batch ID to get document IDs from (alternative to document_ids)"
+  },
+  "region": {
+    "type": "string",
+    "description": "AWS region (optional)"
+  }
+}
+```
+
+**Output Schema:**
+```json
+{
+  "success": "boolean",
+  "batch_id": "string",
+  "documents_queued": "integer",
+  "step": "string",
+  "message": "string"
+}
+```
+
+**Example Request:**
+```json
+{
+  "method": "tools/call",
+  "params": {
+    "name": "reprocess",
+    "arguments": {
+      "step": "extraction",
+      "batch_id": "mcp-batch-20250124-143000"
+    }
+  }
+}
+```
+
+**Example Response:**
+```json
+{
+  "success": true,
+  "batch_id": "mcp-batch-20250124-143000",
+  "documents_queued": 5,
+  "step": "extraction",
+  "message": "Successfully queued 5 documents for extraction reprocessing"
+}
+```
+
+### status
+
+Query batch and document processing status.
+
+**Input Schema:**
+```json
+{
+  "batch_id": {
+    "type": "string",
+    "description": "Batch identifier (e.g., 'mcp-batch-20250124-143000')"
+  },
+  "options": {
+    "type": "object",
+    "description": "Optional status parameters",
+    "properties": {
+      "detailed": {
+        "type": "boolean",
+        "description": "Include per-document details (default: false)"
+      },
+      "include_errors": {
+        "type": "boolean",
+        "description": "Include error details (default: true)"
+      }
+    }
+  },
+  "region": {
+    "type": "string",
+    "description": "AWS region (optional)"
+  }
+}
+```
+
+**Output Schema:**
+```json
+{
+  "success": "boolean",
+  "batch_id": "string",
+  "status": {
+    "total": "integer",
+    "completed": "integer",
+    "in_progress": "integer",
+    "failed": "integer",
+    "queued": "integer"
+  },
+  "progress": {
+    "percentage": "number"
+  },
+  "all_complete": "boolean"
+}
+```
+
+**Example Request:**
+```json
+{
+  "method": "tools/call",
+  "params": {
+    "name": "status",
+    "arguments": {
+      "batch_id": "mcp-batch-20250124-143000",
+      "options": {
+        "detailed": true
+      }
+    }
+  }
+}
+```
+
+**Example Response:**
+```json
+{
+  "success": true,
+  "batch_id": "mcp-batch-20250124-143000",
+  "status": {
+    "total": 5,
+    "completed": 3,
+    "in_progress": 1,
+    "failed": 0,
+    "queued": 1
+  },
+  "progress": {
+    "percentage": 60.0
+  },
+  "all_complete": false
+}
+```
 
 ## Implementation Details
 
@@ -119,6 +377,58 @@ The Analytics Lambda has read-only access to:
 - **Reporting Bucket**: S3 bucket containing analytics data and query results
 - **Configuration Tables**: DynamoDB tables with system configuration
 - **Tracking Tables**: DynamoDB tables with processing status
+
+## Security
+
+### Authentication & Authorization
+
+The MCP Server uses AWS Cognito OAuth 2.0 for secure authentication:
+- External applications obtain JWT tokens from the Cognito User Pool
+- AgentCore Gateway validates JWT tokens on every request
+- Tokens include scopes (openid, email, profile) for fine-grained access control
+- Token expiration and refresh mechanisms prevent unauthorized access
+
+### IAM Role-Based Access Control
+
+The AgentCore Analytics Lambda operates with least-privilege IAM permissions:
+- Read-only access to DynamoDB tracking and configuration tables
+- Read-only access to S3 analytics and reporting buckets
+- No write permissions to input or output buckets
+- Scoped permissions prevent access to resources outside the IDP stack
+- Service role restricts Lambda execution to authorized operations only
+
+### S3 Bucket Access
+
+Document processing through the MCP Server follows secure S3 access patterns:
+- Input documents from S3 are processed through the standard IDP pipeline
+- Base64-encoded documents are uploaded to a temporary MCP bucket with restricted access
+- Temporary files are automatically cleaned up after processing
+- All S3 operations use IAM role credentials (no long-lived access keys)
+- Bucket policies restrict access to the IDP stack's execution roles
+
+### Data Encryption
+
+Data security is maintained throughout the MCP integration:
+- **In Transit**: All communication between external applications and AgentCore Gateway uses HTTPS/TLS
+- **At Rest**: DynamoDB tables and S3 buckets use AWS-managed encryption keys
+- **JWT Tokens**: Signed with Cognito's private keys and validated using public keys
+- **Sensitive Data**: Client secrets are stored securely in AWS Secrets Manager and rotated regularly
+
+## MCP Content Bucket
+
+The stack creates a dedicated S3 bucket for MCP document uploads:
+
+- **Bucket Name**: `MCPContentBucket` (available in CloudFormation stack outputs)
+- **Purpose**: Upload documents for processing via the `process` tool
+- **Access**: Accessible through the MCP Server tools with proper authentication
+- **Usage**: Provide the S3 URI (e.g., `s3://mcp-content-bucket/documents/`) to the `process` tool
+- **Cleanup**: Temporary files are automatically managed by the IDP pipeline
+
+**Example Workflow:**
+1. Upload documents to MCPContentBucket via S3 console or AWS CLI
+2. Use the `process` tool with the S3 URI pointing to MCPContentBucket
+3. Documents are processed through the standard IDP pipeline
+4. Results are available in the output bucket
 
 ## Cognito User Pool Utilization
 
@@ -175,6 +485,12 @@ curl -X POST <MCPTokenURL> \
 
 When MCP integration is enabled, the CloudFormation stack provides the following outputs required for external application integration:
 
+### MCP Content Bucket
+
+- **`MCPContentBucket`**: S3 bucket for uploading documents to process via MCP tools
+  - Use this bucket to upload documents before calling the `process` tool
+  - Provide the S3 URI from this bucket to the `process` tool's `location` parameter
+
 ### MCP Server Endpoint
 
 - **`MCPServerEndpoint`**: The HTTPS endpoint for the MCP Server
@@ -216,6 +532,7 @@ GATEWAY_URL = "<MCPServerEndpoint>"  # From stack outputs
 CLIENT_ID = "<MCPClientId>"  # From stack outputs
 CLIENT_SECRET = "<MCPClientSecret>"  # From stack outputs
 TOKEN_URL = "<MCPTokenURL>"  # From stack outputs
+MCP_BUCKET = "<MCPContentBucket>"  # From stack outputs
 
 # Get access token
 token_response = requests.post(
@@ -229,13 +546,14 @@ token_response = requests.post(
 )
 access_token = token_response.json()["access_token"]
 
-# Query analytics data using natural language
-query_request = {
+# Process documents from MCP bucket
+process_request = {
     "method": "tools/call",
     "params": {
-        "name": "search_genaiidp",
+        "name": "process",
         "arguments": {
-            "query": "How many documents were processed this week?"
+            "location": f"s3://{MCP_BUCKET}/documents/",
+            "prefix": "batch-001"
         }
     }
 }
@@ -246,11 +564,11 @@ response = requests.post(
         "Authorization": f"Bearer {access_token}",
         "Content-Type": "application/json"
     },
-    json=query_request
+    json=process_request
 )
 
 result = response.json()
-print(f"Query result: {result}")
+print(f"Processing result: {result}")
 ```
 
 ### Amazon Quick Suite Integration
@@ -262,3 +580,4 @@ For Amazon Quick Suite integration, configure the MCP connection using the Cloud
 - **Client Secret**: Use `MCPClientSecret` output value
 - **Token URL**: Use `MCPTokenURL` output value
 - **Authorization URL**: Use `MCPAuthorizationURL` output value
+- **Content Bucket**: Use `MCPContentBucket` output value for document uploads

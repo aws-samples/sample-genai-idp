@@ -48,12 +48,16 @@ class DocumentDownloadResult(BaseModel):
     output_dir: str = Field(description="Local output directory path")
 
 
-class DocumentRerunResult(BaseModel):
-    """Result of rerunning a single document."""
+class DocumentReprocessResult(BaseModel):
+    """Result of reprocessing a single document."""
 
     document_id: str = Field(description="Document identifier")
-    step: RerunStep = Field(description="Pipeline step being rerun")
+    step: RerunStep = Field(description="Pipeline step being reprocessed")
     queued: bool = Field(description="Whether document was successfully queued")
+
+
+# Backward compatibility alias
+DocumentRerunResult = DocumentReprocessResult
 
 
 class DocumentDeletionResult(BaseModel):

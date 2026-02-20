@@ -2,94 +2,93 @@
 # SPDX-License-Identifier: MIT-0
 
 """
-Lambda function for AgentCore Gateway analytics processing.
-Provides analytics tools through AgentCore Gateway's built-in MCP server.
+Lambda function for AgentCore Gateway MCP tools.
+Provides IDP operations through AgentCore Gateway's built-in MCP server.
 """
 
 import json
 import logging
-import time
 from typing import Any, Dict
 
-import boto3
-from botocore.exceptions import ClientError, EventStreamError
-
-from idp_common.agents.analytics.config import get_analytics_config
 from idp_common.agents.common.config import configure_logging
-from idp_common.agents.analytics.agent import create_analytics_agent
+from tools import get_tool
 
-# Configure logging for both application and Strands framework
+# Configure logging
 configure_logging()
 
 # Get logger for this module
 logger = logging.getLogger(__name__)
 
-# Cache at module level
-_session = None
-_config = None
-
-def log_analytics_events(context_msg: str = ""):
-    """Helper to log analytics events safely."""
-    try:
-        from idp_common.agents.analytics.analytics_logger import analytics_logger
-        analytics_logger.display_summary()
-    except Exception as e:
-        logger.warning(f"Failed to log analytics events: {e}")
+# Version marker for deployment verification
+CODE_VERSION = "2024-01-SDK-INTEGRATION-v2"
+CODE_UPDATED = "2025-01-09T19:30:00Z"
 
 
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
-    """Process analytics queries through agent."""
-    global _session, _config
+    """Route MCP tool invocations to appropriate handlers"""
+    logger.info(f"=== Lambda Handler Started ===")
+    logger.info(f"Code Version: {CODE_VERSION}")
+    logger.info(f"Code Updated: {CODE_UPDATED}")
+    logger.info(f"Received event: {json.dumps(event)}")
     
-    query = event.get('query')
-    if not query:
+    # Log context details for debugging
+    logger.info(f"Context type: {type(context)}")
+    if hasattr(context, 'client_context'):
+        logger.info(f"client_context: {context.client_context}")
+        if context.client_context:
+            custom = getattr(context.client_context, 'custom', {})
+            logger.info(f"client_context.custom: {custom}")
+    
+    # Extract tool name from context (AgentCore Gateway pattern)
+    # Format: ${target_name}__${tool_name} or _${tool_name}
+    tool_name_full = None
+    if hasattr(context, 'client_context') and context.client_context:
+        custom = getattr(context.client_context, 'custom', {})
+        tool_name_full = custom.get('bedrockAgentCoreToolName')
+    
+    if not tool_name_full:
+        logger.error("No bedrockAgentCoreToolName in context")
         return {
-            'statusCode': 200,
-            'body': json.dumps({'query': '', 'result': 'No query provided'})
+            'statusCode': 400,
+            'body': json.dumps({'error': 'No tool name in context'})
         }
+    
+    # Strip target name prefix (handle ___ delimiter)
+    if '___' in tool_name_full:
+        tool_name = tool_name_full.split('___', 1)[1]
+    else:
+        tool_name = tool_name_full
+    
+    # Strip leading underscore if present
+    if tool_name.startswith('_'):
+        tool_name = tool_name[1:]
+    
+    logger.info(f"Tool name from context: {tool_name_full} -> {tool_name}")
     
     try:
-        # Reuse session and config across warm starts
-        if _session is None:
-            _session = boto3.Session()
-        if _config is None:
-            _config = get_analytics_config()
+        logger.info(f"Looking up tool: {tool_name}")
+        tool = get_tool(tool_name)
+        logger.info(f"Found tool class: {tool.__class__.__name__}")
+        logger.info(f"Tool module: {tool.__class__.__module__}")
         
-        # Create analytics agent directly
-        agent = create_analytics_agent(config=_config, session=_session)
-
-        start_time = time.time()
-        logger.info(f"Query: [{query}]")
-        result = agent(query)
-        elapsed = time.time() - start_time
-        # Log events
-        logger.info(f"Prompt: [{query}]")
-        log_analytics_events("")
-        logger.info(f"Process completed in {elapsed:.2f}s")
+        # Parameters are sent directly as top-level event fields
+        logger.info(f"Executing tool: {tool_name} with event: {json.dumps(event)}")
+        logger.info(f"Tool execution starting...")
+        result = tool.execute(**event)
+        logger.info(f"Tool execution completed successfully")
+        logger.info(f"Result: {json.dumps(result)[:500]}...")  # Log first 500 chars
+        
         return {
             'statusCode': 200,
-            'body': json.dumps({'query': query, 'result': str(result)})
+            'body': json.dumps(result)
         }
+    
     except Exception as e:
-        # Log events
-        logger.info(f"Prompt: [{query}]")
-        log_analytics_events("")
-        
-        # Determine message
-        error_str = str(e).lower()
-        error_code = getattr(e, 'response', {}).get('Error', {}).get('Code', '') if isinstance(e, (EventStreamError, ClientError)) else ''
-        
-        if 'unavailable' in error_str or error_code in ['ThrottlingException', 'ServiceUnavailable']:
-            message = 'Service temporarily unavailable due to high demand. Please retry in a moment.'
-        elif isinstance(e, (EventStreamError, ClientError)):
-            message = f'Error: {str(e)}'
-        else:
-            message = 'An error occurred processing your request. Please try again.'
-        
-        # Single logging point
-        logger.error(f"Query failed: {e}")
-        
+        logger.error(f"Tool execution failed: {e}", exc_info=True)
         return {
-            'statusCode': 200,
-            'body': json.dumps({'query': query, 'result': message})
+            'statusCode': 500,
+            'body': json.dumps({
+                'error': str(e),
+                'tool_name': tool_name
+            })
         }

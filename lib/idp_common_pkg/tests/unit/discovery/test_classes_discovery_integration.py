@@ -267,7 +267,11 @@ class TestClassesDiscoveryIntegration:
         put_item_args = service_with_mocks._mock_table.put_item.call_args[1]
 
         assert put_item_args["Item"]["Configuration"] == "Config#test-version"
-        classes = put_item_args["Item"]["classes"]
+        # Decompress the saved item to inspect config data (compressed storage format)
+        from idp_common.config.configuration_manager import ConfigurationManager
+
+        decompressed_item = ConfigurationManager._decompress_item(put_item_args["Item"])
+        classes = decompressed_item["classes"]
         assert len(classes) == 1
 
         # Verify JSON Schema format

@@ -1,0 +1,6 @@
+# Test dependencies for capacity planning Lambda
+pytest>=7.4.0
+pytest-cov>=4.1.0
+pytest-mock>=3.11.1
+boto3>=1.28.0
+moto>=4.2.0

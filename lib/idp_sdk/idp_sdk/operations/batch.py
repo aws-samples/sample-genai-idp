@@ -16,8 +16,8 @@ from idp_sdk.models import (
     BatchDownloadResult,
     BatchInfo,
     BatchListResult,
-    BatchRerunResult,
-    BatchResult,
+    BatchProcessResult,
+    BatchReprocessResult,
     BatchStatus,
     DocumentDeletionResult,
     DocumentStatus,
@@ -32,7 +32,7 @@ class BatchOperation:
     def __init__(self, client):
         self._client = client
 
-    def run(
+    def process(
         self,
         source: Optional[str] = None,
         manifest: Optional[str] = None,
@@ -49,8 +49,8 @@ class BatchOperation:
         config_version: Optional[str] = None,
         context: Optional[str] = None,
         **kwargs,
-    ) -> BatchResult:
-        """Run inference on a batch of documents.
+    ) -> BatchProcessResult:
+        """Process multiple documents through the IDP pipeline.
 
         Args:
             source: Source path (auto-detects type: directory, manifest, or S3 URI)
@@ -70,7 +70,7 @@ class BatchOperation:
             **kwargs: Additional parameters
 
         Returns:
-            BatchResult with batch processing information
+            BatchProcessResult with batch processing information
         """
         from idp_sdk.core.batch_processor import BatchProcessor
 
@@ -97,10 +97,6 @@ class BatchOperation:
             )
 
         try:
-            # processor = BatchProcessor(
-            #     stack_name=name, config_path=config_path, region=self._client._region
-            # )
-
             processor = BatchProcessor(
                 stack_name=name,
                 config_path=config_path,
@@ -137,7 +133,7 @@ class BatchOperation:
                     batch_id=batch_id,
                 )
 
-            return BatchResult(
+            return BatchProcessResult(
                 batch_id=result["batch_id"],
                 document_ids=result["document_ids"],
                 queued=result.get("queued", 0),
@@ -152,6 +148,50 @@ class BatchOperation:
             )
         except Exception as e:
             raise IDPProcessingError(f"Batch processing failed: {e}") from e
+
+    def run(
+        self,
+        source: Optional[str] = None,
+        manifest: Optional[str] = None,
+        directory: Optional[str] = None,
+        s3_uri: Optional[str] = None,
+        test_set: Optional[str] = None,
+        stack_name: Optional[str] = None,
+        batch_id: Optional[str] = None,
+        batch_prefix: str = "sdk-batch",
+        file_pattern: str = "*.pdf",
+        recursive: bool = True,
+        number_of_files: Optional[int] = None,
+        config_path: Optional[str] = None,
+        config_version: Optional[str] = None,
+        context: Optional[str] = None,
+        **kwargs,
+    ) -> BatchProcessResult:
+        """Deprecated: Use process() instead."""
+        import warnings
+
+        warnings.warn(
+            "run() is deprecated, use process() instead",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.process(
+            source=source,
+            manifest=manifest,
+            directory=directory,
+            s3_uri=s3_uri,
+            test_set=test_set,
+            stack_name=stack_name,
+            batch_id=batch_id,
+            batch_prefix=batch_prefix,
+            file_pattern=file_pattern,
+            recursive=recursive,
+            number_of_files=number_of_files,
+            config_path=config_path,
+            config_version=config_version,
+            context=context,
+            **kwargs,
+        )
 
     def _process_test_set(
         self,
@@ -226,25 +266,25 @@ class BatchOperation:
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
-    def rerun(
+    def reprocess(
         self,
         step: Union[str, RerunStep],
         document_ids: Optional[List[str]] = None,
         batch_id: Optional[str] = None,
         stack_name: Optional[str] = None,
         **kwargs,
-    ) -> BatchRerunResult:
-        """Rerun processing for existing documents from a specific step.
+    ) -> BatchReprocessResult:
+        """Reprocess existing documents from a specific step.
 
         Args:
-            step: Pipeline step to rerun from
-            document_ids: List of document IDs to rerun
-            batch_id: Batch ID (will rerun all documents in batch)
+            step: Pipeline step to reprocess from
+            document_ids: List of document IDs to reprocess
+            batch_id: Batch ID (will reprocess all documents in batch)
             stack_name: Optional stack name override
             **kwargs: Additional parameters
 
         Returns:
-            BatchRerunResult with rerun statistics
+            BatchReprocessResult with reprocess statistics
         """
         from idp_sdk.core.rerun_processor import RerunProcessor
 
@@ -264,14 +304,38 @@ class BatchOperation:
                 document_ids=document_ids, step=step_str, monitor=False
             )
 
-            return BatchRerunResult(
+            return BatchReprocessResult(
                 documents_queued=result.get("documents_queued", 0),
                 documents_failed=result.get("documents_failed", 0),
                 failed_documents=result.get("failed_documents", []),
                 step=RerunStep(step_str),
             )
         except Exception as e:
-            raise IDPProcessingError(f"Rerun failed: {e}") from e
+            raise IDPProcessingError(f"Reprocess failed: {e}") from e
+
+    def rerun(
+        self,
+        step: Union[str, RerunStep],
+        document_ids: Optional[List[str]] = None,
+        batch_id: Optional[str] = None,
+        stack_name: Optional[str] = None,
+        **kwargs,
+    ) -> BatchReprocessResult:
+        """Deprecated: Use reprocess() instead."""
+        import warnings
+
+        warnings.warn(
+            "rerun() is deprecated, use reprocess() instead",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.reprocess(
+            step=step,
+            document_ids=document_ids,
+            batch_id=batch_id,
+            stack_name=stack_name,
+            **kwargs,
+        )
 
     def get_status(
         self,
@@ -312,7 +376,6 @@ class BatchOperation:
             for doc in status_data.get(category, []):
                 start_time = doc.get("start_time") or None
                 end_time = doc.get("end_time") or None
-                # Convert empty strings to None for datetime fields
                 if start_time == "":
                     start_time = None
                 if end_time == "":

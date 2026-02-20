@@ -2378,19 +2378,11 @@ STDERR:
             os.makedirs(layer_python_dir, exist_ok=True)
 
             # Build pip install command with extras
-            self.log_verbose(
-                f"  DEBUG: layer_extras = {layer_extras}, type = {type(layer_extras)}"
-            )
             if layer_extras:
                 extras_str = ",".join(layer_extras)
-                self.log_verbose(f"  DEBUG: extras_str = {extras_str}")
                 install_spec = f"./lib/idp_common_pkg[{extras_str}]"
-                self.log_verbose(f"  DEBUG: install_spec with extras = {install_spec}")
             else:
                 install_spec = "./lib/idp_common_pkg"
-                self.log_verbose(
-                    f"  DEBUG: install_spec without extras = {install_spec}"
-                )
 
             # Install dependencies into layer python directory
             # Use platform-specific flags to ensure x86_64 Lambda compatibility
@@ -2421,11 +2413,18 @@ STDERR:
                 f"[cyan]Building layer '{layer_name}'{extras_info}...[/cyan]"
             )
             self.console.print(f"Installing: {install_spec}", style="dim", markup=False)
-            self.log_verbose(f"  Full command: {' '.join(cmd)}")
 
             result = subprocess.run(cmd, capture_output=True, text=True)
             if result.returncode != 0:
                 raise Exception(f"Layer build failed: {result.stderr}")
+
+            # Copy idp_sdk to layers
+            self.console.print("[cyan]  Copying idp_sdk package files...[/cyan]")
+            sdk_source = "./lib/idp_sdk/idp_sdk"
+            sdk_dest = os.path.join(layer_python_dir, "idp_sdk")
+            if os.path.exists(sdk_dest):
+                shutil.rmtree(sdk_dest)
+            shutil.copytree(sdk_source, sdk_dest)
 
             # Remove Lambda runtime packages (already provided by Lambda runtime)
             # This saves ~100+ MB per layer and prevents size limit issues
@@ -2463,11 +2462,13 @@ STDERR:
                     f"  Removed Lambda runtime packages: {', '.join(set(removed_packages))}"
                 )
 
-            # Compute SOURCE hash from lib/idp_common_pkg source files
-            # This ensures when source changes, layer is always rebuilt
-            source_hash = self.get_source_files_checksum("./lib/idp_common_pkg")[:8]
+            # Compute SOURCE hash from both idp_common_pkg and idp_sdk
+            common_hash = self.get_source_files_checksum("./lib/idp_common_pkg")[:8]
+            sdk_hash = self.get_source_files_checksum("./lib/idp_sdk")[:8]
+            source_hash = hashlib.sha256(
+                f"{common_hash}{sdk_hash}".encode()
+            ).hexdigest()[:8]
 
-            # Use source hash in zip name to ensure rebuild when source changes
             layer_zip_name = f"idp-common-{layer_name}-{source_hash}.zip"
             layer_zip_path = os.path.join(".aws-sam", "layers", layer_zip_name)
 
@@ -2476,7 +2477,6 @@ STDERR:
                 self.console.print(
                     f"[green]Layer {layer_name} already built with same source: {layer_zip_name}[/green]"
                 )
-                # Clean up build directory
                 shutil.rmtree(layer_build_dir)
                 return layer_zip_path, layer_zip_name
 

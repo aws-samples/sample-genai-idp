@@ -4,11 +4,13 @@
 from __future__ import annotations
 
 import boto3
+import gzip
 import json
 import os
 from typing import Dict, Any, Optional, Union, List
 from botocore.exceptions import ClientError
 import logging
+from boto3.dynamodb.types import Binary
 
 from .models import IDPConfig, SchemaConfig, PricingConfig, ConfigurationRecord, ConfigMetadata
 from .merge_utils import (
@@ -29,6 +31,18 @@ logger = logging.getLogger(__name__)
 # Marker field added to full-format config versions in DynamoDB
 _FULL_CONFIG_MARKER = "_config_format"
 _FULL_CONFIG_VALUE = "full"
+
+# Compressed storage markers and fields
+_COMPRESSED_STORAGE_MARKER = "_config_storage"
+_COMPRESSED_STORAGE_VALUE = "compressed"
+_COMPRESSED_DATA_FIELD = "_compressed_config"
+
+# DynamoDB metadata fields that are stored as top-level attributes (not compressed)
+_DYNAMODB_METADATA_FIELDS = {"Configuration", "CreatedAt", "UpdatedAt", "IsActive", "Description"}
+
+# DynamoDB item size limit (400KB) with safety margin
+_DYNAMODB_ITEM_SIZE_LIMIT = 400 * 1024
+_DYNAMODB_ITEM_SIZE_WARNING = 350 * 1024  # Warn at 350KB
 
 # Minimum number of top-level keys expected in a full IDP config
 _MIN_FULL_CONFIG_KEYS = 4
@@ -146,6 +160,8 @@ class ConfigurationManager:
         Used internally for reading configs that may be legacy sparse deltas
         (which can't pass Pydantic validation on their own).
 
+        Supports both compressed and legacy inline storage formats.
+
         Args:
             config_type: Configuration type
             version: Version identifier
@@ -169,9 +185,11 @@ class ConfigurationManager:
                 logger.info(f"Raw configuration not found: {config_type}, version: {version}")
                 return None
 
+            # Decompress if stored in compressed format
+            item = self._decompress_item(item)
+
             # Remove DynamoDB partition key and metadata fields - return only config data
-            metadata_fields = {"Configuration", "CreatedAt", "UpdatedAt", "IsActive", "Description"}
-            config_data = {k: v for k, v in item.items() if k not in metadata_fields}
+            config_data = {k: v for k, v in item.items() if k not in _DYNAMODB_METADATA_FIELDS}
 
             logger.info(f"Retrieved raw configuration for {config_type}, version: {version}")
             return config_data
@@ -206,11 +224,15 @@ class ConfigurationManager:
 
         if not version:
             # Find and use active version
+            active_version: Optional[str] = None
             for version_dict in self.list_config_versions():
                 if version_dict.get("isActive"):
-                    version = version_dict.get("versionName")
-                    logger.info(f"Using active version: {version}")
+                    active_version = version_dict.get("versionName")
+                    logger.info(f"Using active version: {active_version}")
                     break
+            
+            if active_version:
+                version = active_version
             else:
                 logger.warning("No active version found, using default")
                 version = DEFAULT_VERSION
@@ -428,17 +450,21 @@ class ConfigurationManager:
 
         Raises:
             ClientError: If DynamoDB operation fails
-            ValueError: If version is required but not provided, or trying to delete active version
+            ValueError: If version is required but not provided, or trying to delete active/default version
         """
         try:
             if config_type == CONFIG_TYPE_CONFIG:
                 if version is None:
                     raise ValueError("Version is required for Config type")
 
+                # Prevent deletion of default version
+                if version.lower() == DEFAULT_VERSION.lower():
+                    raise ValueError(f"Cannot delete the '{DEFAULT_VERSION}' configuration version")
+
                 record = self._read_record(CONFIG_TYPE_CONFIG, version)
                 logger.info(f"Checking version {version} for deletion. Record found: {record is not None}, Is active: {record.is_active if record else 'N/A'}")
                 if not record:
-                    raise ClientError(f"Version: {version} not found in configurations")
+                    raise ValueError(f"Version: {version} not found in configurations")
                 if record and record.is_active:
                     raise ValueError(f"Cannot delete active version {version}. Activate another version first.")
                 key = f"{CONFIG_TYPE_CONFIG}#{version}"
@@ -730,6 +756,10 @@ class ConfigurationManager:
         """
         Read ConfigurationRecord from DynamoDB using single key.
 
+        Supports both compressed and legacy inline storage formats:
+        - Compressed: config data stored as gzip-compressed Binary attribute
+        - Legacy inline: config data stored as individual top-level DynamoDB attributes
+
         Args:
             configuration_type: Configuration type (Config, Schema, Pricing)
             version: Version identifier for Config type or "" for Schema/Pricing
@@ -743,13 +773,25 @@ class ConfigurationManager:
         if item is None:
             return None
 
+        # Decompress if stored in compressed format
+        item = self._decompress_item(item)
+
         return ConfigurationRecord.from_dynamodb_item(item)
 
     def _write_record(self, record: ConfigurationRecord, identifier: Optional[str] = None) -> None:
         """
         Write ConfigurationRecord to DynamoDB using single key.
 
+        Uses gzip compression to store config data as a Binary attribute,
+        keeping only metadata fields as top-level DynamoDB attributes. This
+        overcomes the DynamoDB 400KB item size limit, supporting configurations
+        with hundreds of document classes.
+
         For Config type records, adds the full config format marker.
+
+        Backward compatibility:
+        - New writes always use compressed format
+        - Reads auto-detect compressed vs legacy inline format
 
         Args:
             record: ConfigurationRecord to write
@@ -761,7 +803,10 @@ class ConfigurationManager:
         if record.configuration_type == CONFIG_TYPE_CONFIG:
             item[_FULL_CONFIG_MARKER] = _FULL_CONFIG_VALUE
 
-        self.table.put_item(Item=item)
+        # Compress config data to avoid DynamoDB 400KB item limit
+        compressed_item = self._compress_item(item)
+
+        self.table.put_item(Item=compressed_item)
 
         # Generate log identifier
         if identifier:
@@ -772,6 +817,122 @@ class ConfigurationManager:
             log_id = record.configuration_type
 
         logger.info(f"Saved configuration: {log_id}")
+
+    # ===== Compression Helpers =====
+
+    @staticmethod
+    def _compress_item(item: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Compress a DynamoDB item's config data into a gzip Binary attribute.
+
+        Separates the item into metadata fields (kept as top-level DynamoDB attributes
+        for queryability) and config data (compressed into a single Binary attribute).
+        This allows storing configurations that would otherwise exceed DynamoDB's
+        400KB item size limit.
+
+        Args:
+            item: Full DynamoDB item dict from to_dynamodb_item()
+
+        Returns:
+            Compact DynamoDB item with metadata + compressed config Binary
+        """
+        # Separate metadata (kept as top-level attributes) from config data (compressed)
+        metadata = {}
+        config_data = {}
+        for key, value in item.items():
+            if key in _DYNAMODB_METADATA_FIELDS:
+                metadata[key] = value
+            else:
+                config_data[key] = value
+
+        # Serialize and compress config data
+        config_json = json.dumps(config_data, default=str, separators=(",", ":"))
+        compressed_bytes = gzip.compress(config_json.encode("utf-8"))
+
+        compressed_size = len(compressed_bytes)
+        original_size = len(config_json.encode("utf-8"))
+        ratio = (1 - compressed_size / original_size) * 100 if original_size > 0 else 0
+        logger.info(
+            f"Compressed config: {original_size:,} bytes → {compressed_size:,} bytes "
+            f"({ratio:.1f}% reduction)"
+        )
+
+        if compressed_size > _DYNAMODB_ITEM_SIZE_WARNING:
+            logger.warning(
+                f"Compressed config size ({compressed_size:,} bytes) is approaching "
+                f"DynamoDB 400KB limit. Consider reducing the number of document classes."
+            )
+
+        if compressed_size > _DYNAMODB_ITEM_SIZE_LIMIT:
+            raise ValueError(
+                f"Configuration too large even after compression ({compressed_size:,} bytes). "
+                f"DynamoDB limit is {_DYNAMODB_ITEM_SIZE_LIMIT:,} bytes. "
+                f"Raw config size: {original_size:,} bytes."
+            )
+
+        # Build compact item: metadata + compressed blob + storage marker
+        compact_item = {
+            **metadata,
+            _COMPRESSED_DATA_FIELD: compressed_bytes,
+            _COMPRESSED_STORAGE_MARKER: _COMPRESSED_STORAGE_VALUE,
+        }
+
+        return compact_item
+
+    @staticmethod
+    def _decompress_item(item: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Decompress a DynamoDB item if it uses compressed storage format.
+
+        If the item has the compressed storage marker, extracts and decompresses
+        the config data from the Binary attribute and merges it with the metadata
+        to reconstruct the original full item.
+
+        If the item does not have the compressed marker (legacy inline format),
+        returns it unchanged for backward compatibility.
+
+        Args:
+            item: Raw DynamoDB item dict from get_item()
+
+        Returns:
+            Full DynamoDB item dict with all config fields expanded
+        """
+        if item.get(_COMPRESSED_STORAGE_MARKER) != _COMPRESSED_STORAGE_VALUE:
+            # Legacy inline format - return as-is
+            return item
+
+        # Extract compressed data
+        compressed_data = item.get(_COMPRESSED_DATA_FIELD)
+        if compressed_data is None:
+            logger.error("Compressed storage marker present but no compressed data found")
+            return item
+
+        # Handle both Binary wrapper and raw bytes
+        if isinstance(compressed_data, Binary):
+            raw_bytes = bytes(compressed_data)
+        elif isinstance(compressed_data, bytes):
+            raw_bytes = compressed_data
+        else:
+            logger.error(f"Unexpected compressed data type: {type(compressed_data)}")
+            return item
+
+        # Decompress and parse
+        try:
+            decompressed_json = gzip.decompress(raw_bytes).decode("utf-8")
+            config_data = json.loads(decompressed_json)
+        except Exception as e:
+            logger.error(f"Failed to decompress config data: {e}")
+            return item
+
+        # Reconstruct full item: metadata fields + decompressed config data
+        full_item = {}
+        for key, value in item.items():
+            if key in _DYNAMODB_METADATA_FIELDS:
+                full_item[key] = value
+        full_item.update(config_data)
+
+        logger.debug(f"Decompressed config: {len(raw_bytes):,} bytes → {len(decompressed_json):,} bytes")
+        return full_item
 
     # ===== Legacy Compatibility =====
 

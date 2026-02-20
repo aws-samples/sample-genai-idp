@@ -21,12 +21,12 @@ from idp_sdk import IDPClient
 client = IDPClient(stack_name="my-idp-stack", region="us-west-2")
 
 # Upload and process a single document
-result = client.document.upload(file_path="./invoice.pdf")
+result = client.document.process(file_path="./invoice.pdf")
 print(f"Document ID: {result.document_id}, Status: {result.status}")
 
 # Process a batch of documents
-batch_result = client.batch.run(source="./documents/")
-print(f"Batch: {batch_result.batch_id}, Queued: {batch_result.queued}")
+batch_result = client.batch.process(source="./documents/")
+print(f"Batch: {batch_result.batch_id}, Queued: {batch_result.documents_queued}")
 
 # Check status
 status = client.batch.get_status(batch_id=batch_result.batch_id)
@@ -46,23 +46,23 @@ client.stack.delete()
 client.stack.get_resources()
 
 # Batch operations (multiple documents)
-client.batch.run(...)
+client.batch.process(...)
+client.batch.reprocess(...)
 client.batch.get_status(...)
 client.batch.list()
 client.batch.download_results(...)
 client.batch.download_sources(...)
 client.batch.delete_documents(...)
-client.batch.rerun(...)
 client.batch.stop_workflows()
 
 # Document operations (single document)
-client.document.upload(...)
+client.document.process(...)
 client.document.get_status(...)
 client.document.get_metadata(...)
 client.document.list(...)
 client.document.download_results(...)
 client.document.download_source(...)
-client.document.rerun(...)
+client.document.reprocess(...)
 client.document.delete(...)
 
 # Evaluation operations (baseline comparison)
@@ -85,6 +85,9 @@ client.config.create(...)
 client.config.validate(...)
 client.config.upload(...)
 client.config.download(...)
+client.config.list(...)
+client.config.activate(...)
+client.config.delete(...)
 
 # Manifest operations
 client.manifest.generate(...)
@@ -122,9 +125,9 @@ client.stack_name = "new-stack"
 
 Operations for processing individual documents.
 
-### document.upload()
+### document.process()
 
-Upload and process a single document.
+Process a single document (upload and queue for processing).
 
 **Parameters:**
 - `file_path` (str, required): Path to local file to upload
@@ -134,7 +137,7 @@ Upload and process a single document.
 **Returns:** `DocumentUploadResult` with `document_id`, `status`, and `timestamp`
 
 ```python
-result = client.document.upload(
+result = client.document.process(
     file_path="/path/to/invoice.pdf",
     document_id="custom-id"  # Optional
 )
@@ -204,21 +207,21 @@ file_path = client.document.download_source(
 print(f"Downloaded to: {file_path}")
 ```
 
-### document.rerun()
+### document.reprocess()
 
-Rerun processing for a single document from a specific pipeline step.
+Reprocess a single document from a specific pipeline step.
 
 **Parameters:**
 - `document_id` (str, required): Document identifier (S3 key)
-- `step` (str or RerunStep, required): Pipeline step to rerun from (e.g., "classification", "extraction", RerunStep.EXTRACTION)
+- `step` (str or RerunStep, required): Pipeline step to reprocess from (e.g., "classification", "extraction", RerunStep.EXTRACTION)
 - `stack_name` (str, optional): Stack name override
 
-**Returns:** `DocumentRerunResult` with `document_id`, `step`, and `queued` status
+**Returns:** `DocumentReprocessResult` with `document_id`, `step`, and `queued` status
 
 ```python
 from idp_sdk import RerunStep
 
-result = client.document.rerun(
+result = client.document.reprocess(
     document_id="batch-123/invoice.pdf",
     step=RerunStep.EXTRACTION
 )
@@ -301,7 +304,7 @@ total_amount = metadata.fields.get("total_amount")
 
 Operations for processing multiple documents.
 
-### batch.run()
+### batch.process()
 
 Process multiple documents through the IDP pipeline.
 
@@ -322,16 +325,16 @@ Process multiple documents through the IDP pipeline.
 
 ```python
 # From directory
-result = client.batch.run(source="./documents/")
+result = client.batch.process(source="./documents/")
 
 # From manifest
-result = client.batch.run(source="./manifest.csv")
+result = client.batch.process(source="./manifest.csv")
 
 # From S3
-result = client.batch.run(source="s3://bucket/path/")
+result = client.batch.process(source="s3://bucket/path/")
 
 # With options
-result = client.batch.run(
+result = client.batch.process(
     source="./documents/",
     batch_prefix="my-batch",
     file_pattern="*.pdf",
@@ -467,31 +470,31 @@ result = client.batch.delete_documents(
 print(f"Deleted: {result.deleted_count}/{result.total_count}")
 ```
 
-### batch.rerun()
+### batch.reprocess()
 
-Rerun processing for multiple documents from a specific pipeline step.
+Reprocess existing documents from a specific pipeline step.
 
 **Parameters:**
-- `step` (str or RerunStep, required): Pipeline step to rerun from (e.g., "classification", "extraction", RerunStep.EXTRACTION)
-- `document_ids` (list[str], optional): Specific document IDs to rerun
-- `batch_id` (str, optional): Batch ID to rerun all documents in batch
+- `step` (str or RerunStep, required): Pipeline step to reprocess from (e.g., "classification", "extraction", RerunStep.EXTRACTION)
+- `document_ids` (list[str], optional): Specific document IDs to reprocess
+- `batch_id` (str, optional): Batch ID to reprocess all documents in batch
 - `stack_name` (str, optional): Stack name override
 
 **Note:** Must specify either `document_ids` or `batch_id`
 
-**Returns:** `BatchRerunResult` with `documents_queued`, `documents_failed`, `failed_documents`, and `step`
+**Returns:** `BatchReprocessResult` with `documents_queued`, `documents_failed`, `failed_documents`, and `step`
 
 ```python
 from idp_sdk import RerunStep
 
-# Rerun batch
-result = client.batch.rerun(
+# Reprocess batch
+result = client.batch.reprocess(
     step=RerunStep.EXTRACTION,
     batch_id="batch-20250123-123456"
 )
 
-# Rerun specific documents
-result = client.batch.rerun(
+# Reprocess specific documents
+result = client.batch.reprocess(
     step="classification",
     document_ids=["batch/doc1.pdf", "batch/doc2.pdf"]
 )
@@ -898,6 +901,47 @@ result = client.config.download(
 print(result.yaml_content)
 ```
 
+### config.list()
+
+List all configuration versions in a deployed stack.
+
+```python
+result = client.config.list()
+
+print(f"Found {result['count']} versions:")
+for version in result['versions']:
+    status = " (ACTIVE)" if version.get('isActive') else ""
+    print(f"  - {version['versionName']}{status}")
+```
+
+### config.activate()
+
+Activate a configuration version.
+
+```python
+result = client.config.activate("v2")
+
+if result["success"]:
+    print(f"Activated version: {result['activated_version']}")
+else:
+    print(f"Failed to activate: {result['error']}")
+```
+
+### config.delete()
+
+Delete a configuration version.
+
+```python
+result = client.config.delete("old-version")
+
+if result["success"]:
+    print(f"Deleted version: {result['deleted_version']}")
+else:
+    print(f"Failed to delete: {result['error']}")
+```
+
+**Note:** Cannot delete 'default' or currently active versions.
+
 ---
 
 ## Manifest Operations
@@ -967,7 +1011,7 @@ from idp_sdk import (
     DocumentUploadResult,
     DocumentStatus,
     DocumentDownloadResult,
-    DocumentRerunResult,
+    DocumentReprocessResult,
     DocumentDeletionResult,
     DocumentMetadata,
     DocumentInfo,
@@ -975,10 +1019,11 @@ from idp_sdk import (
     
     # Batch models
     BatchResult,
+    BatchProcessResult,
     BatchStatus,
     BatchInfo,
     BatchListResult,
-    BatchRerunResult,
+    BatchReprocessResult,
     BatchDownloadResult,
     BatchDeletionResult,
     
@@ -1044,7 +1089,7 @@ from idp_sdk import IDPClient, IDPProcessingError, IDPResourceNotFoundError
 client = IDPClient(stack_name="my-stack")
 
 try:
-    result = client.document.upload(file_path="./invoice.pdf")
+    result = client.document.process(file_path="./invoice.pdf")
 except IDPProcessingError as e:
     print(f"Processing error: {e}")
 except IDPResourceNotFoundError as e:
@@ -1065,7 +1110,7 @@ import time
 client = IDPClient(stack_name="my-idp-stack", region="us-west-2")
 
 # Upload single document
-doc_result = client.document.upload(file_path="./invoice.pdf")
+doc_result = client.document.process(file_path="./invoice.pdf")
 doc_id = doc_result.document_id
 
 # Monitor document processing
@@ -1087,7 +1132,7 @@ if status.status.value == "COMPLETED":
     print("Results downloaded successfully")
 
 # Process a batch
-batch_result = client.batch.run(source="./documents/")
+batch_result = client.batch.process(source="./documents/")
 batch_id = batch_result.batch_id
 
 # Monitor batch progress

@@ -9,11 +9,15 @@ SPDX-License-Identifier: MIT-0
 
 - **Added support for Claude Opus 4.6 model and Long Context (1M) variant**
 - **Added support for Claude Sonnet 4.6 model and Long Context (1M) variant**
-
+- **Included MCP tools `process`, `reprocess`, `status`, `search` for document processing**
+- **Added `process` and `reprocess` CLI commands for batch operations via command line**
+  - **Maintained `run-inference` and `rerun-inference` CLI commands with deprecation notices**
 - **React UI TypeScript Migration (Phases 1–2)** — Added TypeScript tooling foundation (`tsconfig.json`, `@types/*`, ESLint overrides for `.ts/.tsx`) and migrated all 5 contexts, 16 hooks, constants, and utility modules from JavaScript to TypeScript with proper interfaces and type annotations. No runtime behavior changes; JS and TS coexist for incremental migration. ([#187](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues/187), [#188](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/pull/188), [#191](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/pull/191))
+- **Configuration Version Management Commands for CLI and SDK** — Added `config-list`, `config-activate`, and `config-delete` CLI commands and corresponding `client.config.list()`, `client.config.activate()`, `client.config.delete()` SDK operations for programmatic configuration version management. Includes safety protections (default/active version deletion prevention, confirmation prompts, existence validation), `--force` flag for automation, and Rich table output for version listing.
 
 ### Fixed
 
+- **Fixed DynamoDB 400KB item size limit blocking configs with 45+ document classes** — Configuration data is now gzip-compressed before storing to DynamoDB, achieving 37-95x compression ratios. Supports 3,000+ document classes within the 400KB limit. Fully backward compatible with existing deployments. ([#200](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues/200), [#201](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/pull/201))
 - **Fixed Processing Flow chart using active stack config instead of the document's actual config version** for determining disabled steps (assessment, summarization, etc.)
 
 ## [0.4.15]

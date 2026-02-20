@@ -53,3 +53,156 @@ class TestConfigOperationsMocked:
 
         # Should not raise - config operations are stack-independent
         assert client.config is not None
+
+    @patch("boto3.client")
+    @patch("idp_common.config.configuration_manager.ConfigurationManager")
+    def test_list_config(self, mock_manager_class, mock_boto3):
+        """Test listing configuration versions."""
+        # Setup mocks
+        mock_cfn = mock_boto3.return_value
+        mock_paginator = mock_cfn.get_paginator.return_value
+        mock_paginator.paginate.return_value = [
+            {
+                "StackResourceSummaries": [
+                    {
+                        "LogicalResourceId": "ConfigurationTable",
+                        "PhysicalResourceId": "test-table",
+                    }
+                ]
+            }
+        ]
+
+        mock_manager = mock_manager_class.return_value
+        mock_manager.list_config_versions.return_value = [
+            {"versionName": "default", "isActive": False},
+            {"versionName": "v1", "isActive": True},
+        ]
+
+        # Test
+        client = IDPClient(stack_name="test-stack")
+        result = client.config.list()
+
+        assert result["count"] == 2
+        assert len(result["versions"]) == 2
+        assert result["versions"][0]["versionName"] == "default"
+
+    @patch("boto3.client")
+    @patch("idp_common.config.configuration_manager.ConfigurationManager")
+    def test_activate_config(self, mock_manager_class, mock_boto3):
+        """Test activating configuration version."""
+        # Setup mocks
+        mock_cfn = mock_boto3.return_value
+        mock_paginator = mock_cfn.get_paginator.return_value
+        mock_paginator.paginate.return_value = [
+            {
+                "StackResourceSummaries": [
+                    {
+                        "LogicalResourceId": "ConfigurationTable",
+                        "PhysicalResourceId": "test-table",
+                    }
+                ]
+            }
+        ]
+
+        mock_manager = mock_manager_class.return_value
+        mock_manager.get_configuration.return_value = {
+            "version": "v1"
+        }  # Version exists
+        mock_manager.activate_version.return_value = None
+
+        # Test
+        client = IDPClient(stack_name="test-stack")
+        result = client.config.activate("v1")
+
+        assert result["success"] is True
+        assert result["activated_version"] == "v1"
+        mock_manager.activate_version.assert_called_once_with("v1")
+
+    @patch("boto3.client")
+    @patch("idp_common.config.configuration_manager.ConfigurationManager")
+    def test_activate_config_not_found(self, mock_manager_class, mock_boto3):
+        """Test activating non-existent configuration version."""
+        # Setup mocks
+        mock_cfn = mock_boto3.return_value
+        mock_paginator = mock_cfn.get_paginator.return_value
+        mock_paginator.paginate.return_value = [
+            {
+                "StackResourceSummaries": [
+                    {
+                        "LogicalResourceId": "ConfigurationTable",
+                        "PhysicalResourceId": "test-table",
+                    }
+                ]
+            }
+        ]
+
+        mock_manager = mock_manager_class.return_value
+        mock_manager.get_configuration.return_value = None  # Version doesn't exist
+
+        # Test
+        client = IDPClient(stack_name="test-stack")
+        result = client.config.activate("nonexistent")
+
+        assert result["success"] is False
+        assert "does not exist" in result["error"]
+
+    @patch("boto3.client")
+    @patch("idp_common.config.configuration_manager.ConfigurationManager")
+    def test_delete_config(self, mock_manager_class, mock_boto3):
+        """Test deleting configuration version."""
+        # Setup mocks
+        mock_cfn = mock_boto3.return_value
+        mock_paginator = mock_cfn.get_paginator.return_value
+        mock_paginator.paginate.return_value = [
+            {
+                "StackResourceSummaries": [
+                    {
+                        "LogicalResourceId": "ConfigurationTable",
+                        "PhysicalResourceId": "test-table",
+                    }
+                ]
+            }
+        ]
+
+        mock_manager = mock_manager_class.return_value
+        mock_manager.delete_configuration.return_value = None
+
+        # Test
+        client = IDPClient(stack_name="test-stack")
+        result = client.config.delete("old-version")
+
+        assert result["success"] is True
+        assert result["deleted_version"] == "old-version"
+        mock_manager.delete_configuration.assert_called_once_with(
+            "Config", version="old-version"
+        )
+
+    @patch("boto3.client")
+    @patch("idp_common.config.configuration_manager.ConfigurationManager")
+    def test_delete_config_error(self, mock_manager_class, mock_boto3):
+        """Test deleting configuration version with error."""
+        # Setup mocks
+        mock_cfn = mock_boto3.return_value
+        mock_paginator = mock_cfn.get_paginator.return_value
+        mock_paginator.paginate.return_value = [
+            {
+                "StackResourceSummaries": [
+                    {
+                        "LogicalResourceId": "ConfigurationTable",
+                        "PhysicalResourceId": "test-table",
+                    }
+                ]
+            }
+        ]
+
+        mock_manager = mock_manager_class.return_value
+        mock_manager.delete_configuration.side_effect = ValueError(
+            "Cannot delete active version"
+        )
+
+        # Test
+        client = IDPClient(stack_name="test-stack")
+        result = client.config.delete("active-version")
+
+        assert result["success"] is False
+        assert "Cannot delete active version" in result["error"]

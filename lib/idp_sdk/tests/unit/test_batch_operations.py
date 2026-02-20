@@ -10,7 +10,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 from idp_sdk import IDPClient
-from idp_sdk.models import BatchListResult, BatchResult
+from idp_sdk.models import BatchListResult, BatchProcessResult
 
 
 @pytest.mark.unit
@@ -64,9 +64,9 @@ class TestBatchOperationsMocked:
 
         # Test
         client = IDPClient(stack_name="test-stack")
-        result = client.batch.run(manifest="test.csv")
+        result = client.batch.process(manifest="test.csv")
 
-        assert isinstance(result, BatchResult)
+        assert isinstance(result, BatchProcessResult)
         assert result.batch_id == "test-batch"
         assert len(result.document_ids) == 2
 

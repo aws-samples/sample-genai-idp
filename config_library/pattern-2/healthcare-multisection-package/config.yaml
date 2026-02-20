@@ -1,0 +1,1274 @@
+notes: >-
+  AFH workshop configuration - processes healthcare documents - converted format
+  with LLM evaluation
+
+classes:
+  - $schema: https://json-schema.org/draft/2020-12/schema
+    $defs:
+      MedicalInformationDef:
+        type: object
+        description: Medical information related to the claim.
+        properties:
+          Diagnosis-or-Nature-of-Illness-or-Injury:
+            type: string
+            description: Diagnosis or nature of illness or injury.
+            x-aws-idp-evaluation-method: LLM
+          Hospitalization-Dates:
+            format: date
+            description: Dates of hospitalization.
+            type: string
+            x-aws-idp-evaluation-method: LLM
+          Medicaid-Resubmission-Code:
+            type: string
+            description: Medicaid resubmission code.
+            x-aws-idp-evaluation-method: LLM
+          Referring-Physician-ID-Number:
+            type: string
+            description: ID number of the referring physician.
+            x-aws-idp-evaluation-method: LLM
+      PatientInformationDef:
+        type: object
+        description: Information about the patient.
+        properties:
+          Patient-Name:
+            type: string
+            description: Full name of the patient.
+            x-aws-idp-evaluation-method: FUZZY
+          Patient-Address:
+            type: string
+            description: Address of the patient.
+            x-aws-idp-evaluation-method: FUZZY
+          Patient-Birth-Date:
+            format: date
+            description: Date of birth of the patient.
+            type: string
+            x-aws-idp-evaluation-method: EXACT
+          Patient-Sex:
+            type: string
+            description: Sex of the patient.
+            x-aws-idp-evaluation-method: EXACT
+          Patient-Status:
+            type: string
+            description: Marital status of the patient.
+            x-aws-idp-evaluation-method: EXACT
+      EmploymentInformationDef:
+        type: object
+        description: Information about the patient's employment.
+        properties:
+          Employment-Status:
+            type: string
+            description: Current or previous employment status.
+            x-aws-idp-evaluation-method: LLM
+          Employer-Name-or-School-Name:
+            type: string
+            description: Name of the employer or school.
+            x-aws-idp-evaluation-method: LLM
+      InsurancePlanInformationDef:
+        type: object
+        description: Information about the insurance plan.
+        properties:
+          Insurance-Plan-Name-or-Program-Name:
+            type: string
+            description: Name of the insurance plan or program.
+            x-aws-idp-evaluation-method: FUZZY
+      PaymentInformationDef:
+        type: object
+        description: Information about payments and balances.
+        properties:
+          Total-Charge:
+            type: string
+            description: >-
+              The total amount charged in dollars. Typically mentioned in the
+              bottom-right location of the form. It is field number 28 on the
+              health care form. DO NOT confuse it with the "amount paid" field.
+              The "total charge" field provides how much the patient is charged,
+              whereas the "amount paid" field provides how much of that did the
+              patient pay.
+            x-aws-idp-evaluation-method: EXACT
+          Patient-Account-Number:
+            type: string
+            description: Patient account number.
+            x-aws-idp-evaluation-method: EXACT
+          Amount-Paid:
+            type: string
+            description: Amount paid for the services. Can be null.
+            x-aws-idp-evaluation-method: LLM
+          Federal-Tax-ID-Number:
+            type: string
+            description: Federal tax ID number.
+            x-aws-idp-evaluation-method: EXACT
+          Accept-Assignment:
+            type: string
+            description: Indication of accept assignment.
+            x-aws-idp-evaluation-method: LLM
+          Balance-Due:
+            type: string
+            description: Balance due after payment. Can be null.
+            x-aws-idp-evaluation-method: EXACT
+      InsuredInformationDef:
+        type: object
+        description: Information about the insured.
+        properties:
+          Insured-ID-Number:
+            type: string
+            description: ID number of the insured.
+            x-aws-idp-evaluation-method: EXACT
+          Insured-Policy-Group-Number:
+            type: string
+            description: Policy or group number of the insured.
+            x-aws-idp-evaluation-method: EXACT
+          Insured-Address:
+            type: string
+            description: Address of the insured.
+            x-aws-idp-evaluation-method: FUZZY
+          Insured-Name:
+            type: string
+            description: Name of the insured.
+            x-aws-idp-evaluation-method: EXACT
+      OtherInsuredInformationDef:
+        type: object
+        description: >-
+          Information about other insured. It is located on the left-side of the
+          form. DO NOT CONFUSE THIS WITH INSURED'S INFORMATION PROVIDED IN ENTRY
+          NUMBER 11 ON THE RIGHT-SIDE OF THE FORM.
+        properties:
+          Other-Insured-Sex:
+            type: string
+            description: >-
+              Sex of the other insured. This is sub-entry c. of entry number 9,
+              located on the left side of the form. It can be null.
+            x-aws-idp-evaluation-method: EXACT
+          Other-Insured-Policy-Group-Number:
+            type: string
+            description: >-
+              Policy or group number of the other insured. This is sub-entry a.
+              of entry number 9, located on the left side of the form. It can be
+              null.
+            x-aws-idp-evaluation-method: EXACT
+          Other-Insured-Name:
+            type: string
+            description: >-
+              Name of the other insured. This is entry number 9 on the form,
+              located on the left side of the form. It can be null.
+            x-aws-idp-evaluation-method: EXACT
+          Other-Insured-Date-of-Birth:
+            format: date
+            description: >-
+              Date of birth of the other insured. This is sub-entry b. of entry
+              number 9, located on the left side of the form. It can be null.
+            type: string
+            x-aws-idp-evaluation-method: EXACT
+      ServiceInformationItem:
+        type: object
+        properties:
+          Procedures-Services-or-Supplies:
+            type: string
+            description: Description of procedures, services, or supplies.
+            x-aws-idp-evaluation-method: EXACT
+          Date-of-Service:
+            format: date
+            description: Date of service provided.
+            type: string
+            x-aws-idp-evaluation-method: EXACT
+          Charges:
+            type: string
+            description: Charges for the service.
+            x-aws-idp-evaluation-method: EXACT
+          Diagnosis-Code:
+            type: string
+            description: Diagnosis code related to the service.
+            x-aws-idp-evaluation-method: EXACT
+          Reserved-for-Local-Use:
+            type: string
+            description: Reserved for local use.
+            x-aws-idp-evaluation-method: EXACT
+          Place-of-Service:
+            type: string
+            description: Place where the service was provided.
+            x-aws-idp-evaluation-method: EXACT
+      PhysicianInformationDef:
+        type: object
+        description: Information about the physician.
+        properties:
+          Physician-Name:
+            type: string
+            description: Name of the physician.
+            x-aws-idp-evaluation-method: EXACT
+          Physician-Signature:
+            type: string
+            description: Signature of the physician.
+            x-aws-idp-evaluation-method: EXACT
+          Physician-Address:
+            type: string
+            description: Address of the physician.
+            x-aws-idp-evaluation-method: EXACT
+          Physician-Phone:
+            type: string
+            description: Phone number of the physician.
+            x-aws-idp-evaluation-method: EXACT
+          Date:
+            format: date
+            description: Date of the physician's signature.
+            type: string
+            x-aws-idp-evaluation-method: EXACT
+    description: Health insurance claim form for processing medical claims.
+    type: object
+    x-aws-idp-document-type: Health-Insurance-Claim-Form
+    properties:
+      PatientInformation:
+        description: Information about the patient.
+        $ref: '#/$defs/PatientInformationDef'
+        x-aws-idp-evaluation-method: LLM
+      OtherInsuredInformation:
+        description: >-
+          Information about other insured. It is located on the left-side of the
+          form. DO NOT CONFUSE THIS WITH INSURED'S INFORMATION PROVIDED IN ENTRY
+          NUMBER 11 ON THE RIGHT-SIDE OF THE FORM.
+        $ref: '#/$defs/OtherInsuredInformationDef'
+        x-aws-idp-evaluation-method: LLM
+      MedicalInformation:
+        description: Medical information related to the claim.
+        $ref: '#/$defs/MedicalInformationDef'
+        x-aws-idp-evaluation-method: LLM
+      ServiceInformation:
+        description: Information about the services provided.
+        type: array
+        x-aws-idp-list-item-description: Each item represents a service provided.
+        items:
+          $ref: '#/$defs/ServiceInformationItem'
+        x-aws-idp-evaluation-method: LLM
+      PaymentInformation:
+        description: Information about payments and balances.
+        $ref: '#/$defs/PaymentInformationDef'
+        x-aws-idp-evaluation-method: LLM
+      EmploymentInformation:
+        description: Information about the patient's employment.
+        $ref: '#/$defs/EmploymentInformationDef'
+        x-aws-idp-evaluation-method: LLM
+      InsuredInformation:
+        description: Information about the insured.
+        $ref: '#/$defs/InsuredInformationDef'
+        x-aws-idp-evaluation-method: LLM
+      InsurancePlanInformation:
+        description: Information about the insurance plan.
+        $ref: '#/$defs/InsurancePlanInformationDef'
+        x-aws-idp-evaluation-method: LLM
+      PhysicianInformation:
+        description: Information about the physician.
+        $ref: '#/$defs/PhysicianInformationDef'
+        x-aws-idp-evaluation-method: LLM
+    $id: Health-Insurance-Claim-Form
+  - $schema: https://json-schema.org/draft/2020-12/schema
+    $defs:
+      PatientInformationDischargeDef:
+        type: object
+        description: >-
+          Information about the patient including provider, patient ID, and
+          gender.
+        properties:
+          Patient:
+            type: string
+            description: Name of the patient
+            x-aws-idp-evaluation-method: EXACT
+          Providers-Pt-ID:
+            type: string
+            description: Provider's patient ID
+            x-aws-idp-evaluation-method: EXACT
+          Patient-Gender:
+            type: string
+            description: Gender of the patient
+            x-aws-idp-evaluation-method: EXACT
+          Provider:
+            type: string
+            description: Name of the provider
+            x-aws-idp-evaluation-method: EXACT
+          Attachment-Control-Number:
+            type: string
+            description: Attachment control number
+            x-aws-idp-evaluation-method: EXACT
+      DischargeDef:
+        type: object
+        description: Summary of discharge including studies and recommendations.
+        properties:
+          Discharge-Studies-Summary:
+            type: string
+            description: Summary of discharge studies and recommendations
+            x-aws-idp-evaluation-method: LLM
+      AssessmentDef:
+        type: object
+        description: >-
+          Assessment of the patient's condition including reported symptoms and
+          history.
+        properties:
+          Reported-Symptoms-History:
+            type: string
+            description: Reported symptoms and history of the patient
+            x-aws-idp-evaluation-method: LLM
+      HeaderDef:
+        type: object
+        description: Header information including hospital details and document title.
+        properties:
+          HospitalName:
+            type: string
+            description: Name of the hospital
+            x-aws-idp-evaluation-method: FUZZY
+          DocumentTitle:
+            type: string
+            description: Title of the document
+            x-aws-idp-evaluation-method: FUZZY
+      VisitDetailsDef:
+        type: object
+        description: >-
+          Details about the patient's visit including admission and discharge
+          dates.
+        properties:
+          Discharged:
+            format: date
+            description: Date of discharge
+            type: string
+            x-aws-idp-evaluation-method: EXACT
+          Discharged-to:
+            type: string
+            description: Location to which the patient was discharged
+            x-aws-idp-evaluation-method: FUZZY
+          Admitted:
+            format: date
+            description: Date of admission
+            type: string
+            x-aws-idp-evaluation-method: EXACT
+    description: >-
+      Summary of patient's hospital discharge including assessments and
+      recommendations.
+    type: object
+    x-aws-idp-document-type: DischargeSummary
+    properties:
+      PatientInformation:
+        description: >-
+          Information about the patient including provider, patient ID, and
+          gender.
+        $ref: '#/$defs/PatientInformationDischargeDef'
+        x-aws-idp-evaluation-method: LLM
+      VisitDetails:
+        description: >-
+          Details about the patient's visit including admission and discharge
+          dates.
+        $ref: '#/$defs/VisitDetailsDef'
+        x-aws-idp-evaluation-method: LLM
+      Header:
+        description: Header information including hospital details and document title.
+        $ref: '#/$defs/HeaderDef'
+        x-aws-idp-evaluation-method: LLM
+      Discharge:
+        description: Summary of discharge including studies and recommendations.
+        $ref: '#/$defs/DischargeDef'
+        x-aws-idp-evaluation-method: LLM
+      Assessment:
+        description: >-
+          Assessment of the patient's condition including reported symptoms and
+          history.
+        $ref: '#/$defs/AssessmentDef'
+        x-aws-idp-evaluation-method: LLM
+    $id: DischargeSummary
+  - $schema: https://json-schema.org/draft/2020-12/schema
+    $defs:
+      MedicationsDef:
+        type: object
+        description: List of medications the patient is currently taking.
+        properties:
+          Meds:
+            type: string
+            description: List of medications the patient is currently taking.
+            x-aws-idp-evaluation-method: LLM
+      ReviewOfSystemsDef:
+        type: object
+        description: Review of systems for the patient.
+        properties:
+          ROS:
+            type: string
+            description: Review of systems for the patient.
+            x-aws-idp-evaluation-method: LLM
+      PatientHistoryDef:
+        type: object
+        description: Detailed history of the patient's condition.
+        properties:
+          History:
+            type: string
+            description: Detailed history of the patient's condition.
+            x-aws-idp-evaluation-method: LLM
+      PhysicalExamDef:
+        type: object
+        description: Physical examination findings.
+        properties:
+          PMHx:
+            type: string
+            description: Physical examination findings.
+            x-aws-idp-evaluation-method: LLM
+      PatientInformationProviderNotesDef:
+        type: object
+        description: Information about the patient.
+        properties:
+          Patient:
+            type: string
+            description: Name of the patient.
+            x-aws-idp-evaluation-method: LLM
+      ProviderInformationDef:
+        type: object
+        description: Information about the attending provider.
+        properties:
+          Provider:
+            type: string
+            description: Name of the attending provider.
+            x-aws-idp-evaluation-method: LLM
+      AdditionalInformationDef:
+        type: object
+        description: Additional information about the patient's condition.
+        properties:
+          Social-Hx:
+            type: string
+            description: Additional information about the patient's condition.
+            x-aws-idp-evaluation-method: LLM
+          NKDA:
+            type: string
+            description: Additional information about the patient's condition.
+            x-aws-idp-evaluation-method: LLM
+          FHx:
+            type: string
+            description: Additional information about the patient's condition.
+            x-aws-idp-evaluation-method: LLM
+    description: >-
+      Printed or handwritten notes from attending provider regarding patient's
+      condition. Typically has notes on the symptoms, issue and the next steps
+      for the patient.
+    type: object
+    x-aws-idp-document-type: Provider-Notes
+    properties:
+      Patient-History:
+        description: Detailed history of the patient's condition.
+        $ref: '#/$defs/PatientHistoryDef'
+        x-aws-idp-evaluation-method: LLM
+      Additional-Information:
+        description: Additional information about the patient's condition.
+        $ref: '#/$defs/AdditionalInformationDef'
+        x-aws-idp-evaluation-method: LLM
+      Review-of-Systems:
+        description: Review of systems for the patient.
+        $ref: '#/$defs/ReviewOfSystemsDef'
+        x-aws-idp-evaluation-method: LLM
+      Medications:
+        description: List of medications the patient is currently taking.
+        $ref: '#/$defs/MedicationsDef'
+        x-aws-idp-evaluation-method: LLM
+      Physical-Exam:
+        description: Physical examination findings.
+        $ref: '#/$defs/PhysicalExamDef'
+        x-aws-idp-evaluation-method: LLM
+      Patient-Information:
+        description: Information about the patient.
+        $ref: '#/$defs/PatientInformationProviderNotesDef'
+        x-aws-idp-evaluation-method: LLM
+      Provider-Information:
+        description: Information about the attending provider.
+        $ref: '#/$defs/ProviderInformationDef'
+        x-aws-idp-evaluation-method: LLM
+    $id: Provider-Notes
+  - $schema: https://json-schema.org/draft/2020-12/schema
+    $defs:
+      PersonalInformationDef:
+        type: object
+        description: Personal information of the license holder.
+        properties:
+          DateOfBirth:
+            format: date
+            description: >-
+              Date of birth of the license holder, located near the top left of
+              the document.
+            type: string
+            x-aws-idp-evaluation-method: EXACT
+          EyeColor:
+            type: string
+            description: >-
+              Eye color of the license holder, located near the top right of the
+              document.
+            x-aws-idp-evaluation-method: EXACT
+          Address:
+            type: string
+            description: >-
+              Address of the license holder, located near the top left of the
+              document.
+            x-aws-idp-evaluation-method: FUZZY
+          Donor:
+            type: string
+            description: >-
+              Organ donor status of the license holder, located near the top
+              right of the document.
+            x-aws-idp-evaluation-method: EXACT
+          FirstName:
+            type: string
+            description: >-
+              First name of the license holder, located near the top left of the
+              document.
+            x-aws-idp-evaluation-method: FUZZY
+          Sex:
+            type: string
+            description: >-
+              Sex of the license holder, located near the top right of the
+              document.
+            x-aws-idp-evaluation-method: EXACT
+          Height:
+            type: string
+            description: >-
+              Height of the license holder, located near the top right of the
+              document.
+            x-aws-idp-evaluation-method: EXACT
+          LastName:
+            type: string
+            description: >-
+              Last name of the license holder, located near the top left of the
+              document.
+            x-aws-idp-evaluation-method: FUZZY
+          MiddleName:
+            type: string
+            description: >-
+              Middle name of the license holder, located near the top left of
+              the document.
+            x-aws-idp-evaluation-method: LLM
+          HairColor:
+            type: string
+            description: >-
+              Hair color of the license holder, located near the top right of
+              the document.
+            x-aws-idp-evaluation-method: EXACT
+          Weight:
+            type: string
+            description: >-
+              Weight of the license holder, located near the top right of the
+              document.
+            x-aws-idp-evaluation-method: FUZZY
+          SSN:
+            type: string
+            description: >-
+              Social Security Number of the license holder, located near the top
+              left of the document.
+            x-aws-idp-evaluation-method: EXACT
+      LicenseDetailsDef:
+        type: object
+        description: Details about the driver's license.
+        properties:
+          Country:
+            type: string
+            description: Country of issuance, located at the top of the document.
+            x-aws-idp-evaluation-method: LLM
+          DocumentType:
+            type: string
+            description: Type of document, located at the top of the document.
+            x-aws-idp-evaluation-method: EXACT
+          Class:
+            type: string
+            description: Class of the license, located near the top right of the document.
+            x-aws-idp-evaluation-method: EXACT
+          Endorsements:
+            type: string
+            description: >-
+              Endorsements on the license, located near the top right of the
+              document.
+            x-aws-idp-evaluation-method: EXACT
+          ExpirationDate:
+            format: date
+            description: >-
+              Expiration date of the license, located near the top of the
+              document.
+            type: string
+            x-aws-idp-evaluation-method: EXACT
+          LicenseNumber:
+            type: string
+            description: Unique license number, located near the top of the document.
+            x-aws-idp-evaluation-method: EXACT
+    description: A United States Driver License document with personal and vehicle details.
+    type: object
+    x-aws-idp-document-type: Driver-License
+    properties:
+      LicenseDetails:
+        description: Details about the driver's license.
+        $ref: '#/$defs/LicenseDetailsDef'
+        x-aws-idp-evaluation-method: LLM
+      PersonalInformation:
+        description: Personal information of the license holder.
+        $ref: '#/$defs/PersonalInformationDef'
+        x-aws-idp-evaluation-method: LLM
+    $id: Driver-License
+  - $schema: https://json-schema.org/draft/2020-12/schema
+    $defs:
+      PaymentDetailsDef:
+        type: object
+        description: Details about the payment made for the claim.
+        properties:
+          PaymentAmount:
+            type: string
+            description: Total amount paid for the claim.
+            x-aws-idp-evaluation-method: EXACT
+          CheckNumber:
+            type: string
+            description: Check number associated with the payment.
+            x-aws-idp-evaluation-method: EXACT
+      AdditionalInformationClaimDef:
+        type: object
+        description: Additional information and notices related to the claim.
+        properties:
+          Notice:
+            type: string
+            description: Notices or important information related to the claim.
+            x-aws-idp-evaluation-method: LLM
+      HeaderInformationDef:
+        type: object
+        description: General information about the document and the health plan.
+        properties:
+          EmployerInformation:
+            type: string
+            description: Information about the employer associated with the health plan.
+            x-aws-idp-evaluation-method: LLM
+          DocumentType:
+            type: string
+            description: Type of document, e.g., Remittance Advice.
+            x-aws-idp-evaluation-method: LLM
+          HealthPlanName:
+            type: string
+            description: >-
+              Name of the health plan, e.g., North Pocono School District Health
+              Plan.
+            x-aws-idp-evaluation-method: FUZZY
+          CustomerServiceContact:
+            type: string
+            description: Contact information for customer service.
+            x-aws-idp-evaluation-method: LLM
+          GroupInformation:
+            type: string
+            description: Group number and date associated with the claim.
+            x-aws-idp-evaluation-method: LLM
+          CheckNumber:
+            type: string
+            description: Check number associated with the payment.
+            x-aws-idp-evaluation-method: EXACT
+      ClaimDetailsDef:
+        type: object
+        description: Details about the specific claim being processed.
+        properties:
+          DeductibleAmount:
+            type: string
+            description: Amount applied towards the deductible.
+            x-aws-idp-evaluation-method: EXACT
+          ClaimNumber:
+            type: string
+            description: Unique identifier for the claim.
+            x-aws-idp-evaluation-method: EXACT
+          MaximumPlanAllowable:
+            type: string
+            description: Maximum amount allowable under the plan.
+            x-aws-idp-evaluation-method: EXACT
+          RemarkCode:
+            type: string
+            description: Code for any remarks associated with the claim.
+            x-aws-idp-evaluation-method: EXACT
+          ProcedureCode:
+            type: string
+            description: Code for the procedure performed.
+            x-aws-idp-evaluation-method: EXACT
+          BilledAmount:
+            type: string
+            description: Amount billed for the service.
+            x-aws-idp-evaluation-method: EXACT
+          ServiceDates:
+            format: date
+            description: Dates of service for the claim.
+            type: string
+            x-aws-idp-evaluation-method: EXACT
+          PaymentAmount:
+            type: string
+            description: Total payment amount for the claim.
+            x-aws-idp-evaluation-method: EXACT
+          PaidAmount:
+            type: string
+            description: Amount paid for the claim.
+            x-aws-idp-evaluation-method: EXACT
+          PatientInformation:
+            type: string
+            description: Information about the patient associated with the claim.
+            x-aws-idp-evaluation-method: LLM
+          ProviderDiscount:
+            type: string
+            description: Discount provided by the provider.
+            x-aws-idp-evaluation-method: EXACT
+          CopayAmount:
+            type: string
+            description: Copay amount for the service.
+            x-aws-idp-evaluation-method: EXACT
+          MemberInformation:
+            type: string
+            description: Information about the member associated with the claim.
+            x-aws-idp-evaluation-method: LLM
+          IneligibleAmount:
+            type: string
+            description: Amount deemed ineligible for payment.
+            x-aws-idp-evaluation-method: EXACT
+    description: >-
+      Health plan claim document detailing services, costs, and patient
+      information.
+    type: object
+    x-aws-idp-document-type: HealthPlanClaim
+    properties:
+      AdditionalInformation:
+        description: Additional information and notices related to the claim.
+        $ref: '#/$defs/AdditionalInformationClaimDef'
+        x-aws-idp-evaluation-method: LLM
+      HeaderInformation:
+        description: General information about the document and the health plan.
+        $ref: '#/$defs/HeaderInformationDef'
+        x-aws-idp-evaluation-method: LLM
+      PaymentDetails:
+        description: Details about the payment made for the claim.
+        $ref: '#/$defs/PaymentDetailsDef'
+        x-aws-idp-evaluation-method: LLM
+      ClaimDetails:
+        description: Details about the specific claim being processed.
+        $ref: '#/$defs/ClaimDetailsDef'
+        x-aws-idp-evaluation-method: LLM
+    $id: HealthPlanClaim
+  - $schema: https://json-schema.org/draft/2020-12/schema
+    $defs:
+      InsuranceDetailsDef:
+        type: object
+        description: Details about the insurance plan and member information.
+        properties:
+          Group-Number:
+            type: string
+            description: Group number (AAAAA).
+            x-aws-idp-evaluation-method: EXACT
+          Rx-Grp:
+            type: string
+            description: Rx Group number. E.g. AAAAA.
+            x-aws-idp-evaluation-method: EXACT
+          Plan-Number:
+            type: string
+            description: Plan number
+            x-aws-idp-evaluation-method: EXACT
+          InsurRX:
+            type: string
+            description: Insurance prescription details
+            x-aws-idp-evaluation-method: LLM
+          PCP-Phone:
+            type: string
+            description: Primary Care Physician phone number
+            x-aws-idp-evaluation-method: EXACT
+          Health-Plan:
+            type: string
+            description: Health plan identifier.
+            x-aws-idp-evaluation-method: EXACT
+          PCP-Name:
+            type: string
+            description: >-
+              Primary Care Physician name, including degree. E.g. MATEO JACKSON,
+              PhD.
+            x-aws-idp-evaluation-method: LLM
+          Rx-PCN:
+            type: string
+            description: Rx PCN number (E.g. 00000).
+            x-aws-idp-evaluation-method: EXACT
+          Payer-ID:
+            type: string
+            description: Payer identification number
+            x-aws-idp-evaluation-method: EXACT
+          Member-ID:
+            type: string
+            description: Member identification number (E.g. 11-2234-10190).
+            x-aws-idp-evaluation-method: FUZZY
+          Member:
+            type: string
+            description: Name of the member
+            x-aws-idp-evaluation-method: FUZZY
+          Rx-Bin:
+            type: string
+            description: Rx Bin number (E.g. 123456).
+            x-aws-idp-evaluation-method: EXACT
+    description: Health insurance card for a member of Group Insurance of America.
+    type: object
+    x-aws-idp-document-type: Insurance-Card
+    properties:
+      InsuranceDetails:
+        description: Details about the insurance plan and member information.
+        $ref: '#/$defs/InsuranceDetailsDef'
+        x-aws-idp-evaluation-method: LLM
+    $id: Insurance-Card
+  - $schema: https://json-schema.org/draft/2020-12/schema
+    $defs:
+      ChiefComplaintsDef:
+        type: object
+        description: Chief complaints of the examinee
+        properties:
+          Complaint:
+            type: string
+            description: Chief complaint of the examinee
+            x-aws-idp-evaluation-method: LLM
+      HeaderMedicalExamDef:
+        type: object
+        description: Header information of the document
+        properties:
+          Address:
+            type: string
+            description: Address of the insurance company
+            x-aws-idp-evaluation-method: LLM
+          CompanyName:
+            type: string
+            description: Name of the insurance company
+            x-aws-idp-evaluation-method: EXACT
+      ExamineeDetailsDef:
+        type: object
+        description: Details about the examinee
+        properties:
+          ClaimNumber:
+            type: string
+            description: Claim number associated with the examinee
+            x-aws-idp-evaluation-method: EXACT
+          ExaminingPhysicians:
+            type: string
+            description: Name of the examining physicians
+            x-aws-idp-evaluation-method: EXACT
+          DateOfExamination:
+            format: date
+            description: Date of the examination
+            type: string
+            x-aws-idp-evaluation-method: EXACT
+          ExamineeName:
+            type: string
+            description: Name of the examinee
+            x-aws-idp-evaluation-method: EXACT
+          DateOfInjury:
+            format: date
+            description: Date of the injury
+            type: string
+            x-aws-idp-evaluation-method: EXACT
+      HistoryMedicalExamDef:
+        type: object
+        description: History of the examinee
+        properties:
+          HistoryDetails:
+            type: string
+            description: Detailed history of the examinee
+            x-aws-idp-evaluation-method: LLM
+      ExaminationDetailsDef:
+        type: object
+        description: Details about the examination
+        properties:
+          PurposeOfExamination:
+            type: string
+            description: Purpose of the examination
+            x-aws-idp-evaluation-method: LLM
+          TraditionalDoctorPatientRelationship:
+            type: string
+            description: Information about traditional doctor-patient relationship
+            x-aws-idp-evaluation-method: LLM
+          PhysicalActivityLimitation:
+            type: string
+            description: Limitation on physical activity during examination
+            x-aws-idp-evaluation-method: LLM
+    description: Report detailing a medical examination for insurance purposes.
+    type: object
+    x-aws-idp-document-type: Medical-Examination-Report
+    properties:
+      ExamineeDetails:
+        description: Details about the examinee
+        $ref: '#/$defs/ExamineeDetailsDef'
+        x-aws-idp-evaluation-method: LLM
+      ChiefComplaints:
+        description: Chief complaints of the examinee
+        $ref: '#/$defs/ChiefComplaintsDef'
+        x-aws-idp-evaluation-method: LLM
+      Header:
+        description: Header information of the document
+        $ref: '#/$defs/HeaderMedicalExamDef'
+        x-aws-idp-evaluation-method: LLM
+      History:
+        description: History of the examinee
+        $ref: '#/$defs/HistoryMedicalExamDef'
+        x-aws-idp-evaluation-method: LLM
+      ExaminationDetails:
+        description: Details about the examination
+        $ref: '#/$defs/ExaminationDetailsDef'
+        x-aws-idp-evaluation-method: LLM
+    $id: Medical-Examination-Report
+  - $schema: https://json-schema.org/draft/2020-12/schema
+    $defs:
+      InvoiceDetailsDef:
+        type: object
+        description: Details of the invoice.
+        properties:
+          Date:
+            format: date
+            description: Date of the invoice.
+            type: string
+            x-aws-idp-evaluation-method: EXACT
+          InvoiceNumber:
+            type: string
+            description: Invoice number.
+            x-aws-idp-evaluation-method: EXACT
+      PaymentInstructionsDef:
+        type: object
+        description: Instructions for making payment.
+        properties:
+          DueDate:
+            type: string
+            description: Date by which payment is due.
+            x-aws-idp-evaluation-method: EXACT
+          PaymentMethod:
+            type: string
+            description: Method of payment (e.g., check).
+            x-aws-idp-evaluation-method: FUZZY
+          ContactInformation:
+            type: string
+            description: Contact information for inquiries.
+            x-aws-idp-evaluation-method: LLM
+      BillToDef:
+        type: object
+        description: Information about the recipient of the invoice.
+        properties:
+          City-State:
+            type: string
+            description: City and state of the recipient.
+            x-aws-idp-evaluation-method: FUZZY
+          StreetAddress:
+            type: string
+            description: Street address of the recipient.
+            x-aws-idp-evaluation-method: FUZZY
+          ZIPCode:
+            type: string
+            description: ZIP code of the recipient.
+            x-aws-idp-evaluation-method: EXACT
+          Name:
+            type: string
+            description: Name of the recipient.
+            x-aws-idp-evaluation-method: FUZZY
+      ChargeItem:
+        type: object
+        properties:
+          Description:
+            type: string
+            description: Description of the charge.
+            x-aws-idp-evaluation-method: LLM
+          Amount:
+            type: string
+            description: Amount of the charge.
+            x-aws-idp-evaluation-method: EXACT
+      HospitalInformationDef:
+        type: object
+        description: Information about the hospital issuing the invoice.
+        properties:
+          StreetAddress:
+            type: string
+            description: Street address of the hospital.
+            x-aws-idp-evaluation-method: FUZZY
+          ZIPCode:
+            type: string
+            description: ZIP code of the hospital.
+            x-aws-idp-evaluation-method: EXACT
+          E-mail:
+            type: string
+            description: Email address of the hospital.
+            x-aws-idp-evaluation-method: LLM
+          Phone:
+            type: string
+            description: Phone number of the hospital.
+            x-aws-idp-evaluation-method: EXACT
+          City-State:
+            type: string
+            description: City and state of the hospital.
+            x-aws-idp-evaluation-method: FUZZY
+          HospitalName:
+            type: string
+            description: Name of the hospital.
+            x-aws-idp-evaluation-method: FUZZY
+          Name:
+            type: string
+            description: Name of the person associated with the hospital.
+            x-aws-idp-evaluation-method: FUZZY
+      SummaryDef:
+        type: object
+        description: Summary of the invoice including subtotal, discount, tax, and total.
+        properties:
+          Subtotal:
+            type: string
+            description: Subtotal amount of the invoice.
+            x-aws-idp-evaluation-method: LLM
+          Tax:
+            type: string
+            description: Tax amount on the invoice.
+            x-aws-idp-evaluation-method: LLM
+          Discount:
+            type: string
+            description: Discount applied to the invoice.
+            x-aws-idp-evaluation-method: LLM
+          Total:
+            type: string
+            description: Total amount due on the invoice.
+            x-aws-idp-evaluation-method: LLM
+    description: Medical insurance invoice from Not-A Real Hospital of Washington.
+    type: object
+    x-aws-idp-document-type: Medical-Insurance-Invoice
+    properties:
+      InvoiceDetails:
+        description: Details of the invoice.
+        $ref: '#/$defs/InvoiceDetailsDef'
+        x-aws-idp-evaluation-method: LLM
+      BillTo:
+        description: Information about the recipient of the invoice.
+        $ref: '#/$defs/BillToDef'
+        x-aws-idp-evaluation-method: LLM
+      Summary:
+        description: Summary of the invoice including subtotal, discount, tax, and total.
+        $ref: '#/$defs/SummaryDef'
+        x-aws-idp-evaluation-method: LLM
+      Charges:
+        description: List of charges included in the invoice.
+        type: array
+        x-aws-idp-list-item-description: Each item represents a charge included in the invoice.
+        items:
+          $ref: '#/$defs/ChargeItem'
+        x-aws-idp-evaluation-method: LLM
+      HospitalInformation:
+        description: Information about the hospital issuing the invoice.
+        $ref: '#/$defs/HospitalInformationDef'
+        x-aws-idp-evaluation-method: LLM
+      PaymentInstructions:
+        description: Instructions for making payment.
+        $ref: '#/$defs/PaymentInstructionsDef'
+        x-aws-idp-evaluation-method: LLM
+    $id: Medical-Insurance-Invoice
+  - $schema: https://json-schema.org/draft/2020-12/schema
+    $defs:
+      SpecimenDetailsDef:
+        type: object
+        description: Details of the specimen.
+        properties:
+          Specimen:
+            type: string
+            description: Type of specimen.
+            x-aws-idp-evaluation-method: LLM
+      ImmunostainsDef:
+        type: object
+        description: Immunostains results.
+        properties:
+          Immunostains:
+            type: string
+            description: Immunostains results.
+            x-aws-idp-evaluation-method: LLM
+      HeaderPathologyDef:
+        type: object
+        description: Header information including hospital name and address.
+        properties:
+          Address:
+            type: string
+            description: Address of the hospital.
+            x-aws-idp-evaluation-method: FUZZY
+          Hospital-Name:
+            type: string
+            description: Name of the hospital.
+            x-aws-idp-evaluation-method: FUZZY
+      GrossDescriptionDef:
+        type: object
+        description: Gross description of the specimen.
+        properties:
+          Gross-Description:
+            type: string
+            description: Gross description details.
+            x-aws-idp-evaluation-method: LLM
+      ClinicalHistoryDef:
+        type: object
+        description: Clinical history of the patient.
+        properties:
+          Clinical-History:
+            type: string
+            description: Clinical history description.
+            x-aws-idp-evaluation-method: LLM
+      MicroscopicDescriptionDef:
+        type: object
+        description: Microscopic description of the specimen.
+        properties:
+          Microscopic-Description:
+            type: string
+            description: Microscopic description details.
+            x-aws-idp-evaluation-method: LLM
+      DiagnosisDef:
+        type: object
+        description: Diagnosis details.
+        properties:
+          Diagnosis:
+            type: string
+            description: Diagnosis details.
+            x-aws-idp-evaluation-method: LLM
+      ReportDetailsDef:
+        type: object
+        description: Details of the surgical pathology report.
+        properties:
+          Accession-Number:
+            type: string
+            description: Accession number of the procedure.
+            x-aws-idp-evaluation-method: EXACT
+          DOB:
+            format: date
+            description: Date of Birth of the patient.
+            type: string
+            x-aws-idp-evaluation-method: EXACT
+          MRN:
+            type: string
+            description: Medical Record Number of the patient.
+            x-aws-idp-evaluation-method: EXACT
+          Patient:
+            type: string
+            description: Name of the patient.
+            x-aws-idp-evaluation-method: FUZZY
+          Procedure:
+            format: date
+            description: Date of the procedure.
+            type: string
+            x-aws-idp-evaluation-method: LLM
+          Attending:
+            type: string
+            description: Name of the attending doctor.
+            x-aws-idp-evaluation-method: FUZZY
+          Gender:
+            type: string
+            description: Gender of the patient.
+            x-aws-idp-evaluation-method: EXACT
+      CommentDef:
+        type: object
+        description: Comment on the findings.
+        properties:
+          Comment:
+            type: string
+            description: Comment on the findings.
+            x-aws-idp-evaluation-method: LLM
+    description: Surgical pathology report for a patient with gastric tumor.
+    type: object
+    x-aws-idp-document-type: Surgical-Pathology-Report
+    properties:
+      Comment:
+        description: Comment on the findings.
+        $ref: '#/$defs/CommentDef'
+        x-aws-idp-evaluation-method: LLM
+      Report-Details:
+        description: Details of the surgical pathology report.
+        $ref: '#/$defs/ReportDetailsDef'
+        x-aws-idp-evaluation-method: LLM
+      Header:
+        description: Header information including hospital name and address.
+        $ref: '#/$defs/HeaderPathologyDef'
+        x-aws-idp-evaluation-method: LLM
+      Specimen-Details:
+        description: Details of the specimen.
+        $ref: '#/$defs/SpecimenDetailsDef'
+        x-aws-idp-evaluation-method: LLM
+      Gross-Description:
+        description: Gross description of the specimen.
+        $ref: '#/$defs/GrossDescriptionDef'
+        x-aws-idp-evaluation-method: LLM
+      Clinical-History:
+        description: Clinical history of the patient.
+        $ref: '#/$defs/ClinicalHistoryDef'
+        x-aws-idp-evaluation-method: LLM
+      Diagnosis:
+        description: Diagnosis details.
+        $ref: '#/$defs/DiagnosisDef'
+        x-aws-idp-evaluation-method: LLM
+      Immunostains:
+        description: Immunostains results.
+        $ref: '#/$defs/ImmunostainsDef'
+        x-aws-idp-evaluation-method: LLM
+      Microscopic-Description:
+        description: Microscopic description of the specimen.
+        $ref: '#/$defs/MicroscopicDescriptionDef'
+        x-aws-idp-evaluation-method: LLM
+    $id: Surgical-Pathology-Report
+  - $schema: https://json-schema.org/draft/2020-12/schema
+    $defs:
+      PrescriptionDetailsDef:
+        type: object
+        description: >-
+          Details of the prescription including patient and medication
+          information.
+        properties:
+          Address:
+            type: string
+            description: Address of the health center.
+            x-aws-idp-evaluation-method: FUZZY
+          RxNumber:
+            type: string
+            description: Prescription number.
+            x-aws-idp-evaluation-method: EXACT
+          MedicationDosage:
+            type: string
+            description: Dosage of the medication.
+            x-aws-idp-evaluation-method: LLM
+          Quantity:
+            type: number
+            description: Quantity of the medication.
+            x-aws-idp-evaluation-method: EXACT
+          RoundWhiteLogo:
+            type: string
+            description: Indication of the round white logo on the prescription.
+            x-aws-idp-evaluation-method: LLM
+          RefillDate:
+            format: date
+            description: Date when the refill is allowed.
+            type: string
+            x-aws-idp-evaluation-method: EXACT
+          FacilityName:
+            type: string
+            description: Name of the health center issuing the prescription.
+            x-aws-idp-evaluation-method: FUZZY
+          FillDate:
+            format: date
+            description: Date when the prescription was filled.
+            type: string
+            x-aws-idp-evaluation-method: EXACT
+          QRCode:
+            type: string
+            description: Presence of a QR code on the prescription.
+            x-aws-idp-evaluation-method: LLM
+          DaysSupply:
+            type: number
+            description: Number of days the medication is supplied for.
+            x-aws-idp-evaluation-method: LLM
+          OMTF:
+            type: string
+            description: OMTF code.
+            x-aws-idp-evaluation-method: LLM
+          Phone:
+            type: string
+            description: Phone number of the health center.
+            x-aws-idp-evaluation-method: LLM
+          Refills:
+            type: number
+            description: Number of refills allowed.
+            x-aws-idp-evaluation-method: LLM
+          Tablet:
+            type: string
+            description: Indication if the medication is in tablet form.
+            x-aws-idp-evaluation-method: LLM
+          MedicationName:
+            type: string
+            description: Name of the medication.
+            x-aws-idp-evaluation-method: FUZZY
+          OTC:
+            type: string
+            description: Indication if the medication is over-the-counter.
+            x-aws-idp-evaluation-method: LLM
+    description: Prescription form
+    type: object
+    x-aws-idp-document-type: Prescription
+    properties:
+      PrescriptionDetails:
+        description: >-
+          Details of the prescription including patient and medication
+          information.
+        $ref: '#/$defs/PrescriptionDetailsDef'
+        x-aws-idp-evaluation-method: LLM
+    $id: Prescription
+rule_validation:
+  enabled: false

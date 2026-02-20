@@ -122,30 +122,113 @@ def create_gateway(props, gateway_name, client):
     logger.info("Waiting for IAM propagation...")
     time.sleep(30)
 
-    # Add analytics Lambda target
-    logger.info("Adding analytics Lambda target...")
+    # Add IDP tools Lambda target with all tools
+    logger.info("Adding IDP tools Lambda target...")
     client.create_mcp_gateway_target(
         gateway=gateway,
-        name="AnalyticsLambdaTarget",
+        name="IDPTools",
         target_type="lambda",
         target_payload={
             "lambdaArn": lambda_arn,
             "toolSchema": {
                 "inlinePayload": [
                     {
-                        "description": "Provides information from GenAI Intelligent Document Processing System and answer user questions",
+                        "name": "search",
+                        "description": "Search and query processed documents using natural language. Returns analytics, metrics, and document information from the IDP system.",
                         "inputSchema": {
+                            "type": "object",
                             "properties": {
                                 "query": {
-                                    "type": "string"
+                                    "type": "string",
+                                    "description": "Natural language query about processed documents, metrics, or system status"
                                 }
                             },
-                            "required": [
-                                "query"
-                            ],
-                            "type": "object"
-                        },
-                        "name": "search_genaiidp"
+                            "required": ["query"]
+                        }
+                    },
+                    {
+                        "name": "process",
+                        "description": "Process documents through the IDP pipeline. Accepts S3 locations or base64-encoded content. Intelligently handles missing information by requesting specific details.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "location": {
+                                    "type": "string",
+                                    "description": "S3 URI for batch processing (e.g., 's3://bucket/documents/'). Optional if content is provided."
+                                },
+                                "content": {
+                                    "type": "string",
+                                    "description": "Base64-encoded document content for single document processing. Optional if location is provided."
+                                },
+                                "name": {
+                                    "type": "string",
+                                    "description": "Document filename with extension (e.g., 'invoice.pdf', 'contract.docx'). Required if content is provided; optional for S3 locations."
+                                },
+                                "prefix": {
+                                    "type": "string",
+                                    "description": "Optional batch ID prefix (default: 'mcp-batch')"
+                                }
+                            },
+                            "required": []
+                        }
+                    },
+                    {
+                        "name": "reprocess",
+                        "description": "Reprocess documents from a specific pipeline step. Supports classification or extraction reprocessing. Returns batch ID for status tracking.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "step": {
+                                    "type": "string",
+                                    "description": "Pipeline step to reprocess from (classification or extraction)"
+                                },
+                                "document_ids": {
+                                    "type": "string",
+                                    "description": "Comma-separated list of document IDs to reprocess (alternative to batch_id)"
+                                },
+                                "batch_id": {
+                                    "type": "string",
+                                    "description": "Batch ID to get document IDs from (alternative to document_ids)"
+                                },
+                                "region": {
+                                    "type": "string",
+                                    "description": "AWS region (optional)"
+                                }
+                            },
+                            "required": ["step"]
+                        }
+                    },
+                    {
+                        "name": "status",
+                        "description": "Get processing status for a batch of documents. Returns progress, timing, and error information.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "batch_id": {
+                                    "type": "string",
+                                    "description": "Batch identifier (e.g., 'mcp-batch-20250124-143000')"
+                                },
+                                "options": {
+                                    "type": "object",
+                                    "description": "Optional status parameters",
+                                    "properties": {
+                                        "detailed": {
+                                            "type": "boolean",
+                                            "description": "Include per-document details (default: false)"
+                                        },
+                                        "include_errors": {
+                                            "type": "boolean",
+                                            "description": "Include error details (default: true)"
+                                        }
+                                    }
+                                },
+                                "region": {
+                                    "type": "string",
+                                    "description": "AWS region (optional)"
+                                }
+                            },
+                            "required": ["batch_id"]
+                        }
                     }
                 ]
             },

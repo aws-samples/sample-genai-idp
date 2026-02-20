@@ -1,2 +1,3 @@
-# idp_common provided by Lambda Layer 3 (agents)
-# Layer 3 includes: core + agents (strands-agents, bedrock-agentcore, etc.)
+# idp_common provided by Lambda Layer (IDPCommonAgentsLayer)
+# Layer includes: core + agents (strands-agents, bedrock-agentcore, etc.)
+# idp_sdk bundled directly with Lambda function code

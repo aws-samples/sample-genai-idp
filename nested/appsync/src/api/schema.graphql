@@ -1,3 +1,49 @@
+type CapacityResult @aws_cognito_user_pools {
+  success: Boolean!
+  errorMessage: String
+  data: String
+  metrics: [CapacityMetric]
+  quotaRequirements: [QuotaRequirement]
+  latencyDistribution: LatencyDistribution
+  calculationDetails: CalculationDetails
+  recommendations: [String]
+}
+
+type LatencyDistribution @aws_cognito_user_pools {
+  p50: String
+  p75: String
+  p90: String
+  p95: String
+  p99: String
+  baseLatency: String
+  queueLatency: String
+  totalLatency: String
+  maxAllowed: String
+  exceedsLimit: Boolean
+}
+
+type CapacityMetric @aws_cognito_user_pools {
+  label: String!
+  value: String!
+}
+
+type QuotaRequirement @aws_cognito_user_pools {
+  service: String!
+  category: String!
+  currentQuota: String!
+  requiredQuota: String!
+  statusText: String!
+  modelId: String
+}
+
+type CalculationDetails @aws_cognito_user_pools {
+  quotasUsed: QuotasUsed
+}
+
+type QuotasUsed @aws_cognito_user_pools {
+  bedrock_models: AWSJSON
+}
+
 interface DynamoDbBase {
   PK: ID!
   SK: ID!
@@ -618,6 +664,7 @@ type Query @aws_cognito_user_pools @aws_iam {
   getConfigVersions: ConfigurationVersionsResponse
   getConfigVersion(versionName: String!): ConfigurationResponse
   getPricing: PricingResponse
+  calculateCapacity(input: String!): CapacityResult @aws_cognito_user_pools
   listDiscoveryJobs: DiscoveryJobList
   queryKnowledgeBase(input: String!, sessionId: String): String
   chatWithDocument(

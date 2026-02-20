@@ -279,3 +279,154 @@ class ConfigOperation:
             )
         except Exception as e:
             return ConfigUploadResult(success=False, error=str(e))
+
+    def list(
+        self,
+        stack_name: Optional[str] = None,
+        **kwargs,
+    ) -> dict:
+        """List all configuration versions in a deployed IDP stack.
+
+        Args:
+            stack_name: Optional stack name override
+            **kwargs: Additional parameters
+
+        Returns:
+            Dict with list of configuration versions
+        """
+        import boto3
+
+        name = self._client._require_stack(stack_name)
+
+        cfn = boto3.client("cloudformation", region_name=self._client._region)
+        paginator = cfn.get_paginator("list_stack_resources")
+        config_table = None
+
+        for page in paginator.paginate(StackName=name):
+            for resource in page.get("StackResourceSummaries", []):
+                if resource.get("LogicalResourceId") == "ConfigurationTable":
+                    config_table = resource.get("PhysicalResourceId")
+                    break
+            if config_table:
+                break
+
+        if not config_table:
+            raise IDPResourceNotFoundError("ConfigurationTable not found in stack")
+
+        try:
+            import os
+
+            from idp_common.config.configuration_manager import ConfigurationManager
+
+            os.environ["CONFIGURATION_TABLE_NAME"] = config_table
+            manager = ConfigurationManager()
+            versions = manager.list_config_versions()
+
+            return {"versions": versions, "count": len(versions)}
+        except Exception as e:
+            raise IDPResourceNotFoundError(f"Failed to list configurations: {e}")
+
+    def activate(
+        self,
+        config_version: str,
+        stack_name: Optional[str] = None,
+        **kwargs,
+    ) -> dict:
+        """Activate a configuration version in a deployed IDP stack.
+
+        Args:
+            config_version: Configuration version to activate
+            stack_name: Optional stack name override
+            **kwargs: Additional parameters
+
+        Returns:
+            Dict with activation status
+        """
+        import boto3
+
+        name = self._client._require_stack(stack_name)
+
+        cfn = boto3.client("cloudformation", region_name=self._client._region)
+        paginator = cfn.get_paginator("list_stack_resources")
+        config_table = None
+
+        for page in paginator.paginate(StackName=name):
+            for resource in page.get("StackResourceSummaries", []):
+                if resource.get("LogicalResourceId") == "ConfigurationTable":
+                    config_table = resource.get("PhysicalResourceId")
+                    break
+            if config_table:
+                break
+
+        if not config_table:
+            raise IDPResourceNotFoundError("ConfigurationTable not found in stack")
+
+        try:
+            import os
+
+            from idp_common.config.configuration_manager import ConfigurationManager
+
+            os.environ["CONFIGURATION_TABLE_NAME"] = config_table
+            manager = ConfigurationManager()
+
+            # Check if version exists
+            existing_config = manager.get_configuration(
+                "Config", version=config_version
+            )
+            if not existing_config:
+                raise ValueError(
+                    f"Configuration version '{config_version}' does not exist"
+                )
+
+            manager.activate_version(config_version)
+            return {"success": True, "activated_version": config_version}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def delete(
+        self,
+        config_version: str,
+        stack_name: Optional[str] = None,
+        **kwargs,
+    ) -> dict:
+        """Delete a configuration version from a deployed IDP stack.
+
+        Args:
+            config_version: Configuration version to delete
+            stack_name: Optional stack name override
+            **kwargs: Additional parameters
+
+        Returns:
+            Dict with deletion status
+        """
+        import boto3
+
+        name = self._client._require_stack(stack_name)
+
+        cfn = boto3.client("cloudformation", region_name=self._client._region)
+        paginator = cfn.get_paginator("list_stack_resources")
+        config_table = None
+
+        for page in paginator.paginate(StackName=name):
+            for resource in page.get("StackResourceSummaries", []):
+                if resource.get("LogicalResourceId") == "ConfigurationTable":
+                    config_table = resource.get("PhysicalResourceId")
+                    break
+            if config_table:
+                break
+
+        if not config_table:
+            raise IDPResourceNotFoundError("ConfigurationTable not found in stack")
+
+        try:
+            import os
+
+            from idp_common.config.configuration_manager import ConfigurationManager
+
+            os.environ["CONFIGURATION_TABLE_NAME"] = config_table
+            manager = ConfigurationManager()
+
+            manager.delete_configuration("Config", version=config_version)
+            return {"success": True, "deleted_version": config_version}
+        except Exception as e:
+            return {"success": False, "error": str(e)}

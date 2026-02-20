@@ -7,24 +7,31 @@ SPDX-License-Identifier: MIT-0
 
 ## Table of Contents
 
-- [Introduction](#introduction)
-- [Alternative Implementations](#alternative-implementations)
-- [Key Features](#key-features)
-- [Architecture Overview](#architecture-overview)
-- [Quick Start](#quick-start)
-  - [Processing Your First Document](#processing-your-first-document)
-- [Updating an Existing Deployment](#updating-an-existing-deployment)
-- [Detailed Documentation](#detailed-documentation)
-  - [Core Documentation](#core-documentation)
-  - [Processing Patterns](#processing-patterns)
-  - [Python Development](#python-development)
-  - [Planning & Operations](#planning--operations)
-- [Contributing](#contributing)
-- [License](#license)
+- [Gen AI Intelligent Document Processing (GenAIIDP)](#gen-ai-intelligent-document-processing-genaiidp)
+  - [Table of Contents](#table-of-contents)
+  - [Introduction](#introduction)
+  - [Alternative Implementations](#alternative-implementations)
+  - [Key Features](#key-features)
+  - [Architecture Overview](#architecture-overview)
+  - [Quick Start](#quick-start)
+    - [Processing Your First Document](#processing-your-first-document)
+      - [Method 1: Web UI (Interactive)](#method-1-web-ui-interactive)
+      - [Method 2: Direct S3 Upload (Simple)](#method-2-direct-s3-upload-simple)
+      - [Method 3: IDP CLI (Batch/Programmatic)](#method-3-idp-cli-batchprogrammatic)
+  - [Updating an Existing Deployment](#updating-an-existing-deployment)
+  - [Detailed Documentation](#detailed-documentation)
+    - [Core Documentation](#core-documentation)
+    - [Processing Patterns](#processing-patterns)
+    - [Python Development](#python-development)
+    - [Planning \& Operations](#planning--operations)
+  - [Contributing](#contributing)
+  - [License](#license)
 
 ## Introduction
 
 A scalable, serverless solution for automated document processing and information extraction using AWS services. This system combines OCR capabilities with generative AI to convert unstructured documents into structured data at scale.
+
+TODO Placeholder - replace asset with new short demo video
 
 https://github.com/user-attachments/assets/272b543b-e506-48ce-acc1-361422d22322
 
@@ -165,6 +172,7 @@ For detailed deployment and testing instructions, see the [Deployment Guide](./d
 ### Core Documentation
 
 - [Architecture](./docs/architecture.md) - Detailed component architecture and data flow
+- [Demo Videos](./docs/demo-videos.md) - Comprehensive collection of feature demonstration videos
 - [Deployment](./docs/deployment.md) - Build, publish, deploy, and test instructions
 - [IDP CLI](./docs/idp-cli.md) - Command line interface for batch processing and evaluation workflows
 - [Web UI](./docs/web-ui.md) - Web interface features and usage
@@ -200,6 +208,7 @@ For detailed deployment and testing instructions, see the [Deployment Guide](./d
 
 ### Planning & Operations
 
+- [Capacity Planning](./docs/capacity-planning.md) - Comprehensive capacity planning, performance optimization, and resource scaling guidance
 - [Well-Architected Framework Assessment](./docs/well-architected.md) - Analysis based on AWS Well-Architected Framework
 - [AWS Services & IAM Roles](./docs/aws-services-and-roles.md) - AWS services used and IAM role requirements
 - [Cost Calculator](./docs/cost-calculator.md) - Framework for estimating solution costs
