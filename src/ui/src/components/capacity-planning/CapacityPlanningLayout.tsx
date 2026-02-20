@@ -18,14 +18,9 @@ import {
   Cards,
   ColumnLayout,
   Badge,
-  Modal,
-  TextFilter,
-  Pagination,
-  CollectionPreferences,
   Flashbar,
   ExpandableSection,
 } from '@cloudscape-design/components';
-import { useCollection } from '@cloudscape-design/collection-hooks';
 import useConfiguration from '../../hooks/use-configuration';
 import useConfigurationVersions from '../../hooks/use-configuration-versions';
 import useSettingsContext from '../../contexts/settings';
@@ -33,25 +28,165 @@ import useDocumentsContext from '../../contexts/documents';
 import DocumentPickerModal from './DocumentPickerModal';
 import DateRangeModal from '../common/DateRangeModal';
 
+// Type definitions for configuration and state
+interface Configuration {
+  ocr?: { backend?: string; model_id?: string; model?: string };
+  classification?: { model?: string };
+  extraction?: { model?: string };
+  assessment?: { enabled?: boolean; model?: string; granular?: { enabled?: boolean } };
+  summarization?: { model?: string };
+  classes?: Array<{
+    name?: string;
+    $id?: string;
+    'x-aws-idp-document-type'?: string;
+    description?: string;
+  }>;
+  [key: string]: unknown;
+}
+
+interface DocumentConfig {
+  type: string;
+  avgPages: string | number;
+  ocrTokens: string | number;
+  classificationTokens: string | number;
+  extractionTokens: string | number;
+  summarizationTokens: string | number;
+  assessmentTokens: string | number;
+  ocrRequests?: string | number;
+  classificationRequests?: string | number;
+  extractionRequests?: string | number;
+  assessmentRequests?: string | number;
+  summarizationRequests?: string | number;
+  index?: number;
+}
+
+interface TimeSlot {
+  hour: string;
+  documentType: string;
+  docsPerHour: string;
+}
+
+interface ProcessingConfig {
+  timeSlots: TimeSlot[];
+  maxLatency: string;
+  missingConfig?: string;
+}
+
+interface CapacityMetric {
+  label: string;
+  value: string;
+}
+
+interface QuotaRequirement {
+  service: string;
+  category: string;
+  currentQuota: string;
+  requiredQuota: string;
+  statusText: string;
+  modelId?: string;
+  inferenceType?: string;
+  modelDisplayName?: string;
+  usedFor?: string;
+  status?: string;
+}
+
+interface LatencyDistribution {
+  p50?: string;
+  p75?: string;
+  p90?: string;
+  p95?: string;
+  p99?: string;
+  baseLatency?: string;
+  queueLatency?: string;
+  totalLatency?: string;
+  exceedsLimit?: boolean;
+  maxAllowed?: string;
+  actualProcessingTime?: string;
+  dataSource?: string;
+  quotaOverloaded?: boolean;
+  [key: string]: unknown;
+}
+
+interface CapacityResult {
+  success: boolean;
+  errorMessage?: string;
+  metrics?: CapacityMetric[];
+  quotaRequirements?: QuotaRequirement[];
+  latencyDistribution?: LatencyDistribution;
+  calculationDetails?: Record<string, unknown>;
+  recommendations?: string[];
+}
+
+interface Notification {
+  id: string;
+  type: string;
+  content: React.ReactNode;
+  header?: string;
+  dismissible: boolean;
+  onDismiss: () => void;
+}
+
+interface RecentDocument {
+  ObjectKey: string;
+  documentClass: string;
+  documentClasses?: string[];
+  isMultiClass?: boolean;
+  InitialEventTime?: string;
+  ObjectStatus?: string;
+  metering: Record<string, number>;
+}
+
+interface MeteringMetrics {
+  totalTokens?: number;
+  inputTokens?: number;
+  outputTokens?: number;
+  requests?: number;
+  pages?: number;
+  pageCount?: number;
+  PageCount?: number;
+  [key: string]: unknown;
+}
+
+interface HourlyBreakdown {
+  hour: number;
+  ocrTokens: number;
+  classificationTokens: number;
+  extractionTokens: number;
+  summarizationTokens: number;
+  assessmentTokens: number;
+  totalTokens: number;
+  documentTypes?: string[];
+}
+
+interface SelectOption {
+  label: string;
+  value: string;
+  description?: string;
+  disabled?: boolean;
+}
+
 // Time period constants from main Document List
-const DOCUMENT_LIST_SHARDS_PER_DAY = 6;
+const _DOCUMENT_LIST_SHARDS_PER_DAY = 6;
 
 const CapacityPlanningLayout = () => {
-  const { mergedConfig: configuration, fetchConfiguration } = useConfiguration();
+  const { mergedConfig: configurationUntyped, fetchConfiguration } = useConfiguration();
+  const configuration = configurationUntyped as Configuration | null;
   const { versions, getVersionOptions } = useConfigurationVersions();
-  const { settings: deploymentSettings } = useSettingsContext() || {};
-  const {
-    documents,
-    isDocumentsListLoading,
-    setIsDocumentsListLoading,
-    periodsToLoad,
-    setPeriodsToLoad,
-    customDateRange,
-    setCustomDateRange,
-  } = useDocumentsContext() || {};
+  const settingsContext = useSettingsContext() || {};
+  const deploymentSettings = settingsContext.settings as Record<string, unknown> | undefined;
+  const documentsContext = useDocumentsContext() || {};
+  const documents = documentsContext.documents as Array<Record<string, unknown>> | undefined;
+  const isDocumentsListLoading = documentsContext.isDocumentsListLoading as boolean | undefined;
+  const setIsDocumentsListLoading = documentsContext.setIsDocumentsListLoading as ((loading: boolean) => void) | undefined;
+  const periodsToLoad = documentsContext.periodsToLoad as number | undefined;
+  const setPeriodsToLoad = documentsContext.setPeriodsToLoad as ((count: number) => void) | undefined;
+  const customDateRange = documentsContext.customDateRange as { startDateTime: string; endDateTime: string } | null | undefined;
+  const setCustomDateRange = documentsContext.setCustomDateRange as
+    | ((range: { startDateTime: string; endDateTime: string } | null) => void)
+    | undefined;
 
-  const [selectedConfigVersion, setSelectedConfigVersion] = useState(null);
-  const [manualPattern, setManualPattern] = useState(null);
+  const [selectedConfigVersion, setSelectedConfigVersion] = useState<SelectOption | null>(null);
+  const [manualPattern, setManualPattern] = useState<string | null>(null);
 
   // Log documents availability for debugging
   useEffect(() => {
@@ -105,7 +240,7 @@ const CapacityPlanningLayout = () => {
     // Remove auto-population to avoid errors
   }, []); // Remove documents dependency
 
-  const [documentConfigs, setDocumentConfigs] = useState([
+  const [documentConfigs, setDocumentConfigs] = useState<DocumentConfig[]>([
     {
       type: '',
       avgPages: '',
@@ -117,9 +252,9 @@ const CapacityPlanningLayout = () => {
     },
   ]);
 
-  const [configurationError, setConfigurationError] = useState(null);
+  const [_configurationError, _setConfigurationError] = useState<string | null>(null);
 
-  const [processingConfig, setProcessingConfig] = useState(() => {
+  const [processingConfig, setProcessingConfig] = useState<ProcessingConfig>(() => {
     const defaultMaxLatency = import.meta.env.VITE_DEFAULT_MAX_LATENCY;
     if (!defaultMaxLatency) {
       return {
@@ -136,26 +271,24 @@ const CapacityPlanningLayout = () => {
 
   const [loading, setLoading] = useState(false);
   const [hasCalculated, setHasCalculated] = useState(false);
-  const [results, setResults] = useState(null);
-  const [recentDocuments, setRecentDocuments] = useState([]);
+  const [results, setResults] = useState<CapacityResult | null>(null);
+  const [recentDocuments, setRecentDocuments] = useState<RecentDocument[]>([]);
   const [showDocumentPicker, setShowDocumentPicker] = useState(false);
-  const [selectedDocuments, setSelectedDocuments] = useState([]);
-  const [notifications, setNotifications] = useState([]);
+  const [selectedDocuments, setSelectedDocuments] = useState<RecentDocument[]>([]);
+  const [notifications, setNotifications] = useState<Notification[]>([]);
   const [isDateRangeModalVisible, setIsDateRangeModalVisible] = useState(false);
 
   // Helper function to add notifications
-  const addNotification = (type, content, header = null, dismissible = true) => {
+  const addNotification = (type: string, content: React.ReactNode, header: string | null = null, dismissible = true) => {
     const id = Date.now().toString();
-    const notification = {
+    const notification: Notification = {
       id,
       type, // 'success', 'error', 'warning', 'info'
       content,
       dismissible,
       onDismiss: () => setNotifications((prev) => prev.filter((n) => n.id !== id)),
+      ...(header ? { header } : {}),
     };
-    if (header) {
-      notification.header = header;
-    }
     setNotifications((prev) => [...prev, notification]);
 
     // Auto-dismiss success/info notifications after 5 seconds
@@ -259,8 +392,9 @@ const CapacityPlanningLayout = () => {
     };
 
     // Extract tokens and estimate requests from context-prefixed keys
-    Object.entries(meteringData).forEach(([key, metrics]) => {
-      if (typeof metrics === 'object' && metrics !== null) {
+    Object.entries(meteringData).forEach(([key, value]) => {
+      if (typeof value === 'object' && value !== null) {
+        const metrics = value as MeteringMetrics;
         if (key.startsWith('OCR/')) {
           const tokenCount = metrics.totalTokens || (metrics.inputTokens || 0) + (metrics.outputTokens || 0);
           data.ocrTokens += Number(tokenCount) || 0;
@@ -497,9 +631,10 @@ const CapacityPlanningLayout = () => {
 
       // If still no documents, show detailed error
       if (candidateDocuments.length === 0) {
-        const statusCounts = {};
+        const statusCounts: Record<string, number> = {};
         documents.forEach((doc) => {
-          statusCounts[doc.ObjectStatus] = (statusCounts[doc.ObjectStatus] || 0) + 1;
+          const status = String(doc.ObjectStatus ?? 'Unknown');
+          statusCounts[status] = (statusCounts[status] || 0) + 1;
         });
 
         addNotification(
@@ -559,9 +694,11 @@ const CapacityPlanningLayout = () => {
             } else if (doc.Pages) {
               extractedData.avgPages = Number(doc.Pages) || 0;
               console.log(`📄 Extracted page count from doc.Pages: ${extractedData.avgPages} pages`);
-            } else if (doc.Sections && doc.Sections.length > 0) {
+            } else if (doc.Sections && (doc.Sections as Array<Record<string, unknown>>).length > 0) {
               // Try to get page count from sections
-              const maxEndPage = Math.max(...doc.Sections.map((s) => s.EndPage || s.endPage || 0));
+              const maxEndPage = Math.max(
+                ...(doc.Sections as Array<Record<string, unknown>>).map((s) => (s.EndPage as number) || (s.endPage as number) || 0),
+              );
               if (maxEndPage > 0) {
                 extractedData.avgPages = maxEndPage;
                 console.log(`📄 Extracted page count from Sections EndPage: ${extractedData.avgPages} pages`);
@@ -572,14 +709,14 @@ const CapacityPlanningLayout = () => {
           console.log('Extracted data for', doc.ObjectKey, ':', extractedData);
 
           return {
-            ObjectKey: doc.ObjectKey,
+            ObjectKey: String(doc.ObjectKey),
             documentClass: validation.documentClass,
-            documentClasses: validation.documentClasses, // Array of all classes
+            documentClasses: validation.documentClasses as string[], // Array of all classes
             isMultiClass: validation.isMultiClass, // Flag for multi-class documents
-            InitialEventTime: doc.InitialEventTime,
-            ObjectStatus: doc.ObjectStatus,
+            InitialEventTime: doc.InitialEventTime as string | undefined,
+            ObjectStatus: doc.ObjectStatus as string | undefined,
             metering: extractedData,
-          };
+          } as RecentDocument;
         })
         .filter((doc) => doc !== null);
 
@@ -667,11 +804,11 @@ const CapacityPlanningLayout = () => {
           <Box>
             Multi-section document populated: <strong>{selectedDoc.ObjectKey}</strong>
           </Box>
-          <Box variant="p" marginTop="xs">
+          <Box variant="p" margin={{ top: 'xs' }}>
             Created {numClasses} rows (one per document class: {documentClasses.join(', ')}). Token values are divided equally as an
             estimate.
           </Box>
-          <Box variant="small" color="text-status-warning" marginTop="xs">
+          <Box variant="small" color="text-status-warning" margin={{ top: 'xs' }}>
             ⚠️ Note: Actual token usage per class may vary. These are averaged estimates from the total document tokens.
           </Box>
         </>,
@@ -821,11 +958,11 @@ const CapacityPlanningLayout = () => {
               {selectedDocuments.length} document{selectedDocuments.length > 1 ? 's' : ''}
             </strong>
           </Box>
-          <Box variant="p" marginTop="xs">
+          <Box variant="p" margin={{ top: 'xs' }}>
             {multiClassCount} multi-section document{multiClassCount > 1 ? 's were' : ' was'} included. Token values for multi-section
             documents are divided equally among their document classes.
           </Box>
-          <Box variant="small" color="text-status-warning" marginTop="xs">
+          <Box variant="small" color="text-status-warning" margin={{ top: 'xs' }}>
             ⚠️ Note: Multi-section token estimates may vary from actual per-class usage.
           </Box>
         </>,
@@ -840,7 +977,7 @@ const CapacityPlanningLayout = () => {
     }
   };
 
-  const handleDocumentSelection = (document, isSelected) => {
+  const _handleDocumentSelection = (document: RecentDocument, isSelected: boolean) => {
     if (isSelected) {
       setSelectedDocuments([...selectedDocuments, document]);
     } else {
@@ -973,7 +1110,7 @@ const CapacityPlanningLayout = () => {
 
     // Use the same logic as the left panel - simple and reliable
     if (deploymentSettings?.IDPPattern) {
-      const pattern = deploymentSettings.IDPPattern.split(' ')[0]; // Extract just "Pattern1", "Pattern2", etc.
+      const pattern = String(deploymentSettings.IDPPattern).split(' ')[0]; // Extract just "Pattern1", "Pattern2", etc.
 
       if (pattern === 'Pattern1') {
         return 'PATTERN-1';
@@ -1135,7 +1272,7 @@ const CapacityPlanningLayout = () => {
             config.ocrTokens === null ||
             config.ocrTokens === '' ||
             (typeof config.ocrTokens === 'string' && config.ocrTokens.trim() === '') ||
-            Number.isNaN(parseFloat(config.ocrTokens)),
+            Number.isNaN(parseFloat(String(config.ocrTokens))),
         );
 
         if (hasDocumentsWithMissingOcrTokens) {
@@ -1155,17 +1292,34 @@ const CapacityPlanningLayout = () => {
 
       // Calculate total docs per hour from processing schedule time slots
       const totalDocsPerHour = processingConfig.timeSlots.reduce(
-        (sum, slot) => sum + parseInt(slot.docsPerHour || 0, 10), // Default to 0 if empty
+        (sum, slot) => sum + parseInt(String(slot.docsPerHour || 0), 10), // Default to 0 if empty
         0,
       );
 
       // Aggregate document configs from processing schedule
-      const aggregatedDocConfigs = {};
+      const aggregatedDocConfigs: Record<
+        string,
+        {
+          type: string;
+          avgPages: number;
+          ocrTokens: number;
+          classificationTokens: number;
+          extractionTokens: number;
+          summarizationTokens: number;
+          assessmentTokens: number;
+          docsPerHour: number;
+          ocrRequests?: number;
+          classificationRequests?: number;
+          extractionRequests?: number;
+          assessmentRequests?: number;
+          summarizationRequests?: number;
+        }
+      > = {};
       processingConfig.timeSlots
         .filter((slot) => slot && slot.documentType && slot.documentType.trim() !== '') // Only process slots with valid document types
         .forEach((slot) => {
           const docType = slot.documentType;
-          const docsPerHour = parseInt(slot.docsPerHour || 0, 10); // Default to 0 if empty
+          const docsPerHour = parseInt(String(slot.docsPerHour || 0), 10); // Default to 0 if empty
 
           if (!aggregatedDocConfigs[docType]) {
             // Find the document config for this type
@@ -1178,12 +1332,12 @@ const CapacityPlanningLayout = () => {
 
             aggregatedDocConfigs[docType] = {
               type: docType,
-              avgPages: parseFloat(docConfig.avgPages) || 0, // Use actual pages, 0 if not available
-              ocrTokens: parseFloat(docConfig.ocrTokens || 0),
-              classificationTokens: parseFloat(docConfig.classificationTokens || 0),
-              extractionTokens: parseFloat(docConfig.extractionTokens || 0),
-              summarizationTokens: parseFloat(docConfig.summarizationTokens || 0),
-              assessmentTokens: parseFloat(docConfig.assessmentTokens || 0),
+              avgPages: parseFloat(String(docConfig.avgPages)) || 0, // Use actual pages, 0 if not available
+              ocrTokens: parseFloat(String(docConfig.ocrTokens || 0)),
+              classificationTokens: parseFloat(String(docConfig.classificationTokens || 0)),
+              extractionTokens: parseFloat(String(docConfig.extractionTokens || 0)),
+              summarizationTokens: parseFloat(String(docConfig.summarizationTokens || 0)),
+              assessmentTokens: parseFloat(String(docConfig.assessmentTokens || 0)),
               docsPerHour,
             };
           } else {
@@ -1222,7 +1376,7 @@ const CapacityPlanningLayout = () => {
       // Convert timeSlots docsPerHour values to integers for API
       const timeSlotsForAPI = processingConfig.timeSlots.map((slot) => ({
         ...slot,
-        docsPerHour: parseInt(slot.docsPerHour || 0, 10),
+        docsPerHour: parseInt(String(slot.docsPerHour || 0), 10),
       }));
 
       const input = {
@@ -1358,9 +1512,10 @@ const CapacityPlanningLayout = () => {
 
       console.log('📊 Capacity calculation response:', response);
 
-      if (response.data?.calculateCapacity) {
+      const responseData = (response as { data?: { calculateCapacity?: CapacityResult } }).data;
+      if (responseData?.calculateCapacity) {
         // The response now has the proper GraphQL structure
-        const result = response.data.calculateCapacity;
+        const result = responseData.calculateCapacity;
 
         console.log('✅ API result:', result);
 
@@ -1452,6 +1607,7 @@ const CapacityPlanningLayout = () => {
 
         const docConfig = documentConfigs.find((config) => config.type === docType) || {
           avgPages: '', // No default - must be calculated from actual documents
+          ocrTokens: 0,
           classificationTokens: 0,
           extractionTokens: 0,
           summarizationTokens: 0,
@@ -1545,7 +1701,7 @@ const CapacityPlanningLayout = () => {
       const models = [];
 
       // Add OCR model first if configured for document processing
-      const hasOcrTokens = documentConfigs.some((config) => config.ocrTokens && parseFloat(config.ocrTokens) > 0);
+      const hasOcrTokens = documentConfigs.some((config) => config.ocrTokens && parseFloat(String(config.ocrTokens)) > 0);
       if (hasOcrTokens && configuration?.ocr?.backend === 'bedrock') {
         const ocrModelId = configuration?.ocr?.model_id || configuration?.ocr?.model || 'us.amazon.nova-lite-v1:0';
         models.push({ id: ocrModelId, step: 'OCR' });
@@ -1563,12 +1719,12 @@ const CapacityPlanningLayout = () => {
 
       // Add quota values for each configured model - use only API data
       models.forEach(({ id: modelId, step }) => {
-        const displayName = getModelDisplayName(modelId);
+        const _displayName = getModelDisplayName(modelId);
 
         // Calculate required quota for this specific inference step
         let peakTokensPerMinute = 0;
         processingConfig.timeSlots.forEach((slot) => {
-          const docsPerHour = parseInt(slot.docsPerHour || 0, 10);
+          const docsPerHour = parseInt(String(slot.docsPerHour || 0), 10);
           const docType = slot.documentType || '';
 
           if (docsPerHour > 0 && docType) {
@@ -1576,11 +1732,11 @@ const CapacityPlanningLayout = () => {
             if (docConfig) {
               let tokensPerDoc = 0;
 
-              if (step === 'Classification') tokensPerDoc = parseFloat(docConfig.classificationTokens || 0);
-              else if (step === 'Extraction') tokensPerDoc = parseFloat(docConfig.extractionTokens || 0);
-              else if (step === 'Assessment') tokensPerDoc = parseFloat(docConfig.assessmentTokens || 0);
-              else if (step === 'Summarization') tokensPerDoc = parseFloat(docConfig.summarizationTokens || 0);
-              else if (step === 'OCR') tokensPerDoc = parseFloat(docConfig.ocrTokens || 0);
+              if (step === 'Classification') tokensPerDoc = parseFloat(String(docConfig.classificationTokens || 0));
+              else if (step === 'Extraction') tokensPerDoc = parseFloat(String(docConfig.extractionTokens || 0));
+              else if (step === 'Assessment') tokensPerDoc = parseFloat(String(docConfig.assessmentTokens || 0));
+              else if (step === 'Summarization') tokensPerDoc = parseFloat(String(docConfig.summarizationTokens || 0));
+              else if (step === 'OCR') tokensPerDoc = parseFloat(String(docConfig.ocrTokens || 0));
 
               const slotTokensPerMinute = (docsPerHour / 60) * tokensPerDoc;
               peakTokensPerMinute = Math.max(peakTokensPerMinute, slotTokensPerMinute);
@@ -1605,8 +1761,8 @@ const CapacityPlanningLayout = () => {
     return [];
   }, [documentConfigs, processingConfig, configuration, results, manualPattern, deploymentSettings]);
 
-  const groupQuotasByCategory = (quotas) => {
-    const grouped = {};
+  const groupQuotasByCategory = (quotas: QuotaRequirement[]) => {
+    const grouped: Record<string, QuotaRequirement[]> = {};
     quotas.forEach((quota) => {
       const category = quota.category || 'Other Services';
 
@@ -1619,8 +1775,20 @@ const CapacityPlanningLayout = () => {
     return grouped;
   };
 
-  const aggregateQuotasByModel = (quotas) => {
-    const aggregated = {};
+  const aggregateQuotasByModel = (quotas: QuotaRequirement[]) => {
+    const aggregated: Record<
+      string,
+      {
+        modelId: string;
+        totalRequiredTPM: number;
+        totalRequiredRPM: number;
+        currentQuotaTPM: string;
+        currentQuotaRPM: string;
+        needsIncreaseTPM: boolean;
+        needsIncreaseRPM: boolean;
+        steps: string[];
+      }
+    > = {};
 
     quotas.forEach((quota) => {
       const modelId = quota.modelId;
@@ -1698,8 +1866,20 @@ const CapacityPlanningLayout = () => {
     });
   };
 
-  const getDetailedRequirementsByModel = (quotas) => {
-    const byModel = {};
+  const getDetailedRequirementsByModel = (quotas: QuotaRequirement[]) => {
+    const byModel: Record<
+      string,
+      Array<{
+        modelId: string;
+        inferenceType: string;
+        requiredTPM: string;
+        currentTPM: string;
+        statusTPM: string;
+        requiredRPM: string;
+        currentRPM: string;
+        statusRPM: string;
+      }>
+    > = {};
 
     quotas.forEach((quota) => {
       const modelId = quota.modelId;
@@ -1878,7 +2058,9 @@ const CapacityPlanningLayout = () => {
     <Container>
       <SpaceBetween size="l">
         {/* Notifications */}
-        {notifications.length > 0 && <Flashbar items={notifications} stackItems />}
+        {notifications.length > 0 && (
+          <Flashbar items={notifications as unknown as React.ComponentProps<typeof Flashbar>['items']} stackItems />
+        )}
 
         {/* Header */}
         <Header
@@ -1888,7 +2070,7 @@ const CapacityPlanningLayout = () => {
               <FormField label="Configuration Version">
                 <Select
                   selectedOption={selectedConfigVersion}
-                  onChange={({ detail }) => setSelectedConfigVersion(detail.selectedOption)}
+                  onChange={({ detail }) => setSelectedConfigVersion(detail.selectedOption as SelectOption)}
                   options={getVersionOptions()}
                   placeholder={versions.length === 0 ? 'Loading versions...' : 'Select config version'}
                   disabled={versions.length === 0}
@@ -1909,7 +2091,7 @@ const CapacityPlanningLayout = () => {
           <Alert type="success">
             <strong>✓</strong> Using configuration version: <Badge color="green">{selectedConfigVersion?.value || 'default'}</Badge>
             {selectedConfigVersion?.label?.includes('Active') && <Badge color="blue">Active</Badge>}
-            <Box marginTop="xs">
+            <Box margin={{ top: 'xs' }}>
               Token calculations and processing times are loaded from your pattern configuration. Update models in{' '}
               <strong>View/Edit Configuration</strong> to see changes reflected immediately, or select a different configuration version
               above.
@@ -1928,9 +2110,9 @@ const CapacityPlanningLayout = () => {
           <Alert type="warning">
             <strong>⚠️ Pattern Detection Used Fallback.</strong> Using Pattern 2 default. Configure models in{' '}
             <strong>View/Edit Configuration</strong> for accurate calculations.
-            <Box marginTop="m">
+            <Box margin={{ top: 'm' }}>
               <strong>Manual Override Available:</strong> If you know your actual deployment pattern:
-              <Box marginTop="xs">
+              <Box margin={{ top: 'xs' }}>
                 <SpaceBetween direction="horizontal" size="s">
                   <Button variant="normal" onClick={() => setManualPattern('PATTERN-1')}>
                     Pattern 1 (BDA)
@@ -1960,7 +2142,7 @@ const CapacityPlanningLayout = () => {
         <Alert type="info">
           <strong>🚀 Beta Feature:</strong> Capacity Planning is currently in beta. We&apos;re actively improving this feature based on user
           feedback.
-          <Box marginTop="xs">
+          <Box margin={{ top: 'xs' }}>
             <strong>Help us improve:</strong> Share your feedback, report issues, or request enhancements on{' '}
             <a
               href="https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues"
@@ -2016,7 +2198,7 @@ const CapacityPlanningLayout = () => {
                   cell: (item) => (
                     <Input
                       type="number"
-                      value={item.avgPages}
+                      value={String(item.avgPages)}
                       onChange={({ detail }) => updateDocumentConfig(item.index, 'avgPages', detail.value)}
                       step={0.1}
                       placeholder="Pages"
@@ -2038,7 +2220,7 @@ const CapacityPlanningLayout = () => {
                         cell: (item) => (
                           <Input
                             type="number"
-                            value={item.ocrTokens !== undefined && item.ocrTokens !== '' ? item.ocrTokens : ''}
+                            value={item.ocrTokens !== undefined && item.ocrTokens !== '' ? String(item.ocrTokens) : ''}
                             placeholder="OCR tokens"
                             onChange={({ detail }) =>
                               updateDocumentConfig(item.index, 'ocrTokens', detail.value === '' ? '' : parseFloat(detail.value))
@@ -2061,7 +2243,9 @@ const CapacityPlanningLayout = () => {
                   cell: (item) => (
                     <Input
                       type="number"
-                      value={item.classificationTokens !== undefined && item.classificationTokens !== '' ? item.classificationTokens : ''}
+                      value={
+                        item.classificationTokens !== undefined && item.classificationTokens !== '' ? String(item.classificationTokens) : ''
+                      }
                       placeholder="Classification tokens"
                       onChange={({ detail }) =>
                         updateDocumentConfig(item.index, 'classificationTokens', detail.value === '' ? '' : parseFloat(detail.value))
@@ -2082,7 +2266,7 @@ const CapacityPlanningLayout = () => {
                   cell: (item) => (
                     <Input
                       type="number"
-                      value={item.extractionTokens !== undefined && item.extractionTokens !== '' ? item.extractionTokens : ''}
+                      value={item.extractionTokens !== undefined && item.extractionTokens !== '' ? String(item.extractionTokens) : ''}
                       placeholder="Extraction tokens"
                       onChange={({ detail }) =>
                         updateDocumentConfig(item.index, 'extractionTokens', detail.value === '' ? '' : parseFloat(detail.value))
@@ -2103,7 +2287,7 @@ const CapacityPlanningLayout = () => {
                   cell: (item) => (
                     <Input
                       type="number"
-                      value={item.assessmentTokens !== undefined && item.assessmentTokens !== '' ? item.assessmentTokens : ''}
+                      value={item.assessmentTokens !== undefined && item.assessmentTokens !== '' ? String(item.assessmentTokens) : ''}
                       placeholder="Assessment tokens"
                       onChange={({ detail }) =>
                         updateDocumentConfig(item.index, 'assessmentTokens', detail.value === '' ? '' : parseFloat(detail.value))
@@ -2124,7 +2308,9 @@ const CapacityPlanningLayout = () => {
                   cell: (item) => (
                     <Input
                       type="number"
-                      value={item.summarizationTokens !== undefined && item.summarizationTokens !== '' ? item.summarizationTokens : ''}
+                      value={
+                        item.summarizationTokens !== undefined && item.summarizationTokens !== '' ? String(item.summarizationTokens) : ''
+                      }
                       placeholder="Summarization tokens"
                       onChange={({ detail }) =>
                         updateDocumentConfig(item.index, 'summarizationTokens', detail.value === '' ? '' : parseFloat(detail.value))
@@ -2183,13 +2369,13 @@ const CapacityPlanningLayout = () => {
                 input.type = 'file';
                 input.accept = '.csv';
                 input.onchange = (e) => {
-                  const file = e.target.files[0];
+                  const file = (e.target as HTMLInputElement).files?.[0];
                   if (!file) return;
 
                   const reader = new FileReader();
                   reader.onload = (event) => {
                     try {
-                      const csv = event.target.result;
+                      const csv = event.target?.result as string;
                       const lines = csv.split('\n').filter((line) => line.trim());
 
                       if (lines.length < 2) {
@@ -2201,7 +2387,7 @@ const CapacityPlanningLayout = () => {
                       const headerLine = lines[0];
                       const headers = headerLine.split(',').map((h) => h.trim().toLowerCase());
                       const sampleDataLine = lines[1];
-                      const sampleValues = sampleDataLine.split(',').map((v) => v.trim());
+                      const _sampleValues = sampleDataLine.split(',').map((v: string) => v.trim());
 
                       // Check if OCR column exists by looking for 'ocr' in headers
                       const ocrColumnIndex = headers.findIndex((header) => header.includes('ocr'));
@@ -2243,7 +2429,7 @@ const CapacityPlanningLayout = () => {
                       // Additional validation for OCR tokens if Bedrock OCR is configured
                       if (isBedrockOcrConfigured && importedConfigs.length > 0) {
                         const missingOcrTokens = importedConfigs.some(
-                          (config) => !config.ocrTokens || config.ocrTokens === '' || Number.isNaN(parseFloat(config.ocrTokens)),
+                          (config) => !config.ocrTokens || config.ocrTokens === '' || Number.isNaN(parseFloat(String(config.ocrTokens))),
                         );
                         if (missingOcrTokens) {
                           alert(
@@ -2341,7 +2527,9 @@ const CapacityPlanningLayout = () => {
                     <Select
                       selectedOption={
                         item.documentType && item.documentType !== ''
-                          ? scheduleDocumentTypeOptions.find((opt) => opt.value === item.documentType && !opt.disabled)
+                          ? scheduleDocumentTypeOptions.find(
+                              (opt) => opt.value === item.documentType && !(opt as { disabled?: boolean }).disabled,
+                            )
                           : null
                       }
                       onChange={({ detail }) => updateTimeSlot(item.index, 'documentType', detail.selectedOption.value)}
@@ -2435,13 +2623,13 @@ const CapacityPlanningLayout = () => {
                   input.type = 'file';
                   input.accept = '.csv';
                   input.onchange = (e) => {
-                    const file = e.target.files[0];
+                    const file = (e.target as HTMLInputElement).files?.[0];
                     if (!file) return;
 
                     const reader = new FileReader();
                     reader.onload = (event) => {
                       try {
-                        const csv = event.target.result;
+                        const csv = event.target?.result as string;
                         const lines = csv.split('\n').filter((line) => line.trim());
 
                         if (lines.length < 2) {
@@ -2449,7 +2637,7 @@ const CapacityPlanningLayout = () => {
                           return;
                         }
 
-                        const importedSlots = [];
+                        const importedSlots: TimeSlot[] = [];
                         for (let i = 1; i < lines.length; i += 1) {
                           const values = lines[i].split(',').map((v) => v.trim().replace(/"/g, ''));
                           if (values.length >= 3) {
@@ -2554,7 +2742,7 @@ const CapacityPlanningLayout = () => {
               <strong>Understanding Max Latency:</strong> This is the maximum time (in seconds) that a single document should take to
               process end-to-end. After calculating capacity, check the <strong>Processing Latency Distribution</strong> section to see what
               percentage of your documents will complete within this SLA target (P50, P75, P90, P95, P99 percentiles).
-              <Box marginTop="xs">
+              <Box margin={{ top: 'xs' }}>
                 <strong>Quick reference:</strong> 60s = 1 min | 120s = 2 min | 300s = 5 min | 600s = 10 min | 900s = 15 min | 3600s = 1 hour
               </Box>
             </Alert>
@@ -2562,14 +2750,14 @@ const CapacityPlanningLayout = () => {
         </Container>
 
         {/* Calculate Button */}
-        <Button variant="primary" size="large" onClick={calculateCapacityRequirements} loading={loading}>
+        <Button variant="primary" onClick={calculateCapacityRequirements} loading={loading}>
           Calculate Capacity Requirements
         </Button>
 
         {results?.success === false && results?.metrics && (
           <Alert type="warning">
             <strong>⚠️ API Unavailable - Using Local Calculations:</strong> {results.errorMessage}
-            <Box marginTop="xs">
+            <Box margin={{ top: 'xs' }}>
               The capacity calculation service is temporarily unavailable. Showing estimated values based on your configuration. Please try
               again later for precise calculations.
             </Box>
@@ -2630,7 +2818,7 @@ const CapacityPlanningLayout = () => {
                     <div>Pattern: {getDeployedPattern()}</div>
                     <div>
                       Document configs with OCR tokens:{' '}
-                      {documentConfigs.filter((config) => config.ocrTokens && parseFloat(config.ocrTokens) > 0).length}
+                      {documentConfigs.filter((config) => config.ocrTokens && parseFloat(String(config.ocrTokens)) > 0).length}
                     </div>
                     <details>
                       <summary>Full API Response</summary>
@@ -2703,7 +2891,7 @@ const CapacityPlanningLayout = () => {
                       These are the aggregated quota values you should request in AWS Service Quotas. Each model&apos;s total includes all
                       processing steps (OCR, Classification, Extraction, Assessment, Summarization). Both TPM (Tokens per Minute) and RPM
                       (Requests per Minute) quotas may need to be increased.
-                      <Box marginTop="xs">
+                      <Box margin={{ top: 'xs' }}>
                         <strong>Note:</strong> All calculated quotas include a 10% safety buffer to account for burst traffic, token/request
                         variations, and system overhead.
                       </Box>
@@ -2819,7 +3007,7 @@ const CapacityPlanningLayout = () => {
 
                   return Object.entries(detailedByModel).map(([modelId, steps], index) => (
                     <div key={modelId} style={{ marginTop: index > 0 ? '32px' : '0' }}>
-                      <Box padding={{ vertical: 's', horizontal: 'm' }} backgroundColor="awsui-background-container-content">
+                      <Box padding={{ vertical: 's', horizontal: 'm' }}>
                         <div style={{ fontSize: '16px', fontWeight: 'bold', color: '#0972D3' }}>Model: {modelId}</div>
                       </Box>
                       <Table
@@ -3008,7 +3196,7 @@ const CapacityPlanningLayout = () => {
                         {/* Hourly token bars */}
                         {(() => {
                           // Generate hourly breakdown from processing schedule
-                          const hourlyBreakdown = {};
+                          const hourlyBreakdown: Record<number, HourlyBreakdown> = {};
 
                           // Initialize all 24 hours
                           for (let hour = 0; hour < 24; hour += 1) {
@@ -3026,9 +3214,9 @@ const CapacityPlanningLayout = () => {
 
                           // Aggregate by hour from time slots
                           processingConfig.timeSlots.forEach((slot) => {
-                            const hour = parseInt(slot.hour || 0, 10);
+                            const hour = parseInt(String(slot.hour || 0), 10);
                             const docType = slot.documentType || 'Other';
-                            const docsPerHour = parseInt(slot.docsPerHour || 0, 10);
+                            const docsPerHour = parseInt(String(slot.docsPerHour || 0), 10);
 
                             if (docsPerHour > 0) {
                               const docConfig = documentConfigs.find((config) => config.type === docType) || {
@@ -3039,11 +3227,11 @@ const CapacityPlanningLayout = () => {
                                 assessmentTokens: 0,
                               };
 
-                              const ocrTokens = parseFloat(docConfig.ocrTokens || 0);
-                              const classificationTokens = parseFloat(docConfig.classificationTokens || 0);
-                              const extractionTokens = parseFloat(docConfig.extractionTokens || 0);
-                              const summarizationTokens = parseFloat(docConfig.summarizationTokens || 0);
-                              const assessmentTokens = parseFloat(docConfig.assessmentTokens || 0);
+                              const ocrTokens = parseFloat(String(docConfig.ocrTokens || 0));
+                              const classificationTokens = parseFloat(String(docConfig.classificationTokens || 0));
+                              const extractionTokens = parseFloat(String(docConfig.extractionTokens || 0));
+                              const summarizationTokens = parseFloat(String(docConfig.summarizationTokens || 0));
+                              const assessmentTokens = parseFloat(String(docConfig.assessmentTokens || 0));
 
                               // Debug logging
                               console.log(`DEBUG: Hour ${hour}, DocType: ${docType}, DocsPerHour: ${docsPerHour}`);
@@ -3288,7 +3476,7 @@ const CapacityPlanningLayout = () => {
                     <div style={{ marginTop: '15px', padding: '10px', background: '#f9f9f9', borderRadius: '4px' }}>
                       <div style={{ fontWeight: '600', marginBottom: '8px' }}>📈 Peak Hour Analysis</div>
                       {(() => {
-                        const hourlyBreakdown = {};
+                        const hourlyBreakdown: Record<number, HourlyBreakdown> = {};
                         for (let hour = 0; hour < 24; hour += 1) {
                           hourlyBreakdown[hour] = {
                             hour,
@@ -3302,9 +3490,9 @@ const CapacityPlanningLayout = () => {
                         }
 
                         processingConfig.timeSlots.forEach((slot) => {
-                          const hour = parseInt(slot.hour || 0, 10);
+                          const hour = parseInt(String(slot.hour || 0), 10);
                           const docType = slot.documentType || 'Other';
-                          const docsPerHour = parseInt(slot.docsPerHour || 0, 10);
+                          const docsPerHour = parseInt(String(slot.docsPerHour || 0), 10);
                           if (docsPerHour > 0) {
                             const docConfig = documentConfigs.find((config) => config.type === docType) || {
                               ocrTokens: 0,
@@ -3313,11 +3501,11 @@ const CapacityPlanningLayout = () => {
                               summarizationTokens: 0,
                               assessmentTokens: 0,
                             };
-                            const ocrTokensPerDoc = parseFloat(docConfig.ocrTokens || 0);
-                            const classificationTokensPerDoc = parseFloat(docConfig.classificationTokens || 0);
-                            const extractionTokensPerDoc = parseFloat(docConfig.extractionTokens || 0);
-                            const summarizationTokensPerDoc = parseFloat(docConfig.summarizationTokens || 0);
-                            const assessmentTokensPerDoc = parseFloat(docConfig.assessmentTokens || 0);
+                            const ocrTokensPerDoc = parseFloat(String(docConfig.ocrTokens || 0));
+                            const classificationTokensPerDoc = parseFloat(String(docConfig.classificationTokens || 0));
+                            const extractionTokensPerDoc = parseFloat(String(docConfig.extractionTokens || 0));
+                            const summarizationTokensPerDoc = parseFloat(String(docConfig.summarizationTokens || 0));
+                            const assessmentTokensPerDoc = parseFloat(String(docConfig.assessmentTokens || 0));
 
                             // Only include OCR tokens if Bedrock OCR is configured
                             const effectiveOcrTokensPerDoc = configuration?.ocr?.backend === 'bedrock' ? ocrTokensPerDoc : 0;
@@ -3412,7 +3600,7 @@ const CapacityPlanningLayout = () => {
                         ];
 
                         // Parse values and use max allowed latency as scaling reference
-                        const values = percentiles.map((p) => parseFloat(latency[p.key]?.replace('s', '') || '0'));
+                        const values = percentiles.map((p) => parseFloat(String(latency[p.key] || '0').replace('s', '')));
                         const maxAllowed = parseFloat(latency.maxAllowed?.replace('s', '') || '300');
                         // Use max allowed latency as the scaling reference so bars show absolute differences
                         const scalingReference = maxAllowed;
@@ -3446,7 +3634,7 @@ const CapacityPlanningLayout = () => {
                                     minWidth: '60px',
                                   }}
                                 >
-                                  {latency[percentile.key]}
+                                  {String(latency[percentile.key])}
                                 </div>
                               </div>
                               <div style={{ minWidth: '200px', fontSize: '12px', color: '#5f6b7a' }}>{percentile.description}</div>
@@ -3457,7 +3645,7 @@ const CapacityPlanningLayout = () => {
                     </div>
 
                     {/* Summary Information - Only Real Measured Data */}
-                    <Box marginTop="l">
+                    <Box margin={{ top: 'l' }}>
                       <ColumnLayout columns={4} variant="text-grid">
                         <div>
                           <Box variant="awsui-key-label">Base Processing Time</Box>
@@ -3473,7 +3661,7 @@ const CapacityPlanningLayout = () => {
                           <Box variant="awsui-key-label">Queue Delay</Box>
                           <div style={{ fontSize: '16px', fontWeight: '600' }}>{results.latencyDistribution.queueLatency || '0.00s'}</div>
                           <div style={{ fontSize: '12px', color: '#5f6b7a' }}>
-                            {parseFloat(results.latencyDistribution.queueLatency) > 0
+                            {parseFloat(String(results.latencyDistribution.queueLatency)) > 0
                               ? 'Time waiting in queue before processing'
                               : 'No queue delay measured (QueuedTime/WorkflowStartTime timestamps needed)'}
                           </div>
@@ -3526,11 +3714,11 @@ const CapacityPlanningLayout = () => {
                       <Alert type="error">
                         <strong>🚨 Quota Overload Detected:</strong> Scheduled demand exceeds available quota capacity. This will cause
                         indefinite queue growth if sustained.
-                        <Box marginTop="xs">
+                        <Box margin={{ top: 'xs' }}>
                           <strong>Queue Delay Note:</strong> The queue delays shown above are historical (from actual processed documents).
                           If overload persists, future queue delays will grow continuously until quotas are increased or demand is reduced.
                         </Box>
-                        <Box marginTop="xs">
+                        <Box margin={{ top: 'xs' }}>
                           <strong>Action Required:</strong> Review the &quot;Total Quota Requirements by Model&quot; table below and request
                           quota increases for models showing &quot;✗ Insufficient&quot; status.
                         </Box>
@@ -3558,9 +3746,9 @@ const CapacityPlanningLayout = () => {
           setShowDocumentPicker(false);
           setSelectedDocuments([]);
         }}
-        recentDocuments={recentDocuments}
-        selectedDocuments={selectedDocuments}
-        setSelectedDocuments={setSelectedDocuments}
+        recentDocuments={recentDocuments as unknown as React.ComponentProps<typeof DocumentPickerModal>['recentDocuments']}
+        selectedDocuments={selectedDocuments as unknown as React.ComponentProps<typeof DocumentPickerModal>['selectedDocuments']}
+        setSelectedDocuments={setSelectedDocuments as unknown as React.ComponentProps<typeof DocumentPickerModal>['setSelectedDocuments']}
         onUseSelectedDocuments={populateTokensFromMultipleDocuments}
         onUseDocument={populateTokensFromDocument}
         configuration={configuration}

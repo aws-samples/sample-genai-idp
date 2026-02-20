@@ -1,7 +1,6 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 import React, { useState } from 'react';
-import PropTypes from 'prop-types';
 import {
   Modal,
   Box,
@@ -16,9 +15,41 @@ import {
 } from '@cloudscape-design/components';
 import { useCollection } from '@cloudscape-design/collection-hooks';
 
+interface DocumentItem {
+  ObjectKey: string;
+  InitialEventTime?: string;
+  documentClass?: string;
+  isMultiClass?: boolean;
+  ObjectStatus?: string;
+  metering?: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
+interface DateRange {
+  startDateTime: string;
+  endDateTime: string;
+}
+
+interface DocumentPickerModalProps {
+  visible: boolean;
+  onDismiss: () => void;
+  recentDocuments: DocumentItem[];
+  selectedDocuments: DocumentItem[];
+  setSelectedDocuments: (items: DocumentItem[]) => void;
+  onUseSelectedDocuments: () => void;
+  onUseDocument: (doc: DocumentItem) => void;
+  configuration?: Record<string, unknown> | null;
+  periodsToLoad?: number;
+  setPeriodsToLoad?: ((count: number) => void) | null;
+  customDateRange?: DateRange | null;
+  onCustomDateRange?: (() => void) | null;
+  loading?: boolean;
+  onRefresh?: (() => void) | null;
+}
+
 // Time period configuration (matching main Document List)
 const DOCUMENT_LIST_SHARDS_PER_DAY = 6;
-const TIME_PERIOD_DROPDOWN_CONFIG = {
+const TIME_PERIOD_DROPDOWN_CONFIG: Record<string, { count: number; text: string }> = {
   'refresh-2h': { count: 0.5, text: '2 hrs' },
   'refresh-4h': { count: 1, text: '4 hrs' },
   'refresh-8h': { count: DOCUMENT_LIST_SHARDS_PER_DAY / 3, text: '8 hrs' },
@@ -34,7 +65,7 @@ const TIME_PERIOD_DROPDOWN_ITEMS = Object.keys(TIME_PERIOD_DROPDOWN_CONFIG).map(
   ...TIME_PERIOD_DROPDOWN_CONFIG[k],
 }));
 
-const COLUMN_DEFINITIONS = (configuration) => [
+const COLUMN_DEFINITIONS = (configuration: Record<string, unknown> | null | undefined) => [
   {
     id: 'ObjectKey',
     header: 'Document ID',
@@ -56,9 +87,9 @@ const COLUMN_DEFINITIONS = (configuration) => [
       <Box>
         {item.documentClass}
         {item.isMultiClass && (
-          <Badge color="blue" style={{ marginLeft: '8px' }}>
-            Multi-section
-          </Badge>
+          <span style={{ marginLeft: '8px' }}>
+            <Badge color="blue">Multi-section</Badge>
+          </span>
         )}
       </Box>
     ),
@@ -84,7 +115,7 @@ const COLUMN_DEFINITIONS = (configuration) => [
     header: 'Token Usage',
     cell: (item) => (
       <Box fontSize="body-s">
-        {configuration?.ocr?.backend === 'bedrock' && item.metering?.ocrTokens !== undefined && (
+        {(configuration as { ocr?: { backend?: string } } | null)?.ocr?.backend === 'bedrock' && item.metering?.ocrTokens !== undefined && (
           <span style={{ marginRight: '8px' }}>
             <strong>OCR:</strong> {item.metering.ocrTokens.toLocaleString()}
           </span>
@@ -115,7 +146,7 @@ const COLUMN_DEFINITIONS = (configuration) => [
   },
 ];
 
-const PAGE_SIZE_OPTIONS = [
+const _PAGE_SIZE_OPTIONS = [
   { value: 10, label: '10 Documents' },
   { value: 25, label: '25 Documents' },
   { value: 50, label: '50 Documents' },
@@ -128,16 +159,16 @@ const DocumentPickerModal = ({
   selectedDocuments,
   setSelectedDocuments,
   onUseSelectedDocuments,
-  onUseDocument,
-  configuration,
-  periodsToLoad,
-  setPeriodsToLoad,
-  customDateRange,
-  onCustomDateRange,
-  loading,
-  onRefresh,
-}) => {
-  const [preferences, setPreferences] = useState({
+  onUseDocument: _onUseDocument,
+  configuration = null,
+  periodsToLoad = 6,
+  setPeriodsToLoad = null,
+  customDateRange = null,
+  onCustomDateRange = null,
+  loading = false,
+  onRefresh = null,
+}: DocumentPickerModalProps) => {
+  const [preferences, _setPreferences] = useState({
     pageSize: 10,
     wrapLines: false,
   });
@@ -299,33 +330,6 @@ const DocumentPickerModal = ({
       </SpaceBetween>
     </Modal>
   );
-};
-
-DocumentPickerModal.propTypes = {
-  visible: PropTypes.bool.isRequired,
-  onDismiss: PropTypes.func.isRequired,
-  recentDocuments: PropTypes.arrayOf(PropTypes.object).isRequired,
-  selectedDocuments: PropTypes.arrayOf(PropTypes.object).isRequired,
-  setSelectedDocuments: PropTypes.func.isRequired,
-  onUseSelectedDocuments: PropTypes.func.isRequired,
-  onUseDocument: PropTypes.func.isRequired,
-  configuration: PropTypes.object,
-  periodsToLoad: PropTypes.number,
-  setPeriodsToLoad: PropTypes.func,
-  customDateRange: PropTypes.object,
-  onCustomDateRange: PropTypes.func,
-  loading: PropTypes.bool,
-  onRefresh: PropTypes.func,
-};
-
-DocumentPickerModal.defaultProps = {
-  configuration: null,
-  periodsToLoad: 6,
-  setPeriodsToLoad: null,
-  customDateRange: null,
-  onCustomDateRange: null,
-  loading: false,
-  onRefresh: null,
 };
 
 export default DocumentPickerModal;
