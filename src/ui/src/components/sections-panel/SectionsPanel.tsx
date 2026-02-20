@@ -128,7 +128,7 @@ const ActionsCell = ({
 
   // Disable View/Edit only if reviewer and no review owner (review not claimed)
   // View Data should always be enabled, Edit Mode requires claimed review
-  const hasReviewOwner = documentItem?.hitlReviewOwner || documentItem?.hitlReviewOwnerEmail;
+  const _hasReviewOwner = documentItem?.hitlReviewOwner || documentItem?.hitlReviewOwnerEmail;
   const shouldDisableViewEdit = false; // View Data always enabled
 
   // Check if baseline is available based on evaluation status

@@ -276,7 +276,7 @@ export const DocumentsCommonHeader = ({
   onAbort,
   onClaimReview,
   onReleaseReview,
-  currentUsername,
+  _currentUsername,
   ...props
 }: DocumentsCommonHeaderProps): React.JSX.Element => {
   const onPeriodToLoadChange = ({ detail }: { detail: { id: string } }) => {

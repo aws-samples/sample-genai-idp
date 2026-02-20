@@ -1,7 +1,7 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 import React, { useState, useEffect } from 'react';
-import { Badge, ProgressBar, Box } from '@cloudscape-design/components';
+import { Badge, Box } from '@cloudscape-design/components';
 import type { BadgeProps } from '@cloudscape-design/components';
 import { generateClient } from 'aws-amplify/api';
 import GET_TEST_RUN_STATUS from '../../graphql/queries/getTestRunStatus';

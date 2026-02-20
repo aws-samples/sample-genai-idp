@@ -36,7 +36,11 @@ interface TestRunnerProps {
   activeTestRuns: ActiveTestRun[];
 }
 
-const TestRunner = ({ onTestStart, onTestComplete, activeTestRuns }: TestRunnerProps): React.JSX.Element => {
+const TestRunner = ({
+  onTestStart,
+  onTestComplete: _onTestComplete,
+  activeTestRuns: _activeTestRuns,
+}: TestRunnerProps): React.JSX.Element => {
   const [testSets, setTestSets] = useState<TestSetData[]>([]);
   const [selectedTestSet, setSelectedTestSet] = useState<SelectProps.Option | null>(null);
   const [selectedVersion, setSelectedVersion] = useState<SelectProps.Option | null>(null);
@@ -45,7 +49,7 @@ const TestRunner = ({ onTestStart, onTestComplete, activeTestRuns }: TestRunnerP
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const { versions, loading: versionsLoading, getVersionOptions } = useConfigurationVersions();
+  const { versions, loading: _versionsLoading, getVersionOptions } = useConfigurationVersions();
 
   // Set default to active version when versions are loaded
   React.useEffect(() => {
@@ -103,7 +107,7 @@ const TestRunner = ({ onTestStart, onTestComplete, activeTestRuns }: TestRunnerP
     const testSetData = testSets.find((ts) => ts.id === selectedTestSet.value);
     const maxFiles = testSetData?.fileCount || 0;
 
-    let filesToProcess = maxFiles;
+    let _filesToProcess = maxFiles;
     if (numberOfFiles.trim()) {
       const numFiles = parseInt(numberOfFiles.trim(), 10);
       if (isNaN(numFiles) || numFiles <= 0) {
@@ -114,7 +118,7 @@ const TestRunner = ({ onTestStart, onTestComplete, activeTestRuns }: TestRunnerP
         setError(`Number of files cannot exceed ${maxFiles} (total files in test set)`);
         return;
       }
-      filesToProcess = numFiles;
+      _filesToProcess = numFiles;
     }
 
     setLoading(true);

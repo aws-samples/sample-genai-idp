@@ -15,7 +15,7 @@ export interface ConfigVersion {
 export const formatConfigVersionLink = (
   configVersion: string | null | undefined,
   versions: ConfigVersion[],
-  maxDescLength = 10,
+  _maxDescLength = 10,
 ): React.JSX.Element | string => {
   if (!configVersion) return 'N/A';
 

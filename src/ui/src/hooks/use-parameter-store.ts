@@ -3,7 +3,7 @@
 
 import { useState, useEffect } from 'react';
 
-import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm';
+import { SSMClient, GetParameterCommand, type SSMClientConfig } from '@aws-sdk/client-ssm';
 // import { useState, useEffect } from 'react';
 import awsExports from '../aws-exports';
 
@@ -12,7 +12,7 @@ const PARAMETER_NAME = import.meta.env.VITE_SETTINGS_PARAMETER;
 const useParameterStore = (creds: unknown): Record<string, unknown> => {
   const [settings, setSettings] = useState({});
 
-  const refreshSettings = async (credentials: any) => {
+  const refreshSettings = async (credentials: SSMClientConfig['credentials']) => {
     let idpSettings = {};
 
     if (credentials) {
@@ -28,7 +28,7 @@ const useParameterStore = (creds: unknown): Record<string, unknown> => {
   };
 
   useEffect(() => {
-    refreshSettings(creds);
+    refreshSettings(creds as SSMClientConfig['credentials']);
   }, [creds]);
 
   return settings;

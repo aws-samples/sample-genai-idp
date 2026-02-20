@@ -29,6 +29,7 @@ export interface ChatMessage {
     textContent: string;
   } | null;
   bedrockErrorInfo?: Record<string, unknown>;
+  toolMetadata?: ToolMetadata;
   toolUseId?: string;
   toolName?: string;
   executionLoading?: boolean;

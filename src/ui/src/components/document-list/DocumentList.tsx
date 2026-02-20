@@ -28,7 +28,7 @@ import DateRangeModal from '../common/DateRangeModal';
 import claimReviewMutation from '../../graphql/mutations/claimReview';
 import releaseReviewMutation from '../../graphql/mutations/releaseReview';
 
-import type { MappedDocument, ConfigVersion } from './documents-table-config';
+import type { MappedDocument } from './documents-table-config';
 import {
   DocumentsPreferences,
   DocumentsCommonHeader,
@@ -59,7 +59,7 @@ const DocumentList = (): React.JSX.Element => {
   const [isAbortLoading, setIsAbortLoading] = useState(false);
   const [isDateRangeModalVisible, setIsDateRangeModalVisible] = useState(false);
   const [currentUsername, setCurrentUsername] = useState('');
-  const { settings } = useSettingsContext() as Record<string, unknown>;
+  const { settings: _settings } = useSettingsContext() as Record<string, unknown>;
   const { isReviewer, isAdmin } = useUserRole();
   const navigate = useNavigate();
 

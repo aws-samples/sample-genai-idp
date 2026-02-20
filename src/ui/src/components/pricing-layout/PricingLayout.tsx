@@ -408,7 +408,7 @@ const PricingLayout = (): React.JSX.Element => {
   };
 
   // Delete an entire API/service entry
-  const handleDeleteService = (apiName: string): void => {
+  const _handleDeleteService = (apiName: string): void => {
     const newFormValues = JSON.parse(JSON.stringify(formValues));
     newFormValues.pricing = newFormValues.pricing.filter((e) => e.name !== apiName);
     setFormValues(newFormValues);

@@ -206,7 +206,7 @@ const PlotDisplay = ({ plotData = null }: PlotDisplayProps): React.JSX.Element |
 
     // For pie and doughnut charts, we typically don't need scales
     if (chartType === 'pie' || chartType === 'doughnut') {
-      const { scales, ...optionsWithoutScales } = baseOptions;
+      const { scales: _scales, ...optionsWithoutScales } = baseOptions;
 
       // Create a clean legend configuration for pie charts
       const legendConfig = {

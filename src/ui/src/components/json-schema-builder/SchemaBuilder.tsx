@@ -16,7 +16,7 @@ import {
 import { useSchemaDesigner } from '../../hooks/useSchemaDesigner';
 import { useSchemaValidation } from '../../hooks/useSchemaValidation';
 import { useDebounce } from '../../hooks/useDebounce';
-import { TYPE_OPTIONS, X_AWS_IDP_DOCUMENT_TYPE, X_AWS_IDP_RULE_TYPE } from '../../constants/schemaConstants';
+import { TYPE_OPTIONS, X_AWS_IDP_DOCUMENT_TYPE } from '../../constants/schemaConstants';
 import SchemaCanvas from './SchemaCanvas';
 import SchemaInspector from './SchemaInspector';
 import SchemaPreviewTabs from './SchemaPreviewTabs';
@@ -232,16 +232,16 @@ const SchemaBuilder = ({
   };
 
   const docTypeCount = classes.filter((c) => c[X_AWS_IDP_DOCUMENT_TYPE]).length;
-  const sharedCount = classes.filter((c) => !c[X_AWS_IDP_DOCUMENT_TYPE]).length;
+  const _sharedCount = classes.filter((c) => !c[X_AWS_IDP_DOCUMENT_TYPE]).length;
 
   // Dynamic labels based on schema type
   const typeLabel = isRuleSchema ? 'rule' : 'document';
-  const typeLabelPlural = isRuleSchema ? 'rules' : 'documents';
+  const _typeLabelPlural = isRuleSchema ? 'rules' : 'documents';
   const TypeLabel = isRuleSchema ? 'Rule' : 'Document';
   const TypesLabel = isRuleSchema ? 'Rules' : 'Documents';
-  const classLabel = isRuleSchema ? 'Rule Class' : 'Class';
+  const _classLabel = isRuleSchema ? 'Rule Class' : 'Class';
   const classesLabel = isRuleSchema ? 'Rule Classes' : 'Classes';
-  const attributeLabel = isRuleSchema ? 'Rule' : 'Attribute';
+  const _attributeLabel = isRuleSchema ? 'Rule' : 'Attribute';
   const attributesLabel = isRuleSchema ? 'Rules' : 'Attributes';
   const sharedLabel = isRuleSchema ? 'Recommendation Options' : 'Shared Classes';
 

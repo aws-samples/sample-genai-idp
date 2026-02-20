@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT-0
 
 import React, { useState } from 'react';
-import { Table, Box, SpaceBetween, Badge, Link, Button, Header, Pagination, TextFilter, Alert } from '@cloudscape-design/components';
+import { Table, Box, SpaceBetween, Link, Button, Header, Pagination, TextFilter, Alert } from '@cloudscape-design/components';
 import { useCollection } from '@cloudscape-design/collection-hooks';
 
 interface ConfigVersion {

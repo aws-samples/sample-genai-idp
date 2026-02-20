@@ -8,6 +8,22 @@ import getPricingQuery from '../graphql/queries/getPricing';
 import updatePricingMutation from '../graphql/queries/updatePricing';
 import restoreDefaultPricingMutation from '../graphql/queries/restoreDefaultPricing';
 
+interface PricingResponse {
+  success: boolean;
+  error?: { message: string };
+  pricing: unknown;
+  defaultPricing: unknown;
+}
+
+interface GetPricingResult {
+  data: { getPricing: PricingResponse };
+}
+
+interface MutationResponse {
+  success: boolean;
+  error?: { message: string };
+}
+
 interface UsePricingReturn {
   pricing: unknown;
   defaultPricing: unknown;
@@ -39,10 +55,10 @@ const usePricing = (): UsePricingReturn => {
 
     try {
       logger.debug('Fetching pricing...');
-      const result = await client.graphql({ query: getPricingQuery as any });
+      const result = await client.graphql({ query: getPricingQuery as unknown as string });
       logger.debug('API response:', result);
 
-      const response = (result as any).data.getPricing;
+      const response = (result as GetPricingResult).data.getPricing;
 
       if (!response.success) {
         const errorMsg = response.error?.message || 'Failed to load pricing';
@@ -67,9 +83,10 @@ const usePricing = (): UsePricingReturn => {
       logger.debug('Parsed default pricing:', defaultPricingData);
       setPricing(pricingData);
       setDefaultPricing(defaultPricingData);
-    } catch (err: any) {
+    } catch (err: unknown) {
       logger.error('Error fetching pricing', err);
-      setError(`Failed to load pricing: ${err.message}`);
+      const message = err instanceof Error ? err.message : String(err);
+      setError(`Failed to load pricing: ${message}`);
     } finally {
       if (silent) {
         setRefreshing(false);
@@ -90,11 +107,11 @@ const usePricing = (): UsePricingReturn => {
       logger.debug('Sending pricingConfig:', pricingConfig);
 
       const result = await client.graphql({
-        query: updatePricingMutation as any,
+        query: updatePricingMutation as unknown as string,
         variables: { pricingConfig },
       });
 
-      const response = (result as any).data.updatePricing;
+      const response = (result as { data: { updatePricing: MutationResponse } }).data.updatePricing;
 
       if (!response.success) {
         const errorMsg = response.error?.message || 'Failed to update pricing';
@@ -105,9 +122,10 @@ const usePricing = (): UsePricingReturn => {
       await fetchPricing(true);
 
       return true;
-    } catch (err: any) {
+    } catch (err: unknown) {
       logger.error('Error updating pricing', err);
-      setError(`Failed to update pricing: ${err.message}`);
+      const message = err instanceof Error ? err.message : String(err);
+      setError(`Failed to update pricing: ${message}`);
       return false;
     }
   };
@@ -118,10 +136,10 @@ const usePricing = (): UsePricingReturn => {
       logger.debug('Restoring default pricing...');
 
       const result = await client.graphql({
-        query: restoreDefaultPricingMutation as any,
+        query: restoreDefaultPricingMutation as unknown as string,
       });
 
-      const response = (result as any).data.restoreDefaultPricing;
+      const response = (result as { data: { restoreDefaultPricing: MutationResponse } }).data.restoreDefaultPricing;
 
       if (!response.success) {
         const errorMsg = response.error?.message || 'Failed to restore default pricing';
@@ -132,9 +150,10 @@ const usePricing = (): UsePricingReturn => {
       await fetchPricing(true);
 
       return true;
-    } catch (err: any) {
+    } catch (err: unknown) {
       logger.error('Error restoring default pricing', err);
-      setError(`Failed to restore default pricing: ${err.message}`);
+      const message = err instanceof Error ? err.message : String(err);
+      setError(`Failed to restore default pricing: ${message}`);
       return false;
     }
   };

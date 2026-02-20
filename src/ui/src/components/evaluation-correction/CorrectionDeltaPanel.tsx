@@ -39,7 +39,7 @@ interface CorrectionDeltaPanelProps {
   sectionId?: string;
 }
 
-const logger = new ConsoleLogger('CorrectionDeltaPanel');
+const _logger = new ConsoleLogger('CorrectionDeltaPanel');
 
 /**
  * Formats a value for display, truncating if too long

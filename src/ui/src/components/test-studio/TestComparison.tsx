@@ -1,7 +1,6 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 import React, { useState, useEffect } from 'react';
-import type { SelectProps } from '@cloudscape-design/components';
 import {
   Container,
   Header,
@@ -14,7 +13,6 @@ import {
   Select,
   CollectionPreferences,
   ExpandableSection,
-  Link,
 } from '@cloudscape-design/components';
 import { generateClient } from 'aws-amplify/api';
 import COMPARE_TEST_RUNS from '../../graphql/queries/compareTestRuns';
@@ -222,7 +220,7 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
   // Helper function to create clickable test run ID headers
   const createTestRunHeader = (testRunId: string, truncate = false): React.JSX.Element => {
     const displayId = testRunId;
-    const testSetName = truncate ? completeTestRuns[testRunId]?.testSetName : null;
+    const _testSetName = truncate ? completeTestRuns[testRunId]?.testSetName : null;
 
     if (truncate) {
       return (
@@ -365,7 +363,7 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
         const [ctx, serviceApi, unit] = String(itemKey).split('|');
         const row = [ctx, serviceApi, unit];
 
-        Object.entries(completeTestRuns).forEach(([testRunId, testRun]) => {
+        Object.entries(completeTestRuns).forEach(([_testRunId, testRun]) => {
           const services = testRun.costBreakdown?.[ctx] || {};
           const serviceKey = Object.keys(services).find((key) => {
             const lastUnderscoreIndex = key.lastIndexOf('_');
@@ -433,7 +431,7 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
         const [context, serviceApi, unit] = String(itemKey).split('|');
         const row = [context, serviceApi, unit];
 
-        Object.entries(completeTestRuns).forEach(([testRunId, testRun]) => {
+        Object.entries(completeTestRuns).forEach(([_testRunId, testRun]) => {
           const services = testRun.costBreakdown?.[context] || {};
           const serviceKey = Object.keys(services).find((key) => {
             const lastUnderscoreIndex = key.lastIndexOf('_');
@@ -471,7 +469,7 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
           .replace(/_/g, ' ')
           .replace(/\b\w/g, (l) => l.toUpperCase()),
       ];
-      Object.entries(completeTestRuns).forEach(([testRunId, testRun]) => {
+      Object.entries(completeTestRuns).forEach(([_testRunId, testRun]) => {
         const accuracyBreakdown = testRun.accuracyBreakdown || {};
         const value = accuracyBreakdown[metricKey as string];
         const displayValue = value !== null && value !== undefined ? Number(value).toFixed(3) : '0.000';
@@ -482,7 +480,7 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
 
     // Add weighted overall score to accuracy breakdown
     const weightedRow = ['Weighted Overall Score'];
-    Object.entries(completeTestRuns).forEach(([testRunId, testRun]) => {
+    Object.entries(completeTestRuns).forEach(([_testRunId, testRun]) => {
       if (testRun.weightedOverallScores) {
         const scores =
           typeof testRun.weightedOverallScores === 'string' ? JSON.parse(testRun.weightedOverallScores) : testRun.weightedOverallScores;

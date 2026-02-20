@@ -37,7 +37,7 @@ const logger = new ConsoleLogger('JSONEditorTab');
  * JSONEditorTab - Full-width JSON editor with side-by-side view of predictions and baseline
  */
 // Available JSON section options
-const SECTION_OPTIONS = [
+const _SECTION_OPTIONS = [
   { label: 'inference_result', value: 'inference_result', description: 'Extracted data from the document' },
   { label: 'document_class', value: 'document_class', description: 'Document classification result' },
   { label: 'split_document', value: 'split_document', description: 'Document splitting information' },

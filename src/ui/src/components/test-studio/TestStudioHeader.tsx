@@ -22,7 +22,7 @@ const TestStudioHeader = ({
   showPrintButton = false,
   additionalActions = [],
   onBackClick,
-  preferences,
+  preferences: _preferences,
 }: TestStudioHeaderProps): React.JSX.Element => {
   const actions = [];
 

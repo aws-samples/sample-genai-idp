@@ -50,16 +50,24 @@ const areNumericValuesEqual = (val1: unknown, val2: unknown): boolean => {
 const isNumericValue = (val: unknown): boolean => {
   if (typeof val === 'number') return true;
   if (typeof val === 'string' && val.trim() !== '') {
-    return !Number.isNaN(parseFloat(val)) && isFinite(val as any);
+    return !Number.isNaN(parseFloat(val)) && isFinite(Number(val));
   }
   return false;
 };
+
+/** Describes a JSON Schema property, used for recursive normalization of config values. */
+interface SchemaProperty {
+  type?: string;
+  properties?: Record<string, SchemaProperty>;
+  items?: SchemaProperty;
+  [key: string]: unknown;
+}
 
 // Utility function to normalize boolean values from strings
 const normalizeBooleans = (obj: Record<string, unknown>, schema: Record<string, unknown>): Record<string, unknown> => {
   if (!obj || !schema) return obj;
 
-  const normalizeValue = (value: unknown, propertySchema: any): unknown => {
+  const normalizeValue = (value: unknown, propertySchema: SchemaProperty): unknown => {
     // Handle boolean fields that might be strings
     if (propertySchema?.type === 'boolean') {
       if (typeof value === 'string') {
@@ -89,10 +97,11 @@ const normalizeBooleans = (obj: Record<string, unknown>, schema: Record<string, 
   };
 
   const normalized: Record<string, unknown> = { ...obj };
-  if ((schema as any).properties) {
+  const schemaProperties = (schema as SchemaProperty).properties;
+  if (schemaProperties) {
     Object.keys(normalized).forEach((key) => {
-      if ((schema as any).properties[key]) {
-        normalized[key] = normalizeValue(normalized[key], (schema as any).properties[key]);
+      if (schemaProperties[key]) {
+        normalized[key] = normalizeValue(normalized[key], schemaProperties[key]);
       }
     });
   }
@@ -104,19 +113,19 @@ const normalizeBooleans = (obj: Record<string, unknown>, schema: Record<string, 
 const getValueAtPath = (obj: Record<string, unknown>, path: string): unknown => {
   if (!obj || !path) return undefined;
   const segments = path.split(/[.[\]]+/).filter(Boolean);
-  return segments.reduce((acc: any, segment) => {
+  return segments.reduce((acc: unknown, segment) => {
     if (acc === null || acc === undefined) return undefined;
-    return acc[segment];
-  }, obj);
+    return (acc as Record<string, unknown>)[segment];
+  }, obj as unknown);
 };
 
 // Utility: Set value at path in nested object (immutable)
-const setValueAtPath = (obj: Record<string, unknown>, path: string, value: unknown): Record<string, unknown> => {
+const _setValueAtPath = (obj: Record<string, unknown>, path: string, value: unknown): Record<string, unknown> => {
   if (!obj || !path) return obj;
   const segments = path.split(/[.[\]]+/).filter(Boolean);
   const result = JSON.parse(JSON.stringify(obj)); // Deep clone
 
-  let current: any = result;
+  let current: Record<string, unknown> = result;
   for (let i = 0; i < segments.length - 1; i += 1) {
     const segment = segments[i];
     if (!(segment in current)) {
@@ -124,7 +133,7 @@ const setValueAtPath = (obj: Record<string, unknown>, path: string, value: unkno
       const nextSegment = segments[i + 1];
       current[segment] = /^\d+$/.test(nextSegment) ? [] : {};
     }
-    current = current[segment];
+    current = current[segment] as Record<string, unknown>;
   }
 
   current[segments[segments.length - 1]] = value;
@@ -133,13 +142,13 @@ const setValueAtPath = (obj: Record<string, unknown>, path: string, value: unkno
 
 // Utility: Remove value at path from nested object (immutable)
 // Returns new object with the path removed, and cleans up empty parent objects
-const removeValueAtPath = (obj: Record<string, unknown>, path: string): Record<string, unknown> => {
+const _removeValueAtPath = (obj: Record<string, unknown>, path: string): Record<string, unknown> => {
   if (!obj || !path) return obj;
   const segments = path.split(/[.[\]]+/).filter(Boolean);
   const result = JSON.parse(JSON.stringify(obj)); // Deep clone
 
   // Helper to remove empty parent objects recursively
-  const cleanupEmptyParents = (object: any, segs: string[], depth: number = 0): void => {
+  const cleanupEmptyParents = (object: Record<string, unknown>, segs: string[], depth: number = 0): void => {
     if (depth >= segs.length - 1) {
       // At the target level, delete the key
       delete object[segs[depth]];
@@ -149,10 +158,10 @@ const removeValueAtPath = (obj: Record<string, unknown>, path: string): Record<s
     const segment = segs[depth];
     if (!(segment in object)) return;
 
-    cleanupEmptyParents(object[segment], segs, depth + 1);
+    cleanupEmptyParents(object[segment] as Record<string, unknown>, segs, depth + 1);
 
     // If parent is now empty, delete it too
-    if (typeof object[segment] === 'object' && Object.keys(object[segment]).length === 0) {
+    if (typeof object[segment] === 'object' && Object.keys(object[segment] as Record<string, unknown>).length === 0) {
       delete object[segment];
     }
   };
@@ -164,17 +173,17 @@ const removeValueAtPath = (obj: Record<string, unknown>, path: string): Record<s
 // Utility: Compute diff between two configs (returns only changes)
 // Note: This only returns CHANGED values, never deletions
 // Custom config is always complete, never has missing keys
-const getDiff = (oldConfig: Record<string, unknown>, newConfig: Record<string, unknown>): Record<string, unknown> => {
+const _getDiff = (oldConfig: Record<string, unknown>, newConfig: Record<string, unknown>): Record<string, unknown> => {
   const diff: Record<string, unknown> = {};
 
   const setDiffValue = (obj: Record<string, unknown>, path: string[], value: unknown): void => {
-    let current: any = obj;
+    let current: Record<string, unknown> = obj;
     for (let i = 0; i < path.length - 1; i += 1) {
       const segment = path[i];
       if (!(segment in current)) {
         current[segment] = {};
       }
-      current = current[segment];
+      current = current[segment] as Record<string, unknown>;
     }
     current[path[path.length - 1]] = value;
   };
@@ -232,12 +241,16 @@ const useConfiguration = (versionName: string = 'default'): UseConfigurationRetu
     try {
       logger.debug('Fetching configuration for versionName:', fetchVersionName);
       const result = await client.graphql({
-        query: getConfigVersionQuery as any,
+        query: getConfigVersionQuery as unknown as string,
         variables: { versionName: fetchVersionName },
       });
       logger.debug('API response version', fetchVersionName, result);
 
-      const response = (result as any).data.getConfigVersion;
+      const response = (
+        result as {
+          data: { getConfigVersion: { success: boolean; error?: { message: string }; Schema: unknown; Default: unknown; Custom: unknown } };
+        }
+      ).data.getConfigVersion;
 
       if (!response.success) {
         const errorMsg = response.error?.message || 'Failed to load configuration';
@@ -254,24 +267,24 @@ const useConfiguration = (versionName: string = 'default'): UseConfigurationRetu
       });
 
       // Enhanced parsing logic - handle both string and object types
-      let schemaObj = Schema;
-      let defaultObj = Default;
-      let customObj = Custom;
+      let schemaObj: Record<string, unknown> = Schema as Record<string, unknown>;
+      let defaultObj: Record<string, unknown> = Default as Record<string, unknown>;
+      let customObj: Record<string, unknown> = Custom as Record<string, unknown>;
 
       // Parse schema if it's a string
       if (typeof Schema === 'string') {
         try {
           schemaObj = JSON.parse(Schema);
           logger.debug('Schema parsed from string successfully');
-        } catch (e: any) {
+        } catch (e: unknown) {
           logger.error('Error parsing schema string:', e);
-          throw new Error(`Failed to parse schema data: ${e.message}`);
+          throw new Error(`Failed to parse schema data: ${e instanceof Error ? e.message : String(e)}`);
         }
       }
 
       // Unwrap nested Schema object if present
       if (schemaObj && schemaObj.Schema) {
-        schemaObj = schemaObj.Schema;
+        schemaObj = schemaObj.Schema as Record<string, unknown>;
         logger.debug('Unwrapped nested Schema object');
       }
 
@@ -280,9 +293,9 @@ const useConfiguration = (versionName: string = 'default'): UseConfigurationRetu
         try {
           defaultObj = JSON.parse(Default);
           logger.debug('Default config parsed from string successfully');
-        } catch (e: any) {
+        } catch (e: unknown) {
           logger.error('Error parsing default config string:', e);
-          throw new Error(`Failed to parse default configuration: ${e.message}`);
+          throw new Error(`Failed to parse default configuration: ${e instanceof Error ? e.message : String(e)}`);
         }
       }
 
@@ -291,9 +304,9 @@ const useConfiguration = (versionName: string = 'default'): UseConfigurationRetu
         try {
           customObj = JSON.parse(Custom);
           logger.debug('Version config parsed from string successfully');
-        } catch (e: any) {
+        } catch (e: unknown) {
           logger.error('Error parsing version config string:', e);
-          throw new Error(`Failed to parse version configuration: ${e.message}`);
+          throw new Error(`Failed to parse version configuration: ${e instanceof Error ? e.message : String(e)}`);
         }
       } else if (!Custom) {
         logger.warn('Version configuration is empty or missing, using empty object');
@@ -347,9 +360,9 @@ const useConfiguration = (versionName: string = 'default'): UseConfigurationRetu
         logger.debug('Final classes (JSON Schema) data:', activeConfig.classes);
       }
       setMergedConfig(activeConfig);
-    } catch (err: any) {
+    } catch (err: unknown) {
       logger.error('Error fetching configuration', err);
-      setError(`Failed to load configuration: ${err.message}`);
+      setError(`Failed to load configuration: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       if (silent) {
         setRefreshing(false);
@@ -384,7 +397,7 @@ const useConfiguration = (versionName: string = 'default'): UseConfigurationRetu
       logger.debug('Sending customConfig string for version', targetVersionName, ':', configString);
 
       const result = await client.graphql({
-        query: updateConfigurationMutation as any,
+        query: updateConfigurationMutation as unknown as string,
         variables: {
           versionName: targetVersionName,
           customConfig: configString,
@@ -392,7 +405,8 @@ const useConfiguration = (versionName: string = 'default'): UseConfigurationRetu
         },
       });
 
-      const response = (result as any).data.updateConfiguration;
+      const response = (result as { data: { updateConfiguration: { success: boolean; error?: { message: string } } } }).data
+        .updateConfiguration;
 
       if (!response.success) {
         const errorMsg = response.error?.message || 'Failed to update configuration';
@@ -405,9 +419,9 @@ const useConfiguration = (versionName: string = 'default'): UseConfigurationRetu
       await fetchConfiguration(targetVersionName, true);
 
       return true;
-    } catch (err: any) {
+    } catch (err: unknown) {
       logger.error('Error updating configuration for version', targetVersionName, ':', err);
-      setError(`Failed to update configuration for version ${targetVersionName}: ${err.message}`);
+      setError(`Failed to update configuration for version ${targetVersionName}: ${err instanceof Error ? err.message : String(err)}`);
       return false;
     }
   };
@@ -433,7 +447,7 @@ const useConfiguration = (versionName: string = 'default'): UseConfigurationRetu
       // Return the default value - the caller (ConfigBuilder) will call updateValue()
       // to set it in formValues, which triggers hasUnsavedChanges detection
       return { path, defaultValue };
-    } catch (err: any) {
+    } catch (err: unknown) {
       logger.error('Error getting default value for path', err);
       return false;
     }
@@ -454,12 +468,12 @@ const useConfiguration = (versionName: string = 'default'): UseConfigurationRetu
 
       // Helper function to get value at path segments for comparison
       const getValueAtPathSegments = (obj: Record<string, unknown> | null, segments: string[]): unknown => {
-        return segments.reduce((acc: any, segment) => {
-          if (acc === null || acc === undefined || !Object.hasOwn(acc, segment)) {
+        return segments.reduce((acc: unknown, segment) => {
+          if (acc === null || acc === undefined || !Object.hasOwn(acc as object, segment)) {
             return undefined;
           }
-          return acc[segment];
-        }, obj);
+          return (acc as Record<string, unknown>)[segment];
+        }, obj as unknown);
       };
 
       // Get values from both version and default configs
@@ -517,7 +531,7 @@ const useConfiguration = (versionName: string = 'default'): UseConfigurationRetu
 
       // Simple value comparison for non-numeric values
       return customValueExists && customValue !== defaultValue;
-    } catch (err: any) {
+    } catch (err: unknown) {
       logger.error(`Error in isCustomized for path: ${path}`, err);
       return false;
     }

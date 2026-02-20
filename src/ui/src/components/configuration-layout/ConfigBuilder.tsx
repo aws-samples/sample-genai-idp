@@ -260,7 +260,7 @@ interface ResizableColumnsProps {
   columnSpacing?: string;
 }
 
-const ResizableColumns = ({ columns, children = null, columnSpacing = '8px' }: ResizableColumnsProps): React.JSX.Element => {
+const _ResizableColumns = ({ columns, children = null, columnSpacing = '8px' }: ResizableColumnsProps): React.JSX.Element => {
   const [columnWidths, setColumnWidths] = useState<string[]>([]);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const resizingRef = useRef<{ index: number; startX: number; initialWidths: string[] } | null>(null);

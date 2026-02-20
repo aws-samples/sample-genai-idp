@@ -84,7 +84,7 @@ const useConfigurationLibrary = (): UseConfigurationLibraryReturn => {
         variables: { pattern },
       });
 
-      const response = (result as any).data.listConfigurationLibrary as ListConfigurationLibraryResponse;
+      const response = (result as { data: { listConfigurationLibrary: ListConfigurationLibraryResponse } }).data.listConfigurationLibrary;
 
       if (!response.success) {
         throw new Error(response.error || 'Failed to list configurations');
@@ -92,9 +92,10 @@ const useConfigurationLibrary = (): UseConfigurationLibraryReturn => {
 
       logger.debug('Configurations listed successfully:', response.items);
       return response.items || [];
-    } catch (err: any) {
+    } catch (err: unknown) {
       logger.error('Error listing configurations:', err);
-      setError(err.message);
+      const message = err instanceof Error ? err.message : String(err);
+      setError(message);
       return [];
     } finally {
       setLoading(false);
@@ -116,7 +117,8 @@ const useConfigurationLibrary = (): UseConfigurationLibraryReturn => {
         variables: { pattern, configName, fileName },
       });
 
-      const response = (result as any).data.getConfigurationLibraryFile as GetConfigurationLibraryFileResponse;
+      const response = (result as { data: { getConfigurationLibraryFile: GetConfigurationLibraryFileResponse } }).data
+        .getConfigurationLibraryFile;
 
       if (!response.success) {
         throw new Error(response.error || 'Failed to get file');
@@ -127,9 +129,10 @@ const useConfigurationLibrary = (): UseConfigurationLibraryReturn => {
         content: response.content,
         contentType: response.contentType,
       };
-    } catch (err: any) {
+    } catch (err: unknown) {
       logger.error('Error getting file:', err);
-      setError(err.message);
+      const message = err instanceof Error ? err.message : String(err);
+      setError(message);
       return null;
     } finally {
       setLoading(false);

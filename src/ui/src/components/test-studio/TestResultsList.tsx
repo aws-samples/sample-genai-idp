@@ -1,7 +1,7 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 import React, { useState, useEffect } from 'react';
-import { Table, Button, SpaceBetween, ButtonDropdown, Pagination, Box, TextFilter, Flashbar, Link } from '@cloudscape-design/components';
+import { Table, Button, SpaceBetween, ButtonDropdown, Pagination, Box, TextFilter, Flashbar } from '@cloudscape-design/components';
 import type { IconProps } from '@cloudscape-design/components';
 import { useCollection } from '@cloudscape-design/collection-hooks';
 import { generateClient } from 'aws-amplify/api';

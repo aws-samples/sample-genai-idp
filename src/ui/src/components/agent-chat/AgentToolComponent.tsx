@@ -171,7 +171,7 @@ const AgentToolComponentBase = ({
   executionDetails = null,
   resultLoading = false,
   resultDetails = null,
-  timestamp,
+  timestamp: _timestamp,
   onToggle = null,
   parentProcessing = false,
 }: AgentToolComponentProps): React.JSX.Element => {
@@ -424,7 +424,7 @@ const AgentToolComponentBase = ({
     return { text: 'Starting...', color: 'text-status-info' };
   };
 
-  const status = getStatus();
+  const _status = getStatus();
   const hasContent = executionDetails || resultDetails;
   // Hide spinner if parent process is complete, even if individual tool states indicate loading
   const showSpinner = (executionLoading || resultLoading) && parentProcessing;

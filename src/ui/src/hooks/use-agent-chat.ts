@@ -7,6 +7,7 @@ import { ConsoleLogger } from 'aws-amplify/utils';
 import { SEND_AGENT_MESSAGE, ON_AGENT_MESSAGE_UPDATE } from '../graphql/queries/agentChatQueries';
 import { GET_AGENT_CHAT_MESSAGES } from '../graphql/queries/agentChatSessionQueries';
 import { useAgentChatContext } from '../contexts/agentChat';
+import type { ChatMessage } from '../types/agent-chat';
 
 const logger = new ConsoleLogger('useAgentChat');
 const client = generateClient();
@@ -18,17 +19,24 @@ interface AgentChatConfig {
   method: string;
 }
 
+/** Represents a GraphQL subscription that can be subscribed to and unsubscribed from. */
+interface GraphQLSubscribable {
+  subscribe: (handlers: { next: (value: { data: Record<string, unknown> }) => void; error: (err: unknown) => void }) => {
+    unsubscribe: () => void;
+  };
+}
+
 interface UseAgentChatReturn {
-  messages: any[];
+  messages: ChatMessage[];
   isLoading: boolean;
   waitingForResponse: boolean;
   error: string | null;
   sessionId: string;
-  sendMessage: (prompt: string, options?: { enableCodeIntelligence?: boolean }) => Promise<any>;
+  sendMessage: (prompt: string, options?: { enableCodeIntelligence?: boolean }) => Promise<unknown>;
   cancelResponse: () => void;
   clearError: () => void;
   clearChat: () => void;
-  loadChatSession: (targetSessionId: string, existingMessages?: any[] | null) => Promise<void>;
+  loadChatSession: (targetSessionId: string, existingMessages?: ChatMessage[] | null) => Promise<void>;
   agentConfig: AgentChatConfig;
 }
 
@@ -45,9 +53,7 @@ const useAgentChat = (config: Partial<AgentChatConfig> = {}): UseAgentChatReturn
 
   // Use context for persistent state
   const { agentChatState, updateAgentChatState, resetAgentChatState, updateMessages: updateMessagesTyped } = useAgentChatContext();
-  // Cast updateMessages to work with permissive `any[]` message arrays used throughout this hook.
-  // The streaming message objects have many dynamic shapes that don't conform to the strict ChatMessage interface.
-  const updateMessages = updateMessagesTyped as (updater: (messages: any[]) => any[]) => void;
+  const updateMessages = updateMessagesTyped;
 
   // Extract state from context
   const { messages, isLoading, waitingForResponse, error, sessionId } = agentChatState;
@@ -55,8 +61,8 @@ const useAgentChat = (config: Partial<AgentChatConfig> = {}): UseAgentChatReturn
   const sentMessagesRef = useRef(new Set<string>());
 
   // Handle tool execution start messages - creates standalone tool message chronologically
-  const handleToolExecutionStart = (newMessage: any): void => {
-    const toolMetadata = newMessage.toolMetadata || {};
+  const handleToolExecutionStart = (newMessage: ChatMessage): void => {
+    const toolMetadata = newMessage.toolMetadata ?? { toolUseId: '', toolName: '' };
 
     updateMessages((prevMessages) => {
       const updatedMessages = [...prevMessages];
@@ -67,7 +73,7 @@ const useAgentChat = (config: Partial<AgentChatConfig> = {}): UseAgentChatReturn
       );
 
       // Create the tool message object
-      const toolMessage = {
+      const toolMessage: ChatMessage = {
         role: 'assistant',
         content: '',
         messageType: 'unified_tool',
@@ -89,7 +95,7 @@ const useAgentChat = (config: Partial<AgentChatConfig> = {}): UseAgentChatReturn
           ...updatedMessages[activeToolUseIndex],
           toolUseData: {
             ...updatedMessages[activeToolUseIndex].toolUseData,
-            sessionMessages: [...(updatedMessages[activeToolUseIndex].toolUseData.sessionMessages || []), toolMessage],
+            sessionMessages: [...(updatedMessages[activeToolUseIndex].toolUseData?.sessionMessages || []), toolMessage],
           },
         };
         return updatedMessages;
@@ -124,8 +130,8 @@ const useAgentChat = (config: Partial<AgentChatConfig> = {}): UseAgentChatReturn
   };
 
   // Handle tool execution complete messages - updates execution phase
-  const handleToolExecutionComplete = (newMessage: any): void => {
-    const toolMetadata = newMessage.toolMetadata || {};
+  const handleToolExecutionComplete = (newMessage: ChatMessage): void => {
+    const toolMetadata = newMessage.toolMetadata ?? { toolUseId: '', toolName: '' };
 
     updateMessages((prevMessages) => {
       return prevMessages.map((msg) => {
@@ -141,7 +147,7 @@ const useAgentChat = (config: Partial<AgentChatConfig> = {}): UseAgentChatReturn
 
         // Check tools within agent sessionMessages
         if (msg.messageType === 'tool_use' && msg.toolUseData?.sessionMessages) {
-          const updatedSessionMessages = msg.toolUseData.sessionMessages.map((sessionMsg: any) => {
+          const updatedSessionMessages = msg.toolUseData.sessionMessages.map((sessionMsg: ChatMessage) => {
             if (sessionMsg.messageType === 'unified_tool' && sessionMsg.toolUseId === toolMetadata.toolUseId) {
               return {
                 ...sessionMsg,
@@ -164,7 +170,7 @@ const useAgentChat = (config: Partial<AgentChatConfig> = {}): UseAgentChatReturn
 
         // Check nested tools within agents (legacy)
         if (msg.messageType === 'tool_use' && msg.toolUseData?.tools) {
-          const updatedTools = msg.toolUseData.tools.map((tool: any) => {
+          const updatedTools = msg.toolUseData.tools.map((tool: Record<string, unknown>) => {
             if (tool.toolUseId === toolMetadata.toolUseId) {
               return {
                 ...tool,
@@ -191,8 +197,8 @@ const useAgentChat = (config: Partial<AgentChatConfig> = {}): UseAgentChatReturn
   };
 
   // Handle tool result start messages - updates result loading phase
-  const handleToolResultStart = (newMessage: any): void => {
-    const toolMetadata = newMessage.toolMetadata || {};
+  const handleToolResultStart = (newMessage: ChatMessage): void => {
+    const toolMetadata = newMessage.toolMetadata ?? { toolUseId: '', toolName: '' };
 
     updateMessages((prevMessages) => {
       return prevMessages.map((msg) => {
@@ -207,7 +213,7 @@ const useAgentChat = (config: Partial<AgentChatConfig> = {}): UseAgentChatReturn
 
         // Check tools within agent sessionMessages
         if (msg.messageType === 'tool_use' && msg.toolUseData?.sessionMessages) {
-          const updatedSessionMessages = msg.toolUseData.sessionMessages.map((sessionMsg: any) => {
+          const updatedSessionMessages = msg.toolUseData.sessionMessages.map((sessionMsg: ChatMessage) => {
             if (sessionMsg.messageType === 'unified_tool' && sessionMsg.toolUseId === toolMetadata.toolUseId) {
               return {
                 ...sessionMsg,
@@ -229,7 +235,7 @@ const useAgentChat = (config: Partial<AgentChatConfig> = {}): UseAgentChatReturn
 
         // Check nested tools within agents (legacy)
         if (msg.messageType === 'tool_use' && msg.toolUseData?.tools) {
-          const updatedTools = msg.toolUseData.tools.map((tool: any) => {
+          const updatedTools = msg.toolUseData.tools.map((tool: Record<string, unknown>) => {
             if (tool.toolUseId === toolMetadata.toolUseId) {
               return {
                 ...tool,
@@ -255,8 +261,8 @@ const useAgentChat = (config: Partial<AgentChatConfig> = {}): UseAgentChatReturn
   };
 
   // Handle tool result complete messages - completes result phase
-  const handleToolResultComplete = (newMessage: any): void => {
-    const toolMetadata = newMessage.toolMetadata || {};
+  const handleToolResultComplete = (newMessage: ChatMessage): void => {
+    const toolMetadata = newMessage.toolMetadata ?? { toolUseId: '', toolName: '' };
 
     updateMessages((prevMessages) => {
       return prevMessages.map((msg) => {
@@ -272,7 +278,7 @@ const useAgentChat = (config: Partial<AgentChatConfig> = {}): UseAgentChatReturn
 
         // Check tools within agent sessionMessages
         if (msg.messageType === 'tool_use' && msg.toolUseData?.sessionMessages) {
-          const updatedSessionMessages = msg.toolUseData.sessionMessages.map((sessionMsg: any) => {
+          const updatedSessionMessages = msg.toolUseData.sessionMessages.map((sessionMsg: ChatMessage) => {
             if (sessionMsg.messageType === 'unified_tool' && sessionMsg.toolUseId === toolMetadata.toolUseId) {
               return {
                 ...sessionMsg,
@@ -295,7 +301,7 @@ const useAgentChat = (config: Partial<AgentChatConfig> = {}): UseAgentChatReturn
 
         // Check nested tools within agents (legacy)
         if (msg.messageType === 'tool_use' && msg.toolUseData?.tools) {
-          const updatedTools = msg.toolUseData.tools.map((tool: any) => {
+          const updatedTools = msg.toolUseData.tools.map((tool: Record<string, unknown>) => {
             if (tool.toolUseId === toolMetadata.toolUseId) {
               return {
                 ...tool,
@@ -322,7 +328,7 @@ const useAgentChat = (config: Partial<AgentChatConfig> = {}): UseAgentChatReturn
   };
 
   // Parse JSON from message content and extract responseType
-  const parseResponseData = (content: string): { responseType: string; data: any; textContent: string } | null => {
+  const parseResponseData = (content: string): { responseType: string; data: unknown; textContent: string } | null => {
     try {
       // Look for JSON objects containing responseType with proper bracket matching
       const findJsonWithResponseType = (text: string): string | null => {
@@ -412,7 +418,7 @@ const useAgentChat = (config: Partial<AgentChatConfig> = {}): UseAgentChatReturn
   const structuredDataModeRef = useRef(false);
 
   // Parse Bedrock error information from message content
-  const parseBedrockerrorInfo = (content: string): Record<string, any> | null => {
+  const parseBedrockerrorInfo = (content: string): Record<string, unknown> | null => {
     try {
       const parsed = JSON.parse(content);
       if (parsed.type === 'bedrock_error' && parsed.errorInfo) {
@@ -425,7 +431,7 @@ const useAgentChat = (config: Partial<AgentChatConfig> = {}): UseAgentChatReturn
   };
 
   // Handle streaming messages with proper phase management
-  const handleStreamingMessage = (newMessage: any): void => {
+  const handleStreamingMessage = (newMessage: ChatMessage): void => {
     // Handle new tool message types using the messageType field from GraphQL
     if (newMessage.messageType === 'tool_execution_start') {
       return handleToolExecutionStart(newMessage);
@@ -446,7 +452,7 @@ const useAgentChat = (config: Partial<AgentChatConfig> = {}): UseAgentChatReturn
 
       // Add a placeholder message to show we're generating the final result
       updateMessages((prevMessages) => {
-        const placeholderMessage = {
+        const placeholderMessage: ChatMessage = {
           role: 'assistant',
           content: 'Generating final result...',
           messageType: 'text',
@@ -475,7 +481,7 @@ const useAgentChat = (config: Partial<AgentChatConfig> = {}): UseAgentChatReturn
         const parsedData = parseResponseData(newMessage.content);
 
         // Create the final message
-        const finalMessage: Record<string, any> = {
+        const finalMessage: ChatMessage = {
           role: 'assistant',
           content: newMessage.content,
           messageType: bedrockErrorInfo ? 'bedrock_error' : 'text',
@@ -489,7 +495,7 @@ const useAgentChat = (config: Partial<AgentChatConfig> = {}): UseAgentChatReturn
         // Add Bedrock error info if available
         if (bedrockErrorInfo) {
           finalMessage.bedrockErrorInfo = bedrockErrorInfo;
-          finalMessage.content = bedrockErrorInfo.message; // Use user-friendly message
+          finalMessage.content = (bedrockErrorInfo.message as string) || newMessage.content; // Use user-friendly message
         }
         // Add parsed data if available
         else if (parsedData) {
@@ -510,7 +516,7 @@ const useAgentChat = (config: Partial<AgentChatConfig> = {}): UseAgentChatReturn
 
         // Check if we already have a final message with the same timestamp to prevent duplicates
         const existingFinalIndex = updatedMessages.findIndex(
-          (msg: any) =>
+          (msg: ChatMessage) =>
             msg.role === 'assistant' &&
             !msg.isProcessing &&
             msg.sessionId === newMessage.sessionId &&
@@ -595,7 +601,7 @@ const useAgentChat = (config: Partial<AgentChatConfig> = {}): UseAgentChatReturn
             }
 
             // Create new tool use message with an array to collect session messages
-            const toolUseMessage = {
+            const toolUseMessage: ChatMessage = {
               role: 'assistant',
               content: '',
               messageType: 'tool_use',
@@ -638,7 +644,7 @@ const useAgentChat = (config: Partial<AgentChatConfig> = {}): UseAgentChatReturn
 
           // If there's content after subagent_end, create a new streaming message
           if (contentAfterEnd) {
-            const postToolMessage = {
+            const postToolMessage: ChatMessage = {
               role: 'assistant',
               content: contentAfterEnd,
               messageType: 'text',
@@ -701,7 +707,7 @@ const useAgentChat = (config: Partial<AgentChatConfig> = {}): UseAgentChatReturn
             };
           } else {
             // Create a new text message in sessionMessages
-            const newTextMessage = {
+            const newTextMessage: ChatMessage = {
               role: 'assistant',
               content: newMessage.content,
               messageType: 'text',
@@ -760,7 +766,7 @@ const useAgentChat = (config: Partial<AgentChatConfig> = {}): UseAgentChatReturn
     });
   };
 
-  const addMessage = (newMessage: any): void => {
+  const addMessage = (newMessage: ChatMessage): void => {
     // Filter out messages with isProcessing=true and content containing responseType (JSON data)
     // BUT allow structured_data_start messages through
     if (
@@ -801,26 +807,26 @@ const useAgentChat = (config: Partial<AgentChatConfig> = {}): UseAgentChatReturn
     logger.info('Setting up GraphQL subscription for session:', sessionId);
     logger.info('Using agent config:', agentConfig);
 
-    const subscription = (client as any)
-      .graphql({
+    const subscription = (
+      client.graphql({
         query: agentConfig.subscription,
         variables: { sessionId },
-      })
-      .subscribe({
-        next: ({ data }: { data: any }) => {
-          const chatMessage = data?.onAgentChatMessageUpdate;
+      }) as unknown as GraphQLSubscribable
+    ).subscribe({
+      next: ({ data }: { data: Record<string, unknown> }) => {
+        const chatMessage = data?.onAgentChatMessageUpdate as ChatMessage | undefined;
 
-          if (chatMessage) {
-            addMessage(chatMessage);
-          } else {
-            console.log('No chat message in subscription data:', data);
-          }
-        },
-        error: (err: any) => {
-          logger.error('Subscription error:', err);
-          updateAgentChatState({ error: 'Connection to chat service lost. Please refresh the page.' });
-        },
-      });
+        if (chatMessage) {
+          addMessage(chatMessage);
+        } else {
+          console.log('No chat message in subscription data:', data);
+        }
+      },
+      error: (err: unknown) => {
+        logger.error('Subscription error:', err);
+        updateAgentChatState({ error: 'Connection to chat service lost. Please refresh the page.' });
+      },
+    });
 
     return () => {
       if (subscription) {
@@ -830,7 +836,7 @@ const useAgentChat = (config: Partial<AgentChatConfig> = {}): UseAgentChatReturn
   }, [sessionId, agentConfig.subscription]);
 
   // Send a chat message
-  const sendMessage = async (prompt: string, options: { enableCodeIntelligence?: boolean } = {}): Promise<any> => {
+  const sendMessage = async (prompt: string, options: { enableCodeIntelligence?: boolean } = {}): Promise<unknown> => {
     if (!prompt.trim()) return undefined;
 
     updateAgentChatState({
@@ -842,7 +848,7 @@ const useAgentChat = (config: Partial<AgentChatConfig> = {}): UseAgentChatReturn
     const messageKey = `${sessionId}:${prompt}`;
     sentMessagesRef.current.add(messageKey);
 
-    const userMessage = {
+    const userMessage: ChatMessage = {
       role: 'user',
       content: prompt,
       messageType: 'text',
@@ -864,7 +870,7 @@ const useAgentChat = (config: Partial<AgentChatConfig> = {}): UseAgentChatReturn
           method: agentConfig.method,
           enableCodeIntelligence: options.enableCodeIntelligence,
         },
-      } as any);
+      } as unknown as Parameters<typeof client.graphql>[0]);
 
       return response;
     } catch (err) {
@@ -897,7 +903,7 @@ const useAgentChat = (config: Partial<AgentChatConfig> = {}): UseAgentChatReturn
   };
 
   // Load a previous chat session
-  const loadChatSession = async (targetSessionId: string, existingMessages: any[] | null = null): Promise<void> => {
+  const loadChatSession = async (targetSessionId: string, existingMessages: ChatMessage[] | null = null): Promise<void> => {
     try {
       updateAgentChatState({
         isLoading: true,
@@ -912,13 +918,13 @@ const useAgentChat = (config: Partial<AgentChatConfig> = {}): UseAgentChatReturn
         const response = await client.graphql({
           query: GET_AGENT_CHAT_MESSAGES,
           variables: { sessionId: targetSessionId },
-        } as any);
-        messagesToLoad = (response as any)?.data?.getChatMessages || [];
+        } as unknown as Parameters<typeof client.graphql>[0]);
+        messagesToLoad = (response as unknown as { data: { getChatMessages: ChatMessage[] } })?.data?.getChatMessages || [];
       }
 
       // Convert messages to the format expected by the UI
-      const formattedMessages = messagesToLoad.map((msg: any, index: number) => {
-        const baseMessage: Record<string, any> = {
+      const formattedMessages: ChatMessage[] = messagesToLoad.map((msg: ChatMessage, index: number) => {
+        const baseMessage: ChatMessage = {
           role: msg.role,
           content: msg.content,
           messageType: 'text',
@@ -946,7 +952,7 @@ const useAgentChat = (config: Partial<AgentChatConfig> = {}): UseAgentChatReturn
 
       // Update context with loaded session
       updateAgentChatState({
-        messages: formattedMessages as any,
+        messages: formattedMessages,
         sessionId: targetSessionId,
         waitingForResponse: false,
         lastMessageCount: formattedMessages.length,

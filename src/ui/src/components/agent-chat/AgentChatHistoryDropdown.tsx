@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { generateClient } from 'aws-amplify/api';
 import { ConsoleLogger } from 'aws-amplify/utils';
-import { ButtonDropdown, Button, Box } from '@cloudscape-design/components';
+import { ButtonDropdown, Button } from '@cloudscape-design/components';
 
 import {
   LIST_AGENT_CHAT_SESSIONS,

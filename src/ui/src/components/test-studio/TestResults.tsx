@@ -1,6 +1,6 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import {
   Container,
@@ -21,7 +21,6 @@ import {
   CollectionPreferences,
   ExpandableSection,
   RadioGroup,
-  Link,
 } from '@cloudscape-design/components';
 // eslint-disable-next-line import/no-extraneous-dependencies
 import yaml from 'js-yaml';
@@ -233,7 +232,7 @@ const ComprehensiveBreakdown = ({
 
               // Second pass: insert subtotal rows after each context group
               const finalItems = [];
-              const currentContext = null;
+              const _currentContext = null;
 
               costItems.forEach((item, index) => {
                 // Add the regular item
@@ -1016,7 +1015,7 @@ const TestResults = ({ testRunId, setSelectedTestRunId }: TestResultsProps): Rea
                 return { mappedData, maxCount, buckets };
               };
 
-              const { mappedData, maxCount, buckets } = generateChartData();
+              const { mappedData, maxCount: _maxCount, buckets } = generateChartData();
 
               const chartData = mappedData.map((item) => ({
                 range: item.x,
@@ -1041,7 +1040,7 @@ const TestResults = ({ testRunId, setSelectedTestRunId }: TestResultsProps): Rea
                         label={{ value: 'Number of Documents', angle: -90, position: 'insideLeft', style: { textAnchor: 'middle' } }}
                       />
                       <Tooltip
-                        formatter={(value, name) => [value, 'Number of Documents']}
+                        formatter={(value, _name) => [value, 'Number of Documents']}
                         labelFormatter={(label) => `Score Range: ${label}`}
                       />
                       <Bar
@@ -1075,7 +1074,7 @@ const TestResults = ({ testRunId, setSelectedTestRunId }: TestResultsProps): Rea
                         label={{ value: 'Number of Documents', angle: -90, position: 'insideLeft', style: { textAnchor: 'middle' } }}
                       />
                       <Tooltip
-                        formatter={(value, name) => [value, 'Number of Documents']}
+                        formatter={(value, _name) => [value, 'Number of Documents']}
                         labelFormatter={(label) => `Score Range: ${label}`}
                       />
                       <Line

@@ -17,7 +17,6 @@ import {
   Badge,
   ExpandableSection,
   Select,
-  Link,
 } from '@cloudscape-design/components';
 import { generateClient } from 'aws-amplify/api';
 import ADD_TEST_SET from '../../graphql/queries/addTestSet';

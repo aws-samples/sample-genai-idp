@@ -229,7 +229,7 @@ const ConfigurationLayout = (): React.JSX.Element => {
   // Version comparison state
   const [showCompareModal, setShowCompareModal] = useState(false);
   const [compareData, setCompareData] = useState<{ versions: string[]; configs: Record<string, Record<string, unknown>> } | null>(null);
-  const [comparingVersions, setComparingVersions] = useState(false);
+  const [_comparingVersions, setComparingVersions] = useState(false);
 
   // Handle version comparison
   const handleCompareVersions = async () => {
@@ -1501,11 +1501,11 @@ const ConfigurationLayout = (): React.JSX.Element => {
         setSyncSuccessMessage(String(response.message || `Document classes have been synchronized ${directionLabel}.`));
 
         // If there are partial failures, also show the error details
-        const syncError = response.error as Record<string, unknown> | undefined;
-        if (syncError && syncError.type === 'PARTIAL_SYNC_ERROR') {
+        const syncErr = response.error as Record<string, unknown> | undefined;
+        if (syncErr && syncErr.type === 'PARTIAL_SYNC_ERROR') {
           // Show both success and error for partial failures
           setTimeout(() => {
-            setSyncError(syncError.message as string);
+            setSyncError(syncErr.message as string);
           }, 100); // Small delay to show success first
         }
 
@@ -1648,7 +1648,7 @@ const ConfigurationLayout = (): React.JSX.Element => {
 
   // Handler for Import button click - show source selection modal
   // NOTE: Original JS referenced out-of-scope variables; fixed during TS migration
-  const handleImportClick = () => {
+  const _handleImportClick = () => {
     setShowImportSourceModal(true);
   };
 

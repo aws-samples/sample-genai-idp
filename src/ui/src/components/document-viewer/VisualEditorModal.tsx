@@ -222,8 +222,8 @@ const FormFieldRenderer = memo<Record<string, any>>(
     // Change tracking props
     predictionChanges = new Map(),
     baselineChanges = new Map(),
-    onRevertPrediction = null,
-    onRevertBaseline = null,
+    _onRevertPrediction = null,
+    _onRevertBaseline = null,
   }) => {
     // Calculate path key for collapse state using displayPath
     const pathKey = [...displayPath, fieldKey].join('.');
@@ -388,7 +388,7 @@ const FormFieldRenderer = memo<Record<string, any>>(
         // Build the path string from current path and fieldKey
         // path is like [index, "bankInfo"] and fieldKey is like "bank"
         // We need to match against field_comparison_details paths like "checks[0].bankInfo.bank"
-        const fullPath = [...path, fieldKey].filter((p) => p !== undefined && p !== 'Document Data');
+        const _fullPath = [...path, fieldKey].filter((p) => p !== undefined && p !== 'Document Data');
 
         // Look through all attributes' field_comparison_details to find a match
         for (const attr of sectionResult.attributes) {
@@ -433,7 +433,7 @@ const FormFieldRenderer = memo<Record<string, any>>(
 
     // Extract score, threshold, and reason from evaluation result
     const evalScore = evalResult?.score;
-    const evalThreshold = evalResult?.threshold;
+    const _evalThreshold = evalResult?.threshold;
     const evalReason = evalResult?.reason;
 
     // Determine field type
@@ -1847,9 +1847,9 @@ const VisualEditorModal = ({
   const [originalBaselineData, setOriginalBaselineData] = useState(null);
   const [localBaselineData, setLocalBaselineData] = useState(null);
   const [isSaving, setIsSaving] = useState(false);
-  const [saveError, setSaveError] = useState(null);
-  const [showUnsavedChangesModal, setShowUnsavedChangesModal] = useState(false);
-  const [pendingDismiss, setPendingDismiss] = useState(false);
+  const [_saveError, setSaveError] = useState(null);
+  const [_showUnsavedChangesModal, setShowUnsavedChangesModal] = useState(false);
+  const [_pendingDismiss, setPendingDismiss] = useState(false);
   // Tab navigation state
   const [activeTabId, setActiveTabId] = useState('visual');
 
@@ -2041,14 +2041,14 @@ const VisualEditorModal = ({
   }, [visible]);
 
   // Check if section needs review (either low confidence or HITL triggered)
-  const needsReview =
+  const _needsReview =
     sectionData?.confidenceAlertCount > 0 || (sectionData?.documentItem?.hitlTriggered && !sectionData?.documentItem?.hitlCompleted);
 
   // Check if this specific section is already completed
-  const isSectionCompleted = sectionData?.isSectionCompleted || false;
+  const _isSectionCompleted = sectionData?.isSectionCompleted || false;
 
   // Check if user is reviewer only (not admin)
-  const isReviewerOnly = sectionData?.isReviewerOnly || false;
+  const _isReviewerOnly = sectionData?.isReviewerOnly || false;
 
   // Sync local data with props and store original for change tracking
   useEffect(() => {
@@ -2732,14 +2732,14 @@ const VisualEditorModal = ({
   }));
 
   // Handle unsaved changes modal actions
-  const handleDiscardAndClose = () => {
+  const _handleDiscardAndClose = () => {
     setShowUnsavedChangesModal(false);
     setPendingDismiss(false);
     handleDiscardAllChanges();
     onDismiss();
   };
 
-  const handleReturnToEditor = () => {
+  const _handleReturnToEditor = () => {
     setShowUnsavedChangesModal(false);
     setPendingDismiss(false);
   };

@@ -3,6 +3,38 @@ import Ajv from 'ajv';
 import addFormats from 'ajv-formats';
 import { SchemaValidationError } from '../types/common';
 
+interface ValidatableAttribute {
+  type?: string;
+  $ref?: string;
+  oneOf?: unknown[];
+  anyOf?: unknown[];
+  allOf?: unknown[];
+  minLength?: number;
+  maxLength?: number;
+  minimum?: number;
+  maximum?: number;
+  exclusiveMinimum?: number;
+  exclusiveMaximum?: number;
+  minItems?: number;
+  maxItems?: number;
+  minContains?: number;
+  maxContains?: number;
+  minProperties?: number;
+  maxProperties?: number;
+  const?: unknown;
+  enum?: unknown[];
+  readOnly?: boolean;
+  writeOnly?: boolean;
+  [key: string]: unknown;
+}
+
+interface SchemaNode {
+  $ref?: string;
+  properties?: Record<string, SchemaNode>;
+  items?: SchemaNode;
+  [key: string]: unknown;
+}
+
 interface ValidationResult {
   valid: boolean;
   errors: SchemaValidationError[];
@@ -86,7 +118,7 @@ export const useSchemaValidation = (): UseSchemaValidationReturn => {
       return { valid: false, errors: [{ path: '/', message: 'Attribute must be an object' }] };
     }
 
-    const attr = attribute as any;
+    const attr = attribute as ValidatableAttribute;
 
     if (!attr.type && !attr.$ref && !attr.oneOf && !attr.anyOf && !attr.allOf) {
       errors.push({ path: '/', message: 'Attribute must have a type, $ref, or composition keyword' });
@@ -153,7 +185,7 @@ export const useSchemaValidation = (): UseSchemaValidationReturn => {
     (schema: unknown, visited: Set<string> = new Set(), path: string[] = []): SchemaValidationError[] => {
       if (!schema || typeof schema !== 'object') return [];
 
-      const obj = schema as any;
+      const obj = schema as SchemaNode;
       const errors: SchemaValidationError[] = [];
 
       if (obj.$ref) {
@@ -172,7 +204,7 @@ export const useSchemaValidation = (): UseSchemaValidationReturn => {
       }
 
       if (obj.properties) {
-        Object.entries(obj.properties).forEach(([propName, propSchema]: [string, any]) => {
+        Object.entries(obj.properties).forEach(([propName, propSchema]: [string, SchemaNode]) => {
           if (propSchema.$ref) {
             const newVisited = new Set([...visited, path.join('/')]);
             errors.push(...detectCircularReferences(propSchema, newVisited, [...path, propName]));
@@ -211,14 +243,14 @@ export const useSchemaValidation = (): UseSchemaValidationReturn => {
     const traverse = (obj: unknown, path: string[] = []) => {
       if (!obj || typeof obj !== 'object') return;
 
-      const o = obj as any;
+      const o = obj as SchemaNode;
 
       if (o.$ref) {
         checkRef(o.$ref, `/${path.join('/')}`);
       }
 
       if (o.properties) {
-        Object.entries(o.properties).forEach(([propName, propSchema]: [string, any]) => {
+        Object.entries(o.properties).forEach(([propName, propSchema]: [string, SchemaNode]) => {
           traverse(propSchema, [...path, propName]);
         });
       }

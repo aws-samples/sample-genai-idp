@@ -57,7 +57,7 @@ interface FieldComparisonTableProps {
   onShowMismatchesOnlyChange?: ((checked: boolean) => void) | null;
 }
 
-const logger = new ConsoleLogger('FieldComparisonTable');
+const _logger = new ConsoleLogger('FieldComparisonTable');
 
 /**
  * Flattens nested JSON objects into a flat array of field entries
@@ -122,7 +122,7 @@ const flattenObject = (obj: unknown, path: (string | number)[] = [], results: Fl
  * Gets a value from a nested object using a path array
  * Filters out structural keys like 'inference_result' for explainability lookups
  */
-const getValueByPath = (obj: unknown, path: (string | number)[], filterStructural = false): unknown => {
+const _getValueByPath = (obj: unknown, path: (string | number)[], filterStructural = false): unknown => {
   if (!obj || !path || path.length === 0) return undefined;
 
   // Filter out structural keys from the path for explainability lookup

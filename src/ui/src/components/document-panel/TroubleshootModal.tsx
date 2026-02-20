@@ -81,7 +81,7 @@ const TroubleshootModal = ({
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [subscription, setSubscription] = useState<GraphQLSubscription | null>(null);
-  const [availableAgents, setAvailableAgents] = useState<AgentInfo[]>([]);
+  const [_availableAgents, setAvailableAgents] = useState<AgentInfo[]>([]);
 
   const query = `Troubleshoot ${documentItem?.objectKey} for failures or performance issues.`;
 

@@ -33,7 +33,7 @@ const logger = new ConsoleLogger('JSONViewer');
 
 const JSONViewer = ({
   fileUri,
-  fileType = 'text',
+  fileType: _fileType = 'text',
   buttonText = 'View/Edit Data',
   sectionData,
   onOpen,
@@ -51,7 +51,7 @@ const JSONViewer = ({
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [showVisualEditor, setShowVisualEditor] = useState<boolean>(false);
-  const [originalContent, setOriginalContent] = useState<string | null>(null);
+  const [_originalContent, setOriginalContent] = useState<string | null>(null);
 
   // Handle external open request (for section navigation)
   useEffect(() => {

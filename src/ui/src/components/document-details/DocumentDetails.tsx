@@ -55,7 +55,7 @@ const DocumentDetails = (): React.JSX.Element => {
   const deleteDocuments = documentsContext.deleteDocuments as (ids: string[]) => Promise<unknown>;
   const reprocessDocuments = documentsContext.reprocessDocuments as (ids: string[], version?: string) => Promise<unknown>;
   const abortWorkflows = documentsContext.abortWorkflows as (ids: string[]) => Promise<unknown>;
-  const { settings } = useSettingsContext() as Record<string, unknown>;
+  const { settings: _settings } = useSettingsContext() as Record<string, unknown>;
   const { isReviewer, isAdmin } = useUserRole();
   const isReviewerOnly = isReviewer && !isAdmin;
 
