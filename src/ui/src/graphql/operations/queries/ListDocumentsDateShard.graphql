@@ -1,0 +1,10 @@
+query ListDocumentsDateShard($date: AWSDate, $shard: Int) {
+  listDocumentsDateShard(date: $date, shard: $shard) {
+    Documents {
+      ObjectKey
+      PK
+      SK
+    }
+    nextToken
+  }
+}

@@ -1,0 +1,6 @@
+query ValidateTestFileName($fileName: String!) {
+  validateTestFileName(fileName: $fileName) {
+    exists
+    testSetId
+  }
+}

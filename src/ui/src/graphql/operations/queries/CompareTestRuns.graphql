@@ -1,0 +1,9 @@
+query CompareTestRuns($testRunIds: [String!]!) {
+  compareTestRuns(testRunIds: $testRunIds) {
+    metrics
+    configs {
+      setting
+      values
+    }
+  }
+}

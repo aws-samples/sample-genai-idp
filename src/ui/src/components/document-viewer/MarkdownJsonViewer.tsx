@@ -9,8 +9,7 @@ import { generateClient } from 'aws-amplify/api';
 import { ConsoleLogger } from 'aws-amplify/utils';
 import { Editor } from '@monaco-editor/react';
 import type * as Monaco from 'monaco-editor';
-import getFileContents from '../../graphql/queries/getFileContents';
-import uploadDocument from '../../graphql/queries/uploadDocument';
+import { getFileContents, uploadDocument } from '../../graphql/generated';
 import MarkdownViewer from './MarkdownViewer';
 
 interface TextEditorViewProps {
@@ -267,7 +266,7 @@ const MarkdownJsonViewer = ({
       logger.info('Fetching content:', uriToFetch);
 
       const response = await client.graphql({
-        query: getFileContents as unknown as string,
+        query: getFileContents,
         variables: { s3Uri: uriToFetch },
       });
 
@@ -319,7 +318,7 @@ const MarkdownJsonViewer = ({
 
       // Get presigned URL
       const response = await client.graphql({
-        query: uploadDocument as unknown as string,
+        query: uploadDocument,
         variables: {
           fileName,
           contentType: 'application/json',
@@ -328,8 +327,9 @@ const MarkdownJsonViewer = ({
         },
       });
 
-      const { presignedUrl, usePostMethod } = (response as { data: { uploadDocument: { presignedUrl: string; usePostMethod: boolean } } })
-        .data.uploadDocument;
+      const { presignedUrl, usePostMethod } = (
+        response as unknown as { data: { uploadDocument: { presignedUrl: string; usePostMethod: string } } }
+      ).data.uploadDocument;
 
       if (!usePostMethod) {
         throw new Error('Server returned PUT method which is not supported');

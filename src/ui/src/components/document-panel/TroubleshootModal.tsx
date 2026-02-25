@@ -6,10 +6,7 @@ import { generateClient } from 'aws-amplify/api';
 import { ConsoleLogger } from 'aws-amplify/utils';
 import { Modal, Box, SpaceBetween, Button, Spinner, Alert, Header } from '@cloudscape-design/components';
 
-import submitAgentQuery from '../../graphql/queries/submitAgentQuery';
-import getAgentJobStatus from '../../graphql/queries/getAgentJobStatus';
-import onAgentJobComplete from '../../graphql/subscriptions/onAgentJobComplete';
-import listAvailableAgents from '../../graphql/queries/listAvailableAgents';
+import { submitAgentQuery, getAgentJobStatus, onAgentJobComplete, listAvailableAgents } from '../../graphql/generated';
 import AgentResultDisplay from '../document-agents-layout/AgentResultDisplay';
 import AgentMessagesDisplay from '../document-agents-layout/AgentMessagesDisplay';
 
@@ -90,7 +87,7 @@ const TroubleshootModal = ({
       logger.debug('Subscribing to job completion for job ID:', id);
       const sub = (
         client.graphql({
-          query: onAgentJobComplete as unknown as string,
+          query: onAgentJobComplete,
           variables: { jobId: id },
         }) as unknown as { subscribe: (handlers: Record<string, unknown>) => GraphQLSubscription }
       ).subscribe({
@@ -101,7 +98,7 @@ const TroubleshootModal = ({
           if (jobCompleted) {
             try {
               const jobResponse = await client.graphql({
-                query: getAgentJobStatus as unknown as string,
+                query: getAgentJobStatus,
                 variables: { jobId: id },
               });
 
@@ -139,7 +136,7 @@ const TroubleshootModal = ({
 
   const checkAvailableAgents = async (): Promise<AgentInfo[]> => {
     try {
-      const response = await client.graphql({ query: listAvailableAgents as unknown as string });
+      const response = await client.graphql({ query: listAvailableAgents });
       const agents = ((response as { data?: { listAvailableAgents?: AgentInfo[] } })?.data?.listAvailableAgents || []) as AgentInfo[];
       setAvailableAgents(agents);
       logger.debug('Available agents:', agents);
@@ -174,7 +171,7 @@ const TroubleshootModal = ({
       logger.debug('Agent IDs:', ['Error-Analyzer-Agent']);
 
       const response = await client.graphql({
-        query: submitAgentQuery as unknown as string,
+        query: submitAgentQuery,
         variables: {
           query,
           agentIds: ['Error-Analyzer-Agent'],
@@ -232,7 +229,7 @@ const TroubleshootModal = ({
         try {
           logger.debug('Polling job status for job ID:', jobId);
           const response = await client.graphql({
-            query: getAgentJobStatus as unknown as string,
+            query: getAgentJobStatus,
             variables: { jobId },
           });
 

@@ -1,0 +1,12 @@
+mutation SyncBdaIdp($direction: String, $versionName: String) {
+  syncBdaIdp(direction: $direction, versionName: $versionName) {
+    success
+    message
+    processedClasses
+    direction
+    error {
+      type
+      message
+    }
+  }
+}

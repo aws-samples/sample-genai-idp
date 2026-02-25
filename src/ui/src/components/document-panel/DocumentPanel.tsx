@@ -30,7 +30,7 @@ import { getDocumentConfidenceAlertCount } from '../common/confidence-alerts-uti
 import { renderHitlStatus } from '../common/hitl-status-renderer';
 import StepFunctionFlowViewer from '../step-function-flow/StepFunctionFlowViewer';
 import TroubleshootModal from './TroubleshootModal';
-import claimReviewMutation from '../../graphql/mutations/claimReview';
+import { claimReview } from '../../graphql/generated';
 // Uncomment the line below to enable debugging
 // import { debugDocumentStructure } from '../common/debug-utils';
 
@@ -647,7 +647,7 @@ export const DocumentPanel = ({
     setIsClaimingReview(true);
     try {
       const result = await client.graphql({
-        query: claimReviewMutation as unknown as string,
+        query: claimReview,
         variables: { objectKey: localItem.objectKey },
       });
 

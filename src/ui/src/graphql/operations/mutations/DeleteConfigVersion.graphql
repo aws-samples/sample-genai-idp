@@ -1,0 +1,10 @@
+mutation DeleteConfigVersion($versionName: String!) {
+  deleteConfigVersion(versionName: $versionName) {
+    success
+    message
+    error {
+      type
+      message
+    }
+  }
+}

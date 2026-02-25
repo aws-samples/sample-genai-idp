@@ -1,0 +1,10 @@
+mutation UpdateChatSessionTitle($sessionId: ID!, $title: String!) {
+  updateChatSessionTitle(sessionId: $sessionId, title: $title) {
+    sessionId
+    title
+    createdAt
+    updatedAt
+    messageCount
+    lastMessage
+  }
+}

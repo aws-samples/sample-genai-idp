@@ -4,6 +4,7 @@
 import React, { useState } from 'react';
 import { Box, SpaceBetween, ExpandableSection, Button, Alert, Container } from '@cloudscape-design/components';
 import './StepDetails.css';
+import { parseStepFunctionPayload } from '../../graphql/awsjson-parsers';
 
 interface StepConfig {
   summarization?: { enabled?: boolean };
@@ -51,14 +52,12 @@ const JsonDisplay = ({ data = null }: JsonDisplayProps): React.JSX.Element | nul
     }
 
     if (typeof jsonString === 'string') {
-      try {
-        // Try to parse as JSON first
-        const parsed = JSON.parse(jsonString);
+      const parsed = parseStepFunctionPayload(jsonString);
+      if (parsed) {
         return JSON.stringify(parsed, null, 2);
-      } catch {
-        // If not JSON, return as-is but formatted
-        return jsonString;
       }
+      // If not JSON, return as-is
+      return jsonString;
     }
 
     return String(jsonString);
@@ -108,11 +107,11 @@ const StepDetails = ({ step, formatDuration, getStepIcon, mergedConfig = null }:
 
   const formatJson = (jsonString: string | undefined): string => {
     if (!jsonString) return '';
-    try {
-      return JSON.stringify(JSON.parse(jsonString), null, 2);
-    } catch {
-      return jsonString;
+    const parsed = parseStepFunctionPayload(jsonString);
+    if (parsed) {
+      return JSON.stringify(parsed, null, 2);
     }
+    return jsonString;
   };
 
   const copyToClipboard = (text: string): void => {

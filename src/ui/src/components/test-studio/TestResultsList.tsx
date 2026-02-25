@@ -5,8 +5,7 @@ import { Table, Button, SpaceBetween, ButtonDropdown, Pagination, Box, TextFilte
 import type { IconProps } from '@cloudscape-design/components';
 import { useCollection } from '@cloudscape-design/collection-hooks';
 import { generateClient } from 'aws-amplify/api';
-import GET_TEST_RUNS from '../../graphql/queries/getTestRuns';
-import DELETE_TESTS from '../../graphql/queries/deleteTests';
+import { getTestRuns, deleteTests } from '../../graphql/generated';
 import DeleteTestModal from './DeleteTestModal';
 import DateRangeModal from '../common/DateRangeModal';
 import { paginationLabels } from '../common/labels';
@@ -188,7 +187,7 @@ const TestResultsList = ({
         : { timePeriodHours };
       console.log('Fetching test runs with variables:', variables);
       const result = (await client.graphql({
-        query: GET_TEST_RUNS,
+        query: getTestRuns,
         variables,
       })) as GqlResult;
       console.log('Raw GraphQL result:', result);
@@ -278,7 +277,7 @@ const TestResultsList = ({
       console.log('Attempting to delete test runs:', testRunIds);
 
       const result = (await client.graphql({
-        query: DELETE_TESTS,
+        query: deleteTests,
         variables: { testRunIds },
       })) as GqlResult;
       console.log('Delete result:', result);

@@ -5,8 +5,7 @@ import type { SelectProps, IconProps } from '@cloudscape-design/components';
 import { Container, Header, SpaceBetween, Button, FormField, Select, Alert, Textarea, Input } from '@cloudscape-design/components';
 import { generateClient } from 'aws-amplify/api';
 import { ConsoleLogger } from 'aws-amplify/utils';
-import START_TEST_RUN from '../../graphql/queries/startTestRun';
-import GET_TEST_SETS from '../../graphql/queries/getTestSets';
+import { startTestRun, getTestSets } from '../../graphql/generated';
 import handlePrint from './PrintUtils';
 import useConfigurationVersions from '../../hooks/use-configuration-versions';
 
@@ -82,7 +81,7 @@ const TestRunner = ({
   const loadTestSets = async () => {
     try {
       console.log('TestRunner: Loading test sets...');
-      const result = (await client.graphql({ query: GET_TEST_SETS })) as GqlResult;
+      const result = (await client.graphql({ query: getTestSets })) as GqlResult;
       console.log('TestRunner: GraphQL result:', result);
       const testSetsData = result.data.getTestSets || [];
       console.log('TestRunner: Test sets data:', testSetsData);
@@ -132,7 +131,7 @@ const TestRunner = ({
       console.log('TestRunner: Starting test run with input:', input);
 
       const result = (await client.graphql({
-        query: START_TEST_RUN,
+        query: startTestRun,
         variables: { input },
       })) as GqlResult;
 

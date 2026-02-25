@@ -25,13 +25,18 @@ import {
 // eslint-disable-next-line import/no-extraneous-dependencies
 import yaml from 'js-yaml';
 import { generateClient } from 'aws-amplify/api';
-import GET_TEST_RUN from '../../graphql/queries/getTestResults';
-import START_TEST_RUN from '../../graphql/queries/startTestRun';
+import { getTestRun, startTestRun, getTestSets } from '../../graphql/generated';
 import useConfigurationVersions from '../../hooks/use-configuration-versions';
-import GET_TEST_SETS from '../../graphql/queries/getTestSets';
 import TestStudioHeader from './TestStudioHeader';
 import useAppContext from '../../contexts/app';
 import { formatConfigVersionLink } from './utils/configVersionUtils';
+import {
+  parseCostBreakdown,
+  parseAccuracyBreakdown,
+  parseSplitClassificationMetrics,
+  parseWeightedOverallScores,
+  parseTestRunConfig,
+} from '../../graphql/awsjson-parsers';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type GqlResult = { data: Record<string, any> };
@@ -418,7 +423,7 @@ const TestResults = ({ testRunId, setSelectedTestRunId }: TestResultsProps): Rea
 
     try {
       const testSetsResult = (await client.graphql({
-        query: GET_TEST_SETS,
+        query: getTestSets,
       })) as GqlResult;
 
       const testSets = testSetsResult.data.getTestSets || [];
@@ -460,7 +465,7 @@ const TestResults = ({ testRunId, setSelectedTestRunId }: TestResultsProps): Rea
 
         while (attempt <= maxRetries && !isCancelled) {
           try {
-            console.log(`GET_TEST_RUN attempt ${attempt} starting...`);
+            console.log(`getTestRun attempt ${attempt} starting...`);
             if (attempt === 1) {
               setCurrentAttempt(1);
               setRetryMessage('Getting results from cache...');
@@ -497,13 +502,13 @@ const TestResults = ({ testRunId, setSelectedTestRunId }: TestResultsProps): Rea
             if (isCancelled) return;
 
             result = (await client.graphql({
-              query: GET_TEST_RUN,
+              query: getTestRun,
               variables: { testRunId },
             })) as GqlResult;
 
             if (isCancelled) return;
 
-            console.log('GET_TEST_RUN result:', result);
+            console.log('getTestRun result:', result);
             clearAllTimeouts(); // Clear timeouts on success
             setCurrentAttempt(10); // Set to 100% before completing
             await new Promise((resolve) => setTimeout(resolve, 500)); // Brief pause to show 100%
@@ -511,7 +516,7 @@ const TestResults = ({ testRunId, setSelectedTestRunId }: TestResultsProps): Rea
           } catch (retryError) {
             if (isCancelled) return;
 
-            console.log('GET_TEST_RUN error caught:', {
+            console.log('getTestRun error caught:', {
               message: retryError.message,
               code: retryError.code,
               name: retryError.name,
@@ -527,7 +532,7 @@ const TestResults = ({ testRunId, setSelectedTestRunId }: TestResultsProps): Rea
                 (err) => err.errorType === 'Lambda:ExecutionTimeoutException' || err.message?.toLowerCase().includes('timeout'),
               );
             if (isTimeout && attempt < maxRetries) {
-              console.log(`GET_TEST_RUN attempt ${attempt} failed, retrying...`, retryError.message);
+              console.log(`getTestRun attempt ${attempt} failed, retrying...`, retryError.message);
 
               clearAllTimeouts(); // Clear any running timeouts
 
@@ -609,53 +614,33 @@ const TestResults = ({ testRunId, setSelectedTestRunId }: TestResultsProps): Rea
   // Calculate average weighted overall score
   const averageWeightedScore = (() => {
     if (!results.weightedOverallScores) return null;
-    const scores =
-      typeof results.weightedOverallScores === 'string' ? JSON.parse(results.weightedOverallScores) : results.weightedOverallScores;
+    const scores = parseWeightedOverallScores(results.weightedOverallScores as string);
     const values = Object.values(scores) as number[];
     return values.length > 0 ? values.reduce((sum, score) => sum + score, 0) / values.length : null;
   })();
 
-  let costBreakdown = null;
-  let accuracyBreakdown = null;
-  let splitClassificationMetrics = null;
-
-  try {
-    if (results.costBreakdown) {
-      costBreakdown = typeof results.costBreakdown === 'string' ? JSON.parse(results.costBreakdown) : results.costBreakdown;
-    }
-    if (results.accuracyBreakdown) {
-      accuracyBreakdown = typeof results.accuracyBreakdown === 'string' ? JSON.parse(results.accuracyBreakdown) : results.accuracyBreakdown;
-    }
-    if (results.splitClassificationMetrics) {
-      splitClassificationMetrics =
-        typeof results.splitClassificationMetrics === 'string'
-          ? JSON.parse(results.splitClassificationMetrics)
-          : results.splitClassificationMetrics;
-    }
-  } catch (e) {
-    console.error('Error parsing breakdown data:', e);
-  }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const costBreakdown: any = results.costBreakdown ? parseCostBreakdown(results.costBreakdown as string) : null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const accuracyBreakdown: any = results.accuracyBreakdown ? parseAccuracyBreakdown(results.accuracyBreakdown as string) : null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const splitClassificationMetrics: any = results.splitClassificationMetrics
+    ? parseSplitClassificationMetrics(results.splitClassificationMetrics as string)
+    : null;
 
   // Helper function to get merged config from results.config
   // The config may be stored as a JSON string (possibly double-stringified) with {Default: {...}, Custom: {...}} or already merged
   const getMergedConfig = (config: unknown): Record<string, unknown> | null => {
     if (!config) return null;
 
-    // Parse if it's a string (may be double-stringified)
-    let parsedConfig = config;
-    while (typeof parsedConfig === 'string') {
-      try {
-        parsedConfig = JSON.parse(parsedConfig);
-      } catch (e) {
-        console.error('Failed to parse config string:', e);
-        return null;
-      }
-    }
+    // Parse if it's a string (may be double-stringified) using typed parser
+    let parsedConfig: Record<string, unknown> | null =
+      typeof config === 'string' ? parseTestRunConfig(config) : (config as Record<string, unknown>);
+    if (!parsedConfig) return null;
 
     // If config is wrapped in a "Config" object, extract it
-    const configObj = parsedConfig as Record<string, unknown>;
-    if (configObj && configObj.Config && typeof configObj.Config === 'object') {
-      parsedConfig = configObj.Config;
+    if (parsedConfig.Config && typeof parsedConfig.Config === 'object') {
+      parsedConfig = parsedConfig.Config as Record<string, unknown>;
     }
 
     // Deep merge helper function
@@ -771,8 +756,8 @@ const TestResults = ({ testRunId, setSelectedTestRunId }: TestResultsProps): Rea
     setReRunLoading(true);
 
     try {
-      const input = {
-        testSetId: testSetId,
+      const input: { testSetId: string; context?: string; numberOfFiles?: number; configVersion?: string } = {
+        testSetId: testSetId as string,
         ...(reRunContext && { context: reRunContext }),
         ...(reRunNumberOfFiles.trim() && { numberOfFiles: parseInt(reRunNumberOfFiles.trim(), 10) }),
       };
@@ -780,7 +765,7 @@ const TestResults = ({ testRunId, setSelectedTestRunId }: TestResultsProps): Rea
       console.log('About to call GraphQL with input:', input);
 
       const result = (await client.graphql({
-        query: START_TEST_RUN,
+        query: startTestRun,
         variables: { input },
       })) as GqlResult;
 
@@ -953,7 +938,7 @@ const TestResults = ({ testRunId, setSelectedTestRunId }: TestResultsProps): Rea
               const generateChartData = () => {
                 const scores =
                   typeof results.weightedOverallScores === 'string'
-                    ? JSON.parse(results.weightedOverallScores)
+                    ? parseWeightedOverallScores(results.weightedOverallScores)
                     : results.weightedOverallScores;
 
                 // Create score range buckets
@@ -1132,7 +1117,7 @@ const TestResults = ({ testRunId, setSelectedTestRunId }: TestResultsProps): Rea
             {(() => {
               const scores =
                 typeof results.weightedOverallScores === 'string'
-                  ? JSON.parse(results.weightedOverallScores)
+                  ? parseWeightedOverallScores(results.weightedOverallScores)
                   : results.weightedOverallScores;
 
               const sortedDocs = Object.entries(scores as Record<string, number>)

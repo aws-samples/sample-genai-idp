@@ -1,0 +1,11 @@
+query GetPricing {
+  getPricing {
+    success
+    pricing
+    defaultPricing
+    error {
+      type
+      message
+    }
+  }
+}

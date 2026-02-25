@@ -1,0 +1,3 @@
+query ChatWithDocument($s3Uri: String!, $prompt: String!, $history: AWSJSON!, $modelId: String!) {
+  chatWithDocument(s3Uri: $s3Uri, prompt: $prompt, history: $history, modelId: $modelId)
+}

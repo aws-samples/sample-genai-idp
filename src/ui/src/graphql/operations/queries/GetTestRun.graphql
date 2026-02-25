@@ -1,0 +1,23 @@
+query GetTestRun($testRunId: String!) {
+  getTestRun(testRunId: $testRunId) {
+    testRunId
+    testSetId
+    testSetName
+    status
+    filesCount
+    completedFiles
+    failedFiles
+    overallAccuracy
+    weightedOverallScores
+    averageConfidence
+    accuracyBreakdown
+    splitClassificationMetrics
+    totalCost
+    costBreakdown
+    createdAt
+    completedAt
+    context
+    configVersion
+    config
+  }
+}

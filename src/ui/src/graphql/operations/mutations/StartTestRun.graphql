@@ -1,0 +1,9 @@
+mutation StartTestRun($input: TestRunInput!) {
+  startTestRun(input: $input) {
+    testRunId
+    testSetName
+    status
+    filesCount
+    createdAt
+  }
+}

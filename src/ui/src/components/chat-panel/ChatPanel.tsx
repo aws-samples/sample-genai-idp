@@ -6,7 +6,7 @@ import { generateClient } from 'aws-amplify/api';
 import { ConsoleLogger } from 'aws-amplify/utils';
 import { Button, Container, SpaceBetween, FormField, Alert } from '@cloudscape-design/components';
 
-import chatWithDocument from '../../graphql/queries/chatWithDocument';
+import { chatWithDocument } from '../../graphql/generated';
 import './ChatPanel.css';
 
 interface ChatMessage {
@@ -36,7 +36,7 @@ const getChatResponse = async (s3Uri: string, prompt: string, history: ChatHisto
   const modelId = 'us.amazon.nova-pro-v1:0';
   const strHistory = JSON.stringify(history);
   const response = await client.graphql({
-    query: chatWithDocument as unknown as string,
+    query: chatWithDocument,
     variables: { s3Uri, prompt, history: strHistory, modelId },
   });
   // logger.debug('response:', response);

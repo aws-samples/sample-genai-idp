@@ -1,0 +1,3 @@
+query ListBucketFiles($bucketType: String!, $filePattern: String!) {
+  listBucketFiles(bucketType: $bucketType, filePattern: $filePattern)
+}

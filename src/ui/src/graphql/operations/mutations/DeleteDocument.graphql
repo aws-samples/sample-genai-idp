@@ -1,0 +1,3 @@
+mutation DeleteDocument($objectKeys: [String!]!) {
+  deleteDocument(objectKeys: $objectKeys)
+}

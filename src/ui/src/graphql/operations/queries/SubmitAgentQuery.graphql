@@ -1,0 +1,9 @@
+query SubmitAgentQuery($query: String!, $agentIds: [String!]!) {
+  submitAgentQuery(query: $query, agentIds: $agentIds) {
+    jobId
+    status
+    query
+    agentIds
+    createdAt
+  }
+}

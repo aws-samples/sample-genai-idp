@@ -1,0 +1,6 @@
+mutation CopyToBaseline($objectKey: String!) {
+  copyToBaseline(objectKey: $objectKey) {
+    success
+    message
+  }
+}

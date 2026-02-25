@@ -1,0 +1,14 @@
+mutation SendAgentChatMessage($prompt: String!, $sessionId: String, $method: String, $enableCodeIntelligence: Boolean) {
+  sendAgentChatMessage(prompt: $prompt, sessionId: $sessionId, method: $method, enableCodeIntelligence: $enableCodeIntelligence) {
+    role
+    content
+    timestamp
+    isProcessing
+    sessionId
+    messageType
+    toolMetadata {
+      toolName
+      toolUseId
+    }
+  }
+}

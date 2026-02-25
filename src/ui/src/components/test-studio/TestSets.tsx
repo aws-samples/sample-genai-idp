@@ -19,12 +19,14 @@ import {
   Select,
 } from '@cloudscape-design/components';
 import { generateClient } from 'aws-amplify/api';
-import ADD_TEST_SET from '../../graphql/queries/addTestSet';
-import ADD_TEST_SET_FROM_UPLOAD from '../../graphql/queries/addTestSetFromUpload';
-import DELETE_TEST_SETS from '../../graphql/queries/deleteTestSets';
-import GET_TEST_SETS from '../../graphql/queries/getTestSets';
-import LIST_BUCKET_FILES from '../../graphql/queries/listBucketFiles';
-import VALIDATE_TEST_FILE_NAME from '../../graphql/queries/checkTestSetFiles';
+import {
+  addTestSet,
+  addTestSetFromUpload,
+  deleteTestSets,
+  getTestSets,
+  listBucketFiles,
+  validateTestFileName,
+} from '../../graphql/generated';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type GqlResult = { data: Record<string, any> };
@@ -79,7 +81,7 @@ const TestSets = (): React.JSX.Element => {
   const loadTestSets = async () => {
     try {
       console.log('TestSets: Loading test sets...');
-      const result = (await client.graphql({ query: GET_TEST_SETS })) as GqlResult;
+      const result = (await client.graphql({ query: getTestSets })) as GqlResult;
       console.log('TestSets: GraphQL result:', result);
       const backendTestSets = result.data.getTestSets || [];
 
@@ -156,7 +158,7 @@ const TestSets = (): React.JSX.Element => {
     setLoading(true);
     try {
       const result = (await client.graphql({
-        query: LIST_BUCKET_FILES,
+        query: listBucketFiles,
         variables: {
           bucketType: selectedBucket.value,
           filePattern: filePattern.trim(),
@@ -202,10 +204,10 @@ const TestSets = (): React.JSX.Element => {
       return;
     }
 
-    // 2. Backend validation using VALIDATE_TEST_FILE_NAME
+    // 2. Backend validation using validateTestFileName
     try {
       const validationResult = (await client.graphql({
-        query: VALIDATE_TEST_FILE_NAME,
+        query: validateTestFileName,
         variables: { fileName: newTestSetName.trim() },
       })) as GqlResult;
 
@@ -233,7 +235,7 @@ const TestSets = (): React.JSX.Element => {
     setLoading(true);
     try {
       const result = (await client.graphql({
-        query: ADD_TEST_SET,
+        query: addTestSet,
         variables: {
           name: newTestSetName.trim(),
           description: newTestSetDescription.trim(),
@@ -301,7 +303,7 @@ const TestSets = (): React.JSX.Element => {
 
     try {
       const validationResult = (await client.graphql({
-        query: VALIDATE_TEST_FILE_NAME,
+        query: validateTestFileName,
         variables: { fileName: newTestSetName.trim() },
       })) as GqlResult;
 
@@ -334,7 +336,7 @@ const TestSets = (): React.JSX.Element => {
     setLoading(true);
     try {
       const result = (await client.graphql({
-        query: ADD_TEST_SET_FROM_UPLOAD,
+        query: addTestSetFromUpload,
         variables: {
           input: {
             fileName: zipFile.name,
@@ -415,7 +417,7 @@ const TestSets = (): React.JSX.Element => {
     setWarningMessage('');
     setSuccessMessage('');
     try {
-      const result = (await client.graphql({ query: GET_TEST_SETS })) as GqlResult;
+      const result = (await client.graphql({ query: getTestSets })) as GqlResult;
       setTestSets(result.data.getTestSets || []);
     } catch (err) {
       console.error('Error refreshing test sets:', err);
@@ -433,7 +435,7 @@ const TestSets = (): React.JSX.Element => {
     setLoading(true);
     try {
       await client.graphql({
-        query: DELETE_TEST_SETS,
+        query: deleteTestSets,
         variables: { testSetIds },
       });
       setTestSets(testSets.filter((testSet) => !testSetIds.includes(testSet.id)));
@@ -901,7 +903,7 @@ const TestSets = (): React.JSX.Element => {
                   // Check if test set already exists
                   try {
                     const validationResult = (await client.graphql({
-                      query: VALIDATE_TEST_FILE_NAME,
+                      query: validateTestFileName,
                       variables: { fileName },
                     })) as GqlResult;
 

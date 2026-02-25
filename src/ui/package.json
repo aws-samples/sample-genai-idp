@@ -38,8 +38,6 @@
     "chart.js": "^4.5.0",
     "dompurify": "^3.2.5",
     "form-data": "^4.0.4",
-    "graphql": "^16.10.0",
-    "graphql-tag": "^2.12.6",
     "immer": "^10.1.3",
     "js-yaml": "^4.1.1",
     "json-schema-traverse": "^1.0.0",
@@ -70,7 +68,9 @@
     "test": "vitest",
     "lint": "eslint \"src/**/*.{js,jsx,ts,tsx}\"",
     "format": "prettier --write .",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "codegen": "graphql-codegen -c codegen.config.mjs && npm run generate-operations",
+    "generate-operations": "tsx scripts/generate-amplify-operations.ts"
   },
   "browserslist": {
     "production": [
@@ -87,6 +87,11 @@
   "devDependencies": {
     "@babel/plugin-proposal-private-property-in-object": "^7.21.11",
     "@babel/plugin-transform-react-jsx": "^7.22.15",
+    "@graphql-codegen/add": "^6.0.0",
+    "@graphql-codegen/cli": "^6.1.2",
+    "@graphql-codegen/typescript": "^5.0.8",
+    "@graphql-codegen/typescript-operations": "^5.0.8",
+    "graphql": "^16.10.0",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@typescript-eslint/eslint-plugin": "^7.18.0",
@@ -101,6 +106,7 @@
     "eslint-plugin-react": "^7.37.4",
     "eslint-plugin-react-hooks": "^4.6.2",
     "prettier": "^2.8.8",
+    "tsx": "^4.21.0",
     "typescript": "^5.9.3",
     "vite": "^7.1.12",
     "vite-plugin-svgr": "^4.5.0"

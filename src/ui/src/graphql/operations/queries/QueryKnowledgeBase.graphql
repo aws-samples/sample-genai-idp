@@ -1,0 +1,3 @@
+query QueryKnowledgeBase($input: String!, $sessionId: String) {
+  queryKnowledgeBase(input: $input, sessionId: $sessionId)
+}

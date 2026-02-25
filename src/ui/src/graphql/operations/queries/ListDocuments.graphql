@@ -1,0 +1,10 @@
+query ListDocuments($endDateTime: AWSDateTime, $startDateTime: AWSDateTime) {
+  listDocuments(endDateTime: $endDateTime, startDateTime: $startDateTime) {
+    Documents {
+      ObjectKey
+      PK
+      SK
+    }
+    nextToken
+  }
+}

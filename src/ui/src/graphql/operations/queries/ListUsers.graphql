@@ -1,0 +1,11 @@
+query ListUsers {
+  listUsers {
+    users {
+      userId
+      email
+      persona
+      status
+      createdAt
+    }
+  }
+}

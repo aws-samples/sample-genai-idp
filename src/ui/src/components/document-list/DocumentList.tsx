@@ -25,8 +25,7 @@ import DeleteDocumentModal from '../common/DeleteDocumentModal';
 import ReprocessDocumentModal from '../common/ReprocessDocumentModal';
 import AbortWorkflowModal from '../common/AbortWorkflowModal';
 import DateRangeModal from '../common/DateRangeModal';
-import claimReviewMutation from '../../graphql/mutations/claimReview';
-import releaseReviewMutation from '../../graphql/mutations/releaseReview';
+import { claimReview, releaseReview } from '../../graphql/generated';
 
 import type { MappedDocument } from './documents-table-config';
 import {
@@ -226,7 +225,7 @@ const DocumentList = (): React.JSX.Element => {
     for (const item of selectedItems) {
       try {
         const result = await client.graphql({
-          query: claimReviewMutation,
+          query: claimReview,
           variables: { objectKey: item.objectKey },
         });
         const claimData = (
@@ -268,7 +267,7 @@ const DocumentList = (): React.JSX.Element => {
     for (const item of collectionProps.selectedItems as MappedDocument[]) {
       try {
         const result = await client.graphql({
-          query: releaseReviewMutation,
+          query: releaseReview,
           variables: { objectKey: item.objectKey },
         });
         const releaseData = (result as { data: { releaseReview: { HITLStatus: string } } }).data.releaseReview;

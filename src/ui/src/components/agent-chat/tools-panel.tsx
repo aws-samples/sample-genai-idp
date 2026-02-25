@@ -15,7 +15,7 @@ import {
   Modal,
   Header,
 } from '@cloudscape-design/components';
-import listAvailableAgents from '../../graphql/queries/listAvailableAgents';
+import { listAvailableAgents } from '../../graphql/generated';
 
 const client = generateClient();
 const logger = new ConsoleLogger('AgentChatToolsPanel');
@@ -39,7 +39,7 @@ const ToolsPanel = (): React.JSX.Element => {
       try {
         setLoading(true);
         const response = await client.graphql({
-          query: listAvailableAgents as unknown as string,
+          query: listAvailableAgents,
         });
 
         const agentsList = ((response as { data: Record<string, unknown> })?.data?.listAvailableAgents as Agent[]) || [];

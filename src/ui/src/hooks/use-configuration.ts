@@ -4,9 +4,9 @@
 import { useState, useEffect } from 'react';
 import { generateClient } from 'aws-amplify/api';
 import { ConsoleLogger } from 'aws-amplify/utils';
-import getConfigVersionQuery from '../graphql/queries/getConfigVersion';
-import updateConfigurationMutation from '../graphql/queries/updateConfiguration';
+import { getConfigVersion, updateConfiguration as updateConfigurationOp } from '../graphql/generated';
 import { deepMerge } from '../utils/configUtils';
+import { parseConfigurationData } from '../graphql/awsjson-parsers';
 
 const client = generateClient();
 const logger = new ConsoleLogger('useConfiguration');
@@ -241,19 +241,15 @@ const useConfiguration = (versionName: string = 'default'): UseConfigurationRetu
     try {
       logger.debug('Fetching configuration for versionName:', fetchVersionName);
       const result = await client.graphql({
-        query: getConfigVersionQuery as unknown as string,
+        query: getConfigVersion,
         variables: { versionName: fetchVersionName },
       });
       logger.debug('API response version', fetchVersionName, result);
 
-      const response = (
-        result as {
-          data: { getConfigVersion: { success: boolean; error?: { message: string }; Schema: unknown; Default: unknown; Custom: unknown } };
-        }
-      ).data.getConfigVersion;
+      const response = result.data.getConfigVersion;
 
-      if (!response.success) {
-        const errorMsg = response.error?.message || 'Failed to load configuration';
+      if (!response?.success) {
+        const errorMsg = response?.error?.message || 'Failed to load configuration';
         throw new Error(errorMsg);
       }
 
@@ -266,21 +262,10 @@ const useConfiguration = (versionName: string = 'default'): UseConfigurationRetu
         Custom: typeof Custom,
       });
 
-      // Enhanced parsing logic - handle both string and object types
-      let schemaObj: Record<string, unknown> = Schema as Record<string, unknown>;
-      let defaultObj: Record<string, unknown> = Default as Record<string, unknown>;
-      let customObj: Record<string, unknown> = Custom as Record<string, unknown>;
-
-      // Parse schema if it's a string
-      if (typeof Schema === 'string') {
-        try {
-          schemaObj = JSON.parse(Schema);
-          logger.debug('Schema parsed from string successfully');
-        } catch (e: unknown) {
-          logger.error('Error parsing schema string:', e);
-          throw new Error(`Failed to parse schema data: ${e instanceof Error ? e.message : String(e)}`);
-        }
-      }
+      // Parse AWSJSON fields using typed parsers
+      let schemaObj = parseConfigurationData(Schema as string) as Record<string, unknown>;
+      const defaultObj = parseConfigurationData(Default as string) as Record<string, unknown>;
+      let customObj = parseConfigurationData(Custom as string) as Record<string, unknown>;
 
       // Unwrap nested Schema object if present
       if (schemaObj && schemaObj.Schema) {
@@ -288,27 +273,8 @@ const useConfiguration = (versionName: string = 'default'): UseConfigurationRetu
         logger.debug('Unwrapped nested Schema object');
       }
 
-      // Parse default config if it's a string
-      if (typeof Default === 'string') {
-        try {
-          defaultObj = JSON.parse(Default);
-          logger.debug('Default config parsed from string successfully');
-        } catch (e: unknown) {
-          logger.error('Error parsing default config string:', e);
-          throw new Error(`Failed to parse default configuration: ${e instanceof Error ? e.message : String(e)}`);
-        }
-      }
-
-      // Parse version config - use empty object if missing
-      if (typeof Custom === 'string' && Custom) {
-        try {
-          customObj = JSON.parse(Custom);
-          logger.debug('Version config parsed from string successfully');
-        } catch (e: unknown) {
-          logger.error('Error parsing version config string:', e);
-          throw new Error(`Failed to parse version configuration: ${e instanceof Error ? e.message : String(e)}`);
-        }
-      } else if (!Custom) {
+      // Use empty object if Custom parsing returned null
+      if (!customObj) {
         logger.warn('Version configuration is empty or missing, using empty object');
         customObj = {};
       }
@@ -397,7 +363,7 @@ const useConfiguration = (versionName: string = 'default'): UseConfigurationRetu
       logger.debug('Sending customConfig string for version', targetVersionName, ':', configString);
 
       const result = await client.graphql({
-        query: updateConfigurationMutation as unknown as string,
+        query: updateConfigurationOp,
         variables: {
           versionName: targetVersionName,
           customConfig: configString,
@@ -405,11 +371,10 @@ const useConfiguration = (versionName: string = 'default'): UseConfigurationRetu
         },
       });
 
-      const response = (result as { data: { updateConfiguration: { success: boolean; error?: { message: string } } } }).data
-        .updateConfiguration;
+      const response = result.data.updateConfiguration;
 
-      if (!response.success) {
-        const errorMsg = response.error?.message || 'Failed to update configuration';
+      if (!response?.success) {
+        const errorMsg = response?.error?.message || 'Failed to update configuration';
         throw new Error(errorMsg);
       }
 

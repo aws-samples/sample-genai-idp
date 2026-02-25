@@ -5,11 +5,7 @@ import { generateClient } from 'aws-amplify/api';
 import { ConsoleLogger } from 'aws-amplify/utils';
 import { ButtonDropdown, Button } from '@cloudscape-design/components';
 
-import {
-  LIST_AGENT_CHAT_SESSIONS,
-  DELETE_AGENT_CHAT_SESSION,
-  GET_AGENT_CHAT_MESSAGES,
-} from '../../graphql/queries/agentChatSessionQueries';
+import { listChatSessions, deleteChatSession, getChatMessages } from '../../graphql/generated';
 
 import type { ChatMessage } from '../../types/agent-chat';
 
@@ -64,7 +60,7 @@ const AgentChatHistoryDropdown = ({
       let response;
       try {
         response = await client.graphql({
-          query: LIST_AGENT_CHAT_SESSIONS,
+          query: listChatSessions,
           variables: { limit: 20 }, // Limit to most recent 20 sessions
         });
       } catch (amplifyError: unknown) {
@@ -95,8 +91,8 @@ const AgentChatHistoryDropdown = ({
 
       // Get items array and filter out null values (corrupted items)
       const data = responseWithErrors.data as Record<string, unknown> | undefined;
-      const listChatSessions = data?.listChatSessions as Record<string, unknown> | undefined;
-      const rawItems = (listChatSessions?.items as ChatSession[]) || [];
+      const chatSessionsData = data?.listChatSessions as Record<string, unknown> | undefined;
+      const rawItems = (chatSessionsData?.items as ChatSession[]) || [];
       const nonNullSessions = rawItems.filter((session) => session !== null);
 
       logger.debug(`Raw response: ${rawItems.length} total items, ${nonNullSessions.length} non-null items`);
@@ -185,7 +181,7 @@ const AgentChatHistoryDropdown = ({
       try {
         // Load the messages for this session
         const messagesResponse = await client.graphql({
-          query: GET_AGENT_CHAT_MESSAGES,
+          query: getChatMessages,
           variables: { sessionId: selectedSession.sessionId },
         });
 
@@ -250,7 +246,7 @@ const AgentChatHistoryDropdown = ({
 
                 try {
                   await client.graphql({
-                    query: DELETE_AGENT_CHAT_SESSION,
+                    query: deleteChatSession,
                     variables: {
                       sessionId: session.sessionId,
                     },

@@ -1,0 +1,14 @@
+subscription OnAgentChatMessageUpdate($sessionId: String!) {
+  onAgentChatMessageUpdate(sessionId: $sessionId) {
+    role
+    content
+    timestamp
+    isProcessing
+    sessionId
+    messageType
+    toolMetadata {
+      toolName
+      toolUseId
+    }
+  }
+}

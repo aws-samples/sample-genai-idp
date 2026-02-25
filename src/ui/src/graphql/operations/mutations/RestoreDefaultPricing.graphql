@@ -1,0 +1,10 @@
+mutation RestoreDefaultPricing {
+  restoreDefaultPricing {
+    success
+    message
+    error {
+      type
+      message
+    }
+  }
+}

@@ -5,15 +5,17 @@ import { generateClient } from 'aws-amplify/api';
 import { ConsoleLogger } from 'aws-amplify/utils';
 
 import useAppContext from '../contexts/app';
-import listDocumentsDateShard from '../graphql/queries/listDocumentsDateShard';
-import listDocumentsDateHour from '../graphql/queries/listDocumentsDateHour';
-import listDocumentsByDateRangeQuery from '../graphql/queries/listDocumentsByDateRange';
-import getDocument from '../graphql/queries/getDocument';
-import deleteDocument from '../graphql/queries/deleteDocument';
-import reprocessDocument from '../graphql/queries/reprocessDocument';
-import abortWorkflow from '../graphql/queries/abortWorkflow';
-import onCreateDocument from '../graphql/queries/onCreateDocument';
-import onUpdateDocument from '../graphql/queries/onUpdateDocument';
+import {
+  listDocumentsDateShard,
+  listDocumentsDateHour,
+  listDocumentsByDateRange,
+  getDocument,
+  deleteDocument,
+  reprocessDocument,
+  abortWorkflow,
+  onCreateDocument,
+  onUpdateDocument,
+} from '../graphql/generated';
 import { DOCUMENT_LIST_SHARDS_PER_DAY } from '../components/document-list/documents-table-config';
 import { Document } from '../types/documents';
 
@@ -53,33 +55,6 @@ interface DocumentListItem {
   PK?: string;
   SK?: string;
   [key: string]: unknown;
-}
-
-interface GraphQLSubscribable<T> {
-  subscribe: (handlers: { next: (value: T) => void; error: (err: unknown) => void }) => GraphQLSubscriptionRef;
-}
-
-interface GetDocumentResult {
-  data: { getDocument: Document | null };
-}
-
-interface ListDocumentsDateShardResult {
-  data: { listDocumentsDateShard: { Documents: DocumentListItem[] } | null };
-}
-
-interface ListDocumentsDateHourResult {
-  data: { listDocumentsDateHour: { Documents: DocumentListItem[] } | null };
-}
-
-interface ListDocumentsByDateRangeResult {
-  data: { listDocumentsByDateRange: { Documents: DocumentListItem[]; nextToken?: string | null } | null };
-}
-
-interface AbortWorkflowResponse {
-  success: boolean;
-  abortedCount: number;
-  failedCount: number;
-  errors?: string[];
 }
 
 const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2 }: UseGraphQlApiParams = {}): UseGraphQlApiReturn => {
@@ -158,16 +133,16 @@ const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2
     async (objectKeys: string[]): Promise<Document[]> => {
       // prettier-ignore
       logger.debug('getDocumentDetailsFromIds', objectKeys);
-      const getDocumentPromises = objectKeys.map((objectKey) =>
-        client.graphql({ query: getDocument as unknown as string, variables: { objectKey } }),
-      );
+      const getDocumentPromises = objectKeys.map((objectKey) => client.graphql({ query: getDocument, variables: { objectKey } }));
       const getDocumentResolutions = await Promise.allSettled(getDocumentPromises);
+
+      type GetDocumentResolved = Awaited<(typeof getDocumentPromises)[number]>;
 
       // Separate rejected promises from null/undefined results
       const getDocumentRejected = getDocumentResolutions.filter((r) => r.status === 'rejected');
       const fulfilledResults = getDocumentResolutions.filter((r) => r.status === 'fulfilled');
       const getDocumentNull = fulfilledResults
-        .map((r, idx) => ({ doc: (r as PromiseFulfilledResult<GetDocumentResult>).value?.data?.getDocument, key: objectKeys[idx] }))
+        .map((r, idx) => ({ doc: (r as PromiseFulfilledResult<GetDocumentResolved>).value?.data?.getDocument, key: objectKeys[idx] }))
         .filter((item) => !item.doc)
         .map((item) => item.key);
 
@@ -184,8 +159,8 @@ const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2
       // Filter out null/undefined documents to prevent downstream errors
       const documentValues = getDocumentResolutions
         .filter((r) => r.status === 'fulfilled')
-        .map((r) => (r as PromiseFulfilledResult<GetDocumentResult>).value?.data?.getDocument)
-        .filter((doc: Document | null): doc is Document => doc != null);
+        .map((r) => (r as PromiseFulfilledResult<GetDocumentResolved>).value?.data?.getDocument)
+        .filter((doc) => doc != null) as unknown as Document[];
 
       logger.debug(`Successfully loaded ${documentValues.length} of ${objectKeys.length} requested documents`);
       return documentValues;
@@ -200,40 +175,36 @@ const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2
     }
 
     logger.debug('onCreateDocument subscription');
-    interface OnCreateSubscriptionData {
-      data: { onCreateDocument: { ObjectKey: string } };
-    }
-    const subscription = (
-      client.graphql({
-        query: onCreateDocument as unknown as string,
-      }) as unknown as GraphQLSubscribable<OnCreateSubscriptionData>
-    ).subscribe({
-      next: async (subscriptionData: OnCreateSubscriptionData) => {
-        logger.debug('document list subscription update', subscriptionData);
-        const data = subscriptionData?.data;
-        const objectKey = data?.onCreateDocument?.ObjectKey || '';
-        if (objectKey) {
-          try {
-            const documentValues = await getDocumentDetailsFromIds([objectKey]);
-            if (documentValues && documentValues.length > 0) {
-              // Filter: only add documents that fall within the active date range
-              const inRangeDocuments = documentValues.filter(isDocumentInActiveRange);
-              if (inRangeDocuments.length > 0) {
-                setDocumentsDeduped(inRangeDocuments);
-              } else {
-                logger.debug(`Subscription: new document ${objectKey} outside active date range, skipping`);
+    const subscription = client
+      .graphql({
+        query: onCreateDocument,
+      })
+      .subscribe({
+        next: async (message) => {
+          logger.debug('document list subscription update', message);
+          const objectKey = message.data?.onCreateDocument?.ObjectKey || '';
+          if (objectKey) {
+            try {
+              const documentValues = await getDocumentDetailsFromIds([objectKey]);
+              if (documentValues && documentValues.length > 0) {
+                // Filter: only add documents that fall within the active date range
+                const inRangeDocuments = documentValues.filter(isDocumentInActiveRange);
+                if (inRangeDocuments.length > 0) {
+                  setDocumentsDeduped(inRangeDocuments);
+                } else {
+                  logger.debug(`Subscription: new document ${objectKey} outside active date range, skipping`);
+                }
               }
+            } catch (error) {
+              logger.error('Error processing onCreateDocument subscription:', error);
             }
-          } catch (error) {
-            logger.error('Error processing onCreateDocument subscription:', error);
           }
-        }
-      },
-      error: (error: unknown) => {
-        logger.error('onCreateDocument subscription error:', error);
-        setErrorMessage('document list network subscription failed - please reload the page');
-      },
-    });
+        },
+        error: (error: unknown) => {
+          logger.error('onCreateDocument subscription error:', error);
+          setErrorMessage('document list network subscription failed - please reload the page');
+        },
+      });
 
     subscriptionsRef.current.onCreate = subscription;
 
@@ -253,50 +224,46 @@ const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2
     }
 
     logger.debug('onUpdateDocument subscription setup');
-    interface OnUpdateSubscriptionData {
-      data: { onUpdateDocument: Document };
-    }
-    const subscription = (
-      client.graphql({
-        query: onUpdateDocument as unknown as string,
-      }) as unknown as GraphQLSubscribable<OnUpdateSubscriptionData>
-    ).subscribe({
-      next: async (subscriptionData: OnUpdateSubscriptionData) => {
-        logger.debug('document update subscription received', subscriptionData);
-        const data = subscriptionData?.data;
-        const documentUpdateEvent = data?.onUpdateDocument;
-        if (documentUpdateEvent?.ObjectKey) {
-          // Fetch full document details to ensure we have complete data
-          try {
-            const documentValues = await getDocumentDetailsFromIds([documentUpdateEvent.ObjectKey]);
-            if (documentValues && documentValues.length > 0) {
-              // For updates: only add if document is already in the list OR falls within the active range
-              // This ensures in-range docs get updates, but out-of-range new docs don't sneak in
-              const filteredValues = documentValues.filter((doc) => {
-                if (isDocumentInActiveRange(doc)) return true;
-                // Check if this document is already displayed (allow status updates for existing docs)
-                return false;
-              });
-              if (filteredValues.length > 0) {
-                setDocumentsDeduped(filteredValues);
-              } else {
-                logger.debug(`Subscription: updated document ${documentUpdateEvent.ObjectKey} outside active date range, skipping`);
+    const subscription = client
+      .graphql({
+        query: onUpdateDocument,
+      })
+      .subscribe({
+        next: async (message) => {
+          logger.debug('document update subscription received', message);
+          const documentUpdateEvent = message.data?.onUpdateDocument;
+          if (documentUpdateEvent?.ObjectKey) {
+            // Fetch full document details to ensure we have complete data
+            try {
+              const documentValues = await getDocumentDetailsFromIds([documentUpdateEvent.ObjectKey]);
+              if (documentValues && documentValues.length > 0) {
+                // For updates: only add if document is already in the list OR falls within the active range
+                // This ensures in-range docs get updates, but out-of-range new docs don't sneak in
+                const filteredValues = documentValues.filter((doc) => {
+                  if (isDocumentInActiveRange(doc)) return true;
+                  // Check if this document is already displayed (allow status updates for existing docs)
+                  return false;
+                });
+                if (filteredValues.length > 0) {
+                  setDocumentsDeduped(filteredValues);
+                } else {
+                  logger.debug(`Subscription: updated document ${documentUpdateEvent.ObjectKey} outside active date range, skipping`);
+                }
+              }
+            } catch (error) {
+              logger.error('Error fetching document details after update:', error);
+              // Fallback to subscription data if fetch fails - still apply range filter
+              if (isDocumentInActiveRange(documentUpdateEvent as unknown as Document)) {
+                setDocumentsDeduped([documentUpdateEvent as unknown as Document]);
               }
             }
-          } catch (error) {
-            logger.error('Error fetching document details after update:', error);
-            // Fallback to subscription data if fetch fails - still apply range filter
-            if (isDocumentInActiveRange(documentUpdateEvent)) {
-              setDocumentsDeduped([documentUpdateEvent]);
-            }
           }
-        }
-      },
-      error: (error: unknown) => {
-        logger.error('onUpdateDocument subscription error:', error);
-        setErrorMessage('document update network request failed - please reload the page');
-      },
-    });
+        },
+        error: (error: unknown) => {
+          logger.error('onUpdateDocument subscription error:', error);
+          setErrorMessage('document update network request failed - please reload the page');
+        },
+      });
 
     subscriptionsRef.current.onUpdate = subscription;
 
@@ -312,9 +279,11 @@ const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2
   const listDocumentIdsByDateShards = async ({ date, shards }: { date: string; shards: number[] }): Promise<DocumentListItem[]> => {
     const listDocumentsDateShardPromises = shards.map((i) => {
       logger.debug('sending list document date shard', date, i);
-      return client.graphql({ query: listDocumentsDateShard as unknown as string, variables: { date, shard: i } });
+      return client.graphql({ query: listDocumentsDateShard, variables: { date, shard: i } });
     });
     const listDocumentsDateShardResolutions = await Promise.allSettled(listDocumentsDateShardPromises);
+
+    type ShardResolved = Awaited<(typeof listDocumentsDateShardPromises)[number]>;
 
     const listRejected = listDocumentsDateShardResolutions.filter((r) => r.status === 'rejected');
     if (listRejected.length) {
@@ -323,8 +292,8 @@ const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2
     }
     const documentData = listDocumentsDateShardResolutions
       .filter((r) => r.status === 'fulfilled')
-      .map((r) => (r as PromiseFulfilledResult<ListDocumentsDateShardResult>).value?.data?.listDocumentsDateShard?.Documents || [])
-      .reduce((pv: DocumentListItem[], cv: DocumentListItem[]) => [...cv, ...pv], []);
+      .map((r) => (r as PromiseFulfilledResult<ShardResolved>).value?.data?.listDocumentsDateShard?.Documents || [])
+      .flat() as unknown as DocumentListItem[];
 
     return documentData;
   };
@@ -332,9 +301,11 @@ const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2
   const listDocumentIdsByDateHours = async ({ date, hours }: { date: string; hours: number[] }): Promise<DocumentListItem[]> => {
     const listDocumentsDateHourPromises = hours.map((i) => {
       logger.debug('sending list document date hour', date, i);
-      return client.graphql({ query: listDocumentsDateHour as unknown as string, variables: { date, hour: i } });
+      return client.graphql({ query: listDocumentsDateHour, variables: { date, hour: i } });
     });
     const listDocumentsDateHourResolutions = await Promise.allSettled(listDocumentsDateHourPromises);
+
+    type HourResolved = Awaited<(typeof listDocumentsDateHourPromises)[number]>;
 
     const listRejected = listDocumentsDateHourResolutions.filter((r) => r.status === 'rejected');
     if (listRejected.length) {
@@ -344,8 +315,8 @@ const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2
 
     const documentData = listDocumentsDateHourResolutions
       .filter((r) => r.status === 'fulfilled')
-      .map((r) => (r as PromiseFulfilledResult<ListDocumentsDateHourResult>).value?.data?.listDocumentsDateHour?.Documents || [])
-      .reduce((pv: DocumentListItem[], cv: DocumentListItem[]) => [...cv, ...pv], []);
+      .map((r) => (r as PromiseFulfilledResult<HourResolved>).value?.data?.listDocumentsDateHour?.Documents || [])
+      .flat() as unknown as DocumentListItem[];
 
     return documentData;
   };
@@ -360,7 +331,7 @@ const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2
       // Fetch all pages (server-side pagination)
       do {
         const response = await client.graphql({
-          query: listDocumentsByDateRangeQuery as unknown as string,
+          query: listDocumentsByDateRange,
           variables: {
             startDateTime: dateRange.startDateTime,
             endDateTime: dateRange.endDateTime,
@@ -369,9 +340,9 @@ const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2
           },
         });
 
-        const result = (response as ListDocumentsByDateRangeResult)?.data?.listDocumentsByDateRange;
+        const result = response.data?.listDocumentsByDateRange;
         if (result?.Documents) {
-          allDocuments.push(...result.Documents);
+          allDocuments.push(...(result.Documents as unknown as DocumentListItem[]));
         }
         currentToken = result?.nextToken ?? null;
         logger.debug(`Fetched ${result?.Documents?.length || 0} documents, hasMore=${!!currentToken}`);
@@ -539,13 +510,13 @@ const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2
   const deleteDocuments = async (objectKeys: string[]): Promise<unknown> => {
     try {
       logger.debug('Deleting documents', objectKeys);
-      const result = await client.graphql({ query: deleteDocument as unknown as string, variables: { objectKeys } });
+      const result = await client.graphql({ query: deleteDocument, variables: { objectKeys } });
       logger.debug('Delete documents result', result);
 
       // Refresh the document list after deletion
       setIsDocumentsListLoading(true);
 
-      return (result as { data: { deleteDocument: unknown } }).data.deleteDocument;
+      return result.data.deleteDocument;
     } catch (error) {
       setErrorMessage('Failed to delete document(s) - please try again later');
       logger.error('Error deleting documents', error);
@@ -560,11 +531,11 @@ const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2
       if (version) {
         variables.version = version;
       }
-      const result = await client.graphql({ query: reprocessDocument as unknown as string, variables });
+      const result = await client.graphql({ query: reprocessDocument, variables });
       logger.debug('Reprocess documents result', result);
       // Refresh the document list after reprocessing
       setIsDocumentsListLoading(true);
-      return (result as { data: { reprocessDocument: unknown } }).data.reprocessDocument;
+      return result.data.reprocessDocument;
     } catch (error) {
       setErrorMessage('Failed to reprocess document(s) - please try again later');
       logger.error('Error reprocessing documents', error);
@@ -575,9 +546,9 @@ const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2
   const abortWorkflows = async (objectKeys: string[]): Promise<unknown> => {
     try {
       logger.debug('Aborting workflows for documents', objectKeys);
-      const result = await client.graphql({ query: abortWorkflow as unknown as string, variables: { objectKeys } });
+      const result = await client.graphql({ query: abortWorkflow, variables: { objectKeys } });
       logger.debug('Abort workflows result', result);
-      const response = (result as { data: { abortWorkflow: AbortWorkflowResponse } }).data.abortWorkflow;
+      const response = result.data.abortWorkflow;
 
       // Refresh the document list after aborting
       setIsDocumentsListLoading(true);

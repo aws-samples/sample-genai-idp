@@ -5,9 +5,7 @@ import { generateClient } from 'aws-amplify/api';
 import { ConsoleLogger } from 'aws-amplify/utils';
 import { Container, Header, SpaceBetween, Spinner, Box } from '@cloudscape-design/components';
 
-import submitAgentQuery from '../../graphql/queries/submitAgentQuery';
-import getAgentJobStatus from '../../graphql/queries/getAgentJobStatus';
-import onAgentJobComplete from '../../graphql/subscriptions/onAgentJobComplete';
+import { submitAgentQuery, getAgentJobStatus, onAgentJobComplete } from '../../graphql/generated';
 import { useAnalyticsContext } from '../../contexts/analytics';
 
 import AgentQueryInput from './AgentQueryInput';
@@ -28,7 +26,7 @@ const DocumentsAgentsLayout = (): React.JSX.Element => {
       logger.debug('Subscribing to job completion for job ID:', id);
       const sub = (
         client.graphql({
-          query: onAgentJobComplete as unknown as string,
+          query: onAgentJobComplete,
           variables: { jobId: id },
         }) as unknown as { subscribe: (callbacks: Record<string, unknown>) => { unsubscribe: () => void } }
       ).subscribe({
@@ -42,7 +40,7 @@ const DocumentsAgentsLayout = (): React.JSX.Element => {
             try {
               logger.debug('Fetching job details after completion notification');
               const jobResponse = await client.graphql({
-                query: getAgentJobStatus as unknown as string,
+                query: getAgentJobStatus,
                 variables: { jobId: id },
               });
 
@@ -118,7 +116,7 @@ const DocumentsAgentsLayout = (): React.JSX.Element => {
 
         // Fetch the job status and result
         const response = await client.graphql({
-          query: getAgentJobStatus as unknown as string,
+          query: getAgentJobStatus,
           variables: { jobId: existingJobId },
         });
 
@@ -156,7 +154,7 @@ const DocumentsAgentsLayout = (): React.JSX.Element => {
 
       logger.debug('Submitting agent query:', query, 'with agents:', agentIds);
       const response = await client.graphql({
-        query: submitAgentQuery as unknown as string,
+        query: submitAgentQuery,
         variables: { query, agentIds: Array.isArray(agentIds) ? agentIds : [agentIds] },
       });
 
@@ -181,8 +179,8 @@ const DocumentsAgentsLayout = (): React.JSX.Element => {
         try {
           logger.debug('Immediate poll for job ID:', job.jobId);
           const pollResponse = await client.graphql({
-            query: getAgentJobStatus as unknown as string,
-            variables: { jobId: job.jobId },
+            query: getAgentJobStatus,
+            variables: { jobId: job.jobId as string },
           });
 
           const pollResponseData = (pollResponse as unknown as Record<string, unknown>)?.data as Record<string, unknown> | undefined;
@@ -249,7 +247,7 @@ const DocumentsAgentsLayout = (): React.JSX.Element => {
         try {
           logger.debug('Polling job status for job ID:', jobId);
           const response = await client.graphql({
-            query: getAgentJobStatus as unknown as string,
+            query: getAgentJobStatus,
             variables: { jobId },
           });
 

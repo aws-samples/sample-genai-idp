@@ -27,9 +27,8 @@ import { getSectionConfidenceAlertCount, getSectionConfidenceAlerts } from '../c
 import useConfiguration from '../../hooks/use-configuration';
 import useSettingsContext from '../../contexts/settings';
 import useUserRole from '../../hooks/use-user-role';
-import processChanges from '../../graphql/queries/processChanges';
-import getFileContents from '../../graphql/queries/getFileContents';
-import skipAllSectionsReviewMutation from '../../graphql/mutations/skipAllSectionsReview';
+import { processChanges, getFileContents, skipAllSectionsReview } from '../../graphql/generated';
+import { parseHITLReviewHistory } from '../../graphql/awsjson-parsers';
 
 const client = generateClient();
 const logger = new ConsoleLogger('SectionsPanel');
@@ -196,7 +195,7 @@ const ActionsCell = ({
 
       // Fetch file contents using GraphQL
       const response = await client.graphql({
-        query: getFileContents as unknown as string,
+        query: getFileContents,
         variables: { s3Uri: fileUri },
       });
 
@@ -776,7 +775,7 @@ const SectionsPanel = ({ sections, pages, documentItem, mergedConfig, onDocument
       }
 
       const result = await client.graphql({
-        query: skipAllSectionsReviewMutation as unknown as string,
+        query: skipAllSectionsReview,
         variables: { objectKey },
       });
 
@@ -785,15 +784,8 @@ const SectionsPanel = ({ sections, pages, documentItem, mergedConfig, onDocument
       // Update document state immediately with mutation response
       const updatedData = (result as unknown as Record<string, Record<string, Record<string, unknown>>>).data?.skipAllSectionsReview;
       if (updatedData && onDocumentUpdate) {
-        // Parse HITLReviewHistory if it's a string (AWSJSON type)
-        let reviewHistory = updatedData.HITLReviewHistory;
-        if (typeof reviewHistory === 'string') {
-          try {
-            reviewHistory = JSON.parse(reviewHistory);
-          } catch (e) {
-            reviewHistory = [];
-          }
-        }
+        // Parse HITLReviewHistory from AWSJSON using typed parser
+        const reviewHistory = parseHITLReviewHistory(updatedData.HITLReviewHistory as string);
 
         onDocumentUpdate((prev) => {
           const newState = {
@@ -1163,7 +1155,7 @@ const SectionsPanel = ({ sections, pages, documentItem, mergedConfig, onDocument
       // Call the GraphQL API with timeout
       const result = await Promise.race([
         client.graphql({
-          query: processChanges as unknown as string,
+          query: processChanges,
           variables: {
             objectKey,
             modifiedSections: allChanges,

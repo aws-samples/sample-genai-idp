@@ -4,8 +4,7 @@ import { useEffect, useRef } from 'react';
 import { generateClient } from 'aws-amplify/api';
 import { ConsoleLogger } from 'aws-amplify/utils';
 
-import { SEND_AGENT_MESSAGE, ON_AGENT_MESSAGE_UPDATE } from '../graphql/queries/agentChatQueries';
-import { GET_AGENT_CHAT_MESSAGES } from '../graphql/queries/agentChatSessionQueries';
+import { sendAgentChatMessage, onAgentChatMessageUpdate, getChatMessages } from '../graphql/generated';
 import { useAgentChatContext } from '../contexts/agentChat';
 import type { ChatMessage } from '../types/agent-chat';
 
@@ -44,8 +43,8 @@ const useAgentChat = (config: Partial<AgentChatConfig> = {}): UseAgentChatReturn
   // Default configuration for backward compatibility
   const defaultConfig: AgentChatConfig = {
     agentType: 'idp-help',
-    mutation: SEND_AGENT_MESSAGE,
-    subscription: ON_AGENT_MESSAGE_UPDATE,
+    mutation: sendAgentChatMessage,
+    subscription: onAgentChatMessageUpdate,
     method: 'chat',
   };
 
@@ -916,7 +915,7 @@ const useAgentChat = (config: Partial<AgentChatConfig> = {}): UseAgentChatReturn
       // Otherwise, fetch messages from the server
       if (!messagesToLoad) {
         const response = await client.graphql({
-          query: GET_AGENT_CHAT_MESSAGES,
+          query: getChatMessages,
           variables: { sessionId: targetSessionId },
         } as unknown as Parameters<typeof client.graphql>[0]);
         messagesToLoad = (response as unknown as { data: { getChatMessages: ChatMessage[] } })?.data?.getChatMessages || [];

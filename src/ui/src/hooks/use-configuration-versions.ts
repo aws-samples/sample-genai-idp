@@ -4,11 +4,13 @@
 import { useState, useEffect } from 'react';
 import { generateClient } from 'aws-amplify/api';
 import { ConsoleLogger } from 'aws-amplify/utils';
-import getConfigVersionsQuery from '../graphql/queries/getConfigVersions';
-import getConfigVersionQuery from '../graphql/queries/getConfigVersion';
+import {
+  getConfigVersions,
+  getConfigVersion,
+  setActiveVersion as setActiveVersionOp,
+  deleteConfigVersion as deleteConfigVersionOp,
+} from '../graphql/generated';
 import useConfiguration from './use-configuration';
-import setActiveVersionMutation from '../graphql/queries/setActiveVersion';
-import deleteConfigVersionMutation from '../graphql/queries/deleteConfigVersion';
 import type { ConfigVersion } from '../components/test-studio/utils/configVersionUtils';
 
 const client = generateClient();
@@ -48,12 +50,8 @@ const useConfigurationVersions = (): UseConfigurationVersionsReturn => {
     setError(null);
 
     try {
-      const result = await client.graphql({ query: getConfigVersionsQuery as unknown as string });
-      const response = (result as { data: Record<string, unknown> }).data.getConfigVersions as Record<string, unknown> & {
-        success: boolean;
-        error?: { message: string };
-        versions?: ConfigVersion[];
-      };
+      const result = await client.graphql({ query: getConfigVersions });
+      const response = result.data.getConfigVersions;
 
       // Handle null response
       if (!response) {
@@ -64,7 +62,7 @@ const useConfigurationVersions = (): UseConfigurationVersionsReturn => {
         throw new Error(response.error?.message || 'Failed to fetch versions');
       }
 
-      const fetchedVersions = response.versions || [];
+      const fetchedVersions = (response.versions || []).filter(Boolean) as ConfigVersion[];
       logger.info(
         'Fetched versions:',
         fetchedVersions.map((v) => ({ name: v.versionName, description: v.description, created: v.created, isActive: v.isActive })),
@@ -89,19 +87,13 @@ const useConfigurationVersions = (): UseConfigurationVersionsReturn => {
   const fetchVersion = async (versionName: string): Promise<{ schema: unknown; default: unknown; custom: unknown }> => {
     try {
       const result = await client.graphql({
-        query: getConfigVersionQuery as unknown as string,
+        query: getConfigVersion,
         variables: { versionName },
       });
-      const response = (result as { data: Record<string, unknown> }).data.getConfigVersion as Record<string, unknown> & {
-        success: boolean;
-        error?: { message: string };
-        Schema?: unknown;
-        Default?: unknown;
-        Custom?: unknown;
-      };
+      const response = result.data.getConfigVersion;
 
-      if (!response.success) {
-        throw new Error(response.error?.message || 'Failed to fetch version');
+      if (!response?.success) {
+        throw new Error(response?.error?.message || 'Failed to fetch version');
       }
 
       return {
@@ -118,22 +110,19 @@ const useConfigurationVersions = (): UseConfigurationVersionsReturn => {
   const setActiveVersion = async (versionName: string): Promise<Record<string, unknown>> => {
     try {
       const result = await client.graphql({
-        query: setActiveVersionMutation as unknown as string,
+        query: setActiveVersionOp,
         variables: { versionName },
       });
-      const response = (result as { data: Record<string, unknown> }).data.setActiveVersion as Record<string, unknown> & {
-        success: boolean;
-        error?: { message: string };
-      };
+      const response = result.data.setActiveVersion;
 
-      if (!response.success) {
-        throw new Error(response.error?.message || 'Failed to set active version');
+      if (!response?.success) {
+        throw new Error(response?.error?.message || 'Failed to set active version');
       }
 
       // Refresh versions list after setting active
       await fetchVersions();
 
-      return response;
+      return response as Record<string, unknown>;
     } catch (err) {
       logger.error('Error setting active version:', err);
       throw err;
@@ -189,12 +178,10 @@ const useConfigurationVersions = (): UseConfigurationVersionsReturn => {
   const deleteVersion = async (versionName: string, skipRefresh: boolean = false): Promise<Record<string, unknown>> => {
     try {
       const result = await client.graphql({
-        query: deleteConfigVersionMutation as unknown as string,
+        query: deleteConfigVersionOp,
         variables: { versionName },
       });
-      const response = (result as { data: Record<string, unknown> }).data?.deleteConfigVersion as
-        | (Record<string, unknown> & { success: boolean; error?: { message: string } })
-        | undefined;
+      const response = result.data.deleteConfigVersion;
 
       if (!response) {
         throw new Error('No response received from delete operation');
@@ -209,7 +196,7 @@ const useConfigurationVersions = (): UseConfigurationVersionsReturn => {
         await fetchVersions();
       }
 
-      return response;
+      return response as Record<string, unknown>;
     } catch (err) {
       logger.error('Error deleting version:', err);
       throw err;

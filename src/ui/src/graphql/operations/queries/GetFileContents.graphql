@@ -1,0 +1,8 @@
+query GetFileContents($s3Uri: String!) {
+  getFileContents(s3Uri: $s3Uri) {
+    content
+    contentType
+    size
+    isBinary
+  }
+}

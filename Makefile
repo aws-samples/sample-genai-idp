@@ -181,6 +181,18 @@ ui-build:
 	@echo "Checking UI build"
 	cd src/ui && npm ci --prefer-offline --no-audit && npm run build
 
+# Verify generated GraphQL types and operations are up-to-date
+codegen-check:
+	@echo "Checking if GraphQL codegen output is up-to-date..."
+	@cd src/ui && npm run codegen
+	@if ! git diff --quiet src/ui/src/graphql/generated/; then \
+		echo -e "$(RED)ERROR: Generated GraphQL files are out of date!$(NC)"; \
+		echo -e "$(YELLOW)Run 'cd src/ui && npm run codegen' and commit the updated files.$(NC)"; \
+		git diff --stat src/ui/src/graphql/generated/; \
+		exit 1; \
+	fi
+	@echo -e "$(GREEN)✅ GraphQL codegen output is up-to-date$(NC)"
+
 commit: lint test
 	$(info Generating commit message...)
 	export COMMIT_MESSAGE="$(shell kiro-cli chat --no-interactive --trust-all-tools "Understand pending local git change and changes to be committed, then infer a commit message. Return this commit message only on a single line." | grep ">" | tail -n 1 | sed 's/\x1b\[[0-9;]*m//g')" && \

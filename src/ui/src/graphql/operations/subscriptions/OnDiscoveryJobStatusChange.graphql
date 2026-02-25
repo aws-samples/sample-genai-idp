@@ -1,0 +1,7 @@
+subscription OnDiscoveryJobStatusChange($jobId: ID!) {
+  onDiscoveryJobStatusChange(jobId: $jobId) {
+    jobId
+    status
+    errorMessage
+  }
+}

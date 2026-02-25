@@ -21,7 +21,7 @@ import useSettingsContext from '../../contexts/settings';
 import useUserRole from '../../hooks/use-user-role';
 import generateS3PresignedUrl from '../common/generate-s3-presigned-url';
 import PageTextEditorModal from './PageTextEditorModal';
-import processChanges from '../../graphql/queries/processChanges';
+import { processChanges } from '../../graphql/generated';
 
 const client = generateClient();
 const logger = new ConsoleLogger('PagesPanel');
@@ -449,7 +449,7 @@ const PagesPanel = ({ pages, documentItem }: PagesPanelProps): React.JSX.Element
       }
 
       const result = await client.graphql({
-        query: processChanges as unknown as string,
+        query: processChanges,
         variables: {
           objectKey,
           modifiedSections: [], // Empty for page-only changes

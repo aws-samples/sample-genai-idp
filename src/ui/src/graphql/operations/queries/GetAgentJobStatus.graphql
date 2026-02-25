@@ -1,0 +1,13 @@
+query GetAgentJobStatus($jobId: ID!) {
+  getAgentJobStatus(jobId: $jobId) {
+    jobId
+    status
+    query
+    agentIds
+    createdAt
+    completedAt
+    result
+    error
+    agent_messages
+  }
+}

@@ -8,7 +8,7 @@ import { ConsoleLogger } from 'aws-amplify/utils';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
-import getFileContents from '../../graphql/queries/getFileContents';
+import { getFileContents } from '../../graphql/generated';
 import './MarkdownViewer.css';
 
 interface MarkdownViewerProps {
@@ -286,7 +286,7 @@ const MarkdownReport = ({ reportUri, documentId, title = 'Report', emptyMessage 
         logger.info(`Fetching ${title}:`, reportUri);
 
         const response = await client.graphql({
-          query: getFileContents as unknown as string,
+          query: getFileContents,
           variables: { s3Uri: reportUri },
         });
 

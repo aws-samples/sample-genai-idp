@@ -23,9 +23,7 @@ import { ConsoleLogger } from 'aws-amplify/utils';
 import useUserRole from '../../hooks/use-user-role';
 import useAppContext from '../../contexts/app';
 import useSettingsContext from '../../contexts/settings';
-import listUsers from '../../graphql/queries/listUsers';
-import createUserMutation from '../../graphql/mutations/createUser';
-import deleteUserMutation from '../../graphql/mutations/deleteUser';
+import { listUsers, createUser as createUserMutation, deleteUser as deleteUserMutation } from '../../graphql/generated';
 
 const logger = new ConsoleLogger('UserManagementLayout');
 
@@ -108,7 +106,7 @@ const UserManagementLayout = (): React.JSX.Element => {
       try {
         const client = generateClient();
         logger.debug('Loading users...');
-        const result = await client.graphql({ query: listUsers as unknown as string });
+        const result = await client.graphql({ query: listUsers });
         const usersList =
           (((result as { data: Record<string, unknown> }).data?.listUsers as Record<string, unknown>)?.users as User[]) || [];
         logger.debug(`Loaded ${usersList.length} users`);

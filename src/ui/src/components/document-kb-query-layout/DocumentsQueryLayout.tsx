@@ -9,7 +9,7 @@ import { Box, Button, Spinner, Header, Grid, Container, SpaceBetween, Input, Lin
 import { generateClient } from 'aws-amplify/api';
 import { ConsoleLogger } from 'aws-amplify/utils';
 
-import queryKnowledgeBase from '../../graphql/queries/queryKnowledgeBase';
+import { queryKnowledgeBase } from '../../graphql/generated';
 import { DOCUMENTS_PATH } from '../../routes/constants';
 import useSettingsContext from '../../contexts/settings';
 
@@ -85,7 +85,7 @@ export const DocumentsQueryLayout = (): React.JSX.Element => {
 
   const getDocumentsQueryResponseFromKB = async (input: string, sessionId: string) => {
     const response = await client.graphql({
-      query: queryKnowledgeBase as unknown as string,
+      query: queryKnowledgeBase,
       variables: { input, sessionId },
     });
     return response;

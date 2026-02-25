@@ -7,8 +7,7 @@ import { generateClient } from 'aws-amplify/api';
 import { ConsoleLogger } from 'aws-amplify/utils';
 import { Editor } from '@monaco-editor/react';
 import MarkdownViewer from '../document-viewer/MarkdownViewer';
-import getFileContents from '../../graphql/queries/getFileContents';
-import uploadDocument from '../../graphql/queries/uploadDocument';
+import { getFileContents, uploadDocument } from '../../graphql/generated';
 
 const client = generateClient();
 const logger = new ConsoleLogger('PageTextEditorModal');
@@ -89,7 +88,7 @@ const PageTextEditorModal = ({
     try {
       // Fetch text content
       const textResponse = await client.graphql({
-        query: getFileContents as unknown as string,
+        query: getFileContents,
         variables: { s3Uri: textUri },
       });
 
@@ -107,7 +106,7 @@ const PageTextEditorModal = ({
       if (confidenceUri) {
         try {
           const confResponse = await client.graphql({
-            query: getFileContents as unknown as string,
+            query: getFileContents,
             variables: { s3Uri: confidenceUri },
           });
 
@@ -195,7 +194,7 @@ const PageTextEditorModal = ({
 
     // Get presigned URL
     const response = await client.graphql({
-      query: uploadDocument as unknown as string,
+      query: uploadDocument,
       variables: {
         fileName,
         contentType,

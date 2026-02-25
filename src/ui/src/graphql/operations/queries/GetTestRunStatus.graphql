@@ -1,0 +1,11 @@
+query GetTestRunStatus($testRunId: String!) {
+  getTestRunStatus(testRunId: $testRunId) {
+    testRunId
+    status
+    progress
+    filesCount
+    completedFiles
+    failedFiles
+    evaluatingFiles
+  }
+}

@@ -1,0 +1,10 @@
+mutation UpdatePricing($pricingConfig: AWSJSON!) {
+  updatePricing(pricingConfig: $pricingConfig) {
+    success
+    message
+    error {
+      type
+      message
+    }
+  }
+}

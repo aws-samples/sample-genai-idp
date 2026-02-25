@@ -9,7 +9,7 @@ import { ConsoleLogger } from 'aws-amplify/utils';
 import PageImageViewer from '../common/PageImageViewer';
 import FieldComparisonTable from './FieldComparisonTable';
 import CorrectionDeltaPanel from './CorrectionDeltaPanel';
-import getFileContents from '../../graphql/queries/getFileContents';
+import { getFileContents } from '../../graphql/generated';
 import useSettingsContext from '../../contexts/settings';
 
 const client = generateClient();
@@ -157,7 +157,7 @@ const EvaluationCorrectionEditor = ({
         // Load predicted data
         logger.info('Loading predicted data from:', outputUri);
         const predictedResponse = await client.graphql({
-          query: getFileContents as unknown as string,
+          query: getFileContents,
           variables: { s3Uri: outputUri },
         });
         const predictedContent = (predictedResponse as unknown as Record<string, Record<string, Record<string, unknown>>>).data
@@ -176,7 +176,7 @@ const EvaluationCorrectionEditor = ({
           logger.info('Loading baseline data from:', baselineUri);
           try {
             const baselineResponse = await client.graphql({
-              query: getFileContents as unknown as string,
+              query: getFileContents,
               variables: { s3Uri: baselineUri },
             });
             const baselineContent = (baselineResponse as unknown as Record<string, Record<string, Record<string, unknown>>>).data

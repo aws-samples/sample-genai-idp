@@ -18,9 +18,7 @@ import {
 } from '@cloudscape-design/components';
 import type { ButtonDropdownProps } from '@cloudscape-design/components';
 
-import listAgentJobs from '../../graphql/queries/listAgentJobs';
-import deleteAgentJob from '../../graphql/queries/deleteAgentJob';
-import listAvailableAgents from '../../graphql/queries/listAvailableAgents';
+import { listAgentJobs, deleteAgentJob, listAvailableAgents } from '../../graphql/generated';
 import { useAnalyticsContext } from '../../contexts/analytics';
 
 interface AvailableAgent {
@@ -136,7 +134,7 @@ const AgentQueryInput = ({ onSubmit, isSubmitting = false, selectedResult = null
     try {
       setIsLoadingAgents(true);
       const response = await client.graphql({
-        query: listAvailableAgents as unknown as string,
+        query: listAvailableAgents,
       });
 
       const agents = (response as unknown as { data: { listAvailableAgents: AvailableAgent[] } })?.data?.listAvailableAgents || [];
@@ -168,7 +166,7 @@ const AgentQueryInput = ({ onSubmit, isSubmitting = false, selectedResult = null
       let response: Record<string, unknown>;
       try {
         response = (await client.graphql({
-          query: listAgentJobs as unknown as string,
+          query: listAgentJobs,
           variables: { limit: 20 }, // Limit to most recent 20 queries
         })) as unknown as Record<string, unknown>;
       } catch (amplifyError: unknown) {
@@ -402,7 +400,7 @@ const AgentQueryInput = ({ onSubmit, isSubmitting = false, selectedResult = null
 
                 try {
                   await client.graphql({
-                    query: deleteAgentJob as unknown as string,
+                    query: deleteAgentJob,
                     variables: {
                       jobId: job.jobId,
                     },

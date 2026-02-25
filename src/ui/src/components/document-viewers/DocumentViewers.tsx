@@ -6,7 +6,7 @@ import { SpaceBetween, Box, Button, StatusIndicator } from '@cloudscape-design/c
 import { generateClient } from 'aws-amplify/api';
 import { ConsoleLogger } from 'aws-amplify/utils';
 
-import copyToBaselineMutation from '../../graphql/queries/copyToBaseline';
+import { copyToBaseline } from '../../graphql/generated';
 import FileViewer from '../document-viewer/FileViewer';
 import { MarkdownReport } from '../document-viewer/MarkdownViewer';
 
@@ -203,7 +203,7 @@ const DocumentViewers = ({
 
     try {
       const result = await client.graphql({
-        query: copyToBaselineMutation,
+        query: copyToBaseline,
         variables: {
           objectKey,
         },

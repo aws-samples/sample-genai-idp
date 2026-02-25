@@ -1,0 +1,10 @@
+mutation SetActiveVersion($versionName: String!) {
+  setActiveVersion(versionName: $versionName) {
+    success
+    message
+    error {
+      type
+      message
+    }
+  }
+}

@@ -1,0 +1,15 @@
+mutation UpdateConfiguration($versionName: String!, $customConfig: AWSJSON!, $description: String) {
+  updateConfiguration(versionName: $versionName, customConfig: $customConfig, description: $description) {
+    success
+    message
+    error {
+      type
+      message
+      validationErrors {
+        field
+        message
+        type
+      }
+    }
+  }
+}

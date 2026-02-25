@@ -1,0 +1,15 @@
+mutation SkipAllSectionsReview($objectKey: String!) {
+  skipAllSectionsReview(objectKey: $objectKey) {
+    ObjectKey
+    ObjectStatus
+    HITLStatus
+    HITLTriggered
+    HITLCompleted
+    HITLSectionsPending
+    HITLSectionsCompleted
+    HITLSectionsSkipped
+    HITLReviewOwner
+    HITLReviewOwnerEmail
+    HITLReviewHistory
+  }
+}

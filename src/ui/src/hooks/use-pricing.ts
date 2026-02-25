@@ -4,25 +4,8 @@
 import { useState, useEffect } from 'react';
 import { generateClient } from 'aws-amplify/api';
 import { ConsoleLogger } from 'aws-amplify/utils';
-import getPricingQuery from '../graphql/queries/getPricing';
-import updatePricingMutation from '../graphql/queries/updatePricing';
-import restoreDefaultPricingMutation from '../graphql/queries/restoreDefaultPricing';
-
-interface PricingResponse {
-  success: boolean;
-  error?: { message: string };
-  pricing: unknown;
-  defaultPricing: unknown;
-}
-
-interface GetPricingResult {
-  data: { getPricing: PricingResponse };
-}
-
-interface MutationResponse {
-  success: boolean;
-  error?: { message: string };
-}
+import { getPricing, updatePricing as updatePricingOp, restoreDefaultPricing as restoreDefaultPricingOp } from '../graphql/generated';
+import { parsePricingData } from '../graphql/awsjson-parsers';
 
 interface UsePricingReturn {
   pricing: unknown;
@@ -55,30 +38,20 @@ const usePricing = (): UsePricingReturn => {
 
     try {
       logger.debug('Fetching pricing...');
-      const result = await client.graphql({ query: getPricingQuery as unknown as string });
+      const result = await client.graphql({ query: getPricing });
       logger.debug('API response:', result);
 
-      const response = (result as GetPricingResult).data.getPricing;
+      const response = result.data.getPricing;
 
-      if (!response.success) {
-        const errorMsg = response.error?.message || 'Failed to load pricing';
+      if (!response?.success) {
+        const errorMsg = response?.error?.message || 'Failed to load pricing';
         throw new Error(errorMsg);
       }
 
-      // pricing comes as AWSJSON (a JSON string) - parse it
-      let pricingData = response.pricing;
-      if (typeof pricingData === 'string') {
-        pricingData = JSON.parse(pricingData);
-      }
+      // pricing and defaultPricing come as AWSJSON (JSON strings) - parse with typed parser
+      const pricingData = parsePricingData(response.pricing as string);
+      const defaultPricingData = parsePricingData(response.defaultPricing as string);
 
-      // defaultPricing also comes as AWSJSON - parse it
-      let defaultPricingData = response.defaultPricing;
-      if (typeof defaultPricingData === 'string') {
-        defaultPricingData = JSON.parse(defaultPricingData);
-      }
-
-      // The new pricing data structure is { pricing: [{ name: "service/api", units: [{ name, price }] }] }
-      // Just pass through the data directly - no restructuring needed
       logger.debug('Parsed pricing:', pricingData);
       logger.debug('Parsed default pricing:', defaultPricingData);
       setPricing(pricingData);
@@ -107,14 +80,14 @@ const usePricing = (): UsePricingReturn => {
       logger.debug('Sending pricingConfig:', pricingConfig);
 
       const result = await client.graphql({
-        query: updatePricingMutation as unknown as string,
+        query: updatePricingOp,
         variables: { pricingConfig },
       });
 
-      const response = (result as { data: { updatePricing: MutationResponse } }).data.updatePricing;
+      const response = result.data.updatePricing;
 
-      if (!response.success) {
-        const errorMsg = response.error?.message || 'Failed to update pricing';
+      if (!response?.success) {
+        const errorMsg = response?.error?.message || 'Failed to update pricing';
         throw new Error(errorMsg);
       }
 
@@ -136,13 +109,13 @@ const usePricing = (): UsePricingReturn => {
       logger.debug('Restoring default pricing...');
 
       const result = await client.graphql({
-        query: restoreDefaultPricingMutation as unknown as string,
+        query: restoreDefaultPricingOp,
       });
 
-      const response = (result as { data: { restoreDefaultPricing: MutationResponse } }).data.restoreDefaultPricing;
+      const response = result.data.restoreDefaultPricing;
 
-      if (!response.success) {
-        const errorMsg = response.error?.message || 'Failed to restore default pricing';
+      if (!response?.success) {
+        const errorMsg = response?.error?.message || 'Failed to restore default pricing';
         throw new Error(errorMsg);
       }
 

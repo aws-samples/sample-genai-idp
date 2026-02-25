@@ -1,0 +1,13 @@
+query ListChatSessions($limit: Int, $nextToken: String) {
+  listChatSessions(limit: $limit, nextToken: $nextToken) {
+    items {
+      sessionId
+      title
+      createdAt
+      updatedAt
+      messageCount
+      lastMessage
+    }
+    nextToken
+  }
+}

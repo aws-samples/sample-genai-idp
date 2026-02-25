@@ -1,0 +1,13 @@
+query ListAgentJobs($limit: Int, $nextToken: String) {
+  listAgentJobs(limit: $limit, nextToken: $nextToken) {
+    items {
+      jobId
+      status
+      query
+      agentIds
+      createdAt
+      completedAt
+    }
+    nextToken
+  }
+}

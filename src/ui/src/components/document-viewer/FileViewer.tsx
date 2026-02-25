@@ -10,7 +10,7 @@ import DOMPurify from 'dompurify';
 import useSettingsContext from '../../contexts/settings';
 import generateS3PresignedUrl from '../common/generate-s3-presigned-url';
 import useAppContext from '../../contexts/app';
-import getFileContents from '../../graphql/queries/getFileContents';
+import { getFileContents } from '../../graphql/generated';
 
 interface FileViewerProps {
   objectKey: string;
@@ -83,7 +83,7 @@ const FileViewer = ({ objectKey }: FileViewerProps): React.JSX.Element => {
     try {
       logger.info('Fetching file contents via GraphQL for:', s3Url);
       const response = await client.graphql({
-        query: getFileContents as unknown as string,
+        query: getFileContents,
         variables: { s3Uri: s3Url },
       });
 

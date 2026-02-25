@@ -1,0 +1,3 @@
+subscription OnAgentJobComplete($jobId: ID!) {
+  onAgentJobComplete(jobId: $jobId)
+}

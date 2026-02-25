@@ -33,7 +33,7 @@ import ConfigBuilder from './ConfigBuilder';
 import ConfigurationVersionsTable from './ConfigurationVersionsTable';
 import ConfigurationComparison from './ConfigurationComparison';
 import { deepMerge } from '../../utils/configUtils';
-import syncBdaIdpMutation from '../../graphql/queries/syncBdaIdp';
+import { syncBdaIdp } from '../../graphql/generated';
 
 const client = generateClient();
 const logger = new ConsoleLogger('ConfigurationLayout');
@@ -1476,7 +1476,7 @@ const ConfigurationLayout = (): React.JSX.Element => {
       logger.debug(`Starting BDA/IDP sync with direction: ${direction}...`);
 
       const result = await client.graphql({
-        query: syncBdaIdpMutation as unknown as string,
+        query: syncBdaIdp,
         variables: {
           versionName: currentVersionName,
           direction,

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { getDocumentConfidenceAlertCount } from './confidence-alerts-utils';
+import { parseMetering, parseHITLReviewHistory } from '../../graphql/awsjson-parsers';
 
 interface DocumentApiItem {
   ObjectKey: string;
@@ -87,15 +88,8 @@ const mapDocumentsAttributes = (documents: DocumentApiItem[]): Record<string, un
     const hitlReviewOwnerEmail = item.HITLReviewOwnerEmail || '';
     const hitlReviewedBy = item.HITLReviewedBy || '';
     const hitlReviewedByEmail = item.HITLReviewedByEmail || '';
-    // HITLReviewHistory comes as AWSJSON (string), parse if needed
-    let hitlReviewHistory = item.HITLReviewHistory || [];
-    if (typeof hitlReviewHistory === 'string') {
-      try {
-        hitlReviewHistory = JSON.parse(hitlReviewHistory);
-      } catch (e) {
-        hitlReviewHistory = [];
-      }
-    }
+    // HITLReviewHistory comes as AWSJSON (string), parse with typed parser
+    const hitlReviewHistory = parseHITLReviewHistory(item.HITLReviewHistory as string);
 
     const formatDate = (timestamp: string | undefined): string => {
       return timestamp && timestamp !== '0' ? new Date(timestamp).toISOString() : '';
@@ -108,14 +102,7 @@ const mapDocumentsAttributes = (documents: DocumentApiItem[]): Record<string, un
     };
 
     // Parse metering data if available
-    let metering: Record<string, unknown> | null = null;
-    if (meteringJson) {
-      try {
-        metering = JSON.parse(meteringJson);
-      } catch (error) {
-        console.error('Error parsing metering data:', error);
-      }
-    }
+    const metering = parseMetering(meteringJson);
 
     // Calculate confidence alert count
     const confidenceAlertCount = getDocumentConfidenceAlertCount(sections);

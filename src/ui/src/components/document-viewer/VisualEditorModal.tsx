@@ -26,8 +26,7 @@ import generateS3PresignedUrl from '../common/generate-s3-presigned-url';
 import useAppContext from '../../contexts/app';
 import useSettingsContext from '../../contexts/settings';
 import { getFieldConfidenceInfo } from '../common/confidence-alerts-utils';
-import getFileContents from '../../graphql/queries/getFileContents';
-import uploadDocument from '../../graphql/queries/uploadDocument';
+import { getFileContents, uploadDocument } from '../../graphql/generated';
 import JSONEditorTab from './JSONEditorTab';
 import type { BoxProps } from '@cloudscape-design/components';
 import EditHistoryTab from './EditHistoryTab';
@@ -49,7 +48,7 @@ type FileContentsResponse = {
   data: { getFileContents: { isBinary: boolean; content: string } };
 };
 type UploadDocResponse = {
-  data: { uploadDocument: { presignedUrl: string; usePostMethod: boolean } };
+  data: { uploadDocument: { presignedUrl: string; usePostMethod: string } };
 };
 
 const client = generateClient();
@@ -1990,7 +1989,7 @@ const VisualEditorModal = ({
         if (baselineUri && !baselineData) {
           try {
             const baselineResponse = await client.graphql({
-              query: getFileContents as unknown as string,
+              query: getFileContents,
               variables: { s3Uri: baselineUri },
             });
             const baselineResult = (baselineResponse as FileContentsResponse).data.getFileContents;
@@ -2009,7 +2008,7 @@ const VisualEditorModal = ({
         if (evalResultsUri && !evaluationResults) {
           try {
             const evalResponse = await client.graphql({
-              query: getFileContents as unknown as string,
+              query: getFileContents,
               variables: { s3Uri: evalResultsUri },
             });
             const evalResult = (evalResponse as { data: { getFileContents: { isBinary: boolean; content: string } } }).data.getFileContents;
@@ -2199,7 +2198,7 @@ const VisualEditorModal = ({
         const predictionFilename = outputFileKey.split('/').pop();
 
         const predictionUploadResponse = await client.graphql({
-          query: uploadDocument as unknown as string,
+          query: uploadDocument,
           variables: {
             fileName: predictionFilename,
             prefix: predictionPrefix,
@@ -2277,7 +2276,7 @@ const VisualEditorModal = ({
         const baselineFilename = outputFileKey.split('/').pop();
 
         const baselineUploadResponse = await client.graphql({
-          query: uploadDocument as unknown as string,
+          query: uploadDocument,
           variables: {
             fileName: baselineFilename,
             prefix: baselinePrefix,

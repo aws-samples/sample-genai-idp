@@ -27,6 +27,7 @@ import useSettingsContext from '../../contexts/settings';
 import useDocumentsContext from '../../contexts/documents';
 import DocumentPickerModal from './DocumentPickerModal';
 import DateRangeModal from '../common/DateRangeModal';
+import { parseMetering } from '../../graphql/awsjson-parsers';
 
 // Type definitions for configuration and state
 interface Configuration {
@@ -663,10 +664,8 @@ const CapacityPlanningLayout = () => {
       const validationErrors = [];
       const validDocuments = candidateDocuments
         .map((doc) => {
-          let meteringData = {};
-          try {
-            meteringData = typeof doc.Metering === 'string' ? JSON.parse(doc.Metering) : doc.Metering;
-          } catch (e) {
+          const meteringData = parseMetering(doc.Metering as string) || {};
+          if (!meteringData || Object.keys(meteringData).length === 0) {
             console.warn('Failed to parse metering data for', doc.ObjectKey);
             return null;
           }

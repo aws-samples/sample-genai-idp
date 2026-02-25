@@ -1,0 +1,9 @@
+query GetChatMessages($sessionId: ID!) {
+  getChatMessages(sessionId: $sessionId) {
+    role
+    content
+    timestamp
+    isProcessing
+    sessionId
+  }
+}

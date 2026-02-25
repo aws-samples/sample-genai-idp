@@ -20,7 +20,7 @@ import {
 import { generateClient } from 'aws-amplify/api';
 import { ConsoleLogger } from 'aws-amplify/utils';
 
-import getStepFunctionExecution from '../../graphql/queries/getStepFunctionExecution';
+import { getStepFunctionExecution } from '../../graphql/generated';
 import FlowDiagram from './FlowDiagram';
 import StepDetails from './StepDetails';
 
@@ -155,7 +155,7 @@ const StepFunctionFlowViewer = ({
       logger.info('Fetching Step Function execution with ARN:', executionArn);
       console.log('Fetching Step Function execution with ARN:', executionArn);
 
-      const result = await client.graphql({ query: getStepFunctionExecution as unknown as string, variables: { executionArn } });
+      const result = await client.graphql({ query: getStepFunctionExecution, variables: { executionArn } });
       const resultData = (result as { data: Record<string, unknown> }).data;
       logger.info('GraphQL response received:', result);
       console.log('GraphQL response received:', result);

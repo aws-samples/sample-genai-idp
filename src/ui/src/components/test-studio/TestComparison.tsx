@@ -15,11 +15,12 @@ import {
   ExpandableSection,
 } from '@cloudscape-design/components';
 import { generateClient } from 'aws-amplify/api';
-import COMPARE_TEST_RUNS from '../../graphql/queries/compareTestRuns';
+import { compareTestRuns } from '../../graphql/generated';
 import TestStudioHeader from './TestStudioHeader';
 import useLocalStorage from '../common/local-storage';
 import useConfigurationVersions from '../../hooks/use-configuration-versions';
 import { formatConfigVersionLink, formatConfigVersionText, type ConfigVersion as UtilsConfigVersion } from './utils/configVersionUtils';
+import { parseComparisonMetrics, parseWeightedOverallScores, parseConfigSettingValues } from '../../graphql/awsjson-parsers';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type GqlResult = { data: Record<string, any> };
@@ -146,7 +147,7 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
             try {
               setCurrentAttempt(attempt);
               result = (await client.graphql({
-                query: COMPARE_TEST_RUNS,
+                query: compareTestRuns,
                 variables: { testRunIds: preSelectedTestRunIds },
               })) as GqlResult;
               setCurrentAttempt(5); // Set to 100% before completing
@@ -163,7 +164,7 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
                   (err) => err.errorType === 'Lambda:ExecutionTimeoutException' || err.message?.toLowerCase().includes('timeout'),
                 );
               if (isTimeout && attempt < maxRetries) {
-                console.log(`COMPARE_TEST_RUNS attempt ${attempt} failed, retrying...`, error.message);
+                console.log(`compareTestRuns attempt ${attempt} failed, retrying...`, error.message);
                 attempt++;
 
                 // Animate progress during 5-second wait
@@ -198,7 +199,7 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
 
           // Parse metrics if it's a JSON string
           if (typeof compareData.metrics === 'string') {
-            compareData.metrics = JSON.parse(compareData.metrics);
+            compareData.metrics = parseComparisonMetrics(compareData.metrics);
           }
 
           setComparisonData(compareData);
@@ -305,8 +306,7 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
         'Average Weighted Overall Score',
         ...Object.values(completeTestRuns).map((run) => {
           if (run.weightedOverallScores) {
-            const scores =
-              typeof run.weightedOverallScores === 'string' ? JSON.parse(run.weightedOverallScores) : run.weightedOverallScores;
+            const scores = parseWeightedOverallScores(run.weightedOverallScores as string);
             const values = Object.values(scores) as number[];
             if (values.length > 0) {
               const avg = values.reduce((sum: number, score: unknown) => sum + Number(score), 0) / values.length;
@@ -482,8 +482,7 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
     const weightedRow = ['Weighted Overall Score'];
     Object.entries(completeTestRuns).forEach(([_testRunId, testRun]) => {
       if (testRun.weightedOverallScores) {
-        const scores =
-          typeof testRun.weightedOverallScores === 'string' ? JSON.parse(testRun.weightedOverallScores) : testRun.weightedOverallScores;
+        const scores = parseWeightedOverallScores(testRun.weightedOverallScores as string);
         const values = Object.values(scores) as number[];
         if (values.length > 0) {
           const avg = values.reduce((sum: number, score: unknown) => sum + Number(score), 0) / values.length;
@@ -501,7 +500,7 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
     const configRows = [];
     if (comparisonData.configs && comparisonData.configs.length > 0) {
       comparisonData.configs.forEach((config) => {
-        const values = typeof config.values === 'string' ? JSON.parse(config.values) : config.values;
+        const values = parseConfigSettingValues(config.values as string);
         const row = [config.setting, ...Object.keys(completeTestRuns).map((testRunId) => values[testRunId] || 'N/A')];
         configRows.push(row);
       });
@@ -574,10 +573,7 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
             averageConfidence: testRun.averageConfidence,
             averageWeightedOverallScore: (() => {
               if (testRun.weightedOverallScores) {
-                const scores =
-                  typeof testRun.weightedOverallScores === 'string'
-                    ? JSON.parse(testRun.weightedOverallScores)
-                    : testRun.weightedOverallScores;
+                const scores = parseWeightedOverallScores(testRun.weightedOverallScores as string);
                 const values = Object.values(scores) as number[];
                 return values.length > 0 ? values.reduce((sum: number, score: unknown) => sum + Number(score), 0) / values.length : null;
               }
@@ -601,8 +597,7 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
           const breakdown = { ...((testRun.accuracyBreakdown || {}) as Record<string, unknown>) };
           // Add weighted overall score to accuracy breakdown
           if (testRun.weightedOverallScores) {
-            const scores =
-              typeof testRun.weightedOverallScores === 'string' ? JSON.parse(testRun.weightedOverallScores) : testRun.weightedOverallScores;
+            const scores = parseWeightedOverallScores(testRun.weightedOverallScores as string);
             const values = Object.values(scores) as number[];
             if (values.length > 0) {
               breakdown.weightedOverallScore = values.reduce((sum: number, score: unknown) => sum + Number(score), 0) / values.length;
@@ -781,10 +776,7 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
                   ...Object.fromEntries(
                     Object.entries(completeTestRuns).map(([testRunId, testRun]) => {
                       if (testRun.weightedOverallScores) {
-                        const scores =
-                          typeof testRun.weightedOverallScores === 'string'
-                            ? JSON.parse(testRun.weightedOverallScores)
-                            : testRun.weightedOverallScores;
+                        const scores = parseWeightedOverallScores(testRun.weightedOverallScores as string);
                         const values = Object.values(scores) as number[];
                         if (values.length > 0) {
                           const avg = values.reduce((sum: number, score: unknown) => sum + Number(score), 0) / values.length;
@@ -879,10 +871,7 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
             const getLowestDocs = (testRun: Record<string, unknown>) => {
               if (!testRun?.weightedOverallScores) return [];
 
-              const scores =
-                typeof testRun.weightedOverallScores === 'string'
-                  ? JSON.parse(testRun.weightedOverallScores)
-                  : testRun.weightedOverallScores;
+              const scores = parseWeightedOverallScores(testRun.weightedOverallScores as string);
 
               return Object.entries(scores)
                 .map(([docId, score]) => ({ docId, score }))
@@ -1015,7 +1004,7 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
                   wrapLines={preferences.wrapLines}
                   preferences={<div />}
                   items={comparisonData.configs.map((config) => {
-                    const values = typeof config.values === 'string' ? JSON.parse(config.values) : config.values;
+                    const values = parseConfigSettingValues(config.values as string);
                     return {
                       setting: config.setting,
                       ...values, // Spread the values object to create columns for each test run
@@ -1057,10 +1046,7 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
                 ...Object.fromEntries(
                   Object.entries(completeTestRuns).map(([testRunId, testRun]) => {
                     if (testRun.weightedOverallScores) {
-                      const scores =
-                        typeof testRun.weightedOverallScores === 'string'
-                          ? JSON.parse(testRun.weightedOverallScores)
-                          : testRun.weightedOverallScores;
+                      const scores = parseWeightedOverallScores(testRun.weightedOverallScores as string);
                       const values = Object.values(scores) as number[];
                       if (values.length > 0) {
                         const avg = (values as number[]).reduce((sum, score) => sum + score, 0) / values.length;
