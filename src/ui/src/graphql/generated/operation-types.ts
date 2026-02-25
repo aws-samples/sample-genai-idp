@@ -1177,6 +1177,7 @@ export type SendAgentChatMessageMutationVariables = Exact<{
   sessionId?: InputMaybe<Scalars['String']['input']>;
   method?: InputMaybe<Scalars['String']['input']>;
   enableCodeIntelligence?: InputMaybe<Scalars['Boolean']['input']>;
+  toolMetadata?: InputMaybe<ToolMetadataInput>;
 }>;
 
 
@@ -1258,6 +1259,13 @@ export type UploadDocumentMutationVariables = Exact<{
 
 export type UploadDocumentMutation = { uploadDocument: { presignedUrl: string, objectKey: string, usePostMethod: string } };
 
+export type CalculateCapacityQueryVariables = Exact<{
+  input: Scalars['String']['input'];
+}>;
+
+
+export type CalculateCapacityQuery = { calculateCapacity?: { success: boolean, errorMessage?: string | null, recommendations?: Array<string | null> | null, metrics?: Array<{ label: string, value: string } | null> | null, quotaRequirements?: Array<{ service: string, category: string, currentQuota: string, requiredQuota: string, statusText: string, modelId?: string | null } | null> | null, latencyDistribution?: { p50?: string | null, p75?: string | null, p90?: string | null, p95?: string | null, p99?: string | null, procP50?: string | null, procP75?: string | null, procP90?: string | null, procP95?: string | null, procP99?: string | null, queueP50?: string | null, queueP75?: string | null, queueP90?: string | null, queueP95?: string | null, queueP99?: string | null, baseLatency?: string | null, queueLatency?: string | null, totalLatency?: string | null, exceedsLimit?: boolean | null, maxAllowed?: string | null } | null, calculationDetails?: { quotasUsed?: { bedrock_models?: string | null } | null } | null } | null };
+
 export type ChatWithDocumentQueryVariables = Exact<{
   s3Uri: Scalars['String']['input'];
   prompt: Scalars['String']['input'];
@@ -1287,7 +1295,7 @@ export type GetChatMessagesQueryVariables = Exact<{
 }>;
 
 
-export type GetChatMessagesQuery = { getChatMessages?: Array<{ role: string, content: string, timestamp: string, isProcessing?: boolean | null, sessionId?: string | null } | null> | null };
+export type GetChatMessagesQuery = { getChatMessages?: Array<{ role: string, content: string, timestamp: string, isProcessing?: boolean | null, sessionId?: string | null, messageType?: string | null, toolMetadata?: { toolName?: string | null, toolUseId?: string | null } | null } | null> | null };
 
 export type GetConfigVersionQueryVariables = Exact<{
   versionName: Scalars['String']['input'];
@@ -1301,12 +1309,21 @@ export type GetConfigVersionsQueryVariables = Exact<{ [key: string]: never; }>;
 
 export type GetConfigVersionsQuery = { getConfigVersions?: { success: boolean, versions?: Array<{ versionName: string, isActive?: boolean | null, createdAt?: string | null, updatedAt?: string | null, description?: string | null } | null> | null, error?: { type?: string | null, message?: string | null } | null } | null };
 
+export type GetConfigurationLibraryFileQueryVariables = Exact<{
+  pattern: Scalars['String']['input'];
+  configName: Scalars['String']['input'];
+  fileName: Scalars['String']['input'];
+}>;
+
+
+export type GetConfigurationLibraryFileQuery = { getConfigurationLibraryFile?: { success: boolean, content: string, contentType: string, error?: string | null } | null };
+
 export type GetDocumentQueryVariables = Exact<{
   objectKey: Scalars['ID']['input'];
 }>;
 
 
-export type GetDocumentQuery = { getDocument?: { ObjectKey?: string | null, ObjectStatus?: string | null, InitialEventTime?: string | null, QueuedTime?: string | null, WorkflowStartTime?: string | null, CompletionTime?: string | null, WorkflowExecutionArn?: string | null, WorkflowStatus?: string | null, PageCount?: number | null, Metering?: string | null, EvaluationReportUri?: string | null, EvaluationStatus?: string | null, SummaryReportUri?: string | null, RuleValidationResultUri?: string | null, ExpiresAfter?: number | null, HITLStatus?: string | null, HITLTriggered?: boolean | null, HITLReviewURL?: string | null, HITLSectionsPending?: Array<string | null> | null, HITLSectionsCompleted?: Array<string | null> | null, HITLSectionsSkipped?: Array<string | null> | null, HITLReviewOwner?: string | null, HITLReviewOwnerEmail?: string | null, HITLReviewedBy?: string | null, HITLReviewedByEmail?: string | null, HITLReviewHistory?: string | null, ConfigVersion?: string | null, Sections?: Array<{ Id?: string | null, PageIds?: Array<number | null> | null, Class?: string | null, OutputJSONUri?: string | null, ConfidenceThresholdAlerts?: Array<{ attributeName?: string | null, confidence?: number | null, confidenceThreshold?: number | null } | null> | null } | null> | null, Pages?: Array<{ Id?: number | null, Class?: string | null, ImageUri?: string | null, TextUri?: string | null, TextConfidenceUri?: string | null } | null> | null } | null };
+export type GetDocumentQuery = { getDocument?: { ObjectKey?: string | null, ObjectStatus?: string | null, InitialEventTime?: string | null, QueuedTime?: string | null, WorkflowStartTime?: string | null, CompletionTime?: string | null, WorkflowExecutionArn?: string | null, WorkflowStatus?: string | null, PageCount?: number | null, Metering?: string | null, EvaluationReportUri?: string | null, EvaluationStatus?: string | null, SummaryReportUri?: string | null, RuleValidationResultUri?: string | null, ExpiresAfter?: number | null, HITLStatus?: string | null, HITLTriggered?: boolean | null, HITLReviewURL?: string | null, HITLSectionsPending?: Array<string | null> | null, HITLSectionsCompleted?: Array<string | null> | null, HITLSectionsSkipped?: Array<string | null> | null, HITLReviewOwner?: string | null, HITLReviewOwnerEmail?: string | null, HITLReviewedBy?: string | null, HITLReviewedByEmail?: string | null, HITLReviewHistory?: string | null, ConfigVersion?: string | null, HITLCompleted?: boolean | null, TraceId?: string | null, Sections?: Array<{ Id?: string | null, PageIds?: Array<number | null> | null, Class?: string | null, OutputJSONUri?: string | null, ConfidenceThresholdAlerts?: Array<{ attributeName?: string | null, confidence?: number | null, confidenceThreshold?: number | null } | null> | null } | null> | null, Pages?: Array<{ Id?: number | null, Class?: string | null, ImageUri?: string | null, TextUri?: string | null, TextConfidenceUri?: string | null } | null> | null } | null };
 
 export type GetFileContentsQueryVariables = Exact<{
   s3Uri: Scalars['String']['input'];
@@ -1383,6 +1400,13 @@ export type ListChatSessionsQueryVariables = Exact<{
 
 
 export type ListChatSessionsQuery = { listChatSessions?: { nextToken?: string | null, items?: Array<{ sessionId: string, title: string, createdAt: string, updatedAt: string, messageCount: number, lastMessage?: string | null } | null> | null } | null };
+
+export type ListConfigurationLibraryQueryVariables = Exact<{
+  pattern: Scalars['String']['input'];
+}>;
+
+
+export type ListConfigurationLibraryQuery = { listConfigurationLibrary?: { success: boolean, error?: string | null, items?: Array<{ name: string, hasReadme: boolean, path: string, configFileType?: string | null } | null> | null } | null };
 
 export type ListDiscoveryJobsQueryVariables = Exact<{ [key: string]: never; }>;
 
@@ -1480,4 +1504,4 @@ export type OnDiscoveryJobStatusChangeSubscription = { onDiscoveryJobStatusChang
 export type OnUpdateDocumentSubscriptionVariables = Exact<{ [key: string]: never; }>;
 
 
-export type OnUpdateDocumentSubscription = { onUpdateDocument?: { ObjectKey?: string | null, ObjectStatus?: string | null, InitialEventTime?: string | null, QueuedTime?: string | null, WorkflowStartTime?: string | null, CompletionTime?: string | null, WorkflowExecutionArn?: string | null, WorkflowStatus?: string | null, PageCount?: number | null, Metering?: string | null, EvaluationReportUri?: string | null, EvaluationStatus?: string | null, SummaryReportUri?: string | null, ExpiresAfter?: number | null, HITLStatus?: string | null, HITLTriggered?: boolean | null, HITLReviewURL?: string | null, HITLSectionsPending?: Array<string | null> | null, HITLSectionsCompleted?: Array<string | null> | null, HITLSectionsSkipped?: Array<string | null> | null, HITLReviewOwner?: string | null, HITLReviewOwnerEmail?: string | null, HITLReviewedBy?: string | null, HITLReviewedByEmail?: string | null, HITLReviewHistory?: string | null, ConfigVersion?: string | null, TraceId?: string | null, Sections?: Array<{ Id?: string | null, PageIds?: Array<number | null> | null, Class?: string | null, OutputJSONUri?: string | null, ConfidenceThresholdAlerts?: Array<{ attributeName?: string | null, confidence?: number | null, confidenceThreshold?: number | null } | null> | null } | null> | null, Pages?: Array<{ Id?: number | null, Class?: string | null, ImageUri?: string | null, TextUri?: string | null, TextConfidenceUri?: string | null } | null> | null } | null };
+export type OnUpdateDocumentSubscription = { onUpdateDocument?: { ObjectKey?: string | null, ObjectStatus?: string | null, InitialEventTime?: string | null, QueuedTime?: string | null, WorkflowStartTime?: string | null, CompletionTime?: string | null, WorkflowExecutionArn?: string | null, WorkflowStatus?: string | null, PageCount?: number | null, Metering?: string | null, EvaluationReportUri?: string | null, EvaluationStatus?: string | null, SummaryReportUri?: string | null, RuleValidationResultUri?: string | null, ExpiresAfter?: number | null, HITLStatus?: string | null, HITLTriggered?: boolean | null, HITLReviewURL?: string | null, HITLSectionsPending?: Array<string | null> | null, HITLSectionsCompleted?: Array<string | null> | null, HITLSectionsSkipped?: Array<string | null> | null, HITLReviewOwner?: string | null, HITLReviewOwnerEmail?: string | null, HITLReviewedBy?: string | null, HITLReviewedByEmail?: string | null, HITLReviewHistory?: string | null, ConfigVersion?: string | null, HITLCompleted?: boolean | null, TraceId?: string | null, Sections?: Array<{ Id?: string | null, PageIds?: Array<number | null> | null, Class?: string | null, OutputJSONUri?: string | null, ConfidenceThresholdAlerts?: Array<{ attributeName?: string | null, confidence?: number | null, confidenceThreshold?: number | null } | null> | null } | null> | null, Pages?: Array<{ Id?: number | null, Class?: string | null, ImageUri?: string | null, TextUri?: string | null, TextConfidenceUri?: string | null } | null> | null } | null };

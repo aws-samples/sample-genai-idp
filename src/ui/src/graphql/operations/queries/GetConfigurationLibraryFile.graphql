@@ -1,0 +1,8 @@
+query GetConfigurationLibraryFile($pattern: String!, $configName: String!, $fileName: String!) {
+  getConfigurationLibraryFile(pattern: $pattern, configName: $configName, fileName: $fileName) {
+    success
+    content
+    contentType
+    error
+  }
+}

@@ -37,12 +37,16 @@ interface OperationInfo {
  * Extract the operation name and type from raw GraphQL text.
  * Matches patterns like: query GetDocument(...) { ... }
  */
-function parseGraphQL(text: string): { operationName: string; operationType: 'query' | 'mutation' | 'subscription' } | null {
-  const match = text.match(/\b(query|mutation|subscription)\s+([A-Za-z_]\w*)/);
-  if (!match) return null;
+function parseGraphQL(text: string, filePath?: string): { operationName: string; operationType: 'query' | 'mutation' | 'subscription' } | null {
+  const matches = [...text.matchAll(/\b(query|mutation|subscription)\s+([A-Za-z_]\w*)/g)];
+  if (matches.length > 1) {
+    console.warn(`Warning: ${filePath ?? '<unknown>'} contains ${matches.length} operations; only the first will be used`);
+  }
+  if (matches.length === 0) return null;
+  const [, operationType, operationName] = matches[0];
   return {
-    operationType: match[1] as 'query' | 'mutation' | 'subscription',
-    operationName: match[2],
+    operationType: operationType as 'query' | 'mutation' | 'subscription',
+    operationName,
   };
 }
 
@@ -128,7 +132,7 @@ function main(): void {
   const errors: string[] = [];
 
   for (const { filePath, content } of graphqlFiles) {
-    const parsed = parseGraphQL(content);
+    const parsed = parseGraphQL(content, filePath);
     if (!parsed) {
       errors.push(`WARNING: Could not parse operation from ${path.relative(OPERATIONS_DIR, filePath)}`);
       continue;
@@ -195,7 +199,7 @@ function main(): void {
       'GeneratedSubscription';
 
     const variablesPart = op.variablesType || 'never';
-    const outputPart = op.outputType || 'never';
+    const outputPart = op.outputType;
 
     // Indent the GraphQL text by 2 spaces for readability
     const indentedText = op.graphqlText

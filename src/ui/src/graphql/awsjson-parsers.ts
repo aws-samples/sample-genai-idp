@@ -5,7 +5,7 @@ import type {
   MeteringData,
   HITLReviewHistoryEntry,
   AccuracyBreakdown,
-  CostBreakdownItem,
+  CostBreakdown,
   TestRunConfig,
   WeightedOverallScores,
   SplitClassificationMetrics,
@@ -19,7 +19,7 @@ import type {
 
 const MAX_PARSE_DEPTH = 3;
 
-function safeParse<T>(json: string | null | undefined, fallback: T): T {
+function safeParse<T>(json: unknown, fallback: T): T {
   if (json == null || json === '') return fallback;
   let result: unknown = json;
   let depth = 0;
@@ -35,57 +35,59 @@ function safeParse<T>(json: string | null | undefined, fallback: T): T {
     if (result === null && fallback === null) return null as T;
     return fallback;
   }
+  if (Array.isArray(fallback) && !Array.isArray(result)) return fallback;
+  if (!Array.isArray(fallback) && fallback !== null && Array.isArray(result)) return fallback;
   return result as T;
 }
 
-export function parseMetering(json: string | null | undefined): MeteringData | null {
+export function parseMetering(json: unknown): MeteringData | null {
   return safeParse<MeteringData | null>(json, null);
 }
 
-export function parseHITLReviewHistory(json: string | null | undefined): HITLReviewHistoryEntry[] {
+export function parseHITLReviewHistory(json: unknown): HITLReviewHistoryEntry[] {
   return safeParse<HITLReviewHistoryEntry[]>(json, []);
 }
 
-export function parseAccuracyBreakdown(json: string | null | undefined): AccuracyBreakdown {
+export function parseAccuracyBreakdown(json: unknown): AccuracyBreakdown {
   return safeParse<AccuracyBreakdown>(json, {});
 }
 
-export function parseCostBreakdown(json: string | null | undefined): CostBreakdownItem[] {
-  return safeParse<CostBreakdownItem[]>(json, []);
+export function parseCostBreakdown(json: unknown): CostBreakdown {
+  return safeParse<CostBreakdown>(json, {});
 }
 
-export function parseTestRunConfig(json: string | null | undefined): TestRunConfig | null {
+export function parseTestRunConfig(json: unknown): TestRunConfig | null {
   return safeParse<TestRunConfig | null>(json, null);
 }
 
-export function parseWeightedOverallScores(json: string | null | undefined): WeightedOverallScores {
+export function parseWeightedOverallScores(json: unknown): WeightedOverallScores {
   return safeParse<WeightedOverallScores>(json, {});
 }
 
-export function parseSplitClassificationMetrics(json: string | null | undefined): SplitClassificationMetrics {
+export function parseSplitClassificationMetrics(json: unknown): SplitClassificationMetrics {
   return safeParse<SplitClassificationMetrics>(json, {});
 }
 
-export function parseComparisonMetrics(json: string | null | undefined): ComparisonMetrics {
+export function parseComparisonMetrics(json: unknown): ComparisonMetrics {
   return safeParse<ComparisonMetrics>(json, {});
 }
 
-export function parseConfigSettingValues(json: string | null | undefined): ConfigSettingValues {
+export function parseConfigSettingValues(json: unknown): ConfigSettingValues {
   return safeParse<ConfigSettingValues>(json, {});
 }
 
-export function parseConfigurationData(json: string | null | undefined): ConfigurationData | null {
+export function parseConfigurationData(json: unknown): ConfigurationData | null {
   return safeParse<ConfigurationData | null>(json, null);
 }
 
-export function parsePricingData(json: string | null | undefined): PricingData | null {
+export function parsePricingData(json: unknown): PricingData | null {
   return safeParse<PricingData | null>(json, null);
 }
 
-export function parseStepFunctionPayload(json: string | null | undefined): StepFunctionStepPayload | null {
+export function parseStepFunctionPayload(json: unknown): StepFunctionStepPayload | null {
   return safeParse<StepFunctionStepPayload | null>(json, null);
 }
 
-export function parseBedrockModelsQuota(json: string | null | undefined): BedrockModelsQuota | null {
+export function parseBedrockModelsQuota(json: unknown): BedrockModelsQuota | null {
   return safeParse<BedrockModelsQuota | null>(json, null);
 }

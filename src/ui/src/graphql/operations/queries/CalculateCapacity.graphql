@@ -1,0 +1,46 @@
+query CalculateCapacity($input: String!) {
+  calculateCapacity(input: $input) {
+    success
+    errorMessage
+    metrics {
+      label
+      value
+    }
+    quotaRequirements {
+      service
+      category
+      currentQuota
+      requiredQuota
+      statusText
+      modelId
+    }
+    latencyDistribution {
+      p50
+      p75
+      p90
+      p95
+      p99
+      procP50
+      procP75
+      procP90
+      procP95
+      procP99
+      queueP50
+      queueP75
+      queueP90
+      queueP95
+      queueP99
+      baseLatency
+      queueLatency
+      totalLatency
+      exceedsLimit
+      maxAllowed
+    }
+    calculationDetails {
+      quotasUsed {
+        bedrock_models
+      }
+    }
+    recommendations
+  }
+}

@@ -4,25 +4,16 @@
 import { useState } from 'react';
 import { generateClient } from 'aws-amplify/api';
 import { ConsoleLogger } from 'aws-amplify/utils';
+import {
+  listConfigurationLibrary as listConfigurationLibraryOp,
+  getConfigurationLibraryFile as getConfigurationLibraryFileOp,
+} from '../graphql/generated';
 
 interface ConfigLibraryItem {
   name: string;
   hasReadme: boolean;
   path: string;
-  configFileType: string;
-}
-
-interface ListConfigurationLibraryResponse {
-  success: boolean;
-  items: ConfigLibraryItem[];
-  error?: string;
-}
-
-interface GetConfigurationLibraryFileResponse {
-  success: boolean;
-  content: string;
-  contentType: string;
-  error?: string;
+  configFileType?: string;
 }
 
 interface UseConfigurationLibraryReturn {
@@ -35,40 +26,6 @@ interface UseConfigurationLibraryReturn {
 const client = generateClient();
 const logger = new ConsoleLogger('useConfigurationLibrary');
 
-const LIST_CONFIG_LIBRARY = `
-  query ListConfigurationLibrary($pattern: String!) {
-    listConfigurationLibrary(pattern: $pattern) {
-      success
-      items {
-        name
-        hasReadme
-        path
-        configFileType
-      }
-      error
-    }
-  }
-`;
-
-const GET_CONFIG_LIBRARY_FILE = `
-  query GetConfigurationLibraryFile(
-    $pattern: String!
-    $configName: String!
-    $fileName: String!
-  ) {
-    getConfigurationLibraryFile(
-      pattern: $pattern
-      configName: $configName
-      fileName: $fileName
-    ) {
-      success
-      content
-      contentType
-      error
-    }
-  }
-`;
-
 const useConfigurationLibrary = (): UseConfigurationLibraryReturn => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -80,18 +37,18 @@ const useConfigurationLibrary = (): UseConfigurationLibraryReturn => {
     try {
       logger.debug('Listing configurations for pattern:', pattern);
       const result = await client.graphql({
-        query: LIST_CONFIG_LIBRARY,
+        query: listConfigurationLibraryOp,
         variables: { pattern },
       });
 
-      const response = (result as { data: { listConfigurationLibrary: ListConfigurationLibraryResponse } }).data.listConfigurationLibrary;
+      const response = result.data.listConfigurationLibrary;
 
-      if (!response.success) {
-        throw new Error(response.error || 'Failed to list configurations');
+      if (!response?.success) {
+        throw new Error(response?.error || 'Failed to list configurations');
       }
 
       logger.debug('Configurations listed successfully:', response.items);
-      return response.items || [];
+      return response.items?.filter((item): item is NonNullable<typeof item> => item !== null) ?? [];
     } catch (err: unknown) {
       logger.error('Error listing configurations:', err);
       const message = err instanceof Error ? err.message : String(err);
@@ -113,15 +70,14 @@ const useConfigurationLibrary = (): UseConfigurationLibraryReturn => {
     try {
       logger.debug('Getting file:', { pattern, configName, fileName });
       const result = await client.graphql({
-        query: GET_CONFIG_LIBRARY_FILE,
+        query: getConfigurationLibraryFileOp,
         variables: { pattern, configName, fileName },
       });
 
-      const response = (result as { data: { getConfigurationLibraryFile: GetConfigurationLibraryFileResponse } }).data
-        .getConfigurationLibraryFile;
+      const response = result.data.getConfigurationLibraryFile;
 
-      if (!response.success) {
-        throw new Error(response.error || 'Failed to get file');
+      if (!response?.success) {
+        throw new Error(response?.error || 'Failed to get file');
       }
 
       logger.debug('File retrieved successfully');

@@ -34,6 +34,7 @@ import ConfigurationVersionsTable from './ConfigurationVersionsTable';
 import ConfigurationComparison from './ConfigurationComparison';
 import { deepMerge } from '../../utils/configUtils';
 import { syncBdaIdp } from '../../graphql/generated';
+import { parseConfigurationData } from '../../graphql/awsjson-parsers';
 
 const client = generateClient();
 const logger = new ConsoleLogger('ConfigurationLayout');
@@ -248,7 +249,7 @@ const ConfigurationLayout = (): React.JSX.Element => {
 
         // Parse schema if it's a string
         if (typeof rawConfig.schema === 'string') {
-          schemaObj = JSON.parse(rawConfig.schema);
+          schemaObj = parseConfigurationData(rawConfig.schema);
         }
 
         // Unwrap nested Schema object if present
@@ -258,12 +259,12 @@ const ConfigurationLayout = (): React.JSX.Element => {
 
         // Parse default config if it's a string
         if (typeof rawConfig.default === 'string') {
-          defaultObj = JSON.parse(rawConfig.default);
+          defaultObj = parseConfigurationData(rawConfig.default);
         }
 
         // Parse custom config if it's a string
         if (typeof rawConfig.custom === 'string' && rawConfig.custom) {
-          customObj = JSON.parse(rawConfig.custom);
+          customObj = parseConfigurationData(rawConfig.custom);
         } else if (!rawConfig.custom) {
           customObj = {};
         }

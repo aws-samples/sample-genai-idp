@@ -1,5 +1,5 @@
-mutation SendAgentChatMessage($prompt: String!, $sessionId: String, $method: String, $enableCodeIntelligence: Boolean) {
-  sendAgentChatMessage(prompt: $prompt, sessionId: $sessionId, method: $method, enableCodeIntelligence: $enableCodeIntelligence) {
+mutation SendAgentChatMessage($prompt: String!, $sessionId: String, $method: String, $enableCodeIntelligence: Boolean, $toolMetadata: ToolMetadataInput) {
+  sendAgentChatMessage(prompt: $prompt, sessionId: $sessionId, method: $method, enableCodeIntelligence: $enableCodeIntelligence, toolMetadata: $toolMetadata) {
     role
     content
     timestamp

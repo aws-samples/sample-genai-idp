@@ -45,5 +45,7 @@ query GetDocument($objectKey: ID!) {
     HITLReviewedByEmail
     HITLReviewHistory
     ConfigVersion
+    HITLCompleted
+    TraceId
   }
 }

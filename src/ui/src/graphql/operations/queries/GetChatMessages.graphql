@@ -5,5 +5,10 @@ query GetChatMessages($sessionId: ID!) {
     timestamp
     isProcessing
     sessionId
+    messageType
+    toolMetadata {
+      toolName
+      toolUseId
+    }
   }
 }

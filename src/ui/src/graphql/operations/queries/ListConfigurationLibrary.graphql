@@ -1,0 +1,12 @@
+query ListConfigurationLibrary($pattern: String!) {
+  listConfigurationLibrary(pattern: $pattern) {
+    success
+    items {
+      name
+      hasReadme
+      path
+      configFileType
+    }
+    error
+  }
+}

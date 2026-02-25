@@ -105,7 +105,12 @@ lint-cicd:
 		echo -e "$(RED)ERROR: UI build failed$(NC)"; \
 		exit 1; \
 	fi
-	
+
+	@if ! make codegen-check; then \
+		echo -e "$(RED)ERROR: GraphQL codegen check failed$(NC)"; \
+		exit 1; \
+	fi
+
 	@echo -e "$(GREEN)All code quality checks passed!$(NC)"
 
 # Validate AWS CodeBuild buildspec files
@@ -184,7 +189,7 @@ ui-build:
 # Verify generated GraphQL types and operations are up-to-date
 codegen-check:
 	@echo "Checking if GraphQL codegen output is up-to-date..."
-	@cd src/ui && npm run codegen
+	@cd src/ui && npm ci --prefer-offline --no-audit && npm run codegen
 	@if ! git diff --quiet src/ui/src/graphql/generated/; then \
 		echo -e "$(RED)ERROR: Generated GraphQL files are out of date!$(NC)"; \
 		echo -e "$(YELLOW)Run 'cd src/ui && npm run codegen' and commit the updated files.$(NC)"; \

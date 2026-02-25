@@ -215,8 +215,8 @@ src/ui/src/components/agent-chat/
 src/ui/src/hooks/
 └── use-agent-chat.js       # Generic chat hook
 
-src/ui/src/graphql/queries/
-└── agentChatQueries.js     # GraphQL operations
+src/ui/src/graphql/operations/
+└── *.graphql               # GraphQL operations
 ```
 
 ## Testing

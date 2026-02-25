@@ -25,16 +25,16 @@ export interface AccuracyBreakdown {
   };
 }
 
-/** Parsed cost breakdown from TestRun.costBreakdown AWSJSON field */
-export interface CostBreakdownItem {
-  context?: string;
-  serviceApi?: string;
-  unit?: string;
-  value?: string | number;
-  unitCost?: string | number;
-  estimatedCost?: string | number;
+/** Parsed cost breakdown service detail from TestRun.costBreakdown AWSJSON field */
+export interface CostBreakdownServiceDetail {
+  estimated_cost?: number;
+  value?: number;
+  unit_cost?: number;
   [key: string]: unknown;
 }
+
+/** Parsed cost breakdown from TestRun.costBreakdown AWSJSON field */
+export type CostBreakdown = Record<string, Record<string, CostBreakdownServiceDetail>>;
 
 /** Parsed test run config from TestRun.config AWSJSON field */
 export interface TestRunConfig {

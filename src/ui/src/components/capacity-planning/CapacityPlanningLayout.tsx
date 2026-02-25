@@ -3,6 +3,7 @@
 /* eslint-disable react/no-unstable-nested-components, react/no-array-index-key */
 import React, { useState, useMemo, useEffect } from 'react';
 import { generateClient } from 'aws-amplify/api';
+import { calculateCapacity as calculateCapacityOp } from '../../graphql/generated';
 import {
   Container,
   Header,
@@ -1473,60 +1474,13 @@ const CapacityPlanningLayout = () => {
       // Create client inside the function to ensure Amplify is configured
       const client = generateClient();
       const response = await client.graphql({
-        query: `
-          query CalculateCapacity($input: String!) {
-            calculateCapacity(input: $input) {
-              success
-              errorMessage
-              metrics {
-                label
-                value
-              }
-              quotaRequirements {
-                service
-                category
-                currentQuota
-                requiredQuota
-                statusText
-                modelId
-              }
-              latencyDistribution {
-                p50
-                p75
-                p90
-                p95
-                p99
-                procP50
-                procP75
-                procP90
-                procP95
-                procP99
-                queueP50
-                queueP75
-                queueP90
-                queueP95
-                queueP99
-                baseLatency
-                queueLatency
-                totalLatency
-                exceedsLimit
-                maxAllowed
-              }
-              calculationDetails {
-                quotasUsed {
-                  bedrock_models
-                }
-              }
-              recommendations
-            }
-          }
-        `,
+        query: calculateCapacityOp,
         variables: { input: JSON.stringify(input) },
       });
 
       console.log('📊 Capacity calculation response:', response);
 
-      const responseData = (response as { data?: { calculateCapacity?: CapacityResult } }).data;
+      const responseData = response.data;
       if (responseData?.calculateCapacity) {
         // The response now has the proper GraphQL structure
         const result = responseData.calculateCapacity;
