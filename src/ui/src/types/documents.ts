@@ -45,7 +45,7 @@ export interface Document {
   EvaluationStatus: string;
   SummaryReportUri: string;
   RuleValidationResultUri: string;
-  ExpiresAfter: string;
+  ExpiresAfter: number;
   HITLStatus: string;
   HITLTriggered: boolean;
   HITLCompleted: boolean;

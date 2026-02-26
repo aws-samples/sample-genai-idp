@@ -52,6 +52,10 @@ const usePricing = (): UsePricingReturn => {
       const pricingData = parsePricingData(response.pricing as string);
       const defaultPricingData = parsePricingData(response.defaultPricing as string);
 
+      if (pricingData == null || defaultPricingData == null) {
+        throw new Error('Failed to parse pricing data from server response');
+      }
+
       logger.debug('Parsed pricing:', pricingData);
       logger.debug('Parsed default pricing:', defaultPricingData);
       setPricing(pricingData);

@@ -156,12 +156,14 @@ const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2
         logger.warn('These documents have list entries but no corresponding document records - possible orphaned list entries');
       }
 
-      // Filter out null/undefined documents to prevent downstream errors
-      // GqlDocument -> Document normalization (e.g. ExpiresAfter number->string) happens in map-document-attributes.ts
+      // Filter out null/undefined documents and cast to UI Document type.
+      // The generated GQL type uses nullable fields; the UI Document type expects required fields.
+      // This is safe because downstream normalization in map-document-attributes.ts handles
+      // null-to-default conversions before the UI consumes the data.
       const documentValues = getDocumentResolutions
         .filter((r) => r.status === 'fulfilled')
         .map((r) => (r as PromiseFulfilledResult<GetDocumentResolved>).value?.data?.getDocument)
-        .filter((doc) => doc != null) as unknown as Document[];
+        .filter((doc): doc is NonNullable<typeof doc> => doc != null) as Document[];
 
       logger.debug(`Successfully loaded ${documentValues.length} of ${objectKeys.length} requested documents`);
       return documentValues;
