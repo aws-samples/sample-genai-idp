@@ -92,7 +92,7 @@ const PageTextEditorModal = ({
         variables: { s3Uri: textUri },
       });
 
-      const textResult = (textResponse as { data: Record<string, unknown> }).data.getFileContents as { isBinary: boolean; content: string };
+      const textResult = textResponse.data.getFileContents;
       if (textResult.isBinary) {
         throw new Error('Text file contains binary content');
       }
@@ -110,10 +110,7 @@ const PageTextEditorModal = ({
             variables: { s3Uri: confidenceUri },
           });
 
-          const confResult = (confResponse as { data: Record<string, unknown> }).data.getFileContents as {
-            isBinary: boolean;
-            content: string;
-          };
+          const confResult = confResponse.data.getFileContents;
           if (!confResult.isBinary) {
             // Extract markdown from JSON wrapper for confidence content
             const confidenceMarkdown = extractPlainText(confResult.content);
@@ -203,12 +200,10 @@ const PageTextEditorModal = ({
       },
     });
 
-    const { presignedUrl, usePostMethod } = (response as { data: Record<string, unknown> }).data.uploadDocument as {
-      presignedUrl: string;
-      usePostMethod: boolean;
-    };
+    const { presignedUrl, usePostMethod } = response.data.uploadDocument;
+    const usePost = usePostMethod?.toLowerCase() === 'true';
 
-    if (!usePostMethod) {
+    if (!usePost) {
       throw new Error('Server returned PUT method which is not supported');
     }
 

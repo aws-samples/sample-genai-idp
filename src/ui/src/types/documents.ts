@@ -1,9 +1,6 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-import type { Document as GqlDocument, Section as GqlSection, Page as GqlPage } from '../graphql/generated/schema-types';
-
 export interface ConfidenceThresholdAlert {
   attributeName: string;
   confidence: number;

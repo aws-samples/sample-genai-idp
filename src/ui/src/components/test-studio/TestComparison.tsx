@@ -22,9 +22,6 @@ import useConfigurationVersions from '../../hooks/use-configuration-versions';
 import { formatConfigVersionLink, formatConfigVersionText, type ConfigVersion as UtilsConfigVersion } from './utils/configVersionUtils';
 import { parseComparisonMetrics, parseWeightedOverallScores, parseConfigSettingValues } from '../../graphql/awsjson-parsers';
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type GqlResult = { data: Record<string, any> };
-
 const client = generateClient();
 
 interface TestComparisonProps {
@@ -146,10 +143,10 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
           while (attempt <= maxRetries) {
             try {
               setCurrentAttempt(attempt);
-              result = (await client.graphql({
+              result = await client.graphql({
                 query: compareTestRuns,
                 variables: { testRunIds: preSelectedTestRunIds },
-              })) as GqlResult;
+              });
               setCurrentAttempt(5); // Set to 100% before completing
               await new Promise((resolve) => setTimeout(resolve, 500)); // Brief pause to show 100%
               break;

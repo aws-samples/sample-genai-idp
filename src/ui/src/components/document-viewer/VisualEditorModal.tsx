@@ -44,12 +44,6 @@ interface BoundingBoxDimensions {
   transformedOffsetY?: number;
 }
 
-type FileContentsResponse = {
-  data: { getFileContents: { isBinary: boolean; content: string } };
-};
-type UploadDocResponse = {
-  data: { uploadDocument: { presignedUrl: string; usePostMethod: string } };
-};
 
 const client = generateClient();
 
@@ -1992,7 +1986,7 @@ const VisualEditorModal = ({
               query: getFileContents,
               variables: { s3Uri: baselineUri },
             });
-            const baselineResult = (baselineResponse as FileContentsResponse).data.getFileContents;
+            const baselineResult = baselineResponse.data.getFileContents;
             if (!baselineResult.isBinary && baselineResult.content) {
               const parsed = JSON.parse(baselineResult.content);
               setBaselineData(parsed);
@@ -2207,9 +2201,9 @@ const VisualEditorModal = ({
           },
         });
 
-        const predUploadData = (predictionUploadResponse as UploadDocResponse).data.uploadDocument;
+        const predUploadData = predictionUploadResponse.data.uploadDocument;
         const predictionPresignedUrl = predUploadData.presignedUrl;
-        const predictionUsePost = predUploadData.usePostMethod;
+        const predictionUsePost = predUploadData.usePostMethod?.toLowerCase() === 'true';
 
         // Upload the JSON data
         const predictionContent = JSON.stringify(dataToSave, null, 2);
@@ -2285,9 +2279,9 @@ const VisualEditorModal = ({
           },
         });
 
-        const baseUploadData = (baselineUploadResponse as UploadDocResponse).data.uploadDocument;
+        const baseUploadData = baselineUploadResponse.data.uploadDocument;
         const baselinePresignedUrl = baseUploadData.presignedUrl;
-        const baselineUsePost = baseUploadData.usePostMethod;
+        const baselineUsePost = baseUploadData.usePostMethod?.toLowerCase() === 'true';
 
         // Upload the JSON data
         const baselineContent = JSON.stringify(baselineToSave, null, 2);

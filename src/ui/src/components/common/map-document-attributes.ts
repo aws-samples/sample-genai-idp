@@ -156,8 +156,6 @@ const mapDocumentsAttributes = (documents: DocumentApiItem[]): Record<string, un
       configVersion,
     };
 
-    console.log('mapped-document-attributes', mapping);
-
     return mapping;
   });
 };

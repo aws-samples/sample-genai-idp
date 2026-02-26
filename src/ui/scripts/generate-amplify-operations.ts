@@ -38,9 +38,12 @@ interface OperationInfo {
  * Matches patterns like: query GetDocument(...) { ... }
  */
 function parseGraphQL(text: string, filePath?: string): { operationName: string; operationType: 'query' | 'mutation' | 'subscription' } | null {
-  const matches = [...text.matchAll(/\b(query|mutation|subscription)\s+([A-Za-z_]\w*)/g)];
+  // Strip comment lines (lines starting with #) before parsing
+  const strippedText = text.split('\n').filter(line => !line.trimStart().startsWith('#')).join('\n');
+  const matches = [...strippedText.matchAll(/\b(query|mutation|subscription)\s+([A-Za-z_]\w*)/g)];
   if (matches.length > 1) {
     console.warn(`Warning: ${filePath ?? '<unknown>'} contains ${matches.length} operations; only the first will be used`);
+    process.exitCode = 1;
   }
   if (matches.length === 0) return null;
   const [, operationType, operationName] = matches[0];
@@ -154,6 +157,11 @@ function main(): void {
       variablesType,
       outputType,
     });
+  }
+
+  if (operations.length === 0) {
+    console.error('ERROR: No valid operations could be parsed from .graphql files');
+    process.exit(1);
   }
 
   // Log warnings

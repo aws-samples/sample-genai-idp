@@ -84,7 +84,7 @@ const JSONViewer = ({
         variables: { s3Uri: fileUri },
       });
 
-      const result = (response as { data: { getFileContents: { isBinary: boolean; content: string } } }).data.getFileContents;
+      const result = response.data.getFileContents;
 
       if (result.isBinary === true) {
         setError('This file contains binary content that cannot be viewed.');
@@ -152,11 +152,10 @@ const JSONViewer = ({
         },
       });
 
-      const { presignedUrl, usePostMethod } = (
-        response as unknown as { data: { uploadDocument: { presignedUrl: string; usePostMethod: string } } }
-      ).data.uploadDocument;
+      const { presignedUrl, usePostMethod } = response.data.uploadDocument;
+      const usePost = usePostMethod?.toLowerCase() === 'true';
 
-      if (!usePostMethod) {
+      if (!usePost) {
         throw new Error('Server returned PUT method which is not supported');
       }
 

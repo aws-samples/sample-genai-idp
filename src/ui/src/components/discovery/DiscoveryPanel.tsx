@@ -393,15 +393,14 @@ const DiscoveryPanel = (): React.JSX.Element => {
         },
       });
 
-      type UploadResp = Record<string, Record<string, Record<string, unknown>>>;
-      const uploadResult = (documentResponse as unknown as UploadResp).data.uploadDiscoveryDocument;
-      const docPresignedUrl = uploadResult.presignedUrl as string;
-      const docObjectKey = uploadResult.objectKey as string;
-      const docUsePostMethod = uploadResult.usePostMethod as boolean;
-      const docGroundTruthObjectKey = uploadResult.groundTruthObjectKey as string;
-      const docGroundTruthPresignedUrl = uploadResult.groundTruthPresignedUrl as string;
+      const uploadResult = documentResponse.data.uploadDiscoveryDocument;
+      const docPresignedUrl = uploadResult.presignedUrl;
+      const docObjectKey = uploadResult.objectKey;
+      const docUsePost = uploadResult.usePostMethod?.toLowerCase() === 'true';
+      const docGroundTruthObjectKey = uploadResult.groundTruthObjectKey;
+      const docGroundTruthPresignedUrl = uploadResult.groundTruthPresignedUrl;
 
-      if (!docUsePostMethod) {
+      if (!docUsePost) {
         throw new Error('Server returned PUT method which is not supported. Please update your backend code.');
       }
       // Upload document file to S3
@@ -416,8 +415,8 @@ const DiscoveryPanel = (): React.JSX.Element => {
         console.log(`Uploading ground truth ${groundTruthFile.name} to S3...`);
         await uploadFileToS3(
           groundTruthFile,
-          docGroundTruthPresignedUrl,
-          docGroundTruthObjectKey,
+          docGroundTruthPresignedUrl ?? '',
+          docGroundTruthObjectKey ?? '',
           'ground truth',
           newUploadStatus,
         );

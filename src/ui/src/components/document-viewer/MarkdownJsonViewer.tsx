@@ -271,8 +271,7 @@ const MarkdownJsonViewer = ({
       });
 
       // Handle the updated response structure
-      const result = (response as { data: { getFileContents: { content: string; contentType: string; isBinary: boolean } } }).data
-        .getFileContents;
+      const result = response.data.getFileContents;
       const fetchedContent = result.content;
       logger.debug('Received content type:', result.contentType);
       logger.debug('Binary content?', result.isBinary);
@@ -327,11 +326,10 @@ const MarkdownJsonViewer = ({
         },
       });
 
-      const { presignedUrl, usePostMethod } = (
-        response as unknown as { data: { uploadDocument: { presignedUrl: string; usePostMethod: string } } }
-      ).data.uploadDocument;
+      const { presignedUrl, usePostMethod } = response.data.uploadDocument;
+      const usePost = usePostMethod?.toLowerCase() === 'true';
 
-      if (!usePostMethod) {
+      if (!usePost) {
         throw new Error('Server returned PUT method which is not supported');
       }
 

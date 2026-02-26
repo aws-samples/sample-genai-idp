@@ -157,6 +157,7 @@ const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2
       }
 
       // Filter out null/undefined documents to prevent downstream errors
+      // GqlDocument -> Document normalization (e.g. ExpiresAfter number->string) happens in map-document-attributes.ts
       const documentValues = getDocumentResolutions
         .filter((r) => r.status === 'fulfilled')
         .map((r) => (r as PromiseFulfilledResult<GetDocumentResolved>).value?.data?.getDocument)

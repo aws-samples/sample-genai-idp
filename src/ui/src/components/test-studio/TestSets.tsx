@@ -28,9 +28,6 @@ import {
   validateTestFileName,
 } from '../../graphql/generated';
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type GqlResult = { data: Record<string, any> };
-
 const client = generateClient();
 
 // Constants
@@ -44,12 +41,12 @@ const BUCKET_OPTIONS: SelectProps.Option[] = [
 interface TestSetItem {
   id: string;
   name: string;
-  description?: string;
+  description?: string | null;
   filePattern?: string | null;
-  fileCount: number | null;
-  status: string;
+  fileCount?: number | null;
+  status?: string | null;
   createdAt: string;
-  error?: string;
+  error?: string | null;
 }
 
 const TestSets = (): React.JSX.Element => {
@@ -81,7 +78,7 @@ const TestSets = (): React.JSX.Element => {
   const loadTestSets = async () => {
     try {
       console.log('TestSets: Loading test sets...');
-      const result = (await client.graphql({ query: getTestSets })) as GqlResult;
+      const result = await client.graphql({ query: getTestSets });
       console.log('TestSets: GraphQL result:', result);
       const backendTestSets = result.data.getTestSets || [];
 
@@ -157,13 +154,13 @@ const TestSets = (): React.JSX.Element => {
 
     setLoading(true);
     try {
-      const result = (await client.graphql({
+      const result = await client.graphql({
         query: listBucketFiles,
         variables: {
           bucketType: selectedBucket.value,
           filePattern: filePattern.trim(),
         },
-      })) as GqlResult;
+      });
 
       const files = result.data.listBucketFiles || [];
       setMatchingFiles(files);
@@ -206,10 +203,10 @@ const TestSets = (): React.JSX.Element => {
 
     // 2. Backend validation using validateTestFileName
     try {
-      const validationResult = (await client.graphql({
+      const validationResult = await client.graphql({
         query: validateTestFileName,
         variables: { fileName: newTestSetName.trim() },
-      })) as GqlResult;
+      });
 
       const validation = validationResult.data.validateTestFileName;
       if (validation && validation.exists) {
@@ -234,7 +231,7 @@ const TestSets = (): React.JSX.Element => {
 
     setLoading(true);
     try {
-      const result = (await client.graphql({
+      const result = await client.graphql({
         query: addTestSet,
         variables: {
           name: newTestSetName.trim(),
@@ -243,7 +240,7 @@ const TestSets = (): React.JSX.Element => {
           bucketType: selectedBucket.value,
           fileCount,
         },
-      })) as GqlResult;
+      });
 
       console.log('GraphQL result:', result);
       const newTestSet = result.data.addTestSet;
@@ -302,10 +299,10 @@ const TestSets = (): React.JSX.Element => {
     }
 
     try {
-      const validationResult = (await client.graphql({
+      const validationResult = await client.graphql({
         query: validateTestFileName,
         variables: { fileName: newTestSetName.trim() },
-      })) as GqlResult;
+      });
 
       const validation = validationResult.data.validateTestFileName;
       if (validation && validation.exists) {
@@ -335,7 +332,7 @@ const TestSets = (): React.JSX.Element => {
 
     setLoading(true);
     try {
-      const result = (await client.graphql({
+      const result = await client.graphql({
         query: addTestSetFromUpload,
         variables: {
           input: {
@@ -344,7 +341,7 @@ const TestSets = (): React.JSX.Element => {
             description: newTestSetDescription.trim(),
           },
         },
-      })) as GqlResult;
+      });
 
       const response = result.data.addTestSetFromUpload;
 
@@ -417,7 +414,7 @@ const TestSets = (): React.JSX.Element => {
     setWarningMessage('');
     setSuccessMessage('');
     try {
-      const result = (await client.graphql({ query: getTestSets })) as GqlResult;
+      const result = await client.graphql({ query: getTestSets });
       setTestSets(result.data.getTestSets || []);
     } catch (err) {
       console.error('Error refreshing test sets:', err);
@@ -902,10 +899,10 @@ const TestSets = (): React.JSX.Element => {
 
                   // Check if test set already exists
                   try {
-                    const validationResult = (await client.graphql({
+                    const validationResult = await client.graphql({
                       query: validateTestFileName,
                       variables: { fileName },
-                    })) as GqlResult;
+                    });
 
                     const validation = validationResult.data.validateTestFileName;
                     if (validation && validation.exists) {

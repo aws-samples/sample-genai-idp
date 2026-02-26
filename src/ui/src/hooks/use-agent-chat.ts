@@ -13,6 +13,8 @@ const client = generateClient();
 
 interface AgentChatConfig {
   agentType: string;
+  // TODO: mutation/subscription are typed as string, losing branded GraphQL type info.
+  // This is a known tradeoff of the dynamic config pattern - the default config always wins.
   mutation: string;
   subscription: string;
   method: string;
@@ -917,8 +919,9 @@ const useAgentChat = (config: Partial<AgentChatConfig> = {}): UseAgentChatReturn
         const response = await client.graphql({
           query: getChatMessages,
           variables: { sessionId: targetSessionId },
-        } as unknown as Parameters<typeof client.graphql>[0]);
-        messagesToLoad = (response as unknown as { data: { getChatMessages: ChatMessage[] } })?.data?.getChatMessages || [];
+        });
+        // getChatMessages returns partial shape (no `id` field) - normalized in formatting below
+        messagesToLoad = (response.data.getChatMessages as unknown as ChatMessage[]) ?? [];
       }
 
       // Convert messages to the format expected by the UI

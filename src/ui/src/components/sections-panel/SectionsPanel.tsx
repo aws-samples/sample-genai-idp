@@ -199,14 +199,14 @@ const ActionsCell = ({
         variables: { s3Uri: fileUri },
       });
 
-      const result = (response as unknown as Record<string, Record<string, Record<string, unknown>>>).data.getFileContents;
+      const result = response.data.getFileContents;
 
-      if (result.isBinary) {
+      if (result?.isBinary) {
         alert('This file contains binary content that cannot be downloaded');
         return;
       }
 
-      const content = result.content;
+      const content = result?.content;
 
       // Create blob and download
       const blob = new Blob([content as string], { type: 'application/json' });
@@ -782,7 +782,7 @@ const SectionsPanel = ({ sections, pages, documentItem, mergedConfig, onDocument
       logger.info('All sections review skipped successfully', result);
 
       // Update document state immediately with mutation response
-      const updatedData = (result as unknown as Record<string, Record<string, Record<string, unknown>>>).data?.skipAllSectionsReview;
+      const updatedData = result.data.skipAllSectionsReview;
       if (updatedData && onDocumentUpdate) {
         // Parse HITLReviewHistory from AWSJSON using typed parser
         const reviewHistory = parseHITLReviewHistory(updatedData.HITLReviewHistory as string);
@@ -1161,12 +1161,12 @@ const SectionsPanel = ({ sections, pages, documentItem, mergedConfig, onDocument
             modifiedSections: allChanges,
           },
         }),
-        new Promise((_, reject) => {
+        new Promise<never>((_, reject) => {
           setTimeout(() => reject(new Error('Request timed out after 30 seconds')), 30000);
         }),
       ]);
 
-      const response = (result as unknown as Record<string, Record<string, Record<string, unknown>>>).data?.processChanges;
+      const response = result.data.processChanges;
 
       if (!response?.success) {
         throw new Error((response?.message as string) || 'Failed to process changes - no response received');

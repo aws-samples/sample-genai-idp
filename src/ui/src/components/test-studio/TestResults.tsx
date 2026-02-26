@@ -38,9 +38,6 @@ import {
   parseTestRunConfig,
 } from '../../graphql/awsjson-parsers';
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type GqlResult = { data: Record<string, any> };
-
 const client = generateClient();
 
 interface ComprehensiveBreakdownProps {
@@ -422,9 +419,9 @@ const TestResults = ({ testRunId, setSelectedTestRunId }: TestResultsProps): Rea
     if (!results?.testSetId) return;
 
     try {
-      const testSetsResult = (await client.graphql({
+      const testSetsResult = await client.graphql({
         query: getTestSets,
-      })) as GqlResult;
+      });
 
       const testSets = testSetsResult.data.getTestSets || [];
       const testSet = testSets.find((ts) => ts.id === results.testSetId);
@@ -501,10 +498,10 @@ const TestResults = ({ testRunId, setSelectedTestRunId }: TestResultsProps): Rea
 
             if (isCancelled) return;
 
-            result = (await client.graphql({
+            result = await client.graphql({
               query: getTestRun,
               variables: { testRunId },
-            })) as GqlResult;
+            });
 
             if (isCancelled) return;
 
@@ -764,10 +761,10 @@ const TestResults = ({ testRunId, setSelectedTestRunId }: TestResultsProps): Rea
 
       console.log('About to call GraphQL with input:', input);
 
-      const result = (await client.graphql({
+      const result = await client.graphql({
         query: startTestRun,
         variables: { input },
-      })) as GqlResult;
+      });
 
       console.log('GraphQL call completed, result:', result);
 

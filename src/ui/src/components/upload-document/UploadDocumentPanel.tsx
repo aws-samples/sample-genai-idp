@@ -110,13 +110,10 @@ const UploadDocumentPanel = (): React.JSX.Element => {
             },
           });
 
-          const { presignedUrl, objectKey, usePostMethod } = (response as { data: Record<string, unknown> }).data.uploadDocument as {
-            presignedUrl: string;
-            objectKey: string;
-            usePostMethod: boolean;
-          };
+          const { presignedUrl, objectKey, usePostMethod } = response.data.uploadDocument;
+          const usePost = usePostMethod?.toLowerCase() === 'true';
 
-          if (!usePostMethod) {
+          if (!usePost) {
             throw new Error('Server returned PUT method which is not supported. Please update your backend code.');
           }
 
