@@ -1768,6 +1768,9 @@ STDERR:
                 "nested/bedrockkb/src",
                 "nested/bedrockkb/template.yaml",
             ],
+            "nested/alb-hosting": [
+                "nested/alb-hosting/template.yaml",
+            ],
             # Unified pattern (combines BDA + Pipeline)
             "patterns/unified": [
                 LIB_DEPENDENCY,

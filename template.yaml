@@ -312,13 +312,63 @@ Parameters:
         3653,
       ]
 
+  WebUIHosting:
+    Type: String
+    Default: CloudFront
+    AllowedValues:
+      - CloudFront
+      - ALB
+    Description: >-
+      Frontend hosting method. Use CloudFront for public/standard deployments.
+      Use ALB for GovCloud or private network deployments that require
+      VPC-based hosting.
+
+  ALBVpcId:
+    Type: String
+    Default: ""
+    Description: >-
+      (Required when WebUIHosting=ALB) VPC ID for the ALB and S3 VPC endpoint.
+
+  ALBSubnetIds:
+    Type: CommaDelimitedList
+    Default: ""
+    Description: >-
+      (Required when WebUIHosting=ALB) Comma-separated subnet IDs for the ALB
+      (minimum 2 subnets in different AZs).
+
+  ALBCertificateArn:
+    Type: String
+    Default: ""
+    Description: >-
+      (Required when WebUIHosting=ALB) ACM certificate ARN for the ALB HTTPS
+      listener. Can be ACM-issued or imported (including self-signed). Use
+      scripts/generate_self_signed_cert.sh for demo/testing.
+
+  ALBScheme:
+    Type: String
+    Default: internal
+    AllowedValues:
+      - internal
+      - internet-facing
+    Description: >-
+      (ALB hosting only) ALB scheme. Use 'internal' for private network access,
+      'internet-facing' for public access.
+
+  ALBAllowedCIDRs:
+    Type: String
+    Default: ""
+    Description: >-
+      (ALB hosting only) Comma-separated CIDR ranges allowed to access the ALB.
+      Leave empty to automatically use the VPC CIDR range (recommended for
+      internal ALBs). Specify explicit CIDRs to override.
+
   CloudFrontPriceClass:
     Type: String
     Default: PriceClass_100
     Description: >-
-      Specify the CloudFront price class. See https://aws.amazon.com/cloudfront/pricing/
-      for a
-      description of each price class.
+      (CloudFront hosting only) Specify the CloudFront price class. See
+      https://aws.amazon.com/cloudfront/pricing/ for a description of each
+      price class.
     AllowedValues:
       - PriceClass_100
       - PriceClass_200
@@ -376,6 +426,8 @@ Conditions:
   IsS3VectorsVectorStore: !Equals [ !Ref KnowledgeBaseVectorStore, "S3_VECTORS" ]
   CreateAgentCoreLambda: !Equals [ !Ref EnableMCP, "true" ]
   CreateExternalAppClient: !Equals [ !Ref EnableMCP, "true" ]
+  UseCloudFrontHosting: !Equals [ !Ref WebUIHosting, "CloudFront" ]
+  UseALBHosting: !Equals [ !Ref WebUIHosting, "ALB" ]
 
 Metadata:
   cfn-lint:
@@ -430,6 +482,20 @@ Metadata:
         Parameters:
           - EnableMCP
       - Label:
+          default: "Web UI Hosting"
+        Parameters:
+          - WebUIHosting
+          - CloudFrontPriceClass
+          - CloudFrontAllowedGeos
+      - Label:
+          default: "ALB Hosting (when WebUIHosting=ALB)"
+        Parameters:
+          - ALBVpcId
+          - ALBSubnetIds
+          - ALBCertificateArn
+          - ALBScheme
+          - ALBAllowedCIDRs
+      - Label:
           default: "General Configuration"
         Parameters:
           - MaxConcurrentWorkflows
@@ -438,8 +504,6 @@ Metadata:
           - ExecutionTimeThresholdMs
           - LogLevel
           - LogRetentionDays
-          - CloudFrontPriceClass
-          - CloudFrontAllowedGeos
 
     ParameterLabels:
       AdminEmail:
@@ -490,6 +554,18 @@ Metadata:
         default: "WAF Allowed IPv4 Ranges"
       EnableMCP:
         default: "Enable MCP Integration"
+      WebUIHosting:
+        default: "Web UI Hosting Method"
+      ALBVpcId:
+        default: "ALB - VPC ID"
+      ALBSubnetIds:
+        default: "ALB - Subnet IDs"
+      ALBCertificateArn:
+        default: "ALB - ACM Certificate ARN"
+      ALBScheme:
+        default: "ALB - Scheme (internal/internet-facing)"
+      ALBAllowedCIDRs:
+        default: "ALB - Allowed CIDR Ranges"
 
 Resources:
   # Custom resource to enforce max length of StackName - prevent downstream failures
@@ -1545,6 +1621,32 @@ Resources:
             Condition:
               StringEquals:
                 "AWS:SourceAccount": !Ref "AWS::AccountId"
+          - !If
+            - UseALBHosting
+            - Sid: AllowALBAccessLogs
+              Effect: Allow
+              Principal:
+                Service: !Sub "logdelivery.elasticloadbalancing.${AWS::URLSuffix}"
+              Action:
+                - s3:PutObject
+              Resource: !Sub "${LoggingBucket.Arn}/alb-access-logs/*"
+              Condition:
+                StringEquals:
+                  "aws:SourceAccount": !Ref "AWS::AccountId"
+            - !Ref AWS::NoValue
+          - !If
+            - UseALBHosting
+            - Sid: AllowALBAccessLogsBucketACL
+              Effect: Allow
+              Principal:
+                Service: !Sub "logdelivery.elasticloadbalancing.${AWS::URLSuffix}"
+              Action:
+                - s3:GetBucketAcl
+              Resource: !Sub "${LoggingBucket.Arn}"
+              Condition:
+                StringEquals:
+                  "aws:SourceAccount": !Ref "AWS::AccountId"
+            - !Ref AWS::NoValue
           - Sid: EnforceSSLOnly
             Effect: Deny
             Principal: "*"
@@ -1576,7 +1678,10 @@ Resources:
               - PUT
               - POST
             AllowedOrigins:
-              - !Sub "https://${CloudFrontDistribution.DomainName}"
+              - !If
+                - UseCloudFrontHosting
+                - !Sub "https://${CloudFrontDistribution.DomainName}"
+                - !GetAtt ALBHostingStack.Outputs.WebUIURL
               # For local development only
               - "http://localhost:3000"
             ExposedHeaders:
@@ -1645,7 +1750,10 @@ Resources:
               - PUT
               - POST
             AllowedOrigins:
-              - !Sub "https://${CloudFrontDistribution.DomainName}"
+              - !If
+                - UseCloudFrontHosting
+                - !Sub "https://${CloudFrontDistribution.DomainName}"
+                - !GetAtt ALBHostingStack.Outputs.WebUIURL
               # For local development only
               - "http://localhost:3000"
             ExposedHeaders:
@@ -1710,7 +1818,10 @@ Resources:
               - PUT
               - POST
             AllowedOrigins:
-              - !Sub "https://${CloudFrontDistribution.DomainName}"
+              - !If
+                - UseCloudFrontHosting
+                - !Sub "https://${CloudFrontDistribution.DomainName}"
+                - !GetAtt ALBHostingStack.Outputs.WebUIURL
               # For local development only
               - "http://localhost:3000"
             ExposedHeaders:
@@ -2156,7 +2267,10 @@ Resources:
               - PUT
               - POST
             AllowedOrigins:
-              - !Sub "https://${CloudFrontDistribution.DomainName}"
+              - !If
+                - UseCloudFrontHosting
+                - !Sub "https://${CloudFrontDistribution.DomainName}"
+                - !GetAtt ALBHostingStack.Outputs.WebUIURL
               # For local development only
               - "http://localhost:3000"
             ExposedHeaders:
@@ -2268,7 +2382,10 @@ Resources:
               - PUT
               - POST
             AllowedOrigins:
-              - !Sub "https://${CloudFrontDistribution.DomainName}"
+              - !If
+                - UseCloudFrontHosting
+                - !Sub "https://${CloudFrontDistribution.DomainName}"
+                - !GetAtt ALBHostingStack.Outputs.WebUIURL
               # For local development only
               - "http://localhost:3000"
             ExposedHeaders:
@@ -2334,7 +2451,10 @@ Resources:
               - PUT
               - POST
             AllowedOrigins:
-              - !Sub "https://${CloudFrontDistribution.DomainName}"
+              - !If
+                - UseCloudFrontHosting
+                - !Sub "https://${CloudFrontDistribution.DomainName}"
+                - !GetAtt ALBHostingStack.Outputs.WebUIURL
               # For local development only
               - "http://localhost:3000"
             ExposedHeaders:
@@ -2785,7 +2905,10 @@ Resources:
               - PUT
               - POST
             AllowedOrigins:
-              - !Sub "https://${CloudFrontDistribution.DomainName}"
+              - !If
+                - UseCloudFrontHosting
+                - !Sub "https://${CloudFrontDistribution.DomainName}"
+                - !GetAtt ALBHostingStack.Outputs.WebUIURL
               # For local development only
               - "http://localhost:3000"
             ExposedHeaders:
@@ -2850,9 +2973,11 @@ Resources:
         RestrictPublicBuckets: true
       VersioningConfiguration:
         Status: Enabled
-      WebsiteConfiguration:
-        IndexDocument: index.html
-        ErrorDocument: index.html
+      WebsiteConfiguration: !If
+        - UseCloudFrontHosting
+        - IndexDocument: index.html
+          ErrorDocument: index.html
+        - !Ref AWS::NoValue
       LoggingConfiguration:
         DestinationBucketName: !Ref LoggingBucket
         LogFilePrefix: webapp-bucket-logs/
@@ -2864,11 +2989,24 @@ Resources:
       PolicyDocument:
         Version: 2012-10-17
         Statement:
-          - Effect: Allow
-            Principal:
-              CanonicalUser: !GetAtt CloudFrontOriginAccessIdentity.S3CanonicalUserId
-            Action: s3:GetObject
-            Resource: !Sub "${WebUIBucket.Arn}/*"
+          - !If
+            - UseCloudFrontHosting
+            - Effect: Allow
+              Principal:
+                CanonicalUser: !GetAtt CloudFrontOriginAccessIdentity.S3CanonicalUserId
+              Action: s3:GetObject
+              Resource: !Sub "${WebUIBucket.Arn}/*"
+            - !Ref AWS::NoValue
+          - !If
+            - UseALBHosting
+            - Effect: Allow
+              Principal: "*"
+              Action: s3:GetObject
+              Resource: !Sub "${WebUIBucket.Arn}/*"
+              Condition:
+                StringEquals:
+                  "aws:sourceVpce": !GetAtt ALBHostingStack.Outputs.S3VPCEndpointId
+            - !Ref AWS::NoValue
           - Effect: "Deny"
             Action:
               - "s3:*"
@@ -5288,7 +5426,10 @@ Resources:
         - profile
       CallbackURLs:
         - !Sub "https://${GetDomain.OutputString}.auth.${AWS::Region}.amazoncognito.com"
-        - !Sub "https://${CloudFrontDistribution.DomainName}/"
+        - !If
+          - UseCloudFrontHosting
+          - !Sub "https://${CloudFrontDistribution.DomainName}/"
+          - !Sub "${ALBHostingStack.Outputs.WebUIURL}/"
         - !Sub "https://${AWS::Region}.quicksight.aws.amazon.com/sn/oauthcallback"
         - https://us-east-1.quicksight.aws.amazon.com/sn/oauthcallback
         - https://us-west-2.quicksight.aws.amazon.com/sn/oauthcallback
@@ -5296,7 +5437,10 @@ Resources:
         - https://ap-southeast-2.quicksight.aws.amazon.com/sn/oauthcallback
       LogoutURLs:
         - !Sub "https://${GetDomain.OutputString}.auth.${AWS::Region}.amazoncognito.com"
-        - !Sub "https://${CloudFrontDistribution.DomainName}/"
+        - !If
+          - UseCloudFrontHosting
+          - !Sub "https://${CloudFrontDistribution.DomainName}/"
+          - !Sub "${ALBHostingStack.Outputs.WebUIURL}/"
         - !Sub "https://${AWS::Region}.quicksight.aws.amazon.com/sn/oauthcallback"
         - https://us-east-1.quicksight.aws.amazon.com/sn/oauthcallback
         - https://us-west-2.quicksight.aws.amazon.com/sn/oauthcallback
@@ -5323,16 +5467,21 @@ Resources:
           - true
         InviteMessageTemplate:
           EmailSubject: Welcome to GenAI-IDP!
-          EmailMessage: !Sub |-
-            <p>Hello {username},</p>
-            <p>Welcome to the AWS GenAIIDP Solution! Your temporary password is: <strong>{####}</strong></p>
-            <p>When the CloudFormation stack is COMPLETE, use the link below to log in and set your permanent password.
-            <p>     https://${CloudFrontDistribution.DomainName}/
-            <p>
-            <p>Thanks,</p>
-            <p>AWS GenAIIDP Team</p>
-            <p>
-            <p><em>Stack: ${AWS::StackName}, v<VERSION>, <BUILD_DATE_TIME></em>
+          EmailMessage: !Sub
+            - |-
+              <p>Hello {username},</p>
+              <p>Welcome to the AWS GenAIIDP Solution! Your temporary password is: <strong>{####}</strong></p>
+              <p>When the CloudFormation stack is COMPLETE, use the link below to log in and set your permanent password.
+              <p>     ${WebUIURL}
+              <p>
+              <p>Thanks,</p>
+              <p>AWS GenAIIDP Team</p>
+              <p>
+              <p><em>Stack: ${AWS::StackName}, v<VERSION>, <BUILD_DATE_TIME></em>
+            - WebUIURL: !If
+                - UseCloudFrontHosting
+                - !Sub "https://${CloudFrontDistribution.DomainName}/"
+                - !GetAtt ALBHostingStack.Outputs.WebUIURL
       AutoVerifiedAttributes:
         - email
       EmailConfiguration:
@@ -5375,7 +5524,10 @@ Resources:
         - phone
         - profile
       CallbackURLs:
-        - !Sub "https://${CloudFrontDistribution.DomainName}"
+        - !If
+          - UseCloudFrontHosting
+          - !Sub "https://${CloudFrontDistribution.DomainName}"
+          - !GetAtt ALBHostingStack.Outputs.WebUIURL
       AccessTokenValidity: 1
       EnableTokenRevocation: true
       ExplicitAuthFlows:
@@ -6402,6 +6554,7 @@ Resources:
 
   CloudFrontOriginAccessIdentity:
     Type: AWS::CloudFront::CloudFrontOriginAccessIdentity
+    Condition: UseCloudFrontHosting
     Properties:
       CloudFrontOriginAccessIdentityConfig:
         Comment: !Sub "${AWS::StackName} CloudFront OAI for ${WebUIBucket}"
@@ -6409,6 +6562,7 @@ Resources:
   # Define a custom response headers policy for security headers
   SecurityHeadersPolicy:
     Type: AWS::CloudFront::ResponseHeadersPolicy
+    Condition: UseCloudFrontHosting
     Properties:
       ResponseHeadersPolicyConfig:
         Name: !Sub "${AWS::StackName}-security-headers-policy"
@@ -6433,6 +6587,7 @@ Resources:
 
   CloudFrontDistribution:
     Type: AWS::CloudFront::Distribution
+    Condition: UseCloudFrontHosting
     Metadata:
       cfn_nag:
         rules_to_suppress:
@@ -6494,6 +6649,27 @@ Resources:
           - GeoRestriction:
               RestrictionType: none
 
+  ##########################################################################
+  # ALB Hosting (alternative to CloudFront for GovCloud / private networks)
+  ##########################################################################
+
+  ALBHostingStack:
+    Type: AWS::CloudFormation::Stack
+    Condition: UseALBHosting
+    Properties:
+      TemplateURL: ./nested/alb-hosting/.aws-sam/packaged.yaml
+      Parameters:
+        VpcId: !Ref ALBVpcId
+        SubnetIds: !Join [",", !Ref ALBSubnetIds]
+        CertificateArn: !Ref ALBCertificateArn
+        ALBScheme: !Ref ALBScheme
+        ALBAllowedCIDRs: !Ref ALBAllowedCIDRs
+        WebUIBucketName: !Ref WebUIBucket
+        WebUIBucketArn: !GetAtt WebUIBucket.Arn
+        StackName: !Ref AWS::StackName
+        PermissionsBoundaryArn: !Ref PermissionsBoundaryArn
+        LoggingBucketName: !Ref LoggingBucket
+
   UICodeBuildServiceRole:
     Type: AWS::IAM::Role
     Properties:
@@ -6541,11 +6717,14 @@ Resources:
                   - s3:DeleteObject
                 Resource:
                   - !Sub "arn:${AWS::Partition}:s3:::${WebUIBucket}/*"
-              - Effect: Allow
-                Action:
-                  - cloudfront:CreateInvalidation
-                Resource:
-                  - !Sub "arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${CloudFrontDistribution}"
+              - !If
+                - UseCloudFrontHosting
+                - Effect: Allow
+                  Action:
+                    - cloudfront:CreateInvalidation
+                  Resource:
+                    - !Sub "arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${CloudFrontDistribution}"
+                - !Ref AWS::NoValue
 
   UICodeBuildProject:
     Type: AWS::CodeBuild::Project
@@ -6589,10 +6768,13 @@ Resources:
                 - echo Copying Web UI
                 - find build -ls
                 - aws s3 cp --recursive build s3://${WEBAPP_BUCKET}/
-                - echo Invalidating CloudFront Distribution
-                - >
-                  aws cloudfront create-invalidation
-                  --distribution-id "$CLOUDFRONT_DISTRIBUTION_ID" --paths '/*'
+                - |
+                  if [ "$WEB_UI_HOSTING" = "CloudFront" ]; then
+                    echo "Invalidating CloudFront Distribution"
+                    aws cloudfront create-invalidation --distribution-id "$CLOUDFRONT_DISTRIBUTION_ID" --paths '/*'
+                  else
+                    echo "ALB hosting mode - skipping CloudFront invalidation"
+                  fi
           artifacts:
             files:
               - build.json
@@ -6610,8 +6792,13 @@ Resources:
             Value: !Sub "<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>"
           - Name: WEBAPP_BUCKET
             Value: !Ref WebUIBucket
+          - Name: WEB_UI_HOSTING
+            Value: !Ref WebUIHosting
           - Name: CLOUDFRONT_DISTRIBUTION_ID
-            Value: !Ref CloudFrontDistribution
+            Value: !If
+              - UseCloudFrontHosting
+              - !Ref CloudFrontDistribution
+              - ""
             # These VITE variables are used by the web ui in the
             # aws-exports.js Amplify config. The values are embedded in the
             # code at build time.
@@ -6633,7 +6820,10 @@ Resources:
               - "false"
               - "true"
           - Name: VITE_CLOUDFRONT_DOMAIN
-            Value: !Sub "https://${CloudFrontDistribution.DomainName}/"
+            Value: !If
+              - UseCloudFrontHosting
+              - !Sub "https://${CloudFrontDistribution.DomainName}/"
+              - !Sub "${ALBHostingStack.Outputs.WebUIURL}/"
           - Name: VITE_TEST_SET_BUCKET_NAME
             Value: !Ref TestSetBucket
           - Name: VITE_INPUT_BUCKET_NAME
@@ -7059,7 +7249,10 @@ Outputs:
     Value: !GetAtt CustomerManagedEncryptionKey.Arn
   ApplicationWebURL:
     Description: Application Web URL
-    Value: !Sub "https://${CloudFrontDistribution.DomainName}/"
+    Value: !If
+      - UseCloudFrontHosting
+      - !Sub "https://${CloudFrontDistribution.DomainName}/"
+      - !GetAtt ALBHostingStack.Outputs.WebUIURL
   S3InstallBucket:
     Description: Install S3 bucket name
     Value: !Ref InputBucket
