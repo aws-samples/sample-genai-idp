@@ -1,1 +1,0 @@
-../../lib/idp_common_pkg[evaluation,docs_service]  # Evaluation module and document service with dependencies

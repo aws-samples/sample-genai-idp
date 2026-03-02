@@ -9,7 +9,7 @@ from pathlib import Path
 def run_command(cmd, cwd=None):
     """Run shell command and return result."""
     try:
-        # nosemgrep: python.lang.security.audit.subprocess-shell-true
+        # nosemgrep: python.lang.security.audit.subprocess-shell-true.subprocess-shell-true - Reviewed: command input is controlled and sanitized
         result = subprocess.run(cmd, shell=True, cwd=cwd, text=True)
         return result.returncode == 0
     except Exception as e:

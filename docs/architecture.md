@@ -14,7 +14,7 @@ SPDX-License-Identifier: MIT-0
 4. Step Functions workflow runs the steps defined in the selected pattern to process the document and generate output in the Output S3 bucket
 5. Workflow completion events update tracking and metrics
 
-![Architecture Diagram](../images/IDP.drawio.png)
+![Architecture Diagram](../images/IDP.UnifiedPatterns.drawio.png)
 
 ## Components
 
@@ -87,68 +87,30 @@ Each pattern is implemented as a nested stack that contains pattern-specific res
 
 For detailed information about configuration capabilities, see [configuration.md](./configuration.md).
 
-## Current Patterns
+## Unified Pattern Architecture
 
-### Pattern 1: Bedrock Data Automation (BDA)
-Packet or Media processing with Bedrock Data Automation (BDA)
+The solution uses a **Unified Pattern** that combines both BDA and pipeline processing modes into a single deployment. The `use_bda` configuration flag (set via the UI) controls which processing path is used at runtime:
 
-![Pattern 1 Architecture](../images/IDP-Pattern1-BDA.drawio.png)
-*Pattern 1 uses AWS Bedrock Data Automation for end-to-end document processing, including OCR, classification, and extraction.*
+![Unified Architecture](../images/IDP.UnifiedPatterns.drawio.png)
 
-For detailed information about Pattern 1, see [pattern-1.md](./pattern-1.md).
+- **Pipeline mode** (`use_bda: false`, default) — OCR → Classification → Extraction → Assessment → Rule Validation → Summarization → Evaluation
+- **BDA mode** (`use_bda: true`) — BDA Invoke → BDA Process Results → Rule Validation → Summarization → Evaluation
 
-### Pattern 2: Textract + Bedrock
-OCR → Bedrock Classification (page-level or holistic) → Bedrock Extraction
+### Shared Processing Steps
 
-![Pattern 2 Architecture](../images/IDP-Pattern2-Bedrock.drawio.png)
-*Pattern 2 combines Amazon Textract for OCR and AWS Bedrock for classification and extraction tasks, supporting both page-level and holistic classification methods.*
+Both modes share a common tail in the workflow:
+- **HITL Check** — Routes documents to human review if confidence is below threshold
+- **Rule Validation** — Applies configurable business rules (when enabled)
+- **Summarization** — Generates document summaries using Bedrock LLM
+- **Evaluation** — Compares results against ground truth baselines (when available)
 
-For detailed information about Pattern 2, see [pattern-2.md](./pattern-2.md). 
-
-This pattern also supports few-shot examples for classification and extraction. For details on implementing few-shot examples, see [few-shot-examples.md](./few-shot-examples.md).
-
-### Pattern 3: Textract + UDOP + Bedrock
-OCR → UDOP Classification (SageMaker) → Bedrock Extraction
-
-![Pattern 3 Architecture](../images/IDP-Pattern3-UDOP.drawio.png)
-*Pattern 3 uses Amazon Textract for OCR, a UDOP model deployed on Amazon SageMaker for classification, and AWS Bedrock for extraction tasks.*
-
-For detailed information about Pattern 3, see [pattern-3.md](./pattern-3.md).
-
-## Pattern Selection and Deployment
+## Deployment
 
 For detailed information on deploying this solution, see [deployment.md](./deployment.md).
 
-The pattern is selected at deployment time using the `IDPPattern` parameter:
+The unified pattern is deployed as a single nested stack (`PATTERNSTACK`) containing all 12 Lambda functions for both processing modes. There is no pattern selector parameter — the processing mode is controlled entirely by the `use_bda` configuration flag set via the UI.
 
-```yaml
-IDPPattern:
-  Type: String
-  Default: Pattern1 - Packet or Media processing with Bedrock Data Automation (BDA)
-  AllowedValues:
-    - Pattern1 - Packet or Media processing with Bedrock Data Automation (BDA)
-    - Pattern2 - Packet processing with Textract and Bedrock
-    - Pattern3 - Packet processing with Textract, SageMaker(UDOP), and Bedrock
-  Description: Choose from built-in IDP workflow patterns
-```
-
-When deployed, the main stack uses conditions to create the appropriate nested stack:
-
-```yaml
-Conditions:
-  IsPattern1: !Equals [!Ref IDPPattern, "Pattern1"]
-  IsPattern2: !Equals [!Ref IDPPattern, "Pattern2"]
-  IsPattern3: !Equals [!Ref IDPPattern, "Pattern3"]
-
-Resources:
-  PATTERN1STACK:
-    Type: AWS::CloudFormation::Stack
-    Condition: IsPattern1
-    Properties:
-      TemplateURL: ./patterns/pattern-1/.aws-sam/packaged.yaml
-      Parameters:
-        # Pattern-specific parameters...
-```
+> **Note**: The separate Pattern 1 and Pattern 2 deployments have been deprecated in favor of this unified architecture. See [pattern-1.md](./pattern-1.md) and [pattern-2.md](./pattern-2.md) for historical reference.
 
 ## Integrated Monitoring
 
@@ -169,18 +131,6 @@ The solution creates an integrated CloudWatch dashboard that combines metrics fr
 3. The `DashboardMerger` Lambda function combines these dashboards
 
 For detailed information about monitoring capabilities, see [monitoring.md](./monitoring.md).
-
-## Adding New Patterns
-
-To add a new processing pattern:
-
-1. Create a new directory under `patterns/`
-2. Implement the pattern-specific resources in a CloudFormation template
-3. Add the pattern to the `IDPPattern` parameter's allowed values
-4. Add pattern-specific parameters to the main template
-5. Create a new condition and nested stack resource for the pattern
-
-The new pattern will automatically inherit all the core infrastructure and monitoring capabilities while maintaining its own specific processing logic and metrics.
 
 ## Web UI Architecture
 

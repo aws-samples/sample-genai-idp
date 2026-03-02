@@ -716,9 +716,16 @@ const ConfigBuilder = ({
           return null; // Hide field if we can't resolve the dependency
         }
       } else {
-        // Normal dependency resolution
+        // Normal dependency resolution: first try sibling (same parent), then fall back to top-level
         const parentPath = currentPath.substring(0, currentPath.lastIndexOf('.'));
-        dependencyPath = parentPath.length > 0 ? `${parentPath}.${dependencyField}` : dependencyField;
+        const siblingPath = parentPath.length > 0 ? `${parentPath}.${dependencyField}` : dependencyField;
+        // Check if the sibling path resolves to a value; if not, try top-level
+        if (getValueAtPath(formValues, siblingPath) !== undefined) {
+          dependencyPath = siblingPath;
+        } else {
+          // Fall back to top-level field (e.g., use_bda is at root, not inside assessment)
+          dependencyPath = dependencyField;
+        }
       }
 
       // Get the current value of the dependency field
@@ -824,13 +831,15 @@ const ConfigBuilder = ({
     // For top-level objects with sectionLabel, we shouldn't add a container here
     // as it's already being added in renderTopLevelProperty
     if (property.sectionLabel && isTopLevel) {
-      return (
-        <SpaceBetween size="s">
-          {getSortedObjectProperties(property.properties).map(({ propKey, propSchema }) => {
-            return <ExtBox key={propKey}>{renderField(propKey, propSchema, fullPath)}</ExtBox>;
-          })}
-        </SpaceBetween>
-      );
+      // Pre-render fields and filter out nulls to avoid empty Box wrappers causing whitespace
+      const renderedFields = getSortedObjectProperties(property.properties)
+        .map(({ propKey, propSchema }) => {
+          const rendered = renderField(propKey, propSchema, fullPath);
+          return rendered ? <ExtBox key={propKey}>{rendered}</ExtBox> : null;
+        })
+        .filter(Boolean);
+
+      return <SpaceBetween size="s">{renderedFields}</SpaceBetween>;
     }
 
     // For nested objects with sectionLabel, use the same styling as list headers
@@ -1575,6 +1584,25 @@ const ConfigBuilder = ({
       `Rendering top level property: ${key}, type: ${property.type}, sectionLabel: ${property.sectionLabel}`, // nosemgrep: javascript.lang.security.audit.unsafe-formatstring.unsafe-formatstring - Debug logging with controlled internal data
       property,
     );
+
+    // Check top-level dependsOn before rendering (hides entire sections when dependency not met)
+    if (property.dependsOn) {
+      const depField = property.dependsOn.field;
+      const depValues = Array.isArray(property.dependsOn.values) ? property.dependsOn.values : [property.dependsOn.value];
+      const currentValue = getValueAtPath(formValues, depField);
+      // Handle boolean comparison: normalize string "true"/"false" to actual booleans
+      let normalizedValue = currentValue;
+      if (typeof currentValue === 'string' && (currentValue === 'true' || currentValue === 'false')) {
+        normalizedValue = currentValue === 'true';
+      }
+      const normalizedDepValues = depValues.map((v) => {
+        if (typeof v === 'string' && (v === 'true' || v === 'false')) return v === 'true';
+        return v;
+      });
+      if (!normalizedDepValues.includes(normalizedValue)) {
+        return null;
+      }
+    }
 
     // If property should have a section container, wrap it
     if (shouldUseContainer(key, property)) {

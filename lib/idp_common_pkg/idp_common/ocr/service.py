@@ -12,13 +12,14 @@ processing of multiple pages.
 from __future__ import annotations
 
 import concurrent.futures
+import io
 import logging
 import os
 import time
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import boto3
-import fitz  # PyMuPDF
+import pypdfium2 as pdfium
 from botocore.config import Config
 
 from idp_common import bedrock, image, s3, utils
@@ -381,76 +382,107 @@ class OcrService:
                         logger.error(f"{error_msg}\nStack trace:\n{stack_trace}")
                         document.errors.append(f"{error_msg} (see logs for full trace)")
             else:
-                # Process PDF/image documents using existing logic
-                pdf_document = fitz.open(stream=file_content, filetype=file_type)
-                num_pages = len(pdf_document)
-                document.num_pages = num_pages
+                # Process PDF/image documents
+                is_pdf = file_type == "pdf"
 
-                with concurrent.futures.ThreadPoolExecutor(
-                    max_workers=self.max_workers
-                ) as executor:
-                    # Pass original file content for image files
-                    original_content = file_content if not pdf_document.is_pdf else None
+                if is_pdf:
+                    # Phase 1: Render all page images SEQUENTIALLY
+                    # pypdfium2 (PDFium) is not thread-safe for concurrent access
+                    # to the same PdfDocument, so we render all pages first, then
+                    # process OCR in parallel (which is the I/O-bound bottleneck).
+                    pdf_document = pdfium.PdfDocument(file_content)
+                    num_pages = len(pdf_document)
+                    document.num_pages = num_pages
 
-                    future_to_page = {
-                        executor.submit(
-                            self._process_single_page,
-                            i,
-                            pdf_document,
-                            document.output_bucket,
-                            document.input_key,
-                            original_content,
-                        ): i
-                        for i in range(num_pages)
-                    }
+                    logger.info(
+                        f"Rendering {num_pages} page images sequentially (pypdfium2 is not thread-safe)"
+                    )
+                    page_images: Dict[int, bytes] = {}
+                    for i in range(num_pages):
+                        page = pdf_document[i]
+                        page_images[i] = self._extract_page_image(page, True, i + 1)
 
-                    # Start memory monitoring in background thread
-                    memory_monitor_shutdown = self._start_memory_monitoring()
-                    completed_pages = 0
+                    pdf_document.close()
+                    logger.info(f"Rendered {len(page_images)} page images")
 
-                    try:
-                        for future in concurrent.futures.as_completed(future_to_page):
-                            page_index = future_to_page[future]
-                            page_id = str(page_index + 1)
-                            try:
-                                ocr_result, page_metering = future.result()
+                    # Phase 2: Process OCR in PARALLEL (Textract/Bedrock API calls are I/O-bound)
+                    with concurrent.futures.ThreadPoolExecutor(
+                        max_workers=self.max_workers
+                    ) as executor:
+                        future_to_page = {
+                            executor.submit(
+                                self._process_page_with_image,
+                                i,
+                                page_images[i],
+                                document.output_bucket,
+                                document.input_key,
+                            ): i
+                            for i in range(num_pages)
+                        }
 
-                                # Create Page object and add to document
-                                document.pages[page_id] = Page(
-                                    page_id=page_id,
-                                    image_uri=ocr_result["image_uri"],
-                                    raw_text_uri=ocr_result["raw_text_uri"],
-                                    parsed_text_uri=ocr_result["parsed_text_uri"],
-                                    text_confidence_uri=ocr_result[
-                                        "text_confidence_uri"
-                                    ],
-                                )
+                        # Start memory monitoring in background thread
+                        memory_monitor_shutdown = self._start_memory_monitoring()
+                        completed_pages = 0
 
-                                # Merge metering data
-                                document.metering = utils.merge_metering_data(
-                                    document.metering, page_metering
-                                )
+                        try:
+                            for future in concurrent.futures.as_completed(
+                                future_to_page
+                            ):
+                                page_index = future_to_page[future]
+                                page_id = str(page_index + 1)
+                                try:
+                                    ocr_result, page_metering = future.result()
 
-                                completed_pages += 1
+                                    document.pages[page_id] = Page(
+                                        page_id=page_id,
+                                        image_uri=ocr_result["image_uri"],
+                                        raw_text_uri=ocr_result["raw_text_uri"],
+                                        parsed_text_uri=ocr_result["parsed_text_uri"],
+                                        text_confidence_uri=ocr_result[
+                                            "text_confidence_uri"
+                                        ],
+                                    )
 
-                            except Exception as e:
-                                import traceback
+                                    document.metering = utils.merge_metering_data(
+                                        document.metering, page_metering
+                                    )
+                                    completed_pages += 1
 
-                                error_msg = (
-                                    f"Error processing page {page_index + 1}: {str(e)}"
-                                )
-                                stack_trace = traceback.format_exc()
-                                logger.error(
-                                    f"{error_msg}\nStack trace:\n{stack_trace}"
-                                )
-                                document.errors.append(
-                                    f"{error_msg} (see logs for full trace)"
-                                )
-                    finally:
-                        # Stop memory monitoring
-                        memory_monitor_shutdown.set()
+                                except Exception as e:
+                                    import traceback
 
-                pdf_document.close()
+                                    error_msg = f"Error processing page {page_index + 1}: {str(e)}"
+                                    stack_trace = traceback.format_exc()
+                                    logger.error(
+                                        f"{error_msg}\nStack trace:\n{stack_trace}"
+                                    )
+                                    document.errors.append(
+                                        f"{error_msg} (see logs for full trace)"
+                                    )
+                        finally:
+                            memory_monitor_shutdown.set()
+
+                    # Free page images after OCR processing
+                    page_images.clear()
+
+                else:
+                    # Image files - single page, no threading needed
+                    document.num_pages = 1
+                    ocr_result, page_metering = self._process_image_file_direct(
+                        document.output_bucket,
+                        document.input_key,
+                        file_content,
+                    )
+                    document.pages["1"] = Page(
+                        page_id="1",
+                        image_uri=ocr_result["image_uri"],
+                        raw_text_uri=ocr_result["raw_text_uri"],
+                        parsed_text_uri=ocr_result["parsed_text_uri"],
+                        text_confidence_uri=ocr_result["text_confidence_uri"],
+                    )
+                    document.metering = utils.merge_metering_data(
+                        document.metering, page_metering
+                    )
 
             # Sort the pages dictionary by ascending page number
             logger.info(f"Sorting {len(document.pages)} pages by page number")
@@ -530,7 +562,8 @@ class OcrService:
     def _process_single_page(
         self,
         page_index: int,
-        pdf_document: fitz.Document,
+        pdf_document: Optional[pdfium.PdfDocument],
+        is_pdf: bool,
         output_bucket: str,
         prefix: str,
         original_file_content: Optional[bytes] = None,
@@ -540,7 +573,8 @@ class OcrService:
 
         Args:
             page_index: Zero-based index of the page
-            pdf_document: PyMuPDF document object
+            pdf_document: pypdfium2 document object (None for image files)
+            is_pdf: Whether the document is a PDF
             output_bucket: S3 bucket to store results
             prefix: S3 prefix for storing results
             original_file_content: Original file content for image files
@@ -549,11 +583,10 @@ class OcrService:
             Tuple of (page_result_dict, metering_data)
         """
         # Check if this is an image file (not a PDF)
-        # PyMuPDF loads images as single-page documents
-        if not pdf_document.is_pdf and page_index == 0:
+        if not is_pdf and page_index == 0:
             # This is an image file - process it directly
             return self._process_image_file_direct(
-                pdf_document, output_bucket, prefix, original_file_content
+                output_bucket, prefix, original_file_content
             )
 
         # Use the appropriate backend for PDFs
@@ -576,19 +609,17 @@ class OcrService:
 
     def _process_image_file_direct(
         self,
-        pdf_document: fitz.Document,
         output_bucket: str,
         prefix: str,
         original_file_content: Optional[bytes] = None,
     ) -> Tuple[Dict[str, str], Dict[str, Any]]:
         """
-        Process an image file directly without PyMuPDF conversion.
+        Process an image file directly.
 
         Args:
-            pdf_document: PyMuPDF document object (contains the image)
             output_bucket: S3 bucket to store results
             prefix: S3 prefix for storing results
-            original_file_content: Original file content to avoid PyMuPDF processing
+            original_file_content: Original file content bytes
 
         Returns:
             Tuple of (page_result_dict, metering_data)
@@ -596,7 +627,7 @@ class OcrService:
         t0 = time.time()
         page_id = 1
 
-        # If we have the original file content, use it directly to avoid PyMuPDF processing
+        # Use the original file content directly
         if original_file_content:
             import io
 
@@ -723,126 +754,11 @@ class OcrService:
                 logger.debug("No resize needed, using original image")
 
         else:
-            # Fallback to PyMuPDF processing if no original content provided
-            # Get the page (images are loaded as single-page documents)
-            page = pdf_document.load_page(0)
-
-            # Get the original image data from the page
-            # PyMuPDF stores the original image in the page's image list
-            img_list = page.get_images()
-
-            if img_list:
-                # Extract the original image
-                xref = img_list[0][0]  # Get the xref of the first image
-                pix = fitz.Pixmap(pdf_document, xref)
-
-                # Get original format info
-                img_data = pix.tobytes()
-                img_ext = pix.extension  # type: ignore[attr-defined]  # Get original extension (png, jpg, etc.)
-
-                # Determine content type
-                content_type_map = {
-                    "png": "image/png",
-                    "jpg": "image/jpeg",
-                    "jpeg": "image/jpeg",
-                    "gif": "image/gif",
-                    "bmp": "image/bmp",
-                    "tiff": "image/tiff",
-                    "tif": "image/tiff",
-                    "webp": "image/webp",
-                }
-                original_content_type = content_type_map.get(img_ext, "image/jpeg")
-
-                # Apply resize if configured
-                if self.resize_config and (
-                    self.resize_config.get("target_width")
-                    or self.resize_config.get("target_height")
-                ):
-                    target_width = self.resize_config.get("target_width")
-                    target_height = self.resize_config.get("target_height")
-
-                    # Only resize if dimensions are provided
-                    if target_width or target_height:
-                        # The resize_image function now preserves format
-                        img_data = image.resize_image(
-                            img_data, target_width, target_height
-                        )
-
-                        # Check if format changed after resize
-                        import io
-
-                        from PIL import Image as PILImage
-
-                        resized_img = PILImage.open(io.BytesIO(img_data))
-                        if resized_img.format and resized_img.format != img_ext.upper():
-                            # Format changed during resize
-                            new_format = resized_img.format.lower()
-                            img_ext = new_format if new_format != "jpeg" else "jpg"
-                            content_type = content_type_map.get(img_ext, "image/jpeg")
-                            logger.debug(
-                                f"Image format changed during resize to {img_ext}"
-                            )
-                        else:
-                            content_type = original_content_type
-
-                        logger.debug(f"Resized image to {target_width}x{target_height}")
-                else:
-                    content_type = original_content_type
-
-                # Clean up pixmap
-                pix = None
-            else:
-                # Fallback: extract as rendered image
-                # This path should rarely be used since we pass original_file_content for images
-                pix = page.get_pixmap()  # type: ignore[attr-defined]
-                logger.debug(
-                    f"Using PyMuPDF fallback for image extraction: {pix.width}x{pix.height}"
-                )
-
-                img_data = pix.tobytes("png")
-                img_ext = "png"
-                content_type = "image/png"
-
-                # Apply resize if configured
-                if self.resize_config and (
-                    self.resize_config.get("target_width")
-                    or self.resize_config.get("target_height")
-                ):
-                    target_width = self.resize_config.get("target_width")
-                    target_height = self.resize_config.get("target_height")
-
-                    if target_width or target_height:
-                        # The resize_image function now preserves format
-                        img_data = image.resize_image(
-                            img_data, target_width, target_height
-                        )
-
-                        # Check if format changed after resize
-                        import io
-
-                        from PIL import Image as PILImage
-
-                        resized_img = PILImage.open(io.BytesIO(img_data))
-                        if resized_img.format and resized_img.format.lower() != img_ext:
-                            # Format changed during resize
-                            new_format = resized_img.format.lower()
-                            img_ext = new_format if new_format != "jpeg" else "jpg"
-                            content_type_map = {
-                                "png": "image/png",
-                                "jpg": "image/jpeg",
-                                "jpeg": "image/jpeg",
-                                "gif": "image/gif",
-                                "bmp": "image/bmp",
-                                "tiff": "image/tiff",
-                                "tif": "image/tiff",
-                                "webp": "image/webp",
-                            }
-                            content_type = content_type_map.get(img_ext, "image/png")
-                            logger.debug(
-                                f"Image format changed during resize to {img_ext}"
-                            )
-
-                        logger.debug(f"Resized image to {target_width}x{target_height}")
+            # No original content provided - this should not happen for image files
+            # since we always pass original_file_content, but handle gracefully
+            raise ValueError(
+                "Image file processing requires original_file_content to be provided"
+            )
 
         # Store image with appropriate format
         image_key = f"{prefix}/pages/{page_id}/image.{img_ext}"
@@ -1032,6 +948,195 @@ class OcrService:
 
         return result, metering
 
+    def _process_page_with_image(
+        self,
+        page_index: int,
+        img_bytes: bytes,
+        output_bucket: str,
+        prefix: str,
+    ) -> Tuple[Dict[str, str], Dict[str, Any]]:
+        """
+        Process a single page using pre-rendered image bytes.
+
+        This method is used in the thread-safe two-phase approach: page images are
+        rendered sequentially (pypdfium2 is not thread-safe), then this method is
+        called in parallel threads for the I/O-bound OCR processing.
+
+        Args:
+            page_index: Zero-based index of the page
+            img_bytes: Pre-rendered page image bytes (JPEG)
+            output_bucket: S3 bucket to store results
+            prefix: S3 prefix for storing results
+
+        Returns:
+            Tuple of (page_result_dict, metering_data)
+        """
+        t0 = time.time()
+        page_id = page_index + 1
+
+        # Upload pre-rendered image to S3
+        image_key = f"{prefix}/pages/{page_id}/image.jpg"
+        s3.write_content(img_bytes, output_bucket, image_key, content_type="image/jpeg")
+
+        t1 = time.time()
+        logger.debug(f"Time for image upload (page {page_id}): {t1 - t0:.6f} seconds")
+
+        # Use the image for OCR processing
+        ocr_img_bytes = img_bytes
+
+        # Apply preprocessing if enabled
+        if self.preprocessing_config and self.preprocessing_config.get("enabled"):
+            from idp_common.image import apply_adaptive_binarization
+
+            ocr_img_bytes = apply_adaptive_binarization(ocr_img_bytes)
+            logger.debug(
+                f"Applied adaptive binarization preprocessing (page {page_id})"
+            )
+
+        if self.backend == "none":
+            # No OCR processing - create empty results
+            metering: Dict[str, Any] = {}
+            empty_ocr_response = {"DocumentMetadata": {"Pages": 1}, "Blocks": []}
+            raw_text_key = f"{prefix}/pages/{page_id}/rawText.json"
+            s3.write_content(
+                empty_ocr_response,
+                output_bucket,
+                raw_text_key,
+                content_type="application/json",
+            )
+
+            text_confidence_data = {
+                "text": "| Text | Confidence |\n|:-----|:------------|\n| *No OCR performed* | N/A |"
+            }
+            text_confidence_key = f"{prefix}/pages/{page_id}/textConfidence.json"
+            s3.write_content(
+                text_confidence_data,
+                output_bucket,
+                text_confidence_key,
+                content_type="application/json",
+            )
+
+            parsed_result = {"text": ""}
+            parsed_text_key = f"{prefix}/pages/{page_id}/result.json"
+            s3.write_content(
+                parsed_result,
+                output_bucket,
+                parsed_text_key,
+                content_type="application/json",
+            )
+
+        elif self.backend == "bedrock":
+            # Process with Bedrock
+            image_content = image.prepare_bedrock_image_attachment(ocr_img_bytes)
+            content = [{"text": self.bedrock_config["task_prompt"]}, image_content]
+
+            response_with_metering = bedrock.invoke_model(
+                model_id=self.bedrock_config["model_id"],
+                system_prompt=self.bedrock_config["system_prompt"],
+                content=content,
+                temperature=0.0,
+                top_p=0.1,
+                top_k=5,
+                max_tokens=4096,
+                context="OCR",
+                model_lambda_hook_arn=getattr(
+                    self.config.ocr, "model_lambda_hook_arn", None
+                )
+                if hasattr(self, "config")
+                else None,
+            )
+
+            extracted_text = bedrock.extract_text_from_response(response_with_metering)
+            metering = response_with_metering.get("metering", {})
+
+            raw_text_key = f"{prefix}/pages/{page_id}/rawText.json"
+            s3.write_content(
+                response_with_metering["response"],
+                output_bucket,
+                raw_text_key,
+                content_type="application/json",
+            )
+
+            text_confidence_data = {
+                "text": "| Text | Confidence |\n|:-----|:------------|\n| *No confidence data available from LLM OCR* | N/A |"
+            }
+            text_confidence_key = f"{prefix}/pages/{page_id}/textConfidence.json"
+            s3.write_content(
+                text_confidence_data,
+                output_bucket,
+                text_confidence_key,
+                content_type="application/json",
+            )
+
+            parsed_result = {"text": extracted_text}
+            parsed_text_key = f"{prefix}/pages/{page_id}/result.json"
+            s3.write_content(
+                parsed_result,
+                output_bucket,
+                parsed_text_key,
+                content_type="application/json",
+            )
+
+        else:
+            # Process with Textract (default)
+            if isinstance(self.enhanced_features, list) and self.enhanced_features:
+                textract_result = self._analyze_document(ocr_img_bytes, page_id)
+            else:
+                textract_result = self.textract_client.detect_document_text(
+                    Document={"Bytes": ocr_img_bytes}
+                )
+
+            feature_combo = self._feature_combo()
+            metering = {
+                f"OCR/textract/{self._get_api_name()}{feature_combo}": {
+                    "pages": textract_result["DocumentMetadata"]["Pages"]
+                }
+            }
+
+            raw_text_key = f"{prefix}/pages/{page_id}/rawText.json"
+            s3.write_content(
+                textract_result,
+                output_bucket,
+                raw_text_key,
+                content_type="application/json",
+            )
+
+            text_confidence_data = self._generate_text_confidence_data(textract_result)
+            text_confidence_key = f"{prefix}/pages/{page_id}/textConfidence.json"
+            s3.write_content(
+                text_confidence_data,
+                output_bucket,
+                text_confidence_key,
+                content_type="application/json",
+            )
+
+            parsed_result = self._parse_textract_response(textract_result, page_id)
+            parsed_text_key = f"{prefix}/pages/{page_id}/result.json"
+            s3.write_content(
+                parsed_result,
+                output_bucket,
+                parsed_text_key,
+                content_type="application/json",
+            )
+
+        # Memory cleanup
+        img_bytes = None
+        ocr_img_bytes = None
+
+        t2 = time.time()
+        logger.debug(
+            f"Total page processing time (page {page_id}): {t2 - t0:.6f} seconds"
+        )
+
+        result = {
+            "raw_text_uri": f"s3://{output_bucket}/{raw_text_key}",
+            "parsed_text_uri": f"s3://{output_bucket}/{parsed_text_key}",
+            "text_confidence_uri": f"s3://{output_bucket}/{text_confidence_key}",
+            "image_uri": f"s3://{output_bucket}/{image_key}",
+        }
+
+        return result, metering
+
     def _start_memory_monitoring(self):
         """
         Start background memory monitoring that logs usage every 5 seconds.
@@ -1080,7 +1185,7 @@ class OcrService:
     def _process_single_page_textract(
         self,
         page_index: int,
-        pdf_document: fitz.Document,
+        pdf_document: pdfium.PdfDocument,
         output_bucket: str,
         prefix: str,
     ) -> Tuple[Dict[str, str], Dict[str, Any]]:
@@ -1089,7 +1194,7 @@ class OcrService:
 
         Args:
             page_index: Zero-based index of the page
-            pdf_document: PyMuPDF document object
+            pdf_document: pypdfium2 document object
             output_bucket: S3 bucket to store results
             prefix: S3 prefix for storing results
 
@@ -1100,8 +1205,8 @@ class OcrService:
         page_id = page_index + 1
 
         # Extract page image - now returns image at optimal size directly
-        page = pdf_document.load_page(page_index)
-        img_bytes = self._extract_page_image(page, pdf_document.is_pdf, page_id)
+        page = pdf_document[page_index]
+        img_bytes = self._extract_page_image(page, True, page_id)
 
         # Upload processed image to S3 (already at target size if resize config exists)
         image_key = f"{prefix}/pages/{page_id}/image.jpg"
@@ -1191,7 +1296,9 @@ class OcrService:
 
         return result, metering
 
-    def _extract_page_image(self, page: fitz.Page, is_pdf: bool, page_id: int) -> bytes:
+    def _extract_page_image(
+        self, page: pdfium.PdfPage, is_pdf: bool, page_id: int
+    ) -> bytes:
         """
         Extract image bytes from a page at optimal size to prevent memory issues.
 
@@ -1199,14 +1306,14 @@ class OcrService:
         to avoid creating oversized images that cause OutOfMemory errors.
 
         Args:
-            page: PyMuPDF page object
+            page: pypdfium2 page object
             is_pdf: Whether the document is a PDF file
             page_id: Page number for logging
 
         Returns:
             Image bytes in JPEG format (at target size if resize config exists)
         """
-        pix = None
+        pil_img = None
         try:
             # Check if we should extract at target size to avoid memory issues
             if self.resize_config:
@@ -1215,17 +1322,19 @@ class OcrService:
 
                 if target_width and target_height:
                     # Get page dimensions to calculate scaling
-                    page_rect = page.rect
+                    # pypdfium2 page dimensions are in PDF points (1/72 inch)
+                    page_width = page.get_width()
+                    page_height = page.get_height()
 
                     if is_pdf:
                         # For PDF files, calculate dimensions at specified DPI (default to 150 if None)
                         dpi = self.dpi or 150
-                        original_width = int(page_rect.width * (dpi / 72))
-                        original_height = int(page_rect.height * (dpi / 72))
+                        original_width = int(page_width * (dpi / 72))
+                        original_height = int(page_height * (dpi / 72))
                     else:
                         # For image files, use actual dimensions
-                        original_width = int(page_rect.width)
-                        original_height = int(page_rect.height)
+                        original_width = int(page_width)
+                        original_height = int(page_height)
 
                     # Apply same logic as image.resize_image - preserve aspect ratio, never upscale
                     width_ratio = target_width / original_width
@@ -1242,14 +1351,14 @@ class OcrService:
                             dpi = self.dpi or 150
                             base_scale = dpi / 72  # Convert PDF points to pixels
                             final_scale = base_scale * scale_factor
-                            matrix = fitz.Matrix(final_scale, final_scale)
+                            matrix = final_scale
                         else:
                             # For images, just apply the scale factor
-                            matrix = fitz.Matrix(scale_factor, scale_factor)
+                            matrix = scale_factor
 
-                        pix = page.get_pixmap(matrix=matrix)  # type: ignore[attr-defined]
+                        pil_img = page.render(scale=matrix).to_pil()  # type: ignore[attr-defined]
 
-                        actual_width, actual_height = pix.width, pix.height
+                        actual_width, actual_height = pil_img.size
                         logger.info(
                             f"Extracted page {page_id} at target size: {actual_width}x{actual_height} (scale: {scale_factor:.3f})"
                         )
@@ -1258,12 +1367,12 @@ class OcrService:
                         # No resize needed - image is already smaller than targets
                         if is_pdf:
                             dpi = self.dpi or 150
-                            pix = page.get_pixmap(dpi=dpi)  # type: ignore[attr-defined]
+                            pil_img = page.render(scale=dpi / 72).to_pil()  # type: ignore[attr-defined]
                         else:
-                            pix = page.get_pixmap()  # type: ignore[attr-defined]
+                            pil_img = page.render().to_pil()  # type: ignore[attr-defined]
 
                         # Log actual extracted dimensions
-                        actual_width, actual_height = pix.width, pix.height
+                        actual_width, actual_height = pil_img.size
                         logger.info(
                             f"Page {page_id} already fits target size, extracted at: {actual_width}x{actual_height}"
                         )
@@ -1271,12 +1380,12 @@ class OcrService:
                     # No valid target dimensions - use original extraction
                     if is_pdf:
                         dpi = self.dpi or 150
-                        pix = page.get_pixmap(dpi=dpi)  # type: ignore[attr-defined]
+                        pil_img = page.render(scale=dpi / 72).to_pil()  # type: ignore[attr-defined]
                     else:
-                        pix = page.get_pixmap()  # type: ignore[attr-defined]
+                        pil_img = page.render().to_pil()  # type: ignore[attr-defined]
 
                     # Log actual extracted dimensions
-                    actual_width, actual_height = pix.width, pix.height
+                    actual_width, actual_height = pil_img.size
                     logger.info(
                         f"Page {page_id} extracted at original size: {actual_width}x{actual_height}"
                     )
@@ -1284,27 +1393,29 @@ class OcrService:
                 # No resize config - extract at original size
                 if is_pdf:
                     dpi = self.dpi or 150
-                    pix = page.get_pixmap(dpi=dpi)  # type: ignore[attr-defined]
+                    pil_img = page.render(scale=dpi / 72).to_pil()  # type: ignore[attr-defined]
                 else:
-                    pix = page.get_pixmap()  # type: ignore[attr-defined]
+                    pil_img = page.render().to_pil()  # type: ignore[attr-defined]
 
                 # Log actual extracted dimensions
-                actual_width, actual_height = pix.width, pix.height
+                actual_width, actual_height = pil_img.size
                 logger.info(
                     f"Page {page_id} extracted at original size: {actual_width}x{actual_height}"
                 )
 
-            image_bytes = pix.tobytes("jpeg")
+            img_buffer = io.BytesIO()
+            pil_img.save(img_buffer, format="JPEG", quality=95)
+            image_bytes = img_buffer.getvalue()
             return image_bytes
         finally:
-            # Aggressive cleanup of PyMuPDF pixmap to prevent memory leaks
-            if pix is not None:
-                pix = None
+            # Cleanup pypdfium2 page rendering resources
+            if pil_img is not None:
+                pil_img = None
 
     def _process_single_page_bedrock(
         self,
         page_index: int,
-        pdf_document: fitz.Document,
+        pdf_document: pdfium.PdfDocument,
         output_bucket: str,
         prefix: str,
     ) -> Tuple[Dict[str, str], Dict[str, Any]]:
@@ -1313,7 +1424,7 @@ class OcrService:
 
         Args:
             page_index: Zero-based index of the page
-            pdf_document: PyMuPDF document object
+            pdf_document: pypdfium2 document object
             output_bucket: S3 bucket to store results
             prefix: S3 prefix for storing results
 
@@ -1324,8 +1435,8 @@ class OcrService:
         page_id = page_index + 1
 
         # Extract page image - now returns image at optimal size directly
-        page = pdf_document.load_page(page_index)
-        img_bytes = self._extract_page_image(page, pdf_document.is_pdf, page_id)
+        page = pdf_document[page_index]
+        img_bytes = self._extract_page_image(page, True, page_id)
 
         # Upload processed image to S3 (already at target size if resize config exists)
         image_key = f"{prefix}/pages/{page_id}/image.jpg"
@@ -1424,7 +1535,7 @@ class OcrService:
     def _process_single_page_none(
         self,
         page_index: int,
-        pdf_document: fitz.Document,
+        pdf_document: pdfium.PdfDocument,
         output_bucket: str,
         prefix: str,
     ) -> Tuple[Dict[str, str], Dict[str, Any]]:
@@ -1433,7 +1544,7 @@ class OcrService:
 
         Args:
             page_index: Zero-based index of the page
-            pdf_document: PyMuPDF document object
+            pdf_document: pypdfium2 document object
             output_bucket: S3 bucket to store results
             prefix: S3 prefix for storing results
 
@@ -1444,8 +1555,8 @@ class OcrService:
         page_id = page_index + 1
 
         # Extract page image at specified DPI (consistent with other backends)
-        page = pdf_document.load_page(page_index)
-        img_bytes = self._extract_page_image(page, pdf_document.is_pdf, page_id)
+        page = pdf_document[page_index]
+        img_bytes = self._extract_page_image(page, True, page_id)
 
         # Upload image to S3
         image_key = f"{prefix}/pages/{page_id}/image.jpg"
@@ -1732,6 +1843,58 @@ class OcrService:
             # Default to PDF for unknown binary files
             return "pdf"
 
+    def _ocr_image_bytes(self, img_bytes: bytes) -> str:
+        """OCR raw image bytes and return extracted text.
+
+        Used as a callback for DOCX image extraction so that images embedded
+        in Word documents are processed through the configured OCR backend
+        (Textract or Bedrock).
+
+        Args:
+            img_bytes: Raw image bytes (PNG, JPEG, etc.)
+
+        Returns:
+            Extracted text from the image.
+        """
+        if self.backend == "none":
+            return "[Image]"
+
+        try:
+            if self.backend == "bedrock":
+                # Prepare image for Bedrock
+                image_content = image.prepare_bedrock_image_attachment(img_bytes)
+                content = [
+                    {"text": self.bedrock_config["task_prompt"]},
+                    image_content,
+                ]
+                response_with_metering = bedrock.invoke_model(
+                    model_id=self.bedrock_config["model_id"],
+                    system_prompt=self.bedrock_config["system_prompt"],
+                    content=content,
+                    temperature=0.0,
+                    top_p=0.1,
+                    top_k=5,
+                    max_tokens=4096,
+                    context="OCR",
+                )
+                return bedrock.extract_text_from_response(response_with_metering)
+
+            else:
+                # Textract backend (default)
+                textract_result = self.textract_client.detect_document_text(
+                    Document={"Bytes": img_bytes}
+                )
+                # Extract text from LINE blocks
+                lines = []
+                for block in textract_result.get("Blocks", []):
+                    if block.get("BlockType") == "LINE" and "Text" in block:
+                        lines.append(block["Text"])
+                return "\n".join(lines)
+
+        except Exception as e:
+            logger.warning(f"Failed to OCR embedded image: {e}")
+            return "[Image - OCR failed]"
+
     def _process_non_pdf_document(
         self, file_type: str, content: bytes
     ) -> List[Tuple[bytes, str]]:
@@ -1758,7 +1921,9 @@ class OcrService:
                 return self.document_converter.convert_excel_to_pages(content)
 
             elif file_type == "docx":
-                return self.document_converter.convert_word_to_pages(content)
+                return self.document_converter.convert_word_to_pages(
+                    content, ocr_image_callback=self._ocr_image_bytes
+                )
 
             else:
                 # Fallback to text

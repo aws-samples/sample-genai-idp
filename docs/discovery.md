@@ -1237,7 +1237,7 @@ def discovery_with_fallback(discovery_service, document_key, ground_truth_key=No
 
 ## BdaIDP Sync Feature
 
-The BdaIDP Sync feature provides bidirectional synchronization between BDA (Bedrock Data Automation) blueprints and IDP custom classes. This feature enables seamless integration between BDA's blueprint management system and IDP's document class configuration, with support for AWS Standard blueprints and optimized parallel processing.
+The BdaIDP Sync feature provides bidirectional synchronization between BDA (Bedrock Data Automation) blueprints and IDP custom classes. This feature enables seamless integration between BDA's blueprint management system and IDP's document class configuration, with support for AWS Standard blueprints, optimized parallel processing, and configurable **Replace** or **Merge** sync modes.
 
 
 
@@ -1249,15 +1249,18 @@ https://github.com/user-attachments/assets/6016614d-e582-4956-8c39-c189a52f63c6
 
 The sync feature operates through the `sync_bda_idp_resolver` Lambda function, which orchestrates the synchronization process:
 
-1. **Flexible Sync Directions**: Supports three synchronization modes:
+1. **Flexible Sync Directions**: Supports three synchronization directions:
    - `bidirectional`: Syncs both directions (default, backward compatible)
    - `bda_to_idp`: Syncs from BDA blueprints to IDP classes only
    - `idp_to_bda`: Syncs from IDP classes to BDA blueprints only
-2. **AWS Standard Blueprint Support**: Automatically converts AWS-managed blueprints to custom blueprints
-3. **Schema Transformation**: Converts between IDP JSON Schema format and BDA blueprint format
-4. **Change Detection**: Only updates when actual schema changes are detected
-5. **Cleanup Management**: Removes orphaned blueprints that no longer have corresponding IDP classes
-6. **Parallel Processing**: Uses multi-threading for improved performance with configurable worker count
+2. **Configurable Sync Modes**: Each direction supports two modes:
+   - `replace` (default): Full replacement — target is aligned to match source exactly. Items not in the source are removed.
+   - `merge`: Additive — source items are added to the target without removing existing items.
+3. **AWS Standard Blueprint Support**: Automatically converts AWS-managed blueprints to custom blueprints
+4. **Schema Transformation**: Converts between IDP JSON Schema format and BDA blueprint format
+5. **Change Detection**: Only updates when actual schema changes are detected
+6. **Cleanup Management**: Removes orphaned blueprints that no longer have corresponding IDP classes (replace mode only)
+7. **Parallel Processing**: Uses multi-threading for improved performance with configurable worker count
 
 ### Sync Process Flow
 
@@ -1374,16 +1377,35 @@ result = service.create_blueprints_from_custom_configuration(
     sync_direction="bidirectional"
 )
 
-# BDA to IDP only
+# BDA to IDP only (replace mode - removes IDP classes not in BDA)
 result = service.create_blueprints_from_custom_configuration(
-    sync_direction="bda_to_idp"
+    sync_direction="bda_to_idp", sync_mode="replace"
 )
 
-# IDP to BDA only
+# BDA to IDP only (merge mode - adds BDA classes, keeps existing IDP classes)
 result = service.create_blueprints_from_custom_configuration(
-    sync_direction="idp_to_bda"
+    sync_direction="bda_to_idp", sync_mode="merge"
+)
+
+# IDP to BDA only (replace mode - removes BDA blueprints not in IDP)
+result = service.create_blueprints_from_custom_configuration(
+    sync_direction="idp_to_bda", sync_mode="replace"
+)
+
+# IDP to BDA only (merge mode - adds IDP classes to BDA, keeps BDA-only blueprints)
+result = service.create_blueprints_from_custom_configuration(
+    sync_direction="idp_to_bda", sync_mode="merge"
 )
 ```
+
+**Sync Mode Behavior:**
+
+| Direction | Mode | Behavior |
+|-----------|------|----------|
+| `bda_to_idp` | `replace` (default) | IDP classes are replaced with BDA blueprints. Classes not in BDA are removed. |
+| `bda_to_idp` | `merge` | BDA blueprints are added to IDP. Existing IDP classes are kept. |
+| `idp_to_bda` | `replace` (default) | BDA blueprints are replaced with IDP classes. Orphaned blueprints are deleted. |
+| `idp_to_bda` | `merge` | IDP classes are pushed to BDA. Existing BDA-only blueprints are kept. |
 
 **Environment Configuration:**
 ```bash

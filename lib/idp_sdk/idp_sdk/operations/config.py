@@ -33,7 +33,7 @@ class ConfigOperation:
 
         Args:
             features: Feature set to include
-            pattern: Pattern to use (pattern-1, pattern-2, pattern-3)
+            pattern: Pattern to use (pattern-1, pattern-2)
             output: Optional output file path
             include_prompts: Include prompt templates
             include_comments: Include explanatory comments
@@ -167,8 +167,6 @@ class ConfigOperation:
                 )
                 if classification_method == "bda":
                     pattern = "pattern-1"
-                elif classification_method == "udop":
-                    pattern = "pattern-3"
                 else:
                     pattern = "pattern-2"
 

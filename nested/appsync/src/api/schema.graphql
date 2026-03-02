@@ -174,6 +174,9 @@ type ConfigurationVersion @aws_cognito_user_pools @aws_iam {
   createdAt: AWSDateTime
   updatedAt: AWSDateTime
   description: String
+  bdaProjectArn: String
+  bdaSyncStatus: String
+  bdaLastSyncedAt: String
 }
 
 type ConfigurationVersionsResponse @aws_cognito_user_pools @aws_iam {
@@ -194,6 +197,8 @@ type SyncBdaIdpResponse @aws_cognito_user_pools @aws_iam {
   message: String
   processedClasses: [String]
   direction: String
+  bdaProjectArn: String
+  bdaSyncStatus: String
   error: ConfigurationError
 }
 
@@ -580,7 +585,7 @@ type Mutation {
     @aws_cognito_user_pools
   deleteConfigVersion(versionName: String!): UpdateConfigurationResponse
     @aws_cognito_user_pools
-  syncBdaIdp(direction: String, versionName: String): SyncBdaIdpResponse @aws_cognito_user_pools
+  syncBdaIdp(direction: String, versionName: String, bdaProjectArn: String, saveArn: Boolean, syncMode: String): SyncBdaIdpResponse @aws_cognito_user_pools
   updatePricing(pricingConfig: AWSJSON!): UpdatePricingResponse
     @aws_cognito_user_pools
   restoreDefaultPricing: UpdatePricingResponse

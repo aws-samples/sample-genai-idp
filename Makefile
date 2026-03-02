@@ -49,13 +49,26 @@ ui-start:
 	@echo "Starting UI development server..."
 	cd src/ui && npm run start
 
-# Run tests in idp_common_pkg, idp_cli, idp_sdk, and capacity planning Lambda
+# Run tests in idp_common_pkg, idp_cli, idp_sdk, capacity planning Lambda, and config library
 test:
 	$(MAKE) -C lib/idp_common_pkg test
 	cd lib/idp_cli_pkg && python -m pytest -v
 	cd lib/idp_sdk && python -m pytest -m "not integration" -v
 	@echo "Running capacity planning Lambda tests..."
 	cd src/lambda/calculate_capacity && python -m pytest -v
+	@echo "Validating config library files..."
+	python -m pytest config_library/test_config_library.py -v
+
+# Run only config library validation tests
+test-config-library:
+	@echo "Validating config library YAML/JSON files..."
+	python -m pytest config_library/test_config_library.py -v
+
+# Run only IDP CLI tests
+test-cli:
+	@echo "Running IDP CLI tests..."
+	cd lib/idp_cli_pkg && python -m pytest -v
+	@echo -e "$(GREEN)✅ All CLI tests passed!$(NC)"
 
 # Run only capacity planning tests
 test-capacity:
@@ -175,9 +188,9 @@ ui-lint:
 	STORED_HASH=$$(test -f src/ui/.checksum && cat src/ui/.checksum || echo ""); \
 	if [ "$$CURRENT_HASH" != "$$STORED_HASH" ]; then \
 		echo "UI code checksum changed - running lint..."; \
-		cd src/ui && npm ci --prefer-offline --no-audit && npm run lint -- --fix && \
+		cd src/ui && npm ci --prefer-offline --no-audit && npm run lint -- --fix && npm run typecheck && \
 		echo "$$CURRENT_HASH" > .checksum; \
-		echo -e "$(GREEN)✅ UI lint completed and checksum updated$(NC)"; \
+		echo -e "$(GREEN)✅ UI lint and typecheck completed and checksum updated$(NC)"; \
 	else \
 		echo -e "$(GREEN)✅ UI code checksum unchanged - skipping lint$(NC)"; \
 	fi

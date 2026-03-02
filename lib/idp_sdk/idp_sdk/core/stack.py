@@ -1289,11 +1289,9 @@ class StackDeployer:
             # Nested stacks - pattern requires hyphen after stack name
             f"/{stack_name}-PATTERN1STACK-",  # e.g., /IDPDocker-P1-PATTERN1STACK-ABC123/lambda/...
             f"/{stack_name}-PATTERN2STACK-",
-            f"/{stack_name}-PATTERN3STACK-",
             # CodeBuild projects - pattern requires hyphen after stack name
             f"/aws/codebuild/{stack_name}-PATTERN1STACK",  # Nested stack CodeBuild
             f"/aws/codebuild/{stack_name}-PATTERN2STACK",
-            f"/aws/codebuild/{stack_name}-PATTERN3STACK",
             f"/aws/codebuild/{stack_name}-webui-build",  # Main stack webui build
             # Glue crawlers - pattern requires hyphen after stack name
             f"/aws-glue/crawlers-role/{stack_name}-DocumentSectionsCrawlerRole",
@@ -2108,7 +2106,7 @@ def upload_local_config(
         file_path: Path to local config file
         region: AWS region
         stack_name: CloudFormation stack name (unused, kept for compatibility)
-        pattern: Pattern to use for defaults (pattern-1, pattern-2, pattern-3).
+        pattern: Pattern to use for defaults (pattern-1, pattern-2).
                  If not provided, attempts to auto-detect from config file.
         merge_with_defaults: If True, merge user config with system defaults
 
@@ -2140,8 +2138,6 @@ def upload_local_config(
                 )
                 if classification_method == "bda":
                     pattern = "pattern-1"
-                elif classification_method == "udop":
-                    pattern = "pattern-3"
                 else:
                     # Default to pattern-2 (most common)
                     pattern = "pattern-2"
@@ -2215,12 +2211,10 @@ def upload_local_config(
 
 
 def build_parameters(
-    pattern: Optional[str] = None,
     admin_email: Optional[str] = None,
     max_concurrent: Optional[int] = None,
     log_level: Optional[str] = None,
     enable_hitl: Optional[str] = None,
-    pattern_config: Optional[str] = None,
     custom_config: Optional[str] = None,
     additional_params: Optional[Dict[str, str]] = None,
     region: Optional[str] = None,
@@ -2237,12 +2231,10 @@ def build_parameters(
     - For new stacks: Creates a temporary bucket
 
     Args:
-        pattern: IDP pattern (pattern-1, pattern-2, pattern-3) - optional for updates
         admin_email: Admin user email - optional for updates
         max_concurrent: Maximum concurrent workflows - optional
         log_level: Logging level - optional
         enable_hitl: Enable HITL (true/false) - optional
-        pattern_config: Pattern configuration preset - optional
         custom_config: Custom configuration (local file path or S3 URI) - optional
         additional_params: Additional parameters as dict - optional
         region: AWS region (auto-detected if not provided)
@@ -2257,15 +2249,6 @@ def build_parameters(
     if admin_email is not None:
         parameters["AdminEmail"] = admin_email
 
-    if pattern is not None:
-        # Map pattern names to CloudFormation values
-        pattern_map = {
-            "pattern-1": "Pattern1 - Packet or Media processing with Bedrock Data Automation (BDA)",
-            "pattern-2": "Pattern2 - Packet processing with Textract and Bedrock",
-            "pattern-3": "Pattern3 - Packet processing with Textract, SageMaker(UDOP), and Bedrock",
-        }
-        parameters["IDPPattern"] = pattern_map.get(pattern, pattern)
-
     if max_concurrent is not None:
         parameters["MaxConcurrentWorkflows"] = str(max_concurrent)
 
@@ -2274,15 +2257,6 @@ def build_parameters(
 
     if enable_hitl is not None:
         parameters["EnableHITL"] = enable_hitl
-
-    # Add pattern-specific configuration (only if provided)
-    if pattern_config is not None:
-        if pattern == "pattern-1":
-            parameters["Pattern1Configuration"] = pattern_config
-        elif pattern == "pattern-2":
-            parameters["Pattern2Configuration"] = pattern_config
-        elif pattern == "pattern-3":
-            parameters["Pattern3Configuration"] = pattern_config
 
     # Handle custom config - support both local files and S3 URIs
     if custom_config:

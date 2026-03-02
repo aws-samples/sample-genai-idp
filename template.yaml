@@ -28,21 +28,7 @@ Mappings:
     EveryDay:
       ScheduleExpression: "cron(0 0 * * ? *)"
 
-  Pattern1ConfigurationMap:
-    lending-package-sample:
-      ConfigPath: "lending-package-sample"
-    docsplit:
-      ConfigPath: "docsplit"
-    realkie-fcc-verified:
-      ConfigPath: "realkie-fcc-verified"
-    ocr-benchmark:
-      ConfigPath: "ocr-benchmark"
-    rvl-cdip:
-      ConfigPath: "rvl-cdip"
-    default:
-      ConfigPath: "lending-package-sample"
-
-  Pattern2ConfigurationMap:
+  ConfigurationMap:
     lending-package-sample:
       ConfigPath: "lending-package-sample"
     rvl-cdip:
@@ -61,16 +47,6 @@ Mappings:
       ConfigPath: "rule-validation"
     rule-extraction:
       ConfigPath: "rule-extraction"
-    default:
-      ConfigPath: "rvl-cdip"
-
-  Pattern3ConfigurationMap:
-    rvl-cdip:
-      ConfigPath: "rvl-cdip"
-    rvl-cdip-package-sample:  # for backward compatibility when updating existing stacks
-      ConfigPath: "rvl-cdip"
-    default:
-      ConfigPath: "rvl-cdip"
 
 Parameters:
   # Authorization params
@@ -93,17 +69,6 @@ Parameters:
     ConstraintDescription: >-
       Must be empty or a list of comma separated email domains (example1.com, example2.com)
 
-  # Pattern selection
-  IDPPattern:
-    Type: String
-    Default: Pattern1 - Packet or Media processing with Bedrock Data Automation (BDA)
-    AllowedValues:
-      - Pattern1 - Packet or Media processing with Bedrock Data Automation (BDA)
-      - Pattern2 - Packet processing with Textract and Bedrock
-      - Pattern3 - Packet processing with Textract, SageMaker(UDOP), and Bedrock
-    Description: >-
-      Built-in IDP workflow patterns - see README for pattern descriptions.
-
   # Custom Configuration Path
 
   CustomConfigPath:
@@ -121,24 +86,9 @@ Parameters:
     Type: String
     Default: ""
     AllowedPattern: "^(|^arn:aws[a-z-]*:bedrock:[a-z0-9-]+:.+:data-automation-project/.+)$"
-    Description: For Pattern-1, provide a Bedrock Data Automation (BDA) project ARN, or leave blank to create a sample project for processing the sample lending package.
+    Description: Provide a Bedrock Data Automation (BDA) project ARN, or leave blank to create a sample project for processing the sample lending package.
 
-  Pattern1Configuration:
-    Type: String
-    Default: "lending-package-sample"
-    AllowedValues:
-      - "lending-package-sample"
-      - "docsplit"
-      - "realkie-fcc-verified"
-      - "ocr-benchmark"
-      - "rvl-cdip"
-      - "default"
-    Description: >-
-      Select the configuration preset for Pattern 1. Each configuration contains pre-tuned settings for specific document processing scenarios - see https://github.com/aws-samples/sample-genai-idp/blob/main/config_library/README.md. Note: This selected configuration will be replaced by the Custom Configuration Path if specified.
-
-  # Pattern 2 Parameters
-
-  Pattern2Configuration:
+  ConfigurationPreset:
     Type: String
     Default: "lending-package-sample"
     AllowedValues:
@@ -151,9 +101,8 @@ Parameters:
       - "ocr-benchmark"
       - "rule-validation"
       - "rule-extraction"
-      - "default"
     Description: >-
-      Select the configuration preset for Pattern 2. Each configuration contains pre-tuned settings for specific document processing scenarios see https://github.com/aws-samples/sample-genai-idp/blob/main/config_library/README.md. Note: Custom configuration overrides the selected pattern configuration when provided.
+      Select the configuration preset. Each configuration contains pre-tuned settings for specific document processing scenarios - see https://github.com/aws-samples/sample-genai-idp/blob/main/config_library/README.md. Note: Custom Configuration Path overrides this when provided.
 
   Pattern2CustomClassificationModelARN:
     Type: String
@@ -164,22 +113,6 @@ Parameters:
     Type: String
     Default: ""
     Description: Specify Custom Fine Tuned Extraction Model ARN. Leave blank to use pretrained model specified in the selected configuration.
-
-  Pattern3UDOPModelArtifactPath:
-    Type: String
-    Default: "<PUBLIC_SAMPLE_UDOP_MODEL>"
-    AllowedPattern: "^(|s3://.*)$"
-    Description: For Pattern-3, provide S3 path to the UDOP model.tar.gz file (e.g., s3://bucket-name/path/to/model.tar.gz)
-
-  Pattern3Configuration:
-    Type: String
-    Default: "rvl-cdip"
-    AllowedValues:
-      - "rvl-cdip"
-      - "default"
-      - "rvl-cdip-package-sample" # for backward compatibility when updating existing stacks
-    Description: >-
-      Select the configuration preset for Pattern 3. Each configuration contains pre-tuned settings for specific document processing scenarios - see https://github.com/aws-samples/sample-genai-idp/blob/main/config_library/README.md. Note: Custom configuration overrides the selected pattern configuration when provided.
 
   # Evaluation
   EvaluationBaselineBucketName:
@@ -423,36 +356,7 @@ Parameters:
     AllowedPattern: '^([0-9]{1,3}\.){3}[0-9]{1,3}\/[0-9]{1,2}(,\s*([0-9]{1,3}\.){3}[0-9]{1,3}\/[0-9]{1,2})*$'
     ConstraintDescription: Must be valid comma-separated list of IPv4 CIDR ranges
 
-Rules:
-  Pattern3UDOPModelArtifactPath:
-    RuleCondition:
-      !Equals [
-        !Ref IDPPattern,
-        "Pattern3 - Packet processing with Textract, SageMaker(UDOP), and Bedrock",
-      ]
-    Assertions:
-      - Assert: !Not [ !Equals [ !Ref Pattern3UDOPModelArtifactPath, "" ] ]
-        AssertDescription: UDOP Model Artifact Path is required when IDPPattern is 'Pattern1'
-
 Conditions:
-  IsPattern1:
-    !Equals [
-      !Ref IDPPattern,
-      "Pattern1 - Packet or Media processing with Bedrock Data Automation (BDA)",
-    ]
-  IsPattern2:
-    !Equals [
-      !Ref IDPPattern,
-      "Pattern2 - Packet processing with Textract and Bedrock",
-    ]
-
-  IsPattern3:
-    !Equals [
-      !Ref IDPPattern,
-      "Pattern3 - Packet processing with Textract, SageMaker(UDOP), and Bedrock",
-    ]
-  ShouldCreateBDASampleProject:
-    !And [ !Condition IsPattern1, !Equals [ !Ref Pattern1BDAProjectArn, "" ] ]
   HasPattern1BDAProjectArn:
     !Not [ !Equals [ !Ref Pattern1BDAProjectArn, "" ] ]
   HasGuardrailConfig:
@@ -496,29 +400,13 @@ Metadata:
           - AdminEmail
           - AllowedSignUpEmailDomain
       - Label:
-          default: "Workflow Pattern Selection"
+          default: "Configuration"
         Parameters:
-          - IDPPattern
-      - Label:
-          default: "Pattern 1 Configuration"
-        Parameters:
-          - Pattern1Configuration
+          - ConfigurationPreset
+          - CustomConfigPath
           - Pattern1BDAProjectArn
-      - Label:
-          default: "Pattern 2 Configuration"
-        Parameters:
-          - Pattern2Configuration
           - Pattern2CustomClassificationModelARN
           - Pattern2CustomExtractionModelARN
-      - Label:
-          default: "Pattern 3 Configuration"
-        Parameters:
-          - Pattern3Configuration
-          - Pattern3UDOPModelArtifactPath
-      - Label:
-          default: "Custom Configuration"
-        Parameters:
-          - CustomConfigPath
       - Label:
           default: "Evaluation"
         Parameters:
@@ -569,22 +457,14 @@ Metadata:
         default: "Admin Email Address"
       AllowedSignUpEmailDomain:
         default: "Allowed Sign Up Email Domain"
-      IDPPattern:
-        default: "Document Processing Pattern"
       Pattern1BDAProjectArn:
-        default: "Pattern1 - Packet or Media processing with Bedrock Data Automation (BDA) Project ARN"
+        default: "Bedrock Data Automation (BDA) Project ARN"
       Pattern2CustomClassificationModelARN:
-        default: "Pattern2 - Custom Classification Model ARN"
+        default: "Custom Classification Model ARN"
       Pattern2CustomExtractionModelARN:
-        default: "Pattern2 - Custom Extraction Model ARN"
-      Pattern1Configuration:
-        default: "Pattern1 - Configuration Preset"
-      Pattern2Configuration:
-        default: "Pattern2 - Configuration Preset"
-      Pattern3UDOPModelArtifactPath:
-        default: "Pattern3 - UDOP Model Artifact Path"
-      Pattern3Configuration:
-        default: "Pattern3 - Configuration Preset"
+        default: "Custom Extraction Model ARN"
+      ConfigurationPreset:
+        default: "Configuration Preset"
       CustomConfigPath:
         default: "Custom Configuration Path"
       PostProcessingLambdaHookFunctionArn:
@@ -825,19 +705,6 @@ Resources:
   ##########################################################################
   # Nested stack for selected options
   ##########################################################################
-
-  BDASAMPLEPROJECT:
-    DependsOn:
-      - IsStacknameLengthOK
-    Type: AWS::CloudFormation::Stack
-    Condition: ShouldCreateBDASampleProject
-    Properties:
-      TemplateURL: ./nested/bda-lending-project/.aws-sam/packaged.yaml
-      Parameters:
-        ProjectName: !Sub "${AWS::StackName}-Project"
-        ProjectDescription: !Sub "${AWS::StackName}-Project"
-        LogLevel: !Ref LogLevel
-        PermissionsBoundaryArn: !Ref PermissionsBoundaryArn
 
   DOCUMENTKB:
     DependsOn:
@@ -1222,17 +1089,71 @@ Resources:
       SourceCodeHash: <LAMBDA_HASH_TOKEN>
 
   ##########################################################################
+  # Read previous IDPPattern from SSM before PATTERNSTACK overwrites it
+  # This detects Pattern-1 → Unified upgrades so BDA can be auto-enabled
+  ##########################################################################
+
+  ReadPreviousIDPPatternFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Function does not require VPC access
+          - id: W92
+            reason: Reserved concurrency not required
+    # checkov:skip=CKV_AWS_116: "DLQ not required for Cfn Custom Resource function"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
+    Properties:
+      PermissionsBoundary:
+        !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
+      Handler: index.handler
+      Runtime: python3.12
+      Timeout: 10
+      CodeUri: src/lambda/read_previous_idp_pattern
+      Environment:
+        Variables:
+          LOG_LEVEL: INFO
+      LoggingConfig:
+        LogGroup: !Ref ReadPreviousIDPPatternFunctionLogGroup
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: ssm:GetParameter
+              Resource:
+                - !Sub "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${SettingsParameter}"
+
+  ReadPreviousIDPPatternFunctionLogGroup:
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W84
+            reason: "LogGroup does not require KMS Key Id"
+    # checkov:skip=CKV_AWS_158: "LogGroup does not require KMS Key Id"
+    Type: AWS::Logs::LogGroup
+    Properties:
+      RetentionInDays: !Ref LogRetentionDays
+
+  PreviousIDPPatternValue:
+    Type: Custom::ReadPreviousIDPPattern
+    DependsOn: SettingsParameter
+    Properties:
+      ServiceToken: !GetAtt ReadPreviousIDPPatternFunction.Arn
+      SettingsParameterName: !Ref SettingsParameter
+
+  ##########################################################################
   # Nested stack for selected pattern
   ##########################################################################
 
-  PATTERN1STACK:
+  PATTERNSTACK:
     DependsOn:
       - IsStacknameLengthOK
       - CopyConfigurationFiles
+      - PreviousIDPPatternValue
     Type: AWS::CloudFormation::Stack
-    Condition: IsPattern1
     Properties:
-      TemplateURL: ./patterns/pattern-1/.aws-sam/packaged.yaml
+      TemplateURL: ./patterns/unified/.aws-sam/packaged.yaml
       Parameters:
         StackName: !Ref AWS::StackName
         InputBucket: !Ref InputBucket
@@ -1248,10 +1169,7 @@ Resources:
         ExecutionTimeThresholdMs: !Ref ExecutionTimeThresholdMs
         BedrockGuardrailId: !Ref BedrockGuardrailId
         BedrockGuardrailVersion: !Ref BedrockGuardrailVersion
-        BDAProjectArn: !If
-          - ShouldCreateBDASampleProject
-          - !GetAtt BDASAMPLEPROJECT.Outputs.ProjectArn
-          - !Ref Pattern1BDAProjectArn
+        BDAProjectArn: !Ref Pattern1BDAProjectArn
         UpdateConfigurationFunctionArn: !GetAtt UpdateConfigurationFunction.Arn
         ConfigurationTable: !Ref ConfigurationTable
         AppSyncApiUrl: !GetAtt GraphQLApi.GraphQLUrl
@@ -1260,11 +1178,11 @@ Resources:
           - HasCustomConfigPath
           - !Ref CustomConfigPath
           - !Sub
-            - "s3://${ConfigurationBucket}/config_library/pattern-1/${ConfigPath}/config.yaml"
+            - "s3://${ConfigurationBucket}/config_library/unified/${ConfigPath}/config.yaml"
             - ConfigPath:
                 !FindInMap [
-                  Pattern1ConfigurationMap,
-                  !Ref Pattern1Configuration,
+                  ConfigurationMap,
+                  !Ref ConfigurationPreset,
                   ConfigPath,
                 ]
         ConfigLibraryHash: "<CONFIG_LIBRARY_HASH_TOKEN>"
@@ -1279,123 +1197,14 @@ Resources:
           - !Ref EvaluationBaselineBucket
           - !Ref EvaluationBaselineBucketName
         SaveReportingFunctionName: !Ref SaveReportingDataFunctionV2
-        ImageVersion: "<PATTERN1_IMAGE_VERSION>"
+        ImageVersion: "<UNIFIED_IMAGE_VERSION>"
         ArtifactBucket: "<ARTIFACT_BUCKET_TOKEN>"
         ArtifactPrefix: "<ARTIFACT_PREFIX_TOKEN>"
-        SourceZipfile: "<PATTERN1_SOURCE_ZIPFILE_TOKEN>"
-        EnableECRImageScanning: !Ref EnableECRImageScanning
-
-  PATTERN2STACK:
-    DependsOn:
-      - IsStacknameLengthOK
-      - CopyConfigurationFiles
-    Type: AWS::CloudFormation::Stack
-    Condition: IsPattern2
-    Properties:
-      TemplateURL: ./patterns/pattern-2/.aws-sam/packaged.yaml
-      Parameters:
-        StackName: !Ref AWS::StackName
-        InputBucket: !Ref InputBucket
-        ConfigurationBucket: !Ref ConfigurationBucket
-        OutputBucket: !Ref OutputBucket
-        WorkingBucket: !Ref WorkingBucket
-        TrackingTable: !Ref TrackingTable
-        CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
-        LogRetentionDays: !Ref LogRetentionDays
-        LogLevel: !Ref LogLevel
-        ExecutionTimeThresholdMs: !Ref ExecutionTimeThresholdMs
-        BedrockGuardrailId: !Ref BedrockGuardrailId
-        BedrockGuardrailVersion: !Ref BedrockGuardrailVersion
+        SourceZipfile: "<UNIFIED_SOURCE_ZIPFILE_TOKEN>"
         CustomClassificationModelARN: !Ref Pattern2CustomClassificationModelARN
         CustomExtractionModelARN: !Ref Pattern2CustomExtractionModelARN
-        UpdateConfigurationFunctionArn: !GetAtt UpdateConfigurationFunction.Arn
-        AppSyncApiUrl: !GetAtt GraphQLApi.GraphQLUrl
-        AppSyncApiArn: !GetAtt GraphQLApi.Arn
-        ConfigurationTable: !Ref ConfigurationTable
-        ConfigurationDefaultS3Uri: !If
-          - HasCustomConfigPath
-          - !Ref CustomConfigPath
-          - !Sub
-            - "s3://${ConfigurationBucket}/config_library/pattern-2/${ConfigPath}/config.yaml"
-            - ConfigPath:
-                !FindInMap [
-                  Pattern2ConfigurationMap,
-                  !Ref Pattern2Configuration,
-                  ConfigPath,
-                ]
-        ConfigLibraryHash: "<CONFIG_LIBRARY_HASH_TOKEN>"
-        EnableXRayTracing: !Ref EnableXRayTracing
-        PermissionsBoundaryArn: !Ref PermissionsBoundaryArn
-        ImageVersion: "<PATTERN2_IMAGE_VERSION>"
-        ArtifactBucket: "<ARTIFACT_BUCKET_TOKEN>"
-        ArtifactPrefix: "<ARTIFACT_PREFIX_TOKEN>"
-        SourceZipfile: "<PATTERN2_SOURCE_ZIPFILE_TOKEN>"
-        ReportingBucket: !If
-          - ShouldCreateReportingBucket
-          - !Ref ReportingBucket
-          - !Ref ReportingBucketName
-        BaselineBucket: !If
-          - ShouldCreateEvaluationBaselineBucket
-          - !Ref EvaluationBaselineBucket
-          - !Ref EvaluationBaselineBucketName
-        SaveReportingFunctionName: !Ref SaveReportingDataFunctionV2
         EnableECRImageScanning: !Ref EnableECRImageScanning
-
-  PATTERN3STACK:
-    DependsOn:
-      - IsStacknameLengthOK
-      - CopyConfigurationFiles
-    Type: AWS::CloudFormation::Stack
-    Condition: IsPattern3
-    Properties:
-      # yamllint disable rule:line-length
-      TemplateURL: ./patterns/pattern-3/.aws-sam/packaged.yaml
-      Parameters:
-        StackName: !Ref AWS::StackName
-        InputBucket: !Ref InputBucket
-        ConfigurationBucket: !Ref ConfigurationBucket
-        OutputBucket: !Ref OutputBucket
-        WorkingBucket: !Ref WorkingBucket
-        TrackingTable: !Ref TrackingTable
-        CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
-        LogRetentionDays: !Ref LogRetentionDays
-        LogLevel: !Ref LogLevel
-        ExecutionTimeThresholdMs: !Ref ExecutionTimeThresholdMs
-        BedrockGuardrailId: !Ref BedrockGuardrailId
-        BedrockGuardrailVersion: !Ref BedrockGuardrailVersion
-        UDOPModelArtifactPath: !Ref Pattern3UDOPModelArtifactPath
-        UpdateConfigurationFunctionArn: !GetAtt UpdateConfigurationFunction.Arn
-        AppSyncApiUrl: !GetAtt GraphQLApi.GraphQLUrl
-        AppSyncApiArn: !GetAtt GraphQLApi.Arn
-        ConfigurationTable: !Ref ConfigurationTable
-        ConfigurationDefaultS3Uri: !If
-          - HasCustomConfigPath
-          - !Ref CustomConfigPath
-          - !Sub
-            - "s3://${ConfigurationBucket}/config_library/pattern-3/${ConfigPath}/config.yaml"
-            - ConfigPath:
-                !FindInMap [
-                  Pattern3ConfigurationMap,
-                  !Ref Pattern3Configuration,
-                  ConfigPath,
-                ]
-        ConfigLibraryHash: "<CONFIG_LIBRARY_HASH_TOKEN>"
-        EnableXRayTracing: !Ref EnableXRayTracing
-        PermissionsBoundaryArn: !Ref PermissionsBoundaryArn
-        ReportingBucket: !If
-          - ShouldCreateReportingBucket
-          - !Ref ReportingBucket
-          - !Ref ReportingBucketName
-        BaselineBucket: !If
-          - ShouldCreateEvaluationBaselineBucket
-          - !Ref EvaluationBaselineBucket
-          - !Ref EvaluationBaselineBucketName
-        SaveReportingFunctionName: !Ref SaveReportingDataFunctionV2
-        ImageVersion: "<PATTERN3_IMAGE_VERSION>"
-        ArtifactBucket: "<ARTIFACT_BUCKET_TOKEN>"
-        ArtifactPrefix: "<ARTIFACT_PREFIX_TOKEN>"
-        SourceZipfile: "<PATTERN3_SOURCE_ZIPFILE_TOKEN>"
-        EnableECRImageScanning: !Ref EnableECRImageScanning
+        PreviousIDPPattern: !GetAtt PreviousIDPPatternValue.IDPPattern
 
   ##########################################################################
   # Encryption key
@@ -1486,11 +1295,7 @@ Resources:
         KnowledgeBaseModelId: !Ref KnowledgeBaseModelId
         ShouldCreateEvaluationBaselineBucket: !If [ShouldCreateEvaluationBaselineBucket, "true", "false"]
         ShouldCreateReportingBucket: !If [ShouldCreateReportingBucket, "true", "false"]
-        IsPattern1: !If [IsPattern1, "true", "false"]
-        Pattern1BDAProjectArn: !If
-          - ShouldCreateBDASampleProject
-          - !GetAtt BDASAMPLEPROJECT.Outputs.ProjectArn
-          - !Ref Pattern1BDAProjectArn
+        Pattern1BDAProjectArn: !Ref Pattern1BDAProjectArn
         HasPattern1BDAProjectArn: !If [HasPattern1BDAProjectArn, "true", "false"]
                 
         # Lambda Layers
@@ -1895,7 +1700,8 @@ Resources:
 
   TestSetBucket:
     Type: AWS::S3::Bucket
-    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    DeletionPolicy: Retain
     Properties:
       CorsConfiguration:
         CorsRules:
@@ -2262,6 +2068,78 @@ Resources:
       DatasetName: "RVL-CDIP-NMP-Packets"
       DatasetDescription: "Test set with 500 multi-page document packets combining 13 document types (budget, email, form, handwritten, invoice, language, letter, memo, news article, questionnaire, resume, scientific publication, specification) for classification and document splitting evaluation."
       SourceCodeHash: <docsplit_testset_deployer_HASH_TOKEN>
+
+  ##########################################################################
+  # W2 Dataset Deployer - Automatically deploys Fake W-2 Tax Form dataset
+  ##########################################################################
+
+  W2DatasetDeployerLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      KmsKeyId: !GetAtt CustomerManagedEncryptionKey.Arn
+      RetentionInDays: !Ref LogRetentionDays
+
+  W2DatasetDeployerFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: "Function does not require VPC access as it only interacts with AWS services via APIs"
+          - id: W92
+            reason: "Function does not require reserved concurrency as it scales based on demand"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for Cfn Custom Resource function"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only configuration values like feature flags and non-sensitive settings"
+    Properties:
+      PermissionsBoundary:
+        !If [
+          HasPermissionsBoundary,
+          !Ref PermissionsBoundaryArn,
+          !Ref AWS::NoValue,
+        ]
+      FunctionName: !Sub "${AWS::StackName}-W2DatasetDeployer"
+      CodeUri: src/lambda/w2_dataset_deployer/
+      Handler: index.handler
+      Runtime: python3.12
+      Timeout: 900
+      MemorySize: 3008
+      EphemeralStorage:
+        Size: 10240
+      LoggingConfig:
+        LogGroup: !Ref W2DatasetDeployerLogGroup
+      Environment:
+        Variables:
+          LOG_LEVEL: !Ref LogLevel
+          TESTSET_BUCKET: !Ref TestSetBucket
+          TRACKING_TABLE: !Ref TrackingTable
+      Policies:
+        - S3CrudPolicy:
+            BucketName: !Ref TestSetBucket
+        - DynamoDBCrudPolicy:
+            TableName: !Ref TrackingTable
+        - Statement:
+            - Effect: Allow
+              Action:
+                - kms:Encrypt
+                - kms:Decrypt
+                - kms:ReEncrypt*
+                - kms:GenerateDataKey*
+                - kms:DescribeKey
+              Resource: !GetAtt CustomerManagedEncryptionKey.Arn
+
+  W2DatasetDeployment:
+    Type: Custom::W2DatasetDeployer
+    DependsOn:
+      - TestSetBucket
+      - TrackingTable
+    Properties:
+      ServiceToken: !GetAtt W2DatasetDeployerFunction.Arn
+      DatasetVersion: "1.0"
+      DatasetName: "Fake-W2-Tax-Forms"
+      DatasetDescription: "Test set with 2,000 synthetic US W-2 tax form images and 45-field structured ground truth for extraction evaluation. Source: HuggingFace singhsays/fake-w2-us-tax-form-dataset (CC0: Public Domain)."
+      SourceCodeHash: <w2_dataset_deployer_HASH_TOKEN>
 
   ConfigurationBucket:
     Type: AWS::S3::Bucket
@@ -3335,7 +3213,7 @@ Resources:
         StackName: !Sub "${AWS::StackName}"
         Version: <VERSION>
         BuildDateTime: <BUILD_DATE_TIME>
-        IDPPattern: !Ref IDPPattern
+        IDPPattern: "Unified"
         InputBucket: !Ref InputBucket
         DiscoveryBucket: !Ref DiscoveryBucket
         ConfigurationBucket: !Ref ConfigurationBucket
@@ -3360,27 +3238,9 @@ Resources:
             - !Ref QueueProcessorLogGroup
             - !Ref WorkflowTrackerLogGroup
             - !Ref SaveReportingDataFunctionV2LogGroup
-            - !If
-              - IsPattern1
-              - !GetAtt PATTERN1STACK.Outputs.PatternLogGroups
-              - !If
-                - IsPattern2
-                - !GetAtt PATTERN2STACK.Outputs.PatternLogGroups
-                - !GetAtt PATTERN3STACK.Outputs.PatternLogGroups
-        StateMachineArn: !If
-          - IsPattern3
-          - !GetAtt PATTERN3STACK.Outputs.StateMachineArn
-          - !If
-            - IsPattern2
-            - !GetAtt PATTERN2STACK.Outputs.StateMachineArn
-            - !GetAtt PATTERN1STACK.Outputs.StateMachineArn
-        StateMachineName: !If
-          - IsPattern3
-          - !GetAtt PATTERN3STACK.Outputs.StateMachineName
-          - !If
-            - IsPattern2
-            - !GetAtt PATTERN2STACK.Outputs.StateMachineName
-            - !GetAtt PATTERN1STACK.Outputs.StateMachineName
+            - !GetAtt PATTERNSTACK.Outputs.PatternLogGroups
+        StateMachineArn: !GetAtt PATTERNSTACK.Outputs.StateMachineArn
+        StateMachineName: !GetAtt PATTERNSTACK.Outputs.StateMachineName
         KnowledgeBaseId: !If
           - ShouldCreateDocumentKnowledgeBase
           - !GetAtt DOCUMENTKB.Outputs.KnowledgeBaseID
@@ -3586,32 +3446,23 @@ Resources:
       Environment:
         Variables:
           LOG_LEVEL: !Ref LogLevel
-          STATE_MACHINE_ARN: !If
-            - IsPattern3
-            - !GetAtt PATTERN3STACK.Outputs.StateMachineArn
-            - !If
-              - IsPattern2
-              - !GetAtt PATTERN2STACK.Outputs.StateMachineArn
-              - !GetAtt PATTERN1STACK.Outputs.StateMachineArn
+          STATE_MACHINE_ARN: !GetAtt PATTERNSTACK.Outputs.StateMachineArn
           APPSYNC_API_URL: !GetAtt GraphQLApi.GraphQLUrl
           CONCURRENCY_TABLE: !Ref ConcurrencyTable
           MAX_CONCURRENT: !Ref MaxConcurrentWorkflows
           WORKING_BUCKET: !Ref WorkingBucket
+          CONFIG_TABLE: !Ref ConfigurationTable
       Policies:
         - SQSPollerPolicy:
             QueueName: !GetAtt DocumentQueue.QueueName
         - StepFunctionsExecutionPolicy:
-            StateMachineName: !If
-              - IsPattern3
-              - !GetAtt PATTERN3STACK.Outputs.StateMachineName
-              - !If
-                - IsPattern2
-                - !GetAtt PATTERN2STACK.Outputs.StateMachineName
-                - !GetAtt PATTERN1STACK.Outputs.StateMachineName
+            StateMachineName: !GetAtt PATTERNSTACK.Outputs.StateMachineName
         - DynamoDBCrudPolicy:
             TableName: !Ref TrackingTable
         - DynamoDBCrudPolicy:
             TableName: !Ref ConcurrencyTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref ConfigurationTable
         - S3CrudPolicy:
             BucketName: !Ref WorkingBucket
         - Statement:
@@ -3772,13 +3623,7 @@ Resources:
           - Step Functions Execution Status Change
         detail:
           stateMachineArn:
-            - !If
-              - IsPattern3
-              - !GetAtt PATTERN3STACK.Outputs.StateMachineArn
-              - !If
-                - IsPattern2
-                - !GetAtt PATTERN2STACK.Outputs.StateMachineArn
-                - !GetAtt PATTERN1STACK.Outputs.StateMachineArn
+            - !GetAtt PATTERNSTACK.Outputs.StateMachineArn
           status:
             - FAILED
             - TIMED_OUT
@@ -3904,13 +3749,7 @@ Resources:
           - Step Functions Execution Status Change
         detail:
           stateMachineArn:
-            - !If
-              - IsPattern3
-              - !GetAtt PATTERN3STACK.Outputs.StateMachineArn
-              - !If
-                - IsPattern2
-                - !GetAtt PATTERN2STACK.Outputs.StateMachineArn
-                - !GetAtt PATTERN1STACK.Outputs.StateMachineArn
+            - !GetAtt PATTERNSTACK.Outputs.StateMachineArn
           status:
             - SUCCEEDED
       State: ENABLED
@@ -4040,13 +3879,7 @@ Resources:
       ComparisonOperator: GreaterThanOrEqualToThreshold
       Dimensions:
         - Name: StateMachineArn
-          Value: !If
-            - IsPattern3
-            - !GetAtt PATTERN3STACK.Outputs.StateMachineArn
-            - !If
-              - IsPattern2
-              - !GetAtt PATTERN2STACK.Outputs.StateMachineArn
-              - !GetAtt PATTERN1STACK.Outputs.StateMachineArn
+          Value: !GetAtt PATTERNSTACK.Outputs.StateMachineArn
       AlarmActions:
         - !Ref AlertsTopic
 
@@ -4063,13 +3896,7 @@ Resources:
       ComparisonOperator: GreaterThanThreshold
       Dimensions:
         - Name: StateMachineArn
-          Value: !If
-            - IsPattern3
-            - !GetAtt PATTERN3STACK.Outputs.StateMachineArn
-            - !If
-              - IsPattern2
-              - !GetAtt PATTERN2STACK.Outputs.StateMachineArn
-              - !GetAtt PATTERN1STACK.Outputs.StateMachineArn
+          Value: !GetAtt PATTERNSTACK.Outputs.StateMachineArn
       AlarmActions:
         - !Ref AlertsTopic
 
@@ -4431,20 +4258,8 @@ Resources:
               }
             ]
           }
-        - StateMachineArn: !If
-            - IsPattern3
-            - !GetAtt PATTERN3STACK.Outputs.StateMachineArn
-            - !If
-              - IsPattern2
-              - !GetAtt PATTERN2STACK.Outputs.StateMachineArn
-              - !GetAtt PATTERN1STACK.Outputs.StateMachineArn
-          StateMachineLogGroup: !If
-            - IsPattern3
-            - !GetAtt PATTERN3STACK.Outputs.StateMachineLogGroup
-            - !If
-              - IsPattern2
-              - !GetAtt PATTERN2STACK.Outputs.StateMachineLogGroup
-              - !GetAtt PATTERN1STACK.Outputs.StateMachineLogGroup
+        - StateMachineArn: !GetAtt PATTERNSTACK.Outputs.StateMachineArn
+          StateMachineLogGroup: !GetAtt PATTERNSTACK.Outputs.StateMachineLogGroup
 
   DashboardMergerFunction:
     DependsOn:
@@ -4495,13 +4310,7 @@ Resources:
     Properties:
       ServiceToken: !GetAtt DashboardMergerFunction.Arn
       Dashboard1Name: !Ref MainTemplateSubsetDashboard
-      Dashboard2Name: !If
-        - IsPattern3
-        - !GetAtt PATTERN3STACK.Outputs.DashboardName
-        - !If
-          - IsPattern2
-          - !GetAtt PATTERN2STACK.Outputs.DashboardName
-          - !GetAtt PATTERN1STACK.Outputs.DashboardName
+      Dashboard2Name: !GetAtt PATTERNSTACK.Outputs.DashboardName
       MergedDashboardName: !Sub "${AWS::StackName}-${AWS::Region}"
       ChangeToForceUpdate: <HASH_TOKEN> # Source code hash set by publish script
 
@@ -6046,6 +5855,10 @@ Resources:
             reason: "Lambda function does not need to be in VPC"
           - id: W92
             reason: "Lambda function does not need reserved concurrency"
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for synchronous AppSync resolver"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_173: "Environment variables contain non-sensitive configuration values"
     Properties:
       PermissionsBoundary:
         !If [
@@ -7108,24 +6921,12 @@ Outputs:
     Value: !Sub https://s3.console.aws.amazon.com/s3/buckets/${TestSetBucket}
   StateMachineArn:
     Description: Step Functions State machine ARN
-    Value: !If
-      - IsPattern3
-      - !GetAtt PATTERN3STACK.Outputs.StateMachineArn
-      - !If
-        - IsPattern2
-        - !GetAtt PATTERN2STACK.Outputs.StateMachineArn
-        - !GetAtt PATTERN1STACK.Outputs.StateMachineArn
+    Value: !GetAtt PATTERNSTACK.Outputs.StateMachineArn
   StateMachineConsoleURL:
     Description: Step Functions State machine console URL
     Value: !Sub
       - https://${AWS::Region}.console.aws.amazon.com/states/home?region=${AWS::Region}#/statemachines/view/${StateMachineArn}
-      - StateMachineArn: !If
-          - IsPattern3
-          - !GetAtt PATTERN3STACK.Outputs.StateMachineArn
-          - !If
-            - IsPattern2
-            - !GetAtt PATTERN2STACK.Outputs.StateMachineArn
-            - !GetAtt PATTERN1STACK.Outputs.StateMachineArn
+      - StateMachineArn: !GetAtt PATTERNSTACK.Outputs.StateMachineArn
 
   CWDashboardConsoleName:
     Description: Name of the merged CloudWatch dashboard

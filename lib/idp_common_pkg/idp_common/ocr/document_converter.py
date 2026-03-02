@@ -220,12 +220,25 @@ class DocumentConverter:
             logger.error(f"Error converting Excel to pages: {str(e)}")
             return [(self._create_empty_page(), "Error reading Excel file")]
 
-    def convert_word_to_pages(self, file_bytes: bytes) -> List[Tuple[bytes, str]]:
+    def convert_word_to_pages(
+        self,
+        file_bytes: bytes,
+        ocr_image_callback=None,
+    ) -> List[Tuple[bytes, str]]:
         """
         Convert Word document to page images and text with enhanced formatting.
 
+        Extracts text, tables, and images from the document in their original
+        order. Page boundaries are determined from the DOCX metadata (explicit
+        page breaks, image display dimensions, section properties) **before**
+        images are OCR'd, so that the output page count matches the original
+        document.
+
         Args:
             file_bytes: Word document bytes
+            ocr_image_callback: Optional callable that takes image bytes and
+                returns extracted text. If None, images are replaced with
+                "[Image]" placeholder text.
 
         Returns:
             List of tuples (image_bytes, page_text)
@@ -240,120 +253,190 @@ class DocumentConverter:
 
                 doc = Document(tmp_file.name)
 
-                # Extract formatted elements
-                elements = self._extract_word_formatting(doc)
+                # Extract formatted elements (including images, page breaks,
+                # and display dimensions) plus page geometry from sectPr.
+                elements, page_geometry = self._extract_word_formatting(doc)
 
-                # Render with enhanced formatting
-                return self._render_formatted_word_content(elements)
+                # Determine page boundaries from DOCX metadata FIRST
+                # (before OCR, so image display heights are still available).
+                page_groups = self._calculate_word_page_layout(elements, page_geometry)
+
+                # Resolve images (OCR or placeholder) within each page group,
+                # then render each page.
+                result_pages: List[Tuple[bytes, str]] = []
+                fonts = self._load_fonts()
+                for group in page_groups:
+                    resolved = self._resolve_image_elements(group, ocr_image_callback)
+                    img_bytes, text = self._render_word_page(resolved, fonts)
+                    result_pages.append((img_bytes, text))
+
+                return (
+                    result_pages if result_pages else [(self._create_empty_page(), "")]
+                )
 
         except Exception as e:
             logger.error(f"Error converting Word to pages: {str(e)}")
             return [(self._create_empty_page(), "Error reading Word document")]
 
-    def _extract_word_formatting(self, doc) -> List[dict]:
-        """Extract formatted content from Word document."""
-        elements = []
+    def _resolve_image_elements(
+        self,
+        elements: List[dict],
+        ocr_image_callback=None,
+    ) -> List[dict]:
+        """Replace image elements with text paragraphs containing OCR'd or placeholder text."""
+        resolved = []
+        for element in elements:
+            if element["type"] != "image":
+                resolved.append(element)
+                continue
+
+            # Get text for the image
+            image_bytes = element.get("image_bytes", b"")
+            if ocr_image_callback and image_bytes:
+                try:
+                    ocr_text = ocr_image_callback(image_bytes)
+                except Exception as e:
+                    logger.warning(f"OCR callback failed for embedded image: {e}")
+                    ocr_text = "[Image - OCR failed]"
+            else:
+                ocr_text = "[Image]"
+
+            if not ocr_text or not ocr_text.strip():
+                ocr_text = "[Image]"
+
+            # Convert OCR text into paragraph elements (one per line)
+            for line in ocr_text.split("\n"):
+                if not line.strip():
+                    resolved.append({"type": "spacing", "height": 6})
+                    continue
+                resolved.append(
+                    {
+                        "type": "paragraph",
+                        "text": line,
+                        "style": "Normal",
+                        "is_heading": False,
+                        "heading_level": 0,
+                        "alignment": "left",
+                        "runs": [
+                            {
+                                "text": line,
+                                "bold": False,
+                                "italic": False,
+                                "underline": False,
+                                "font_size": None,
+                                "font_name": None,
+                            }
+                        ],
+                        "space_before": 2,
+                        "space_after": 2,
+                    }
+                )
+
+        return resolved
+
+    def _extract_word_formatting(self, doc) -> Tuple[List[dict], dict]:
+        """Extract formatted content from Word document in document order.
+
+        Iterates the document body children (paragraphs, tables) in their
+        original order.  For paragraphs it also:
+        - detects embedded images and emits ``{"type": "image", ...}``
+          elements with ``display_height_px`` derived from ``wp:extent``.
+        - detects explicit page breaks (``w:br type="page"``,
+          ``w:pageBreakBefore``, ``w:lastRenderedPageBreak``) and emits
+          ``{"type": "page_break"}`` elements.
+
+        Returns:
+            (elements, page_geometry) where *page_geometry* contains the
+            usable page height in pixels derived from ``<w:sectPr>``.
+        """
+        elements: List[dict] = []
+        page_geometry = self._default_page_geometry()
 
         try:
             from docx.enum.text import WD_ALIGN_PARAGRAPH
+            from docx.oxml.ns import qn
+            from docx.table import Table as DocxTable
+            from docx.text.paragraph import Paragraph
 
-            # Process paragraphs
-            for paragraph in doc.paragraphs:
-                if not paragraph.text.strip():
-                    elements.append({"type": "spacing", "height": 12})
-                    continue
-
-                # Determine if this is a heading
-                style_name = paragraph.style.name if paragraph.style else "Normal"
-                is_heading = "Heading" in style_name
-                heading_level = 0
-
-                if is_heading:
+            # Build image cache: relationship-id -> image bytes
+            image_cache: dict[str, bytes] = {}
+            for rel_id, rel in doc.part.rels.items():
+                if "image" in rel.reltype:
                     try:
-                        heading_level = int(style_name.split()[-1])
-                    except (ValueError, IndexError):
-                        heading_level = 1
+                        image_cache[rel_id] = rel.target_part.blob
+                    except Exception:
+                        logger.debug(f"Could not read image for rel {rel_id}")
 
-                # Get alignment
-                alignment = "left"
-                if paragraph.alignment:
-                    if paragraph.alignment == WD_ALIGN_PARAGRAPH.CENTER:
-                        alignment = "center"
-                    elif paragraph.alignment == WD_ALIGN_PARAGRAPH.RIGHT:
-                        alignment = "right"
-                    elif paragraph.alignment == WD_ALIGN_PARAGRAPH.JUSTIFY:
-                        alignment = "justify"
+            # XML namespace shortcuts
+            _a_blip = qn("a:blip")
+            _r_embed = qn("r:embed")
+            _w_drawing = qn("w:drawing")
+            _w_p = qn("w:p")
+            _w_tbl = qn("w:tbl")
+            _w_br = qn("w:br")
+            _w_type = qn("w:type")
+            _w_lastRenderedPageBreak = qn("w:lastRenderedPageBreak")
+            _w_pPr = qn("w:pPr")
+            _w_pageBreakBefore = qn("w:pageBreakBefore")
+            _w_sectPr = qn("w:sectPr")
 
-                # Extract run-level formatting
-                formatted_runs = []
-                for run in paragraph.runs:
-                    if run.text.strip():
-                        run_info = {
-                            "text": run.text,
-                            "bold": bool(run.bold),
-                            "italic": bool(run.italic),
-                            "underline": bool(run.underline),
-                            "font_size": (
-                                getattr(run.font.size, "pt", None)
-                                if run.font.size
-                                else None
-                            ),
-                            "font_name": run.font.name if run.font.name else None,
-                        }
-                        formatted_runs.append(run_info)
+            # --- Extract page geometry from sectPr ----
+            page_geometry = self._extract_page_geometry(doc.element.body, _w_sectPr, qn)
 
-                if not formatted_runs:
-                    formatted_runs = [
-                        {
-                            "text": paragraph.text,
-                            "bold": False,
-                            "italic": False,
-                            "underline": False,
-                            "font_size": None,
-                            "font_name": None,
-                        }
-                    ]
+            for child in doc.element.body:
+                tag = child.tag
 
-                para_element = {
-                    "type": "paragraph",
-                    "text": paragraph.text,
-                    "style": style_name,
-                    "is_heading": is_heading,
-                    "heading_level": heading_level,
-                    "alignment": alignment,
-                    "runs": formatted_runs,
-                    "space_before": 6 if is_heading else 3,
-                    "space_after": 6 if is_heading else 3,
-                }
-                elements.append(para_element)
+                # ----- Paragraph -----
+                if tag == _w_p:
+                    # Check for page break BEFORE this paragraph
+                    pPr = child.find(_w_pPr)
+                    if pPr is not None and pPr.find(_w_pageBreakBefore) is not None:
+                        elements.append({"type": "page_break"})
 
-            # Process tables
-            for table in doc.tables:
-                table_data = []
-                for row in table.rows:
-                    row_data = []
-                    for cell in row.cells:
-                        cell_text = cell.text.strip()
-                        # Check if first row (likely header)
-                        is_header = table.rows[0] == row
-                        cell_info = {
-                            "text": cell_text,
-                            "is_header": is_header,
-                            "bold": is_header,  # Headers are typically bold
-                            "alignment": "center" if is_header else "left",
-                        }
-                        row_data.append(cell_info)
-                    table_data.append(row_data)
+                    # Check for explicit w:br type="page" or lastRenderedPageBreak
+                    has_page_break_in_runs = False
+                    for br in child.findall(".//" + _w_br):
+                        if br.get(_w_type) == "page":
+                            has_page_break_in_runs = True
+                            break
+                    if not has_page_break_in_runs:
+                        if child.findall(".//" + _w_lastRenderedPageBreak):
+                            has_page_break_in_runs = True
 
-                if table_data:
-                    elements.append(
-                        {
-                            "type": "table",
-                            "data": table_data,
-                            "space_before": 12,
-                            "space_after": 12,
-                        }
-                    )
+                    if has_page_break_in_runs:
+                        elements.append({"type": "page_break"})
+
+                    paragraph = Paragraph(child, doc)
+                    has_images = bool(child.findall(".//" + _w_drawing))
+                    has_text = bool(paragraph.text.strip())
+
+                    # Emit text element if present
+                    if has_text:
+                        elements.append(
+                            self._build_paragraph_element(paragraph, WD_ALIGN_PARAGRAPH)
+                        )
+                    elif not has_images:
+                        # Empty paragraph (spacing)
+                        elements.append({"type": "spacing", "height": 12})
+
+                    # Emit image elements (with display dimensions)
+                    if has_images:
+                        self._extract_images_from_paragraph(
+                            child,
+                            image_cache,
+                            elements,
+                            _w_drawing,
+                            _a_blip,
+                            _r_embed,
+                            self.dpi,
+                        )
+
+                # ----- Table -----
+                elif tag == _w_tbl:
+                    table = DocxTable(child, doc)
+                    table_element = self._build_table_element(table)
+                    if table_element:
+                        elements.append(table_element)
 
         except Exception as e:
             logger.error(f"Error extracting Word formatting: {str(e)}")
@@ -380,7 +463,218 @@ class DocumentConverter:
                 }
             ]
 
-        return elements
+        return elements, page_geometry
+
+    # ------------------------------------------------------------------
+    # Page geometry helpers
+    # ------------------------------------------------------------------
+
+    def _default_page_geometry(self) -> dict:
+        """Return default page geometry based on the converter's DPI."""
+        return {
+            "usable_height_px": self.page_height - 2 * self.margin,
+            "usable_width_px": self.page_width - 2 * self.margin,
+        }
+
+    @staticmethod
+    def _extract_page_geometry(body, _w_sectPr, qn) -> dict:
+        """Read ``<w:sectPr>`` from the document body to get page dimensions.
+
+        Converts twips (1/20 of a point, 1440 twips = 1 inch) into pixels
+        at 150 DPI (the converter default).
+        """
+        _TWIPS_PER_INCH = 1440
+        _DPI = 150  # match converter default
+
+        sect = body.find(".//" + _w_sectPr)
+        if sect is None:
+            return {
+                "usable_height_px": int(9.0 * _DPI),  # 11 - 2*1 margins
+                "usable_width_px": int(6.5 * _DPI),  # 8.5 - 2*1 margins
+            }
+
+        _w_pgSz = qn("w:pgSz")
+        _w_pgMar = qn("w:pgMar")
+        _w_h = qn("w:h")
+        _w_w = qn("w:w")
+        _w_top = qn("w:top")
+        _w_bottom = qn("w:bottom")
+        _w_left = qn("w:left")
+        _w_right = qn("w:right")
+
+        page_h_twips = 15840  # default letter 11"
+        page_w_twips = 12240  # default letter 8.5"
+        margin_top_twips = 1440  # 1"
+        margin_bottom_twips = 1440
+        margin_left_twips = 1440
+        margin_right_twips = 1440
+
+        pgSz = sect.find(_w_pgSz)
+        if pgSz is not None:
+            page_h_twips = int(pgSz.get(_w_h, page_h_twips))
+            page_w_twips = int(pgSz.get(_w_w, page_w_twips))
+
+        pgMar = sect.find(_w_pgMar)
+        if pgMar is not None:
+            margin_top_twips = int(pgMar.get(_w_top, margin_top_twips))
+            margin_bottom_twips = int(pgMar.get(_w_bottom, margin_bottom_twips))
+            margin_left_twips = int(pgMar.get(_w_left, margin_left_twips))
+            margin_right_twips = int(pgMar.get(_w_right, margin_right_twips))
+
+        usable_h_inches = (
+            page_h_twips - margin_top_twips - margin_bottom_twips
+        ) / _TWIPS_PER_INCH
+        usable_w_inches = (
+            page_w_twips - margin_left_twips - margin_right_twips
+        ) / _TWIPS_PER_INCH
+
+        return {
+            "usable_height_px": int(usable_h_inches * _DPI),
+            "usable_width_px": int(usable_w_inches * _DPI),
+        }
+
+    # ------------------------------------------------------------------
+    # Helpers for _extract_word_formatting
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _build_paragraph_element(paragraph, WD_ALIGN_PARAGRAPH) -> dict:
+        """Build a paragraph element dict with formatting metadata."""
+        style_name = paragraph.style.name if paragraph.style else "Normal"
+        is_heading = "Heading" in style_name
+        heading_level = 0
+        if is_heading:
+            try:
+                heading_level = int(style_name.split()[-1])
+            except (ValueError, IndexError):
+                heading_level = 1
+
+        alignment = "left"
+        if paragraph.alignment:
+            if paragraph.alignment == WD_ALIGN_PARAGRAPH.CENTER:
+                alignment = "center"
+            elif paragraph.alignment == WD_ALIGN_PARAGRAPH.RIGHT:
+                alignment = "right"
+            elif paragraph.alignment == WD_ALIGN_PARAGRAPH.JUSTIFY:
+                alignment = "justify"
+
+        formatted_runs = []
+        for run in paragraph.runs:
+            if run.text.strip():
+                formatted_runs.append(
+                    {
+                        "text": run.text,
+                        "bold": bool(run.bold),
+                        "italic": bool(run.italic),
+                        "underline": bool(run.underline),
+                        "font_size": (
+                            getattr(run.font.size, "pt", None)
+                            if run.font.size
+                            else None
+                        ),
+                        "font_name": run.font.name if run.font.name else None,
+                    }
+                )
+
+        if not formatted_runs:
+            formatted_runs = [
+                {
+                    "text": paragraph.text,
+                    "bold": False,
+                    "italic": False,
+                    "underline": False,
+                    "font_size": None,
+                    "font_name": None,
+                }
+            ]
+
+        return {
+            "type": "paragraph",
+            "text": paragraph.text,
+            "style": style_name,
+            "is_heading": is_heading,
+            "heading_level": heading_level,
+            "alignment": alignment,
+            "runs": formatted_runs,
+            "space_before": 6 if is_heading else 3,
+            "space_after": 6 if is_heading else 3,
+        }
+
+    @staticmethod
+    def _build_table_element(table) -> dict | None:
+        """Build a table element dict from a python-docx Table."""
+        table_data = []
+        for row in table.rows:
+            row_data = []
+            for cell in row.cells:
+                cell_text = cell.text.strip()
+                is_header = table.rows[0] == row
+                row_data.append(
+                    {
+                        "text": cell_text,
+                        "is_header": is_header,
+                        "bold": is_header,
+                        "alignment": "center" if is_header else "left",
+                    }
+                )
+            table_data.append(row_data)
+
+        if table_data:
+            return {
+                "type": "table",
+                "data": table_data,
+                "space_before": 12,
+                "space_after": 12,
+            }
+        return None
+
+    @staticmethod
+    def _extract_images_from_paragraph(
+        para_element,
+        image_cache: dict,
+        elements: List[dict],
+        _w_drawing,
+        _a_blip,
+        _r_embed,
+        dpi: int = 150,
+    ) -> None:
+        """Find embedded images in a paragraph's XML and append image elements.
+
+        Reads ``wp:extent`` (cx, cy in EMUs) to record the display height so
+        that ``_calculate_word_page_layout`` can compute accurate page breaks.
+        1 inch = 914400 EMUs.
+        """
+        _EMU_PER_INCH = 914400
+        drawings = para_element.findall(".//" + _w_drawing)
+        for drawing in drawings:
+            blips = drawing.findall(".//" + _a_blip)
+            for blip in blips:
+                embed_id = blip.get(_r_embed)
+                if embed_id and embed_id in image_cache:
+                    # Try to read display dimensions from wp:extent
+                    display_height_px = 0
+                    for extent in drawing.iter():
+                        local = (
+                            extent.tag.split("}")[-1]
+                            if "}" in extent.tag
+                            else extent.tag
+                        )
+                        if local == "extent":
+                            try:
+                                cy = int(extent.get("cy", 0))
+                                if cy > 0:
+                                    display_height_px = int((cy / _EMU_PER_INCH) * dpi)
+                            except (ValueError, TypeError):
+                                pass
+                            break
+
+                    elements.append(
+                        {
+                            "type": "image",
+                            "image_bytes": image_cache[embed_id],
+                            "display_height_px": display_height_px,
+                        }
+                    )
 
     def _render_formatted_word_content(
         self, elements: List[dict]
@@ -462,53 +756,95 @@ class DocumentConverter:
 
         return fonts
 
-    def _calculate_word_page_layout(self, elements: List[dict]) -> List[List[dict]]:
-        """Calculate page breaks for Word content."""
-        pages = []
-        current_page = []
-        current_y = self.margin
+    def _calculate_word_page_layout(
+        self,
+        elements: List[dict],
+        page_geometry: dict | None = None,
+    ) -> List[List[dict]]:
+        """Calculate page breaks for Word content.
 
-        # Usable page height
-        max_y = self.page_height - self.margin
+        Page boundaries are determined by:
+        1. Explicit ``page_break`` elements (highest priority).
+        2. Content overflow based on actual element heights and the usable
+           page height derived from ``<w:sectPr>`` (or converter defaults).
+
+        Image elements carry ``display_height_px`` from ``wp:extent`` so
+        their real size is used instead of a fixed estimate.
+        """
+        if page_geometry is None:
+            page_geometry = self._default_page_geometry()
+
+        usable_height = page_geometry["usable_height_px"]
+
+        pages: List[List[dict]] = []
+        current_page: List[dict] = []
+        current_y = 0
 
         for element in elements:
-            # Estimate element height
-            if element["type"] == "spacing":
-                element_height = element["height"]
-            elif element["type"] == "paragraph":
-                # Estimate based on text length and heading level
-                base_height = 24 if element["is_heading"] else 16
-                lines = max(1, len(element["text"]) // 80 + 1)  # Rough estimate
-                element_height = (
-                    base_height * lines
-                    + element.get("space_before", 0)
-                    + element.get("space_after", 0)
-                )
-            elif element["type"] == "table":
-                # Estimate table height
-                row_count = len(element["data"])
-                element_height = (
-                    row_count * 25
-                    + element.get("space_before", 0)
-                    + element.get("space_after", 0)
-                )
-            else:
-                element_height = 20
+            etype = element["type"]
 
-            # Check if we need a new page
-            if current_y + element_height > max_y and current_page:
+            # --- Explicit page break → start a new page ----
+            if etype == "page_break":
+                if current_page:
+                    pages.append(current_page)
+                    current_page = []
+                    current_y = 0
+                continue  # don't add the marker itself to any page
+
+            # --- Estimate element height ----
+            element_height = self._estimate_element_height(element)
+
+            # --- Overflow check → new page ----
+            if current_y + element_height > usable_height and current_page:
                 pages.append(current_page)
                 current_page = []
-                current_y = self.margin
+                current_y = 0
 
             current_page.append(element)
             current_y += element_height
 
-        # Add final page
+        # Final page
         if current_page:
             pages.append(current_page)
 
         return pages if pages else [[]]
+
+    @staticmethod
+    def _estimate_element_height(element: dict) -> int:
+        """Return an estimated pixel height for a single element.
+
+        For images the ``display_height_px`` field (from ``wp:extent``) is
+        used when available, giving an accurate height.
+        """
+        etype = element["type"]
+
+        if etype == "spacing":
+            return element.get("height", 12)
+
+        if etype == "paragraph":
+            base_height = 24 if element.get("is_heading") else 16
+            text = element.get("text", "")
+            lines = max(1, len(text) // 80 + 1)
+            return (
+                base_height * lines
+                + element.get("space_before", 0)
+                + element.get("space_after", 0)
+            )
+
+        if etype == "table":
+            row_count = len(element.get("data", []))
+            return (
+                row_count * 25
+                + element.get("space_before", 0)
+                + element.get("space_after", 0)
+            )
+
+        if etype == "image":
+            # Use actual display height when available
+            h = element.get("display_height_px", 0)
+            return h if h > 0 else 200  # sensible fallback
+
+        return 20
 
     def _render_word_page(self, elements: List[dict], fonts: dict) -> Tuple[bytes, str]:
         """Render a single page with enhanced formatting."""

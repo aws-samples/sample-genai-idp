@@ -170,9 +170,7 @@ def main():
     # Templates to check
     templates = [
         'template.yaml',  # Main template
-        'patterns/pattern-1/template.yaml',
-        'patterns/pattern-2/template.yaml', 
-        'patterns/pattern-3/template.yaml',
+        'patterns/unified/template.yaml',
         'nested/bda-lending-project/template.yaml',
         'nested/bedrockkb/template.yaml'
     ]

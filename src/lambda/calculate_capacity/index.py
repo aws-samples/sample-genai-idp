@@ -1548,15 +1548,20 @@ def lambda_handler(event: Dict[str, Any], context) -> Dict[str, Any]:
             f"🔍 DEBUG: maxAllowedLatency value: {input_data.get('maxAllowedLatency')}"
         )
 
-        # Normalize pattern format and validate Pattern 2 only
+        # Normalize pattern format and validate supported patterns
         if pattern.startswith("PATTERN-"):
             pattern = pattern.lower()
+
+        # Unified pattern uses the same Bedrock pipeline as Pattern-2
+        if pattern == "unified":
+            print(f"ℹ️ Unified pattern detected, treating as pattern-2 for capacity planning")
+            pattern = "pattern-2"
 
         if pattern != "pattern-2":
             print(f"❌ Unsupported pattern: {pattern}")
             error_result = {
                 "success": False,
-                "errorMessage": f"Only Pattern 2 is supported for capacity planning. Received: {pattern}",
+                "errorMessage": f"Only Pattern 2 and Unified patterns are supported for capacity planning. Received: {pattern}",
                 "metrics": [
                     {"label": "Status", "value": "Unsupported Pattern"},
                     {"label": "Pattern", "value": pattern},
@@ -1568,7 +1573,7 @@ def lambda_handler(event: Dict[str, Any], context) -> Dict[str, Any]:
                     "exceedsLimit": False, "maxAllowed": "0s",
                 },
                 "calculationDetails": {"quotasUsed": {"bedrock_models": {}}},
-                "recommendations": [f"❌ Only Pattern 2 is supported. Received: {pattern}"],
+                "recommendations": [f"❌ Only Pattern 2 and Unified patterns are supported. Received: {pattern}"],
             }
             if "body" in event:
                 return {"statusCode": 400, "body": json.dumps(error_result)}

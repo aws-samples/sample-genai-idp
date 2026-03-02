@@ -22,7 +22,6 @@ system_defaults/
    base-discovery.yaml         # Schema discovery
    pattern-1.yaml              # BDA pattern (selective inheritance)
    pattern-2.yaml              # Bedrock LLM pattern (full inheritance)
-   pattern-3.yaml              # UDOP pattern (selective inheritance)
    README.md
 ```
 

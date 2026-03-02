@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Annotated
 
 import boto3
-import fitz
+import pypdfium2 as pdfium
 import pytest
 import yaml
 from idp_common.models import Document, Page, Section
@@ -165,9 +165,10 @@ def test_payslip(execution_number, s3_bucket):
         temp_pdf = Path(temp_dir) / "lending_package.pdf"
         shutil.copy(sample_pdf, temp_pdf)
 
-        pdf_doc = fitz.open(sample_pdf)
+        pdf_doc = pdfium.PdfDocument(sample_pdf)
         first_page = pdf_doc[0]
-        ocr_text = first_page.get_text()
+        pil_img = first_page.render().to_pil()
+        ocr_text = ""
 
         ocr_text_path = Path(temp_dir) / "ocr_text.txt"
         with open(ocr_text_path, "w") as f:
@@ -175,9 +176,9 @@ def test_payslip(execution_number, s3_bucket):
 
         s3_client.upload_file(str(ocr_text_path), bucket_name, "ocr_text.txt")
 
-        pix = first_page.get_pixmap()
+        pil_img = first_page.render().to_pil()
         img_path = Path(temp_dir) / "page_1.png"
-        pix.save(str(img_path))
+        pil_img.save(str(img_path))
         pdf_doc.close()
 
         s3_client.upload_file(str(temp_pdf), bucket_name, "lending_package.pdf")

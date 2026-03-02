@@ -222,7 +222,8 @@ For every code change, I must review and verify:
 - [ ] No commented-out code left behind unless intentional
 
 #### 2. Test Coverage
-- [ ] Run existing tests if changes could affect them (`make test-cicd -C lib/idp_common_pkg` or relevant subset)
+- [ ] **MANDATORY**: Run `make test-cicd -C lib/idp_common_pkg` (or `make test` from project root) and verify ALL tests pass — do NOT skip this step
+- [ ] **MANDATORY**: Run `ruff check` (or `make lint`) on changed Python files and verify no new lint errors
 - [ ] New functionality has corresponding tests (or note why tests weren't added)
 - [ ] Test assertions are meaningful, not just "it doesn't crash"
 

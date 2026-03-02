@@ -10,6 +10,7 @@ import logging
 from typing import Dict, Any, Tuple
 from idp_common.models import Document, Status
 from idp_common.docs_service import create_document_service
+from idp_common.config import ConfigurationManager
 from aws_xray_sdk.core import xray_recorder, patch_all
 
 patch_all()
@@ -95,6 +96,42 @@ def start_workflow(document: Document) -> Dict[str, Any]:
         compressed_document = document.to_dict()
         logger.warning("No WORKING_BUCKET configured, sending uncompressed document to workflow")
     
+    # Inject use_bda flag and bda_project_arn from config into document for state machine routing.
+    # The unified state machine uses $.document.use_bda to choose BDA vs pipeline branch,
+    # and $.document.bda_project_arn for the per-config-version BDA project.
+    config_table_name = os.environ.get('CONFIG_TABLE')
+    if config_table_name:
+        try:
+            config_version = getattr(document, 'config_version', None) or 'default'
+            manager = ConfigurationManager(table_name=config_table_name)
+
+            # Read use_bda from the full config (properly decompresses gzip storage)
+            config = manager.get_merged_configuration(config_version)
+            use_bda = getattr(config, 'use_bda', False) if config else False
+            compressed_document['use_bda'] = bool(use_bda)
+
+            # Read per-version BDA project ARN (stored as top-level DynamoDB metadata)
+            if use_bda:
+                bda_project_arn = manager.get_bda_project_arn(config_version)
+                if bda_project_arn:
+                    compressed_document['bda_project_arn'] = bda_project_arn
+                    logger.info(f"Config version '{config_version}': use_bda=True, bda_project_arn={bda_project_arn}")
+                else:
+                    # No BDA project linked — fall back to pipeline to avoid errors
+                    logger.warning(
+                        f"Config version '{config_version}' has use_bda=True but no BDA project ARN linked. "
+                        f"Falling back to pipeline mode. Please sync the config version to a BDA project."
+                    )
+                    compressed_document['use_bda'] = False
+            else:
+                logger.info(f"Config version '{config_version}': use_bda=False, using pipeline mode")
+        except Exception as e:
+            logger.warning(f"Could not read config from ConfigurationManager: {e}. Defaulting to pipeline mode.", exc_info=True)
+            compressed_document['use_bda'] = False
+    else:
+        logger.warning("CONFIG_TABLE env var not set. Cannot determine use_bda flag. Defaulting to pipeline mode.")
+        compressed_document['use_bda'] = False
+
     event = {
         "document": compressed_document
     }

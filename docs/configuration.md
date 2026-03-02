@@ -103,9 +103,8 @@ The GenAI IDP Accelerator uses a **system defaults** architecture where configur
 ### How It Works
 
 1. **System defaults** are loaded first from `lib/idp_common_pkg/idp_common/config/system_defaults/`:
-   - `pattern-1.yaml` - BDA pattern defaults
-   - `pattern-2.yaml` - Bedrock LLM pattern defaults
-   - `pattern-3.yaml` - UDOP pattern defaults
+   - `pattern-1.yaml` - BDA mode defaults (used when `use_bda: true`)
+   - `pattern-2.yaml` - Pipeline mode defaults (used when `use_bda: false`)
 
 2. **User configurations** are merged on top, overriding only the specified values
 
@@ -278,23 +277,16 @@ Key parameters that can be configured during CloudFormation deployment:
 
 ### Pattern Selection
 - `IDPPattern`: Select processing pattern:
-  - Pattern1: Packet or Media processing with Bedrock Data Automation (BDA)
-  - Pattern2: Packet processing with Textract and Bedrock
-  - Pattern3: Packet processing with Textract, SageMaker(UDOP), and Bedrock
+  - Unified: Supports both BDA and Pipeline processing modes via `use_bda` flag
 
 ### Pattern-Specific Parameters
-- **Pattern 1 (BDA)**
-  - `Pattern1BDAProjectArn`: Optional existing Bedrock Data Automation project ARN
-  - `Pattern1Configuration`: Configuration preset to use
+- **Configuration Preset**: `ConfigurationPreset` — Select from available presets (lending-package-sample, bank-statement-sample, etc.)
+- **BDA Project ARN**: Optional existing Bedrock Data Automation project ARN (for BDA mode)
+- **Custom Model ARNs**: Optional custom fine-tuned classification/extraction model ARNs
 
-- **Pattern 2 (Textract + Bedrock)**
-  - `Pattern2Configuration`: Configuration preset (default, few_shot_example_with_multimodal_page_classification, medical_records_summarization)
-  - `Pattern2CustomClassificationModelARN`: Optional custom fine-tuned classification model (Coming Soon)
-  - `Pattern2CustomExtractionModelARN`: Optional custom fine-tuned extraction model (Coming Soon)
+> **Note**: The processing mode (BDA vs Pipeline) is controlled by the `use_bda` flag in the configuration, not by deployment parameters. See the [architecture docs](./architecture.md) for details.
 
 - **Pattern 3 (Textract + UDOP + Bedrock)**
-  - `Pattern3UDOPModelArtifactPath`: S3 path for UDOP model artifact
-  - `Pattern3Configuration`: Configuration preset to use
 
 ### Optional Features
 - `EvaluationBaselineBucketName`: Optional existing bucket for ground truth data
@@ -304,7 +296,7 @@ Key parameters that can be configured during CloudFormation deployment:
 - `BedrockGuardrailId`: Optional Bedrock Guardrail ID to apply
 - `BedrockGuardrailVersion`: Version of Bedrock Guardrail to use
 
-For details on specific patterns, see [pattern-1.md](pattern-1.md), [pattern-2.md](pattern-2.md), and [pattern-3.md](pattern-3.md).
+For details on processing modes, see [architecture.md](architecture.md). For legacy pattern-specific references, see [pattern-1.md](pattern-1.md) (BDA) and [pattern-2.md](pattern-2.md) (Pipeline).
 
 ## High Volume Processing
 

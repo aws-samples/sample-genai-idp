@@ -1111,7 +1111,7 @@ const CapacityPlanningLayout = () => {
 
     // Use the same logic as the left panel - simple and reliable
     if (deploymentSettings?.IDPPattern) {
-      const pattern = String(deploymentSettings.IDPPattern).split(' ')[0]; // Extract just "Pattern1", "Pattern2", etc.
+      const pattern = String(deploymentSettings.IDPPattern).split(' ')[0]; // Extract just "Pattern1", "Pattern2", "Unified", etc.
 
       if (pattern === 'Pattern1') {
         return 'PATTERN-1';
@@ -1120,6 +1120,10 @@ const CapacityPlanningLayout = () => {
         return 'PATTERN-3';
       }
       if (pattern === 'Pattern2') {
+        return 'PATTERN-2';
+      }
+      // Unified pattern uses the same Bedrock pipeline as Pattern-2
+      if (pattern.toLowerCase() === 'unified') {
         return 'PATTERN-2';
       }
     }

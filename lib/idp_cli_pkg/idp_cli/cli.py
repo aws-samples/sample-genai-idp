@@ -142,7 +142,7 @@ TEMPLATE_URLS = {
 
 
 @click.group()
-@click.version_option(version="0.4.16")
+@click.version_option(version="0.5.0")
 def cli():
     """
     IDP CLI - Batch document processing for IDP Accelerator
@@ -152,17 +152,18 @@ def cli():
     - Batch document upload and processing
     - Progress monitoring with live updates
     - Status checking and reporting
+
+    Global Options:
+      --profile PROFILE    AWS profile name to use for credentials.
+                          Can be placed anywhere in the command.
+                          Example: idp-cli --profile my-profile run-inference ...
+                          Example: idp-cli run-inference --profile my-profile ...
     """
     pass
 
 
 @cli.command()
 @click.option("--stack-name", required=True, help="CloudFormation stack name")
-@click.option(
-    "--pattern",
-    type=click.Choice(["pattern-1", "pattern-2", "pattern-3"]),
-    help="IDP pattern to deploy (required for new stacks)",
-)
 @click.option(
     "--admin-email", help="Admin user email address (required for new stacks)"
 )
@@ -193,7 +194,6 @@ def cli():
     type=click.Choice(["true", "false"]),
     help="Enable Human-in-the-Loop (default: false)",
 )
-@click.option("--pattern-config", help="Pattern configuration preset")
 @click.option(
     "--custom-config",
     help="Path to local config file or S3 URI (e.g., ./config.yaml or s3://bucket/config.yaml)",
@@ -207,14 +207,12 @@ def cli():
 @click.option("--role-arn", help="CloudFormation service role ARN")
 def deploy(
     stack_name: str,
-    pattern: str,
     admin_email: str,
     from_code: Optional[str],
     template_url: str,
     max_concurrent: int,
     log_level: str,
     enable_hitl: str,
-    pattern_config: Optional[str],
     custom_config: Optional[str],
     parameters: Optional[str],
     wait: bool,
@@ -225,16 +223,16 @@ def deploy(
     """
     Deploy or update IDP stack from command line
     
-    For new stacks, --pattern and --admin-email are required.
+    For new stacks, --admin-email is required.
     For existing stacks, only specify parameters you want to update.
     
     Examples:
     
-      # Create new stack with Pattern 2
-      idp-cli deploy --stack-name my-idp --pattern pattern-2 --admin-email user@example.com
+      # Create new stack
+      idp-cli deploy --stack-name my-idp --admin-email user@example.com
       
-      # Deploy from local code (NEW!)
-      idp-cli deploy --stack-name my-idp --from-code . --pattern pattern-2 --admin-email user@example.com --wait
+      # Deploy from local code
+      idp-cli deploy --stack-name my-idp --from-code . --admin-email user@example.com --wait
       
       # Update existing stack with local config file
       idp-cli deploy --stack-name my-idp --custom-config ./my-config.yaml
@@ -246,7 +244,7 @@ def deploy(
       idp-cli deploy --stack-name my-idp --max-concurrent 200 --wait
       
       # Create with additional parameters
-      idp-cli deploy --stack-name my-idp --pattern pattern-2 \\
+      idp-cli deploy --stack-name my-idp \\
           --admin-email user@example.com \\
           --parameters "DataRetentionInDays=90,ErrorThreshold=5"
     """
@@ -358,21 +356,13 @@ def deploy(
             console.print(
                 f"[bold blue]Updating existing IDP stack: {stack_name}[/bold blue]"
             )
-            if pattern:
-                console.print(f"Pattern: {pattern}")
             if admin_email:
                 console.print(f"Admin Email: {admin_email}")
         else:
-            # New stack - require pattern and admin_email
+            # New stack - require admin_email
             console.print(
                 f"[bold blue]Creating new IDP stack: {stack_name}[/bold blue]"
             )
-
-            if not pattern:
-                console.print(
-                    "[red]✗ Error: --pattern is required when creating a new stack[/red]"
-                )
-                sys.exit(1)
 
             if not admin_email:
                 console.print(
@@ -380,7 +370,6 @@ def deploy(
                 )
                 sys.exit(1)
 
-            console.print(f"Pattern: {pattern}")
             console.print(f"Admin Email: {admin_email}")
 
         console.print()
@@ -396,12 +385,10 @@ def deploy(
         # Build parameters - only pass explicitly provided values
         # Convert Click defaults to None when not explicitly provided by user
         cfn_parameters = build_parameters(
-            pattern=pattern,
             admin_email=admin_email,
             max_concurrent=max_concurrent if max_concurrent != 100 else None,
             log_level=log_level if log_level != "INFO" else None,
             enable_hitl=enable_hitl if enable_hitl != "false" else None,
-            pattern_config=pattern_config,
             custom_config=custom_config,
             additional_params=additional_params,
             region=region,
@@ -1133,23 +1120,41 @@ def _process_impl(
             )
         else:
             # Handle manifest/directory/S3 processing
-            batch_result = processor.process_batch(
-                manifest_path=manifest,
-                directory=directory,
-                s3_uri=s3_uri,
-                batch_id=batch_id,
-                file_pattern=file_pattern,
-                recursive=recursive,
-                config_path=config,
-                batch_prefix=batch_prefix,
-                number_of_files=number_of_files,
-                config_version=config_version,
-            )
+            if manifest:
+                batch_result = processor.process_batch(
+                    manifest_path=manifest,
+                    output_prefix=batch_prefix,
+                    batch_id=batch_id,
+                    number_of_files=number_of_files,
+                    config_version=config_version,
+                )
+            elif directory:
+                batch_result = processor.process_batch_from_directory(
+                    dir_path=directory,
+                    file_pattern=file_pattern,
+                    recursive=recursive,
+                    output_prefix=batch_prefix,
+                    batch_id=batch_id,
+                    number_of_files=number_of_files,
+                    config_version=config_version,
+                )
+            elif s3_uri:
+                batch_result = processor.process_batch_from_s3_uri(
+                    s3_uri=s3_uri,
+                    file_pattern=file_pattern,
+                    recursive=recursive,
+                    output_prefix=batch_prefix,
+                    batch_id=batch_id,
+                )
+            else:
+                raise ValueError("No input source specified")
 
         # Show results
         console.print()
         console.print(f"[bold blue]Batch ID: {batch_result['batch_id']}[/bold blue]")
-        console.print(f"Documents queued: {batch_result['documents_queued']}")
+        console.print(
+            f"Documents queued: {batch_result.get('queued', batch_result.get('documents_queued', 0))}"
+        )
 
         if batch_result.get("uploaded", 0) > 0:
             console.print(f"Files uploaded: {batch_result['uploaded']}")
@@ -1161,7 +1166,10 @@ def _process_impl(
         console.print()
 
         # Monitor if requested
-        if monitor and batch_result["documents_queued"] > 0:
+        if (
+            monitor
+            and batch_result.get("queued", batch_result.get("documents_queued", 0)) > 0
+        ):
             _monitor_progress(
                 stack_name=stack_name,
                 batch_id=batch_result["batch_id"],
@@ -1677,8 +1685,12 @@ def _rerun_inference_impl(
 
 @cli.command()
 @click.option("--stack-name", required=True, help="CloudFormation stack name")
-@click.option("--batch-id", help="Batch identifier")
+@click.option("--batch-id", help="Batch identifier or PK substring to search for")
 @click.option("--document-id", help="Single document ID (alternative to --batch-id)")
+@click.option(
+    "--object-status",
+    help="Filter by object status (e.g., COMPLETED, FAILED, QUEUED, RUNNING)",
+)
 @click.option("--wait", is_flag=True, help="Wait for all documents to complete")
 @click.option(
     "--refresh-interval",
@@ -1693,38 +1705,74 @@ def _rerun_inference_impl(
     default="table",
     help="Output format: table (default) or json",
 )
+@click.option(
+    "--show-details",
+    is_flag=True,
+    help="Show detailed information about matching documents",
+)
+@click.option(
+    "--get-time",
+    is_flag=True,
+    help="Calculate and display timing statistics (processing time, queue time, etc.)",
+)
+@click.option(
+    "--include-metering",
+    is_flag=True,
+    help="Include Lambda metering statistics (GB-seconds by stage) when using --get-time",
+)
 @click.option("--region", help="AWS region (optional)")
 def status(
     stack_name: str,
     batch_id: Optional[str],
     document_id: Optional[str],
+    object_status: Optional[str],
     wait: bool,
     refresh_interval: int,
     output_format: str,
+    show_details: bool,
+    get_time: bool,
+    include_metering: bool,
     region: Optional[str],
 ):
     """
-    Check status of a batch or single document
+    Check status of documents by batch ID, document ID, or search criteria
 
     Specify ONE of:
-      --batch-id: Check status of all documents in a batch
+      --batch-id: Search for documents with PK containing this substring
       --document-id: Check status of a single document
+
+    Optional filters and display options:
+      --object-status: Filter by status (COMPLETED, FAILED, QUEUED, RUNNING)
+      --show-details: Show detailed document information
+      --get-time: Calculate timing statistics
+      --include-metering: Include Lambda metering data (requires --get-time)
 
     Examples:
 
-      # Check batch status
+      # Search for all documents in a batch (PK substring search)
       idp-cli status --stack-name my-stack --batch-id cli-batch-20250110-153045-abc12345
+
+      # Search for completed documents in a batch
+      idp-cli status --stack-name my-stack --batch-id batch-123 --object-status COMPLETED
+
+      # Search with timing statistics
+      idp-cli status --stack-name my-stack --batch-id batch-123 --object-status COMPLETED --get-time
+
+      # Search with timing and Lambda metering
+      idp-cli status --stack-name my-stack --batch-id test --object-status COMPLETED --get-time --include-metering
 
       # Check single document status
       idp-cli status --stack-name my-stack --document-id batch-123/invoice.pdf
 
-      # Monitor single document until completion
-      idp-cli status --stack-name my-stack --document-id batch-123/invoice.pdf --wait
+      # Monitor documents until completion
+      idp-cli status --stack-name my-stack --batch-id batch-123 --wait
 
       # Get JSON output for scripting
-      idp-cli status --stack-name my-stack --document-id batch-123/invoice.pdf --format json
+      idp-cli status --stack-name my-stack --batch-id batch-123 --format json
     """
     try:
+        from .search_tracking_table import TrackingTableSearcher
+
         # Validate mutually exclusive options
         if not batch_id and not document_id:
             console.print(
@@ -1743,17 +1791,105 @@ def status(
 
         # Get document IDs to monitor
         if batch_id:
-            # Get batch info
-            batch_info = processor.get_batch_info(batch_id)
-            if not batch_info:
-                console.print(f"[red]✗ Batch not found: {batch_id}[/red]")
+            # Use TrackingTableSearcher for PK substring search
+            searcher = TrackingTableSearcher(stack_name=stack_name, region=region)
+
+            # Default to searching all statuses if not specified
+            if object_status:
+                # Search with specific status filter
+                search_results = searcher.search_by_pk_and_status(
+                    pk=batch_id, object_status=object_status
+                )
+            else:
+                # Search across all statuses by doing multiple searches
+                # This ensures we get all documents matching the PK substring
+                all_statuses = [
+                    "COMPLETED",
+                    "FAILED",
+                    "QUEUED",
+                    "RUNNING",
+                    "PROCESSING",
+                ]
+                all_items = []
+
+                console.print(
+                    f"[yellow]Searching for documents with PK containing '{batch_id}'...[/yellow]"
+                )
+
+                for status in all_statuses:
+                    results = searcher.search_by_pk_and_status(
+                        pk=batch_id, object_status=status
+                    )
+                    if results.get("success") and results.get("items"):
+                        all_items.extend(results["items"])
+
+                search_results = {
+                    "success": True,
+                    "count": len(all_items),
+                    "items": all_items,
+                    "pk": batch_id,
+                    "object_status": "ALL",
+                }
+
+                console.print(
+                    f"[green]✓ Found {len(all_items)} matching documents[/green]"
+                )
+
+            if not search_results.get("success"):
+                console.print(
+                    f"[red]✗ Search failed: {search_results.get('error')}[/red]"
+                )
                 sys.exit(1)
-            document_ids = batch_info["document_ids"]
+
+            if search_results.get("count", 0) == 0:
+                msg = f"No documents found matching batch-id '{batch_id}'"
+                if object_status:
+                    msg += f" with status '{object_status}'"
+                console.print(f"[yellow]{msg}[/yellow]")
+                sys.exit(1)
+
+            # Extract document IDs from search results
+            document_ids = []
+            for item in search_results.get("items", []):
+                # Extract ObjectKey from DynamoDB format
+                object_key = item.get("ObjectKey", {}).get("S")
+                if object_key:
+                    document_ids.append(object_key)
+
             identifier = batch_id
+
+            # Display search results summary if not waiting
+            if not wait and not get_time:
+                console.print()
+                console.print(f"[bold blue]Search Results for: {batch_id}[/bold blue]")
+                if object_status:
+                    console.print(f"[dim]Status filter: {object_status}[/dim]")
+                console.print(f"[dim]Documents found: {len(document_ids)}[/dim]")
+                console.print()
+
+                # Show details if requested
+                if show_details:
+                    searcher.display_results(search_results, show_details=True)
+                    console.print()
+
         else:
             # Single document
             document_ids = [document_id]
             identifier = document_id
+
+        # Handle timing statistics display (only for batch-id searches)
+        if get_time and batch_id:
+            console.print()
+            timing_stats = searcher.calculate_timing_statistics(
+                search_results, include_metering=include_metering
+            )
+            searcher.display_timing_statistics(timing_stats)
+
+            # If not waiting, we're done
+            if not wait:
+                sys.exit(0)
+
+            console.print()
 
         if wait:
             # JSON format not compatible with live monitoring
@@ -3124,7 +3260,7 @@ def remove_residual_resources_from_deleted_stacks(
 )
 @click.option(
     "--pattern",
-    type=click.Choice(["pattern-1", "pattern-2", "pattern-3"]),
+    type=click.Choice(["pattern-1", "pattern-2"]),
     default="pattern-2",
     help="Pattern to use for defaults (default: pattern-2)",
 )
@@ -3241,7 +3377,7 @@ def config_create(
 )
 @click.option(
     "--pattern",
-    type=click.Choice(["pattern-1", "pattern-2", "pattern-3"]),
+    type=click.Choice(["pattern-1", "pattern-2"]),
     default="pattern-2",
     help="Pattern to validate against (default: pattern-2)",
 )
@@ -3408,7 +3544,7 @@ def config_validate(
 )
 @click.option(
     "--pattern",
-    type=click.Choice(["pattern-1", "pattern-2", "pattern-3"]),
+    type=click.Choice(["pattern-1", "pattern-2"]),
     help="Pattern for validation (auto-detected if not specified)",
 )
 @click.option(
@@ -3500,8 +3636,6 @@ def config_upload(
                         detected_pattern = "pattern-1"
                     elif "Pattern2" in logical_id:
                         detected_pattern = "pattern-2"
-                    elif "Pattern3" in logical_id:
-                        detected_pattern = "pattern-3"
 
             if not config_table:
                 console.print("[red]✗ ConfigurationTable not found in stack[/red]")
@@ -3636,7 +3770,7 @@ def config_upload(
 )
 @click.option(
     "--pattern",
-    type=click.Choice(["pattern-1", "pattern-2", "pattern-3"]),
+    type=click.Choice(["pattern-1", "pattern-2"]),
     help="Pattern for minimal diff (auto-detected if not specified)",
 )
 @click.option(
@@ -3734,8 +3868,6 @@ def config_download(
                 )
                 if classification_method == "bda":
                     pattern = "pattern-1"
-                elif classification_method == "udop":
-                    pattern = "pattern-3"
                 else:
                     pattern = "pattern-2"
                 console.print(f"[dim]Auto-detected pattern: {pattern}[/dim]")
@@ -4069,6 +4201,25 @@ def config_delete(
 
 def main():
     """Main entry point for the CLI"""
+    # Parse --profile from anywhere in sys.argv before Click processes arguments
+    args = sys.argv[1:]  # Skip script name
+    profile = None
+
+    # Look for --profile in arguments
+    i = 0
+    while i < len(args):
+        if args[i] == "--profile" and i + 1 < len(args):
+            profile = args[i + 1]
+            # Remove --profile and its value from sys.argv
+            sys.argv.pop(i + 1)  # Remove profile value
+            sys.argv.pop(i + 1)  # Remove --profile (index shifts after first pop)
+            break
+        i += 1
+
+    if profile:
+        os.environ["AWS_DEFAULT_PROFILE"] = profile
+        console.print(f"[green]Using AWS profile: {profile}[/green]")
+
     cli()
 
 

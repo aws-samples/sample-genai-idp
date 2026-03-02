@@ -276,6 +276,9 @@ export const getConfigVersions = /* GraphQL */ `
         createdAt
         updatedAt
         description
+        bdaProjectArn
+        bdaSyncStatus
+        bdaLastSyncedAt
       }
       error {
         type
@@ -875,12 +878,26 @@ export const submitAgentQuery = /* GraphQL */ `
 ` as GeneratedQuery<SubmitAgentQueryQueryVariables, SubmitAgentQueryQuery>;
 
 export const syncBdaIdp = /* GraphQL */ `
-  mutation SyncBdaIdp($direction: String, $versionName: String) {
-    syncBdaIdp(direction: $direction, versionName: $versionName) {
+  mutation SyncBdaIdp(
+    $direction: String,
+    $versionName: String,
+    $bdaProjectArn: String,
+    $saveArn: Boolean,
+    $syncMode: String
+  ) {
+    syncBdaIdp(
+      direction: $direction,
+      versionName: $versionName,
+      bdaProjectArn: $bdaProjectArn,
+      saveArn: $saveArn,
+      syncMode: $syncMode
+    ) {
       success
       message
       processedClasses
       direction
+      bdaProjectArn
+      bdaSyncStatus
       error {
         type
         message

@@ -109,55 +109,16 @@ Resources:
         Variables:
           LOG_LEVEL: !Ref LogLevel
 
-  # Custom resource to create BDA project
+  # Custom resource to create empty BDA project (blueprints managed via "Sync to BDA" in UI)
   BDAProject:
     Type: Custom::BDAProject
     Properties:
       ServiceToken: !GetAtt BDAProjectLambda.Arn
       ProjectName: !Ref ProjectName
       ProjectDescription: !Ref ProjectDescription
-      CustomHomeApplicationBlueprint: true
-      BlueprintNames:
-        - Bank-Statement
-        - Payslip
-        - US-Driver-License
-        - US-Bank-Check
-        - W2-Form
-        # - Form-W9
-        # - US-Passport
-        # - US-Medical-Insurance-Card
-        # - Canada-Driver-License
-        # - Covid-Vaccination-Card
-        # - Form-1098
-        # - Receipt
-        # - Invoice
-        # - Electricity-Bill
-        # - Form-940
-        # - Form-1005
-        # - Form-1040
-        # - US-Marriage-Certificate
-        # - Form-941
-        # - Form-1099-INT
-        # - Form-1040-Schedule-C
-        # - Water-And-Sewer-Bill
-        # - Dental-Insurance-Card
-        # - Property_Tax_Statement
-        # - US-College-ID
-        # - US-Vehicle-Title-Document
-        # - Demographic-Addendum
-        # - Form-1099-MISC
-        # - Prescription-Label
-        # - Cable-Bill
-        # - Credit-Card-Statement
-        # - Death-Certificate
-        # - Workers-Compensation-Form
-      Version: 04-04-2025
+      Version: 02-26-2026
 
 Outputs:
   ProjectArn:
     Description: ARN of the created Bedrock Data Automation project
     Value: !GetAtt BDAProject.projectArn
-   
-  BlueprintArns:
-    Description: ARNs of the blueprints added to the project
-    Value: !Join [", ", !GetAtt BDAProject.blueprintArns]

@@ -3,6 +3,10 @@ SPDX-License-Identifier: MIT-0
 
 # Pattern 1: Bedrock Data Automation (BDA) Workflow
 
+> **⚠️ DEPRECATED**: Pattern 1 has been superseded by the **Unified Pattern**, which combines both BDA and pipeline processing modes into a single deployment. The `use_bda` configuration flag (set via the UI) controls whether documents are processed via BDA or the step-by-step pipeline. See [architecture.md](./architecture.md) for details on the unified architecture.
+>
+> This document is retained as a reference for BDA-specific concepts and behavior that still apply when `use_bda: true` is set in the unified pattern.
+
 This pattern implements an intelligent document processing workflow using Amazon Bedrock Data Automation (BDA) for orchestrating ML-powered document processing tasks. It leverages BDA's ability to extract insights from documents using pre-configured templates and workflows.
 
 <img src="../images/IDP-Pattern1-BDA.drawio.png" alt="Architecture" width="800">

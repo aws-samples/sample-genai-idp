@@ -26,18 +26,18 @@ export const documentsNavHeader = { text: 'Tools', href: `#${DEFAULT_PATH}` };
 // Full navigation items for Admin users
 export const adminNavItems = [
   { type: 'link', text: 'Document List', href: `#${DOCUMENTS_PATH}` },
-  { type: 'link', text: 'Document KB', href: `#${DOCUMENTS_KB_QUERY_PATH}` },
   { type: 'link', text: 'Upload Document(s)', href: `#${UPLOAD_DOCUMENT_PATH}` },
+  { type: 'link', text: 'Document KB', href: `#${DOCUMENTS_KB_QUERY_PATH}` },
   { type: 'link', text: 'Agent Companion Chat', href: `#${AGENT_CHAT_PATH}` },
   {
     type: 'section',
     text: 'Configuration',
     items: [
+      { type: 'link', text: 'View/Edit Configuration', href: `#${CONFIGURATION_PATH}` },
       { type: 'link', text: 'Discovery', href: `#${DISCOVERY_PATH}` },
       { type: 'link', text: 'Capacity Planning', href: `#${CAPACITY_PLANNING_PATH}` },
-      { type: 'link', text: 'View/Edit Configuration', href: `#${CONFIGURATION_PATH}` },
-      { type: 'link', text: 'View/Edit Pricing', href: `#${PRICING_PATH}` },
       { type: 'link', text: 'User Management', href: `#${USER_MANAGEMENT_PATH}` },
+      { type: 'link', text: 'View/Edit Pricing', href: `#${PRICING_PATH}` },
     ],
   },
   {
@@ -110,22 +110,23 @@ const Navigation = ({
   const filteredItems = useMemo(() => {
     const pattern = (settings?.IDPPattern as string | undefined)?.toLowerCase();
 
-    // Check for Pattern-2 in various formats: "Pattern-2", "Pattern 2", "PATTERN_2", "Pattern2"
-    const isPattern2 =
+    // Check for Pattern-2 or Unified in various formats
+    const isCapacityPlanningSupported =
       !pattern || // Show if pattern not loaded yet (fail-safe)
       pattern.includes('pattern-2') ||
       pattern.includes('pattern 2') ||
       pattern.includes('pattern_2') ||
       pattern.includes('pattern2') ||
+      pattern.includes('unified') ||
       /pattern[\s\-_]?2/.test(pattern); // Regex: "pattern" followed by optional separator, then "2"
 
     // Debug logging (remove after testing)
     if (pattern) {
-      console.log('[Navigation] IDPPattern detected:', settings.IDPPattern, '| Is Pattern-2:', isPattern2);
+      console.log('[Navigation] IDPPattern detected:', settings.IDPPattern, '| Capacity Planning supported:', isCapacityPlanningSupported);
     }
 
-    if (isPattern2) {
-      // Show Capacity Planning for Pattern-2 or if pattern is unknown
+    if (isCapacityPlanningSupported) {
+      // Show Capacity Planning for Pattern-2, Unified, or if pattern is unknown
       return baseItems;
     }
 

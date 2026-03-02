@@ -1,0 +1,492 @@
+{
+    "Comment": "Unified IDP Document Processing Workflow - routes between BDA and step-by-step pipeline based on use_bda config flag",
+    "StartAt": "RouteByProcessingMode",
+    "States": {
+        "RouteByProcessingMode": {
+            "Type": "Choice",
+            "Comment": "Route to BDA or step-by-step pipeline based on use_bda flag in document config",
+            "Choices": [
+                {
+                    "Variable": "$.document.use_bda",
+                    "BooleanEquals": true,
+                    "Next": "BDA_CheckExistingData"
+                }
+            ],
+            "Default": "OCRStep"
+        },
+
+        "BDA_CheckExistingData": {
+            "Type": "Choice",
+            "Comment": "Check if document already has pages/sections data (reprocessing scenario)",
+            "Choices": [
+                {
+                    "And": [
+                        {
+                            "Variable": "$.document.num_pages",
+                            "NumericGreaterThan": 0
+                        },
+                        {
+                            "Variable": "$.document.sections[0]",
+                            "IsString": true
+                        }
+                    ],
+                    "Comment": "Document has existing data with string section IDs - skip BDA invocation",
+                    "Next": "BDA_ProcessResultsSkip"
+                },
+                {
+                    "And": [
+                        {
+                            "Variable": "$.document.num_pages",
+                            "NumericGreaterThan": 0
+                        },
+                        {
+                            "Variable": "$.document.sections[0].section_id",
+                            "IsPresent": true
+                        }
+                    ],
+                    "Comment": "Document has existing data with section objects - skip BDA invocation",
+                    "Next": "BDA_ProcessResultsSkip"
+                }
+            ],
+            "Default": "BDA_InvokeDataAutomation"
+        },
+        "BDA_InvokeDataAutomation": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+            "Parameters": {
+                "FunctionName": "${InvokeBDALambdaArn}",
+                "Payload": {
+                    "taskToken.$": "$$.Task.Token",
+                    "execution_arn.$": "$$.Execution.Id",
+                    "working_bucket": "${WorkingBucket}",
+                    "BDAProjectArn.$": "$.document.bda_project_arn",
+                    "document.$": "$.document"
+                }
+            },
+            "ResultPath": "$.BDAResponse",
+            "Retry": [
+                {
+                    "ErrorEquals": [
+                        "Lambda.ServiceException",
+                        "Lambda.SdkClientException",
+                        "Lambda.TooManyRequestsException",
+                        "ServiceQuotaExceededException",
+                        "ThrottlingException",
+                        "ProvisionedThroughputExceededException",
+                        "RequestLimitExceeded",
+                        "ServiceUnavailableException"
+                    ],
+                    "IntervalSeconds": 2,
+                    "MaxAttempts": 10,
+                    "BackoffRate": 2
+                }
+            ],
+            "Next": "BDA_ProcessResultsStep",
+            "Catch": [
+                {
+                    "ErrorEquals": [
+                        "States.ALL"
+                    ],
+                    "Next": "FailState"
+                }
+            ]
+        },
+        "BDA_ProcessResultsStep": {
+            "Type": "Task",
+            "Resource": "${BDAProcessResultsLambdaArn}",
+            "Parameters": {
+                "execution_arn.$": "$$.Execution.Id",
+                "output_bucket": "${OutputBucket}",
+                "BDAResponse.$": "$.BDAResponse"
+            },
+            "ResultPath": "$.Result",
+            "Retry": [
+                {
+                    "ErrorEquals": [
+                        "Lambda.ServiceException",
+                        "Lambda.AWSLambdaException",
+                        "Lambda.SdkClientException",
+                        "Lambda.TooManyRequestsException",
+                        "ServiceQuotaExceededException",
+                        "ThrottlingException",
+                        "ProvisionedThroughputExceededException",
+                        "RequestLimitExceeded",
+                        "ServiceUnavailableException"
+                    ],
+                    "IntervalSeconds": 2,
+                    "MaxAttempts": 10,
+                    "BackoffRate": 2
+                }
+            ],
+            "Next": "CheckHITLRequired"
+        },
+        "BDA_ProcessResultsSkip": {
+            "Type": "Task",
+            "Comment": "Process existing document data without BDA invocation (reprocessing scenario)",
+            "Resource": "${BDAProcessResultsLambdaArn}",
+            "Parameters": {
+                "execution_arn.$": "$$.Execution.Id",
+                "output_bucket": "${OutputBucket}",
+                "skip_bda": true,
+                "document.$": "$.document"
+            },
+            "ResultPath": "$.Result",
+            "Retry": [
+                {
+                    "ErrorEquals": [
+                        "Lambda.ServiceException",
+                        "Lambda.AWSLambdaException",
+                        "Lambda.SdkClientException",
+                        "Lambda.TooManyRequestsException",
+                        "ServiceQuotaExceededException",
+                        "ThrottlingException",
+                        "ProvisionedThroughputExceededException",
+                        "RequestLimitExceeded",
+                        "ServiceUnavailableException"
+                    ],
+                    "IntervalSeconds": 2,
+                    "MaxAttempts": 10,
+                    "BackoffRate": 2
+                }
+            ],
+            "Next": "CheckHITLRequired"
+        },
+
+        "OCRStep": {
+            "Type": "Task",
+            "Resource": "${OCRFunctionArn}",
+            "Parameters": {
+                "execution_arn.$": "$$.Execution.Id",
+                "document.$": "$.document"
+            },
+            "ResultPath": "$.OCRResult",
+            "Retry": [
+                {
+                    "ErrorEquals": [
+                        "Sandbox.Timedout",
+                        "Lambda.ServiceException",
+                        "Lambda.AWSLambdaException",
+                        "Lambda.SdkClientException",
+                        "Lambda.TooManyRequestsException",
+                        "ServiceQuotaExceededException",
+                        "ThrottlingException",
+                        "ProvisionedThroughputExceededException",
+                        "RequestLimitExceeded",
+                        "ServiceUnavailableException"
+                    ],
+                    "IntervalSeconds": 2,
+                    "MaxAttempts": 2,
+                    "BackoffRate": 2
+                }
+            ],
+            "Next": "ClassificationStep"
+        },
+        "ClassificationStep": {
+            "Type": "Task",
+            "Resource": "${ClassificationFunctionArn}",
+            "Parameters": {
+                "execution_arn.$": "$$.Execution.Id",
+                "OCRResult.$": "$.OCRResult"
+            },
+            "ResultPath": "$.ClassificationResult",
+            "Retry": [
+                {
+                    "ErrorEquals": [
+                        "Sandbox.Timedout",
+                        "Lambda.ServiceException",
+                        "Lambda.AWSLambdaException",
+                        "Lambda.SdkClientException",
+                        "Lambda.TooManyRequestsException",
+                        "ServiceQuotaExceededException",
+                        "ThrottlingException",
+                        "ProvisionedThroughputExceededException",
+                        "RequestLimitExceeded",
+                        "ServiceUnavailableException"
+                    ],
+                    "IntervalSeconds": 2,
+                    "MaxAttempts": 10,
+                    "BackoffRate": 2
+                }
+            ],
+            "Next": "ProcessSections"
+        },
+        "ProcessSections": {
+            "Type": "Map",
+            "ItemsPath": "$.ClassificationResult.document.sections",
+            "ItemSelector": {
+                "execution_arn.$": "$$.Execution.Id",
+                "document.$": "$.ClassificationResult.document",
+                "section_id.$": "$$.Map.Item.Value"
+            },
+            "MaxConcurrency": 10,
+            "Iterator": {
+                "StartAt": "ExtractionStep",
+                "States": {
+                    "ExtractionStep": {
+                        "Type": "Task",
+                        "Resource": "${ExtractionFunctionArn}",
+                        "Retry": [
+                            {
+                                "ErrorEquals": [
+                                    "Sandbox.Timedout",
+                                    "Lambda.ServiceException",
+                                    "Lambda.AWSLambdaException",
+                                    "Lambda.SdkClientException",
+                                    "Lambda.TooManyRequestsException",
+                                    "ServiceQuotaExceededException",
+                                    "ThrottlingException",
+                                    "ProvisionedThroughputExceededException",
+                                    "RequestLimitExceeded",
+                                    "ServiceUnavailableException"
+                                ],
+                                "IntervalSeconds": 2,
+                                "MaxAttempts": 10,
+                                "BackoffRate": 2
+                            }
+                        ],
+                        "Next": "AssessmentStep"
+                    },
+                    "AssessmentStep": {
+                        "Type": "Task",
+                        "Resource": "${AssessmentFunctionArn}",
+                        "Parameters": {
+                            "execution_arn.$": "$$.Execution.Id",
+                            "document.$": "$.document",
+                            "section_id.$": "$.section_id"
+                        },
+                        "ResultPath": "$",
+                        "Retry": [
+                            {
+                                "ErrorEquals": [
+                                    "Sandbox.Timedout",
+                                    "Lambda.ServiceException",
+                                    "Lambda.AWSLambdaException",
+                                    "Lambda.SdkClientException",
+                                    "Lambda.TooManyRequestsException",
+                                    "ServiceQuotaExceededException",
+                                    "ThrottlingException",
+                                    "ProvisionedThroughputExceededException",
+                                    "RequestLimitExceeded",
+                                    "ServiceUnavailableException"
+                                ],
+                                "IntervalSeconds": 2,
+                                "MaxAttempts": 10,
+                                "BackoffRate": 2
+                            }
+                        ],
+                        "Next": "SectionComplete"
+                    },
+                    "SectionComplete": {
+                        "Type": "Pass",
+                        "End": true
+                    }
+                }
+            },
+            "ResultPath": "$.ExtractionResults",
+            "Next": "Pipeline_ProcessResultsStep"
+        },
+        "Pipeline_ProcessResultsStep": {
+            "Type": "Task",
+            "Resource": "${PipelineProcessResultsLambdaArn}",
+            "Parameters": {
+                "execution_arn.$": "$$.Execution.Id",
+                "ClassificationResult.$": "$.ClassificationResult",
+                "ExtractionResults.$": "$.ExtractionResults"
+            },
+            "ResultPath": "$.Result",
+            "Retry": [
+                {
+                    "ErrorEquals": [
+                        "Sandbox.Timedout",
+                        "Lambda.ServiceException",
+                        "Lambda.AWSLambdaException",
+                        "Lambda.SdkClientException",
+                        "Lambda.TooManyRequestsException",
+                        "ServiceQuotaExceededException",
+                        "ThrottlingException",
+                        "ProvisionedThroughputExceededException",
+                        "RequestLimitExceeded",
+                        "ServiceUnavailableException"
+                    ],
+                    "IntervalSeconds": 2,
+                    "MaxAttempts": 10,
+                    "BackoffRate": 2
+                }
+            ],
+            "Next": "CheckHITLRequired"
+        },
+        "CheckRuleValidationEnabled": {
+            "Type": "Choice",
+            "Choices": [
+                {
+                    "Variable": "$.Result.rule_validation_enabled",
+                    "BooleanEquals": true,
+                    "Next": "ProcessRuleValidationSections"
+                }
+            ],
+            "Default": "SetEmptyRuleValidationResult"
+        },
+        "SetEmptyRuleValidationResult": {
+            "Type": "Pass",
+            "Parameters": {
+                "document.$": "$.Result.document"
+            },
+            "ResultPath": "$.RuleValidationOrchestrationResult",
+            "Next": "SummarizationStep"
+        },
+        "ProcessRuleValidationSections": {
+            "Type": "Map",
+            "ItemsPath": "$.Result.document.sections",
+            "ItemSelector": {
+                "execution_arn.$": "$$.Execution.Id",
+                "document.$": "$.Result.document",
+                "section_id.$": "$$.Map.Item.Value"
+            },
+            "MaxConcurrency": 10,
+            "Iterator": {
+                "StartAt": "RuleValidationStep",
+                "States": {
+                    "RuleValidationStep": {
+                        "Type": "Task",
+                        "Resource": "${RuleValidationLambdaArn}",
+                        "Retry": [
+                            {
+                                "ErrorEquals": [
+                                    "Sandbox.Timedout",
+                                    "Lambda.ServiceException",
+                                    "Lambda.AWSLambdaException",
+                                    "Lambda.SdkClientException",
+                                    "Lambda.TooManyRequestsException",
+                                    "ServiceQuotaExceededException",
+                                    "ThrottlingException",
+                                    "ProvisionedThroughputExceededException",
+                                    "RequestLimitExceeded",
+                                    "ServiceUnavailableException"
+                                ],
+                                "IntervalSeconds": 2,
+                                "MaxAttempts": 10,
+                                "BackoffRate": 2
+                            }
+                        ],
+                        "Next": "RuleValidationSectionComplete"
+                    },
+                    "RuleValidationSectionComplete": {
+                        "Type": "Pass",
+                        "End": true
+                    }
+                }
+            },
+            "ResultPath": "$.RuleValidationResults",
+            "Next": "RuleValidationOrchestration"
+        },
+        "RuleValidationOrchestration": {
+            "Type": "Task",
+            "Resource": "${RuleValidationOrchestrationLambdaArn}",
+            "Retry": [
+                {
+                    "ErrorEquals": [
+                        "Lambda.ServiceException",
+                        "Lambda.AWSLambdaException",
+                        "Lambda.SdkClientException",
+                        "Lambda.TooManyRequestsException",
+                        "ServiceQuotaExceededException",
+                        "ThrottlingException",
+                        "ProvisionedThroughputExceededException",
+                        "RequestLimitExceeded",
+                        "ServiceUnavailableException"
+                    ],
+                    "IntervalSeconds": 2,
+                    "MaxAttempts": 6,
+                    "BackoffRate": 2
+                }
+            ],
+            "ResultPath": "$.RuleValidationOrchestrationResult",
+            "Next": "SummarizationStep"
+        },
+
+        "CheckHITLRequired": {
+            "Type": "Choice",
+            "Choices": [
+                {
+                    "Variable": "$.Result.hitl_triggered",
+                    "BooleanEquals": true,
+                    "Next": "MarkHITLPending"
+                }
+            ],
+            "Default": "CheckRuleValidationEnabled"
+        },
+        "MarkHITLPending": {
+            "Type": "Pass",
+            "Comment": "Document marked for async HITL review, workflow continues without waiting",
+            "Next": "CheckRuleValidationEnabled"
+        },
+        "SummarizationStep": {
+            "Type": "Task",
+            "Resource": "${SummarizationLambdaArn}",
+            "Parameters": {
+                "execution_arn.$": "$$.Execution.Id",
+                "document.$": "$.Result.document"
+            },
+            "ResultPath": "$.Result",
+            "OutputPath": "$.Result.document",
+            "Retry": [
+                {
+                    "ErrorEquals": [
+                        "Sandbox.Timedout",
+                        "Lambda.ServiceException",
+                        "Lambda.AWSLambdaException",
+                        "Lambda.SdkClientException",
+                        "Lambda.TooManyRequestsException",
+                        "ServiceQuotaExceededException",
+                        "ThrottlingException",
+                        "ProvisionedThroughputExceededException",
+                        "RequestLimitExceeded",
+                        "ServiceUnavailableException"
+                    ],
+                    "IntervalSeconds": 2,
+                    "MaxAttempts": 10,
+                    "BackoffRate": 2
+                }
+            ],
+            "Next": "EvaluationStep"
+        },
+        "EvaluationStep": {
+            "Type": "Task",
+            "Resource": "${EvaluationLambdaArn}",
+            "Parameters": {
+                "execution_arn.$": "$$.Execution.Id",
+                "document.$": "$"
+            },
+            "ResultPath": "$",
+            "Retry": [
+                {
+                    "ErrorEquals": [
+                        "Sandbox.Timedout",
+                        "Lambda.ServiceException",
+                        "Lambda.AWSLambdaException",
+                        "Lambda.SdkClientException",
+                        "Lambda.TooManyRequestsException",
+                        "ServiceQuotaExceededException",
+                        "ThrottlingException",
+                        "ProvisionedThroughputExceededException",
+                        "RequestLimitExceeded",
+                        "ServiceUnavailableException"
+                    ],
+                    "IntervalSeconds": 2,
+                    "MaxAttempts": 10,
+                    "BackoffRate": 2
+                }
+            ],
+            "Next": "WorkflowComplete"
+        },
+        "WorkflowComplete": {
+            "Type": "Pass",
+            "End": true
+        },
+        "FailState": {
+            "Type": "Fail",
+            "Cause": "Workflow Failed",
+            "Error": "WorkflowFailedException"
+        }
+    }
+}

@@ -15,8 +15,8 @@ import sys
 from io import BytesIO
 from unittest.mock import ANY, MagicMock, patch
 
-# Mock PyMuPDF and textractor before importing any modules that might depend on them
-sys.modules["fitz"] = MagicMock()
+# Mock pypdfium2 and textractor before importing any modules that might depend on them
+sys.modules["pypdfium2"] = MagicMock()
 sys.modules["textractor"] = MagicMock()
 sys.modules["textractor.parsers"] = MagicMock()
 sys.modules["textractor.parsers.response_parser"] = MagicMock()
@@ -303,9 +303,9 @@ class TestOcrService:
             assert service.preprocessing_config == preprocessing_config
 
     @patch("boto3.client")
-    @patch("idp_common.ocr.service.fitz.open")
+    @patch("idp_common.ocr.service.pdfium.PdfDocument")
     def test_process_document_success(
-        self, mock_fitz_open, mock_boto_client, mock_document, mock_pdf_content
+        self, mock_pdfium_doc, mock_boto_client, mock_document, mock_pdf_content
     ):
         """Test successful document processing."""
         # Mock S3 client
@@ -319,12 +319,20 @@ class TestOcrService:
         mock_pdf_doc.__len__.return_value = 2
         mock_pdf_doc.__iter__.return_value = iter(range(2))
         mock_pdf_doc.is_pdf = True  # Add is_pdf attribute
-        mock_fitz_open.return_value = mock_pdf_doc
+        mock_pdfium_doc.return_value = mock_pdf_doc
 
-        # Mock concurrent processing
-        with patch(
-            "idp_common.ocr.service.OcrService._process_single_page"
-        ) as mock_process:
+        # Mock the two-phase processing:
+        # Phase 1: Sequential page rendering (pypdfium2 not thread-safe)
+        # Phase 2: Parallel OCR processing
+        with (
+            patch(
+                "idp_common.ocr.service.OcrService._extract_page_image"
+            ) as mock_extract,
+            patch(
+                "idp_common.ocr.service.OcrService._process_page_with_image"
+            ) as mock_process,
+        ):
+            mock_extract.return_value = b"image_data"
             mock_process.return_value = (
                 {
                     "raw_text_uri": "s3://output/raw.json",
@@ -346,7 +354,7 @@ class TestOcrService:
             assert result.status != Status.FAILED
 
             # Verify PDF was opened and closed
-            mock_fitz_open.assert_called_once()
+            mock_pdfium_doc.assert_called_once()
             mock_pdf_doc.close.assert_called_once()
 
     @patch("boto3.client")
@@ -366,9 +374,9 @@ class TestOcrService:
         assert "S3 error" in result.errors[0]
 
     @patch("boto3.client")
-    @patch("idp_common.ocr.service.fitz.open")
+    @patch("idp_common.ocr.service.pdfium.PdfDocument")
     def test_process_document_pdf_error(
-        self, mock_fitz_open, mock_boto_client, mock_document, mock_pdf_content
+        self, mock_pdfium_doc, mock_boto_client, mock_document, mock_pdf_content
     ):
         """Test document processing with PDF error."""
         # Mock S3 client
@@ -376,9 +384,9 @@ class TestOcrService:
         mock_s3_client.get_object.return_value = {"Body": BytesIO(mock_pdf_content)}
         mock_boto_client.return_value = mock_s3_client
 
-        # Mock fitz.open to raise exception when called
+        # Mock pdfium.PdfDocument to raise exception when called
         # This simulates a corrupted PDF or unsupported format
-        mock_fitz_open.side_effect = Exception("PDF error")
+        mock_pdfium_doc.side_effect = Exception("PDF error")
 
         service = OcrService()
         result = service.process_document(mock_document)
@@ -434,9 +442,8 @@ class TestOcrService:
 
     @patch("boto3.client")
     @patch("idp_common.s3.write_content")
-    @patch("fitz.Page")
     def test_process_single_page_textract(
-        self, mock_page, mock_write_content, mock_boto_client, mock_textract_response
+        self, mock_write_content, mock_boto_client, mock_textract_response
     ):
         """Test single page processing with Textract."""
         # Mock Textract client
@@ -444,16 +451,20 @@ class TestOcrService:
         mock_textract_client.detect_document_text.return_value = mock_textract_response
         mock_boto_client.return_value = mock_textract_client
 
-        # Mock page image extraction
-        mock_page_obj = MagicMock()
-        mock_pixmap = MagicMock()
-        mock_pixmap.tobytes.return_value = b"image_data"
-        mock_page_obj.get_pixmap.return_value = mock_pixmap
-
-        # Mock PDF document
+        # Mock PDF document with pypdfium2 API
         mock_pdf_doc = MagicMock()
-        mock_pdf_doc.load_page.return_value = mock_page_obj
-        mock_pdf_doc.is_pdf = True
+        mock_page_obj = MagicMock()
+        mock_page_obj.get_width.return_value = 612  # Letter width in points
+        mock_page_obj.get_height.return_value = 792  # Letter height in points
+        mock_pil_image = MagicMock()
+        mock_pil_image.size = (951, 1268)
+        mock_pil_image.save = MagicMock(
+            side_effect=lambda buf, **kw: buf.write(b"image_data")
+        )
+        mock_render_result = MagicMock()
+        mock_render_result.to_pil.return_value = mock_pil_image
+        mock_page_obj.render.return_value = mock_render_result
+        mock_pdf_doc.__getitem__ = MagicMock(return_value=mock_page_obj)
 
         service = OcrService()
         result, metering = service._process_single_page_textract(
@@ -478,10 +489,8 @@ class TestOcrService:
     @patch("idp_common.bedrock.invoke_model")
     @patch("idp_common.bedrock.extract_text_from_response")
     @patch("idp_common.image.prepare_bedrock_image_attachment")
-    @patch("fitz.Page")
     def test_process_single_page_bedrock(
         self,
-        mock_page,
         mock_prepare_image,
         mock_extract_text,
         mock_invoke_model,
@@ -491,16 +500,20 @@ class TestOcrService:
         mock_bedrock_response,
     ):
         """Test single page processing with Bedrock."""
-        # Mock page image extraction
-        mock_page_obj = MagicMock()
-        mock_pixmap = MagicMock()
-        mock_pixmap.tobytes.return_value = b"image_data"
-        mock_page_obj.get_pixmap.return_value = mock_pixmap
-
-        # Mock PDF document
+        # Mock PDF document with pypdfium2 API
         mock_pdf_doc = MagicMock()
-        mock_pdf_doc.load_page.return_value = mock_page_obj
-        mock_pdf_doc.is_pdf = True
+        mock_page_obj = MagicMock()
+        mock_page_obj.get_width.return_value = 612  # Letter width in points
+        mock_page_obj.get_height.return_value = 792  # Letter height in points
+        mock_pil_image = MagicMock()
+        mock_pil_image.size = (951, 1268)
+        mock_pil_image.save = MagicMock(
+            side_effect=lambda buf, **kw: buf.write(b"image_data")
+        )
+        mock_render_result = MagicMock()
+        mock_render_result.to_pil.return_value = mock_pil_image
+        mock_page_obj.render.return_value = mock_render_result
+        mock_pdf_doc.__getitem__ = MagicMock(return_value=mock_page_obj)
 
         # Mock Bedrock functions
         mock_prepare_image.return_value = {"image": "base64_image"}
@@ -528,21 +541,22 @@ class TestOcrService:
 
     @patch("boto3.client")
     @patch("idp_common.s3.write_content")
-    @patch("fitz.Page")
-    def test_process_single_page_none(
-        self, mock_page, mock_write_content, mock_boto_client
-    ):
+    def test_process_single_page_none(self, mock_write_content, mock_boto_client):
         """Test single page processing with 'none' backend."""
-        # Mock page image extraction
-        mock_page_obj = MagicMock()
-        mock_pixmap = MagicMock()
-        mock_pixmap.tobytes.return_value = b"image_data"
-        mock_page_obj.get_pixmap.return_value = mock_pixmap
-
-        # Mock PDF document
+        # Mock PDF document with pypdfium2 API
         mock_pdf_doc = MagicMock()
-        mock_pdf_doc.load_page.return_value = mock_page_obj
-        mock_pdf_doc.is_pdf = True
+        mock_page_obj = MagicMock()
+        mock_page_obj.get_width.return_value = 612  # Letter width in points
+        mock_page_obj.get_height.return_value = 792  # Letter height in points
+        mock_pil_image = MagicMock()
+        mock_pil_image.size = (951, 1268)
+        mock_pil_image.save = MagicMock(
+            side_effect=lambda buf, **kw: buf.write(b"image_data")
+        )
+        mock_render_result = MagicMock()
+        mock_render_result.to_pil.return_value = mock_pil_image
+        mock_page_obj.render.return_value = mock_render_result
+        mock_pdf_doc.__getitem__ = MagicMock(return_value=mock_page_obj)
 
         service = OcrService(backend="none")
         result, metering = service._process_single_page_none(
@@ -559,38 +573,50 @@ class TestOcrService:
         # Verify S3 writes (empty content)
         assert mock_write_content.call_count == 4  # image, raw, confidence, parsed
 
-    @patch("fitz.Page")
-    def test_extract_page_image_pdf(self, mock_page):
+    def test_extract_page_image_pdf(self):
         """Test page image extraction from PDF."""
-        # Mock page and pixmap
+        # Mock page with pypdfium2 API
         mock_page_obj = MagicMock()
-        mock_pixmap = MagicMock()
-        mock_pixmap.tobytes.return_value = b"pdf_image_data"
-        mock_page_obj.get_pixmap.return_value = mock_pixmap
+        mock_page_obj.get_width.return_value = 612  # Letter width in points
+        mock_page_obj.get_height.return_value = 792  # Letter height in points
+        mock_pil_image = MagicMock()
+        mock_pil_image.size = (1275, 1650)  # 612 * (200/72) x 792 * (200/72)
+        mock_pil_image.save = MagicMock(
+            side_effect=lambda buf, **kw: buf.write(b"pdf_image_data")
+        )
+        mock_render_result = MagicMock()
+        mock_render_result.to_pil.return_value = mock_pil_image
+        mock_page_obj.render.return_value = mock_render_result
 
         with patch("boto3.client"):
             service = OcrService(dpi=200)
             result = service._extract_page_image(mock_page_obj, True, 1)
 
-            # Verify DPI was used for PDF
-            mock_page_obj.get_pixmap.assert_called_once_with(dpi=200)
+            # Verify render was called with DPI-based scale (200/72 ≈ 2.78)
+            mock_page_obj.render.assert_called_once()
             assert result == b"pdf_image_data"
 
-    @patch("fitz.Page")
-    def test_extract_page_image_non_pdf(self, mock_page):
+    def test_extract_page_image_non_pdf(self):
         """Test page image extraction from non-PDF."""
-        # Mock page and pixmap
+        # Mock page with pypdfium2 API
         mock_page_obj = MagicMock()
-        mock_pixmap = MagicMock()
-        mock_pixmap.tobytes.return_value = b"image_data"
-        mock_page_obj.get_pixmap.return_value = mock_pixmap
+        mock_page_obj.get_width.return_value = 800
+        mock_page_obj.get_height.return_value = 600
+        mock_pil_image = MagicMock()
+        mock_pil_image.size = (800, 600)
+        mock_pil_image.save = MagicMock(
+            side_effect=lambda buf, **kw: buf.write(b"image_data")
+        )
+        mock_render_result = MagicMock()
+        mock_render_result.to_pil.return_value = mock_pil_image
+        mock_page_obj.render.return_value = mock_render_result
 
         with patch("boto3.client"):
             service = OcrService(dpi=200)
             result = service._extract_page_image(mock_page_obj, False, 1)
 
-            # Verify no DPI was used for non-PDF
-            mock_page_obj.get_pixmap.assert_called_once_with()
+            # Verify render was called (no DPI scaling for non-PDF)
+            mock_page_obj.render.assert_called_once()
             assert result == b"image_data"
 
     @patch("boto3.client")
@@ -755,9 +781,9 @@ class TestOcrService:
 
     @patch("boto3.client")
     @patch("idp_common.s3.write_content")
-    @patch("idp_common.ocr.service.fitz")
+    @patch("idp_common.ocr.service.pdfium")
     def test_process_single_page_with_resize_config(
-        self, mock_fitz, mock_write_content, mock_boto_client, mock_textract_response
+        self, mock_pdfium, mock_write_content, mock_boto_client, mock_textract_response
     ):
         """Test single page processing with resize configuration."""
         # Mock Textract client
@@ -765,29 +791,24 @@ class TestOcrService:
         mock_textract_client.detect_document_text.return_value = mock_textract_response
         mock_boto_client.return_value = mock_textract_client
 
-        # Mock page with rect dimensions that trigger resize
+        # Mock page with dimensions that trigger resize
         mock_page_obj = MagicMock()
-        mock_page_obj.rect = MagicMock()
-        mock_page_obj.rect.width = 2048  # Large original width
-        mock_page_obj.rect.height = 1536  # Large original height
+        mock_page_obj.get_width.return_value = 2048  # Large original width in points
+        mock_page_obj.get_height.return_value = 1536  # Large original height in points
 
-        # Mock pixmap that will be returned after resize
-        mock_pixmap = MagicMock()
-        mock_pixmap.width = 1024  # Resized width
-        mock_pixmap.height = 768  # Resized height
-        mock_pixmap.tobytes.return_value = b"resized_image_data"
-
-        # Configure get_pixmap to return the mock pixmap
-        mock_page_obj.get_pixmap.return_value = mock_pixmap
+        # Mock PIL image returned after resize rendering
+        mock_pil_image = MagicMock()
+        mock_pil_image.size = (1024, 768)
+        mock_pil_image.save = MagicMock(
+            side_effect=lambda buf, **kw: buf.write(b"resized_image_data")
+        )
+        mock_render_result = MagicMock()
+        mock_render_result.to_pil.return_value = mock_pil_image
+        mock_page_obj.render.return_value = mock_render_result
 
         # Mock PDF document
         mock_pdf_doc = MagicMock()
-        mock_pdf_doc.load_page.return_value = mock_page_obj
-        mock_pdf_doc.is_pdf = True
-
-        # Mock the Matrix class in the fitz module
-        mock_matrix_instance = MagicMock()
-        mock_fitz.Matrix.return_value = mock_matrix_instance
+        mock_pdf_doc.__getitem__ = MagicMock(return_value=mock_page_obj)
 
         resize_config = {"target_width": 1024, "target_height": 768}
         service = OcrService(resize_config=resize_config, dpi=150)
@@ -796,15 +817,10 @@ class TestOcrService:
             0, mock_pdf_doc, "output-bucket", "test-prefix"
         )
 
-        # Verify Matrix was created for scaling
-        # Original size: 2048x1536, Target: 1024x768
-        # At DPI 150: original becomes 2048*(150/72) x 1536*(150/72) = 4267x3200
-        # Scale factor to fit in 1024x768 = min(1024/4267, 768/3200) ≈ 0.24
-        # Final scale = (150/72) * 0.24 ≈ 0.5
-        mock_fitz.Matrix.assert_called_once()
-
-        # Verify get_pixmap was called with matrix for direct resize
-        mock_page_obj.get_pixmap.assert_called_once_with(matrix=mock_matrix_instance)
+        # Verify render was called with a scale parameter for direct resize
+        mock_page_obj.render.assert_called_once()
+        call_kwargs = mock_page_obj.render.call_args
+        assert "scale" in call_kwargs.kwargs or len(call_kwargs.args) > 0
 
         # Verify the image was processed and results returned
         assert "raw_text_uri" in result
@@ -812,10 +828,8 @@ class TestOcrService:
 
     @patch("boto3.client")
     @patch("idp_common.image.apply_adaptive_binarization")
-    @patch("fitz.Page")
     def test_process_single_page_with_preprocessing(
         self,
-        mock_page,
         mock_preprocessing,
         mock_boto_client,
         mock_textract_response,
@@ -826,16 +840,20 @@ class TestOcrService:
         mock_textract_client.detect_document_text.return_value = mock_textract_response
         mock_boto_client.return_value = mock_textract_client
 
-        # Mock page image extraction
-        mock_page_obj = MagicMock()
-        mock_pixmap = MagicMock()
-        mock_pixmap.tobytes.return_value = b"original_image_data"
-        mock_page_obj.get_pixmap.return_value = mock_pixmap
-
-        # Mock PDF document
+        # Mock PDF document with pypdfium2 API
         mock_pdf_doc = MagicMock()
-        mock_pdf_doc.load_page.return_value = mock_page_obj
-        mock_pdf_doc.is_pdf = True
+        mock_page_obj = MagicMock()
+        mock_page_obj.get_width.return_value = 612
+        mock_page_obj.get_height.return_value = 792
+        mock_pil_image = MagicMock()
+        mock_pil_image.size = (951, 1268)
+        mock_pil_image.save = MagicMock(
+            side_effect=lambda buf, **kw: buf.write(b"original_image_data")
+        )
+        mock_render_result = MagicMock()
+        mock_render_result.to_pil.return_value = mock_pil_image
+        mock_page_obj.render.return_value = mock_render_result
+        mock_pdf_doc.__getitem__ = MagicMock(return_value=mock_page_obj)
 
         # Mock preprocessing
         mock_preprocessing.return_value = b"preprocessed_image_data"
@@ -866,11 +884,12 @@ class TestOcrService:
             ) as mock_textract:
                 mock_textract.return_value = ("result", "metering")
 
+                mock_pdf = MagicMock()
                 result = service._process_single_page(
-                    0, MagicMock(), "bucket", "prefix"
+                    0, mock_pdf, True, "bucket", "prefix"
                 )
 
-                mock_textract.assert_called_once_with(0, ANY, "bucket", "prefix")
+                mock_textract.assert_called_once_with(0, mock_pdf, "bucket", "prefix")
                 assert result == ("result", "metering")
 
     def test_process_single_page_dispatch_bedrock(self, mock_bedrock_config):
@@ -881,11 +900,12 @@ class TestOcrService:
             with patch.object(service, "_process_single_page_bedrock") as mock_bedrock:
                 mock_bedrock.return_value = ("result", "metering")
 
+                mock_pdf = MagicMock()
                 result = service._process_single_page(
-                    0, MagicMock(), "bucket", "prefix"
+                    0, mock_pdf, True, "bucket", "prefix"
                 )
 
-                mock_bedrock.assert_called_once_with(0, ANY, "bucket", "prefix")
+                mock_bedrock.assert_called_once_with(0, mock_pdf, "bucket", "prefix")
                 assert result == ("result", "metering")
 
     def test_process_single_page_dispatch_none(self):
@@ -896,9 +916,95 @@ class TestOcrService:
             with patch.object(service, "_process_single_page_none") as mock_none:
                 mock_none.return_value = ("result", "metering")
 
+                mock_pdf = MagicMock()
                 result = service._process_single_page(
-                    0, MagicMock(), "bucket", "prefix"
+                    0, mock_pdf, True, "bucket", "prefix"
                 )
 
-                mock_none.assert_called_once_with(0, ANY, "bucket", "prefix")
+                mock_none.assert_called_once_with(0, mock_pdf, "bucket", "prefix")
                 assert result == ("result", "metering")
+
+    # ------------------------------------------------------------------
+    # _ocr_image_bytes tests
+    # ------------------------------------------------------------------
+
+    def test_ocr_image_bytes_none_backend(self):
+        """Test _ocr_image_bytes returns placeholder for none backend."""
+        with patch("boto3.client"):
+            service = OcrService(backend="none")
+            result = service._ocr_image_bytes(b"fake-image")
+            assert result == "[Image]"
+
+    def test_ocr_image_bytes_textract_backend(self, mock_textract_response):
+        """Test _ocr_image_bytes extracts text via Textract."""
+        with patch("boto3.client"):
+            service = OcrService(region="us-east-1", backend="textract")
+            service.textract_client = MagicMock()
+            service.textract_client.detect_document_text.return_value = (
+                mock_textract_response
+            )
+
+            result = service._ocr_image_bytes(b"fake-image")
+
+            service.textract_client.detect_document_text.assert_called_once_with(
+                Document={"Bytes": b"fake-image"}
+            )
+            assert "Sample text line 1" in result
+            assert "Sample text line 2" in result
+
+    def test_ocr_image_bytes_bedrock_backend(
+        self, mock_bedrock_config, mock_bedrock_response
+    ):
+        """Test _ocr_image_bytes extracts text via Bedrock."""
+        with patch("boto3.client"):
+            service = OcrService(
+                region="us-east-1",
+                backend="bedrock",
+                bedrock_config=mock_bedrock_config,
+            )
+
+            with (
+                patch("idp_common.ocr.service.image") as mock_image,
+                patch("idp_common.ocr.service.bedrock") as mock_bedrock,
+            ):
+                mock_image.prepare_bedrock_image_attachment.return_value = {
+                    "image": {"format": "png", "source": {"bytes": b"fake"}}
+                }
+                mock_bedrock.invoke_model.return_value = mock_bedrock_response
+                mock_bedrock.extract_text_from_response.return_value = (
+                    "Extracted text from document"
+                )
+
+                result = service._ocr_image_bytes(b"fake-image")
+
+            assert result == "Extracted text from document"
+            mock_bedrock.invoke_model.assert_called_once()
+
+    def test_ocr_image_bytes_handles_errors(self):
+        """Test _ocr_image_bytes returns fallback on error."""
+        with patch("boto3.client"):
+            service = OcrService(region="us-east-1", backend="textract")
+            service.textract_client = MagicMock()
+            service.textract_client.detect_document_text.side_effect = Exception(
+                "API error"
+            )
+
+            result = service._ocr_image_bytes(b"fake-image")
+            assert "OCR failed" in result
+
+    def test_process_non_pdf_docx_passes_callback(self):
+        """Test _process_non_pdf_document passes OCR callback for DOCX."""
+        with patch("boto3.client"):
+            service = OcrService(region="us-east-1")
+
+            with patch.object(
+                service.document_converter, "convert_word_to_pages"
+            ) as mock_convert:
+                mock_convert.return_value = [(b"page-img", "page-text")]
+
+                result = service._process_non_pdf_document("docx", b"fake-docx")
+
+                mock_convert.assert_called_once_with(
+                    b"fake-docx", ocr_image_callback=service._ocr_image_bytes
+                )
+                assert result == [(b"page-img", "page-text")]

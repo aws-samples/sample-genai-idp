@@ -282,14 +282,25 @@ def deploy_and_test_pattern(stack_prefix, pattern_config, admin_email, template_
 
         # Step 5: Verify result content
         print(f"[{pattern_name}] Step 5: Verifying result content...")
+        
+        # Wait for results to be fully written
+        print(f"[{pattern_name}] Waiting 10 seconds for results to be fully written...")
+        import time
+        time.sleep(10)
 
         # Find the result file at the specified location
-        cmd = f"find {results_dir} -path '*/{result_location}' | head -1"
-        result = run_command(cmd)
+        cmd = f"find {results_dir} -path '*/pages/1/result.json' -o -path '*/pages/0/result.json' | head -1"
+        result = run_command(cmd, check=False)
         result_file = result.stdout.strip()
 
         if not result_file:
-            print(f"[{pattern_name}] ❌ No result file found at {result_location}")
+            # Debug: List what files were actually downloaded
+            cmd = f"find {results_dir} -name 'result.json' | head -10"
+            debug_result = run_command(cmd, check=False)
+            print(f"[{pattern_name}] Found result.json files:")
+            print(debug_result.stdout)
+            
+            print(f"[{pattern_name}] ❌ No result file found at pages/0 or pages/1")
             return {
                 "stack_name": stack_name,
                 "pattern_name": pattern_name,

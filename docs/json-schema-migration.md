@@ -218,7 +218,6 @@ classes:
 
 Find JSON Schema templates in:
 - `config_library/pattern-2/` - Pattern 2 examples (Bedrock)
-- `config_library/pattern-3/` - Pattern 3 examples (UDOP + Bedrock)
 
 ## Validation Methods
 

@@ -192,8 +192,8 @@ def validate_capacity_input(input_data: Dict[str, Any]) -> None:
     pattern = input_data.get('pattern')
     if not pattern:
         errors.append('pattern is required')
-    elif pattern != 'pattern-2':
-        errors.append(f'Only pattern-2 is supported, got: {pattern}')
+    elif pattern not in ('pattern-2', 'unified'):
+        errors.append(f'Only pattern-2 and unified patterns are supported, got: {pattern}')
 
     # Validate maxAllowedLatency
     max_latency = input_data.get('maxAllowedLatency') or input_data.get('max_allowed_latency')

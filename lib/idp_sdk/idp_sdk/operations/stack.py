@@ -3,11 +3,10 @@
 
 """Stack operations for IDP SDK."""
 
-from typing import Dict, Optional, Union
+from typing import Dict, Optional
 
 from idp_sdk.exceptions import IDPConfigurationError, IDPStackError
 from idp_sdk.models import (
-    Pattern,
     StackDeletionResult,
     StackDeploymentResult,
     StackResources,
@@ -23,7 +22,6 @@ class StackOperation:
     def deploy(
         self,
         stack_name: Optional[str] = None,
-        pattern: Optional[Union[str, Pattern]] = None,
         admin_email: Optional[str] = None,
         template_url: Optional[str] = None,
         from_code: Optional[str] = None,
@@ -31,7 +29,6 @@ class StackOperation:
         max_concurrent: Optional[int] = None,
         log_level: Optional[str] = None,
         enable_hitl: Optional[bool] = None,
-        pattern_config: Optional[str] = None,
         parameters: Optional[Dict[str, str]] = None,
         wait: bool = True,
         no_rollback: bool = False,
@@ -43,7 +40,6 @@ class StackOperation:
 
         Args:
             stack_name: CloudFormation stack name (uses default if not provided)
-            pattern: IDP pattern (pattern-1, pattern-2, pattern-3) - required for new stacks
             admin_email: Admin user email - required for new stacks
             template_url: URL to CloudFormation template in S3
             from_code: Path to project root for building from source
@@ -51,7 +47,6 @@ class StackOperation:
             max_concurrent: Maximum concurrent workflows
             log_level: Logging level (DEBUG, INFO, WARN, ERROR)
             enable_hitl: Enable Human-in-the-Loop
-            pattern_config: Pattern configuration preset
             parameters: Additional parameters as dict
             wait: Wait for operation to complete (default: True)
             no_rollback: Disable rollback on failure
@@ -69,16 +64,12 @@ class StackOperation:
 
         name = self._client._require_stack(stack_name)
 
-        pattern_str = pattern.value if isinstance(pattern, Pattern) else pattern
-
         additional_params = parameters or {}
         cfn_parameters = build_parameters(
-            pattern=pattern_str,
             admin_email=admin_email,
             max_concurrent=max_concurrent,
             log_level=log_level,
             enable_hitl="true" if enable_hitl else None,
-            pattern_config=pattern_config,
             custom_config=custom_config,
             additional_params=additional_params,
             region=self._client._region,

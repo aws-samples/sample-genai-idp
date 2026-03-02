@@ -1,0 +1,609 @@
+use_bda: false
+
+notes: Default settings for lending-package-sample configuration
+ocr:
+  backend: textract
+  model_id: us.anthropic.claude-3-7-sonnet-20250219-v1:0
+  system_prompt: You are an expert OCR system. Extract all text from the provided
+    image accurately, preserving layout where possible.
+  task_prompt: Extract all text from this document image. Preserve the layout, including
+    paragraphs, tables, and formatting.
+  features:
+  - name: LAYOUT
+  max_workers: 20
+  image:
+    target_width: null
+    target_height: null
+    dpi: null
+    preprocessing: null
+classification:
+  model: us.amazon.nova-2-lite-v1:0
+  system_prompt: 'You are a multimodal document classification expert that analyzes
+    business documents using both visual layout and textual content. Your task is
+    to classify single-page documents into predefined categories based on their structural
+    patterns, visual features, and text content. Your output must be valid JSON according
+    to the requested format.
+
+    <variables> <document-ocr-data>: OCR-extracted text content from the document
+    page that provides textual information for classification <document-image>: Visual
+    representation of the document page that provides layout, formatting, and visual
+    structure information <document-types>: List of valid document types with their
+    descriptions that the document must be classified into </variables>'
+  task_prompt: "<task-description> Analyze the provided document using both its visual\
+    \ layout and textual content to determine its document type and whether this page\
+    \ begins a new document or continues the previous one. </task-description>\n<document-types>\
+    \ {CLASS_NAMES_AND_DESCRIPTIONS} </document-types>\n<classification-instructions>\
+    \ Follow these steps to classify the document: 1. Examine the visual layout: headers,\
+    \ logos, formatting, structure, and visual organization 2. Analyze the textual\
+    \ content: key phrases, terminology, purpose, and information type 3. Identify\
+    \ distinctive features that match the document type descriptions 4. Decide if\
+    \ this page starts a new document (output \"start\") or continues the previous\
+    \ document (output \"continue\") 5. Consider both visual and textual evidence\
+    \ together to determine the best match 6. CRITICAL: Only use document types explicitly\
+    \ listed in the <document-types> section </classification-instructions>\n<output-format>\
+    \ {\n  \"classification_reason\": \"Detailed reasoning including specific visual\
+    \ and textual evidence that led to this classification\",\n  \"class\": \"exact_document_type_from_list\"\
+    ,\n  \"document_boundary\": \"start or continue\"\n} </output-format>\n<<CACHEPOINT>>\n\
+    <document-ocr-data> {DOCUMENT_TEXT} </document-ocr-data>\n<document-image> {DOCUMENT_IMAGE}\
+    \ </document-image>\n<final-instructions> Analyze the document above by: 1. Applying\
+    \ the <classification-instructions> to examine both visual and textual features\
+    \ 2. Selecting ONLY from document types in <document-types> 3. Providing clear\
+    \ reasoning with specific evidence 4. Outputting in the exact JSON format specified\
+    \ in <output-format> </final-instructions>"
+  temperature: 0
+  top_p: 0
+  top_k: 5
+  max_tokens: 4096
+  maxPagesForClassification: 0
+  classificationMethod: multimodalPageLevelClassification
+  sectionSplitting: llm_determined
+  image:
+    target_width: null
+    target_height: null
+    dpi: null
+    preprocessing: null
+extraction:
+  model: us.anthropic.claude-opus-4-5-20251101-v1:0
+  system_prompt: You are a healthcare coding policy extraction assistant specialized
+    in EXACT TEXT EXTRACTION ONLY from NCCI (National Correct Coding Initiative) Medicare
+    Policy documents. Your task is  to extract specific coding rules, guidelines,
+    and policy information by copying text verbatim  from the document. You must NEVER
+    interpret, infer, assume, or explain anything. Always  respond in valid JSON format.
+    If information is not explicitly found in the document text,  return null for
+    that field.
+  task_prompt: "<extraction-request> Extract ONLY NCCI healthcare coding rules from\
+    \ this <document-text>, focusing on:\n- CPT Code Ranges: Specific CPT code ranges\
+    \ covered (e.g., 30000-39999), code descriptors, and code groupings by body system\
+    \ or procedure type\n- Bundling Rules: Services that are bundled into other procedures,\
+    \ components that shall not be reported separately, integral services included\
+    \ in procedures, unbundling prohibitions\n- Global Surgery Rules: Global periods\
+    \ (000, 010, 090, XXX, YYY, ZZZ, MMM days), preoperative E&M services, postoperative\
+    \ care, same-day services\n- Modifier Usage: When modifiers (25, 57, 58, 59, 78,\
+    \ XS, XU, etc.) may or may not be used, modifier requirements for specific procedures,\
+    \ modifier restrictions\n- Separate Procedure Designations: Procedures with \"\
+    separate procedure\" in descriptor, CMS separate procedure policy applications,\
+    \ exceptions to separate procedure rules\n- Medically Unlikely Edits (MUEs): Maximum\
+    \ units of service, per-day limits, bilateral procedure reporting, units of service\
+    \ clarifications\n- NCCI PTP Edits: Procedure-to-Procedure edit pairs, mutually\
+    \ exclusive procedures, column 1/column 2 relationships, edit bypass conditions\n\
+    - Anatomic Rules: Bilateral procedures (modifier 50), ipsilateral vs contralateral\
+    \ reporting, same anatomic site restrictions, different anatomic site exceptions\n\
+    - Component Services: Services included in procedures (exploration, closure, anesthesia,\
+    \ dressings, supplies), control of bleeding, catheter placement\n- E&M Service\
+    \ Rules: Evaluation and Management service reporting with procedures, significant\
+    \ separately identifiable services, decision for surgery\n- Diagnostic vs Surgical\
+    \ Procedure Rules: When diagnostic procedures are separately reportable, conversion\
+    \ from endoscopic to open procedures\n- Documentation Requirements: Medical record\
+    \ documentation needed, medical necessity requirements, required justifications\n\
+    </extraction-request>\n<extraction-guidelines> \nCRITICAL: EXTRACT EXACT TEXT\
+    \ ONLY - NO INFERENCE OR INTERPRETATION\nSTRICT EXTRACTION RULES:\n1. Extract\
+    \ ONLY information explicitly stated in the document text  2. Copy text verbatim\
+    \ including exact wording, punctuation, and capitalization  3. Do NOT interpret,\
+    \ infer, assume, or explain what text might mean  4. Do NOT apply business logic,\
+    \ clinical assumptions, or contextual reasoning  5. Do NOT paraphrase or summarize\
+    \ - extract exact phrases and sentences  6. If exact text is not found in the\
+    \ document, return null - do NOT approximate  7. Do NOT make logical connections\
+    \ between different parts of the document  8. Do NOT fill gaps with reasonable\
+    \ assumptions or standard practices  9. Include double quotes around all JSON\
+    \ keys and values  10. Use null for any fields not explicitly found in the document\
+    \ text  11. Do not use newlines in values, use spaces instead  12. For each extracted\
+    \ rule, provide the exact page number where it was found  13. If a category has\
+    \ multiple sub-rules, extract them all with their respective page numbers  14.\
+    \ DEDUPLICATION: If the same rule appears multiple times across pages, extract\
+    \ it ONCE with all relevant page numbers (e.g., page: \"V-5, V-12, V-18\")  15.\
+    \ Consolidate identical text statements but preserve exact wording  16. Do not\
+    \ repeat the same text multiple times  17. CPT CODE EXTRACTION: Always extract\
+    \ specific CPT codes mentioned (e.g., 31237, 36000, 92960) along with their descriptors\
+    \ when provided 18. MODIFIER EXTRACTION: Extract modifier codes (e.g., 25, 57,\
+    \ 58, 59, 78) with their full names and usage conditions 19. DO NOT wrap your\
+    \ JSON output in markdown code blocks. Return ONLY valid JSON with no markdown\
+    \ formatting, code block markers, or triple backticks.\nRULE CATEGORIZATION: 20.\
+    \ Categorize rules by body system section (Respiratory, Cardiovascular, Hemic/Lymphatic,\
+    \ Mediastinum) 21. Within each section, organize rules by rule type (bundling,\
+    \ modifier, MUE, etc.) 22. Preserve the numbered rule format from the source document\
+    \ (e.g., \"C.1.\", \"D.7.\", \"G.3.\")\n</extraction-guidelines>\n<document-text>\
+    \ {DOCUMENT_TEXT} </document-text>\n<output-format>\nOUTPUT FORMAT:\nReturn the\
+    \ extracted information as a structured JSON object with ncci_rules_by_section\
+    \ as the top-level key.\nAlways use this structure. Organize rules by body system\
+    \ section as they appear in the document.\n{\n  \"ncci_rules_by_section\": {\n\
+    \    \"document_info\": {\n      \"title\": null,\n      \"revision_date\": null,\n\
+    \      \"cpt_code_range\": null,\n      \"chapter_number\": null,\n      \"page\"\
+    : null\n    },\n    \"general_principles\": {\n      \"coding_specificity\": {\n\
+    \        \"rule_text\": null,\n        \"page\": null\n      },\n      \"unbundling_prohibition\"\
+    : {\n        \"rule_text\": null,\n        \"page\": null\n      },\n      \"\
+    standard_of_practice\": {\n        \"rule_text\": null,\n        \"page\": null\n\
+    \      }\n    },\n    \"e_and_m_services\": {\n      \"global_periods\": {\n \
+    \       \"major_surgery_090\": {\n          \"rule_text\": null,\n          \"\
+    modifier_requirements\": null,\n          \"page\": null\n        },\n       \
+    \ \"minor_surgery_000_010\": {\n          \"rule_text\": null,\n          \"modifier_requirements\"\
+    : null,\n          \"page\": null\n        },\n        \"xxx_procedures\": {\n\
+    \          \"rule_text\": null,\n          \"modifier_requirements\": null,\n\
+    \          \"page\": null\n        }\n      },\n      \"same_day_service_rules\"\
+    : [{\n        \"rule_text\": null,\n        \"applicable_modifiers\": null,\n\
+    \        \"page\": null\n      }],\n      \"postoperative_rules\": [{\n      \
+    \  \"rule_text\": null,\n        \"page\": null\n      }]\n    },\n    \"respiratory_system\"\
+    : {\n      \"section_number\": null,\n      \"cpt_code_range\": null,\n      \"\
+    rules\": [{\n        \"rule_number\": null,\n        \"rule_type\": null,\n  \
+    \      \"cpt_codes_affected\": null,\n        \"rule_text\": null,\n        \"\
+    bundled_services\": null,\n        \"separately_reportable_conditions\": null,\n\
+    \        \"modifier_requirements\": null,\n        \"exceptions\": null,\n   \
+    \     \"examples\": null,\n        \"page\": null\n      }]\n    },\n    \"cardiovascular_system\"\
+    : {\n      \"section_number\": null,\n      \"cpt_code_range\": null,\n      \"\
+    rules\": [{\n        \"rule_number\": null,\n        \"rule_type\": null,\n  \
+    \      \"cpt_codes_affected\": null,\n        \"rule_text\": null,\n        \"\
+    bundled_services\": null,\n        \"separately_reportable_conditions\": null,\n\
+    \        \"modifier_requirements\": null,\n        \"exceptions\": null,\n   \
+    \     \"examples\": null,\n        \"page\": null\n      }]\n    },\n    \"hemic_lymphatic_systems\"\
+    : {\n      \"section_number\": null,\n      \"cpt_code_range\": null,\n      \"\
+    rules\": [{\n        \"rule_number\": null,\n        \"rule_type\": null,\n  \
+    \      \"cpt_codes_affected\": null,\n        \"rule_text\": null,\n        \"\
+    bundled_services\": null,\n        \"separately_reportable_conditions\": null,\n\
+    \        \"modifier_requirements\": null,\n        \"exceptions\": null,\n   \
+    \     \"page\": null\n      }]\n    },\n    \"mediastinum\": {\n      \"section_number\"\
+    : null,\n      \"cpt_code_range\": null,\n      \"rules\": [{\n        \"rule_number\"\
+    : null,\n        \"rule_type\": null,\n        \"cpt_codes_affected\": null,\n\
+    \        \"rule_text\": null,\n        \"bundled_services\": null,\n        \"\
+    separately_reportable_conditions\": null,\n        \"modifier_requirements\":\
+    \ null,\n        \"exceptions\": null,\n        \"page\": null\n      }]\n   \
+    \ },\n    \"medically_unlikely_edits\": {\n      \"general_guidance\": {\n   \
+    \     \"rule_text\": null,\n        \"page\": null\n      },\n      \"specific_mue_rules\"\
+    : [{\n        \"rule_number\": null,\n        \"cpt_codes_affected\": null,\n\
+    \        \"max_units\": null,\n        \"rule_text\": null,\n        \"reporting_requirements\"\
+    : null,\n        \"page\": null\n      }]\n    },\n    \"general_policy_statements\"\
+    : {\n      \"rules\": [{\n        \"rule_number\": null,\n        \"rule_type\"\
+    : null,\n        \"rule_text\": null,\n        \"cpt_codes_affected\": null,\n\
+    \        \"applicable_settings\": null,\n        \"exceptions\": null,\n     \
+    \   \"page\": null\n      }]\n    }\n  }\n}\nNOTES ON STRUCTURE:  - Extract each\
+    \ numbered rule from the document (e.g., \"C.1.\", \"D.7.\") as a separate rule\
+    \ object - rule_type should be one of: bundling, modifier, separate_procedure,\
+    \ mue, anatomic, component_service, documentation, e_and_m, diagnostic_surgical\
+    \ - cpt_codes_affected should list all CPT codes mentioned in the rule - bundled_services\
+    \ lists services that are included/bundled and shall not be reported separately\
+    \ - separately_reportable_conditions lists exceptions when services CAN be reported\
+    \ separately - modifier_requirements lists any modifier usage rules (which modifiers\
+    \ to use/not use) - examples should capture any clinical examples provided in\
+    \ the rule text - Null values indicate information not found in the document.\n\
+    CRITICAL OUTPUT REQUIREMENT: YOU MUST OUTPUT ONLY VALID JSON. DO NOT wrap output\
+    \ in markdown code blocks. DO NOT include triple backticks before or after JSON.\
+    \ DO NOT add any text, explanation, or preamble before the JSON. DO NOT add any\
+    \ text, explanation, or epilogue after the JSON. Your response MUST begin with\
+    \ opening curly brace and end with closing curly brace with NOTHING else.\n</output-format>"
+  temperature: 0
+  top_p: 0
+  top_k: 5
+  max_tokens: 64000
+  image:
+    target_width: null
+    target_height: null
+    dpi: null
+    preprocessing: null
+  agentic:
+    enabled: false
+    review_agent: false
+    review_agent_model: us.amazon.nova-pro-v1:0
+  custom_prompt_lambda_arn: null
+assessment:
+  enabled: true
+  hitl_enabled: false
+  model: us.amazon.nova-lite-v1:0
+  system_prompt: 'You are a document analysis assessment expert. Your role is to evaluate
+    the confidence and accuracy of data extraction results by analyzing them against
+    source documents.
+
+    Provide accurate confidence scores for each assessment. When bounding boxes are
+    requested, provide precise coordinate locations where information appears in the
+    document.'
+  task_prompt: "<background> You are an expert document analysis assessment system.\
+    \ Your task is to evaluate the confidence of extraction results for a document\
+    \ of class {DOCUMENT_CLASS} and provide precise spatial localization for each\
+    \ field. </background>\n<task> Analyze the extraction results against the source\
+    \ document and provide confidence assessments AND bounding box coordinates for\
+    \ each extracted attribute. Consider factors such as: 1. Text clarity and OCR\
+    \ quality in the source regions  2. Alignment between extracted values and document\
+    \ content  3. Presence of clear evidence supporting the extraction  4. Potential\
+    \ ambiguity or uncertainty in the source material  5. Completeness and accuracy\
+    \ of the extracted information 6. Precise spatial location of each field in the\
+    \ document </task>\n<assessment-guidelines> For each attribute, provide:  - A\
+    \ confidence score between 0.0 and 1.0 where:\n   - 1.0 = Very high confidence,\
+    \ clear and unambiguous evidence\n   - 0.8-0.9 = High confidence, strong evidence\
+    \ with minor uncertainty\n   - 0.6-0.7 = Medium confidence, reasonable evidence\
+    \ but some ambiguity\n   - 0.4-0.5 = Low confidence, weak or unclear evidence\n\
+    \   - 0.0-0.3 = Very low confidence, little to no supporting evidence\n- A clear\
+    \ explanation of the confidence reasoning - Precise spatial coordinates where\
+    \ the field appears in the document\nGuidelines:  - Base assessments on actual\
+    \ document content and OCR quality  - Consider both text-based evidence and visual/layout\
+    \ clues  - Account for OCR confidence scores when provided  - Be objective and\
+    \ specific in reasoning  - If an extraction appears incorrect, score accordingly\
+    \ with explanation - Provide tight, accurate bounding boxes around the actual\
+    \ text </assessment-guidelines>\n<spatial-localization-guidelines> For each field,\
+    \ provide bounding box coordinates: - bbox: [x1, y1, x2, y2] coordinates in normalized\
+    \ 0-1000 scale - page: Page number where the field appears (starting from 1)\n\
+    Coordinate system: - Use normalized scale 0-1000 for both x and y axes - x1, y1\
+    \ = top-left corner of bounding box   - x2, y2 = bottom-right corner of bounding\
+    \ box - Ensure x2 > x1 and y2 > y1 - Make bounding boxes tight around the actual\
+    \ text content - If a field spans multiple lines, create a bounding box that encompasses\
+    \ all relevant text </spatial-localization-guidelines>\n<final-instructions> Analyze\
+    \ the extraction results against the source document and provide confidence assessments\
+    \ with spatial localization. Return a JSON object with the following structure\
+    \ based on the attribute type:\nFor SIMPLE attributes:  {\n  \"simple_attribute_name\"\
+    : {\n    \"confidence\": 0.85,\n    \"bbox\": [100, 200, 300, 250],\n    \"page\"\
+    : 1\n  }\n}\nFor GROUP attributes (nested object structure):  {\n  \"group_attribute_name\"\
+    : {\n    \"sub_attribute_1\": {\n      \"confidence\": 0.90,\n      \"bbox\":\
+    \ [150, 300, 250, 320],\n      \"page\": 1\n    },\n    \"sub_attribute_2\": {\n\
+    \      \"confidence\": 0.75,\n      \"bbox\": [150, 325, 280, 345],\n      \"\
+    page\": 1\n    }\n  }\n}\nFor LIST attributes (array of assessed items):  {\n\
+    \  \"list_attribute_name\": [\n    {\n      \"item_attribute_1\": {\n        \"\
+    confidence\": 0.95,\n        \"bbox\": [100, 400, 200, 420],\n        \"page\"\
+    : 1\n      },\n      \"item_attribute_2\": {\n        \"confidence\": 0.88,\n\
+    \        \"bbox\": [250, 400, 350, 420],\n        \"page\": 1\n      }\n    },\n\
+    \    {\n      \"item_attribute_1\": {\n        \"confidence\": 0.92,\n       \
+    \ \"bbox\": [100, 425, 200, 445],\n        \"page\": 1\n      },\n      \"item_attribute_2\"\
+    : {\n        \"confidence\": 0.70,\n        \"bbox\": [250, 425, 350, 445],\n\
+    \        \"page\": 1\n      }\n    }\n  ]\n}\nIMPORTANT:   - For LIST attributes\
+    \ like \"Transactions\", assess EACH individual item in the list separately with\
+    \ individual bounding boxes - Each transaction should be assessed as a separate\
+    \ object in the array with its own spatial coordinates - Do NOT provide aggregate\
+    \ assessments for list items - assess each one individually with precise locations\
+    \ - Include assessments AND bounding boxes for ALL attributes present in the extraction\
+    \ results - Match the exact structure of the extracted data - Provide page numbers\
+    \ for all bounding boxes (starting from 1) </final-instructions>\n<<CACHEPOINT>>\n\
+    <document-image> {DOCUMENT_IMAGE} </document-image>\n<ocr-text-confidence-results>\
+    \ {OCR_TEXT_CONFIDENCE} </ocr-text-confidence-results>\n<<CACHEPOINT>>\n<attributes-definitions>\
+    \ {ATTRIBUTE_NAMES_AND_DESCRIPTIONS} </attributes-definitions>\n<extraction-results>\
+    \ {EXTRACTION_RESULTS} </extraction-results>"
+  temperature: 0
+  top_p: 0
+  top_k: 5
+  max_tokens: 10000
+  default_confidence_threshold: 0.8
+  validation_enabled: false
+  image:
+    target_width: null
+    target_height: null
+    dpi: null
+    preprocessing: null
+  granular:
+    enabled: true
+    list_batch_size: 1
+    simple_batch_size: 3
+    max_workers: 20
+summarization:
+  enabled: false
+  model: us.amazon.nova-pro-v1:0
+  system_prompt: 'You are a document summarization expert who can analyze and summarize
+    documents from various domains including medical, financial, legal, and general
+    business documents. Your task is to create a summary that captures the key information,
+    main points, and important details from the document. Your output must be in valid
+    JSON format. \nSummarization Style: Balanced\\nCreate a balanced summary that
+    provides a moderate level of detail. Include the main points and key supporting
+    information, while maintaining the document''s overall structure. Aim for a comprehensive
+    yet concise summary.\n Your output MUST be in valid JSON format with markdown
+    content. You MUST strictly adhere to the output format specified in the instructions.'
+  task_prompt: "<document-text> {DOCUMENT_TEXT} </document-text>\n<extracted-attributes>\
+    \ {EXTRACTION_RESULTS} </extracted-attributes>\nAnalyze the provided document\
+    \ (<document-text>) along with the extracted attributes (<extracted-attributes>)\
+    \ to create a comprehensive and accurate summary.\nCRITICAL INSTRUCTION: You MUST\
+    \ return your response as valid JSON with the EXACT structure shown at the end\
+    \ of these instructions. Do not include any explanations, notes, or text outside\
+    \ of the JSON structure.\nCreate a summary that captures the essential information\
+    \ from the document. Your summary should:\n1. **Integrate Extracted Attributes**:\
+    \ Begin with a \"Key Information\" section that highlights the most important\
+    \ extracted attributes in a structured format (use tables or lists as appropriate)\n\
+    2. **Validate and Reference**: Cross-reference the document text with extracted\
+    \ values to ensure accuracy. When mentioning specific values, prefer the extracted\
+    \ attributes when they are available\n3. **Maintain Document Structure**: Preserve\
+    \ the original document's organizational structure where appropriate, using the\
+    \ extracted attributes to enhance each section\n4. **Highlight Critical Data**:\
+    \ Emphasize important extracted values such as:\n   - Names, addresses, and identification\
+    \ numbers\n   - Dates and time periods\n   - Monetary amounts and financial figures\n\
+    \   - Status indicators and classifications\n   - Any calculated or derived values\n\
+    \n5. **Use Markdown Formatting**: Apply markdown for better readability:\n   -\
+    \ Use headers (##, ###) for sections\n   - Create tables for structured data from\
+    \ extracted attributes\n   - Use **bold** for important values and *italics* for\
+    \ emphasis\n   - Create lists (bullet or numbered) for multiple items\n\n6. **Provide\
+    \ Context**: For each extracted value mentioned, provide brief context from the\
+    \ document text to explain its significance\n7. **Citation System**: Cite all\
+    \ facts using inline citations in the format [Cite-X, Page-Y] where X is a sequential\
+    \ citation number and Y is the page number. Format citations as markdown links:\
+    \ [[Cite-1, Page-3]](#cite-1-page-3)\n8. **Data Completeness**: If extracted attributes\
+    \ are missing or empty, note this in the summary and rely more heavily on the\
+    \ document text\n9. **References Section**: At the end, include a \"References\"\
+    \ section listing all citations with their exact text from the source document\n\
+    Structure your summary as follows: - **Key Information** (from extracted attributes)\
+    \ - **Document Overview** - **Detailed Sections** (based on document structure)\
+    \ - **Summary and Conclusions** - **References**\nOutput Format:\nYou MUST return\
+    \ ONLY valid JSON with the following structure and nothing else:\n```json {\n\
+    \  \"summary\": \"A comprehensive summary in markdown format that integrates extracted\
+    \ attributes with document text, includes inline citations linked to a references\
+    \ section at the bottom\"\n} ```\nDo not include any text, explanations, or notes\
+    \ outside of this JSON structure. The JSON must be properly formatted and parseable."
+  temperature: 0
+  top_p: 0
+  top_k: 5
+  max_tokens: 4096
+criteria_validation:
+  model: us.anthropic.claude-3-5-sonnet-20240620-v1:0
+  system_prompt: ''
+  task_prompt: ''
+  temperature: 0
+  top_p: 0
+  top_k: 20
+  max_tokens: 4096
+  semaphore: 3
+  max_chunk_size: 180000
+  token_size: 4
+  overlap_percentage: 10
+  response_prefix: <response>
+agents:
+  error_analyzer:
+    model_id: us.anthropic.claude-sonnet-4-20250514-v1:0
+    error_patterns:
+    - ERROR
+    - CRITICAL
+    - FATAL
+    - Exception
+    - Traceback
+    - Failed
+    - Timeout
+    - AccessDenied
+    - ThrottlingException
+    system_prompt: "You are an intelligent error analysis agent for the GenAI IDP\
+      \ system with access to specialized diagnostic tools.\n\nGENERAL TROUBLESHOOTING\
+      \ WORKFLOW:\n1. Identify document status from DynamoDB\n2. Find any errors reported\
+      \ during Step Function execution\n3. Collect relevant logs from CloudWatch\n\
+      4. Identify any performance issues from X-Ray traces\n5. Provide root cause\
+      \ analysis based on the collected information\n\nTOOL SELECTION STRATEGY:\n\
+      - If user provides a filename: Use cloudwatch_document_logs and dynamodb_status\
+      \ for document-specific analysis\n- For system-wide issues: Use cloudwatch_logs\
+      \ and dynamodb_query\n- For execution context: Use lambda_lookup or stepfunction_details\n\
+      - For distributed tracing: Use xray_trace or xray_performance_analysis\n\nALWAYS\
+      \ format your response with exactly these three sections in this order:\n\n\
+      ## Root Cause\nIdentify the specific underlying technical reason why the error\
+      \ occurred. Focus on the primary cause, not symptoms.\n\n## Recommendations\n\
+      Provide specific, actionable steps to resolve the issue. Limit to top three\
+      \ recommendations only.\n\n<details>\n<summary><strong>Evidence</strong></summary>\n\
+      \nFormat evidence with source information. Include relevant data from tool responses:\n\
+      \n**For CloudWatch logs:**\n**Log Group:** [full log_group name]\n**Log Stream:**\
+      \ [full log_stream name]\n```\n[ERROR] timestamp message\n```\n\n**For other\
+      \ sources (DynamoDB, Step Functions, X-Ray):**\n**Source:** [service name and\
+      \ resource]\n```\nRelevant data from tool response\n```\n\n</details>\n\nFORMATTING\
+      \ RULES:\n- Use the exact three-section structure above\n- Make Evidence section\
+      \ collapsible using HTML details tags\n- Include relevant data from all tool\
+      \ responses (CloudWatch, DynamoDB, Step Functions, X-Ray)\n- For CloudWatch:\
+      \ Show complete log group and log stream names without truncation\n- Present\
+      \ evidence data in code blocks with appropriate source labels\n  \nANALYSIS\
+      \ GUIDELINES:\n- Use multiple tools for comprehensive analysis when needed\n\
+      - Start with document-specific tools for targeted queries\n- Use system-wide\
+      \ tools for pattern analysis\n- Combine DynamoDB status with CloudWatch logs\
+      \ for complete picture\n- Leverage X-Ray for distributed system issues\n\nROOT\
+      \ CAUSE DETERMINATION:\n1. Document Status: Check dynamodb_status first\n2.\
+      \ Execution Details: Use stepfunction_details for workflow failures\n3. Log\
+      \ Analysis: Use cloudwatch_document_logs or cloudwatch_logs for error details\n\
+      4. Distributed Tracing: Use xray_performance_analysis for service interaction\
+      \ issues\n5. Context: Use lambda_lookup for execution environment\n\nRECOMMENDATION\
+      \ GUIDELINES:\nFor code-related issues or system bugs:\n- Do not suggest code\
+      \ modifications\n- Include error details, timestamps, and context\n\nFor configuration-related\
+      \ issues:\n- Direct users to UI configuration panel\n- Specify exact configuration\
+      \ section and parameter names\n\nFor operational issues:\n- Provide immediate\
+      \ troubleshooting steps\n- Include preventive measures\n\nTIME RANGE PARSING:\n\
+      - recent: 1 hour\n- last week: 168 hours  \n- last day: 24 hours\n- No time\
+      \ specified: 24 hours (default)\n\nIMPORTANT: Do not include any search quality\
+      \ reflections, search quality scores, or meta-analysis sections in your response.\
+      \ Only provide the three required sections: Root Cause, Recommendations, and\
+      \ Evidence."
+    parameters:
+      max_log_events: 5
+      time_range_hours_default: 24
+      max_log_message_length: 400
+      max_events_per_log_group: 5
+      max_log_groups: 20
+      max_stepfunction_timeline_events: 3
+      max_stepfunction_error_length: 400
+      xray_slow_segment_threshold_ms: 5000
+      xray_error_rate_threshold: 0.05
+      xray_response_time_threshold_ms: 10000
+  chat_companion:
+    model_id: us.anthropic.claude-haiku-4-5-20251001-v1:0
+    error_patterns:
+    - ERROR
+    - CRITICAL
+    - FATAL
+    - Exception
+    - Traceback
+    - Failed
+    - Timeout
+    - AccessDenied
+    - ThrottlingException
+    system_prompt: "\n            You are an intelligent error analysis agent for\
+      \ the GenAI IDP system with access to specialized diagnostic tools.\n\n    \
+      \          GENERAL TROUBLESHOOTING WORKFLOW:\n              1. Identify document\
+      \ status from DynamoDB\n                  2. Find any errors reported during\
+      \ Step Function execution\n              3. Collect relevant logs from CloudWatch\n\
+      \              4. Identify any performance issues from X-Ray traces\n      \
+      \    5. Provide root cause analysis based on the collected information\n   \
+      \       \n          TOOL SELECTION STRATEGY:\n          - If user provides a\
+      \ filename: Use cloudwatch_document_logs and dynamodb_status for document-specific\
+      \ analysis\n          - For system-wide issues: Use cloudwatch_logs and dynamodb_query\n\
+      \          - For execution context: Use lambda_lookup or stepfunction_details\n\
+      \          - For distributed tracing: Use xray_trace or xray_performance_analysis\n\
+      \          \n          ALWAYS format your response with exactly these three\
+      \ sections in this order:\n          \n          ## Root Cause\n          Identify\
+      \ the specific underlying technical reason why the error occurred. Focus on\
+      \ the primary cause, not symptoms.\n\n          ## Recommendations\n       \
+      \       Provide specific, actionable steps to resolve the issue. Limit to top\
+      \ three recommendations only.\n\n          <details>\n              <summary><strong>Evidence</strong></summary>\n\
+      \              \n              Format evidence with source information. Include\
+      \ relevant data from tool responses:\n              \n              **For CloudWatch\
+      \ logs:**\n                  **Log Group:** [full log_group name]\n        \
+      \      **Log Stream:** [full log_stream name]\n                  ```\n     \
+      \         [ERROR] timestamp message\n          ```\n          \n          **For\
+      \ other sources (DynamoDB, Step Functions, X-Ray):**\n              **Source:**\
+      \ [service name and resource]\n              ```\n          Relevant data from\
+      \ tool response\n              ```\n\n          </details>\n\n             \
+      \ FORMATTING RULES:\n          - Use the exact three-section structure above\n\
+      \          - Make Evidence section collapsible using HTML details tags\n   \
+      \       - Include relevant data from all tool responses (CloudWatch, DynamoDB,\
+      \ Step Functions, X-Ray)\n          - For CloudWatch: Show complete log group\
+      \ and log stream names without truncation\n          - Present evidence data\
+      \ in code blocks with appropriate source labels\n                \n        \
+      \      ANALYSIS GUIDELINES:\n          - Use multiple tools for comprehensive\
+      \ analysis when needed\n              - Start with document-specific tools for\
+      \ targeted queries\n              - Use system-wide tools for pattern analysis\n\
+      \              - Combine DynamoDB status with CloudWatch logs for complete picture\n\
+      \              - Leverage X-Ray for distributed system issues\n            \
+      \      \n                  ROOT CAUSE DETERMINATION:\n                  1. Document\
+      \ Status: Check dynamodb_status first\n              2. Execution Details: Use\
+      \ stepfunction_details for workflow failures\n              3. Log Analysis:\
+      \ Use cloudwatch_document_logs or cloudwatch_logs for error details\n      \
+      \        4. Distributed Tracing: Use xray_performance_analysis for service interaction\
+      \ issues\n              5. Context: Use lambda_lookup for execution environment\n\
+      \              \n              RECOMMENDATION GUIDELINES:\n              For\
+      \ code-related issues or system bugs:\n                  - Do not suggest code\
+      \ modifications\n              - Include error details, timestamps, and context\n\
+      \n              For configuration-related issues:\n                  - Direct\
+      \ users to UI configuration panel\n                      - Specify exact configuration\
+      \ section and parameter names\n\n                      For operational issues:\n\
+      \                      - Provide immediate troubleshooting steps\n         \
+      \             - Include preventive measures\n\n                      TIME RANGE\
+      \ PARSING:\n                      - recent: 1 hour\n              - last week:\
+      \ 168 hours  \n                      - last day: 24 hours\n                \
+      \      - No time specified: 24 hours (default)\n              \n           \
+      \   IMPORTANT: Do not include any search quality reflections, search quality\
+      \ scores, or meta-analysis sections in your response. Only provide the three\
+      \ required sections: Root Cause, Recommendations, and Evidence."
+    parameters:
+      max_log_events: 5
+      time_range_hours_default: 24
+      max_log_message_length: 400
+      max_events_per_log_group: 5
+      max_log_groups: 20
+      max_stepfunction_timeline_events: 3
+      max_stepfunction_error_length: 400
+      xray_slow_segment_threshold_ms: 5000
+      xray_error_rate_threshold: 0.05
+      xray_response_time_threshold_ms: 10000
+classes:
+- description: Medicare Policy document containing NCCI coding rules and guidelines
+    for medical procedure billing
+  $schema: https://json-schema.org/draft/2020-12/schema
+  type: object
+  x-aws-idp-document-type: medicare-policy
+  properties:
+    policy-rules:
+      type: string
+      description: 'Individual numbered policy rules from the document with specific
+        coding guidance (includes rule-number, rule-type, cpt-codes-affected, rule-text,
+        exceptions, page)
+
+        Rules for bilateral, ipsilateral, and contralateral procedure reporting (includes
+        rule-type, cpt-codes, reporting-requirements)
+
+        Medical record documentation requirements for specific procedures or situations
+        (includes situation, required-documentation, medical-necessity)'
+  $id: medicare-policy
+discovery:
+  without_ground_truth:
+    model_id: us.amazon.nova-pro-v1:0
+    system_prompt: You are an expert in processing forms. Extracting data from images
+      and documents. Analyze forms line by line to identify field names, data types,
+      and organizational structure. Focus on creating comprehensive blueprints for
+      document processing without extracting actual values.
+    temperature: 0
+    top_p: 0
+    max_tokens: 10000
+    user_prompt: "This image contains forms data. Analyze the form line by line. Image\
+      \ may contains multiple pages, process all the pages.  Form may contain multiple\
+      \ name value pair in one line.  Extract all the names in the form including\
+      \ the name value pair which doesn't have value.  Organize them into groups,\
+      \ extract field_name, data_type and field description Field_name should be less\
+      \ than 60 characters, should not have space use '-' instead of space. field_description\
+      \ is a brief description of the field and the location of the field like box\
+      \ number or line number in the form and section of the form. Field_name should\
+      \ be unique within the group. Add two fields document_class and document_description.\
+      \  For document_class generate a short name based on the document content like\
+      \ W4, I-9, Paystub.  For document_description generate a description about the\
+      \ document in less than 50 words. \nGroup the fields based on the section they\
+      \ are grouped in the form. Group should have attributeType as \"group\". If\
+      \ the group repeats and follows table format, update the attributeType as \"\
+      list\". Do not extract the values. Return the extracted data in JSON format.\
+      \ Format the extracted data using the below JSON format: Format the extracted\
+      \ groups and fields using the below JSON format:"
+  with_ground_truth:
+    model_id: us.amazon.nova-pro-v1:0
+    system_prompt: You are an expert in processing forms. Extracting data from images
+      and documents. Use provided ground truth data as reference to optimize field
+      extraction and ensure consistency with expected document structure and field
+      definitions.
+    temperature: 0
+    top_p: 0
+    max_tokens: 10000
+    user_prompt: 'This image contains unstructured data. Analyze the data line by
+      line using the provided ground truth as reference.                         <GROUND_TRUTH_REFERENCE>
+      {ground_truth_json} </GROUND_TRUTH_REFERENCE> Ground truth reference JSON has
+      the fields we are interested in extracting from the document/image. Use the
+      ground truth to optimize field extraction. Match field names, data types, and
+      groupings from the reference. Image may contain multiple pages, process all
+      pages. Extract all field names including those without values. Do not change
+      the group name and field name from ground truth in the extracted data json.
+      Add field_description field for every field which will contain instruction to
+      LLM to extract the field data from the image/document. Add data_type field for
+      every field.  Add two fields document_class and document_description.  For document_class
+      generate a short name based on the document content like W4, I-9, Paystub.  For
+      document_description generate a description about the document in less than
+      50 words. If the group repeats and follows table format, update the attributeType
+      as "list".                          Do not extract the values. Format the extracted
+      data using the below JSON format: Format the extracted groups and fields using
+      the below JSON format:'
+evaluation:
+  enabled: false
+  llm_method:
+    top_p: 0
+    max_tokens: 4096
+    top_k: 5
+    task_prompt: "I need to evaluate attribute extraction for a document of class:\
+      \ {DOCUMENT_CLASS}.\n\nFor the attribute named \"{ATTRIBUTE_NAME}\" described\
+      \ as \"{ATTRIBUTE_DESCRIPTION}\":\n- Expected value: {EXPECTED_VALUE}\n- Actual\
+      \ value: {ACTUAL_VALUE}\n\nDo these values match in meaning, taking into account\
+      \ formatting differences, word order, abbreviations, and semantic equivalence?\n\
+      Provide your assessment as a JSON with three fields:\n- \"match\": boolean (true\
+      \ if they match, false if not)\n- \"score\": number between 0 and 1 representing\
+      \ the confidence/similarity score\n- \"reason\": brief explanation of your decision\n\
+      \nRespond ONLY with the JSON and nothing else. Here's the exact format:\n{\n\
+      \  \"match\": true or false,\n  \"score\": 0.0 to 1.0,\n  \"reason\": \"Your\
+      \ explanation here\"\n}"
+    temperature: 0
+    model: us.amazon.nova-2-lite-v1:0
+    system_prompt: You are an evaluator that helps determine if the predicted and
+      expected values match for document attribute extraction. You will consider the
+      context and meaning rather than just exact string matching.
+pricing: null
+summary: null
+criteria_types: null
+request_bucket: null
+request_history_prefix: null
+criteria_bucket: null
+output_bucket: null
+textract_page_tracker: null
+cost_report_bucket: null
+rule_validation:
+  enabled: false

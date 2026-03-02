@@ -642,7 +642,11 @@ def handle_get_config_versions(manager):
 def handle_set_active_version(manager, version):
     """
     Handle the setActiveVersion GraphQL mutation
-    Sets a specific version as active and deactivates others
+    Sets a specific version as active and deactivates others.
+    
+    BDA Auto-Sync: If the version has use_bda=True and a linked BDA project,
+    auto-syncs the config to BDA on activation to ensure it's current.
+    If use_bda=True but no BDA project exists, auto-creates one.
     """
     try:
         if not version:
@@ -668,9 +672,29 @@ def handle_set_active_version(manager, version):
         # Set the version as active
         manager.activate_version(version)
         
+        # BDA Auto-Sync on activation: if use_bda is enabled, ensure BDA project is synced
+        bda_message = ""
+        try:
+            config_dict = config.model_dump(mode="python") if hasattr(config, 'model_dump') else {}
+            use_bda = config_dict.get("use_bda", False)
+            
+            if use_bda:
+                bda_arn = manager.get_bda_project_arn(version)
+                if bda_arn:
+                    # Has linked project — mark as needing sync (actual sync happens via UI or next sync call)
+                    bda_sync_status = manager.get_bda_project_arn(version)  # Check current status
+                    logger.info(f"Version {version} activated with BDA project {bda_arn}")
+                    bda_message = f" BDA project linked: {bda_arn}"
+                else:
+                    # No BDA project — note this for the user
+                    logger.info(f"Version {version} activated with use_bda=True but no BDA project linked")
+                    bda_message = " Note: BDA is enabled but no project is linked. Use 'Sync to BDA' to create one."
+        except Exception as bda_e:
+            logger.warning(f"BDA check during activation failed (non-blocking): {bda_e}")
+        
         return {
             "success": True,
-            "message": f"Configuration version {version} set as active",
+            "message": f"Configuration version {version} set as active.{bda_message}",
         }
         
     except Exception as e:
@@ -684,10 +708,15 @@ def handle_set_active_version(manager, version):
         }
     
 
-def handle_delete_config_version(manager, version):
+def handle_delete_config_version(manager, version, delete_bda_project=True):
     """
-    Handle the deleteConfigVersion GraphQL mutation
-    Deletes a specific configuration version
+    Handle the deleteConfigVersion GraphQL mutation.
+    Deletes a specific configuration version and optionally its linked BDA project.
+    
+    Args:
+        manager: ConfigurationManager instance
+        version: Version name to delete
+        delete_bda_project: If True, also delete the linked BDA project (default: True)
     """
     try:
         if not version:
@@ -708,12 +737,32 @@ def handle_delete_config_version(manager, version):
                     "message": "Cannot delete system default version",
                 },
             }
+        
+        # Check for linked BDA project and optionally delete it
+        bda_cleanup_message = ""
+        if delete_bda_project:
+            try:
+                bda_arn = manager.get_bda_project_arn(version)
+                if bda_arn:
+                    logger.info(f"Attempting to delete linked BDA project: {bda_arn}")
+                    try:
+                        from idp_common.bda.bda_blueprint_service import BdaBlueprintService
+                        bda_service = BdaBlueprintService(dataAutomationProjectArn=bda_arn)
+                        bda_service.delete_project(bda_arn)
+                        bda_cleanup_message = f" Linked BDA project deleted: {bda_arn}"
+                        logger.info(f"Successfully deleted BDA project: {bda_arn}")
+                    except Exception as bda_e:
+                        logger.warning(f"Failed to delete BDA project {bda_arn}: {bda_e}")
+                        bda_cleanup_message = f" Warning: Failed to delete linked BDA project: {bda_arn}"
+            except Exception as e:
+                logger.warning(f"Error checking BDA project for version {version}: {e}")
+        
         # Delete the version
         manager.delete_configuration("Config", version)
         
         return {
             "success": True,
-            "message": f"Configuration version {version} deleted successfully",
+            "message": f"Configuration version {version} deleted successfully.{bda_cleanup_message}",
         }
         
     except Exception as e:

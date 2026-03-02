@@ -14,6 +14,9 @@
 # No pattern-specific overrides needed - all defaults come from base modules.
 # =============================================================================
 
+# BDA not used - step-by-step pipeline
+use_bda: false
+
 _inherits: base.yaml
 
 notes: "Pattern-2 default configuration - Bedrock LLM-based processing"

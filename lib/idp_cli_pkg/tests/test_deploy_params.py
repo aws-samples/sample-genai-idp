@@ -16,7 +16,6 @@ class TestParameterPreservation:
     def test_build_parameters_new_stack_all_required(self):
         """Test parameter building for new stack with all required parameters"""
         params = build_parameters(
-            pattern="pattern-2",
             admin_email="admin@example.com",
             max_concurrent=100,
             log_level="INFO",
@@ -24,7 +23,6 @@ class TestParameterPreservation:
         )
 
         assert params["AdminEmail"] == "admin@example.com"
-        assert "Pattern2" in params["IDPPattern"]
         assert params["MaxConcurrentWorkflows"] == "100"
         assert params["LogLevel"] == "INFO"
         assert params["EnableHITL"] == "false"
@@ -44,7 +42,6 @@ class TestParameterPreservation:
         # Only MaxConcurrentWorkflows should be included
         assert params["MaxConcurrentWorkflows"] == "200"
         assert "AdminEmail" not in params
-        assert "IDPPattern" not in params
         assert "LogLevel" not in params
         assert "EnableHITL" not in params
 
@@ -55,7 +52,6 @@ class TestParameterPreservation:
         # Only LogLevel should be included
         assert params["LogLevel"] == "DEBUG"
         assert "AdminEmail" not in params
-        assert "IDPPattern" not in params
         assert "MaxConcurrentWorkflows" not in params
         assert "EnableHITL" not in params
 
@@ -72,17 +68,6 @@ class TestParameterPreservation:
         assert params["LogLevel"] == "DEBUG"
         assert params["EnableHITL"] == "true"
         assert "AdminEmail" not in params
-        assert "IDPPattern" not in params
-
-    def test_build_parameters_pattern_config(self):
-        """Test pattern-specific configuration parameter"""
-        params = build_parameters(
-            pattern="pattern-2",
-            pattern_config="bank-statement-sample",
-        )
-
-        assert "Pattern2" in params["IDPPattern"]
-        assert params["Pattern2Configuration"] == "bank-statement-sample"
 
     def test_build_parameters_additional_params(self):
         """Test additional parameters override"""
@@ -98,30 +83,13 @@ class TestParameterPreservation:
         assert params["DataRetentionInDays"] == "90"
         assert params["ErrorThreshold"] == "5"
 
-    def test_build_parameters_pattern_mapping(self):
-        """Test pattern name to CloudFormation value mapping"""
-        params1 = build_parameters(pattern="pattern-1")
-        params2 = build_parameters(pattern="pattern-2")
-        params3 = build_parameters(pattern="pattern-3")
-
-        assert "Pattern1" in params1["IDPPattern"]
-        assert "BDA" in params1["IDPPattern"]
-
-        assert "Pattern2" in params2["IDPPattern"]
-        assert "Textract and Bedrock" in params2["IDPPattern"]
-
-        assert "Pattern3" in params3["IDPPattern"]
-        assert "SageMaker" in params3["IDPPattern"]
-
     def test_build_parameters_none_values_excluded(self):
         """Test that None values are not included in parameters dict"""
         params = build_parameters(
-            pattern=None,
             admin_email=None,
             max_concurrent=None,
             log_level=None,
             enable_hitl=None,
-            pattern_config=None,
             custom_config=None,
         )
 
@@ -163,17 +131,15 @@ class TestParameterPreservationIntegration:
         assert "LogLevel" not in params
         assert "EnableHITL" not in params
         assert "AdminEmail" not in params
-        assert "IDPPattern" not in params
 
     def test_new_stack_scenario_all_required_params(self):
         """
         Simulate new stack creation:
-        - User provides: --pattern pattern-2 --admin-email user@example.com
-        - Expected: pattern and admin_email in parameters
+        - User provides: --admin-email user@example.com
+        - Expected: admin_email in parameters
         - Optional params with defaults also included
         """
         params = build_parameters(
-            pattern="pattern-2",
             admin_email="user@example.com",
             max_concurrent=100,  # Default value
             log_level="INFO",  # Default value
@@ -182,7 +148,6 @@ class TestParameterPreservationIntegration:
 
         # Required params for new stack
         assert params["AdminEmail"] == "user@example.com"
-        assert "Pattern2" in params["IDPPattern"]
 
         # Defaults should be included for new stack
         assert params["MaxConcurrentWorkflows"] == "100"

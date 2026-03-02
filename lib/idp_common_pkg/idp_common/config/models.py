@@ -1025,6 +1025,13 @@ IDP_CONFIG_DEPRECATED_FIELDS = {
     "output_bucket",
     "textract_page_tracker",
     "summary",
+    "processing_mode",  # Renamed to use_bda (bool) in Phase 1
+    # DynamoDB storage metadata fields (not part of IDPConfig model)
+    "BdaProjectArn",
+    "BdaSyncStatus",
+    "BdaLastSyncedAt",
+    "_config_format",
+    "_config_storage",
 }
 
 
@@ -1071,6 +1078,14 @@ class IDPConfig(BaseModel):
 
     config_type: Literal["Config"] = Field(
         default="Config", description="Configuration type"
+    )
+
+    use_bda: bool = Field(
+        default=False,
+        description="Use Bedrock Data Automation (BDA) for document processing. "
+        "When true, BDA handles OCR, classification, and extraction as a single managed service. "
+        "When false (default), uses the step-by-step pipeline with configurable OCR, classification, "
+        "extraction, and assessment stages.",
     )
 
     notes: Optional[str] = Field(default=None, description="Configuration notes")
@@ -1327,8 +1342,14 @@ class ConfigurationRecord(BaseModel):
             version = ""
 
         # Remove DynamoDB keys and metadata
-        config_data = {k: v for k, v in item.items() 
-                      if k not in ("Configuration", "IsActive", "CreatedAt", "UpdatedAt", "Description")}
+        # Remove DynamoDB partition key, record metadata, and storage metadata fields
+        # These are not part of the config data model
+        _DYNAMODB_NON_CONFIG_FIELDS = {
+            "Configuration", "IsActive", "CreatedAt", "UpdatedAt", "Description",
+            "BdaProjectArn", "BdaSyncStatus", "BdaLastSyncedAt",
+            "_config_format", "_config_storage",
+        }
+        config_data = {k: v for k, v in item.items() if k not in _DYNAMODB_NON_CONFIG_FIELDS}
 
         # Set config_type discriminator directly from DynamoDB Configuration key
         # DynamoDB keys match Pydantic discriminators exactly:

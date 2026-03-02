@@ -11,7 +11,7 @@ The GenAI IDP accelerator includes comprehensive capacity planning capabilities 
 https://github.com/user-attachments/assets/6e668c2f-c6dc-490e-a4ce-10c533cd330e
 
 
-**This feature is designed specifically for Pattern 2** due to its well-defined processing steps (OCR, Classification, Extraction, Assessment, Summarization) and predictable Bedrock model quota requirements.
+**This feature is designed for Pattern 2 and the Unified pattern** due to their well-defined processing steps (OCR, Classification, Extraction, Assessment, Summarization) and predictable Bedrock model quota requirements. The Unified pattern uses the same Bedrock pipeline as Pattern 2 for capacity planning purposes.
 
 ## Key Benefits
 
@@ -198,17 +198,17 @@ The capacity calculation system provides sophisticated analysis through GraphQL 
 
 ### 1. Accessing the Capacity Planner
 
-**⚠️ Pattern 2 Only**: This feature is only available for Pattern 2 deployments. The navigation link will not appear for Pattern 1 or Pattern 3.
+**⚠️ Pattern 2 or Unified Only**: This feature is available for Pattern 2 and Unified pattern deployments. The navigation link will not appear for Pattern 1 or Pattern 3.
 
 Navigate to the Web UI and select the "Capacity Planning" section:
 
 1. **Prerequisites**:
-   - **Must be using Pattern 2** (Textract + Bedrock)
+   - **Must be using Pattern 2 or Unified pattern** (Textract + Bedrock pipeline)
    - Process some documents first to populate metering data
    - Documents must be single-class and classified with configured document types
 2. **Configuration**: Visit "View/Edit Configuration" tab to load your pattern configuration
-3. **Navigation**: Click on "Capacity Planning" in the main navigation (only visible for Pattern 2)
-4. **Pattern Detection**: System automatically detects your deployment pattern and validates it's Pattern 2
+3. **Navigation**: Click on "Capacity Planning" in the main navigation (visible for Pattern 2 and Unified)
+4. **Pattern Detection**: System automatically detects your deployment pattern. The Unified pattern is treated as Pattern 2 for capacity planning purposes
 
 ### 2. Document Configuration
 

@@ -7,6 +7,9 @@ query GetConfigVersions {
       createdAt
       updatedAt
       description
+      bdaProjectArn
+      bdaSyncStatus
+      bdaLastSyncedAt
     }
     error {
       type

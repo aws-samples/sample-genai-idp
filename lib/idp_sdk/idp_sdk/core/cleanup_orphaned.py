@@ -138,7 +138,6 @@ class OrphanedResourceCleanup:
                                 for pattern in [
                                     "PATTERN1",
                                     "PATTERN2",
-                                    "PATTERN3",
                                     "-p1-",
                                     "-p2-",
                                     "-p3-",

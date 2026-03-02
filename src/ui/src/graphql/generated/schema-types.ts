@@ -153,6 +153,9 @@ export type ConfigurationResponse = {
 };
 
 export type ConfigurationVersion = {
+  bdaLastSyncedAt?: Maybe<Scalars['String']['output']>;
+  bdaProjectArn?: Maybe<Scalars['String']['output']>;
+  bdaSyncStatus?: Maybe<Scalars['String']['output']>;
   createdAt?: Maybe<Scalars['AWSDateTime']['output']>;
   description?: Maybe<Scalars['String']['output']>;
   isActive?: Maybe<Scalars['Boolean']['output']>;
@@ -499,7 +502,10 @@ export type MutationStartTestRunArgs = {
 
 
 export type MutationSyncBdaIdpArgs = {
+  bdaProjectArn?: InputMaybe<Scalars['String']['input']>;
   direction?: InputMaybe<Scalars['String']['input']>;
+  saveArn?: InputMaybe<Scalars['Boolean']['input']>;
+  syncMode?: InputMaybe<Scalars['String']['input']>;
   versionName?: InputMaybe<Scalars['String']['input']>;
 };
 
@@ -873,6 +879,8 @@ export type SubscriptionOnDiscoveryJobStatusChangeArgs = {
 };
 
 export type SyncBdaIdpResponse = {
+  bdaProjectArn?: Maybe<Scalars['String']['output']>;
+  bdaSyncStatus?: Maybe<Scalars['String']['output']>;
   direction?: Maybe<Scalars['String']['output']>;
   error?: Maybe<ConfigurationError>;
   message?: Maybe<Scalars['String']['output']>;

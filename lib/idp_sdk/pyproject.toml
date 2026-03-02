@@ -7,7 +7,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "idp-sdk"
-version = "0.4.16"
+version = "0.5.0"
 description = "Python SDK for IDP Accelerator - programmatic access to document processing capabilities"
 authors = [{name = "AWS"}]
 license = {text = "MIT-0"}
@@ -53,12 +53,5 @@ lambda = [
 "Homepage" = "https://github.com/aws-samples/sample-genai-idp"
 "Documentation" = "https://github.com/aws-samples/sample-genai-idp/blob/main/docs/idp-sdk.md"
 
-[tool.setuptools]
-packages = [
-    "idp_sdk",
-    "idp_sdk.core",
-    "idp_sdk.models",
-    "idp_sdk.operations",
-]
-
-[tool.setuptools.package-dir]
+[tool.setuptools.packages.find]
+include = ["idp_sdk*"]

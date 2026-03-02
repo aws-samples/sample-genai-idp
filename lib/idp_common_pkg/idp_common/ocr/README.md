@@ -126,7 +126,7 @@ ocr:
 
 The OCR service uses advanced memory optimization to prevent OutOfMemory errors when processing large high-resolution documents:
 
-**Direct Size Extraction**: When resize configuration is provided (`target_width` and `target_height`), images are extracted directly at the target dimensions using PyMuPDF matrix transformations. This completely eliminates memory spikes from creating oversized images.
+**Direct Size Extraction**: When resize configuration is provided (`target_width` and `target_height`), images are extracted directly at the target dimensions using pypdfium2 matrix transformations. This completely eliminates memory spikes from creating oversized images.
 
 **Example for Large Document:**
 - **Original approach**: Extract 7469×9623 (101MB) → Resize to 951×1268 (5MB) → Memory spike
@@ -306,7 +306,7 @@ def handler(event, context):
 ## Roadmap
 
 ### Phase 1: Current Implementation (Basic Integration)
-- ✅ Basic OCR service with PyMuPDF for PDF processing
+- ✅ Basic OCR service with pypdfium2 for PDF processing
 - ✅ Support for Textract's text detection
 - ✅ Compatible with existing Pattern workflow
 - ✅ Full integration with Document data model

@@ -5,7 +5,7 @@
 System defaults for IDP configuration.
 
 This package contains YAML files with default configuration values
-for all IDP patterns (pattern-1, pattern-2, pattern-3).
+for all IDP patterns (pattern-1, pattern-2).
 
 The defaults are organized into modular files:
 - base.yaml: Composite that includes all modules
@@ -22,7 +22,6 @@ The defaults are organized into modular files:
 - base-discovery.yaml: Schema discovery
 - pattern-1.yaml: BDA pattern (selective inheritance)
 - pattern-2.yaml: Bedrock LLM pattern (full inheritance)
-- pattern-3.yaml: UDOP pattern (selective inheritance)
 
 Usage:
     from idp_common.config.merge_utils import load_system_defaults

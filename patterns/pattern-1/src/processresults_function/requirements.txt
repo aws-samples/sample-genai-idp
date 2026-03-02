@@ -1,3 +1,0 @@
-PyMuPDF==1.25.5
-boto3
-../../lib/idp_common_pkg[core,docs_service]  # core utilities and document service with dependencies

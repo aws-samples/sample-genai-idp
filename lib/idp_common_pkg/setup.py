@@ -31,7 +31,7 @@ extras_require = {
     # OCR module dependencies
     "ocr": [
         "Pillow==11.2.1",
-        "PyMuPDF==1.25.5",
+        "pypdfium2>=5.5.0",
         "amazon-textract-textractor[pandas]==1.9.2",
         "numpy==1.26.4",
         "pandas==2.2.3",
@@ -99,7 +99,7 @@ extras_require = {
         "stickler-eval==0.1.4",
         "genson==1.3.0",
         "Pillow==11.2.1",
-        "PyMuPDF==1.25.5",
+        "pypdfium2>=5.5.0",
         "amazon-textract-textractor[pandas]==1.9.2",
         "munkres>=1.1.4",
         "numpy==1.26.4",
@@ -117,7 +117,7 @@ extras_require = {
 
 setup(
     name="idp_common",
-    version="0.4.16",
+    version="0.5.0",
     packages=find_packages(
         exclude=[
             "build",

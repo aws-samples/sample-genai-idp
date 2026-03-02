@@ -1,0 +1,204 @@
+notes: >-
+  Fake W-2 Tax Form configuration for evaluating extraction accuracy on synthetic
+  US W-2 tax documents. Uses 45 flat ground truth fields matching standard W-2 boxes.
+  Source: HuggingFace singhsays/fake-w2-us-tax-form-dataset (CC0: Public Domain).
+use_bda: false
+assessment:
+  enabled: false
+summarization:
+  enabled: false
+rule_validation:
+  enabled: false
+classes:
+  - $schema: https://json-schema.org/draft/2020-12/schema
+    $id: W2
+    type: object
+    description: >-
+      US W-2 Wage and Tax Statement - an annual tax document provided by employers
+      to employees reporting wages earned and taxes withheld during the tax year.
+    x-aws-idp-document-type: W2
+    properties:
+      box_b_employer_identification_number:
+        type: string
+        description: "Box b - Employer's federal identification number (EIN)"
+        x-aws-idp-evaluation-method: EXACT
+      box_c_employer_name:
+        type: string
+        description: "Box c - Employer's name"
+        x-aws-idp-evaluation-method: LEVENSHTEIN
+        x-aws-idp-evaluation-threshold: '0.8'
+      box_c_employer_street_address:
+        type: string
+        description: "Box c - Employer's street address"
+        x-aws-idp-evaluation-method: LEVENSHTEIN
+        x-aws-idp-evaluation-threshold: '0.8'
+      box_c_employer_city_state_zip:
+        type: string
+        description: "Box c - Employer's city, state, and ZIP code"
+        x-aws-idp-evaluation-method: LEVENSHTEIN
+        x-aws-idp-evaluation-threshold: '0.8'
+      box_a_employee_ssn:
+        type: string
+        description: "Box a - Employee's Social Security Number"
+        x-aws-idp-evaluation-method: EXACT
+      box_e_employee_name:
+        type: string
+        description: "Box e - Employee's full name"
+        x-aws-idp-evaluation-method: LEVENSHTEIN
+        x-aws-idp-evaluation-threshold: '0.8'
+      box_e_employee_street_address:
+        type: string
+        description: "Box f - Employee's street address"
+        x-aws-idp-evaluation-method: LEVENSHTEIN
+        x-aws-idp-evaluation-threshold: '0.8'
+      box_e_employee_city_state_zip:
+        type: string
+        description: "Box f - Employee's city, state, and ZIP code"
+        x-aws-idp-evaluation-method: LEVENSHTEIN
+        x-aws-idp-evaluation-threshold: '0.8'
+      box_d_control_number:
+        type: string
+        description: "Box d - Control number assigned by employer"
+        x-aws-idp-evaluation-method: EXACT
+      box_1_wages:
+        type: string
+        description: "Box 1 - Wages, tips, other compensation"
+        x-aws-idp-evaluation-method: NUMERIC_EXACT
+      box_2_federal_tax_withheld:
+        type: string
+        description: "Box 2 - Federal income tax withheld"
+        x-aws-idp-evaluation-method: NUMERIC_EXACT
+      box_3_social_security_wages:
+        type: string
+        description: "Box 3 - Social Security wages"
+        x-aws-idp-evaluation-method: NUMERIC_EXACT
+      box_4_social_security_tax_withheld:
+        type: string
+        description: "Box 4 - Social Security tax withheld"
+        x-aws-idp-evaluation-method: NUMERIC_EXACT
+      box_5_medicare_wages:
+        type: string
+        description: "Box 5 - Medicare wages and tips"
+        x-aws-idp-evaluation-method: NUMERIC_EXACT
+      box_6_medicare_wages_tax_withheld:
+        type: string
+        description: "Box 6 - Medicare tax withheld"
+        x-aws-idp-evaluation-method: NUMERIC_EXACT
+      box_7_social_security_tips:
+        type: string
+        description: "Box 7 - Social Security tips"
+        x-aws-idp-evaluation-method: NUMERIC_EXACT
+      box_8_allocated_tips:
+        type: string
+        description: "Box 8 - Allocated tips"
+        x-aws-idp-evaluation-method: NUMERIC_EXACT
+      box_10_dependent_care_benefits:
+        type: string
+        description: "Box 10 - Dependent care benefits"
+        x-aws-idp-evaluation-method: NUMERIC_EXACT
+      box_11_nonqualified_plans:
+        type: string
+        description: "Box 11 - Nonqualified plans distributions"
+        x-aws-idp-evaluation-method: NUMERIC_EXACT
+      box_12a_code:
+        type: string
+        description: "Box 12a - Code (letter identifying type of compensation)"
+        x-aws-idp-evaluation-method: EXACT
+      box_12a_value:
+        type: string
+        description: "Box 12a - Amount for the code"
+        x-aws-idp-evaluation-method: NUMERIC_EXACT
+      box_12b_code:
+        type: string
+        description: "Box 12b - Code"
+        x-aws-idp-evaluation-method: EXACT
+      box_12b_value:
+        type: string
+        description: "Box 12b - Amount for the code"
+        x-aws-idp-evaluation-method: NUMERIC_EXACT
+      box_12c_code:
+        type: string
+        description: "Box 12c - Code"
+        x-aws-idp-evaluation-method: EXACT
+      box_12c_value:
+        type: string
+        description: "Box 12c - Amount for the code"
+        x-aws-idp-evaluation-method: NUMERIC_EXACT
+      box_12d_code:
+        type: string
+        description: "Box 12d - Code"
+        x-aws-idp-evaluation-method: EXACT
+      box_12d_value:
+        type: string
+        description: "Box 12d - Amount for the code"
+        x-aws-idp-evaluation-method: NUMERIC_EXACT
+      box_13_statutary_employee:
+        type: string
+        description: "Box 13 - Statutory employee checkbox (x if checked)"
+        x-aws-idp-evaluation-method: EXACT
+      box_13_retirement_plan:
+        type: string
+        description: "Box 13 - Retirement plan checkbox (x if checked)"
+        x-aws-idp-evaluation-method: EXACT
+      box_13_third_part_sick_pay:
+        type: string
+        description: "Box 13 - Third-party sick pay checkbox (x if checked)"
+        x-aws-idp-evaluation-method: EXACT
+      box_15_1_state:
+        type: string
+        description: "Box 15 - State (first entry)"
+        x-aws-idp-evaluation-method: EXACT
+      box_15_1_employee_state_id:
+        type: string
+        description: "Box 15 - Employer's state ID number (first entry)"
+        x-aws-idp-evaluation-method: EXACT
+      box_16_1_state_wages:
+        type: string
+        description: "Box 16 - State wages, tips, etc. (first entry)"
+        x-aws-idp-evaluation-method: NUMERIC_EXACT
+      box_17_1_state_income_tax:
+        type: string
+        description: "Box 17 - State income tax (first entry)"
+        x-aws-idp-evaluation-method: NUMERIC_EXACT
+      box_18_1_local_wages:
+        type: string
+        description: "Box 18 - Local wages, tips, etc. (first entry)"
+        x-aws-idp-evaluation-method: NUMERIC_EXACT
+      box_19_1_local_income_tax:
+        type: string
+        description: "Box 19 - Local income tax (first entry)"
+        x-aws-idp-evaluation-method: NUMERIC_EXACT
+      box_20_1_locality:
+        type: string
+        description: "Box 20 - Locality name (first entry)"
+        x-aws-idp-evaluation-method: LEVENSHTEIN
+        x-aws-idp-evaluation-threshold: '0.8'
+      box_15_2_state:
+        type: string
+        description: "Box 15 - State (second entry)"
+        x-aws-idp-evaluation-method: EXACT
+      box_15_2_employee_state_id:
+        type: string
+        description: "Box 15 - Employer's state ID number (second entry)"
+        x-aws-idp-evaluation-method: EXACT
+      box_16_2_state_wages:
+        type: string
+        description: "Box 16 - State wages, tips, etc. (second entry)"
+        x-aws-idp-evaluation-method: NUMERIC_EXACT
+      box_17_2_state_income_tax:
+        type: string
+        description: "Box 17 - State income tax (second entry)"
+        x-aws-idp-evaluation-method: NUMERIC_EXACT
+      box_18_2_local_wages:
+        type: string
+        description: "Box 18 - Local wages, tips, etc. (second entry)"
+        x-aws-idp-evaluation-method: NUMERIC_EXACT
+      box_19_2_local_income_tax:
+        type: string
+        description: "Box 19 - Local income tax (second entry)"
+        x-aws-idp-evaluation-method: NUMERIC_EXACT
+      box_20_2_locality:
+        type: string
+        description: "Box 20 - Locality name (second entry)"
+        x-aws-idp-evaluation-method: LEVENSHTEIN
+        x-aws-idp-evaluation-threshold: '0.8'

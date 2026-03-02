@@ -73,7 +73,6 @@ class TestConfigModelsIntegration:
                 # Pattern 2 and 3 should have these fields (except special configs like criteria-validation)
                 is_standard_pattern = (
                     "pattern-2" in str(relative_path)
-                    or "pattern-3" in str(relative_path)
                 ) and "criteria-validation" not in str(relative_path)
 
                 if is_standard_pattern:
@@ -182,22 +181,6 @@ class TestConfigModelsIntegration:
 
         # Validate that classes with examples work
         assert len(config.classes) > 0
-
-    def test_pattern3_config(self, config_root):
-        """Test Pattern 3 configuration"""
-        config_file = config_root / "pattern-3" / "rvl-cdip" / "config.yaml"
-
-        if not config_file.exists():
-            pytest.skip(f"Config file not found: {config_file}")
-
-        with open(config_file, "r") as f:
-            config_dict = yaml.safe_load(f)
-
-        config = IDPConfig.model_validate(config_dict)
-
-        # Pattern 3 specific validation
-        assert config.ocr is not None
-        assert config.classification is not None
 
     def test_rule_validation_config(self, config_root):
         """Test rule validation configuration"""

@@ -153,6 +153,9 @@ export type ConfigurationResponse = {
 };
 
 export type ConfigurationVersion = {
+  bdaLastSyncedAt?: Maybe<Scalars['String']['output']>;
+  bdaProjectArn?: Maybe<Scalars['String']['output']>;
+  bdaSyncStatus?: Maybe<Scalars['String']['output']>;
   createdAt?: Maybe<Scalars['AWSDateTime']['output']>;
   description?: Maybe<Scalars['String']['output']>;
   isActive?: Maybe<Scalars['Boolean']['output']>;
@@ -499,7 +502,10 @@ export type MutationStartTestRunArgs = {
 
 
 export type MutationSyncBdaIdpArgs = {
+  bdaProjectArn?: InputMaybe<Scalars['String']['input']>;
   direction?: InputMaybe<Scalars['String']['input']>;
+  saveArn?: InputMaybe<Scalars['Boolean']['input']>;
+  syncMode?: InputMaybe<Scalars['String']['input']>;
   versionName?: InputMaybe<Scalars['String']['input']>;
 };
 
@@ -873,6 +879,8 @@ export type SubscriptionOnDiscoveryJobStatusChangeArgs = {
 };
 
 export type SyncBdaIdpResponse = {
+  bdaProjectArn?: Maybe<Scalars['String']['output']>;
+  bdaSyncStatus?: Maybe<Scalars['String']['output']>;
   direction?: Maybe<Scalars['String']['output']>;
   error?: Maybe<ConfigurationError>;
   message?: Maybe<Scalars['String']['output']>;
@@ -1207,10 +1215,13 @@ export type StartTestRunMutation = { startTestRun?: { testRunId: string, testSet
 export type SyncBdaIdpMutationVariables = Exact<{
   direction?: InputMaybe<Scalars['String']['input']>;
   versionName?: InputMaybe<Scalars['String']['input']>;
+  bdaProjectArn?: InputMaybe<Scalars['String']['input']>;
+  saveArn?: InputMaybe<Scalars['Boolean']['input']>;
+  syncMode?: InputMaybe<Scalars['String']['input']>;
 }>;
 
 
-export type SyncBdaIdpMutation = { syncBdaIdp?: { success: boolean, message?: string | null, processedClasses?: Array<string | null> | null, direction?: string | null, error?: { type?: string | null, message?: string | null } | null } | null };
+export type SyncBdaIdpMutation = { syncBdaIdp?: { success: boolean, message?: string | null, processedClasses?: Array<string | null> | null, direction?: string | null, bdaProjectArn?: string | null, bdaSyncStatus?: string | null, error?: { type?: string | null, message?: string | null } | null } | null };
 
 export type UpdateChatSessionTitleMutationVariables = Exact<{
   sessionId: Scalars['ID']['input'];
@@ -1307,7 +1318,7 @@ export type GetConfigVersionQuery = { getConfigVersion?: { success: boolean, Sch
 export type GetConfigVersionsQueryVariables = Exact<{ [key: string]: never; }>;
 
 
-export type GetConfigVersionsQuery = { getConfigVersions?: { success: boolean, versions?: Array<{ versionName: string, isActive?: boolean | null, createdAt?: string | null, updatedAt?: string | null, description?: string | null } | null> | null, error?: { type?: string | null, message?: string | null } | null } | null };
+export type GetConfigVersionsQuery = { getConfigVersions?: { success: boolean, versions?: Array<{ versionName: string, isActive?: boolean | null, createdAt?: string | null, updatedAt?: string | null, description?: string | null, bdaProjectArn?: string | null, bdaSyncStatus?: string | null, bdaLastSyncedAt?: string | null } | null> | null, error?: { type?: string | null, message?: string | null } | null } | null };
 
 export type GetConfigurationLibraryFileQueryVariables = Exact<{
   pattern: Scalars['String']['input'];

@@ -1,0 +1,35 @@
+version: 0.2
+phases:
+  pre_build:
+    commands:
+      - echo "Logging into Amazon ECR..."
+      - aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $ECR_URI
+      - echo "Verifying Docker..."
+      - docker --version
+      - echo "Setting up Docker buildx for cross-platform builds..."
+      - docker buildx create --use --name multiarch-builder --driver docker-container || docker buildx use multiarch-builder
+      - docker buildx inspect --bootstrap
+  build:
+    commands:
+      - echo "Building BDA Docker images..."
+      - echo "Using IMAGE_VERSION from environment (content-based hash)"
+      - echo "Image tag will be $IMAGE_VERSION"
+      - export FUNCTION_bda_invoke="patterns/unified/src/bda_invoke_function"
+      - export FUNCTION_bda_completion="patterns/unified/src/bda_completion_function"
+      - export FUNCTION_bda_processresults="patterns/unified/src/bda_processresults_function"
+      - |
+        for func_var in FUNCTION_bda_invoke FUNCTION_bda_completion FUNCTION_bda_processresults; do
+          func_path="${!func_var}"
+          func_name=$(basename "$func_path" | sed 's/_/-/g')
+          echo "Building ${func_name} from ${func_path}..."
+          docker buildx build \
+            --platform linux/arm64 \
+            --tag "${ECR_URI}:${func_name}-${IMAGE_VERSION}" \
+            --provenance=false \
+            --push \
+            "${func_path}"
+        done
+  post_build:
+    commands:
+      - echo "BDA Docker images built and pushed successfully"
+      - echo "Images tagged with version ${IMAGE_VERSION}"

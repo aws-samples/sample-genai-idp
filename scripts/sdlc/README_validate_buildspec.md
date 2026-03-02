@@ -31,7 +31,7 @@ pip install pyyaml
 ### Validate a single file
 
 ```bash
-python3 scripts/sdlc/validate_buildspec.py patterns/pattern-2/buildspec.yml
+python3 scripts/sdlc/validate_buildspec.py patterns/unified/buildspec.yml
 ```
 
 ### Validate multiple files with glob patterns
@@ -59,7 +59,7 @@ The validator provides clear output with:
 ### Example Output
 
 ```
-Validating: patterns/pattern-2/buildspec.yml
+Validating: patterns/unified/buildspec.yml
 ======================================================================
 ✅ Valid buildspec file
 
@@ -74,7 +74,7 @@ Summary:
 ### Example Error Output
 
 ```
-Validating: patterns/pattern-2/buildspec.yml
+Validating: patterns/unified/buildspec.yml
 ======================================================================
 
 ❌ ERRORS (1):

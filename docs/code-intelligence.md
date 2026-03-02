@@ -1,22 +1,54 @@
 Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 SPDX-License-Identifier: MIT-0
 
-# Code Intelligence Feature
+# Code Intelligence Agent
 
-The GenAIIDP solution includes an integrated Code Intelligence feature that provides intelligent codebase understanding and analysis capabilities through an AI-powered chat interface. This feature enables developers and users to interactively explore, understand, and analyze complex codebases using natural language queries, making code comprehension and maintenance significantly more efficient.
+The GenAIIDP solution includes a Code Intelligence Agent that provides intelligent codebase understanding and analysis capabilities through the [Agent Companion Chat](./agent-companion-chat.md). This agent enables developers and users to interactively explore, understand, and analyze complex codebases using natural language queries, making code comprehension and maintenance significantly more efficient.
 
 ## Overview
 
-The Code Intelligence feature provides comprehensive codebase analysis and understanding capabilities through:
+The Code Intelligence Agent is one of several specialized sub-agents available within the Agent Companion Chat's multi-agent orchestration system. When enabled, the orchestrator can route code-related questions to this agent, which provides comprehensive codebase analysis and understanding capabilities through:
 
 - **Intelligent Code Analysis**: Natural language queries about codebase structure, functionality, and architecture
 - **File System Management**: Efficient handling of large codebases with smart caching and filtering
-- **Conversation Memory**: Persistent chat sessions with DynamoDB integration for continuous learning
+- **Conversation Memory**: Persistent chat sessions via the Agent Companion Chat's DynamoDB-backed conversation history
 - **Lambda Integration**: Serverless deployment with automatic codebase extraction and initialization
 - **Multi-Format Support**: Support for various file types including Python, JavaScript, Jupyter notebooks, and more
 - **Context-Aware Responses**: Deep technical analysis with accurate code references and examples
 - **Real-time Code Exploration**: Interactive exploration of codebase components and relationships
-- **Secure Architecture**: Enterprise-grade security with comprehensive audit trails and monitoring
+
+## How It Fits Into Agent Companion Chat
+
+The Code Intelligence Agent operates as an **optional sub-agent** within the Agent Companion Chat's orchestrator system:
+
+```
+User → Agent Companion Chat → Orchestrator Agent
+                                  ├── Analytics Agent
+                                  ├── Error Analyzer Agent
+                                  ├── Code Intelligence Agent (Optional - toggle controlled)
+                                  └── External MCP Agents (Optional)
+```
+
+- The **Orchestrator Agent** automatically routes code-related queries to the Code Intelligence Agent when it is enabled
+- Users control whether the agent is active via the **"Enable Code Intelligence Agent"** checkbox in the chat interface
+- When disabled, the orchestrator will not route any queries to this agent
+- The agent shares the same conversation memory, streaming infrastructure, and UI as all other companion chat agents
+
+![Agent Companion Chat Interface](../images/agent_companion_chat.png)
+
+For full details on the Agent Companion Chat architecture, session management, streaming, and multi-agent orchestration, see the [Agent Companion Chat documentation](./agent-companion-chat.md).
+
+## ⚠️ Security and Privacy
+
+**IMPORTANT: The Code Intelligence Agent uses third-party MCP (Model Context Protocol) servers (DeepWiki), which means your queries may be sent to external services not controlled by AWS or your organization.**
+
+- When Code Intelligence is **enabled**, queries routed to this agent may be sent to external services
+- Data sent to these services is subject to their privacy policies and terms of service
+- **Keep Code Intelligence disabled by default** unless you specifically need code assistance
+- **Do NOT share** sensitive information (credentials, account IDs, proprietary data, customer information) in queries when this agent is enabled
+- Use the Analytics Agent or Error Analyzer Agent for queries involving your actual system data — those agents operate entirely within your AWS account
+
+For detailed security guidance and best practices, see the [Security and Privacy section](./agent-companion-chat.md#security-and-privacy) in the Agent Companion Chat documentation.
 
 ## Key Features
 
@@ -26,35 +58,32 @@ The Code Intelligence feature provides comprehensive codebase analysis and under
 - **Multi-File Analysis**: Simultaneous analysis of multiple related files for comprehensive understanding
 - **Notebook Support**: Special handling for Jupyter notebooks with image removal and optimization
 - **Smart Caching**: File hashing and overview caching for improved performance
-- **Conversation Persistence**: Maintain context across multiple queries within a session
 - **Advanced Filtering**: Configurable ignore patterns to focus on relevant code
 - **Performance Optimization**: Sliding window conversation management and tool result optimization
-- **Comprehensive Monitoring**: Detailed logging and performance tracking
 
 ## Architecture
 
-The architecture of the Code Intelligence feature is shown below. The Web UI and AppSync API components are the same as used by the rest of the IDP system (with new AppSync endpoints added). The system uses Lambda functions for serverless processing with codebase files stored in the Lambda's /tmp directory (with future plans to migrate to EFS for enhanced scalability).
+The Code Intelligence Agent runs within the Agent Companion Chat's Lambda-based architecture. The shared `agent_chat_processor` Lambda function hosts the orchestrator and all sub-agents, including Code Intelligence. The system uses Lambda functions for serverless processing with codebase files stored in the Lambda's /tmp directory.
 
 ![Architecture Diagram](../images/IDP-ChatHelperAgent.png)
 
 ### System Components
 
-The Code Intelligence feature uses a streamlined architecture with:
-
-1. **IDP Helper Agent Request Handler**: Receives and validates incoming code intelligence requests
-2. **IDP Helper Agent Request Processor**: Processes queries using the Strands framework and specialized tools
-3. **Conversation History Management**: Persistent storage of chat sessions and analysis results
-4. **Codebase File System**: Currently uses Lambda /tmp directory, with future EFS integration planned
-5. **Web UI Integration**: Seamless integration with the existing GenAI IDP web interface
+1. **Agent Companion Chat Orchestrator**: Routes code-related queries to the Code Intelligence Agent
+2. **Code Intelligence Agent**: Processes queries using the Strands framework and specialized tools
+3. **Conversation History Management**: Shared DynamoDB-backed memory via `ChatMemoryTable` (last 20 turns)
+4. **Codebase File System**: Uses Lambda /tmp directory for codebase storage
+5. **Web UI Integration**: Accessed through the Agent Companion Chat interface with toggle control
 
 ### Agent Workflow
 
-1. **Request Reception**: User submits a natural language question about the codebase through the web UI
-2. **Codebase Initialization**: System extracts and prepares codebase files in the Lambda environment
-3. **Context Loading**: Agent loads codebase overview and determines relevant files for analysis
-4. **Intelligent Analysis**: Agent processes the query using specialized tools and codebase understanding
-5. **Response Generation**: System generates comprehensive responses with code examples and technical insights
-6. **Result Display**: Final results are displayed in the web interface with conversation history
+1. **User Sends Message**: User submits a question in the Agent Companion Chat interface
+2. **Orchestrator Routing**: The orchestrator determines the query is code-related and routes to Code Intelligence Agent
+3. **Codebase Initialization**: System extracts and prepares codebase files in the Lambda environment
+4. **Context Loading**: Agent loads codebase overview and determines relevant files for analysis
+5. **Intelligent Analysis**: Agent processes the query using specialized tools and codebase understanding
+6. **Streaming Response**: Results stream back in real-time through the Agent Companion Chat's AppSync subscription infrastructure
+7. **Conversation Continuity**: The response is stored in shared conversation memory for follow-up questions
 
 ### Code Intelligence Workflow
 
@@ -65,24 +94,12 @@ For codebase analysis queries, the Code Intelligence Agent follows this structur
 3. **Intelligent File Retrieval**: Retrieves relevant files in ranked order of importance using `read_multiple_files`
 4. **Multi-File Analysis**: Analyzes multiple related files simultaneously for comprehensive understanding
 5. **Context-Aware Response**: Provides technical responses with code examples, architectural insights, and implementation details
-6. **Conversation Continuity**: Maintains context for follow-up questions within the same session
-
-### Security Architecture
-
-The Code Intelligence feature implements enterprise-grade security:
-
-- **Secure File Access**: Controlled access to codebase files with proper authentication and authorization
-- **Session Isolation**: Each user's queries and analysis are isolated and tracked separately
-- **Audit Trail**: Comprehensive logging of all interactions for security reviews and compliance
-- **Data Protection**: Sensitive code information is handled securely with proper encryption
-- **Access Control**: Integration with existing IDP authentication and authorization mechanisms
-- **Resource Management**: Proper cleanup of temporary files and resources after processing
-
+6. **Conversation Continuity**: Maintains context for follow-up questions within the same chat session
 
 
 ## Available Tools
 
-The code intelligence agent has access to specialized tools for comprehensive code analysis:
+The Code Intelligence Agent has access to specialized tools for comprehensive code analysis:
 
 ### 1. Codebase Overview Context Tool
 - **Purpose**: Loads existing codebase overview with file purposes and relationships
@@ -121,14 +138,15 @@ The code intelligence agent has access to specialized tools for comprehensive co
 ### Accessing the Feature
 
 1. Log in to the GenAI IDP Web UI
-2. Navigate to the "IDP Accelerator Help" section in the main navigation
-3. You'll see a chat-like interface for querying the codebase
+2. Navigate to **Agent Companion Chat** in the main navigation
+3. Check the **"Enable Code Intelligence Agent"** checkbox at the bottom of the chat interface
+4. Start asking code-related questions — the orchestrator will automatically route them to the Code Intelligence Agent
 
-![Chat Interface](../images/IDP-help-chatbot.png)
+> **Note**: Code Intelligence is disabled by default for security reasons. Enable it only when you need code assistance and ensure your queries contain no sensitive information. A warning message reminds you: *"Avoid sharing sensitive information, the Code Intelligence Agent may use third-party services."*
 
 ### Types of Questions
 
-The Code Intelligence agent can answer various types of questions about your codebase:
+The Code Intelligence Agent can answer various types of questions about your codebase:
 
 **Architecture and Structure Questions:**
 - "What is the main architecture of this codebase?"
@@ -178,7 +196,7 @@ Here are some example questions you can ask about the IDP codebase:
 
 ### Understanding Results
 
-The Code Intelligence agent provides comprehensive responses including:
+The Code Intelligence Agent provides comprehensive responses including:
 
 1. **Technical Explanations**: Detailed explanations of code functionality and architecture
 2. **Code Examples**: Relevant code snippets with proper context and annotations
@@ -192,6 +210,8 @@ Each response includes:
 - Direct references to relevant code sections and files
 - Step-by-step guidance for complex procedures
 - Best practices and recommendations
+
+Responses stream in real-time through the Agent Companion Chat interface, so you can see results as they are generated.
 
 ## File System Architecture
 
@@ -225,45 +245,28 @@ Planned migration to Amazon Elastic File System (EFS) for enhanced scalability:
 - **Shared Access**: Multiple Lambda instances can access the same codebase
 - **Faster Cold Starts**: No need to extract codebase on each cold start
 
-**Migration Benefits:**
-- **Improved Performance**: Faster initialization and reduced cold start times
-- **Enhanced Scalability**: Support for enterprise-scale codebases
-- **Better Reliability**: Persistent storage reduces initialization failures
-- **Cost Optimization**: Reduced Lambda execution time and costs
-
 ## Configuration
-
-The Code Intelligence feature is configured through environment variables and CloudFormation parameters:
 
 ### Model Selection
 
-**Supported Models:**
-- `us.anthropic.claude-3-7-sonnet-20250219-v1:0` (Default - Recommended)
-- `us.anthropic.claude-3-5-sonnet-20241022-v2:0`
-- `us.anthropic.claude-3-haiku-20240307-v1:0`
-- `us.amazon.nova-pro-v1:0`
-- `us.amazon.nova-lite-v1:0`
+The Code Intelligence Agent uses the model configured for the Agent Companion Chat orchestrator. See the [Agent Companion Chat Configuration](./agent-companion-chat.md#configuration) for supported models and settings.
 
 ### Infrastructure Components
 
-The feature automatically creates:
-- **DynamoDB Tables**: Conversation history and memory management
-- **Lambda Functions**: Request handler and processor functions
-- **AppSync Resolvers**: GraphQL API endpoints for web UI integration
+The Code Intelligence Agent shares infrastructure with the Agent Companion Chat:
+
+- **DynamoDB Tables**: `ChatMessagesTable` (message storage) and `ChatMemoryTable` (conversation history)
+- **Lambda Functions**: `agent_chat_resolver` (entry point) and `agent_chat_processor` (agent execution)
+- **AppSync Resolvers**: Shared GraphQL API endpoints for real-time streaming
 - **IAM Roles**: Minimal permissions for secure operation
-- **S3 Integration**: Codebase storage and caching (future EFS migration)
 
-### Environment Variables
+### Code Intelligence-Specific Settings
 
-Key configuration settings:
 - **CODEBASE_DIR**: Root directory for codebase files
 - **OUTPUT_DIR**: Directory for generated outputs and cache
-- **ENABLE_MONITORING**: Enable comprehensive monitoring and logging
 - **CONTEXT_WINDOW_SIZE**: Maximum context window size in characters
 - **MAX_FILE_SIZE**: Maximum individual file size (2MB default)
 - **MAX_NOTEBOOK_SIZE**: Maximum notebook size (2GB default)
-- **MEMORY_METHOD**: Memory backend method (DynamoDB or AgentCore)
-- **BEDROCK_REGION**: AWS Bedrock region for model access
 
 ## Best Practices
 
@@ -272,7 +275,7 @@ Key configuration settings:
 1. **Start with Overview**: Begin with general architecture questions before diving into specifics
 2. **Be Specific**: Clearly state what aspect of the code you want to understand
 3. **Use Context**: Reference previous responses to build deeper understanding
-4. **Ask Follow-ups**: Build on previous answers to explore topics in depth
+4. **Ask Follow-ups**: Build on previous answers to explore topics in depth — the Agent Companion Chat remembers the last 20 turns of conversation
 
 ### Effective Code Exploration
 
@@ -281,57 +284,25 @@ Key configuration settings:
 3. **Trace Data Flow**: Follow how data moves through the system
 4. **Explore Patterns**: Understand common patterns and design principles used
 
-### Performance Optimization
+### Security Best Practices
 
-1. **Efficient Queries**: Ask focused questions to get targeted responses
-2. **Batch Related Questions**: Group related questions to leverage context
-3. **Use High-Level Overview**: For large codebases, start with high-level overview mode
-4. **Monitor Response Times**: Be aware of context window limits for complex queries
-
-## Testing and Development
-
-### Local Testing Setup
-
-The Code Intelligence feature includes comprehensive testing utilities for local development:
-
-1. **Environment Setup**: Create a virtual environment and install required dependencies
-2. **Configuration**: Copy and configure environment variables from the provided template
-3. **Testing**: Run test queries against the code intelligence system
-
-### Environment Configuration
-
-Required environment variables for testing:
-- **CODEBASE_DATA_PATH**: Path to codebase zip files
-- **LAMBDA_TMP_DIR**: Temporary directory for Lambda simulation
-- **BEDROCK_REGION**: AWS Bedrock region for model access
-- **Memory Tables**: DynamoDB table names for conversation history
-- **MEMORY_METHOD**: Backend method for conversation persistence
-
-### Sample Test Queries
-
-The testing framework supports various types of queries:
-
-**Architecture Understanding:**
-- "Explain the overall system architecture and main components"
-
-**Pattern Comparison:**
-- "What are the differences between Pattern 1, Pattern 2, and Pattern 3?"
-
-**Implementation Details:**
-- "How is the document processing pipeline implemented?"
-
-**Configuration Guidance:**
-- "What environment variables do I need to configure for deployment?"
+1. **Keep Disabled by Default**: Only enable Code Intelligence when you specifically need code assistance
+2. **Review Your Questions**: Ensure queries contain no sensitive information before sending
+3. **Use Other Agents for System Data**: Use Analytics or Error Analyzer agents for queries involving your actual system data
+4. **Disable After Use**: Uncheck the Code Intelligence toggle when you're done with code-related questions
 
 ## Troubleshooting
 
 ### Common Issues
 
-**Agent Not Responding:**
-- Check CloudWatch logs for the IDP Helper Agent Request Processor Lambda function
+**Code Intelligence Toggle Not Available:**
+- Verify Code Intelligence is configured in your deployment
+- Contact your administrator if the feature should be available
+
+**Agent Not Responding to Code Questions:**
+- Ensure the **"Enable Code Intelligence Agent"** checkbox is checked in the chat interface
+- Check CloudWatch logs for the `agent_chat_processor` Lambda function
 - Verify Bedrock model access is enabled for your selected model
-- Ensure sufficient Lambda timeout (15 minutes) for complex codebase analysis
-- Check that codebase files are properly extracted to `/tmp` directory
 
 **File Reading Errors:**
 - Verify codebase zip files are present in the expected location
@@ -345,76 +316,33 @@ The testing framework supports various types of queries:
 - Use high-level overview mode for codebases with 300+ files
 - Consider breaking complex queries into smaller, focused questions
 
-**Conversation History Issues:**
-- Verify DynamoDB table permissions and configuration
-- Check session ID consistency across requests
-- Monitor DynamoDB write throttling and capacity
-- Review conversation manager settings for memory optimization
-
 ### Monitoring and Logging
 
-- **CloudWatch Logs**: Detailed logs for Lambda functions with agent execution traces
-- **DynamoDB Console**: View conversation history and session data directly
-- **Agent Messages**: Real-time display of agent reasoning and tool usage in web UI
-- **Performance Metrics**: Monitor response times, file processing, and resource usage
-
-### Debug Mode
-
-Enable detailed debugging for troubleshooting by configuring monitoring and debug output settings in the system configuration.
+- **CloudWatch Logs**: Check `/aws/lambda/agent_chat_processor` for agent execution logs
+- **DynamoDB Console**: View conversation history in `ChatMessagesTable` and `ChatMemoryTable`
+- **Agent Messages**: Real-time display of agent reasoning and tool usage in the chat interface
 
 ## Cost Considerations
 
-The Code Intelligence feature uses several AWS services that incur costs:
+The Code Intelligence Agent shares infrastructure costs with the Agent Companion Chat:
 
 - **Amazon Bedrock**: Model inference costs for code analysis processing
-- **AWS Lambda**: Function execution costs for request handling and processing
-- **Amazon DynamoDB**: Storage and request costs for conversation history and memory
-- **Amazon S3**: Storage costs for codebase files and caching (current implementation)
-- **Amazon EFS**: Storage and throughput costs (future implementation)
-- **Amazon CloudWatch**: Logging and monitoring costs
+- **AWS Lambda**: Shared function execution costs with other companion chat agents
+- **Amazon DynamoDB**: Shared storage costs for conversation history and memory
 
 ### Cost Optimization Strategies
 
-1. **Model Selection**: Choose appropriate Bedrock models based on accuracy vs. cost requirements
+1. **Enable Only When Needed**: Keep Code Intelligence disabled when not actively using it
 2. **Efficient Queries**: Ask focused questions to minimize processing time
 3. **Caching Utilization**: Leverage codebase overview caching to reduce repeated analysis
-4. **Memory Management**: Optimize Lambda memory allocation based on codebase size
-5. **Session Management**: Use conversation history effectively to avoid redundant processing
+4. **Session Management**: Start new chat sessions when switching topics to reduce context size
 
-Monitor usage through AWS Cost Explorer and set up billing alerts for cost control.
+For overall Agent Companion Chat cost details, see the [Cost Considerations section](./agent-companion-chat.md#cost-considerations) in the Agent Companion Chat documentation.
 
-## Integration with Other Features
+## Related Documentation
 
-The Code Intelligence feature integrates seamlessly with other GenAI IDP capabilities:
-
-### Agent Framework Integration
-- Shares the same Strands-based agent framework with analytics agents
-- Common monitoring and logging infrastructure
-- Unified conversation management and memory systems
-
-### Web UI Integration
-- Consistent user interface with other IDP features
-- Shared authentication and authorization mechanisms
-- Common AppSync API patterns and GraphQL resolvers
-
-### Configuration Management
-- Integrated with overall IDP configuration system
-- Shared environment variable patterns
-- Common CloudFormation deployment templates
-
-### Security Integration
-- Uses the same security model as other IDP components
-- Integrated audit trails and compliance logging
-- Shared IAM roles and permission patterns
-
-## Future Enhancements
-
-Planned improvements for the Code Intelligence feature include:
-
-### File System Migration
-- **EFS Integration**: Migration from Lambda /tmp to Amazon EFS for persistent storage
-- **Enhanced Scalability**: Support for larger codebases and multiple concurrent users
-- **Improved Performance**: Faster cold starts and reduced initialization overhead
-
-
-The Code Intelligence feature represents a significant advancement in making complex codebases more accessible and understandable, enabling developers and stakeholders to quickly gain insights into system architecture, functionality, and implementation details through natural language interaction.
+- [Agent Companion Chat](./agent-companion-chat.md) - Full documentation on the multi-agent chat interface
+- [Custom MCP Agent](./custom-MCP-agent.md) - Integrating external tools via MCP
+- [Error Analyzer](./error-analyzer.md) - Document-specific troubleshooting agent
+- [Agent Analysis](./agent-analysis.md) - Analytics agent capabilities
+- [Configuration](./configuration.md) - System configuration options

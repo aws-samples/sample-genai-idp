@@ -31,18 +31,12 @@ flowchart TD
   
     Accuracy3 -->|No| OptimizePath3{Issue source:<br/>Classification or Extraction?}
     Accuracy3 -->|Yes| Deploy3[Deploy]
-  
-    OptimizePath2 -->|Classification| Pattern3A[Pattern 3<br/>UDOP model for classification]
     OptimizePath2 -->|Extraction| FineTuning2[Pattern 2<br/>And model fine-tuning]
-  
-    OptimizePath3 -->|Classification| Pattern3B[Pattern 3<br/>UDOP model for classification]
     OptimizePath3 -->|Extraction| FineTuning3[Pattern 2<br/>And model fine-tuning]
   
     Pattern2Fallback --> Accuracy4{Accuracy meets<br/>requirements?}
     Accuracy4 -->|Yes| Deploy4[Deploy]
     Accuracy4 -->|No| OptimizePath4{Issue source:<br/>Classification or Extraction?}
-  
-    OptimizePath4 -->|Classification| Pattern3C[Pattern 3<br/>UDOP model for classification]
     OptimizePath4 -->|Extraction| FineTuning4[Pattern 2<br/>And model fine-tuning]
 ```
 

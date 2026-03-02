@@ -186,7 +186,7 @@ class TestCapacityInputValidation:
         }
         with pytest.raises(ValidationError) as exc_info:
             validate_capacity_input(input_data)
-        assert 'pattern-2 is supported' in str(exc_info.value)
+        assert 'pattern-2 and unified' in str(exc_info.value)
 
     def test_validate_missing_max_latency(self):
         """Test validation fails when maxAllowedLatency is missing."""

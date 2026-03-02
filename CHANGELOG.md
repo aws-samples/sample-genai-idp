@@ -5,6 +5,50 @@ SPDX-License-Identifier: MIT-0
 
 ## [Unreleased]
 
+## [0.5.0]
+
+### Added
+
+- **Unified Pattern** — Merged Pattern-1 (BDA) and Pattern-2 (Pipeline) into a single deployment. Switch between BDA and Pipeline processing modes at runtime using the `use_bda` configuration toggle — no redeployment needed. Use [Test Studio](./docs/test-studio.md) to compare accuracy and cost across both modes to find the optimal approach for your documents. See the [Migration Guide](./docs/migration-v04-to-v05.md) for upgrade instructions.
+
+- **Rule Validation for BDA mode** — Rule validation (business rule checking) is now available in both BDA and Pipeline modes. Previously it was Pipeline-only.
+
+- **Fake W-2 Tax Form Test Set Auto-Deployment** — New pre-deployed benchmark test set with 2,000 synthetically generated US W-2 tax form images and structured ground truth, sourced from HuggingFace (`singhsays/fake-w2-us-tax-form-dataset`, originally from Kaggle under CC0: Public Domain license). Features 45 ground truth fields per document covering employer info (EIN, name, address), employee info (SSN, name, address), federal wages/taxes (boxes 1-8), compensation codes (boxes 12a-d), checkboxes (box 13), and state/local taxes (boxes 15-20). Includes both clean and noisy image variants for testing OCR robustness. Ideal for benchmarking W-2 extraction accuracy, evaluating image quality impact on processing, and testing structured form data extraction at scale.
+
+- **AWS Profile Support for CLI** — Added optional `--profile` parameter to specify AWS credentials profile. Can be placed anywhere in the command. Automatically applies to all AWS SDK calls.
+
+- **Enhanced `status` CLI/MCP Command with Advanced Search, Filtering, and Analytics** — Added PK substring search (`--batch-id` now matches partial batch identifiers across multiple batches), `--object-status` filter for searching by processing status (COMPLETED, FAILED, etc.), `--get-time` flag for timing statistics (processing, queue, total time with min/max outlier tracking), `--include-metering` flag for Lambda GB-seconds usage and cost estimates, and `--show-details` flag for detailed document information. Introduces `TrackingTableSearcher` class for flexible DynamoDB tracking table queries. Fully backward compatible with existing usage.
+
+- **Added Replace/Merge sync modes for BDA synchronization** — Both "Sync from BDA" and "Sync to BDA" now support two modes: **Replace** (default) aligns the target to match the source exactly, removing items not in the source; **Merge** adds source items to the target without removing existing items. The UI modal now always shows a mode selection and ARN input (pre-filled for linked projects).
+
+
+### Deprecated
+
+- **Pattern-1 (BDA) and Pattern-2 (Pipeline) separate deployments** — Replaced by the Unified Pattern. Existing stacks are automatically upgraded. See the [Migration Guide](./docs/migration-v04-to-v05.md) for details.
+
+- **Pattern-3 (UDOP + Bedrock)** — Pattern-3 is no longer available as a deployment option. If you are currently using Pattern-3 with a SageMaker UDOP endpoint, do not upgrade to v0.5.x without first testing in a non-production environment. You can use the [Lambda Inference Hooks](./docs/lambda-hook-inference.md) feature (introduced in v0.4.15) to call your existing SageMaker UDOP endpoint from the unified pattern's classification step via a custom Lambda function.
+
+### Changed
+
+- **Switched `idp_sdk` pyproject.toml to auto-discovery** — Replaced explicit subpackage listing with `setuptools.packages.find` using `include = ["idp_sdk*"]` so new subpackages are automatically included without manual pyproject.toml updates.
+
+- **Resilient Test Set Deployment — Graceful Degradation on Download Failures** — All test set deployer Lambdas (RealKIE-FCC, OmniAI-OCR-Benchmark, DocSplit-Poly-Seq) now handle download failures gracefully instead of causing CloudFormation stack rollbacks. When a dataset source (HuggingFace) is unreachable or a download fails, the deployer creates a FAILED test set record in DynamoDB with a descriptive error message visible in the Test Studio UI, and sends `cfnresponse.SUCCESS` to CloudFormation so the stack deployment continues. Previously failed deployments are automatically retried on the next stack update. This ensures transient third-party service outages never block IDP infrastructure deployment.
+
+- **Replaced PyMuPDF (AGPL-3.0) with pypdfium2 (Apache-2.0/BSD-3-Clause) for PDF rendering** — Resolves license incompatibility with the project's MIT-0 license. pypdfium2 provides equivalent PDF-to-image rendering using PDFium engine. Page rendering is now performed sequentially before parallel OCR processing to ensure thread-safety.
+
+### Fixed
+
+- **Fixed "Sync from BDA" not removing IDP classes absent from BDA project** — Previously, "Sync from BDA" only added new classes from the BDA project without removing classes that weren't in BDA. Now defaults to "Replace" mode which fully aligns the config version's classes with the BDA project, removing classes not present in BDA. A new "Merge" mode is also available to preserve the legacy additive behavior.
+
+- **Fixed insufficient Lambda memory for Extraction, Assessment, and Evaluation functions in unified pattern template** — Increased MemorySize from 512 MB (Extraction, Assessment) and 1024 MB (Evaluation) to 4096 MB to match all other document processing Lambda functions, preventing potential out-of-memory errors during document processing. ([#205](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues/205))
+
+- **Fixed DOCX processing to extract text from embedded images and correct page splitting** — DOCX files with embedded images (e.g., `<w:drawing>` elements) now have image content OCR'd and included in the extracted text instead of being silently skipped. Page splitting now uses DOCX metadata (explicit page breaks, image display dimensions from `wp:extent`, section properties) instead of inaccurate height estimates, producing correct page boundaries.
+
+### Templates
+   - us-west-2: `https://s3.us-west-2.amazonaws.com/aws-ml-blog-us-west-2/artifacts/genai-idp/idp-main_0.5.0.yaml`
+   - us-east-1: `https://s3.us-east-1.amazonaws.com/aws-ml-blog-us-east-1/artifacts/genai-idp/idp-main_0.5.0.yaml`
+   - eu-central-1: `https://s3.eu-central-1.amazonaws.com/aws-ml-blog-eu-central-1/artifacts/genai-idp/idp-main_0.5.0.yaml`
+
 ## [0.4.16]
 
 ### Added
@@ -32,6 +76,7 @@ SPDX-License-Identifier: MIT-0
 
 - **Fixed DynamoDB 400KB item size limit blocking configs with 45+ document classes** — Configuration data is now gzip-compressed before storing to DynamoDB, achieving 37-95x compression ratios. Supports 3,000+ document classes within the 400KB limit. Fully backward compatible with existing deployments. ([#200](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues/200), [#201](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/pull/201))
 - **Fixed Processing Flow chart using active stack config instead of the document's actual config version** for determining disabled steps (assessment, summarization, etc.)
+- **Fixed `idp_sdk` pip install from GitHub missing subpackages** — Non-editable pip installs of `idp_sdk` from GitHub were missing `core/`, `models/`, and `operations/` subpackages, causing `ModuleNotFoundError`. Fixed by explicitly declaring all subpackages in `pyproject.toml`. ([#196](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues/196))
 
 ### Templates
    - us-west-2: `https://s3.us-west-2.amazonaws.com/aws-ml-blog-us-west-2/artifacts/genai-idp/idp-main_0.4.16.yaml`

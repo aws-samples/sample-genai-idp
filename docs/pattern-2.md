@@ -3,6 +3,10 @@ SPDX-License-Identifier: MIT-0
 
 # Pattern 2: Bedrock Classification and Extraction
 
+> **⚠️ DEPRECATED**: Pattern 2 has been superseded by the **Unified Pattern**, which combines both BDA and pipeline processing modes into a single deployment. The `use_bda` configuration flag (set via the UI) controls whether documents are processed via BDA or the step-by-step pipeline. See [architecture.md](./architecture.md) for details on the unified architecture.
+>
+> This document is retained as a reference for pipeline-specific concepts (OCR, classification, extraction, assessment, rule validation) that still apply when `use_bda: false` is set in the unified pattern (the default mode).
+
 This pattern implements an intelligent document processing workflow that uses Amazon Bedrock with Nova or Claude models for both page classification/grouping and information extraction.
 
 <img src="../images/IDP-Pattern2-Bedrock.drawio.png" alt="Architecture" width="800">

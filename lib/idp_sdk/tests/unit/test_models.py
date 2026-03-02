@@ -30,7 +30,6 @@ class TestEnums:
         """Pattern enum has correct values."""
         assert Pattern.PATTERN_1.value == "pattern-1"
         assert Pattern.PATTERN_2.value == "pattern-2"
-        assert Pattern.PATTERN_3.value == "pattern-3"
 
     def test_rerun_step_enum(self):
         """RerunStep enum has correct values."""

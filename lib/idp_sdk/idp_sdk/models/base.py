@@ -49,7 +49,6 @@ class Pattern(str, Enum):
 
     PATTERN_1 = "pattern-1"
     PATTERN_2 = "pattern-2"
-    PATTERN_3 = "pattern-3"
 
 
 class RerunStep(str, Enum):

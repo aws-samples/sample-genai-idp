@@ -38,7 +38,7 @@ def main():
         "--pattern",
         type=str,
         default="pattern-2",
-        help="Pattern for defaults (pattern-1, pattern-2, pattern-3)",
+        help="Pattern for defaults (pattern-1, pattern-2)",
     )
     create_parser.add_argument(
         "--output",

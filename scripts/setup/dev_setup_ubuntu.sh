@@ -44,7 +44,7 @@ unzip -q aws-sam-cli-linux-x86_64.zip -d ./sam-cli
 sudo ./sam-cli/install --update
 
 # node 22
-curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash  # nosemgrep: bash.curl.security.curl-pipe-bash - Official NVM installation script for development environment only
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash  # nosemgrep: bash.curl.security.curl-pipe-bash.curl-pipe-bash - Official NVM installation script
 export NVM_DIR="$HOME/.nvm"
 [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
 nvm install 20

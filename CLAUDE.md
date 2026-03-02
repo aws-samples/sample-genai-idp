@@ -177,7 +177,6 @@ The solution uses a modular architecture with the main template (`template.yaml`
    - OCR with Amazon Textract
    - Classification with UDOP model on SageMaker
    - Extraction with Bedrock
-   - Location: `patterns/pattern-3/`
 
 ### Document Processing Flow
 

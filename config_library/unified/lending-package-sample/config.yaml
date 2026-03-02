@@ -1,0 +1,713 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: MIT-0
+
+# All settings not explicitly defined here are inherited from system defaults.
+
+use_bda: false
+
+notes: "Lending package sample - processes payslips, driver licenses, bank checks, bank statements, W2s, and insurance applications - . Set use_bda: true for BDA mode."
+
+classes:
+  - $schema: https://json-schema.org/draft/2020-12/schema
+    $id: Payslip
+    type: object
+    x-aws-idp-document-type: Payslip
+    description: >-
+      An employee wage statement showing earnings, deductions, taxes, and net
+      pay for a specific pay period, typically issued by employers to document
+      compensation details including gross pay, various tax withholdings, and
+      year-to-date totals.
+    $defs:
+      Address:
+        type: object
+        description: >-
+          The complete business address of the employing company, including
+          street address, city, state, and postal code information.
+        properties:
+          City:
+            type: string
+            description: The city portion of the company's business address.
+            x-aws-idp-evaluation-method: EXACT
+          Line1:
+            type: string
+            description: The primary street address line of the company's business location.
+            x-aws-idp-evaluation-method: EXACT
+          State:
+            type: string
+            description: The state or province portion of the company's business address.
+            x-aws-idp-evaluation-method: EXACT
+          ZipCode:
+            type: string
+            description: The postal code portion of the company's business address.
+            x-aws-idp-evaluation-method: EXACT
+          Line2:
+            type: string
+            description: The secondary address line for the company, such as suite or floor number.
+            x-aws-idp-evaluation-method: EXACT
+      EmployeeName:
+        type: object
+        description: >-
+          The complete name information of the employee, including first name,
+          middle name, last name, and any suffix.
+        properties:
+          SuffixName:
+            type: string
+            description: Name suffix such as Jr., Sr., III, etc.
+            x-aws-idp-evaluation-method: EXACT
+          LastName:
+            type: string
+            description: The family name or surname of the employee.
+            x-aws-idp-evaluation-method: EXACT
+          MiddleName:
+            type: string
+            description: The middle name or initial of the employee.
+            x-aws-idp-evaluation-method: EXACT
+          FirstName:
+            type: string
+            description: The given name of the employee.
+            x-aws-idp-evaluation-method: EXACT
+      TaxInfo:
+        type: object
+        properties:
+          YTD:
+            type: string
+            description: Year-to-date amount for this federal tax item.
+            x-aws-idp-evaluation-method: NUMERIC_EXACT
+          Period:
+            type: string
+            description: Current period amount for this federal tax item.
+            x-aws-idp-evaluation-method: NUMERIC_EXACT
+          ItemDescription:
+            type: string
+            description: Description of the specific federal tax type or category.
+            x-aws-idp-evaluation-method: EXACT
+    properties:
+      PayDate:
+        format: date
+        description: The actual date when the employee was paid.
+        type: string
+        x-aws-idp-evaluation-method: EXACT
+      PayPeriodStartDate:
+        format: date
+        description: The beginning date of the pay period covered by this payslip.
+        type: string
+        x-aws-idp-evaluation-method: EXACT
+      PayPeriodEndDate:
+        format: date
+        description: The ending date of the pay period covered by this payslip.
+        type: string
+        x-aws-idp-evaluation-method: EXACT
+      CurrentGrossPay:
+        type: number
+        description: The total earnings before any deductions for the current pay period.
+        x-aws-idp-evaluation-method: NUMERIC_EXACT
+      CurrentNetPay:
+        type: number
+        description: The take-home pay after all deductions for the current pay period.
+        x-aws-idp-evaluation-method: NUMERIC_EXACT
+      YTDGrossPay:
+        type: number
+        description: Year-to-date gross pay representing cumulative earnings before deductions.
+        x-aws-idp-evaluation-method: NUMERIC_EXACT
+      YTDNetPay:
+        type: number
+        description: Year-to-date net pay amount representing cumulative take-home earnings.
+        x-aws-idp-evaluation-method: NUMERIC_EXACT
+      CurrentTotalDeductions:
+        type: number
+        description: Total amount deducted from gross pay for the current period.
+        x-aws-idp-evaluation-method: NUMERIC_EXACT
+      YTDTotalDeductions:
+        type: number
+        description: Year-to-date total deductions representing cumulative amounts withheld.
+        x-aws-idp-evaluation-method: NUMERIC_EXACT
+      EmployeeName:
+        description: The complete name information of the employee.
+        $ref: "#/$defs/EmployeeName"
+        x-aws-idp-evaluation-method: LLM
+      EmployeeNumber:
+        type: string
+        description: The unique identifier assigned to the employee by the employer.
+        x-aws-idp-evaluation-method: EXACT
+      EmployeeAddress:
+        description: The complete residential address of the employee.
+        $ref: "#/$defs/Address"
+        x-aws-idp-evaluation-method: LLM
+      CompanyAddress:
+        description: The complete business address of the employing company.
+        $ref: "#/$defs/Address"
+        x-aws-idp-evaluation-method: LLM
+      FederalTaxes:
+        description: List of federal tax withholdings.
+        type: array
+        x-aws-idp-list-item-description: Each item represents a specific federal tax withholding category
+        items:
+          $ref: "#/$defs/TaxInfo"
+        x-aws-idp-evaluation-method: LLM
+      StateTaxes:
+        description: List of state tax withholdings.
+        type: array
+        x-aws-idp-list-item-description: Each item represents a specific state tax withholding category
+        items:
+          $ref: "#/$defs/TaxInfo"
+        x-aws-idp-evaluation-method: LLM
+      CityTaxes:
+        description: List of city or local tax withholdings.
+        type: array
+        x-aws-idp-list-item-description: Each item represents a specific city or local tax withholding
+        items:
+          $ref: "#/$defs/TaxInfo"
+        x-aws-idp-evaluation-method: LLM
+      FederalFilingStatus:
+        type: string
+        description: The employee's federal tax filing status for withholding purposes.
+        x-aws-idp-evaluation-method: EXACT
+      StateFilingStatus:
+        type: string
+        description: The employee's state tax filing status for withholding purposes.
+        x-aws-idp-evaluation-method: EXACT
+      RegularHourlyRate:
+        type: number
+        description: The standard hourly wage rate for regular working hours.
+        x-aws-idp-evaluation-method: NUMERIC_EXACT
+      HolidayHourlyRate:
+        type: number
+        description: The hourly wage rate for holiday work.
+        x-aws-idp-evaluation-method: NUMERIC_EXACT
+      PayrollNumber:
+        type: string
+        description: The payroll batch or sequence number for this pay period.
+        x-aws-idp-evaluation-method: EXACT
+      currency:
+        type: string
+        description: The currency in which all monetary amounts are denominated.
+        x-aws-idp-evaluation-method: EXACT
+    required:
+      - PayDate
+      - CurrentGrossPay
+      - YTDGrossPay
+      - CurrentNetPay
+
+  - $schema: https://json-schema.org/draft/2020-12/schema
+    $id: US-drivers-licenses
+    type: object
+    x-aws-idp-document-type: US-drivers-licenses
+    description: >-
+      An official government-issued identification document that authorizes an
+      individual to operate motor vehicles, containing personal information,
+      physical characteristics, address details, and driving privileges with
+      restrictions and endorsements.
+    $defs:
+      Address:
+        type: object
+        properties:
+          City:
+            type: string
+            x-aws-idp-evaluation-method: EXACT
+          Line1:
+            type: string
+            x-aws-idp-evaluation-method: EXACT
+          State:
+            type: string
+            x-aws-idp-evaluation-method: EXACT
+          ZipCode:
+            type: string
+            x-aws-idp-evaluation-method: EXACT
+          Line2:
+            type: string
+            x-aws-idp-evaluation-method: EXACT
+      EmployeeName:
+        type: object
+        properties:
+          SuffixName:
+            type: string
+            x-aws-idp-evaluation-method: EXACT
+          LastName:
+            type: string
+            x-aws-idp-evaluation-method: EXACT
+          MiddleName:
+            type: string
+            x-aws-idp-evaluation-method: EXACT
+          FirstName:
+            type: string
+            x-aws-idp-evaluation-method: EXACT
+      PERSONAL_DETAILS:
+        type: object
+        properties:
+          HAIR_COLOR:
+            type: string
+            x-aws-idp-evaluation-method: EXACT
+          HEIGHT:
+            type: string
+            x-aws-idp-evaluation-method: EXACT
+          WEIGHT:
+            type: string
+            x-aws-idp-evaluation-method: EXACT
+          SEX:
+            type: string
+            x-aws-idp-evaluation-method: EXACT
+          EYE_COLOR:
+            type: string
+            x-aws-idp-evaluation-method: EXACT
+    properties:
+      STATE_NAME:
+        type: string
+        description: The state that issued the driver's license.
+        x-aws-idp-evaluation-method: EXACT
+      NAME_DETAILS:
+        $ref: "#/$defs/EmployeeName"
+        x-aws-idp-evaluation-method: LLM
+      ID_NUMBER:
+        type: string
+        description: The unique driver's license identification number.
+        x-aws-idp-evaluation-method: EXACT
+      DATE_OF_BIRTH:
+        type: string
+        description: The birth date of the license holder.
+        x-aws-idp-evaluation-method: EXACT
+      DATE_OF_ISSUE:
+        type: string
+        description: The date when the driver's license was issued.
+        x-aws-idp-evaluation-method: EXACT
+      EXPIRATION_DATE:
+        type: string
+        description: The date when the driver's license expires.
+        x-aws-idp-evaluation-method: EXACT
+      CLASS:
+        type: string
+        description: The type of driving privileges granted.
+        x-aws-idp-evaluation-method: EXACT
+      ADDRESS_DETAILS:
+        $ref: "#/$defs/Address"
+        x-aws-idp-evaluation-method: LLM
+      PERSONAL_DETAILS:
+        $ref: "#/$defs/PERSONAL_DETAILS"
+        x-aws-idp-evaluation-method: LLM
+      ENDORSEMENTS:
+        type: array
+        items:
+          type: string
+        x-aws-idp-evaluation-method: LLM
+      RESTRICTIONS:
+        type: array
+        items:
+          type: string
+        x-aws-idp-evaluation-method: LLM
+
+  - $schema: https://json-schema.org/draft/2020-12/schema
+    $id: Bank-checks
+    type: object
+    x-aws-idp-document-type: Bank-checks
+    description: >-
+      A written financial instrument directing a bank to pay a specific amount
+      of money from the account holder's account to a designated payee.
+    properties:
+      date:
+        format: date
+        type: string
+        x-aws-idp-evaluation-method: EXACT
+      dollar_amount:
+        type: number
+        x-aws-idp-evaluation-method: NUMERIC_EXACT
+      check_number:
+        type: string
+        x-aws-idp-evaluation-method: NUMERIC_EXACT
+      account_holder_name:
+        type: string
+        x-aws-idp-evaluation-method: EXACT
+      payee_name:
+        type: string
+        x-aws-idp-evaluation-method: EXACT
+      bank_name:
+        type: string
+        x-aws-idp-evaluation-method: EXACT
+      memo:
+        type: string
+        x-aws-idp-evaluation-method: EXACT
+      bank_routing_number:
+        type: string
+        x-aws-idp-evaluation-method: EXACT
+      amount_in_words:
+        type: string
+        x-aws-idp-evaluation-method: EXACT
+      is_signed:
+        type: boolean
+        x-aws-idp-evaluation-method: EXACT
+
+  - $schema: https://json-schema.org/draft/2020-12/schema
+    $id: Bank-Statement
+    type: object
+    x-aws-idp-document-type: Bank-Statement
+    description: >-
+      A periodic financial document issued by banks detailing account activity,
+      balances, and transactions over a specific time period.
+    $defs:
+      Address:
+        type: object
+        properties:
+          City:
+            type: string
+            x-aws-idp-evaluation-method: EXACT
+          Line1:
+            type: string
+            x-aws-idp-evaluation-method: EXACT
+          State:
+            type: string
+            x-aws-idp-evaluation-method: EXACT
+          ZipCode:
+            type: string
+            x-aws-idp-evaluation-method: EXACT
+          Line2:
+            type: string
+            x-aws-idp-evaluation-method: EXACT
+      account_summaryItem:
+        type: object
+        properties:
+          summary_desc:
+            type: string
+            x-aws-idp-evaluation-method: EXACT
+          summary_amount:
+            type: string
+            x-aws-idp-evaluation-method: NUMERIC_EXACT
+      transaction_detail:
+        type: object
+        properties:
+          date:
+            type: string
+            x-aws-idp-evaluation-method: EXACT
+          description:
+            type: string
+            x-aws-idp-evaluation-method: EXACT
+          balance:
+            type: string
+            x-aws-idp-evaluation-method: NUMERIC_EXACT
+          deposits:
+            type: string
+            x-aws-idp-evaluation-method: NUMERIC_EXACT
+          withdrawals:
+            type: string
+            x-aws-idp-evaluation-method: NUMERIC_EXACT
+    properties:
+      bank_name:
+        type: string
+        x-aws-idp-evaluation-method: EXACT
+      account_holder_name:
+        type: string
+        x-aws-idp-evaluation-method: EXACT
+      account_holder_address:
+        $ref: "#/$defs/Address"
+        x-aws-idp-evaluation-method: EXACT
+      account_number:
+        type: string
+        x-aws-idp-evaluation-method: EXACT
+      account_type:
+        type: string
+        x-aws-idp-evaluation-method: EXACT
+      statement_start_date:
+        format: date
+        type: string
+        x-aws-idp-evaluation-method: EXACT
+      statement_end_date:
+        format: date
+        type: string
+        x-aws-idp-evaluation-method: EXACT
+      account_summary:
+        type: array
+        items:
+          $ref: "#/$defs/account_summaryItem"
+        x-aws-idp-evaluation-method: LLM
+      transaction_details:
+        type: array
+        items:
+          $ref: "#/$defs/transaction_detail"
+        x-aws-idp-evaluation-method: LLM
+
+  - $schema: https://json-schema.org/draft/2020-12/schema
+    $id: W2
+    type: object
+    x-aws-idp-document-type: W2
+    description: >-
+      An annual tax document provided by employers to employees reporting wages
+      earned and taxes withheld during the tax year.
+    $defs:
+      employer_info:
+        type: object
+        properties:
+          control_number:
+            type: string
+            x-aws-idp-evaluation-method: EXACT
+          employer_address:
+            type: string
+            x-aws-idp-evaluation-method: EXACT
+          employer_name:
+            type: string
+            x-aws-idp-evaluation-method: EXACT
+          ein:
+            type: string
+            x-aws-idp-evaluation-method: EXACT
+          employer_zip_code:
+            type: string
+            x-aws-idp-evaluation-method: EXACT
+      employee_general_info:
+        type: object
+        properties:
+          employee_last_name:
+            type: string
+            x-aws-idp-evaluation-method: EXACT
+          employee_name_suffix:
+            type: string
+            x-aws-idp-evaluation-method: EXACT
+          employee_zip_code:
+            type: string
+            x-aws-idp-evaluation-method: EXACT
+          employee_address:
+            type: string
+            x-aws-idp-evaluation-method: EXACT
+          first_name:
+            type: string
+            x-aws-idp-evaluation-method: EXACT
+          ssn:
+            type: string
+            x-aws-idp-evaluation-method: EXACT
+      federal_wage_info:
+        type: object
+        properties:
+          wages_tips_other_compensation:
+            type: string
+            x-aws-idp-evaluation-method: NUMERIC_EXACT
+          social_security_wages:
+            type: string
+            x-aws-idp-evaluation-method: NUMERIC_EXACT
+          social_security_tips:
+            type: string
+            x-aws-idp-evaluation-method: NUMERIC_EXACT
+          medicare_wages_tips:
+            type: string
+            x-aws-idp-evaluation-method: NUMERIC_EXACT
+      federal_tax_info:
+        type: object
+        properties:
+          federal_income_tax:
+            type: string
+            x-aws-idp-evaluation-method: NUMERIC_EXACT
+          social_security_tax:
+            type: string
+            x-aws-idp-evaluation-method: NUMERIC_EXACT
+          medicare_tax:
+            type: string
+            x-aws-idp-evaluation-method: NUMERIC_EXACT
+          allocated_tips:
+            type: string
+            x-aws-idp-evaluation-method: NUMERIC_EXACT
+      state_taxes_tableItem:
+        type: object
+        properties:
+          state_name:
+            type: string
+            x-aws-idp-evaluation-method: EXACT
+          state_wages_and_tips:
+            type: string
+            x-aws-idp-evaluation-method: NUMERIC_EXACT
+          state_income_tax:
+            type: string
+            x-aws-idp-evaluation-method: NUMERIC_EXACT
+          local_wages_tips:
+            type: string
+            x-aws-idp-evaluation-method: NUMERIC_EXACT
+          local_income_tax:
+            type: string
+            x-aws-idp-evaluation-method: NUMERIC_EXACT
+          locality_name:
+            type: string
+            x-aws-idp-evaluation-method: EXACT
+      code:
+        type: object
+        properties:
+          code:
+            type: string
+            x-aws-idp-evaluation-method: EXACT
+          amount:
+            type: string
+            x-aws-idp-evaluation-method: NUMERIC_EXACT
+    properties:
+      employer_info:
+        $ref: "#/$defs/employer_info"
+        x-aws-idp-evaluation-method: LLM
+      employee_general_info:
+        $ref: "#/$defs/employee_general_info"
+        x-aws-idp-evaluation-method: LLM
+      federal_wage_info:
+        $ref: "#/$defs/federal_wage_info"
+        x-aws-idp-evaluation-method: LLM
+      federal_tax_info:
+        $ref: "#/$defs/federal_tax_info"
+        x-aws-idp-evaluation-method: LLM
+      state_taxes_table:
+        type: array
+        items:
+          $ref: "#/$defs/state_taxes_tableItem"
+        x-aws-idp-evaluation-method: LLM
+      codes:
+        type: array
+        items:
+          $ref: "#/$defs/code"
+        x-aws-idp-evaluation-method: LLM
+      other:
+        type: string
+        x-aws-idp-evaluation-method: EXACT
+      nonqualified_plans_income:
+        type: string
+        x-aws-idp-evaluation-method: NUMERIC_EXACT
+
+  - $schema: https://json-schema.org/draft/2020-12/schema
+    $id: Homeowners-Insurance-Application
+    type: object
+    x-aws-idp-document-type: Homeowners-Insurance-Application
+    description: >-
+      An application form for homeowners insurance coverage containing applicant
+      personal information, property details, and underwriting data.
+    $defs:
+      Primary Applicant Information:
+        type: object
+        properties:
+          Name:
+            type: string
+            x-aws-idp-evaluation-method: EXACT
+          Date of Birth:
+            type: string
+            x-aws-idp-evaluation-method: EXACT
+          Gender:
+            type: string
+            x-aws-idp-evaluation-method: EXACT
+          Marital Status:
+            type: string
+            x-aws-idp-evaluation-method: EXACT
+          Education Level:
+            type: string
+            x-aws-idp-evaluation-method: EXACT
+          Drivers License Number:
+            type: string
+            x-aws-idp-evaluation-method: EXACT
+          DL State:
+            type: string
+            x-aws-idp-evaluation-method: EXACT
+          Currently Insured Auto:
+            type: string
+            x-aws-idp-evaluation-method: EXACT
+          Length of Time with Current Auto Carrier:
+            type: string
+            x-aws-idp-evaluation-method: EXACT
+          Length of Time with Prior Auto Carrier:
+            type: string
+            x-aws-idp-evaluation-method: EXACT
+          Type of Current Property Policy:
+            type: string
+            x-aws-idp-evaluation-method: EXACT
+          Years with Prior Property Company:
+            type: string
+            x-aws-idp-evaluation-method: EXACT
+          Existing Esurance Policy:
+            type: string
+            x-aws-idp-evaluation-method: EXACT
+      Co-Applicant Information:
+        type: object
+        properties:
+          Name:
+            type: string
+            x-aws-idp-evaluation-method: EXACT
+          Date of Birth:
+            type: string
+            x-aws-idp-evaluation-method: EXACT
+          Gender:
+            type: string
+            x-aws-idp-evaluation-method: EXACT
+          Marital Status:
+            type: string
+            x-aws-idp-evaluation-method: EXACT
+          Relationship to Primary Applicant:
+            type: string
+            x-aws-idp-evaluation-method: EXACT
+          Education Level:
+            type: string
+            x-aws-idp-evaluation-method: EXACT
+          Drivers License Number:
+            type: string
+            x-aws-idp-evaluation-method: EXACT
+          DL State:
+            type: string
+            x-aws-idp-evaluation-method: EXACT
+          Currently Insured- Auto:
+            type: string
+            x-aws-idp-evaluation-method: EXACT
+          Length of Time with Current Auto Carrier:
+            type: string
+            x-aws-idp-evaluation-method: EXACT
+          Length of Time with Prior Auto Carrier:
+            type: string
+            x-aws-idp-evaluation-method: EXACT
+      Auto Claims, Accidents, and Violations:
+        type: object
+        properties:
+          Number of Auto Accidents:
+            type: string
+            x-aws-idp-evaluation-method: EXACT
+          At-Fault:
+            type: string
+            x-aws-idp-evaluation-method: EXACT
+          Not-at-Fault:
+            type: string
+            x-aws-idp-evaluation-method: EXACT
+          Number of Violations:
+            type: string
+            x-aws-idp-evaluation-method: EXACT
+          Major:
+            type: string
+            x-aws-idp-evaluation-method: EXACT
+          Minor:
+            type: string
+            x-aws-idp-evaluation-method: EXACT
+          Number of Comp Claims:
+            type: string
+            x-aws-idp-evaluation-method: EXACT
+    properties:
+      Policy Number:
+        type: string
+        x-aws-idp-evaluation-method: EXACT
+      Effective Date:
+        type: string
+        x-aws-idp-evaluation-method: EXACT
+      Expiration Date:
+        type: string
+        x-aws-idp-evaluation-method: EXACT
+      Purchase Date and Time:
+        type: string
+        x-aws-idp-evaluation-method: EXACT
+      Insurance Company:
+        type: string
+        x-aws-idp-evaluation-method: EXACT
+      Named Insured(s) and Mailing Address:
+        type: string
+        x-aws-idp-evaluation-method: EXACT
+      Insured Property:
+        type: string
+        x-aws-idp-evaluation-method: EXACT
+      Primary Phone number:
+        type: string
+        x-aws-idp-evaluation-method: EXACT
+      Alternate Phone number:
+        type: string
+        x-aws-idp-evaluation-method: EXACT
+      Primary Email:
+        type: string
+        x-aws-idp-evaluation-method: EXACT
+      Primary Applicant Information:
+        $ref: "#/$defs/Primary Applicant Information"
+        x-aws-idp-evaluation-method: LLM
+      Co-Applicant Information:
+        $ref: "#/$defs/Co-Applicant Information"
+        x-aws-idp-evaluation-method: LLM
+      Auto Claims, Accidents, and Violations:
+        $ref: "#/$defs/Auto Claims, Accidents, and Violations"
+        x-aws-idp-evaluation-method: LLM
+rule_validation:
+  enabled: false

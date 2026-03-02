@@ -173,10 +173,6 @@ Parameters:
     Type: String
     AllowedValues: ["true", "false"]
   
-  IsPattern1:
-    Type: String
-    AllowedValues: ["true", "false"]
-  
   Pattern1BDAProjectArn:
     Type: String
   
@@ -198,7 +194,6 @@ Conditions:
   HasGuardrail: !Equals [!Ref HasGuardrailConfig, "true"]
   ShouldCreateEvaluationBaselineBucket: !Equals [!Ref ShouldCreateEvaluationBaselineBucket, "true"]
   ShouldCreateReportingBucket: !Equals [!Ref ShouldCreateReportingBucket, "true"]
-  IsPattern1Enabled: !Equals [!Ref IsPattern1, "true"]
   HasBDAProjectArn: !Equals [!Ref HasPattern1BDAProjectArn, "true"]
 
 Resources:
@@ -294,10 +289,7 @@ Resources:
                   - !GetAtt GetAgentChatMessagesFunction.Arn
                   - !GetAtt DeleteAgentChatSessionFunction.Arn
                   - !GetAtt ListDocumentsByDateRangeResolverFunction.Arn
-                  - !If
-                    - IsPattern1Enabled
-                    - !GetAtt SyncBdaIdpResolverFunction.Arn
-                    - !Ref AWS::NoValue
+                  - !GetAtt SyncBdaIdpResolverFunction.Arn
 
   # Lambda function for Create Document resolver
 
@@ -974,6 +966,16 @@ Resources:
                 - ssm:GetParameter
                 - ssm:PutParameter
               Resource: !Sub "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${AWS::StackName}/FlowDefinitionArn"
+            # BDA permissions for project lifecycle (delete linked BDA project when version is deleted)
+            - Effect: Allow
+              Action:
+                - bedrock:DeleteDataAutomationProject
+                - bedrock:GetDataAutomationProject
+                - bedrock:DeleteBlueprint
+                - bedrock:ListBlueprints
+              Resource:
+                - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:data-automation-project/*"
+                - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:blueprint/*"
 
 
   ##########################################################################
@@ -1545,6 +1547,10 @@ Resources:
             reason: "Function does not require reserved concurrency as it scales based on demand"
           - id: W12
             reason: "Lambda requires CloudWatch logs permissions"
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for synchronous AppSync resolver"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_173: "Environment variables contain non-sensitive configuration values"
     Properties:
       PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
       Handler: index.lambda_handler
@@ -2626,7 +2632,6 @@ Resources:
   ##########################################################################
   SyncBdaIdpResolverFunctionLogGroup:
     Type: AWS::Logs::LogGroup
-    Condition: IsPattern1Enabled
     Properties:
       RetentionInDays: !Ref LogRetentionDays
       KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
@@ -2637,7 +2642,6 @@ Resources:
   ##########################################################################
   SyncBdaIdpResolverFunction:
     Type: AWS::Serverless::Function
-    Condition: IsPattern1Enabled
     Metadata:
       cfn_nag:
         rules_to_suppress:
@@ -2705,6 +2709,7 @@ Resources:
               Action:
                 - bedrock:InvokeDataAutomationAsync
                 - bedrock:CreateDataAutomationProject
+                - bedrock:DeleteDataAutomationProject
                 - bedrock:UpdateDataAutomationProject
                 - bedrock:GetDataAutomationProject
                 - bedrock:GetDataAutomationStatus
@@ -2715,10 +2720,7 @@ Resources:
                 - bedrock:ListBlueprints
                 - bedrock:DeleteBlueprint
               Resource:
-                - !If
-                  - HasBDAProjectArn
-                  - !Ref Pattern1BDAProjectArn
-                  - !Ref Pattern1BDAProjectArn
+                - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:data-automation-project/*"
                 - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:blueprint/*"
                 - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:aws:blueprint/*"
 
@@ -2728,7 +2730,6 @@ Resources:
   ##########################################################################
   SyncBdaIdpDataSource:
     Type: AWS::AppSync::DataSource
-    Condition: IsPattern1Enabled
     Properties:
       ApiId: !Ref GraphQLApiId
       Name: SyncBdaIdpDataSource
@@ -2744,7 +2745,6 @@ Resources:
   ##########################################################################
   SyncBdaIdpResolver:
     Type: AWS::AppSync::Resolver
-    Condition: IsPattern1Enabled
     DependsOn: GraphQLSchema
     Properties:
       ApiId: !Ref GraphQLApiId
@@ -2777,6 +2777,10 @@ Resources:
             reason: "Function does not require reserved concurrency as it scales based on demand"
           - id: W12
             reason: "Lambda requires CloudWatch logs permissions"
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for synchronous AppSync resolver"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_173: "Environment variables contain non-sensitive configuration values"
     Properties:
       PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
       Handler: index.handler
@@ -3057,6 +3061,10 @@ Resources:
             reason: "Function does not require reserved concurrency as it scales based on demand"
           - id: W12
             reason: "Lambda requires CloudWatch logs permissions"
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for synchronous AppSync resolver"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_173: "Environment variables contain non-sensitive configuration values"
     Properties:
       PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
       Handler: index.handler

@@ -48,10 +48,7 @@
             TableName: !Ref TrackingTable
         - StepFunctionsExecutionPolicy:
             StateMachineName: !If
-              - IsPattern3
-              - !GetAtt PATTERN3STACK.Outputs.StateMachineName
-              - !If
-                - IsPattern2
+              - IsPattern2
                 - !GetAtt PATTERN2STACK.Outputs.StateMachineName
                 - !GetAtt PATTERN1STACK.Outputs.StateMachineName
         - Statement:
@@ -66,12 +63,9 @@
                 - states:StopExecution
               Resource:
                 - !If
-                  - IsPattern3
-                  - !Sub "arn:${AWS::Partition}:states:${AWS::Region}:${AWS::AccountId}:execution:${PATTERN3STACK.Outputs.StateMachineName}:*"
-                  - !If
-                    - IsPattern2
-                    - !Sub "arn:${AWS::Partition}:states:${AWS::Region}:${AWS::AccountId}:execution:${PATTERN2STACK.Outputs.StateMachineName}:*"
-                    - !Sub "arn:${AWS::Partition}:states:${AWS::Region}:${AWS::AccountId}:execution:${PATTERN1STACK.Outputs.StateMachineName}:*"
+                  - IsPattern2
+                  - !Sub "arn:${AWS::Partition}:states:${AWS::Region}:${AWS::AccountId}:execution:${PATTERN2STACK.Outputs.StateMachineName}:*"
+                  - !Sub "arn:${AWS::Partition}:states:${AWS::Region}:${AWS::AccountId}:execution:${PATTERN1STACK.Outputs.StateMachineName}:*"
             - Effect: Allow
               Action:
                 - kms:Encrypt
@@ -986,10 +980,7 @@
                 - !Sub
                   - "arn:${AWS::Partition}:states:${AWS::Region}:${AWS::AccountId}:execution:${StateMachineName}*"
                   - StateMachineName: !If
-                      - IsPattern3
-                      - !GetAtt PATTERN3STACK.Outputs.StateMachineName
-                      - !If
-                        - IsPattern2
+                      - IsPattern2
                         - !GetAtt PATTERN2STACK.Outputs.StateMachineName
                         - !GetAtt PATTERN1STACK.Outputs.StateMachineName
         - KMSDecryptPolicy:

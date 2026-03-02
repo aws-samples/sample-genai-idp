@@ -31,7 +31,7 @@ else:
 logger = logging.getLogger(__name__)
 
 # Valid pattern names
-VALID_PATTERNS = ["pattern-1", "pattern-2", "pattern-3"]
+VALID_PATTERNS = ["pattern-1", "pattern-2"]
 
 # Feature sets for create-config command
 FEATURE_SETS = {
@@ -372,7 +372,7 @@ def load_system_defaults(pattern: str = "pattern-2") -> Dict[str, Any]:
     - Multiple modules: _inherits: [base-notes.yaml, base-classes.yaml, base-ocr.yaml, ...]
 
     Args:
-        pattern: Pattern name (pattern-1, pattern-2, pattern-3)
+        pattern: Pattern name (pattern-1, pattern-2)
 
     Returns:
         Dictionary containing the merged system defaults
@@ -411,7 +411,7 @@ def merge_config_with_defaults(
 
     Args:
         user_config: User's configuration dictionary (may be partial)
-        pattern: Pattern to use for defaults (pattern-1, pattern-2, pattern-3)
+        pattern: Pattern to use for defaults (pattern-1, pattern-2)
         validate: If True, validate the merged config with Pydantic
 
     Returns:

@@ -93,8 +93,19 @@ def handler(event, context):
         
     except Exception as e:
         logger.error(f"Error deploying dataset: {str(e)}", exc_info=True)
-        cfnresponse.send(event, context, cfnresponse.FAILED, {}, 
-                        reason=f"Error deploying dataset: {str(e)}")
+        # Graceful degradation: don't fail the stack due to test set download issues.
+        # Instead, create a FAILED test set record visible in the Test Studio UI.
+        try:
+            create_failed_testset_record(
+                version=properties.get('DatasetVersion', '1.0') if 'properties' in dir() else '1.0',
+                error_message=str(e)
+            )
+        except Exception as record_err:
+            logger.error(f"Failed to create error test set record: {record_err}")
+        cfnresponse.send(event, context, cfnresponse.SUCCESS, {
+            'Status': 'DEPLOYMENT_FAILED',
+            'Message': f'Test set deployment failed (non-blocking): {str(e)[:200]}'
+        })
 
 
 def check_existing_version(version: str) -> bool:
@@ -114,8 +125,12 @@ def check_existing_version(version: str) -> bool:
             existing_version = response['Item'].get('datasetVersion', '')
             logger.info(f"Found existing dataset version: {existing_version}")
             
-            # Check if version matches and files exist
+            # Check if version matches, status is not FAILED, and files exist
             if existing_version == version:
+                existing_status = response['Item'].get('status', '')
+                if existing_status == 'FAILED':
+                    logger.info("Previous deployment failed, retrying deployment")
+                    return False
                 # Verify at least some files exist in S3
                 try:
                     s3_response = s3_client.list_objects_v2(
@@ -471,9 +486,39 @@ def deploy_dataset(version: str, description: str) -> Dict[str, Any]:
         }
 
 
+def create_failed_testset_record(version: str, error_message: str):
+    """
+    Create a FAILED test set record in DynamoDB so the error is visible in Test Studio UI.
+    On the next stack update, check_existing_version will detect the FAILED status and retry.
+    """
+    table = dynamodb.Table(TRACKING_TABLE)  # type: ignore[attr-defined]
+    timestamp = datetime.utcnow().isoformat() + 'Z'
+
+    item = {
+        'PK': f'testset#{TEST_SET_ID}',
+        'SK': 'metadata',
+        'id': TEST_SET_ID,
+        'name': DATASET_NAME,
+        'filePattern': '',
+        'fileCount': 0,
+        'status': 'FAILED',
+        'createdAt': timestamp,
+        'datasetVersion': version,
+        'source': 'huggingface:jordyvl/rvl_cdip_n_mp',
+        'description': (
+            f'⚠️ Deployment failed: {error_message[:500]}. '
+            f'This test set could not be downloaded from its source. '
+            f'It will be retried on the next stack update.'
+        ),
+    }
+
+    table.put_item(Item=item)
+    logger.info(f"Created FAILED test set record in DynamoDB: {TEST_SET_ID}")
+
+
 def create_testset_record(
-    version: str, 
-    description: str, 
+    version: str,
+    description: str,
     file_count: int,
     doc_type_distribution: Dict[str, int]
 ):

@@ -233,15 +233,14 @@ aws cloudformation update-stack \
   --parameters ParameterKey=AdminEmail,ParameterValue="<your-email>" ParameterKey=IDPPattern,ParameterValue="<pattern-name>"
 ```
 
-**Pattern Parameter Options:**
+**Processing Mode:**
 
-- `Pattern1 - Packet or Media processing with Bedrock Data Automation (BDA)`
-  - Can use an existing BDA project or create a new demo project
-- `Pattern2 - Packet processing with Textract and Bedrock`
-  - Supports both page-level and holistic classification
-  - Recommended for first-time users
-- `Pattern3 - Packet processing with Textract, SageMaker(UDOP), and Bedrock`
-  - Requires a UDOP model in S3 that will be deployed on SageMaker
+The solution deploys a **Unified Pattern** that supports both BDA and pipeline processing modes. The processing mode is controlled at runtime by the `use_bda` configuration flag (set via the UI), not at deployment time.
+
+- **Pipeline mode** (`use_bda: false`, default) — Textract OCR → Bedrock Classification → Bedrock Extraction → Assessment → Rule Validation → Summarization
+- **BDA mode** (`use_bda: true`) — Bedrock Data Automation for end-to-end processing → Rule Validation → Summarization
+
+> **Note**: The separate Pattern 1 and Pattern 2 deployment options have been deprecated. All new deployments use the unified pattern.
 
 After deployment, check the Outputs tab in the CloudFormation console to find links to dashboards, buckets, workflows, and other solution resources.
 
@@ -260,8 +259,8 @@ Use container-based deployment when:
 
 ### Container Deployment Process
 
-1. **Pattern-2 Uses Containers Automatically:**
-   - When Pattern-2 changes are detected, the script builds Docker images for Pattern-2 functions and pushes them to ECR.
+1. **Unified Pattern Uses Containers Automatically:**
+   - All Lambda functions are deployed as container images built by CodeBuild during stack deployment.
    - Ensure Docker is running and your AWS credentials have ECR permissions.
 
 2. **What Happens Behind the Scenes:**

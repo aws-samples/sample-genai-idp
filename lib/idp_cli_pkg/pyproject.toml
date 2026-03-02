@@ -7,7 +7,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "idp-cli"
-version = "0.4.16"
+version = "0.5.0"
 description = "Command-line interface for IDP Accelerator batch document processing"
 authors = [{name = "AWS"}]
 license = {text = "MIT-0"}

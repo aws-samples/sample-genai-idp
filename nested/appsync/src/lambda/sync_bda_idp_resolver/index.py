@@ -9,6 +9,7 @@ from typing import Any, Dict
 from idp_common.bda.bda_blueprint_service import (
     BdaBlueprintService,  # type: ignore[import-untyped]
 )
+from idp_common.config import ConfigurationManager
 
 logger = logging.getLogger()
 logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
@@ -20,6 +21,12 @@ def handler(event: Dict[str, Any], context) -> Dict[str, Any]:
     """
     Synchronous BDA/IDP sync resolver with bidirectional support.
     
+    BDA project ARN resolution order:
+    1. Explicit bdaProjectArn from UI arguments (user-provided)
+    2. Version tracking table (previously linked project)
+    3. BDA_PROJECT_ARN env var (legacy/migration fallback)
+    4. Auto-create new project (for idp_to_bda direction)
+    
     Supports four sync directions:
     - "bda_to_idp": Sync from BDA blueprints to IDP classes (read BDA, update IDP)
     - "idp_to_bda": Sync from IDP classes to BDA blueprints (read IDP, update BDA)
@@ -30,42 +37,117 @@ def handler(event: Dict[str, Any], context) -> Dict[str, Any]:
         logger.info("Starting BDA/IDP sync")
         logger.info(f"Event: {json.dumps(event, default=str)}")
         
-        # Get sync direction from arguments (default to bidirectional for backward compatibility)
+        # Get arguments
         arguments = event.get('arguments', {})
         sync_direction = arguments.get('direction', 'bidirectional')
+        sync_mode = arguments.get('syncMode', 'replace')  # 'replace' or 'merge'
         versionName = arguments.get('versionName', 'default')
+        explicit_bda_arn = arguments.get('bdaProjectArn')  # Optional: user-provided ARN
+        save_arn = arguments.get('saveArn', True)  # Whether to save the ARN to version tracking
         
-        logger.info(f"Sync direction: {sync_direction}")
+        logger.info(f"Sync direction: {sync_direction}, mode: {sync_mode}, version: {versionName}, explicit ARN: {explicit_bda_arn}")
         
-        # Get BDA project ARN from environment
-        bda_project_arn = os.environ.get('BDA_PROJECT_ARN')
+        # Initialize ConfigurationManager for BDA project tracking
+        config_table = os.environ.get('CONFIGURATION_TABLE_NAME')
+        manager = ConfigurationManager(table_name=config_table) if config_table else None
+        
+        # Legacy fallback: env var from CloudFormation deployment
+        default_bda_project_arn = os.environ.get('BDA_PROJECT_ARN')
+        
+        # Resolve BDA project ARN using priority chain
+        bda_project_arn = None
+        arn_source = None
+        
+        # Check for CREATE_NEW sentinel — user explicitly wants a new BDA project
+        force_create_new = explicit_bda_arn == "CREATE_NEW"
+        if force_create_new:
+            explicit_bda_arn = None  # Clear sentinel so it's not used as an ARN
+            logger.info("User requested CREATE_NEW — will force-create a new BDA project")
+        
+        # Priority 1: Explicit ARN from UI (skip if CREATE_NEW was requested)
+        if explicit_bda_arn and not force_create_new:
+            bda_project_arn = explicit_bda_arn
+            arn_source = "user-provided"
+            logger.info(f"Using user-provided BDA project ARN: {bda_project_arn}")
+        
+        # Priority 2: Version tracking table (skip if CREATE_NEW was requested)
+        if not bda_project_arn and not force_create_new and manager:
+            tracked_arn = manager.get_bda_project_arn(versionName)
+            if tracked_arn:
+                bda_project_arn = tracked_arn
+                arn_source = "version-tracking"
+                logger.info(f"Using tracked BDA project ARN for version '{versionName}': {bda_project_arn}")
+        
+        # Priority 3: Legacy env var fallback (skip if CREATE_NEW was requested)
+        if not bda_project_arn and not force_create_new and default_bda_project_arn:
+            bda_project_arn = default_bda_project_arn
+            arn_source = "env-var-legacy"
+            logger.info(f"Using legacy BDA_PROJECT_ARN env var: {bda_project_arn}")
+            # Migrate: save this legacy ARN to version tracking for future use
+            if manager and save_arn:
+                try:
+                    manager.set_bda_project_arn(versionName, bda_project_arn, "synced")
+                    logger.info(f"Migrated legacy BDA ARN to version tracking for '{versionName}'")
+                except Exception as e:
+                    logger.warning(f"Failed to migrate legacy BDA ARN to version tracking: {e}")
+        
+        # Priority 4: Auto-create for idp_to_bda or bidirectional (or when CREATE_NEW forced)
+        if not bda_project_arn and (force_create_new or sync_direction in ("idp_to_bda", "bidirectional")):
+            logger.info(f"No BDA project found, auto-creating for version '{versionName}'")
+            if manager:
+                manager.set_bda_sync_status(versionName, "creating")
+            try:
+                bda_service = BdaBlueprintService(dataAutomationProjectArn=default_bda_project_arn)
+                bda_project_arn = bda_service.get_or_create_project_for_version(versionName)
+                arn_source = "auto-created"
+                logger.info(f"Auto-created BDA project for version '{versionName}': {bda_project_arn}")
+            except Exception as e:
+                logger.error(f"Failed to auto-create BDA project: {e}")
+                if manager:
+                    manager.set_bda_sync_status(versionName, "error")
+                return {
+                    "success": False,
+                    "error": {
+                        "type": "CONFIGURATION_ERROR",
+                        "message": f"Failed to create BDA project for version '{versionName}': {str(e)}"
+                    },
+                    "processedClasses": [],
+                    "direction": sync_direction
+                }
+        
+        # No ARN available for bda_to_idp — need user to provide one
         if not bda_project_arn:
-            logger.error("BDA project ARN not configured")
             return {
                 "success": False,
                 "error": {
                     "type": "CONFIGURATION_ERROR",
-                    "message": "BDA project ARN not configured"
+                    "message": f"No BDA project linked to version '{versionName}'. "
+                               f"Please provide a BDA Project ARN or sync to BDA first to create one."
                 },
                 "processedClasses": [],
                 "direction": sync_direction
             }
         
-        logger.info(f"Using BDA project ARN: {bda_project_arn}, config version : {versionName}")
-        
-        # Initialize BDA service
+        # Initialize BDA service with the resolved project ARN
         bda_service = BdaBlueprintService(dataAutomationProjectArn=bda_project_arn)
+        bda_service.dataAutomationProjectArn = bda_project_arn
         
         # Handle cleanup_orphaned direction separately
         if sync_direction == "cleanup_orphaned":
             logger.info("Executing orphaned blueprint cleanup")
             cleanup_result = bda_service.cleanup_orphaned_blueprints(version=versionName)
             
+            # Update tracking
+            if manager and save_arn:
+                manager.set_bda_project_arn(versionName, bda_project_arn, "synced")
+            
             return {
                 "success": cleanup_result.get("success", False),
                 "message": cleanup_result.get("message", ""),
                 "processedClasses": [],
                 "direction": sync_direction,
+                "bdaProjectArn": bda_project_arn,
+                "bdaSyncStatus": "synced",
                 "cleanupDetails": {
                     "deletedCount": cleanup_result.get("deleted_count", 0),
                     "failedCount": cleanup_result.get("failed_count", 0),
@@ -73,9 +155,9 @@ def handler(event: Dict[str, Any], context) -> Dict[str, Any]:
                 }
             }
         
-        # Execute the sync operation with direction parameter
+        # Execute the sync operation with direction and mode parameters
         result = bda_service.create_blueprints_from_custom_configuration(
-            sync_direction=sync_direction, version=versionName
+            sync_direction=sync_direction, version=versionName, sync_mode=sync_mode
         )
 
         logger.info(f"BDA Service results: {result}")
@@ -98,14 +180,27 @@ def handler(event: Dict[str, Any], context) -> Dict[str, Any]:
         
         logger.info(f"BDA/IDP sync completed. Direction: {sync_direction}, Succeeded: {len(sync_succeeded_classes)}, Failed: {len(sync_failed_classes)}")
         
+        # Update BDA project tracking in version table
+        sync_status = "synced" if len(sync_failed_classes) == 0 else "partial"
+        if manager and save_arn:
+            try:
+                manager.set_bda_project_arn(versionName, bda_project_arn, sync_status)
+                logger.info(f"Updated BDA tracking for version '{versionName}': {sync_status}")
+            except Exception as e:
+                logger.warning(f"Failed to update BDA tracking: {e}")
+        
         # Handle different scenarios
         if len(sync_succeeded_classes) == 0 and len(sync_failed_classes) > 0:
             # Complete failure
+            if manager:
+                manager.set_bda_sync_status(versionName, "error")
             return {
                 "success": False,
                 "message": f"Synchronization failed for all {len(sync_failed_classes)} document classes.",
                 "processedClasses": [],
                 "direction": sync_direction,
+                "bdaProjectArn": bda_project_arn,
+                "bdaSyncStatus": "error",
                 "error": {
                     "type": "SYNC_ERROR", 
                     "message": f"Failed to sync classes: {', '.join(sync_failed_classes)}"
@@ -118,6 +213,8 @@ def handler(event: Dict[str, Any], context) -> Dict[str, Any]:
                 "message": f"Successfully synchronized {len(sync_succeeded_classes)} document classes. Failed to sync {len(sync_failed_classes)} classes: {', '.join(sync_failed_classes)}",
                 "processedClasses": sync_succeeded_classes,
                 "direction": sync_direction,
+                "bdaProjectArn": bda_project_arn,
+                "bdaSyncStatus": "partial",
                 "error": {
                     "type": "PARTIAL_SYNC_ERROR",
                     "message": f"Failed to sync classes: {', '.join(sync_failed_classes)}"
@@ -157,7 +254,9 @@ def handler(event: Dict[str, Any], context) -> Dict[str, Any]:
                 "success": True,
                 "message": message,
                 "processedClasses": sync_succeeded_classes,
-                "direction": sync_direction
+                "direction": sync_direction,
+                "bdaProjectArn": bda_project_arn,
+                "bdaSyncStatus": "synced",
             }
             
             # Add warnings array if any exist
