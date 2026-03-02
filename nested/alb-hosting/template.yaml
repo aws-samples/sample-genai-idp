@@ -1,0 +1,469 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: MIT-0
+
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  ALB hosting nested stack for GenAI IDP Web UI.
+  Creates an Application Load Balancer with S3 VPC Interface Endpoint
+  to serve static web content without CloudFront.
+
+Parameters:
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC ID for the ALB and S3 VPC endpoint
+
+  SubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Subnet IDs for the ALB (minimum 2 in different AZs)
+
+  CertificateArn:
+    Type: String
+    Description: ACM certificate ARN for the ALB HTTPS listener
+
+  ALBScheme:
+    Type: String
+    Default: internal
+    AllowedValues: [internal, internet-facing]
+    Description: ALB scheme
+
+  ALBAllowedCIDRs:
+    Type: String
+    Default: ""
+    Description: >-
+      Comma-separated CIDR ranges for ALB security group ingress.
+      Empty means use VPC CIDR.
+
+  WebUIBucketName:
+    Type: String
+    Description: S3 bucket name for static web content
+
+  WebUIBucketArn:
+    Type: String
+    Description: S3 bucket ARN
+
+  StackName:
+    Type: String
+    Description: Parent stack name for resource naming
+
+  PermissionsBoundaryArn:
+    Type: String
+    Default: ""
+    Description: Optional IAM permissions boundary ARN
+
+  LoggingBucketName:
+    Type: String
+    Description: S3 bucket name for ALB access logs
+
+Conditions:
+  HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
+  UseVpcCidr: !Equals [!Ref ALBAllowedCIDRs, ""]
+
+Resources:
+  ##########################################################################
+  # VPC CIDR Lookup (when ALBAllowedCIDRs is empty)
+  ##########################################################################
+
+  VpcCidrLookupRole:
+    Type: AWS::IAM::Role
+    Condition: UseVpcCidr
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: !Sub "lambda.${AWS::URLSuffix}"
+            Action: sts:AssumeRole
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
+      Policies:
+        - PolicyName: VpcCidrLookup
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ec2:DescribeVpcs
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:*"
+
+  VpcCidrLookupFunction:
+    Type: AWS::Lambda::Function
+    Condition: UseVpcCidr
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: "Custom resource Lambda does not need VPC access"
+          - id: W92
+            reason: "Custom resource Lambda does not need reserved concurrency"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for CloudFormation custom resource"
+    # checkov:skip=CKV_AWS_117: "Function does not need VPC access"
+    # checkov:skip=CKV_AWS_115: "Function does not need reserved concurrency"
+    Properties:
+      Runtime: python3.12
+      Handler: index.handler
+      Timeout: 30
+      MemorySize: 128
+      Role: !GetAtt VpcCidrLookupRole.Arn
+      Code:
+        ZipFile: |
+          import boto3
+          import cfnresponse
+
+          def handler(event, context):
+              if event["RequestType"] == "Delete":
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+                  return
+              try:
+                  vpc_id = event["ResourceProperties"]["VpcId"]
+                  ec2 = boto3.client("ec2")
+                  resp = ec2.describe_vpcs(VpcIds=[vpc_id])
+                  cidr = resp["Vpcs"][0]["CidrBlock"]
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, {"CidrBlock": cidr})
+              except Exception as e:
+                  cfnresponse.send(event, context, cfnresponse.FAILED, {"Error": str(e)})
+
+  VpcCidrLookup:
+    Type: Custom::VpcCidrLookup
+    Condition: UseVpcCidr
+    Properties:
+      ServiceToken: !GetAtt VpcCidrLookupFunction.Arn
+      VpcId: !Ref VpcId
+
+  ##########################################################################
+  # Security Groups
+  ##########################################################################
+
+  ALBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W5
+            reason: "Egress restricted to VPC endpoint security group on port 443"
+    Properties:
+      GroupDescription: !Sub "${StackName} ALB Security Group"
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: !If
+            - UseVpcCidr
+            - !GetAtt VpcCidrLookup.CidrBlock
+            - !Select [0, !Split [",", !Ref ALBAllowedCIDRs]]
+      Tags:
+        - Key: Name
+          Value: !Sub "${StackName}-alb-sg"
+
+  EndpointSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: !Sub "${StackName} S3 VPC Endpoint Security Group"
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          SourceSecurityGroupId: !Ref ALBSecurityGroup
+      Tags:
+        - Key: Name
+          Value: !Sub "${StackName}-s3-endpoint-sg"
+
+  ALBToEndpointEgress:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref ALBSecurityGroup
+      IpProtocol: tcp
+      FromPort: 443
+      ToPort: 443
+      DestinationSecurityGroupId: !Ref EndpointSecurityGroup
+
+  ##########################################################################
+  # S3 Interface VPC Endpoint
+  ##########################################################################
+
+  S3InterfaceEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcEndpointType: Interface
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.s3"
+      VpcId: !Ref VpcId
+      SubnetIds: !Ref SubnetIds
+      SecurityGroupIds:
+        - !Ref EndpointSecurityGroup
+      PrivateDnsEnabled: false
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowWebUIBucketOnly
+            Effect: Allow
+            Principal: "*"
+            Action:
+              - "s3:*"
+            Resource:
+              - !Sub "arn:${AWS::Partition}:s3:::${WebUIBucketName}"
+              - !Sub "arn:${AWS::Partition}:s3:::${WebUIBucketName}/*"
+
+  ##########################################################################
+  # ALB Target Group & Target Registration
+  ##########################################################################
+
+  S3TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub "${StackName}-s3-tg"
+      TargetType: ip
+      Protocol: HTTPS
+      Port: 443
+      VpcId: !Ref VpcId
+      HealthCheckProtocol: HTTPS
+      HealthCheckPort: "443"
+      HealthCheckPath: /
+      Matcher:
+        HttpCode: "200,307,405"
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 3
+      UnhealthyThresholdCount: 3
+      Tags:
+        - Key: Name
+          Value: !Sub "${StackName}-s3-target-group"
+
+  RegisterTargetsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: !Sub "lambda.${AWS::URLSuffix}"
+            Action: sts:AssumeRole
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
+      Policies:
+        - PolicyName: RegisterTargets
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ec2:DescribeVpcEndpoints
+                  - ec2:DescribeNetworkInterfaces
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - elasticloadbalancing:RegisterTargets
+                  - elasticloadbalancing:DeregisterTargets
+                Resource: !Sub "arn:${AWS::Partition}:elasticloadbalancing:${AWS::Region}:${AWS::AccountId}:targetgroup/*"
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:*"
+
+  RegisterTargetsFunction:
+    Type: AWS::Lambda::Function
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: "Custom resource Lambda does not need VPC access"
+          - id: W92
+            reason: "Custom resource Lambda does not need reserved concurrency"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for CloudFormation custom resource"
+    # checkov:skip=CKV_AWS_117: "Function does not need VPC access"
+    # checkov:skip=CKV_AWS_115: "Function does not need reserved concurrency"
+    Properties:
+      Runtime: python3.12
+      Handler: index.handler
+      Timeout: 60
+      MemorySize: 128
+      Role: !GetAtt RegisterTargetsRole.Arn
+      Code:
+        ZipFile: |
+          import boto3
+          import cfnresponse
+
+          def handler(event, context):
+              try:
+                  ec2 = boto3.client("ec2")
+                  elbv2 = boto3.client("elbv2")
+                  vpce_id = event["ResourceProperties"]["VpcEndpointId"]
+                  tg_arn = event["ResourceProperties"]["TargetGroupArn"]
+
+                  # Get VPC endpoint ENI IDs
+                  vpce_resp = ec2.describe_vpc_endpoints(VpcEndpointIds=[vpce_id])
+                  eni_ids = vpce_resp["VpcEndpoints"][0]["NetworkInterfaceIds"]
+
+                  # Get private IPs from ENIs
+                  eni_resp = ec2.describe_network_interfaces(NetworkInterfaceIds=eni_ids)
+                  ips = [eni["PrivateIpAddress"] for eni in eni_resp["NetworkInterfaces"]]
+
+                  if event["RequestType"] == "Delete":
+                      # Deregister targets
+                      targets = [{"Id": ip, "Port": 443} for ip in ips]
+                      try:
+                          elbv2.deregister_targets(TargetGroupArn=tg_arn, Targets=targets)
+                      except Exception:
+                          pass  # Best effort on delete
+                      cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+                      return
+
+                  # Register targets
+                  targets = [{"Id": ip, "Port": 443} for ip in ips]
+                  elbv2.register_targets(TargetGroupArn=tg_arn, Targets=targets)
+
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, {
+                      "IpAddresses": ",".join(ips),
+                      "TargetCount": str(len(ips)),
+                  })
+              except Exception as e:
+                  cfnresponse.send(event, context, cfnresponse.FAILED, {"Error": str(e)})
+
+  RegisterTargetsCustomResource:
+    Type: Custom::RegisterTargets
+    DependsOn:
+      - S3InterfaceEndpoint
+      - S3TargetGroup
+    Properties:
+      ServiceToken: !GetAtt RegisterTargetsFunction.Arn
+      VpcEndpointId: !Ref S3InterfaceEndpoint
+      TargetGroupArn: !Ref S3TargetGroup
+
+  ##########################################################################
+  # Application Load Balancer
+  ##########################################################################
+
+  ALB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W52
+            reason: "ALB access logging is configured to the logging bucket"
+    Properties:
+      Name: !Sub "${StackName}-webui-alb"
+      Type: application
+      Scheme: !Ref ALBScheme
+      Subnets: !Ref SubnetIds
+      SecurityGroups:
+        - !Ref ALBSecurityGroup
+      LoadBalancerAttributes:
+        - Key: idle_timeout.timeout_seconds
+          Value: "60"
+        - Key: routing.http2.enabled
+          Value: "true"
+        - Key: routing.http.drop_invalid_header_fields.enabled
+          Value: "true"
+        - Key: access_logs.s3.enabled
+          Value: "true"
+        - Key: access_logs.s3.bucket
+          Value: !Ref LoggingBucketName
+        - Key: access_logs.s3.prefix
+          Value: alb-access-logs
+      Tags:
+        - Key: Name
+          Value: !Sub "${StackName}-webui-alb"
+
+  ##########################################################################
+  # ALB Listener and Rules
+  ##########################################################################
+
+  ALBListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref ALB
+      Port: 443
+      Protocol: HTTPS
+      Certificates:
+        - CertificateArn: !Ref CertificateArn
+      SslPolicy: ELBSecurityPolicy-TLS13-1-2-2021-06
+      DefaultActions:
+        - Type: fixed-response
+          FixedResponseConfig:
+            StatusCode: "404"
+            ContentType: text/plain
+            MessageBody: "Not Found"
+
+  # Rule 1: Root path - rewrite to /index.html for SPA entry point
+  ALBListenerRuleRoot:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    DependsOn: RegisterTargetsCustomResource
+    Properties:
+      ListenerArn: !Ref ALBListener
+      Priority: 1
+      Conditions:
+        - Field: path-pattern
+          PathPatternConfig:
+            Values:
+              - "/"
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref S3TargetGroup
+      Transforms:
+        - Type: host-header-rewrite
+          HostHeaderRewriteConfig:
+            Rewrites:
+              - Regex: ".*"
+                Replace: !Sub "${WebUIBucketName}.s3.${AWS::Region}.${AWS::URLSuffix}"
+        - Type: url-rewrite
+          UrlRewriteConfig:
+            Rewrites:
+              - Regex: "^/$"
+                Replace: "/index.html"
+
+  # Rule 2: All other paths - serve static assets (JS, CSS, images, fonts, etc.)
+  ALBListenerRuleCatchAll:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    DependsOn: RegisterTargetsCustomResource
+    Properties:
+      ListenerArn: !Ref ALBListener
+      Priority: 2
+      Conditions:
+        - Field: path-pattern
+          PathPatternConfig:
+            Values:
+              - "/*"
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref S3TargetGroup
+      Transforms:
+        - Type: host-header-rewrite
+          HostHeaderRewriteConfig:
+            Rewrites:
+              - Regex: ".*"
+                Replace: !Sub "${WebUIBucketName}.s3.${AWS::Region}.${AWS::URLSuffix}"
+
+Outputs:
+  WebUIURL:
+    Description: Web UI URL via ALB
+    Value: !Sub "https://${ALB.DNSName}"
+
+  ALBDNSName:
+    Description: ALB DNS name
+    Value: !GetAtt ALB.DNSName
+
+  ALBArn:
+    Description: ALB ARN
+    Value: !Ref ALB
+
+  S3VPCEndpointId:
+    Description: S3 VPC Interface Endpoint ID
+    Value: !Ref S3InterfaceEndpoint
+
+  ALBHostedZoneID:
+    Description: ALB Canonical Hosted Zone ID (for Route53 alias records)
+    Value: !GetAtt ALB.CanonicalHostedZoneID
