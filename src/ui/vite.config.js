@@ -15,7 +15,7 @@ export default defineConfig(({ mode }) => ({
       // Include all JavaScript files for JSX transformation
       include: '**/*.{js,jsx,ts,tsx}',
     }),
-   
+
     // Enable SVG import as React components
     svgr(),
   ],
@@ -44,14 +44,9 @@ export default defineConfig(({ mode }) => ({
         // Manual chunking for better code splitting
         manualChunks: {
           'aws-amplify': ['aws-amplify', '@aws-amplify/ui-react'],
-          'aws-sdk': [
-            '@aws-sdk/client-s3',
-            '@aws-sdk/client-ssm',
-            '@aws-sdk/client-cognito-identity',
-            '@aws-sdk/s3-request-presigner',
-          ],
-          'cloudscape': ['@cloudscape-design/components', '@cloudscape-design/global-styles'],
-          'chart': ['chart.js', 'react-chartjs-2'],
+          'aws-sdk': ['@aws-sdk/client-s3', '@aws-sdk/client-ssm', '@aws-sdk/client-cognito-identity', '@aws-sdk/s3-request-presigner'],
+          cloudscape: ['@cloudscape-design/components', '@cloudscape-design/global-styles'],
+          chart: ['chart.js', 'react-chartjs-2'],
           'react-vendor': ['react', 'react-dom', 'react-router-dom'],
         },
       },
@@ -101,6 +96,14 @@ export default defineConfig(({ mode }) => ({
     logLevel: 'info',
     clearScreen: false,
   }),
+
+  // Test configuration (vitest)
+  test: {
+    globals: true,
+    environment: 'jsdom',
+    setupFiles: './src/setupTests.ts',
+    include: ['src/**/*.test.{ts,tsx}'],
+  },
 
   // CSS configuration
   css: {
