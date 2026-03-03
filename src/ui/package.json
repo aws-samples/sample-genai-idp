@@ -56,7 +56,7 @@
     "recharts": "^3.5.1",
     "rehype-raw": "^7.0.0",
     "remark-gfm": "^4.0.1",
-    "serialize-javascript": "^6.0.2",
+    "serialize-javascript": "^7.0.3",
     "tmp": "^0.2.5",
     "uuid": "^11.1.0",
     "vuera": "^0.2.7",
