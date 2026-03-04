@@ -30,6 +30,8 @@ The following table shows all US to EU model mappings currently configured in th
 | `us.anthropic.claude-opus-4-5-20251101-v1:0` | `eu.anthropic.claude-opus-4-5-20251101-v1:0` | Direct mapping |
 | `us.anthropic.claude-opus-4-6-v1` | `eu.anthropic.claude-opus-4-6-v1` | Direct mapping |
 | `us.anthropic.claude-opus-4-6-v1:1m` | `eu.anthropic.claude-opus-4-6-v1:1m` | Direct mapping |
+| `us.meta.llama4-maverick-17b-instruct-v1:0` | `eu.anthropic.claude-sonnet-4-5-20250929-v1:0` | **Fallback mapping** |
+| `us.meta.llama4-scout-17b-instruct-v1:0` | `eu.anthropic.claude-sonnet-4-5-20250929-v1:0` | **Fallback mapping** |
 
 ### Mapping Types
 
@@ -91,12 +93,24 @@ The UpdateConfiguration lambda processes default configurations as follows:
 2. **Behavior Differences**: Different models may produce varying outputs for the same input
 3. **Cost Impact**: Fallback models may have different pricing structures
 
+### Third-Party Models (US-Only)
+
+The following third-party models are available in US regions only and have no EU cross-region inference profiles. In EU deployments, the Meta Llama 4 models fall back to Claude Sonnet 4.5, while the single-region models (Gemma, Nemotron) are not available and should not be selected:
+
+- **Meta Llama 4 Maverick 17B**: `us.meta.llama4-maverick-17b-instruct-v1:0` → `eu.anthropic.claude-sonnet-4-5-20250929-v1:0` (fallback)
+- **Meta Llama 4 Scout 17B**: `us.meta.llama4-scout-17b-instruct-v1:0` → `eu.anthropic.claude-sonnet-4-5-20250929-v1:0` (fallback)
+- **Google Gemma 3 27B IT**: `google.gemma-3-27b-it` — single-region only, no EU availability
+- **NVIDIA Nemotron Nano 12B v2**: `nvidia.nemotron-nano-12b-v2` — single-region only, no EU availability
+- **Qwen3 VL 235B A22B**: `qwen.qwen3-vl-235b-a22b` — single-region only, no EU availability
+
 ### Missing Direct EU Equivalents
 
 The following US models do not have direct EU equivalents:
 - Nova Premier
 - Claude 3.5 Haiku (specific version)
 - Claude Opus 4 variants
+- Meta Llama 4 Maverick/Scout (US cross-region only)
+- Google Gemma 3, NVIDIA Nemotron, Qwen (single-region US only)
 
 ## Best Practices
 

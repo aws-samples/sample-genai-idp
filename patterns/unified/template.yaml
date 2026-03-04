@@ -292,6 +292,10 @@ Resources:
                   - "eu.anthropic.claude-opus-4-6-v1"
                   - "eu.anthropic.claude-opus-4-6-v1:1m"
                   - "qwen.qwen3-vl-235b-a22b"
+                  - "us.meta.llama4-maverick-17b-instruct-v1:0"
+                  - "us.meta.llama4-scout-17b-instruct-v1:0"
+                  - "google.gemma-3-27b-it"
+                  - "nvidia.nemotron-nano-12b-v2"
                   - "global.amazon.nova-2-lite-v1:0"
                   - "global.anthropic.claude-haiku-4-5-20251001-v1:0"
                   - "global.anthropic.claude-sonnet-4-5-20250929-v1:0"
@@ -646,6 +650,10 @@ Resources:
                   - "eu.anthropic.claude-opus-4-6-v1"
                   - "eu.anthropic.claude-opus-4-6-v1:1m"
                   - "qwen.qwen3-vl-235b-a22b"
+                  - "us.meta.llama4-maverick-17b-instruct-v1:0"
+                  - "us.meta.llama4-scout-17b-instruct-v1:0"
+                  - "google.gemma-3-27b-it"
+                  - "nvidia.nemotron-nano-12b-v2"
                   - "global.amazon.nova-2-lite-v1:0"
                   - "global.anthropic.claude-haiku-4-5-20251001-v1:0"
                   - "global.anthropic.claude-sonnet-4-5-20250929-v1:0"
@@ -816,6 +824,10 @@ Resources:
                   - "eu.anthropic.claude-opus-4-6-v1"
                   - "eu.anthropic.claude-opus-4-6-v1:1m"
                   - "qwen.qwen3-vl-235b-a22b"
+                  - "us.meta.llama4-maverick-17b-instruct-v1:0"
+                  - "us.meta.llama4-scout-17b-instruct-v1:0"
+                  - "google.gemma-3-27b-it"
+                  - "nvidia.nemotron-nano-12b-v2"
                   - "global.amazon.nova-2-lite-v1:0"
                   - "global.anthropic.claude-haiku-4-5-20251001-v1:0"
                   - "global.anthropic.claude-sonnet-4-5-20250929-v1:0"
@@ -983,6 +995,10 @@ Resources:
                     "eu.anthropic.claude-opus-4-6-v1",
                     "eu.anthropic.claude-opus-4-6-v1:1m",
                     "qwen.qwen3-vl-235b-a22b",
+                    "us.meta.llama4-maverick-17b-instruct-v1:0",
+                    "us.meta.llama4-scout-17b-instruct-v1:0",
+                    "google.gemma-3-27b-it",
+                    "nvidia.nemotron-nano-12b-v2",
                     "global.amazon.nova-2-lite-v1:0",
                     "global.anthropic.claude-haiku-4-5-20251001-v1:0",
                     "global.anthropic.claude-sonnet-4-5-20250929-v1:0",
@@ -1077,6 +1093,10 @@ Resources:
                     "eu.anthropic.claude-opus-4-6-v1",
                     "eu.anthropic.claude-opus-4-6-v1:1m",
                     "qwen.qwen3-vl-235b-a22b",
+                    "us.meta.llama4-maverick-17b-instruct-v1:0",
+                    "us.meta.llama4-scout-17b-instruct-v1:0",
+                    "google.gemma-3-27b-it",
+                    "nvidia.nemotron-nano-12b-v2",
                     "global.amazon.nova-2-lite-v1:0",
                     "global.anthropic.claude-haiku-4-5-20251001-v1:0",
                     "global.anthropic.claude-sonnet-4-5-20250929-v1:0",
@@ -1167,6 +1187,10 @@ Resources:
                         "eu.anthropic.claude-opus-4-6-v1",
                         "eu.anthropic.claude-opus-4-6-v1:1m",
                         "qwen.qwen3-vl-235b-a22b",
+                        "us.meta.llama4-maverick-17b-instruct-v1:0",
+                        "us.meta.llama4-scout-17b-instruct-v1:0",
+                        "google.gemma-3-27b-it",
+                        "nvidia.nemotron-nano-12b-v2",
                         "global.amazon.nova-2-lite-v1:0",
                         "global.anthropic.claude-haiku-4-5-20251001-v1:0",
                         "global.anthropic.claude-sonnet-4-5-20250929-v1:0",
@@ -1252,6 +1276,10 @@ Resources:
                         "eu.anthropic.claude-opus-4-6-v1",
                         "eu.anthropic.claude-opus-4-6-v1:1m",
                         "qwen.qwen3-vl-235b-a22b",
+                        "us.meta.llama4-maverick-17b-instruct-v1:0",
+                        "us.meta.llama4-scout-17b-instruct-v1:0",
+                        "google.gemma-3-27b-it",
+                        "nvidia.nemotron-nano-12b-v2",
                         "global.amazon.nova-2-lite-v1:0",
                         "global.anthropic.claude-haiku-4-5-20251001-v1:0",
                         "global.anthropic.claude-sonnet-4-5-20250929-v1:0",
@@ -1337,6 +1365,10 @@ Resources:
                         "eu.anthropic.claude-opus-4-6-v1",
                         "eu.anthropic.claude-opus-4-6-v1:1m",
                         "qwen.qwen3-vl-235b-a22b",
+                        "us.meta.llama4-maverick-17b-instruct-v1:0",
+                        "us.meta.llama4-scout-17b-instruct-v1:0",
+                        "google.gemma-3-27b-it",
+                        "nvidia.nemotron-nano-12b-v2",
                         "global.amazon.nova-2-lite-v1:0",
                         "global.anthropic.claude-haiku-4-5-20251001-v1:0",
                         "global.anthropic.claude-sonnet-4-5-20250929-v1:0",
@@ -1451,6 +1483,10 @@ Resources:
                       - "eu.anthropic.claude-opus-4-6-v1"
                       - "eu.anthropic.claude-opus-4-6-v1:1m"
                       - "qwen.qwen3-vl-235b-a22b"
+                      - "us.meta.llama4-maverick-17b-instruct-v1:0"
+                      - "us.meta.llama4-scout-17b-instruct-v1:0"
+                      - "google.gemma-3-27b-it"
+                      - "nvidia.nemotron-nano-12b-v2"
                     default: "us.anthropic.claude-haiku-4-5-20251001-v1:0"
                     order: 0
               error_analyzer:
@@ -1558,6 +1594,10 @@ Resources:
                         "eu.anthropic.claude-opus-4-6-v1",
                         "eu.anthropic.claude-opus-4-6-v1:1m",
                         "qwen.qwen3-vl-235b-a22b",
+                        "us.meta.llama4-maverick-17b-instruct-v1:0",
+                        "us.meta.llama4-scout-17b-instruct-v1:0",
+                        "google.gemma-3-27b-it",
+                        "nvidia.nemotron-nano-12b-v2",
                         "global.amazon.nova-2-lite-v1:0",
                         "global.anthropic.claude-haiku-4-5-20251001-v1:0",
                         "global.anthropic.claude-sonnet-4-5-20250929-v1:0",
@@ -1645,6 +1685,10 @@ Resources:
                         "eu.anthropic.claude-opus-4-6-v1",
                         "eu.anthropic.claude-opus-4-6-v1:1m",
                         "qwen.qwen3-vl-235b-a22b",
+                        "us.meta.llama4-maverick-17b-instruct-v1:0",
+                        "us.meta.llama4-scout-17b-instruct-v1:0",
+                        "google.gemma-3-27b-it",
+                        "nvidia.nemotron-nano-12b-v2",
                         "global.amazon.nova-2-lite-v1:0",
                         "global.anthropic.claude-haiku-4-5-20251001-v1:0",
                         "global.anthropic.claude-sonnet-4-5-20250929-v1:0",

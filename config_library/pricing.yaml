@@ -606,6 +606,35 @@ pricing:
       - name: outputTokens
         price: "2.66E-6"
 
+  - name: bedrock/us.meta.llama4-maverick-17b-instruct-v1:0
+    units:
+      - name: inputTokens
+        price: "2.4E-7"
+      - name: outputTokens
+        price: "9.7E-7"
+
+  - name: bedrock/us.meta.llama4-scout-17b-instruct-v1:0
+    units:
+      - name: inputTokens
+        price: "1.7E-7"
+      - name: outputTokens
+        price: "6.6E-7"
+
+  - name: bedrock/google.gemma-3-27b-it
+    units:
+      - name: inputTokens
+        price: "2.3E-7"
+      - name: outputTokens
+        price: "3.8E-7"
+
+  - name: bedrock/nvidia.nemotron-nano-12b-v2
+    units:
+      - name: inputTokens
+        price: "2.0E-7"
+      - name: outputTokens
+        price: "6.0E-7"
+
+
   # ---------------------------------------------------------------------------
   # AWS Lambda Pricing (US East - N. Virginia)
   # ---------------------------------------------------------------------------

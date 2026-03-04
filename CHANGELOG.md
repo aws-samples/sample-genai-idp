@@ -5,6 +5,10 @@ SPDX-License-Identifier: MIT-0
 
 ## [Unreleased]
 
+### Added
+
+- **Third-Party Model Support** — Added Meta Llama 4 Maverick 17B, Llama 4 Scout 17B, Google Gemma 3 27B IT, and NVIDIA Nemotron Nano 12B v2 VL as selectable models across all pipeline stages (OCR, Classification, Extraction, Assessment, Summarization, Evaluation, Discovery, Agents, Rule Validation). Includes per-token pricing configuration and EU region fallback mappings for Llama 4 models. ([#217](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues/217))
+
 ## [0.5.0]
 
 ### Added

@@ -97,6 +97,9 @@ MODEL_MAPPINGS = {
     "us.anthropic.claude-opus-4-5-20251101-v1:0": "eu.anthropic.claude-sonnet-4-5-20250929-v1:0",
     "us.anthropic.claude-opus-4-6-v1": "eu.anthropic.claude-opus-4-6-v1",
     "us.anthropic.claude-opus-4-6-v1:1m": "eu.anthropic.claude-opus-4-6-v1:1m",
+    # Third-party models (US-only, no EU equivalent - fall back to themselves)
+    "us.meta.llama4-maverick-17b-instruct-v1:0": "eu.anthropic.claude-sonnet-4-5-20250929-v1:0",
+    "us.meta.llama4-scout-17b-instruct-v1:0": "eu.anthropic.claude-sonnet-4-5-20250929-v1:0",
 }
 
 def get_current_region() -> str:
