@@ -2,1021 +2,941 @@
 # SPDX-License-Identifier: MIT-0
 
 # All settings not explicitly defined here are inherited from system defaults.
-
-use_bda: false
-
-notes: "OmniAI OCR Benchmark dataset settings for pipeline mode (Bedrock LLM). Set use_bda: true for BDA mode. Assessment and summarization disabled by default."
-
-assessment:
-  enabled: false
-summarization:
-  enabled: false
-
+notes: Pattern-2 default configuration - Bedrock LLM-based processing
 classes:
 - $schema: https://json-schema.org/draft/2020-12/schema
   $id: BANK_CHECK
   x-aws-idp-document-type: BANK_CHECK
-  description: Bank check with MICR encoding, payee info, and amounts
+  description: A bank check or cheque document with payee, amount, date, bank info, and account details.
   type: object
   properties:
     checks:
       type: array
-      description: List of checks
       items:
         type: object
         properties:
           bankInfo:
             type: object
-            description: Bank information
             properties:
               bank:
                 type: string
                 data_type: string
-                description: Bank name (CHASE, BANK_OF_AMERICA, WELLS_FARGO, CITIBANK,
-                  US_BANK)
-                enum:
-                - CHASE
-                - BANK_OF_AMERICA
-                - WELLS_FARGO
-                - CITIBANK
-                - US_BANK
-                x-aws-idp-evaluation-method: EXACT
-                x-aws-idp-confidence-threshold: '0.8'
-          personalInfo:
-            type: object
-            description: Account holder personal information
-            properties:
-              firstName:
-                type: string
-                data_type: string
-                description: Account holder first name
-                x-aws-idp-evaluation-method: LEVENSHTEIN
-                x-aws-idp-evaluation-threshold: '0.7'
-                x-aws-idp-confidence-threshold: '0.8'
-              lastName:
-                type: string
-                data_type: string
-                description: Account holder last name
-                x-aws-idp-evaluation-method: LEVENSHTEIN
-                x-aws-idp-evaluation-threshold: '0.7'
-                x-aws-idp-confidence-threshold: '0.8'
-              address:
-                type: string
-                data_type: string
-                description: Street address
-                x-aws-idp-evaluation-method: LEVENSHTEIN
-                x-aws-idp-evaluation-threshold: '0.7'
-                x-aws-idp-confidence-threshold: '0.8'
-              city:
-                type: string
-                data_type: string
-                description: City
-                x-aws-idp-evaluation-method: LEVENSHTEIN
-                x-aws-idp-evaluation-threshold: '0.7'
-                x-aws-idp-confidence-threshold: '0.8'
-              state:
-                type: string
-                data_type: string
-                description: State abbreviation
-                x-aws-idp-evaluation-method: EXACT
-                x-aws-idp-confidence-threshold: '0.8'
-              zip:
-                type: string
-                data_type: string
-                description: ZIP code
+                description: 'Bank name in UPPER_SNAKE_CASE format with underscores replacing spaces. Examples: "BANK_OF_AMERICA", "WELLS_FARGO", "CITIBANK", "CHASE".'
                 x-aws-idp-evaluation-method: EXACT
                 x-aws-idp-confidence-threshold: '0.8'
           checkInfo:
             type: object
-            description: Check details
             properties:
               date:
                 type: string
-                data_type: string
-                description: Date of the check, formatted as YYYY-MM-DD
                 x-aws-idp-evaluation-method: LEVENSHTEIN
                 x-aws-idp-evaluation-threshold: '0.7'
                 x-aws-idp-confidence-threshold: '0.8'
-              payee:
-                type: string
                 data_type: string
-                description: Payee name
-                x-aws-idp-evaluation-method: LEVENSHTEIN
-                x-aws-idp-evaluation-threshold: '0.7'
-                x-aws-idp-confidence-threshold: '0.8'
-              amount:
-                type: number
-                data_type: number
-                description: Check amount
-                x-aws-idp-evaluation-method: NUMERIC_EXACT
-                x-aws-idp-confidence-threshold: '0.8'
-              amountInWords:
-                type: string
-                data_type: string
-                description: Amount in words (excluding the word 'dollars')
-                x-aws-idp-evaluation-method: LEVENSHTEIN
-                x-aws-idp-evaluation-threshold: '0.7'
-                x-aws-idp-confidence-threshold: '0.8'
               memo:
                 type: string
-                data_type: string
-                description: Memo field
                 x-aws-idp-evaluation-method: LEVENSHTEIN
                 x-aws-idp-evaluation-threshold: '0.7'
                 x-aws-idp-confidence-threshold: '0.8'
+                data_type: string
+                description: The memo line text on the check. Return null if the memo line is blank or absent.
               micr:
                 type: object
-                description: MICR encoding data
                 properties:
                   checkNumber:
-                    type: number
-                    data_type: number
-                    description: Check number, usually 4 digits
+                    type: integer
                     x-aws-idp-evaluation-method: NUMERIC_EXACT
                     x-aws-idp-confidence-threshold: '0.8'
+                    data_type: number
                   accountNumber:
-                    type: number
-                    data_type: number
-                    description: Account number, usually 8 - 12 digits
+                    type: integer
                     x-aws-idp-evaluation-method: NUMERIC_EXACT
                     x-aws-idp-confidence-threshold: '0.8'
+                    data_type: number
                   routingNumber:
-                    type: number
-                    data_type: number
-                    description: Routing number, usually 9 digits
+                    type: integer
                     x-aws-idp-evaluation-method: NUMERIC_EXACT
                     x-aws-idp-confidence-threshold: '0.8'
+                    data_type: number
+              payee:
+                type: string
+                x-aws-idp-evaluation-method: LEVENSHTEIN
+                x-aws-idp-evaluation-threshold: '0.7'
+                x-aws-idp-confidence-threshold: '0.8'
+                data_type: string
+              amount:
+                type: number
+                x-aws-idp-evaluation-method: NUMERIC_EXACT
+                x-aws-idp-confidence-threshold: '0.8'
+                data_type: number
+              amountInWords:
+                type: string
+                x-aws-idp-evaluation-method: LEVENSHTEIN
+                x-aws-idp-evaluation-threshold: '0.7'
+                x-aws-idp-confidence-threshold: '0.8'
+                data_type: string
+          personalInfo:
+            type: object
+            properties:
+              zip:
+                type: string
+                data_type: string
+                x-aws-idp-evaluation-method: EXACT
+                x-aws-idp-confidence-threshold: '0.8'
+              city:
+                type: string
+                x-aws-idp-evaluation-method: LEVENSHTEIN
+                x-aws-idp-evaluation-threshold: '0.7'
+                x-aws-idp-confidence-threshold: '0.8'
+                data_type: string
+              state:
+                type: string
+                data_type: string
+                x-aws-idp-evaluation-method: EXACT
+                x-aws-idp-confidence-threshold: '0.8'
+              address:
+                type: string
+                x-aws-idp-evaluation-method: LEVENSHTEIN
+                x-aws-idp-evaluation-threshold: '0.7'
+                x-aws-idp-confidence-threshold: '0.8'
+                data_type: string
+              lastName:
+                type: string
+                x-aws-idp-evaluation-method: LEVENSHTEIN
+                x-aws-idp-evaluation-threshold: '0.7'
+                x-aws-idp-confidence-threshold: '0.8'
+                data_type: string
+              firstName:
+                type: string
+                x-aws-idp-evaluation-method: LEVENSHTEIN
+                x-aws-idp-evaluation-threshold: '0.7'
+                x-aws-idp-confidence-threshold: '0.8'
+                data_type: string
+            description: Personal information of the check writer/payer printed on the check. Extract the name, address, city, state, and zip from the check.
 - $schema: https://json-schema.org/draft/2020-12/schema
   $id: COMMERCIAL_LEASE_AGREEMENT
   x-aws-idp-document-type: COMMERCIAL_LEASE_AGREEMENT
-  description: Commercial lease agreement with lessor, lessee, premises, rent
+  description: A commercial lease agreement between a lessor and lessee for business premises, with rent, lease terms, and property details.
   type: object
   properties:
     date:
       type: string
-      data_type: string
-      description: Date of the lease (YYYY-MM-DD)
       x-aws-idp-evaluation-method: LEVENSHTEIN
       x-aws-idp-evaluation-threshold: '0.7'
       x-aws-idp-confidence-threshold: '0.8'
-    lessor:
+      description: The agreement date in YYYY-MM-DD format.
+      data_type: string
+    rent:
       type: object
-      description: Lessor/landlord information
       properties:
-        name:
+        monthlyAmount:
+          type: integer
+          x-aws-idp-evaluation-method: NUMERIC_EXACT
+          x-aws-idp-confidence-threshold: '0.8'
+          data_type: number
+        securityDeposit:
+          type: integer
+          x-aws-idp-evaluation-method: NUMERIC_EXACT
+          x-aws-idp-confidence-threshold: '0.8'
+          data_type: number
+    lease:
+      type: object
+      properties:
+        years:
+          type: integer
+          x-aws-idp-evaluation-method: NUMERIC_EXACT
+          x-aws-idp-confidence-threshold: '0.8'
+          data_type: number
+        months:
+          type: integer
+          x-aws-idp-evaluation-method: NUMERIC_EXACT
+          x-aws-idp-confidence-threshold: '0.8'
+          data_type: number
+        endDate:
           type: string
-          data_type: string
-          description: Lessor/landlord name
           x-aws-idp-evaluation-method: LEVENSHTEIN
           x-aws-idp-evaluation-threshold: '0.7'
           x-aws-idp-confidence-threshold: '0.8'
-        streetAddress:
-          type: string
+          description: Lease end date in YYYY-MM-DD format.
           data_type: string
-          description: Lessor street address
+        startDate:
+          type: string
           x-aws-idp-evaluation-method: LEVENSHTEIN
           x-aws-idp-evaluation-threshold: '0.7'
           x-aws-idp-confidence-threshold: '0.8'
-        state:
-          type: string
+          description: Lease start date in YYYY-MM-DD format.
           data_type: string
-          description: Lessor state
-          x-aws-idp-evaluation-method: EXACT
-          x-aws-idp-confidence-threshold: '0.8'
     lessee:
       type: object
-      description: Lessee/tenant information
       properties:
         name:
           type: string
-          data_type: string
-          description: Lessee/tenant name
           x-aws-idp-evaluation-method: LEVENSHTEIN
           x-aws-idp-evaluation-threshold: '0.7'
           x-aws-idp-confidence-threshold: '0.8'
-        streetAddress:
-          type: string
           data_type: string
-          description: Lessee street address
-          x-aws-idp-evaluation-method: LEVENSHTEIN
-          x-aws-idp-evaluation-threshold: '0.7'
-          x-aws-idp-confidence-threshold: '0.8'
         state:
           type: string
           data_type: string
-          description: Lessee state
           x-aws-idp-evaluation-method: EXACT
           x-aws-idp-confidence-threshold: '0.8'
-    premises:
-      type: object
-      description: Premises information
-      properties:
         streetAddress:
           type: string
-          data_type: string
-          description: Premises street address
           x-aws-idp-evaluation-method: LEVENSHTEIN
           x-aws-idp-evaluation-threshold: '0.7'
           x-aws-idp-confidence-threshold: '0.8'
-        squareFeet:
+          data_type: string
+    lessor:
+      type: object
+      properties:
+        name:
+          type: string
+          x-aws-idp-evaluation-method: LEVENSHTEIN
+          x-aws-idp-evaluation-threshold: '0.7'
+          x-aws-idp-confidence-threshold: '0.8'
+          data_type: string
+        state:
           type: string
           data_type: string
-          description: Square footage
+          x-aws-idp-evaluation-method: EXACT
+          x-aws-idp-confidence-threshold: '0.8'
+        streetAddress:
+          type: string
           x-aws-idp-evaluation-method: LEVENSHTEIN
           x-aws-idp-evaluation-threshold: '0.7'
           x-aws-idp-confidence-threshold: '0.8'
+          data_type: string
+    premises:
+      type: object
+      properties:
         spaceType:
           type: string
           data_type: string
-          description: Space type
-          enum:
-          - Office Space
-          - Retail Space
-          - Warehouse
-          - Industrial Space
           x-aws-idp-evaluation-method: EXACT
           x-aws-idp-confidence-threshold: '0.8'
-    lease:
-      type: object
-      description: Lease term information
-      properties:
-        years:
-          type: number
-          data_type: number
-          description: Lease term years
-          x-aws-idp-evaluation-method: NUMERIC_EXACT
-          x-aws-idp-confidence-threshold: '0.8'
-        months:
-          type: number
-          data_type: number
-          description: Lease term months
-          x-aws-idp-evaluation-method: NUMERIC_EXACT
-          x-aws-idp-confidence-threshold: '0.8'
-        startDate:
+        squareFeet:
           type: string
-          data_type: string
-          description: Start date of the lease, formatted as YYYY-MM-DD
           x-aws-idp-evaluation-method: LEVENSHTEIN
           x-aws-idp-evaluation-threshold: '0.7'
           x-aws-idp-confidence-threshold: '0.8'
-        endDate:
-          type: string
           data_type: string
-          description: End date of the lease, formatted as YYYY-MM-DD
+        streetAddress:
+          type: string
           x-aws-idp-evaluation-method: LEVENSHTEIN
           x-aws-idp-evaluation-threshold: '0.7'
           x-aws-idp-confidence-threshold: '0.8'
-    rent:
-      type: object
-      description: Rent information
-      properties:
-        monthlyAmount:
-          type: number
-          data_type: number
-          description: Monthly rent amount
-          x-aws-idp-evaluation-method: NUMERIC_EXACT
-          x-aws-idp-confidence-threshold: '0.8'
-        securityDeposit:
-          type: number
-          data_type: number
-          description: Security deposit amount
-          x-aws-idp-evaluation-method: NUMERIC_EXACT
-          x-aws-idp-confidence-threshold: '0.8'
+          data_type: string
 - $schema: https://json-schema.org/draft/2020-12/schema
   $id: CREDIT_CARD_STATEMENT
   x-aws-idp-document-type: CREDIT_CARD_STATEMENT
-  description: Credit card/bank account statement with transactions
+  description: A credit card account statement showing transaction history with dates, deposits, withdrawals, and account number.
   type: object
   properties:
-    accountNumber:
-      type: string
-      data_type: string
-      description: Unique identifier for the account
-      x-aws-idp-evaluation-method: EXACT
-      x-aws-idp-confidence-threshold: '0.8'
     period:
       type: object
-      description: Date range for the account statement period
       properties:
-        start:
-          type: string
-          data_type: string
-          description: Start date of the statement period exactly as it appears
-          x-aws-idp-evaluation-method: LEVENSHTEIN
-          x-aws-idp-evaluation-threshold: '0.7'
-          x-aws-idp-confidence-threshold: '0.8'
         end:
           type: string
-          data_type: string
-          description: End date of the statement period exactly as it appears
           x-aws-idp-evaluation-method: LEVENSHTEIN
           x-aws-idp-evaluation-threshold: '0.7'
           x-aws-idp-confidence-threshold: '0.8'
+          description: Statement period end date in "Month Day, Year" format, e.g. "November 30, 2016".
+          data_type: string
+        start:
+          type: string
+          x-aws-idp-evaluation-method: LEVENSHTEIN
+          x-aws-idp-evaluation-threshold: '0.7'
+          x-aws-idp-confidence-threshold: '0.8'
+          description: Statement period start date in "Month Day, Year" format, e.g. "September 1, 2016".
+          data_type: string
     transactions:
       type: array
-      description: List of transactions
       items:
         type: object
         properties:
           date:
             type: string
-            data_type: string
-            description: Date of the transaction exactly as it appears
             x-aws-idp-evaluation-method: LEVENSHTEIN
             x-aws-idp-evaluation-threshold: '0.7'
+            x-aws-idp-confidence-threshold: '0.8'
+            description: Transaction date in MM/DD format as shown on the statement (not YYYY-MM-DD for this field).
+            data_type: string
+          total:
+            type: integer
+            x-aws-idp-evaluation-method: NUMERIC_EXACT
+            x-aws-idp-confidence-threshold: '0.8'
+            description: Running total/balance after this transaction. Negative values indicate debits.
+            data_type: number
+          deposit:
+            type: integer
+            x-aws-idp-evaluation-method: NUMERIC_EXACT
+            x-aws-idp-confidence-threshold: '0.8'
+            description: Deposit amount as an integer. Use 0 (not null) when there is no deposit for this transaction.
+            data_type: number
+          withdrawal:
+            type: integer
+            description: Withdrawal amount as an integer. Use 0 (not null) when there is no withdrawal for this transaction.
+            data_type: number
+            x-aws-idp-evaluation-method: NUMERIC_EXACT
             x-aws-idp-confidence-threshold: '0.8'
           description:
             type: string
-            data_type: string
-            description: Description for the transaction
             x-aws-idp-evaluation-method: LEVENSHTEIN
             x-aws-idp-evaluation-threshold: '0.7'
             x-aws-idp-confidence-threshold: '0.8'
-          deposit:
-            type: number
-            data_type: number
-            description: Amount deposited into the account
-            x-aws-idp-evaluation-method: NUMERIC_EXACT
-            x-aws-idp-confidence-threshold: '0.8'
-          withdrawal:
-            type: number
-            data_type: number
-            description: Amount withdrawn from the account
-            x-aws-idp-evaluation-method: NUMERIC_EXACT
-            x-aws-idp-confidence-threshold: '0.8'
-          total:
-            type: number
-            data_type: number
-            description: Net balance after applying the deposit and withdrawal
-            x-aws-idp-evaluation-method: NUMERIC_EXACT
-            x-aws-idp-confidence-threshold: '0.8'
+            description: Full transaction description text exactly as it appears in the document.
+            data_type: string
+    accountNumber:
+      type: string
+      data_type: string
+      x-aws-idp-evaluation-method: EXACT
+      x-aws-idp-confidence-threshold: '0.8'
 - $schema: https://json-schema.org/draft/2020-12/schema
   $id: DELIVERY_NOTE
   x-aws-idp-document-type: DELIVERY_NOTE
-  description: Delivery note with sender/receiver and itemized products
+  description: A delivery note or shipping document listing items delivered, with sender/receiver details and product specifications.
   type: object
   properties:
-    header:
-      type: object
-      description: Delivery note header information
-      properties:
-        date:
-          type: string
-          data_type: string
-          description: Delivery note date
-          x-aws-idp-evaluation-method: LEVENSHTEIN
-          x-aws-idp-evaluation-threshold: '0.7'
-          x-aws-idp-confidence-threshold: '0.8'
-        projectName:
-          type: string
-          data_type: string
-          description: Project name
-          x-aws-idp-evaluation-method: LEVENSHTEIN
-          x-aws-idp-evaluation-threshold: '0.7'
-          x-aws-idp-confidence-threshold: '0.8'
-        from:
-          type: object
-          description: Sender information
-          properties:
-            companyName:
-              type: string
-              data_type: string
-              description: Sender company name
-              x-aws-idp-evaluation-method: LEVENSHTEIN
-              x-aws-idp-evaluation-threshold: '0.7'
-              x-aws-idp-confidence-threshold: '0.8'
-            reference:
-              type: string
-              data_type: string
-              description: Sender reference
-              x-aws-idp-evaluation-method: EXACT
-              x-aws-idp-confidence-threshold: '0.8'
-            location:
-              type: string
-              data_type: string
-              description: Sender location
-              x-aws-idp-evaluation-method: LEVENSHTEIN
-              x-aws-idp-evaluation-threshold: '0.7'
-              x-aws-idp-confidence-threshold: '0.8'
-            tel:
-              type: string
-              data_type: string
-              description: Sender telephone
-              x-aws-idp-evaluation-method: EXACT
-              x-aws-idp-confidence-threshold: '0.8'
-            email:
-              type: string
-              data_type: string
-              description: Sender email
-              x-aws-idp-evaluation-method: EXACT
-              x-aws-idp-confidence-threshold: '0.8'
-            vatNumber:
-              type: string
-              data_type: string
-              description: Sender VAT number
-              x-aws-idp-evaluation-method: EXACT
-              x-aws-idp-confidence-threshold: '0.8'
-        to:
-          type: object
-          description: Receiver information
-          properties:
-            companyName:
-              type: string
-              data_type: string
-              description: Receiver company name
-              x-aws-idp-evaluation-method: LEVENSHTEIN
-              x-aws-idp-evaluation-threshold: '0.7'
-              x-aws-idp-confidence-threshold: '0.8'
-            reference:
-              type: string
-              data_type: string
-              description: Receiver reference
-              x-aws-idp-evaluation-method: EXACT
-              x-aws-idp-confidence-threshold: '0.8'
-            location:
-              type: string
-              data_type: string
-              description: Receiver location
-              x-aws-idp-evaluation-method: LEVENSHTEIN
-              x-aws-idp-evaluation-threshold: '0.7'
-              x-aws-idp-confidence-threshold: '0.8'
-            attention:
-              type: string
-              data_type: string
-              description: Attention to person
-              x-aws-idp-evaluation-method: LEVENSHTEIN
-              x-aws-idp-evaluation-threshold: '0.7'
-              x-aws-idp-confidence-threshold: '0.8'
-            tel:
-              type: string
-              data_type: string
-              description: Receiver telephone
-              x-aws-idp-evaluation-method: EXACT
-              x-aws-idp-confidence-threshold: '0.8'
-            email:
-              type: string
-              data_type: string
-              description: Receiver email
-              x-aws-idp-evaluation-method: EXACT
-              x-aws-idp-confidence-threshold: '0.8'
-            vatNumber:
-              type: string
-              data_type: string
-              description: Receiver VAT number
-              x-aws-idp-evaluation-method: EXACT
-              x-aws-idp-confidence-threshold: '0.8'
     items:
       type: array
-      description: List of delivered items
       items:
         type: object
         properties:
           sn:
-            type: number
-            data_type: number
-            description: Serial/line number
+            type: integer
             x-aws-idp-evaluation-method: NUMERIC_EXACT
             x-aws-idp-confidence-threshold: '0.8'
+            data_type: number
           type:
             type: string
             data_type: string
-            description: Product type
-            enum:
-            - LED Luminaire
-            - Power Supply
-            - Control System
-            - Mounting Bracket
-            - LED Driver
-            - Cable Assembly
-            - Junction Box
-            - Sensor Module
-            x-aws-idp-evaluation-method: EXACT
-            x-aws-idp-confidence-threshold: '0.8'
-          brand:
-            type: string
-            data_type: string
-            description: Brand name
-            enum:
-            - Philips
-            - Osram
-            - Schneider Electric
-            - Siemens
-            - ABB
-            - Lutron
-            - Legrand
-            - Mean Well
-            x-aws-idp-evaluation-method: EXACT
-            x-aws-idp-confidence-threshold: '0.8'
-          reference:
-            type: string
-            data_type: string
-            description: Product reference
             x-aws-idp-evaluation-method: EXACT
             x-aws-idp-confidence-threshold: '0.8'
           unit:
             type: string
             data_type: string
-            description: Unit of measure
-            enum:
-            - pcs
-            - set
-            - unit
+            x-aws-idp-evaluation-method: EXACT
+            x-aws-idp-confidence-threshold: '0.8'
+          brand:
+            type: string
+            data_type: string
             x-aws-idp-evaluation-method: EXACT
             x-aws-idp-confidence-threshold: '0.8'
           quantity:
-            type: number
-            data_type: number
-            description: Quantity
+            type: integer
             x-aws-idp-evaluation-method: NUMERIC_EXACT
+            x-aws-idp-confidence-threshold: '0.8'
+            data_type: number
+          reference:
+            type: string
+            data_type: string
+            x-aws-idp-evaluation-method: EXACT
             x-aws-idp-confidence-threshold: '0.8'
           productSpecsJson:
             type: object
-            description: Product specifications
             properties:
               power:
                 type: object
-                description: Power specifications
                 properties:
                   watts:
-                    type: number
-                    data_type: number
-                    description: Power in watts
+                    type: integer
                     x-aws-idp-evaluation-method: NUMERIC_EXACT
                     x-aws-idp-confidence-threshold: '0.8'
+                    data_type: number
+                  efficiency:
+                    type: integer
+                    x-aws-idp-evaluation-method: NUMERIC_EXACT
+                    x-aws-idp-confidence-threshold: '0.8'
+                    data_type: number
                   inputVoltage:
                     type: string
                     data_type: string
-                    description: Input voltage
-                    enum:
-                    - 100-240v
-                    - 100-277v
-                    - 220-240v
                     x-aws-idp-evaluation-method: EXACT
                     x-aws-idp-confidence-threshold: '0.8'
-                  efficiency:
-                    type: number
-                    data_type: number
-                    description: Efficiency in percentage (0-100)
-                    x-aws-idp-evaluation-method: NUMERIC_EXACT
+              ratings:
+                type: object
+                properties:
+                  protection:
+                    type: string
+                    data_type: string
+                    x-aws-idp-evaluation-method: EXACT
                     x-aws-idp-confidence-threshold: '0.8'
               physical:
                 type: object
-                description: Physical specifications
                 properties:
+                  weight:
+                    type: number
+                    x-aws-idp-evaluation-method: NUMERIC_EXACT
+                    x-aws-idp-confidence-threshold: '0.8'
+                    data_type: number
                   material:
                     type: string
                     data_type: string
-                    description: Material
-                    enum:
-                    - aluminum
-                    - steel
-                    - plastic
                     x-aws-idp-evaluation-method: EXACT
                     x-aws-idp-confidence-threshold: '0.8'
                   mountingType:
                     type: string
                     data_type: string
-                    description: Mounting type
-                    enum:
-                    - surface
-                    - recessed
-                    - track
                     x-aws-idp-evaluation-method: EXACT
                     x-aws-idp-confidence-threshold: '0.8'
-                  weight:
-                    type: number
-                    data_type: number
-                    description: Weight
-                    x-aws-idp-evaluation-method: NUMERIC_EXACT
-                    x-aws-idp-confidence-threshold: '0.8'
-              ratings:
-                type: object
-                description: Ratings and certifications
-                properties:
-                  protection:
-                    type: string
-                    data_type: string
-                    description: IP protection rating
-                    enum:
-                    - ip65
-                    - ip66
-                    - ip67
-                    x-aws-idp-evaluation-method: EXACT
-                    x-aws-idp-confidence-threshold: '0.8'
+    header:
+      type: object
+      properties:
+        to:
+          type: object
+          properties:
+            tel:
+              type: string
+              data_type: string
+              x-aws-idp-evaluation-method: EXACT
+              x-aws-idp-confidence-threshold: '0.8'
+            email:
+              type: string
+              data_type: string
+              x-aws-idp-evaluation-method: EXACT
+              x-aws-idp-confidence-threshold: '0.8'
+            location:
+              type: string
+              x-aws-idp-evaluation-method: LEVENSHTEIN
+              x-aws-idp-evaluation-threshold: '0.7'
+              x-aws-idp-confidence-threshold: '0.8'
+              data_type: string
+            attention:
+              type: string
+              x-aws-idp-evaluation-method: LEVENSHTEIN
+              x-aws-idp-evaluation-threshold: '0.7'
+              x-aws-idp-confidence-threshold: '0.8'
+              data_type: string
+            reference:
+              type: string
+              data_type: string
+              x-aws-idp-evaluation-method: EXACT
+              x-aws-idp-confidence-threshold: '0.8'
+            vatNumber:
+              type: string
+              data_type: string
+              x-aws-idp-evaluation-method: EXACT
+              x-aws-idp-confidence-threshold: '0.8'
+            companyName:
+              type: string
+              x-aws-idp-evaluation-method: LEVENSHTEIN
+              x-aws-idp-evaluation-threshold: '0.7'
+              x-aws-idp-confidence-threshold: '0.8'
+              data_type: string
+        date:
+          type: string
+          x-aws-idp-evaluation-method: LEVENSHTEIN
+          x-aws-idp-evaluation-threshold: '0.7'
+          x-aws-idp-confidence-threshold: '0.8'
+          data_type: string
+        from:
+          type: object
+          properties:
+            tel:
+              type: string
+              data_type: string
+              x-aws-idp-evaluation-method: EXACT
+              x-aws-idp-confidence-threshold: '0.8'
+            email:
+              type: string
+              data_type: string
+              x-aws-idp-evaluation-method: EXACT
+              x-aws-idp-confidence-threshold: '0.8'
+            location:
+              type: string
+              x-aws-idp-evaluation-method: LEVENSHTEIN
+              x-aws-idp-evaluation-threshold: '0.7'
+              x-aws-idp-confidence-threshold: '0.8'
+              data_type: string
+            reference:
+              type: string
+              data_type: string
+              x-aws-idp-evaluation-method: EXACT
+              x-aws-idp-confidence-threshold: '0.8'
+            vatNumber:
+              type: string
+              data_type: string
+              x-aws-idp-evaluation-method: EXACT
+              x-aws-idp-confidence-threshold: '0.8'
+            companyName:
+              type: string
+              x-aws-idp-evaluation-method: LEVENSHTEIN
+              x-aws-idp-evaluation-threshold: '0.7'
+              x-aws-idp-confidence-threshold: '0.8'
+              data_type: string
+        projectName:
+          type: string
+          x-aws-idp-evaluation-method: LEVENSHTEIN
+          x-aws-idp-evaluation-threshold: '0.7'
+          x-aws-idp-confidence-threshold: '0.8'
+          data_type: string
 - $schema: https://json-schema.org/draft/2020-12/schema
   $id: EQUIPMENT_INSPECTION
   x-aws-idp-document-type: EQUIPMENT_INSPECTION
-  description: Equipment inspection report with checkpoints and status
+  description: An equipment inspection report with checkpoint categories, pass/fail status, and next inspection date.
   type: object
   properties:
-    equipmentInfo:
-      type: object
-      description: Equipment information
-      properties:
-        equipmentId:
-          type: string
-          data_type: string
-          description: Equipment identifier
-          x-aws-idp-evaluation-method: EXACT
-          x-aws-idp-confidence-threshold: '0.8'
-        model:
-          type: string
-          data_type: string
-          description: Equipment model
-          x-aws-idp-evaluation-method: LEVENSHTEIN
-          x-aws-idp-evaluation-threshold: '0.7'
-          x-aws-idp-confidence-threshold: '0.8'
-        department:
-          type: string
-          data_type: string
-          description: Department
-          x-aws-idp-evaluation-method: LEVENSHTEIN
-          x-aws-idp-evaluation-threshold: '0.7'
-          x-aws-idp-confidence-threshold: '0.8'
-        inspectionDate:
-          type: string
-          data_type: string
-          description: Inspection date
-          x-aws-idp-evaluation-method: LEVENSHTEIN
-          x-aws-idp-evaluation-threshold: '0.7'
-          x-aws-idp-confidence-threshold: '0.8'
     checkpoints:
       type: array
-      description: Inspection checkpoints
       items:
         type: object
         properties:
-          category:
-            type: string
-            data_type: string
-            description: Category name
-            x-aws-idp-evaluation-method: LEVENSHTEIN
-            x-aws-idp-evaluation-threshold: '0.7'
-            x-aws-idp-confidence-threshold: '0.8'
           items:
             type: array
-            description: Checkpoint items
             items:
               type: object
               properties:
-                checkpoint:
+                notes:
                   type: string
-                  data_type: string
-                  description: Checkpoint description
                   x-aws-idp-evaluation-method: LEVENSHTEIN
                   x-aws-idp-evaluation-threshold: '0.7'
                   x-aws-idp-confidence-threshold: '0.8'
+                  data_type: string
                 status:
                   type: string
                   data_type: string
-                  description: Status
                   enum:
                   - functional
                   - needsService
                   - defective
-                  - pass
-                  - fail
                   - na
+                  description: 'Inspection status. Must be exactly one of: "functional", "needsService", "defective", "na". Use lowercase. Map "Not Applicable" to "na", "Needs Service" to "needsService".'
                   x-aws-idp-evaluation-method: EXACT
                   x-aws-idp-confidence-threshold: '0.8'
-                notes:
+                checkpoint:
                   type: string
-                  data_type: string
-                  description: Notes
                   x-aws-idp-evaluation-method: LEVENSHTEIN
                   x-aws-idp-evaluation-threshold: '0.7'
                   x-aws-idp-confidence-threshold: '0.8'
+                  data_type: string
+          category:
+            type: string
+            x-aws-idp-evaluation-method: LEVENSHTEIN
+            x-aws-idp-evaluation-threshold: '0.7'
+            x-aws-idp-confidence-threshold: '0.8'
+            data_type: string
+    equipmentInfo:
+      type: object
+      properties:
+        model:
+          type: string
+          x-aws-idp-evaluation-method: LEVENSHTEIN
+          x-aws-idp-evaluation-threshold: '0.7'
+          x-aws-idp-confidence-threshold: '0.8'
+          data_type: string
+        department:
+          type: string
+          x-aws-idp-evaluation-method: LEVENSHTEIN
+          x-aws-idp-evaluation-threshold: '0.7'
+          x-aws-idp-confidence-threshold: '0.8'
+          data_type: string
+        equipmentId:
+          type: string
+          data_type: string
+          x-aws-idp-evaluation-method: EXACT
+          x-aws-idp-confidence-threshold: '0.8'
+        inspectionDate:
+          type: string
+          x-aws-idp-evaluation-method: LEVENSHTEIN
+          x-aws-idp-evaluation-threshold: '0.7'
+          x-aws-idp-confidence-threshold: '0.8'
+          description: inspectionDate in YYYY-MM-DD format.
+          data_type: string
     overallStatus:
       type: object
-      description: Overall inspection status
       properties:
         passedInspection:
           type: boolean
-          data_type: boolean
-          description: Whether passed inspection
           x-aws-idp-evaluation-method: EXACT
           x-aws-idp-confidence-threshold: '0.8'
+          data_type: boolean
+          description: Whether the equipment passed overall inspection. Extract the explicit pass/fail determination stated in the document. Do NOT infer this from individual checkpoint statuses — use only the explicitly stated overall result.
         nextInspectionDue:
           type: string
-          data_type: string
-          description: Next inspection due date
           x-aws-idp-evaluation-method: LEVENSHTEIN
           x-aws-idp-evaluation-threshold: '0.7'
           x-aws-idp-confidence-threshold: '0.8'
+          description: nextInspectionDue in YYYY-MM-DD format.
+          data_type: string
 - $schema: https://json-schema.org/draft/2020-12/schema
   $id: GLOSSARY
   x-aws-idp-document-type: GLOSSARY
-  description: Glossary with alphabetized terms
+  description: A glossary or dictionary page with terms organized alphabetically by letter sections.
   type: object
-  $defs:
-    Term:
-      type: object
-      properties:
-        term:
-          type: string
-          data_type: string
-          description: The glossary term. Don't make up terms, use the ones provided
-            in the glossary list.
-          x-aws-idp-evaluation-method: LEVENSHTEIN
-          x-aws-idp-evaluation-threshold: '0.7'
-          x-aws-idp-confidence-threshold: '0.8'
-    GlossarySection:
-      type: object
-      properties:
-        letter:
-          type: string
-          data_type: string
-          description: The letter heading for this section
-          x-aws-idp-evaluation-method: EXACT
-          x-aws-idp-confidence-threshold: '0.8'
-        terms:
-          type: array
-          description: Terms in section
-          items:
-            $ref: '#/$defs/Term'
   properties:
     title:
       type: string
-      data_type: string
-      description: Glossary title
       x-aws-idp-evaluation-method: LEVENSHTEIN
       x-aws-idp-evaluation-threshold: '0.7'
       x-aws-idp-confidence-threshold: '0.8'
+      data_type: string
     pageNumber:
-      type: number
-      data_type: number
-      description: The current page number of the glossary
+      type: integer
       x-aws-idp-evaluation-method: NUMERIC_EXACT
       x-aws-idp-confidence-threshold: '0.8'
+      data_type: number
     glossarySections:
       type: array
-      description: Sections by letter
       items:
-        $ref: '#/$defs/GlossarySection'
+        type: object
+        properties:
+          terms:
+            type: array
+            items:
+              type: object
+              properties:
+                term:
+                  type: string
+                  x-aws-idp-evaluation-method: LEVENSHTEIN
+                  x-aws-idp-evaluation-threshold: '0.7'
+                  x-aws-idp-confidence-threshold: '0.8'
+                  data_type: string
+          letter:
+            type: string
+            data_type: string
+            description: 'The section heading letter or number. Can be a single letter (A, B, C...) or a digit (1, 2, 3...). Extract exactly as shown in the document. Note: "1" is the digit one, not the letter "I" or "l".'
+            x-aws-idp-evaluation-method: EXACT
+            x-aws-idp-confidence-threshold: '0.8'
 - $schema: https://json-schema.org/draft/2020-12/schema
   $id: PETITION_FORM
   x-aws-idp-document-type: PETITION_FORM
-  description: Petition form with candidate info and signatures
+  description: A petition form with candidate information, witness details, and voter signatures for an election.
   type: object
   properties:
     header:
       type: object
-      description: Petition header information
       properties:
-        title:
-          type: string
-          data_type: string
-          description: Petition title
-          x-aws-idp-evaluation-method: LEVENSHTEIN
-          x-aws-idp-evaluation-threshold: '0.7'
-          x-aws-idp-confidence-threshold: '0.8'
-        county:
-          type: string
-          data_type: string
-          description: County
-          x-aws-idp-evaluation-method: LEVENSHTEIN
-          x-aws-idp-evaluation-threshold: '0.7'
-          x-aws-idp-confidence-threshold: '0.8'
         state:
           type: string
           data_type: string
-          description: State
           x-aws-idp-evaluation-method: EXACT
           x-aws-idp-confidence-threshold: '0.8'
+        title:
+          type: string
+          x-aws-idp-evaluation-method: LEVENSHTEIN
+          x-aws-idp-evaluation-threshold: '0.7'
+          x-aws-idp-confidence-threshold: '0.8'
+          data_type: string
+        county:
+          type: string
+          x-aws-idp-evaluation-method: LEVENSHTEIN
+          x-aws-idp-evaluation-threshold: '0.7'
+          x-aws-idp-confidence-threshold: '0.8'
+          data_type: string
         electionDate:
           type: string
-          data_type: string
-          description: Election date
           x-aws-idp-evaluation-method: LEVENSHTEIN
           x-aws-idp-evaluation-threshold: '0.7'
           x-aws-idp-confidence-threshold: '0.8'
-    candidate:
-      type: object
-      description: Candidate information
-      properties:
-        name:
-          type: string
           data_type: string
-          description: Candidate name
-          x-aws-idp-evaluation-method: LEVENSHTEIN
-          x-aws-idp-evaluation-threshold: '0.7'
-          x-aws-idp-confidence-threshold: '0.8'
-        position:
-          type: string
-          data_type: string
-          description: Position sought
-          x-aws-idp-evaluation-method: LEVENSHTEIN
-          x-aws-idp-evaluation-threshold: '0.7'
-          x-aws-idp-confidence-threshold: '0.8'
-        residence:
-          type: string
-          data_type: string
-          description: Candidate residence
-          x-aws-idp-evaluation-method: LEVENSHTEIN
-          x-aws-idp-evaluation-threshold: '0.7'
-          x-aws-idp-confidence-threshold: '0.8'
     witness:
       type: object
-      description: Witness information
+      properties:
+        date:
+          type: string
+          x-aws-idp-evaluation-method: LEVENSHTEIN
+          x-aws-idp-evaluation-threshold: '0.7'
+          x-aws-idp-confidence-threshold: '0.8'
+          data_type: string
+        name:
+          type: string
+          x-aws-idp-evaluation-method: LEVENSHTEIN
+          x-aws-idp-evaluation-threshold: '0.7'
+          x-aws-idp-confidence-threshold: '0.8'
+          data_type: string
+        residence:
+          type: string
+          x-aws-idp-evaluation-method: LEVENSHTEIN
+          x-aws-idp-evaluation-threshold: '0.7'
+          x-aws-idp-confidence-threshold: '0.8'
+          data_type: string
+    candidate:
+      type: object
       properties:
         name:
           type: string
-          data_type: string
-          description: Witness name
           x-aws-idp-evaluation-method: LEVENSHTEIN
           x-aws-idp-evaluation-threshold: '0.7'
           x-aws-idp-confidence-threshold: '0.8'
+          data_type: string
+        position:
+          type: string
+          x-aws-idp-evaluation-method: LEVENSHTEIN
+          x-aws-idp-evaluation-threshold: '0.7'
+          x-aws-idp-confidence-threshold: '0.8'
+          data_type: string
         residence:
           type: string
-          data_type: string
-          description: Witness residence
           x-aws-idp-evaluation-method: LEVENSHTEIN
           x-aws-idp-evaluation-threshold: '0.7'
           x-aws-idp-confidence-threshold: '0.8'
-        date:
-          type: string
           data_type: string
-          description: Witness date
-          x-aws-idp-evaluation-method: LEVENSHTEIN
-          x-aws-idp-evaluation-threshold: '0.7'
-          x-aws-idp-confidence-threshold: '0.8'
     signatures:
       type: array
-      description: List of signatures
       items:
         type: object
         properties:
           date:
             type: string
-            data_type: string
-            description: Signature date
             x-aws-idp-evaluation-method: LEVENSHTEIN
             x-aws-idp-evaluation-threshold: '0.7'
             x-aws-idp-confidence-threshold: '0.8'
-          printName:
-            type: string
             data_type: string
-            description: Printed name
-            x-aws-idp-evaluation-method: LEVENSHTEIN
-            x-aws-idp-evaluation-threshold: '0.7'
-            x-aws-idp-confidence-threshold: '0.8'
-          residence:
-            type: string
-            data_type: string
-            description: Signer residence
-            x-aws-idp-evaluation-method: LEVENSHTEIN
-            x-aws-idp-evaluation-threshold: '0.7'
-            x-aws-idp-confidence-threshold: '0.8'
           town:
             type: string
-            data_type: string
-            description: Signer town
             x-aws-idp-evaluation-method: LEVENSHTEIN
             x-aws-idp-evaluation-threshold: '0.7'
             x-aws-idp-confidence-threshold: '0.8'
+            data_type: string
+          printName:
+            type: string
+            x-aws-idp-evaluation-method: LEVENSHTEIN
+            x-aws-idp-evaluation-threshold: '0.7'
+            x-aws-idp-confidence-threshold: '0.8'
+            data_type: string
+          residence:
+            type: string
+            x-aws-idp-evaluation-method: LEVENSHTEIN
+            x-aws-idp-evaluation-threshold: '0.7'
+            x-aws-idp-confidence-threshold: '0.8'
+            data_type: string
 - $schema: https://json-schema.org/draft/2020-12/schema
   $id: REAL_ESTATE
   x-aws-idp-document-type: REAL_ESTATE
-  description: Real estate transaction data with quarterly and city breakdowns
+  description: A real estate transaction summary showing property values by category and city.
   type: object
-  $defs:
-    Transaction:
-      type: object
-      properties:
-        period:
-          type: string
-          data_type: string
-          description: The period in the format Q[1-4]-YYYY (e.g., Q1-2017)
-          x-aws-idp-evaluation-method: EXACT
-          x-aws-idp-confidence-threshold: '0.8'
-        value:
-          type: number
-          data_type: number
-          description: The value of the transaction in millions
-          x-aws-idp-evaluation-method: NUMERIC_EXACT
-          x-aws-idp-confidence-threshold: '0.8'
-        category:
-          type: string
-          data_type: string
-          description: The category of the transaction (e.g., Multifamily Housing)
-          x-aws-idp-evaluation-method: LEVENSHTEIN
-          x-aws-idp-evaluation-threshold: '0.7'
-          x-aws-idp-confidence-threshold: '0.8'
-    CityTransaction:
-      type: object
-      properties:
-        year:
-          type: string
-          data_type: string
-          description: The year in YYYY format (e.g. 2017)
-          x-aws-idp-evaluation-method: EXACT
-          x-aws-idp-confidence-threshold: '0.8'
-        city:
-          type: string
-          data_type: string
-          description: City name
-          x-aws-idp-evaluation-method: LEVENSHTEIN
-          x-aws-idp-evaluation-threshold: '0.7'
-          x-aws-idp-confidence-threshold: '0.8'
-        value:
-          type: number
-          data_type: number
-          description: Total value transactions in millions
-          x-aws-idp-evaluation-method: NUMERIC_EXACT
-          x-aws-idp-confidence-threshold: '0.8'
   properties:
     transactions:
       type: array
-      description: Quarterly real estate transactions by property class
       items:
-        $ref: '#/$defs/Transaction'
+        type: object
+        properties:
+          value:
+            type: integer
+            x-aws-idp-evaluation-method: NUMERIC_EXACT
+            x-aws-idp-confidence-threshold: '0.8'
+            description: The NUMBER of transactions (integer count), NOT a dollar amount. These are small integers typically in the range 1-50. If the document shows both dollar amounts and transaction counts, extract the COUNT.
+            data_type: number
+          period:
+            type: string
+            description: Quarter-year period in format "Q{N}-{YYYY}", e.g. "Q1-2018", "Q2-2023". The quarter number comes first, then a hyphen, then the 4-digit year.
+            data_type: string
+            x-aws-idp-evaluation-method: EXACT
+            x-aws-idp-confidence-threshold: '0.8'
+          category:
+            type: string
+            x-aws-idp-evaluation-method: LEVENSHTEIN
+            x-aws-idp-evaluation-threshold: '0.7'
+            x-aws-idp-confidence-threshold: '0.8'
+            description: The property category, e.g. "Retail", "Commercial Industrial".
+            data_type: string
+      description: Array of transaction counts by category AND quarter. Each row is one category in one quarter period. For example, if there are 2 categories and 4 quarters, there should be 8 rows. Extract individual quarterly counts, NOT yearly totals.
     transactionsByCity:
       type: array
-      description: Transactions by city
       items:
-        $ref: '#/$defs/CityTransaction'
+        type: object
+        properties:
+          city:
+            type: string
+            x-aws-idp-evaluation-method: LEVENSHTEIN
+            x-aws-idp-evaluation-threshold: '0.7'
+            x-aws-idp-confidence-threshold: '0.8'
+            description: The city name.
+            data_type: string
+          year:
+            type: string
+            description: The year for this transaction count.
+            data_type: string
+            x-aws-idp-evaluation-method: EXACT
+            x-aws-idp-confidence-threshold: '0.8'
+          value:
+            type: integer
+            x-aws-idp-evaluation-method: NUMERIC_EXACT
+            x-aws-idp-confidence-threshold: '0.8'
+            description: The total transaction value for this city in millions of dollars, as an integer. Extract from the "Transactions (Total)" column. For example, "$239M" should be extracted as 239. Do NOT extract the "Permits Filed" count.
+            data_type: number
+      description: Array of total transaction values by city. Each row has a city, year, and the total transaction dollar amount in millions (as an integer without $ or M).
 - $schema: https://json-schema.org/draft/2020-12/schema
   $id: SHIFT_SCHEDULE
   x-aws-idp-document-type: SHIFT_SCHEDULE
-  description: Employee shift schedule with daily assignments
+  description: A staff shift schedule showing employee assignments across days of the week with shift types and hours.
   type: object
-  $defs:
-    Shift:
-      type: object
-      properties:
-        type:
-          type: string
-          data_type: string
-          description: Shift type
-          enum:
-          - Morning
-          - Afternoon
-          - Night
-          - Leave
-          - empty
-          x-aws-idp-evaluation-method: EXACT
-          x-aws-idp-confidence-threshold: '0.8'
-        hours:
-          type: string
-          data_type: string
-          description: Shift hours, ex. 07:00-15:00. Only required for Morning, Afternoon,
-            and Night.
-          x-aws-idp-evaluation-method: EXACT
-          x-aws-idp-confidence-threshold: '0.8'
-    Employee:
-      type: object
-      properties:
-        employeeName:
-          type: string
-          data_type: string
-          description: Employee name
-          x-aws-idp-evaluation-method: LEVENSHTEIN
-          x-aws-idp-evaluation-threshold: '0.7'
-          x-aws-idp-confidence-threshold: '0.8'
-        employeeId:
-          type: string
-          data_type: string
-          description: Employee ID
-          x-aws-idp-evaluation-method: EXACT
-          x-aws-idp-confidence-threshold: '0.8'
-        department:
-          type: string
-          data_type: string
-          description: Department
-          x-aws-idp-evaluation-method: LEVENSHTEIN
-          x-aws-idp-evaluation-threshold: '0.7'
-          x-aws-idp-confidence-threshold: '0.8'
-        shifts:
-          type: array
-          description: Weekly shifts
-          items:
-            $ref: '#/$defs/Shift'
   properties:
     title:
       type: string
-      data_type: string
-      description: Schedule title
       x-aws-idp-evaluation-method: LEVENSHTEIN
       x-aws-idp-evaluation-threshold: '0.7'
       x-aws-idp-confidence-threshold: '0.8'
-    weekStartDate:
-      type: string
       data_type: string
-      description: Week start date
-      x-aws-idp-evaluation-method: LEVENSHTEIN
-      x-aws-idp-evaluation-threshold: '0.7'
-      x-aws-idp-confidence-threshold: '0.8'
     facility:
       type: string
-      data_type: string
-      description: Facility name
       x-aws-idp-evaluation-method: LEVENSHTEIN
       x-aws-idp-evaluation-threshold: '0.7'
       x-aws-idp-confidence-threshold: '0.8'
+      data_type: string
     employees:
       type: array
-      description: Employee schedules
       items:
-        $ref: '#/$defs/Employee'
-rule_validation:
+        type: object
+        properties:
+          shifts:
+            type: array
+            items:
+              type: object
+              properties:
+                type:
+                  type: string
+                  data_type: string
+                  x-aws-idp-evaluation-method: EXACT
+                  x-aws-idp-confidence-threshold: '0.8'
+                hours:
+                  type: string
+                  data_type: string
+                  x-aws-idp-evaluation-method: EXACT
+                  x-aws-idp-confidence-threshold: '0.8'
+          department:
+            type: string
+            x-aws-idp-evaluation-method: LEVENSHTEIN
+            x-aws-idp-evaluation-threshold: '0.7'
+            x-aws-idp-confidence-threshold: '0.8'
+            data_type: string
+          employeeId:
+            type: string
+            data_type: string
+            x-aws-idp-evaluation-method: EXACT
+            x-aws-idp-confidence-threshold: '0.8'
+          employeeName:
+            type: string
+            x-aws-idp-evaluation-method: LEVENSHTEIN
+            x-aws-idp-evaluation-threshold: '0.7'
+            x-aws-idp-confidence-threshold: '0.8'
+            data_type: string
+    weekStartDate:
+      type: string
+      x-aws-idp-evaluation-method: LEVENSHTEIN
+      x-aws-idp-evaluation-threshold: '0.7'
+      x-aws-idp-confidence-threshold: '0.8'
+      data_type: string
+ocr:
+  backend: textract
+  model_id: us.amazon.nova-2-lite-v1:0
+  system_prompt: You are an expert OCR system. Extract all text from the provided image accurately, preserving layout where possible.
+  task_prompt: Extract all text from this document image. Preserve the layout, including paragraphs, tables, and formatting.
+  features:
+  - name: LAYOUT
+  max_workers: 20
+  image:
+    target_width:
+    target_height:
+    dpi:
+    preprocessing:
+classification:
+  classificationMethod: multimodalPageLevelClassification
+  maxPagesForClassification: ALL
+  contextPagesCount: '0'
+  sectionSplitting: llm_determined
+  image:
+    target_height: ''
+    target_width: ''
+  model: us.amazon.nova-2-lite-v1:0
+  temperature: '0.0'
+  top_p: '0.0'
+  max_tokens: '4096'
+  top_k: '5'
+  system_prompt: 'You are a multimodal document classification expert that analyzes business documents using both visual layout and textual content. Your task is to classify single-page documents into predefined categories based on their structural patterns, visual features, and text content. Your output must be valid JSON according to the requested format. <variables> <document-ocr-data>: OCR-extracted text content from the document page that provides textual information for classification <document-image>: Visual representation of the document page that provides layout, formatting, and visual structure information <document-types>: List of valid document types with their descriptions that the document must be classified into </variables>'
+  task_prompt: "<task-description> Analyze the provided document using both its visual layout and textual content to determine its document type and whether this page begins a new document or continues the previous one. </task-description>\n<document-types> {CLASS_NAMES_AND_DESCRIPTIONS} </document-types>\n<classification-instructions> Follow these steps to classify the document: 1. Examine the visual layout: headers, logos, formatting, structure, and visual organization 2. Analyze the textual content: key phrases, terminology, purpose, and information type 3. Identify distinctive features that match the document type descriptions 4. Decide if this page starts a new document (output \"start\") or continues the previous document (output \"continue\") 5. Consider both visual and textual evidence together to determine the best match 6. CRITICAL: Only use document types explicitly listed in the <document-types> section </classification-instructions>\n<output-format> {\n  \"classification_reason\": \"Detailed reasoning including specific visual and textual evidence that led to this classification\",\n  \"class\": \"exact_document_type_from_list\",\n  \"document_boundary\": \"start or continue\"\n} </output-format>\n<<CACHEPOINT>>\n<document-ocr-data> {DOCUMENT_TEXT} </document-ocr-data>\n<document-image> {DOCUMENT_IMAGE} </document-image>\n<final-instructions> Analyze the document above by: 1. Applying the <classification-instructions> to examine both visual and textual features 2. Selecting ONLY from document types in <document-types> 3. Providing clear reasoning with specific evidence 4. Outputting in the exact JSON format specified in <output-format> </final-instructions>"
+extraction:
+  agentic:
+    enabled: false
+    review_agent: false
+  image:
+    target_width: ''
+    target_height: ''
+  model: us.amazon.nova-2-lite-v1:0
+  temperature: '0.0'
+  top_p: '0.0'
+  max_tokens: '65535'
+  top_k: '5'
+  system_prompt: You are a document assistant. Respond only with JSON. Never make up data, only provide data found in the document being provided.
+  task_prompt: "<background> You are an expert in document analysis and information extraction.  You can understand and extract key information from documents classified as type: \n{DOCUMENT_CLASS}. </background>\n<task> Your task is to take the unstructured text provided and convert it into a well-organized table format using JSON. Identify the main entities, attributes, or categories mentioned in the attributes list below and use them as keys in the JSON object.  Then, extract the relevant information from the text and populate the corresponding values in the JSON object. </task>\n<extraction-guidelines> Guidelines:\n    1. Ensure that the data is accurately represented and properly formatted within\n    the JSON structure\n    2. Include double quotes around all keys and values\n    3. Do not make up data - only extract information explicitly found in the\n    document\n    4. Do not use /n for new lines, use a space instead\n    5. If a field is not found or if unsure, return null\n    6. All dates should be in YYYY-MM-DD format (e.g., 2025-01-15)\n    7. Do not perform calculations or summations unless totals are explicitly given\n    8. If an alias is not found in the document, return null\n    9. Guidelines for checkboxes:\n     9.A. CAREFULLY examine each checkbox, radio button, and selection field:\n        - Look for marks like ✓, ✗, x, filled circles (●), darkened areas, or handwritten checks indicating selection\n        - For checkboxes and multi-select fields, ONLY INCLUDE options that show clear visual evidence of selection\n        - DO NOT list options that have no visible selection mark\n     9.B. For ambiguous or overlapping tick marks:\n        - If a mark overlaps between two or more checkboxes, determine which option contains the majority of the mark\n        - Consider a checkbox selected if the mark is primarily inside the check box or over the option text\n        - When a mark touches multiple options, analyze which option was most likely intended based on position and density. For handwritten checks, the mark typically flows from the selected checkbox outward.\n        - Carefully analyze visual cues and contextual hints. Think from a human perspective, anticipate natural tendencies, and apply thoughtful reasoning to make the best possible judgment.\n    10. Think step by step first and then answer.\n</extraction-guidelines>\nIf the attributes section below contains a list of attribute names and descriptions, then output only those attributes, using the provided descriptions as guidance for finding the correct values. \n<attributes> {ATTRIBUTE_NAMES_AND_DESCRIPTIONS} </attributes>\n<<CACHEPOINT>>\n<document-text> {DOCUMENT_TEXT} </document-text>\n<document_image> {DOCUMENT_IMAGE} </document_image>\n<final-instructions> Extract key information from the document and return a JSON object with the following key steps: 1. Carefully analyze the document text to identify the requested attributes 2. Extract only information explicitly found in the document - never make up data 3. Format all dates as YYYY-MM-DD and replace newlines with spaces 4. For checkboxes, only include options with clear visual selection marks 5. Use null for any fields not found in the document 6. Ensure the output is properly formatted JSON with quoted keys and values 7. Think step by step before finalizing your answer </final-instructions>"
+assessment:
   enabled: false
+  validation_enabled: false
+  hitl_enabled: false
+  default_confidence_threshold: '0.8'
+  image:
+    target_height: ''
+    target_width: ''
+  granular:
+    enabled: true
+    max_workers: '20'
+    simple_batch_size: '3'
+    list_batch_size: '1'
+  model: us.amazon.nova-lite-v1:0
+  top_p: '0.0'
+  max_tokens: '10000'
+  top_k: '5'
+  temperature: '0.0'
+  system_prompt: You are a document analysis assessment expert. Your role is to evaluate the confidence and accuracy of data extraction results by analyzing them against source documents. Provide accurate confidence scores for each assessment. When bounding boxes are requested, provide precise coordinate locations where information appears in the document.
+  task_prompt: "<background> You are an expert document analysis assessment system. Your task is to evaluate the confidence of extraction results for a document of class {DOCUMENT_CLASS} and provide precise spatial localization for each field. </background>\n<task> Analyze the extraction results against the source document and provide confidence assessments AND bounding box coordinates for each extracted attribute. Consider factors such as: 1. Text clarity and OCR quality in the source regions  2. Alignment between extracted values and document content  3. Presence of clear evidence supporting the extraction  4. Potential ambiguity or uncertainty in the source material  5. Completeness and accuracy of the extracted information 6. Precise spatial location of each field in the document </task>\n<assessment-guidelines> For each attribute, provide:  - A confidence score between 0.0 and 1.0 where:\n   - 1.0 = Very high confidence, clear and unambiguous evidence\n   - 0.8-0.9 = High confidence, strong evidence with minor uncertainty\n   - 0.6-0.7 = Medium confidence, reasonable evidence but some ambiguity\n   - 0.4-0.5 = Low confidence, weak or unclear evidence\n   - 0.0-0.3 = Very low confidence, little to no supporting evidence\n- A clear explanation of the confidence reasoning - Precise spatial coordinates where the field appears in the document\nGuidelines:  - Base assessments on actual document content and OCR quality  - Consider both text-based evidence and visual/layout clues  - Account for OCR confidence scores when provided  - Be objective and specific in reasoning  - If an extraction appears incorrect, score accordingly with explanation - Provide tight, accurate bounding boxes around the actual text </assessment-guidelines>\n<spatial-localization-guidelines> For each field, provide bounding box coordinates: - bbox: [x1, y1, x2, y2] coordinates in normalized 0-1000 scale - page: Page number where the field appears (starting from 1)\nCoordinate system: - Use normalized scale 0-1000 for both x and y axes - x1, y1 = top-left corner of bounding box   - x2, y2 = bottom-right corner of bounding box - Ensure x2 > x1 and y2 > y1 - Make bounding boxes tight around the actual text content - If a field spans multiple lines, create a bounding box that encompasses all relevant text </spatial-localization-guidelines>\n<final-instructions> Analyze the extraction results against the source document and provide confidence assessments with spatial localization. Return a JSON object with the following structure based on the attribute type:\nFor SIMPLE attributes:  {\n  \"simple_attribute_name\": {\n    \"confidence\": 0.85,\n    \"bbox\": [100, 200, 300, 250],\n    \"page\": 1\n  }\n}\nFor GROUP attributes (nested object structure):  {\n  \"group_attribute_name\": {\n    \"sub_attribute_1\": {\n      \"confidence\": 0.90,\n      \"bbox\": [150, 300, 250, 320],\n      \"page\": 1\n    },\n    \"sub_attribute_2\": {\n      \"confidence\": 0.75,\n      \"bbox\": [150, 325, 280, 345],\n      \"page\": 1\n    }\n  }\n}\nFor LIST attributes (array of assessed items):  {\n  \"list_attribute_name\": [\n    {\n      \"item_attribute_1\": {\n        \"confidence\": 0.95,\n        \"bbox\": [100, 400, 200, 420],\n        \"page\": 1\n      },\n      \"item_attribute_2\": {\n        \"confidence\": 0.88,\n        \"bbox\": [250, 400, 350, 420],\n        \"page\": 1\n      }\n    },\n    {\n      \"item_attribute_1\": {\n        \"confidence\": 0.92,\n        \"bbox\": [100, 425, 200, 445],\n        \"page\": 1\n      },\n      \"item_attribute_2\": {\n        \"confidence\": 0.70,\n        \"bbox\": [250, 425, 350, 445],\n        \"page\": 1\n      }\n    }\n  ]\n}\nIMPORTANT:   - For LIST attributes like \"Transactions\", assess EACH individual item in the list separately with individual bounding boxes - Each transaction should be assessed as a separate object in the array with its own spatial coordinates - Do NOT provide aggregate assessments for list items - assess each one individually with precise locations - Include assessments AND bounding boxes
+    for ALL attributes present in the extraction results - Match the exact structure of the extracted data - Provide page numbers for all bounding boxes (starting from 1) </final-instructions>\n<<CACHEPOINT>>\n<document-image> {DOCUMENT_IMAGE} </document-image>\n<ocr-text-confidence-results> {OCR_TEXT_CONFIDENCE} </ocr-text-confidence-results>\n<<CACHEPOINT>>\n<attributes-definitions> {ATTRIBUTE_NAMES_AND_DESCRIPTIONS} </attributes-definitions>\n<extraction-results> {EXTRACTION_RESULTS} </extraction-results>"
+summarization:
+  enabled: false
+  model: us.amazon.nova-pro-v1:0
+  top_p: '0.0'
+  max_tokens: '4096'
+  top_k: '5'
+  temperature: '0.0'
+  system_prompt: "You are a document summarization expert who can analyze and summarize documents from various domains including medical, financial, legal, and general business documents. Your task is to create a summary that captures the key information, main points, and important details from the document. Your output must be in valid JSON format. \\nSummarization Style: Balanced\\\\nCreate a balanced summary that provides a moderate level of detail. Include the main points and key supporting information, while maintaining the document's overall structure. Aim for a comprehensive yet concise summary.\\n Your output MUST be in valid JSON format with markdown content. You MUST strictly adhere to the output format specified in the instructions."
+  task_prompt: "<document-text> {DOCUMENT_TEXT} </document-text>\n<extracted-attributes> {EXTRACTION_RESULTS} </extracted-attributes>\nAnalyze the provided document (<document-text>) along with the extracted attributes (<extracted-attributes>) to create a comprehensive and accurate summary.\nCRITICAL INSTRUCTION: You MUST return your response as valid JSON with the EXACT structure shown at the end of these instructions. Do not include any explanations, notes, or text outside of the JSON structure.\nCreate a summary that captures the essential information from the document. Your summary should:\n1. **Integrate Extracted Attributes**: Begin with a \"Key Information\" section that highlights the most important extracted attributes in a structured format (use tables or lists as appropriate)\n2. **Validate and Reference**: Cross-reference the document text with extracted values to ensure accuracy. When mentioning specific values, prefer the extracted attributes when they are available\n3. **Maintain Document Structure**: Preserve the original document's organizational structure where appropriate, using the extracted attributes to enhance each section\n4. **Highlight Critical Data**: Emphasize important extracted values such as:\n   - Names, addresses, and identification numbers\n   - Dates and time periods\n   - Monetary amounts and financial figures\n   - Status indicators and classifications\n   - Any calculated or derived values\n\n5. **Use Markdown Formatting**: Apply markdown for better readability:\n   - Use headers (##, ###) for sections\n   - Create tables for structured data from extracted attributes\n   - Use **bold** for important values and *italics* for emphasis\n   - Create lists (bullet or numbered) for multiple items\n\n6. **Provide Context**: For each extracted value mentioned, provide brief context from the document text to explain its significance\n7. **Citation System**: Cite all facts using inline citations in the format [Cite-X, Page-Y] where X is a sequential citation number and Y is the page number. Format citations as markdown links: [[Cite-1, Page-3]](#cite-1-page-3)\n8. **Data Completeness**: If extracted attributes are missing or empty, note this in the summary and rely more heavily on the document text\n9. **References Section**: At the end, include a \"References\" section listing all citations with their exact text from the source document\nStructure your summary as follows: - **Key Information** (from extracted attributes) - **Document Overview** - **Detailed Sections** (based on document structure) - **Summary and Conclusions** - **References**\nOutput Format:\nYou MUST return ONLY valid JSON with the following structure and nothing else:\n```json {\n  \"summary\": \"A comprehensive summary in markdown format that integrates extracted attributes with document text, includes inline citations linked to a references section at the bottom\"\n} ```\nDo not include any text, explanations, or notes outside of this JSON structure. The JSON must be properly formatted and parseable."
+evaluation:
+  enabled: true
+  llm_method:
+    top_p: '0.0'
+    max_tokens: '4096'
+    top_k: '5'
+    system_prompt: You are an evaluator that helps determine if the predicted and expected values match for document attribute extraction. You will consider the context and meaning rather than just exact string matching.
+    task_prompt: "I need to evaluate attribute extraction for a document of class: {DOCUMENT_CLASS}. For the attribute named \"{ATTRIBUTE_NAME}\" described as \"{ATTRIBUTE_DESCRIPTION}\": - Expected value: {EXPECTED_VALUE} - Actual value: {ACTUAL_VALUE} Do these values match in meaning, taking into account formatting differences, word order, abbreviations, and semantic equivalence? Provide your assessment as a JSON with three fields: - \"match\": boolean (true if they match, false if not) - \"score\": number between 0 and 1 representing the confidence/similarity score - \"reason\": brief explanation of your decision Respond ONLY with the JSON and nothing else. Here's the exact format: {\n  \"match\": true or false,\n  \"score\": 0.0 to 1.0,\n  \"reason\": \"Your explanation here\"\n}"
+    temperature: '0.0'
+    model: us.amazon.nova-2-lite-v1:0
+criteria_validation:
+  model: us.anthropic.claude-3-5-sonnet-20240620-v1:0
+  temperature: 0.0
+  top_k: 20
+  top_p: 0.01
+  max_tokens: 4096
+  semaphore: 3
+  max_chunk_size: 180000
+  token_size: 4
+  overlap_percentage: 10
+  response_prefix: <response>
+  system_prompt: ''
+  task_prompt: ''
+  criteria: []
+agents:
+  chat_companion:
+    model_id: us.anthropic.claude-haiku-4-5-20251001-v1:0
+  error_analyzer:
+    model_id: us.anthropic.claude-sonnet-4-20250514-v1:0
+    parameters:
+      max_log_events: 5
+      time_range_hours_default: 24
+    system_prompt: "You are an intelligent error analysis agent for the GenAI IDP system with access to specialized diagnostic tools.\n\nGENERAL TROUBLESHOOTING WORKFLOW:\n1. Identify document status from DynamoDB\n2. Find any errors reported during Step Function execution\n3. Collect relevant logs from CloudWatch\n4. Identify any performance issues from X-Ray traces\n5. Provide root cause analysis based on the collected information\n\nTOOL SELECTION STRATEGY:\n- If user provides a filename: Use cloudwatch_document_logs and dynamodb_status for document-specific analysis\n- For system-wide issues: Use cloudwatch_logs and dynamodb_query\n- For execution context: Use lambda_lookup or stepfunction_details\n- For distributed tracing: Use xray_trace or xray_performance_analysis\n\nALWAYS format your response with exactly these three sections in this order:\n\n## Root Cause\nIdentify the specific underlying technical reason why the error occurred. Focus on the primary cause, not symptoms.\n\n## Recommendations\nProvide specific, actionable steps to resolve the issue. Limit to top three recommendations only.\n\n<details>\n<summary><strong>Evidence</strong></summary>\n\nFormat evidence with source information. Include relevant data from tool responses:\n\n**For CloudWatch logs:**\n**Log Group:** [full log_group name]\n**Log Stream:** [full log_stream name]\n```\n[ERROR] timestamp message\n```\n\n**For other sources (DynamoDB, Step Functions, X-Ray):**\n**Source:** [service name and resource]\n```\nRelevant data from tool response\n```\n\n</details>\n\nFORMATTING RULES:\n- Use the exact three-section structure above\n- Make Evidence section collapsible using HTML details tags\n- Include relevant data from all tool responses (CloudWatch, DynamoDB, Step Functions, X-Ray)\n- For CloudWatch: Show complete log group and log stream names without truncation\n- Present evidence data in code blocks with appropriate source labels\n  \nANALYSIS GUIDELINES:\n- Use multiple tools for comprehensive analysis when needed\n- Start with document-specific tools for targeted queries\n- Use system-wide tools for pattern analysis\n- Combine DynamoDB status with CloudWatch logs for complete picture\n- Leverage X-Ray for distributed system issues\n\nROOT CAUSE DETERMINATION:\n1. Document Status: Check dynamodb_status first\n2. Execution Details: Use stepfunction_details for workflow failures\n3. Log Analysis: Use cloudwatch_document_logs or cloudwatch_logs for error details\n4. Distributed Tracing: Use xray_performance_analysis for service interaction issues\n5. Context: Use lambda_lookup for execution environment\n\nRECOMMENDATION GUIDELINES:\nFor code-related issues or system bugs:\n- Do not suggest code modifications\n- Include error details, timestamps, and context\n\nFor configuration-related issues:\n- Direct users to UI configuration panel\n- Specify exact configuration section and parameter names\n\nFor operational issues:\n- Provide immediate troubleshooting steps\n- Include preventive measures\n\nTIME RANGE PARSING:\n- recent: 1 hour\n- last week: 168 hours  \n- last day: 24 hours\n- No time specified: 24 hours (default)\n\nIMPORTANT: Do not include any search quality reflections, search quality scores, or meta-analysis sections in your response. Only provide the three required sections: Root Cause, Recommendations, and Evidence."
+discovery:
+  output_format:
+    sample_json: "{\n    \"document_class\" : \"Form-1040\",\n    \"document_description\" : \"Brief summary of the document\",\n    \"groups\" : [\n        {\n            \"name\" : \"PersonalInformation\",\n            \"description\" : \"Personal information of Tax payer\",\n            \"attributeType\" : \"group\",\n            \"groupAttributes\" : [\n                {\n                    \"name\": \"FirstName\",\n                    \"dataType\" : \"string\",\n                    \"description\" : \"First Name of Taxpayer\"\n                },\n                {\n                    \"name\": \"Age\",\n                    \"dataType\" : \"number\",\n                    \"description\" : \"Age of Taxpayer\"\n                }\n            ]\n        },\n        {\n            \"name\" : \"Dependents\",\n            \"description\" : \"Dependents of taxpayer\",\n            \"attributeType\" : \"list\",\n            \"listItemTemplate\": {\n                \"itemAttributes\" : [\n                    {\n                        \"name\": \"FirstName\",\n                        \"dataType\" : \"string\",\n                        \"description\" : \"Dependent first name\"\n                    },\n                    {\n                        \"name\": \"Age\",\n                        \"dataType\" : \"number\",\n                        \"description\" : \"Dependent Age\"\n                    }\n                ]\n            }\n        }\n    ]\n}"
+  with_ground_truth:
+    model_id: us.amazon.nova-pro-v1:0
+    system_prompt: You are an expert in processing forms. Extracting data from images and documents. Use provided ground truth data as reference to optimize field extraction and ensure consistency with expected document structure and field definitions.
+    max_tokens: '10000'
+    top_p: '0.0'
+    temperature: '0.0'
+    user_prompt: 'This image contains unstructured data. Analyze the data line by line using the provided ground truth as reference.                         <GROUND_TRUTH_REFERENCE> {ground_truth_json} </GROUND_TRUTH_REFERENCE> Ground truth reference JSON has the fields we are interested in extracting from the document/image. Use the ground truth to optimize field extraction. Match field names, data types, and groupings from the reference. Image may contain multiple pages, process all pages. Extract all field names including those without values. Do not change the group name and field name from ground truth in the extracted data json. Add field_description field for every field which will contain instruction to LLM to extract the field data from the image/document. Add data_type field for every field.  Add two fields document_class and document_description.  For document_class generate a short name based on the document content like W4, I-9, Paystub.  For document_description generate a description about the document in less than 50 words. If the group repeats and follows table format, update the attributeType as "list".                          Do not extract the values. Format the extracted data using the below JSON format: Format the extracted groups and fields using the below JSON format:'
+  without_ground_truth:
+    model_id: us.amazon.nova-pro-v1:0
+    system_prompt: You are an expert in processing forms. Extracting data from images and documents. Analyze forms line by line to identify field names, data types, and organizational structure. Focus on creating comprehensive blueprints for document processing without extracting actual values.
+    max_tokens: '10000'
+    top_p: '0.0'
+    temperature: '0.0'
+    user_prompt: "This image contains forms data. Analyze the form line by line. Image may contains multiple pages, process all the pages.  Form may contain multiple name value pair in one line.  Extract all the names in the form including the name value pair which doesn't have value.  Organize them into groups, extract field_name, data_type and field description Field_name should be less than 60 characters, should not have space use '-' instead of space. field_description is a brief description of the field and the location of the field like box number or line number in the form and section of the form. Field_name should be unique within the group. Add two fields document_class and document_description.  For document_class generate a short name based on the document content like W4, I-9, Paystub.  For document_description generate a description about the document in less than 50 words.  Group the fields based on the section they are grouped in the form. Group should have attributeType as \"group\". If the group repeats and follows table format, update the attributeType as \"list\". Do not extract the values. Return the extracted data in JSON format. Format the extracted data using the below JSON format: Format the extracted groups and fields using the below JSON format:"
+use_bda: false

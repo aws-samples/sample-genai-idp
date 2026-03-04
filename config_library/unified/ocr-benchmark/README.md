@@ -20,6 +20,38 @@ The OCR Benchmark dataset contains diverse document types with ground truth JSON
 | **REAL_ESTATE** | Real estate transaction data | transactions[], transactionsByCity[] |
 | **SHIFT_SCHEDULE** | Employee scheduling | title, facility, employees[] with shifts |
 
+## Benchmark Results
+
+Evaluated on the full 293-document dataset using IDP Accelerator v0.5.0 (pattern-2, pipeline mode). Evaluation methods are identical across all configs for apples-to-apples comparison.
+
+| Metric | Previous Config | This Config (Nova 2 Lite) | With Sonnet 4.6 |
+|--------|----------------|---------------------------|------------------|
+| **Overall Accuracy** | 51.5% | 75.2% | 91.2% |
+| **Classification Accuracy** | 100% | 100% | 100% |
+| **Total Cost (293 docs)** | $2.60 | $2.62 | $9.73 |
+| **Cost per Document** | ~$0.009 | ~$0.009 | ~$0.033 |
+
+### Per-Class Extraction Accuracy
+
+| Class | Previous | This Config (Nova) | With Sonnet |
+|-------|----------|-------------------|-------------|
+| DELIVERY_NOTE (8) | 89.5% | 98.9% | 99.4% |
+| PETITION_FORM (51) | 74.7% | 96.7% | 98.4% |
+| COMMERCIAL_LEASE_AGREEMENT (52) | 75.5% | 96.3% | 98.5% |
+| SHIFT_SCHEDULE (18) | 68.9% | 95.7% | 96.0% |
+| REAL_ESTATE (59) | 80.6% | 91.4% | 98.9% |
+| BANK_CHECK (52) | 82.6% | 86.1% | 97.0% |
+| EQUIPMENT_INSPECTION (11) | 60.8% | 83.6% | 97.1% |
+| CREDIT_CARD_STATEMENT (11) | 53.1% | 74.7% | 82.3% |
+| GLOSSARY (31) | 68.0% | 67.3% | 95.0% |
+
+### Models Used
+
+- **Classification**: Nova 2 Lite (`us.amazon.nova-2-lite-v1:0`)
+- **Extraction**: Nova 2 Lite (`us.amazon.nova-2-lite-v1:0`)
+- **OCR**: Textract (Layout feature)
+
+To use Sonnet 4.6 for extraction, change `extraction.model` to `us.anthropic.claude-sonnet-4-6-20250929-v1:0`.
 
 ## Processing Mode
 
@@ -27,7 +59,7 @@ The OCR Benchmark dataset contains diverse document types with ground truth JSON
 
 ## Validation Level
 
-**Level**: 2 - Minimal Testing
+**Level**: 3 - Benchmarked
 
-- **Testing Evidence**: This configuration has been lightly tested with the RealKIE-FCC-Verified Dataset. 
-- **Known Limitations**: Performance may vary - consider this configuration a starting point. We welome Pull Requests to improve the accuracy.
+- **Testing Evidence**: Evaluated on the full 293-document OmniAI OCR Benchmark dataset with per-class accuracy breakdown. Evaluation methods identical to previous config for fair comparison.
+- **Known Limitations**: GLOSSARY class has lower accuracy (67.3%) due to OCR challenges with single-digit numbers. Upgrading extraction model to Claude Sonnet 4.6 improves overall accuracy to 91.2% at higher cost.
