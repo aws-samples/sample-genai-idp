@@ -1,7 +1,7 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 import React, { useEffect, useState, useMemo } from 'react';
-import { Table, Pagination, TextFilter, Box, SpaceBetween } from '@cloudscape-design/components';
+import { Table, Pagination, TextFilter, Box, SpaceBetween, Alert } from '@cloudscape-design/components';
 import { useCollection } from '@cloudscape-design/collection-hooks';
 import { ConsoleLogger } from 'aws-amplify/utils';
 import { generateClient } from 'aws-amplify/api';
@@ -16,6 +16,7 @@ interface DateRange {
 import useDocumentsContext from '../../contexts/documents';
 import useSettingsContext from '../../contexts/settings';
 import useUserRole from '../../hooks/use-user-role';
+import { MAX_DOCUMENTS } from '../../hooks/use-graphql-api';
 
 import mapDocumentsAttributes from '../common/map-document-attributes';
 import { paginationLabels } from '../common/labels';
@@ -60,7 +61,7 @@ const DocumentList = (): React.JSX.Element => {
   const [isDateRangeModalVisible, setIsDateRangeModalVisible] = useState(false);
   const [currentUsername, setCurrentUsername] = useState('');
   const { settings: _settings } = useSettingsContext() as Record<string, unknown>;
-  const { isReviewer, isAdmin } = useUserRole();
+  const { isReviewer, isSupervisor, isAdmin, loading: isRoleLoading } = useUserRole();
   const navigate = useNavigate();
 
   // Get current username on mount
@@ -90,12 +91,15 @@ const DocumentList = (): React.JSX.Element => {
   const deleteDocuments = documentsContext.deleteDocuments as (ids: string[]) => Promise<unknown>;
   const reprocessDocuments = documentsContext.reprocessDocuments as (ids: string[], version?: string) => Promise<unknown>;
   const abortWorkflows = documentsContext.abortWorkflows as (ids: string[]) => Promise<unknown>;
+  const isDocumentListTruncated = documentsContext.isDocumentListTruncated as boolean;
 
   const [preferences, setPreferences] = useLocalStorage('documents-list-preferences', DEFAULT_PREFERENCES);
 
   // Filter documents for reviewers - show only pending HITL reviews (not completed/skipped)
+  // Supervisors see all documents (like Admin), scoped to their use cases by the backend
+  // While roles are loading, show all documents (filtering will apply once roles resolve)
   const filteredDocumentList = useMemo(() => {
-    if (isReviewer && !isAdmin) {
+    if (!isRoleLoading && isReviewer && !isAdmin && !isSupervisor) {
       return documentList.filter((doc) => {
         // Must have HITL triggered
         if (!doc.hitlTriggered) return false;
@@ -109,11 +113,11 @@ const DocumentList = (): React.JSX.Element => {
       });
     }
     return documentList;
-  }, [documentList, isReviewer, isAdmin, currentUsername]);
+  }, [documentList, isReviewer, isSupervisor, isAdmin, isRoleLoading, currentUsername]);
 
-  // Custom empty state for reviewers
+  // Custom empty state for reviewers (only show when role is resolved)
   const emptyState = useMemo(() => {
-    if (isReviewer && !isAdmin) {
+    if (!isRoleLoading && isReviewer && !isAdmin && !isSupervisor) {
       return (
         <Box margin={{ vertical: 'xs' }} textAlign="center" color="inherit">
           <SpaceBetween size="xxs">
@@ -128,7 +132,7 @@ const DocumentList = (): React.JSX.Element => {
       );
     }
     return <TableEmptyState resourceName="Document" />;
-  }, [isReviewer, isAdmin]);
+  }, [isReviewer, isSupervisor, isAdmin, isRoleLoading]);
 
   // prettier-ignore
   const {
@@ -263,9 +267,21 @@ const DocumentList = (): React.JSX.Element => {
     }
   };
 
+  // Determine if the current user can release reviews for the selected items
+  const canReleaseReview =
+    collectionProps.selectedItems.length > 0 &&
+    (isAdmin ||
+      isSupervisor ||
+      (isReviewer && (collectionProps.selectedItems as MappedDocument[]).every((item) => item.hitlReviewOwner === currentUsername)));
+
   const handleReleaseReview = async () => {
     const client = generateClient();
     for (const item of collectionProps.selectedItems as MappedDocument[]) {
+      // Reviewers can only release reviews they own; admins/supervisors can release any
+      if (!isRoleLoading && isReviewer && !isAdmin && !isSupervisor && item.hitlReviewOwner !== currentUsername) {
+        logger.debug('Skipping release for item not owned by current reviewer', item.objectKey);
+        continue;
+      }
       try {
         const result = await client.graphql({
           query: releaseReviewMutation,
@@ -299,6 +315,13 @@ const DocumentList = (): React.JSX.Element => {
   /* eslint-disable react/jsx-props-no-spreading */
   return (
     <>
+      {isDocumentListTruncated && (
+        <Box margin={{ bottom: 's' }}>
+          <Alert type="info">
+            Showing the first {MAX_DOCUMENTS.toLocaleString()} documents. Additional documents exist but are not displayed.
+          </Alert>
+        </Box>
+      )}
       <Table
         {...collectionProps}
         header={
@@ -308,7 +331,7 @@ const DocumentList = (): React.JSX.Element => {
             selectedItems={collectionProps.selectedItems}
             totalItems={filteredDocumentList}
             updateTools={() => setToolsOpen(true)}
-            loading={isDocumentsListLoading}
+            loading={isDocumentsListLoading || isRoleLoading}
             setIsLoading={setIsDocumentsListLoading}
             periodsToLoad={periodsToLoad}
             setPeriodsToLoad={setPeriodsToLoad}
@@ -323,11 +346,11 @@ const DocumentList = (): React.JSX.Element => {
               }));
               exportToExcel(exportData, 'Document-List');
             }}
-            onReprocess={isReviewer && !isAdmin ? null : () => setIsReprocessModalVisible(true)}
-            onDelete={isReviewer && !isAdmin ? null : () => setIsDeleteModalVisible(true)}
-            onAbort={isReviewer && !isAdmin ? null : () => setIsAbortModalVisible(true)}
-            onClaimReview={isReviewer ? handleClaimReview : null}
-            onReleaseReview={isAdmin ? handleReleaseReview : null}
+            onReprocess={isRoleLoading || (isReviewer && !isAdmin && !isSupervisor) ? null : () => setIsReprocessModalVisible(true)}
+            onDelete={isRoleLoading || (isReviewer && !isAdmin && !isSupervisor) ? null : () => setIsDeleteModalVisible(true)}
+            onAbort={isRoleLoading || (isReviewer && !isAdmin && !isSupervisor) ? null : () => setIsAbortModalVisible(true)}
+            onClaimReview={!isRoleLoading && (isAdmin || isReviewer || isSupervisor) ? handleClaimReview : null}
+            onReleaseReview={!isRoleLoading && canReleaseReview ? handleReleaseReview : null}
             currentUsername={currentUsername}
           />
         }

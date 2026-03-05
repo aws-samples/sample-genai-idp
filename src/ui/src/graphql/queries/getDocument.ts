@@ -7,6 +7,8 @@ const getDocument: DocumentNode = gql`
   query Query($objectKey: ID!) {
     getDocument(ObjectKey: $objectKey) {
       ObjectKey
+      BusinessUnitId
+      UseCaseId
       ObjectStatus
       InitialEventTime
       QueuedTime

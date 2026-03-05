@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { produce } from 'immer';
 import {
   X_AWS_IDP_DOCUMENT_TYPE,
@@ -315,6 +315,20 @@ export const useSchemaDesigner = (
   const [selectedAttributeId, setSelectedAttributeId] = useState<string | null>(null);
   const [isDirty, setIsDirty] = useState(false);
   const [initialized, setInitialized] = useState(false);
+  const prevInitialSchemaRef = useRef<string | null>(null);
+
+  // Reset initialized when initialSchema changes externally (e.g. use-case switch).
+  // Use a stable serialization of the full schema content so field/rule changes
+  // are detected even when $id / x-aws-idp-document-type stay the same.
+  useEffect(() => {
+    if (!initialSchema) return;
+    const schemaKey = Array.isArray(initialSchema) ? JSON.stringify(initialSchema) : '';
+    if (prevInitialSchemaRef.current !== null && prevInitialSchemaRef.current !== schemaKey) {
+      setInitialized(false);
+      setIsDirty(false);
+    }
+    prevInitialSchemaRef.current = schemaKey;
+  }, [initialSchema]);
 
   useEffect(() => {
     if (!initialized && initialSchema) {

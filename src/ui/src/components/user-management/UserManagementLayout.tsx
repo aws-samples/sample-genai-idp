@@ -15,7 +15,9 @@ import {
   FormField,
   Input,
   Select,
+  Multiselect,
   StatusIndicator,
+  Badge,
 } from '@cloudscape-design/components';
 import { generateClient } from 'aws-amplify/api';
 import { ConsoleLogger } from 'aws-amplify/utils';
@@ -23,6 +25,7 @@ import { ConsoleLogger } from 'aws-amplify/utils';
 import useUserRole from '../../hooks/use-user-role';
 import useAppContext from '../../contexts/app';
 import useSettingsContext from '../../contexts/settings';
+import useUseCases from '../../hooks/use-use-cases';
 import listUsers from '../../graphql/queries/listUsers';
 import createUserMutation from '../../graphql/mutations/createUser';
 import deleteUserMutation from '../../graphql/mutations/deleteUser';
@@ -35,21 +38,41 @@ interface User {
   persona: string;
   status?: string;
   createdAt?: string;
+  allowedUseCases?: string[];
 }
 
 const UserManagementLayout = (): React.JSX.Element => {
   const { awsConfig } = useAppContext();
   const { settings } = useSettingsContext();
   const { isAdmin, loading: roleLoading } = useUserRole();
+  const { useCases } = useUseCases({ isAdmin, authLoading: roleLoading });
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [email, setEmail] = useState('');
   const [persona, setPersona] = useState('Reviewer');
+  const [selectedUseCases, setSelectedUseCases] = useState<{ value?: string }[]>([]);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [emailError, setEmailError] = useState('');
+
+  const hasUseCases = useCases && useCases.length > 0;
+
+  const decodeUseCaseValue = (value: string): string =>
+    (value || '')
+      .split('/')
+      .map((part) => decodeURIComponent(part))
+      .join('/');
+
+  const useCaseOptions = useMemo(() => {
+    if (!useCases || useCases.length === 0) return [];
+    return useCases.map((uc: { name?: string; businessUnitId: string; useCaseId: string; description?: string }) => ({
+      label: uc.name || `${uc.businessUnitId}/${uc.useCaseId}`,
+      value: `${encodeURIComponent(uc.businessUnitId)}/${encodeURIComponent(uc.useCaseId)}`,
+      description: uc.description || `${uc.businessUnitId}/${uc.useCaseId}`,
+    }));
+  }, [useCases]);
 
   const allowedDomains = useMemo(() => {
     const domains = ((settings as Record<string, unknown>)?.AllowedSignUpEmailDomains as string) || '';
@@ -63,6 +86,7 @@ const UserManagementLayout = (): React.JSX.Element => {
 
   const personaOptions = [
     { label: 'Admin', value: 'Admin' },
+    { label: 'Supervisor', value: 'Supervisor' },
     { label: 'Reviewer', value: 'Reviewer' },
   ];
 
@@ -148,10 +172,19 @@ const UserManagementLayout = (): React.JSX.Element => {
 
     try {
       const client = generateClient();
-      logger.debug('Creating user:', { email, persona });
+      // Backend normalizes admin to ["*"]; for reviewers, only include
+      // allowedUseCases when use cases exist so stacks without multi-use-case
+      // mode don't receive an empty array that would deny all access.
+      const allowedUseCases =
+        persona === 'Admin' ? undefined : hasUseCases ? selectedUseCases.map((opt) => decodeUseCaseValue(opt.value)) : undefined;
+      logger.debug('Creating user:', { email, persona, allowedUseCases: allowedUseCases ?? '(server default)' });
+      const variables: Record<string, unknown> = { email, persona };
+      if (allowedUseCases !== undefined) {
+        variables.allowedUseCases = allowedUseCases;
+      }
       await client.graphql({
-        query: createUserMutation,
-        variables: { email, persona },
+        query: createUserMutation as unknown as string,
+        variables,
       });
 
       logger.debug('User created successfully');
@@ -159,6 +192,7 @@ const UserManagementLayout = (): React.JSX.Element => {
       setShowCreateModal(false);
       setEmail('');
       setPersona('Reviewer');
+      setSelectedUseCases([]);
       await loadUsers();
     } catch (err) {
       logger.error('Failed to create user:', err);
@@ -208,8 +242,25 @@ const UserManagementLayout = (): React.JSX.Element => {
     setShowCreateModal(false);
     setEmail('');
     setPersona('Reviewer');
+    setSelectedUseCases([]);
     setError('');
     setEmailError('');
+  };
+
+  const formatAllowedUseCases = (allowedUseCasesList: string[] | undefined): React.JSX.Element => {
+    if (!allowedUseCasesList || allowedUseCasesList.length === 0) {
+      return <Box {...({ color: 'text-status-inactive' } as Record<string, unknown>)}>None</Box>;
+    }
+    if (allowedUseCasesList.includes('*')) {
+      return <Badge color="blue">All use cases</Badge>;
+    }
+    return (
+      <SpaceBetween direction="horizontal" size="xxs">
+        {allowedUseCasesList.map((uc) => (
+          <Badge key={uc}>{decodeUseCaseValue(uc)}</Badge>
+        ))}
+      </SpaceBetween>
+    );
   };
 
   const handleRefresh = () => {
@@ -246,19 +297,28 @@ const UserManagementLayout = (): React.JSX.Element => {
     {
       id: 'email',
       header: 'Email',
-      cell: (item) => item.email,
+      cell: (item: User) => item.email,
       sortingField: 'email',
     },
     {
       id: 'persona',
       header: 'Role',
-      cell: (item) => (
+      cell: (item: User) => (
         <Box {...({ color: item.persona === 'Admin' ? 'text-status-info' : 'text-body-default' } as Record<string, unknown>)}>
           {item.persona}
         </Box>
       ),
       sortingField: 'persona',
     },
+    ...(hasUseCases
+      ? [
+          {
+            id: 'allowedUseCases',
+            header: 'Allowed Use Cases',
+            cell: (item: User) => formatAllowedUseCases(item.allowedUseCases),
+          },
+        ]
+      : []),
     {
       id: 'status',
       header: 'Status',
@@ -377,6 +437,27 @@ const UserManagementLayout = (): React.JSX.Element => {
                   options={personaOptions}
                 />
               </FormField>
+              {hasUseCases && persona !== 'Admin' && (
+                <FormField
+                  label="Allowed Use Cases"
+                  description="Select which use cases this user can access. Admin users automatically get access to all use cases."
+                  constraintText="Users without any assigned use cases will be denied access to all use-case-scoped data"
+                >
+                  <Multiselect
+                    selectedOptions={selectedUseCases}
+                    onChange={({ detail }) => setSelectedUseCases(detail.selectedOptions as { value?: string }[])}
+                    options={useCaseOptions}
+                    placeholder="Select use cases"
+                    filteringType="auto"
+                    tokenLimit={3}
+                  />
+                </FormField>
+              )}
+              {hasUseCases && persona === 'Admin' && (
+                <FormField label="Allowed Use Cases">
+                  <Alert type="info">Admin users automatically have access to all use cases.</Alert>
+                </FormField>
+              )}
             </SpaceBetween>
           </Form>
         </Modal>

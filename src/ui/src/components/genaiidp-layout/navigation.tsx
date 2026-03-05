@@ -6,6 +6,7 @@ import type { SideNavigationProps } from '@cloudscape-design/components';
 import { SideNavigation } from '@cloudscape-design/components';
 import useSettingsContext from '../../contexts/settings';
 import useUserRole from '../../hooks/use-user-role';
+import UseCaseSelector from '../use-case-selector/UseCaseSelector';
 
 import {
   DOCUMENTS_PATH,
@@ -17,6 +18,7 @@ import {
   PRICING_PATH,
   DISCOVERY_PATH,
   USER_MANAGEMENT_PATH,
+  USE_CASE_MANAGEMENT_PATH,
   AGENT_CHAT_PATH,
   CAPACITY_PLANNING_PATH,
 } from '../../routes/constants';
@@ -37,6 +39,7 @@ export const adminNavItems = [
       { type: 'link', text: 'Discovery', href: `#${DISCOVERY_PATH}` },
       { type: 'link', text: 'Capacity Planning', href: `#${CAPACITY_PLANNING_PATH}` },
       { type: 'link', text: 'User Management', href: `#${USER_MANAGEMENT_PATH}` },
+      { type: 'link', text: 'Use Cases', href: `#${USE_CASE_MANAGEMENT_PATH}` },
       { type: 'link', text: 'View/Edit Pricing', href: `#${PRICING_PATH}` },
     ],
   },
@@ -66,6 +69,13 @@ export const adminNavItems = [
       },
     ],
   },
+];
+
+// Navigation items for Supervisor users (full doc visibility + HITL management, no config/upload/admin)
+export const supervisorNavItems = [
+  { type: 'link', text: 'Document List', href: `#${DOCUMENTS_PATH}` },
+  { type: 'link', text: 'Document KB', href: `#${DOCUMENTS_KB_QUERY_PATH}` },
+  { type: 'link', text: 'Agent Companion Chat', href: `#${AGENT_CHAT_PATH}` },
 ];
 
 // Limited navigation items for Reviewer users
@@ -98,13 +108,17 @@ const Navigation = ({
   let activeHref = `#${DEFAULT_PATH}`;
   const { settings: rawSettings } = useSettingsContext() || {};
   const settings = rawSettings as Record<string, unknown> | undefined;
-  const { isReviewer, isAdmin } = useUserRole();
+  const { isReviewer, isSupervisor, isAdmin, loading: roleLoading } = useUserRole();
 
-  // Select navigation items based on user role
+  // Select navigation items based on user role (deny-by-default while loading)
   const baseItems = useMemo(() => {
     if (items) return items;
-    return isReviewer && !isAdmin ? reviewerNavItems : adminNavItems;
-  }, [items, isReviewer, isAdmin]);
+    if (roleLoading) return reviewerNavItems;
+    if (isAdmin) return adminNavItems;
+    if (isSupervisor) return supervisorNavItems;
+    if (isReviewer) return reviewerNavItems;
+    return reviewerNavItems;
+  }, [items, roleLoading, isReviewer, isSupervisor, isAdmin]);
 
   // Filter out Capacity Planning link if pattern is not Pattern-2
   const filteredItems = useMemo(() => {
@@ -161,6 +175,8 @@ const Navigation = ({
     activeHref = `#${DISCOVERY_PATH}`;
   } else if (path.includes(USER_MANAGEMENT_PATH)) {
     activeHref = `#${USER_MANAGEMENT_PATH}`;
+  } else if (path.includes(USE_CASE_MANAGEMENT_PATH)) {
+    activeHref = `#${USE_CASE_MANAGEMENT_PATH}`;
   } else if (path.includes(CAPACITY_PLANNING_PATH)) {
     activeHref = `#${CAPACITY_PLANNING_PATH}`;
   } else if (path.includes(DOCUMENTS_PATH)) {
@@ -197,7 +213,10 @@ const Navigation = ({
   }
 
   return (
-    <SideNavigation items={navigationItems} header={header || documentsNavHeader} activeHref={activeHref} onFollow={onFollowHandler} />
+    <>
+      {!roleLoading && <UseCaseSelector isAdmin={isAdmin} />}
+      <SideNavigation items={navigationItems} header={header || documentsNavHeader} activeHref={activeHref} onFollow={onFollowHandler} />
+    </>
   );
 };
 

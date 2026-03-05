@@ -709,8 +709,8 @@ const SectionsPanel = ({ sections, pages, documentItem, mergedConfig, onDocument
   const { mergedConfig: configuration } = useConfiguration();
   const { settings: rawSettings2 } = useSettingsContext() || {};
   const settings2 = rawSettings2 as Record<string, unknown> | undefined;
-  const { isReviewer, isAdmin } = useUserRole();
-  const isReviewerOnly = isReviewer && !isAdmin;
+  const { isReviewer, isSupervisor, isAdmin } = useUserRole();
+  const isReviewerOnly = isReviewer && !isAdmin && !isSupervisor;
 
   // Check if current pattern is Pattern-1 (for data-only edit mode)
   const isPattern1 = () => {
@@ -724,7 +724,7 @@ const SectionsPanel = ({ sections, pages, documentItem, mergedConfig, onDocument
   const isHitlCompleted = hitlStatusLower === 'completed' || hitlStatusLower === 'reviewcompleted';
   const hasPendingHITL = documentItem?.hitlTriggered && !isHitlCompleted && !isHitlSkipped;
   // Show skip button only if HITL pending and not already completed/skipped
-  const showSkipAllButton = isAdmin && hasPendingHITL;
+  const showSkipAllButton = (isAdmin || isSupervisor) && hasPendingHITL;
 
   // Log for debugging
   logger.debug('HITL Status Check:', {

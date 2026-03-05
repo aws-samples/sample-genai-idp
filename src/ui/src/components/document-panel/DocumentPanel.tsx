@@ -37,6 +37,8 @@ import claimReviewMutation from '../../graphql/mutations/claimReview';
 interface MappedDocument {
   objectKey: string;
   objectStatus: string;
+  businessUnitId?: string;
+  useCaseId?: string;
   initialEventTime?: string;
   completionTime?: string;
   duration?: string;
@@ -629,7 +631,7 @@ export const DocumentPanel = ({
   const { mergedConfig } = useConfiguration();
   // Fetch the specific config version that was used to process this document (for flow viewer)
   const { mergedConfig: documentVersionConfig } = useConfiguration(localItem?.configVersion || 'default');
-  const { isReviewer } = useUserRole();
+  const { isReviewer, isSupervisor } = useUserRole();
 
   // Check if document can be aborted
   const canAbort = ABORTABLE_STATUSES.includes(localItem?.objectStatus);
@@ -640,7 +642,7 @@ export const DocumentPanel = ({
   const isHitlSkipped = hitlStatusLower === 'skipped' || hitlStatusLower === 'reviewskipped';
   const isHitlCompleted = hitlStatusLower === 'completed' || hitlStatusLower === 'reviewcompleted';
   const hasPendingHITL = localItem?.hitlTriggered && !isHitlCompleted && !isHitlSkipped;
-  const showStartReview = isReviewer && hasPendingHITL && !hasReviewOwner;
+  const showStartReview = (isReviewer || isSupervisor) && hasPendingHITL && !hasReviewOwner;
 
   // Handle Start Review button click
   const handleStartReview = async () => {
@@ -751,6 +753,17 @@ export const DocumentPanel = ({
             setToolsOpen={setToolsOpen}
             getDocumentDetailsFromIds={getDocumentDetailsFromIds}
           />
+
+          {(enhancedItem.businessUnitId || enhancedItem.useCaseId) && (
+            <SpaceBetween size="xs">
+              <div>
+                <Box margin={{ bottom: 'xxxs' }} color="text-label">
+                  <strong>Business Unit / Use Case</strong>
+                </Box>
+                <div>{[enhancedItem.businessUnitId, enhancedItem.useCaseId].filter(Boolean).join(' / ') || '-'}</div>
+              </div>
+            </SpaceBetween>
+          )}
 
           {localItem.metering && (
             <div>

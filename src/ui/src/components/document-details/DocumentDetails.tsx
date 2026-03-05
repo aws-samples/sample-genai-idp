@@ -56,8 +56,8 @@ const DocumentDetails = (): React.JSX.Element => {
   const reprocessDocuments = documentsContext.reprocessDocuments as (ids: string[], version?: string) => Promise<unknown>;
   const abortWorkflows = documentsContext.abortWorkflows as (ids: string[]) => Promise<unknown>;
   const { settings: _settings } = useSettingsContext() as Record<string, unknown>;
-  const { isReviewer, isAdmin } = useUserRole();
-  const isReviewerOnly = isReviewer && !isAdmin;
+  const { isReviewer, isSupervisor, isAdmin } = useUserRole();
+  const isReviewerOnly = isReviewer && !isAdmin && !isSupervisor;
 
   const [document, setDocument] = useState<MappedDocument | null>(null);
   const [isDeleteModalVisible, setIsDeleteModalVisible] = useState(false);

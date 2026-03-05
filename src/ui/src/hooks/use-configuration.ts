@@ -1,12 +1,16 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: MIT-0
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useContext } from 'react';
 import { generateClient } from 'aws-amplify/api';
 import { ConsoleLogger } from 'aws-amplify/utils';
 import getConfigVersionQuery from '../graphql/queries/getConfigVersion';
+import getUseCaseConfigurationQuery from '../graphql/queries/getUseCaseConfiguration';
 import updateConfigurationMutation from '../graphql/queries/updateConfiguration';
+import updateUseCaseConfigurationMutation from '../graphql/mutations/updateUseCaseConfiguration';
 import { deepMerge } from '../utils/configUtils';
+import { UseCaseContext } from '../contexts/useCase';
+import { ALL_USE_CASES_ID } from './use-use-cases';
 
 const client = generateClient();
 const logger = new ConsoleLogger('useConfiguration');
@@ -221,7 +225,19 @@ const _getDiff = (oldConfig: Record<string, unknown>, newConfig: Record<string, 
   return diff;
 };
 
+const DEFAULT_CONFIG_VERSION = 'default';
+
 const useConfiguration = (versionName: string = 'default'): UseConfigurationReturn => {
+  const useCaseContext = useContext(UseCaseContext);
+  const effectiveUseCase =
+    (useCaseContext as { effectiveUseCase?: { businessUnitId: string; useCaseId: string } | null } | null)?.effectiveUseCase ?? null;
+  const businessUnitId = effectiveUseCase?.businessUnitId ?? null;
+  const useCaseId = effectiveUseCase?.useCaseId ?? null;
+  const hasBusinessUnitId = Boolean(businessUnitId) && businessUnitId !== ALL_USE_CASES_ID;
+  const hasUseCaseId = Boolean(useCaseId) && useCaseId !== ALL_USE_CASES_ID;
+  const isUseCaseScoped = hasBusinessUnitId && hasUseCaseId;
+  const isPartialScope = (hasBusinessUnitId && !hasUseCaseId) || (!hasBusinessUnitId && hasUseCaseId);
+
   const [schema, setSchema] = useState<Record<string, unknown> | null>(null);
   const [defaultConfig, setDefaultConfig] = useState<Record<string, unknown> | null>(null);
   const [customConfig, setCustomConfig] = useState<Record<string, unknown> | null>(null);
@@ -229,8 +245,10 @@ const useConfiguration = (versionName: string = 'default'): UseConfigurationRetu
   const [loading, setLoading] = useState<boolean>(true);
   const [refreshing, setRefreshing] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  const requestIdRef = useRef(0);
 
   const fetchConfiguration = async (fetchVersionName: string = 'default', silent: boolean = false): Promise<void> => {
+    const requestId = (requestIdRef.current += 1);
     // Use different loading states for initial load vs background refresh
     if (silent) {
       setRefreshing(true);
@@ -238,26 +256,70 @@ const useConfiguration = (versionName: string = 'default'): UseConfigurationRetu
       setLoading(true);
     }
     setError(null);
-    try {
-      logger.debug('Fetching configuration for versionName:', fetchVersionName);
-      const result = await client.graphql({
-        query: getConfigVersionQuery as unknown as string,
-        variables: { versionName: fetchVersionName },
-      });
-      logger.debug('API response version', fetchVersionName, result);
 
-      const response = (
-        result as {
-          data: { getConfigVersion: { success: boolean; error?: { message: string }; Schema: unknown; Default: unknown; Custom: unknown } };
-        }
-      ).data.getConfigVersion;
+    // Fail fast if only one of businessUnitId/useCaseId is provided
+    if (isPartialScope) {
+      setError('Both businessUnitId and useCaseId are required for use-case configuration.');
+      if (silent) setRefreshing(false);
+      else setLoading(false);
+      return;
+    }
+
+    try {
+      let response: {
+        success: boolean;
+        error?: { message: string };
+        Schema?: unknown;
+        Default?: unknown;
+        Custom?: unknown;
+      };
+      if (isUseCaseScoped && businessUnitId && useCaseId) {
+        logger.debug(`Fetching use-case configuration for ${businessUnitId}/${useCaseId}...`);
+        const result = await client.graphql({
+          query: getUseCaseConfigurationQuery as unknown as string,
+          variables: { businessUnitId, useCaseId },
+        });
+        logger.debug('Use-case config API response:', result);
+        response = (result as { data: { getUseCaseConfiguration: typeof response } }).data.getUseCaseConfiguration;
+      } else {
+        logger.debug('Fetching configuration for versionName:', fetchVersionName);
+        const result = await client.graphql({
+          query: getConfigVersionQuery as unknown as string,
+          variables: { versionName: fetchVersionName },
+        });
+        logger.debug('API response version', fetchVersionName, result);
+        response = (
+          result as {
+            data: { getConfigVersion: typeof response };
+          }
+        ).data.getConfigVersion;
+      }
 
       if (!response.success) {
         const errorMsg = response.error?.message || 'Failed to load configuration';
         throw new Error(errorMsg);
       }
 
-      const { Schema, Default, Custom } = response;
+      let Schema: unknown = response.Schema;
+      const Default = response.Default;
+      let Custom: unknown = response.Custom;
+
+      // Use-case-scoped config returns only Default (fully merged); no Schema or Custom
+      // Fetch global config for the schema when in use-case mode
+      if (isUseCaseScoped && !Schema) {
+        const globalResult = await client.graphql({
+          query: getConfigVersionQuery as unknown as string,
+          variables: { versionName: DEFAULT_CONFIG_VERSION },
+        });
+        const globalResponse = (globalResult as { data: { getConfigVersion: typeof response } }).data.getConfigVersion;
+        if (!globalResponse.success) {
+          const globalErrorMsg = globalResponse.error?.message || 'Failed to load global schema for use-case mode';
+          throw new Error(globalErrorMsg);
+        }
+        Schema = globalResponse.Schema;
+        // For use-case configs, the Default is the full merged config; Custom is empty
+        Custom = null;
+      }
 
       // Log raw data types
       logger.debug('Raw data types:', {
@@ -327,6 +389,9 @@ const useConfiguration = (versionName: string = 'default'): UseConfigurationRetu
         throw new Error('Invalid default configuration data structure');
       }
 
+      // Discard stale response if scope changed while request was in-flight
+      if (requestId !== requestIdRef.current) return;
+
       setSchema(schemaObj);
 
       // Normalize boolean values in both default and version configs
@@ -364,10 +429,12 @@ const useConfiguration = (versionName: string = 'default'): UseConfigurationRetu
       logger.error('Error fetching configuration', err);
       setError(`Failed to load configuration: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
-      if (silent) {
-        setRefreshing(false);
-      } else {
-        setLoading(false);
+      if (requestId === requestIdRef.current) {
+        if (silent) {
+          setRefreshing(false);
+        } else {
+          setLoading(false);
+        }
       }
     }
   };
@@ -378,6 +445,10 @@ const useConfiguration = (versionName: string = 'default'): UseConfigurationRetu
     description: string | null = null,
   ): Promise<boolean> => {
     setError(null);
+    if (isPartialScope) {
+      setError('Both businessUnitId and useCaseId are required for use-case configuration.');
+      return false;
+    }
     try {
       logger.debug('Updating config - versionName:', targetVersionName, 'description:', description, 'config:', newCustomConfig);
 
@@ -396,17 +467,33 @@ const useConfiguration = (versionName: string = 'default'): UseConfigurationRetu
 
       logger.debug('Sending customConfig string for version', targetVersionName, ':', configString);
 
-      const result = await client.graphql({
-        query: updateConfigurationMutation as unknown as string,
-        variables: {
-          versionName: targetVersionName,
-          customConfig: configString,
-          description,
-        },
-      });
+      type UpdateResult = {
+        data: {
+          updateConfiguration?: { success: boolean; error?: { message: string } };
+          updateUseCaseConfiguration?: { success: boolean; error?: { message: string } };
+        };
+      };
+      let result: UpdateResult;
+      if (isUseCaseScoped && businessUnitId && useCaseId) {
+        result = (await client.graphql({
+          query: updateUseCaseConfigurationMutation as unknown as string,
+          variables: { businessUnitId, useCaseId, customConfig: configString },
+        })) as UpdateResult;
+      } else {
+        result = (await client.graphql({
+          query: updateConfigurationMutation as unknown as string,
+          variables: {
+            versionName: targetVersionName,
+            customConfig: configString,
+            description,
+          },
+        })) as UpdateResult;
+      }
 
-      const response = (result as { data: { updateConfiguration: { success: boolean; error?: { message: string } } } }).data
-        .updateConfiguration;
+      type UpdateResponse = { success: boolean; error?: { message: string } };
+      const ucData = (result as { data: { updateUseCaseConfiguration: UpdateResponse } }).data;
+      const cfgData = (result as { data: { updateConfiguration: UpdateResponse } }).data;
+      const response = isUseCaseScoped ? ucData.updateUseCaseConfiguration : cfgData.updateConfiguration;
 
       if (!response.success) {
         const errorMsg = response.error?.message || 'Failed to update configuration';
@@ -538,8 +625,18 @@ const useConfiguration = (versionName: string = 'default'): UseConfigurationRetu
   };
 
   useEffect(() => {
-    fetchConfiguration(versionName);
-  }, [versionName]); // Re-fetch when version changes
+    // Clear stale state when scope changes to avoid displaying
+    // configuration from a previous business unit / use case
+    setSchema(null);
+    setDefaultConfig(null);
+    setCustomConfig(null);
+    setMergedConfig(null);
+    if (isUseCaseScoped) {
+      fetchConfiguration(DEFAULT_CONFIG_VERSION, false);
+    } else {
+      fetchConfiguration(versionName);
+    }
+  }, [businessUnitId, useCaseId, versionName]); // Re-fetch when scope or version changes
 
   return {
     schema,

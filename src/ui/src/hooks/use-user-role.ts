@@ -6,6 +6,7 @@ import { fetchAuthSession } from 'aws-amplify/auth';
 interface UserRoleReturn {
   groups: string[];
   isAdmin: boolean;
+  isSupervisor: boolean;
   isReviewer: boolean;
   loading: boolean;
 }
@@ -31,9 +32,10 @@ const useUserRole = (): UserRoleReturn => {
   }, []);
 
   const isAdmin = groups.includes('Admin');
+  const isSupervisor = groups.includes('Supervisor');
   const isReviewer = groups.includes('Reviewer');
 
-  return { groups, isAdmin, isReviewer, loading };
+  return { groups, isAdmin, isSupervisor, isReviewer, loading };
 };
 
 export default useUserRole;

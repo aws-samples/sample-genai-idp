@@ -8,6 +8,7 @@ import useAppContext from '../contexts/app';
 import listDocumentsDateShard from '../graphql/queries/listDocumentsDateShard';
 import listDocumentsDateHour from '../graphql/queries/listDocumentsDateHour';
 import listDocumentsByDateRangeQuery from '../graphql/queries/listDocumentsByDateRange';
+import listDocumentsByUseCaseQuery from '../graphql/queries/listDocumentsByUseCase';
 import getDocument from '../graphql/queries/getDocument';
 import deleteDocument from '../graphql/queries/deleteDocument';
 import reprocessDocument from '../graphql/queries/reprocessDocument';
@@ -15,6 +16,7 @@ import abortWorkflow from '../graphql/queries/abortWorkflow';
 import onCreateDocument from '../graphql/queries/onCreateDocument';
 import onUpdateDocument from '../graphql/queries/onUpdateDocument';
 import { DOCUMENT_LIST_SHARDS_PER_DAY } from '../components/document-list/documents-table-config';
+import { ALL_USE_CASES_ID } from './use-use-cases';
 import { Document } from '../types/documents';
 
 const client = generateClient();
@@ -26,13 +28,22 @@ interface DateRange {
   endDateTime: string;
 }
 
+export interface UseCaseFilter {
+  businessUnitId: string;
+  useCaseId: string;
+}
+
 interface UseGraphQlApiParams {
   initialPeriodsToLoad?: number;
+  useCaseFilter?: UseCaseFilter | null;
 }
+
+export const MAX_DOCUMENTS = 1000;
 
 interface UseGraphQlApiReturn {
   documents: Document[];
   isDocumentsListLoading: boolean;
+  isDocumentListTruncated: boolean;
   getDocumentDetailsFromIds: (objectKeys: string[]) => Promise<Document[]>;
   setIsDocumentsListLoading: React.Dispatch<React.SetStateAction<boolean>>;
   setPeriodsToLoad: React.Dispatch<React.SetStateAction<number>>;
@@ -75,6 +86,10 @@ interface ListDocumentsByDateRangeResult {
   data: { listDocumentsByDateRange: { Documents: DocumentListItem[]; nextToken?: string | null } | null };
 }
 
+interface ListDocumentsByUseCaseResult {
+  data: { listDocumentsByUseCase: { Documents: DocumentListItem[]; nextToken?: string | null } | null };
+}
+
 interface AbortWorkflowResponse {
   success: boolean;
   abortedCount: number;
@@ -82,10 +97,14 @@ interface AbortWorkflowResponse {
   errors?: string[];
 }
 
-const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2 }: UseGraphQlApiParams = {}): UseGraphQlApiReturn => {
+const useGraphQlApi = ({
+  initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2,
+  useCaseFilter = null,
+}: UseGraphQlApiParams = {}): UseGraphQlApiReturn => {
   const [periodsToLoad, setPeriodsToLoad] = useState<number>(initialPeriodsToLoad);
   const [isDocumentsListLoading, setIsDocumentsListLoading] = useState<boolean>(false);
   const [documents, setDocuments] = useState<Document[]>([]);
+  const [isDocumentListTruncated, setIsDocumentListTruncated] = useState<boolean>(false);
   const [customDateRange, setCustomDateRange] = useState<DateRange | null>(null); // { startDateTime, endDateTime }
   const [_dateRangeNextToken, _setDateRangeNextToken] = useState<string | null>(null);
   const { setErrorMessage } = useAppContext()!;
@@ -101,6 +120,41 @@ const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2
     customDateRangeRef.current = customDateRange;
   }, [customDateRange]);
 
+  // Ref for useCaseFilter so closures always see the latest value
+  const useCaseFilterRef = useRef<UseCaseFilter | null>(useCaseFilter);
+  useCaseFilterRef.current = useCaseFilter;
+
+  const pendingReloadRef = useRef<boolean>(false);
+  const reloadTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const loadTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hasMountedRef = useRef<boolean>(false);
+  const loadSequenceRef = useRef<number>(0);
+
+  // Cleanup timeouts on unmount to prevent state updates after unmount
+  useEffect(() => {
+    return () => {
+      if (reloadTimeoutRef.current) {
+        clearTimeout(reloadTimeoutRef.current);
+      }
+      if (loadTimeoutRef.current) {
+        clearTimeout(loadTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  const finalizeDocumentsLoad = useCallback((): void => {
+    if (pendingReloadRef.current) {
+      pendingReloadRef.current = false;
+      if (reloadTimeoutRef.current) {
+        clearTimeout(reloadTimeoutRef.current);
+      }
+      setIsDocumentsListLoading(false);
+      reloadTimeoutRef.current = setTimeout(() => setIsDocumentsListLoading(true), 0);
+    } else {
+      setIsDocumentsListLoading(false);
+    }
+  }, []);
+
   /**
    * Check if a document falls within the active date range filter.
    * For relative periods (no customDateRange), always returns true.
@@ -114,6 +168,16 @@ const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2
     if (!docTime) return false; // No timestamp = can't verify, exclude
 
     return docTime >= range.startDateTime && docTime <= range.endDateTime;
+  }, []);
+
+  /**
+   * Check if a document matches the active use-case filter.
+   * When no filter or ALL_USE_CASES_ID, always returns true.
+   */
+  const isDocumentInUseCaseFilter = useCallback((doc: Document & { BusinessUnitId?: string; UseCaseId?: string }): boolean => {
+    const filter = useCaseFilterRef.current;
+    if (!filter?.useCaseId || filter.useCaseId === ALL_USE_CASES_ID) return true;
+    return doc.BusinessUnitId === filter.businessUnitId && doc.UseCaseId === filter.useCaseId;
   }, []);
 
   const setDocumentsDeduped = useCallback((documentValues: Document[]): void => {
@@ -216,12 +280,12 @@ const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2
           try {
             const documentValues = await getDocumentDetailsFromIds([objectKey]);
             if (documentValues && documentValues.length > 0) {
-              // Filter: only add documents that fall within the active date range
-              const inRangeDocuments = documentValues.filter(isDocumentInActiveRange);
+              // Filter: only add documents that fall within the active date range and use-case filter
+              const inRangeDocuments = documentValues.filter(isDocumentInActiveRange).filter(isDocumentInUseCaseFilter);
               if (inRangeDocuments.length > 0) {
                 setDocumentsDeduped(inRangeDocuments);
               } else {
-                logger.debug(`Subscription: new document ${objectKey} outside active date range, skipping`);
+                logger.debug(`Subscription: new document ${objectKey} outside active date/use-case range, skipping`);
               }
             }
           } catch (error) {
@@ -244,7 +308,7 @@ const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2
         subscriptionsRef.current.onCreate = null;
       }
     };
-  }, [getDocumentDetailsFromIds, setDocumentsDeduped, setErrorMessage]);
+  }, [getDocumentDetailsFromIds, setDocumentsDeduped, setErrorMessage, isDocumentInActiveRange, isDocumentInUseCaseFilter]);
 
   useEffect(() => {
     if (subscriptionsRef.current.onUpdate) {
@@ -270,23 +334,22 @@ const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2
           try {
             const documentValues = await getDocumentDetailsFromIds([documentUpdateEvent.ObjectKey]);
             if (documentValues && documentValues.length > 0) {
-              // For updates: only add if document is already in the list OR falls within the active range
-              // This ensures in-range docs get updates, but out-of-range new docs don't sneak in
-              const filteredValues = documentValues.filter((doc) => {
-                if (isDocumentInActiveRange(doc)) return true;
-                // Check if this document is already displayed (allow status updates for existing docs)
-                return false;
-              });
+              // For updates: only add if document falls within the active date range and use-case filter
+              const filteredValues = documentValues.filter(isDocumentInActiveRange).filter(isDocumentInUseCaseFilter);
               if (filteredValues.length > 0) {
                 setDocumentsDeduped(filteredValues);
               } else {
-                logger.debug(`Subscription: updated document ${documentUpdateEvent.ObjectKey} outside active date range, skipping`);
+                logger.debug(
+                  `Subscription: updated document ${documentUpdateEvent.ObjectKey} outside active date/use-case range, skipping`,
+                );
               }
             }
           } catch (error) {
             logger.error('Error fetching document details after update:', error);
-            // Fallback to subscription data if fetch fails - still apply range filter
-            if (isDocumentInActiveRange(documentUpdateEvent)) {
+            // Fallback to subscription data if fetch fails - still apply range and use-case filter
+            const docWithExtras = documentUpdateEvent as Document & { BusinessUnitId?: string; UseCaseId?: string };
+            const matchesFilter = isDocumentInActiveRange(documentUpdateEvent) && isDocumentInUseCaseFilter(docWithExtras);
+            if (matchesFilter) {
               setDocumentsDeduped([documentUpdateEvent]);
             }
           }
@@ -307,7 +370,7 @@ const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2
         subscriptionsRef.current.onUpdate = null;
       }
     };
-  }, [setDocumentsDeduped, setErrorMessage, getDocumentDetailsFromIds]);
+  }, [setDocumentsDeduped, setErrorMessage, getDocumentDetailsFromIds, isDocumentInActiveRange, isDocumentInUseCaseFilter]);
 
   const listDocumentIdsByDateShards = async ({ date, shards }: { date: string; shards: number[] }): Promise<DocumentListItem[]> => {
     const listDocumentsDateShardPromises = shards.map((i) => {
@@ -350,7 +413,89 @@ const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2
     return documentData;
   };
 
-  const sendSetDocumentsForDateRange = async (dateRange: DateRange, nextToken: string | null = null): Promise<void> => {
+  const sendSetDocumentsByUseCase = async (useCaseId: string, businessUnitId: string, loadSeq: number): Promise<void> => {
+    if (!businessUnitId || !useCaseId) {
+      setDocumentsDeduped([]);
+      setIsDocumentListTruncated(false);
+      finalizeDocumentsLoad();
+      return;
+    }
+
+    const BATCH_SIZE = 50;
+
+    try {
+      const allDocumentItems: DocumentListItem[] = [];
+      let nextToken: string | null = null;
+
+      do {
+        if (loadSeq !== loadSequenceRef.current) {
+          logger.debug(`Discarding stale use-case load (seq ${loadSeq}, current ${loadSequenceRef.current})`);
+          return;
+        }
+        const result = await client.graphql({
+          query: listDocumentsByUseCaseQuery as unknown as string,
+          variables: { useCaseId, businessUnitId, limit: 100, nextToken },
+        });
+        const data = (result as ListDocumentsByUseCaseResult)?.data?.listDocumentsByUseCase ?? null;
+        const docs = data?.Documents ?? [];
+        allDocumentItems.push(...docs);
+        nextToken = data?.nextToken ?? null;
+      } while (nextToken && allDocumentItems.length < MAX_DOCUMENTS);
+
+      if (loadSeq !== loadSequenceRef.current) {
+        logger.debug(`Discarding stale use-case load (seq ${loadSeq}, current ${loadSequenceRef.current})`);
+        return;
+      }
+
+      const cappedItems = allDocumentItems.slice(0, MAX_DOCUMENTS);
+      const wasTruncated = nextToken != null && allDocumentItems.length >= MAX_DOCUMENTS;
+      setIsDocumentListTruncated(wasTruncated);
+      if (wasTruncated) {
+        logger.warn(`Use-case document list capped at ${MAX_DOCUMENTS} (total available: ${allDocumentItems.length}+)`);
+      }
+
+      const objectKeys = cappedItems.map((item) => item.ObjectKey);
+      if (objectKeys.length === 0) {
+        setDocumentsDeduped([]);
+        finalizeDocumentsLoad();
+        return;
+      }
+
+      const allDocumentValues: Document[] = [];
+      for (let i = 0; i < objectKeys.length; i += BATCH_SIZE) {
+        if (loadSeq !== loadSequenceRef.current) {
+          logger.debug(`Discarding stale use-case load during detail fetch (seq ${loadSeq}, current ${loadSequenceRef.current})`);
+          return;
+        }
+        const batch = objectKeys.slice(i, i + BATCH_SIZE);
+        const batchValues = await getDocumentDetailsFromIds(batch);
+        allDocumentValues.push(...batchValues);
+      }
+
+      if (loadSeq !== loadSequenceRef.current) {
+        logger.debug(`Discarding stale use-case load after detail fetch (seq ${loadSeq}, current ${loadSequenceRef.current})`);
+        return;
+      }
+
+      const itemsByKey = new Map(cappedItems.map((item) => [item.ObjectKey, item]));
+      const mergedDocumentValues = allDocumentValues
+        .filter((detail) => detail != null)
+        .map((detail) => {
+          const matchingItem = itemsByKey.get(detail.ObjectKey);
+          return matchingItem ? { ...detail, ListPK: matchingItem.PK, ListSK: matchingItem.SK } : detail;
+        });
+
+      setDocumentsDeduped(mergedDocumentValues);
+      finalizeDocumentsLoad();
+    } catch (error) {
+      setIsDocumentListTruncated(false);
+      finalizeDocumentsLoad();
+      setErrorMessage('failed to list documents by use case - please try again later');
+      logger.error('error listing documents by use case', error);
+    }
+  };
+
+  const sendSetDocumentsForDateRange = async (dateRange: DateRange, nextToken: string | null = null, loadSeq?: number): Promise<void> => {
     // Server-side paginated query for custom date ranges
     try {
       logger.info('Fetching documents by date range', dateRange);
@@ -359,6 +504,10 @@ const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2
 
       // Fetch all pages (server-side pagination)
       do {
+        if (loadSeq != null && loadSeq !== loadSequenceRef.current) {
+          logger.debug(`Discarding stale date range load (seq ${loadSeq}, current ${loadSequenceRef.current})`);
+          return;
+        }
         const response = await client.graphql({
           query: listDocumentsByDateRangeQuery as unknown as string,
           variables: {
@@ -377,6 +526,11 @@ const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2
         logger.debug(`Fetched ${result?.Documents?.length || 0} documents, hasMore=${!!currentToken}`);
       } while (currentToken);
 
+      if (loadSeq != null && loadSeq !== loadSequenceRef.current) {
+        logger.debug(`Discarding stale date range load (seq ${loadSeq}, current ${loadSequenceRef.current})`);
+        return;
+      }
+
       logger.info(`Total documents fetched for date range: ${allDocuments.length}`);
 
       // Transform to match existing document format expected by the UI
@@ -387,16 +541,17 @@ const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2
       }));
 
       setDocumentsDeduped(documentValues as Document[]);
-      setIsDocumentsListLoading(false);
+      finalizeDocumentsLoad();
     } catch (error) {
-      setIsDocumentsListLoading(false);
+      finalizeDocumentsLoad();
       setErrorMessage('Failed to list documents for date range - please try again later');
       logger.error('Error fetching documents by date range', error);
     }
   };
 
-  const sendSetDocumentsForPeriod = async (): Promise<void> => {
+  const sendSetDocumentsForPeriod = async (loadSeq?: number): Promise<void> => {
     // XXX this logic should be moved to the API
+    setIsDocumentListTruncated(false);
     try {
       const now = new Date();
 
@@ -486,8 +641,14 @@ const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2
         .map((r) => (r as PromiseFulfilledResult<Document[]>).value)
         .reduce((previous, current) => [...previous, ...current], []);
       logger.debug('documentValuesReduced', documentValuesReduced);
+
+      if (loadSeq != null && loadSeq !== loadSequenceRef.current) {
+        logger.debug(`Discarding stale period load (seq ${loadSeq}, current ${loadSequenceRef.current})`);
+        return;
+      }
+
       setDocumentsDeduped(documentValuesReduced);
-      setIsDocumentsListLoading(false);
+      finalizeDocumentsLoad();
       const getDocumentsRejected = getDocumentsPromiseResolutions.filter((r) => r.status === 'rejected');
       // Only show error banner if ALL shard queries failed
       if (getDocumentsRejected.length === documentDataPromises.length) {
@@ -499,7 +660,7 @@ const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2
         logger.debug('Rejected shard queries:', getDocumentsRejected);
       }
     } catch (error) {
-      setIsDocumentsListLoading(false);
+      finalizeDocumentsLoad();
       setErrorMessage('failed to list Documents - please try again later');
       logger.error('error obtaining document list', error);
     }
@@ -508,26 +669,39 @@ const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2
   useEffect(() => {
     if (isDocumentsListLoading) {
       logger.debug('document list is loading');
-      // send in a timeout to avoid blocking rendering
-      setTimeout(() => {
+      loadSequenceRef.current += 1;
+      const thisLoadSeq = loadSequenceRef.current;
+      loadTimeoutRef.current = setTimeout(() => {
         setDocuments([]);
-        if (customDateRange) {
-          // Use server-side paginated query for custom date ranges
-          sendSetDocumentsForDateRange(customDateRange);
+        const currentFilter = useCaseFilterRef.current;
+        if (currentFilter?.useCaseId && currentFilter.useCaseId !== ALL_USE_CASES_ID) {
+          sendSetDocumentsByUseCase(currentFilter.useCaseId, currentFilter.businessUnitId, thisLoadSeq);
+        } else if (customDateRange) {
+          sendSetDocumentsForDateRange(customDateRange, null, thisLoadSeq);
         } else {
-          // Use existing shard-based client-side mechanism for relative periods
-          sendSetDocumentsForPeriod();
+          sendSetDocumentsForPeriod(thisLoadSeq);
         }
       }, 1);
     }
-  }, [isDocumentsListLoading]);
+    return () => {
+      if (loadTimeoutRef.current) {
+        clearTimeout(loadTimeoutRef.current);
+        loadTimeoutRef.current = null;
+      }
+    };
+  }, [isDocumentsListLoading, customDateRange]);
 
   useEffect(() => {
     logger.debug('list period changed', periodsToLoad);
+    if (!hasMountedRef.current) {
+      hasMountedRef.current = true;
+      setIsDocumentsListLoading(true);
+      return;
+    }
     if (!customDateRange) {
       setIsDocumentsListLoading(true);
     }
-  }, [periodsToLoad]);
+  }, [periodsToLoad, customDateRange]);
 
   useEffect(() => {
     if (customDateRange) {
@@ -535,6 +709,18 @@ const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2
       setIsDocumentsListLoading(true);
     }
   }, [customDateRange]);
+
+  // Reload documents when the use-case filter changes
+  useEffect(() => {
+    if (!hasMountedRef.current) {
+      return;
+    }
+    if (isDocumentsListLoading) {
+      pendingReloadRef.current = true;
+      return;
+    }
+    setIsDocumentsListLoading(true);
+  }, [useCaseFilter?.useCaseId, useCaseFilter?.businessUnitId]);
 
   const deleteDocuments = async (objectKeys: string[]): Promise<unknown> => {
     try {
@@ -605,6 +791,7 @@ const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2
   return {
     documents,
     isDocumentsListLoading,
+    isDocumentListTruncated,
     getDocumentDetailsFromIds,
     setIsDocumentsListLoading,
     setPeriodsToLoad,

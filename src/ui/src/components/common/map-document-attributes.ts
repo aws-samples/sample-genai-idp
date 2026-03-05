@@ -5,6 +5,8 @@ import { getDocumentConfidenceAlertCount } from './confidence-alerts-utils';
 
 interface DocumentApiItem {
   ObjectKey: string;
+  BusinessUnitId?: string;
+  UseCaseId?: string;
   ObjectStatus?: string;
   InitialEventTime?: string;
   QueuedTime?: string;
@@ -57,6 +59,8 @@ const mapDocumentsAttributes = (documents: DocumentApiItem[]): Record<string, un
   return documents.map((item) => {
     const {
       ObjectKey: objectKey,
+      BusinessUnitId: businessUnitId,
+      UseCaseId: useCaseId,
       ObjectStatus: objectStatus,
       InitialEventTime: initialEventTime,
       QueuedTime: queuedTime,
@@ -130,6 +134,8 @@ const mapDocumentsAttributes = (documents: DocumentApiItem[]): Record<string, un
     const mapping = {
       uniqueId,
       objectKey,
+      businessUnitId: businessUnitId || '',
+      useCaseId: useCaseId || '',
       objectStatus,
       initialEventTime: formatDate(initialEventTime),
       queuedTime: formatDate(queuedTime),

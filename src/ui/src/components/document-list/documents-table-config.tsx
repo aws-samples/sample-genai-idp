@@ -15,6 +15,8 @@ export type { ConfigVersion };
 
 export interface MappedDocument {
   objectKey: string;
+  businessUnitId?: string;
+  useCaseId?: string;
   objectStatus: string;
   initialEventTime: string;
   completionTime: string;
@@ -79,6 +81,20 @@ export const COLUMN_DEFINITIONS_MAIN = (versions: ConfigVersion[] = []): TablePr
     },
     sortingField: 'objectKey',
     width: 300,
+  },
+  {
+    id: 'businessUnitId',
+    header: 'Business Unit',
+    cell: (item) => item.businessUnitId || '-',
+    sortingField: 'businessUnitId',
+    width: 150,
+  },
+  {
+    id: 'useCaseId',
+    header: 'Use Case',
+    cell: (item) => item.useCaseId || '-',
+    sortingField: 'useCaseId',
+    width: 150,
   },
   {
     id: 'objectStatus',
@@ -171,6 +187,8 @@ const VISIBLE_CONTENT_OPTIONS = [
     label: 'Document list properties',
     options: [
       { id: 'objectKey', label: 'Document ID', editable: false },
+      { id: 'businessUnitId', label: 'Business Unit' },
+      { id: 'useCaseId', label: 'Use Case' },
       { id: 'objectStatus', label: 'Status' },
       { id: 'initialEventTime', label: 'Submitted' },
       { id: 'completionTime', label: 'Completed' },
@@ -188,6 +206,8 @@ const VISIBLE_CONTENT_OPTIONS = [
 const VISIBLE_CONTENT = [
   'objectKey',
   'objectStatus',
+  'businessUnitId',
+  'useCaseId',
   'configVersion',
   'initialEventTime',
   'duration',

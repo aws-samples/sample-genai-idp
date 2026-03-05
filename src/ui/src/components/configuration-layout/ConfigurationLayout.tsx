@@ -29,6 +29,7 @@ import useConfiguration from '../../hooks/use-configuration';
 import useConfigurationVersions from '../../hooks/use-configuration-versions';
 import useConfigurationLibrary from '../../hooks/use-configuration-library';
 import useSettingsContext from '../../contexts/settings';
+import useUseCaseContext from '../../contexts/useCase';
 import ConfigBuilder from './ConfigBuilder';
 import ConfigurationVersionsTable from './ConfigurationVersionsTable';
 import ConfigurationComparison from './ConfigurationComparison';
@@ -134,6 +135,13 @@ const isNumericValue = (val: unknown): boolean => {
 };
 
 const ConfigurationLayout = (): React.JSX.Element => {
+  const useCaseContext = useUseCaseContext();
+  const effectiveUseCase = useCaseContext?.effectiveUseCase || null;
+
+  // Stable key that changes when the use-case scope changes, used to force
+  // SchemaBuilder remount so useSchemaDesigner gets a fresh initial state.
+  const configScopeKey = effectiveUseCase ? `${effectiveUseCase.businessUnitId}/${effectiveUseCase.useCaseId}` : 'global';
+
   // Version selection state - declare first
   const [selectedVersionsForCompare, setSelectedVersionsForCompare] = useState<string[]>([]);
   const [selectedVersion, setSelectedVersion] = useState<string | null>(null);
@@ -2345,6 +2353,7 @@ const ConfigurationLayout = (): React.JSX.Element => {
             {viewMode === 'form' && (
               <SpaceBetween size="l">
                 <ConfigBuilder
+                  key={`${currentVersionName}-${configScopeKey}`}
                   schema={{
                     ...schema,
                     properties: Object.fromEntries(Object.entries(schema?.properties || {}).filter(([key]) => key !== 'classes')),
