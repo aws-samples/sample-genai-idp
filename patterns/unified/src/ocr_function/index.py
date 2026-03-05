@@ -277,22 +277,23 @@ def handler(event, context):
     if document.status == Status.FAILED:
         error_message = f"OCR processing failed for document {document.id}"
         logger.error(error_message)
-        # Update status in AppSync before raising exception
-        document_service.update_document(document)
         
         # Check if failure was due to throttling - if so, raise ThrottlingException
-        # so Step Functions can match it in the Retry configuration and retry the step
+        # so Step Functions can match it in the Retry configuration and retry the step.
+        # Do NOT update document status to FAILED for throttling — Step Functions will retry
+        # and the document should remain in OCR status until retries are exhausted.
         has_throttling, throttling_error = check_document_for_throttling_errors(document)
         if has_throttling:
             logger.error(f"Throttling error detected in OCR errors: {throttling_error}")
-            logger.error("Raising ThrottlingException to trigger Step Functions retry")
+            logger.error("Raising ThrottlingException to trigger Step Functions retry (NOT marking document as FAILED)")
             # Emit CloudWatch metric for OCR throttling visibility
             metrics.put_metric('OCRThrottles', 1)
             raise ThrottlingException(
                 f"Throttling detected during OCR processing: {throttling_error}"
             )
         
-        # Non-throttling failure - emit non-retryable error metric and raise
+        # Non-throttling failure - update status to FAILED in AppSync and raise
+        document_service.update_document(document)
         metrics.put_metric('OCRNonRetryableErrors', 1)
         raise Exception(error_message)
     
