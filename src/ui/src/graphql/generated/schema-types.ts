@@ -786,6 +786,12 @@ export type QueryListDocumentsDateShardArgs = {
 };
 
 
+export type QueryListPendingReviewDocumentsArgs = {
+  limit?: InputMaybe<Scalars['Int']['input']>;
+  nextToken?: InputMaybe<Scalars['String']['input']>;
+};
+
+
 export type QueryQueryKnowledgeBaseArgs = {
   input: Scalars['String']['input'];
   sessionId?: InputMaybe<Scalars['String']['input']>;
