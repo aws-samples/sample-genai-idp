@@ -174,9 +174,9 @@
                         "RequestLimitExceeded",
                         "ServiceUnavailableException"
                     ],
-                    "IntervalSeconds": 2,
-                    "MaxAttempts": 2,
-                    "BackoffRate": 2
+                    "IntervalSeconds": 5,
+                    "MaxAttempts": 6,
+                    "BackoffRate": 3
                 }
             ],
             "Next": "ClassificationStep"

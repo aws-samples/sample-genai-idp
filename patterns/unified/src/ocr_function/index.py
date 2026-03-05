@@ -11,13 +11,40 @@ import logging
 import os
 import time
 
-from idp_common import get_config, ocr
-from idp_common.models import Document, Status
+from aws_xray_sdk.core import patch_all, xray_recorder
+from idp_common import get_config, metrics, ocr
 from idp_common.docs_service import create_document_service
+from idp_common.models import Document, Status
 from idp_common.utils import calculate_lambda_metering, merge_metering_data
-from aws_xray_sdk.core import xray_recorder, patch_all
 
 patch_all()
+
+# Custom exception for throttling scenarios - re-raised so Step Functions can match
+# the error name in its Retry configuration and retry the OCR step appropriately.
+class ThrottlingException(Exception):
+    """Exception raised when throttling is detected in OCR processing results."""
+    pass
+
+# Throttling detection constants (shared pattern with assessment_function)
+THROTTLING_KEYWORDS = [
+    "throttlingexception",
+    "provisionedthroughputexceededexception",
+    "servicequotaexceededexception",
+    "toomanyrequestsexception",
+    "requestlimitexceeded",
+    "too many tokens",
+    "please wait before trying again",
+    "reached max retries",
+    "provisioned rate exceeded",
+]
+
+THROTTLING_EXCEPTIONS = [
+    "ThrottlingException",
+    "ProvisionedThroughputExceededException",
+    "ServiceQuotaExceededException",
+    "TooManyRequestsException",
+    "RequestLimitExceeded",
+]
 
 # Configuration will be loaded in handler function
 
@@ -29,6 +56,52 @@ logging.getLogger('idp_common.bedrock.client').setLevel(os.environ.get("BEDROCK_
 region = os.environ['AWS_REGION']
 METRIC_NAMESPACE = os.environ.get('METRIC_NAMESPACE')
 MAX_WORKERS = int(os.environ.get('MAX_WORKERS', 20))
+
+
+def is_throttling_exception(exception):
+    """
+    Check if an exception is related to throttling.
+
+    Args:
+        exception: The exception to check
+
+    Returns:
+        bool: True if the exception is throttling-related, False otherwise
+    """
+    from botocore.exceptions import ClientError
+
+    if isinstance(exception, ClientError):
+        error_code = exception.response.get('Error', {}).get('Code', '')
+        return error_code in THROTTLING_EXCEPTIONS
+
+    exception_name = type(exception).__name__
+    exception_message = str(exception).lower()
+
+    return (
+        exception_name in THROTTLING_EXCEPTIONS or
+        any(keyword in exception_message for keyword in THROTTLING_KEYWORDS)
+    )
+
+
+def check_document_for_throttling_errors(document):
+    """
+    Check if a document has throttling errors in its errors field.
+
+    Args:
+        document: The document object to check
+
+    Returns:
+        tuple: (has_throttling_errors: bool, first_throttling_error: str or None)
+    """
+    if document.status != Status.FAILED or not document.errors:
+        return False, None
+
+    for error_msg in document.errors:
+        error_lower = str(error_msg).lower()
+        if any(keyword in error_lower for keyword in THROTTLING_KEYWORDS):
+            return True, error_msg
+
+    return False, None
 
 @xray_recorder.capture('ocr_function')
 def handler(event, context): 
@@ -68,7 +141,7 @@ def handler(event, context):
         # Update document execution ARN for tracking
         if document.status == Status.QUEUED:
             document_service = create_document_service()
-            logger.info(f"Updating document execution ARN for OCR skip")
+            logger.info("Updating document execution ARN for OCR skip")
             document_service.update_document(document)
         
         # Add Lambda metering for OCR skip execution
@@ -119,6 +192,21 @@ def handler(event, context):
         logger.error(error_message)
         # Update status in AppSync before raising exception
         document_service.update_document(document)
+        
+        # Check if failure was due to throttling - if so, raise ThrottlingException
+        # so Step Functions can match it in the Retry configuration and retry the step
+        has_throttling, throttling_error = check_document_for_throttling_errors(document)
+        if has_throttling:
+            logger.error(f"Throttling error detected in OCR errors: {throttling_error}")
+            logger.error("Raising ThrottlingException to trigger Step Functions retry")
+            # Emit CloudWatch metric for OCR throttling visibility
+            metrics.put_metric('OCRThrottles', 1)
+            raise ThrottlingException(
+                f"Throttling detected during OCR processing: {throttling_error}"
+            )
+        
+        # Non-throttling failure - emit non-retryable error metric and raise
+        metrics.put_metric('OCRNonRetryableErrors', 1)
         raise Exception(error_message)
     
     t1 = time.time()

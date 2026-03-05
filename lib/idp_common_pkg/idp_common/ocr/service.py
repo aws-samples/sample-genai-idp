@@ -406,6 +406,31 @@ class OcrService:
                     logger.info(f"Rendered {len(page_images)} page images")
 
                     # Phase 2: Process OCR in PARALLEL (Textract/Bedrock API calls are I/O-bound)
+                    # Skip pages that already have OCR results (retry-safe: preserves completed work)
+                    pages_to_process = {}
+                    pages_skipped = 0
+                    for i in range(num_pages):
+                        page_id = str(i + 1)
+                        existing_page = document.pages.get(page_id)
+                        if (
+                            existing_page
+                            and existing_page.image_uri
+                            and existing_page.raw_text_uri
+                            and existing_page.parsed_text_uri
+                        ):
+                            logger.info(
+                                f"Skipping page {page_id} - already has OCR results (retry-safe)"
+                            )
+                            pages_skipped += 1
+                        else:
+                            pages_to_process[i] = page_images[i]
+
+                    if pages_skipped > 0:
+                        logger.info(
+                            f"Retry-safe OCR: skipping {pages_skipped} already-completed pages, "
+                            f"processing {len(pages_to_process)} remaining pages"
+                        )
+
                     with concurrent.futures.ThreadPoolExecutor(
                         max_workers=self.max_workers
                     ) as executor:
@@ -413,11 +438,11 @@ class OcrService:
                             executor.submit(
                                 self._process_page_with_image,
                                 i,
-                                page_images[i],
+                                pages_to_process[i],
                                 document.output_bucket,
                                 document.input_key,
                             ): i
-                            for i in range(num_pages)
+                            for i in pages_to_process
                         }
 
                         # Start memory monitoring in background thread

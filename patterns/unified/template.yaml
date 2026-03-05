@@ -3521,14 +3521,19 @@ Resources:
               "width": 8,
               "height": 6,
               "properties": {
-                "metrics": [],
+                "metrics": [
+                  [{"expression": "m1/PERIOD(m1)*60", "label": "OCR Throttles per Minute"}],
+                  [{"expression": "m2/PERIOD(m2)*60", "label": "OCR Non-Retryable Errors per Minute"}],
+                  ["${StackName}", "OCRThrottles", {"id": "m1", "stat": "Sum", "visible": false}],
+                  [".", "OCRNonRetryableErrors", {"id": "m2", "stat": "Sum", "visible": false}]
+                ],
                 "region": "${AWS::Region}",
-                "title": "Blank",
+                "title": "OCR Throttling & Errors (per Minute)",
                 "view": "timeSeries",
                 "period": 60,
                 "yAxis": {
                   "left": {
-                    "label": "N/A"
+                    "label": "Count per Minute"
                   }
                 }
               }
