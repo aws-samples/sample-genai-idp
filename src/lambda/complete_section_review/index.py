@@ -39,6 +39,7 @@ def handler(event, context):
     user_email = identity.get("claims", {}).get("email", "")
     user_groups = identity.get("claims", {}).get("cognito:groups", [])
     is_admin = "Admin" in user_groups
+    is_supervisor = "Supervisor" in user_groups
 
     if field_name == "claimReview":
         if not object_key:
@@ -51,8 +52,8 @@ def handler(event, context):
         return release_review(object_key, username, user_email, is_admin)
 
     if field_name == "skipAllSectionsReview":
-        if not is_admin:
-            raise ValueError("Only administrators can skip all sections review")
+        if not is_admin and not is_supervisor:
+            raise ValueError("Only administrators and supervisors can skip all sections review")
         if not object_key:
             raise ValueError("objectKey is required")
         return skip_all_sections_review(object_key, username, user_email)
@@ -252,8 +253,8 @@ def trigger_reprocessing(object_key):
 
 
 def skip_all_sections_review(object_key, username="", user_email=""):
-    """Skip all pending section reviews and mark document as complete (Admin only)."""
-    logger.info(f"Skipping all sections review for document {object_key} by admin {username}")
+    """Skip all pending section reviews and mark document as complete (Admin/Supervisor)."""
+    logger.info(f"Skipping all sections review for document {object_key} by {username}")
 
     # Load document using document service to verify it exists
     document_service = create_document_service(mode='dynamodb')

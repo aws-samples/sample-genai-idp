@@ -11,6 +11,7 @@ from typing import Dict, Any, Tuple
 from idp_common.models import Document, Status
 from idp_common.docs_service import create_document_service
 from idp_common.config import ConfigurationManager
+from idp_common.config.constants import DEFAULT_BUSINESS_UNIT_ID, DEFAULT_USE_CASE_ID
 from aws_xray_sdk.core import xray_recorder, patch_all
 
 patch_all()
@@ -95,6 +96,13 @@ def start_workflow(document: Document) -> Dict[str, Any]:
         # Fallback to direct document dict if no working bucket
         compressed_document = document.to_dict()
         logger.warning("No WORKING_BUCKET configured, sending uncompressed document to workflow")
+
+    # Build use-case context for downstream Lambda handlers
+    use_case_context = {}
+    if document.business_unit_id:
+        use_case_context["business_unit_id"] = document.business_unit_id
+    if document.use_case_id:
+        use_case_context["use_case_id"] = document.use_case_id
     
     # Inject use_bda flag and bda_project_arn from config into document for state machine routing.
     # The unified state machine uses $.document.use_bda to choose BDA vs pipeline branch,
@@ -104,9 +112,30 @@ def start_workflow(document: Document) -> Dict[str, Any]:
         try:
             config_version = getattr(document, 'config_version', None) or 'default'
             manager = ConfigurationManager(table_name=config_table_name)
+            business_unit_id = document.business_unit_id
+            use_case_id = document.use_case_id
+            is_default_pair = (
+                business_unit_id == DEFAULT_BUSINESS_UNIT_ID
+                and use_case_id == DEFAULT_USE_CASE_ID
+            )
+            is_mixed_default_pair = (
+                (business_unit_id == DEFAULT_BUSINESS_UNIT_ID)
+                != (use_case_id == DEFAULT_USE_CASE_ID)
+            )
 
-            # Read use_bda from the full config (properly decompresses gzip storage)
-            config = manager.get_merged_configuration(config_version)
+            # Resolve config for workflow branching.
+            # Use use-case-scoped config when BU/UC is present, otherwise use versioned global config.
+            config_scope = f"version '{config_version}'"
+            if business_unit_id and use_case_id and not is_default_pair:
+                if is_mixed_default_pair:
+                    raise ValueError(
+                        "Invalid mixed default IDs in document context: "
+                        f"business_unit_id={business_unit_id!r}, use_case_id={use_case_id!r}"
+                    )
+                config = manager.get_use_case_configuration(business_unit_id, use_case_id)
+                config_scope = f"use case '{business_unit_id}/{use_case_id}'"
+            else:
+                config = manager.get_merged_configuration(config_version)
             use_bda = getattr(config, 'use_bda', False) if config else False
             compressed_document['use_bda'] = bool(use_bda)
 
@@ -115,16 +144,16 @@ def start_workflow(document: Document) -> Dict[str, Any]:
                 bda_project_arn = manager.get_bda_project_arn(config_version)
                 if bda_project_arn:
                     compressed_document['bda_project_arn'] = bda_project_arn
-                    logger.info(f"Config version '{config_version}': use_bda=True, bda_project_arn={bda_project_arn}")
+                    logger.info(f"{config_scope}: use_bda=True, bda_project_arn={bda_project_arn}")
                 else:
                     # No BDA project linked — fall back to pipeline to avoid errors
                     logger.warning(
-                        f"Config version '{config_version}' has use_bda=True but no BDA project ARN linked. "
+                        f"{config_scope} has use_bda=True but no BDA project ARN linked for config version '{config_version}'. "
                         f"Falling back to pipeline mode. Please sync the config version to a BDA project."
                     )
                     compressed_document['use_bda'] = False
             else:
-                logger.info(f"Config version '{config_version}': use_bda=False, using pipeline mode")
+                logger.info(f"{config_scope}: use_bda=False, using pipeline mode")
         except Exception as e:
             logger.warning(f"Could not read config from ConfigurationManager: {e}. Defaulting to pipeline mode.", exc_info=True)
             compressed_document['use_bda'] = False
@@ -133,7 +162,8 @@ def start_workflow(document: Document) -> Dict[str, Any]:
         compressed_document['use_bda'] = False
 
     event = {
-        "document": compressed_document
+        "document": compressed_document,
+        "use_case_context": use_case_context,
     }
 
     logger.info(f"Starting workflow for document (size: {len(json.dumps(event, default=str))} chars)")

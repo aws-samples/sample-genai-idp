@@ -1,7 +1,34 @@
 {
     "Comment": "Unified IDP Document Processing Workflow - routes between BDA and step-by-step pipeline based on use_bda config flag",
-    "StartAt": "RouteByProcessingMode",
+    "StartAt": "CheckUseCaseContext",
     "States": {
+        "CheckUseCaseContext": {
+            "Type": "Choice",
+            "Comment": "Ensure use_case_context is present and non-null before downstream steps reference it",
+            "Choices": [
+                {
+                    "And": [
+                        {
+                            "Variable": "$.use_case_context",
+                            "IsPresent": true
+                        },
+                        {
+                            "Variable": "$.use_case_context",
+                            "IsNull": false
+                        }
+                    ],
+                    "Next": "RouteByProcessingMode"
+                }
+            ],
+            "Default": "InitUseCaseContext"
+        },
+        "InitUseCaseContext": {
+            "Type": "Pass",
+            "Comment": "Initialize use_case_context with safe defaults when missing from input",
+            "Result": {},
+            "ResultPath": "$.use_case_context",
+            "Next": "RouteByProcessingMode"
+        },
         "RouteByProcessingMode": {
             "Type": "Choice",
             "Comment": "Route to BDA or step-by-step pipeline based on use_bda flag in document config",
@@ -97,7 +124,8 @@
             "Parameters": {
                 "execution_arn.$": "$$.Execution.Id",
                 "output_bucket": "${OutputBucket}",
-                "BDAResponse.$": "$.BDAResponse"
+                "BDAResponse.$": "$.BDAResponse",
+                "use_case_context.$": "$.use_case_context"
             },
             "ResultPath": "$.Result",
             "Retry": [
@@ -128,7 +156,8 @@
                 "execution_arn.$": "$$.Execution.Id",
                 "output_bucket": "${OutputBucket}",
                 "skip_bda": true,
-                "document.$": "$.document"
+                "document.$": "$.document",
+                "use_case_context.$": "$.use_case_context"
             },
             "ResultPath": "$.Result",
             "Retry": [
@@ -157,7 +186,8 @@
             "Resource": "${OCRFunctionArn}",
             "Parameters": {
                 "execution_arn.$": "$$.Execution.Id",
-                "document.$": "$.document"
+                "document.$": "$.document",
+                "use_case_context.$": "$.use_case_context"
             },
             "ResultPath": "$.OCRResult",
             "Retry": [
@@ -186,7 +216,8 @@
             "Resource": "${ClassificationFunctionArn}",
             "Parameters": {
                 "execution_arn.$": "$$.Execution.Id",
-                "OCRResult.$": "$.OCRResult"
+                "OCRResult.$": "$.OCRResult",
+                "use_case_context.$": "$.use_case_context"
             },
             "ResultPath": "$.ClassificationResult",
             "Retry": [
@@ -216,7 +247,8 @@
             "ItemSelector": {
                 "execution_arn.$": "$$.Execution.Id",
                 "document.$": "$.ClassificationResult.document",
-                "section_id.$": "$$.Map.Item.Value"
+                "section_id.$": "$$.Map.Item.Value",
+                "use_case_context.$": "$.use_case_context"
             },
             "MaxConcurrency": 10,
             "Iterator": {
@@ -225,6 +257,7 @@
                     "ExtractionStep": {
                         "Type": "Task",
                         "Resource": "${ExtractionFunctionArn}",
+                        "ResultPath": "$.ExtractionResult",
                         "Retry": [
                             {
                                 "ErrorEquals": [
@@ -251,8 +284,9 @@
                         "Resource": "${AssessmentFunctionArn}",
                         "Parameters": {
                             "execution_arn.$": "$$.Execution.Id",
-                            "document.$": "$.document",
-                            "section_id.$": "$.section_id"
+                            "document.$": "$.ExtractionResult.document",
+                            "section_id.$": "$.section_id",
+                            "use_case_context.$": "$.use_case_context"
                         },
                         "ResultPath": "$",
                         "Retry": [
@@ -291,7 +325,8 @@
             "Parameters": {
                 "execution_arn.$": "$$.Execution.Id",
                 "ClassificationResult.$": "$.ClassificationResult",
-                "ExtractionResults.$": "$.ExtractionResults"
+                "ExtractionResults.$": "$.ExtractionResults",
+                "use_case_context.$": "$.use_case_context"
             },
             "ResultPath": "$.Result",
             "Retry": [
@@ -340,7 +375,8 @@
             "ItemSelector": {
                 "execution_arn.$": "$$.Execution.Id",
                 "document.$": "$.Result.document",
-                "section_id.$": "$$.Map.Item.Value"
+                "section_id.$": "$$.Map.Item.Value",
+                "use_case_context.$": "$.use_case_context"
             },
             "MaxConcurrency": 10,
             "Iterator": {
@@ -425,10 +461,10 @@
             "Resource": "${SummarizationLambdaArn}",
             "Parameters": {
                 "execution_arn.$": "$$.Execution.Id",
-                "document.$": "$.Result.document"
+                "document.$": "$.RuleValidationOrchestrationResult.document",
+                "use_case_context.$": "$.use_case_context"
             },
-            "ResultPath": "$.Result",
-            "OutputPath": "$.Result.document",
+            "ResultPath": "$.SummarizationResult",
             "Retry": [
                 {
                     "ErrorEquals": [
@@ -455,7 +491,8 @@
             "Resource": "${EvaluationLambdaArn}",
             "Parameters": {
                 "execution_arn.$": "$$.Execution.Id",
-                "document.$": "$"
+                "document.$": "$.SummarizationResult.document",
+                "use_case_context.$": "$.use_case_context"
             },
             "ResultPath": "$",
             "Retry": [

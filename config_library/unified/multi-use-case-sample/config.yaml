@@ -1,0 +1,153 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: MIT-0
+
+# Multi-use-case sample - Global default configuration
+#
+# This config serves as the global default when deploying with multi-use-case
+# document handling. Each use case can override specific settings (model,
+# temperature, classes, etc.) while inheriting everything else from this global
+# default via the 5-layer configuration merge.
+#
+# Global defaults include Bank-Statement and Bank-checks - common document types
+# that are useful across business units. Per-use-case configs add specialized
+# document types for their specific workflows.
+#
+# All settings not explicitly defined here are inherited from system defaults.
+
+notes: >-
+  Multi-use-case sample - Global default for multi-business-unit document
+  processing. Includes common financial document types (bank statements and
+  checks). Use cases override with specialized document types per business unit.
+
+# Global default classes - common document types shared across business units
+classes:
+  - $schema: https://json-schema.org/draft/2020-12/schema
+    $id: Bank-Statement
+    type: object
+    x-aws-idp-document-type: Bank-Statement
+    description: >-
+      A periodic financial document issued by banks detailing account activity,
+      balances, and transactions over a specific time period.
+    $defs:
+      Address:
+        type: object
+        properties:
+          City:
+            type: string
+            x-aws-idp-evaluation-method: EXACT
+          Line1:
+            type: string
+            x-aws-idp-evaluation-method: EXACT
+          State:
+            type: string
+            x-aws-idp-evaluation-method: EXACT
+          ZipCode:
+            type: string
+            x-aws-idp-evaluation-method: EXACT
+          Line2:
+            type: string
+            x-aws-idp-evaluation-method: EXACT
+      account_summaryItem:
+        type: object
+        properties:
+          summary_desc:
+            type: string
+            x-aws-idp-evaluation-method: EXACT
+          summary_amount:
+            type: string
+            x-aws-idp-evaluation-method: NUMERIC_EXACT
+      transaction_detail:
+        type: object
+        properties:
+          date:
+            type: string
+            x-aws-idp-evaluation-method: EXACT
+          description:
+            type: string
+            x-aws-idp-evaluation-method: EXACT
+          balance:
+            type: string
+            x-aws-idp-evaluation-method: NUMERIC_EXACT
+          deposits:
+            type: string
+            x-aws-idp-evaluation-method: NUMERIC_EXACT
+          withdrawals:
+            type: string
+            x-aws-idp-evaluation-method: NUMERIC_EXACT
+    properties:
+      bank_name:
+        type: string
+        x-aws-idp-evaluation-method: EXACT
+      account_holder_name:
+        type: string
+        x-aws-idp-evaluation-method: EXACT
+      account_holder_address:
+        $ref: "#/$defs/Address"
+        x-aws-idp-evaluation-method: EXACT
+      account_number:
+        type: string
+        x-aws-idp-evaluation-method: EXACT
+      account_type:
+        type: string
+        x-aws-idp-evaluation-method: EXACT
+      statement_start_date:
+        format: date
+        type: string
+        x-aws-idp-evaluation-method: EXACT
+      statement_end_date:
+        format: date
+        type: string
+        x-aws-idp-evaluation-method: EXACT
+      account_summary:
+        type: array
+        items:
+          $ref: "#/$defs/account_summaryItem"
+        x-aws-idp-evaluation-method: LLM
+      transaction_details:
+        type: array
+        items:
+          $ref: "#/$defs/transaction_detail"
+        x-aws-idp-evaluation-method: LLM
+
+  - $schema: https://json-schema.org/draft/2020-12/schema
+    $id: Bank-checks
+    type: object
+    x-aws-idp-document-type: Bank-checks
+    description: >-
+      A written financial instrument directing a bank to pay a specific amount
+      of money from the account holder's account to a designated payee.
+    properties:
+      date:
+        format: date
+        type: string
+        x-aws-idp-evaluation-method: EXACT
+      dollar_amount:
+        type: number
+        x-aws-idp-evaluation-method: NUMERIC_EXACT
+      check_number:
+        type: string
+        x-aws-idp-evaluation-method: NUMERIC_EXACT
+      account_holder_name:
+        type: string
+        x-aws-idp-evaluation-method: EXACT
+      payee_name:
+        type: string
+        x-aws-idp-evaluation-method: EXACT
+      bank_name:
+        type: string
+        x-aws-idp-evaluation-method: EXACT
+      memo:
+        type: string
+        x-aws-idp-evaluation-method: EXACT
+      bank_routing_number:
+        type: string
+        x-aws-idp-evaluation-method: EXACT
+      amount_in_words:
+        type: string
+        x-aws-idp-evaluation-method: EXACT
+      is_signed:
+        type: boolean
+        x-aws-idp-evaluation-method: EXACT
+
+rule_validation:
+  enabled: false

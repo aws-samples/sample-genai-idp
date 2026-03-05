@@ -10,6 +10,7 @@ from urllib.parse import urlparse
 import boto3
 from idp_common import s3, utils
 from idp_common.config import get_config
+from idp_common.utils import resolve_use_case_context
 from idp_common.docs_service import create_document_service
 from idp_common.models import Document, HitlMetadata, Status
 
@@ -23,10 +24,17 @@ logging.getLogger("idp_common.bedrock.client").setLevel(
 s3_client = boto3.client("s3")
 
 
-def is_hitl_enabled(config_version=None):
-    """Check if HITL is enabled from configuration."""
+def is_hitl_enabled(config=None):
+    """Check if HITL is enabled from configuration.
+
+    Args:
+        config: Optional pre-loaded IDPConfig instance. When provided, uses
+            the scoped config directly instead of loading global settings.
+            This ensures use-case-level overrides are honored.
+    """
     try:
-        config = get_config(as_model=True, version=config_version)
+        if config is None:
+            config = get_config(as_model=True)
         return config.assessment.hitl_enabled
     except Exception as e:
         logger.warning(f"Failed to get HITL config: {e}")
@@ -55,9 +63,17 @@ def handler(event, context):
         classification_document_data, working_bucket, logger
     )
 
-    # Load configuration - use document's version if specified, otherwise use active version
+    # Resolve effective business_unit_id and use_case_id for config
+    effective_business_unit_id, effective_use_case_id = resolve_use_case_context(event, document, logger)
+
+    # Load configuration - use use_case_context when resolved, else fall back to document's config_version
     config_version = getattr(document, 'config_version', None)
-    config = get_config(as_model=True, version=config_version)
+    config = get_config(
+        as_model=True,
+        business_unit_id=effective_business_unit_id,
+        use_case_id=effective_use_case_id,
+        version=config_version if not effective_business_unit_id else None,
+    )
 
     extraction_results = event.get("ExtractionResults", [])
     execution_arn = event.get("execution_arn", "")
@@ -100,7 +116,7 @@ def handler(event, context):
                 logger.info(
                     f"section.confidence_threshold_alerts: {section.confidence_threshold_alerts}"
                 )
-                hitl_enabled = is_hitl_enabled(config_version)
+                hitl_enabled = is_hitl_enabled(config)
                 logger.info(f"is_hitl_enabled: {hitl_enabled}")
                 document.sections.append(section)
 

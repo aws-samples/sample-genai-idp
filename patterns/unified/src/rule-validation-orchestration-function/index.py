@@ -13,7 +13,7 @@ import time
 from idp_common import get_config, rule_validation
 from idp_common.models import Document, Status
 from idp_common.docs_service import create_document_service
-from idp_common.utils import calculate_lambda_metering, merge_metering_data
+from idp_common.utils import calculate_lambda_metering, merge_metering_data, resolve_use_case_context
 
 # X-Ray tracing
 from aws_xray_sdk.core import xray_recorder
@@ -88,11 +88,19 @@ def handler(event, context):
         # With two-step approach (fact extraction → orchestrator), 
         # orchestrator must ALWAYS run to make final compliance decision
         logger.info(f"Orchestrator will run for {len(document.sections)} section(s)")
-        
-        # Get configuration - use document's version if specified, otherwise use active version
+
+        # Resolve effective business_unit_id and use_case_id for config
+        effective_business_unit_id, effective_use_case_id = resolve_use_case_context(event, document, logger)
+
+        # Get configuration - use use_case_context when resolved, else fall back to document's config_version
         config_version = getattr(document, 'config_version', None)
-        config = get_config(version=config_version)
-        
+        config = get_config(
+            as_model=True,
+            business_unit_id=effective_business_unit_id,
+            use_case_id=effective_use_case_id,
+            version=config_version if not effective_business_unit_id else None,
+        )
+
         # Create rule validation orchestrator service
         summarization_service = rule_validation.RuleValidationOrchestratorService(
             config=config

@@ -104,7 +104,27 @@ def handler(event, context):
             'ObjectKey': {
                 'StringValue': object_key,
                 'DataType': 'String'
-            }
+            },
+            **(
+                {
+                    'BusinessUnitId': {
+                        'StringValue': document.business_unit_id,
+                        'DataType': 'String'
+                    }
+                }
+                if document.business_unit_id
+                else {}
+            ),
+            **(
+                {
+                    'UseCaseId': {
+                        'StringValue': document.use_case_id,
+                        'DataType': 'String'
+                    }
+                }
+                if document.use_case_id
+                else {}
+            ),
         }
     }
     logger.info(f"Sending document to SQS queue: {object_key}")

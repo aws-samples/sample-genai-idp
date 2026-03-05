@@ -14,7 +14,7 @@ import time
 from idp_common import get_config, ocr
 from idp_common.models import Document, Status
 from idp_common.docs_service import create_document_service
-from idp_common.utils import calculate_lambda_metering, merge_metering_data
+from idp_common.utils import calculate_lambda_metering, merge_metering_data, resolve_use_case_context
 from aws_xray_sdk.core import xray_recorder, patch_all
 
 patch_all()
@@ -49,9 +49,16 @@ def handler(event, context):
     logger.info(f"Document pages count: {len(document.pages)}, sections count: {len(document.sections)}")
     logger.info(f"Full document content: {json.dumps(document.to_dict(), default=str)}")
     
+    # Resolve effective business_unit_id and use_case_id for config and X-Ray
+    effective_business_unit_id, effective_use_case_id = resolve_use_case_context(event, document, logger)
+
     # X-Ray annotations
-    xray_recorder.put_annotation('document_id', {document.id})
+    xray_recorder.put_annotation('document_id', document.id)
     xray_recorder.put_annotation('processing_stage', 'ocr')
+    if effective_business_unit_id:
+        xray_recorder.put_annotation('business_unit_id', effective_business_unit_id)
+    if effective_use_case_id:
+        xray_recorder.put_annotation('use_case_id', effective_use_case_id)
 
     # Intelligent OCR detection: Skip if pages already have OCR data
     pages_with_ocr = 0
@@ -98,9 +105,14 @@ def handler(event, context):
     t0 = time.time()
     
     # Load configuration and initialize the OCR service using new simplified pattern
-    # Use document's version if specified, otherwise use active version
+    # Use use_case_context when resolved, else fall back to document's config_version
     config_version = getattr(document, 'config_version', None)
-    config = get_config(as_model=True, version=config_version)
+    config = get_config(
+        as_model=True,
+        business_unit_id=effective_business_unit_id,
+        use_case_id=effective_use_case_id,
+        version=config_version if not effective_business_unit_id else None,
+    )
     backend = config.ocr.backend
     
     logger.info(f"Initializing OCR with backend: {backend}")

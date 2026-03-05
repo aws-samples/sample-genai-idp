@@ -10,7 +10,7 @@ import logging
 from idp_common import metrics, get_config, extraction
 from idp_common.models import Document, Section, Status
 from idp_common.docs_service import create_document_service
-from idp_common.utils import calculate_lambda_metering, merge_metering_data
+from idp_common.utils import calculate_lambda_metering, merge_metering_data, resolve_use_case_context
 from aws_xray_sdk.core import xray_recorder, patch_all
 
 patch_all()
@@ -35,15 +35,18 @@ def handler(event, context):
     # Extract the document and section from the event - handle both compressed and uncompressed
     working_bucket = os.environ.get('WORKING_BUCKET')
     full_document = Document.load_document(event.get("document", {}), working_bucket, logger)
-    
-    # Load configuration - use document's version if specified, otherwise use active version
+
+    # Resolve effective business_unit_id and use_case_id for config and X-Ray
+    effective_business_unit_id, effective_use_case_id = resolve_use_case_context(event, full_document, logger)
+
+    # Load configuration - use use_case_context when resolved, else fall back to document's config_version
     config_version = getattr(full_document, 'config_version', None)
-    config = get_config(as_model=True, version=config_version)
-    
-    if config_version:
-        logger.info(f"Using configuration version {config_version} for document {full_document.id}")
-    else:
-        logger.info(f"Using active configuration for document {full_document.id}")
+    config = get_config(
+        as_model=True,
+        business_unit_id=effective_business_unit_id,
+        use_case_id=effective_use_case_id,
+        version=config_version if not effective_business_unit_id else None,
+    )
     
     logger.info(f"Config: {json.dumps(config.model_dump(), default=str)}")
     
@@ -55,8 +58,12 @@ def handler(event, context):
     logger.info(f"Full document content: {json.dumps(full_document.to_dict(), default=str)}")
 
     # X-Ray annotations
-    xray_recorder.put_annotation('document_id', {full_document.id})
+    xray_recorder.put_annotation('document_id', full_document.id)
     xray_recorder.put_annotation('processing_stage', 'extraction')
+    if effective_business_unit_id:
+        xray_recorder.put_annotation('business_unit_id', effective_business_unit_id)
+    if effective_use_case_id:
+        xray_recorder.put_annotation('use_case_id', effective_use_case_id)
     
     # Get the section ID directly from the Map state input
     # Now using the simplified array of section IDs format

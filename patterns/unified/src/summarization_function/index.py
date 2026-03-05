@@ -13,7 +13,7 @@ import time
 from idp_common import get_config, summarization
 from idp_common.models import Document, Status
 from idp_common.docs_service import create_document_service
-from idp_common.utils import calculate_lambda_metering, merge_metering_data
+from idp_common.utils import calculate_lambda_metering, merge_metering_data, resolve_use_case_context
 
 # Configuration will be loaded in handler function
 
@@ -70,16 +70,19 @@ def handler(event, context):
         document_service = create_document_service()
         logger.info(f"Updating document status to {document.status}")
         document_service.update_document(document)
-        
-        # Load configuration - use document's version if specified, otherwise use active version
+
+        # Resolve effective business_unit_id and use_case_id for config
+        effective_business_unit_id, effective_use_case_id = resolve_use_case_context(event, document, logger)
+
+        # Load configuration - use use_case_context when resolved, else fall back to document's config_version
         config_version = getattr(document, 'config_version', None)
-        config = get_config(as_model=True, version=config_version)
-        
-        if config_version:
-            logger.info(f"Using configuration version {config_version} for document {document.id}")
-        else:
-            logger.info(f"Using active configuration for document {document.id}")
-        
+        config = get_config(
+            as_model=True,
+            business_unit_id=effective_business_unit_id,
+            use_case_id=effective_use_case_id,
+            version=config_version if not effective_business_unit_id else None,
+        )
+
         # Create the summarization service
         summarization_service = summarization.SummarizationService(
             config=config

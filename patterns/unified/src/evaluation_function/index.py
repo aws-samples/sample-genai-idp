@@ -19,6 +19,7 @@ from typing import Dict, Any, Optional
 from idp_common import get_config, evaluation
 from idp_common.models import Document, Status
 from idp_common.docs_service import create_document_service
+from idp_common.utils import resolve_use_case_context
 
 # Environment variables
 BASELINE_BUCKET = os.environ.get('BASELINE_BUCKET')
@@ -164,16 +165,19 @@ def handler(event, context):
         
         # Extract document from event
         actual_document = extract_document_from_event(event)
-        
-        # Load configuration - use document's version if specified, otherwise use active version
+
+        # Resolve effective business_unit_id and use_case_id for config
+        effective_business_unit_id, effective_use_case_id = resolve_use_case_context(event, actual_document, logger)
+
+        # Load configuration - use use_case_context when resolved, else fall back to document's config_version
         config_version = getattr(actual_document, 'config_version', None)
-        config = get_config(as_model=True, version=config_version)
-        
-        if config_version:
-            logger.info(f"Using configuration version {config_version} for document {actual_document.id}")
-        else:
-            logger.info(f"Using active configuration for document {actual_document.id}")
-        
+        config = get_config(
+            as_model=True,
+            business_unit_id=effective_business_unit_id,
+            use_case_id=effective_use_case_id,
+            version=config_version if not effective_business_unit_id else None,
+        )
+
         if not config.evaluation.enabled:
             logger.info("Evaluation is disabled in configuration, skipping evaluation")
             # Return document unchanged

@@ -10,7 +10,7 @@ from idp_common import get_config, assessment
 from idp_common.models import Document, Status
 from idp_common.docs_service import create_document_service
 from idp_common import s3
-from idp_common.utils import normalize_boolean_value, calculate_lambda_metering, merge_metering_data
+from idp_common.utils import normalize_boolean_value, calculate_lambda_metering, merge_metering_data, resolve_use_case_context
 from assessment_validator import AssessmentValidator
 from aws_xray_sdk.core import xray_recorder, patch_all
 
@@ -115,24 +115,28 @@ def handler(event, context):
     # Convert document data to Document object - handle compression
     working_bucket = os.environ.get('WORKING_BUCKET')
     document = Document.load_document(document_data, working_bucket, logger)
-    
-    # Load configuration - use document's version if specified, otherwise use active version
+
+    # Resolve effective business_unit_id and use_case_id for config and X-Ray
+    effective_business_unit_id, effective_use_case_id = resolve_use_case_context(event, document, logger)
+
+    # Load configuration - use use_case_context when resolved, else fall back to document's config_version
     config_version = getattr(document, 'config_version', None)
-    config = get_config(as_model=True, version=config_version)
-    
-    if config_version:
-        logger.info(f"Using configuration version {config_version} for document {document.id}")
-    else:
-        logger.info(f"Using active configuration for document {document.id}")
-    
-    # Use default=str to handle Decimal and other non-serializable types
-    logger.info(f"Config: {json.dumps(config.model_dump(), default=str)}")
-    
+    config = get_config(
+        as_model=True,
+        business_unit_id=effective_business_unit_id,
+        use_case_id=effective_use_case_id,
+        version=config_version if not effective_business_unit_id else None,
+    )
+
     logger.info(f"Processing assessment for document {document.id}, section {section_id}")
 
     # X-Ray annotations
-    xray_recorder.put_annotation('document_id', {document.id})
+    xray_recorder.put_annotation('document_id', document.id)
     xray_recorder.put_annotation('processing_stage', 'assessment')
+    if effective_business_unit_id:
+        xray_recorder.put_annotation('business_unit_id', effective_business_unit_id)
+    if effective_use_case_id:
+        xray_recorder.put_annotation('use_case_id', effective_use_case_id)
 
     # Find the section we're processing
     section = None

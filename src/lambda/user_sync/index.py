@@ -14,6 +14,7 @@ logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 cognito = boto3.client("cognito-idp")
 USER_POOL_ID = os.environ.get("USER_POOL_ID", "")
 ADMIN_GROUP = os.environ.get("ADMIN_GROUP", "Admin")
+SUPERVISOR_GROUP = os.environ.get("SUPERVISOR_GROUP", "Supervisor")
 REVIEWER_GROUP = os.environ.get("REVIEWER_GROUP", "Reviewer")
 
 
@@ -73,7 +74,13 @@ def handle_user_created(record):
         )
 
         # Add to appropriate group
-        group_name = ADMIN_GROUP if persona.lower() == "admin" else REVIEWER_GROUP
+        persona_norm = (persona or "").lower()
+        if persona_norm == "admin":
+            group_name = ADMIN_GROUP
+        elif persona_norm == "supervisor":
+            group_name = SUPERVISOR_GROUP
+        else:
+            group_name = REVIEWER_GROUP
         cognito.admin_add_user_to_group(
             UserPoolId=USER_POOL_ID, 
             Username=email, 
@@ -128,7 +135,13 @@ def handle_user_modified(record):
         
         try:
             # Remove from old group
-            old_group = ADMIN_GROUP if old_persona.lower() == "admin" else REVIEWER_GROUP
+            old_persona_norm = (old_persona or "").lower()
+            if old_persona_norm == "admin":
+                old_group = ADMIN_GROUP
+            elif old_persona_norm == "supervisor":
+                old_group = SUPERVISOR_GROUP
+            else:
+                old_group = REVIEWER_GROUP
             try:
                 cognito.admin_remove_user_from_group(
                     UserPoolId=USER_POOL_ID,
@@ -139,7 +152,13 @@ def handle_user_modified(record):
                 logger.warning(f"Failed to remove user {email} from group {old_group}: {e}")
             
             # Add to new group
-            new_group = ADMIN_GROUP if new_persona.lower() == "admin" else REVIEWER_GROUP
+            new_persona_norm = (new_persona or "").lower()
+            if new_persona_norm == "admin":
+                new_group = ADMIN_GROUP
+            elif new_persona_norm == "supervisor":
+                new_group = SUPERVISOR_GROUP
+            else:
+                new_group = REVIEWER_GROUP
             cognito.admin_add_user_to_group(
                 UserPoolId=USER_POOL_ID,
                 Username=email,

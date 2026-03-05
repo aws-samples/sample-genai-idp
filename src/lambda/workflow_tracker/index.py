@@ -202,25 +202,40 @@ def put_latency_metrics(document: Document) -> None:
             f"workflow: {workflow_latency}ms, total: {total_latency}ms"
         )
         
+        # Build dimensions including use-case context when available
+        dimensions = []
+        business_unit_id = getattr(document, 'business_unit_id', None)
+        use_case_id = getattr(document, 'use_case_id', None)
+        if business_unit_id:
+            dimensions.append({'Name': 'BusinessUnitId', 'Value': business_unit_id})
+        if use_case_id:
+            dimensions.append({'Name': 'UseCaseId', 'Value': use_case_id})
+
+        metric_data = [
+            {
+                'MetricName': 'QueueLatencyMilliseconds',
+                'Value': queue_latency,
+                'Unit': 'Milliseconds',
+            },
+            {
+                'MetricName': 'WorkflowLatencyMilliseconds',
+                'Value': workflow_latency,
+                'Unit': 'Milliseconds',
+            },
+            {
+                'MetricName': 'TotalLatencyMilliseconds',
+                'Value': total_latency,
+                'Unit': 'Milliseconds',
+            },
+        ]
+        # Add dimensions to each metric if present
+        if dimensions:
+            for metric in metric_data:
+                metric['Dimensions'] = dimensions
+
         cloudwatch.put_metric_data(
             Namespace=f'{METRIC_NAMESPACE}',
-            MetricData=[
-                {
-                    'MetricName': 'QueueLatencyMilliseconds',
-                    'Value': queue_latency,
-                    'Unit': 'Milliseconds'
-                },
-                {
-                    'MetricName': 'WorkflowLatencyMilliseconds',
-                    'Value': workflow_latency,
-                    'Unit': 'Milliseconds'
-                },
-                {
-                    'MetricName': 'TotalLatencyMilliseconds',
-                    'Value': total_latency,
-                    'Unit': 'Milliseconds'
-                }
-            ]
+            MetricData=metric_data,
         )
     except ValueError as e:
         logger.error(f"Invalid timestamps in metrics data: {e}")

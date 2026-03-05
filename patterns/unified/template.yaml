@@ -162,6 +162,10 @@ Parameters:
     Type: String
     Default: ""
 
+  UseCaseConfigs:
+    Type: String
+    Default: ""
+
 Conditions:
   HasGuardrailConfig:
     !And [
@@ -172,6 +176,7 @@ Conditions:
     !Not [!Equals [!Ref CustomClassificationModelARN, ""]]
   HasCustomExtractionModelARN:
     !Not [!Equals [!Ref CustomExtractionModelARN, ""]]
+  HasUseCaseConfigs: !Not [!Equals [!Ref UseCaseConfigs, ""]]
   HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
   HasAppSyncApi: !Not [!Equals [!Ref AppSyncApiArn, ""]]
   IsECRImageScanningEnabled: !Equals [!Ref EnableECRImageScanning, "true"]
@@ -1703,6 +1708,10 @@ Resources:
       CustomExtractionModelARN: !Ref CustomExtractionModelARN
       BDAProjectArn: !Ref BDAProjectArn
       PreviousIDPPattern: !Ref PreviousIDPPattern
+      UseCaseConfigs: !If
+        - HasUseCaseConfigs
+        - !Ref UseCaseConfigs
+        - !Ref AWS::NoValue
 
 
   ##########################################################################

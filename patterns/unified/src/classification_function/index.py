@@ -14,7 +14,7 @@ import time
 from idp_common import classification, metrics, get_config
 from idp_common.models import Document, Status
 from idp_common.docs_service import create_document_service
-from idp_common.utils import calculate_lambda_metering, merge_metering_data
+from idp_common.utils import calculate_lambda_metering, merge_metering_data, resolve_use_case_context
 from aws_xray_sdk.core import xray_recorder, patch_all
 
 patch_all()
@@ -38,10 +38,18 @@ def handler(event, context):
     # Extract document from the OCR result - handle both compressed and uncompressed
     working_bucket = os.environ.get('WORKING_BUCKET')
     document = Document.load_document(event["OCRResult"]["document"], working_bucket, logger)
-    
-    # Load configuration - use document's version if specified, otherwise use active version
+
+    # Resolve effective business_unit_id and use_case_id for config and X-Ray
+    effective_business_unit_id, effective_use_case_id = resolve_use_case_context(event, document, logger)
+
+    # Load configuration - use use_case_context when resolved, else fall back to document's config_version
     config_version = getattr(document, 'config_version', None)
-    config = get_config(as_model=True, version = config_version)
+    config = get_config(
+        as_model=True,
+        business_unit_id=effective_business_unit_id,
+        use_case_id=effective_use_case_id,
+        version=config_version if not effective_business_unit_id else None,
+    )
     # Use default=str to handle Decimal and other non-serializable types
     logger.info(f"Config: {json.dumps(config.model_dump(), default=str)}, version name: {config_version}")
     
@@ -53,8 +61,12 @@ def handler(event, context):
     logger.info(f"Full document content: {json.dumps(document.to_dict(), default=str)}")
 
     # X-Ray annotations
-    xray_recorder.put_annotation('document_id', {document.id})
+    xray_recorder.put_annotation('document_id', document.id)
     xray_recorder.put_annotation('processing_stage', 'classification')
+    if effective_business_unit_id:
+        xray_recorder.put_annotation('business_unit_id', effective_business_unit_id)
+    if effective_use_case_id:
+        xray_recorder.put_annotation('use_case_id', effective_use_case_id)
     
     # Intelligent Classification detection: Skip if pages already have classifications
     pages_with_classification = 0
