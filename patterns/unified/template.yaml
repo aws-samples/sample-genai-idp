@@ -4166,6 +4166,38 @@ Resources:
                 "title": "ProcessResults Lambda Errors",
                 "view": "table"
               }
+            },
+            {
+              "type": "metric",
+              "x": 0,
+              "y": 84,
+              "width": 24,
+              "height": 6,
+              "properties": {
+                "metrics": [
+                  ["AWS/Lambda", "Throttles", "FunctionName", "${OCRFunction}", {"stat": "Sum"}],
+                  [".", ".", ".", "${ClassificationFunction}", {"stat": "Sum"}],
+                  [".", ".", ".", "${ExtractionFunction}", {"stat": "Sum"}],
+                  [".", ".", ".", "${AssessmentFunction}", {"stat": "Sum"}],
+                  [".", ".", ".", "${SummarizationFunction}", {"stat": "Sum"}],
+                  [".", ".", ".", "${EvaluationFunction}", {"stat": "Sum"}],
+                  [".", ".", ".", "${RuleValidationFunction}", {"stat": "Sum"}],
+                  [".", ".", ".", "${InvokeBDAFunction}", {"stat": "Sum"}],
+                  [".", ".", ".", "${BDAProcessResultsFunction}", {"stat": "Sum"}],
+                  [".", ".", ".", "${BDACompletionFunction}", {"stat": "Sum"}],
+                  [".", ".", ".", "${ProcessResultsFunction}", {"stat": "Sum"}]
+                ],
+                "region": "${AWS::Region}",
+                "title": "Lambda Concurrency Throttles (429) - All Functions",
+                "view": "timeSeries",
+                "period": 60,
+                "stacked": true,
+                "yAxis": {
+                  "left": {
+                    "label": "Throttle Count"
+                  }
+                }
+              }
             }
           ]
         }
