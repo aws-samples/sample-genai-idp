@@ -386,28 +386,12 @@ class OcrService:
                 is_pdf = file_type == "pdf"
 
                 if is_pdf:
-                    # Phase 1: Render all page images SEQUENTIALLY
-                    # pypdfium2 (PDFium) is not thread-safe for concurrent access
-                    # to the same PdfDocument, so we render all pages first, then
-                    # process OCR in parallel (which is the I/O-bound bottleneck).
+                    # Determine which pages need processing (retry-safe: skip completed pages)
                     pdf_document = pdfium.PdfDocument(file_content)
                     num_pages = len(pdf_document)
                     document.num_pages = num_pages
 
-                    logger.info(
-                        f"Rendering {num_pages} page images sequentially (pypdfium2 is not thread-safe)"
-                    )
-                    page_images: Dict[int, bytes] = {}
-                    for i in range(num_pages):
-                        page = pdf_document[i]
-                        page_images[i] = self._extract_page_image(page, True, i + 1)
-
-                    pdf_document.close()
-                    logger.info(f"Rendered {len(page_images)} page images")
-
-                    # Phase 2: Process OCR in PARALLEL (Textract/Bedrock API calls are I/O-bound)
-                    # Skip pages that already have OCR results (retry-safe: preserves completed work)
-                    pages_to_process = {}
+                    pages_to_render = []
                     pages_skipped = 0
                     for i in range(num_pages):
                         page_id = str(i + 1)
@@ -418,19 +402,32 @@ class OcrService:
                             and existing_page.raw_text_uri
                             and existing_page.parsed_text_uri
                         ):
-                            logger.info(
-                                f"Skipping page {page_id} - already has OCR results (retry-safe)"
-                            )
                             pages_skipped += 1
                         else:
-                            pages_to_process[i] = page_images[i]
+                            pages_to_render.append(i)
 
                     if pages_skipped > 0:
                         logger.info(
                             f"Retry-safe OCR: skipping {pages_skipped} already-completed pages, "
-                            f"processing {len(pages_to_process)} remaining pages"
+                            f"rendering and processing {len(pages_to_render)} remaining pages"
                         )
 
+                    # Phase 1: Render ONLY needed page images SEQUENTIALLY
+                    # pypdfium2 (PDFium) is not thread-safe for concurrent access
+                    # to the same PdfDocument, so we render pages first, then
+                    # process OCR in parallel (which is the I/O-bound bottleneck).
+                    logger.info(
+                        f"Rendering {len(pages_to_render)} of {num_pages} page images sequentially (pypdfium2 is not thread-safe)"
+                    )
+                    page_images: Dict[int, bytes] = {}
+                    for i in pages_to_render:
+                        page = pdf_document[i]
+                        page_images[i] = self._extract_page_image(page, True, i + 1)
+
+                    pdf_document.close()
+                    logger.info(f"Rendered {len(page_images)} page images")
+
+                    # Phase 2: Process OCR in PARALLEL (Textract/Bedrock API calls are I/O-bound)
                     with concurrent.futures.ThreadPoolExecutor(
                         max_workers=self.max_workers
                     ) as executor:
@@ -438,11 +435,11 @@ class OcrService:
                             executor.submit(
                                 self._process_page_with_image,
                                 i,
-                                pages_to_process[i],
+                                page_images[i],
                                 document.output_bucket,
                                 document.input_key,
                             ): i
-                            for i in pages_to_process
+                            for i in page_images
                         }
 
                         # Start memory monitoring in background thread
