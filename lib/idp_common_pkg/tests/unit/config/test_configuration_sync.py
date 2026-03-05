@@ -2,10 +2,11 @@
 # SPDX-License-Identifier: MIT-0
 
 """
-Tests for configuration synchronization behavior when Default is updated.
+Tests for configuration synchronization behavior.
 
-This tests the critical behavior: when Default config is updated, Custom should
-get all new default values EXCEPT for fields the user has customized.
+In the current full-config design, versions are independent snapshots.
+sync_custom_with_new_default is a legacy compatibility no-op that returns
+old_custom unchanged.  These tests verify that contract.
 """
 
 from unittest.mock import patch
@@ -16,237 +17,78 @@ from idp_common.config.configuration_manager import ConfigurationManager
 from idp_common.config.models import (
     AssessmentConfig,
     ExtractionConfig,
-    GranularAssessmentConfig,
     IDPConfig,
-    ImageConfig,
 )
 from moto import mock_aws
 
 
 class TestSyncCustomWithNewDefault:
-    """Test sync_custom_with_new_default method."""
+    """Test sync_custom_with_new_default returns old_custom unchanged.
 
-    def test_no_customizations_gets_all_new_defaults(self):
-        """When Custom == Default, updating Default should give user all new values."""
+    In the full-config design each version is an independent snapshot,
+    so sync is intentionally a no-op.
+    """
+
+    def test_returns_old_custom_unchanged(self):
+        """sync_custom_with_new_default returns old_custom as-is."""
         manager = ConfigurationManager(table_name="test-table")
 
-        # Old configs are identical (no user customizations)
         old_default = IDPConfig(extraction=ExtractionConfig(temperature=0.0, top_p=0.1))
-        old_custom = IDPConfig(extraction=ExtractionConfig(temperature=0.0, top_p=0.1))
-
-        # New default has updated values
+        old_custom = IDPConfig(extraction=ExtractionConfig(temperature=0.8, top_p=0.1))
         new_default = IDPConfig(
             extraction=ExtractionConfig(temperature=0.5, top_p=0.2, max_tokens=5000)
         )
 
-        # Sync
-        new_custom = manager.sync_custom_with_new_default(
+        result = manager.sync_custom_with_new_default(
             old_default, new_default, old_custom
         )
 
-        # User should get ALL new defaults
-        assert new_custom.extraction.temperature == 0.5
-        assert new_custom.extraction.top_p == 0.2
-        assert new_custom.extraction.max_tokens == 5000
+        assert result is old_custom
+        assert result.extraction.temperature == 0.8
+        assert result.extraction.top_p == 0.1
 
-    def test_preserves_user_customization(self):
-        """User's temperature customization should be preserved when Default updates top_p."""
-        manager = ConfigurationManager(table_name="test-table")
-
-        # Old default
-        old_default = IDPConfig(
-            extraction=ExtractionConfig(temperature=0.0, top_p=0.1, max_tokens=1000)
-        )
-
-        # User customized temperature only
-        old_custom = IDPConfig(
-            extraction=ExtractionConfig(temperature=0.8, top_p=0.1, max_tokens=1000)
-        )
-
-        # New default changes multiple fields
-        new_default = IDPConfig(
-            extraction=ExtractionConfig(temperature=0.5, top_p=0.2, max_tokens=2000)
-        )
-
-        # Sync
-        new_custom = manager.sync_custom_with_new_default(
-            old_default, new_default, old_custom
-        )
-
-        # User's temperature should be preserved
-        assert new_custom.extraction.temperature == 0.8
-
-        # But user should get new defaults for fields they didn't customize
-        assert new_custom.extraction.top_p == 0.2
-        assert new_custom.extraction.max_tokens == 2000
-
-    def test_multiple_customizations_at_different_levels(self):
-        """Multiple user customizations across different config sections."""
+    def test_user_customizations_preserved(self):
+        """All user customizations in old_custom are retained."""
         manager = ConfigurationManager(table_name="test-table")
 
         old_default = IDPConfig(
             extraction=ExtractionConfig(temperature=0.0, model="nova-pro-v1:0"),
             assessment=AssessmentConfig(enabled=True, temperature=0.0),
         )
-
-        # User customized extraction.temperature and assessment.enabled
         old_custom = IDPConfig(
             extraction=ExtractionConfig(temperature=0.9, model="nova-pro-v1:0"),
             assessment=AssessmentConfig(enabled=False, temperature=0.0),
         )
-
-        # New default changes everything
         new_default = IDPConfig(
             extraction=ExtractionConfig(temperature=0.5, model="nova-premier-v1:0"),
             assessment=AssessmentConfig(enabled=True, temperature=0.5),
         )
 
-        new_custom = manager.sync_custom_with_new_default(
+        result = manager.sync_custom_with_new_default(
             old_default, new_default, old_custom
         )
 
-        # User's customizations preserved
-        assert new_custom.extraction.temperature == 0.9
-        assert not new_custom.assessment.enabled
+        assert result.extraction.temperature == 0.9
+        assert not result.assessment.enabled
+        assert result.extraction.model == "nova-pro-v1:0"
 
-        # New defaults applied to non-customized fields
-        assert new_custom.extraction.model == "nova-premier-v1:0"
-        assert new_custom.assessment.temperature == 0.5
-
-    def test_nested_field_customization(self):
-        """User customized a nested field - only that field should be preserved."""
-        manager = ConfigurationManager(table_name="test-table")
-
-        old_default = IDPConfig(
-            extraction=ExtractionConfig(
-                temperature=0.0, image=ImageConfig(dpi=300, target_width=None)
-            )
-        )
-
-        # User customized only image.dpi
-        old_custom = IDPConfig(
-            extraction=ExtractionConfig(
-                temperature=0.0, image=ImageConfig(dpi=600, target_width=None)
-            )
-        )
-
-        # New default updates multiple fields
-        new_default = IDPConfig(
-            extraction=ExtractionConfig(
-                temperature=0.5, image=ImageConfig(dpi=450, target_width=1024)
-            )
-        )
-
-        new_custom = manager.sync_custom_with_new_default(
-            old_default, new_default, old_custom
-        )
-
-        # User's nested customization preserved
-        assert new_custom.extraction.image.dpi == 600
-
-        # New defaults for other fields
-        assert new_custom.extraction.temperature == 0.5
-        assert new_custom.extraction.image.target_width == 1024
-
-    def test_user_added_new_field(self):
-        """User added a field not in Default - should be preserved."""
+    def test_classes_preserved(self):
+        """User-added classes in old_custom are preserved."""
         manager = ConfigurationManager(table_name="test-table")
 
         old_default = IDPConfig(extraction=ExtractionConfig(temperature=0.0))
-
-        # User added notes field (allowed by extra='allow' - wait, we changed to forbid!)
-        # Let's use classes instead which is a real field
         old_custom = IDPConfig(
-            extraction=ExtractionConfig(temperature=0.0),
-            classes=[{"$id": "UserClass", "properties": {}}],
+            extraction=ExtractionConfig(temperature=0.8),
+            classes=[{"$id": "Invoice", "properties": {}}],
         )
-
         new_default = IDPConfig(extraction=ExtractionConfig(temperature=0.5))
 
-        new_custom = manager.sync_custom_with_new_default(
+        result = manager.sync_custom_with_new_default(
             old_default, new_default, old_custom
         )
 
-        # User's added field should be preserved
-        assert new_custom.classes == [{"$id": "UserClass", "properties": {}}]
-
-        # New default applied
-        assert new_custom.extraction.temperature == 0.5
-
-    def test_complex_real_world_scenario(self):
-        """Complex scenario with changes at multiple levels."""
-        manager = ConfigurationManager(table_name="test-table")
-
-        # Old system default
-        old_default = IDPConfig(
-            extraction=ExtractionConfig(
-                model="us.amazon.nova-pro-v1:0",
-                temperature=0.0,
-                top_p=0.1,
-                max_tokens=10000,
-            ),
-            assessment=AssessmentConfig(
-                enabled=True, temperature=0.0, granular={"enabled": False}
-            ),
-            classes=[],
-        )
-
-        # User's customizations:
-        # - Changed extraction.temperature to 0.8
-        # - Disabled assessment
-        # - Added custom classes
-        old_custom = IDPConfig(
-            extraction=ExtractionConfig(
-                model="us.amazon.nova-pro-v1:0",
-                temperature=0.8,  # CUSTOM
-                top_p=0.1,
-                max_tokens=10000,
-            ),
-            assessment=AssessmentConfig(
-                enabled=False,  # CUSTOM
-                temperature=0.0,
-                granular=GranularAssessmentConfig(enabled=False),
-            ),
-            classes=[{"$id": "Invoice", "properties": {}}],  # CUSTOM
-        )
-
-        # New system default (v2):
-        # - New model
-        # - Different defaults for temp/top_p
-        # - Increased max_tokens
-        # - Enabled granular assessment
-        new_default = IDPConfig(
-            extraction=ExtractionConfig(
-                model="us.amazon.nova-premier-v1:0",  # NEW
-                temperature=0.5,  # NEW
-                top_p=0.2,  # NEW
-                max_tokens=15000,  # NEW
-            ),
-            assessment=AssessmentConfig(
-                enabled=True,
-                temperature=0.5,  # NEW
-                granular=GranularAssessmentConfig(enabled=True),  # NEW
-            ),
-            classes=[],
-        )
-
-        # What should new_custom look like?
-        new_custom = manager.sync_custom_with_new_default(
-            old_default, new_default, old_custom
-        )
-
-        # User's customizations PRESERVED:
-        assert new_custom.extraction.temperature == 0.8  # User's custom value
-        assert not new_custom.assessment.enabled  # User's custom value
-        assert len(new_custom.classes) == 1  # User's custom classes
-        assert new_custom.classes[0]["$id"] == "Invoice"
-
-        # New defaults APPLIED to non-customized fields:
-        assert new_custom.extraction.model == "us.amazon.nova-premier-v1:0"
-        assert new_custom.extraction.top_p == 0.2
-        assert new_custom.extraction.max_tokens == 15000
-        assert new_custom.assessment.temperature == 0.5
-        assert new_custom.assessment.granular.enabled
+        assert len(result.classes) == 1
+        assert result.classes[0]["$id"] == "Invoice"
 
 
 @pytest.mark.unit
@@ -259,7 +101,6 @@ class TestConfigurationManagerSync:
     )
     def test_save_default_triggers_sync(self):
         """Saving Default should automatically sync Custom."""
-        # Create mock DynamoDB table
         dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
         table_name = "test-config-table"
 
@@ -272,7 +113,6 @@ class TestConfigurationManagerSync:
 
         manager = ConfigurationManager(table_name=table_name)
 
-        # Mock get_configuration to return old configs
         old_default = IDPConfig(extraction=ExtractionConfig(temperature=0.0))
         old_custom = IDPConfig(extraction=ExtractionConfig(temperature=0.8))
 
@@ -282,27 +122,21 @@ class TestConfigurationManagerSync:
             patch.object(manager, "_write_record") as mock_write,
         ):
             mock_get.side_effect = [old_default, old_custom]
-            mock_get_raw.return_value = None  # No raw config needed for this test
+            mock_get_raw.return_value = None
 
-            # Save new default
             new_default = IDPConfig(extraction=ExtractionConfig(temperature=0.5))
             manager.save_configuration("Default", new_default)
 
-            # Should have written BOTH Default and synced Custom
             assert mock_write.call_count == 2
 
-            # First call is for Custom (synced), second is for Default
-            # Get the Custom config that was saved
             custom_call = mock_write.call_args_list[0]
             saved_custom = custom_call[0][0].config
 
-            # User's temperature should be preserved
             assert saved_custom.extraction.temperature == 0.8
 
     @mock_aws
     def test_save_custom_does_not_trigger_sync(self):
         """Saving Custom should NOT trigger any sync."""
-        # Create mock DynamoDB table
         dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
         table_name = "test-config-table"
 
@@ -320,5 +154,4 @@ class TestConfigurationManagerSync:
         with patch.object(manager, "_write_record") as mock_write:
             manager.save_configuration("Custom", custom)
 
-        # Should have written only once (just Custom, no sync)
         assert mock_write.call_count == 1

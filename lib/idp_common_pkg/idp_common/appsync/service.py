@@ -76,6 +76,11 @@ class DocumentAppSyncService:
         # Add config_version if available
         if document.config_version:
             input_data["ConfigVersion"] = document.config_version
+        # Add use-case routing fields for UseCaseIndex GSI
+        if document.business_unit_id:
+            input_data["BusinessUnitId"] = document.business_unit_id
+        if document.use_case_id:
+            input_data["UseCaseId"] = document.use_case_id
 
         return input_data
 
@@ -268,6 +273,11 @@ class DocumentAppSyncService:
             trace_id=appsync_data.get("TraceId"),
             config_version=appsync_data.get("ConfigVersion"),
         )
+        # Map use-case routing fields from GSI
+        if appsync_data.get("BusinessUnitId"):
+            doc.business_unit_id = appsync_data["BusinessUnitId"]
+        if appsync_data.get("UseCaseId"):
+            doc.use_case_id = appsync_data["UseCaseId"]
 
         # Handle rule validation result URI if present
         rule_validation_uri = appsync_data.get("RuleValidationResultUri")

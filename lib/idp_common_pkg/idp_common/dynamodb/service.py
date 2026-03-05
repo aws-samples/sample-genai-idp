@@ -111,6 +111,11 @@ class DocumentDynamoDBService:
             "QueuedTime": document.queued_time,
         }
 
+        if document.business_unit_id:
+            item["BusinessUnitId"] = document.business_unit_id
+        if document.use_case_id:
+            item["UseCaseId"] = document.use_case_id
+
         if expires_after:
             item["ExpiresAfter"] = expires_after
 
@@ -274,6 +279,16 @@ class DocumentDynamoDBService:
             expression_names["#TraceId"] = "TraceId"
             expression_values[":TraceId"] = document.trace_id
 
+        # Add use-case routing fields if available
+        if document.business_unit_id:
+            set_expressions.append("#BusinessUnitId = :BusinessUnitId")
+            expression_names["#BusinessUnitId"] = "BusinessUnitId"
+            expression_values[":BusinessUnitId"] = document.business_unit_id
+        if document.use_case_id:
+            set_expressions.append("#UseCaseId = :UseCaseId")
+            expression_names["#UseCaseId"] = "UseCaseId"
+            expression_values[":UseCaseId"] = document.use_case_id
+
         # Add Review Status fields if available
         if document.hitl_status:
             set_expressions.append("#HITLStatus = :HITLStatus")
@@ -319,6 +334,10 @@ class DocumentDynamoDBService:
             summary_report_uri=item.get("SummaryReportUri"),
             trace_id=item.get("TraceId"),
         )
+
+        # Set use-case routing fields
+        doc.business_unit_id = item.get("BusinessUnitId")
+        doc.use_case_id = item.get("UseCaseId")
 
         # Convert status
         object_status = item.get("ObjectStatus")
@@ -434,6 +453,11 @@ class DocumentDynamoDBService:
             "ObjectKey": document.input_key,
             "QueuedTime": document.queued_time,
         }
+
+        if document.business_unit_id:
+            list_item["BusinessUnitId"] = document.business_unit_id
+        if document.use_case_id:
+            list_item["UseCaseId"] = document.use_case_id
 
         if expires_after:
             list_item["ExpiresAfter"] = expires_after

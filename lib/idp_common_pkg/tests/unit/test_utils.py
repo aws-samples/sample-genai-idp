@@ -6,6 +6,7 @@ Unit tests for the utils module.
 """
 
 import json
+import logging
 
 import pytest
 from idp_common.utils import (
@@ -14,6 +15,7 @@ from idp_common.utils import (
     extract_structured_data_from_text,
     extract_yaml_from_text,
     repair_truncated_json,
+    resolve_use_case_context,
 )
 
 # Import yaml with fallback for testing
@@ -215,6 +217,41 @@ with complex descriptions"
         assert len(parsed["items"]) == 2
         assert parsed["items"][0]["name"] == "Item 1"
         assert parsed["total"] == 30
+
+
+@pytest.mark.unit
+class TestResolveUseCaseContext:
+    class _Doc:
+        def __init__(self, business_unit_id=None, use_case_id=None):
+            self.business_unit_id = business_unit_id
+            self.use_case_id = use_case_id
+
+    def test_uses_event_context_when_complete(self):
+        event = {"use_case_context": {"business_unit_id": "bu1", "use_case_id": "uc1"}}
+        doc = self._Doc("doc-bu", "doc-uc")
+        logger = logging.getLogger("test")
+
+        bu, uc = resolve_use_case_context(event, doc, logger)
+        assert bu == "bu1"
+        assert uc == "uc1"
+
+    def test_falls_back_to_document_when_context_partial(self):
+        event = {"use_case_context": {"business_unit_id": "bu1"}}
+        doc = self._Doc("doc-bu", "doc-uc")
+        logger = logging.getLogger("test")
+
+        bu, uc = resolve_use_case_context(event, doc, logger)
+        assert bu == "doc-bu"
+        assert uc == "doc-uc"
+
+    def test_falls_back_to_document_when_context_not_dict(self):
+        event = {"use_case_context": "not-a-dict"}
+        doc = self._Doc("doc-bu", "doc-uc")
+        logger = logging.getLogger("test")
+
+        bu, uc = resolve_use_case_context(event, doc, logger)
+        assert bu == "doc-bu"
+        assert uc == "doc-uc"
 
 
 @pytest.mark.unit

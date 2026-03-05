@@ -879,3 +879,113 @@ class TestDocumentAppSyncService:
         input_data = call_args[0][1]["input"]
 
         assert input_data["Section"]["OutputJSONUri"] == ""
+
+    # ── Multi-use-case field tests ────────────────────────────────────
+
+    def test_document_to_create_input_with_use_case_fields(self):
+        """Test that business_unit_id and use_case_id are included in create input."""
+        doc = Document(
+            id="test-doc",
+            input_key="retail-banking/mortgage-processing/payslip.pdf",
+            status=Status.QUEUED,
+            initial_event_time="2025-05-08T14:30:00Z",
+            queued_time="2025-05-08T14:31:00Z",
+        )
+        doc.business_unit_id = "retail-banking"
+        doc.use_case_id = "mortgage-processing"
+
+        service = DocumentAppSyncService(appsync_client=MagicMock())
+        input_data = service._document_to_create_input(doc)
+
+        assert input_data["BusinessUnitId"] == "retail-banking"
+        assert input_data["UseCaseId"] == "mortgage-processing"
+
+    def test_document_to_create_input_omits_use_case_when_absent(self):
+        """Test that use-case fields are omitted when not set on the document."""
+        doc = Document(
+            id="test-doc",
+            input_key="simple-document.pdf",
+            status=Status.QUEUED,
+        )
+
+        service = DocumentAppSyncService(appsync_client=MagicMock())
+        input_data = service._document_to_create_input(doc)
+
+        assert "BusinessUnitId" not in input_data
+        assert "UseCaseId" not in input_data
+
+    def test_document_to_create_input_partial_use_case(self):
+        """Test that only the set use-case field is included when partially set."""
+        doc = Document(
+            id="test-doc",
+            input_key="test.pdf",
+            status=Status.QUEUED,
+        )
+        doc.business_unit_id = "retail-banking"
+        # use_case_id intentionally not set
+
+        service = DocumentAppSyncService(appsync_client=MagicMock())
+        input_data = service._document_to_create_input(doc)
+
+        assert input_data["BusinessUnitId"] == "retail-banking"
+        assert "UseCaseId" not in input_data
+
+    def test_appsync_to_document_with_use_case_fields(self):
+        """Test round-trip: AppSync data with BusinessUnitId/UseCaseId maps correctly."""
+        appsync_data = {
+            "ObjectKey": "retail-banking/mortgage-processing/payslip.pdf",
+            "ObjectStatus": "COMPLETED",
+            "BusinessUnitId": "retail-banking",
+            "UseCaseId": "mortgage-processing",
+        }
+
+        service = DocumentAppSyncService(appsync_client=MagicMock())
+        doc = service._appsync_to_document(appsync_data)
+
+        assert doc.business_unit_id == "retail-banking"
+        assert doc.use_case_id == "mortgage-processing"
+
+    def test_appsync_to_document_without_use_case_fields(self):
+        """Test that missing BusinessUnitId/UseCaseId leaves document fields as None."""
+        appsync_data = {
+            "ObjectKey": "simple-document.pdf",
+            "ObjectStatus": "QUEUED",
+        }
+
+        service = DocumentAppSyncService(appsync_client=MagicMock())
+        doc = service._appsync_to_document(appsync_data)
+
+        assert doc.business_unit_id is None
+        assert doc.use_case_id is None
+
+    def test_create_input_to_appsync_roundtrip(self):
+        """Test full round-trip: Document -> create_input -> (simulate AppSync) -> Document."""
+        original = Document(
+            id="roundtrip-test",
+            input_key="insurance/claims-processing/license.pdf",
+            status=Status.QUEUED,
+            queued_time="2025-05-08T14:31:00Z",
+        )
+        original.business_unit_id = "insurance"
+        original.use_case_id = "claims-processing"
+        original.trace_id = "trace-123"
+
+        service = DocumentAppSyncService(appsync_client=MagicMock())
+        create_input = service._document_to_create_input(original)
+
+        # Simulate what AppSync stores and returns
+        appsync_response = {
+            "ObjectKey": create_input["ObjectKey"],
+            "ObjectStatus": create_input["ObjectStatus"],
+            "QueuedTime": create_input["QueuedTime"],
+            "BusinessUnitId": create_input.get("BusinessUnitId"),
+            "UseCaseId": create_input.get("UseCaseId"),
+            "TraceId": create_input.get("TraceId"),
+        }
+
+        restored = service._appsync_to_document(appsync_response)
+
+        assert restored.input_key == original.input_key
+        assert restored.business_unit_id == original.business_unit_id
+        assert restored.use_case_id == original.use_case_id
+        assert restored.trace_id == original.trace_id

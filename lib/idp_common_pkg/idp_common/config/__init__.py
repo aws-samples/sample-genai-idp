@@ -28,6 +28,8 @@ from .constants import (
     CONFIG_TYPE_CUSTOM,
     CONFIG_TYPE_DEFAULT_PRICING,
     CONFIG_TYPE_CUSTOM_PRICING,
+    DEFAULT_BUSINESS_UNIT_ID,
+    DEFAULT_USE_CASE_ID,
     VALID_CONFIG_TYPES,
 )
 
@@ -113,15 +115,32 @@ class ConfigurationReader:
         return deep_update(merged, custom)
     
     @overload
-    def get_merged_configuration(self, *, as_model: Literal[True], version: Optional[str] = None) -> IDPConfig: ...
+    def get_merged_configuration(
+        self,
+        *,
+        as_model: Literal[True],
+        version: Optional[str] = None,
+        business_unit_id: Optional[str] = None,
+        use_case_id: Optional[str] = None,
+    ) -> IDPConfig: ...
 
     @overload
     def get_merged_configuration(
-        self, *, as_model: Literal[False], version: Optional[str] = None
+        self,
+        *,
+        as_model: Literal[False],
+        version: Optional[str] = None,
+        business_unit_id: Optional[str] = None,
+        use_case_id: Optional[str] = None,
     ) -> Dict[str, Any]: ...
 
     def get_merged_configuration(
-        self, *, as_model: bool = False, version: Optional[str] = None
+        self,
+        *,
+        as_model: bool = False,
+        version: Optional[str] = None,
+        business_unit_id: Optional[str] = None,
+        use_case_id: Optional[str] = None,
     ) -> Union[IDPConfig, Dict[str, Any]]:
         """
         Get the full configuration for a version, ready for runtime processing.
@@ -134,11 +153,49 @@ class ConfigurationReader:
         Args:
             as_model: If True, return IDPConfig Pydantic model. If False (default), return dict.
             version: Optional version to load. If None, uses active version.
+            business_unit_id: Optional business unit for use-case-scoped config.
+            use_case_id: Optional use case for use-case-scoped config.
 
         Returns:
             Full configuration as IDPConfig or dictionary
         """
         try:
+            if (business_unit_id and not use_case_id) or (
+                use_case_id and not business_unit_id
+            ):
+                raise ValueError(
+                    "business_unit_id and use_case_id must be provided together"
+                )
+
+            if business_unit_id and use_case_id:
+                if version is not None:
+                    raise ValueError(
+                        "version cannot be used together with business_unit_id/use_case_id"
+                    )
+                is_default_bu = business_unit_id == DEFAULT_BUSINESS_UNIT_ID
+                is_default_uc = use_case_id == DEFAULT_USE_CASE_ID
+
+                # Only the exact default/default pair is treated as global scope.
+                # Mixed default/non-default pairs are invalid inputs.
+                if is_default_bu != is_default_uc:
+                    raise ValueError(
+                        "business_unit_id and use_case_id must either both be "
+                        "default or both be non-default"
+                    )
+
+                if not (is_default_bu and is_default_uc):
+                    uc_config = self.manager.get_use_case_configuration(
+                        business_unit_id, use_case_id
+                    )
+                    if uc_config is None:
+                        raise ValueError(
+                            f"Use-case configuration not found for "
+                            f"{business_unit_id}/{use_case_id}"
+                        )
+                    if as_model:
+                        return uc_config
+                    return uc_config.model_dump(mode="python")
+
             # Use ConfigurationManager.get_merged_configuration which handles:
             # - Full config format (new): direct read
             # - Legacy sparse format: merge with default + auto-migrate
@@ -159,7 +216,12 @@ class ConfigurationReader:
 
 @overload
 def get_config(
-    *, table_name: Optional[str] = None, as_model: Literal[True], version: Optional[str] = None
+    *,
+    table_name: Optional[str] = None,
+    as_model: Literal[True],
+    version: Optional[str] = None,
+    business_unit_id: Optional[str] = None,
+    use_case_id: Optional[str] = None,
 ) -> IDPConfig:
     """
     Get configuration as Pydantic model.
@@ -173,14 +235,24 @@ def get_config(
 
 @overload
 def get_config(
-    *, table_name: Optional[str] = None, as_model: Literal[False] = False, version: Optional[str] = None
+    *,
+    table_name: Optional[str] = None,
+    as_model: Literal[False] = False,
+    version: Optional[str] = None,
+    business_unit_id: Optional[str] = None,
+    use_case_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Get configuration as mutable dictionary."""
     ...
 
 
 def get_config(
-    *, table_name: Optional[str] = None, as_model: bool = False, version: Optional[str] = None
+    *,
+    table_name: Optional[str] = None,
+    as_model: bool = False,
+    version: Optional[str] = None,
+    business_unit_id: Optional[str] = None,
+    use_case_id: Optional[str] = None,
 ) -> Union[IDPConfig, Dict[str, Any]]:
     """
     Get the merged configuration using the environment variable for table name.
@@ -189,6 +261,8 @@ def get_config(
         table_name: Optional override for configuration table name
         as_model: If True, return IDPConfig Pydantic model. If False (default), return dict.
         version: Optional version to load. If None, uses active version.
+        business_unit_id: Optional business unit for use-case-scoped config.
+        use_case_id: Optional use case for use-case-scoped config.
     Returns:
         Merged configuration as IDPConfig (with .to_dict() helper) or mutable dictionary.
 
@@ -202,4 +276,9 @@ def get_config(
         config_dict = config.to_dict(sagemaker_endpoint_name=endpoint)
     """
     reader = ConfigurationReader(table_name)
-    return reader.get_merged_configuration(as_model=as_model, version=version)
+    return reader.get_merged_configuration(
+        as_model=as_model,
+        version=version,
+        business_unit_id=business_unit_id,
+        use_case_id=use_case_id,
+    )

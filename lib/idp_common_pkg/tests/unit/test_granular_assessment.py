@@ -526,20 +526,23 @@ class TestGranularAssessmentService:
         tasks = service._create_assessment_tasks({}, properties, 0.9)
         assert len(tasks) == 0
 
-    def test_missing_task_prompt_uses_default(self, sample_config):
-        """Test that default task_prompt is used when not in config."""
+    def test_missing_task_prompt_raises_value_error(self, sample_config):
+        """Test that ValueError is raised when task_prompt is not in config.
+
+        The granular assessment service requires task_prompt for building prompts.
+        When it is missing, the service raises ValueError rather than using a default.
+        """
         # Remove task_prompt from config
         del sample_config["assessment"]["task_prompt"]
 
         idp_config = IDPConfig.model_validate(sample_config)
         service = GranularAssessmentService(config=idp_config)
 
-        # Should not raise an error, should use default task_prompt from IDPConfig
-        prompt = service._build_cached_prompt_base("text", "letter", "attrs", "ocr", [])
+        with pytest.raises(ValueError) as exc_info:
+            service._build_cached_prompt_base("text", "letter", "attrs", "ocr", [])
 
-        # Verify a prompt was generated (not empty)
-        assert prompt is not None
-        assert len(prompt) > 0
+        assert "task_prompt" in str(exc_info.value)
+        assert "required" in str(exc_info.value)
 
     def test_confidence_threshold_inheritance(self, sample_config):
         """Test that confidence thresholds are properly inherited."""

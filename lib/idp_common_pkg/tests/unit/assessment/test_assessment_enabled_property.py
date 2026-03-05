@@ -312,8 +312,13 @@ class TestAssessmentEnabledProperty(unittest.TestCase):
             mock_invoke_model.assert_not_called()
 
     def test_assessment_missing_config_section(self):
-        """Test assessment runs when assessment config section is missing."""
-        # Configure without assessment section
+        """Test assessment raises ValueError when assessment config section is missing.
+
+        When the assessment section is omitted, IDPConfig uses default AssessmentConfig
+        with task_prompt=''. The service requires task_prompt for assessment and raises
+        ValueError when it is missing.
+        """
+        # Configure without assessment section (no task_prompt available)
         config = {"classes": self.base_config["classes"]}
 
         # Initialize assessment service
@@ -327,7 +332,7 @@ class TestAssessmentEnabledProperty(unittest.TestCase):
             patch("idp_common.image.prepare_image") as mock_prepare_image,
             patch("idp_common.bedrock.invoke_model") as mock_invoke_model,
         ):
-            # Mock S3 responses
+            # Mock S3 so we reach the task_prompt validation (before Bedrock call)
             mock_get_json.return_value = {
                 "inference_result": {"invoice_number": "INV-12345"},
                 "metadata": {},
@@ -335,35 +340,17 @@ class TestAssessmentEnabledProperty(unittest.TestCase):
             mock_get_text.return_value = "Invoice #INV-12345\nAmount: $100.00"
             mock_prepare_image.return_value = self._create_mock_image_data()
 
-            # Mock Bedrock response
-            mock_invoke_model.return_value = {
-                "response": {
-                    "output": {
-                        "message": {
-                            "content": [
-                                {
-                                    "text": '{"invoice_number": {"confidence": 0.95, "confidence_reason": "Clear text"}}'
-                                }
-                            ]
-                        }
-                    }
-                },
-                "metering": {
-                    "inputTokens": 1000,
-                    "outputTokens": 200,
-                    "totalTokens": 1200,
-                },
-            }
+            with self.assertRaises(ValueError) as ctx:
+                assessment_service.process_document_section(
+                    self.document, self.section_id
+                )
 
-            # Process document section
-            result_document = assessment_service.process_document_section(
-                self.document, self.section_id
-            )
+            # Ensure no external writes or Bedrock calls occurred
+            mock_write_content.assert_not_called()
+            mock_invoke_model.assert_not_called()
 
-            # Verify the service processed normally (defaults to enabled)
-            self.assertIsNotNone(result_document)
-            mock_invoke_model.assert_called_once()
-            mock_write_content.assert_called_once()
+        self.assertIn("task_prompt", str(ctx.exception))
+        self.assertIn("required", str(ctx.exception))
 
     @patch("idp_common.assessment.service.logger")
     def test_assessment_disabled_logging(self, mock_logger):

@@ -9,10 +9,14 @@ as it moves through the processing pipeline.
 """
 
 import json
+import logging
 import time
+import urllib.parse
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional
+
+_logger = logging.getLogger(__name__)
 
 
 class Status(Enum):
@@ -267,6 +271,8 @@ class Document:
     metadata: Dict[str, Any] = field(default_factory=dict)
     trace_id: Optional[str] = None
     config_version: Optional[str] = None  # Configuration version to use for processing
+    business_unit_id: Optional[str] = None
+    use_case_id: Optional[str] = None
     evaluation_status: Optional[str] = None
     evaluation_report_uri: Optional[str] = None
     evaluation_results_uri: Optional[str] = None
@@ -305,6 +311,8 @@ class Document:
             "metering": self.metering,
             "trace_id": self.trace_id,
             "config_version": self.config_version,
+            "business_unit_id": self.business_unit_id,
+            "use_case_id": self.use_case_id,
             # We don't include evaluation_result or summarization_result in the dict since they're objects
         }
 
@@ -388,6 +396,8 @@ class Document:
             metering=data.get("metering", {}),
             trace_id=data.get("trace_id"),
             config_version=data.get("config_version"),
+            business_unit_id=data.get("business_unit_id"),
+            use_case_id=data.get("use_case_id"),
             errors=data.get("errors", []),
         )
 
@@ -459,13 +469,41 @@ class Document:
     @classmethod
     def from_s3_event(cls, event: Dict[str, Any], output_bucket: str) -> "Document":
         """Create a Document from an S3 event."""
-        import logging
-
-        logger = logging.getLogger(__name__)
-
         input_bucket = event.get("detail", {}).get("bucket", {}).get("name", "")
-        input_key = event.get("detail", {}).get("object", {}).get("key", "")
+        raw_key = event.get("detail", {}).get("object", {}).get("key", "")
+        input_key = urllib.parse.unquote_plus(raw_key)
         initial_event_time = event.get("time", "")
+
+        business_unit_id = None
+        use_case_id = None
+        parts = raw_key.split("/", 2)
+        if len(parts) >= 3:
+            candidate_bu = urllib.parse.unquote_plus(parts[0])
+            candidate_uc = urllib.parse.unquote_plus(parts[1])
+
+            def _is_reserved(value: str) -> bool:
+                normalized = value.upper().lstrip("_")
+                return normalized == "DEFAULT" or normalized.startswith("DEFAULT_")
+
+            if (
+                candidate_bu
+                and candidate_uc
+                and "#" not in candidate_bu
+                and "#" not in candidate_uc
+                and "/" not in candidate_bu
+                and "/" not in candidate_uc
+                and not _is_reserved(candidate_bu)
+                and not _is_reserved(candidate_uc)
+            ):
+                business_unit_id = candidate_bu
+                use_case_id = candidate_uc
+            else:
+                _logger.warning(
+                    "S3 key '%s' candidate BU/UC pair '%s'/'%s' is invalid; treating as non-routed",
+                    input_key,
+                    candidate_bu,
+                    candidate_uc,
+                )
 
         # Read S3 metadata to get configuration version if available
         config_version = None
@@ -475,14 +513,14 @@ class Document:
             s3_client = boto3.client("s3")
             response = s3_client.head_object(Bucket=input_bucket, Key=input_key)
             metadata = response.get("Metadata", {})
-            logger.info(f"S3 metadata for {input_key}: {metadata}")
+            _logger.info(f"S3 metadata for {input_key}: {metadata}")
             config_version = metadata.get("config-version")
             if config_version:
-                logger.info(f"Found config version in S3 metadata: {config_version}")
+                _logger.info(f"Found config version in S3 metadata: {config_version}")
             else:
-                logger.info(f"No config-version found in metadata for {input_key}")
+                _logger.info(f"No config-version found in metadata for {input_key}")
         except Exception as e:
-            logger.warning(f"Could not read S3 metadata for {input_key}: {e}")
+            _logger.warning(f"Could not read S3 metadata for {input_key}: {e}")
 
         return cls(
             id=input_key,
@@ -492,6 +530,8 @@ class Document:
             initial_event_time=initial_event_time,
             status=Status.QUEUED,
             config_version=config_version,  # Add config version to document
+            business_unit_id=business_unit_id,
+            use_case_id=use_case_id,
         )
 
     def to_json(self) -> str:

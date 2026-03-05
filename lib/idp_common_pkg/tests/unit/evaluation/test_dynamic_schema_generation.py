@@ -53,7 +53,9 @@ class TestDynamicSchemaGeneration:
         assert props["amount"]["type"] == "number"
         assert props["amount"]["x-aws-idp-evaluation-method"] == "NUMERIC_EXACT"
 
-        assert props["quantity"]["type"] == "integer"
+        # genson infers integer for whole numbers; _normalize_integer_to_number
+        # converts to number for extraction compatibility (int/float both valid)
+        assert props["quantity"]["type"] == "number"
         assert props["quantity"]["x-aws-idp-evaluation-method"] == "NUMERIC_EXACT"
 
         assert props["is_paid"]["type"] == "boolean"
@@ -107,6 +109,9 @@ class TestDynamicSchemaGeneration:
         assert "description" in item_props
         assert "quantity" in item_props
         assert "price" in item_props
+        # Verify numeric types are normalized to "number"
+        assert item_props["quantity"]["type"] == "number"
+        assert item_props["price"]["type"] == "number"
 
     def test_infer_schema_from_array_of_primitives(self, evaluation_service):
         """Test schema inference from array of primitive values."""
@@ -136,9 +141,10 @@ class TestDynamicSchemaGeneration:
 
         schema = evaluation_service._infer_schema_from_data(data, "Document")
 
-        # genson correctly infers None as "null" type (proper JSON Schema)
+        # genson infers None as "null", but _normalize_null_types converts
+        # it to "string" since downstream evaluation doesn't support null type
         props = schema["properties"]
-        assert props["optional_field"]["type"] == "null"
+        assert props["optional_field"]["type"] == "string"
         assert props["required_field"]["type"] == "string"
 
     @patch("idp_common.evaluation.service.s3.get_json_content")

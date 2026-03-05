@@ -21,6 +21,12 @@ CONFIG_TYPE_CUSTOM = "Custom"
 CONFIG_TYPE_DEFAULT_PRICING = "DefaultPricing"
 CONFIG_TYPE_CUSTOM_PRICING = "CustomPricing"
 
+# Use-Case Configuration
+USE_CASE_CONFIG_PREFIX = "UC"
+USE_CASE_REGISTRY_KEY = "UseCaseRegistry"
+DEFAULT_BUSINESS_UNIT_ID = "_default"
+DEFAULT_USE_CASE_ID = "_default"
+
 # All valid configuration types
 VALID_CONFIG_TYPES = [
     CONFIG_TYPE_SCHEMA,

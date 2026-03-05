@@ -28,6 +28,41 @@ INITIAL_BACKOFF = 2  # seconds
 MAX_BACKOFF = 300  # 5 minutes
 
 
+def resolve_use_case_context(
+    event: Dict[str, Any], full_document: Any, logger: logging.Logger
+) -> Tuple[Optional[str], Optional[str]]:
+    """
+    Resolve effective business/use-case IDs from event context with document fallback.
+
+    Context is used only when both IDs are present to avoid mixed-source routing.
+    """
+    use_case_context = event.get("use_case_context")
+    if not isinstance(use_case_context, dict):
+        if use_case_context is not None:
+            logger.warning(
+                "use_case_context is not a dict (got %s), falling back to empty dict",
+                type(use_case_context).__name__,
+            )
+        use_case_context = {}
+
+    ctx_bu = use_case_context.get("business_unit_id")
+    ctx_uc = use_case_context.get("use_case_id")
+    if ctx_bu and ctx_uc:
+        return ctx_bu, ctx_uc
+
+    if ctx_bu or ctx_uc:
+        logger.warning(
+            "Partial use_case_context (bu=%s, uc=%s); falling back to document fields",
+            ctx_bu,
+            ctx_uc,
+        )
+
+    return (
+        getattr(full_document, "business_unit_id", None),
+        getattr(full_document, "use_case_id", None),
+    )
+
+
 def calculate_backoff(
     attempt: int,
     initial_backoff: float = INITIAL_BACKOFF,

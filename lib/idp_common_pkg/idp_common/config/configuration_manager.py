@@ -3,27 +3,42 @@
 
 from __future__ import annotations
 
-import boto3
 import gzip
 import json
-import os
-from typing import Dict, Any, Optional, Union, List
-from botocore.exceptions import ClientError
 import logging
-from boto3.dynamodb.types import Binary
+import os
+from copy import deepcopy
+from typing import Any, Dict, List, Literal, Optional, Union, overload
 
-from .models import IDPConfig, SchemaConfig, PricingConfig, ConfigurationRecord, ConfigMetadata
-from .merge_utils import (
-    deep_update,
-    get_diff_dict,
-)
+import boto3
+from boto3.dynamodb.types import Binary
+from botocore.exceptions import ClientError
+
 from .constants import (
+    CONFIG_TYPE_CONFIG,
+    CONFIG_TYPE_CUSTOM,
     CONFIG_TYPE_CUSTOM_PRICING,
+    CONFIG_TYPE_DEFAULT,
     CONFIG_TYPE_DEFAULT_PRICING,
     CONFIG_TYPE_SCHEMA,
-    CONFIG_TYPE_CONFIG,
-    VALID_CONFIG_TYPES,
-    DEFAULT_VERSION
+    DEFAULT_BUSINESS_UNIT_ID,
+    DEFAULT_USE_CASE_ID,
+    DEFAULT_VERSION,
+    USE_CASE_CONFIG_PREFIX,
+    USE_CASE_REGISTRY_KEY,
+)
+from .exceptions import UseCaseRegistrationError
+from .merge_utils import (
+    apply_delta_with_deletions,
+    deep_update,
+    strip_matching_defaults,
+)
+from .models import (
+    ConfigMetadata,
+    ConfigurationRecord,
+    IDPConfig,
+    PricingConfig,
+    SchemaConfig,
 )
 
 logger = logging.getLogger(__name__)
@@ -38,8 +53,16 @@ _COMPRESSED_STORAGE_VALUE = "compressed"
 _COMPRESSED_DATA_FIELD = "_compressed_config"
 
 # DynamoDB metadata fields that are stored as top-level attributes (not compressed)
-_DYNAMODB_METADATA_FIELDS = {"Configuration", "CreatedAt", "UpdatedAt", "IsActive", "Description",
-                              "BdaProjectArn", "BdaSyncStatus", "BdaLastSyncedAt"}
+_DYNAMODB_METADATA_FIELDS = {
+    "Configuration",
+    "CreatedAt",
+    "UpdatedAt",
+    "IsActive",
+    "Description",
+    "BdaProjectArn",
+    "BdaSyncStatus",
+    "BdaLastSyncedAt",
+}
 
 # DynamoDB item size limit (400KB) with safety margin
 _DYNAMODB_ITEM_SIZE_LIMIT = 400 * 1024
@@ -68,7 +91,14 @@ def _is_full_config(raw_dict: Dict[str, Any]) -> bool:
     if raw_dict.get(_FULL_CONFIG_MARKER) == _FULL_CONFIG_VALUE:
         return True
     # Heuristic: full configs have many top-level sections
-    config_sections = {"ocr", "classification", "extraction", "classes", "assessment", "summarization"}
+    config_sections = {
+        "ocr",
+        "classification",
+        "extraction",
+        "classes",
+        "assessment",
+        "summarization",
+    }
     present = config_sections.intersection(raw_dict.keys())
     return len(present) >= _MIN_FULL_CONFIG_KEYS
 
@@ -115,9 +145,7 @@ class ConfigurationManager:
             )
 
         self.dynamodb = boto3.resource("dynamodb")
-        self.table = self.dynamodb.Table(
-            table_name
-        )  # pyright: ignore[reportAttributeAccessIssue]
+        self.table = self.dynamodb.Table(table_name)  # pyright: ignore[reportAttributeAccessIssue]
         self.table_name = table_name
         logger.info(f"ConfigurationManager initialized with table: {table_name}")
 
@@ -145,7 +173,9 @@ class ConfigurationManager:
         try:
             record = self._read_record(config_type, version=version)
             if record is None:
-                logger.info(f"Configuration not found: {config_type}, version: {version}")
+                logger.info(
+                    f"Configuration not found: {config_type}, version: {version}"
+                )
                 return None
 
             return record.config
@@ -154,7 +184,9 @@ class ConfigurationManager:
             logger.error(f"Error retrieving configuration {config_type}: {e}")
             raise
 
-    def get_raw_configuration(self, config_type: str, version: str) -> Optional[Dict[str, Any]]:
+    def get_raw_configuration(
+        self, config_type: str, version: Optional[str] = None
+    ) -> Optional[Dict[str, Any]]:
         """
         Retrieve RAW configuration from DynamoDB without Pydantic validation.
 
@@ -183,23 +215,31 @@ class ConfigurationManager:
             item = response.get("Item")
 
             if item is None:
-                logger.info(f"Raw configuration not found: {config_type}, version: {version}")
+                logger.info(
+                    f"Raw configuration not found: {config_type}, version: {version}"
+                )
                 return None
 
             # Decompress if stored in compressed format
             item = self._decompress_item(item)
 
             # Remove DynamoDB partition key and metadata fields - return only config data
-            config_data = {k: v for k, v in item.items() if k not in _DYNAMODB_METADATA_FIELDS}
+            config_data = {
+                k: v for k, v in item.items() if k not in _DYNAMODB_METADATA_FIELDS
+            }
 
-            logger.info(f"Retrieved raw configuration for {config_type}, version: {version}")
+            logger.info(
+                f"Retrieved raw configuration for {config_type}, version: {version}"
+            )
             return config_data
 
         except ClientError as e:
             logger.error(f"Error retrieving raw configuration {config_type}: {e}")
             raise
 
-    def get_merged_configuration(self, version: str) -> Optional[IDPConfig]:
+    def get_merged_configuration(
+        self, version: Optional[str] = None
+    ) -> Optional[IDPConfig]:
         """
         Get the full configuration for a version, ready for runtime processing.
 
@@ -221,7 +261,6 @@ class ConfigurationManager:
             ClientError: If DynamoDB operation fails
             ValueError: If version not found
         """
-        from copy import deepcopy
 
         if not version:
             # Find and use active version
@@ -231,7 +270,7 @@ class ConfigurationManager:
                     active_version = version_dict.get("versionName")
                     logger.info(f"Using active version: {active_version}")
                     break
-            
+
             if active_version:
                 version = active_version
             else:
@@ -252,11 +291,15 @@ class ConfigurationManager:
             logger.debug(f"Could not load version {version} as full config: {e}")
 
         # LEGACY PATH: sparse delta config - merge with default
-        logger.info(f"Version {version} appears to be legacy sparse format, merging with default")
+        logger.info(
+            f"Version {version} appears to be legacy sparse format, merging with default"
+        )
 
         default_config = self.get_configuration(CONFIG_TYPE_CONFIG, DEFAULT_VERSION)
         if default_config is None:
-            logger.warning("Default configuration not found - cannot create merged config")
+            logger.warning(
+                "Default configuration not found - cannot create merged config"
+            )
             return None
 
         if not isinstance(default_config, IDPConfig):
@@ -281,7 +324,9 @@ class ConfigurationManager:
 
         # Auto-migrate: save the merged full config back so future reads are fast
         try:
-            self.save_configuration(CONFIG_TYPE_CONFIG, merged_config, version=version, skip_sync=True)
+            self.save_configuration(
+                CONFIG_TYPE_CONFIG, merged_config, version=version, skip_sync=True
+            )
             logger.info(f"Auto-migrated version {version} from sparse to full format")
         except Exception as e:
             logger.warning(f"Failed to auto-migrate version {version}: {e}")
@@ -331,6 +376,7 @@ class ConfigurationManager:
 
         if config_type == CONFIG_TYPE_CONFIG:
             import datetime
+
             timestamp = datetime.datetime.utcnow().isoformat() + "Z"
 
             # Get existing record to preserve metadata
@@ -340,30 +386,31 @@ class ConfigurationManager:
             if existing_record:
                 # Existing config - preserve created_at, update updated_at
                 record_metadata = {
-                    "created_at": existing_record.metadata.created_at if existing_record.metadata else timestamp,
-                    "updated_at": timestamp
+                    "created_at": existing_record.metadata.created_at
+                    if existing_record.metadata
+                    else timestamp,
+                    "updated_at": timestamp,
                 }
                 record = ConfigurationRecord(
                     configuration_type=config_type,
                     version=version,
                     is_active=is_active_status,
-                    description=description if description else existing_record.description,
+                    description=description
+                    if description
+                    else existing_record.description,
                     config=config,
-                    metadata=ConfigMetadata(**record_metadata)
+                    metadata=ConfigMetadata(**record_metadata),
                 )
             else:
                 # New config - set both timestamps
-                record_metadata = {
-                    "created_at": timestamp,
-                    "updated_at": timestamp
-                }
+                record_metadata = {"created_at": timestamp, "updated_at": timestamp}
                 record = ConfigurationRecord(
                     configuration_type=config_type,
                     version=version,
                     is_active=is_active_status,
                     description=description,
                     config=config,
-                    metadata=ConfigMetadata(**record_metadata)
+                    metadata=ConfigMetadata(**record_metadata),
                 )
         else:
             record = ConfigurationRecord(configuration_type=config_type, config=config)
@@ -384,7 +431,9 @@ class ConfigurationManager:
         """
         try:
             # Verify the version exists
-            response = self.table.get_item(Key={"Configuration": f"{CONFIG_TYPE_CONFIG}#{version}"})
+            response = self.table.get_item(
+                Key={"Configuration": f"{CONFIG_TYPE_CONFIG}#{version}"}
+            )
             if not response.get("Item"):
                 raise ValueError(f"Config version {version} not found")
 
@@ -392,16 +441,18 @@ class ConfigurationManager:
             for version_dict in self.list_config_versions():
                 if version_dict.get("isActive"):
                     self.table.update_item(
-                        Key={"Configuration": f"{CONFIG_TYPE_CONFIG}#{version_dict.get('versionName')}"},
+                        Key={
+                            "Configuration": f"{CONFIG_TYPE_CONFIG}#{version_dict.get('versionName')}"
+                        },
                         UpdateExpression="SET IsActive = :false",
-                        ExpressionAttributeValues={":false": False}
+                        ExpressionAttributeValues={":false": False},
                     )
 
             # Activate the target version
             self.table.update_item(
                 Key={"Configuration": f"{CONFIG_TYPE_CONFIG}#{version}"},
                 UpdateExpression="SET IsActive = :true",
-                ExpressionAttributeValues={":true": True}
+                ExpressionAttributeValues={":true": True},
             )
             logger.info(f"Activated Config version {version}")
         except ClientError as e:
@@ -417,27 +468,37 @@ class ConfigurationManager:
             description, bdaProjectArn, bdaSyncStatus, bdaLastSyncedAt
         """
         try:
-            response = self.table.scan(
-                FilterExpression="begins_with(Configuration, :config_prefix)",
-                ExpressionAttributeValues={":config_prefix": f"{CONFIG_TYPE_CONFIG}#"},
-                ProjectionExpression="Configuration, IsActive, CreatedAt, UpdatedAt, Description, BdaProjectArn, BdaSyncStatus, BdaLastSyncedAt"
-            )
+            scan_kwargs = {
+                "FilterExpression": "begins_with(Configuration, :config_prefix)",
+                "ExpressionAttributeValues": {":config_prefix": f"{CONFIG_TYPE_CONFIG}#"},
+                "ProjectionExpression": "Configuration, IsActive, CreatedAt, UpdatedAt, Description, BdaProjectArn, BdaSyncStatus, BdaLastSyncedAt",
+            }
+            items = []
+            while True:
+                response = self.table.scan(**scan_kwargs)
+                items.extend(response.get("Items", []))
+                last_key = response.get("LastEvaluatedKey")
+                if not last_key:
+                    break
+                scan_kwargs["ExclusiveStartKey"] = last_key
 
             versions = []
-            for item in response.get('Items', []):
-                config_key = item.get('Configuration', '')
+            for item in items:
+                config_key = item.get("Configuration", "")
                 if "#" in config_key:
                     _, version = config_key.split("#", 1)
-                    versions.append({
-                        "versionName": version,
-                        "isActive": item.get('IsActive'),
-                        "createdAt": item.get('CreatedAt'),
-                        "updatedAt": item.get('UpdatedAt'),
-                        "description": item.get('Description', ""),
-                        "bdaProjectArn": item.get('BdaProjectArn'),
-                        "bdaSyncStatus": item.get('BdaSyncStatus'),
-                        "bdaLastSyncedAt": item.get('BdaLastSyncedAt'),
-                    })
+                    versions.append(
+                        {
+                            "versionName": version,
+                            "isActive": item.get("IsActive"),
+                            "createdAt": item.get("CreatedAt"),
+                            "updatedAt": item.get("UpdatedAt"),
+                            "description": item.get("Description", ""),
+                            "bdaProjectArn": item.get("BdaProjectArn"),
+                            "bdaSyncStatus": item.get("BdaSyncStatus"),
+                            "bdaLastSyncedAt": item.get("BdaLastSyncedAt"),
+                        }
+                    )
 
             return versions
 
@@ -460,8 +521,7 @@ class ConfigurationManager:
         try:
             key = {"Configuration": f"{CONFIG_TYPE_CONFIG}#{version}"}
             response = self.table.get_item(
-                Key=key,
-                ProjectionExpression="BdaProjectArn"
+                Key=key, ProjectionExpression="BdaProjectArn"
             )
             item = response.get("Item")
             if item:
@@ -471,7 +531,9 @@ class ConfigurationManager:
             logger.error(f"Error getting BDA project ARN for version {version}: {e}")
             return None
 
-    def set_bda_project_arn(self, version: str, arn: str, sync_status: str = "synced") -> None:
+    def set_bda_project_arn(
+        self, version: str, arn: str, sync_status: str = "synced"
+    ) -> None:
         """
         Set or update the BDA project ARN and sync status for a config version.
 
@@ -481,6 +543,7 @@ class ConfigurationManager:
             sync_status: Sync status ("synced", "out-of-sync", "creating")
         """
         import datetime
+
         try:
             key = {"Configuration": f"{CONFIG_TYPE_CONFIG}#{version}"}
             timestamp = datetime.datetime.utcnow().isoformat() + "Z"
@@ -491,9 +554,11 @@ class ConfigurationManager:
                     ":arn": arn,
                     ":status": sync_status,
                     ":ts": timestamp,
-                }
+                },
             )
-            logger.info(f"Set BDA project ARN for version {version}: {arn} (status: {sync_status})")
+            logger.info(
+                f"Set BDA project ARN for version {version}: {arn} (status: {sync_status})"
+            )
         except ClientError as e:
             logger.error(f"Error setting BDA project ARN for version {version}: {e}")
             raise
@@ -529,14 +594,16 @@ class ConfigurationManager:
             self.table.update_item(
                 Key=key,
                 UpdateExpression="SET BdaSyncStatus = :status",
-                ExpressionAttributeValues={":status": status}
+                ExpressionAttributeValues={":status": status},
             )
             logger.info(f"Updated BDA sync status for version {version}: {status}")
         except ClientError as e:
             logger.error(f"Error updating BDA sync status for version {version}: {e}")
             raise
 
-    def delete_configuration(self, config_type: str, version: Optional[str] = None) -> None:
+    def delete_configuration(
+        self, config_type: str, version: Optional[str] = None
+    ) -> None:
         """
         Delete configuration from DynamoDB.
 
@@ -555,14 +622,20 @@ class ConfigurationManager:
 
                 # Prevent deletion of default version
                 if version.lower() == DEFAULT_VERSION.lower():
-                    raise ValueError(f"Cannot delete the '{DEFAULT_VERSION}' configuration version")
+                    raise ValueError(
+                        f"Cannot delete the '{DEFAULT_VERSION}' configuration version"
+                    )
 
                 record = self._read_record(CONFIG_TYPE_CONFIG, version)
-                logger.info(f"Checking version {version} for deletion. Record found: {record is not None}, Is active: {record.is_active if record else 'N/A'}")
+                logger.info(
+                    f"Checking version {version} for deletion. Record found: {record is not None}, Is active: {record.is_active if record else 'N/A'}"
+                )
                 if not record:
                     raise ValueError(f"Version: {version} not found in configurations")
                 if record and record.is_active:
-                    raise ValueError(f"Cannot delete active version {version}. Activate another version first.")
+                    raise ValueError(
+                        f"Cannot delete active version {version}. Activate another version first."
+                    )
                 key = f"{CONFIG_TYPE_CONFIG}#{version}"
             else:
                 key = config_type
@@ -581,7 +654,6 @@ class ConfigurationManager:
         Returns:
             Merged PricingConfig with custom overrides applied, or None if not found
         """
-        from copy import deepcopy
 
         default_config = self.get_configuration(CONFIG_TYPE_DEFAULT_PRICING)
         if default_config is None:
@@ -589,7 +661,9 @@ class ConfigurationManager:
             return None
 
         if not isinstance(default_config, PricingConfig):
-            logger.warning(f"Expected PricingConfig but got {type(default_config).__name__}")
+            logger.warning(
+                f"Expected PricingConfig but got {type(default_config).__name__}"
+            )
             return None
 
         custom_config = self.get_configuration(CONFIG_TYPE_CUSTOM_PRICING)
@@ -598,7 +672,9 @@ class ConfigurationManager:
             return default_config
 
         if not isinstance(custom_config, PricingConfig):
-            logger.warning(f"CustomPricing is not PricingConfig, returning DefaultPricing")
+            logger.warning(
+                "CustomPricing is not PricingConfig, returning DefaultPricing"
+            )
             return default_config
 
         default_dict = default_config.model_dump(mode="python")
@@ -634,7 +710,10 @@ class ConfigurationManager:
     # ===== Update Configuration Handler =====
 
     def handle_update_custom_configuration(
-        self, custom_config: Union[str, Dict[str, Any], IDPConfig], version: Optional[str] = None, description: Optional[str] = None
+        self,
+        custom_config: Union[str, Dict[str, Any], IDPConfig],
+        version: Optional[str] = None,
+        description: Optional[str] = None,
     ) -> bool:
         """
         Handle the updateConfiguration GraphQL mutation.
@@ -658,7 +737,6 @@ class ConfigurationManager:
         Returns:
             True on success
         """
-        from copy import deepcopy
 
         # Parse input
         if isinstance(custom_config, str):
@@ -695,8 +773,15 @@ class ConfigurationManager:
             logger.info(f"Resetting version {version} to default")
             default_config = self.get_configuration(CONFIG_TYPE_CONFIG, DEFAULT_VERSION)
             if default_config and isinstance(default_config, IDPConfig):
-                self.save_configuration(CONFIG_TYPE_CONFIG, default_config, version=version, description=description)
-                logger.info(f"Version {version} reset to default (saved full default config)")
+                self.save_configuration(
+                    CONFIG_TYPE_CONFIG,
+                    default_config,
+                    version=version,
+                    description=description,
+                )
+                logger.info(
+                    f"Version {version} reset to default (saved full default config)"
+                )
             else:
                 logger.error("Cannot reset to default: default config not found")
             return True
@@ -708,7 +793,9 @@ class ConfigurationManager:
             self.save_configuration(CONFIG_TYPE_CONFIG, config, version=DEFAULT_VERSION)
 
             # Reset the current version to default
-            self.save_configuration(CONFIG_TYPE_CONFIG, config, version=version, description=description)
+            self.save_configuration(
+                CONFIG_TYPE_CONFIG, config, version=version, description=description
+            )
 
             logger.info(f"Saved version {version} state as new default, version reset")
             return True
@@ -725,12 +812,19 @@ class ConfigurationManager:
                 deep_update(full_dict, config_dict)
                 # Validate
                 full_config = IDPConfig(**full_dict)
-                self.save_configuration(CONFIG_TYPE_CONFIG, full_config, version=version, description=description)
+                self.save_configuration(
+                    CONFIG_TYPE_CONFIG,
+                    full_config,
+                    version=version,
+                    description=description,
+                )
                 logger.info(f"Saved new version: {version} with full configuration")
             else:
                 # No default available, try to save as-is
                 config = IDPConfig(**config_dict)
-                self.save_configuration(CONFIG_TYPE_CONFIG, config, version=version, description=description)
+                self.save_configuration(
+                    CONFIG_TYPE_CONFIG, config, version=version, description=description
+                )
                 logger.info(f"Saved new version: {version} (no default to merge with)")
             return True
 
@@ -740,8 +834,12 @@ class ConfigurationManager:
         existing_description = existing_record.description if existing_record else None
         description_updated = existing_description != description
 
-        if not description_updated and (not config_dict or (isinstance(config_dict, dict) and len(config_dict) == 0)):
-            logger.info("Empty configuration update with no special flags - no changes made")
+        if not description_updated and (
+            not config_dict or (isinstance(config_dict, dict) and len(config_dict) == 0)
+        ):
+            logger.info(
+                "Empty configuration update with no special flags - no changes made"
+            )
             return True
 
         # Get current full config for this version
@@ -753,7 +851,9 @@ class ConfigurationManager:
                 current_dict = default_config.model_dump(mode="python")
             else:
                 current_dict = {}
-            logger.info(f"No existing config for version {version}, starting from default")
+            logger.info(
+                f"No existing config for version {version}, starting from default"
+            )
         else:
             current_dict = current_config.model_dump(mode="python")
 
@@ -762,9 +862,836 @@ class ConfigurationManager:
 
         # Validate and save the full config
         updated_config = IDPConfig(**current_dict)
-        self.save_configuration(CONFIG_TYPE_CONFIG, updated_config, version=version, description=description)
+        self.save_configuration(
+            CONFIG_TYPE_CONFIG, updated_config, version=version, description=description
+        )
         logger.info(f"Updated version {version} configuration (full config saved)")
 
+        return True
+
+    # ===== Use-Case Configuration Methods =====
+
+    @staticmethod
+    def _use_case_config_key(
+        business_unit_id: str, use_case_id: str, config_type: str
+    ) -> str:
+        """Build a DynamoDB key for use-case-scoped configuration.
+
+        Format: UC#{business_unit_id}#{use_case_id}#{config_type}
+
+        Args:
+            business_unit_id: Business unit identifier
+            use_case_id: Use case identifier
+            config_type: Configuration type (Default, Custom, Schema)
+
+        Returns:
+            Composite key string for DynamoDB
+        """
+        if "#" in business_unit_id or "#" in use_case_id:
+            raise ValueError(
+                "business_unit_id and use_case_id cannot contain the '#' delimiter character"
+            )
+        if config_type not in (
+            CONFIG_TYPE_DEFAULT,
+            CONFIG_TYPE_CUSTOM,
+            CONFIG_TYPE_SCHEMA,
+        ):
+            raise ValueError(
+                f"config_type must be Default, Custom, or Schema (got: {config_type!r})"
+            )
+        return (
+            f"{USE_CASE_CONFIG_PREFIX}#{business_unit_id}#{use_case_id}#{config_type}"
+        )
+
+    def _is_default_use_case(
+        self,
+        business_unit_id: Optional[str],
+        use_case_id: Optional[str],
+    ) -> bool:
+        """Check if the given IDs represent the default (global) use case.
+
+        Only explicit ``None`` or the reserved ``DEFAULT_*`` constants are
+        treated as defaults.  Empty strings are *not* considered defaults and
+        will fall through to normal use-case validation, preventing accidental
+        global-config routing when a caller provides ``""``.
+        """
+        if business_unit_id is None and use_case_id is None:
+            return True
+        # If only one is None, it's a partial/invalid pair — not default
+        if business_unit_id is None or use_case_id is None:
+            return False
+        return (
+            business_unit_id == DEFAULT_BUSINESS_UNIT_ID
+            and use_case_id == DEFAULT_USE_CASE_ID
+        )
+
+    def get_use_case_configuration(
+        self, business_unit_id: str, use_case_id: str
+    ) -> Optional[IDPConfig]:
+        """
+        Get fully merged configuration for a specific use case.
+
+        Merge order (5-layer):
+        1. System defaults (code-packaged, already in Global Default)
+        2. Global Default (DynamoDB "Default")
+        3. Global Custom (DynamoDB "Custom") — user overrides, inherited as baseline
+        4. UC Default (DynamoDB "UC#{bu}#{uc}#Default") — sparse delta
+        5. UC Custom (DynamoDB "UC#{bu}#{uc}#Custom") — sparse delta
+        Result: (Global Default + Global Custom) deep-updated with UC Default, then UC Custom
+
+        Args:
+            business_unit_id: Business unit identifier
+            use_case_id: Use case identifier
+
+        Returns:
+            Merged IDPConfig for the use case, or None if Global Default missing
+        """
+        # Layer 1+2: Global Default + Global Custom (merged baseline)
+        # Using get_merged_configuration() ensures tenant-level customizations
+        # stored in CONFIG_TYPE_CUSTOM are included in the base config, not
+        # dropped when UC layers are applied on top.
+        base_config = self.get_merged_configuration()
+        if base_config is None or not isinstance(base_config, IDPConfig):
+            logger.warning("Global Default configuration not found")
+            return None
+
+        if self._is_default_use_case(business_unit_id, use_case_id):
+            return base_config
+
+        # Validate IDs before constructing DynamoDB keys to fail fast on
+        # invalid characters (e.g., '#', '/') or reserved identifiers.
+        self.validate_use_case_ids(business_unit_id, use_case_id)
+
+        merged_dict = base_config.model_dump(mode="python")
+
+        # Layer 3: UC Default (sparse delta)
+        uc_default_key = self._use_case_config_key(
+            business_unit_id, use_case_id, CONFIG_TYPE_DEFAULT
+        )
+        uc_default_dict = self.get_raw_configuration(uc_default_key)
+        if uc_default_dict:
+            deep_update(merged_dict, uc_default_dict)
+
+        # Layer 4: UC Custom (sparse delta)
+        uc_custom_key = self._use_case_config_key(
+            business_unit_id, use_case_id, CONFIG_TYPE_CUSTOM
+        )
+        uc_custom_dict = self.get_raw_configuration(uc_custom_key)
+        if uc_custom_dict:
+            deep_update(merged_dict, uc_custom_dict)
+
+        logger.info(
+            f"Merged use-case configuration for {business_unit_id}/{use_case_id}"
+        )
+        return IDPConfig(**merged_dict)
+
+    @staticmethod
+    def validate_use_case_ids(business_unit_id: str, use_case_id: str) -> None:
+        """Validate use-case identifiers.
+
+        Rejects empty strings, IDs containing the ``#`` or ``/``
+        delimiters, and reserved identifiers (``DEFAULT`` or those
+        starting with ``DEFAULT_``).
+
+        Args:
+            business_unit_id: Business unit identifier to validate
+            use_case_id: Use case identifier to validate
+
+        Raises:
+            ValueError: If any identifier is invalid.
+        """
+        if not isinstance(business_unit_id, str):
+            raise ValueError(
+                f"business_unit_id must be a string (got {type(business_unit_id).__name__})"
+            )
+        if not isinstance(use_case_id, str):
+            raise ValueError(
+                f"use_case_id must be a string (got {type(use_case_id).__name__})"
+            )
+
+        if not business_unit_id or not business_unit_id.strip():
+            raise ValueError("business_unit_id must be a non-empty string")
+        if not use_case_id or not use_case_id.strip():
+            raise ValueError("use_case_id must be a non-empty string")
+        for field_name, value in [
+            ("business_unit_id", business_unit_id),
+            ("use_case_id", use_case_id),
+        ]:
+            if "#" in value:
+                raise ValueError(
+                    f"{field_name} cannot contain the '#' delimiter "
+                    f"character (got: {value!r})"
+                )
+            if "/" in value:
+                raise ValueError(
+                    f"{field_name} cannot contain the '/' delimiter "
+                    f"character (got: {value!r})"
+                )
+            normalized = value.upper().lstrip("_")
+            if normalized == "DEFAULT" or normalized.startswith("DEFAULT_"):
+                raise ValueError(
+                    f"{field_name} cannot use the reserved 'DEFAULT' or "
+                    f"'DEFAULT_*' identifier (got: {value!r}). These "
+                    f"identifiers are reserved for global/default "
+                    f"configurations and cannot be registered as scoped "
+                    f"use cases."
+                )
+
+    @staticmethod
+    def validate_use_case_config_entry(entry: Any) -> tuple[str, str]:
+        """Validate a use-case configuration entry structure and IDs.
+
+        Validates that the entry is a dictionary with required keys
+        (businessUnitId, useCaseId) and that the IDs meet all requirements.
+
+        Args:
+            entry: A use-case config entry (expected to be a dict)
+
+        Returns:
+            Tuple of (business_unit_id, use_case_id) as validated strings
+
+        Raises:
+            ValueError: If entry structure or IDs are invalid
+        """
+        if not isinstance(entry, dict):
+            raise ValueError("Each UseCaseConfigs entry must be an object")
+
+        missing = [k for k in ("businessUnitId", "useCaseId") if k not in entry]
+        if missing:
+            raise ValueError(
+                f"UseCaseConfigs entry missing required keys: {', '.join(missing)}"
+            )
+
+        bu_id = entry["businessUnitId"]
+        uc_id = entry["useCaseId"]
+
+        if not isinstance(bu_id, str) or not isinstance(uc_id, str):
+            raise ValueError("businessUnitId and useCaseId must be strings")
+
+        # Validate IDs using shared validation logic
+        ConfigurationManager.validate_use_case_ids(bu_id, uc_id)
+
+        return bu_id, uc_id
+
+    def save_use_case_configuration(
+        self,
+        business_unit_id: str,
+        use_case_id: str,
+        config_type: str,
+        config_data: Dict[str, Any],
+    ) -> None:
+        """
+        Save a use-case-scoped configuration to DynamoDB.
+
+        Args:
+            business_unit_id: Business unit identifier
+            use_case_id: Use case identifier
+            config_type: Configuration type (Default or Custom)
+            config_data: Configuration data (sparse delta dict)
+        """
+
+        if not isinstance(config_data, dict):
+            raise ValueError(
+                f"config_data must be a dictionary (got {type(config_data).__name__}). "
+                "Methods save_use_case_configuration -> save_raw_configuration -> "
+                "_stringify_values require a dictionary to process configuration values."
+            )
+        self.validate_use_case_ids(business_unit_id, use_case_id)
+        uc_key = self._use_case_config_key(business_unit_id, use_case_id, config_type)
+        self.save_raw_configuration(uc_key, config_data)
+        logger.info(
+            f"Saved use-case configuration: {business_unit_id}/{use_case_id} ({config_type})"
+        )
+
+    def apply_use_case_batch_atomic(
+        self, resolved_entries: list[Dict[str, Any]]
+    ) -> None:
+        """
+        Atomically save use-case Default configs and registry entries in one transaction.
+
+        Args:
+            resolved_entries: List of entries with:
+                - bu_id
+                - uc_id
+                - uc_name
+                - uc_desc
+                - uc_config
+
+        Raises:
+            ValueError: If entry structure is invalid or batch exceeds transaction limit.
+            ClientError: If DynamoDB transaction fails.
+        """
+        if not resolved_entries:
+            return
+
+        # One registry write + one config write per entry must fit in a single tx.
+        max_entries_per_tx = 24
+        if len(resolved_entries) > max_entries_per_tx:
+            raise ValueError(
+                f"UseCaseConfigs supports at most {max_entries_per_tx} entries per batch "
+                f"(received {len(resolved_entries)}) for atomic apply"
+            )
+
+        use_cases, version = self.list_use_cases(include_version=True)
+        registry_map: dict[tuple[str, str], Dict[str, Any]] = {
+            (uc.get("businessUnitId", ""), uc.get("useCaseId", "")): uc
+            for uc in use_cases
+        }
+
+        transact_items_plain: list[Dict[str, Any]] = []
+
+        for entry in resolved_entries:
+            bu_id = entry.get("bu_id")
+            uc_id = entry.get("uc_id")
+            uc_name = entry.get("uc_name")
+            uc_desc = entry.get("uc_desc", "")
+            uc_config = entry.get("uc_config")
+
+            self.validate_use_case_ids(bu_id, uc_id)
+            if not isinstance(uc_name, str) or not uc_name.strip():
+                raise ValueError(
+                    f"use-case name for {bu_id}/{uc_id} must be a non-empty string"
+                )
+            if not isinstance(uc_desc, str):
+                raise ValueError(
+                    f"use-case description for {bu_id}/{uc_id} must be a string"
+                )
+            if not isinstance(uc_config, dict):
+                raise ValueError(
+                    f"use-case config for {bu_id}/{uc_id} must be a dictionary"
+                )
+
+            uc_key = self._use_case_config_key(bu_id, uc_id, CONFIG_TYPE_DEFAULT)
+            item = {"Configuration": uc_key}
+            item.update(ConfigurationRecord._stringify_values(uc_config))
+            transact_items_plain.append(
+                {
+                    "Put": {
+                        "TableName": self.table_name,
+                        "Item": item,
+                    }
+                }
+            )
+
+            registry_map[(bu_id, uc_id)] = {
+                "businessUnitId": bu_id,
+                "useCaseId": uc_id,
+                "name": uc_name,
+                "description": uc_desc,
+            }
+
+        updated_registry = list(registry_map.values())
+        new_version = version + 1
+
+        registry_item = {
+            "Configuration": USE_CASE_REGISTRY_KEY,
+            "use_cases": json.dumps(updated_registry),
+            "version": new_version,
+        }
+        registry_put: Dict[str, Any] = {
+            "TableName": self.table_name,
+            "Item": registry_item,
+            "ConditionExpression": (
+                "attribute_not_exists(version) OR version = :v"
+                if version == 0
+                else "version = :v"
+            ),
+            "ExpressionAttributeValues": {
+                ":v": version,
+            },
+        }
+        transact_items_plain.append({"Put": registry_put})
+
+        def _serialize_attribute_value(value: Any) -> Dict[str, Any]:
+            if value is None:
+                return {"NULL": True}
+            if isinstance(value, bool):
+                return {"BOOL": value}
+            if isinstance(value, (int, float)):
+                return {"N": str(value)}
+            if isinstance(value, str):
+                return {"S": value}
+            if isinstance(value, list):
+                return {"L": [_serialize_attribute_value(v) for v in value]}
+            if isinstance(value, dict):
+                return {
+                    "M": {k: _serialize_attribute_value(v) for k, v in value.items()}
+                }
+            return {"S": str(value)}
+
+        transact_items_typed: list[Dict[str, Any]] = []
+        for tx_item in transact_items_plain:
+            put = tx_item["Put"]
+            typed_put: Dict[str, Any] = {
+                "TableName": put["TableName"],
+                "Item": {
+                    k: _serialize_attribute_value(v) for k, v in put["Item"].items()
+                },
+            }
+            if "ConditionExpression" in put:
+                typed_put["ConditionExpression"] = put["ConditionExpression"]
+            if "ExpressionAttributeValues" in put:
+                typed_put["ExpressionAttributeValues"] = {
+                    k: _serialize_attribute_value(v)
+                    for k, v in put["ExpressionAttributeValues"].items()
+                }
+            transact_items_typed.append({"Put": typed_put})
+
+        try:
+            self.dynamodb.meta.client.transact_write_items(
+                TransactItems=transact_items_typed
+            )
+            logger.info(
+                "Atomically applied %d use-case config entries", len(resolved_entries)
+            )
+        except ClientError as e:
+            # Moto's transact_write_items currently expects native python values;
+            # production DynamoDB expects AttributeValue maps. Retry with native
+            # values only for this compatibility case.
+            error_response = getattr(e, "response", {}) or {}
+            cancellation_reasons = error_response.get("CancellationReasons") or []
+            reason_codes = [
+                reason.get("Code")
+                for reason in cancellation_reasons
+                if isinstance(reason, dict) and reason.get("Code")
+            ]
+            has_type_error_cause = isinstance(e.__cause__, TypeError) or isinstance(
+                e.__context__, TypeError
+            )
+            has_type_error_reason = "TypeError" in reason_codes
+
+            if has_type_error_cause or has_type_error_reason:
+                logger.warning(
+                    "Retrying atomic use-case batch apply with native transaction item format"
+                )
+                self.dynamodb.meta.client.transact_write_items(
+                    TransactItems=transact_items_plain
+                )
+                logger.info(
+                    "Atomically applied %d use-case config entries",
+                    len(resolved_entries),
+                )
+                return
+            logger.error("Atomic use-case batch apply failed: %s", e)
+            raise
+        except Exception:
+            logger.error(
+                "Atomic use-case batch apply failed with unexpected error",
+                exc_info=True,
+            )
+            raise
+
+    @overload
+    def list_use_cases(
+        self, *, include_version: Literal[False] = False
+    ) -> list[Dict[str, Any]]: ...
+
+    @overload
+    def list_use_cases(
+        self, *, include_version: Literal[True]
+    ) -> tuple[list[Dict[str, Any]], int]: ...
+
+    def list_use_cases(
+        self, *, include_version: bool = False
+    ) -> Union[list[Dict[str, Any]], tuple[list[Dict[str, Any]], int]]:
+        """
+        List all registered use cases from the UseCaseRegistry.
+
+        Args:
+            include_version: If True, return a tuple of (use_cases, version)
+                for optimistic locking support. Defaults to False for
+                backward compatibility.
+
+        Returns:
+            If include_version is False: list of use case entries.
+            If include_version is True: tuple of (use_cases, version).
+            Each entry contains businessUnitId, useCaseId, name, and description.
+            Returns empty list (or ([], 0)) if no registry exists.
+        """
+        try:
+            response = self.table.get_item(Key={"Configuration": USE_CASE_REGISTRY_KEY})
+            item = response.get("Item")
+            if item is None:
+                return ([], 0) if include_version else []
+
+            registry_json = item.get("use_cases", "[]")
+            version = item.get("version", 0)
+            try:
+                use_cases = (
+                    json.loads(registry_json)
+                    if isinstance(registry_json, str)
+                    else registry_json
+                )
+            except json.JSONDecodeError as e:
+                logger.error(f"Malformed use_cases JSON in registry: {e}")
+                return ([], 0) if include_version else []
+
+            # Guard against registry data that is not a list so that
+            # downstream callers (e.g. register_use_case) can safely
+            # assume list semantics.
+            if not isinstance(use_cases, list):
+                logger.warning(
+                    "use_cases registry value is not a list (got %s); "
+                    "treating as empty registry",
+                    type(use_cases).__name__,
+                )
+                return ([], 0) if include_version else []
+
+            # Filter out non-dict entries to ensure downstream callers
+            # can safely call .get() on every item.
+            required_keys = {"businessUnitId", "useCaseId"}
+            valid_entries = []
+            non_dict_dropped = 0
+            missing_key_dropped = 0
+            for uc in use_cases:
+                if not isinstance(uc, dict):
+                    non_dict_dropped += 1
+                    continue
+                missing = required_keys - uc.keys()
+                if missing:
+                    missing_key_dropped += 1
+                    logger.warning(
+                        "Dropped use-case entry missing required keys %s: %s",
+                        sorted(missing),
+                        uc,
+                    )
+                    continue
+                valid_entries.append(uc)
+
+            if non_dict_dropped:
+                bad_types = {
+                    type(uc).__name__ for uc in use_cases if not isinstance(uc, dict)
+                }
+                logger.warning(
+                    "Dropped %d non-dict entries from use_cases registry (types: %s)",
+                    non_dict_dropped,
+                    ", ".join(sorted(bad_types)),
+                )
+
+            return (valid_entries, version) if include_version else valid_entries
+        except ClientError as e:
+            logger.error(f"Error reading use case registry: {e}")
+            raise
+
+    def register_use_case(
+        self,
+        business_unit_id: str,
+        use_case_id: str,
+        name: str,
+        description: str = "",
+    ) -> None:
+        """
+        Register a new use case in the UseCaseRegistry.
+
+        If a use case with the same business_unit_id and use_case_id already exists,
+        it is updated with the new name and description.
+
+        Args:
+            business_unit_id: Business unit identifier
+            use_case_id: Use case identifier
+            name: Human-readable name
+            description: Optional description
+
+        Raises:
+            ValueError: If business_unit_id or use_case_id are empty or contain
+                forbidden characters (e.g. '#'), or if name is empty
+        """
+        # Validate identifiers before persisting to avoid creating keys
+        # that break _use_case_config_key or downstream S3 key construction
+        self.validate_use_case_ids(business_unit_id, use_case_id)
+
+        if not name or not name.strip():
+            raise ValueError("name must be a non-empty string")
+
+        max_retries = 3
+        for attempt in range(max_retries):
+            use_cases, version = self.list_use_cases(include_version=True)
+
+            # Update existing or append new
+            entry = {
+                "businessUnitId": business_unit_id,
+                "useCaseId": use_case_id,
+                "name": name,
+                "description": description,
+            }
+
+            updated = False
+            for i, uc in enumerate(use_cases):
+                if (
+                    uc.get("businessUnitId") == business_unit_id
+                    and uc.get("useCaseId") == use_case_id
+                ):
+                    use_cases[i] = entry
+                    updated = True
+                    break
+
+            if not updated:
+                use_cases.append(entry)
+
+            new_version = version + 1
+
+            # Write back to DynamoDB with optimistic locking via ConditionExpression
+            try:
+                if version == 0:
+                    # First write: item may not exist yet or has no version attribute
+                    self.table.put_item(
+                        Item={
+                            "Configuration": USE_CASE_REGISTRY_KEY,
+                            "use_cases": json.dumps(use_cases),
+                            "version": new_version,
+                        },
+                        ConditionExpression="attribute_not_exists(version) OR version = :v",
+                        ExpressionAttributeValues={":v": version},
+                    )
+                else:
+                    self.table.put_item(
+                        Item={
+                            "Configuration": USE_CASE_REGISTRY_KEY,
+                            "use_cases": json.dumps(use_cases),
+                            "version": new_version,
+                        },
+                        ConditionExpression="version = :v",
+                        ExpressionAttributeValues={":v": version},
+                    )
+                logger.info(
+                    f"Registered use case: {business_unit_id}/{use_case_id} ({name})"
+                )
+                return
+            except ClientError as e:
+                if (
+                    e.response.get("Error", {}).get("Code")
+                    == "ConditionalCheckFailedException"
+                ):
+                    logger.warning(
+                        f"Concurrent modification detected on attempt {attempt + 1}/{max_retries}, "
+                        f"retrying with fresh data..."
+                    )
+                    continue
+                raise
+
+        raise UseCaseRegistrationError(
+            f"Failed to register use case after {max_retries} retries due to concurrent modifications"
+        )
+
+    def delete_use_case(
+        self,
+        business_unit_id: str,
+        use_case_id: str,
+        max_retries: int = 3,
+    ) -> bool:
+        """
+        Delete a use case: remove it from the registry and clean up config records.
+
+        This performs:
+        1. Remove the use case entry from the UseCaseRegistry (with optimistic locking)
+        2. Best-effort cleanup of UC Default/Custom/Schema configuration records
+
+        Args:
+            business_unit_id: Business unit identifier
+            use_case_id: Use case identifier
+            max_retries: Maximum optimistic-lock retries for the registry update
+
+        Returns:
+            True if the use case was found and removed, False if it was not in the registry.
+
+        Raises:
+            UseCaseRegistrationError: If the registry update fails after max_retries
+                due to concurrent modifications.
+            ClientError: If a DynamoDB operation fails for a non-concurrency reason.
+        """
+        self.validate_use_case_ids(business_unit_id, use_case_id)
+
+        for attempt in range(max_retries):
+            use_cases, version = self.list_use_cases(include_version=True)
+
+            updated = [
+                uc
+                for uc in use_cases
+                if not (
+                    uc.get("businessUnitId") == business_unit_id
+                    and uc.get("useCaseId") == use_case_id
+                )
+            ]
+
+            if len(updated) == len(use_cases):
+                logger.info(
+                    f"Use case {business_unit_id}/{use_case_id} not found in registry"
+                )
+                return False
+
+            new_version = version + 1
+
+            try:
+                condition_expr = (
+                    "attribute_not_exists(version) OR version = :v"
+                    if version == 0
+                    else "version = :v"
+                )
+                self.table.put_item(
+                    Item={
+                        "Configuration": USE_CASE_REGISTRY_KEY,
+                        "use_cases": json.dumps(updated),
+                        "version": new_version,
+                    },
+                    ConditionExpression=condition_expr,
+                    ExpressionAttributeValues={":v": version},
+                )
+                logger.info(
+                    f"Removed {business_unit_id}/{use_case_id} from use-case registry"
+                )
+                break
+            except ClientError as e:
+                if (
+                    e.response.get("Error", {}).get("Code")
+                    == "ConditionalCheckFailedException"
+                ):
+                    logger.warning(
+                        f"Concurrent modification detected on attempt "
+                        f"{attempt + 1}/{max_retries}, retrying..."
+                    )
+                    continue
+                raise
+        else:
+            raise UseCaseRegistrationError(
+                f"Failed to delete use case {business_unit_id}/{use_case_id} "
+                f"after {max_retries} retries due to concurrent modifications"
+            )
+
+        # Clean up associated configuration records (best-effort)
+        for config_type in (
+            CONFIG_TYPE_DEFAULT,
+            CONFIG_TYPE_CUSTOM,
+            CONFIG_TYPE_SCHEMA,
+        ):
+            try:
+                key = self._use_case_config_key(
+                    business_unit_id, use_case_id, config_type
+                )
+                self.delete_configuration(key)
+            except ClientError as e:
+                logger.warning(
+                    f"Could not delete {config_type} config for "
+                    f"{business_unit_id}/{use_case_id}: {e}"
+                )
+
+        logger.info(
+            f"Deleted use case {business_unit_id}/{use_case_id} and its configuration records"
+        )
+        return True
+
+    def handle_update_use_case_configuration(
+        self,
+        business_unit_id: str,
+        use_case_id: str,
+        custom_config: Union[str, Dict[str, Any]],
+    ) -> bool:
+        """
+        Handle a use-case-scoped configuration update (mirrors handle_update_custom_configuration).
+
+        Merges deltas into the existing UC Custom config, validates against
+        Global Default + UC Default + UC Custom, and stores sparse deltas.
+
+        Args:
+            business_unit_id: Business unit identifier
+            use_case_id: Use case identifier
+            custom_config: Configuration deltas as JSON string or dict
+
+        Returns:
+            True on success
+        """
+
+        # Validate identifiers before any persistence
+        self.validate_use_case_ids(business_unit_id, use_case_id)
+
+        # Parse input
+        if isinstance(custom_config, str):
+            config_dict = json.loads(custom_config)
+        else:
+            config_dict = custom_config if custom_config else {}
+
+        # Remove legacy pricing field (pricing is stored separately)
+        if isinstance(config_dict, dict):
+            config_dict.pop("pricing", None)
+
+        # Validate that parsed config is a dict (apply_delta_with_deletions requires it)
+        if not isinstance(config_dict, dict):
+            raise ValueError(
+                f"custom_config for {business_unit_id}/{use_case_id} must be a "
+                f"JSON object (dict), got {type(config_dict).__name__}"
+            )
+
+        # Extract special flags
+        reset_to_default = config_dict.pop("resetToDefault", False)
+
+        uc_custom_key = self._use_case_config_key(
+            business_unit_id, use_case_id, CONFIG_TYPE_CUSTOM
+        )
+
+        # Handle reset — delete UC Custom so UC Default + Global Default apply
+        if reset_to_default:
+            try:
+                self.delete_configuration(uc_custom_key)
+            except Exception:
+                logger.debug(
+                    f"UC Custom config not found or already deleted for "
+                    f"{business_unit_id}/{use_case_id}"
+                )
+            logger.info(f"Reset use-case Custom for {business_unit_id}/{use_case_id}")
+            return True
+
+        if not config_dict:
+            return True
+
+        # Get existing UC Custom (raw sparse delta)
+        existing_custom = self.get_raw_configuration(uc_custom_key) or {}
+
+        # Remove legacy pricing field from existing custom as well
+        if isinstance(existing_custom, dict):
+            existing_custom.pop("pricing", None)
+
+        # Merge deltas
+        apply_delta_with_deletions(existing_custom, config_dict)
+
+        # Validate: Global Default + Global Custom + UC Default + UC Custom must produce valid IDPConfig
+        global_default = self.get_configuration(CONFIG_TYPE_DEFAULT)
+        if global_default and isinstance(global_default, IDPConfig):
+            merged = deepcopy(global_default.model_dump(mode="python"))
+
+            global_custom_dict = self.get_raw_configuration(CONFIG_TYPE_CUSTOM)
+            if global_custom_dict:
+                global_custom_dict.pop("config_type", None)
+                deep_update(merged, global_custom_dict)
+
+            uc_default_key = self._use_case_config_key(
+                business_unit_id, use_case_id, CONFIG_TYPE_DEFAULT
+            )
+            uc_default_dict = self.get_raw_configuration(uc_default_key)
+            if uc_default_dict:
+                uc_default_dict.pop("config_type", None)
+                deep_update(merged, uc_default_dict)
+
+            validation_dict = deepcopy(merged)
+            deep_update(validation_dict, existing_custom)
+            # Ensure config_type is "Config" for IDPConfig validation;
+            # raw layer dicts may carry their storage-level config_type
+            # (e.g. "Default") which is not a valid IDPConfig discriminator.
+            validation_dict["config_type"] = CONFIG_TYPE_CONFIG
+            IDPConfig(**validation_dict)  # raises ValidationError if invalid
+
+            # Auto-cleanup: strip values matching the effective base (Global + UC Default)
+            strip_matching_defaults(existing_custom, merged)
+
+        if existing_custom:
+            self.save_raw_configuration(uc_custom_key, existing_custom)
+        else:
+            try:
+                self.delete_configuration(uc_custom_key)
+            except Exception:
+                logger.debug(
+                    "UC Custom config not found or already deleted for "
+                    f"{business_unit_id}/{use_case_id}"
+                )
+        logger.info(f"Updated use-case Custom for {business_unit_id}/{use_case_id}")
         return True
 
     # ===== Private Methods =====
@@ -776,7 +1703,6 @@ class ConfigurationManager:
         Returns:
             IDPConfig or None
         """
-        from copy import deepcopy
 
         raw = self.get_raw_configuration(CONFIG_TYPE_CONFIG, version)
         if raw is None:
@@ -801,7 +1727,9 @@ class ConfigurationManager:
             try:
                 return IDPConfig(**merged)
             except Exception as e:
-                logger.error(f"Failed to create merged config for version {version}: {e}")
+                logger.error(
+                    f"Failed to create merged config for version {version}: {e}"
+                )
                 return None
 
         return None
@@ -811,7 +1739,7 @@ class ConfigurationManager:
     ) -> None:
         """
         Apply deltas to a full config dict.
-        
+
         Null values in deltas mean "restore this field to its default value".
         Other values are applied normally via deep_update.
 
@@ -820,7 +1748,6 @@ class ConfigurationManager:
             deltas: Delta dict (null values = restore to default)
             version: Version name (for looking up defaults)
         """
-        from copy import deepcopy
 
         # Separate null values (restore to default) from real updates
         restore_fields: Dict[str, Any] = {}
@@ -848,7 +1775,9 @@ class ConfigurationManager:
                         target[key] = deepcopy(default_dict[key])
                         logger.info(f"Restored field '{key}' to default value")
 
-    def _read_record(self, configuration_type: str, version: str = "") -> Optional[ConfigurationRecord]:
+    def _read_record(
+        self, configuration_type: str, version: str = ""
+    ) -> Optional[ConfigurationRecord]:
         """
         Read ConfigurationRecord from DynamoDB using single key.
 
@@ -863,7 +1792,13 @@ class ConfigurationManager:
         Returns:
             ConfigurationRecord or None if not found
         """
-        response = self.table.get_item(Key={"Configuration": f"{CONFIG_TYPE_CONFIG}#{version}" if version else configuration_type})
+        response = self.table.get_item(
+            Key={
+                "Configuration": f"{CONFIG_TYPE_CONFIG}#{version}"
+                if version
+                else configuration_type
+            }
+        )
         item = response.get("Item")
 
         if item is None:
@@ -874,7 +1809,9 @@ class ConfigurationManager:
 
         return ConfigurationRecord.from_dynamodb_item(item)
 
-    def _write_record(self, record: ConfigurationRecord, identifier: Optional[str] = None) -> None:
+    def _write_record(
+        self, record: ConfigurationRecord, identifier: Optional[str] = None
+    ) -> None:
         """
         Write ConfigurationRecord to DynamoDB using single key.
 
@@ -1000,7 +1937,9 @@ class ConfigurationManager:
         # Extract compressed data
         compressed_data = item.get(_COMPRESSED_DATA_FIELD)
         if compressed_data is None:
-            logger.error("Compressed storage marker present but no compressed data found")
+            logger.error(
+                "Compressed storage marker present but no compressed data found"
+            )
             return item
 
         # Handle both Binary wrapper and raw bytes
@@ -1027,59 +1966,105 @@ class ConfigurationManager:
                 full_item[key] = value
         full_item.update(config_data)
 
-        logger.debug(f"Decompressed config: {len(raw_bytes):,} bytes → {len(decompressed_json):,} bytes")
+        logger.debug(
+            f"Decompressed config: {len(raw_bytes):,} bytes → {len(decompressed_json):,} bytes"
+        )
         return full_item
 
     # ===== Legacy Compatibility =====
 
-    def save_raw_configuration(self, config_type: str, config_dict: Dict[str, Any], version: str, description: Optional[str] = None) -> None:
+    def save_raw_configuration(
+        self,
+        config_type: str,
+        config_dict: Dict[str, Any],
+        version: Optional[str] = None,
+        description: Optional[str] = None,
+    ) -> None:
         """
         Save raw configuration dict to DynamoDB.
 
         LEGACY COMPATIBILITY: This method is kept for backward compatibility with
         code that still calls it directly. For new code, use save_configuration().
 
-        If config_dict is a full config, it's saved as-is.
-        If config_dict is None/empty, the version is reset to default.
+        If config_type is not `Config` and no version is supplied, this method
+        writes the raw dictionary directly under `Configuration=<config_type>`.
+        This supports use-case scoped keys (`UC#...`) which intentionally store
+        sparse deltas without full-config validation.
+
+        If config_type is `Config`, config_dict is treated as a versioned config:
+        - full config is saved as-is
+        - sparse delta is merged with default then saved as full
+        - empty config resets the version to default
 
         Args:
             config_type: Configuration type
             config_dict: Configuration dict to save, or None to reset to default
-            version: Version to save
+            version: Version to save (required when config_type is Config)
             description: Optional description
         """
-        if config_dict is None or (isinstance(config_dict, dict) and len(config_dict) == 0):
+        # Raw non-versioned write path (used for UC#... sparse delta entries)
+        if config_type != CONFIG_TYPE_CONFIG and version is None:
+            item = {"Configuration": config_type}
+            item.update(ConfigurationRecord._stringify_values(config_dict))
+            self.table.put_item(Item=item)
+            logger.info(f"Saved raw configuration: {config_type}")
+            return
+
+        if version is None:
+            raise ValueError("version is required when saving raw Config records")
+
+        if config_dict is None or (
+            isinstance(config_dict, dict) and len(config_dict) == 0
+        ):
             # Reset to default: copy default config into this version
             default_config = self.get_configuration(CONFIG_TYPE_CONFIG, DEFAULT_VERSION)
             if default_config and isinstance(default_config, IDPConfig):
-                self.save_configuration(CONFIG_TYPE_CONFIG, default_config, version=version, description=description)
-                logger.info(f"Reset version {version} to default (via save_raw_configuration)")
+                self.save_configuration(
+                    CONFIG_TYPE_CONFIG,
+                    default_config,
+                    version=version,
+                    description=description,
+                )
+                logger.info(
+                    f"Reset version {version} to default (via save_raw_configuration)"
+                )
             else:
-                logger.warning(f"Cannot reset version {version}: default config not found")
+                logger.warning(
+                    f"Cannot reset version {version}: default config not found"
+                )
             return
 
         # If it's a full config, save through normal path
         if _is_full_config(config_dict):
-            config_dict_clean = {k: v for k, v in config_dict.items() if k != _FULL_CONFIG_MARKER}
+            config_dict_clean = {
+                k: v for k, v in config_dict.items() if k != _FULL_CONFIG_MARKER
+            }
             config = IDPConfig(**config_dict_clean)
-            self.save_configuration(CONFIG_TYPE_CONFIG, config, version=version, description=description)
+            self.save_configuration(
+                CONFIG_TYPE_CONFIG, config, version=version, description=description
+            )
             return
 
         # Legacy sparse dict - merge with default first, then save full
-        from copy import deepcopy
         default_config = self.get_configuration(CONFIG_TYPE_CONFIG, DEFAULT_VERSION)
         if default_config and isinstance(default_config, IDPConfig):
             default_dict = default_config.model_dump(mode="python")
             merged = deepcopy(default_dict)
             deep_update(merged, config_dict)
             config = IDPConfig(**merged)
-            self.save_configuration(CONFIG_TYPE_CONFIG, config, version=version, description=description)
-            logger.info(f"Saved version {version} (merged sparse delta with default into full config)")
+            self.save_configuration(
+                CONFIG_TYPE_CONFIG, config, version=version, description=description
+            )
+            logger.info(
+                f"Saved version {version} (merged sparse delta with default into full config)"
+            )
         else:
             # No default - try saving as-is (may fail validation)
             try:
                 config = IDPConfig(**config_dict)
-                self.save_configuration(CONFIG_TYPE_CONFIG, config, version=version, description=description)
+                self.save_configuration(
+                    CONFIG_TYPE_CONFIG, config, version=version, description=description
+                )
             except Exception as e:
                 logger.error(f"Cannot save sparse config without default: {e}")
                 raise

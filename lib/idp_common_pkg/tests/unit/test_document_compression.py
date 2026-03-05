@@ -178,9 +178,14 @@ class TestDocumentCompression:
 
     def test_unique_s3_keys_generated(self):
         """Test that each compression generates unique S3 keys."""
+        # Patch time where Document.compress uses it. Logging may call time.time()
+        # between compress calls, so provide values: compress1_ts, [intervening], compress2_ts
         with (
             patch("boto3.client") as mock_boto3,
-            patch("time.time", side_effect=[1000.123, 1000.456]),
+            patch(
+                "idp_common.models.time.time",
+                side_effect=[1000.123, 1000.456, 1000.456, 1000.456],
+            ),
         ):
             mock_s3 = Mock()
             mock_boto3.return_value = mock_s3
@@ -189,7 +194,7 @@ class TestDocumentCompression:
             compressed_1 = self.document.compress(self.bucket, "step1")
             compressed_2 = self.document.compress(self.bucket, "step2")
 
-            # Verify different S3 URIs
+            # Verify different S3 URIs (timestamps from compress calls)
             assert compressed_1["s3_uri"] != compressed_2["s3_uri"]
             assert "1000123_step1_state.json" in compressed_1["s3_uri"]
             assert "1000456_step2_state.json" in compressed_2["s3_uri"]
