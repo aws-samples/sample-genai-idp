@@ -71,7 +71,7 @@ const PricingLayout = (): React.JSX.Element => {
   const [newServiceUnits, setNewServiceUnits] = useState<{ name: string; price: string }[]>([{ name: '', price: '' }]);
 
   // Service display names mapping
-  const serviceDisplayNames = {
+  const serviceDisplayNames: Record<string, string> = {
     textract: 'Amazon Textract',
     bedrock: 'Amazon Bedrock',
     bda: 'Amazon BDA',
@@ -80,7 +80,7 @@ const PricingLayout = (): React.JSX.Element => {
   };
 
   // Service display order (Amazon services first, then AWS Lambda last, then alphabetically)
-  const serviceDisplayOrder = {
+  const serviceDisplayOrder: Record<string, number> = {
     textract: 1,
     bedrock: 2,
     bda: 3,
@@ -371,9 +371,9 @@ const PricingLayout = (): React.JSX.Element => {
   // Update a specific unit price
   const updateUnitPrice = (apiName: string, unitName: string, newPrice: string): void => {
     const newFormValues = JSON.parse(JSON.stringify(formValues));
-    const entry = newFormValues.pricing.find((e) => e.name === apiName);
+    const entry = newFormValues.pricing.find((e: PricingEntry) => e.name === apiName);
     if (entry && entry.units) {
-      const unit = entry.units.find((u) => u.name === unitName);
+      const unit = entry.units.find((u: PricingUnit) => u.name === unitName);
       if (unit) {
         unit.price = newPrice;
         setFormValues(newFormValues);
@@ -390,12 +390,12 @@ const PricingLayout = (): React.JSX.Element => {
   // Delete a specific unit
   const handleDeleteUnit = (apiName: string, unitName: string): void => {
     const newFormValues = JSON.parse(JSON.stringify(formValues));
-    const entry = newFormValues.pricing.find((e) => e.name === apiName);
+    const entry = newFormValues.pricing.find((e: PricingEntry) => e.name === apiName);
     if (entry && entry.units) {
-      entry.units = entry.units.filter((u) => u.name !== unitName);
+      entry.units = entry.units.filter((u: PricingUnit) => u.name !== unitName);
       // Remove entry if no units remain
       if (entry.units.length === 0) {
-        newFormValues.pricing = newFormValues.pricing.filter((e) => e.name !== apiName);
+        newFormValues.pricing = newFormValues.pricing.filter((e: PricingEntry) => e.name !== apiName);
       }
       setFormValues(newFormValues);
       setJsonContent(JSON.stringify(newFormValues, null, 2));
@@ -410,7 +410,7 @@ const PricingLayout = (): React.JSX.Element => {
   // Delete an entire API/service entry
   const _handleDeleteService = (apiName: string): void => {
     const newFormValues = JSON.parse(JSON.stringify(formValues));
-    newFormValues.pricing = newFormValues.pricing.filter((e) => e.name !== apiName);
+    newFormValues.pricing = newFormValues.pricing.filter((e: PricingEntry) => e.name !== apiName);
     setFormValues(newFormValues);
     setJsonContent(JSON.stringify(newFormValues, null, 2));
     try {

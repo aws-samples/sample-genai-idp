@@ -114,7 +114,7 @@ const createViewColumnDefinitions = (thumbnailUrls: Record<string, string | null
   {
     id: 'id',
     header: 'Page ID',
-    cell: (item) => <IdCell item={item} />,
+    cell: (item: PageItem) => <IdCell item={item} />,
     sortingField: 'Id',
     minWidth: 160,
     width: 160,
@@ -123,7 +123,7 @@ const createViewColumnDefinitions = (thumbnailUrls: Record<string, string | null
   {
     id: 'class',
     header: 'Class/Type',
-    cell: (item) => <ClassCell item={item} />,
+    cell: (item: PageItem) => <ClassCell item={item} />,
     sortingField: 'Class',
     minWidth: 200,
     width: 200,
@@ -132,7 +132,7 @@ const createViewColumnDefinitions = (thumbnailUrls: Record<string, string | null
   {
     id: 'thumbnail',
     header: 'Thumbnail',
-    cell: (item) => <ThumbnailCell imageUrl={thumbnailUrls[item.Id]} />,
+    cell: (item: PageItem) => <ThumbnailCell imageUrl={thumbnailUrls[item.Id]} />,
     minWidth: 240,
     width: 240,
     isResizable: true,
@@ -140,7 +140,7 @@ const createViewColumnDefinitions = (thumbnailUrls: Record<string, string | null
   {
     id: 'actions',
     header: 'Actions',
-    cell: (item) => <ActionsCell item={item} isEditMode={false} onViewEditClick={onViewEditClick} />,
+    cell: (item: PageItem) => <ActionsCell item={item} isEditMode={false} onViewEditClick={onViewEditClick} />,
     minWidth: 200,
     width: 200,
     isResizable: true,
@@ -156,7 +156,7 @@ const createEditColumnDefinitions = (
   {
     id: 'id',
     header: 'Page ID',
-    cell: (item) => <IdCell item={item} />,
+    cell: (item: PageItem) => <IdCell item={item} />,
     sortingField: 'Id',
     minWidth: 160,
     width: 160,
@@ -165,7 +165,7 @@ const createEditColumnDefinitions = (
   {
     id: 'class',
     header: 'Class/Type',
-    cell: (item) => <EditableClassCell item={item} onResetClass={onResetClass} />,
+    cell: (item: PageItem) => <EditableClassCell item={item} onResetClass={onResetClass} />,
     minWidth: 250,
     width: 250,
     isResizable: true,
@@ -173,7 +173,7 @@ const createEditColumnDefinitions = (
   {
     id: 'thumbnail',
     header: 'Thumbnail',
-    cell: (item) => <ThumbnailCell imageUrl={thumbnailUrls[item.Id]} />,
+    cell: (item: PageItem) => <ThumbnailCell imageUrl={thumbnailUrls[item.Id]} />,
     minWidth: 240,
     width: 240,
     isResizable: true,
@@ -181,7 +181,7 @@ const createEditColumnDefinitions = (
   {
     id: 'actions',
     header: 'Actions',
-    cell: (item) => <ActionsCell item={item} isEditMode={true} onViewEditClick={onViewEditClick} />,
+    cell: (item: PageItem) => <ActionsCell item={item} isEditMode={true} onViewEditClick={onViewEditClick} />,
     minWidth: 200,
     width: 200,
     isResizable: true,
@@ -251,7 +251,7 @@ const PagesPanel = ({ pages, documentItem }: PagesPanelProps): React.JSX.Element
   const loadThumbnails = async () => {
     if (!pages) return;
 
-    const urls = {};
+    const urls: Record<string, string | null> = {};
     await Promise.all(
       pages.map(async (page) => {
         if (page.ImageUri) {
@@ -271,12 +271,12 @@ const PagesPanel = ({ pages, documentItem }: PagesPanelProps): React.JSX.Element
   // Initialize edited pages when entering edit mode
   useEffect(() => {
     if (isEditMode && pages) {
-      const pagesWithEditableFormat = pages.map((page) => ({
+      const pagesWithEditableFormat: PageItem[] = pages.map((page) => ({
         ...page,
         classReset: false,
         textModified: false,
-        newTextUri: null,
-        newConfidenceUri: null,
+        newTextUri: null as string | null,
+        newConfidenceUri: null as string | null,
       }));
       setEditedPages(pagesWithEditableFormat);
       setModifiedPageIds(new Set());

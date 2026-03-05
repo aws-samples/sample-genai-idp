@@ -114,7 +114,7 @@ const StepFunctionFlowViewer = ({
     if (!steps || !Array.isArray(steps)) return [];
 
     // Create a flattened list of all steps including Map iterations
-    const allSteps = [];
+    const allSteps: Step[] = [];
 
     steps.forEach((step) => {
       // Add the main step

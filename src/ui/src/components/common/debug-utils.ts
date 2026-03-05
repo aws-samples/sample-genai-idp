@@ -21,8 +21,8 @@ export const debugSectionStructure = (section: Record<string, unknown>, sectionI
       console.log('Output keys:', Object.keys(section.Output));
 
       // Check for confidence-related data in Output
-      Object.keys(section.Output).forEach((key) => {
-        const value = section.Output[key];
+      Object.keys(section.Output as Record<string, unknown>).forEach((key) => {
+        const value = (section.Output as Record<string, unknown>)[key];
         if (value && typeof value === 'object' && !Array.isArray(value)) {
           const hasConfidenceFields = Object.values(value).some(
             (fieldValue) =>

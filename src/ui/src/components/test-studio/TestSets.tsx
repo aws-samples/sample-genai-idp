@@ -366,7 +366,7 @@ const TestSets = (): React.JSX.Element => {
         throw new Error(`Upload failed: ${uploadResponse.status} ${uploadResponse.statusText}`);
       }
 
-      const newTestSet = {
+      const newTestSet: TestSetItem = {
         id: response.testSetId,
         name: newTestSetName.trim(),
         description: newTestSetDescription.trim(),
@@ -457,36 +457,36 @@ const TestSets = (): React.JSX.Element => {
     {
       id: 'name',
       header: 'Test Set Name',
-      cell: (item) => item.name,
+      cell: (item: TestSetItem) => item.name,
       sortingField: 'name',
     },
     {
       id: 'id',
       header: 'Test Set ID',
-      cell: (item) => item.id,
+      cell: (item: TestSetItem) => item.id,
       sortingField: 'id',
     },
     {
       id: 'description',
       header: 'Description',
-      cell: (item) => item.description || '-',
+      cell: (item: TestSetItem) => item.description || '-',
       width: 200,
       minWidth: 120,
     },
     {
       id: 'filePattern',
       header: 'File Pattern',
-      cell: (item) => item.filePattern,
+      cell: (item: TestSetItem) => item.filePattern,
     },
     {
       id: 'fileCount',
       header: 'Files',
-      cell: (item) => item.fileCount,
+      cell: (item: TestSetItem) => item.fileCount,
     },
     {
       id: 'status',
       header: 'Status',
-      cell: (item) => {
+      cell: (item: TestSetItem) => {
         const status = item.status || '-';
 
         if (status === 'FAILED' && item.error) {
@@ -520,7 +520,7 @@ const TestSets = (): React.JSX.Element => {
     {
       id: 'createdAt',
       header: 'Created',
-      cell: (item) => new Date(item.createdAt).toLocaleDateString(),
+      cell: (item: TestSetItem) => new Date(item.createdAt).toLocaleDateString(),
       sortingField: 'createdAt',
     },
   ];

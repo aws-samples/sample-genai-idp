@@ -18,7 +18,7 @@ const useCurrentSessionCreds = ({
   const { authStatus } = useAuthenticator((context) => [context.authStatus]);
   const [currentSession, setCurrentSession] = useState<unknown>();
   const [currentCredentials, setCurrentCredentials] = useState<unknown>();
-  let interval;
+  let interval: ReturnType<typeof setInterval> | null = null;
 
   const refreshCredentials = async () => {
     try {

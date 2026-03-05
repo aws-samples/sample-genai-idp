@@ -244,13 +244,13 @@ const UserManagementLayout = (): React.JSX.Element => {
     {
       id: 'email',
       header: 'Email',
-      cell: (item) => item.email,
+      cell: (item: User) => item.email,
       sortingField: 'email',
     },
     {
       id: 'persona',
       header: 'Role',
-      cell: (item) => (
+      cell: (item: User) => (
         <Box {...({ color: item.persona === 'Admin' ? 'text-status-info' : 'text-body-default' } as Record<string, unknown>)}>
           {item.persona}
         </Box>
@@ -260,19 +260,19 @@ const UserManagementLayout = (): React.JSX.Element => {
     {
       id: 'status',
       header: 'Status',
-      cell: (item) => <StatusIndicator type={item.status === 'active' ? 'success' : 'stopped'}>{item.status || 'active'}</StatusIndicator>,
+      cell: (item: User) => <StatusIndicator type={item.status === 'active' ? 'success' : 'stopped'}>{item.status || 'active'}</StatusIndicator>,
       sortingField: 'status',
     },
     {
       id: 'createdAt',
       header: 'Created',
-      cell: (item) => (item.createdAt ? new Date(item.createdAt).toLocaleDateString() : 'N/A'),
+      cell: (item: User) => (item.createdAt ? new Date(item.createdAt).toLocaleDateString() : 'N/A'),
       sortingField: 'createdAt',
     },
     {
       id: 'actions',
       header: 'Actions',
-      cell: (item) => (
+      cell: (item: User) => (
         <Button variant="link" onClick={() => deleteUser(item.userId, item.email)} disabled={loading || refreshing}>
           Delete
         </Button>

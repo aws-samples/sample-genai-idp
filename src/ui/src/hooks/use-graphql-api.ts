@@ -402,7 +402,7 @@ const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2
 
       // get document Ids by hour on residual hours outside of the lower shard date/hour boundary
       // or just last n hours when periodsToLoad is less than 1 shard period
-      let baseDate;
+      let baseDate: Date;
       let residualHours;
       if (periodsToLoad < 1) {
         baseDate = new Date(now);

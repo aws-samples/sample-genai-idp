@@ -120,6 +120,20 @@ const ActionsCell = ({
   onViewerOpen,
   onViewerClose,
   isViewerOpen = false,
+}: {
+  item: SectionItem;
+  pages: PageItem[];
+  documentItem: DocumentItem | undefined;
+  mergedConfig: Record<string, unknown> | null | undefined;
+  isSectionCompleted: boolean;
+  isReviewerOnly: boolean;
+  isEditModeEnabled: boolean;
+  allSections?: SectionItem[];
+  currentSectionIndex?: number;
+  onNavigateToSection: (index: number) => void;
+  onViewerOpen: () => void;
+  onViewerClose: () => void;
+  isViewerOpen?: boolean;
 }) => {
   const [isDownloading, setIsDownloading] = React.useState(false);
   const { settings } = useSettingsContext();
@@ -133,7 +147,7 @@ const ActionsCell = ({
   const isBaselineAvailable = documentItem?.evaluationStatus === 'BASELINE_AVAILABLE' || documentItem?.evaluationStatus === 'COMPLETED';
 
   // Construct baseline URI by replacing output bucket with evaluation baseline bucket
-  const constructBaselineUri = (outputUri) => {
+  const constructBaselineUri = (outputUri: string | undefined) => {
     if (!outputUri) return null;
 
     // Get actual bucket names from settings
@@ -172,14 +186,14 @@ const ActionsCell = ({
   };
 
   // Generate download filename
-  const generateFilename = (documentKey, sectionId, type) => {
+  const generateFilename = (documentKey: string, sectionId: string, type: string) => {
     // Sanitize document key by replacing forward slashes with underscores
     const sanitizedDocId = documentKey.replace(/\//g, '_');
     return `${sanitizedDocId}_section${sectionId}_${type}.json`;
   };
 
   // Download handler for both prediction and baseline data
-  const handleDownload = async (type) => {
+  const handleDownload = async (type: string) => {
     setIsDownloading(true);
 
     try {
@@ -229,10 +243,10 @@ const ActionsCell = ({
 
       let errorMessage = `Failed to download ${type} data`;
 
-      if (type === 'baseline' && error.message?.includes('not found')) {
+      if (type === 'baseline' && (error as Error).message?.includes('not found')) {
         errorMessage = 'Baseline data not found. The baseline may not have been set for this document yet.';
-      } else if (error.message) {
-        errorMessage = `Failed to download ${type} data: ${error.message}`;
+      } else if ((error as Error).message) {
+        errorMessage = `Failed to download ${type} data: ${(error as Error).message}`;
       }
 
       alert(errorMessage);
@@ -270,7 +284,7 @@ const ActionsCell = ({
         onClose={onViewerClose}
         disabled={shouldDisableViewEdit}
         isReadOnly={!isEditModeEnabled}
-        allSections={allSections}
+        allSections={allSections as unknown as Record<string, unknown>[]}
         currentSectionIndex={currentSectionIndex}
         onNavigateToSection={onNavigateToSection}
         isExternallyOpen={isViewerOpen}
@@ -350,7 +364,7 @@ const EditablePageIdsCell = ({
     setInputValue(item.PageIds && item.PageIds.length > 0 ? item.PageIds.join(', ') : '');
   }, [item.PageIds]);
 
-  const parseAndUpdatePageIds = (value) => {
+  const parseAndUpdatePageIds = (value: string) => {
     const trimmedValue = value.trim();
 
     if (!trimmedValue) {
@@ -361,15 +375,15 @@ const EditablePageIdsCell = ({
     // Parse comma-separated page IDs
     const rawPageIds = trimmedValue
       .split(/[,\s]+/) // Split on commas and/or whitespace
-      .map((id) => id.trim())
-      .filter((id) => id !== '');
+      .map((id: string) => id.trim())
+      .filter((id: string) => id !== '');
 
-    const seenIds = new Set();
+    const seenIds = new Set<number>();
 
     const pageIds = rawPageIds
-      .map((rawId) => parseInt(rawId, 10))
-      .filter((parsed) => !Number.isNaN(parsed) && parsed > 0)
-      .filter((parsed) => {
+      .map((rawId: string) => parseInt(rawId, 10))
+      .filter((parsed: number) => !Number.isNaN(parsed) && parsed > 0)
+      .filter((parsed: number) => {
         if (seenIds.has(parsed)) {
           return false;
         }
@@ -380,7 +394,7 @@ const EditablePageIdsCell = ({
     updateSection(item.Id, 'PageIds', pageIds);
   };
 
-  const handleInputChange = ({ detail }) => {
+  const handleInputChange = ({ detail }: { detail: { value: string } }) => {
     // Only update the input value, don't parse yet
     setInputValue(detail.value);
   };
@@ -421,6 +435,18 @@ const EditableActionsCell = ({
   onViewerOpen,
   onViewerClose,
   isViewerOpen = false,
+}: {
+  item: SectionItem;
+  deleteSection: (id: string) => void;
+  pages: PageItem[];
+  documentItem: DocumentItem | undefined;
+  mergedConfig: Record<string, unknown> | null | undefined;
+  allSections?: SectionItem[];
+  currentSectionIndex?: number;
+  onNavigateToSection: (index: number) => void;
+  onViewerOpen: () => void;
+  onViewerClose: () => void;
+  isViewerOpen?: boolean;
 }) => {
   return (
     <SpaceBetween direction="horizontal" size="xs">
@@ -433,7 +459,7 @@ const EditableActionsCell = ({
         onClose={onViewerClose}
         disabled={!item.OutputJSONUri}
         isReadOnly={false}
-        allSections={allSections}
+        allSections={allSections as unknown as Record<string, unknown>[]}
         currentSectionIndex={currentSectionIndex}
         onNavigateToSection={onNavigateToSection}
         isExternallyOpen={isViewerOpen}
@@ -445,16 +471,16 @@ const EditableActionsCell = ({
 
 // Column definitions - now a factory that takes navigation params
 const createColumnDefinitions = (
-  pages,
-  documentItem,
-  mergedConfig,
-  isReviewerOnly,
-  isEditModeEnabled,
+  pages: PageItem[],
+  documentItem: DocumentItem | undefined,
+  mergedConfig: Record<string, unknown> | null | undefined,
+  isReviewerOnly: boolean,
+  isEditModeEnabled: boolean,
   // Navigation params
-  allSections,
-  openViewerSectionIndex,
-  setOpenViewerSectionIndex,
-  onNavigateToSection,
+  allSections: SectionItem[],
+  openViewerSectionIndex: number | null,
+  setOpenViewerSectionIndex: (index: number | null) => void,
+  onNavigateToSection: (index: number) => void,
 ) => {
   // Get completed sections from documentItem
   const completedSections = documentItem?.hitlSectionsCompleted || [];
@@ -463,7 +489,7 @@ const createColumnDefinitions = (
     {
       id: 'id',
       header: 'Section ID',
-      cell: (item) => <IdCell item={item} />,
+      cell: (item: SectionItem) => <IdCell item={item} />,
       sortingField: 'Id',
       minWidth: 160,
       width: 160,
@@ -472,7 +498,7 @@ const createColumnDefinitions = (
     {
       id: 'class',
       header: 'Class/Type',
-      cell: (item) => <ClassCell item={item} />,
+      cell: (item: SectionItem) => <ClassCell item={item} />,
       sortingField: 'Class',
       minWidth: 200,
       width: 200,
@@ -481,7 +507,7 @@ const createColumnDefinitions = (
     {
       id: 'pageIds',
       header: 'Page IDs',
-      cell: (item) => <PageIdsCell item={item} />,
+      cell: (item: SectionItem) => <PageIdsCell item={item} />,
       minWidth: 120,
       width: 120,
       isResizable: true,
@@ -489,7 +515,7 @@ const createColumnDefinitions = (
     {
       id: 'confidenceAlerts',
       header: 'Low Confidence Fields',
-      cell: (item) => <ConfidenceAlertsCell item={item} mergedConfig={mergedConfig} />,
+      cell: (item: SectionItem) => <ConfidenceAlertsCell item={item} mergedConfig={mergedConfig} />,
       minWidth: 140,
       width: 140,
       isResizable: true,
@@ -497,9 +523,9 @@ const createColumnDefinitions = (
     {
       id: 'actions',
       header: 'Actions',
-      cell: (item) => {
+      cell: (item: SectionItem) => {
         // Find index of current item in allSections
-        const currentIndex = allSections?.findIndex((s) => s.Id === item.Id) ?? -1;
+        const currentIndex = allSections?.findIndex((s: SectionItem) => s.Id === item.Id) ?? -1;
         const isThisViewerOpen = openViewerSectionIndex === currentIndex;
 
         return (
@@ -529,14 +555,14 @@ const createColumnDefinitions = (
 
 // Pattern-1 edit mode column definitions - data-only editing (read-only section structure)
 const createPattern1EditColumnDefinitions = (
-  pages,
-  documentItem,
-  mergedConfig,
+  pages: PageItem[],
+  documentItem: DocumentItem | undefined,
+  mergedConfig: Record<string, unknown> | null | undefined,
   // Navigation params
-  allSections,
-  openViewerSectionIndex,
-  setOpenViewerSectionIndex,
-  onNavigateToSection,
+  allSections: SectionItem[],
+  openViewerSectionIndex: number | null,
+  setOpenViewerSectionIndex: (index: number | null) => void,
+  onNavigateToSection: (index: number) => void,
 ) => {
   // Get completed sections from documentItem
   const completedSections = documentItem?.hitlSectionsCompleted || [];
@@ -545,7 +571,7 @@ const createPattern1EditColumnDefinitions = (
     {
       id: 'id',
       header: 'Section ID',
-      cell: (item) => <IdCell item={item} />,
+      cell: (item: SectionItem) => <IdCell item={item} />,
       sortingField: 'Id',
       minWidth: 160,
       width: 160,
@@ -554,7 +580,7 @@ const createPattern1EditColumnDefinitions = (
     {
       id: 'class',
       header: 'Class/Type',
-      cell: (item) => <ClassCell item={item} />,
+      cell: (item: SectionItem) => <ClassCell item={item} />,
       sortingField: 'Class',
       minWidth: 200,
       width: 200,
@@ -563,7 +589,7 @@ const createPattern1EditColumnDefinitions = (
     {
       id: 'pageIds',
       header: 'Page IDs',
-      cell: (item) => <PageIdsCell item={item} />,
+      cell: (item: SectionItem) => <PageIdsCell item={item} />,
       minWidth: 120,
       width: 120,
       isResizable: true,
@@ -571,7 +597,7 @@ const createPattern1EditColumnDefinitions = (
     {
       id: 'confidenceAlerts',
       header: 'Low Confidence Fields',
-      cell: (item) => <ConfidenceAlertsCell item={item} mergedConfig={mergedConfig} />,
+      cell: (item: SectionItem) => <ConfidenceAlertsCell item={item} mergedConfig={mergedConfig} />,
       minWidth: 140,
       width: 140,
       isResizable: true,
@@ -579,9 +605,9 @@ const createPattern1EditColumnDefinitions = (
     {
       id: 'actions',
       header: 'Actions',
-      cell: (item) => {
+      cell: (item: SectionItem) => {
         // Find index of current item in allSections
-        const currentIndex = allSections?.findIndex((s) => s.Id === item.Id) ?? -1;
+        const currentIndex = allSections?.findIndex((s: SectionItem) => s.Id === item.Id) ?? -1;
         const isThisViewerOpen = openViewerSectionIndex === currentIndex;
 
         return (
@@ -602,7 +628,7 @@ const createPattern1EditColumnDefinitions = (
               onClose={() => setOpenViewerSectionIndex(null)}
               disabled={!item.OutputJSONUri}
               isReadOnly={false}
-              allSections={allSections}
+              allSections={allSections as unknown as Record<string, unknown>[]}
               currentSectionIndex={currentIndex}
               onNavigateToSection={onNavigateToSection}
               isExternallyOpen={isThisViewerOpen}
@@ -619,24 +645,24 @@ const createPattern1EditColumnDefinitions = (
 
 // Edit mode column definitions for Pattern-2/3 - expanded to use maximum available width
 const createEditColumnDefinitions = (
-  validationErrors,
-  updateSection,
-  updateSectionId,
-  getAvailableClasses,
-  deleteSection,
-  pages,
-  documentItem,
-  mergedConfig,
+  validationErrors: Record<string, string[]>,
+  updateSection: (id: string, field: string, value: unknown) => void,
+  updateSectionId: (oldId: string, newId: string) => void,
+  getAvailableClasses: () => { value: string; label: string }[],
+  deleteSection: (id: string) => void,
+  pages: PageItem[],
+  documentItem: DocumentItem | undefined,
+  mergedConfig: Record<string, unknown> | null | undefined,
   // Navigation params
-  allSections,
-  openViewerSectionIndex,
-  setOpenViewerSectionIndex,
-  onNavigateToSection,
+  allSections: SectionItem[],
+  openViewerSectionIndex: number | null,
+  setOpenViewerSectionIndex: (index: number | null) => void,
+  onNavigateToSection: (index: number) => void,
 ) => [
   {
     id: 'id',
     header: 'Section ID',
-    cell: (item) => <EditableIdCell item={item} validationErrors={validationErrors} updateSectionId={updateSectionId} />,
+    cell: (item: SectionItem) => <EditableIdCell item={item} validationErrors={validationErrors} updateSectionId={updateSectionId} />,
     minWidth: 160,
     width: 300,
     isResizable: true,
@@ -644,7 +670,7 @@ const createEditColumnDefinitions = (
   {
     id: 'class',
     header: 'Class/Type',
-    cell: (item) => (
+    cell: (item: SectionItem) => (
       <EditableClassCell
         item={item}
         validationErrors={validationErrors}
@@ -659,7 +685,7 @@ const createEditColumnDefinitions = (
   {
     id: 'pageIds',
     header: 'Page IDs',
-    cell: (item) => <EditablePageIdsCell item={item} validationErrors={validationErrors} updateSection={updateSection} />,
+    cell: (item: SectionItem) => <EditablePageIdsCell item={item} validationErrors={validationErrors} updateSection={updateSection} />,
     minWidth: 250,
     width: 500,
     isResizable: true,
@@ -667,9 +693,9 @@ const createEditColumnDefinitions = (
   {
     id: 'actions',
     header: 'Actions',
-    cell: (item) => {
+    cell: (item: SectionItem) => {
       // Find index of current item in allSections
-      const currentIndex = allSections?.findIndex((s) => s.Id === item.Id) ?? -1;
+      const currentIndex = allSections?.findIndex((s: SectionItem) => s.Id === item.Id) ?? -1;
       const isThisViewerOpen = openViewerSectionIndex === currentIndex;
 
       return (
@@ -808,7 +834,7 @@ const SectionsPanel = ({ sections, pages, documentItem, mergedConfig, onDocument
       }
     } catch (error) {
       logger.error('Failed to skip all sections review:', error);
-      alert(`Failed to skip all sections: ${error.message || 'Unknown error'}`);
+      alert(`Failed to skip all sections: ${(error as Error).message || 'Unknown error'}`);
     } finally {
       setIsSkipping(false);
     }
@@ -838,7 +864,7 @@ const SectionsPanel = ({ sections, pages, documentItem, mergedConfig, onDocument
         // Support both JSON Schema and legacy formats
         // JSON Schema: $id or x-aws-idp-document-type
         // Legacy: name
-        const className = cls.$id || cls['x-aws-idp-document-type'] || cls.name;
+        const className = String(cls.$id || cls['x-aws-idp-document-type'] || cls.name || '');
 
         return {
           label: className,
@@ -911,8 +937,8 @@ const SectionsPanel = ({ sections, pages, documentItem, mergedConfig, onDocument
         sectionErrors.push('Section must have at least one valid page ID');
       } else {
         // Check each page ID for validity
-        const invalidPageIds = [];
-        const nonExistentPageIds = [];
+        const invalidPageIds: number[] = [];
+        const nonExistentPageIds: number[] = [];
 
         section.PageIds.forEach((pageId) => {
           // Check if page ID is valid (should be handled by parsing, but double-check)
@@ -1003,10 +1029,10 @@ const SectionsPanel = ({ sections, pages, documentItem, mergedConfig, onDocument
   // Add new section
   const addSection = () => {
     const newId = getNextSectionId();
-    const newSection = {
+    const newSection: SectionItem = {
       Id: newId,
       Class: '',
-      PageIds: [],
+      PageIds: [] as number[],
       OriginalId: null,
       isModified: false,
       isNew: true,
@@ -1031,7 +1057,7 @@ const SectionsPanel = ({ sections, pages, documentItem, mergedConfig, onDocument
   };
 
   // Sort sections by starting page ID
-  const sortSectionsByPageId = (sectionsToSort) => {
+  const sortSectionsByPageId = (sectionsToSort: SectionItem[]) => {
     return [...sectionsToSort].sort((a, b) => {
       const aMin = Math.min(...(a.PageIds || [Infinity]));
       const bMin = Math.min(...(b.PageIds || [Infinity]));
@@ -1040,14 +1066,14 @@ const SectionsPanel = ({ sections, pages, documentItem, mergedConfig, onDocument
   };
 
   // Check if a section has actually been modified
-  const hasActualChanges = (section, originalSections) => {
+  const hasActualChanges = (section: SectionItem, originalSections: SectionItem[] | undefined) => {
     // If it's a new section, it's always a change
     if (section.isNew) {
       return true;
     }
 
     // Find the original section
-    const originalSection = originalSections?.find((orig) => orig.Id === section.OriginalId);
+    const originalSection = originalSections?.find((orig: SectionItem) => orig.Id === section.OriginalId);
     if (!originalSection) {
       // If we can't find the original, treat as modified (shouldn't happen)
       return true;

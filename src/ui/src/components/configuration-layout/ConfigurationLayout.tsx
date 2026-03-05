@@ -78,7 +78,7 @@ const normalizeBooleans = (
     }
 
     if (value && typeof value === 'object' && !Array.isArray(value) && propertySchema?.properties) {
-      const normalized = { ...value };
+      const normalized: Record<string, unknown> = { ...(value as Record<string, unknown>) };
       Object.keys(normalized).forEach((key) => {
         if (propertySchema.properties[key]) {
           normalized[key] = normalizeValue(normalized[key], propertySchema.properties[key]);
@@ -597,7 +597,7 @@ const ConfigurationLayout = (): React.JSX.Element => {
   // Process schema to convert custom types to standard JSON Schema format
   const processSchema = (inputSchema: Record<string, unknown>): Record<string, unknown> | null => {
     try {
-      const processedSchema = {
+      const processedSchema: { type: string; properties: Record<string, Record<string, unknown>>; required: unknown } = {
         type: 'object',
         properties: {},
         required: inputSchema.required || [],
@@ -642,8 +642,8 @@ const ConfigurationLayout = (): React.JSX.Element => {
                   itemProps[itemKey] = itemProp;
                 }
               });
-              processedSchema.properties[key].items.properties = itemProps;
-              processedSchema.properties[key].items.required = (items as Record<string, unknown>).required || [];
+              (processedSchema.properties[key].items as Record<string, unknown>).properties = itemProps;
+              (processedSchema.properties[key].items as Record<string, unknown>).required = (items as Record<string, unknown>).required || [];
             }
           } else if (prop.type === 'number' || prop.type === 'integer') {
             // For number types, we'll use a more flexible approach
@@ -684,7 +684,7 @@ const ConfigurationLayout = (): React.JSX.Element => {
       if (!parsedYaml) return [{ message: 'Empty or invalid YAML content' }];
 
       // Perform schema validation manually
-      const errors = [];
+      const errors: { message: string }[] = [];
 
       // Check required fields
       if (schema.required) {
@@ -813,12 +813,12 @@ const ConfigurationLayout = (): React.JSX.Element => {
                             }
 
                             // Only check constraints if it's a valid number
-                            if (isValidNumber && itemProp.minimum !== undefined && numValue < itemProp.minimum) {
+                            if (isValidNumber && itemProp.minimum !== undefined && numValue < Number(itemProp.minimum)) {
                               errors.push({
                                 message: `Field '${itemKey}' in item ${index} of '${key}' must be ` + `at least ${itemProp.minimum}`,
                               });
                             }
-                            if (isValidNumber && itemProp.maximum !== undefined && numValue > itemProp.maximum) {
+                            if (isValidNumber && itemProp.maximum !== undefined && numValue > Number(itemProp.maximum)) {
                               errors.push({
                                 message: `Field '${itemKey}' in item ${index} of '${key}' must be ` + `at most ${itemProp.maximum}`,
                               });
@@ -883,7 +883,7 @@ const ConfigurationLayout = (): React.JSX.Element => {
             } else if (prop.properties) {
               // Validate nested object properties
               Object.entries(prop.properties).forEach(([nestedKey]) => {
-                const nestedValue = value[nestedKey];
+                const nestedValue = (value as Record<string, unknown>)[nestedKey];
 
                 // Check if required
                 if (prop.required && (prop.required as string[]).includes(nestedKey) && nestedValue === undefined) {
@@ -1036,10 +1036,10 @@ const ConfigurationLayout = (): React.JSX.Element => {
     try {
       // Simpler approach: Just compare the current form values with default values
       // and only include differences in our version config
-      const customConfigToSave = {};
+      const customConfigToSave: Record<string, unknown> = {};
 
       // Helper function to compare values - returns a new object
-      const compareWithDefault = (current, defaultObj, path = '') => {
+      const compareWithDefault = (current: Record<string, unknown>, defaultObj: Record<string, unknown>, path = ''): Record<string, unknown> => {
         // Add debugging for granular assessment
         if (path.includes('granular')) {
           console.log(`DEBUG: compareWithDefault called with path '${path}':`, {
@@ -1142,7 +1142,7 @@ const ConfigurationLayout = (): React.JSX.Element => {
             }
             // If key exists in both, compare recursively
             else if (key in defaultObj && key in current) {
-              const nestedResults = compareWithDefault(current[key], defaultObj[key], newPath);
+              const nestedResults = compareWithDefault(current[key] as Record<string, unknown>, defaultObj[key] as Record<string, unknown>, newPath);
 
               // Add debugging for granular assessment
               if (newPath.includes('granular')) {
@@ -1255,29 +1255,29 @@ const ConfigurationLayout = (): React.JSX.Element => {
                 const parts = path.split('.');
 
                 // Build an object to merge
-                const objectToMerge = {};
-                let current = objectToMerge;
+                const objectToMerge: Record<string, unknown> = {};
+                let current: Record<string, unknown> = objectToMerge;
 
                 // Build nested structure without modifying existing objects
                 for (let i = 0; i < parts.length - 1; i += 1) {
                   // Use += 1 instead of ++
                   current[parts[i]] = {};
-                  current = current[parts[i]]; // nosemgrep: javascript.lang.security.audit.prototype-pollution.prototype-pollution-loop.prototype-pollution-loop - Index from controlled array iteration
+                  current = current[parts[i]] as Record<string, unknown>; // nosemgrep: javascript.lang.security.audit.prototype-pollution.prototype-pollution-loop.prototype-pollution-loop - Index from controlled array iteration
                 }
 
                 // Set the value at the final path - IMPORTANT: preserve boolean false values!
                 current[parts[parts.length - 1]] = value;
 
                 // Deep merge this into result
-                const deepMergeNested = (target, source) => {
+                const deepMergeNested = (target: Record<string, unknown>, source: Record<string, unknown>): Record<string, unknown> => {
                   const output = { ...target };
 
                   Object.keys(source).forEach((key) => {
                     if (source[key] && typeof source[key] === 'object' && !Array.isArray(source[key])) {
                       if (target[key] && typeof target[key] === 'object') {
-                        output[key] = deepMergeNested(target[key], source[key]);
+                        output[key] = deepMergeNested(target[key] as Record<string, unknown>, source[key] as Record<string, unknown>);
                       } else {
-                        output[key] = { ...source[key] };
+                        output[key] = { ...(source[key] as Record<string, unknown>) };
                       }
                     } else {
                       // CRITICAL FIX: Always set the value, including boolean false

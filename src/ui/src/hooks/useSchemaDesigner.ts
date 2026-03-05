@@ -357,8 +357,9 @@ export const useSchemaDesigner = (
               if (!cls.attributes) {
                 cls.attributes = { type: 'object', properties: {}, required: [] };
               }
-              Object.keys(updates.attributes).forEach((attrKey) => {
-                cls.attributes[attrKey] = updates.attributes[attrKey];
+              const updatesAttrs = updates.attributes as Record<string, unknown>;
+              Object.keys(updatesAttrs).forEach((attrKey) => {
+                (cls.attributes as Record<string, unknown>)[attrKey] = updatesAttrs[attrKey];
               });
             } else {
               // Direct assignment for top-level properties

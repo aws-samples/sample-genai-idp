@@ -160,10 +160,10 @@ const TestRunner = ({
       });
 
       let errorMessage = 'Failed to start test run';
-      if (err.errors && err.errors.length > 0) {
-        errorMessage = err.errors.map((e) => e.message).join('; ');
-      } else if (err.message) {
-        errorMessage = err.message;
+      if ((err as Record<string, unknown>).errors && Array.isArray((err as Record<string, unknown>).errors) && ((err as Record<string, unknown>).errors as Array<{ message: string }>).length > 0) {
+        errorMessage = ((err as Record<string, unknown>).errors as Array<{ message: string }>).map((e: { message: string }) => e.message).join('; ');
+      } else if ((err as Error).message) {
+        errorMessage = (err as Error).message;
       }
       setError(errorMessage);
     } finally {

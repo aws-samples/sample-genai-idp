@@ -26,6 +26,7 @@ import useConfiguration from '../../hooks/use-configuration';
 import useConfigurationVersions from '../../hooks/use-configuration-versions';
 import useSettingsContext from '../../contexts/settings';
 import useDocumentsContext from '../../contexts/documents';
+import type { Document as UIDocument, Section } from '../../types/documents';
 import DocumentPickerModal from './DocumentPickerModal';
 import DateRangeModal from '../common/DateRangeModal';
 import { parseMetering } from '../../graphql/awsjson-parsers';
@@ -293,14 +294,14 @@ const CapacityPlanningLayout = () => {
   };
 
   // Handle time period changes - uses context's time range state
-  const handlePeriodChange = (shardCount) => {
+  const handlePeriodChange = (shardCount: number) => {
     if (setPeriodsToLoad) {
       setPeriodsToLoad(shardCount);
     }
   };
 
   // Handle custom date range apply - uses context's time range state
-  const handleCustomDateRangeApply = (dateRange) => {
+  const handleCustomDateRangeApply = (dateRange: { startDateTime: string; endDateTime: string }) => {
     setIsDateRangeModalVisible(false);
     if (setCustomDateRange) {
       setCustomDateRange(dateRange);
@@ -322,10 +323,10 @@ const CapacityPlanningLayout = () => {
   };
 
   // Helper function to extract token and request values from metering data structure
-  const extractTokensAndRequestsFromMetering = (meteringData) => {
+  const extractTokensAndRequestsFromMetering = (meteringData: Record<string, unknown>) => {
     // Calculate estimated request count based on token usage patterns
     // Large token counts typically indicate multiple API requests due to chunking
-    const estimateRequestsFromTokens = (tokens, stepType) => {
+    const estimateRequestsFromTokens = (tokens: number, stepType: string) => {
       if (!tokens || tokens === 0) return 0;
 
       // Get max tokens per request from environment or use defaults
@@ -485,33 +486,33 @@ const CapacityPlanningLayout = () => {
 
   // Helper function to validate a document for capacity planning
   // Returns { valid: boolean, error?: string, documentClass?: string }
-  const validateDocumentForCapacityPlanning = (doc) => {
+  const validateDocumentForCapacityPlanning = (doc: UIDocument) => {
     const configuredTypes = getConfiguredDocumentTypes();
 
     // Check if document has sections
-    const sections = doc.Sections || [];
+    const sections: Section[] = doc.Sections || [];
 
     // Get unique classes from sections
-    const uniqueClasses = new Set();
-    sections.forEach((section) => {
+    const uniqueClasses = new Set<string>();
+    sections.forEach((section: Section) => {
       if (section.Class) {
         uniqueClasses.add(section.Class);
       }
     });
 
     // Also check DocumentClass field
-    if (doc.DocumentClass) {
-      uniqueClasses.add(doc.DocumentClass);
+    if ((doc as unknown as Record<string, unknown>).DocumentClass) {
+      uniqueClasses.add((doc as unknown as Record<string, unknown>).DocumentClass as string);
     }
 
     // Add diagnostic logging
     console.log(`🔍 Validating document: ${doc.ObjectKey}`);
     console.log(`  - Sections: ${sections.length}`);
-    console.log(`  - DocumentClass field: ${doc.DocumentClass || 'none'}`);
+    console.log(`  - DocumentClass field: ${(doc as unknown as Record<string, unknown>).DocumentClass || 'none'}`);
     console.log(
       `  - Classes from Sections: ${
         sections
-          .map((s) => s.Class)
+          .map((s: Section) => s.Class)
           .filter(Boolean)
           .join(', ') || 'none'
       }`,
@@ -528,8 +529,8 @@ const CapacityPlanningLayout = () => {
       return {
         valid: false,
         error: `Document "${doc.ObjectKey}" has no classification. Please ensure documents are classified before using for capacity planning.`,
-        documentClass: null,
-        documentClasses: [],
+        documentClass: null as string | null,
+        documentClasses: [] as string[],
         isMultiClass: false,
       };
     }
@@ -652,7 +653,7 @@ const CapacityPlanningLayout = () => {
       }
 
       // Map documents with metering data and validate for capacity planning
-      const validationErrors = [];
+      const validationErrors: string[] = [];
       const validDocuments = candidateDocuments
         .map((doc) => {
           const meteringData = parseMetering(doc.Metering as string) || {};
@@ -746,7 +747,7 @@ const CapacityPlanningLayout = () => {
     }
   };
 
-  const populateTokensFromDocument = (selectedDoc) => {
+  const populateTokensFromDocument = (selectedDoc: RecentDocument) => {
     if (!selectedDoc.metering) return;
 
     const metering = selectedDoc.metering;
@@ -977,7 +978,7 @@ const CapacityPlanningLayout = () => {
   };
 
   // Helper function to get readable model display name
-  const getModelDisplayName = (modelId) => {
+  const getModelDisplayName = (modelId: string | undefined) => {
     if (!modelId) return 'Not configured';
 
     // Extract readable name from model ID
@@ -1015,7 +1016,7 @@ const CapacityPlanningLayout = () => {
     const defaultOption = { label: '-- Select Document Type --', value: '', disabled: true };
 
     // Only show document types from View/Edit Configuration (configuration.classes)
-    let classOptions = [];
+    let classOptions: SelectOption[] = [];
     if (configuration?.classes && Array.isArray(configuration.classes)) {
       classOptions = configuration.classes
         .map((docClass) => {
@@ -1139,14 +1140,14 @@ const CapacityPlanningLayout = () => {
     }
   }, [configuration]);
 
-  const updateDocumentConfig = async (index, field, value) => {
+  const updateDocumentConfig = async (index: number, field: keyof DocumentConfig, value: string | number) => {
     const updated = [...documentConfigs];
-    updated[index][field] = value;
+    (updated[index] as unknown as Record<string, unknown>)[field] = value;
 
     setDocumentConfigs(updated);
   };
 
-  const removeDocumentConfig = (index) => {
+  const removeDocumentConfig = (index: number) => {
     const updated = documentConfigs.filter((_, i) => i !== index);
     setDocumentConfigs(updated);
   };
@@ -1239,13 +1240,13 @@ const CapacityPlanningLayout = () => {
     addNotification('success', 'All time slots cleared', 'Schedule Reset');
   };
 
-  const updateTimeSlot = (index, field, value) => {
+  const updateTimeSlot = (index: number, field: keyof TimeSlot, value: string) => {
     const updated = { ...processingConfig };
-    updated.timeSlots[index][field] = value;
+    (updated.timeSlots[index] as unknown as Record<string, unknown>)[field] = value;
     setProcessingConfig(updated);
   };
 
-  const removeTimeSlot = (index) => {
+  const removeTimeSlot = (index: number) => {
     const updated = { ...processingConfig };
     updated.timeSlots = updated.timeSlots.filter((_, i) => i !== index);
     setProcessingConfig(updated);
@@ -1515,8 +1516,9 @@ const CapacityPlanningLayout = () => {
       console.error('❌ Capacity calculation error:', error);
 
       // Log GraphQL errors specifically
-      if (error.errors) {
-        error.errors.forEach((gqlError, index) => {
+      const gqlErr = error as { errors?: unknown[] };
+      if (gqlErr.errors) {
+        gqlErr.errors.forEach((gqlError: unknown, index: number) => {
           console.error(`GraphQL Error ${index + 1}:`, gqlError);
         });
       }
@@ -1542,13 +1544,13 @@ const CapacityPlanningLayout = () => {
   // Memoized capacity calculations that update when config changes
   const capacityMetrics = useMemo(() => {
     // Helper function to safely parse numbers
-    const safeParseInt = (value, defaultValue = 0) => {
-      const parsed = parseInt(value, 10);
+    const safeParseInt = (value: string | number, defaultValue = 0) => {
+      const parsed = parseInt(String(value), 10);
       return Number.isNaN(parsed) ? defaultValue : parsed;
     };
 
-    const safeParseFloat = (value, defaultValue = 0) => {
-      const parsed = parseFloat(value);
+    const safeParseFloat = (value: string | number, defaultValue = 0): number => {
+      const parsed = parseFloat(String(value));
       return Number.isNaN(parsed) ? defaultValue : parsed;
     };
 
@@ -1657,7 +1659,7 @@ const CapacityPlanningLayout = () => {
       }
 
       // Fallback: build quota data from configuration if no quotaRequirements
-      const quotaList = [];
+      const quotaList: QuotaRequirement[] = [];
 
       // Get the models from configuration including OCR
       const models = [];
@@ -2179,7 +2181,7 @@ const CapacityPlanningLayout = () => {
                             </div>
                           </div>
                         ),
-                        cell: (item) => (
+                        cell: (item: DocumentConfig) => (
                           <Input
                             type="number"
                             value={item.ocrTokens !== undefined && item.ocrTokens !== '' ? String(item.ocrTokens) : ''}
@@ -3857,7 +3859,7 @@ const CapacityPlanningLayout = () => {
         selectedDocuments={selectedDocuments as unknown as React.ComponentProps<typeof DocumentPickerModal>['selectedDocuments']}
         setSelectedDocuments={setSelectedDocuments as unknown as React.ComponentProps<typeof DocumentPickerModal>['setSelectedDocuments']}
         onUseSelectedDocuments={populateTokensFromMultipleDocuments}
-        onUseDocument={populateTokensFromDocument}
+        onUseDocument={populateTokensFromDocument as unknown as React.ComponentProps<typeof DocumentPickerModal>['onUseDocument']}
         configuration={configuration}
         periodsToLoad={periodsToLoad}
         setPeriodsToLoad={handlePeriodChange}

@@ -194,7 +194,7 @@ const DiscoveryPanel = (): React.JSX.Element => {
           variables: { jobId: job.jobId },
         }) as unknown as GqlSubscription;
         const subscription = observable.subscribe({
-            next: (data) => {
+            next: (data: { data?: { onDiscoveryJobStatusChange?: DiscoveryJob } }) => {
               console.log('Discovery job status changed:', data);
               const updatedJob = data?.data?.onDiscoveryJobStatusChange;
               if (updatedJob) {
@@ -205,7 +205,7 @@ const DiscoveryPanel = (): React.JSX.Element => {
               console.warn('Received subscription update but no job data, falling back to refresh');
               loadDiscoveryJobs();
             },
-            error: (subscriptionError) => {
+            error: (subscriptionError: unknown) => {
               console.error('Discovery job subscription error:', subscriptionError);
             },
           });

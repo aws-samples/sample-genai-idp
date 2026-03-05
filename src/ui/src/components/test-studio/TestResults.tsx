@@ -191,9 +191,9 @@ const ComprehensiveBreakdown = ({
             resizableColumns
             wrapLines={preferences.wrapLines}
             items={(() => {
-              const costItems = [];
+              const costItems: { context: string; serviceApi: string; unit: string; value: string; unitCost: string; estimatedCost: string; isTotal?: boolean; isSubtotal?: boolean; sortOrder: number }[] = [];
               let totalCost = 0;
-              const contextTotals = {};
+              const contextTotals: Record<string, number> = {};
 
               // First pass: collect all items and calculate context totals
               Object.entries(costBreakdown).forEach(([context, services]) => {
@@ -233,8 +233,8 @@ const ComprehensiveBreakdown = ({
               });
 
               // Second pass: insert subtotal rows after each context group
-              const finalItems = [];
-              const _currentContext = null;
+              const finalItems: { context: string; serviceApi: string; unit: string; value: string; unitCost: string; estimatedCost: string; isTotal?: boolean; isSubtotal?: boolean; sortOrder: number }[] = [];
+              const _currentContext: string | null = null;
 
               costItems.forEach((item, index) => {
                 // Add the regular item
@@ -437,7 +437,7 @@ const TestResults = ({ testRunId, setSelectedTestRunId }: TestResultsProps): Rea
 
   useEffect(() => {
     let isCancelled = false;
-    const timeouts = []; // Track all timeouts to clear them
+    const timeouts: ReturnType<typeof setTimeout>[] = []; // Track all timeouts to clear them
 
     const fetchResults = async () => {
       if (isCancelled) return;
@@ -505,24 +505,25 @@ const TestResults = ({ testRunId, setSelectedTestRunId }: TestResultsProps): Rea
             break;
           } catch (retryError) {
             if (isCancelled) return;
+            const typedRetryError = retryError as { message?: string; code?: string; name?: string; errors?: Array<{ errorType?: string; message?: string }> };
 
             console.log('getTestRun error caught:', {
-              message: retryError.message,
-              code: retryError.code,
-              name: retryError.name,
+              message: typedRetryError.message,
+              code: typedRetryError.code,
+              name: typedRetryError.name,
               error: retryError,
             });
             const isTimeout =
-              retryError.message?.toLowerCase().includes('timeout') ||
-              retryError.code === 'TIMEOUT' ||
-              retryError.message?.includes('Request failed with status code 504') ||
-              retryError.name === 'TimeoutError' ||
-              retryError.code === 'NetworkError' ||
-              retryError.errors?.some(
-                (err) => err.errorType === 'Lambda:ExecutionTimeoutException' || err.message?.toLowerCase().includes('timeout'),
+              typedRetryError.message?.toLowerCase().includes('timeout') ||
+              typedRetryError.code === 'TIMEOUT' ||
+              typedRetryError.message?.includes('Request failed with status code 504') ||
+              typedRetryError.name === 'TimeoutError' ||
+              typedRetryError.code === 'NetworkError' ||
+              typedRetryError.errors?.some(
+                (err: { errorType?: string; message?: string }) => err.errorType === 'Lambda:ExecutionTimeoutException' || err.message?.toLowerCase().includes('timeout'),
               );
             if (isTimeout && attempt < maxRetries) {
-              console.log(`getTestRun attempt ${attempt} failed, retrying...`, retryError.message);
+              console.log(`getTestRun attempt ${attempt} failed, retrying...`, typedRetryError.message);
 
               clearAllTimeouts(); // Clear any running timeouts
 
@@ -551,7 +552,7 @@ const TestResults = ({ testRunId, setSelectedTestRunId }: TestResultsProps): Rea
         }
       } catch (err) {
         if (!isCancelled) {
-          setError(err.message);
+          setError((err as Error).message);
         }
       } finally {
         if (!isCancelled) {
@@ -776,8 +777,9 @@ const TestResults = ({ testRunId, setSelectedTestRunId }: TestResultsProps): Rea
       }
     } catch (err) {
       console.error('GraphQL call failed:', err);
-      if (err.errors) {
-        err.errors.forEach((errorItem, index) => {
+      const typedErr = err as { errors?: Array<{ message: string }> };
+      if (typedErr.errors) {
+        typedErr.errors.forEach((errorItem: { message: string }, index: number) => {
           console.error(`Error ${index}:`, errorItem.message);
         });
       }
@@ -932,7 +934,7 @@ const TestResults = ({ testRunId, setSelectedTestRunId }: TestResultsProps): Rea
                     : results.weightedOverallScores;
 
                 // Create score range buckets
-                const buckets = {
+                const buckets: Record<string, { count: number; docs: RangeDoc[] }> = {
                   '0.0-0.1': { count: 0, docs: [] },
                   '0.1-0.2': { count: 0, docs: [] },
                   '0.2-0.3': { count: 0, docs: [] },
@@ -1061,10 +1063,11 @@ const TestResults = ({ testRunId, setSelectedTestRunId }: TestResultsProps): Rea
                         activeDot={{
                           r: 6,
                           cursor: 'pointer',
-                          onClick: (data) => {
-                            const range = data.payload.range;
+                          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                          onClick: (data: any) => {
+                            const range = data.payload.range as string;
                             if (range && buckets[range] && buckets[range].docs.length > 0) {
-                              const docs = buckets[range].docs.sort((a, b) => b.score - a.score);
+                              const docs = buckets[range].docs.sort((a: RangeDoc, b: RangeDoc) => b.score - a.score);
                               setSelectedRangeData({ range, docs });
                               setTimeout(() => {
                                 setShowDocumentsModal(true);

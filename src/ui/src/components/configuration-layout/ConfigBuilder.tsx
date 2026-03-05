@@ -1122,8 +1122,8 @@ const ConfigBuilder = ({
                         };
 
                         // Separate regular fields from special fields (lists, objects with dependencies)
-                        const regularProps = [];
-                        const specialProps = []; // For lists, objects with dependsOn, or objects with sectionLabel
+                        const regularProps: { propKey: string; propSchema: SchemaProperty }[] = [];
+                        const specialProps: { propKey: string; propSchema: SchemaProperty }[] = []; // For lists, objects with dependsOn, or objects with sectionLabel
 
                         // Identify and separate the fields, filtering out hidden ones
                         propEntries.forEach(({ propKey, prop: propSchema }: { propKey: string; prop: SchemaProperty }) => {
@@ -1153,9 +1153,9 @@ const ConfigBuilder = ({
                         const distributeFieldsToColumns = (
                           fields: { propKey: string; propSchema: SchemaProperty }[],
                           numColumns: number,
-                        ) => {
+                        ): { columns: { propKey: string; propSchema: SchemaProperty }[][]; descriptionField: { propKey: string; propSchema: SchemaProperty } | undefined; actualColumnCount: number } => {
                           // Create columns array
-                          const columns = Array.from({ length: numColumns }, () => []);
+                          const columns: { propKey: string; propSchema: SchemaProperty }[][] = Array.from({ length: numColumns }, (): { propKey: string; propSchema: SchemaProperty }[] => []);
 
                           // Special handling for description field - it should span full width if it exists
                           const descriptionField = fields.find(({ propKey }) => propKey === 'description');

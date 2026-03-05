@@ -235,14 +235,14 @@ const ConfigurationComparison = ({ versions, configs }: ConfigurationComparisonP
     {
       id: 'field',
       header: 'Field',
-      cell: (item) => item.field,
+      cell: (item: { field: string; values: Record<string, string> }) => item.field,
       sortingField: 'field',
       width: `${equalWidth}%`,
     },
     ...versions.map((version) => ({
       id: version,
       header: version,
-      cell: (item) => formatValue(item.values[version]),
+      cell: (item: { field: string; values: Record<string, string> }) => formatValue(item.values[version]),
       width: `${equalWidth}%`,
     })),
   ];
