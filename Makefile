@@ -202,7 +202,7 @@ ui-build:
 # Verify generated GraphQL types and operations are up-to-date
 codegen-check:
 	@echo "Checking if GraphQL codegen output is up-to-date..."
-	@cd src/ui && npm ci --prefer-offline --no-audit && (npm run codegen || true)
+	@cd src/ui && npm ci --prefer-offline --no-audit && npm run codegen
 	@if ! git diff --quiet src/ui/src/graphql/generated/; then \
 		echo -e "$(RED)ERROR: Generated GraphQL files are out of date!$(NC)"; \
 		echo -e "$(YELLOW)Run 'cd src/ui && npm run codegen' and commit the updated files.$(NC)"; \

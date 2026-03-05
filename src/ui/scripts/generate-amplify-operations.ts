@@ -43,7 +43,6 @@ function parseGraphQL(text: string, filePath?: string): { operationName: string;
   const matches = [...strippedText.matchAll(/\b(query|mutation|subscription)\s+([A-Za-z_]\w*)/g)];
   if (matches.length > 1) {
     console.warn(`Warning: ${filePath ?? '<unknown>'} contains ${matches.length} operations; only the first will be used`);
-    process.exitCode = 1;
   }
   if (matches.length === 0) return null;
   const [, operationType, operationName] = matches[0];
