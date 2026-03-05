@@ -91,9 +91,10 @@
     "@graphql-codegen/cli": "^6.1.2",
     "@graphql-codegen/typescript": "^5.0.8",
     "@graphql-codegen/typescript-operations": "^5.0.8",
-    "graphql": "^16.10.0",
+    "@types/js-yaml": "^4.0.9",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
+    "@types/react-syntax-highlighter": "^15.5.13",
     "@typescript-eslint/eslint-plugin": "^7.18.0",
     "@typescript-eslint/parser": "^7.18.0",
     "@vitejs/plugin-react": "^5.0.4",
@@ -105,13 +106,14 @@
     "eslint-plugin-prettier": "^4.2.1",
     "eslint-plugin-react": "^7.37.4",
     "eslint-plugin-react-hooks": "^4.6.2",
+    "graphql": "^16.10.0",
+    "jsdom": "^26.1.0",
     "prettier": "^2.8.8",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3",
     "vite": "^7.1.12",
     "vite-plugin-svgr": "^4.5.0",
-    "vitest": "^3.1.0",
-    "jsdom": "^26.1.0"
+    "vitest": "^3.1.0"
   },
   "overrides": {
     "nth-check": "^2.0.1"

@@ -174,18 +174,8 @@ const CapacityPlanningLayout = () => {
   const { mergedConfig: configurationUntyped, fetchConfiguration } = useConfiguration();
   const configuration = configurationUntyped as Configuration | null;
   const { versions, getVersionOptions } = useConfigurationVersions();
-  const settingsContext = useSettingsContext() || {};
-  const deploymentSettings = settingsContext.settings as Record<string, unknown> | undefined;
-  const documentsContext = useDocumentsContext() || {};
-  const documents = documentsContext.documents as Array<Record<string, unknown>> | undefined;
-  const isDocumentsListLoading = documentsContext.isDocumentsListLoading as boolean | undefined;
-  const setIsDocumentsListLoading = documentsContext.setIsDocumentsListLoading as ((loading: boolean) => void) | undefined;
-  const periodsToLoad = documentsContext.periodsToLoad as number | undefined;
-  const setPeriodsToLoad = documentsContext.setPeriodsToLoad as ((count: number) => void) | undefined;
-  const customDateRange = documentsContext.customDateRange as { startDateTime: string; endDateTime: string } | null | undefined;
-  const setCustomDateRange = documentsContext.setCustomDateRange as
-    | ((range: { startDateTime: string; endDateTime: string } | null) => void)
-    | undefined;
+  const { settings: deploymentSettings } = useSettingsContext();
+  const { documents, isDocumentsListLoading, setIsDocumentsListLoading, periodsToLoad, setPeriodsToLoad, customDateRange, setCustomDateRange } = useDocumentsContext();
 
   const [selectedConfigVersion, setSelectedConfigVersion] = useState<SelectOption | null>(null);
   const [manualPattern, setManualPattern] = useState<string | null>(null);
@@ -689,16 +679,16 @@ const CapacityPlanningLayout = () => {
             if (doc.PageCount) {
               extractedData.avgPages = Number(doc.PageCount) || 0;
               console.log(`📄 Extracted page count from doc.PageCount: ${extractedData.avgPages} pages`);
-            } else if (doc.pageCount) {
-              extractedData.avgPages = Number(doc.pageCount) || 0;
+            } else if ((doc as unknown as Record<string, unknown>).pageCount) {
+              extractedData.avgPages = Number((doc as unknown as Record<string, unknown>).pageCount) || 0;
               console.log(`📄 Extracted page count from doc.pageCount: ${extractedData.avgPages} pages`);
             } else if (doc.Pages) {
               extractedData.avgPages = Number(doc.Pages) || 0;
               console.log(`📄 Extracted page count from doc.Pages: ${extractedData.avgPages} pages`);
-            } else if (doc.Sections && (doc.Sections as Array<Record<string, unknown>>).length > 0) {
+            } else if (doc.Sections && doc.Sections.length > 0) {
               // Try to get page count from sections
               const maxEndPage = Math.max(
-                ...(doc.Sections as Array<Record<string, unknown>>).map((s) => (s.EndPage as number) || (s.endPage as number) || 0),
+                ...(doc.Sections as unknown as Array<Record<string, unknown>>).map((s) => (s.EndPage as number) || (s.endPage as number) || 0),
               );
               if (maxEndPage > 0) {
                 extractedData.avgPages = maxEndPage;

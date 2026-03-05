@@ -6,7 +6,7 @@ import { Authenticator, ThemeProvider, useAuthenticator } from '@aws-amplify/ui-
 import { ConsoleLogger } from 'aws-amplify/utils';
 import '@aws-amplify/ui-react/styles.css';
 
-import { AppContext } from './contexts/app';
+import { AppContext, type AppActiveTestRun } from './contexts/app';
 import { AnalyticsProvider } from './contexts/analytics';
 import { AgentChatProvider } from './contexts/agentChat';
 import useAwsConfig from './hooks/use-aws-config';
@@ -15,15 +15,6 @@ import useCurrentSessionCreds from './hooks/use-current-session-creds';
 import Routes from './routes/Routes';
 
 import './App.css';
-
-interface AppActiveTestRun {
-  testRunId: string;
-  testSetName: string;
-  context: string;
-  filesCount: number;
-  configVersion: string;
-  startTime: Date;
-}
 
 const logger = new ConsoleLogger('App', import.meta.env.DEV ? 'DEBUG' : 'WARN');
 

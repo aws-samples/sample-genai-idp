@@ -16,8 +16,8 @@ const DocumentListSplitPanel = (): React.JSX.Element => {
   const { header: panelHeader, body: panelBody } = getPanelContent(
     selectedItems as unknown as MappedDocument[],
     'multiple',
-    setToolsOpen as (open: boolean) => void,
-    getDocumentDetailsFromIds as (ids: string[]) => Promise<unknown>,
+    setToolsOpen,
+    getDocumentDetailsFromIds,
   );
 
   return (

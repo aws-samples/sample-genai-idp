@@ -63,7 +63,7 @@ const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2
   const [documents, setDocuments] = useState<Document[]>([]);
   const [customDateRange, setCustomDateRange] = useState<DateRange | null>(null); // { startDateTime, endDateTime }
   const [_dateRangeNextToken, _setDateRangeNextToken] = useState<string | null>(null);
-  const { setErrorMessage } = useAppContext()!;
+  const { setErrorMessage } = useAppContext();
 
   const subscriptionsRef = useRef<{
     onCreate: GraphQLSubscriptionRef | null;

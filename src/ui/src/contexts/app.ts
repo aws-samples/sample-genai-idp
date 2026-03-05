@@ -1,15 +1,38 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
-import { useContext, createContext } from 'react';
+import React, { useContext, createContext } from 'react';
+import type { AuthUser } from 'aws-amplify/auth';
+
+export interface AppActiveTestRun {
+  testRunId: string;
+  testSetName: string;
+  context: string;
+  filesCount: number;
+  configVersion: string;
+  startTime: Date;
+}
 
 export interface AppContextValue {
+  authState: string;
+  awsConfig: Record<string, unknown> | undefined;
   errorMessage: string | undefined;
-  setErrorMessage: (message: string) => void;
-  [key: string]: unknown;
+  currentCredentials: unknown;
+  currentSession: unknown;
+  setErrorMessage: React.Dispatch<React.SetStateAction<string | undefined>>;
+  user: AuthUser | undefined;
+  navigationOpen: boolean;
+  setNavigationOpen: React.Dispatch<React.SetStateAction<boolean>>;
+  activeTestRuns: AppActiveTestRun[];
+  addTestRun: (testRunId: string, testSetName: string, context: string, filesCount: number, configVersion: string) => void;
+  removeTestRun: (testRunId: string) => void;
 }
 
 export const AppContext = createContext<AppContextValue | null>(null);
 
-const useAppContext = (): AppContextValue | null => useContext(AppContext);
+const useAppContext = (): AppContextValue => {
+  const ctx = useContext(AppContext);
+  if (!ctx) throw new Error('useAppContext must be used within AppContext.Provider');
+  return ctx;
+};
 
 export default useAppContext;

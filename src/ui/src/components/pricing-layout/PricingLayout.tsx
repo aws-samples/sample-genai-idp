@@ -182,7 +182,7 @@ const PricingLayout = (): React.JSX.Element => {
   const handleYamlEditorChange = (value: string | undefined): void => {
     setYamlContent(value);
     try {
-      const parsedValue = yaml.load(value);
+      const parsedValue = yaml.load(value) as PricingFormValues;
       setFormValues(parsedValue);
 
       try {

@@ -96,8 +96,7 @@ const Navigation = ({
   const location = useLocation();
   const path = location.pathname;
   let activeHref = `#${DEFAULT_PATH}`;
-  const { settings: rawSettings } = useSettingsContext() || {};
-  const settings = rawSettings as Record<string, unknown> | undefined;
+  const { settings } = useSettingsContext();
   const { isReviewer, isAdmin } = useUserRole();
 
   // Select navigation items based on user role

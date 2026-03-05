@@ -2137,7 +2137,7 @@ const VisualEditorModal = ({
       const results = { predictions: null, baseline: null };
 
       // Build combined edit entry for both files
-      const username = ((user as Record<string, unknown>)?.username as string) || 'unknown';
+      const username = user?.username || 'unknown';
       const timestamp = new Date().toISOString();
 
       // Build prediction diffs

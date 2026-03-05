@@ -14,6 +14,7 @@ interface DateRange {
 }
 
 import useDocumentsContext from '../../contexts/documents';
+import { Document } from '../../types/documents';
 import useSettingsContext from '../../contexts/settings';
 import useUserRole from '../../hooks/use-user-role';
 
@@ -58,7 +59,7 @@ const DocumentList = (): React.JSX.Element => {
   const [isAbortLoading, setIsAbortLoading] = useState(false);
   const [isDateRangeModalVisible, setIsDateRangeModalVisible] = useState(false);
   const [currentUsername, setCurrentUsername] = useState('');
-  const { settings: _settings } = useSettingsContext() as Record<string, unknown>;
+  const { settings: _settings } = useSettingsContext();
   const { isReviewer, isAdmin } = useUserRole();
   const navigate = useNavigate();
 
@@ -75,20 +76,21 @@ const DocumentList = (): React.JSX.Element => {
     getUsername();
   }, []);
 
-  const documentsContext = useDocumentsContext() as Record<string, unknown>;
-  const documents = documentsContext.documents as Record<string, unknown>[];
-  const isDocumentsListLoading = documentsContext.isDocumentsListLoading as boolean;
-  const setIsDocumentsListLoading = documentsContext.setIsDocumentsListLoading as (loading: boolean) => void;
-  const setPeriodsToLoad = documentsContext.setPeriodsToLoad as (periods: number) => void;
-  const setSelectedItems = documentsContext.setSelectedItems as (items: unknown) => void;
-  const setToolsOpen = documentsContext.setToolsOpen as (open: boolean) => void;
-  const periodsToLoad = documentsContext.periodsToLoad as number;
-  const customDateRange = documentsContext.customDateRange as { startDateTime: string; endDateTime: string };
-  const setCustomDateRange = documentsContext.setCustomDateRange as (range: { startDateTime: string; endDateTime: string }) => void;
-  const getDocumentDetailsFromIds = documentsContext.getDocumentDetailsFromIds as (ids: string[]) => Promise<unknown>;
-  const deleteDocuments = documentsContext.deleteDocuments as (ids: string[]) => Promise<unknown>;
-  const reprocessDocuments = documentsContext.reprocessDocuments as (ids: string[], version?: string) => Promise<unknown>;
-  const abortWorkflows = documentsContext.abortWorkflows as (ids: string[]) => Promise<unknown>;
+  const {
+    documents,
+    isDocumentsListLoading,
+    setIsDocumentsListLoading,
+    setPeriodsToLoad,
+    setSelectedItems,
+    setToolsOpen,
+    periodsToLoad,
+    customDateRange,
+    setCustomDateRange,
+    getDocumentDetailsFromIds,
+    deleteDocuments,
+    reprocessDocuments,
+    abortWorkflows,
+  } = useDocumentsContext();
 
   const [preferences, setPreferences] = useLocalStorage('documents-list-preferences', DEFAULT_PREFERENCES);
 
@@ -156,7 +158,7 @@ const DocumentList = (): React.JSX.Element => {
 
   useEffect(() => {
     logger.debug('setting selected items', collectionProps.selectedItems);
-    setSelectedItems(collectionProps.selectedItems);
+    setSelectedItems([...(collectionProps.selectedItems ?? [])] as unknown as Document[]);
   }, [collectionProps.selectedItems]);
 
   const handleDeleteConfirm = async () => {

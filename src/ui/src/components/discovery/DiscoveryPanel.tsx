@@ -50,8 +50,7 @@ interface DiscoveryJob {
 }
 
 const DiscoveryPanel = (): React.JSX.Element => {
-  const { settings: rawSettings } = useSettingsContext() || {};
-  const settings = rawSettings as Record<string, unknown> | undefined;
+  const { settings } = useSettingsContext();
   const { versions, loading: versionsLoading, getVersionOptions } = useConfigurationVersions();
   const [documentFile, setDocumentFile] = useState<File | null>(null);
   const [groundTruthFile, setGroundTruthFile] = useState<File | null>(null);

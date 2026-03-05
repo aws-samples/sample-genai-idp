@@ -3,11 +3,15 @@
 import { useContext, createContext } from 'react';
 
 export interface SettingsContextValue {
-  [key: string]: unknown;
+  settings: Record<string, unknown>;
 }
 
 export const SettingsContext = createContext<SettingsContextValue | null>(null);
 
-const useSettingsContext = (): SettingsContextValue | null => useContext(SettingsContext);
+const useSettingsContext = (): SettingsContextValue => {
+  const ctx = useContext(SettingsContext);
+  if (!ctx) throw new Error('useSettingsContext must be used within SettingsContext.Provider');
+  return ctx;
+};
 
 export default useSettingsContext;

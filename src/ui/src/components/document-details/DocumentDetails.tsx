@@ -48,14 +48,8 @@ const DocumentDetails = (): React.JSX.Element => {
     logger.debug('Error decoding objectKey, using as is', e);
   }
 
-  const documentsContext = useDocumentsContext() as Record<string, unknown>;
-  const documents = documentsContext.documents as Record<string, unknown>[];
-  const getDocumentDetailsFromIds = documentsContext.getDocumentDetailsFromIds as (ids: string[]) => Promise<Record<string, unknown>[]>;
-  const setToolsOpen = documentsContext.setToolsOpen as (open: boolean) => void;
-  const deleteDocuments = documentsContext.deleteDocuments as (ids: string[]) => Promise<unknown>;
-  const reprocessDocuments = documentsContext.reprocessDocuments as (ids: string[], version?: string) => Promise<unknown>;
-  const abortWorkflows = documentsContext.abortWorkflows as (ids: string[]) => Promise<unknown>;
-  const { settings: _settings } = useSettingsContext() as Record<string, unknown>;
+  const { documents, getDocumentDetailsFromIds, setToolsOpen, deleteDocuments, reprocessDocuments, abortWorkflows } = useDocumentsContext();
+  const { settings: _settings } = useSettingsContext();
   const { isReviewer, isAdmin } = useUserRole();
   const isReviewerOnly = isReviewer && !isAdmin;
 
@@ -88,11 +82,11 @@ const DocumentDetails = (): React.JSX.Element => {
 
   // Handle updates from subscription
   useEffect(() => {
-    if (!objectKey || !(documents as unknown[])?.length) {
+    if (!objectKey || !documents?.length) {
       return;
     }
 
-    const documentsFiltered = (documents as Record<string, unknown>[]).filter((c: Record<string, unknown>) => c.ObjectKey === objectKey);
+    const documentsFiltered = documents.filter((c) => c.ObjectKey === objectKey);
     if (documentsFiltered && documentsFiltered?.length) {
       const documentsMap = mapDocumentsAttributes([documentsFiltered[0]] as unknown as { ObjectKey: string }[]) as MappedDocument[];
       const documentDetails = documentsMap[0];

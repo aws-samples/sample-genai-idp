@@ -65,12 +65,11 @@ const AgentChatLayout = ({
   const { messages, isLoading, waitingForResponse, error, sendMessage, clearError, clearChat, loadChatSession } = useAgentChat(
     agentConfig as Record<string, unknown>,
   );
-  const appContext = useAppContext() || ({} as Record<string, unknown>);
-  const user = (appContext as Record<string, unknown>).user as Record<string, unknown> | undefined;
+  const { user } = useAppContext();
 
   const userInitial = useMemo(() => {
-    if (!(user as Record<string, unknown>)?.username) return 'U';
-    return ((user as Record<string, unknown>).username as string).charAt(0).toUpperCase();
+    if (!user?.username) return 'U';
+    return user.username.charAt(0).toUpperCase();
   }, [user]);
 
   useEffect(() => {

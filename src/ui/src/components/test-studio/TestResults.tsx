@@ -373,14 +373,7 @@ interface SelectedRange {
 }
 
 const TestResults = ({ testRunId, setSelectedTestRunId }: TestResultsProps): React.JSX.Element => {
-  const { addTestRun: addTestRunRaw } = useAppContext();
-  const addTestRun = addTestRunRaw as (
-    testRunId: string,
-    testSetName: string,
-    context: string,
-    filesCount: number,
-    configVersion?: string,
-  ) => void;
+  const { addTestRun } = useAppContext();
   const { versions } = useConfigurationVersions();
   const [results, setResults] = useState<Record<string, unknown> | null>(null);
   const [loading, setLoading] = useState(true);
@@ -772,7 +765,7 @@ const TestResults = ({ testRunId, setSelectedTestRunId }: TestResultsProps): Rea
         console.log('Success! Closing modal and redirecting...');
         const newTestRun = result.data.startTestRun;
         // Add to active test runs
-        addTestRun(newTestRun.testRunId as string, newTestRun.testSetName as string, reRunContext, newTestRun.filesCount as number);
+        addTestRun(newTestRun.testRunId as string, newTestRun.testSetName as string, reRunContext, newTestRun.filesCount as number, ((newTestRun as unknown as Record<string, unknown>).configVersion as string) || '');
         setShowReRunModal(false);
         setReRunContext('');
         setReRunNumberOfFiles('');

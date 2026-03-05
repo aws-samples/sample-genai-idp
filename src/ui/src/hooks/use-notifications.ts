@@ -20,7 +20,7 @@ const initialNotifications: Omit<Notification, 'onDismiss'>[] = [
 ];
 
 const useNotifications = (): Notification[] => {
-  const { errorMessage, setErrorMessage } = useAppContext()!;
+  const { errorMessage, setErrorMessage } = useAppContext();
 
   const [notifications, setNotifications] = useState<Notification[]>([]);
 

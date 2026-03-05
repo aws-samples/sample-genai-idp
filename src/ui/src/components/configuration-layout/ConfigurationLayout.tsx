@@ -518,8 +518,7 @@ const ConfigurationLayout = (): React.JSX.Element => {
 
   // Hooks for configuration library
   const { listConfigurations, getFile } = useConfigurationLibrary();
-  const settingsContext = useSettingsContext() as Record<string, unknown> | null;
-  const settings = settingsContext?.settings as Record<string, unknown> | undefined;
+  const { settings } = useSettingsContext();
 
   // Helper function to map IDPPattern to directory name
   const getPatternDirectory = (idpPattern: string | undefined): string | null => {
@@ -976,7 +975,7 @@ const ConfigurationLayout = (): React.JSX.Element => {
   const handleYamlEditorChange = (value: string | undefined): void => {
     setYamlContent(value);
     try {
-      const parsedValue = yaml.load(value);
+      const parsedValue = yaml.load(value) as Record<string, unknown>;
       setFormValues(parsedValue);
 
       // Update JSON when YAML changes

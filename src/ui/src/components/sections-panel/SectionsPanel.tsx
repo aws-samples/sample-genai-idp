@@ -122,8 +122,7 @@ const ActionsCell = ({
   isViewerOpen = false,
 }) => {
   const [isDownloading, setIsDownloading] = React.useState(false);
-  const { settings: rawSettings } = useSettingsContext() || {};
-  const settings = rawSettings as Record<string, unknown> | undefined;
+  const { settings } = useSettingsContext();
 
   // Disable View/Edit only if reviewer and no review owner (review not claimed)
   // View Data should always be enabled, Edit Mode requires claimed review
@@ -706,8 +705,7 @@ const SectionsPanel = ({ sections, pages, documentItem, mergedConfig, onDocument
   // Track which section's viewer is open for navigation
   const [openViewerSectionIndex, setOpenViewerSectionIndex] = useState<number | null>(null);
   const { mergedConfig: configuration } = useConfiguration();
-  const { settings: rawSettings2 } = useSettingsContext() || {};
-  const settings2 = rawSettings2 as Record<string, unknown> | undefined;
+  const { settings: settings2 } = useSettingsContext();
   const { isReviewer, isAdmin } = useUserRole();
   const isReviewerOnly = isReviewer && !isAdmin;
 

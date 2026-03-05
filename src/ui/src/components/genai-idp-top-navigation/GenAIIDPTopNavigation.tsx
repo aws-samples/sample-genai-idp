@@ -53,7 +53,7 @@ const SignOutModal = ({ visible, setVisible }: SignOutModalProps): React.JSX.Ele
 const GenAIIDPTopNavigation = (): React.JSX.Element => {
   const { user } = useAppContext();
   const { isAdmin, isReviewer, loading: roleLoading } = useUserRole();
-  const userId = ((user as Record<string, unknown>)?.username as string) || 'user';
+  const userId = user?.username || 'user';
   const [isSignOutModalVisible, setIsSignOutModalVisiblesetVisible] = useState(false);
 
   // Determine role display
