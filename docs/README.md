@@ -17,6 +17,7 @@ This folder contains detailed documentation on various aspects of the GenAI Inte
 - [Assessment Feature](./assessment.md) - Extraction confidence evaluation using LLMs
 - [Configuration](./configuration.md) - Configuration and customization options
 - [Configuration Versions](./configuration-versions.md) - Managing multiple configuration versions
+- [Multi-Use-Case](./multi-use-case.md) - Multi-use-case document handling and routing
 - [Classification](./classification.md) - Customizing document classification
 - [Extraction](./extraction.md) - Customizing information extraction
 - [Criteria Validation](./criteria-validation.md) - Document validation against business rules using LLMs

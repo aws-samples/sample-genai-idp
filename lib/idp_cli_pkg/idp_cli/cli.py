@@ -35,6 +35,63 @@ logger = logging.getLogger(__name__)
 console = Console()
 
 
+def _validate_use_case_identifiers(
+    business_unit_id: Optional[str], use_case_id: Optional[str]
+) -> tuple[Optional[str], Optional[str]]:
+    """
+    Validate use-case identifiers for CLI routing.
+
+    Rules:
+    - Both identifiers must be provided together (or neither).
+    - Identifiers cannot be empty, contain '#', contain '/', or use reserved
+      DEFAULT identifiers.
+    """
+    bu_stripped = business_unit_id.strip() if business_unit_id else ""
+    uc_stripped = use_case_id.strip() if use_case_id else ""
+
+    if business_unit_id is not None and not bu_stripped:
+        console.print(
+            "[red]✗ Error: --business-unit-id cannot be empty or whitespace[/red]"
+        )
+        sys.exit(1)
+    if use_case_id is not None and not uc_stripped:
+        console.print("[red]✗ Error: --use-case-id cannot be empty or whitespace[/red]")
+        sys.exit(1)
+
+    bu_provided = bool(business_unit_id and bu_stripped)
+    uc_provided = bool(use_case_id and uc_stripped)
+    if bu_provided != uc_provided:
+        console.print(
+            "[red]✗ Error: --business-unit-id and --use-case-id must be provided together[/red]"
+        )
+        sys.exit(1)
+
+    if bu_provided and uc_provided:
+        for label, value in [
+            ("--business-unit-id", bu_stripped),
+            ("--use-case-id", uc_stripped),
+        ]:
+            if "#" in value:
+                console.print(
+                    f"[red]✗ Error: {label} cannot contain '#' (got: {value!r})[/red]"
+                )
+                sys.exit(1)
+            if "/" in value:
+                console.print(
+                    f"[red]✗ Error: {label} cannot contain '/' (got: {value!r})[/red]"
+                )
+                sys.exit(1)
+            normalized = value.lstrip("_").upper()
+            if normalized == "DEFAULT" or normalized.startswith("DEFAULT_"):
+                console.print(
+                    f"[red]✗ Error: {label} cannot use reserved DEFAULT identifiers (got: {value!r})[/red]"
+                )
+                sys.exit(1)
+        return bu_stripped, uc_stripped
+
+    return None, None
+
+
 def _build_from_local_code(from_code_dir: str, region: str, stack_name: str) -> tuple:
     """
     Build project from local code using publish.py
@@ -1087,6 +1144,8 @@ def _process_impl(
     region: Optional[str],
     number_of_files: Optional[int],
     config_version: Optional[str],
+    business_unit_id: Optional[str] = None,
+    use_case_id: Optional[str] = None,
 ):
     """Implementation for process and run_inference commands"""
     try:
@@ -1103,6 +1162,36 @@ def _process_impl(
         if input_count > 1:
             console.print("[red]✗ Error: Cannot specify multiple input sources[/red]")
             sys.exit(1)
+
+        # Validate and normalize use-case identifiers for routing
+        business_unit_id, use_case_id = _validate_use_case_identifiers(
+            business_unit_id, use_case_id
+        )
+        if test_set and business_unit_id:
+            console.print(
+                "[red]✗ Error: --business-unit-id/--use-case-id are not supported with --test-set[/red]"
+            )
+            sys.exit(1)
+
+        # Route uploads under {business_unit_id}/{use_case_id}/...
+        if business_unit_id and use_case_id:
+            routing_prefix = f"{business_unit_id}/{use_case_id}"
+            console.print(
+                f"[bold blue]Using use-case routing prefix: {routing_prefix}/[/bold blue]"
+            )
+
+            if batch_id:
+                normalized_batch_id = batch_id.lstrip("/")
+                if not normalized_batch_id.startswith(f"{routing_prefix}/"):
+                    batch_id = f"{routing_prefix}/{normalized_batch_id}"
+                else:
+                    batch_id = normalized_batch_id
+            else:
+                normalized_batch_prefix = batch_prefix.lstrip("/")
+                if not normalized_batch_prefix.startswith(f"{routing_prefix}/"):
+                    batch_prefix = f"{routing_prefix}/{normalized_batch_prefix}"
+                else:
+                    batch_prefix = normalized_batch_prefix
 
         # Initialize processor
         processor = BatchProcessor(stack_name=stack_name, region=region)
@@ -1244,6 +1333,14 @@ def _process_impl(
     "--config-version",
     help="Configuration version to use for processing (e.g., v1, v2)",
 )
+@click.option(
+    "--business-unit-id",
+    help="Business unit identifier for use-case-scoped routing",
+)
+@click.option(
+    "--use-case-id",
+    help="Use case identifier for use-case-scoped routing",
+)
 def process(
     stack_name: str,
     manifest: Optional[str],
@@ -1261,6 +1358,8 @@ def process(
     region: Optional[str],
     number_of_files: Optional[int],
     config_version: Optional[str],
+    business_unit_id: Optional[str] = None,
+    use_case_id: Optional[str] = None,
 ):
     """
     Process documents
@@ -1328,6 +1427,8 @@ def process(
         region,
         number_of_files,
         config_version,
+        business_unit_id,
+        use_case_id,
     )
 
 
@@ -1466,6 +1567,14 @@ def reprocess(
     "--config-version",
     help="Configuration version to use for processing (e.g., v1, v2)",
 )
+@click.option(
+    "--business-unit-id",
+    help="Business unit identifier for use-case-scoped routing",
+)
+@click.option(
+    "--use-case-id",
+    help="Use case identifier for use-case-scoped routing",
+)
 def run_inference(
     stack_name: str,
     manifest: Optional[str],
@@ -1483,6 +1592,8 @@ def run_inference(
     region: Optional[str],
     number_of_files: Optional[int],
     config_version: Optional[str],
+    business_unit_id: Optional[str] = None,
+    use_case_id: Optional[str] = None,
 ):
     """
     Run inference on a batch of documents
@@ -1510,6 +1621,8 @@ def run_inference(
         region,
         number_of_files,
         config_version,
+        business_unit_id,
+        use_case_id,
     )
 
 
