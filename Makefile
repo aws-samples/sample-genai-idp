@@ -200,16 +200,27 @@ ui-build:
 	cd src/ui && npm ci --prefer-offline --no-audit && npm run build
 
 # Verify generated GraphQL types and operations are up-to-date
+codegen:
+	@cd src/ui && npm run codegen
+	@echo -e "$(GREEN)✅ GraphQL types regenerated. Don't forget to commit the changes.$(NC)"
+
 codegen-check:
 	@echo "Checking if GraphQL codegen output is up-to-date..."
 	@cd src/ui && npm ci --prefer-offline --no-audit && npm run codegen
 	@if ! git diff --quiet src/ui/src/graphql/generated/; then \
-		echo -e "$(RED)ERROR: Generated GraphQL files are out of date!$(NC)"; \
-		echo -e "$(YELLOW)Run 'cd src/ui && npm run codegen' and commit the updated files.$(NC)"; \
-		git diff --stat src/ui/src/graphql/generated/; \
-		exit 1; \
+		if [ -n "$$CI" ] || [ -n "$$GITHUB_ACTIONS" ]; then \
+			echo -e "$(RED)ERROR: Generated GraphQL files are out of date!$(NC)"; \
+			echo -e "$(YELLOW)Run 'make codegen' and commit the updated files.$(NC)"; \
+			git diff --stat src/ui/src/graphql/generated/; \
+			exit 1; \
+		else \
+			echo -e "$(YELLOW)Generated GraphQL files were out of date — auto-updated.$(NC)"; \
+			git diff --stat src/ui/src/graphql/generated/; \
+			echo -e "$(YELLOW)Please commit the changes above.$(NC)"; \
+		fi \
+	else \
+		echo -e "$(GREEN)✅ GraphQL codegen output is up-to-date$(NC)"; \
 	fi
-	@echo -e "$(GREEN)✅ GraphQL codegen output is up-to-date$(NC)"
 
 commit: lint test
 	$(info Generating commit message...)
