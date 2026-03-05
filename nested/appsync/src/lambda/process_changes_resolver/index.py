@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 
 import boto3
 from idp_common.docs_service import create_document_service
+from idp_common.utils.auth import get_caller_groups
 
 # Import IDP Common modules
 from idp_common.models import Section, Status
@@ -27,6 +28,22 @@ def handler(event, context):
     
     # Add comprehensive error handling
     try:
+        # Enforce role-based authorization: only Admin and Supervisor users
+        # may process changes, matching the pattern used by complete_section_review.
+        caller_groups = get_caller_groups(event)
+        is_admin = "Admin" in caller_groups
+        is_supervisor = "Supervisor" in caller_groups
+        if not is_admin and not is_supervisor:
+            logger.warning(
+                "Unauthorized processChanges attempt by user with groups: %s",
+                caller_groups,
+            )
+            return {
+                'success': False,
+                'message': 'Access denied: only Admin and Supervisor users can process changes',
+                'processingJobId': None,
+            }
+
         # Extract arguments from the GraphQL event
         args = event.get('arguments', {})
         logger.info(f"Arguments received: {json.dumps(args)}")

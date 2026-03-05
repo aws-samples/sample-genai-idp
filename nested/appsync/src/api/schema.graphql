@@ -80,6 +80,8 @@ type Document implements DynamoDbBase @aws_cognito_user_pools @aws_iam {
   SummaryReportUri: String
   RuleValidationResultUri: String
   ExpiresAfter: AWSTimestamp
+  BusinessUnitId: String
+  UseCaseId: String
   HITLStatus: String
   HITLReviewURL: String
   HITLTriggered: Boolean
@@ -94,6 +96,17 @@ type Document implements DynamoDbBase @aws_cognito_user_pools @aws_iam {
   HITLReviewHistory: AWSJSON
   ConfigVersion: String
   TraceId: String
+}
+
+type UseCase @aws_cognito_user_pools @aws_iam {
+  businessUnitId: String!
+  useCaseId: String!
+  name: String!
+  description: String
+}
+
+type UseCaseList @aws_cognito_user_pools @aws_iam {
+  useCases: [UseCase]
 }
 
 type Section @aws_cognito_user_pools @aws_iam {
@@ -127,8 +140,12 @@ type DocumentListItem implements DynamoDbBase @aws_cognito_user_pools @aws_iam {
   PK: ID!
   SK: ID!
   ObjectKey: ID
+  ObjectStatus: String
   InitialEventTime: AWSDateTime
+  CompletionTime: AWSDateTime
   ExpiresAfter: AWSTimestamp
+  BusinessUnitId: String
+  UseCaseId: String
   HITLStatus: String
   HITLReviewURL: String
   HITLTriggered: Boolean
@@ -142,6 +159,7 @@ type User @aws_cognito_user_pools {
   persona: String!
   status: String
   createdAt: AWSDateTime
+  allowedUseCases: [String]
 }
 
 type UserList @aws_cognito_user_pools {
@@ -259,6 +277,8 @@ input CreateDocumentInput {
   ExpiresAfter: AWSTimestamp
   ConfigVersion: String
   TraceId: String
+  BusinessUnitId: String
+  UseCaseId: String
 }
 
 type CreateDocumentOutput @aws_iam {
@@ -647,8 +667,11 @@ type Mutation {
   addTestSetFromUpload(input: TestSetUploadInput!): TestSetUploadResponse @aws_cognito_user_pools
   deleteTestSets(testSetIds: [String!]!): Boolean! @aws_cognito_user_pools
   # User Management
-  createUser(email: String!, persona: String!): User @aws_cognito_user_pools
+  createUser(email: String!, persona: String!, allowedUseCases: [String]): User @aws_cognito_user_pools
   deleteUser(userId: ID!): Boolean @aws_cognito_user_pools
+  # Use-Case Management
+  createUseCase(businessUnitId: String!, useCaseId: String!, name: String!, description: String, sourceConfig: String): UseCase @aws_cognito_user_pools
+  updateUseCaseConfiguration(businessUnitId: String!, useCaseId: String!, customConfig: AWSJSON!): UpdateConfigurationResponse @aws_cognito_user_pools
   # HITL Section Review
   completeSectionReview(objectKey: String!, sectionId: String!, editedData: AWSJSON): Document @aws_cognito_user_pools
   skipAllSectionsReview(objectKey: String!): Document @aws_cognito_user_pools
@@ -721,6 +744,10 @@ type Query @aws_cognito_user_pools @aws_iam {
   listUsers: UserList @aws_cognito_user_pools
   # HITL Pending Reviews
   listPendingReviewDocuments: DocumentList @aws_cognito_user_pools
+  # Use-Case Management
+  listUseCases: UseCaseList @aws_cognito_user_pools
+  listDocumentsByUseCase(useCaseId: String!, businessUnitId: String!, limit: Int, nextToken: String): DocumentList @aws_cognito_user_pools
+  getUseCaseConfiguration(businessUnitId: String!, useCaseId: String!): ConfigurationResponse @aws_cognito_user_pools
 }
 
 type Subscription @aws_cognito_user_pools @aws_iam {

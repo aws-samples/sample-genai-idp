@@ -90,27 +90,31 @@ def handler(event, context):
         
         # Create both items directly using the resource interface instead of transactions
         try:
-            # Create the document record
+            # Create the document record (strip None values to avoid DynamoDB ValidationException)
             logger.info(f"Creating document record: PK={doc_pk}, SK={doc_sk}")
-            tracking_table.put_item(
-                Item={
-                    'PK': doc_pk,
-                    'SK': doc_sk,
-                    **input_data
-                }
-            )
+            doc_item = {
+                'PK': doc_pk,
+                'SK': doc_sk,
+                **{k: v for k, v in input_data.items() if v is not None and k not in ("PK", "SK")},
+            }
+            tracking_table.put_item(Item=doc_item)
             
-            # Create the list item
+            # Create the list item (include use-case fields for UseCaseIndex GSI)
             logger.info(f"Creating list item: PK={list_pk}, SK={list_sk}")
-            tracking_table.put_item(
-                Item={
-                    'PK': list_pk,
-                    'SK': list_sk,
-                    'ObjectKey': object_key,
-                    'QueuedTime': queued_time,
-                    'ExpiresAfter': input_data.get('ExpiresAfter')
-                }
-            )
+            list_item = {
+                'PK': list_pk,
+                'SK': list_sk,
+                'ObjectKey': object_key,
+                'QueuedTime': queued_time,
+            }
+            expires = input_data.get('ExpiresAfter')
+            if expires is not None:
+                list_item['ExpiresAfter'] = expires
+            if input_data.get('BusinessUnitId'):
+                list_item['BusinessUnitId'] = input_data['BusinessUnitId']
+            if input_data.get('UseCaseId'):
+                list_item['UseCaseId'] = input_data['UseCaseId']
+            tracking_table.put_item(Item=list_item)
             
             logger.info(f"Successfully created document and list entries for {object_key}")
         except Exception as e:

@@ -189,6 +189,10 @@ Parameters:
     Type: String
     Description: ARN of IDP Common Agents Layer
 
+  UserPoolId:
+    Type: String
+    Description: Cognito User Pool ID for resolving user custom attributes
+
 Conditions:
   HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
   HasGuardrail: !Equals [!Ref HasGuardrailConfig, "true"]
@@ -288,6 +292,7 @@ Resources:
                   - !GetAtt ListAgentChatSessionsFunction.Arn
                   - !GetAtt GetAgentChatMessagesFunction.Arn
                   - !GetAtt DeleteAgentChatSessionFunction.Arn
+                  - !GetAtt UseCaseResolverFunction.Arn
                   - !GetAtt ListDocumentsByDateRangeResolverFunction.Arn
                   - !GetAtt SyncBdaIdpResolverFunction.Arn
 
@@ -1122,6 +1127,284 @@ Resources:
       DataSourceName: !GetAtt ConfigurationDataSource.Name
       TypeName: Mutation
       FieldName: restoreDefaultPricing
+
+
+  ##########################################################################
+  # UseCaseResolverFunctionLogGroup
+  ##########################################################################
+  UseCaseResolverFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+      RetentionInDays: !Ref LogRetentionDays
+
+
+  ##########################################################################
+  # UseCaseResolverFunction
+  ##########################################################################
+  UseCaseResolverFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: "Function does not require VPC access as it only interacts with AWS services via APIs"
+          - id: W92
+            reason: "Function does not require reserved concurrency as it scales based on demand"
+          - id: W12
+            reason: "Lambda requires CloudWatch logs permissions"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for AppSync resolver function"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data"
+    Properties:
+      PermissionsBoundary:
+        !If [
+          HasPermissionsBoundary,
+          !Ref PermissionsBoundaryArn,
+          !Ref AWS::NoValue,
+        ]
+      Handler: index.handler
+      Runtime: python3.12
+      CodeUri: ./src/lambda/usecase_resolver
+      Description: Lambda function for use-case management via GraphQL API
+      MemorySize: 512
+      Timeout: 60
+      Layers:
+        - !Ref IDPCommonBaseLayerArn
+      Environment:
+        Variables:
+          LOG_LEVEL: !Ref LogLevel
+          CONFIGURATION_TABLE_NAME: !Ref ConfigurationTableName
+          TRACKING_TABLE_NAME: !Ref TrackingTableName
+          USER_POOL_ID: !Ref UserPoolId
+          CONFIGURATION_BUCKET: !Ref ConfigurationBucketName
+      LoggingConfig:
+        LogGroup: !Ref UseCaseResolverFunctionLogGroup
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ConfigurationTableName
+        - S3ReadPolicy:
+            BucketName: !Ref ConfigurationBucketName
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:Query
+              Resource:
+                - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${TrackingTableName}/index/UseCaseIndex"
+            - Effect: Allow
+              Action:
+                - kms:Encrypt
+                - kms:Decrypt
+                - kms:ReEncrypt*
+                - kms:GenerateDataKey*
+                - kms:DescribeKey
+              Resource: !Ref CustomerManagedEncryptionKeyArn
+            - Effect: Allow
+              Action:
+                - cognito-idp:AdminGetUser
+              Resource:
+                - !Sub "arn:${AWS::Partition}:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${UserPoolId}"
+
+
+  ##########################################################################
+  # UseCaseDataSource
+  ##########################################################################
+  UseCaseDataSource:
+    Type: AWS::AppSync::DataSource
+    Properties:
+      ApiId: !Ref GraphQLApiId
+      Name: UseCaseDataSource
+      Description: Lambda function for use-case management via GraphQL API
+      Type: AWS_LAMBDA
+      ServiceRoleArn: !GetAtt AppSyncServiceRole.Arn
+      LambdaConfig:
+        LambdaFunctionArn: !GetAtt UseCaseResolverFunction.Arn
+
+
+  ##########################################################################
+  # Use-Case Resolvers
+  #
+  # These resolvers use VTL mapping templates to explicitly forward the
+  # full Cognito identity claims (including custom attributes like
+  # custom:allowed_use_cases) to the Lambda function.  Without VTL
+  # templates, AppSync's direct Lambda resolver only passes access-token
+  # claims which do not include custom Cognito user attributes.
+  ##########################################################################
+  ListUseCasesResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: GraphQLSchema
+    Properties:
+      ApiId: !Ref GraphQLApiId
+      DataSourceName: !GetAtt UseCaseDataSource.Name
+      TypeName: Query
+      FieldName: listUseCases
+      RequestMappingTemplate: |
+        {
+          "version": "2017-02-28",
+          "operation": "Invoke",
+          "payload": {
+            "arguments": $util.toJson($context.arguments),
+            "info": {
+              "fieldName": "$context.info.fieldName"
+            },
+            "identity": {
+              "username": $util.toJson($context.identity.username),
+              "sub": $util.toJson($context.identity.sub),
+              "sourceIp": $util.toJson($context.identity.sourceIp),
+              "claims": $util.toJson($context.identity.claims)
+            }
+          }
+        }
+      ResponseMappingTemplate: |
+        #if($ctx.error)
+            $util.error($ctx.error.message, $ctx.error.type)
+        #end
+        #if($ctx.result)
+            $util.toJson($ctx.result)
+        #else
+            $util.error("No response from Lambda")
+        #end
+
+  ListDocumentsByUseCaseResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: GraphQLSchema
+    Properties:
+      ApiId: !Ref GraphQLApiId
+      DataSourceName: !GetAtt UseCaseDataSource.Name
+      TypeName: Query
+      FieldName: listDocumentsByUseCase
+      RequestMappingTemplate: |
+        {
+          "version": "2017-02-28",
+          "operation": "Invoke",
+          "payload": {
+            "arguments": $util.toJson($context.arguments),
+            "info": {
+              "fieldName": "$context.info.fieldName"
+            },
+            "identity": {
+              "username": $util.toJson($context.identity.username),
+              "sub": $util.toJson($context.identity.sub),
+              "sourceIp": $util.toJson($context.identity.sourceIp),
+              "claims": $util.toJson($context.identity.claims)
+            }
+          }
+        }
+      ResponseMappingTemplate: |
+        #if($ctx.error)
+            $util.error($ctx.error.message, $ctx.error.type)
+        #end
+        #if($ctx.result)
+            $util.toJson($ctx.result)
+        #else
+            $util.error("No response from Lambda")
+        #end
+
+  GetUseCaseConfigurationResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: GraphQLSchema
+    Properties:
+      ApiId: !Ref GraphQLApiId
+      DataSourceName: !GetAtt UseCaseDataSource.Name
+      TypeName: Query
+      FieldName: getUseCaseConfiguration
+      RequestMappingTemplate: |
+        {
+          "version": "2017-02-28",
+          "operation": "Invoke",
+          "payload": {
+            "arguments": $util.toJson($context.arguments),
+            "info": {
+              "fieldName": "$context.info.fieldName"
+            },
+            "identity": {
+              "username": $util.toJson($context.identity.username),
+              "sub": $util.toJson($context.identity.sub),
+              "sourceIp": $util.toJson($context.identity.sourceIp),
+              "claims": $util.toJson($context.identity.claims)
+            }
+          }
+        }
+      ResponseMappingTemplate: |
+        #if($ctx.error)
+            $util.error($ctx.error.message, $ctx.error.type)
+        #end
+        #if($ctx.result)
+            $util.toJson($ctx.result)
+        #else
+            $util.error("No response from Lambda")
+        #end
+
+  CreateUseCaseResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: GraphQLSchema
+    Properties:
+      ApiId: !Ref GraphQLApiId
+      DataSourceName: !GetAtt UseCaseDataSource.Name
+      TypeName: Mutation
+      FieldName: createUseCase
+      RequestMappingTemplate: |
+        {
+          "version": "2017-02-28",
+          "operation": "Invoke",
+          "payload": {
+            "arguments": $util.toJson($context.arguments),
+            "info": {
+              "fieldName": "$context.info.fieldName"
+            },
+            "identity": {
+              "username": $util.toJson($context.identity.username),
+              "sub": $util.toJson($context.identity.sub),
+              "sourceIp": $util.toJson($context.identity.sourceIp),
+              "claims": $util.toJson($context.identity.claims)
+            }
+          }
+        }
+      ResponseMappingTemplate: |
+        #if($ctx.error)
+            $util.error($ctx.error.message, $ctx.error.type)
+        #end
+        #if($ctx.result)
+            $util.toJson($ctx.result)
+        #else
+            $util.error("No response from Lambda")
+        #end
+
+  UpdateUseCaseConfigurationResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: GraphQLSchema
+    Properties:
+      ApiId: !Ref GraphQLApiId
+      DataSourceName: !GetAtt UseCaseDataSource.Name
+      TypeName: Mutation
+      FieldName: updateUseCaseConfiguration
+      RequestMappingTemplate: |
+        {
+          "version": "2017-02-28",
+          "operation": "Invoke",
+          "payload": {
+            "arguments": $util.toJson($context.arguments),
+            "info": {
+              "fieldName": "$context.info.fieldName"
+            },
+            "identity": {
+              "username": $util.toJson($context.identity.username),
+              "sub": $util.toJson($context.identity.sub),
+              "sourceIp": $util.toJson($context.identity.sourceIp),
+              "claims": $util.toJson($context.identity.claims)
+            }
+          }
+        }
+      ResponseMappingTemplate: |
+        #if($ctx.error)
+            $util.error($ctx.error.message, $ctx.error.type)
+        #end
+        #if($ctx.result)
+            $util.toJson($ctx.result)
+        #else
+            $util.error("No response from Lambda")
+        #end
 
 
   ##########################################################################

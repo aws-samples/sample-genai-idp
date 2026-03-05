@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from idp_common.models import Document, Status
 from idp_common.docs_service import create_document_service
 from idp_common.utils.settings_helper import get_setting
+from idp_common.utils.auth import get_caller_groups
 
 logger = logging.getLogger()
 logger.setLevel(os.environ.get('LOG_LEVEL', 'INFO'))
@@ -47,7 +48,26 @@ def handler(event, context):
     """
     logger.info(f"Abort workflow resolver invoked with event: {json.dumps(event)}")
     
+    object_keys = []
     try:
+        # Enforce role-based authorization: only Admin and Supervisor users
+        # may abort workflows, consistent with complete_section_review pattern.
+        caller_groups = get_caller_groups(event)
+        is_admin = "Admin" in caller_groups
+        is_supervisor = "Supervisor" in caller_groups
+        if not is_admin and not is_supervisor:
+            logger.warning(
+                "Access denied for abort_workflow: caller groups %s lack Admin or Supervisor role",
+                caller_groups,
+            )
+            return {
+                "success": False,
+                "message": "Access denied: only Admin and Supervisor users can abort workflows",
+                "abortedCount": 0,
+                "failedCount": 0,
+                "errors": ["Access denied: insufficient permissions"],
+            }
+
         # Extract arguments from GraphQL event
         args = event.get('arguments', {})
         object_keys = args.get('objectKeys', [])
@@ -103,7 +123,7 @@ def handler(event, context):
             "success": False,
             "message": f"Error: {str(e)}",
             "abortedCount": 0,
-            "failedCount": len(object_keys) if object_keys else 0,
+            "failedCount": len(object_keys),
             "errors": [str(e)]
         }
 

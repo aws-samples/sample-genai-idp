@@ -17,6 +17,7 @@ from typing import List
 import boto3
 
 from idp_common.delete_documents import delete_single_document
+from idp_common.utils.auth import get_caller_groups
 
 # Configure logging
 logger = logging.getLogger()
@@ -32,6 +33,20 @@ def handler(event, context):
     logger.info(f"Delete document resolver invoked with event: {json.dumps(event)}")
 
     try:
+        # Enforce role-based authorization: only Admin and Supervisor users
+        # may delete documents, consistent with complete_section_review pattern.
+        caller_groups = get_caller_groups(event)
+        is_admin = "Admin" in caller_groups
+        is_supervisor = "Supervisor" in caller_groups
+        if not is_admin and not is_supervisor:
+            logger.warning(
+                "Access denied for delete_document: caller groups %s lack Admin or Supervisor role",
+                caller_groups,
+            )
+            raise PermissionError(
+                "Access denied: only Admin and Supervisor users can delete documents"
+            )
+
         object_keys: List[str] = event["arguments"]["objectKeys"]
 
         # Validate input
