@@ -11,10 +11,11 @@ import logging
 import os
 import time
 
+import boto3
 from aws_xray_sdk.core import patch_all, xray_recorder
 from idp_common import get_config, metrics, ocr
 from idp_common.docs_service import create_document_service
-from idp_common.models import Document, Status
+from idp_common.models import Document, Page, Status
 from idp_common.utils import calculate_lambda_metering, merge_metering_data
 
 patch_all()
@@ -103,6 +104,76 @@ def check_document_for_throttling_errors(document):
 
     return False, None
 
+
+def discover_existing_ocr_pages(output_bucket, input_key):
+    """
+    Discover OCR page results that already exist in S3 from a previous (throttled) attempt.
+
+    On Step Functions retry, the document object is reloaded from the original compressed
+    state with pages={}, losing all progress from the failed attempt. This function scans
+    S3 for existing page results so the service can skip already-completed pages.
+
+    Expected S3 layout per page:
+      {input_key}/pages/{page_id}/image.jpg
+      {input_key}/pages/{page_id}/rawText.json
+      {input_key}/pages/{page_id}/result.json
+      {input_key}/pages/{page_id}/textConfidence.json
+
+    A page is considered complete if it has all 4 files (image, rawText, result, textConfidence).
+
+    Args:
+        output_bucket: S3 bucket where OCR results are stored
+        input_key: Document input key (S3 prefix for pages)
+
+    Returns:
+        dict: Mapping of page_id -> Page object for completed pages, empty dict if none found
+    """
+    s3_client = boto3.client("s3")
+    prefix = f"{input_key}/pages/"
+    completed_pages = {}
+
+    try:
+        # Single list-objects call to discover all existing page files
+        paginator = s3_client.get_paginator("list_objects_v2")
+        page_files = {}  # page_id -> set of file types found
+
+        for page in paginator.paginate(Bucket=output_bucket, Prefix=prefix):
+            for obj in page.get("Contents", []):
+                key = obj["Key"]
+                # Parse: {input_key}/pages/{page_id}/{filename}
+                parts = key[len(prefix):].split("/", 1)
+                if len(parts) == 2:
+                    page_id = parts[0]
+                    filename = parts[1]
+                    if page_id not in page_files:
+                        page_files[page_id] = {}
+                    page_files[page_id][filename] = f"s3://{output_bucket}/{key}"
+
+        # A page is complete if it has all required files
+        required_files = {"rawText.json", "result.json", "textConfidence.json"}
+        for page_id, files in page_files.items():
+            # Check for required files (image can be .jpg, .png, etc.)
+            image_uri = None
+            for fname, uri in files.items():
+                if fname.startswith("image."):
+                    image_uri = uri
+                    break
+
+            if image_uri and required_files.issubset(files.keys()):
+                completed_pages[page_id] = Page(
+                    page_id=page_id,
+                    image_uri=image_uri,
+                    raw_text_uri=files["rawText.json"],
+                    parsed_text_uri=files["result.json"],
+                    text_confidence_uri=files["textConfidence.json"],
+                )
+
+    except Exception as e:
+        logger.warning(f"Failed to discover existing OCR pages from S3: {e}")
+        # Non-fatal — proceed with full OCR processing
+
+    return completed_pages
+
 @xray_recorder.capture('ocr_function')
 def handler(event, context): 
     """
@@ -183,6 +254,22 @@ def handler(event, context):
         backend=backend
     )
     
+    # Retry-safe: discover OCR pages from previous (throttled) attempts in S3.
+    # On Step Functions retry, the document is reloaded from compressed state with pages={},
+    # losing progress. Pre-populating document.pages lets the service skip completed pages.
+    if not document.pages:
+        existing_pages = discover_existing_ocr_pages(
+            document.output_bucket, document.input_key
+        )
+        if existing_pages:
+            document.pages = existing_pages
+            # Clear any stale errors from previous failed attempt
+            document.errors = []
+            logger.info(
+                f"Retry-safe OCR: recovered {len(existing_pages)} completed pages from S3, "
+                f"only failed pages will be re-processed"
+            )
+
     # Process the document - the service will read the PDF content directly
     document = service.process_document(document)
     
