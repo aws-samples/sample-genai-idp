@@ -797,7 +797,7 @@ const TestResults = ({ testRunId, setSelectedTestRunId }: TestResultsProps): Rea
           newTestRun.testSetName as string,
           reRunContext,
           newTestRun.filesCount as number,
-          ((newTestRun as unknown as Record<string, unknown>).configVersion as string) || '',
+          newTestRun.configVersion || '',
         );
         setShowReRunModal(false);
         setReRunContext('');
