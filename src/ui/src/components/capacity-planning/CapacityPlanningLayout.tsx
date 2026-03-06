@@ -1152,7 +1152,7 @@ const CapacityPlanningLayout = () => {
 
   const updateDocumentConfig = async (index: number, field: keyof DocumentConfig, value: string | number) => {
     const updated = [...documentConfigs];
-    (updated[index] as unknown as Record<string, unknown>)[field] = value;
+    updated[index] = { ...updated[index], [field]: value };
 
     setDocumentConfigs(updated);
   };
@@ -1252,7 +1252,7 @@ const CapacityPlanningLayout = () => {
 
   const updateTimeSlot = (index: number, field: keyof TimeSlot, value: string) => {
     const updated = { ...processingConfig };
-    (updated.timeSlots[index] as unknown as Record<string, unknown>)[field] = value;
+    updated.timeSlots[index] = { ...updated.timeSlots[index], [field]: value };
     setProcessingConfig(updated);
   };
 
