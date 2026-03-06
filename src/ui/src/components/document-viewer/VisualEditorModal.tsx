@@ -1836,7 +1836,7 @@ interface VisualEditorModalProps {
   onChange: ((jsonString: string) => void) | null;
   isReadOnly: boolean;
   sectionData: Record<string, unknown> | null;
-  allSections?: Array<{ Id: string; Class: string; PageIds: number[]; OutputJSONUri?: string; [key: string]: unknown }>;
+  allSections?: Array<{ Id: string; Class: string; PageIds: number[]; OutputJSONUri?: string }>;
   currentSectionIndex?: number;
   onNavigateToSection?: ((index: number) => void) | null;
 }

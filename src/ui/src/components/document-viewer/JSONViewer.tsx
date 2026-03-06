@@ -21,7 +21,7 @@ interface JSONViewerProps {
   onClose?: () => void;
   disabled?: boolean;
   isReadOnly?: boolean;
-  allSections?: Array<{ Id: string; Class: string; PageIds: number[]; OutputJSONUri?: string; [key: string]: unknown }>;
+  allSections?: Array<{ Id: string; Class: string; PageIds: number[]; OutputJSONUri?: string }>;
   currentSectionIndex?: number;
   onNavigateToSection?: (index: number) => void;
   isExternallyOpen?: boolean;
