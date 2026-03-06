@@ -821,8 +821,8 @@ const SectionsPanel = ({ sections, pages = [], documentItem, mergedConfig, onDoc
             hitlSectionsPending: updatedData.HITLSectionsPending ?? [],
             hitlSectionsCompleted: updatedData.HITLSectionsCompleted ?? prev.hitlSectionsCompleted,
             hitlSectionsSkipped: updatedData.HITLSectionsSkipped ?? [],
-            hitlReviewOwner: updatedData.HITLReviewOwner ?? prev.hitlReviewOwner,
-            hitlReviewOwnerEmail: updatedData.HITLReviewOwnerEmail ?? prev.hitlReviewOwnerEmail,
+            hitlReviewOwner: updatedData.HITLReviewOwner || prev.hitlReviewOwner,
+            hitlReviewOwnerEmail: updatedData.HITLReviewOwnerEmail || prev.hitlReviewOwnerEmail,
             hitlReviewHistory: reviewHistory ?? prev.hitlReviewHistory,
           };
           logger.info('Skip All Reviews - Updated document state:', {
