@@ -79,9 +79,10 @@ const normalizeBooleans = (
 
     if (value && typeof value === 'object' && !Array.isArray(value) && propertySchema?.properties) {
       const normalized: Record<string, unknown> = { ...(value as Record<string, unknown>) };
+      const props = propertySchema.properties;
       Object.keys(normalized).forEach((key) => {
-        if (propertySchema.properties[key]) {
-          normalized[key] = normalizeValue(normalized[key], propertySchema.properties[key]);
+        if (props[key]) {
+          normalized[key] = normalizeValue(normalized[key], props[key]);
         }
       });
       return normalized;
@@ -96,9 +97,10 @@ const normalizeBooleans = (
 
   const normalized = { ...obj };
   if (schema.properties) {
+    const schemaProps = schema.properties;
     Object.keys(normalized).forEach((key) => {
-      if (schema.properties[key]) {
-        normalized[key] = normalizeValue(normalized[key], schema.properties[key]);
+      if (schemaProps[key]) {
+        normalized[key] = normalizeValue(normalized[key], schemaProps[key]);
       }
     });
   }
@@ -274,7 +276,7 @@ const ConfigurationLayout = (): React.JSX.Element => {
         const normalizedCustomObj = normalizeBooleans(customObj as Record<string, unknown>, schemaObj as ConfigSchema);
 
         // Return merged config (same as fetchConfiguration)
-        return deepMerge(normalizedDefaultObj, normalizedCustomObj);
+        return deepMerge(normalizedDefaultObj ?? {}, normalizedCustomObj);
       });
 
       const configs = await Promise.all(configPromises);
@@ -721,7 +723,7 @@ const ConfigurationLayout = (): React.JSX.Element => {
               errors.push({ message: `Field '${key}' must be a number or a string` });
             } else {
               // Try to convert to number for constraint validation
-              let numValue;
+              let numValue: number | undefined;
               let isValidNumber = false;
 
               if (typeof value === 'number') {
@@ -734,7 +736,7 @@ const ConfigurationLayout = (): React.JSX.Element => {
               }
 
               // Only check constraints if it's a valid number
-              if (isValidNumber) {
+              if (isValidNumber && numValue !== undefined) {
                 if (prop.minimum !== undefined && numValue < Number(prop.minimum)) {
                   errors.push({ message: `Field '${key}' must be at least ${prop.minimum}` });
                 }
@@ -800,7 +802,7 @@ const ConfigurationLayout = (): React.JSX.Element => {
                             });
                           } else {
                             // Try to convert to number for constraint validation
-                            let numValue;
+                            let numValue: number | undefined;
                             let isValidNumber = false;
 
                             if (typeof itemValue === 'number') {
@@ -813,12 +815,12 @@ const ConfigurationLayout = (): React.JSX.Element => {
                             }
 
                             // Only check constraints if it's a valid number
-                            if (isValidNumber && itemProp.minimum !== undefined && numValue < Number(itemProp.minimum)) {
+                            if (isValidNumber && numValue !== undefined && itemProp.minimum !== undefined && numValue < Number(itemProp.minimum)) {
                               errors.push({
                                 message: `Field '${itemKey}' in item ${index} of '${key}' must be ` + `at least ${itemProp.minimum}`,
                               });
                             }
-                            if (isValidNumber && itemProp.maximum !== undefined && numValue > Number(itemProp.maximum)) {
+                            if (isValidNumber && numValue !== undefined && itemProp.maximum !== undefined && numValue > Number(itemProp.maximum)) {
                               errors.push({
                                 message: `Field '${itemKey}' in item ${index} of '${key}' must be ` + `at most ${itemProp.maximum}`,
                               });
@@ -839,7 +841,7 @@ const ConfigurationLayout = (): React.JSX.Element => {
                       });
                     } else {
                       // Try to convert to number for constraint validation
-                      let numValue;
+                      let numValue: number | undefined;
                       let isValidNumber = false;
 
                       if (typeof item === 'number') {
@@ -854,6 +856,7 @@ const ConfigurationLayout = (): React.JSX.Element => {
                       // Only check constraints if it's a valid number
                       if (
                         isValidNumber &&
+                        numValue !== undefined &&
                         (propItems as Record<string, unknown>).minimum !== undefined &&
                         numValue < Number((propItems as Record<string, unknown>).minimum)
                       ) {
@@ -863,6 +866,7 @@ const ConfigurationLayout = (): React.JSX.Element => {
                       }
                       if (
                         isValidNumber &&
+                        numValue !== undefined &&
                         (propItems as Record<string, unknown>).maximum !== undefined &&
                         numValue > Number((propItems as Record<string, unknown>).maximum)
                       ) {
@@ -952,9 +956,9 @@ const ConfigurationLayout = (): React.JSX.Element => {
 
   // Handle changes in the JSON editor
   const handleJsonEditorChange = (value: string | undefined): void => {
-    setJsonContent(value);
+    setJsonContent(value ?? '');
     try {
-      const parsedValue = JSON.parse(value);
+      const parsedValue = JSON.parse(value ?? '');
       setFormValues(parsedValue);
 
       // Update YAML when JSON changes
@@ -973,9 +977,9 @@ const ConfigurationLayout = (): React.JSX.Element => {
 
   // Handle changes in the YAML editor
   const handleYamlEditorChange = (value: string | undefined): void => {
-    setYamlContent(value);
+    setYamlContent(value ?? '');
     try {
-      const parsedValue = yaml.load(value) as Record<string, unknown>;
+      const parsedValue = yaml.load(value ?? '') as Record<string, unknown>;
       setFormValues(parsedValue);
 
       // Update JSON when YAML changes
@@ -988,7 +992,7 @@ const ConfigurationLayout = (): React.JSX.Element => {
 
       // Validate YAML against schema
       if (schema) {
-        const schemaErrors = validateYamlContent(value);
+        const schemaErrors = validateYamlContent(value ?? '');
         setValidationErrors(schemaErrors);
       } else {
         setValidationErrors([]);
@@ -1220,7 +1224,7 @@ const ConfigurationLayout = (): React.JSX.Element => {
           granularInFormValues: (formValues?.assessment as Record<string, unknown> | undefined)?.granular,
           granularInMergedConfig: (mergedConfig?.assessment as Record<string, unknown> | undefined)?.granular,
         });
-        const differences = compareWithDefault(formValues, mergedConfig);
+        const differences = compareWithDefault(formValues, mergedConfig ?? {});
         console.log('DEBUG: Differences found by compareWithDefault:', differences);
 
         // Flatten path results into a proper object structure - revised to avoid ESLint errors
@@ -1598,14 +1602,14 @@ const ConfigurationLayout = (): React.JSX.Element => {
   };
 
   const handleImport = (event: React.ChangeEvent<HTMLInputElement>): void => {
-    const file = event.target.files[0];
+    const file = event.target.files?.[0];
     if (!file) return;
 
     const reader = new FileReader();
     reader.onload = async (e) => {
       try {
         setImportError(null);
-        const content = e.target.result as string;
+        const content = e.target?.result as string;
 
         const importedConfig = file.name.endsWith('.yaml') || file.name.endsWith('.yml') ? yaml.load(content) : JSON.parse(content);
 
@@ -1644,7 +1648,7 @@ const ConfigurationLayout = (): React.JSX.Element => {
     if (pendingImportSource.type === 'file') {
       baseName = pendingImportSource.name.replace(/\.(json|yaml|yml)$/, '');
     } else {
-      baseName = pendingImportSource.name.split('/').pop();
+      baseName = pendingImportSource.name.split('/').pop() ?? pendingImportSource.name;
     }
 
     // Set up for new version creation with migration
@@ -1671,7 +1675,7 @@ const ConfigurationLayout = (): React.JSX.Element => {
 
   // Handler for local file import
   const handleLocalFileImport = () => {
-    document.getElementById('import-file').click();
+    document.getElementById('import-file')?.click();
   };
 
   // Handler for library import
@@ -1704,6 +1708,7 @@ const ConfigurationLayout = (): React.JSX.Element => {
     if (config.hasReadme) {
       // Fetch and show README
       const patternDir = getPatternDirectory(settings?.IDPPattern as string | undefined);
+      if (!patternDir) return;
       const file = await getFile(patternDir, config.name, 'README.md');
 
       if (file) {
@@ -1727,6 +1732,10 @@ const ConfigurationLayout = (): React.JSX.Element => {
 
     try {
       const patternDir = getPatternDirectory(settings?.IDPPattern as string | undefined);
+      if (!patternDir) {
+        setImportError('Pattern not configured in settings');
+        return;
+      }
 
       // Use the detected file type from the config object
       const fileName = config.configFileType === 'json' ? 'config.json' : 'config.yaml';
@@ -1751,7 +1760,7 @@ const ConfigurationLayout = (): React.JSX.Element => {
           // Set imported config for new version creation
           setImportedConfigForNewVersion(importedConfig);
           setImportSource('library');
-          const baseName = config.name.split('/').pop();
+          const baseName = config.name.split('/').pop() ?? config.name;
           setNewVersionName(baseName);
           setNewVersionDescription('');
         }
@@ -2095,7 +2104,7 @@ const ConfigurationLayout = (): React.JSX.Element => {
               >
                 Go Back
               </Button>
-              <Button variant="primary" onClick={() => importFromLibrary(selectedLibraryConfig)}>
+              <Button variant="primary" onClick={() => { if (selectedLibraryConfig) importFromLibrary(selectedLibraryConfig); }}>
                 Import This Configuration
               </Button>
             </SpaceBetween>
@@ -2139,7 +2148,7 @@ const ConfigurationLayout = (): React.JSX.Element => {
                 <Button variant="normal" onClick={() => fetchConfiguration(currentVersionName)} loading={refreshing} iconName="refresh">
                   Refresh
                 </Button>
-                {(isPattern1 || mergedConfig?.use_bda || formValues?.use_bda) && (
+                {Boolean(isPattern1 || mergedConfig?.use_bda || formValues?.use_bda) && (
                   <>
                     <span title={hasUnsavedChanges ? 'Save your changes first' : undefined}>
                       <Button
@@ -2282,7 +2291,7 @@ const ConfigurationLayout = (): React.JSX.Element => {
           )}
 
           {/* BDA Project Status Banner */}
-          {(isPattern1 || mergedConfig?.use_bda || formValues?.use_bda) && currentVersion && (
+          {Boolean(isPattern1 || mergedConfig?.use_bda || formValues?.use_bda) && currentVersion && (
             <>
               {currentVersion.bdaProjectArn ? (
                 <Alert
@@ -2504,7 +2513,7 @@ const ConfigurationLayout = (): React.JSX.Element => {
                   !newVersionName.trim() ||
                   newVersionName.length > 50 ||
                   !/^[a-zA-Z0-9_-]+$/.test(newVersionName) ||
-                  (newVersionDescription && newVersionDescription.length > 200)
+                  !!(newVersionDescription && newVersionDescription.length > 200)
                 }
               >
                 Create Version
@@ -2538,7 +2547,7 @@ const ConfigurationLayout = (): React.JSX.Element => {
               value={newVersionName}
               onChange={({ detail }) => setNewVersionName(detail.value)}
               placeholder="Version name"
-              invalid={newVersionName && (newVersionName.length > 50 || !/^[a-zA-Z0-9_-]+$/.test(newVersionName))}
+              invalid={!!newVersionName && (newVersionName.length > 50 || !/^[a-zA-Z0-9_-]+$/.test(newVersionName))}
             />
           </FormField>
           <FormField
@@ -2549,7 +2558,7 @@ const ConfigurationLayout = (): React.JSX.Element => {
               value={newVersionDescription}
               onChange={({ detail }) => setNewVersionDescription(detail.value)}
               placeholder="Optional description"
-              invalid={newVersionDescription && newVersionDescription.length > 200}
+              invalid={!!newVersionDescription && newVersionDescription.length > 200}
             />
           </FormField>
         </SpaceBetween>
@@ -2740,11 +2749,11 @@ const ConfigurationLayout = (): React.JSX.Element => {
               project will be linked to this version for future syncs.
             </Box>
           )}
-          {currentVersion?.bdaProjectArn && (
+          {Boolean(currentVersion?.bdaProjectArn) && (
             <Box>
               Syncing from linked project:{' '}
               <Box variant="code" display="inline" fontSize="body-s">
-                {currentVersion.bdaProjectArn as string}
+                {currentVersion?.bdaProjectArn as string}
               </Box>
               . You can enter a different ARN below to override.
             </Box>

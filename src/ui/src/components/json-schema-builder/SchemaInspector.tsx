@@ -178,7 +178,7 @@ const SchemaInspector = ({
             />
           </FormField>
 
-          {selectedClass[X_AWS_IDP_DOCUMENT_TYPE] && !isRuleSchema && (
+          {!!selectedClass[X_AWS_IDP_DOCUMENT_TYPE] && !isRuleSchema && (
             <>
               <ExamplesEditor
                 examples={(selectedClass[X_AWS_IDP_EXAMPLES] as Example[]) || []}
@@ -550,7 +550,7 @@ const SchemaInspector = ({
                   <Select
                     selectedOption={availableMethods.find((opt) => opt.value === currentMethod) || null}
                     onChange={({ detail }) => {
-                      const method = detail.selectedOption.value;
+                      const method = detail.selectedOption.value ?? '';
                       const updates: Record<string, unknown> = {
                         [X_AWS_IDP_EVALUATION_METHOD]: method,
                       };

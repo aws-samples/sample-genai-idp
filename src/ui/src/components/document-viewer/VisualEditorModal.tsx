@@ -65,6 +65,7 @@ const BoundingBox = memo(({ box, page, currentPage, imageRef, zoomLevel = 1, pan
     if (imageRef.current && page === currentPage) {
       const updateDimensions = () => {
         const img = imageRef.current;
+        if (!img || !img.parentElement) return;
         const rect = img.getBoundingClientRect();
         const containerRect = img.parentElement.getBoundingClientRect();
 
@@ -114,6 +115,7 @@ const BoundingBox = memo(({ box, page, currentPage, imageRef, zoomLevel = 1, pan
     if (imageRef.current && page === currentPage) {
       const updateDimensions = () => {
         const img = imageRef.current;
+        if (!img || !img.parentElement) return;
         const rect = img.getBoundingClientRect();
         const containerRect = img.parentElement.getBoundingClientRect();
 
@@ -155,10 +157,10 @@ const BoundingBox = memo(({ box, page, currentPage, imageRef, zoomLevel = 1, pan
   const bbox = box.boundingBox as { left: number; top: number; width: number; height: number };
 
   // Calculate position and size directly on the transformed image
-  const finalLeft = bbox.left * dimensions.transformedWidth + dimensions.transformedOffsetX - padding;
-  const finalTop = bbox.top * dimensions.transformedHeight + dimensions.transformedOffsetY - padding;
-  const finalWidth = bbox.width * dimensions.transformedWidth + padding * 2;
-  const finalHeight = bbox.height * dimensions.transformedHeight + padding * 2;
+  const finalLeft = bbox.left * (dimensions.transformedWidth ?? 0) + (dimensions.transformedOffsetX ?? 0) - padding;
+  const finalTop = bbox.top * (dimensions.transformedHeight ?? 0) + (dimensions.transformedOffsetY ?? 0) - padding;
+  const finalWidth = bbox.width * (dimensions.transformedWidth ?? 0) + padding * 2;
+  const finalHeight = bbox.height * (dimensions.transformedHeight ?? 0) + padding * 2;
 
   // Position the bounding box directly without additional transforms
   const style = {
@@ -418,7 +420,7 @@ const FormFieldRenderer = memo<Record<string, any>>(
 
     // Use evaluation result for match status if available, otherwise compare values
     const hasEvalResult = evalResult !== null && evalResult !== undefined;
-    const isMatchedFromEval = hasEvalResult ? evalResult.matched : null;
+    const isMatchedFromEval = evalResult ? evalResult.matched : null;
     const valuesMatch = hasEvalResult
       ? isMatchedFromEval
       : !showComparison || baselineValue === null || JSON.stringify(value) === JSON.stringify(baselineValue);
@@ -624,10 +626,10 @@ const FormFieldRenderer = memo<Record<string, any>>(
                   {confidenceInfo.hasConfidenceInfo && (
                     <ExtBox fontSize="body-s" padding={{ top: 'xxxs' }} color={confidenceColor} style={confidenceStyle}>
                       {confidenceInfo.displayMode === 'with-threshold'
-                        ? `Confidence: ${(confidenceInfo.confidence * 100).toFixed(1)}% / Threshold: ${(
-                            confidenceInfo.confidenceThreshold * 100
+                        ? `Confidence: ${((confidenceInfo.confidence ?? 0) * 100).toFixed(1)}% / Threshold: ${(
+                            (confidenceInfo.confidenceThreshold ?? 0) * 100
                           ).toFixed(1)}%`
-                        : `Confidence: ${(confidenceInfo.confidence * 100).toFixed(1)}%`}
+                        : `Confidence: ${((confidenceInfo.confidence ?? 0) * 100).toFixed(1)}%`}
                     </ExtBox>
                   )}
                   {showComparison && evalScore !== undefined && (
@@ -820,10 +822,10 @@ const FormFieldRenderer = memo<Record<string, any>>(
                   {confidenceInfo.hasConfidenceInfo && (
                     <ExtBox fontSize="body-s" padding={{ top: 'xxxs' }} color={confidenceColor} style={confidenceStyle}>
                       {confidenceInfo.displayMode === 'with-threshold'
-                        ? `Confidence: ${(confidenceInfo.confidence * 100).toFixed(1)}% / Threshold: ${(
-                            confidenceInfo.confidenceThreshold * 100
+                        ? `Confidence: ${((confidenceInfo.confidence ?? 0) * 100).toFixed(1)}% / Threshold: ${(
+                            (confidenceInfo.confidenceThreshold ?? 0) * 100
                           ).toFixed(1)}%`
-                        : `Confidence: ${(confidenceInfo.confidence * 100).toFixed(1)}%`}
+                        : `Confidence: ${((confidenceInfo.confidence ?? 0) * 100).toFixed(1)}%`}
                     </ExtBox>
                   )}
                   {showComparison && evalScore !== undefined && (
@@ -1026,10 +1028,10 @@ const FormFieldRenderer = memo<Record<string, any>>(
                   {confidenceInfo.hasConfidenceInfo && (
                     <ExtBox fontSize="body-s" padding={{ top: 'xxxs' }} color={confidenceColor} style={confidenceStyle}>
                       {confidenceInfo.displayMode === 'with-threshold'
-                        ? `Confidence: ${(confidenceInfo.confidence * 100).toFixed(1)}% / Threshold: ${(
-                            confidenceInfo.confidenceThreshold * 100
+                        ? `Confidence: ${((confidenceInfo.confidence ?? 0) * 100).toFixed(1)}% / Threshold: ${(
+                            (confidenceInfo.confidenceThreshold ?? 0) * 100
                           ).toFixed(1)}%`
-                        : `Confidence: ${(confidenceInfo.confidence * 100).toFixed(1)}%`}
+                        : `Confidence: ${((confidenceInfo.confidence ?? 0) * 100).toFixed(1)}%`}
                     </ExtBox>
                   )}
                   {showComparison && evalScore !== undefined && (
@@ -1413,10 +1415,10 @@ const FormFieldRenderer = memo<Record<string, any>>(
                   {confidenceInfo.hasConfidenceInfo && (
                     <ExtBox fontSize="body-s" padding={{ top: 'xxxs' }} color={confidenceColor} style={confidenceStyle}>
                       {confidenceInfo.displayMode === 'with-threshold'
-                        ? `Confidence: ${(confidenceInfo.confidence * 100).toFixed(1)}% / Threshold: ${(
-                            confidenceInfo.confidenceThreshold * 100
+                        ? `Confidence: ${((confidenceInfo.confidence ?? 0) * 100).toFixed(1)}% / Threshold: ${(
+                            (confidenceInfo.confidenceThreshold ?? 0) * 100
                           ).toFixed(1)}%`
-                        : `Confidence: ${(confidenceInfo.confidence * 100).toFixed(1)}%`}
+                        : `Confidence: ${((confidenceInfo.confidence ?? 0) * 100).toFixed(1)}%`}
                     </ExtBox>
                   )}
                   {showComparison && evalScore !== undefined && (
@@ -1765,10 +1767,10 @@ const FormFieldRenderer = memo<Record<string, any>>(
                   {confidenceInfo.hasConfidenceInfo && (
                     <ExtBox fontSize="body-s" padding={{ top: 'xxxs' }} color={confidenceColor} style={confidenceStyle}>
                       {confidenceInfo.displayMode === 'with-threshold'
-                        ? `Confidence: ${(confidenceInfo.confidence * 100).toFixed(1)}% / Threshold: ${(
-                            confidenceInfo.confidenceThreshold * 100
+                        ? `Confidence: ${((confidenceInfo.confidence ?? 0) * 100).toFixed(1)}% / Threshold: ${(
+                            (confidenceInfo.confidenceThreshold ?? 0) * 100
                           ).toFixed(1)}%`
-                        : `Confidence: ${(confidenceInfo.confidence * 100).toFixed(1)}%`}
+                        : `Confidence: ${((confidenceInfo.confidence ?? 0) * 100).toFixed(1)}%`}
                     </ExtBox>
                   )}
                 </ExtBox>
@@ -2000,13 +2002,13 @@ const VisualEditorModal = ({
               variables: { s3Uri: baselineUri },
             });
             const baselineResult = baselineResponse.data.getFileContents;
-            if (!baselineResult.isBinary && baselineResult.content) {
+            if (baselineResult && !baselineResult.isBinary && baselineResult.content) {
               const parsed = JSON.parse(baselineResult.content);
               setBaselineData(parsed);
               logger.info('Baseline data loaded successfully');
             }
           } catch (error) {
-            logger.warn('Failed to load baseline data:', error.message);
+            logger.warn('Failed to load baseline data:', error instanceof Error ? error.message : error);
           }
         }
 
@@ -2202,7 +2204,7 @@ const VisualEditorModal = ({
 
         // Extract prefix (directory) and filename for uploadDocument
         const predictionPrefix = outputFileKey.substring(0, outputFileKey.lastIndexOf('/'));
-        const predictionFilename = outputFileKey.split('/').pop();
+        const predictionFilename = outputFileKey.split('/').pop() ?? outputFileKey;
 
         const predictionUploadResponse = await client.graphql({
           query: uploadDocument,
@@ -2233,7 +2235,7 @@ const VisualEditorModal = ({
 
           // Append the file content as last field (required for S3 presigned POST)
           const blob = new Blob([predictionContent], { type: 'application/json' });
-          formData.append('file', blob, predictionFilename as string);
+          formData.append('file', blob, predictionFilename);
 
           logger.info('📤 Uploading predictions via presigned POST to:', presignedPostData.url);
           const uploadResponse = await fetch(presignedPostData.url, {
@@ -2280,7 +2282,7 @@ const VisualEditorModal = ({
 
         // Extract prefix (directory) and filename for uploadDocument
         const baselinePrefix = outputFileKey.substring(0, outputFileKey.lastIndexOf('/'));
-        const baselineFilename = outputFileKey.split('/').pop();
+        const baselineFilename = outputFileKey.split('/').pop() ?? outputFileKey;
 
         const baselineUploadResponse = await client.graphql({
           query: uploadDocument,
@@ -2949,25 +2951,25 @@ const VisualEditorModal = ({
                                     iconName="angle-left"
                                     variant="icon"
                                     onClick={() => {
-                                      const currentIndex = pageIds.indexOf(currentPage);
+                                      const currentIndex = pageIds.indexOf(currentPage as string | number);
                                       if (currentIndex > 0) {
                                         setCurrentPage(pageIds[currentIndex - 1]);
                                         setActiveFieldGeometry(null);
                                       }
                                     }}
-                                    disabled={pageIds.indexOf(currentPage) === 0}
+                                    disabled={pageIds.indexOf(currentPage as string | number) === 0}
                                   />
                                   <Button
                                     iconName="angle-right"
                                     variant="icon"
                                     onClick={() => {
-                                      const currentIndex = pageIds.indexOf(currentPage);
+                                      const currentIndex = pageIds.indexOf(currentPage as string | number);
                                       if (currentIndex < pageIds.length - 1) {
                                         setCurrentPage(pageIds[currentIndex + 1]);
                                         setActiveFieldGeometry(null);
                                       }
                                     }}
-                                    disabled={pageIds.indexOf(currentPage) === pageIds.length - 1}
+                                    disabled={pageIds.indexOf(currentPage as string | number) === pageIds.length - 1}
                                   />
                                 </ExtBox>
                               </ExtBox>
@@ -2990,7 +2992,7 @@ const VisualEditorModal = ({
                                     borderRadius: '4px',
                                   }}
                                 >
-                                  Page {pageIds.indexOf(currentPage) + 1} of {pageIds.length}
+                                  Page {pageIds.indexOf(currentPage as string | number) + 1} of {pageIds.length}
                                 </ExtBox>
 
                                 {/* Zoom and Pan Controls */}

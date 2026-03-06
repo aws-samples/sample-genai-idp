@@ -81,8 +81,8 @@ const normalizeBooleans = (obj: Record<string, unknown>, schema: Record<string, 
     if (value && typeof value === 'object' && !Array.isArray(value) && propertySchema?.properties) {
       const normalized = { ...(value as Record<string, unknown>) };
       Object.keys(normalized).forEach((key) => {
-        if (propertySchema.properties[key]) {
-          normalized[key] = normalizeValue(normalized[key], propertySchema.properties[key]);
+        if (propertySchema.properties![key]) {
+          normalized[key] = normalizeValue(normalized[key], propertySchema.properties![key]);
         }
       });
       return normalized;
@@ -90,7 +90,7 @@ const normalizeBooleans = (obj: Record<string, unknown>, schema: Record<string, 
 
     // Handle arrays
     if (Array.isArray(value) && propertySchema?.items) {
-      return value.map((item: unknown) => normalizeValue(item, propertySchema.items));
+      return value.map((item: unknown) => normalizeValue(item, propertySchema.items!));
     }
 
     return value;

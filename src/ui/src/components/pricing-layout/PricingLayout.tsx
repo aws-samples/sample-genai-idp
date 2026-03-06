@@ -160,9 +160,9 @@ const PricingLayout = (): React.JSX.Element => {
 
   // Handle changes in the JSON editor
   const handleJsonEditorChange = (value: string | undefined): void => {
-    setJsonContent(value);
+    setJsonContent(value ?? '');
     try {
-      const parsedValue = JSON.parse(value);
+      const parsedValue = JSON.parse(value ?? '');
       setFormValues(parsedValue);
 
       try {
@@ -174,15 +174,15 @@ const PricingLayout = (): React.JSX.Element => {
 
       setValidationErrors([]);
     } catch (e) {
-      setValidationErrors([{ message: `Invalid JSON: ${e.message}` }]);
+      setValidationErrors([{ message: `Invalid JSON: ${(e as Error).message}` }]);
     }
   };
 
   // Handle changes in the YAML editor
   const handleYamlEditorChange = (value: string | undefined): void => {
-    setYamlContent(value);
+    setYamlContent(value ?? '');
     try {
-      const parsedValue = yaml.load(value) as PricingFormValues;
+      const parsedValue = yaml.load(value ?? '') as PricingFormValues;
       setFormValues(parsedValue);
 
       try {
@@ -194,7 +194,7 @@ const PricingLayout = (): React.JSX.Element => {
 
       setValidationErrors([]);
     } catch (e) {
-      setValidationErrors([{ message: `Invalid YAML: ${e.message}` }]);
+      setValidationErrors([{ message: `Invalid YAML: ${(e as Error).message}` }]);
     }
   };
 
@@ -219,7 +219,7 @@ const PricingLayout = (): React.JSX.Element => {
       }
     } catch (err) {
       console.error('Save error:', err);
-      setSaveError(`Error: ${err.message}`);
+      setSaveError(`Error: ${(err as Error).message}`);
     } finally {
       setIsSaving(false);
     }
@@ -242,7 +242,7 @@ const PricingLayout = (): React.JSX.Element => {
       }
     } catch (err) {
       console.error('Restore error:', err);
-      setSaveError(`Error: ${err.message}`);
+      setSaveError(`Error: ${(err as Error).message}`);
     } finally {
       setIsRestoring(false);
     }
@@ -331,7 +331,7 @@ const PricingLayout = (): React.JSX.Element => {
       URL.revokeObjectURL(url);
       setShowExportModal(false);
     } catch (err) {
-      setSaveError(`Export failed: ${err.message}`);
+      setSaveError(`Export failed: ${(err as Error).message}`);
     }
   };
 
@@ -361,7 +361,7 @@ const PricingLayout = (): React.JSX.Element => {
           setImportError('Invalid pricing file format');
         }
       } catch (err) {
-        setImportError(`Import failed: ${err.message}`);
+        setImportError(`Import failed: ${(err as Error).message}`);
       }
     };
     reader.readAsText(file);
@@ -721,7 +721,7 @@ const PricingLayout = (): React.JSX.Element => {
                 <Button variant="normal" onClick={() => setShowExportModal(true)}>
                   Export
                 </Button>
-                <Button variant="normal" onClick={() => document.getElementById('import-pricing-file').click()}>
+                <Button variant="normal" onClick={() => document.getElementById('import-pricing-file')?.click()}>
                   Import
                 </Button>
                 <input id="import-pricing-file" type="file" accept=".json,.yaml,.yml" style={{ display: 'none' }} onChange={handleImport} />

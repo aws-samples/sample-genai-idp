@@ -84,14 +84,19 @@ const JSONViewer = ({
         variables: { s3Uri: fileUri },
       });
 
-      const result = response.data.getFileContents;
+      const result = response.data?.getFileContents;
+
+      if (!result) {
+        setError('No response from server.');
+        return;
+      }
 
       if (result.isBinary === true) {
         setError('This file contains binary content that cannot be viewed.');
         return;
       }
 
-      const fetchedContent = result.content;
+      const fetchedContent = result.content ?? '';
       logger.debug('Received content');
 
       // Parse JSON content
@@ -138,7 +143,7 @@ const JSONViewer = ({
       }
 
       const [, bucket, fullPath] = s3UriMatch;
-      const fileName = fullPath.split('/').pop();
+      const fileName = fullPath.split('/').pop() ?? fullPath;
       const prefix = fullPath.substring(0, fullPath.lastIndexOf('/'));
 
       // Get presigned URL

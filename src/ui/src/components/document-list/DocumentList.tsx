@@ -281,8 +281,8 @@ const DocumentList = (): React.JSX.Element => {
             doc.objectKey === item.objectKey
               ? {
                   ...doc,
-                  hitlReviewOwner: null,
-                  hitlReviewOwnerEmail: null,
+                  hitlReviewOwner: '' as string,
+                  hitlReviewOwnerEmail: '' as string,
                   hitlStatus: releaseData.HITLStatus,
                 }
               : doc,
@@ -343,7 +343,7 @@ const DocumentList = (): React.JSX.Element => {
             {...filterProps}
             filteringAriaLabel="Filter documents"
             filteringPlaceholder="Find documents"
-            countText={getFilterCounterText(filteredItemsCount)}
+            countText={getFilterCounterText(filteredItemsCount ?? 0)}
           />
         }
         wrapLines={preferences.wrapLines}
@@ -358,7 +358,7 @@ const DocumentList = (): React.JSX.Element => {
         visible={isDeleteModalVisible}
         onDismiss={() => setIsDeleteModalVisible(false)}
         onConfirm={handleDeleteConfirm}
-        selectedItems={collectionProps.selectedItems}
+        selectedItems={(collectionProps.selectedItems ?? []) as readonly { objectKey: string }[]}
         isLoading={isDeleteLoading}
       />
 

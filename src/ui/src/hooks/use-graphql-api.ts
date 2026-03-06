@@ -557,9 +557,9 @@ const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2
       setIsDocumentsListLoading(true);
 
       // Show error message if some aborts failed but not all
-      if (response.failedCount > 0 && response.abortedCount > 0) {
-        setErrorMessage(`Aborted ${response.abortedCount} document(s), but ${response.failedCount} failed`);
-      } else if (response.failedCount > 0 && response.abortedCount === 0) {
+      if ((response.failedCount ?? 0) > 0 && (response.abortedCount ?? 0) > 0) {
+        setErrorMessage(`Aborted ${response.abortedCount ?? 0} document(s), but ${response.failedCount ?? 0} failed`);
+      } else if ((response.failedCount ?? 0) > 0 && response.abortedCount === 0) {
         setErrorMessage(`Failed to abort document(s): ${response.errors?.join(', ') || 'Unknown error'}`);
       }
 

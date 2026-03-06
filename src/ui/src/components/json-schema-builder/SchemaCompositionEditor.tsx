@@ -175,7 +175,7 @@ const SchemaCompositionEditor = ({
               <FormField label="Add Composition" description="Choose how to combine multiple schemas">
                 <Select
                   selectedOption={compositionOptions.find((opt) => opt.value === compositionType) || compositionOptions[0]}
-                  onChange={({ detail }) => setCompositionType(detail.selectedOption.value)}
+                  onChange={({ detail }) => setCompositionType(detail.selectedOption.value ?? '')}
                   options={compositionOptions}
                   placeholder="Select composition type"
                 />
@@ -209,7 +209,7 @@ const SchemaCompositionEditor = ({
                           (selectedAttribute.not as Record<string, unknown>)?.type === opt.value,
                       ) || schemaTypeOptions[0]
                     }
-                    onChange={({ detail }) => handleUpdateNotSchema(detail.selectedOption.value)}
+                    onChange={({ detail }) => handleUpdateNotSchema(detail.selectedOption.value ?? '')}
                     options={schemaTypeOptions}
                   />
                 </FormField>
@@ -235,7 +235,7 @@ const SchemaCompositionEditor = ({
                                 schemaTypeOptions.find((opt) => schema.$ref === opt.value || schema.type === opt.value) ||
                                 schemaTypeOptions[0]
                               }
-                              onChange={({ detail }) => handleUpdateSchema(idx, detail.selectedOption.value)}
+                              onChange={({ detail }) => handleUpdateSchema(idx, detail.selectedOption.value ?? '')}
                               options={schemaTypeOptions}
                             />
                           </FormField>

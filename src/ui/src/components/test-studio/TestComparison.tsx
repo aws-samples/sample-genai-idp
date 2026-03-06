@@ -192,14 +192,14 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
             }
           }
 
-          const compareData = result.data.compareTestRuns;
+          const compareData = result?.data.compareTestRuns;
 
           // Parse metrics if it's a JSON string
           const parsedData: ComparisonData = {
-            configs: compareData.configs as ComparisonData['configs'],
-            metrics: typeof compareData.metrics === 'string'
+            configs: (compareData?.configs ?? undefined) as ComparisonData['configs'],
+            metrics: typeof compareData?.metrics === 'string'
               ? parseComparisonMetrics(compareData.metrics) as Record<string, Record<string, unknown>>
-              : compareData.metrics as Record<string, Record<string, unknown>>,
+              : compareData?.metrics as Record<string, Record<string, unknown>> | undefined,
           };
 
           setComparisonData(parsedData);
@@ -551,7 +551,7 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
   };
 
   const downloadToJson = () => {
-    if (!comparisonData) return;
+    if (!comparisonData?.metrics) return;
 
     const completeTestRuns: Record<string, Record<string, unknown>> = Object.fromEntries(
       Object.entries(comparisonData.metrics).filter(
@@ -897,7 +897,7 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
 
             // Helper function to extract filename from document ID
             const getDocumentFilename = (docId: string): string => {
-              return docId.split('/').pop().split('\\').pop(); // Handle both / and \ separators
+              return (docId.split('/').pop() ?? docId).split('\\').pop() ?? docId; // Handle both / and \ separators
             };
 
             // Helper to get doc from item

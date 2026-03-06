@@ -12,12 +12,25 @@ import TestComparison from './TestComparison';
 import { appLayoutLabels } from '../common/labels';
 import useAppContext from '../../contexts/app';
 
+interface TestRunItem {
+  testRunId: string;
+  testSetName: string;
+  status: string;
+  isActive?: boolean;
+  progress?: number;
+  filesCount: number;
+  createdAt: string;
+  completedAt: string | null;
+  context: string;
+  configVersion?: string | null;
+}
+
 const TestStudioLayout = (): React.JSX.Element => {
   const { navigationOpen, setNavigationOpen, activeTestRuns, addTestRun, removeTestRun } = useAppContext();
   const location = useLocation();
   const [activeTabId, setActiveTabId] = useState('sets');
   const [timePeriodHours, setTimePeriodHours] = useState(2);
-  const [selectedTestItems, setSelectedTestItems] = useState([]);
+  const [selectedTestItems, setSelectedTestItems] = useState<TestRunItem[]>([]);
 
   // Handle URL tab parameter
   useEffect(() => {
@@ -29,7 +42,7 @@ const TestStudioLayout = (): React.JSX.Element => {
   }, [location.search]);
 
   const handleTestStart = (testRunId: string, testSetName: string, context: string, filesCount: number, configVersion?: string): void => {
-    addTestRun(testRunId, testSetName, context, filesCount, configVersion);
+    addTestRun(testRunId, testSetName, context, filesCount, configVersion ?? '');
   };
 
   const handleTestComplete = (testRunId: string): void => {
@@ -59,7 +72,7 @@ const TestStudioLayout = (): React.JSX.Element => {
       case 'results': {
         const urlParams = new URLSearchParams(location.search);
         const testRunId = urlParams.get('testRunId');
-        return <TestResults testRunId={testRunId} />;
+        return <TestResults testRunId={testRunId ?? ''} />;
       }
       case 'comparison': {
         const urlParams = new URLSearchParams(location.search);

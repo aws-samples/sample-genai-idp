@@ -189,7 +189,7 @@ const StepDetails = ({ step, formatDuration, getStepIcon, mergedConfig = null }:
             expanded={errorExpanded}
             onChange={({ detail }) => setErrorExpanded(detail.expanded)}
             headerActions={
-              <Button variant="inline-icon" iconName="copy" onClick={() => copyToClipboard(step.error)} ariaLabel="Copy error message" />
+              <Button variant="inline-icon" iconName="copy" onClick={() => copyToClipboard(step.error ?? '')} ariaLabel="Copy error message" />
             }
           >
             <Alert type="error" header="Error Details">

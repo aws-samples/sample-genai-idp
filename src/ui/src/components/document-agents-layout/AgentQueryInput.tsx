@@ -496,8 +496,8 @@ const AgentQueryInput = ({ onSubmit, isSubmitting = false, selectedResult = null
                         <Box>
                           <Box fontWeight="bold">{agent.agent_name}</Box>
                           <Box fontSize="body-s" color="text-body-secondary">
-                            {agent.agent_description?.length > 150
-                              ? `${agent.agent_description.substring(0, 150)}...`
+                            {(agent.agent_description?.length ?? 0) > 150
+                              ? `${agent.agent_description?.substring(0, 150)}...`
                               : agent.agent_description}
                           </Box>
                         </Box>

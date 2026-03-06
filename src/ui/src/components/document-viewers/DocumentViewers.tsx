@@ -118,7 +118,7 @@ const ViewerContent = ({
       {isReportVisible && (
         <div className="flex-1 min-w-0">
           <MarkdownReport
-            reportUri={evaluationReportUri}
+            reportUri={evaluationReportUri ?? ''}
             documentId={objectKey}
             title="Evaluation Report"
             emptyMessage="Evaluation report not available for this document"
@@ -128,7 +128,7 @@ const ViewerContent = ({
       {isSummaryVisible && (
         <div className="flex-1 min-w-0">
           <MarkdownReport
-            reportUri={summaryReportUri}
+            reportUri={summaryReportUri ?? ''}
             documentId={objectKey}
             title="Document Summary"
             emptyMessage="Summary report not available for this document"
@@ -138,7 +138,7 @@ const ViewerContent = ({
       {isRuleValidationVisible && (
         <div className="flex-1 min-w-0">
           <MarkdownReport
-            reportUri={ruleValidationResultUri}
+            reportUri={ruleValidationResultUri ?? ''}
             documentId={objectKey}
             title="Rule Validation Summary"
             emptyMessage="Rule validation summary not available for this document"

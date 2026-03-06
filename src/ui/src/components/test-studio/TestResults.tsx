@@ -417,12 +417,12 @@ const TestResults = ({ testRunId, setSelectedTestRunId }: TestResultsProps): Rea
       });
 
       const testSets = testSetsResult.data.getTestSets || [];
-      const testSet = testSets.find((ts) => ts.id === results.testSetId);
+      const testSet = testSets.find((ts) => ts?.id === results.testSetId);
 
       if (testSet) {
-        setTestSetStatus(testSet.status);
-        setTestSetFileCount(testSet.fileCount);
-        setTestSetFilePattern(testSet.filePattern);
+        setTestSetStatus(testSet.status ?? null);
+        setTestSetFileCount(testSet.fileCount ?? null);
+        setTestSetFilePattern(testSet.filePattern ?? null);
       } else {
         setTestSetStatus('NOT_FOUND');
         setTestSetFileCount(0);
@@ -545,10 +545,10 @@ const TestResults = ({ testRunId, setSelectedTestRunId }: TestResultsProps): Rea
           }
         }
 
-        if (!isCancelled) {
+        if (!isCancelled && result) {
           const testRun = result.data.getTestRun;
           console.log('Test results:', testRun);
-          setResults(testRun);
+          setResults(testRun as Record<string, unknown> | null);
         }
       } catch (err) {
         if (!isCancelled) {
@@ -738,7 +738,7 @@ const TestResults = ({ testRunId, setSelectedTestRunId }: TestResultsProps): Rea
         console.error('Invalid numberOfFiles value');
         return;
       }
-      if (numFiles > testSetFileCount) {
+      if (testSetFileCount !== null && numFiles > testSetFileCount) {
         console.error(`numberOfFiles (${numFiles}) exceeds test set file count (${testSetFileCount})`);
         return;
       }
@@ -896,7 +896,7 @@ const TestResults = ({ testRunId, setSelectedTestRunId }: TestResultsProps): Rea
                 : 'N/A'}
             </Box>
           </Box>
-          {results.configVersion && (
+          {Boolean(results.configVersion) && (
             <Box>
               <Box variant="awsui-key-label">Config Version</Box>
               <Box fontSize="heading-l">{formatConfigVersionLink(results.configVersion as string, versions)}</Box>
@@ -1250,7 +1250,7 @@ const TestResults = ({ testRunId, setSelectedTestRunId }: TestResultsProps): Rea
         size="medium"
       >
         <Box>
-          {selectedRangeData?.docs?.length > 0 ? (
+          {selectedRangeData && selectedRangeData.docs?.length > 0 ? (
             <Table
               resizableColumns
               wrapLines={preferences.wrapLines}

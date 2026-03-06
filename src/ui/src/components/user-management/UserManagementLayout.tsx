@@ -370,8 +370,8 @@ const UserManagementLayout = (): React.JSX.Element => {
               </FormField>
               <FormField label="Role" description="Admin users can manage other users and configurations">
                 <Select
-                  selectedOption={personaOptions.find((opt) => opt.value === persona)}
-                  onChange={({ detail }) => setPersona(detail.selectedOption.value)}
+                  selectedOption={personaOptions.find((opt) => opt.value === persona) ?? null}
+                  onChange={({ detail }) => setPersona(detail.selectedOption.value ?? '')}
                   options={personaOptions}
                 />
               </FormField>

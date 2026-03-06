@@ -49,9 +49,11 @@ export const BoundingBox = memo(
       if (imageRef.current && page === currentPage) {
         const updateDimensions = () => {
           const img = imageRef.current;
+          if (!img) return;
           const rect = img.getBoundingClientRect();
           // Use containerRef if provided, otherwise fall back to parentElement
           const container = containerRef?.current || img.parentElement;
+          if (!container) return;
           const containerRect = container.getBoundingClientRect();
 
           // Get the actual displayed dimensions and position after all transforms
@@ -99,9 +101,11 @@ export const BoundingBox = memo(
       if (imageRef.current && page === currentPage) {
         const updateDimensions = () => {
           const img = imageRef.current;
+          if (!img) return;
           const rect = img.getBoundingClientRect();
           // Use containerRef if provided, otherwise fall back to parentElement
           const container = containerRef?.current || img.parentElement;
+          if (!container) return;
           const containerRect = container.getBoundingClientRect();
 
           const transformedWidth = rect.width;
@@ -327,6 +331,7 @@ const PageImageViewer = ({
 
   // Handle page navigation
   const goToPreviousPage = useCallback(() => {
+    if (currentPage === null) return;
     const currentIndex = pageIds.indexOf(currentPage);
     if (currentIndex > 0) {
       const newPage = pageIds[currentIndex - 1];
@@ -338,6 +343,7 @@ const PageImageViewer = ({
   }, [currentPage, pageIds, onPageChange]);
 
   const goToNextPage = useCallback(() => {
+    if (currentPage === null) return;
     const currentIndex = pageIds.indexOf(currentPage);
     if (currentIndex < pageIds.length - 1) {
       const newPage = pageIds[currentIndex + 1];
@@ -424,7 +430,7 @@ const PageImageViewer = ({
     );
   }
 
-  const currentPageIndex = pageIds.indexOf(currentPage);
+  const currentPageIndex = currentPage !== null ? pageIds.indexOf(currentPage) : -1;
 
   return (
     <div style={{ position: 'relative', height, overflow: 'hidden' }}>
@@ -443,7 +449,7 @@ const PageImageViewer = ({
         }}
         onWheel={handleWheel}
       >
-        {pageImages[currentPage] ? (
+        {currentPage !== null && pageImages[currentPage] ? (
           <>
             <img
               ref={imageRef}

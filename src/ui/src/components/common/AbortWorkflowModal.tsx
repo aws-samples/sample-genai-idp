@@ -41,8 +41,8 @@ const AbortWorkflowModal = ({
   isLoading = false,
 }: AbortWorkflowModalProps): React.JSX.Element => {
   // Filter to only include items that can be aborted
-  const abortableItems = selectedItems.filter((item) => ABORTABLE_STATUSES.includes(item.objectStatus));
-  const nonAbortableItems = selectedItems.filter((item) => !ABORTABLE_STATUSES.includes(item.objectStatus));
+  const abortableItems = selectedItems.filter((item) => item.objectStatus && ABORTABLE_STATUSES.includes(item.objectStatus));
+  const nonAbortableItems = selectedItems.filter((item) => !item.objectStatus || !ABORTABLE_STATUSES.includes(item.objectStatus));
 
   let title = 'Abort workflow';
   let message = 'Are you sure you want to abort processing for this document?';

@@ -30,7 +30,7 @@ const ConfidenceDisplay = ({
   const { confidence, confidenceThreshold, isAboveThreshold, displayMode } = confidenceInfo;
 
   // Format confidence as percentage
-  const confidencePercent = (confidence * 100).toFixed(1);
+  const confidencePercent = ((confidence ?? 0) * 100).toFixed(1);
 
   // Determine colors based on threshold comparison
   const getColors = () => {

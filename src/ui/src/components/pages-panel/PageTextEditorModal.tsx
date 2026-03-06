@@ -89,16 +89,19 @@ const PageTextEditorModal = ({
       // Fetch text content
       const textResponse = await client.graphql({
         query: getFileContents,
-        variables: { s3Uri: textUri },
+        variables: { s3Uri: textUri as string },
       });
 
-      const textResult = textResponse.data.getFileContents;
+      const textResult = textResponse.data?.getFileContents;
+      if (!textResult) {
+        throw new Error('No response from getFileContents');
+      }
       if (textResult.isBinary) {
         throw new Error('Text file contains binary content');
       }
 
       // Extract plain text from JSON wrapper
-      const plainText = extractPlainText(textResult.content);
+      const plainText = extractPlainText(textResult.content ?? '');
       setTextContent(plainText);
       setOriginalTextContent(plainText);
 
@@ -110,10 +113,10 @@ const PageTextEditorModal = ({
             variables: { s3Uri: confidenceUri },
           });
 
-          const confResult = confResponse.data.getFileContents;
-          if (!confResult.isBinary) {
+          const confResult = confResponse.data?.getFileContents;
+          if (confResult && !confResult.isBinary) {
             // Extract markdown from JSON wrapper for confidence content
-            const confidenceMarkdown = extractPlainText(confResult.content);
+            const confidenceMarkdown = extractPlainText(confResult.content ?? '');
             setConfidenceContent(confidenceMarkdown);
             setOriginalConfidenceContent(confidenceMarkdown);
           }
@@ -149,7 +152,7 @@ const PageTextEditorModal = ({
 
       // Save text content if changed
       if (textContent !== originalTextContent) {
-        newTextUri = await saveToS3(textUri, wrapInJson(textContent), 'application/json');
+        newTextUri = await saveToS3(textUri!, wrapInJson(textContent), 'application/json');
         logger.info('Saved text content to:', newTextUri);
       }
 
@@ -186,7 +189,7 @@ const PageTextEditorModal = ({
     }
 
     const [, bucket, fullPath] = match;
-    const fileName = fullPath.split('/').pop();
+    const fileName = fullPath.split('/').pop() ?? fullPath;
     const prefix = fullPath.substring(0, fullPath.lastIndexOf('/'));
 
     // Get presigned URL

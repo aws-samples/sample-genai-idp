@@ -165,7 +165,7 @@ const SchemaBuilder = ({
   };
 
   const handleConfirmAddAttribute = (): void => {
-    if (newAttributeName.trim() && newAttributeType.value) {
+    if (newAttributeName.trim() && newAttributeType.value && selectedClassId) {
       const attrName = newAttributeName.trim();
       addAttribute(selectedClassId, attrName, newAttributeType.value);
 
@@ -187,7 +187,7 @@ const SchemaBuilder = ({
         }
       }
 
-      if (Object.keys(updates).length > 0) {
+      if (Object.keys(updates).length > 0 && selectedClassId) {
         updateAttribute(selectedClassId, attrName, updates);
       }
 
@@ -531,9 +531,9 @@ const SchemaBuilder = ({
                     selectedClass={getSelectedClass()}
                     selectedAttributeId={selectedAttributeId}
                     onSelectAttribute={setSelectedAttributeId}
-                    onUpdateAttribute={(name, updates) => updateAttribute(selectedClassId, name, updates)}
-                    onRemoveAttribute={(name) => removeAttribute(selectedClassId, name)}
-                    onReorder={(oldIndex, newIndex) => reorderAttributes(selectedClassId, oldIndex, newIndex)}
+                    onUpdateAttribute={(name, updates) => { if (selectedClassId) updateAttribute(selectedClassId, name, updates); }}
+                    onRemoveAttribute={(name) => { if (selectedClassId) removeAttribute(selectedClassId, name); }}
+                    onReorder={(oldIndex, newIndex) => { if (selectedClassId) reorderAttributes(selectedClassId, oldIndex, newIndex); }}
                     onNavigateToClass={(classId) => {
                       setSelectedClassId(classId);
                       setSelectedAttributeId(null);
@@ -550,11 +550,11 @@ const SchemaBuilder = ({
                     selectedClass={getSelectedClass()}
                     selectedAttribute={getSelectedAttribute()}
                     selectedAttributeName={selectedAttributeId}
-                    onUpdate={(updates) => updateAttribute(selectedClassId, selectedAttributeId, updates)}
-                    onUpdateClass={(updates) => updateClass(selectedClassId, updates)}
-                    onRenameAttribute={(newName) => renameAttribute(selectedClassId, selectedAttributeId, newName)}
+                    onUpdate={(updates) => { if (selectedClassId && selectedAttributeId) updateAttribute(selectedClassId, selectedAttributeId, updates); }}
+                    onUpdateClass={(updates) => { if (selectedClassId) updateClass(selectedClassId, updates); }}
+                    onRenameAttribute={(newName) => { if (selectedClassId && selectedAttributeId) return renameAttribute(selectedClassId, selectedAttributeId, newName); return false; }}
                     availableClasses={classes}
-                    isRequired={getSelectedClass()?.attributes?.required?.includes(selectedAttributeId) || false}
+                    isRequired={(selectedAttributeId ? getSelectedClass()?.attributes?.required?.includes(selectedAttributeId) : false) || false}
                     isRuleSchema={isRuleSchema}
                     onToggleRequired={(checked) => {
                       const selectedClass = getSelectedClass();
@@ -563,6 +563,7 @@ const SchemaBuilder = ({
                       const currentRequired = selectedClass.attributes.required || [];
                       let newRequired: string[];
 
+                      if (!selectedAttributeId || !selectedClassId) return;
                       if (checked) {
                         if (!currentRequired.includes(selectedAttributeId)) {
                           newRequired = [...currentRequired, selectedAttributeId];

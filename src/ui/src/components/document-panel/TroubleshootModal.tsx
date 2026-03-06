@@ -100,9 +100,9 @@ const TroubleshootModal = ({
                   setAgentMessages(job.agent_messages);
 
                   if (job.status === 'COMPLETED') {
-                    setJobResult(job.result);
+                    setJobResult(job.result ?? null);
                   } else if (job.status === 'FAILED') {
-                    setError(job.error || 'Job processing failed');
+                    setError(job.error ?? 'Job processing failed');
                   }
                 }
               } catch (fetchError) {
@@ -158,7 +158,7 @@ const TroubleshootModal = ({
         throw new Error(`Error-Analyzer-Agent agent is not available. Available agents: ${agents.map((a) => a.agent_id).join(', ')}`);
       }
 
-      logger.debug('Submitting troubleshoot query for document:', documentItem.objectKey);
+      logger.debug('Submitting troubleshoot query for document:', documentItem?.objectKey);
       logger.debug('Query:', query);
       logger.debug('Agent IDs:', ['Error-Analyzer-Agent']);
 
@@ -200,9 +200,9 @@ const TroubleshootModal = ({
         logger.info('Resuming existing troubleshoot job:', existingJob.jobId);
         setJobId(existingJob.jobId);
         setJobStatus(existingJob.status);
-        setJobResult(existingJob.result);
+        setJobResult(existingJob.result ?? null);
         setAgentMessages(existingJob.agentMessages);
-        setError(existingJob.error);
+        setError(existingJob.error ?? null);
         subscribeToJobCompletion(existingJob.jobId);
       } else {
         // Create new job (no existing job OR previous job is COMPLETED/FAILED)
@@ -235,10 +235,10 @@ const TroubleshootModal = ({
               setJobStatus(job.status);
 
               if (job.status === 'COMPLETED') {
-                setJobResult(job.result);
+                setJobResult(job.result ?? null);
                 clearInterval(intervalId);
               } else if (job.status === 'FAILED') {
-                setError(job.error || 'Job processing failed');
+                setError(job.error ?? 'Job processing failed');
                 clearInterval(intervalId);
               }
             }

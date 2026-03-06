@@ -801,7 +801,7 @@ const ConfigBuilder = ({
     return renderInputField(key, property, value, currentPath);
   }
 
-  function renderObjectField(key: string, property: SchemaProperty, path: string): React.JSX.Element {
+  function renderObjectField(key: string, property: SchemaProperty, path: string): React.JSX.Element | null {
     if (!property.properties) {
       return null;
     }
@@ -1342,7 +1342,7 @@ const ConfigBuilder = ({
                 setShowNameAsDropdown(hasEnumForName);
 
                 // If it's a dropdown with enum values, set the default value to the first option
-                if (hasEnumForName && propertyDefinition.items.properties.name.enum.length > 0) {
+                if (hasEnumForName && propertyDefinition?.items?.properties?.name?.enum && propertyDefinition.items.properties.name.enum.length > 0) {
                   setNewItemName(propertyDefinition.items.properties.name.enum[0]);
                 }
               }}
@@ -1382,7 +1382,7 @@ const ConfigBuilder = ({
     // If this is an object type, it should be rendered as an object field, not an input field
     if (property.type === 'object') {
       console.log(`Redirecting object type ${key} to renderObjectField`); // nosemgrep: javascript.lang.security.audit.unsafe-formatstring.unsafe-formatstring - Debug logging with controlled internal data
-      return renderObjectField(key, property, path.substring(0, path.lastIndexOf('.')) || '');
+      return renderObjectField(key, property, path.substring(0, path.lastIndexOf('.')) || '') ?? <></>;
     }
 
     let input;
@@ -1648,7 +1648,7 @@ const ConfigBuilder = ({
                       value={versionDescription}
                       onChange={({ detail }) => onDescriptionChange?.(detail.value)}
                       placeholder="Enter a description for this configuration version..."
-                      invalid={versionDescription && versionDescription.length > 200}
+                      invalid={!!versionDescription && versionDescription.length > 200}
                     />
                   </FormField>
 
@@ -1725,7 +1725,7 @@ const ConfigBuilder = ({
                   label: newItemName || '',
                 }}
                 onChange={({ detail }) => {
-                  setNewItemName(detail.selectedOption.value);
+                  setNewItemName(detail.selectedOption.value ?? '');
                   setNameError('');
                 }}
                 options={

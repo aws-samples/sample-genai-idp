@@ -127,7 +127,7 @@ const SchemaConditionalEditor = ({
               selectedOption={
                 schemaTypeOptions.find((opt) => schema.$ref === opt.value || schema.type === opt.value) || schemaTypeOptions[0]
               }
-              onChange={({ detail }) => handleUpdateSchema(key, 'type', detail.selectedOption.value)}
+              onChange={({ detail }) => handleUpdateSchema(key, 'type', detail.selectedOption.value ?? '')}
               options={schemaTypeOptions}
             />
           </FormField>

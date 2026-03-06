@@ -68,7 +68,7 @@ const TestRunner = ({
   // Set default context when test set, version, or numberOfFiles changes
   React.useEffect(() => {
     if (selectedTestSet && selectedVersion) {
-      const testSetName = selectedTestSet.label.split(' - ')[0]; // Extract name without file count
+      const testSetName = (selectedTestSet.label ?? '').split(' - ')[0]; // Extract name without file count
       const versionName = selectedVersion.value; // Use value instead of label to avoid "(Active)"
       const testSetData = testSets.find((ts) => ts.id === selectedTestSet.value);
       const totalFiles = testSetData?.fileCount || 0;
@@ -123,7 +123,7 @@ const TestRunner = ({
     setLoading(true);
     try {
       const input = {
-        testSetId: selectedTestSet.value,
+        testSetId: selectedTestSet.value ?? '',
         ...(context && { context }),
         ...(numberOfFiles.trim() && { numberOfFiles: parseInt(numberOfFiles.trim(), 10) }),
         ...(selectedVersion && { configVersion: selectedVersion.value }),
@@ -287,7 +287,7 @@ const TestRunner = ({
             onChange={({ detail }) => setContext(detail.value)}
             placeholder="Enter context information..."
             rows={2}
-            invalid={context && context.length > 500}
+            invalid={!!context && context.length > 500}
           />
         </FormField>
       </SpaceBetween>

@@ -299,7 +299,7 @@ const DocumentsAgentsLayout = (): React.JSX.Element => {
 
         <AgentJobStatus jobId={jobId} status={jobStatus} error={error} />
 
-        {jobResult && <AgentResultDisplay result={jobResult as string | Record<string, unknown>} query={queryText as string} />}
+        {jobResult != null && <AgentResultDisplay result={jobResult as string | Record<string, unknown>} query={queryText as string} />}
 
         {/* Show agent messages at the bottom when available */}
         {(agentMessages || jobStatus === 'PROCESSING') && (

@@ -115,29 +115,29 @@ const COLUMN_DEFINITIONS = (configuration: Record<string, unknown> | null | unde
     header: 'Token Usage',
     cell: (item: DocumentItem) => (
       <Box fontSize="body-s">
-        {(configuration as { ocr?: { backend?: string } } | null)?.ocr?.backend === 'bedrock' && item.metering?.ocrTokens !== undefined && (
+        {(configuration as { ocr?: { backend?: string } } | null)?.ocr?.backend === 'bedrock' && item.metering?.ocrTokens != null && (
           <span style={{ marginRight: '8px' }}>
-            <strong>OCR:</strong> {item.metering.ocrTokens.toLocaleString()}
+            <strong>OCR:</strong> {Number(item.metering.ocrTokens).toLocaleString()}
           </span>
         )}
-        {item.metering?.classificationTokens !== undefined && (
+        {item.metering?.classificationTokens != null && (
           <span style={{ marginRight: '8px' }}>
-            <strong>Classification:</strong> {item.metering.classificationTokens.toLocaleString()}
+            <strong>Classification:</strong> {Number(item.metering.classificationTokens).toLocaleString()}
           </span>
         )}
-        {item.metering?.extractionTokens !== undefined && (
+        {item.metering?.extractionTokens != null && (
           <span style={{ marginRight: '8px' }}>
-            <strong>Extraction:</strong> {item.metering.extractionTokens.toLocaleString()}
+            <strong>Extraction:</strong> {Number(item.metering.extractionTokens).toLocaleString()}
           </span>
         )}
-        {item.metering?.assessmentTokens !== undefined && (
+        {item.metering?.assessmentTokens != null && (
           <span style={{ marginRight: '8px' }}>
-            <strong>Assessment:</strong> {item.metering.assessmentTokens.toLocaleString()}
+            <strong>Assessment:</strong> {Number(item.metering.assessmentTokens).toLocaleString()}
           </span>
         )}
-        {item.metering?.summarizationTokens !== undefined && Number(item.metering?.summarizationTokens) > 0 && (
+        {item.metering?.summarizationTokens != null && Number(item.metering?.summarizationTokens) > 0 && (
           <span style={{ marginRight: '8px' }}>
-            <strong>Summarization:</strong> {item.metering.summarizationTokens.toLocaleString()}
+            <strong>Summarization:</strong> {Number(item.metering.summarizationTokens).toLocaleString()}
           </span>
         )}
       </Box>

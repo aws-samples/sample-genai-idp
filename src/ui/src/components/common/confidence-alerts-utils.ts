@@ -401,7 +401,7 @@ export const getFieldConfidenceInfo = (
 
   // Case 1: Both confidence and threshold available
   if (hasConfidence && hasThreshold) {
-    const isAboveThreshold = confidence >= confidenceThreshold;
+    const isAboveThreshold = confidence >= confidenceThreshold!;
     return {
       hasConfidenceInfo: true,
       confidence,

@@ -405,12 +405,12 @@ const PagesPanel = ({ pages, documentItem }: PagesPanelProps): React.JSX.Element
 
         return result;
       })
-      .filter((p) => {
-        const include = p && (p.textModified || p.classReset);
-        if (p && !include) {
+      .filter((p): p is NonNullable<typeof p> => {
+        const include = p != null && (p.textModified || p.classReset);
+        if (p != null && !include) {
           logger.warn(`Filtering out page ${p.pageId} - no modifications detected`);
         }
-        return include;
+        return !!include;
       });
 
     logger.info(`Final payload (${payload.length} pages):`, payload);

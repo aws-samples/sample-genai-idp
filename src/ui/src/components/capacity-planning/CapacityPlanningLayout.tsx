@@ -666,7 +666,7 @@ const CapacityPlanningLayout = () => {
           const validation = validateDocumentForCapacityPlanning(doc);
 
           if (!validation.valid) {
-            validationErrors.push(validation.error);
+            validationErrors.push(validation.error ?? 'Unknown validation error');
             console.warn('Document validation failed:', validation.error);
             return null;
           }
@@ -1047,7 +1047,7 @@ const CapacityPlanningLayout = () => {
             description,
           };
         })
-        .filter(Boolean); // Remove null entries
+        .filter((item): item is NonNullable<typeof item> => item !== null); // Remove null entries
     }
 
     // If no classes configured, show a helpful message
@@ -1484,7 +1484,7 @@ const CapacityPlanningLayout = () => {
 
         // Check if API returned success
         if (result.success) {
-          setResults(result);
+          setResults(result as unknown as CapacityResult);
           setHasCalculated(true);
           return; // Exit early on success
         }
@@ -1637,7 +1637,7 @@ const CapacityPlanningLayout = () => {
           const inferenceType = stepMatch ? stepMatch[1] : quota.usedFor || '';
 
           // Clean up model display name
-          const modelDisplayName = quota.modelId ? quota.modelId.split('.').pop().split(':')[0] : '';
+          const modelDisplayName = quota.modelId ? (quota.modelId.split('.').pop() ?? '').split(':')[0] : '';
 
           // Transform category names to spell out abbreviations
           let category = quota.category || 'Bedrock Models';
@@ -2142,8 +2142,8 @@ const CapacityPlanningLayout = () => {
                   width: 220,
                   cell: (item) => (
                     <Select
-                      selectedOption={documentTypeOptions.find((opt) => opt.value === item.type && !opt.disabled) || null}
-                      onChange={({ detail }) => updateDocumentConfig(item.index, 'type', detail.selectedOption.value)}
+                      selectedOption={documentTypeOptions.find((opt) => opt.value === item.type && !opt.disabled) ?? null}
+                      onChange={({ detail }) => updateDocumentConfig(item.index ?? 0, 'type', detail.selectedOption.value ?? '')}
                       options={documentTypeOptions}
                       placeholder="Select document type"
                       expandToViewport
@@ -2163,7 +2163,7 @@ const CapacityPlanningLayout = () => {
                     <Input
                       type="number"
                       value={String(item.avgPages)}
-                      onChange={({ detail }) => updateDocumentConfig(item.index, 'avgPages', detail.value)}
+                      onChange={({ detail }) => updateDocumentConfig(item.index ?? 0, 'avgPages', detail.value)}
                       step={0.1}
                       placeholder="Pages"
                     />
@@ -2187,7 +2187,7 @@ const CapacityPlanningLayout = () => {
                             value={item.ocrTokens !== undefined && item.ocrTokens !== '' ? String(item.ocrTokens) : ''}
                             placeholder="OCR tokens"
                             onChange={({ detail }) =>
-                              updateDocumentConfig(item.index, 'ocrTokens', detail.value === '' ? '' : parseFloat(detail.value))
+                              updateDocumentConfig(item.index ?? 0, 'ocrTokens', detail.value === '' ? '' : parseFloat(detail.value))
                             }
                           />
                         ),
@@ -2212,7 +2212,7 @@ const CapacityPlanningLayout = () => {
                       }
                       placeholder="Classification tokens"
                       onChange={({ detail }) =>
-                        updateDocumentConfig(item.index, 'classificationTokens', detail.value === '' ? '' : parseFloat(detail.value))
+                        updateDocumentConfig(item.index ?? 0, 'classificationTokens', detail.value === '' ? '' : parseFloat(detail.value))
                       }
                     />
                   ),
@@ -2233,7 +2233,7 @@ const CapacityPlanningLayout = () => {
                       value={item.extractionTokens !== undefined && item.extractionTokens !== '' ? String(item.extractionTokens) : ''}
                       placeholder="Extraction tokens"
                       onChange={({ detail }) =>
-                        updateDocumentConfig(item.index, 'extractionTokens', detail.value === '' ? '' : parseFloat(detail.value))
+                        updateDocumentConfig(item.index ?? 0, 'extractionTokens', detail.value === '' ? '' : parseFloat(detail.value))
                       }
                     />
                   ),
@@ -2254,7 +2254,7 @@ const CapacityPlanningLayout = () => {
                       value={item.assessmentTokens !== undefined && item.assessmentTokens !== '' ? String(item.assessmentTokens) : ''}
                       placeholder="Assessment tokens"
                       onChange={({ detail }) =>
-                        updateDocumentConfig(item.index, 'assessmentTokens', detail.value === '' ? '' : parseFloat(detail.value))
+                        updateDocumentConfig(item.index ?? 0, 'assessmentTokens', detail.value === '' ? '' : parseFloat(detail.value))
                       }
                     />
                   ),
@@ -2277,7 +2277,7 @@ const CapacityPlanningLayout = () => {
                       }
                       placeholder="Summarization tokens"
                       onChange={({ detail }) =>
-                        updateDocumentConfig(item.index, 'summarizationTokens', detail.value === '' ? '' : parseFloat(detail.value))
+                        updateDocumentConfig(item.index ?? 0, 'summarizationTokens', detail.value === '' ? '' : parseFloat(detail.value))
                       }
                     />
                   ),
@@ -2289,7 +2289,7 @@ const CapacityPlanningLayout = () => {
                     <Button
                       variant="icon"
                       iconName="close"
-                      onClick={() => removeDocumentConfig(item.index)}
+                      onClick={() => removeDocumentConfig(item.index ?? 0)}
                       ariaLabel="Remove document configuration"
                     />
                   ),
@@ -2476,8 +2476,8 @@ const CapacityPlanningLayout = () => {
                   header: 'Processing Hours',
                   cell: (item) => (
                     <Select
-                      selectedOption={item.hour ? timeSlotOptions.find((opt) => opt.value === item.hour) : null}
-                      onChange={({ detail }) => updateTimeSlot(item.index, 'hour', detail.selectedOption.value)}
+                      selectedOption={item.hour ? timeSlotOptions.find((opt) => opt.value === item.hour) ?? null : null}
+                      onChange={({ detail }) => updateTimeSlot(item.index, 'hour', detail.selectedOption.value ?? '')}
                       options={timeSlotOptions}
                       placeholder="Select processing hour"
                       expandToViewport
@@ -2493,10 +2493,10 @@ const CapacityPlanningLayout = () => {
                         item.documentType && item.documentType !== ''
                           ? scheduleDocumentTypeOptions.find(
                               (opt) => opt.value === item.documentType && !(opt as { disabled?: boolean }).disabled,
-                            )
+                            ) ?? null
                           : null
                       }
-                      onChange={({ detail }) => updateTimeSlot(item.index, 'documentType', detail.selectedOption.value)}
+                      onChange={({ detail }) => updateTimeSlot(item.index, 'documentType', detail.selectedOption.value ?? '')}
                       options={scheduleDocumentTypeOptions}
                       placeholder="Select document type"
                       expandToViewport
@@ -3187,7 +3187,8 @@ const CapacityPlanningLayout = () => {
                             const docType = slot.documentType || 'Other';
                             const docsPerHour = parseInt(String(slot.docsPerHour || 0), 10);
 
-                            if (docsPerHour > 0) {
+                            const hourEntry = hourlyBreakdown[hour];
+                            if (docsPerHour > 0 && hourEntry) {
                               const docConfig = documentConfigs.find((config) => config.type === docType) || {
                                 ocrTokens: 0,
                                 classificationTokens: 0,
@@ -3223,23 +3224,23 @@ const CapacityPlanningLayout = () => {
                               );
 
                               // Accumulate tokens for this hour (multiple slots can add to same hour)
-                              hourlyBreakdown[hour].ocrTokens += slotOcrTokens;
-                              hourlyBreakdown[hour].classificationTokens += slotClassificationTokens;
-                              hourlyBreakdown[hour].extractionTokens += slotExtractionTokens;
-                              hourlyBreakdown[hour].summarizationTokens += slotSummarizationTokens;
-                              hourlyBreakdown[hour].assessmentTokens += slotAssessmentTokens;
-                              hourlyBreakdown[hour].totalTokens +=
+                              hourEntry.ocrTokens += slotOcrTokens;
+                              hourEntry.classificationTokens += slotClassificationTokens;
+                              hourEntry.extractionTokens += slotExtractionTokens;
+                              hourEntry.summarizationTokens += slotSummarizationTokens;
+                              hourEntry.assessmentTokens += slotAssessmentTokens;
+                              hourEntry.totalTokens +=
                                 slotOcrTokens +
                                 slotClassificationTokens +
                                 slotExtractionTokens +
                                 slotSummarizationTokens +
                                 slotAssessmentTokens;
 
-                              console.log(`DEBUG: Hour ${hour} accumulated total: ${hourlyBreakdown[hour].totalTokens}`);
+                              console.log(`DEBUG: Hour ${hour} accumulated total: ${hourEntry.totalTokens}`);
 
                               // Track document types
-                              if (!hourlyBreakdown[hour].documentTypes.includes(docType)) {
-                                hourlyBreakdown[hour].documentTypes.push(docType);
+                              if (hourEntry.documentTypes && !hourEntry.documentTypes.includes(docType)) {
+                                hourEntry.documentTypes.push(docType);
                               }
                             }
                           });

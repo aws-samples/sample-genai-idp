@@ -128,7 +128,7 @@ const ConfigurationVersionsTable = ({
     pagination: { pageSize: 5 },
     sorting: {
       defaultState: {
-        sortingColumn: columnDefinitions.find((col) => col.header === 'Updated'),
+        sortingColumn: columnDefinitions.find((col) => col.header === 'Updated')!,
         isDescending: true,
       },
     },

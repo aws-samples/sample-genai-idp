@@ -105,7 +105,9 @@ const mapDocumentsAttributes = (documents: DocumentApiItem[]): Record<string, un
     const metering = parseMetering(meteringJson);
 
     // Calculate confidence alert count
-    const confidenceAlertCount = getDocumentConfidenceAlertCount(sections);
+    const confidenceAlertCount = getDocumentConfidenceAlertCount(
+      (sections ?? null) as Parameters<typeof getDocumentConfidenceAlertCount>[0],
+    );
 
     // Extract HITL metadata - use HITLTriggered from backend, fallback to status check
     const hitlTriggered = item.HITLTriggered === true || (hitlStatus && hitlStatus !== 'N/A');

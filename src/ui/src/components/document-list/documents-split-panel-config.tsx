@@ -106,7 +106,8 @@ const getPanelContentComparison = ({ items, getDocumentDetailsFromIds }: PanelCo
     const data: Record<string, unknown> = { comparisonType: keyHeaderMap[key] };
 
     items.forEach((item) => {
-      data[item.id] = item[key];
+      const itemId = item.id ?? item.objectKey;
+      data[itemId] = item[key];
     });
 
     return data;
@@ -118,11 +119,14 @@ const getPanelContentComparison = ({ items, getDocumentDetailsFromIds }: PanelCo
       header: '',
       cell: ({ comparisonType }: Record<string, unknown>) => <b>{comparisonType as string}</b>,
     },
-    ...items.map(({ id }) => ({
-      id,
-      header: id,
-      cell: (item: Record<string, unknown>) => (Array.isArray(item[id]) ? (item[id] as string[]).join(', ') : String(item[id] ?? '')),
-    })),
+    ...items.map(({ id, objectKey }) => {
+      const columnId = id ?? objectKey;
+      return {
+        id: columnId,
+        header: columnId,
+        cell: (item: Record<string, unknown>) => (Array.isArray(item[columnId]) ? (item[columnId] as string[]).join(', ') : String(item[columnId] ?? '')),
+      };
+    }),
   ];
 
   return {

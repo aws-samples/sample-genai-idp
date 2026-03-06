@@ -200,7 +200,7 @@ const CorrectionDeltaPanel = ({
         <SpaceBetween direction="horizontal" size="xs">
           <Button
             variant="primary"
-            onClick={onSaveBaselineCorrections}
+            onClick={onSaveBaselineCorrections ?? undefined}
             disabled={baselineCorrections.length === 0 || isSaving}
             loading={isSaving}
           >
@@ -208,7 +208,7 @@ const CorrectionDeltaPanel = ({
           </Button>
           <Button
             variant="normal"
-            onClick={onSavePredictionCorrections}
+            onClick={onSavePredictionCorrections ?? undefined}
             disabled={predictionCorrections.length === 0 || isSaving}
             loading={isSaving}
           >

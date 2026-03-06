@@ -88,7 +88,7 @@ const TextEditorView = ({ fileContent, onChange, isReadOnly, fileType }: TextEdi
 
     // Observe the editor's container
     const container = editor.getContainerDomNode();
-    if (container) {
+    if (container?.parentElement) {
       resizeObserver.observe(container.parentElement);
     }
   };
@@ -104,7 +104,7 @@ const TextEditorView = ({ fileContent, onChange, isReadOnly, fileType }: TextEdi
         <Editor
           height="100%"
           defaultLanguage={fileType === 'json' ? 'json' : fileType}
-          value={fileType === 'json' && typeof fileContent === 'string' ? JSON.stringify(JSON.parse(fileContent), null, 2) : fileContent}
+          value={fileType === 'json' && typeof fileContent === 'string' ? JSON.stringify(JSON.parse(fileContent), null, 2) : fileContent ?? undefined}
           onChange={onChange}
           onMount={handleEditorDidMount}
           options={{
@@ -159,17 +159,17 @@ const FileEditorView = ({
   const handleTextEditorChange = (value: string | undefined) => {
     if (fileType === 'json') {
       try {
-        const parsed = JSON.parse(value);
+        const parsed = JSON.parse(value ?? '');
         setJsonData(parsed);
         setIsValid(true);
-        if (onChange) {
+        if (onChange && value !== undefined) {
           onChange(value);
         }
       } catch (error) {
         setIsValid(false);
         logger.error('Invalid JSON:', error);
       }
-    } else if (onChange) {
+    } else if (onChange && value !== undefined) {
       onChange(value);
     }
   };
@@ -267,11 +267,15 @@ const MarkdownJsonViewer = ({
 
       const response = await client.graphql({
         query: getFileContents,
-        variables: { s3Uri: uriToFetch },
+        variables: { s3Uri: uriToFetch as string },
       });
 
       // Handle the updated response structure
       const result = response.data.getFileContents;
+      if (!result) {
+        setError('No content returned from server.');
+        return;
+      }
       const fetchedContent = result.content;
       logger.debug('Received content type:', result.contentType);
       logger.debug('Binary content?', result.isBinary);
@@ -279,9 +283,9 @@ const MarkdownJsonViewer = ({
         setError('This file contains binary content that cannot be viewed in the Markdown viewer.');
         return;
       }
-      logger.debug('Received content:', `${fetchedContent.substring(0, 100)}...`);
-      setFileContent(fetchedContent);
-      setLoadedUri(uriToFetch);
+      logger.debug('Received content:', `${fetchedContent?.substring(0, 100)}...`);
+      setFileContent(fetchedContent ?? null);
+      setLoadedUri(uriToFetch as string);
     } catch (err) {
       logger.error('Error fetching content:', err);
       setError(`Failed to load ${fileType} content. Please try again.`);
@@ -312,7 +316,7 @@ const MarkdownJsonViewer = ({
       }
 
       const [, bucket, fullPath] = s3UriMatch;
-      const fileName = fullPath.split('/').pop();
+      const fileName = fullPath.split('/').pop() ?? fullPath;
       const prefix = fullPath.substring(0, fullPath.lastIndexOf('/'));
 
       // Get presigned URL
@@ -345,7 +349,7 @@ const MarkdownJsonViewer = ({
       });
 
       // Create a Blob from the JSON content and append it as a file
-      const blob = new Blob([editedContent], { type: 'application/json' });
+      const blob = new Blob([editedContent ?? ''], { type: 'application/json' });
       formData.append('file', blob, fileName);
 
       // Upload to S3

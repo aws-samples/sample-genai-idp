@@ -102,7 +102,7 @@ const JSONEditorTab = ({
 
       // If only one section selected, show just that section's content
       if (selectedValues.length === 1) {
-        const section = selectedValues[0];
+        const section = selectedValues[0] ?? '';
         // Handle both naming conventions
         const sectionData =
           data[section] ||
@@ -142,7 +142,7 @@ const JSONEditorTab = ({
 
       // If only one section selected, show just that section's content
       if (selectedValues.length === 1) {
-        const section = selectedValues[0];
+        const section = selectedValues[0] ?? '';
         const sectionData =
           data[section] ||
           (section === 'inference_result' ? data.inferenceResult : null) ||

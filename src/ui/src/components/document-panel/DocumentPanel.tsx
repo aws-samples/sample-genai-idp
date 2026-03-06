@@ -127,12 +127,12 @@ interface DocumentPanelProps {
 
 interface TroubleshootJobData {
   jobId: string;
-  status: string;
-  result: unknown;
+  status: string | null;
+  result: string | Record<string, unknown> | null;
   agentMessages: unknown;
   error: string | null;
   timestamp: number;
-  documentKey: string;
+  documentKey: string | undefined;
 }
 
 const client = generateClient();
@@ -677,7 +677,7 @@ export const DocumentPanel = ({
   // Create enhanced item with configuration
   const enhancedItem = {
     ...localItem,
-    mergedConfig,
+    mergedConfig: mergedConfig ?? undefined,
   };
 
   return (

@@ -84,13 +84,14 @@ const TestSets = (): React.JSX.Element => {
 
       // Upsert: merge backend data with existing UI state, deduplicating by id
       setTestSets((prevTestSets) => {
-        const backendIds = new Set(backendTestSets.map((ts) => ts.id));
+        const nonNullBackendTestSets = backendTestSets.filter((ts): ts is NonNullable<typeof ts> => ts !== null);
+        const backendIds = new Set(nonNullBackendTestSets.map((ts) => ts.id));
 
         // Keep UI test sets that don't exist in backend (active processing)
         const uiOnlyTestSets = prevTestSets.filter((ts) => !backendIds.has(ts.id) && ts.status !== 'COMPLETED' && ts.status !== 'FAILED');
 
         // Combine backend test sets (always win) with UI-only active test sets
-        return [...backendTestSets, ...uiOnlyTestSets];
+        return [...nonNullBackendTestSets, ...uiOnlyTestSets];
       });
     } catch (err) {
       console.error('TestSets: Failed to load test sets:', err);
@@ -157,12 +158,12 @@ const TestSets = (): React.JSX.Element => {
       const result = await client.graphql({
         query: listBucketFiles,
         variables: {
-          bucketType: selectedBucket.value,
+          bucketType: selectedBucket.value ?? '',
           filePattern: filePattern.trim(),
         },
       });
 
-      const files = result.data.listBucketFiles || [];
+      const files = (result.data.listBucketFiles || []).filter((f): f is string => f !== null);
       setMatchingFiles(files);
       setFileCount(files.length);
       setShowFilesModal(true);
@@ -237,7 +238,7 @@ const TestSets = (): React.JSX.Element => {
           name: newTestSetName.trim(),
           description: newTestSetDescription.trim(),
           filePattern: filePattern.trim(),
-          bucketType: selectedBucket.value,
+          bucketType: selectedBucket.value ?? '',
           fileCount,
         },
       });
@@ -415,7 +416,7 @@ const TestSets = (): React.JSX.Element => {
     setSuccessMessage('');
     try {
       const result = await client.graphql({ query: getTestSets });
-      setTestSets(result.data.getTestSets || []);
+      setTestSets((result.data.getTestSets || []).filter((ts): ts is NonNullable<typeof ts> => ts !== null));
     } catch (err) {
       console.error('Error refreshing test sets:', err);
       const errorMessage = err?.message || err?.errors?.[0]?.message || JSON.stringify(err) || 'Unknown error';
@@ -643,7 +644,7 @@ const TestSets = (): React.JSX.Element => {
                 setWarningMessage('');
               }}
               placeholder="e.g., lending-package-v1"
-              invalid={newTestSetName && !validateTestSetName(newTestSetName)}
+              invalid={!!newTestSetName && !validateTestSetName(newTestSetName)}
             />
           </FormField>
 
@@ -658,7 +659,7 @@ const TestSets = (): React.JSX.Element => {
               value={newTestSetDescription}
               onChange={({ detail }) => setNewTestSetDescription(detail.value)}
               placeholder="Test set description"
-              invalid={newTestSetDescription && !validateDescription(newTestSetDescription)}
+              invalid={!!newTestSetDescription && !validateDescription(newTestSetDescription)}
             />
           </FormField>
 
@@ -825,7 +826,7 @@ const TestSets = (): React.JSX.Element => {
               value={newTestSetDescription}
               onChange={({ detail }) => setNewTestSetDescription(detail.value)}
               placeholder="Test set description"
-              invalid={newTestSetDescription && !validateDescription(newTestSetDescription)}
+              invalid={!!newTestSetDescription && !validateDescription(newTestSetDescription)}
             />
           </FormField>
 
@@ -876,7 +877,7 @@ const TestSets = (): React.JSX.Element => {
               type="file"
               accept=".zip"
               onChange={async (e) => {
-                const file = e.target.files[0];
+                const file = e.target.files?.[0];
                 if (file) {
                   setZipFile(file);
 

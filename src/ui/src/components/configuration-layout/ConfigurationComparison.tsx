@@ -139,7 +139,7 @@ const ConfigurationComparison = ({ versions, configs }: ConfigurationComparisonP
         if (!firstValueSet) {
           firstValue = strValue;
           firstValueSet = true;
-        } else if (!areStrValuesEqual(firstValue, strValue)) {
+        } else if (!areStrValuesEqual(firstValue ?? '', strValue)) {
           hasDifferences = true;
         }
       });

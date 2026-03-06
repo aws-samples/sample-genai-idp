@@ -276,7 +276,7 @@ const ActionsCell = ({
   return (
     <SpaceBetween direction="horizontal" size="xs">
       <FileViewer
-        fileUri={item.OutputJSONUri}
+        fileUri={item.OutputJSONUri ?? ''}
         fileType="json"
         buttonText={isEditModeEnabled ? 'Edit Data' : 'View Data'}
         sectionData={{ ...item, pages, documentItem, mergedConfig, isSectionCompleted, isReviewerOnly }}
@@ -339,7 +339,7 @@ const EditableClassCell = ({
   <FormField errorText={validationErrors[item.Id]?.find((err) => err.includes('class'))}>
     <Select
       selectedOption={getAvailableClasses().find((option) => option.value === item.Class) || null}
-      onChange={({ detail }) => updateSection(item.Id, 'Class', detail.selectedOption.value)}
+      onChange={({ detail }) => updateSection(item.Id, 'Class', detail.selectedOption.value ?? '')}
       options={getAvailableClasses()}
       placeholder="Select class/type"
       invalid={validationErrors[item.Id]?.some((err) => err.includes('class'))}
@@ -451,7 +451,7 @@ const EditableActionsCell = ({
   return (
     <SpaceBetween direction="horizontal" size="xs">
       <FileViewer
-        fileUri={item.OutputJSONUri}
+        fileUri={item.OutputJSONUri ?? ''}
         fileType="json"
         buttonText="Edit Data"
         sectionData={{ ...item, pages, documentItem, mergedConfig, isSectionCompleted: false, isReviewerOnly: false }}
@@ -613,7 +613,7 @@ const createPattern1EditColumnDefinitions = (
         return (
           <SpaceBetween direction="horizontal" size="xs">
             <FileViewer
-              fileUri={item.OutputJSONUri}
+              fileUri={item.OutputJSONUri ?? ''}
               fileType="json"
               buttonText="Edit Data"
               sectionData={{
@@ -720,7 +720,7 @@ const createEditColumnDefinitions = (
   },
 ];
 
-const SectionsPanel = ({ sections, pages, documentItem, mergedConfig, onDocumentUpdate }: SectionsPanelProps): React.JSX.Element => {
+const SectionsPanel = ({ sections, pages = [], documentItem, mergedConfig, onDocumentUpdate }: SectionsPanelProps): React.JSX.Element => {
   const [isEditMode, setIsEditMode] = useState(false);
   const [editedSections, setEditedSections] = useState<SectionItem[]>([]);
   const [validationErrors, setValidationErrors] = useState<Record<string, string[]>>({});
@@ -893,7 +893,7 @@ const SectionsPanel = ({ sections, pages, documentItem, mergedConfig, onDocument
         }
         return null;
       })
-      .filter((num) => num !== null && !Number.isNaN(num));
+      .filter((num): num is number => num !== null && !Number.isNaN(num));
 
     // Determine the format to use based on existing sections
     const hasSimpleFormat = allSections.some((section) => /^\d+$/.test(section.Id));

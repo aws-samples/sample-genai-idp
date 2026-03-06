@@ -50,7 +50,7 @@ const GenAIIDPLayout = ({ children }: GenAIIDPLayoutProps): React.JSX.Element =>
     // default to 2 hours - half of one (4hr) shard period
     let periods = 0.5;
     try {
-      const periodsFromStorage = Math.abs(JSON.parse(localStorage.getItem(PERIODS_TO_LOAD_STORAGE_KEY)));
+      const periodsFromStorage = Math.abs(JSON.parse(localStorage.getItem(PERIODS_TO_LOAD_STORAGE_KEY) ?? '0'));
       // prettier-ignore
       if (
         !Number.isFinite(periodsFromStorage)

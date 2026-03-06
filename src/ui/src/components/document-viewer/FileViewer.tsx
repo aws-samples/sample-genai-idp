@@ -54,7 +54,7 @@ const detectFileType = (objectKey: string, contentType: string | null): string =
   }
   // Fallback to checking file extension
   if (objectKey) {
-    const extension = objectKey.split('.').pop()?.toLowerCase();
+    const extension = objectKey.split('.').pop()?.toLowerCase() ?? '';
     if (extension === 'pdf') return 'pdf';
     if (['jpg', 'jpeg', 'png', 'gif', 'svg', 'webp'].includes(extension)) return 'image';
     if (extension === 'html' || extension === 'htm') return 'html';

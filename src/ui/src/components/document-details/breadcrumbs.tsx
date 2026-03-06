@@ -10,7 +10,7 @@ import { documentListBreadcrumbItems } from '../document-list/breadcrumbs';
 
 const Breadcrumbs = (): React.JSX.Element => {
   const { objectKey } = useParams();
-  const decodedDocumentId = decodeURIComponent(objectKey);
+  const decodedDocumentId = decodeURIComponent(objectKey ?? '');
   // Always ensure the objectKey in the URL is properly encoded to handle slashes correctly
   const encodedObjectKey = encodeURIComponent(decodedDocumentId);
   const documentDetailsBreadcrumbItems = [
