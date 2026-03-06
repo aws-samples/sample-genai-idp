@@ -62,6 +62,8 @@ export interface Document {
   ListSK?: string;
   PK?: string;
   SK?: string;
+  DocumentClass?: string;
+  pageCount?: number;
   // UI-computed fields from map-document-attributes.ts
   uniqueId?: string;
   hitlTriggered?: boolean;

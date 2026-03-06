@@ -509,14 +509,14 @@ const CapacityPlanningLayout = () => {
     });
 
     // Also check DocumentClass field
-    if ((doc as unknown as Record<string, unknown>).DocumentClass) {
-      uniqueClasses.add((doc as unknown as Record<string, unknown>).DocumentClass as string);
+    if (doc.DocumentClass) {
+      uniqueClasses.add(doc.DocumentClass);
     }
 
     // Add diagnostic logging
     console.log(`🔍 Validating document: ${doc.ObjectKey}`);
     console.log(`  - Sections: ${sections.length}`);
-    console.log(`  - DocumentClass field: ${(doc as unknown as Record<string, unknown>).DocumentClass || 'none'}`);
+    console.log(`  - DocumentClass field: ${doc.DocumentClass || 'none'}`);
     console.log(
       `  - Classes from Sections: ${
         sections
@@ -688,8 +688,8 @@ const CapacityPlanningLayout = () => {
             if (doc.PageCount) {
               extractedData.avgPages = Number(doc.PageCount) || 0;
               console.log(`📄 Extracted page count from doc.PageCount: ${extractedData.avgPages} pages`);
-            } else if ((doc as unknown as Record<string, unknown>).pageCount) {
-              extractedData.avgPages = Number((doc as unknown as Record<string, unknown>).pageCount) || 0;
+            } else if (doc.pageCount) {
+              extractedData.avgPages = Number(doc.pageCount) || 0;
               console.log(`📄 Extracted page count from doc.pageCount: ${extractedData.avgPages} pages`);
             } else if (doc.Pages) {
               extractedData.avgPages = Number(doc.Pages) || 0;
