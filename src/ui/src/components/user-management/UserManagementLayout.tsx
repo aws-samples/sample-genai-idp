@@ -113,7 +113,10 @@ const UserManagementLayout = (): React.JSX.Element => {
         setUsers(usersList);
       } catch (err) {
         logger.error('Failed to load users:', err);
-        const errorMessage = err.errors?.[0]?.message || err.message || 'Unknown error';
+        const errorMessage =
+          (err as { errors?: { message?: string }[]; message?: string }).errors?.[0]?.message ||
+          (err as { message?: string }).message ||
+          'Unknown error';
         setError(`Failed to load users: ${errorMessage}`);
       } finally {
         setLoading(false);
@@ -161,7 +164,10 @@ const UserManagementLayout = (): React.JSX.Element => {
     } catch (err) {
       logger.error('Failed to create user:', err);
       // Extract error message from GraphQL error structure
-      const errorMessage = err.errors?.[0]?.message || err.message || 'Unknown error';
+      const errorMessage =
+        (err as { errors?: { message?: string }[]; message?: string }).errors?.[0]?.message ||
+        (err as { message?: string }).message ||
+        'Unknown error';
       setError(`Failed to create user: ${errorMessage}`);
     } finally {
       setLoading(false);
@@ -195,7 +201,10 @@ const UserManagementLayout = (): React.JSX.Element => {
       await loadUsers();
     } catch (err) {
       logger.error('Failed to delete user:', err);
-      const errorMessage = err.errors?.[0]?.message || err.message || 'Unknown error';
+      const errorMessage =
+        (err as { errors?: { message?: string }[]; message?: string }).errors?.[0]?.message ||
+        (err as { message?: string }).message ||
+        'Unknown error';
       setError(`Failed to delete user: ${errorMessage}`);
     } finally {
       setLoading(false);
@@ -260,7 +269,9 @@ const UserManagementLayout = (): React.JSX.Element => {
     {
       id: 'status',
       header: 'Status',
-      cell: (item: User) => <StatusIndicator type={item.status === 'active' ? 'success' : 'stopped'}>{item.status || 'active'}</StatusIndicator>,
+      cell: (item: User) => (
+        <StatusIndicator type={item.status === 'active' ? 'success' : 'stopped'}>{item.status || 'active'}</StatusIndicator>
+      ),
       sortingField: 'status',
     },
     {

@@ -645,7 +645,8 @@ const ConfigurationLayout = (): React.JSX.Element => {
                 }
               });
               (processedSchema.properties[key].items as Record<string, unknown>).properties = itemProps;
-              (processedSchema.properties[key].items as Record<string, unknown>).required = (items as Record<string, unknown>).required || [];
+              (processedSchema.properties[key].items as Record<string, unknown>).required =
+                (items as Record<string, unknown>).required || [];
             }
           } else if (prop.type === 'number' || prop.type === 'integer') {
             // For number types, we'll use a more flexible approach
@@ -815,12 +816,22 @@ const ConfigurationLayout = (): React.JSX.Element => {
                             }
 
                             // Only check constraints if it's a valid number
-                            if (isValidNumber && numValue !== undefined && itemProp.minimum !== undefined && numValue < Number(itemProp.minimum)) {
+                            if (
+                              isValidNumber &&
+                              numValue !== undefined &&
+                              itemProp.minimum !== undefined &&
+                              numValue < Number(itemProp.minimum)
+                            ) {
                               errors.push({
                                 message: `Field '${itemKey}' in item ${index} of '${key}' must be ` + `at least ${itemProp.minimum}`,
                               });
                             }
-                            if (isValidNumber && numValue !== undefined && itemProp.maximum !== undefined && numValue > Number(itemProp.maximum)) {
+                            if (
+                              isValidNumber &&
+                              numValue !== undefined &&
+                              itemProp.maximum !== undefined &&
+                              numValue > Number(itemProp.maximum)
+                            ) {
                               errors.push({
                                 message: `Field '${itemKey}' in item ${index} of '${key}' must be ` + `at most ${itemProp.maximum}`,
                               });
@@ -1043,7 +1054,11 @@ const ConfigurationLayout = (): React.JSX.Element => {
       const customConfigToSave: Record<string, unknown> = {};
 
       // Helper function to compare values - returns a new object
-      const compareWithDefault = (current: Record<string, unknown>, defaultObj: Record<string, unknown>, path = ''): Record<string, unknown> => {
+      const compareWithDefault = (
+        current: Record<string, unknown>,
+        defaultObj: Record<string, unknown>,
+        path = '',
+      ): Record<string, unknown> => {
         // Add debugging for granular assessment
         if (path.includes('granular')) {
           console.log(`DEBUG: compareWithDefault called with path '${path}':`, {
@@ -1146,7 +1161,11 @@ const ConfigurationLayout = (): React.JSX.Element => {
             }
             // If key exists in both, compare recursively
             else if (key in defaultObj && key in current) {
-              const nestedResults = compareWithDefault(current[key] as Record<string, unknown>, defaultObj[key] as Record<string, unknown>, newPath);
+              const nestedResults = compareWithDefault(
+                current[key] as Record<string, unknown>,
+                defaultObj[key] as Record<string, unknown>,
+                newPath,
+              );
 
               // Add debugging for granular assessment
               if (newPath.includes('granular')) {
@@ -1244,9 +1263,9 @@ const ConfigurationLayout = (): React.JSX.Element => {
                 const arrayPath = path.split('[')[0];
                 if (!Object.prototype.hasOwnProperty.call(newResult, arrayPath)) {
                   // Find the array in formValues
-                  const arrayValue = path.split('.').reduce((acc, part) => {
+                  const arrayValue = path.split('.').reduce<Record<string, unknown> | undefined>((acc, part) => {
                     if (!acc) return undefined;
-                    return acc[part.replace(/\[\d+\]$/, '')];
+                    return acc[part.replace(/\[\d+\]$/, '')] as Record<string, unknown> | undefined;
                   }, formValues);
 
                   if (arrayValue) {
@@ -2104,7 +2123,12 @@ const ConfigurationLayout = (): React.JSX.Element => {
               >
                 Go Back
               </Button>
-              <Button variant="primary" onClick={() => { if (selectedLibraryConfig) importFromLibrary(selectedLibraryConfig); }}>
+              <Button
+                variant="primary"
+                onClick={() => {
+                  if (selectedLibraryConfig) importFromLibrary(selectedLibraryConfig);
+                }}
+              >
                 Import This Configuration
               </Button>
             </SpaceBetween>

@@ -176,7 +176,15 @@ const CapacityPlanningLayout = () => {
   const configuration = configurationUntyped as Configuration | null;
   const { versions, getVersionOptions } = useConfigurationVersions();
   const { settings: deploymentSettings } = useSettingsContext();
-  const { documents, isDocumentsListLoading, setIsDocumentsListLoading, periodsToLoad, setPeriodsToLoad, customDateRange, setCustomDateRange } = useDocumentsContext();
+  const {
+    documents,
+    isDocumentsListLoading,
+    setIsDocumentsListLoading,
+    periodsToLoad,
+    setPeriodsToLoad,
+    customDateRange,
+    setCustomDateRange,
+  } = useDocumentsContext();
 
   const [selectedConfigVersion, setSelectedConfigVersion] = useState<SelectOption | null>(null);
   const [manualPattern, setManualPattern] = useState<string | null>(null);
@@ -689,7 +697,9 @@ const CapacityPlanningLayout = () => {
             } else if (doc.Sections && doc.Sections.length > 0) {
               // Try to get page count from sections
               const maxEndPage = Math.max(
-                ...(doc.Sections as unknown as Array<Record<string, unknown>>).map((s) => (s.EndPage as number) || (s.endPage as number) || 0),
+                ...(doc.Sections as unknown as Array<Record<string, unknown>>).map(
+                  (s) => (s.EndPage as number) || (s.endPage as number) || 0,
+                ),
               );
               if (maxEndPage > 0) {
                 extractedData.avgPages = maxEndPage;

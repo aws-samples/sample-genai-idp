@@ -44,15 +44,14 @@ interface CustomLinkProps {
 }
 
 const CustomLink = ({ href, children }: CustomLinkProps): React.JSX.Element => {
-  const handleClick = (e: CustomEvent): void => {
-    e.preventDefault();
+  const handleClick = (): void => {
     // Handle the link click here
     console.log('Link clicked:', href);
     // You can add your custom navigation logic here
   };
 
   return (
-    <Link href={`#${DOCUMENTS_PATH}/${href}`} onClick={handleClick as unknown as (event: CustomEvent) => void}>
+    <Link href={`#${DOCUMENTS_PATH}/${href}`} onClick={handleClick}>
       {children}
     </Link>
   );

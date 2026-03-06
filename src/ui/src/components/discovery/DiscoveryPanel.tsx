@@ -283,7 +283,7 @@ const DiscoveryPanel = (): React.JSX.Element => {
         setError(null);
         setIsValidatingJson(false);
       } catch (jsonError) {
-        const friendlyError = getJsonValidationError(jsonError);
+        const friendlyError = getJsonValidationError(jsonError as { message?: string; toString: () => string });
         setError(`Invalid JSON format in ground truth file: ${friendlyError}`);
         setGroundTruthFile(null);
         setIsValidatingJson(false);

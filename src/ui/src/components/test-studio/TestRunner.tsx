@@ -88,7 +88,7 @@ const TestRunner = ({
       setTestSets(testSetsData);
     } catch (err) {
       console.error('TestRunner: Failed to load test sets:', err);
-      setError(`Failed to load test sets: ${err.message}`);
+      setError(`Failed to load test sets: ${err instanceof Error ? err.message : String(err)}`);
     }
   };
 
@@ -152,16 +152,23 @@ const TestRunner = ({
       setError('');
     } catch (err) {
       logger.error('Failed to start test run:', err);
+      const errObj = err as { message?: string; errors?: { message: string }[]; networkError?: unknown; graphQLErrors?: unknown };
       console.error('TestRunner: Error details:', {
-        message: err.message,
-        errors: err.errors,
-        networkError: err.networkError,
-        graphQLErrors: err.graphQLErrors,
+        message: errObj.message,
+        errors: errObj.errors,
+        networkError: errObj.networkError,
+        graphQLErrors: errObj.graphQLErrors,
       });
 
       let errorMessage = 'Failed to start test run';
-      if ((err as Record<string, unknown>).errors && Array.isArray((err as Record<string, unknown>).errors) && ((err as Record<string, unknown>).errors as Array<{ message: string }>).length > 0) {
-        errorMessage = ((err as Record<string, unknown>).errors as Array<{ message: string }>).map((e: { message: string }) => e.message).join('; ');
+      if (
+        (err as Record<string, unknown>).errors &&
+        Array.isArray((err as Record<string, unknown>).errors) &&
+        ((err as Record<string, unknown>).errors as Array<{ message: string }>).length > 0
+      ) {
+        errorMessage = ((err as Record<string, unknown>).errors as Array<{ message: string }>)
+          .map((e: { message: string }) => e.message)
+          .join('; ');
       } else if ((err as Error).message) {
         errorMessage = (err as Error).message;
       }

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import React from 'react';
 import { Table, ColumnLayout, Box, Link } from '@cloudscape-design/components';
+import type { TableProps } from '@cloudscape-design/components';
 import { SELECTION_LABELS } from './documents-table-config';
 import { DOCUMENTS_PATH } from '../../routes/constants';
 
@@ -124,7 +125,8 @@ const getPanelContentComparison = ({ items, getDocumentDetailsFromIds }: PanelCo
       return {
         id: columnId,
         header: columnId,
-        cell: (item: Record<string, unknown>) => (Array.isArray(item[columnId]) ? (item[columnId] as string[]).join(', ') : String(item[columnId] ?? '')),
+        cell: (item: Record<string, unknown>) =>
+          Array.isArray(item[columnId]) ? (item[columnId] as string[]).join(', ') : String(item[columnId] ?? ''),
       };
     }),
   ];
@@ -133,8 +135,8 @@ const getPanelContentComparison = ({ items, getDocumentDetailsFromIds }: PanelCo
     header: `${items.length} documents selected`,
     body: (
       <Box padding={{ bottom: 'l' }}>
-        <Table
-          ariaLabels={SELECTION_LABELS}
+        <Table<Record<string, unknown>>
+          ariaLabels={SELECTION_LABELS as unknown as TableProps.AriaLabels<Record<string, unknown>>}
           header={<h2>Compare details</h2>}
           items={transformedData}
           columnDefinitions={columnDefinitions}

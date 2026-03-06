@@ -26,7 +26,7 @@ interface MappedDocument {
 
 interface AbortableItem {
   objectKey: string;
-  [key: string]: unknown;
+  objectStatus?: string;
 }
 
 const logger = new ConsoleLogger('documentDetails');

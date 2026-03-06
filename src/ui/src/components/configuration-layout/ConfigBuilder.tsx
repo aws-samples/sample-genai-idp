@@ -1153,9 +1153,16 @@ const ConfigBuilder = ({
                         const distributeFieldsToColumns = (
                           fields: { propKey: string; propSchema: SchemaProperty }[],
                           numColumns: number,
-                        ): { columns: { propKey: string; propSchema: SchemaProperty }[][]; descriptionField: { propKey: string; propSchema: SchemaProperty } | undefined; actualColumnCount: number } => {
+                        ): {
+                          columns: { propKey: string; propSchema: SchemaProperty }[][];
+                          descriptionField: { propKey: string; propSchema: SchemaProperty } | undefined;
+                          actualColumnCount: number;
+                        } => {
                           // Create columns array
-                          const columns: { propKey: string; propSchema: SchemaProperty }[][] = Array.from({ length: numColumns }, (): { propKey: string; propSchema: SchemaProperty }[] => []);
+                          const columns: { propKey: string; propSchema: SchemaProperty }[][] = Array.from(
+                            { length: numColumns },
+                            (): { propKey: string; propSchema: SchemaProperty }[] => [],
+                          );
 
                           // Special handling for description field - it should span full width if it exists
                           const descriptionField = fields.find(({ propKey }) => propKey === 'description');
@@ -1342,7 +1349,11 @@ const ConfigBuilder = ({
                 setShowNameAsDropdown(hasEnumForName);
 
                 // If it's a dropdown with enum values, set the default value to the first option
-                if (hasEnumForName && propertyDefinition?.items?.properties?.name?.enum && propertyDefinition.items.properties.name.enum.length > 0) {
+                if (
+                  hasEnumForName &&
+                  propertyDefinition?.items?.properties?.name?.enum &&
+                  propertyDefinition.items.properties.name.enum.length > 0
+                ) {
                   setNewItemName(propertyDefinition.items.properties.name.enum[0]);
                 }
               }}

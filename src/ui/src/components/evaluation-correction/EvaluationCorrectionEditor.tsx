@@ -25,9 +25,9 @@ interface Correction {
 }
 
 interface FieldGeometry {
-  boundingBox: Record<string, number>;
-  page: number;
-  vertices?: Record<string, number>[];
+  boundingBox?: Record<string, number>;
+  page?: number | string;
+  vertices?: unknown;
 }
 
 interface SectionData {
@@ -219,7 +219,7 @@ const EvaluationCorrectionEditor = ({
   }, []);
 
   // Remove a correction
-  const handleRemoveCorrection = useCallback((correction: Correction) => {
+  const handleRemoveCorrection = useCallback((correction: { pathString: string; source: string }) => {
     setCorrections((prev) => prev.filter((c) => !(c.pathString === correction.pathString && c.source === correction.source)));
   }, []);
 

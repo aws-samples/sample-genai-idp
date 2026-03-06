@@ -151,17 +151,19 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
               await new Promise((resolve) => setTimeout(resolve, 500)); // Brief pause to show 100%
               break;
             } catch (error) {
+              const err = error as { message?: string; code?: string; name?: string; errors?: { errorType?: string; message?: string }[] };
               const isTimeout =
-                error.message?.toLowerCase().includes('timeout') ||
-                error.code === 'TIMEOUT' ||
-                error.message?.includes('Request failed with status code 504') ||
-                error.name === 'TimeoutError' ||
-                error.code === 'NetworkError' ||
-                error.errors?.some(
-                  (err: { errorType?: string; message?: string }) => err.errorType === 'Lambda:ExecutionTimeoutException' || err.message?.toLowerCase().includes('timeout'),
+                err.message?.toLowerCase().includes('timeout') ||
+                err.code === 'TIMEOUT' ||
+                err.message?.includes('Request failed with status code 504') ||
+                err.name === 'TimeoutError' ||
+                err.code === 'NetworkError' ||
+                err.errors?.some(
+                  (e: { errorType?: string; message?: string }) =>
+                    e.errorType === 'Lambda:ExecutionTimeoutException' || e.message?.toLowerCase().includes('timeout'),
                 );
               if (isTimeout && attempt < maxRetries) {
-                console.log(`compareTestRuns attempt ${attempt} failed, retrying...`, error.message);
+                console.log(`compareTestRuns attempt ${attempt} failed, retrying...`, err.message);
                 attempt++;
 
                 // Animate progress during 5-second wait
@@ -197,9 +199,10 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
           // Parse metrics if it's a JSON string
           const parsedData: ComparisonData = {
             configs: (compareData?.configs ?? undefined) as ComparisonData['configs'],
-            metrics: typeof compareData?.metrics === 'string'
-              ? parseComparisonMetrics(compareData.metrics) as Record<string, Record<string, unknown>>
-              : compareData?.metrics as Record<string, Record<string, unknown>> | undefined,
+            metrics:
+              typeof compareData?.metrics === 'string'
+                ? (parseComparisonMetrics(compareData.metrics) as Record<string, Record<string, unknown>>)
+                : (compareData?.metrics as Record<string, Record<string, unknown>> | undefined),
           };
 
           setComparisonData(parsedData);
@@ -207,7 +210,9 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
           console.error('Error comparing test runs:', error);
           const typedError = error as { errors?: Array<{ message: string }>; message?: string };
           const errorMessage =
-            typedError.errors?.length && typedError.errors.length > 0 ? typedError.errors.map((e: { message: string }) => e.message).join('; ') : typedError.message || 'Error comparing test runs';
+            typedError.errors?.length && typedError.errors.length > 0
+              ? typedError.errors.map((e: { message: string }) => e.message).join('; ')
+              : typedError.message || 'Error comparing test runs';
           setComparisonData({ error: errorMessage });
         } finally {
           setComparing(false);
@@ -1111,7 +1116,12 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
                     preferences={<div />}
                     items={mainItems}
                     columnDefinitions={[
-                      { id: 'metric', header: 'Metric', cell: (item: Record<string, unknown>) => item.metric as React.ReactNode, width: 400 },
+                      {
+                        id: 'metric',
+                        header: 'Metric',
+                        cell: (item: Record<string, unknown>) => item.metric as React.ReactNode,
+                        width: 400,
+                      },
                       ...Object.keys(completeTestRuns).map((testRunId) => ({
                         id: testRunId,
                         header: createTestRunHeader(testRunId, true),
@@ -1203,7 +1213,12 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
                             : []),
                         ]}
                         columnDefinitions={[
-                          { id: 'metric', header: 'Metric', cell: (item: Record<string, unknown>) => item.metric as React.ReactNode, width: 400 },
+                          {
+                            id: 'metric',
+                            header: 'Metric',
+                            cell: (item: Record<string, unknown>) => item.metric as React.ReactNode,
+                            width: 400,
+                          },
                           ...Object.keys(completeTestRuns).map((testRunId) => ({
                             id: testRunId,
                             header: createTestRunHeader(testRunId, true),
@@ -1250,7 +1265,8 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
 
                 // Add cost for each test run
                 Object.entries(completeTestRuns).forEach(([testRunId, testRun]) => {
-                  const services = (testRun.costBreakdown as Record<string, Record<string, Record<string, unknown>>> | undefined)?.[context] || {};
+                  const services =
+                    (testRun.costBreakdown as Record<string, Record<string, Record<string, unknown>>> | undefined)?.[context] || {};
                   const serviceKey = Object.keys(services).find((key) => {
                     const lastUnderscoreIndex = key.lastIndexOf('_');
                     const keyServiceApi = key.substring(0, lastUnderscoreIndex);
@@ -1332,7 +1348,12 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
                   preferences={<div />}
                   items={finalItems}
                   columnDefinitions={[
-                    { id: 'context', header: 'Context', cell: (item: Record<string, string>) => (item.isSubtotal || item.isTotal ? '' : item.context), width: 180 },
+                    {
+                      id: 'context',
+                      header: 'Context',
+                      cell: (item: Record<string, string>) => (item.isSubtotal || item.isTotal ? '' : item.context),
+                      width: 180,
+                    },
                     {
                       id: 'serviceApi',
                       header: 'Service/Api',
@@ -1348,7 +1369,12 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
                         </span>
                       ),
                     },
-                    { id: 'unit', header: 'Unit', cell: (item: Record<string, string>) => (item.isSubtotal || item.isTotal ? '' : item.unit), width: 200 },
+                    {
+                      id: 'unit',
+                      header: 'Unit',
+                      cell: (item: Record<string, string>) => (item.isSubtotal || item.isTotal ? '' : item.unit),
+                      width: 200,
+                    },
                     ...Object.keys(completeTestRuns).map((testRunId) => ({
                       id: testRunId,
                       header: createTestRunHeader(testRunId, true),
@@ -1403,7 +1429,8 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
 
                 // Add usage value for each test run
                 Object.entries(completeTestRuns).forEach(([testRunId, testRun]) => {
-                  const services = (testRun.costBreakdown as Record<string, Record<string, Record<string, unknown>>> | undefined)?.[context] || {};
+                  const services =
+                    (testRun.costBreakdown as Record<string, Record<string, Record<string, unknown>>> | undefined)?.[context] || {};
                   const serviceKey = Object.keys(services).find((key) => {
                     const lastUnderscoreIndex = key.lastIndexOf('_');
                     const keyServiceApi = key.substring(0, lastUnderscoreIndex);

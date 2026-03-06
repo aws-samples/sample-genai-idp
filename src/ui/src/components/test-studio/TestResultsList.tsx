@@ -221,7 +221,10 @@ const TestResultsList = ({
     } catch (err) {
       console.error('Error fetching test runs:', err);
       const typedErr = err as { errors?: Array<{ message: string }> };
-      const errorMessage = typedErr.errors?.length && typedErr.errors.length > 0 ? typedErr.errors.map((e: { message: string }) => e.message).join('; ') : 'Failed to load test runs';
+      const errorMessage =
+        typedErr.errors?.length && typedErr.errors.length > 0
+          ? typedErr.errors.map((e: { message: string }) => e.message).join('; ')
+          : 'Failed to load test runs';
       setError(errorMessage);
     } finally {
       setLoading(false);
@@ -295,7 +298,7 @@ const TestResultsList = ({
       return result.data.deleteTests;
     } catch (err) {
       console.error('Error deleting test runs:', err);
-      console.error('Error details:', err.errors);
+      console.error('Error details:', (err as { errors?: unknown }).errors);
       return false;
     } finally {
       setDeleteLoading(false);

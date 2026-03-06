@@ -225,7 +225,12 @@ const FormFieldRenderer = memo<Record<string, any>>(
     const isCollapsed = collapsedPaths.has(pathKey);
 
     // Helper to check if a value has confidence alerts (recursively)
-    const hasConfidenceAlertInTree = (val: unknown, currentFilteredPath: (string | number)[], explainInfo: Record<string, unknown> | Record<string, unknown>[] | null, config: Record<string, unknown> | null): boolean => {
+    const hasConfidenceAlertInTree = (
+      val: unknown,
+      currentFilteredPath: (string | number)[],
+      explainInfo: Record<string, unknown> | Record<string, unknown>[] | null,
+      config: Record<string, unknown> | null,
+    ): boolean => {
       // Handle null/undefined values - they can still have low confidence in explainability_info
       if (val === null || val === undefined) {
         const fieldInfo = getFieldConfidenceInfo(fieldKey, explainInfo, currentFilteredPath, config);
@@ -263,7 +268,13 @@ const FormFieldRenderer = memo<Record<string, any>>(
     };
 
     // Deep helper that takes fieldKey as parameter
-    const hasConfidenceAlertInTreeDeep = (val: unknown, fKey: string, currentFilteredPath: (string | number)[], explainInfo: Record<string, unknown> | Record<string, unknown>[] | null, config: Record<string, unknown> | null): boolean => {
+    const hasConfidenceAlertInTreeDeep = (
+      val: unknown,
+      fKey: string,
+      currentFilteredPath: (string | number)[],
+      explainInfo: Record<string, unknown> | Record<string, unknown>[] | null,
+      config: Record<string, unknown> | null,
+    ): boolean => {
       // Handle null/undefined values - they can still have low confidence in explainability_info
       if (val === null || val === undefined) {
         const fieldInfo = getFieldConfidenceInfo(fKey, explainInfo, currentFilteredPath.slice(0, -1), config);
@@ -298,7 +309,12 @@ const FormFieldRenderer = memo<Record<string, any>>(
     };
 
     // Helper to check if a value has eval mismatches (recursively)
-    const hasEvalMismatchInTree = (val: unknown, baseval: unknown, evalResults: Record<string, unknown> | null, secId: unknown): boolean => {
+    const hasEvalMismatchInTree = (
+      val: unknown,
+      baseval: unknown,
+      evalResults: Record<string, unknown> | null,
+      secId: unknown,
+    ): boolean => {
       if (!evalResults?.section_results) return false;
 
       // For primitives, check direct mismatch
@@ -374,7 +390,9 @@ const FormFieldRenderer = memo<Record<string, any>>(
     let evalResult = null;
     if (showComparison && evaluationResults?.section_results) {
       // Get section result (use first if only one)
-      let sectionResult = evaluationResults.section_results.find((sr: Record<string, unknown>) => String(sr.section_id) === String(sectionId));
+      let sectionResult = evaluationResults.section_results.find(
+        (sr: Record<string, unknown>) => String(sr.section_id) === String(sectionId),
+      );
       if (!sectionResult && evaluationResults.section_results.length === 1) {
         sectionResult = evaluationResults.section_results[0];
       }
@@ -1205,7 +1223,9 @@ const FormFieldRenderer = memo<Record<string, any>>(
         // Look for group-level eval result (e.g., for bankInfo, personalInfo)
         let groupEvalResult = null;
         if (showComparison && evaluationResults?.section_results) {
-          let sectionResult = evaluationResults.section_results.find((sr: Record<string, unknown>) => String(sr.section_id) === String(sectionId));
+          let sectionResult = evaluationResults.section_results.find(
+        (sr: Record<string, unknown>) => String(sr.section_id) === String(sectionId),
+      );
           if (!sectionResult && evaluationResults.section_results.length === 1) {
             sectionResult = evaluationResults.section_results[0];
           }
@@ -1577,13 +1597,18 @@ const FormFieldRenderer = memo<Record<string, any>>(
         // Look for array-level eval result (e.g., for checks array)
         let arrayEvalResult = null;
         if (showComparison && evaluationResults?.section_results) {
-          let sectionResult = evaluationResults.section_results.find((sr: Record<string, unknown>) => String(sr.section_id) === String(sectionId));
+          let sectionResult = evaluationResults.section_results.find(
+        (sr: Record<string, unknown>) => String(sr.section_id) === String(sectionId),
+      );
           if (!sectionResult && evaluationResults.section_results.length === 1) {
             sectionResult = evaluationResults.section_results[0];
           }
           if (sectionResult?.attributes?.length > 0) {
             // Look for top-level attribute that matches our array name
-            const attr = sectionResult.attributes.find((a: Record<string, unknown>) => a.name === fieldKey || (a.name as string)?.toLowerCase() === fieldKey?.toLowerCase());
+            const attr = sectionResult.attributes.find(
+              (a: Record<string, unknown>) =>
+                a.name === fieldKey || (a.name as string)?.toLowerCase() === fieldKey?.toLowerCase(),
+            );
             if (attr) {
               arrayEvalResult = {
                 matched: attr.matched,
@@ -2149,7 +2174,10 @@ const VisualEditorModal = ({
       const [, outputBucketFromUri, outputFileKey] = outputUriMatch;
       logger.info('💾 Parsed output URI:', { bucket: outputBucketFromUri, key: outputFileKey });
 
-      const results: { predictions: { success: boolean; changedFields: string[] } | null; baseline: { success: boolean; changedFields: string[] } | null } = { predictions: null, baseline: null };
+      const results: {
+        predictions: { success: boolean; changedFields: string[] } | null;
+        baseline: { success: boolean; changedFields: string[] } | null;
+      } = { predictions: null, baseline: null };
 
       // Build combined edit entry for both files
       const username = user?.username || 'unknown';

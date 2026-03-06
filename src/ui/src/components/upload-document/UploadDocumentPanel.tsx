@@ -163,7 +163,7 @@ const UploadDocumentPanel = (): React.JSX.Element => {
           newUploadStatus.push({
             file: file.name,
             status: 'error',
-            error: err.message,
+            error: err instanceof Error ? err.message : String(err),
           });
         }
 
@@ -172,7 +172,7 @@ const UploadDocumentPanel = (): React.JSX.Element => {
       }, Promise.resolve() as Promise<void>);
     } catch (err) {
       console.error('Error in overall upload process:', err);
-      setError(`Upload process failed: ${err.message}`);
+      setError(`Upload process failed: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setIsUploading(false);
     }

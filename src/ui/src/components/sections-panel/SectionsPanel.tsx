@@ -1215,15 +1215,16 @@ const SectionsPanel = ({ sections, pages = [], documentItem, mergedConfig, onDoc
     } catch (error) {
       // Handle different types of errors
       let errorMessage = 'Failed to process changes';
+      const err = error as { message?: string; errors?: { message?: string }[]; data?: { processChanges?: { message?: string } } };
 
-      if (error?.message) {
-        errorMessage = error.message;
-      } else if (error?.errors?.length > 0) {
-        errorMessage = error.errors[0].message || 'GraphQL error occurred';
+      if (err?.message) {
+        errorMessage = err.message;
+      } else if (err?.errors && err.errors.length > 0) {
+        errorMessage = err.errors[0].message || 'GraphQL error occurred';
       } else if (typeof error === 'string') {
         errorMessage = error;
-      } else if (error?.data?.processChanges?.message) {
-        errorMessage = error.data.processChanges.message;
+      } else if (err?.data?.processChanges?.message) {
+        errorMessage = err.data.processChanges.message;
       }
 
       alert(`Error processing changes: ${errorMessage}`);

@@ -30,6 +30,17 @@ import {
 
 const client = generateClient();
 
+interface GraphQLError {
+  message?: string;
+  errors?: { message?: string }[];
+}
+
+const getErrorMessage = (err: unknown): string => {
+  if (err instanceof Error) return err.message;
+  const gqlErr = err as GraphQLError;
+  return gqlErr?.message || gqlErr?.errors?.[0]?.message || JSON.stringify(err) || 'Unknown error';
+};
+
 // Constants
 const MAX_ZIP_SIZE_BYTES = 1073741824; // 1 GB
 
@@ -95,7 +106,7 @@ const TestSets = (): React.JSX.Element => {
       });
     } catch (err) {
       console.error('TestSets: Failed to load test sets:', err);
-      setError(`Failed to load test sets: ${err.message || 'Unknown error'}`);
+      setError(`Failed to load test sets: ${err instanceof Error ? err.message : 'Unknown error'}`);
     }
   };
 
@@ -168,7 +179,7 @@ const TestSets = (): React.JSX.Element => {
       setFileCount(files.length);
       setShowFilesModal(true);
     } catch (err) {
-      const errorMessage = err.message || err.errors?.[0]?.message || JSON.stringify(err) || 'Unknown error';
+      const errorMessage = getErrorMessage(err);
       setError(`Failed to check files: ${errorMessage}`);
     } finally {
       setLoading(false);
@@ -225,7 +236,7 @@ const TestSets = (): React.JSX.Element => {
       }
     } catch (err) {
       console.error('Error validating test set name:', err);
-      const errorMessage = err?.message || err?.errors?.[0]?.message || JSON.stringify(err) || 'Unknown error';
+      const errorMessage = getErrorMessage(err);
       setError(`Failed to validate test set name: ${errorMessage}`);
       return;
     }
@@ -275,7 +286,7 @@ const TestSets = (): React.JSX.Element => {
       }
     } catch (err) {
       console.error('Error adding test set:', err);
-      const errorMessage = err?.message || err?.errors?.[0]?.message || JSON.stringify(err) || 'Unknown error';
+      const errorMessage = getErrorMessage(err);
       setError(`Failed to add test set: ${errorMessage}`);
     } finally {
       setLoading(false);
@@ -321,7 +332,7 @@ const TestSets = (): React.JSX.Element => {
       }
     } catch (err) {
       console.error('Error validating test set name:', err);
-      const errorMessage = err?.message || err?.errors?.[0]?.message || JSON.stringify(err) || 'Unknown error';
+      const errorMessage = getErrorMessage(err);
       setError(`Failed to validate test set name: ${errorMessage}`);
       return;
     }
@@ -402,7 +413,7 @@ const TestSets = (): React.JSX.Element => {
       }
     } catch (err) {
       console.error('Error creating test set:', err);
-      const errorMessage = err?.message || err?.errors?.[0]?.message || JSON.stringify(err) || 'Unknown error';
+      const errorMessage = getErrorMessage(err);
       setError(`Failed to create test set: ${errorMessage}`);
     } finally {
       setLoading(false);
@@ -419,7 +430,7 @@ const TestSets = (): React.JSX.Element => {
       setTestSets((result.data.getTestSets || []).filter((ts): ts is NonNullable<typeof ts> => ts !== null));
     } catch (err) {
       console.error('Error refreshing test sets:', err);
-      const errorMessage = err?.message || err?.errors?.[0]?.message || JSON.stringify(err) || 'Unknown error';
+      const errorMessage = getErrorMessage(err);
       setError(`Failed to refresh test sets: ${errorMessage}`);
     } finally {
       setRefreshing(false);
@@ -442,7 +453,7 @@ const TestSets = (): React.JSX.Element => {
       setError('');
     } catch (err) {
       console.error('Error deleting test sets:', err);
-      const errorMessage = err?.message || err?.errors?.[0]?.message || JSON.stringify(err) || 'Unknown error';
+      const errorMessage = getErrorMessage(err);
       setError(`Failed to delete test sets: ${errorMessage}`);
     } finally {
       setLoading(false);
@@ -913,7 +924,7 @@ const TestSets = (): React.JSX.Element => {
                     }
                   } catch (err) {
                     console.error('Error validating test set name:', err);
-                    const errorMessage = err?.message || err?.errors?.[0]?.message || JSON.stringify(err) || 'Unknown error';
+                    const errorMessage = getErrorMessage(err);
                     setError(`Failed to validate test set name: ${errorMessage}`);
                     setNewTestSetName('');
                     return;

@@ -191,7 +191,17 @@ const ComprehensiveBreakdown = ({
             resizableColumns
             wrapLines={preferences.wrapLines}
             items={(() => {
-              const costItems: { context: string; serviceApi: string; unit: string; value: string; unitCost: string; estimatedCost: string; isTotal?: boolean; isSubtotal?: boolean; sortOrder: number }[] = [];
+              const costItems: {
+                context: string;
+                serviceApi: string;
+                unit: string;
+                value: string;
+                unitCost: string;
+                estimatedCost: string;
+                isTotal?: boolean;
+                isSubtotal?: boolean;
+                sortOrder: number;
+              }[] = [];
               let totalCost = 0;
               const contextTotals: Record<string, number> = {};
 
@@ -233,7 +243,17 @@ const ComprehensiveBreakdown = ({
               });
 
               // Second pass: insert subtotal rows after each context group
-              const finalItems: { context: string; serviceApi: string; unit: string; value: string; unitCost: string; estimatedCost: string; isTotal?: boolean; isSubtotal?: boolean; sortOrder: number }[] = [];
+              const finalItems: {
+                context: string;
+                serviceApi: string;
+                unit: string;
+                value: string;
+                unitCost: string;
+                estimatedCost: string;
+                isTotal?: boolean;
+                isSubtotal?: boolean;
+                sortOrder: number;
+              }[] = [];
               const _currentContext: string | null = null;
 
               costItems.forEach((item, index) => {
@@ -505,7 +525,12 @@ const TestResults = ({ testRunId, setSelectedTestRunId }: TestResultsProps): Rea
             break;
           } catch (retryError) {
             if (isCancelled) return;
-            const typedRetryError = retryError as { message?: string; code?: string; name?: string; errors?: Array<{ errorType?: string; message?: string }> };
+            const typedRetryError = retryError as {
+              message?: string;
+              code?: string;
+              name?: string;
+              errors?: Array<{ errorType?: string; message?: string }>;
+            };
 
             console.log('getTestRun error caught:', {
               message: typedRetryError.message,
@@ -520,7 +545,8 @@ const TestResults = ({ testRunId, setSelectedTestRunId }: TestResultsProps): Rea
               typedRetryError.name === 'TimeoutError' ||
               typedRetryError.code === 'NetworkError' ||
               typedRetryError.errors?.some(
-                (err: { errorType?: string; message?: string }) => err.errorType === 'Lambda:ExecutionTimeoutException' || err.message?.toLowerCase().includes('timeout'),
+                (err: { errorType?: string; message?: string }) =>
+                  err.errorType === 'Lambda:ExecutionTimeoutException' || err.message?.toLowerCase().includes('timeout'),
               );
             if (isTimeout && attempt < maxRetries) {
               console.log(`getTestRun attempt ${attempt} failed, retrying...`, typedRetryError.message);
@@ -766,7 +792,13 @@ const TestResults = ({ testRunId, setSelectedTestRunId }: TestResultsProps): Rea
         console.log('Success! Closing modal and redirecting...');
         const newTestRun = result.data.startTestRun;
         // Add to active test runs
-        addTestRun(newTestRun.testRunId as string, newTestRun.testSetName as string, reRunContext, newTestRun.filesCount as number, ((newTestRun as unknown as Record<string, unknown>).configVersion as string) || '');
+        addTestRun(
+          newTestRun.testRunId as string,
+          newTestRun.testSetName as string,
+          reRunContext,
+          newTestRun.filesCount as number,
+          ((newTestRun as unknown as Record<string, unknown>).configVersion as string) || '',
+        );
         setShowReRunModal(false);
         setReRunContext('');
         setReRunNumberOfFiles('');

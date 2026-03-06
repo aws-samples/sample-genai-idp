@@ -104,7 +104,11 @@ const TextEditorView = ({ fileContent, onChange, isReadOnly, fileType }: TextEdi
         <Editor
           height="100%"
           defaultLanguage={fileType === 'json' ? 'json' : fileType}
-          value={fileType === 'json' && typeof fileContent === 'string' ? JSON.stringify(JSON.parse(fileContent), null, 2) : fileContent ?? undefined}
+          value={
+            fileType === 'json' && typeof fileContent === 'string'
+              ? JSON.stringify(JSON.parse(fileContent), null, 2)
+              : fileContent ?? undefined
+          }
           onChange={onChange}
           onMount={handleEditorDidMount}
           options={{

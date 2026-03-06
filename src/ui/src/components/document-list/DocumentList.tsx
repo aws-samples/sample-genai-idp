@@ -180,7 +180,7 @@ const DocumentList = (): React.JSX.Element => {
     }
   };
 
-  const handleReprocessConfirm = async (version: string) => {
+  const handleReprocessConfirm = async (version?: string) => {
     const objectKeys = (collectionProps.selectedItems as MappedDocument[]).map((item) => item.objectKey);
     logger.debug('Reprocessing documents', objectKeys, 'with version', version);
 
@@ -199,7 +199,7 @@ const DocumentList = (): React.JSX.Element => {
     }
   };
 
-  const handleAbortConfirm = async (abortableItems: MappedDocument[]) => {
+  const handleAbortConfirm = async (abortableItems: { objectKey: string; objectStatus?: string }[]) => {
     const objectKeys = abortableItems.map((item) => item.objectKey);
     logger.debug('Aborting workflows', objectKeys);
 

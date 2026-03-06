@@ -7,7 +7,7 @@ import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
 
 interface ChildrenProps {
-  children: React.ReactNode;
+  children?: React.ReactNode;
 }
 
 // Custom heading components with stronger inline styles
@@ -85,7 +85,7 @@ const ParagraphComponent = ({ children }: ChildrenProps): React.JSX.Element => (
 
 interface CodeComponentProps {
   inline?: boolean;
-  children: React.ReactNode;
+  children?: React.ReactNode;
 }
 
 const CodeComponent = ({ inline = false, children }: CodeComponentProps): React.JSX.Element => {
@@ -199,7 +199,7 @@ const TdComponent = ({ children }: ChildrenProps): React.JSX.Element => (
 );
 
 interface LinkComponentProps {
-  children: React.ReactNode;
+  children?: React.ReactNode;
   href?: string;
 }
 

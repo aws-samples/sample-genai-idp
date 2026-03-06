@@ -43,9 +43,9 @@ const AgentMessagesDisplay = ({ agentMessages = null, isProcessing = false }: Ag
       return true;
     };
 
-    window.addEventListener('error', handleResizeObserverError as EventListener);
+    window.addEventListener('error', handleResizeObserverError as unknown as EventListener);
     return () => {
-      window.removeEventListener('error', handleResizeObserverError as EventListener);
+      window.removeEventListener('error', handleResizeObserverError as unknown as EventListener);
     };
   }, []);
 
