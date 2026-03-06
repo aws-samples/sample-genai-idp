@@ -37,6 +37,7 @@ import {
   parseWeightedOverallScores,
   parseTestRunConfig,
 } from '../../graphql/awsjson-parsers';
+import type { SelectProps } from '@cloudscape-design/components';
 
 const client = generateClient();
 
@@ -406,14 +407,12 @@ const TestResults = ({ testRunId, setSelectedTestRunId }: TestResultsProps): Rea
   const [testSetFileCount, setTestSetFileCount] = useState<number | null>(null);
   const [testSetStatus, setTestSetStatus] = useState<string | null>(null);
   const [testSetFilePattern, setTestSetFilePattern] = useState<string | null>(null);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const [chartType, setChartType] = useState<any>({ label: 'Bar Chart', value: 'bar' });
+  const [chartType, setChartType] = useState<SelectProps.Option>({ label: 'Bar Chart', value: 'bar' });
   const [retryMessage, setRetryMessage] = useState('');
   const [preferences, setPreferences] = useState({ wrapLines: false });
   const [showDocumentsModal, setShowDocumentsModal] = useState(false);
   const [selectedRangeData, setSelectedRangeData] = useState<SelectedRange | null>(null);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const [lowestScoreCount, setLowestScoreCount] = useState<any>({ label: '5', value: 5 });
+  const [lowestScoreCount, setLowestScoreCount] = useState<SelectProps.Option>({ label: '5', value: '5' });
 
   // Config export modal state
   const [showConfigExportModal, setShowConfigExportModal] = useState(false);

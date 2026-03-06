@@ -19,7 +19,7 @@ import {
   ExpandableSection,
   Icon,
 } from '@cloudscape-design/components';
-import Editor from '@monaco-editor/react';
+import Editor, { type OnMount } from '@monaco-editor/react';
 // eslint-disable-next-line import/no-extraneous-dependencies
 import yaml from 'js-yaml';
 import ReactMarkdown from 'react-markdown';
@@ -468,8 +468,7 @@ const ConfigurationLayout = (): React.JSX.Element => {
   const [syncFromBdaArnInput, setSyncFromBdaArnInput] = useState('');
   const [syncFromBdaMode, setSyncFromBdaMode] = useState<string>('replace'); // 'replace' or 'merge'
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const editorRef = useRef<any>(null);
+  const editorRef = useRef<Parameters<OnMount>[0] | null>(null);
 
   // Compute whether there are unsaved changes by comparing formValues with mergedConfig
   const hasUnsavedChanges = useMemo(() => {
@@ -921,8 +920,7 @@ const ConfigurationLayout = (): React.JSX.Element => {
     }
   };
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const handleEditorDidMount = (editor: any, monaco: any): void => {
+  const handleEditorDidMount: OnMount = (editor, monaco): void => {
     editorRef.current = editor;
 
     // Set up JSON schema validation if schema is available
@@ -1457,13 +1455,13 @@ const ConfigurationLayout = (): React.JSX.Element => {
 
   const formatJson = () => {
     if (editorRef.current && viewMode === 'json') {
-      editorRef.current.getAction('editor.action.formatDocument').run();
+      editorRef.current.getAction('editor.action.formatDocument')?.run();
     }
   };
 
   const formatYaml = () => {
     if (editorRef.current && viewMode === 'yaml') {
-      editorRef.current.getAction('editor.action.formatDocument').run();
+      editorRef.current.getAction('editor.action.formatDocument')?.run();
 
       // Re-validate after formatting
       setTimeout(() => {
