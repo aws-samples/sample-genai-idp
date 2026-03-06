@@ -10,7 +10,6 @@ from .batch_run import BatchRunTool
 from .batch_reprocess import BatchReprocessTool
 from .batch_status import BatchStatusTool
 from .batch_results import GetResultsTool
-from .batch_confidence import GetConfidenceTool
 
 # Tool registry
 TOOLS: Dict[str, Type[IDPTool]] = {
@@ -19,7 +18,6 @@ TOOLS: Dict[str, Type[IDPTool]] = {
     "reprocess": BatchReprocessTool,
     "status": BatchStatusTool,
     "get_results": GetResultsTool,
-    "get_confidence": GetConfidenceTool,
 }
 
 

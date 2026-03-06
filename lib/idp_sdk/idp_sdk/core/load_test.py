@@ -101,6 +101,7 @@ class LoadTester:
         stats: CopyStats,
         current_minute: int = 0,
         target_copies: int = 0,
+        config_version: Optional[str] = None,
     ) -> bool:
         """Copy a single file to the input bucket."""
         try:
@@ -125,18 +126,26 @@ class LoadTester:
 
             new_key = f"{dest_prefix}/{new_filename}"
 
-            self.s3.copy_object(
-                Bucket=self.input_bucket,
-                Key=new_key,
-                CopySource={"Bucket": source_bucket, "Key": source_key},
-            )
+            copy_kwargs = {
+                "Bucket": self.input_bucket,
+                "Key": new_key,
+                "CopySource": {"Bucket": source_bucket, "Key": source_key},
+            }
+            if config_version:
+                copy_kwargs["Metadata"] = {"config-version": config_version}
+                copy_kwargs["MetadataDirective"] = "REPLACE"
+            self.s3.copy_object(**copy_kwargs)
             return True
         except Exception as e:
             logger.error(f"Error copying file: {e}")
             return False
 
     def _upload_local_file(
-        self, local_path: str, dest_prefix: str, stats: CopyStats
+        self,
+        local_path: str,
+        dest_prefix: str,
+        stats: CopyStats,
+        config_version: Optional[str] = None,
     ) -> bool:
         """Upload a local file to the input bucket."""
         try:
@@ -146,7 +155,12 @@ class LoadTester:
             new_filename = f"{base_name}_{sequence:06d}{file_ext}"
             new_key = f"{dest_prefix}/{new_filename}"
 
-            self.s3.upload_file(local_path, self.input_bucket, new_key)
+            extra_args = {}
+            if config_version:
+                extra_args["Metadata"] = {"config-version": config_version}
+            self.s3.upload_file(
+                local_path, self.input_bucket, new_key, ExtraArgs=extra_args or None
+            )
             return True
         except Exception as e:
             logger.error(f"Error uploading file: {e}")
@@ -158,6 +172,7 @@ class LoadTester:
         rate: int = 2500,
         duration: int = 1,
         dest_prefix: str = "load-test",
+        config_version: Optional[str] = None,
     ) -> dict:
         """Run constant rate load test.
 
@@ -166,6 +181,7 @@ class LoadTester:
             rate: Copies per minute
             duration: Duration in minutes
             dest_prefix: Destination prefix in input bucket
+            config_version: Configuration version to tag files with (optional)
 
         Returns:
             Dict with test results
@@ -179,6 +195,8 @@ class LoadTester:
         console.print("[bold blue]Starting load test[/bold blue]")
         console.print(f"  Rate: {rate} files/minute")
         console.print(f"  Duration: {duration} minutes")
+        if config_version:
+            console.print(f"  Config version: {config_version}")
         console.print(f"  Destination: s3://{self.input_bucket}/{dest_prefix}/")
         console.print()
 
@@ -235,6 +253,9 @@ class LoadTester:
                                     source_key,
                                     dest_prefix,
                                     stats,
+                                    0,
+                                    0,
+                                    config_version,
                                 )
                             )
                         else:
@@ -244,6 +265,7 @@ class LoadTester:
                                     source_file,
                                     dest_prefix,
                                     stats,
+                                    config_version,
                                 )
                             )
 
@@ -271,7 +293,11 @@ class LoadTester:
         }
 
     def run_scheduled_load(
-        self, source_file: str, schedule_file: str, dest_prefix: str = "load-test"
+        self,
+        source_file: str,
+        schedule_file: str,
+        dest_prefix: str = "load-test",
+        config_version: Optional[str] = None,
     ) -> dict:
         """Run scheduled load test with variable rates.
 
@@ -279,6 +305,7 @@ class LoadTester:
             source_file: Local file path or S3 URI
             schedule_file: CSV file with minute,count columns
             dest_prefix: Destination prefix in input bucket
+            config_version: Configuration version to tag files with (optional)
 
         Returns:
             Dict with test results
@@ -308,6 +335,8 @@ class LoadTester:
         console.print("[bold blue]Starting scheduled load test[/bold blue]")
         console.print(f"  Schedule: {len(schedule)} minutes")
         console.print(f"  Total planned: {total_planned} files")
+        if config_version:
+            console.print(f"  Config version: {config_version}")
         console.print(f"  Destination: s3://{self.input_bucket}/{dest_prefix}/")
         console.print()
 
@@ -368,6 +397,7 @@ class LoadTester:
                                         stats,
                                         current_minute,
                                         target_copies,
+                                        config_version,
                                     )
                                 )
                             else:
@@ -377,6 +407,7 @@ class LoadTester:
                                         source_file,
                                         dest_prefix,
                                         stats,
+                                        config_version,
                                     )
                                 )
 

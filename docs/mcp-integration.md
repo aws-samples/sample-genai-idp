@@ -62,7 +62,7 @@ When disabled, these resources are not created, reducing deployment complexity a
 
 ## Current Capabilities
 
-The AgentCore Gateway provides four integrated tools for document processing and analytics:
+The AgentCore Gateway provides five integrated tools for document processing and analytics:
 
 ### search
 
@@ -256,6 +256,103 @@ Reprocess documents from classification or extraction steps.
 }
 ```
 
+### get_results
+
+Retrieve processing results and extracted metadata for all documents in a batch.
+
+**Input Schema:**
+```json
+{
+  "batch_id": {
+    "type": "string",
+    "description": "Batch identifier (e.g., 'mcp-batch-20250124-143022'). Required to identify which batch to retrieve metadata from."
+  },
+  "section_id": {
+    "type": "integer",
+    "description": "Section number within documents (default: 1). Use for multi-section documents like healthcare packages."
+  },
+  "limit": {
+    "type": "integer",
+    "description": "Maximum documents to return per page (default: 10, max: 100)."
+  },
+  "next_token": {
+    "type": "string",
+    "description": "Pagination token from previous request for retrieving next page of results."
+  }
+}
+```
+
+**Output Schema:**
+```json
+{
+  "success": "boolean",
+  "batch_id": "string",
+  "section_id": "integer",
+  "count": "integer",
+  "total_in_batch": "integer",
+  "documents": "array",
+  "next_token": "string (optional)",
+  "message": "string"
+}
+```
+
+**Example Request:**
+```json
+{
+  "method": "tools/call",
+  "params": {
+    "name": "get_results",
+    "arguments": {
+      "batch_id": "mcp-batch-20250124-143022",
+      "section_id": 1,
+      "limit": 10
+    }
+  }
+}
+```
+
+**Example Response:**
+```json
+{
+  "success": true,
+  "batch_id": "mcp-batch-20250124-143022",
+  "section_id": 1,
+  "count": 1,
+  "total_in_batch": 1,
+  "documents": [
+    {
+      "document_id": "mcp-batch-20250124-143022/document-001.pdf",
+      "document_class": "invoice",
+      "fields": {
+        "vendor_info": {
+          "name": "<vendor_name>",
+          "address": "<vendor_address>",
+          "tax_id": "<tax_id>"
+        },
+        "line_items": [
+          {"description": "<item_description>", "amount": "<amount>"},
+          {"description": "<item_description>", "amount": "<amount>"}
+        ],
+        "total_amount": "<total>",
+        "invoice_date": "<date>"
+      },
+      "confidence": {
+        "vendor_info": {
+          "name": 0.98,
+          "address": 0.95,
+          "tax_id": 1.0
+        },
+        "total_amount": 0.99,
+        "invoice_date": 0.97
+      },
+      "page_count": 1,
+      "status": "COMPLETED"
+    }
+  ],
+  "message": "Retrieved results for 1 document"
+}
+```
+
 ### status
 
 Query batch and document processing status.
@@ -339,6 +436,46 @@ Query batch and document processing status.
     "percentage": 60.0
   },
   "all_complete": false
+}
+```
+
+## Important Notes
+
+### Pagination
+
+The `get_results` tool returns paginated results:
+- Default page size: 10 documents
+- Maximum page size: 100 documents
+- Use `next_token` to retrieve subsequent pages
+- `total_in_batch` shows the complete batch size
+- Per-document data is accurate for the current page only
+
+### Document Sections
+
+For multi-section documents (e.g., lending packages):
+- Section 1: Primary extraction results
+- Sections 2+: Additional document types within the same file
+- Use `section_id` parameter to retrieve specific sections
+
+### Confidence Structure
+
+Confidence scores mirror the field structure exactly:
+- **Flat fields**: Confidence is a numeric value (0.0-1.0)
+- **Nested objects**: Confidence is nested with the same structure as fields
+- **Array fields**: Confidence scores are not provided for array items (e.g., `line_items`)
+- **Null values**: Fields with null values have confidence score of 0.0
+
+Example:
+```json
+{
+  "fields": {
+    "vendor_info": {"tax_id": "<tax_id>"},
+    "line_items": [{"description": "<item>", "amount": "<amount>"}]
+  },
+  "confidence": {
+    "vendor_info": {"tax_id": 1.0},
+    "line_items": null
+  }
 }
 ```
 
@@ -469,10 +606,10 @@ curl -X POST <MCPTokenURL> \
 **User Authentication Flow:**
 ```bash
 # Step 1: Get authorization code
-<MCPAuthorizationURL>?
-  response_type=code&
-  client_id=<MCPClientId>&
-  redirect_uri=CALLBACK_URL&
+<MCPAuthorizationURL>?\
+  response_type=code&\
+  client_id=<MCPClientId>&\
+  redirect_uri=CALLBACK_URL&\
   scope=openid+email+profile
 
 # Step 2: Exchange code for tokens

@@ -328,7 +328,22 @@ const useConfiguration = (versionName: string = 'default'): UseConfigurationRetu
       setMergedConfig(activeConfig);
     } catch (err: unknown) {
       logger.error('Error fetching configuration', err);
-      setError(`Failed to load configuration: ${err instanceof Error ? err.message : String(err)}`);
+      // Extract meaningful error message from various error shapes:
+      // - Error instances: use .message
+      // - Amplify GraphQL errors: { errors: [{ message: "..." }] }
+      // - Plain objects: JSON.stringify to avoid [object Object]
+      let errorMsg: string;
+      if (err instanceof Error) {
+        errorMsg = err.message;
+      } else if (err && typeof err === 'object' && 'errors' in err && Array.isArray((err as Record<string, unknown>).errors)) {
+        const gqlErrors = (err as Record<string, unknown>).errors as Array<Record<string, unknown>>;
+        errorMsg = gqlErrors.map((e) => (e.message as string) || 'Unknown GraphQL error').join('; ');
+      } else if (err && typeof err === 'object') {
+        errorMsg = JSON.stringify(err);
+      } else {
+        errorMsg = String(err);
+      }
+      setError(`Failed to load configuration: ${errorMsg}`);
     } finally {
       if (silent) {
         setRefreshing(false);
@@ -386,7 +401,18 @@ const useConfiguration = (versionName: string = 'default'): UseConfigurationRetu
       return true;
     } catch (err: unknown) {
       logger.error('Error updating configuration for version', targetVersionName, ':', err);
-      setError(`Failed to update configuration for version ${targetVersionName}: ${err instanceof Error ? err.message : String(err)}`);
+      let errorMsg: string;
+      if (err instanceof Error) {
+        errorMsg = err.message;
+      } else if (err && typeof err === 'object' && 'errors' in err && Array.isArray((err as Record<string, unknown>).errors)) {
+        const gqlErrors = (err as Record<string, unknown>).errors as Array<Record<string, unknown>>;
+        errorMsg = gqlErrors.map((e) => (e.message as string) || 'Unknown GraphQL error').join('; ');
+      } else if (err && typeof err === 'object') {
+        errorMsg = JSON.stringify(err);
+      } else {
+        errorMsg = String(err);
+      }
+      setError(`Failed to update configuration for version ${targetVersionName}: ${errorMsg}`);
       return false;
     }
   };

@@ -13,6 +13,10 @@ SPDX-License-Identifier: MIT-0
 
 - **Third-Party Model Support** — Added Meta Llama 4 Maverick 17B, Llama 4 Scout 17B, Google Gemma 3 27B IT, and NVIDIA Nemotron Nano 12B v2 VL as selectable models across all pipeline stages (OCR, Classification, Extraction, Assessment, Summarization, Evaluation, Discovery, Agents, Rule Validation). Includes per-token pricing configuration and EU region fallback mappings for Llama 4 models. ([#217](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues/217))
 
+- **Load Test Config Version Support** — Added `--config-version` parameter to the `idp-cli load-test` command, enabling load tests to target a specific configuration version. Files uploaded during load tests now include `config-version` S3 metadata, consistent with the `process` command behavior.
+
+- **Deploy Failure Root Cause Analysis** — Enhanced `idp-cli deploy` failure reporting to recursively analyze nested stack events and identify actual root causes. Previously, failures in nested stacks showed only a generic "Embedded stack was not successfully created" message. Now displays a structured "Root Cause Analysis" section with the specific resource, type, and error message from the nested stack that caused the failure, along with cascade failure counts.
+
 ### Changed
 
 - **OCR Benchmark Config Optimization** — Optimized `config_library/unified/ocr-benchmark` configuration with targeted field descriptions, explicit model/prompt/OCR settings, and corrected date format (YYYY-MM-DD to match ground truth). Improved overall extraction accuracy from 51.5% to 75.2% on the full 293-document benchmark at equivalent cost (~$2.62). Classification remains 100% across all 9 document classes. ([#220](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/pull/220))
@@ -22,6 +26,8 @@ SPDX-License-Identifier: MIT-0
 ### Fixed
 
 - **AgentCore Gateway Manager** — Fixed the issue where gateway was not getting deleted once stack is deleted.
+
+- **Configuration Page Error Display** — Fixed `[object Object]` error message when configuration loading fails (e.g., due to Lambda throttling) by properly extracting error messages from Amplify GraphQL error responses.
 
 
 ## [0.5.0]

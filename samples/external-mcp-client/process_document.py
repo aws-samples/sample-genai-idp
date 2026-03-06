@@ -250,6 +250,43 @@ def check_status(
     return result
 
 
+def get_results(processor: DocumentProcessor, batch_id: str) -> dict:
+    """Retrieve processing results for completed batch"""
+    print("\n[4] Retrieving processing results...")
+    result = processor.call_tool(
+        "get_results", {"batch_id": batch_id, "section_id": 1, "limit": 10}
+    )
+
+    if result.get("error"):
+        print(f"    Error: {result.get('error')}")
+        return result
+
+    result_data = extract_response_data(result)
+
+    if not result_data.get("success"):
+        print(f"    Error: {result_data.get('error', 'Unknown error')}")
+        return result
+
+    print(f"    Retrieved {result_data.get('count')} documents")
+    print(f"    Total in batch: {result_data.get('total_in_batch')}")
+
+    documents = result_data.get("documents", [])
+    if documents:
+        print("\n    Document Results:")
+        for doc in documents:
+            print(f"      - {doc.get('document_id')}")
+            print(f"        Class: {doc.get('document_class')}")
+            print(f"        Status: {doc.get('status')}")
+            if doc.get("fields"):
+                print(f"        Fields: {json.dumps(doc.get('fields'), indent=10)}")
+            if doc.get("confidence"):
+                print(
+                    f"        Confidence: {json.dumps(doc.get('confidence'), indent=10)}"
+                )
+
+    return result
+
+
 def main():
     """Main workflow"""
     config_path = Path(__file__).parent / "mcp_client_config.properties"
@@ -304,6 +341,7 @@ def main():
         sys.exit(1)
 
     check_status(processor, batch_id)
+    get_results(processor, batch_id)
 
     print("\n" + "=" * 60)
     print("Processing completed successfully!")

@@ -29,7 +29,7 @@ def handler(event, context):
                 cfnresponse.send(event, context, cfnresponse.SUCCESS, {}, physicalResourceId=gateway_name)
             except Exception as e:
                 logger.error(f"Delete failed: {e}", exc_info=True)
-                cfnresponse.send(event, context, cfnresponse.FAILED, {}, physicalResourceId=gateway_name, reason=str(e))
+                cfnresponse.send(event, context, cfnresponse.SUCCESS, {}, physicalResourceId=gateway_name, reason=str(e))
             return
 
         # Create or Update
@@ -294,24 +294,38 @@ def delete_gateway(props, gateway_name):
     gateway_id = items[0].get("gatewayId")
     logger.info(f"Deleting gateway: {gateway_id}")
     
-    # Delete all targets first
+    # Delete all targets first (typically only one target per gateway)
     response = client.list_gateway_targets(gatewayIdentifier=gateway_id)
     targets = response.get("items", [])
     logger.info(f"Found {len(targets)} targets to delete")
     
+    deletion_errors = []
     for target in targets:
         target_id = target["targetId"]
         logger.info(f"Deleting target: {target_id}")
-        client.delete_gateway_target(gatewayIdentifier=gateway_id, targetId=target_id)
-        time.sleep(2)
+        try:
+            client.delete_gateway_target(gatewayIdentifier=gateway_id, targetId=target_id)
+            time.sleep(2)
+        except Exception as e:
+            error_msg = f"target {target_id}: {str(e)}"
+            logger.warning(f"Failed to delete {error_msg}")
+            deletion_errors.append(error_msg)
     
     # Wait for targets to be fully deleted
     time.sleep(10)
     
     # Delete gateway
-    client.delete_gateway(gatewayIdentifier=gateway_id)
-    logger.info(f"Gateway deleted: {gateway_id}")
+    try:
+        client.delete_gateway(gatewayIdentifier=gateway_id)
+        logger.info(f"Gateway deleted: {gateway_id}")
+    except Exception as e:
+        error_msg = f"gateway: {str(e)}"
+        logger.warning(f"Failed to delete {error_msg}")
+        deletion_errors.append(error_msg)
     
     # Wait for gateway deletion to complete
     time.sleep(5)
+    
+    if deletion_errors:
+        raise Exception(f"Partial deletion errors: {'; '.join(deletion_errors)}")
 

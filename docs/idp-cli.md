@@ -25,8 +25,8 @@ https://github.com/user-attachments/assets/3d448a74-ba5b-4a4a-96ad-ec03ac0b4d7d
 - [Commands Reference](#commands-reference)
   - [deploy](#deploy)
   - [delete](#delete)
-  - [process](#process)
-  - [reprocess](#reprocess)
+  - [process](#process--run-inference)
+  - [reprocess](#reprocess--rerun-inference)
   - [status](#status)
   - [download-results](#download-results)
   - [delete-documents](#delete-documents)
@@ -1626,6 +1626,7 @@ idp-cli load-test [OPTIONS]
 - `--duration`: Duration in minutes (default: 1)
 - `--schedule`: CSV schedule file (minute,count) - overrides --rate and --duration
 - `--dest-prefix`: Destination prefix in input bucket (default: load-test)
+- `--config-version`: Configuration version to use for processing (default: active version)
 - `--region`: AWS region (optional)
 
 **Examples:**
@@ -1642,6 +1643,9 @@ idp-cli load-test --stack-name my-stack --source-file samples/invoice.pdf --sche
 
 # Use S3 source file
 idp-cli load-test --stack-name my-stack --source-file s3://my-bucket/test.pdf --rate 500
+
+# Load test with a specific config version
+idp-cli load-test --stack-name my-stack --source-file samples/invoice.pdf --rate 100 --config-version v2
 ```
 
 **Schedule File Format (CSV):**

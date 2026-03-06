@@ -784,40 +784,12 @@ class BatchOperation:
                     }
                 )
 
-        # Calculate summary statistics
-        completed_docs = [d for d in documents if d["status"] == "COMPLETED"]
-        avg_confidence = 0.0
-        if completed_docs:
-            confidence_values = []
-            for d in completed_docs:
-                conf = d.get("confidence")
-                if conf and isinstance(conf, dict):
-                    conf_vals = [
-                        v for v in conf.values() if isinstance(v, (int, float))
-                    ]
-                    confidence_values.extend(conf_vals)
-                elif isinstance(conf, (int, float)):
-                    confidence_values.append(conf)
-            if confidence_values:
-                avg_confidence = sum(confidence_values) / len(confidence_values)
-
-        document_classes = {}
-        for doc in documents:
-            doc_class = doc.get("document_class")
-            if doc_class:
-                document_classes[doc_class] = document_classes.get(doc_class, 0) + 1
-
         result = {
             "batch_id": batch_id,
             "section_id": section_id,
             "count": len(documents),
             "total_in_batch": total_in_batch,
             "documents": documents,
-            "summary": {
-                "total_documents": total_in_batch,
-                "average_confidence": avg_confidence,
-                "document_classes": document_classes,
-            },
         }
 
         # Add pagination token if more results exist
@@ -888,8 +860,6 @@ class BatchOperation:
 
         # Retrieve confidence scores for each document
         documents = []
-        all_confidences = []
-        fields_below_threshold = 0
 
         for doc_id in page_docs:
             try:
@@ -906,12 +876,6 @@ class BatchOperation:
                     status = "FAILED"
 
                 attributes = confidence_data.get("attributes", {})
-                for attr_name, attr_data in attributes.items():
-                    conf = attr_data.get("confidence", 0.0)
-                    all_confidences.append(conf)
-                    if not attr_data.get("meets_threshold", True):
-                        fields_below_threshold += 1
-
                 documents.append(
                     {
                         "document_id": doc_id,
@@ -937,29 +901,12 @@ class BatchOperation:
                     }
                 )
 
-        # Calculate summary statistics
-        avg_confidence = (
-            sum(all_confidences) / len(all_confidences) if all_confidences else 0.0
-        )
-        threshold_compliance = (
-            ((len(all_confidences) - fields_below_threshold) / len(all_confidences))
-            * 100
-            if all_confidences
-            else 0.0
-        )
-
         result = {
             "batch_id": batch_id,
             "section_id": section_id,
             "count": len(documents),
             "total_in_batch": total_in_batch,
             "documents": documents,
-            "summary": {
-                "total_documents": total_in_batch,
-                "average_confidence": avg_confidence,
-                "fields_below_threshold": fields_below_threshold,
-                "threshold_compliance": threshold_compliance,
-            },
         }
 
         # Add pagination token if more results exist
