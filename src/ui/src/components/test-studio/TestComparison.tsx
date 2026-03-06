@@ -34,6 +34,15 @@ interface ComparisonData {
   error?: string;
 }
 
+interface CostComparisonRow {
+  context: string;
+  serviceApi: string;
+  unit: string;
+  isSubtotal?: boolean;
+  isTotal?: boolean;
+  [testRunId: string]: string | boolean | undefined;
+}
+
 const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): React.JSX.Element => {
   const { versions } = useConfigurationVersions();
   const [comparisonData, setComparisonData] = useState<ComparisonData | null>(null);
@@ -1255,9 +1264,9 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
                 }
               });
 
-              const tableItems: Record<string, string>[] = Array.from(allCostItems).map((itemKey) => {
+              const tableItems: CostComparisonRow[] = Array.from(allCostItems).map((itemKey) => {
                 const [context, serviceApi, unit] = String(itemKey).split('|');
-                const row: Record<string, string> = {
+                const row: CostComparisonRow = {
                   context,
                   serviceApi,
                   unit,
@@ -1289,7 +1298,7 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
               });
 
               // Add context subtotals
-              const finalItems: Record<string, string>[] = [];
+              const finalItems: CostComparisonRow[] = [];
               tableItems.forEach((item, index) => {
                 finalItems.push(item);
 
@@ -1300,17 +1309,17 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
                 if (isLastInContext) {
                   // Calculate subtotal for this context
                   const contextItems = tableItems.filter((i) => i.context === item.context);
-                  const subtotalRow: Record<string, string> = {
+                  const subtotalRow: CostComparisonRow = {
                     context: '',
                     serviceApi: `${item.context} Subtotal`,
                     unit: '',
-                    isSubtotal: 'true',
+                    isSubtotal: true,
                   };
 
                   Object.keys(completeTestRuns).forEach((testRunId) => {
                     const contextTotal = contextItems.reduce((sum, contextItem) => {
                       const value = contextItem[testRunId];
-                      if (value === 'N/A' || !value) return sum;
+                      if (typeof value !== 'string' || value === 'N/A') return sum;
                       const numValue = parseFloat(value.replace('$', ''));
                       return sum + (isNaN(numValue) ? 0 : numValue);
                     }, 0);
@@ -1322,17 +1331,17 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
               });
 
               // Add total row
-              const totalRow: Record<string, string> = {
+              const totalRow: CostComparisonRow = {
                 context: '',
                 serviceApi: 'Total',
                 unit: '',
-                isTotal: 'true',
+                isTotal: true,
               };
 
               Object.keys(completeTestRuns).forEach((testRunId) => {
                 const grandTotal = tableItems.reduce((sum, item) => {
                   const value = item[testRunId];
-                  if (value === 'N/A' || !value) return sum;
+                  if (typeof value !== 'string' || value === 'N/A') return sum;
                   const numValue = parseFloat(value.replace('$', ''));
                   return sum + (isNaN(numValue) ? 0 : numValue);
                 }, 0);
@@ -1351,14 +1360,14 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
                     {
                       id: 'context',
                       header: 'Context',
-                      cell: (item: Record<string, string>) => (item.isSubtotal || item.isTotal ? '' : item.context),
+                      cell: (item: CostComparisonRow) => (item.isSubtotal || item.isTotal ? '' : item.context),
                       width: 180,
                     },
                     {
                       id: 'serviceApi',
                       header: 'Service/Api',
                       width: 300,
-                      cell: (item: Record<string, string>) => (
+                      cell: (item: CostComparisonRow) => (
                         <span
                           style={{
                             fontWeight: item.isSubtotal || item.isTotal ? 'bold' : 'normal',
@@ -1372,21 +1381,21 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
                     {
                       id: 'unit',
                       header: 'Unit',
-                      cell: (item: Record<string, string>) => (item.isSubtotal || item.isTotal ? '' : item.unit),
+                      cell: (item: CostComparisonRow) => (item.isSubtotal || item.isTotal ? '' : item.unit),
                       width: 200,
                     },
                     ...Object.keys(completeTestRuns).map((testRunId) => ({
                       id: testRunId,
                       header: createTestRunHeader(testRunId, true),
                       width: 100,
-                      cell: (item: Record<string, string>) => (
+                      cell: (item: CostComparisonRow) => (
                         <span
                           style={{
                             fontWeight: item.isSubtotal || item.isTotal ? 'bold' : 'normal',
                             color: item.isTotal ? '#0073bb' : 'inherit',
                           }}
                         >
-                          {item[testRunId] || '$0.0000'}
+                          {(item[testRunId] as string) || '$0.0000'}
                         </span>
                       ),
                     })),

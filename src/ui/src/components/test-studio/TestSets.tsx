@@ -27,19 +27,9 @@ import {
   listBucketFiles,
   validateTestFileName,
 } from '../../graphql/generated';
+import { getErrorMessage } from '../../utils/errorUtils';
 
 const client = generateClient();
-
-interface GraphQLError {
-  message?: string;
-  errors?: { message?: string }[];
-}
-
-const getErrorMessage = (err: unknown): string => {
-  if (err instanceof Error) return err.message;
-  const gqlErr = err as GraphQLError;
-  return gqlErr?.message || gqlErr?.errors?.[0]?.message || JSON.stringify(err) || 'Unknown error';
-};
 
 // Constants
 const MAX_ZIP_SIZE_BYTES = 1073741824; // 1 GB

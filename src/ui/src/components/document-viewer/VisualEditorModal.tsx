@@ -1224,8 +1224,8 @@ const FormFieldRenderer = memo<Record<string, any>>(
         let groupEvalResult = null;
         if (showComparison && evaluationResults?.section_results) {
           let sectionResult = evaluationResults.section_results.find(
-        (sr: Record<string, unknown>) => String(sr.section_id) === String(sectionId),
-      );
+            (sr: Record<string, unknown>) => String(sr.section_id) === String(sectionId),
+          );
           if (!sectionResult && evaluationResults.section_results.length === 1) {
             sectionResult = evaluationResults.section_results[0];
           }
@@ -1598,8 +1598,8 @@ const FormFieldRenderer = memo<Record<string, any>>(
         let arrayEvalResult = null;
         if (showComparison && evaluationResults?.section_results) {
           let sectionResult = evaluationResults.section_results.find(
-        (sr: Record<string, unknown>) => String(sr.section_id) === String(sectionId),
-      );
+            (sr: Record<string, unknown>) => String(sr.section_id) === String(sectionId),
+          );
           if (!sectionResult && evaluationResults.section_results.length === 1) {
             sectionResult = evaluationResults.section_results[0];
           }

@@ -41,6 +41,18 @@ import type { SelectProps } from '@cloudscape-design/components';
 
 const client = generateClient();
 
+interface CostItem {
+  context: string;
+  serviceApi: string;
+  unit: string;
+  value: string;
+  unitCost: string;
+  estimatedCost: string;
+  isTotal?: boolean;
+  isSubtotal?: boolean;
+  sortOrder: number;
+}
+
 interface ComprehensiveBreakdownProps {
   costBreakdown: Record<string, Record<string, Record<string, unknown>>> | null;
   accuracyBreakdown: Record<string, number> | null;
@@ -192,17 +204,7 @@ const ComprehensiveBreakdown = ({
             resizableColumns
             wrapLines={preferences.wrapLines}
             items={(() => {
-              const costItems: {
-                context: string;
-                serviceApi: string;
-                unit: string;
-                value: string;
-                unitCost: string;
-                estimatedCost: string;
-                isTotal?: boolean;
-                isSubtotal?: boolean;
-                sortOrder: number;
-              }[] = [];
+              const costItems: CostItem[] = [];
               let totalCost = 0;
               const contextTotals: Record<string, number> = {};
 
@@ -244,17 +246,7 @@ const ComprehensiveBreakdown = ({
               });
 
               // Second pass: insert subtotal rows after each context group
-              const finalItems: {
-                context: string;
-                serviceApi: string;
-                unit: string;
-                value: string;
-                unitCost: string;
-                estimatedCost: string;
-                isTotal?: boolean;
-                isSubtotal?: boolean;
-                sortOrder: number;
-              }[] = [];
+              const finalItems: CostItem[] = [];
               const _currentContext: string | null = null;
 
               costItems.forEach((item, index) => {

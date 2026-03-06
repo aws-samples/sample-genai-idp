@@ -24,6 +24,7 @@ import useUserRole from '../../hooks/use-user-role';
 import useAppContext from '../../contexts/app';
 import useSettingsContext from '../../contexts/settings';
 import { listUsers, createUser as createUserMutation, deleteUser as deleteUserMutation } from '../../graphql/generated';
+import { getErrorMessage } from '../../utils/errorUtils';
 
 const logger = new ConsoleLogger('UserManagementLayout');
 
@@ -113,11 +114,7 @@ const UserManagementLayout = (): React.JSX.Element => {
         setUsers(usersList);
       } catch (err) {
         logger.error('Failed to load users:', err);
-        const errorMessage =
-          (err as { errors?: { message?: string }[]; message?: string }).errors?.[0]?.message ||
-          (err as { message?: string }).message ||
-          'Unknown error';
-        setError(`Failed to load users: ${errorMessage}`);
+        setError(`Failed to load users: ${getErrorMessage(err)}`);
       } finally {
         setLoading(false);
         setRefreshing(false);
@@ -163,12 +160,7 @@ const UserManagementLayout = (): React.JSX.Element => {
       await loadUsers();
     } catch (err) {
       logger.error('Failed to create user:', err);
-      // Extract error message from GraphQL error structure
-      const errorMessage =
-        (err as { errors?: { message?: string }[]; message?: string }).errors?.[0]?.message ||
-        (err as { message?: string }).message ||
-        'Unknown error';
-      setError(`Failed to create user: ${errorMessage}`);
+      setError(`Failed to create user: ${getErrorMessage(err)}`);
     } finally {
       setLoading(false);
     }
@@ -201,11 +193,7 @@ const UserManagementLayout = (): React.JSX.Element => {
       await loadUsers();
     } catch (err) {
       logger.error('Failed to delete user:', err);
-      const errorMessage =
-        (err as { errors?: { message?: string }[]; message?: string }).errors?.[0]?.message ||
-        (err as { message?: string }).message ||
-        'Unknown error';
-      setError(`Failed to delete user: ${errorMessage}`);
+      setError(`Failed to delete user: ${getErrorMessage(err)}`);
     } finally {
       setLoading(false);
     }
