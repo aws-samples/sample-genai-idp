@@ -46,9 +46,7 @@ class AppSyncClient:
         self.credentials = self.session.get_credentials()
         self.api_url = api_url or os.environ.get("APPSYNC_API_URL")
         self.region = (
-            region
-            or os.environ.get("AWS_REGION")
-            or boto3.Session().region_name
+            region or os.environ.get("AWS_REGION") or boto3.Session().region_name
         )
 
         if not self.api_url:

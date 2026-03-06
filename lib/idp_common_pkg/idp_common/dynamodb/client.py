@@ -41,9 +41,7 @@ class DynamoDBClient:
         """
         self.table_name = table_name or os.environ.get("TRACKING_TABLE")
         self.region = (
-            region
-            or os.environ.get("AWS_REGION")
-            or boto3.Session().region_name
+            region or os.environ.get("AWS_REGION") or boto3.Session().region_name
         )
 
         if not self.table_name:
