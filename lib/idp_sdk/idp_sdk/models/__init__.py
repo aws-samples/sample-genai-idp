@@ -28,6 +28,10 @@ from .config import (
     ConfigUploadResult,
     ConfigValidationResult,
 )
+from .discovery import (
+    DiscoveryBatchResult,
+    DiscoveryResult,
+)
 from .document import (
     DocumentDeletionResult,
     DocumentDownloadResult,
@@ -88,6 +92,9 @@ __all__ = [
     "ConfigValidationResult",
     "ConfigDownloadResult",
     "ConfigUploadResult",
+    # Discovery models
+    "DiscoveryResult",
+    "DiscoveryBatchResult",
     # Manifest models
     "ManifestDocument",
     "ManifestResult",

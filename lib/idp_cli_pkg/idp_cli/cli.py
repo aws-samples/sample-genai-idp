@@ -4316,6 +4316,194 @@ def config_delete(
         sys.exit(1)
 
 
+@cli.command(name="discover")
+@click.option("--stack-name", required=True, help="CloudFormation stack name")
+@click.option(
+    "--document",
+    "-d",
+    required=True,
+    multiple=True,
+    type=click.Path(exists=True),
+    help="Path to document file(s). Specify multiple times for batch: -d doc1.pdf -d doc2.pdf",
+)
+@click.option(
+    "--ground-truth",
+    "-g",
+    type=click.Path(exists=True),
+    help="Path to a JSON ground truth file for more accurate schema generation (single document only)",
+)
+@click.option(
+    "--config-version",
+    help="Configuration version to save the discovered schema to (default: active version)",
+)
+@click.option("--region", help="AWS region (optional)")
+@click.option(
+    "--output",
+    "-o",
+    type=click.Path(),
+    help="Path to write the generated JSON Schema to a file (single document only)",
+)
+def discover(
+    stack_name: str,
+    document: tuple,
+    ground_truth: Optional[str],
+    config_version: Optional[str],
+    region: Optional[str],
+    output: Optional[str],
+):
+    """
+    Discover document class schema from sample document(s)
+
+    Analyzes document(s) using Amazon Bedrock to automatically generate
+    JSON Schema definitions for document classes. The schemas describe the
+    document's structure, field names, types, and groupings. Discovered
+    schemas are saved to the stack's configuration.
+
+    Supports two modes:
+    - Without ground truth: Analyzes the document and infers the schema
+    - With ground truth: Uses a JSON reference file for more accurate results
+
+    Pass multiple -d flags to discover schemas for several documents at once.
+
+    Examples:
+
+      # Discover schema from a single document
+      idp-cli discover --stack-name my-stack -d ./samples/w2/w2-sample.pdf
+
+      # Discovery with ground truth for better accuracy
+      idp-cli discover --stack-name my-stack -d ./invoice.pdf --ground-truth ./invoice-expected.json
+
+      # Save to specific config version and output schema to file
+      idp-cli discover --stack-name my-stack -d ./form.pdf --config-version v2 --output ./form-schema.json
+
+      # Discover schemas for multiple documents (batch)
+      idp-cli discover --stack-name my-stack -d ./invoice.pdf -d ./w2.pdf -d ./paystub.png
+    """
+    import json
+
+    try:
+        # Validate: ground truth and output only make sense for single document
+        if len(document) > 1 and ground_truth:
+            console.print(
+                "[red]✗ Error: --ground-truth can only be used with a single document[/red]"
+            )
+            sys.exit(1)
+        if len(document) > 1 and output:
+            console.print(
+                "[red]✗ Error: --output can only be used with a single document[/red]"
+            )
+            sys.exit(1)
+
+        from idp_sdk import IDPClient
+
+        client = IDPClient(stack_name=stack_name, region=region)
+
+        if len(document) == 1:
+            # Single document mode — detailed output
+            doc_path = document[0]
+            console.print("[bold blue]IDP Discovery[/bold blue]")
+            console.print(f"Stack: {stack_name}")
+            console.print(f"Document: {doc_path}")
+            if ground_truth:
+                console.print(f"Ground Truth: {ground_truth}")
+            if config_version:
+                console.print(f"Config Version: {config_version}")
+            console.print()
+
+            with console.status(
+                "[bold cyan]Analyzing document with Amazon Bedrock...[/bold cyan]"
+            ):
+                result = client.discovery.run(
+                    document_path=doc_path,
+                    ground_truth_path=ground_truth,
+                    config_version=config_version,
+                )
+
+            if result.status == "SUCCESS":
+                console.print("[green]✓ Discovery completed successfully[/green]")
+                console.print()
+
+                if result.document_class:
+                    console.print(
+                        f"[bold]Document Class:[/bold] {result.document_class}"
+                    )
+
+                if result.json_schema:
+                    properties = result.json_schema.get("properties", {})
+                    console.print(
+                        f"[bold]Properties:[/bold] {len(properties)} top-level fields"
+                    )
+                    console.print()
+
+                    schema_json = json.dumps(result.json_schema, indent=2)
+                    console.print("[bold]Generated JSON Schema:[/bold]")
+                    console.print(schema_json)
+                    console.print()
+
+                    if output:
+                        with open(output, "w", encoding="utf-8") as f:
+                            f.write(schema_json)
+                        console.print(f"[green]✓ Schema written to: {output}[/green]")
+
+                console.print(
+                    f"[green]✓ Schema saved to configuration"
+                    f"{' (version: ' + config_version + ')' if config_version else ''}[/green]"
+                )
+            else:
+                console.print("[red]✗ Discovery failed[/red]")
+                if result.error:
+                    console.print(f"[red]Error: {result.error}[/red]")
+                sys.exit(1)
+
+        else:
+            # Batch mode — process multiple documents
+            console.print("[bold blue]IDP Discovery (batch)[/bold blue]")
+            console.print(f"Stack: {stack_name}")
+            console.print(f"Documents: {len(document)}")
+            if config_version:
+                console.print(f"Config Version: {config_version}")
+            console.print()
+
+            succeeded = 0
+            failed = 0
+            for i, doc_path in enumerate(document, 1):
+                console.print(
+                    f"[bold cyan]Processing document {i}/{len(document)}: {doc_path}[/bold cyan]"
+                )
+
+                with console.status("[cyan]Analyzing with Amazon Bedrock...[/cyan]"):
+                    result = client.discovery.run(
+                        document_path=doc_path,
+                        config_version=config_version,
+                    )
+
+                if result.status == "SUCCESS":
+                    doc_class = result.document_class or "Unknown"
+                    console.print(f"  [green]✓ Discovered class: {doc_class}[/green]")
+                    succeeded += 1
+                else:
+                    console.print(f"  [red]✗ Failed: {result.error}[/red]")
+                    failed += 1
+
+                console.print()
+
+            console.print("[bold]Summary:[/bold]")
+            console.print(
+                f"  Total: {len(document)}, Succeeded: {succeeded}, Failed: {failed}"
+            )
+            console.print("[green]✓ Batch discovery complete[/green]")
+
+            if failed > 0:
+                sys.exit(1)
+
+    except FileNotFoundError as e:
+        console.print(f"[red]✗ File not found: {e}[/red]")
+        sys.exit(1)
+    except Exception as e:
+        console.print(f"[red]✗ Error: {e}[/red]")
+        sys.exit(1)
+
+
 def main():
     """Main entry point for the CLI"""
     # Parse --profile from anywhere in sys.argv before Click processes arguments

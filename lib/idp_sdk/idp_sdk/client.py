@@ -29,10 +29,11 @@ class IDPClient:
         - Enabling semantic search across processed documents
 
     Architecture:
-        The client organizes functionality into 9 operation namespaces:
+        The client organizes functionality into 10 operation namespaces:
         - stack: Infrastructure deployment and management
         - batch: Process multiple documents in bulk
         - document: Process and manage individual documents
+        - discovery: Discover document class schemas from sample documents
         - evaluation: Compare results against baseline data
         - assessment: Analyze extraction quality and confidence
         - search: Query processed documents with natural language
@@ -80,6 +81,7 @@ class IDPClient:
         stack: StackOperation - Infrastructure management
         batch: BatchOperation - Bulk document processing
         document: DocumentOperation - Single document operations
+        discovery: DiscoveryOperation - Document class schema discovery
         evaluation: EvaluationOperation - Baseline comparison and accuracy
         assessment: AssessmentOperation - Quality metrics and confidence
         search: SearchOperation - Knowledge base queries
@@ -131,6 +133,7 @@ class IDPClient:
             AssessmentOperation,
             BatchOperation,
             ConfigOperation,
+            DiscoveryOperation,
             DocumentOperation,
             EvaluationOperation,
             ManifestOperation,
@@ -143,6 +146,7 @@ class IDPClient:
         self.batch = BatchOperation(self)
         self.document = DocumentOperation(self)
         self.config = ConfigOperation(self)
+        self.discovery = DiscoveryOperation(self)
         self.manifest = ManifestOperation(self)
         self.testing = TestingOperation(self)
         self.search = SearchOperation(self)

@@ -5,6 +5,10 @@ SPDX-License-Identifier: MIT-0
 
 ## [Unreleased]
 
+### Added
+
+- **Discovery accessible from CLI and SDK** — Discovery can now be run programmatically via the IDP SDK (`client.discovery.run()`) and CLI (`idp-cli discover`), enabling users with many document classes to automate schema generation without the Web UI. Supports both modes: without ground truth (exploratory) and with ground truth (optimized). Batch discovery is also supported via `client.discovery.run_batch()` and `idp-cli discover-batch`. ([#228](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues/228))
+
 ### Changed
 
 - **Sync to BDA no longer auto-activates the config version** — Previously, performing "Sync to BDA" would automatically set the current config version as active. Since each config version now has its own BDA project, auto-activation is unnecessary. Users can manually choose which version to activate via the Versions table. The "Sync to BDA" confirmation modal text has been updated accordingly.
