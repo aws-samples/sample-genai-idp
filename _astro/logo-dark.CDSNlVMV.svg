@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 32" fill="none">
+  <rect x="0" y="2" width="28" height="28" rx="6" fill="#FF9900"/>
+  <path d="M8 10h12v3H8zM8 15h9v3H8zM8 20h12v3H8z" fill="#1a2332"/>
+  <text x="36" y="22" font-family="system-ui, sans-serif" font-size="16" font-weight="700" fill="#ffffff">IDP</text>
+</svg>

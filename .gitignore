@@ -1,0 +1,52 @@
+.env
+.aws-sam
+build.toml
+model.tar.gz
+.checksum
+.checksums/
+.build_checksum
+.lib_checksum
+
+# Build artifacts - backup files from publish.py
+*.pre-build-backup
+.vscode/
+.DS_Store
+dist/
+.sav/
+.delete/
+.data/
+*.egg-info/
+build/
+__pycache__
+*.code-workspace
+.ruff_cache
+.kiro
+notebooks/examples/data
+.idea/
+.dsr/
+*tmp-dev-assets*
+scratch/
+
+# Node.js / npm
+node_modules/
+package-lock.json
+
+# Type checking
+pyrightconfig.temp.json
+.pyright/
+
+# Python virtual environments
+.venv/
+.venv-*/
+venv/
+
+#Temp notebook data
+output/*
+*.log
+dataset
+venv-*/
+notebooks/doc-split-metrics-exp/
+# SAM CLI config (may contain sensitive ARNs)
+samconfig.toml
+..bfg-report
+.git-rewrite

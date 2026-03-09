@@ -1,0 +1,15 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: MIT-0
+
+# Configuration for GitHub issue templates
+blank_issues_enabled: false
+contact_links:
+  - name: GenAIIDP Documentation
+    url: https://github.com/aws-samples/sample-genai-idp/blob/main/docs/README.md
+    about: Please check our documentation before filing an issue
+  - name: AWS Support
+    url: https://aws.amazon.com/support/
+    about: For issues related to AWS services used in this solution (Amazon Bedrock, Amazon Textract, etc.)
+  - name: AWS Service Feedback
+    url: https://aws.amazon.com/feedback/
+    about: For feature requests or feedback on the underlying AWS services (not the GenAIIDP solution)

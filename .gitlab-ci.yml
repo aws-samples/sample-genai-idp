@@ -1,0 +1,196 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: MIT-0
+
+# Any publicly available image
+image: public.ecr.aws/docker/library/python:3.13-bookworm
+
+# Global timeout for all jobs
+default:
+  timeout: 2h
+
+# Change pip's cache directory to be inside the project directory since we can
+# only cache local items.
+# variables:
+#   PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+
+# https://pip.pypa.io/en/stable/topics/caching/
+# cache:
+#   paths:
+#     - .cache/pip
+
+stages:
+  - developer_tests
+  - deployment_validation
+  - integration_tests
+
+developer_tests:
+  stage: developer_tests
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      when: always # Only run on merge requests (PRs), not on merged branches
+
+  before_script:
+    - python --version
+    - apt-get update -y
+    - apt-get install make curl git -y
+    # Fetch target branch for comparison in typecheck-pr
+    - export TARGET_BRANCH="${CI_MERGE_REQUEST_TARGET_BRANCH_NAME:-main}"
+    - echo "MR target branch (CI_MERGE_REQUEST_TARGET_BRANCH_NAME):$TARGET_BRANCH"
+    - git fetch origin $TARGET_BRANCH:$TARGET_BRANCH || echo "Could not fetch $TARGET_BRANCH branch"
+    # Install uv
+    - pip install uv
+    # Create virtual environment
+    - uv venv .venv
+    - source .venv/bin/activate
+    # Install Node.js and npm for basedpyright
+    - curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+    - apt-get install -y nodejs
+    - npm install -g npm@11
+    - npm install -g basedpyright
+    - uv pip install ruff
+    # Install dependencies needed by publish.py for test imports
+    - uv pip install typer rich boto3
+    # Install test dependencies
+    - cd lib/idp_common_pkg && uv pip install -e ".[test,evaluation]" && cd ../..
+
+  script:
+    - make lint-cicd
+    - echo "=== Type Checking Configuration ==="
+    - echo "MR target branch:$TARGET_BRANCH"
+    - echo "Comparing:$TARGET_BRANCH...HEAD"
+    - echo "===================================="
+    - echo ""
+    - make typecheck-pr TARGET_BRANCH=$TARGET_BRANCH
+    - make test-cicd -C lib/idp_common_pkg
+
+  artifacts:
+    paths:
+      - lib/idp_common_pkg/test-reports/coverage.xml
+      - lib/idp_common_pkg/test-reports/test-results.xml
+    reports:
+      coverage_report:
+        coverage_format: cobertura
+        path: lib/idp_common_pkg/test-reports/coverage.xml
+      junit: lib/idp_common_pkg/test-reports/test-results.xml
+    expire_in: 1 week
+
+deployment_validation:
+  stage: deployment_validation
+  rules:
+    - when: on_success
+
+  before_script:
+    - apt-get update -y
+    - apt-get install curl unzip python3-pip -y
+    # Install AWS CLI
+    - curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+    - unzip awscliv2.zip
+    - ./aws/install
+    # Install PyYAML for template analysis
+    - pip install PyYAML
+
+  script:
+    # Check if service role has sufficient permissions for main stack deployment
+    - python3 scripts/sdlc/validate_service_role_permissions.py
+
+integration_tests:
+  stage: integration_tests
+  timeout: 2h
+  variables:
+    IDP_ADMIN_EMAIL: ${GITLAB_USER_EMAIL}
+  # variables:
+  #   # In order to run tests in another account, add a AWS_CREDS_TARGET_ROLE variable to the Gitlab pipeline variables.
+  #   AWS_CREDS_TARGET_ROLE: ${AWS_CREDS_TARGET_ROLE}
+  #   AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION}
+  #   IDP_ACCOUNT_ID: ${IDP_ACCOUNT_ID}
+
+  # Add rules to only run on develop branch
+  rules:
+    - if: $CI_COMMIT_BRANCH == "develop"
+      when: on_success
+    - if: $CI_COMMIT_BRANCH =~ /^feature\/.*/
+      when: on_success
+    - if: $CI_COMMIT_BRANCH =~ /^fix\/.*/
+      when: on_success
+    - if: $CI_COMMIT_BRANCH =~ /^hotfix\/.*/
+      when: manual
+    - if: $CI_COMMIT_BRANCH =~ /^release\/.*/
+      when: manual
+    - when: manual
+
+  before_script:
+    - apt-get update -y
+    - apt-get install zip unzip curl python3-pip -y
+    # Install AWS CLI
+    - curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+    - unzip awscliv2.zip
+    - ./aws/install
+    # Install boto3 for Python script
+    - pip install boto3 rich
+
+  script:
+    - aws --version
+    - aws sts get-caller-identity --no-cli-pager
+
+    # Set environment variables for Python script
+    - export IDP_ACCOUNT_ID=${IDP_ACCOUNT_ID:-020432867916}
+    - export AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION:-us-east-1}
+    - export IDP_PIPELINE_NAME=genaiic-sdlc-deploy-pipeline
+
+    # Run integration test deployment
+    - python3 scripts/sdlc/integration_test_deployment.py
+
+  after_script:
+    # Display CodeBuild logs directly in GitLab runner console
+    - |
+      if [ -f "pipeline_execution_id.txt" ]; then
+        EXECUTION_ID=$(cat pipeline_execution_id.txt)
+        echo "Pipeline Execution: $EXECUTION_ID"
+        
+        # Get CodeBuild ID from the pipeline execution
+        BUILD_ID=$(aws codepipeline list-action-executions --pipeline-name ${IDP_PIPELINE_NAME:-genaiic-sdlc-deploy-pipeline} --filter pipelineExecutionId=$EXECUTION_ID --query 'actionExecutionDetails[?actionName==`BuildAction`].output.executionResult.externalExecutionId' --output text 2>/dev/null || echo "")
+        
+        if [ "$BUILD_ID" != "" ] && [ "$BUILD_ID" != "None" ]; then
+          echo "CodeBuild ID: $BUILD_ID"
+          # Extract just the build ID part (after the colon)
+          LOG_STREAM_NAME="${BUILD_ID#*:}"
+          echo "Log Stream: $LOG_STREAM_NAME"
+          echo ""
+          echo "=== DEPLOYMENT SUMMARY ==="
+          # Wait for CloudWatch Logs to flush all events
+          echo "Waiting 30 seconds for logs to flush..."
+          sleep 30
+          FULL_LOGS=$(aws logs get-log-events --log-group-name "/aws/codebuild/app-sdlc" --log-stream-name "$LOG_STREAM_NAME" --start-from-head --query 'events[].message' --output text 2>/dev/null || echo "Could not retrieve CodeBuild logs")
+          
+          # Save full logs to artifact
+          echo "$FULL_LOGS" > codebuild_logs.txt
+          echo -e "\033[1;36m📁 Full deployment logs saved to: \033[1;33mcodebuild_logs.txt\033[0m"
+          echo -e "\033[1;34m🔗 View logs: ${CI_JOB_URL}/artifacts/external_file/codebuild_logs.txt\033[0m"
+          # Extract and show deployment summary (AI or manual)
+          echo ""
+          SUMMARY=$(echo "$FULL_LOGS" | sed -n '/🤖 Generating deployment summary with Bedrock.../,$p' | sed 's/^\t*//' | grep -v '\[Container\]' | grep -v 'Phase complete:' | grep -v 'Phase context status code:' | grep -v 'Entering phase' || true)
+          
+          if [ -n "$SUMMARY" ]; then
+            echo "┌─────────────────────────────────────────────────────────────────────────┐"
+            echo "│                        DEPLOYMENT SUMMARY                               │"
+            echo "├─────────────────────────────────────────────────────────────────────────┤"
+            echo "$SUMMARY" | while IFS= read -r line; do
+              printf "│ %-71s │\n" "$line"
+            done
+            echo "└─────────────────────────────────────────────────────────────────────────┘"
+          else
+            echo "⚠️ No deployment summary found - check codebuild_logs.txt for details"
+          fi
+        else
+          echo "Could not find CodeBuild execution"
+        fi
+      else
+        echo "No pipeline execution ID found"
+      fi
+
+  artifacts:
+    when: always
+    paths:
+      - pipeline_execution_id.txt
+      - codebuild_logs.txt
+    expire_in: 1 week
