@@ -1995,6 +1995,45 @@ This uses the same mechanism as the Web UI configuration management system.
 
 ---
 
+### `discover`
+
+Discover document class schemas from sample documents using Amazon Bedrock.
+
+**Two modes:**
+- **Stack-connected** (`--stack-name`): Uses stack's discovery config and saves schema to DynamoDB configuration
+- **Local** (no `--stack-name`): Uses system default Bedrock settings, prints schema to stdout without saving
+
+```bash
+# Discover schema from a single document (local mode — no stack needed)
+idp-cli discover -d ./invoice.pdf
+
+# Discover with stack (saves to config)
+idp-cli discover --stack-name my-stack -d ./samples/w2/w2-sample.pdf
+
+# Discovery with ground truth for better accuracy
+idp-cli discover --stack-name my-stack -d ./invoice.pdf --ground-truth ./invoice-expected.json
+
+# Save schema to file
+idp-cli discover -d ./form.pdf --output ./form-schema.json
+
+# Save to specific config version
+idp-cli discover --stack-name my-stack -d ./form.pdf --config-version v2 --output ./form-schema.json
+
+# Batch: discover schemas for multiple documents
+idp-cli discover --stack-name my-stack -d ./invoice.pdf -d ./w2.pdf -d ./paystub.png
+```
+
+| Option | Description |
+|--------|-------------|
+| `--stack-name` | CloudFormation stack name (optional — omit for local mode) |
+| `-d, --document` | Path to document file (required, repeatable for batch) |
+| `-g, --ground-truth` | Path to JSON ground truth file (single document only) |
+| `--config-version` | Config version to save to (stack mode only) |
+| `-o, --output` | Write schema to file (single document only) |
+| `--region` | AWS region |
+
+---
+
 ## Troubleshooting
 
 ### Stack Not Found
