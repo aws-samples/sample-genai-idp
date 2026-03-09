@@ -282,6 +282,9 @@ class Document:
     hitl_sections_pending: List[str] = field(default_factory=list)
     hitl_sections_completed: List[str] = field(default_factory=list)
 
+    # Confidence alerts (top-level count for GSI projection)
+    confidence_alert_count: int = 0
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert document to dictionary representation."""
         # First convert basic attributes

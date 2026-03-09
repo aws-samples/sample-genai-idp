@@ -217,7 +217,7 @@ classes:
 ### Configuration Templates
 
 Find JSON Schema templates in:
-- `config_library/pattern-2/` - Pattern 2 examples (Bedrock)
+- `config_library/unified/` - Pattern 2 examples (Bedrock)
 
 ## Validation Methods
 

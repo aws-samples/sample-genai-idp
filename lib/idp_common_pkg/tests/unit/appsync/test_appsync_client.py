@@ -39,9 +39,15 @@ class TestAppSyncClient:
         with pytest.raises(ValueError, match="AppSync API URL must be provided"):
             AppSyncClient(region="us-west-2")
 
-    def test_init_missing_region(self, monkeypatch):
+    @patch("idp_common.appsync.client.boto3")
+    def test_init_missing_region(self, mock_boto3, monkeypatch):
         """Test initialization fails when region is missing."""
         monkeypatch.delenv("AWS_REGION", raising=False)
+        # Also mock boto3.Session().region_name to return None
+        mock_session = MagicMock()
+        mock_session.region_name = None
+        mock_session.get_credentials.return_value = MagicMock()
+        mock_boto3.Session.return_value = mock_session
         with pytest.raises(ValueError, match="AWS region must be provided"):
             AppSyncClient(api_url="https://test-api.com/graphql")
 

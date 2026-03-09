@@ -180,9 +180,12 @@ def _store_test_run_metadata(tracking_table, test_run_id, test_set_id, test_set_
     table = dynamodb.Table(tracking_table)  # type: ignore[attr-defined]
     
     try:
+        created_at = datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S.%fZ')
         item = {
             'PK': f'testrun#{test_run_id}',
             'SK': 'metadata',
+            'ItemType': 'testrun',
+            'InitialEventTime': created_at,
             'TestSetId': test_set_id,
             'TestSetName': test_set_name,
             'TestRunId': test_run_id,
@@ -192,7 +195,7 @@ def _store_test_run_metadata(tracking_table, test_run_id, test_set_id, test_set_
             'FailedFiles': 0,
             'Files': files,
             'Config': config,
-            'CreatedAt': datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S.%fZ')
+            'CreatedAt': created_at
         }
         
         if context:

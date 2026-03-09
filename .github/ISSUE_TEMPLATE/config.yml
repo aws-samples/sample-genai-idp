@@ -5,7 +5,7 @@
 blank_issues_enabled: false
 contact_links:
   - name: GenAIIDP Documentation
-    url: https://github.com/aws-samples/sample-genai-idp/blob/main/docs/README.md
+    url: https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/blob/main/docs/README.md
     about: Please check our documentation before filing an issue
   - name: AWS Support
     url: https://aws.amazon.com/support/

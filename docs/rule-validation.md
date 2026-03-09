@@ -20,10 +20,10 @@ The healthcare examples we provide show what's possible, but you can customize t
 
 ### How to Enable Rule Validation
 
-Rule Validation is available in **Pattern 2**. You can enable it in two ways:
+Rule Validation is available in **Pipeline mode** (the default processing mode). You can enable it in two ways:
 
 **Option 1: During Stack Deployment**
-- When deploying the CloudFormation stack, select Pattern 2
+- When deploying the CloudFormation stack, select the **rule-validation** configuration preset
 - In the configuration dropdown, select **rule-validation**
 - The stack deploys with rule validation enabled
 
@@ -45,7 +45,7 @@ Rule validation works for any industry using this two-step process:
 
 **How to do it:**
 1. **Enable Rule Extraction**
-   - Option A: Deploy stack with Pattern 2, select **rule-extraction** configuration
+   - Option A: Deploy stack with the **rule-extraction** configuration preset
    - Option B: Import **rule-extraction** from Config Library in the UI
 
 2. **Upload Your Policy Document**
@@ -69,7 +69,7 @@ Rule validation works for any industry using this two-step process:
 
 **How to do it:**
 1. **Enable Rule Validation**
-   - Option A: Deploy stack with Pattern 2, select **rule-validation** configuration
+   - Option A: Deploy stack with the **rule-validation** configuration preset
    - Option B: Import **rule-validation** from Config Library in the UI
 
 2. **Configure Document Schema**
@@ -136,7 +136,7 @@ Want to see it in action first? We provide a complete healthcare example with sa
 
 ### State Machine Integration
 
-Rule validation is integrated into Pattern-2's workflow after extraction:
+Rule validation is integrated into the pipeline mode workflow after extraction:
 
 ```
 OCR → Classification → Extraction → Rule Validation → Orchestration
@@ -549,8 +549,8 @@ We provide a complete healthcare example demonstrating prior authorization valid
   - Contains medical coding rules, bundling guidelines, and compliance requirements
 
 **Configuration Files:**
-- **Step 1 - Rule Extraction**: `config_library/pattern-2/rule-extraction/config.yaml`
-- **Step 2 - Rule Validation**: `config_library/pattern-2/rule-validation/config.yaml`
+- **Step 1 - Rule Extraction**: `config_library/unified/rule-extraction/config.yaml`
+- **Step 2 - Rule Validation**: `config_library/unified/rule-validation/config.yaml`
 
 This example includes:
 - NCCI coding rules

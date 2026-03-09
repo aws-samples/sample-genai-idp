@@ -96,6 +96,7 @@ def handler(event, context):
                 Item={
                     'PK': doc_pk,
                     'SK': doc_sk,
+                    'ItemType': 'document',
                     **input_data
                 }
             )

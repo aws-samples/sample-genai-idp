@@ -80,14 +80,6 @@ Parameters:
     AllowedPattern: '^(|s3://.*)$'
     ConstraintDescription: Must be empty or a valid S3 URI (e.g., s3://my-bucket/custom-config/config.yaml)
 
-  # Pattern 1 Parameters
-
-  Pattern1BDAProjectArn:
-    Type: String
-    Default: ""
-    AllowedPattern: "^(|^arn:aws[a-z-]*:bedrock:[a-z0-9-]+:.+:data-automation-project/.+)$"
-    Description: Provide a Bedrock Data Automation (BDA) project ARN, or leave blank to create a sample project for processing the sample lending package.
-
   ConfigurationPreset:
     Type: String
     Default: "lending-package-sample"
@@ -357,8 +349,6 @@ Parameters:
     ConstraintDescription: Must be valid comma-separated list of IPv4 CIDR ranges
 
 Conditions:
-  HasPattern1BDAProjectArn:
-    !Not [ !Equals [ !Ref Pattern1BDAProjectArn, "" ] ]
   HasGuardrailConfig:
     !And [
       !Not [ !Equals [ !Ref BedrockGuardrailId, "" ] ],
@@ -404,7 +394,6 @@ Metadata:
         Parameters:
           - ConfigurationPreset
           - CustomConfigPath
-          - Pattern1BDAProjectArn
           - Pattern2CustomClassificationModelARN
           - Pattern2CustomExtractionModelARN
       - Label:
@@ -457,8 +446,6 @@ Metadata:
         default: "Admin Email Address"
       AllowedSignUpEmailDomain:
         default: "Allowed Sign Up Email Domain"
-      Pattern1BDAProjectArn:
-        default: "Bedrock Data Automation (BDA) Project ARN"
       Pattern2CustomClassificationModelARN:
         default: "Custom Classification Model ARN"
       Pattern2CustomExtractionModelARN:
@@ -1169,7 +1156,6 @@ Resources:
         ExecutionTimeThresholdMs: !Ref ExecutionTimeThresholdMs
         BedrockGuardrailId: !Ref BedrockGuardrailId
         BedrockGuardrailVersion: !Ref BedrockGuardrailVersion
-        BDAProjectArn: !Ref Pattern1BDAProjectArn
         UpdateConfigurationFunctionArn: !GetAtt UpdateConfigurationFunction.Arn
         ConfigurationTable: !Ref ConfigurationTable
         AppSyncApiUrl: !GetAtt GraphQLApi.GraphQLUrl
@@ -1295,8 +1281,6 @@ Resources:
         KnowledgeBaseModelId: !Ref KnowledgeBaseModelId
         ShouldCreateEvaluationBaselineBucket: !If [ShouldCreateEvaluationBaselineBucket, "true", "false"]
         ShouldCreateReportingBucket: !If [ShouldCreateReportingBucket, "true", "false"]
-        Pattern1BDAProjectArn: !Ref Pattern1BDAProjectArn
-        HasPattern1BDAProjectArn: !If [HasPattern1BDAProjectArn, "true", "false"]
                 
         # Lambda Layers
         IDPCommonBaseLayerArn: !Ref IDPCommonBaseLayer
@@ -2900,9 +2884,9 @@ Resources:
           AttributeType: S
         - AttributeName: SK
           AttributeType: S
-        - AttributeName: HITLPendingReview
-          AttributeType: S
         - AttributeName: InitialEventTime
+          AttributeType: S
+        - AttributeName: ItemType
           AttributeType: S
       KeySchema:
         - AttributeName: PK
@@ -2910,14 +2894,37 @@ Resources:
         - AttributeName: SK
           KeyType: RANGE
       GlobalSecondaryIndexes:
-        - IndexName: HITLPendingReviewIndex
+        # TypeDateIndex replaces both the old listDocuments scan and the HITLPendingReviewIndex.
+        # Pending reviews use: ItemType='document' + time range + FilterExpression: HITLPendingReview='true'
+        - IndexName: TypeDateIndex
           KeySchema:
-            - AttributeName: HITLPendingReview
+            - AttributeName: ItemType
               KeyType: HASH
             - AttributeName: InitialEventTime
               KeyType: RANGE
           Projection:
-            ProjectionType: KEYS_ONLY
+            ProjectionType: INCLUDE
+            NonKeyAttributes:
+              - ObjectKey
+              - ObjectStatus
+              - CompletionTime
+              - ConfigVersion
+              - EvaluationStatus
+              - NumPages
+              - ConfidenceAlertCount
+              - HITLTriggered
+              - HITLCompleted
+              - HITLStatus
+              - HITLReviewOwner
+              - HITLReviewedBy
+              - TestRunId
+              - TestSetName
+              - CreatedAt
+              - CompletedFiles
+              - FailedFiles
+              - FilesCount
+              - Status
+              - CompletedAt
       TimeToLiveSpecification:
         AttributeName: ExpiresAfter
         Enabled: true
@@ -2925,6 +2932,143 @@ Resources:
         SSEEnabled: true
         SSEType: KMS
         KMSMasterKeyId: !Ref CustomerManagedEncryptionKey
+
+  ##########################################################################
+  # GSI Attribute Backfill - Step Functions + Lambda for populating
+  # TypeDateIndex and HITLPendingReviewIndex on existing items
+  ##########################################################################
+
+  BackfillWorkerFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      KmsKeyId: !GetAtt CustomerManagedEncryptionKey.Arn
+      RetentionInDays: !Ref LogRetentionDays
+
+  BackfillWorkerFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: "Function does not require VPC access as it only interacts with DynamoDB"
+          - id: W92
+            reason: "Function does not require reserved concurrency"
+    # checkov:skip=CKV_AWS_116: "DLQ not required - Step Functions handles retries"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data"
+    Properties:
+      PermissionsBoundary:
+        !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
+      Handler: index.lambda_handler
+      Runtime: python3.12
+      CodeUri: src/lambda/backfill_gsi_attributes/
+      Timeout: 900
+      MemorySize: 512
+      Environment:
+        Variables:
+          LOG_LEVEL: !Ref LogLevel
+      LoggingConfig:
+        LogGroup: !Ref BackfillWorkerFunctionLogGroup
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref TrackingTable
+        - Statement:
+            - Effect: Allow
+              Action:
+                - kms:Encrypt
+                - kms:Decrypt
+                - kms:ReEncrypt*
+                - kms:GenerateDataKey*
+                - kms:DescribeKey
+              Resource: !GetAtt CustomerManagedEncryptionKey.Arn
+
+  BackfillStateMachineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: !Sub "states.${AWS::URLSuffix}"
+            Action: sts:AssumeRole
+      PermissionsBoundary:
+        !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
+      Policies:
+        - PolicyName: BackfillStateMachinePolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource: !GetAtt BackfillWorkerFunction.Arn
+
+  BackfillStateMachine:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      Name: !Sub "${AWS::StackName}-GSIBackfill"
+      DefinitionUri: src/lambda/backfill_gsi_attributes/statemachine.asl.json
+      DefinitionSubstitutions:
+        BackfillWorkerFunctionArn: !GetAtt BackfillWorkerFunction.Arn
+      Role: !GetAtt BackfillStateMachineRole.Arn
+
+  BackfillTriggerFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      KmsKeyId: !GetAtt CustomerManagedEncryptionKey.Arn
+      RetentionInDays: !Ref LogRetentionDays
+
+  BackfillTriggerFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: "Function does not require VPC access"
+          - id: W92
+            reason: "Function does not require reserved concurrency"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for Custom Resource function"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
+    Properties:
+      PermissionsBoundary:
+        !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
+      Handler: index.handler
+      Runtime: python3.12
+      CodeUri: src/lambda/backfill_gsi_attributes/
+      Timeout: 60
+      MemorySize: 256
+      Environment:
+        Variables:
+          LOG_LEVEL: !Ref LogLevel
+      LoggingConfig:
+        LogGroup: !Ref BackfillTriggerFunctionLogGroup
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref TrackingTable
+        - Statement:
+            - Effect: Allow
+              Action: states:StartExecution
+              Resource: !Ref BackfillStateMachine
+            - Effect: Allow
+              Action:
+                - kms:Decrypt
+                - kms:DescribeKey
+              Resource: !GetAtt CustomerManagedEncryptionKey.Arn
+
+  BackfillCustomResource:
+    Type: Custom::GSIBackfill
+    DependsOn:
+      - TrackingTable
+      - BackfillStateMachine
+    Properties:
+      ServiceToken: !GetAtt BackfillTriggerFunction.Arn
+      TrackingTableName: !Ref TrackingTable
+      BackfillStateMachineArn: !Ref BackfillStateMachine
+      TotalSegments: "10"
+      # Force re-evaluation on each stack update
+      BackfillVersion: "1.0"
 
   ##############################################################################
   # DynamoDB table and initialization function for workflow concurrency counter

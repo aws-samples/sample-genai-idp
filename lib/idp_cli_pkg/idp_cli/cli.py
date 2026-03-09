@@ -209,7 +209,7 @@ TEMPLATE_URLS = {
 
 
 @click.group()
-@click.version_option(version="0.5.0")
+@click.version_option(version="0.5.2")
 def cli():
     """
     IDP CLI - Batch document processing for IDP Accelerator
@@ -3332,12 +3332,6 @@ def remove_residual_resources_from_deleted_stacks(
     help="Feature set: 'min' (classification, extraction, classes), 'core' (adds ocr, assessment), 'all', or comma-separated list of sections",
 )
 @click.option(
-    "--pattern",
-    type=click.Choice(["pattern-1", "pattern-2"]),
-    default="pattern-2",
-    help="Pattern to use for defaults (default: pattern-2)",
-)
-@click.option(
     "--output",
     "-o",
     type=click.Path(),
@@ -3355,7 +3349,6 @@ def remove_residual_resources_from_deleted_stacks(
 )
 def config_create(
     features: str,
-    pattern: str,
     output: Optional[str],
     include_prompts: bool,
     no_comments: bool,
@@ -3379,9 +3372,6 @@ def config_create(
       # Generate minimal config to stdout
       idp-cli config-create
 
-      # Generate minimal config for Pattern-1 (BDA)
-      idp-cli config-create --pattern pattern-1 --output config.yaml
-
       # Generate full config with all sections
       idp-cli config-create --features all --output full-config.yaml
 
@@ -3403,7 +3393,7 @@ def config_create(
         # Generate template
         yaml_content = generate_config_template(
             features=feature_list,
-            pattern=pattern,
+            pattern="pattern-2",
             include_prompts=include_prompts,
             include_comments=not no_comments,
         )
@@ -3449,12 +3439,6 @@ def config_create(
     help="Path to configuration file to validate",
 )
 @click.option(
-    "--pattern",
-    type=click.Choice(["pattern-1", "pattern-2"]),
-    default="pattern-2",
-    help="Pattern to validate against (default: pattern-2)",
-)
-@click.option(
     "--show-merged",
     is_flag=True,
     help="Show the full merged configuration",
@@ -3466,7 +3450,6 @@ def config_create(
 )
 def config_validate(
     config_file: str,
-    pattern: str,
     show_merged: bool,
     strict: bool,
 ):
@@ -3484,9 +3467,6 @@ def config_validate(
       # Validate a config file
       idp-cli config-validate --config-file ./my-config.yaml
 
-      # Validate against Pattern-1 defaults
-      idp-cli config-validate --config-file ./config.yaml --pattern pattern-1
-
       # Show the full merged config
       idp-cli config-validate --config-file ./config.yaml --show-merged
 
@@ -3499,7 +3479,6 @@ def config_validate(
 
         # Load the user's config
         console.print(f"[bold blue]Validating: {config_file}[/bold blue]")
-        console.print(f"Pattern: {pattern}")
         console.print()
 
         try:
@@ -3543,7 +3522,7 @@ def config_validate(
             sys.exit(1)
 
         # Validate config
-        result = validate_config(user_config, pattern=pattern)
+        result = validate_config(user_config, pattern="pattern-2")
 
         if result["valid"]:
             console.print("[green]✓ Config merges with system defaults[/green]")
@@ -3616,11 +3595,6 @@ def config_validate(
     help="Validate config before uploading (default: validate)",
 )
 @click.option(
-    "--pattern",
-    type=click.Choice(["pattern-1", "pattern-2"]),
-    help="Pattern for validation (auto-detected if not specified)",
-)
-@click.option(
     "--config-version",
     required=True,
     help="Configuration version to update (e.g., v1, v2). If version doesn't exist, it will be created.",
@@ -3634,7 +3608,6 @@ def config_upload(
     stack_name: str,
     config_file: str,
     validate: bool,
-    pattern: Optional[str],
     config_version: Optional[str],
     version_description: Optional[str],
     region: Optional[str],
@@ -3662,9 +3635,6 @@ def config_upload(
 
       # Skip validation (use with caution)
       idp-cli config-upload --stack-name my-stack --config-file ./config.yaml --no-validate
-
-      # Explicit pattern for validation
-      idp-cli config-upload --stack-name my-stack --config-file ./config.yaml --pattern pattern-2
     """
     try:
         import json
@@ -3720,17 +3690,15 @@ def config_upload(
             console.print(f"[red]✗ Failed to get stack resources: {e}[/red]")
             sys.exit(1)
 
-        # Auto-detect pattern if not specified
-        if not pattern:
-            pattern = detected_pattern or "pattern-2"
-            console.print(f"[dim]Using pattern: {pattern}[/dim]")
+        # Auto-detect pattern for validation
+        validation_pattern = detected_pattern or "pattern-2"
 
         # Validate if requested
         if validate:
             try:
                 from idp_common.config.merge_utils import validate_config
 
-                result = validate_config(user_config, pattern=pattern)
+                result = validate_config(user_config, pattern=validation_pattern)
 
                 if result["valid"]:
                     console.print("[green]✓ Config validation passed[/green]")
@@ -3852,11 +3820,6 @@ def config_upload(
     help="Output format: 'full' (complete config) or 'minimal' (only differences from defaults)",
 )
 @click.option(
-    "--pattern",
-    type=click.Choice(["pattern-1", "pattern-2"]),
-    help="Pattern for minimal diff (auto-detected if not specified)",
-)
-@click.option(
     "--config-version",
     help="Configuration version to download (e.g., v1, v2). If not specified, downloads active version.",
 )
@@ -3865,7 +3828,6 @@ def config_download(
     stack_name: str,
     output: Optional[str],
     output_format: str,
-    pattern: Optional[str],
     config_version: Optional[str],
     region: Optional[str],
 ):
@@ -3943,23 +3905,17 @@ def config_download(
                 load_system_defaults,
             )
 
-            # Auto-detect pattern if not specified
-            if not pattern:
-                # Try to detect from config or stack
-                classification_method = config_data.get("classification", {}).get(
-                    "classificationMethod", ""
-                )
-                if classification_method == "bda":
-                    pattern = "pattern-1"
-                else:
-                    pattern = "pattern-2"
-                console.print(f"[dim]Auto-detected pattern: {pattern}[/dim]")
-
-            defaults = load_system_defaults(pattern)
-            config_data = get_diff_dict(defaults, config_data)
-            console.print(
-                f"[dim]Showing only differences from {pattern} defaults[/dim]"
+            # Auto-detect pattern from config
+            classification_method = config_data.get("classification", {}).get(
+                "classificationMethod", ""
             )
+            diff_pattern = (
+                "pattern-1" if classification_method == "bda" else "pattern-2"
+            )
+
+            defaults = load_system_defaults(diff_pattern)
+            config_data = get_diff_dict(defaults, config_data)
+            console.print("[dim]Showing only differences from defaults[/dim]")
 
         # Convert to YAML
         yaml_content = yaml.dump(

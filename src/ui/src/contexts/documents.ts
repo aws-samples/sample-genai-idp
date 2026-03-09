@@ -12,6 +12,7 @@ export interface DocumentsContextValue {
   documents: Document[];
   getDocumentDetailsFromIds: (objectKeys: string[]) => Promise<Document[]>;
   isDocumentsListLoading: boolean;
+  hasListBeenLoaded: boolean;
   selectedItems: Document[];
   setIsDocumentsListLoading: React.Dispatch<React.SetStateAction<boolean>>;
   setPeriodsToLoad: React.Dispatch<React.SetStateAction<number>>;

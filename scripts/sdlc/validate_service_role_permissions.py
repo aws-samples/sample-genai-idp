@@ -171,7 +171,6 @@ def main():
     templates = [
         'template.yaml',  # Main template
         'patterns/unified/template.yaml',
-        'nested/bda-lending-project/template.yaml',
         'nested/bedrockkb/template.yaml'
     ]
     

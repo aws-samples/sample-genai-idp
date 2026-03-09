@@ -24,8 +24,7 @@ def handler(event: Dict[str, Any], context) -> Dict[str, Any]:
     BDA project ARN resolution order:
     1. Explicit bdaProjectArn from UI arguments (user-provided)
     2. Version tracking table (previously linked project)
-    3. BDA_PROJECT_ARN env var (legacy/migration fallback)
-    4. Auto-create new project (for idp_to_bda direction)
+    3. Auto-create new project (for idp_to_bda direction)
     
     Supports four sync directions:
     - "bda_to_idp": Sync from BDA blueprints to IDP classes (read BDA, update IDP)
@@ -51,9 +50,6 @@ def handler(event: Dict[str, Any], context) -> Dict[str, Any]:
         config_table = os.environ.get('CONFIGURATION_TABLE_NAME')
         manager = ConfigurationManager(table_name=config_table) if config_table else None
         
-        # Legacy fallback: env var from CloudFormation deployment
-        default_bda_project_arn = os.environ.get('BDA_PROJECT_ARN')
-        
         # Resolve BDA project ARN using priority chain
         bda_project_arn = None
         arn_source = None
@@ -78,26 +74,13 @@ def handler(event: Dict[str, Any], context) -> Dict[str, Any]:
                 arn_source = "version-tracking"
                 logger.info(f"Using tracked BDA project ARN for version '{versionName}': {bda_project_arn}")
         
-        # Priority 3: Legacy env var fallback (skip if CREATE_NEW was requested)
-        if not bda_project_arn and not force_create_new and default_bda_project_arn:
-            bda_project_arn = default_bda_project_arn
-            arn_source = "env-var-legacy"
-            logger.info(f"Using legacy BDA_PROJECT_ARN env var: {bda_project_arn}")
-            # Migrate: save this legacy ARN to version tracking for future use
-            if manager and save_arn:
-                try:
-                    manager.set_bda_project_arn(versionName, bda_project_arn, "synced")
-                    logger.info(f"Migrated legacy BDA ARN to version tracking for '{versionName}'")
-                except Exception as e:
-                    logger.warning(f"Failed to migrate legacy BDA ARN to version tracking: {e}")
-        
-        # Priority 4: Auto-create for idp_to_bda or bidirectional (or when CREATE_NEW forced)
+        # Priority 3: Auto-create for idp_to_bda or bidirectional (or when CREATE_NEW forced)
         if not bda_project_arn and (force_create_new or sync_direction in ("idp_to_bda", "bidirectional")):
             logger.info(f"No BDA project found, auto-creating for version '{versionName}'")
             if manager:
                 manager.set_bda_sync_status(versionName, "creating")
             try:
-                bda_service = BdaBlueprintService(dataAutomationProjectArn=default_bda_project_arn)
+                bda_service = BdaBlueprintService()
                 bda_project_arn = bda_service.get_or_create_project_for_version(versionName)
                 arn_source = "auto-created"
                 logger.info(f"Auto-created BDA project for version '{versionName}': {bda_project_arn}")

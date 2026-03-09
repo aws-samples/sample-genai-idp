@@ -50,7 +50,6 @@ pip install -e .
 ```bash
 idp-cli deploy \
     --stack-name my-idp-stack \
-    --pattern pattern-2 \
     --admin-email your.email@example.com \
     --max-concurrent 100 \
     --wait
@@ -68,9 +67,8 @@ idp-cli deploy \
 # Deploy with local config file (automatically uploaded to S3)
 idp-cli deploy \
     --stack-name my-idp-stack \
-    --pattern pattern-2 \
     --admin-email your.email@example.com \
-    --custom-config ./config_library/pattern-2/bank-statement-sample/config.yaml \
+    --custom-config ./config_library/unified/bank-statement-sample/config.yaml \
     --wait
 ```
 
@@ -102,9 +100,7 @@ idp-cli deploy \
 
 ---
 
-## Option 3: Build Deployment Assets from Source Code
-
-Demo Video (5 minutes)
+## Option 3: Build and Deploy from Source Code
 
 
 ### Dependencies
@@ -116,7 +112,7 @@ You need to have the following packages installed on your computer:
 3. [sam (AWS SAM)](https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/install-sam-cli.html)
 4. python 3.11 or later
 5. A local Docker daemon
-6. Python packages for publish.py: `pip install boto3 rich typer PyYAML botocore setuptools ruff build cfn-lint`
+6. Python packages: `pip install boto3 rich typer PyYAML botocore setuptools ruff build cfn-lint`
 7. **Node.js 22.12+** and **npm** (required for UI validation in publish script)
 
 For guidance on setting up a development environment, see:
@@ -130,16 +126,53 @@ Copy the repo to your computer. Either:
 - Use the git command to clone the repo, if you have access
 - OR, download and expand the ZIP file for the repo, or use the ZIP file that has been shared with you
 
-### Build and Publish the Solution
+### Option A: IDP CLI `--from-code` (Recommended)
 
-To build and publish your own template to your own S3 bucket:
+The easiest way to build, publish, and deploy from source in a single command is using the IDP CLI with the `--from-code` option. This builds all artifacts using `publish.py`, publishes them to S3, and deploys the CloudFormation stack — all in one step.
 
-- `cfn_bucket_basename`: A prefix added to the beginning of the bucket name (e.g. `idp-1234567890` to ensure global uniqueness)
-- `cfn_prefix`: A prefix added to CloudFormation resources (e.g. `idp` or `idp-dev`)
+#### Install the CLI
 
-Navigate into the project root directory and run:
+```bash
+cd lib/idp_cli_pkg
+pip install -e .
+```
 
-#### Using publish.py (Recommended)
+#### Deploy a New Stack from Source
+
+```bash
+idp-cli deploy \
+    --stack-name my-idp-dev \
+    --from-code . \
+    --admin-email your.email@example.com \
+    --wait
+```
+
+#### Update an Existing Stack from Source
+
+```bash
+idp-cli deploy \
+    --stack-name my-idp-dev \
+    --from-code . \
+    --wait
+```
+
+**What `--from-code` does:**
+- Runs `publish.py` to build SAM templates, Lambda layers, container images, and the UI
+- Publishes all artifacts to an S3 bucket in your account
+- Creates or updates the CloudFormation stack with the newly published template
+- With `--wait`, monitors the deployment until completion
+
+> **Tip**: Use `--from-code` for development and testing iterations. For production deployments from pre-published templates, use `--template-url` instead (see [Option 2: CLI-Based Deployment](#option-2-cli-based-deployment-recommended-for-automation)).
+
+**For complete CLI documentation**, see [IDP CLI Documentation](./idp-cli.md).
+
+---
+
+### Option B: Publish Templates + Deploy Separately
+
+If you prefer to publish artifacts first and then deploy as a separate step, use `publish.py` to build and publish, then deploy using the AWS CloudFormation console or CLI.
+
+#### Step 1: Build and Publish with publish.py
 
 ```bash
 python3 publish.py <cfn_bucket_basename> <cfn_prefix> <region> [--verbose] [--no-validate] [--clean-build] [--max-workers N]
@@ -147,21 +180,32 @@ python3 publish.py <cfn_bucket_basename> <cfn_prefix> <region> [--verbose] [--no
 
 **Parameters:**
 
-- `cfn_bucket_basename`: A prefix for the S3 bucket name (e.g., `idp-1234567890`)
-- `cfn_prefix`: S3 prefix for artifacts (e.g., `idp`)
+- `cfn_bucket_basename`: A prefix for the S3 bucket name (e.g., `idp-1234567890` to ensure global uniqueness)
+- `cfn_prefix`: S3 prefix for artifacts (e.g., `idp` or `idp-dev`)
 - `region`: AWS region for deployment (e.g., `us-east-1`)
 - `--verbose` or `-v`: (Optional) Enable detailed error output for debugging build failures
-- Pattern-2 functions are built and deployed as container images automatically. Pattern-1 and Pattern-3 use ZIP-based Lambdas.
+- `--clean-build`: (Optional) Force a clean rebuild of all artifacts
+- `--max-workers N`: (Optional) Number of parallel build workers
 
-**Standard ZIP Deployment:**
+**Example:**
 
 ```bash
 python3 publish.py idp-1234567890 idp us-east-1
 ```
 
-Note: Pattern-2 container images are built and pushed automatically when Pattern-2 changes are detected. Ensure Docker is running and you have ECR permissions.
+The publish script:
 
-> **Note**: Container-based deployment is recommended when Lambda functions exceed the 250MB unzipped size limit. This allows deployment packages up to 10GB.
+- Checks your system dependencies for required packages
+- Builds SAM templates, Lambda layers, and container images
+- Packages and uploads the UI
+- Publishes all templates and assets to an S3 bucket (`<cfn_bucket_basename>-<region>`, created if it doesn't exist)
+
+When completed, the script displays:
+
+- The CloudFormation template's S3 URL
+- A 1-click URL for launching the stack creation in the CloudFormation console
+
+> **Note**: Ensure Docker is running — Lambda functions are deployed as container images built during the publish process.
 
 **Troubleshooting Build Issues:**
 If the build fails, use the `--verbose` flag to see detailed error messages:
@@ -177,37 +221,13 @@ This will show:
 - Python version compatibility issues
 - Missing dependencies or configuration problems
 
-#### Using publish.sh (Legacy)
+#### Step 2: Deploy using AWS CloudFormation
 
-```bash
-./publish.sh <cfn_bucket_basename> <cfn_prefix> <region>
-```
-
-Example:
-
-```bash
-./publish.sh idp-1234567890 idp us-east-1
-```
-
-Both scripts:
-
-- Check your system dependencies for required packages
-- Create CloudFormation templates and asset zip files
-- Publish the templates and required assets to an S3 bucket in your account
-- The bucket will be named `<cfn_bucket_basename>-<region>` (created if it doesn't exist)
-
-When completed, the script displays:
-
-- The CloudFormation template's S3 URL
-- A 1-click URL for launching the stack creation in the CloudFormation console
-
-### Deployment Options
-
-#### Recommended: Deploy using AWS CloudFormation console
+**Recommended: Deploy using the CloudFormation console**
 
 For your first deployment, use the `1-Click Launch URL` provided by the publish script. This lets you inspect the available parameter options in the console.
 
-#### CLI Deployment
+**CLI Deployment:**
 
 For scripted/automated deployments, use the AWS CLI:
 
@@ -218,7 +238,7 @@ aws cloudformation deploy \
   --s3-bucket <bucket-name> \
   --s3-prefix <s3-prefix> \
   --capabilities CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND \
-  --parameter-overrides IDPPattern="<pattern-name>" AdminEmail=<your-email> \
+  --parameter-overrides AdminEmail=<your-email> \
   --stack-name <your-stack-name>
 ```
 
@@ -230,62 +250,49 @@ aws cloudformation update-stack \
   --template-url <template URL output by publish script, e.g. https://s3.us-east-1.amazonaws.com/blahblah.yaml> \
   --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND \
   --region <region> \
-  --parameters ParameterKey=AdminEmail,ParameterValue="<your-email>" ParameterKey=IDPPattern,ParameterValue="<pattern-name>"
+  --parameters ParameterKey=AdminEmail,ParameterValue="<your-email>"
 ```
 
-**Processing Mode:**
+#### Using publish.sh (Legacy)
+
+`publish.sh` is a Bash wrapper around `publish.py`. Use `publish.py` directly for new deployments.
+
+```bash
+./publish.sh <cfn_bucket_basename> <cfn_prefix> <region>
+```
+
+---
+
+### Processing Mode
 
 The solution deploys a **Unified Pattern** that supports both BDA and pipeline processing modes. The processing mode is controlled at runtime by the `use_bda` configuration flag (set via the UI), not at deployment time.
 
 - **Pipeline mode** (`use_bda: false`, default) — Textract OCR → Bedrock Classification → Bedrock Extraction → Assessment → Rule Validation → Summarization
 - **BDA mode** (`use_bda: true`) — Bedrock Data Automation for end-to-end processing → Rule Validation → Summarization
 
-> **Note**: The separate Pattern 1 and Pattern 2 deployment options have been deprecated. All new deployments use the unified pattern.
-
 After deployment, check the Outputs tab in the CloudFormation console to find links to dashboards, buckets, workflows, and other solution resources.
 
 ## Container-Based Lambda Deployment
 
-When Lambda functions exceed the 250MB unzipped size limit, use the container-based deployment option. This allows deployment packages up to 10GB.
+The solution **automatically** deploys all Lambda functions as container images — no manual configuration is required. During stack deployment, CodeBuild builds Docker images for each Lambda function, pushes them to ECR, and configures the Lambda functions to use the container images.
 
-### When to Use Container Deployment
+### Prerequisites
 
-Use container-based deployment when:
+- **Docker** must be running on your build machine (for local builds via `publish.py` or `idp-cli --from-code`)
+- Your AWS credentials must have **ECR permissions**
 
-- Lambda package size exceeds 250MB unzipped
-- You need additional system dependencies not available in the Lambda runtime
-- You want to use custom runtime environments
-- Your deployment includes large ML models or data files
+### How It Works
 
-### Container Deployment Process
+When you deploy (or build from source), the following happens automatically:
 
-1. **Unified Pattern Uses Containers Automatically:**
-   - All Lambda functions are deployed as container images built by CodeBuild during stack deployment.
-   - Ensure Docker is running and your AWS credentials have ECR permissions.
+1. Creates/verifies an ECR repository for Lambda images
+2. Builds optimized multi-stage Docker images for each Lambda function
+3. Pushes images to ECR with appropriate tags
+4. Configures CloudFormation templates to reference the container images
 
-2. **What Happens Behind the Scenes:**
-   - Creates/verifies ECR repository for Lambda images
-   - Builds Docker images for each Lambda function
-   - Pushes images to ECR with appropriate tags
-   - Updates CloudFormation templates to use container images
-   - Uploads templates to S3 for deployment
-
-3. **Architecture Support:**
-
-- Default: ARM64 (Graviton2) for better price/performance
-- Optional: x86_64 for broader compatibility (adjust Docker build if needed)
-
-### Container Image Structure
-
-The solution uses optimized multi-stage Docker builds:
-
-- **Base stage**: Python runtime and system dependencies
-- **Dependencies stage**: Python packages from requirements.txt
-- **Function stage**: Lambda function code and handler
+**Architecture:** Lambda functions use ARM64 (Graviton2) by default for better price/performance.
 
 ### Monitoring Container Deployments
-
-Check deployment status:
 
 ```bash
 # View ECR images
@@ -297,8 +304,6 @@ aws lambda get-function --function-name <function-name>
 # View container logs
 aws logs tail /aws/lambda/<function-name> --follow
 ```
-
-For detailed container deployment documentation, see [Container Lambda Deployment Guide](./container-lambda-deployment.md).
 
 ## Updating an Existing Stack
 
@@ -422,14 +427,13 @@ cat ./eval-results/eval-test/invoice.pdf/evaluation/report.md
 
 ---
 
-### Method 2: Web UI Testing (Interactive)
-### Method 3: Direct S3 Upload Testing (Simple)
+
+### Method 2: Direct S3 Upload Testing (Simple)
 
 1. Open the `S3InputBucketConsoleURL` and `S3OutputBucketConsoleURL` from the stack Outputs tab
 2. Open the `StateMachineConsoleURL` from the stack Outputs tab
 3. Upload a PDF form to the Input bucket (sample files are in the `./samples` folder):
-   - For Patterns 1 (BDA) and Pattern 2: Use [samples/lending_package.pdf](../samples/lending_package.pdf)
-   - For Pattern 3 (UDOP): Use [samples/rvl_cdip_package.pdf](../samples/rvl_cdip_package.pdf)
+   - Recommended: [samples/lending_package.pdf](../samples/lending_package.pdf)
 4. Monitor the Step Functions execution to observe the workflow
 5. When complete, check the Output bucket for the structured JSON file with extracted fields
 
@@ -447,47 +451,15 @@ done
 
 ---
 
-### Method 4: Web UI Testing (Interactive)
+### Method 3: Web UI Testing (Interactive)
 
 1. Open the Web UI URL from the CloudFormation stack's Outputs tab
 2. Log in using your credentials (the temporary password from the email if this is your first login)
 3. Navigate to the main dashboard
 4. Click the "Upload Document" button
-5. Select a sample PDF file appropriate for your pattern (see above for recommendations)
+5. Select a sample PDF file (e.g., [samples/lending_package.pdf](../samples/lending_package.pdf))
 6. Follow the upload process and observe the document processing in the UI
 7. View the extraction results once processing is complete
 
-
-### Testing Individual Lambda Functions Locally
-
-To test any lambda function locally:
-
-1. Change directory to the folder containing the function's `template.yaml`
-2. Create an input event file (some templates are in the `./testing` folder)
-3. Verify `./testing/env.json` and change the region if necessary
-4. Run `sam build` to package the function(s)
-5. Use `sam local` to run the function:
-
-   ```bash
-   sam local invoke OCRFunction -e testing/OCRFunction-event.json --env-vars testing/env.json
-   ```
-
-### Steady-State Volume Testing
-
-Use the load simulator script to test high document volumes:
-
-```bash
-python ./scripts/simulate_load.py -s source_bucket -k prefix/exampledoc.pdf -d idp-kmsxxxxxxxxx -r 500 -t 10
-```
-
-This simulates an incoming document rate of 500 docs per minute for 10 minutes.
-
-### Variable Volume Testing
-
-Use the dynamic load simulator script for variable document rates over time:
-
-```bash
-python ./scripts/simulate_dynamic_load.py -s source_bucket -k prefix/exampledoc.pdf -d idp-kmsxxxxxxxxx -f schedule.csv
-```
 
 This simulates incoming documents based on minute-by-minute rates in the schedule CSV file.

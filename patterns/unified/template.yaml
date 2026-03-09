@@ -9,7 +9,7 @@ Metadata:
   cfn-lint:
     config:
       ignore_checks:
-        - W1030  # BDAProjectArn parameter can be empty string
+        - W1030  # ARN pattern matching when Ref resolves to empty string
 
 Parameters:
   StackName:
@@ -57,10 +57,6 @@ Parameters:
     Type: Number
     Default: 30000
 
-  BDAProjectArn:
-    Type: String
-    Default: ''
-    Description: Bedrock Data Automation (BDA) project ARN
 
   PreviousIDPPattern:
     Type: String
@@ -1745,7 +1741,6 @@ Resources:
       ConfigLibraryHash: !Ref ConfigLibraryHash
       CustomClassificationModelARN: !Ref CustomClassificationModelARN
       CustomExtractionModelARN: !Ref CustomExtractionModelARN
-      BDAProjectArn: !Ref BDAProjectArn
       PreviousIDPPattern: !Ref PreviousIDPPattern
 
 
@@ -2145,7 +2140,6 @@ Resources:
           TRACKING_TABLE: !Ref TrackingTable
           DOCUMENT_TRACKING_MODE: !If [HasAppSyncApi, 'appsync', 'dynamodb']
           DB_NAME: !Ref BDAMetadataTable
-          BDA_PROJECT_ARN: !Ref BDAProjectArn
           WORKING_BUCKET: !Ref WorkingBucket
           CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
       LoggingConfig:
@@ -3402,7 +3396,6 @@ Resources:
         # BDA branch functions
         InvokeBDALambdaArn: !GetAtt InvokeBDAFunction.Arn
         BDAProcessResultsLambdaArn: !GetAtt BDAProcessResultsFunction.Arn
-        BDAProjectArn: !Ref BDAProjectArn
         WorkingBucket: !Ref WorkingBucket
         # Pipeline branch functions
         OCRFunctionArn: !GetAtt OCRFunction.Arn
@@ -3521,14 +3514,19 @@ Resources:
               "width": 8,
               "height": 6,
               "properties": {
-                "metrics": [],
+                "metrics": [
+                  [{"expression": "m1/PERIOD(m1)*60", "label": "OCR Throttles per Minute"}],
+                  [{"expression": "m2/PERIOD(m2)*60", "label": "OCR Non-Retryable Errors per Minute"}],
+                  ["${StackName}", "OCRThrottles", {"id": "m1", "stat": "Sum", "visible": false}],
+                  [".", "OCRNonRetryableErrors", {"id": "m2", "stat": "Sum", "visible": false}]
+                ],
                 "region": "${AWS::Region}",
-                "title": "Blank",
+                "title": "OCR Throttling & Errors (per Minute)",
                 "view": "timeSeries",
                 "period": 60,
                 "yAxis": {
                   "left": {
-                    "label": "N/A"
+                    "label": "Count per Minute"
                   }
                 }
               }
@@ -4160,6 +4158,38 @@ Resources:
                 "region": "${AWS::Region}",
                 "title": "ProcessResults Lambda Errors",
                 "view": "table"
+              }
+            },
+            {
+              "type": "metric",
+              "x": 0,
+              "y": 84,
+              "width": 24,
+              "height": 6,
+              "properties": {
+                "metrics": [
+                  ["AWS/Lambda", "Throttles", "FunctionName", "${OCRFunction}", {"stat": "Sum"}],
+                  [".", ".", ".", "${ClassificationFunction}", {"stat": "Sum"}],
+                  [".", ".", ".", "${ExtractionFunction}", {"stat": "Sum"}],
+                  [".", ".", ".", "${AssessmentFunction}", {"stat": "Sum"}],
+                  [".", ".", ".", "${SummarizationFunction}", {"stat": "Sum"}],
+                  [".", ".", ".", "${EvaluationFunction}", {"stat": "Sum"}],
+                  [".", ".", ".", "${RuleValidationFunction}", {"stat": "Sum"}],
+                  [".", ".", ".", "${InvokeBDAFunction}", {"stat": "Sum"}],
+                  [".", ".", ".", "${BDAProcessResultsFunction}", {"stat": "Sum"}],
+                  [".", ".", ".", "${BDACompletionFunction}", {"stat": "Sum"}],
+                  [".", ".", ".", "${ProcessResultsFunction}", {"stat": "Sum"}]
+                ],
+                "region": "${AWS::Region}",
+                "title": "Lambda Concurrency Throttles (429) - All Functions",
+                "view": "timeSeries",
+                "period": 60,
+                "stacked": true,
+                "yAxis": {
+                  "left": {
+                    "label": "Throttle Count"
+                  }
+                }
               }
             }
           ]

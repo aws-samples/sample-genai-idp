@@ -5,30 +5,94 @@ SPDX-License-Identifier: MIT-0
 
 This folder contains detailed documentation on various aspects of the GenAI Intelligent Document Processing solution.
 
-## Documentation Structure
+## Core
 
 - [Architecture](./architecture.md) - Detailed component architecture and data flow
 - [Deployment](./deployment.md) - Build, publish, deploy, and test instructions
-- [Web UI](./web-ui.md) - Web interface features and usage
-- [Agent Analysis](./agent-analysis.md) - Natural language analytics and data visualization feature
-- [Knowledge Base](./knowledge-base.md) - Document knowledge base query feature
-- [Post-Processing Lambda Hook](./post-processing-lambda-hook.md) - Custom downstream processing integration
-- [Evaluation Framework](./evaluation.md) - Accuracy assessment system powered by Stickler
-- [Assessment Feature](./assessment.md) - Extraction confidence evaluation using LLMs
 - [Configuration](./configuration.md) - Configuration and customization options
 - [Configuration Versions](./configuration-versions.md) - Managing multiple configuration versions
+- [IDP Configuration Best Practices](./idp-configuration-best-practices.md) - Guidelines for effective configuration design
+- [JSON Schema Migration](./json-schema-migration.md) - JSON Schema format guide and legacy migration details
+- [Web UI](./web-ui.md) - Web interface features and usage
+- [IDP CLI](./idp-cli.md) - Command line interface for batch processing and evaluation workflows
+- [IDP SDK](./idp-sdk.md) - Python SDK for programmatic access
+- [Demo Videos](./demo-videos.md) - Comprehensive collection of feature demonstration videos
+- [Troubleshooting](./troubleshooting.md) - Troubleshooting and performance guides
+- [Error Analyzer](./error-analyzer.md) - AI-powered error diagnosis
+
+## Processing Modes
+
+- [BDA Mode Reference](./pattern-1.md) - Bedrock Data Automation (BDA) concepts and behavior
+- [Pipeline Mode Reference](./pattern-2.md) - Textract + Bedrock classification and extraction
+- [Discovery](./discovery.md) - Pattern-neutral discovery process and BDA blueprint automation
+
+## Document Processing Features
+
 - [Classification](./classification.md) - Customizing document classification
 - [Extraction](./extraction.md) - Customizing information extraction
-- [Criteria Validation](./criteria-validation.md) - Document validation against business rules using LLMs
+- [Assessment](./assessment.md) - Extraction confidence evaluation using LLMs
+- [Assessment Bounding Boxes](./assessment-bounding-boxes.md) - Spatial localization of extracted fields
+- [Few-Shot Examples](./few-shot-examples.md) - Implementing few-shot examples for improved accuracy
+- [Human-in-the-Loop Review](./human-review.md) - Human review workflows with built-in review system
+- [Rule Validation](./rule-validation.md) - Business rule validation and compliance checking
+- [Criteria Validation](./criteria-validation.md) - Document validation against dynamic business rules using LLMs
+- [OCR Image Sizing Guide](./ocr-image-sizing-guide.md) - Optimizing image sizes for OCR processing
+- [Languages](./languages.md) - Multi-language support
+
+## Evaluation & Testing
+
+- [Evaluation Framework](./evaluation.md) - Accuracy assessment system powered by Stickler
+- [Evaluation Enhanced Reporting](./evaluation-enhanced-reporting.md) - Advanced evaluation reports with field-level comparisons
+- [Test Studio](./test-studio.md) - Interactive testing with curated datasets
+
+## AI Agents & Analytics
+
+- [Agent Analysis](./agent-analysis.md) - Natural language analytics and data visualization feature
+- [Agent Companion Chat](./agent-companion-chat.md) - Conversational agent for document analysis
+- [Code Intelligence](./code-intelligence.md) - Chat bot for asking questions about the IDP code base and features
+- [Knowledge Base](./knowledge-base.md) - Document knowledge base query feature
+- [Custom MCP Agent](./custom-MCP-agent.md) - Integrating external MCP servers for custom tools and capabilities
+- [MCP Integration](./mcp-integration.md) - Model Context Protocol integration for external applications
+
+## Integration & Extensions
+
+- [Post-Processing Lambda Hook](./post-processing-lambda-hook.md) - Custom downstream processing integration
+- [Lambda Hook Inference](./lambda-hook-inference.md) - Custom LLM integration via Lambda hooks
+- [Nova Fine-Tuning](./nova-finetuning.md) - Fine-tuning Amazon Nova models for IDP tasks
+- [Service Tiers](./service-tiers.md) - Configurable service tier options
+
+## Monitoring & Operations
+
 - [Monitoring](./monitoring.md) - Monitoring and logging capabilities
-- [Troubleshooting](./troubleshooting.md) - Troubleshooting and performance guides
+- [Reporting Database](./reporting-database.md) - Analytics database for evaluation metrics and metering data
+- [Capacity Planning](./capacity-planning.md) - Performance optimization and resource scaling guidance
+- [Cost Calculator](./cost-calculator.md) - Framework for estimating solution costs
+
+## Planning & Security
+
+- [Well-Architected Framework Assessment](./well-architected.md) - Analysis based on AWS Well-Architected Framework
+- [AWS Services & IAM Roles](./aws-services-and-roles.md) - AWS services used and IAM role requirements
+- [GovCloud Deployment](./govcloud-deployment.md) - Deployment guide for AWS GovCloud regions
+- [EU Region Model Support](./eu-region-model-support.md) - Model availability in EU regions
+
+## Development Setup
+
+- [Setup: Linux](./setup-development-env-linux.md) - Development environment setup for Linux
+- [Setup: macOS](./setup-development-env-macos.md) - Development environment setup for macOS
+- [Setup: WSL](./setup-development-env-WSL.md) - Development environment setup for Windows Subsystem for Linux
+- [Using Notebooks](./using-notebooks-with-idp-common.md) - Guide for using Jupyter notebooks with the IDP Common Library
+
+## Migration
+
+- [Migration v0.4 to v0.5](./migration-v04-to-v05.md) - Upgrading from v0.4.x to v0.5.x (Unified Pattern)
 
 ## Screenshots and Diagrams
 
 The documentation references several screenshots and diagrams from the `../images` folder:
 
-- Architecture diagrams (`IDP.drawio.png`, etc.)
-- Architecture diagrams (`IDP-Pattern1-BDA.drawio.png` for BDA mode, `IDP-Pattern2-Bedrock.drawio.png` for Pipeline mode)
+- Unified architecture diagram (`IDP.UnifiedPatterns.drawio.png`)
+- BDA mode architecture (`IDP-Pattern1-BDA.drawio.png`)
+- Pipeline mode architecture (`IDP-Pattern2-Bedrock.drawio.png`)
 - Web UI screenshots (`WebUI.png`)
 - Dashboard screenshots (`Dashboard1.png`, `Dashboard2.png`, `Dashboard3.png`)
 
@@ -40,3 +104,4 @@ When updating these documents:
 2. Include relevant screenshots and diagrams where helpful
 3. Use markdown formatting for readability
 4. Cross-reference other documents where appropriate
+5. Ensure new documents are listed in this README

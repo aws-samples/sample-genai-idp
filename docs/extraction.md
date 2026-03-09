@@ -743,7 +743,7 @@ classes:
             "InvoiceNumber": "INV-12345"
             "InvoiceDate": "2023-04-15"
             "TotalAmount": "$1,234.56"
-        x-aws-idp-image-path: "config_library/pattern-2/examples/invoice-samples/invoice1.jpg"
+        x-aws-idp-image-path: "config_library/unified/examples/invoice-samples/invoice1.jpg"
       # Additional examples...
 ```
 

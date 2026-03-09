@@ -386,19 +386,41 @@ class OcrService:
                 is_pdf = file_type == "pdf"
 
                 if is_pdf:
-                    # Phase 1: Render all page images SEQUENTIALLY
-                    # pypdfium2 (PDFium) is not thread-safe for concurrent access
-                    # to the same PdfDocument, so we render all pages first, then
-                    # process OCR in parallel (which is the I/O-bound bottleneck).
+                    # Determine which pages need processing (retry-safe: skip completed pages)
                     pdf_document = pdfium.PdfDocument(file_content)
                     num_pages = len(pdf_document)
                     document.num_pages = num_pages
 
+                    pages_to_render = []
+                    pages_skipped = 0
+                    for i in range(num_pages):
+                        page_id = str(i + 1)
+                        existing_page = document.pages.get(page_id)
+                        if (
+                            existing_page
+                            and existing_page.image_uri
+                            and existing_page.raw_text_uri
+                            and existing_page.parsed_text_uri
+                        ):
+                            pages_skipped += 1
+                        else:
+                            pages_to_render.append(i)
+
+                    if pages_skipped > 0:
+                        logger.info(
+                            f"Retry-safe OCR: skipping {pages_skipped} already-completed pages, "
+                            f"rendering and processing {len(pages_to_render)} remaining pages"
+                        )
+
+                    # Phase 1: Render ONLY needed page images SEQUENTIALLY
+                    # pypdfium2 (PDFium) is not thread-safe for concurrent access
+                    # to the same PdfDocument, so we render pages first, then
+                    # process OCR in parallel (which is the I/O-bound bottleneck).
                     logger.info(
-                        f"Rendering {num_pages} page images sequentially (pypdfium2 is not thread-safe)"
+                        f"Rendering {len(pages_to_render)} of {num_pages} page images sequentially (pypdfium2 is not thread-safe)"
                     )
                     page_images: Dict[int, bytes] = {}
-                    for i in range(num_pages):
+                    for i in pages_to_render:
                         page = pdf_document[i]
                         page_images[i] = self._extract_page_image(page, True, i + 1)
 
@@ -417,7 +439,7 @@ class OcrService:
                                 document.output_bucket,
                                 document.input_key,
                             ): i
-                            for i in range(num_pages)
+                            for i in page_images
                         }
 
                         # Start memory monitoring in background thread

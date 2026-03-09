@@ -1,6 +1,6 @@
 import importlib.util
 import os
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 
@@ -99,29 +99,42 @@ class TestTestSetResolver:
             assert mock_delete.call_count == 2
             assert result is True
 
-    @patch.dict(os.environ, {"INPUT_BUCKET": "test-bucket"})
-    def test_get_test_sets_uses_scan_all(self):
-        """Test get_test_sets uses scan_all method"""
+    @patch.dict(
+        os.environ, {"INPUT_BUCKET": "test-bucket", "TRACKING_TABLE": "test-table"}
+    )
+    def test_get_test_sets_uses_gsi_and_batch(self):
+        """Test get_test_sets uses GSI query + BatchGetItem"""
         with patch.object(test_set_index, "find_matching_files") as mock_find_files:
-            # Mock find_matching_files to return 3 files
             mock_find_files.return_value = ["file1.pdf", "file2.pdf", "file3.pdf"]
 
-            with patch.object(test_set_index.db_client, "scan_all") as mock_scan:
-                mock_scan.return_value = [
-                    {
-                        "PK": "testset#test-id",
-                        "SK": "metadata",
-                        "id": "test-id",
-                        "name": "test-name",
-                        "filePattern": "*.pdf",
-                        "fileCount": 5,
-                        "createdAt": "2025-10-17T16:00:00Z",
+            with patch.object(test_set_index, "boto3") as mock_boto3:
+                # Mock GSI query returning keys
+                mock_table = MagicMock()
+                mock_table.query.return_value = {
+                    "Items": [{"PK": "testset#test-id", "SK": "metadata"}]
+                }
+                mock_boto3.resource.return_value.Table.return_value = mock_table
+
+                # Mock BatchGetItem returning full records
+                mock_boto3.resource.return_value.batch_get_item.return_value = {
+                    "Responses": {
+                        "test-table": [
+                            {
+                                "PK": "testset#test-id",
+                                "SK": "metadata",
+                                "id": "test-id",
+                                "name": "test-name",
+                                "filePattern": "*.pdf",
+                                "fileCount": 5,
+                                "createdAt": "2025-10-17T16:00:00Z",
+                            }
+                        ]
                     }
-                ]
+                }
 
                 result = test_set_index.get_test_sets()
 
-                mock_scan.assert_called_once()
+                mock_table.query.assert_called_once()
                 assert len(result) == 1
                 assert result[0]["id"] == "test-id"
 

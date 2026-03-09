@@ -26,8 +26,8 @@ If applicable, add screenshots to help explain your problem.
 **AWS Region**
 What AWS region have you deployed in?
 
-**Accelerator Pattern**
-Which Pattern did you deploy?
+**Accelerator Processing Mode**
+Which processing mode did you deploy with? (Pipeline mode, BDA mode, or both)
 
 **Accelerator Version / Build**
 Which Version did you deploy?  (Please ensure problem exists in latest version)
@@ -36,7 +36,7 @@ Which Version did you deploy?  (Please ensure problem exists in latest version)
 What non-default stack parameters did you configure when deploying?
 
 **Custom Configurations**
-What configuration serttings did you customize?
+What configuration settings did you customize?
 
 **Output of the 'TroubleShoot' agent (if issue is a document processing failure)**
 *See [error analyzer](../../docs/error-analyzer.md)*

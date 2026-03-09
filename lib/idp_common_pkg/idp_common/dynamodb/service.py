@@ -128,6 +128,7 @@ class DocumentDynamoDBService:
             "ObjectStatus": document.status.value,
             "InitialEventTime": document.initial_event_time,
             "QueuedTime": document.queued_time,
+            "ItemType": "document",
         }
 
         if expires_after:
@@ -316,6 +317,12 @@ class DocumentDynamoDBService:
             expression_values[":HITLSectionsCompleted"] = (
                 document.hitl_sections_completed
             )
+
+        # Add confidence alert count if available
+        if document.confidence_alert_count > 0:
+            set_expressions.append("#ConfidenceAlertCount = :ConfidenceAlertCount")
+            expression_names["#ConfidenceAlertCount"] = "ConfidenceAlertCount"
+            expression_values[":ConfidenceAlertCount"] = document.confidence_alert_count
 
         # Build update expression with optional REMOVE clause
         update_expression = "SET " + ", ".join(set_expressions)
@@ -565,6 +572,9 @@ class DocumentDynamoDBService:
         """
         List documents with optional date filtering.
 
+        Uses TypeDateIndex GSI when available for efficient querying.
+        Falls back to scan if GSI query fails.
+
         Args:
             start_date_time: Optional start datetime filter (ISO 8601)
             end_date_time: Optional end datetime filter (ISO 8601)
@@ -577,6 +587,15 @@ class DocumentDynamoDBService:
         Raises:
             DynamoDBError: If the DynamoDB operation fails
         """
+        # Try GSI query first (efficient)
+        try:
+            return self._list_documents_via_gsi(
+                start_date_time, end_date_time, limit, exclusive_start_key
+            )
+        except Exception as e:
+            logger.warning(f"GSI query failed, falling back to scan: {e}")
+
+        # Fallback to scan
         filter_expression = None
         expression_attribute_values = {}
 
@@ -607,6 +626,57 @@ class DocumentDynamoDBService:
                 documents.append(self._dynamodb_item_to_document(item))
             except Exception as e:
                 logger.warning(f"Failed to convert item to document: {e}")
+
+        return {
+            "Documents": documents,
+            "nextToken": response.get("LastEvaluatedKey"),
+        }
+
+    def _list_documents_via_gsi(
+        self,
+        start_date_time: Optional[str] = None,
+        end_date_time: Optional[str] = None,
+        limit: Optional[int] = None,
+        exclusive_start_key: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """List documents using TypeDateIndex GSI for efficient querying."""
+        import boto3
+        from boto3.dynamodb.conditions import Key
+
+        table = boto3.resource("dynamodb").Table(self.client.table_name)
+
+        query_kwargs: Dict[str, Any] = {
+            "IndexName": "TypeDateIndex",
+            "Limit": limit or 50,
+            "ScanIndexForward": False,
+        }
+
+        if start_date_time and end_date_time:
+            query_kwargs["KeyConditionExpression"] = Key("ItemType").eq(
+                "document"
+            ) & Key("InitialEventTime").between(start_date_time, end_date_time)
+        elif start_date_time:
+            query_kwargs["KeyConditionExpression"] = Key("ItemType").eq(
+                "document"
+            ) & Key("InitialEventTime").gte(start_date_time)
+        elif end_date_time:
+            query_kwargs["KeyConditionExpression"] = Key("ItemType").eq(
+                "document"
+            ) & Key("InitialEventTime").lte(end_date_time)
+        else:
+            query_kwargs["KeyConditionExpression"] = Key("ItemType").eq("document")
+
+        if exclusive_start_key:
+            query_kwargs["ExclusiveStartKey"] = exclusive_start_key
+
+        response = table.query(**query_kwargs)
+
+        documents = []
+        for item in response.get("Items", []):
+            try:
+                documents.append(self._dynamodb_item_to_document(item))
+            except Exception as e:
+                logger.warning(f"Failed to convert GSI item to document: {e}")
 
         return {
             "Documents": documents,

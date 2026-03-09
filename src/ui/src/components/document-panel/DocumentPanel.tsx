@@ -627,8 +627,14 @@ export const DocumentPanel = ({
 
   // Fetch active configuration for dynamic confidence threshold (used by sections panel, etc.)
   const { mergedConfig } = useConfiguration();
-  // Fetch the specific config version that was used to process this document (for flow viewer)
-  const { mergedConfig: documentVersionConfig } = useConfiguration(localItem?.configVersion || 'default');
+  // Fetch the specific config version that was used to process this document (for flow viewer).
+  // Optimization: skip the extra API call when the document version is 'default' or unset,
+  // since useConfiguration() above already fetches the default config.
+  const docConfigVersion = localItem?.configVersion || 'default';
+  const needsSeparateVersionFetch = docConfigVersion !== 'default';
+  const { mergedConfig: separateVersionConfig } = useConfiguration(needsSeparateVersionFetch ? docConfigVersion : 'default');
+  // Use the separate fetch result only when the version differs; otherwise reuse the default config
+  const documentVersionConfig = needsSeparateVersionFetch ? separateVersionConfig : mergedConfig;
   const { isReviewer } = useUserRole();
 
   // Check if document can be aborted

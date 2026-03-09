@@ -98,8 +98,7 @@ class ClassesDiscovery:
             # No need to transform - it's already in the right format
             current_class = model_response
 
-            # Merge the new class with existing Default + Custom classes
-            # and save to Custom config
+            # Add the discovered class to the target version's config
             self._merge_and_save_class(current_class)
 
             return {"status": "SUCCESS"}
@@ -151,8 +150,7 @@ class ClassesDiscovery:
             # No need to transform - it's already in the right format
             current_class = model_response
 
-            # Merge the new class with existing Default + Custom classes
-            # and save to Custom config
+            # Add the discovered class to the target version's config
             self._merge_and_save_class(current_class)
 
             return {"status": "SUCCESS"}
@@ -166,18 +164,17 @@ class ClassesDiscovery:
 
     def _merge_and_save_class(self, new_class: Dict[str, Any]) -> None:
         """
-        Merge a new discovered class with existing Default + Custom classes and save to Custom.
+        Merge a new discovered class into the target version's configuration.
 
-        This method ensures that discovered classes are ADDITIVE to existing classes:
-        1. Read Default classes (base classes from deployment)
-        2. Read existing Custom classes (previous user customizations)
-        3. Build a merged list starting from Default, overriding with Custom
-        4. Add/update the new discovered class
-        5. Save the complete merged list to Custom
+        This method only adds/updates the discovered class within the target version's
+        own class list. It does NOT pull in classes from the default configuration version,
+        keeping the target version's classes exactly as the user curated them, plus the
+        newly discovered class.
 
-        This is necessary because the Default+Custom merge uses array replacement,
-        not array concatenation. By saving the complete class list to Custom,
-        we ensure no classes are lost during the merge.
+        Steps:
+        1. Read existing classes from the target version
+        2. Add/update the new discovered class (deduplicate by $id)
+        3. Save back to the target version
 
         Args:
             new_class: The newly discovered class schema to add/update
@@ -186,65 +183,36 @@ class ClassesDiscovery:
         new_class_id = new_class.get("$id") or new_class.get("x-aws-idp-document-type")
         logger.info(f"Merging discovered class: {new_class_id}")
 
-        # Step 1: Read Default classes (base classes from deployment)
-        default_config = self.config_manager.get_configuration("Config", "default")
-        default_classes: list = []
-        if (
-            default_config
-            and isinstance(default_config, IDPConfig)
-            and default_config.classes
-        ):
-            # Convert to list of dicts for easier manipulation
-            default_classes = [
-                cls
-                if isinstance(cls, dict)
-                else cls.model_dump()
-                if hasattr(cls, "model_dump")
-                else dict(cls)
-                for cls in default_config.classes
-            ]
-        logger.info(f"Found {len(default_classes)} classes in Default config")
-
-        # Step 2: Read existing Custom config (raw, no Pydantic defaults)
+        # Read existing config for the target version (raw, no Pydantic defaults)
         existing_custom = (
             self.config_manager.get_raw_configuration("Config", version=self.version)
             or {}
         )
         custom_classes = list(existing_custom.get("classes", []))
-        logger.info(f"Found {len(custom_classes)} classes in Custom config")
+        logger.info(
+            f"Found {len(custom_classes)} existing classes in version '{self.version}'"
+        )
 
-        # Step 3: Build merged class list - start with Default, override with Custom
-        # Use a dict keyed by class ID for efficient deduplication
-        merged_classes_by_id: Dict[str, Dict[str, Any]] = {}
-
-        # Add Default classes first
-        for cls in default_classes:
-            cls_id = cls.get("$id") or cls.get("x-aws-idp-document-type")
-            if cls_id:
-                merged_classes_by_id[cls_id] = cls
-
-        # Override/add Custom classes
+        # Build class list from existing version classes, deduplicating by ID
+        classes_by_id: Dict[str, Dict[str, Any]] = {}
         for cls in custom_classes:
             cls_id = cls.get("$id") or cls.get("x-aws-idp-document-type")
             if cls_id:
-                merged_classes_by_id[cls_id] = cls
+                classes_by_id[cls_id] = cls
 
-        # Step 4: Add/update the new discovered class
+        # Add/update the new discovered class
         if new_class_id:
-            merged_classes_by_id[new_class_id] = new_class
+            classes_by_id[new_class_id] = new_class
 
         # Convert back to list
-        merged_classes = list(merged_classes_by_id.values())
-        logger.info(f"Merged class list has {len(merged_classes)} classes")
+        merged_classes = list(classes_by_id.values())
+        logger.info(f"Saving {len(merged_classes)} classes to version '{self.version}'")
 
-        # Step 5: Save to Custom config
-        # The merged list will replace Default.classes during runtime merge,
-        # ensuring all classes (Default + Custom + new) are preserved
+        # Save to version config
         existing_custom["classes"] = merged_classes
         self.config_manager.save_raw_configuration(
             "Config", existing_custom, version=self.version
         )
-        logger.info(f"Saved {len(merged_classes)} classes to Custom config")
 
     def _validate_json_schema(self, schema: Dict[str, Any]) -> tuple[bool, str]:
         """

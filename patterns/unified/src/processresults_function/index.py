@@ -165,6 +165,13 @@ def handler(event, context):
         else:
             logger.info(f"Document already reviewed (status: {existing_status}), preserving HITL status on reprocess")
 
+    # Compute confidence alert count from all sections
+    document.confidence_alert_count = sum(
+        len(section.confidence_threshold_alerts)
+        for section in document.sections
+    )
+    logger.info(f"Total confidence alert count: {document.confidence_alert_count}")
+
     # Update final status in AppSync / Document Service (includes Review Status)
     logger.info(f"Updating document status to {document.status}")
     document_service.update_document(document)

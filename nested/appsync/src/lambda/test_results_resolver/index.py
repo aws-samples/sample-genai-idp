@@ -279,21 +279,64 @@ def get_test_results(test_run_id):
     
     return result
 
-def get_test_runs_by_date_range(start_date_time, end_date_time):
-    """Get list of test runs within a specific date range (startDateTime to endDateTime)"""
-    table = dynamodb.Table(os.environ['TRACKING_TABLE'])
+def _query_test_runs_from_gsi(table, start_iso, end_iso):
+    """Query test runs from TypeDateIndex GSI instead of scanning the full table.
     
-    logger.info(f"Fetching test runs between: {start_date_time} and {end_date_time}")
+    Uses GSI to find testrun keys efficiently, then BatchGetItem for full records
+    (GSI projection doesn't include all fields like Context, ConfigVersion, etc.).
+    Falls back to scan if GSI query returns no results (backfill may not be complete).
+    """
+    from boto3.dynamodb.conditions import Key
     
-    # Handle pagination for DynamoDB scan
+    gsi_items = []
+    query_kwargs = {
+        'IndexName': 'TypeDateIndex',
+        'KeyConditionExpression': Key('ItemType').eq('testrun') & Key('InitialEventTime').between(start_iso, end_iso),
+        'ScanIndexForward': False,  # Newest first
+        'ProjectionExpression': 'PK, SK',
+    }
+    
+    try:
+        while True:
+            response = table.query(**query_kwargs)
+            gsi_items.extend(response.get('Items', []))
+            
+            if 'LastEvaluatedKey' not in response:
+                break
+            query_kwargs['ExclusiveStartKey'] = response['LastEvaluatedKey']
+        
+        logger.info(f"GSI query returned {len(gsi_items)} test run keys")
+        
+        # If GSI returned results, fetch full records via BatchGetItem
+        if gsi_items:
+            items = []
+            keys = [{'PK': item['PK'], 'SK': item['SK']} for item in gsi_items]
+            table_name = table.table_name
+            # DynamoDB BatchGetItem supports max 100 keys per call
+            for i in range(0, len(keys), 100):
+                batch_keys = keys[i:i+100]
+                batch_response = boto3.resource('dynamodb').batch_get_item(
+                    RequestItems={table_name: {'Keys': batch_keys}}
+                )
+                items.extend(batch_response.get('Responses', {}).get(table_name, []))
+            logger.info(f"BatchGetItem returned {len(items)} full test run records")
+            return items
+        
+        # Fallback: GSI may not have ItemType yet (backfill pending).
+        # Try scan with CreatedAt filter as fallback.
+        logger.info("GSI returned 0 results, falling back to scan (backfill may be pending)")
+    except Exception as e:
+        logger.warning(f"GSI query failed, falling back to scan: {e}")
+    
+    # Fallback scan
     items = []
     scan_kwargs = {
         'FilterExpression': 'begins_with(PK, :pk) AND SK = :sk AND CreatedAt >= :start AND CreatedAt <= :end',
         'ExpressionAttributeValues': {
             ':pk': 'testrun#',
             ':sk': 'metadata',
-            ':start': start_date_time,
-            ':end': end_date_time
+            ':start': start_iso,
+            ':end': end_iso
         }
     }
     
@@ -305,7 +348,19 @@ def get_test_runs_by_date_range(start_date_time, end_date_time):
             break
         scan_kwargs['ExclusiveStartKey'] = response['LastEvaluatedKey']
     
-    logger.info(f"DynamoDB scan completed. Items found: {len(items)}")
+    logger.info(f"Fallback scan returned {len(items)} test runs")
+    return items
+
+
+def get_test_runs_by_date_range(start_date_time, end_date_time):
+    """Get list of test runs within a specific date range (startDateTime to endDateTime)"""
+    table = dynamodb.Table(os.environ['TRACKING_TABLE'])
+    
+    logger.info(f"Fetching test runs between: {start_date_time} and {end_date_time}")
+    
+    items = _query_test_runs_from_gsi(table, start_date_time, end_date_time)
+    
+    logger.info(f"Test runs found: {len(items)}")
     
     test_runs = []
     for item in items:
@@ -361,30 +416,11 @@ def get_test_runs(time_period_hours=2):
     logger.info(f"Current UTC time: {datetime.utcnow().isoformat()}Z")
     logger.info(f"Time period hours: {time_period_hours}")
     
-    # Handle pagination for DynamoDB scan
-    items = []
-    scan_kwargs = {
-        'FilterExpression': 'begins_with(PK, :pk) AND SK = :sk AND CreatedAt >= :cutoff',
-        'ExpressionAttributeValues': {
-            ':pk': 'testrun#',
-            ':sk': 'metadata',
-            ':cutoff': cutoff_iso
-        }
-    }
+    # Use GSI query instead of full table scan
+    end_iso = datetime.utcnow().isoformat() + 'Z'
+    items = _query_test_runs_from_gsi(table, cutoff_iso, end_iso)
     
-    while True:
-        response = table.scan(**scan_kwargs)
-        items.extend(response.get('Items', []))
-        
-        if 'LastEvaluatedKey' not in response:
-            break
-        scan_kwargs['ExclusiveStartKey'] = response['LastEvaluatedKey']
-    
-    logger.info(f"DynamoDB scan completed. Items found: {len(items)}")
-    if items:
-        logger.info(f"Sample item CreatedAt: {items[0].get('CreatedAt')}")
-    else:
-        logger.info("No items found in scan")
+    logger.info(f"Test runs found: {len(items)}")
     
     test_runs = []
     for item in items:

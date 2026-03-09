@@ -773,7 +773,7 @@ classes:
               "RecipientName": "The Honorable Wendell H. Ford",
               "Date": "10/31/1995",
               "Subject": null
-        x-aws-idp-image-path: "config_library/pattern-2/few_shot_example/example-images/letter1.jpg"
+        x-aws-idp-image-path: "config_library/unified/few_shot_example/example-images/letter1.jpg"
       - x-aws-idp-class-prompt: "This is an example of the class 'Letter'"
         name: "Letter2"
         x-aws-idp-attributes-prompt: |
@@ -783,7 +783,7 @@ classes:
               "RecipientName": "Mr. Addison Y. Yeaman",
               "Date": "10/14/1970",
               "Subject": "Invitation to the Twelfth Annual Meeting of the TGIC"
-        x-aws-idp-image-path: "config_library/pattern-2/few_shot_example/example-images/letter2.png"
+        x-aws-idp-image-path: "config_library/unified/few_shot_example/example-images/letter2.png"
 ```
 
 ### Example Fields Explained
@@ -808,12 +808,12 @@ The `x-aws-idp-image-path` field supports multiple formats:
 
 **Single Image File:**
 ```yaml
-x-aws-idp-image-path: "config_library/pattern-2/few_shot_example/example-images/letter1.jpg"
+x-aws-idp-image-path: "config_library/unified/few_shot_example/example-images/letter1.jpg"
 ```
 
 **Local Directory with Multiple Images:**
 ```yaml
-x-aws-idp-image-path: "config_library/pattern-2/few_shot_example/example-images/"
+x-aws-idp-image-path: "config_library/unified/few_shot_example/example-images/"
 ```
 
 **S3 Prefix with Multiple Images:**

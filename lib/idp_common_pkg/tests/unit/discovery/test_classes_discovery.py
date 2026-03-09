@@ -639,32 +639,7 @@ class TestClassesDiscovery:
     def test_discovery_classes_with_document_updates_existing_class(
         self, service, mock_configuration_item
     ):
-        """Test that discovery updates existing class configuration."""
-        # Mock existing Default configuration with classes in JSON Schema format
-        # Use actual IDPConfig so isinstance check passes
-        existing_default_config = IDPConfig(
-            classes=[
-                {
-                    "$schema": "http://json-schema.org/draft-07/schema#",
-                    "$id": "w4",
-                    "type": "object",
-                    "title": "W-4",
-                    "description": "Old description",
-                    "x-aws-idp-document-type": "W-4",
-                    "properties": {},
-                },
-                {
-                    "$schema": "http://json-schema.org/draft-07/schema#",
-                    "$id": "other_form",
-                    "type": "object",
-                    "title": "Other-Form",
-                    "description": "Other form",
-                    "x-aws-idp-document-type": "Other-Form",
-                    "properties": {},
-                },
-            ]
-        )
-
+        """Test that discovery updates existing class in the target version only."""
         with (
             patch("idp_common.utils.s3util.S3Util.get_bytes") as mock_get_bytes,
             patch("idp_common.bedrock.extract_text_from_response") as mock_extract_text,
@@ -685,12 +660,29 @@ class TestClassesDiscovery:
                 "response": {"output": {"message": {"content": [{"text": "{}"}]}}},
                 "metering": {"tokens": 500},
             }
-            # get_configuration returns Default config (for reading Default classes)
-            service.config_manager.get_configuration.return_value = (
-                existing_default_config
-            )
-            # get_raw_configuration returns existing Custom (no existing Custom classes in this case)
-            service.config_manager.get_raw_configuration.return_value = {}
+            # Target version already has an old W-4 and another class
+            service.config_manager.get_raw_configuration.return_value = {
+                "classes": [
+                    {
+                        "$schema": "http://json-schema.org/draft-07/schema#",
+                        "$id": "w4",
+                        "type": "object",
+                        "title": "W-4",
+                        "description": "Old description",
+                        "x-aws-idp-document-type": "W-4",
+                        "properties": {},
+                    },
+                    {
+                        "$schema": "http://json-schema.org/draft-07/schema#",
+                        "$id": "other_form",
+                        "type": "object",
+                        "title": "Other-Form",
+                        "description": "Other form",
+                        "x-aws-idp-document-type": "Other-Form",
+                        "properties": {},
+                    },
+                ]
+            }
 
             result = service.discovery_classes_with_document(
                 "test-bucket", "test-document.pdf"
@@ -704,7 +696,7 @@ class TestClassesDiscovery:
             assert call_args[0][0] == "Config"  # Config type
             updated_classes = call_args[0][1]["classes"]  # Classes from saved config
 
-            # Should have 2 classes (Other-Form from Default + updated W-4)
+            # Should have 2 classes (existing Other-Form + updated W-4 from version)
             assert len(updated_classes) == 2
 
             # Find the W-4 class and verify it was updated (by $id)
@@ -713,6 +705,60 @@ class TestClassesDiscovery:
             )
             assert w4_class is not None
             assert w4_class["description"] == "Updated description"
+
+            # Verify Other-Form is preserved from the version
+            other_class = next(
+                (cls for cls in updated_classes if cls.get("$id") == "other_form"), None
+            )
+            assert other_class is not None
+            assert other_class["description"] == "Other form"
+
+    def test_discovery_does_not_pull_default_classes_into_version(self, service):
+        """Test that discovery does NOT inject default config classes into the target version.
+
+        When a user runs discovery on a version, only the discovered class should be
+        added. Classes from the 'default' config version should NOT be merged in.
+        """
+        with (
+            patch("idp_common.utils.s3util.S3Util.get_bytes") as mock_get_bytes,
+            patch("idp_common.bedrock.extract_text_from_response") as mock_extract_text,
+        ):
+            mock_get_bytes.return_value = b"fake_content"
+            mock_extract_text.return_value = json.dumps(
+                {
+                    "$schema": "http://json-schema.org/draft-07/schema#",
+                    "$id": "w4",
+                    "type": "object",
+                    "title": "W-4",
+                    "description": "Discovered W-4",
+                    "x-aws-idp-document-type": "W-4",
+                    "properties": {},
+                }
+            )
+            service._mock_bedrock_client.return_value = {
+                "response": {"output": {"message": {"content": [{"text": "{}"}]}}},
+                "metering": {"tokens": 500},
+            }
+            # Target version has NO classes yet (empty version)
+            service.config_manager.get_raw_configuration.return_value = {}
+
+            result = service.discovery_classes_with_document(
+                "test-bucket", "test-document.pdf"
+            )
+
+            assert result["status"] == "SUCCESS"
+
+            # Verify only the discovered class is saved — no default classes injected
+            service.config_manager.save_raw_configuration.assert_called_once()
+            call_args = service.config_manager.save_raw_configuration.call_args
+            updated_classes = call_args[0][1]["classes"]
+
+            assert len(updated_classes) == 1
+            assert updated_classes[0]["$id"] == "w4"
+            assert updated_classes[0]["description"] == "Discovered W-4"
+
+            # Verify get_configuration was NOT called (no default config reading)
+            service.config_manager.get_configuration.assert_not_called()
 
     def test_discovery_classes_with_document_no_existing_config(self, service):
         """Test discovery when no existing configuration exists."""

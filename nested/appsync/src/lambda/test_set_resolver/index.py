@@ -109,6 +109,8 @@ def add_test_set_from_upload(args):
     item = {
         'PK': f'testset#{test_set_id}',
         'SK': 'metadata',
+        'ItemType': 'testset',
+        'InitialEventTime': now,
         'id': test_set_id,
         'name': test_set_name,
         'description': description,
@@ -153,6 +155,8 @@ def add_test_set(args):
     item = {
         'PK': f'testset#{test_set_id}',
         'SK': 'metadata',
+        'ItemType': 'testset',
+        'InitialEventTime': now,
         'id': test_set_id,
         'name': test_set_name,
         'description': description,
@@ -233,20 +237,61 @@ def delete_test_sets(args):
 def get_test_sets():
     logger.info("Retrieving all test sets and scanning for direct uploads")
     
-    # Get existing test sets from DynamoDB
-    items = db_client.scan_all(
-        filter_expression='begins_with(PK, :pk) AND SK = :sk',
-        expression_attribute_values={
-            ':pk': 'testset#',
-            ':sk': 'metadata'
+    # Use GSI to find testset PK/SK keys efficiently, then BatchGetItem for full records.
+    # This avoids scanning the entire TrackingTable (which includes all documents).
+    tracking_table = boto3.resource('dynamodb').Table(os.environ['TRACKING_TABLE'])
+    items = []
+    try:
+        from boto3.dynamodb.conditions import Key as DDBKey
+        # Step 1: GSI query to get testset keys (lightweight - only projected attrs)
+        gsi_items = []
+        query_kwargs = {
+            'IndexName': 'TypeDateIndex',
+            'KeyConditionExpression': DDBKey('ItemType').eq('testset'),
+            'ProjectionExpression': 'PK, SK',
         }
-    )
+        while True:
+            response = tracking_table.query(**query_kwargs)
+            gsi_items.extend(response.get('Items', []))
+            if 'LastEvaluatedKey' not in response:
+                break
+            query_kwargs['ExclusiveStartKey'] = response['LastEvaluatedKey']
+        
+        logger.info(f"GSI query found {len(gsi_items)} testset keys")
+        
+        if gsi_items:
+            # Step 2: BatchGetItem to fetch full records from base table
+            keys = [{'PK': item['PK'], 'SK': item['SK']} for item in gsi_items]
+            # DynamoDB BatchGetItem supports max 100 keys per call
+            for i in range(0, len(keys), 100):
+                batch_keys = keys[i:i+100]
+                batch_response = boto3.resource('dynamodb').batch_get_item(
+                    RequestItems={
+                        os.environ['TRACKING_TABLE']: {'Keys': batch_keys}
+                    }
+                )
+                items.extend(batch_response.get('Responses', {}).get(os.environ['TRACKING_TABLE'], []))
+            logger.info(f"BatchGetItem returned {len(items)} full testset records")
+    except Exception as e:
+        logger.warning(f"GSI+BatchGet failed, falling back to scan: {e}")
+        items = []
+    
+    # Fallback to scan only if GSI approach failed
+    if not items:
+        items = db_client.scan_all(
+            filter_expression='begins_with(PK, :pk) AND SK = :sk',
+            expression_attribute_values={
+                ':pk': 'testset#',
+                ':sk': 'metadata'
+            }
+        )
     
     existing_test_sets = {}
     result = []
     
     for item in items:
-        test_set_id = item['id']
+        # GSI projection may not include 'id' - derive from PK if needed
+        test_set_id = item.get('id') or item.get('PK', '').replace('testset#', '')
         existing_test_sets[test_set_id] = item
         result.append({
             'id': test_set_id,
@@ -475,16 +520,19 @@ def _get_test_set_creation_time(s3_client, bucket, prefix):
 def _create_test_set_tracking_entry(test_set_id, name, file_count, status, error=None, created_at=None):
     """Create tracking table entry for direct upload test set"""
     try:
+        now = datetime.utcnow().isoformat() + 'Z'
         item = {
             'PK': f'testset#{test_set_id}',
             'SK': 'metadata',
+            'ItemType': 'testset',
+            'InitialEventTime': now,
             'id': test_set_id,
             'name': name,
             'description': '',  # Direct uploads don't have descriptions
             'filePattern': '',
             'fileCount': file_count,
             'status': status,
-            'createdAt': datetime.utcnow().isoformat() + 'Z'
+            'createdAt': now
         }
         
         if error:

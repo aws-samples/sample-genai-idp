@@ -1,0 +1,86 @@
+{
+  "Comment": "GSI Attribute Backfill - Parallel scan with continuation support for large tables",
+  "StartAt": "GenerateSegments",
+  "States": {
+    "GenerateSegments": {
+      "Type": "Pass",
+      "Comment": "Generate array of segment indices [0, 1, 2, ..., N-1] for parallel processing",
+      "Parameters": {
+        "tableName.$": "$.tableName",
+        "totalSegments.$": "$.totalSegments",
+        "segments.$": "States.ArrayRange(0, States.MathAdd($.totalSegments, -1), 1)"
+      },
+      "Next": "ProcessSegments"
+    },
+    "ProcessSegments": {
+      "Type": "Map",
+      "Comment": "Process each segment in parallel with controlled concurrency",
+      "ItemsPath": "$.segments",
+      "ItemSelector": {
+        "tableName.$": "$.tableName",
+        "totalSegments.$": "$.totalSegments",
+        "segment.$": "$$.Map.Item.Value",
+        "exclusiveStartKey": null
+      },
+      "MaxConcurrency": 10,
+      "Iterator": {
+        "StartAt": "BackfillSegment",
+        "States": {
+          "BackfillSegment": {
+            "Type": "Task",
+            "Resource": "${BackfillWorkerFunctionArn}",
+            "TimeoutSeconds": 900,
+            "Retry": [
+              {
+                "ErrorEquals": ["Lambda.ServiceException", "Lambda.AWSLambdaException", "Lambda.SdkClientException", "Lambda.TooManyRequestsException"],
+                "IntervalSeconds": 5,
+                "MaxAttempts": 3,
+                "BackoffRate": 2
+              },
+              {
+                "ErrorEquals": ["States.TaskFailed"],
+                "IntervalSeconds": 10,
+                "MaxAttempts": 2,
+                "BackoffRate": 2
+              }
+            ],
+            "Next": "CheckContinuation"
+          },
+          "CheckContinuation": {
+            "Type": "Choice",
+            "Comment": "If segment is not complete (Lambda timed out), continue with the last evaluated key",
+            "Choices": [
+              {
+                "Variable": "$.complete",
+                "BooleanEquals": false,
+                "Next": "PrepareContinuation"
+              }
+            ],
+            "Default": "SegmentDone"
+          },
+          "PrepareContinuation": {
+            "Type": "Pass",
+            "Comment": "Prepare input for continuation of this segment",
+            "Parameters": {
+              "tableName.$": "$.tableName",
+              "totalSegments.$": "$.totalSegments",
+              "segment.$": "$.segment",
+              "exclusiveStartKey.$": "$.continuation"
+            },
+            "Next": "BackfillSegment"
+          },
+          "SegmentDone": {
+            "Type": "Pass",
+            "End": true
+          }
+        }
+      },
+      "Next": "BackfillComplete"
+    },
+    "BackfillComplete": {
+      "Type": "Pass",
+      "Comment": "All segments processed successfully",
+      "End": true
+    }
+  }
+}

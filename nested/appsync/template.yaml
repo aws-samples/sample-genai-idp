@@ -173,13 +173,6 @@ Parameters:
     Type: String
     AllowedValues: ["true", "false"]
   
-  Pattern1BDAProjectArn:
-    Type: String
-  
-  HasPattern1BDAProjectArn:
-    Type: String
-    AllowedValues: ["true", "false"]
-  
   # Lambda Layers from main template
   IDPCommonBaseLayerArn:
     Type: String
@@ -194,7 +187,6 @@ Conditions:
   HasGuardrail: !Equals [!Ref HasGuardrailConfig, "true"]
   ShouldCreateEvaluationBaselineBucket: !Equals [!Ref ShouldCreateEvaluationBaselineBucket, "true"]
   ShouldCreateReportingBucket: !Equals [!Ref ShouldCreateReportingBucket, "true"]
-  HasBDAProjectArn: !Equals [!Ref HasPattern1BDAProjectArn, "true"]
 
 Resources:
 
@@ -289,7 +281,7 @@ Resources:
                   - !GetAtt GetAgentChatMessagesFunction.Arn
                   - !GetAtt DeleteAgentChatSessionFunction.Arn
                   - !GetAtt ListDocumentsByDateRangeResolverFunction.Arn
-                  - !GetAtt ListPendingReviewResolverFunction.Arn
+                  - !GetAtt ListDocumentsGSIResolverFunction.Arn
                   - !GetAtt SyncBdaIdpResolverFunction.Arn
 
   # Lambda function for Create Document resolver
@@ -2679,10 +2671,6 @@ Resources:
           LOG_LEVEL: !Ref LogLevel
           CONFIGURATION_TABLE_NAME: !Ref ConfigurationTableName
           STACK_NAME: !Ref StackName
-          BDA_PROJECT_ARN: !If
-            - HasBDAProjectArn
-            - !Ref Pattern1BDAProjectArn
-            - !Ref Pattern1BDAProjectArn
       LoggingConfig:
         LogGroup: !Ref SyncBdaIdpResolverFunctionLogGroup
       Policies:
@@ -3478,51 +3466,6 @@ Resources:
         $util.toJson($ctx.result)
 
 
-  ##########################################################################
-  # ListDocumentResolver
-  ##########################################################################
-  ListDocumentResolver:
-    Type: AWS::AppSync::Resolver
-    Properties:
-      ApiId: !Ref GraphQLApiId
-      TypeName: Query
-      FieldName: listDocuments
-      DataSourceName: !GetAtt TrackingTableDataSource.Name
-      RequestMappingTemplate: |
-        {
-            "version": "2018-05-29",
-            "operation": "Scan",
-            "filter": {
-                #if($context.arguments.startDateTime && $context.arguments.endDateTime)
-                    "expression": "InitialEventTime BETWEEN :startDateTime AND :endDateTime",
-                    "expressionValues": {
-                        ":startDateTime": { "S": "$context.arguments.startDateTime" },
-                        ":endDateTime": { "S": "$context.arguments.endDateTime" }
-                    }
-                #elseif($context.arguments.startDateTime)
-                    "expression": "InitialEventTime >= :startDateTime",
-                    "expressionValues": {
-                        ":startDateTime": { "S": "$context.arguments.startDateTime" }
-                    }
-                #elseif($context.arguments.endDateTime)
-                    "expression": "InitialEventTime <= :endDateTime",
-                    "expressionValues": {
-                        ":endDateTime": { "S": "$context.arguments.endDateTime" }
-                    }
-                #end
-            },
-            #if($context.prev.result)
-                "nextToken": "$context.prev.result.nextToken",
-            #end
-            "limit": 50,
-            "consistentRead": false,
-            "select": "ALL_ATTRIBUTES"
-        }
-      ResponseMappingTemplate: |
-        {
-            "Documents": $util.toJson($ctx.result.items),
-            "nextToken": $util.toJson($ctx.result.nextToken)
-        }
 
 
   ##########################################################################
@@ -3613,21 +3556,16 @@ Resources:
       TypeName: Query
       FieldName: listDocumentsByDateRange
 
-
   ##########################################################################
-  # ListPendingReviewResolverFunctionLogGroup
+  # ListDocumentsGSI - GSI-based document list and count resolvers
   ##########################################################################
-  ListPendingReviewResolverFunctionLogGroup:
+  ListDocumentsGSIResolverFunctionLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
       KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
       RetentionInDays: !Ref LogRetentionDays
 
-
-  ##########################################################################
-  # ListPendingReviewResolverFunction
-  ##########################################################################
-  ListPendingReviewResolverFunction:
+  ListDocumentsGSIResolverFunction:
     Type: AWS::Serverless::Function
     Metadata:
       cfn_nag:
@@ -3636,67 +3574,66 @@ Resources:
             reason: "Function does not require VPC access"
           - id: W92
             reason: "Function does not require reserved concurrency"
-    # checkov:skip=CKV_AWS_116: "DLQ not required for AppSync resolver function"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for AppSync resolver"
     # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
     # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
-    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data"
     Properties:
       PermissionsBoundary:
-        !If [
-          HasPermissionsBoundary,
-          !Ref PermissionsBoundaryArn,
-          !Ref AWS::NoValue,
-        ]
+        !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
       Handler: index.handler
       Runtime: python3.12
-      CodeUri: ./src/lambda/list_pending_review_resolver
-      Description: Lambda function to list pending HITL review documents via GraphQL API
-      MemorySize: 512
-      Timeout: 60
+      CodeUri: src/lambda/list_documents_gsi_resolver/
+      Timeout: 30
+      MemorySize: 256
+      LoggingConfig:
+        LogGroup: !Ref ListDocumentsGSIResolverFunctionLogGroup
       Environment:
         Variables:
           LOG_LEVEL: !Ref LogLevel
           TRACKING_TABLE_NAME: !Ref TrackingTableName
-      LoggingConfig:
-        LogGroup: !Ref ListPendingReviewResolverFunctionLogGroup
       Policies:
-        - DynamoDBCrudPolicy:
-            TableName: !Ref TrackingTableName
         - Statement:
             - Effect: Allow
               Action:
+                - dynamodb:Query
+              Resource:
+                - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${TrackingTableName}/index/TypeDateIndex"
+            - Effect: Allow
+              Action:
                 - kms:Decrypt
-                - kms:GenerateDataKey*
                 - kms:DescribeKey
               Resource: !Ref CustomerManagedEncryptionKeyArn
 
-
-  ##########################################################################
-  # ListPendingReviewDataSource
-  ##########################################################################
-  ListPendingReviewDataSource:
+  ListDocumentsGSIDataSource:
     Type: AWS::AppSync::DataSource
     Properties:
       ApiId: !Ref GraphQLApiId
-      Name: ListPendingReviewDataSource
-      Description: Lambda function for listing pending HITL review documents
+      Name: ListDocumentsGSIDataSource
+      Description: Lambda function for GSI-based document listing and counting
       Type: AWS_LAMBDA
       ServiceRoleArn: !GetAtt AppSyncServiceRole.Arn
       LambdaConfig:
-        LambdaFunctionArn: !GetAtt ListPendingReviewResolverFunction.Arn
+        LambdaFunctionArn: !GetAtt ListDocumentsGSIResolverFunction.Arn
 
-
-  ##########################################################################
-  # ListPendingReviewResolver
-  ##########################################################################
-  ListPendingReviewResolver:
+  # Reuses the logical ID 'ListDocumentResolver' from the old VTL resolver
+  # so CloudFormation updates in-place instead of create+delete conflict
+  ListDocumentResolver:
     Type: AWS::AppSync::Resolver
     DependsOn: GraphQLSchema
     Properties:
       ApiId: !Ref GraphQLApiId
-      DataSourceName: !GetAtt ListPendingReviewDataSource.Name
+      DataSourceName: !GetAtt ListDocumentsGSIDataSource.Name
       TypeName: Query
-      FieldName: listPendingReviewDocuments
+      FieldName: listDocuments
+
+  GetDocumentCountResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: GraphQLSchema
+    Properties:
+      ApiId: !Ref GraphQLApiId
+      DataSourceName: !GetAtt ListDocumentsGSIDataSource.Name
+      TypeName: Query
+      FieldName: getDocumentCount
 
 
   ##########################################################################

@@ -21,7 +21,7 @@ SPDX-License-Identifier: MIT-0
   - [Updating an Existing Deployment](#updating-an-existing-deployment)
   - [Detailed Documentation](#detailed-documentation)
     - [Core Documentation](#core-documentation)
-    - [Processing Patterns](#processing-patterns)
+    - [Processing Modes](#processing-modes)
     - [Python Development](#python-development)
     - [Planning \& Operations](#planning--operations)
   - [Contributing](#contributing)

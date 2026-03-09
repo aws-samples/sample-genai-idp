@@ -34,6 +34,7 @@ interface DocumentApiItem {
   HITLReviewedBy?: string;
   HITLReviewedByEmail?: string;
   HITLReviewHistory?: string | Record<string, unknown>[];
+  ConfidenceAlertCount?: number;
   ConfigVersion?: string;
 }
 
@@ -105,9 +106,12 @@ const mapDocumentsAttributes = (documents: DocumentApiItem[]): Record<string, un
     const metering = parseMetering(meteringJson);
 
     // Calculate confidence alert count
-    const confidenceAlertCount = getDocumentConfidenceAlertCount(
-      (sections ?? null) as Parameters<typeof getDocumentConfidenceAlertCount>[0],
-    );
+    // Prefer the server-side computed ConfidenceAlertCount (from GSI) when Sections are not available
+    const apiConfidenceAlertCount = item.ConfidenceAlertCount;
+    const confidenceAlertCount =
+      apiConfidenceAlertCount != null && apiConfidenceAlertCount > 0
+        ? apiConfidenceAlertCount
+        : getDocumentConfidenceAlertCount((sections ?? null) as Parameters<typeof getDocumentConfidenceAlertCount>[0]);
 
     // Extract HITL metadata - use HITLTriggered from backend, fallback to status check
     const hitlTriggered = item.HITLTriggered === true || (hitlStatus && hitlStatus !== 'N/A');

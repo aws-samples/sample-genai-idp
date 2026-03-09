@@ -1563,17 +1563,6 @@ const ConfigurationLayout = (): React.JSX.Element => {
           }, 5000);
         }
         logger.debug('BDA/IDP sync completed successfully');
-
-        // If this was sync to BDA, activate the version (skip confirmation to prevent circular call)
-        if (direction === 'idp_to_bda') {
-          try {
-            await handleActivateVersion(currentVersionName, true); // Skip confirmation
-            logger.debug(`Activated version ${currentVersionName} after sync to BDA`);
-          } catch (activateErr) {
-            logger.error('Failed to activate version after sync:', activateErr);
-            // Don't fail the sync, just log the error
-          }
-        }
       } else {
         const errorMsg = String(response?.error?.message || response?.message || 'Sync operation failed');
         setSyncError(errorMsg);
@@ -2649,9 +2638,8 @@ const ConfigurationLayout = (): React.JSX.Element => {
         }
       >
         <SpaceBetween size="m">
-          <Alert type="warning">
-            This will sync your IDP document classes to BDA blueprints and set <strong>{currentVersionName}</strong> as the active
-            configuration version.
+          <Alert type="info">
+            This will sync your IDP document classes as BDA blueprints for version <strong>{currentVersionName}</strong>.
           </Alert>
           <FormField label="BDA Project" description="Choose how to sync your configuration to BDA.">
             <RadioGroup

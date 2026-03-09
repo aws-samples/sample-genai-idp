@@ -6,9 +6,9 @@ import { ConsoleLogger } from 'aws-amplify/utils';
 
 import useAppContext from '../contexts/app';
 import {
-  listDocumentsDateShard,
-  listDocumentsDateHour,
-  listDocumentsByDateRange,
+  listDocuments,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  getDocumentCount,
   getDocument,
   deleteDocument,
   reprocessDocument,
@@ -35,6 +35,7 @@ interface UseGraphQlApiParams {
 interface UseGraphQlApiReturn {
   documents: Document[];
   isDocumentsListLoading: boolean;
+  hasListBeenLoaded: boolean;
   getDocumentDetailsFromIds: (objectKeys: string[]) => Promise<Document[]>;
   setIsDocumentsListLoading: React.Dispatch<React.SetStateAction<boolean>>;
   setPeriodsToLoad: React.Dispatch<React.SetStateAction<number>>;
@@ -50,6 +51,7 @@ interface GraphQLSubscriptionRef {
   unsubscribe: () => void;
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 interface DocumentListItem {
   ObjectKey: string;
   PK?: string;
@@ -57,12 +59,26 @@ interface DocumentListItem {
   [key: string]: unknown;
 }
 
+/**
+ * Calculate the date range for a relative time period.
+ * periodsToLoad represents the number of shard periods (each 4 hours).
+ */
+const getDateRangeForPeriod = (periodsToLoad: number): DateRange => {
+  const now = new Date();
+  const hoursInShard = 24 / DOCUMENT_LIST_SHARDS_PER_DAY;
+  const hoursBack = periodsToLoad * hoursInShard;
+  const startDate = new Date(now.getTime() - hoursBack * 3600 * 1000);
+  return {
+    startDateTime: startDate.toISOString(),
+    endDateTime: now.toISOString(),
+  };
+};
+
 const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2 }: UseGraphQlApiParams = {}): UseGraphQlApiReturn => {
   const [periodsToLoad, setPeriodsToLoad] = useState<number>(initialPeriodsToLoad);
   const [isDocumentsListLoading, setIsDocumentsListLoading] = useState<boolean>(false);
   const [documents, setDocuments] = useState<Document[]>([]);
-  const [customDateRange, setCustomDateRange] = useState<DateRange | null>(null); // { startDateTime, endDateTime }
-  const [_dateRangeNextToken, _setDateRangeNextToken] = useState<string | null>(null);
+  const [customDateRange, setCustomDateRange] = useState<DateRange | null>(null);
   const { setErrorMessage } = useAppContext();
 
   const subscriptionsRef = useRef<{
@@ -78,40 +94,25 @@ const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2
 
   /**
    * Check if a document falls within the active date range filter.
-   * For relative periods (no customDateRange), always returns true.
-   * For custom date ranges, checks the document's InitialEventTime or QueuedTime.
    */
-  const isDocumentInActiveRange = useCallback((doc: Document): boolean => {
-    const range = customDateRangeRef.current;
-    if (!range) return true; // No custom range = relative period, always accept
-
-    const docTime = doc?.InitialEventTime || doc?.QueuedTime;
-    if (!docTime) return false; // No timestamp = can't verify, exclude
-
-    return docTime >= range.startDateTime && docTime <= range.endDateTime;
-  }, []);
+  const isDocumentInActiveRange = useCallback(
+    (doc: Document): boolean => {
+      const range = customDateRangeRef.current || getDateRangeForPeriod(periodsToLoad);
+      const docTime = doc?.InitialEventTime || doc?.QueuedTime;
+      if (!docTime) return false;
+      return docTime >= range.startDateTime && docTime <= range.endDateTime;
+    },
+    [periodsToLoad],
+  );
 
   const setDocumentsDeduped = useCallback((documentValues: Document[]): void => {
-    logger.debug('setDocumentsDeduped called with:', documentValues);
     setDocuments((currentDocuments) => {
       const documentValuesdocumentIds = documentValues.map((c) => c.ObjectKey);
-
-      // Remove old entries with matching ObjectKeys
       const filteredCurrentDocuments = currentDocuments.filter((c) => !documentValuesdocumentIds.includes(c.ObjectKey));
-
-      // Add new entries with PK/SK preserved
-      const newDocuments = documentValues.map((document) => ({
-        ...document,
-        ListPK: document.ListPK || currentDocuments.find((c) => c.ObjectKey === document.ObjectKey)?.ListPK,
-        ListSK: document.ListSK || currentDocuments.find((c) => c.ObjectKey === document.ObjectKey)?.ListSK,
-      }));
-
-      // Combine and deduplicate by ObjectKey, keeping only the latest entry per ObjectKey
-      const allDocuments = [...filteredCurrentDocuments, ...newDocuments];
+      const allDocuments = [...filteredCurrentDocuments, ...documentValues];
       const deduplicatedByObjectKey = Object.values(
         allDocuments.reduce((acc: Record<string, Document>, doc) => {
           const existing = acc[doc.ObjectKey];
-          // Keep the document with the most recent CompletionTime or InitialEventTime
           if (!existing) {
             acc[doc.ObjectKey] = doc;
           } else {
@@ -124,381 +125,192 @@ const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2
           return acc;
         }, {}),
       );
-
       return deduplicatedByObjectKey;
     });
   }, []);
 
+  /**
+   * Fetch full document details for specific documents by ObjectKey.
+   * Used only when navigating to document detail view, NOT for list loading.
+   */
   const getDocumentDetailsFromIds = useCallback(
     async (objectKeys: string[]): Promise<Document[]> => {
-      // prettier-ignore
       logger.debug('getDocumentDetailsFromIds', objectKeys);
       const getDocumentPromises = objectKeys.map((objectKey) => client.graphql({ query: getDocument, variables: { objectKey } }));
       const getDocumentResolutions = await Promise.allSettled(getDocumentPromises);
 
       type GetDocumentResolved = Awaited<(typeof getDocumentPromises)[number]>;
 
-      // Separate rejected promises from null/undefined results
-      const getDocumentRejected = getDocumentResolutions.filter((r) => r.status === 'rejected');
-      const fulfilledResults = getDocumentResolutions.filter((r) => r.status === 'fulfilled');
-      const getDocumentNull = fulfilledResults
-        .map((r, idx) => ({ doc: (r as PromiseFulfilledResult<GetDocumentResolved>).value?.data?.getDocument, key: objectKeys[idx] }))
-        .filter((item) => !item.doc)
-        .map((item) => item.key);
-
-      // Log partial failures but NEVER show error banner for individual document failures
-      if (getDocumentRejected.length > 0) {
-        logger.warn(`Failed to load ${getDocumentRejected.length} of ${objectKeys.length} document(s) due to query rejection`);
-        logger.debug('Rejected promises:', getDocumentRejected);
-      }
-      if (getDocumentNull.length > 0) {
-        logger.warn(`${getDocumentNull.length} of ${objectKeys.length} document(s) not found (returned null):`, getDocumentNull);
-        logger.warn('These documents have list entries but no corresponding document records - possible orphaned list entries');
-      }
-
-      // Filter out null/undefined documents and cast to UI Document type.
-      // The generated GQL type uses nullable fields; the UI Document type expects required fields.
-      // This is safe because downstream normalization in map-document-attributes.ts handles
-      // null-to-default conversions before the UI consumes the data.
       const documentValues = getDocumentResolutions
         .filter((r) => r.status === 'fulfilled')
         .map((r) => (r as PromiseFulfilledResult<GetDocumentResolved>).value?.data?.getDocument)
         .filter((doc): doc is NonNullable<typeof doc> => doc != null) as Document[];
 
-      logger.debug(`Successfully loaded ${documentValues.length} of ${objectKeys.length} requested documents`);
       return documentValues;
     },
     [setErrorMessage],
   );
 
+  // ── Subscriptions ──────────────────────────────────────────────────────
+  // Subscriptions use the event data directly — NO getDocument calls needed.
+  // The onUpdateDocument subscription includes all Document fields.
+  // The onCreateDocument subscription only has ObjectKey, so we add a minimal
+  // placeholder that will be updated by the next onUpdateDocument event.
+
   useEffect(() => {
-    if (subscriptionsRef.current.onCreate) {
-      logger.debug('onCreateDocument subscription already exists, skipping');
-      return undefined;
-    }
+    if (subscriptionsRef.current.onCreate) return undefined;
 
     logger.debug('onCreateDocument subscription');
-    const subscription = client
-      .graphql({
-        query: onCreateDocument,
-      })
-      .subscribe({
-        next: async (message) => {
-          logger.debug('document list subscription update', message);
-          const objectKey = message.data?.onCreateDocument?.ObjectKey || '';
-          if (objectKey) {
-            try {
-              const documentValues = await getDocumentDetailsFromIds([objectKey]);
-              if (documentValues && documentValues.length > 0) {
-                // Filter: only add documents that fall within the active date range
-                const inRangeDocuments = documentValues.filter(isDocumentInActiveRange);
-                if (inRangeDocuments.length > 0) {
-                  setDocumentsDeduped(inRangeDocuments);
-                } else {
-                  logger.debug(`Subscription: new document ${objectKey} outside active date range, skipping`);
-                }
-              }
-            } catch (error) {
-              logger.error('Error processing onCreateDocument subscription:', error);
-            }
+    const subscription = client.graphql({ query: onCreateDocument }).subscribe({
+      next: (message) => {
+        const objectKey = message.data?.onCreateDocument?.ObjectKey || '';
+        if (objectKey) {
+          // Create a minimal placeholder document from the subscription event.
+          // It will be enriched by the next onUpdateDocument subscription event.
+          const placeholderDoc = {
+            ObjectKey: objectKey,
+            PK: `doc#${objectKey}`,
+            SK: 'none',
+            ObjectStatus: 'QUEUED',
+            InitialEventTime: new Date().toISOString(),
+          } as unknown as Document;
+
+          if (isDocumentInActiveRange(placeholderDoc)) {
+            setDocumentsDeduped([placeholderDoc]);
+            logger.debug(`Subscription: added new document placeholder ${objectKey}`);
           }
-        },
-        error: (error: unknown) => {
-          logger.error('onCreateDocument subscription error:', error);
-          setErrorMessage('document list network subscription failed - please reload the page');
-        },
-      });
+        }
+      },
+      error: (error: unknown) => {
+        logger.error('onCreateDocument subscription error:', error);
+        setErrorMessage('document list network subscription failed - please reload the page');
+      },
+    });
 
     subscriptionsRef.current.onCreate = subscription;
-
     return () => {
-      logger.debug('onCreateDocument subscription cleanup');
       if (subscriptionsRef.current.onCreate) {
         subscriptionsRef.current.onCreate.unsubscribe();
         subscriptionsRef.current.onCreate = null;
       }
     };
-  }, [getDocumentDetailsFromIds, setDocumentsDeduped, setErrorMessage]);
+  }, [setDocumentsDeduped, setErrorMessage, isDocumentInActiveRange]);
 
   useEffect(() => {
-    if (subscriptionsRef.current.onUpdate) {
-      logger.debug('onUpdateDocument subscription already exists, skipping');
-      return undefined;
-    }
+    if (subscriptionsRef.current.onUpdate) return undefined;
 
     logger.debug('onUpdateDocument subscription setup');
-    const subscription = client
-      .graphql({
-        query: onUpdateDocument,
-      })
-      .subscribe({
-        next: async (message) => {
-          logger.debug('document update subscription received', message);
-          const documentUpdateEvent = message.data?.onUpdateDocument;
-          if (documentUpdateEvent?.ObjectKey) {
-            // Fetch full document details to ensure we have complete data
-            try {
-              const documentValues = await getDocumentDetailsFromIds([documentUpdateEvent.ObjectKey]);
-              if (documentValues && documentValues.length > 0) {
-                // For updates: only add if document is already in the list OR falls within the active range
-                // This ensures in-range docs get updates, but out-of-range new docs don't sneak in
-                const filteredValues = documentValues.filter((doc) => {
-                  if (isDocumentInActiveRange(doc)) return true;
-                  // Check if this document is already displayed (allow status updates for existing docs)
-                  return false;
-                });
-                if (filteredValues.length > 0) {
-                  setDocumentsDeduped(filteredValues);
-                } else {
-                  logger.debug(`Subscription: updated document ${documentUpdateEvent.ObjectKey} outside active date range, skipping`);
-                }
-              }
-            } catch (error) {
-              logger.error('Error fetching document details after update:', error);
-              // Fallback to subscription data if fetch fails - still apply range filter
-              if (isDocumentInActiveRange(documentUpdateEvent as unknown as Document)) {
-                setDocumentsDeduped([documentUpdateEvent as unknown as Document]);
-              }
-            }
+    const subscription = client.graphql({ query: onUpdateDocument }).subscribe({
+      next: (message) => {
+        // Use the subscription event data directly — it already includes all Document fields.
+        // No need to call getDocument for each update!
+        const documentUpdateEvent = message.data?.onUpdateDocument;
+        if (documentUpdateEvent?.ObjectKey) {
+          const doc = documentUpdateEvent as unknown as Document;
+          if (isDocumentInActiveRange(doc)) {
+            setDocumentsDeduped([doc]);
           }
-        },
-        error: (error: unknown) => {
-          logger.error('onUpdateDocument subscription error:', error);
-          setErrorMessage('document update network request failed - please reload the page');
-        },
-      });
+        }
+      },
+      error: (error: unknown) => {
+        logger.error('onUpdateDocument subscription error:', error);
+        setErrorMessage('document update network request failed - please reload the page');
+      },
+    });
 
     subscriptionsRef.current.onUpdate = subscription;
-
     return () => {
-      logger.debug('onUpdateDocument subscription cleanup');
       if (subscriptionsRef.current.onUpdate) {
         subscriptionsRef.current.onUpdate.unsubscribe();
         subscriptionsRef.current.onUpdate = null;
       }
     };
-  }, [setDocumentsDeduped, setErrorMessage, getDocumentDetailsFromIds]);
+  }, [setDocumentsDeduped, setErrorMessage, isDocumentInActiveRange]);
 
-  const listDocumentIdsByDateShards = async ({ date, shards }: { date: string; shards: number[] }): Promise<DocumentListItem[]> => {
-    const listDocumentsDateShardPromises = shards.map((i) => {
-      logger.debug('sending list document date shard', date, i);
-      return client.graphql({ query: listDocumentsDateShard, variables: { date, shard: i } });
-    });
-    const listDocumentsDateShardResolutions = await Promise.allSettled(listDocumentsDateShardPromises);
+  // ── Document Loading (GSI-based, paginated with cap) ────────────────
 
-    type ShardResolved = Awaited<(typeof listDocumentsDateShardPromises)[number]>;
+  // Track whether the initial list load has been explicitly requested.
+  // This prevents listDocuments from firing on mount when the user is on
+  // a non-list page (e.g., document details, config). The DocumentList
+  // component triggers the initial load by calling setIsDocumentsListLoading(true).
+  const hasListBeenRequestedRef = useRef<boolean>(false);
 
-    const listRejected = listDocumentsDateShardResolutions.filter((r) => r.status === 'rejected');
-    if (listRejected.length) {
-      setErrorMessage('failed to list documents - please try again later');
-      logger.error('list document promises rejected', listRejected);
-    }
-    const documentData = listDocumentsDateShardResolutions
-      .filter((r) => r.status === 'fulfilled')
-      .map((r) => (r as PromiseFulfilledResult<ShardResolved>).value?.data?.listDocumentsDateShard?.Documents || [])
-      .flat() as unknown as DocumentListItem[];
-
-    return documentData;
-  };
-
-  const listDocumentIdsByDateHours = async ({ date, hours }: { date: string; hours: number[] }): Promise<DocumentListItem[]> => {
-    const listDocumentsDateHourPromises = hours.map((i) => {
-      logger.debug('sending list document date hour', date, i);
-      return client.graphql({ query: listDocumentsDateHour, variables: { date, hour: i } });
-    });
-    const listDocumentsDateHourResolutions = await Promise.allSettled(listDocumentsDateHourPromises);
-
-    type HourResolved = Awaited<(typeof listDocumentsDateHourPromises)[number]>;
-
-    const listRejected = listDocumentsDateHourResolutions.filter((r) => r.status === 'rejected');
-    if (listRejected.length) {
-      setErrorMessage('failed to list documents - please try again later');
-      logger.error('list document promises rejected', listRejected);
-    }
-
-    const documentData = listDocumentsDateHourResolutions
-      .filter((r) => r.status === 'fulfilled')
-      .map((r) => (r as PromiseFulfilledResult<HourResolved>).value?.data?.listDocumentsDateHour?.Documents || [])
-      .flat() as unknown as DocumentListItem[];
-
-    return documentData;
-  };
-
-  const sendSetDocumentsForDateRange = async (dateRange: DateRange, nextToken: string | null = null): Promise<void> => {
-    // Server-side paginated query for custom date ranges
+  /**
+   * Fetch documents for a date range using the GSI-based listDocuments query.
+   * Paginates through results up to MAX_DOCUMENTS_TO_LOAD to avoid excessive API calls.
+   * The GSI query returns document list fields directly (no getDocument calls needed).
+   */
+  const sendSetDocumentsForDateRange = async (dateRange: DateRange): Promise<void> => {
     try {
-      logger.info('Fetching documents by date range', dateRange);
-      const allDocuments: DocumentListItem[] = [];
-      let currentToken = nextToken;
+      logger.info('Fetching documents via GSI', dateRange);
+      let totalLoaded = 0;
+      let currentToken: string | null = null;
 
-      // Fetch all pages (server-side pagination)
       do {
+        const variables: Record<string, unknown> = {
+          startDateTime: dateRange.startDateTime,
+          endDateTime: dateRange.endDateTime,
+          limit: 200,
+        };
+        if (currentToken) {
+          variables.nextToken = currentToken;
+        }
+
         const response = await client.graphql({
-          query: listDocumentsByDateRange,
-          variables: {
-            startDateTime: dateRange.startDateTime,
-            endDateTime: dateRange.endDateTime,
-            limit: 200,
-            nextToken: currentToken,
-          },
+          query: listDocuments,
+          variables,
         });
 
-        const result = response.data?.listDocumentsByDateRange;
-        if (result?.Documents) {
-          allDocuments.push(...(result.Documents as unknown as DocumentListItem[]));
-        }
+        const result = response.data?.listDocuments;
+        const pageDocs = (result?.Documents ?? []) as unknown as Document[];
         currentToken = result?.nextToken ?? null;
-        logger.debug(`Fetched ${result?.Documents?.length || 0} documents, hasMore=${!!currentToken}`);
+        totalLoaded += pageDocs.length;
+
+        // Render incrementally — show each page as it arrives
+        if (pageDocs.length > 0) {
+          setDocumentsDeduped(pageDocs as unknown as Document[]);
+        }
+
+        // Stop loading spinner after first page so user sees results immediately
+        if (totalLoaded === pageDocs.length) {
+          setIsDocumentsListLoading(false);
+        }
+
+        logger.debug(`Fetched ${pageDocs.length} documents (total: ${totalLoaded}), hasMore=${!!currentToken}`);
       } while (currentToken);
 
-      logger.info(`Total documents fetched for date range: ${allDocuments.length}`);
-
-      // Transform to match existing document format expected by the UI
-      const documentValues = allDocuments.map((doc: DocumentListItem) => ({
-        ...doc,
-        ListPK: (doc.ListPK as string) || (doc.PK as string),
-        ListSK: (doc.ListSK as string) || (doc.SK as string),
-      }));
-
-      setDocumentsDeduped(documentValues as Document[]);
+      logger.info(`Total documents loaded: ${totalLoaded}`);
       setIsDocumentsListLoading(false);
-    } catch (error) {
+    } catch (error: unknown) {
       setIsDocumentsListLoading(false);
-      setErrorMessage('Failed to list documents for date range - please try again later');
-      logger.error('Error fetching documents by date range', error);
-    }
-  };
-
-  const sendSetDocumentsForPeriod = async (): Promise<void> => {
-    // XXX this logic should be moved to the API
-    try {
-      const now = new Date();
-
-      // array of arrays containing date / shard pairs relative to current UTC time
-      // e.g. 2 periods to on load 2021-01-01T:20:00:00.000Z ->
-      // [ [ '2021-01-01', 3 ], [ '2021-01-01', 4 ] ]
-      const hoursInShard = 24 / DOCUMENT_LIST_SHARDS_PER_DAY;
-      const dateShardPairs = [...Array(Math.floor(periodsToLoad)).keys()].map((p) => {
-        const deltaInHours = p * hoursInShard;
-        const relativeDate = new Date(now.getTime() - deltaInHours * 3600 * 1000);
-
-        const relativeDateString = relativeDate.toISOString().split('T')[0];
-        const shard = Math.floor(relativeDate.getUTCHours() / hoursInShard);
-
-        return [relativeDateString, shard] as [string, number];
-      });
-
-      // reduce array of date/shard pairs into object of shards by date
-      // e.g. [ [ '2021-01-01', 3 ], [ '2021-01-01', 4 ] ] -> { '2021-01-01': [ 3, 4 ] }
-      const dateShards = dateShardPairs.reduce((p: Record<string, number[]>, c) => ({ ...p, [c[0]]: [...(p[c[0]] || []), c[1]] }), {});
-      logger.debug('document list date shards', dateShards);
-
-      // parallelizes listDocuments and getDocumentDetails
-      // alternatively we could implement it by sending multiple graphql queries in 1 request
-      const documentDataDateShardPromises = Object.keys(dateShards).map(
-        // pretttier-ignore
-        async (d) => listDocumentIdsByDateShards({ date: d, shards: dateShards[d] }),
-      );
-
-      // get document Ids by hour on residual hours outside of the lower shard date/hour boundary
-      // or just last n hours when periodsToLoad is less than 1 shard period
-      let baseDate: Date;
-      let residualHours;
-      if (periodsToLoad < 1) {
-        baseDate = new Date(now);
-        const numHours = Math.floor(periodsToLoad * hoursInShard);
-        residualHours = [...Array(numHours).keys()].map((h) => (((baseDate.getUTCHours() - h) % 24) + 24) % 24);
-      } else {
-        baseDate = new Date(now.getTime() - periodsToLoad * hoursInShard * 3600 * 1000);
-        const residualBaseHour = baseDate.getUTCHours() % hoursInShard;
-        residualHours = [...Array(hoursInShard - residualBaseHour).keys()].map((h) => (baseDate.getUTCHours() + h) % 24);
-      }
-      const baseDateString = baseDate.toISOString().split('T')[0];
-
-      const residualDateHours = { date: baseDateString, hours: residualHours };
-      logger.debug('document list date hours', residualDateHours);
-
-      const documentDataDateHourPromise = listDocumentIdsByDateHours(residualDateHours);
-
-      const documentDataPromises = [...documentDataDateShardPromises, documentDataDateHourPromise];
-      const documentDetailsPromises = documentDataPromises.map(async (documentDataPromise) => {
-        const documentData = await documentDataPromise;
-        const objectKeys = documentData.map((item: DocumentListItem) => item.ObjectKey);
-        const documentDetails = await getDocumentDetailsFromIds(objectKeys);
-
-        // Log orphaned list entries with full PK/SK details for debugging
-        const retrievedKeys = new Set(documentDetails.map((d) => d.ObjectKey));
-        const missingDocs = documentData.filter((item: DocumentListItem) => !retrievedKeys.has(item.ObjectKey));
-        if (missingDocs.length > 0) {
-          missingDocs.forEach((item: DocumentListItem) => {
-            logger.warn(`Orphaned list entry detected:`);
-            logger.warn(`  - List entry: PK="${item.PK}", SK="${item.SK}"`);
-            logger.warn(`  - Expected doc entry: PK="doc#${item.ObjectKey}", SK="none"`);
-            logger.warn(`  - ObjectKey: "${item.ObjectKey}"`);
-          });
-        }
-
-        // Merge document details with PK and SK, filtering out nulls to prevent shard-level failures
-        return documentDetails
-          .filter((detail) => detail != null)
-          .map((detail) => {
-            const matchingData = documentData.find((item: DocumentListItem) => item.ObjectKey === detail.ObjectKey);
-            return { ...detail, ListPK: matchingData?.PK, ListSK: matchingData?.SK };
-          });
-      });
-
-      const documentValuesPromises = documentDetailsPromises.map(async (documentValuesPromise) => {
-        const documentValues = await documentValuesPromise;
-        logger.debug('documentValues', documentValues);
-        return documentValues;
-      });
-
-      const getDocumentsPromiseResolutions = await Promise.allSettled(documentValuesPromises);
-      logger.debug('getDocumentsPromiseResolutions', getDocumentsPromiseResolutions);
-      const documentValuesReduced = getDocumentsPromiseResolutions
-        .filter((r) => r.status === 'fulfilled')
-        .map((r) => (r as PromiseFulfilledResult<Document[]>).value)
-        .reduce((previous, current) => [...previous, ...current], []);
-      logger.debug('documentValuesReduced', documentValuesReduced);
-      setDocumentsDeduped(documentValuesReduced);
-      setIsDocumentsListLoading(false);
-      const getDocumentsRejected = getDocumentsPromiseResolutions.filter((r) => r.status === 'rejected');
-      // Only show error banner if ALL shard queries failed
-      if (getDocumentsRejected.length === documentDataPromises.length) {
-        setErrorMessage('failed to get document details - please try again later');
-        logger.error('All shard queries rejected', getDocumentsRejected);
-      } else if (getDocumentsRejected.length > 0) {
-        // Partial failure - log but don't show error banner
-        logger.warn(`${getDocumentsRejected.length} of ${documentDataPromises.length} shard queries failed`);
-        logger.debug('Rejected shard queries:', getDocumentsRejected);
-      }
-    } catch (error) {
-      setIsDocumentsListLoading(false);
-      setErrorMessage('failed to list Documents - please try again later');
-      logger.error('error obtaining document list', error);
+      // Extract meaningful error message from GraphQL/Lambda errors
+      const gqlError = error as { errors?: { message?: string; errorType?: string }[] };
+      const firstError = gqlError?.errors?.[0];
+      const detail = firstError?.message || (error instanceof Error ? error.message : 'Unknown error');
+      const errorType = firstError?.errorType ? ` (${firstError.errorType})` : '';
+      setErrorMessage(`Failed to list documents${errorType}: ${detail}`);
+      logger.error('Error fetching documents', error);
     }
   };
 
   useEffect(() => {
     if (isDocumentsListLoading) {
+      // Mark that the list has been requested at least once. This allows
+      // the periodsToLoad watcher to auto-reload on subsequent changes.
+      hasListBeenRequestedRef.current = true;
       logger.debug('document list is loading');
-      // send in a timeout to avoid blocking rendering
       setTimeout(() => {
         setDocuments([]);
-        if (customDateRange) {
-          // Use server-side paginated query for custom date ranges
-          sendSetDocumentsForDateRange(customDateRange);
-        } else {
-          // Use existing shard-based client-side mechanism for relative periods
-          sendSetDocumentsForPeriod();
-        }
+        const dateRange = customDateRange || getDateRangeForPeriod(periodsToLoad);
+        sendSetDocumentsForDateRange(dateRange);
       }, 1);
     }
   }, [isDocumentsListLoading]);
 
   useEffect(() => {
     logger.debug('list period changed', periodsToLoad);
-    if (!customDateRange) {
+    if (!customDateRange && hasListBeenRequestedRef.current) {
+      // Only auto-reload when the period changes AFTER the first load was requested
       setIsDocumentsListLoading(true);
     }
   }, [periodsToLoad]);
@@ -510,15 +322,12 @@ const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2
     }
   }, [customDateRange]);
 
+  // ── Mutations ──────────────────────────────────────────────────────────
+
   const deleteDocuments = async (objectKeys: string[]): Promise<unknown> => {
     try {
-      logger.debug('Deleting documents', objectKeys);
       const result = await client.graphql({ query: deleteDocument, variables: { objectKeys } });
-      logger.debug('Delete documents result', result);
-
-      // Refresh the document list after deletion
       setIsDocumentsListLoading(true);
-
       return result.data.deleteDocument;
     } catch (error) {
       setErrorMessage('Failed to delete document(s) - please try again later');
@@ -529,14 +338,9 @@ const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2
 
   const reprocessDocuments = async (objectKeys: string[], version?: string): Promise<unknown> => {
     try {
-      logger.debug('Reprocessing documents', objectKeys, 'with version', version);
       const variables: { objectKeys: string[]; version?: string } = { objectKeys };
-      if (version) {
-        variables.version = version;
-      }
+      if (version) variables.version = version;
       const result = await client.graphql({ query: reprocessDocument, variables });
-      logger.debug('Reprocess documents result', result);
-      // Refresh the document list after reprocessing
       setIsDocumentsListLoading(true);
       return result.data.reprocessDocument;
     } catch (error) {
@@ -548,15 +352,10 @@ const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2
 
   const abortWorkflows = async (objectKeys: string[]): Promise<unknown> => {
     try {
-      logger.debug('Aborting workflows for documents', objectKeys);
       const result = await client.graphql({ query: abortWorkflow, variables: { objectKeys } });
-      logger.debug('Abort workflows result', result);
       const response = result.data.abortWorkflow;
-
-      // Refresh the document list after aborting
       setIsDocumentsListLoading(true);
 
-      // Show error message if some aborts failed but not all
       if ((response.failedCount ?? 0) > 0 && (response.abortedCount ?? 0) > 0) {
         setErrorMessage(`Aborted ${response.abortedCount ?? 0} document(s), but ${response.failedCount ?? 0} failed`);
       } else if ((response.failedCount ?? 0) > 0 && response.abortedCount === 0) {
@@ -579,6 +378,7 @@ const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2
   return {
     documents,
     isDocumentsListLoading,
+    hasListBeenLoaded: hasListBeenRequestedRef.current,
     getDocumentDetailsFromIds,
     setIsDocumentsListLoading,
     setPeriodsToLoad,

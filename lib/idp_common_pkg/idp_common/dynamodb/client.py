@@ -40,7 +40,9 @@ class DynamoDBClient:
             region: Optional AWS region. If not provided, will be read from AWS_REGION env var.
         """
         self.table_name = table_name or os.environ.get("TRACKING_TABLE")
-        self.region = region or os.environ.get("AWS_REGION")
+        self.region = (
+            region or os.environ.get("AWS_REGION") or boto3.Session().region_name
+        )
 
         if not self.table_name:
             raise ValueError(
@@ -49,7 +51,8 @@ class DynamoDBClient:
 
         if not self.region:
             raise ValueError(
-                "AWS region must be provided or set in AWS_REGION environment variable"
+                "AWS region must be provided, set in AWS_REGION environment variable, "
+                "or configured in AWS CLI (~/.aws/config)"
             )
 
         try:

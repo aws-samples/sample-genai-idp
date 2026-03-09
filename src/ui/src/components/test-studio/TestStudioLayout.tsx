@@ -29,7 +29,7 @@ const TestStudioLayout = (): React.JSX.Element => {
   const { navigationOpen, setNavigationOpen, activeTestRuns, addTestRun, removeTestRun } = useAppContext();
   const location = useLocation();
   const [activeTabId, setActiveTabId] = useState('sets');
-  const [timePeriodHours, setTimePeriodHours] = useState(2);
+  const [timePeriodHours, setTimePeriodHours] = useState(336); // Default: 2 weeks
   const [selectedTestItems, setSelectedTestItems] = useState<TestRunItem[]>([]);
 
   // Handle URL tab parameter

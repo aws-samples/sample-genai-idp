@@ -16,6 +16,7 @@ Thank you for your interest in contributing to the GenAI Intelligent Document Pr
   - [Making Changes](#making-changes)
   - [Testing Your Changes](#testing-your-changes)
 - [Pull Request Process](#pull-request-process)
+- [Make Commands](#make-commands)
 - [Coding Standards](#coding-standards)
 - [Documentation](#documentation)
 - [Reporting Bugs/Feature Requests](#reporting-bugsfeature-requests)
@@ -61,7 +62,6 @@ Familiarize yourself with the project structure:
 - `samples/`: Sample documents for testing
 - `scripts/`: Utility scripts for development, testing, and deployment
 - `src/`: Source code for the application
-  - `api/`: API definitions
   - `lambda/`: AWS Lambda functions
   - `ui/`: Web UI components
 
@@ -83,7 +83,7 @@ Familiarize yourself with the project structure:
 3. Write/update tests as necessary
 4. Ensure code passes linting rules:
    - For Python code: `ruff` is configured for this project
-   - For UI code: ESLint is configured in `src/ui/.eslintrc`
+   - For UI code: ESLint is configured in `src/ui/.eslintrc.json`
 
 ### Testing Your Changes
 
@@ -96,11 +96,6 @@ Familiarize yourself with the project structure:
    # Run Python unit tests
    pytest lib/idp_common_pkg/tests/
 
-   # Test individual Lambda functions
-   cd patterns/pattern-2/
-   sam build
-   sam local invoke OCRFunction -e ../../testing/OCRFunction-event.json --env-vars ../../testing/env.json
-   
    # Verify UI code passes linting checks
    make ui-lint
    # Or manually: cd src/ui/ && npm run lint

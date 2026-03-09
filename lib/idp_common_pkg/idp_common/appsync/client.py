@@ -45,7 +45,9 @@ class AppSyncClient:
         self.session = boto3.Session()
         self.credentials = self.session.get_credentials()
         self.api_url = api_url or os.environ.get("APPSYNC_API_URL")
-        self.region = region or os.environ.get("AWS_REGION")
+        self.region = (
+            region or os.environ.get("AWS_REGION") or boto3.Session().region_name
+        )
 
         if not self.api_url:
             raise ValueError(
@@ -54,7 +56,8 @@ class AppSyncClient:
 
         if not self.region:
             raise ValueError(
-                "AWS region must be provided or set in AWS_REGION environment variable"
+                "AWS region must be provided, set in AWS_REGION environment variable, "
+                "or configured in AWS CLI (~/.aws/config)"
             )
 
         # Create a requests session for connection pooling

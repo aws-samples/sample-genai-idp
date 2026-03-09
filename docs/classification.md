@@ -170,7 +170,7 @@ The boundary detection is automatically included in the classification results. 
 - Better suited for multi-document packets where context spans multiple pages
 - Deployed when you select the default pattern-2 configuration during stack deployment or update
 
-The default configuration in `config_library/pattern-2/default/config.yaml` implements this approach with a task prompt that instructs the model to:
+The default configuration in `config_library/unified/default/config.yaml` implements this approach with a task prompt that instructs the model to:
 
 1. Read through the entire document package to understand its contents
 2. Identify page ranges that form complete, distinct documents
@@ -700,18 +700,18 @@ classes:
     x-aws-idp-examples:
       - x-aws-idp-class-prompt: "This is an example of the class 'Letter'"
         name: "Letter1"
-        x-aws-idp-image-path: "config_library/pattern-2/your_config/example-images/letter1.jpg"
+        x-aws-idp-image-path: "config_library/unified/your_config/example-images/letter1.jpg"
       - x-aws-idp-class-prompt: "This is an example of the class 'Letter'"
         name: "Letter2"
-        x-aws-idp-image-path: "config_library/pattern-2/your_config/example-images/letter2.png"
+        x-aws-idp-image-path: "config_library/unified/your_config/example-images/letter2.png"
 ```
 
 ### Example Image Path Support
 
 The `imagePath` field supports multiple formats:
 
-- **Single Image File**: `"config_library/pattern-2/examples/letter1.jpg"`
-- **Local Directory with Multiple Images**: `"config_library/pattern-2/examples/letters/"`
+- **Single Image File**: `"config_library/unified/examples/letter1.jpg"`
+- **Local Directory with Multiple Images**: `"config_library/unified/examples/letters/"`
 - **S3 Prefix with Multiple Images**: `"s3://my-config-bucket/examples/letter/"`
 - **Direct S3 Image URI**: `"s3://my-config-bucket/examples/letter1.jpg"`
 

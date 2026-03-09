@@ -5,9 +5,35 @@ SPDX-License-Identifier: MIT-0
 
 ## [Unreleased]
 
+### Changed
+
+- **Sync to BDA no longer auto-activates the config version** — Previously, performing "Sync to BDA" would automatically set the current config version as active. Since each config version now has its own BDA project, auto-activation is unnecessary. Users can manually choose which version to activate via the Versions table. The "Sync to BDA" confirmation modal text has been updated accordingly.
+
+- **Removed `Bedrock Data Automation (BDA) Project ARN` CloudFormation parameter** — The deploy-time `Pattern1BDAProjectArn` parameter has been removed as it was redundant with the per-config-version BDA project management already available in the Web UI, CLI, and GraphQL API. BDA projects are now managed entirely post-deployment: enable `use_bda: true` in your configuration, then use "Sync to BDA" to create or link a BDA project, or "Sync from BDA" to import from any existing BDA project. This simplifies the deployment experience (one fewer parameter) and better aligns the CloudFormation interface with the system's actual architecture. Existing deployed stacks are unaffected — runtime BDA project ARN resolution reads from DynamoDB per-version tracking, not from the CloudFormation parameter. Also removed the unused `nested/bda-lending-project/` directory (dead code not referenced by any template) and the legacy `BDA_PROJECT_ARN` environment variable fallback from the sync resolver.
+
+### Fixed
+
+- **CLI: Remove deprecated `--pattern` references** — Updated `idp-cli.md` and CLI code to reflect the unified pattern architecture. Removed `--pattern` from all deploy and config command examples/options.
+
+- **Discovery no longer injects default config classes into target version** — Previously, running Discovery on a configuration version would merge all classes from the `default` version into the target version alongside the newly discovered class. Now Discovery only adds/updates the discovered class within the target version's own class list, keeping the version's classes exactly as the user curated them.
+
+- **Documentation: Comprehensive review and cleanup** — Fixed outdated references, broken links, and missing content across documentation files.
+
+## [0.5.1]
+
 ### Added
 
-- **MCP Server** — Added additional tool to MCP Server for retrieving results of the processed document from the IDP system.
+- **Scalable Document List and Test Executions** — Comprehensive redesign to eliminate UI and backend bottlenecks when working with thousands of documents. ([#203](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues/203))
+  - **TypeDateIndex GSI on TrackingTable**: New DynamoDB Global Secondary Index (`ItemType` + `InitialEventTime`) enables efficient queries by item type (document, testrun, testset) sorted by time, replacing full table scans. Includes 20 projected attributes for list-view rendering without base table fetches.
+  - **GSI Attribute Backfill Mechanism**: Robust Step Functions state machine with parallel scan workers that automatically backfills `ItemType` and `HITLPendingReview` attributes on existing items during stack upgrades. Features timeout-safe continuation, idempotent conditional updates, and automatic trigger via CloudFormation Custom Resource.
+  - **GSI-Based Document List Resolver**: New `listDocuments` Lambda resolver queries the TypeDateIndex GSI with server-side pagination (`limit`/`nextToken`).
+  - **`getDocumentCount` API**: New efficient count query using GSI `Select: 'COUNT'` for accurate document totals without fetching data.
+  - **UI Document List Rewrite**: Eliminated the N+1 query pattern (shard queries → individual `getDocument` per document). Now uses a single paginated `listDocuments` GSI query for all time periods. First page renders immediately with incremental background loading of remaining pages.
+  - **Subscription Optimization**: `onUpdateDocument` events now use subscription data directly instead of triggering individual `getDocument` API calls, eliminating thousands of redundant requests during active processing.
+  - **GSI-Based Test Runs Query**: Replaced full table scan in `get_test_runs()` and `get_test_runs_by_date_range()` with GSI query + BatchGetItem pattern for efficient test run listing with all fields (including Context, ConfigVersion).
+  - **GSI-Based Test Sets Query**: Replaced full table scan in `get_test_sets()` with GSI query + BatchGetItem pattern, avoiding scanning the entire TrackingTable (which includes all documents) just to find ~10 test sets.
+  - **`ItemType` Written on All Creation Paths**: All document, test run, and test set creation paths (DynamoDB service, AppSync resolvers, test runners, dataset deployers) now write `ItemType` and `InitialEventTime` for immediate GSI indexing.
+  - **Improved Error Messages**: Document list errors now show the actual failure reason (e.g., Lambda throttling, timeout details) instead of generic "please try again" messages.
 
 - **GraphQL Type Generation & Unit Testing** — Replaced 60+ hand-written GraphQL query/mutation/subscription files with auto-generated types via `@graphql-codegen`, added typed AWSJSON parsers with unit tests (vitest + jsdom), and integrated a CI codegen-check to prevent type drift.
 
@@ -17,7 +43,11 @@ SPDX-License-Identifier: MIT-0
 
 - **Deploy Failure Root Cause Analysis** — Enhanced `idp-cli deploy` failure reporting to recursively analyze nested stack events and identify actual root causes. Previously, failures in nested stacks showed only a generic "Embedded stack was not successfully created" message. Now displays a structured "Root Cause Analysis" section with the specific resource, type, and error message from the nested stack that caused the failure, along with cascade failure counts.
 
+- **MCP Server** — Added additional tool to MCP Server for retrieving results of the processed document from the IDP system.
+
+
 ### Changed
+
 
 - **OCR Benchmark Config Optimization** — Optimized `config_library/unified/ocr-benchmark` configuration with targeted field descriptions, explicit model/prompt/OCR settings, and corrected date format (YYYY-MM-DD to match ground truth). Improved overall extraction accuracy from 51.5% to 75.2% on the full 293-document benchmark at equivalent cost (~$2.62). Classification remains 100% across all 9 document classes. ([#220](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/pull/220))
 
@@ -29,6 +59,10 @@ SPDX-License-Identifier: MIT-0
 
 - **Configuration Page Error Display** — Fixed `[object Object]` error message when configuration loading fails (e.g., due to Lambda throttling) by properly extracting error messages from Amplify GraphQL error responses.
 
+### Templates
+   - us-west-2: `https://s3.us-west-2.amazonaws.com/aws-ml-blog-us-west-2/artifacts/genai-idp/idp-main_0.5.1.yaml`
+   - us-east-1: `https://s3.us-east-1.amazonaws.com/aws-ml-blog-us-east-1/artifacts/genai-idp/idp-main_0.5.1.yaml`
+   - eu-central-1: `https://s3.eu-central-1.amazonaws.com/aws-ml-blog-eu-central-1/artifacts/genai-idp/idp-main_0.5.1.yaml`
 
 ## [0.5.0]
 
@@ -54,6 +88,7 @@ SPDX-License-Identifier: MIT-0
 - **Pattern-3 (UDOP + Bedrock)** — Pattern-3 is no longer available as a deployment option. If you are currently using Pattern-3 with a SageMaker UDOP endpoint, do not upgrade to v0.5.x without first testing in a non-production environment. You can use the [Lambda Inference Hooks](./docs/lambda-hook-inference.md) feature (introduced in v0.4.15) to call your existing SageMaker UDOP endpoint from the unified pattern's classification step via a custom Lambda function.
 
 ### Changed
+
 
 - **Switched `idp_sdk` pyproject.toml to auto-discovery** — Replaced explicit subpackage listing with `setuptools.packages.find` using `include = ["idp_sdk*"]` so new subpackages are automatically included without manual pyproject.toml updates.
 
@@ -190,6 +225,7 @@ SPDX-License-Identifier: MIT-0
   - **Use Cases**: Correct extraction errors, add baseline data for evaluation comparison, re-run evaluation after data corrections, update document summaries
 
 ### Changed
+
 
 - **HITL Decoupled from Step Functions**: HITL review operations now update document status directly in DynamoDB without triggering workflow reprocessing, improving reliability and reducing unintended side effects
 
@@ -335,6 +371,7 @@ SPDX-License-Identifier: MIT-0
 
 ### Changed
 
+
 - **Scripts Directory Reorganization**
   - Consolidated development environment setup scripts into `scripts/setup/` subdirectory
   - Moved CI/CD scripts (`codebuild_deployment.py`, `integration_test_deployment.py`, `validate_buildspec.py`, `typecheck_pr_changes.py`, `validate_service_role_permissions.py`) into `scripts/sdlc/` subdirectory
@@ -432,6 +469,7 @@ SPDX-License-Identifier: MIT-0
 
 ### Changed
 
+
 - **HITL Configuration**
   - HITL is now disabled by default in the configuration
   - Users must explicitly enable HITL in the Configuration page (Assessment & HITL Configuration section) to trigger human review workflows
@@ -446,6 +484,7 @@ SPDX-License-Identifier: MIT-0
 
 
 ### Changed
+
 
 - **Lambda Layers Architecture for Improved Build Efficiency**
   - Replaced bundled `idp_common` package dependencies in individual Lambda functions with three shared Lambda Layers
@@ -604,6 +643,7 @@ SPDX-License-Identifier: MIT-0
 
 ### Changed
 
+
 - **Test Studio UI Enhancements for Improved Table Layouts and User Experience**
   - Added resizable columns and CollectionPreferences with wrap lines for all tables in TestComparison and TestResults
   - Combined accuracy and split classification metrics into collapsible "Average Accuracy and Split Metrics" section with expandable "Additional Metrics" for comprehensive review
@@ -756,6 +796,7 @@ SPDX-License-Identifier: MIT-0
   - Resolves #146
 
 ### Changed
+
 
 - **Improved Temperature and Top_P Parameter Logic for Deterministic Output**
   - Changed inference parameter selection logic to allow `temperature=0.0` for deterministic output (recommended by Anthropic and other model providers)
@@ -916,6 +957,7 @@ SPDX-License-Identifier: MIT-0
 
 ### Changed
 
+
 - **Containerized Pattern-1 and Pattern-3 Deployment Pipelines**
   - Migrated Pattern-1 and Pattern-3 Lambda functions to Docker image deployments (following Pattern-2 approach from v0.3.20)
   - Builds and pushes all Lambda images via CodeBuild with automated ECR cleanup
@@ -948,6 +990,7 @@ SPDX-License-Identifier: MIT-0
 ## [0.4.1]
 
 ### Changed
+
 
 - **Configuration Library Updates with JSON Schema Support**
   - Updated configuration library with JSON schema format for lending package, bank statement, and RVL-CDIP package samples
@@ -1081,6 +1124,7 @@ SPDX-License-Identifier: MIT-0
 
 ### Changed
 
+
 - **Migrated Evaluation from EventBridge Trigger to Step Functions Workflow**
   - Moved evaluation processing from external EventBridge-triggered Lambda to integrated Step Functions workflow step
   - **Race Condition Eliminated**: Evaluation now runs inside state machine before WorkflowTracker marks documents COMPLETE, preventing premature completion status when evaluation is still running
@@ -1135,6 +1179,7 @@ SPDX-License-Identifier: MIT-0
   - **Benefits**: Context-aware summaries referencing extracted values, improved accuracy and quality, better extraction-summary alignment
 
 ### Changed
+
 
 - **Containerized Pattern-2 deployment pipeline** that builds and pushes all Lambda images via CodeBuild using the new Dockerfile, plus automated ECR cleanup and tests.
   - Lambda docker image deployments have a 10 GB image size limit compared to the 250 MB zip limit of regular deployment. This however doesn't allow for viewing the code in the AWS console.
@@ -1231,6 +1276,7 @@ SPDX-License-Identifier: MIT-0
   - **Faster Time-to-Query**: Agent has immediate access to table overview and can proceed directly to detailed schema loading for relevant tables
 
 ### Changed
+
 
 - Add UI code lint/validation to publish.py script
 
@@ -1408,6 +1454,7 @@ SPDX-License-Identifier: MIT-0
 
 ### Changed
 
+
 - **Reverted to python3.12 runtime to resolve build package dependency problems**
 
 ### Fixed
@@ -1483,6 +1530,7 @@ SPDX-License-Identifier: MIT-0
 
 ### Changed
 
+
 - **Updated Python Lambda Runtime to 3.13**
 
 ### Fixed
@@ -1552,6 +1600,7 @@ SPDX-License-Identifier: MIT-0
 
 ### Changed
 
+
 - Updated lending_package.pdf sample with more realistic driver's license image
 
 ### Fixed
@@ -1580,6 +1629,7 @@ SPDX-License-Identifier: MIT-0
   - Configurable through Web UI without requiring code changes or redeployment
 
 ### Changed
+
 
 - **Converted text confidence data format from JSON to markdown table for improved readability and reduced token usage**
   - Removed unnecessary "page_count" field
@@ -1677,6 +1727,7 @@ SPDX-License-Identifier: MIT-0
   - Resolves "size exceeding the maximum number of bytes service limit" errors for documents with 500+ pages
 
 ### Changed
+
 
 - **Default behavior for image attachment in Pattern-2 and Pattern3**
   - If the prompt contains a `{DOCUMENT_IMAGE}` placeholder, keep the current behavior (insert image at placeholder)
@@ -1846,6 +1897,7 @@ SPDX-License-Identifier: MIT-0
 
 ### Changed
 
+
 - Pin packages to tested versions to avoid vulnerability from incompatible new package versions.
 - Updated reporting data to use document's queued_time for consistent timestamps
 - Create new extensible SaveReportingData class in idp_common package for saving evaluation results to Parquet format
@@ -2008,6 +2060,7 @@ SPDX-License-Identifier: MIT-0
 
 ### Changed
 
+
 - **Simplified Model Configuration Architecture**
   - Removed individual model parameters from main template: `Pattern1SummarizationModel`, `Pattern2ClassificationModel`, `Pattern2ExtractionModel`, `Pattern2SummarizationModel`, `Pattern3ExtractionModel`, `Pattern3SummarizationModel`, `EvaluationLLMModelId`
   - Model selection now handled through enum constraints in UpdateSchemaConfig sections within each pattern template
@@ -2052,6 +2105,7 @@ SPDX-License-Identifier: MIT-0
 - Added document reprocessing capability to the UI - New "Reprocess" button with confirmation dialog
 
 ### Changed
+
 
 - Refactored code for better maintainability
 - Updated UI components to support markdown table viewing

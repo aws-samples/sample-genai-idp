@@ -220,6 +220,7 @@ export type DiscoveryJobListItem = {
 
 export type Document = DynamoDbBase & {
   CompletionTime?: Maybe<Scalars['AWSDateTime']['output']>;
+  ConfidenceAlertCount?: Maybe<Scalars['Int']['output']>;
   ConfigVersion?: Maybe<Scalars['String']['output']>;
   EvaluationReportUri?: Maybe<Scalars['String']['output']>;
   EvaluationStatus?: Maybe<Scalars['String']['output']>;
@@ -252,6 +253,10 @@ export type Document = DynamoDbBase & {
   WorkflowExecutionArn?: Maybe<Scalars['String']['output']>;
   WorkflowStartTime?: Maybe<Scalars['AWSDateTime']['output']>;
   WorkflowStatus?: Maybe<Scalars['String']['output']>;
+};
+
+export type DocumentCount = {
+  count: Scalars['Int']['output'];
 };
 
 export type DocumentList = {
@@ -635,6 +640,7 @@ export type Query = {
   getConfigVersions?: Maybe<ConfigurationVersionsResponse>;
   getConfigurationLibraryFile?: Maybe<ConfigurationLibraryFileResponse>;
   getDocument?: Maybe<Document>;
+  getDocumentCount?: Maybe<DocumentCount>;
   getFileContents?: Maybe<FileContentsResponse>;
   getPricing?: Maybe<PricingResponse>;
   getStepFunctionExecution?: Maybe<StepFunctionExecutionResponse>;
@@ -648,11 +654,10 @@ export type Query = {
   listChatSessions?: Maybe<ChatSessionConnection>;
   listConfigurationLibrary?: Maybe<ConfigurationLibraryResponse>;
   listDiscoveryJobs?: Maybe<DiscoveryJobList>;
-  listDocuments?: Maybe<DocumentList>;
+  listDocuments?: Maybe<DocumentPage>;
   listDocumentsByDateRange?: Maybe<DocumentPage>;
   listDocumentsDateHour?: Maybe<DocumentList>;
   listDocumentsDateShard?: Maybe<DocumentList>;
-  listPendingReviewDocuments?: Maybe<DocumentList>;
   listUsers?: Maybe<UserList>;
   queryKnowledgeBase?: Maybe<Scalars['String']['output']>;
   submitAgentQuery?: Maybe<AgentJob>;
@@ -710,6 +715,12 @@ export type QueryGetDocumentArgs = {
 };
 
 
+export type QueryGetDocumentCountArgs = {
+  endDateTime?: InputMaybe<Scalars['AWSDateTime']['input']>;
+  startDateTime?: InputMaybe<Scalars['AWSDateTime']['input']>;
+};
+
+
 export type QueryGetFileContentsArgs = {
   s3Uri: Scalars['String']['input'];
 };
@@ -762,6 +773,8 @@ export type QueryListConfigurationLibraryArgs = {
 
 export type QueryListDocumentsArgs = {
   endDateTime?: InputMaybe<Scalars['AWSDateTime']['input']>;
+  limit?: InputMaybe<Scalars['Int']['input']>;
+  nextToken?: InputMaybe<Scalars['String']['input']>;
   startDateTime?: InputMaybe<Scalars['AWSDateTime']['input']>;
 };
 
@@ -783,12 +796,6 @@ export type QueryListDocumentsDateHourArgs = {
 export type QueryListDocumentsDateShardArgs = {
   date?: InputMaybe<Scalars['AWSDate']['input']>;
   shard?: InputMaybe<Scalars['Int']['input']>;
-};
-
-
-export type QueryListPendingReviewDocumentsArgs = {
-  limit?: InputMaybe<Scalars['Int']['input']>;
-  nextToken?: InputMaybe<Scalars['String']['input']>;
 };
 
 
@@ -985,6 +992,7 @@ export type UpdateConfigurationResponse = {
 
 export type UpdateDocumentInput = {
   CompletionTime?: InputMaybe<Scalars['AWSDateTime']['input']>;
+  ConfidenceAlertCount?: InputMaybe<Scalars['Int']['input']>;
   ConfigVersion?: InputMaybe<Scalars['String']['input']>;
   EvaluationReportUri?: InputMaybe<Scalars['String']['input']>;
   EvaluationStatus?: InputMaybe<Scalars['String']['input']>;
@@ -1342,6 +1350,14 @@ export type GetDocumentQueryVariables = Exact<{
 
 export type GetDocumentQuery = { getDocument?: { ObjectKey?: string | null, ObjectStatus?: string | null, InitialEventTime?: string | null, QueuedTime?: string | null, WorkflowStartTime?: string | null, CompletionTime?: string | null, WorkflowExecutionArn?: string | null, WorkflowStatus?: string | null, PageCount?: number | null, Metering?: string | null, EvaluationReportUri?: string | null, EvaluationStatus?: string | null, SummaryReportUri?: string | null, RuleValidationResultUri?: string | null, ExpiresAfter?: number | null, HITLStatus?: string | null, HITLTriggered?: boolean | null, HITLReviewURL?: string | null, HITLSectionsPending?: Array<string | null> | null, HITLSectionsCompleted?: Array<string | null> | null, HITLSectionsSkipped?: Array<string | null> | null, HITLReviewOwner?: string | null, HITLReviewOwnerEmail?: string | null, HITLReviewedBy?: string | null, HITLReviewedByEmail?: string | null, HITLReviewHistory?: string | null, ConfigVersion?: string | null, HITLCompleted?: boolean | null, TraceId?: string | null, Sections?: Array<{ Id?: string | null, PageIds?: Array<number | null> | null, Class?: string | null, OutputJSONUri?: string | null, ConfidenceThresholdAlerts?: Array<{ attributeName?: string | null, confidence?: number | null, confidenceThreshold?: number | null } | null> | null } | null> | null, Pages?: Array<{ Id?: number | null, Class?: string | null, ImageUri?: string | null, TextUri?: string | null, TextConfidenceUri?: string | null } | null> | null } | null };
 
+export type GetDocumentCountQueryVariables = Exact<{
+  startDateTime?: InputMaybe<Scalars['AWSDateTime']['input']>;
+  endDateTime?: InputMaybe<Scalars['AWSDateTime']['input']>;
+}>;
+
+
+export type GetDocumentCountQuery = { getDocumentCount?: { count: number } | null };
+
 export type GetFileContentsQueryVariables = Exact<{
   s3Uri: Scalars['String']['input'];
 }>;
@@ -1431,12 +1447,14 @@ export type ListDiscoveryJobsQueryVariables = Exact<{ [key: string]: never; }>;
 export type ListDiscoveryJobsQuery = { listDiscoveryJobs?: { nextToken?: string | null, DiscoveryJobs?: Array<{ jobId: string, documentKey?: string | null, groundTruthKey?: string | null, status: string, createdAt?: string | null, updatedAt?: string | null, errorMessage?: string | null } | null> | null } | null };
 
 export type ListDocumentsQueryVariables = Exact<{
-  endDateTime?: InputMaybe<Scalars['AWSDateTime']['input']>;
   startDateTime?: InputMaybe<Scalars['AWSDateTime']['input']>;
+  endDateTime?: InputMaybe<Scalars['AWSDateTime']['input']>;
+  limit?: InputMaybe<Scalars['Int']['input']>;
+  nextToken?: InputMaybe<Scalars['String']['input']>;
 }>;
 
 
-export type ListDocumentsQuery = { listDocuments?: { nextToken?: string | null, Documents?: Array<{ ObjectKey?: string | null, PK: string, SK: string } | null> | null } | null };
+export type ListDocumentsQuery = { listDocuments?: { nextToken?: string | null, Documents?: Array<{ PK: string, SK: string, ObjectKey?: string | null, ObjectStatus?: string | null, InitialEventTime?: string | null, CompletionTime?: string | null, ConfigVersion?: string | null, EvaluationStatus?: string | null, HITLStatus?: string | null, HITLTriggered?: boolean | null, HITLCompleted?: boolean | null, HITLReviewOwner?: string | null, HITLReviewedBy?: string | null, PageCount?: number | null, ConfidenceAlertCount?: number | null } | null> | null } | null };
 
 export type ListDocumentsByDateRangeQueryVariables = Exact<{
   startDateTime: Scalars['AWSDateTime']['input'];

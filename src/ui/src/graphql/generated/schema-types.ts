@@ -220,6 +220,7 @@ export type DiscoveryJobListItem = {
 
 export type Document = DynamoDbBase & {
   CompletionTime?: Maybe<Scalars['AWSDateTime']['output']>;
+  ConfidenceAlertCount?: Maybe<Scalars['Int']['output']>;
   ConfigVersion?: Maybe<Scalars['String']['output']>;
   EvaluationReportUri?: Maybe<Scalars['String']['output']>;
   EvaluationStatus?: Maybe<Scalars['String']['output']>;
@@ -252,6 +253,10 @@ export type Document = DynamoDbBase & {
   WorkflowExecutionArn?: Maybe<Scalars['String']['output']>;
   WorkflowStartTime?: Maybe<Scalars['AWSDateTime']['output']>;
   WorkflowStatus?: Maybe<Scalars['String']['output']>;
+};
+
+export type DocumentCount = {
+  count: Scalars['Int']['output'];
 };
 
 export type DocumentList = {
@@ -635,6 +640,7 @@ export type Query = {
   getConfigVersions?: Maybe<ConfigurationVersionsResponse>;
   getConfigurationLibraryFile?: Maybe<ConfigurationLibraryFileResponse>;
   getDocument?: Maybe<Document>;
+  getDocumentCount?: Maybe<DocumentCount>;
   getFileContents?: Maybe<FileContentsResponse>;
   getPricing?: Maybe<PricingResponse>;
   getStepFunctionExecution?: Maybe<StepFunctionExecutionResponse>;
@@ -648,11 +654,10 @@ export type Query = {
   listChatSessions?: Maybe<ChatSessionConnection>;
   listConfigurationLibrary?: Maybe<ConfigurationLibraryResponse>;
   listDiscoveryJobs?: Maybe<DiscoveryJobList>;
-  listDocuments?: Maybe<DocumentList>;
+  listDocuments?: Maybe<DocumentPage>;
   listDocumentsByDateRange?: Maybe<DocumentPage>;
   listDocumentsDateHour?: Maybe<DocumentList>;
   listDocumentsDateShard?: Maybe<DocumentList>;
-  listPendingReviewDocuments?: Maybe<DocumentList>;
   listUsers?: Maybe<UserList>;
   queryKnowledgeBase?: Maybe<Scalars['String']['output']>;
   submitAgentQuery?: Maybe<AgentJob>;
@@ -710,6 +715,12 @@ export type QueryGetDocumentArgs = {
 };
 
 
+export type QueryGetDocumentCountArgs = {
+  endDateTime?: InputMaybe<Scalars['AWSDateTime']['input']>;
+  startDateTime?: InputMaybe<Scalars['AWSDateTime']['input']>;
+};
+
+
 export type QueryGetFileContentsArgs = {
   s3Uri: Scalars['String']['input'];
 };
@@ -762,6 +773,8 @@ export type QueryListConfigurationLibraryArgs = {
 
 export type QueryListDocumentsArgs = {
   endDateTime?: InputMaybe<Scalars['AWSDateTime']['input']>;
+  limit?: InputMaybe<Scalars['Int']['input']>;
+  nextToken?: InputMaybe<Scalars['String']['input']>;
   startDateTime?: InputMaybe<Scalars['AWSDateTime']['input']>;
 };
 
@@ -783,12 +796,6 @@ export type QueryListDocumentsDateHourArgs = {
 export type QueryListDocumentsDateShardArgs = {
   date?: InputMaybe<Scalars['AWSDate']['input']>;
   shard?: InputMaybe<Scalars['Int']['input']>;
-};
-
-
-export type QueryListPendingReviewDocumentsArgs = {
-  limit?: InputMaybe<Scalars['Int']['input']>;
-  nextToken?: InputMaybe<Scalars['String']['input']>;
 };
 
 
@@ -985,6 +992,7 @@ export type UpdateConfigurationResponse = {
 
 export type UpdateDocumentInput = {
   CompletionTime?: InputMaybe<Scalars['AWSDateTime']['input']>;
+  ConfidenceAlertCount?: InputMaybe<Scalars['Int']['input']>;
   ConfigVersion?: InputMaybe<Scalars['String']['input']>;
   EvaluationReportUri?: InputMaybe<Scalars['String']['input']>;
   EvaluationStatus?: InputMaybe<Scalars['String']['input']>;

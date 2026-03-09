@@ -54,7 +54,7 @@ During stack deployment, the system automatically:
 
 #### Corresponding Config
 
-Use with: `config_library/pattern-2/realkie-fcc-verified/config.yaml`
+Use with: `config_library/unified/realkie-fcc-verified/config.yaml`
 
 ---
 
@@ -98,7 +98,7 @@ During stack deployment, the system automatically:
 
 #### Corresponding Config
 
-Use with: `config_library/pattern-2/ocr-benchmark/config.yaml`
+Use with: `config_library/unified/ocr-benchmark/config.yaml`
 
 ---
 
@@ -216,7 +216,7 @@ During stack deployment, the system automatically:
 
 #### Corresponding Config
 
-Use with: `config_library/pattern-2/rvl-cdip/config.yaml`
+Use with: `config_library/unified/rvl-cdip/config.yaml`
 
 #### Evaluation Metrics
 
@@ -286,7 +286,7 @@ During stack deployment, the system automatically:
 
 #### Corresponding Config
 
-Use with: `config_library/pattern-2/fake-w2/config.yaml`
+Use with: `config_library/unified/fake-w2/config.yaml`
 
 **Fake-W2-Tax-Forms** is ideal for:
 - Benchmarking W-2 tax form extraction accuracy at scale

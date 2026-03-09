@@ -92,6 +92,7 @@ type Document implements DynamoDbBase @aws_cognito_user_pools @aws_iam {
   HITLReviewedBy: String
   HITLReviewedByEmail: String
   HITLReviewHistory: AWSJSON
+  ConfidenceAlertCount: Int
   ConfigVersion: String
   TraceId: String
 }
@@ -306,6 +307,7 @@ input UpdateDocumentInput {
   HITLReviewedBy: String
   HITLReviewedByEmail: String
   HITLReviewHistory: AWSJSON
+  ConfidenceAlertCount: Int
   ConfigVersion: String
   TraceId: String
 }
@@ -661,12 +663,22 @@ type DocumentPage @aws_cognito_user_pools @aws_iam {
   nextToken: String
 }
 
+type DocumentCount @aws_cognito_user_pools @aws_iam {
+  count: Int!
+}
+
 type Query @aws_cognito_user_pools @aws_iam {
   getDocument(ObjectKey: ID!): Document
   listDocuments(
     startDateTime: AWSDateTime
     endDateTime: AWSDateTime
-  ): DocumentList
+    limit: Int
+    nextToken: String
+  ): DocumentPage
+  getDocumentCount(
+    startDateTime: AWSDateTime
+    endDateTime: AWSDateTime
+  ): DocumentCount
   listDocumentsDateHour(date: AWSDate, hour: Int): DocumentList
   listDocumentsDateShard(date: AWSDate, shard: Int): DocumentList
   listDocumentsByDateRange(
@@ -719,8 +731,6 @@ type Query @aws_cognito_user_pools @aws_iam {
   ): ConfigurationLibraryFileResponse @aws_cognito_user_pools
   # User Management
   listUsers: UserList @aws_cognito_user_pools
-  # HITL Pending Reviews
-  listPendingReviewDocuments(limit: Int, nextToken: String): DocumentList @aws_cognito_user_pools
 }
 
 type Subscription @aws_cognito_user_pools @aws_iam {

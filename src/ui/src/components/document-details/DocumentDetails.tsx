@@ -80,7 +80,11 @@ const DocumentDetails = (): React.JSX.Element => {
     return () => {};
   }, [objectKey]);
 
-  // Handle updates from subscription
+  // Handle updates from subscription or document list context.
+  // IMPORTANT: The `documents` context may contain lightweight data from listDocuments
+  // (which lacks Sections, Pages, Metering, etc.) OR rich data from onUpdateDocument
+  // subscriptions (which includes all fields). We must merge carefully to avoid
+  // overwriting full document data with lightweight list data.
   useEffect(() => {
     if (!objectKey || !documents?.length) {
       return;
@@ -89,15 +93,55 @@ const DocumentDetails = (): React.JSX.Element => {
     const documentsFiltered = documents.filter((c) => c.ObjectKey === objectKey);
     if (documentsFiltered && documentsFiltered?.length) {
       const documentsMap = mapDocumentsAttributes([documentsFiltered[0]] as unknown as { ObjectKey: string }[]) as MappedDocument[];
-      const documentDetails = documentsMap[0];
+      const incomingDoc = documentsMap[0];
 
-      // Check if document content has changed by comparing stringified versions
-      const currentStr = JSON.stringify(document);
-      const newStr = JSON.stringify(documentDetails);
+      if (!document) {
+        // No existing document yet — use whatever we got
+        setDocument(incomingDoc);
+        return;
+      }
 
-      if (currentStr !== newStr) {
-        logger.debug('Updating document with new data', documentDetails);
-        setDocument(documentDetails);
+      // Merge incoming data into existing document, preserving fields that
+      // the incoming data doesn't have (e.g., Sections/Pages from getDocument
+      // should not be wiped by lightweight listDocuments data).
+      const merged = { ...document } as Record<string, unknown>;
+      let hasChanges = false;
+
+      for (const [key, newValue] of Object.entries(incomingDoc as Record<string, unknown>)) {
+        const existingValue = (document as Record<string, unknown>)[key];
+
+        // Skip if the new value is empty/missing but existing value has data.
+        // This prevents lightweight list data from wiping rich detail fields.
+        const newIsEmpty =
+          newValue === undefined ||
+          newValue === null ||
+          (Array.isArray(newValue) && newValue.length === 0) ||
+          (typeof newValue === 'object' && newValue !== null && !Array.isArray(newValue) && Object.keys(newValue).length === 0);
+        const existingHasData =
+          existingValue !== undefined &&
+          existingValue !== null &&
+          !(Array.isArray(existingValue) && existingValue.length === 0) &&
+          !(
+            typeof existingValue === 'object' &&
+            existingValue !== null &&
+            !Array.isArray(existingValue) &&
+            Object.keys(existingValue).length === 0
+          );
+
+        if (newIsEmpty && existingHasData) {
+          // Keep existing rich data — don't overwrite with empty
+          continue;
+        }
+
+        if (JSON.stringify(existingValue) !== JSON.stringify(newValue)) {
+          merged[key] = newValue;
+          hasChanges = true;
+        }
+      }
+
+      if (hasChanges) {
+        logger.debug('Merging document update (preserving existing rich data)', merged);
+        setDocument(merged as MappedDocument);
       }
     }
   }, [documents, objectKey]);

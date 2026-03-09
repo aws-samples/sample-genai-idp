@@ -69,6 +69,10 @@ class DocumentAppSyncService:
             "ExpiresAfter": expires_after,
         }
 
+        # Add confidence alert count if available
+        if document.confidence_alert_count > 0:
+            input_data["ConfidenceAlertCount"] = document.confidence_alert_count
+
         # Add trace_id if available
         if document.trace_id:
             input_data["TraceId"] = document.trace_id

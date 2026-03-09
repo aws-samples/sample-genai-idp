@@ -58,7 +58,7 @@ classes:
               "RecipientName": "The Honorable Wendell H. Ford",
               "Date": "10/31/1995",
               "Subject": null
-        x-aws-idp-image-path: "config_library/pattern-2/few_shot_example/example-images/letter1.jpg"
+        x-aws-idp-image-path: "config_library/unified/few_shot_example/example-images/letter1.jpg"
       - x-aws-idp-class-prompt: "This is an example of the class 'Letter'"
         name: "Letter2"
         x-aws-idp-attributes-prompt: |
@@ -68,7 +68,7 @@ classes:
               "RecipientName": "Mr. Addison Y. Yeaman",
               "Date": "10/14/1970",
               "Subject": "Invitation to the Twelfth Annual Meeting of the TGIC"
-        x-aws-idp-image-path: "config_library/pattern-2/few_shot_example/example-images/letter2.png"
+        x-aws-idp-image-path: "config_library/unified/few_shot_example/example-images/letter2.png"
 ```
 
 ### Example Fields Explained
@@ -128,12 +128,12 @@ The `x-aws-idp-image-path` field supports multiple formats for maximum flexibili
 
 **Single Image File (Original functionality)**:
 ```yaml
-x-aws-idp-image-path: "config_library/pattern-2/few_shot_example/example-images/letter1.jpg"
+x-aws-idp-image-path: "config_library/unified/few_shot_example/example-images/letter1.jpg"
 ```
 
 **Local Directory with Multiple Images (New)**:
 ```yaml
-x-aws-idp-image-path: "config_library/pattern-2/few_shot_example/example-images/"
+x-aws-idp-image-path: "config_library/unified/few_shot_example/example-images/"
 ```
 
 **S3 Prefix with Multiple Images (New)**:
@@ -203,7 +203,7 @@ examples:
           "total_amount": "$1,250.00",
           "due_date": "February 15, 2024"
     # imagePath is optional - can be omitted for text-only examples
-    imagePath: "config_library/pattern-2/your_config/example-images/invoice1.pdf"
+    imagePath: "config_library/unified/your_config/example-images/invoice1.pdf"
 ```
 
 ## How Few-Shot Examples Work in Pattern-2
@@ -250,7 +250,7 @@ When extracting attributes from documents:
 If using images, store your example document images in an accessible location:
 
 ```
-config_library/pattern-2/your_config/example-images/
+config_library/unified/your_config/example-images/
 ├── letter1.jpg
 ├── letter2.png
 ├── email1.jpg
@@ -260,7 +260,7 @@ config_library/pattern-2/your_config/example-images/
 For multiple images per example, you can organize them in directories:
 
 ```
-config_library/pattern-2/your_config/example-images/
+config_library/unified/your_config/example-images/
 ├── letters/
 │   ├── 001_formal_letter.jpg
 │   ├── 002_informal_letter.png
@@ -311,7 +311,7 @@ classes:
               "VendorName": "ACME Corporation",
               "TotalAmount": "$1,250.00",
               "DueDate": "02/15/2024"
-        x-aws-idp-image-path: "config_library/pattern-2/your_config/example-images/invoice1.pdf"
+        x-aws-idp-image-path: "config_library/unified/your_config/example-images/invoice1.pdf"
       
       # Example with multiple images from directory
       - x-aws-idp-class-prompt: "These are examples of the class 'Invoice' showing different formats"
@@ -323,7 +323,7 @@ classes:
               "VendorName": "string",
               "TotalAmount": "$X.XX",
               "DueDate": "MM/DD/YYYY or null"
-        x-aws-idp-image-path: "config_library/pattern-2/your_config/example-images/invoices/"
+        x-aws-idp-image-path: "config_library/unified/your_config/example-images/invoices/"
       
       # Example with text only (no image)
       - x-aws-idp-class-prompt: |
@@ -717,7 +717,7 @@ Monitor these metrics to ensure optimal cache usage:
 
 ### Complete Working Example with Caching
 
-See `config_library/pattern-2/few_shot_example/` for a complete working configuration that demonstrates:
+See `config_library/unified/few_shot_example/` for a complete working configuration that demonstrates:
 - Letter classification and extraction with 2 examples
 - Email classification and extraction with 1 example
 - Proper image path configuration
@@ -749,7 +749,7 @@ classes:
           expected attributes are:
               "SenderName": "John Smith",
               "RecipientName": "Jane Doe"
-        x-aws-idp-image-path: "config_library/pattern-2/your_config/example-images/letter1.jpg"
+        x-aws-idp-image-path: "config_library/unified/your_config/example-images/letter1.jpg"
       
       # Multiple images from directory
       - x-aws-idp-class-prompt: "These are various examples of the class 'Letter'"
@@ -758,7 +758,7 @@ classes:
           For letters like these examples, the expected format is:
               "SenderName": "string",
               "RecipientName": "string"
-        x-aws-idp-image-path: "config_library/pattern-2/your_config/example-images/letters/"
+        x-aws-idp-image-path: "config_library/unified/your_config/example-images/letters/"
       
       # Multiple images from S3 prefix
       - x-aws-idp-class-prompt: "Additional letter examples from S3"

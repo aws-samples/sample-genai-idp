@@ -1764,10 +1764,6 @@ STDERR:
                 "nested/appsync/src",
                 "nested/appsync/template.yaml",
             ],
-            "nested/bda-lending-project": [
-                "nested/bda-lending-project/src",
-                "nested/bda-lending-project/template.yaml",
-            ],
             "nested/bedrockkb": [
                 "nested/bedrockkb/src",
                 "nested/bedrockkb/template.yaml",

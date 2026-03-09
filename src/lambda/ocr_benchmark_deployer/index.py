@@ -436,6 +436,8 @@ def create_failed_testset_record(version: str, error_message: str):
     item = {
         'PK': f'testset#{TEST_SET_ID}',
         'SK': 'metadata',
+        'ItemType': 'testset',
+        'InitialEventTime': timestamp,
         'id': TEST_SET_ID,
         'name': DATASET_NAME,
         'filePattern': '',
@@ -466,6 +468,8 @@ def create_testset_record(version: str, description: str, file_count: int,
     item = {
         'PK': f'testset#{TEST_SET_ID}',
         'SK': 'metadata',
+        'ItemType': 'testset',
+        'InitialEventTime': timestamp,
         'id': TEST_SET_ID,
         'name': DATASET_NAME,
         'filePattern': '',

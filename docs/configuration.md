@@ -281,7 +281,6 @@ Key parameters that can be configured during CloudFormation deployment:
 
 ### Pattern-Specific Parameters
 - **Configuration Preset**: `ConfigurationPreset` — Select from available presets (lending-package-sample, bank-statement-sample, etc.)
-- **BDA Project ARN**: Optional existing Bedrock Data Automation project ARN (for BDA mode)
 - **Custom Model ARNs**: Optional custom fine-tuned classification/extraction model ARNs
 
 > **Note**: The processing mode (BDA vs Pipeline) is controlled by the `use_bda` flag in the configuration, not by deployment parameters. See the [architecture docs](./architecture.md) for details.
