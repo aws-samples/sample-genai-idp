@@ -4499,8 +4499,17 @@ def discover(
             if is_batch:
                 console.print()
 
-        # Write output
-        if output and all_schemas:
+        # Write/print output
+        if not output and all_schemas and is_batch:
+            # No -o specified in batch mode → print schemas to stdout
+            console.print()
+            console.print("[bold]Discovered schemas:[/bold]")
+            if len(all_schemas) == 1:
+                console.print(json.dumps(all_schemas[0], indent=2))
+            else:
+                console.print(json.dumps(all_schemas, indent=2))
+            console.print()
+        elif output and all_schemas:
             output_path = Path(output)
             if len(all_schemas) == 1 and not output_path.is_dir():
                 # Single schema → write directly to file
