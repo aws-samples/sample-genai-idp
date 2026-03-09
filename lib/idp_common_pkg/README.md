@@ -31,6 +31,7 @@ This README provides a high-level overview of the package. For detailed document
 - **Summarization**: Document summary generation
 - **AppSync**: GraphQL API integration for document storage
 - **Reporting**: Analytics data storage
+- **Discovery**: Automated document class schema generation using LLMs
 
 ### AWS Service Clients
 

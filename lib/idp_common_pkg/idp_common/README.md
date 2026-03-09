@@ -326,6 +326,16 @@ document = orchestrator.consolidate_and_save(document, config=config, multiple_s
 evaluation_service = evaluation.EvaluationService(config=config)
 document = evaluation_service.evaluate_document(document, expected_document)
 
+# Document Class Discovery (generates JSON Schema for new document types)
+from idp_common.discovery.classes_discovery import ClassesDiscovery
+discovery = ClassesDiscovery(input_bucket="bucket", input_prefix="doc.pdf", region="us-west-2")
+# With local file bytes (no S3 read):
+result = discovery.discovery_classes_with_document(
+    input_bucket="local", input_prefix="doc.pdf",
+    file_bytes=open("doc.pdf", "rb").read(), save_to_config=False
+)
+schema = result["schema"]  # JSON Schema dict
+
 # Store in AppSync
 appsync_service = appsync.DocumentAppSyncService()
 document = appsync_service.update_document(document)
