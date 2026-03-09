@@ -19,6 +19,8 @@ SPDX-License-Identifier: MIT-0
 
 - **CLI: Remove deprecated `--pattern` references** — Updated `idp-cli.md` and CLI code to reflect the unified pattern architecture. Removed `--pattern` from all deploy and config command examples/options.
 
+- **Discovery no longer injects default config classes into target version** — Previously, running Discovery on a configuration version would merge all classes from the `default` version into the target version alongside the newly discovered class. Now Discovery only adds/updates the discovered class within the target version's own class list, keeping the version's classes exactly as the user curated them.
+
 - **Documentation: Comprehensive review and cleanup** — Fixed outdated references, broken links, and missing content across documentation files.
 
 ## [0.5.1]

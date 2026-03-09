@@ -17,7 +17,6 @@ from unittest.mock import MagicMock, patch, call
 
 # Import application modules
 from idp_common.discovery.classes_discovery import ClassesDiscovery
-from idp_common.config.models import IDPConfig
 
 
 @pytest.mark.unit
@@ -371,7 +370,11 @@ class TestClassesDiscoveryIntegration:
         service_with_mocks,
         mock_w4_bedrock_response,
     ):
-        """Test that discovery properly updates existing configuration."""
+        """Test that discovery properly updates existing version configuration.
+
+        Discovery should only add/update the discovered class within the target
+        version's own classes — it should NOT pull in classes from the default version.
+        """
         # Mock S3 file content
         mock_get_bytes.return_value = b"fake content"
 
@@ -381,35 +384,30 @@ class TestClassesDiscoveryIntegration:
         ]["content"][0]["text"]
         service_with_mocks._mock_bedrock_client.return_value = mock_w4_bedrock_response
 
-        # Mock existing Default configuration with different forms in JSON Schema format
-        existing_default = IDPConfig(
-            classes=[
-                {
-                    "$schema": "http://json-schema.org/draft-07/schema#",
-                    "$id": "i9",
-                    "type": "object",
-                    "title": "I-9",
-                    "description": "Employment Eligibility Verification",
-                    "x-aws-idp-document-type": "I-9",
-                    "properties": {},
-                },
-                {
-                    "$schema": "http://json-schema.org/draft-07/schema#",
-                    "$id": "w4",
-                    "type": "object",
-                    "title": "W-4",
-                    "description": "Old W-4 description",
-                    "x-aws-idp-document-type": "W-4",
-                    "properties": {},
-                },
-            ]
-        )
-        # Create mocks for config_manager methods
-        service_with_mocks.config_manager.get_configuration = MagicMock(
-            return_value=existing_default
-        )
+        # Target version already has an I-9 and an old W-4
         service_with_mocks.config_manager.get_raw_configuration = MagicMock(
-            return_value={}  # No existing Custom
+            return_value={
+                "classes": [
+                    {
+                        "$schema": "http://json-schema.org/draft-07/schema#",
+                        "$id": "i9",
+                        "type": "object",
+                        "title": "I-9",
+                        "description": "Employment Eligibility Verification",
+                        "x-aws-idp-document-type": "I-9",
+                        "properties": {},
+                    },
+                    {
+                        "$schema": "http://json-schema.org/draft-07/schema#",
+                        "$id": "w4",
+                        "type": "object",
+                        "title": "W-4",
+                        "description": "Old W-4 description",
+                        "x-aws-idp-document-type": "W-4",
+                        "properties": {},
+                    },
+                ]
+            }
         )
         service_with_mocks.config_manager.save_raw_configuration = MagicMock()
 
@@ -429,7 +427,7 @@ class TestClassesDiscoveryIntegration:
         assert save_config_args[0] == "Config"  # First arg is config type
         updated_classes = save_config_args[1]["classes"]  # Second arg is config dict
 
-        # Should have 2 classes: I-9 (from Default) + W-4 (updated)
+        # Should have 2 classes: I-9 (existing in version) + W-4 (updated by discovery)
         assert len(updated_classes) == 2
 
         # Find and verify the updated W-4 class (JSON Schema format)
@@ -440,7 +438,7 @@ class TestClassesDiscoveryIntegration:
         )
         assert len(w4_class["properties"]) == 3
 
-        # Verify I-9 class is still present (JSON Schema format)
+        # Verify I-9 class is still present from the version (JSON Schema format)
         i9_class = next(cls for cls in updated_classes if cls["$id"] == "i9")
         assert i9_class["description"] == "Employment Eligibility Verification"
 
