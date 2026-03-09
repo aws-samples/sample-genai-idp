@@ -989,15 +989,23 @@ result = client.discovery.run(
 
 ### discovery.run_batch()
 
-Run discovery on multiple documents sequentially.
+Run discovery on multiple documents sequentially. Ground truth paths are
+auto-matched to documents by filename stem.
 
 ```python
+# Batch without ground truth
 result = client.discovery.run_batch([
     "./invoice.pdf",
     "./w2-form.pdf",
     "./paystub.png",
 ])
 print(f"Succeeded: {result.succeeded}/{result.total}")
+
+# Batch with selective ground truth (matched by position)
+result = client.discovery.run_batch(
+    ["./invoice.pdf", "./w2.pdf"],
+    ground_truth_paths=[None, "./w2.json"],
+)
 ```
 
 **Parameters:**

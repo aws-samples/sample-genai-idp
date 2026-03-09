@@ -2003,33 +2003,43 @@ Discover document class schemas from sample documents using Amazon Bedrock.
 - **Stack-connected** (`--stack-name`): Uses stack's discovery config and saves schema to DynamoDB configuration
 - **Local** (no `--stack-name`): Uses system default Bedrock settings, prints schema to stdout without saving
 
+**Ground truth matching:** Ground truth files (`-g`) are auto-matched to documents (`-d`) by filename stem. For example, `invoice.pdf` matches `invoice.json`. Unmatched documents run without ground truth.
+
+**Output behavior:**
+- Single document: `-o` writes the schema to the specified file
+- Batch + `-o` is a directory (or has no extension): writes one `{class_name}.json` per schema
+- Batch + `-o` is a file: writes all schemas as a JSON array
+
 ```bash
-# Discover schema from a single document (local mode — no stack needed)
+# Single document (local mode — no stack needed)
 idp-cli discover -d ./invoice.pdf
 
-# Discover with stack (saves to config)
-idp-cli discover --stack-name my-stack -d ./samples/w2/w2-sample.pdf
-
-# Discovery with ground truth for better accuracy
-idp-cli discover --stack-name my-stack -d ./invoice.pdf --ground-truth ./invoice-expected.json
+# With ground truth (matched by filename stem)
+idp-cli discover -d ./invoice.pdf -g ./invoice.json
 
 # Save schema to file
-idp-cli discover -d ./form.pdf --output ./form-schema.json
+idp-cli discover -d ./form.pdf -o ./form-schema.json
 
-# Save to specific config version
-idp-cli discover --stack-name my-stack -d ./form.pdf --config-version v2 --output ./form-schema.json
+# Batch with auto-matched ground truth
+idp-cli discover -d ./invoice.pdf -d ./w2.pdf -g ./invoice.json -g ./w2.json
 
-# Batch: discover schemas for multiple documents
-idp-cli discover --stack-name my-stack -d ./invoice.pdf -d ./w2.pdf -d ./paystub.png
+# Batch output to directory (one file per schema)
+idp-cli discover -d ./invoice.pdf -d ./w2.pdf -o ./schemas/
+
+# Batch output to single file (JSON array)
+idp-cli discover -d ./invoice.pdf -d ./w2.pdf -o ./all-schemas.json
+
+# Stack mode (saves to config)
+idp-cli discover --stack-name my-stack -d ./invoice.pdf --config-version v2
 ```
 
 | Option | Description |
 |--------|-------------|
 | `--stack-name` | CloudFormation stack name (optional — omit for local mode) |
 | `-d, --document` | Path to document file (required, repeatable for batch) |
-| `-g, --ground-truth` | Path to JSON ground truth file (single document only) |
+| `-g, --ground-truth` | Path to JSON ground truth file(s) (repeatable, auto-matched by filename stem) |
 | `--config-version` | Config version to save to (stack mode only) |
-| `-o, --output` | Write schema to file (single document only) |
+| `-o, --output` | Output path: file (single/JSON array) or directory (one file per schema) |
 | `--region` | AWS region |
 
 ---
