@@ -4317,7 +4317,10 @@ def config_delete(
 
 
 @cli.command(name="discover")
-@click.option("--stack-name", required=True, help="CloudFormation stack name")
+@click.option(
+    "--stack-name",
+    help="CloudFormation stack name (optional — if omitted, runs in local mode without saving to config)",
+)
 @click.option(
     "--document",
     "-d",

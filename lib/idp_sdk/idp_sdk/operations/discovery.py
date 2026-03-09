@@ -3,11 +3,11 @@
 
 """Discovery operations for IDP SDK."""
 
+import json
 import logging
 import os
-import uuid
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import List, Optional
 
 from idp_sdk.exceptions import IDPConfigurationError, IDPResourceNotFoundError
 from idp_sdk.models.discovery import DiscoveryBatchResult, DiscoveryResult
@@ -20,25 +20,28 @@ class DiscoveryOperation:
 
     Provides programmatic access to IDP Discovery, which analyzes documents
     using Amazon Bedrock to automatically generate JSON Schema definitions
-    for document classes. These schemas are saved to the IDP configuration
-    and can be used for classification and extraction.
+    for document classes.
 
-    Discovery supports two modes:
-    - **Without ground truth**: Analyzes a document and infers the schema structure
-    - **With ground truth**: Uses a JSON ground truth file as reference to generate
-      a more accurate schema matching expected field names and types
+    Two operating modes:
+
+    **Stack-connected mode** (with ``stack_name``):
+        Uses the stack's discovery configuration (model, prompts) from DynamoDB
+        and saves the discovered schema to the stack's configuration.
+
+    **Local mode** (without ``stack_name``):
+        Uses system default discovery settings, calls Bedrock directly with
+        local file bytes, and returns the schema without saving anywhere.
+        The schema is printed to stdout and/or written to a file via CLI.
 
     Example:
+        Stack-connected:
         >>> client = IDPClient(stack_name="my-idp-stack")
         >>> result = client.discovery.run("./samples/w2/w2-sample.pdf")
-        >>> print(f"Discovered class: {result.document_class}")
-        >>> print(json.dumps(result.schema, indent=2))
 
-        >>> # With ground truth
-        >>> result = client.discovery.run(
-        ...     "./samples/w2/w2-sample.pdf",
-        ...     ground_truth_path="./samples/w2/w2-ground-truth.json"
-        ... )
+        Local (no stack needed):
+        >>> client = IDPClient()
+        >>> result = client.discovery.run("./invoice.pdf")
+        >>> print(json.dumps(result.json_schema, indent=2))
     """
 
     def __init__(self, client):
@@ -54,111 +57,97 @@ class DiscoveryOperation:
     ) -> DiscoveryResult:
         """Run discovery on a single document to generate a document class schema.
 
-        Uploads the document to the stack's S3 input bucket, invokes the
-        ClassesDiscovery engine to analyze the document with Amazon Bedrock,
-        and saves the generated JSON Schema to the stack's configuration.
+        If a stack_name is available (via client or parameter), operates in
+        stack-connected mode: uses the stack's discovery config and saves the
+        schema to DynamoDB. If no stack_name, operates in local mode: uses
+        system defaults and returns the schema without saving.
 
         Args:
             document_path: Local path to the document file (PDF, PNG, JPG, TIFF)
             ground_truth_path: Optional local path to a JSON ground truth file.
-                If provided, the discovery engine uses it as reference to generate
-                a more accurate schema.
-            config_version: Configuration version to save the discovered schema to.
-                If not specified, saves to the active version.
+            config_version: Configuration version to save to (stack mode only).
             stack_name: Optional stack name override.
-            **kwargs: Additional parameters (reserved for future use).
+            **kwargs: Additional parameters.
 
         Returns:
-            DiscoveryResult with the generated schema, document class name,
-            and status.
+            DiscoveryResult with the generated schema and status.
 
         Raises:
-            IDPConfigurationError: If stack_name is not available.
-            IDPResourceNotFoundError: If required stack resources are not found.
             FileNotFoundError: If the document or ground truth file doesn't exist.
-
-        Examples:
-            Basic discovery:
-            >>> result = client.discovery.run("./invoice.pdf")
-            >>> print(result.document_class)  # e.g., "Invoice"
-            >>> print(result.status)  # "SUCCESS"
-
-            With ground truth:
-            >>> result = client.discovery.run(
-            ...     "./w2-form.pdf",
-            ...     ground_truth_path="./w2-expected.json"
-            ... )
-
-            With specific config version:
-            >>> result = client.discovery.run(
-            ...     "./invoice.pdf",
-            ...     config_version="v2"
-            ... )
         """
-        # Validate stack first (before file checks)
-        name = self._client._require_stack(stack_name)
-
         doc_path = Path(document_path)
         if not doc_path.exists():
             raise FileNotFoundError(f"Document not found: {document_path}")
 
-        gt_path = None
+        gt_data = None
         if ground_truth_path:
             gt_path = Path(ground_truth_path)
             if not gt_path.exists():
                 raise FileNotFoundError(
                     f"Ground truth file not found: {ground_truth_path}"
                 )
+            gt_data = json.loads(gt_path.read_text(encoding="utf-8"))
 
-        # Get stack resources
-        resources = self._get_discovery_resources(name)
+        # Read file bytes locally — never upload to S3
+        file_bytes = doc_path.read_bytes()
 
-        input_bucket = resources["input_bucket"]
-        config_table = resources["config_table"]
+        # Determine mode: stack-connected or local
+        resolved_stack = stack_name or self._client._stack_name
+        if resolved_stack:
+            return self._run_with_stack(
+                resolved_stack, doc_path, file_bytes, gt_data, config_version
+            )
+        else:
+            return self._run_local(doc_path, file_bytes, gt_data)
 
-        # Upload document to S3
-        s3_doc_key = self._upload_to_s3(input_bucket, doc_path)
-
-        # Upload ground truth if provided
-        s3_gt_key = None
-        if gt_path:
-            s3_gt_key = self._upload_to_s3(input_bucket, gt_path)
-
+    def _run_with_stack(
+        self,
+        stack_name: str,
+        doc_path: Path,
+        file_bytes: bytes,
+        gt_data: Optional[dict],
+        config_version: Optional[str],
+    ) -> DiscoveryResult:
+        """Stack-connected mode: uses stack config, saves schema to DynamoDB."""
         try:
-            # Set up environment for ClassesDiscovery
+            # Get config table from stack resources
+            config_table = self._get_config_table(stack_name)
             os.environ["CONFIGURATION_TABLE_NAME"] = config_table
 
             from idp_common.discovery.classes_discovery import ClassesDiscovery
 
+            # ClassesDiscovery reads config from DynamoDB but we pass file_bytes
+            # so it never reads from S3. input_prefix is used only for extension.
             discovery = ClassesDiscovery(
-                input_bucket=input_bucket,
-                input_prefix=s3_doc_key,
+                input_bucket="local",
+                input_prefix=doc_path.name,
                 region=self._client._region,
                 version=config_version,
             )
 
-            # Run discovery
-            if s3_gt_key:
+            if gt_data:
                 result = discovery.discovery_classes_with_document_and_ground_truth(
-                    input_bucket=input_bucket,
-                    input_prefix=s3_doc_key,
-                    ground_truth_key=s3_gt_key,
+                    input_bucket="local",
+                    input_prefix=doc_path.name,
+                    file_bytes=file_bytes,
+                    ground_truth_data=gt_data,
+                    save_to_config=True,
                 )
             else:
                 result = discovery.discovery_classes_with_document(
-                    input_bucket=input_bucket,
-                    input_prefix=s3_doc_key,
+                    input_bucket="local",
+                    input_prefix=doc_path.name,
+                    file_bytes=file_bytes,
+                    save_to_config=True,
                 )
 
-            # Read back the saved config to get the schema
-            schema = self._get_last_discovered_schema(config_table, config_version)
-
+            schema = result.get("schema")
             doc_class = None
             if schema:
                 doc_class = schema.get("$id") or schema.get("x-aws-idp-document-type")
 
             return DiscoveryResult(
-                status=result.get("status", "SUCCESS"),
+                status="SUCCESS",
                 document_class=doc_class,
                 json_schema=schema,
                 config_version=config_version,
@@ -166,17 +155,104 @@ class DiscoveryOperation:
             )
 
         except Exception as e:
-            logger.error(f"Discovery failed for {document_path}: {e}")
+            logger.error(f"Discovery failed for {doc_path}: {e}")
             return DiscoveryResult(
                 status="FAILED",
                 document_path=str(doc_path),
                 error=str(e),
             )
-        finally:
-            # Clean up uploaded files
-            self._cleanup_s3(input_bucket, s3_doc_key)
-            if s3_gt_key:
-                self._cleanup_s3(input_bucket, s3_gt_key)
+
+    def _run_local(
+        self,
+        doc_path: Path,
+        file_bytes: bytes,
+        gt_data: Optional[dict],
+    ) -> DiscoveryResult:
+        """Local mode: uses system defaults, no stack needed, no config save."""
+        try:
+            from idp_common import bedrock, image
+            from idp_common.config.merge_utils import load_system_defaults
+
+            # Load system defaults to get discovery prompts and model settings
+            defaults = load_system_defaults("pattern-2")
+            discovery_cfg = defaults.get("discovery", {})
+            mode_cfg = (
+                discovery_cfg.get("with_ground_truth", {})
+                if gt_data
+                else discovery_cfg.get("without_ground_truth", {})
+            )
+
+            model_id = mode_cfg.get("model_id", "us.amazon.nova-pro-v1:0")
+            system_prompt = mode_cfg.get(
+                "system_prompt",
+                "You are an expert in processing forms. Extracting data from images and documents",
+            )
+            temperature = mode_cfg.get("temperature", 0.0)
+            top_p = mode_cfg.get("top_p", 0.0)
+            max_tokens = mode_cfg.get("max_tokens", 10000)
+
+            # Build prompt
+            sample_format = _sample_output_format()
+            if gt_data:
+                user_prompt = mode_cfg.get("user_prompt") or _prompt_with_gt(gt_data)
+                if "{ground_truth_json}" in user_prompt:
+                    user_prompt = user_prompt.replace(
+                        "{ground_truth_json}", json.dumps(gt_data, indent=2)
+                    )
+            else:
+                user_prompt = mode_cfg.get("user_prompt") or _prompt_without_gt()
+
+            full_prompt = f"{user_prompt}\nFormat the extracted data using the below JSON format:\n{sample_format}"
+
+            # Create content with file bytes
+            file_extension = doc_path.suffix.lower().lstrip(".")
+            if file_extension == "pdf":
+                content = [
+                    {
+                        "document": {
+                            "format": "pdf",
+                            "name": "document_messages",
+                            "source": {"bytes": file_bytes},
+                        }
+                    },
+                    {"text": full_prompt},
+                ]
+            else:
+                image_content = image.prepare_bedrock_image_attachment(file_bytes)
+                content = [image_content, {"text": full_prompt}]
+
+            # Call Bedrock
+            region = self._client._region or os.environ.get("AWS_REGION", "us-west-2")
+            client = bedrock.BedrockClient(region=region)
+            response = client.invoke_model(
+                model_id=model_id,
+                system_prompt=system_prompt,
+                content=content,
+                temperature=temperature,
+                top_p=top_p,
+                max_tokens=max_tokens,
+                context="ClassesDiscoveryLocal",
+            )
+
+            content_text = bedrock.extract_text_from_response(response)
+            schema = json.loads(content_text)
+
+            doc_class = schema.get("$id") or schema.get("x-aws-idp-document-type")
+
+            return DiscoveryResult(
+                status="SUCCESS",
+                document_class=doc_class,
+                json_schema=schema,
+                document_path=str(doc_path),
+            )
+
+        except Exception as e:
+            logger.error(f"Local discovery failed for {doc_path}: {e}")
+            return DiscoveryResult(
+                status="FAILED",
+                document_path=str(doc_path),
+                error=str(e),
+            )
 
     def run_batch(
         self,
@@ -188,36 +264,14 @@ class DiscoveryOperation:
     ) -> DiscoveryBatchResult:
         """Run discovery on multiple documents sequentially.
 
-        Processes each document individually, collecting results. If a
-        ground_truth_paths list is provided, each entry corresponds to
-        the document at the same index (use None for documents without
-        ground truth).
-
         Args:
             document_paths: List of local paths to document files.
-            ground_truth_paths: Optional list of ground truth file paths,
-                one per document. Use None entries for documents without
-                ground truth.
-            config_version: Configuration version to save discovered schemas to.
+            ground_truth_paths: Optional list of ground truth file paths.
+            config_version: Configuration version to save to.
             stack_name: Optional stack name override.
-            **kwargs: Additional parameters.
 
         Returns:
             DiscoveryBatchResult with overall stats and per-document results.
-
-        Examples:
-            >>> results = client.discovery.run_batch([
-            ...     "./invoice.pdf",
-            ...     "./w2-form.pdf",
-            ...     "./paystub.png",
-            ... ])
-            >>> print(f"Succeeded: {results.succeeded}/{results.total}")
-
-            With selective ground truth:
-            >>> results = client.discovery.run_batch(
-            ...     ["./invoice.pdf", "./w2-form.pdf"],
-            ...     ground_truth_paths=[None, "./w2-expected.json"],
-            ... )
         """
         if ground_truth_paths and len(ground_truth_paths) != len(document_paths):
             raise IDPConfigurationError(
@@ -250,112 +304,94 @@ class DiscoveryOperation:
             results=results,
         )
 
-    def _get_discovery_resources(self, stack_name: str) -> Dict[str, str]:
-        """Get required stack resources for discovery.
-
-        Args:
-            stack_name: CloudFormation stack name.
-
-        Returns:
-            Dict with 'input_bucket' and 'config_table' keys.
-
-        Raises:
-            IDPResourceNotFoundError: If required resources not found.
-        """
+    def _get_config_table(self, stack_name: str) -> str:
+        """Get ConfigurationTable from stack resources."""
         import boto3
 
         cfn = boto3.client("cloudformation", region_name=self._client._region)
         paginator = cfn.get_paginator("list_stack_resources")
 
-        input_bucket = None
-        config_table = None
-
         for page in paginator.paginate(StackName=stack_name):
             for resource in page.get("StackResourceSummaries", []):
-                logical_id = resource.get("LogicalResourceId", "")
-                physical_id = resource.get("PhysicalResourceId", "")
+                if resource.get("LogicalResourceId") == "ConfigurationTable":
+                    return resource.get("PhysicalResourceId", "")
 
-                if logical_id == "ConfigurationTable":
-                    config_table = physical_id
-                elif logical_id in ("InputBucket", "DocumentInputBucket"):
-                    input_bucket = physical_id
+        raise IDPResourceNotFoundError("ConfigurationTable not found in stack.")
 
-        if not input_bucket:
-            raise IDPResourceNotFoundError(
-                "Input S3 bucket not found in stack. "
-                "Looked for 'InputBucket' or 'DocumentInputBucket'."
-            )
-        if not config_table:
-            raise IDPResourceNotFoundError("ConfigurationTable not found in stack.")
 
-        return {"input_bucket": input_bucket, "config_table": config_table}
+# --- Standalone prompt helpers for local mode ---
 
-    def _upload_to_s3(self, bucket: str, file_path: Path) -> str:
-        """Upload a local file to S3 under a discovery prefix.
 
-        Args:
-            bucket: S3 bucket name.
-            file_path: Local file path.
+def _sample_output_format() -> str:
+    return """{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "Form-1040",
+    "x-aws-idp-document-type": "Form-1040",
+    "type": "object",
+    "description": "Brief summary of the document",
+    "properties": {
+        "PersonalInformation": {
+            "type": "object",
+            "description": "Personal information of Tax payer",
+            "properties": {
+                "FirstName": {"type": "string", "description": "First Name of Taxpayer"},
+                "Age": {"type": "number", "description": "Age of Taxpayer"}
+            }
+        },
+        "Dependents": {
+            "type": "array",
+            "description": "Dependents of taxpayer",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "FirstName": {"type": "string", "description": "Dependent first name"},
+                    "Age": {"type": "number", "description": "Dependent Age"}
+                }
+            }
+        }
+    }
+}"""
 
-        Returns:
-            S3 key where the file was uploaded.
-        """
-        import boto3
 
-        s3 = boto3.client("s3", region_name=self._client._region)
-        job_id = str(uuid.uuid4())[:8]
-        s3_key = f"discovery-sdk/{job_id}/{file_path.name}"
+def _prompt_without_gt() -> str:
+    return """This image contains forms data. Analyze the form line by line.
+Image may contain multiple pages, process all the pages.
+Form may contain multiple name value pair in one line.
+Extract all the names in the form including the name value pair which doesn't have value.
 
-        logger.info(f"Uploading {file_path} to s3://{bucket}/{s3_key}")
-        s3.upload_file(str(file_path), bucket, s3_key)
+Generate a JSON Schema that describes the document structure:
+- Use "$schema": "https://json-schema.org/draft/2020-12/schema"
+- Set "$id" to a short document class name (e.g., "W4", "I-9", "Paystub")
+- Set "x-aws-idp-document-type" to the same document class name
+- Set "type": "object"
+- Add "description" with a brief summary of the document (less than 50 words)
 
-        return s3_key
+For the "properties" object:
+- Group related fields as objects (type: "object") with their own "properties"
+- For repeating/table data, use type: "array" with "items" containing object schema
+- Each field should have "type" (string, number, boolean, etc.) and "description"
 
-    def _cleanup_s3(self, bucket: str, key: str) -> None:
-        """Remove a temporary file from S3.
+Do not extract the actual values, only the schema structure."""
 
-        Args:
-            bucket: S3 bucket name.
-            key: S3 key to delete.
-        """
-        try:
-            import boto3
 
-            s3 = boto3.client("s3", region_name=self._client._region)
-            s3.delete_object(Bucket=bucket, Key=key)
-            logger.debug(f"Cleaned up s3://{bucket}/{key}")
-        except Exception as e:
-            logger.warning(f"Failed to clean up s3://{bucket}/{key}: {e}")
+def _prompt_with_gt(ground_truth_data: dict) -> str:
+    gt_json = json.dumps(ground_truth_data, indent=2)
+    return f"""This image contains unstructured data. Analyze the data line by line using the provided ground truth as reference.
+<GROUND_TRUTH_REFERENCE>
+{gt_json}
+</GROUND_TRUTH_REFERENCE>
 
-    def _get_last_discovered_schema(
-        self, config_table: str, config_version: Optional[str]
-    ) -> Optional[Dict[str, Any]]:
-        """Read the most recently added class schema from config.
+Generate a JSON Schema that describes the document structure using the ground truth as reference:
+- Use "$schema": "https://json-schema.org/draft/2020-12/schema"
+- Set "$id" to a short document class name (e.g., "W4", "I-9", "Paystub")
+- Set "x-aws-idp-document-type" to the same document class name
+- Set "type": "object"
+- Add "description" with a brief summary of the document (less than 50 words)
 
-        After ClassesDiscovery saves the schema, we read it back from
-        the configuration to return it to the caller.
+For the "properties" object:
+- Preserve the exact field names and groupings from ground truth
+- Use nested objects (type: "object") for grouped fields with their own "properties"
+- For repeating/table data, use type: "array" with "items" containing object schema
 
-        Args:
-            config_table: DynamoDB table name.
-            config_version: Configuration version.
-
-        Returns:
-            The last class schema dict, or None if not found.
-        """
-        try:
-            os.environ["CONFIGURATION_TABLE_NAME"] = config_table
-            from idp_common.config import ConfigurationReader
-
-            reader = ConfigurationReader(table_name=config_table)
-            config = reader.get_merged_configuration(
-                version=config_version, as_model=False
-            )
-
-            classes = config.get("classes", [])
-            if classes:
-                return classes[-1]
-
-            return None
-        except Exception as e:
-            logger.warning(f"Could not read back discovered schema: {e}")
-            return None
+Match field names, data types, and structure from the ground truth reference.
+Do not extract the actual values, only the schema structure."""

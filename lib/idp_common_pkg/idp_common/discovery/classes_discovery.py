@@ -54,7 +54,13 @@ class ClassesDiscovery:
 
         return
 
-    def discovery_classes_with_document(self, input_bucket: str, input_prefix: str):
+    def discovery_classes_with_document(
+        self,
+        input_bucket: str,
+        input_prefix: str,
+        file_bytes: Optional[bytes] = None,
+        save_to_config: bool = True,
+    ):
         """
         Create blueprint for document discovery.
         Process document/image:
@@ -64,10 +70,13 @@ class ClassesDiscovery:
 
         Args:
             input_bucket: S3 bucket name
-            input_prefix: S3 prefix
+            input_prefix: S3 prefix (also used to determine file extension)
+            file_bytes: Optional document bytes. If provided, skips S3 read.
+            save_to_config: If True (default), saves schema to DynamoDB config.
+                If False, returns the schema without saving.
 
         Returns:
-            status of blueprint creation
+            dict with status and optionally the discovered schema
 
         Raises:
             Exception: If blueprint creation fails
@@ -77,7 +86,10 @@ class ClassesDiscovery:
         )
 
         try:
-            file_in_bytes = S3Util.get_bytes(bucket=input_bucket, key=input_prefix)
+            if file_bytes is not None:
+                file_in_bytes = file_bytes
+            else:
+                file_in_bytes = S3Util.get_bytes(bucket=input_bucket, key=input_prefix)
 
             # Extract labels
             file_extension = os.path.splitext(input_prefix)[1].lower()
@@ -98,10 +110,12 @@ class ClassesDiscovery:
             # No need to transform - it's already in the right format
             current_class = model_response
 
-            # Add the discovered class to the target version's config
-            self._merge_and_save_class(current_class)
+            if save_to_config:
+                # Merge the new class with existing Default + Custom classes
+                # and save to Custom config
+                self._merge_and_save_class(current_class)
 
-            return {"status": "SUCCESS"}
+            return {"status": "SUCCESS", "schema": current_class}
 
         except Exception as e:
             logger.error(
@@ -111,18 +125,28 @@ class ClassesDiscovery:
             raise Exception(f"Failed to process document {input_prefix}: {str(e)}")
 
     def discovery_classes_with_document_and_ground_truth(
-        self, input_bucket: str, input_prefix: str, ground_truth_key: str
+        self,
+        input_bucket: str,
+        input_prefix: str,
+        ground_truth_key: str = "",
+        file_bytes: Optional[bytes] = None,
+        ground_truth_data: Optional[dict] = None,
+        save_to_config: bool = True,
     ):
         """
         Create optimized blueprint using ground truth data.
 
         Args:
             input_bucket: S3 bucket name
-            input_prefix: S3 prefix for document
-            ground_truth_s3_uri: S3 URI for JSON file with ground truth data
+            input_prefix: S3 prefix for document (also used to determine file extension)
+            ground_truth_key: S3 key for ground truth JSON file
+            file_bytes: Optional document bytes. If provided, skips S3 read.
+            ground_truth_data: Optional ground truth dict. If provided, skips S3 read for GT.
+            save_to_config: If True (default), saves schema to DynamoDB config.
+                If False, returns the schema without saving.
 
         Returns:
-            status of blueprint creation
+            dict with status and optionally the discovered schema
 
         Raises:
             Exception: If blueprint creation fails
@@ -132,10 +156,16 @@ class ClassesDiscovery:
         )
 
         try:
-            # Load ground truth data
-            ground_truth_data = self._load_ground_truth(input_bucket, ground_truth_key)
+            # Load ground truth data from S3 or use provided data
+            if ground_truth_data is None:
+                ground_truth_data = self._load_ground_truth(
+                    input_bucket, ground_truth_key
+                )
 
-            file_in_bytes = S3Util.get_bytes(bucket=input_bucket, key=input_prefix)
+            if file_bytes is not None:
+                file_in_bytes = file_bytes
+            else:
+                file_in_bytes = S3Util.get_bytes(bucket=input_bucket, key=input_prefix)
 
             file_extension = os.path.splitext(input_prefix)[1].lower()[1:]
 
@@ -150,10 +180,12 @@ class ClassesDiscovery:
             # No need to transform - it's already in the right format
             current_class = model_response
 
-            # Add the discovered class to the target version's config
-            self._merge_and_save_class(current_class)
+            if save_to_config:
+                # Merge the new class with existing Default + Custom classes
+                # and save to Custom config
+                self._merge_and_save_class(current_class)
 
-            return {"status": "SUCCESS"}
+            return {"status": "SUCCESS", "schema": current_class}
 
         except Exception as e:
             logger.error(
