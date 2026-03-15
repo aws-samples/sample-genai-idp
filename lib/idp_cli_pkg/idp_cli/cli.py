@@ -2432,6 +2432,15 @@ def generate_manifest(
                     f"[yellow]Warning: Could not clear existing files: {e}[/yellow]"
                 )
 
+            # Place .uploading marker to prevent resolver race condition
+            # The test set resolver's auto-detection skips folders with this marker,
+            # preventing premature validation before all files are uploaded.
+            # See: https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues/193
+            marker_key = f"{test_set}/.uploading"
+            s3_client.put_object(
+                Bucket=test_set_bucket, Key=marker_key, Body=b"upload-in-progress"
+            )
+
             # Upload input documents
             for i, doc in enumerate(documents):
                 doc_path = doc["document_path"]
@@ -2487,6 +2496,15 @@ def generate_manifest(
             console.print()
 
         if test_set:
+            # Remove .uploading marker now that all files are uploaded
+            marker_key = f"{test_set}/.uploading"
+            try:
+                s3_client.delete_object(Bucket=test_set_bucket, Key=marker_key)
+            except Exception as e:
+                console.print(
+                    f"[yellow]Warning: Could not remove upload marker: {e}[/yellow]"
+                )
+
             # Auto-register test set in tracking table
             from idp_cli.stack_info import StackInfo
 
@@ -2929,6 +2947,12 @@ def _create_test_set_from_manifest(
     except Exception as e:
         console.print(f"[yellow]Warning: Could not clear existing files: {e}[/yellow]")
 
+    # Place .uploading marker to prevent resolver race condition (issue #193)
+    marker_key = f"{test_set_name}/.uploading"
+    s3_client.put_object(
+        Bucket=test_set_bucket, Key=marker_key, Body=b"upload-in-progress"
+    )
+
     # Copy input files
     for _, row in df.iterrows():
         source_path = row["document_path"]
@@ -2965,6 +2989,12 @@ def _create_test_set_from_manifest(
                     rel_path = os.path.relpath(baseline_file, baseline_path)
                     s3_key = f"{test_set_name}/baseline/{filename}/{rel_path}"
                     s3_client.upload_file(baseline_file, test_set_bucket, s3_key)
+
+    # Remove .uploading marker now that all files are uploaded (issue #193)
+    try:
+        s3_client.delete_object(Bucket=test_set_bucket, Key=marker_key)
+    except Exception as e:
+        console.print(f"[yellow]Warning: Could not remove upload marker: {e}[/yellow]")
 
     console.print(
         f"[green]✓ Test set '{test_set_name}' created with {len(df)} files[/green]"

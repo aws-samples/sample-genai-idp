@@ -413,8 +413,22 @@ def get_test_sets():
     return result
 
 def _is_valid_test_set_structure(s3_client, bucket, prefix):
-    """Check if prefix contains input/ and baseline/ folders"""
+    """Check if prefix contains input/ and baseline/ folders.
+    
+    Also checks for a .uploading marker file which indicates the CLI is still
+    uploading files. This prevents a race condition where the resolver auto-detects
+    and validates a test set before all files (especially baselines) are uploaded.
+    See: https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues/193
+    """
     try:
+        # Check for upload-in-progress marker
+        try:
+            s3_client.head_object(Bucket=bucket, Key=f"{prefix}/.uploading")
+            logger.info(f"Skipping {prefix} - upload in progress (.uploading marker found)")
+            return False
+        except Exception:
+            pass  # No marker = not uploading, proceed with validation
+
         # Check for input/ folder
         input_response = s3_client.list_objects_v2(
             Bucket=bucket,
