@@ -8,6 +8,7 @@ SPDX-License-Identifier: MIT-0
 ### Fixed
 
 - **GovCloud template: fix unresolved RBAC resource dependencies** — Added `AuthorGroup`, `ViewerGroup`, `GetMyProfileResolver`, and `UpdateUserResolver` to GovCloud removal lists so they are stripped alongside the `UserPool` they depend on.
+- **Fix race condition in `idp-cli generate-manifest --test-set`** — Added `.uploading` marker file protocol to prevent the test set resolver from prematurely validating test sets while the CLI is still uploading baseline files ([#193](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues/193)).
 
 ## [0.5.2]
 
