@@ -108,14 +108,14 @@ SPDX-License-Identifier: MIT-0</p>
 <p><strong>Key benefits:</strong></p>
 <ul>
 <li>Switch between BDA and Pipeline modes without redeploying</li>
-<li>Use <a href="./test-studio.md">Test Studio</a> to compare accuracy and cost across BDA and Pipeline configurations — helping you choose the optimal processing approach for your documents</li>
+<li>Use <a href="../test-studio/">Test Studio</a> to compare accuracy and cost across BDA and Pipeline configurations — helping you choose the optimal processing approach for your documents</li>
 <li>Rule validation now works in both modes</li>
 <li>Simplified configuration library</li>
 <li>Fewer CloudFormation resources to manage</li>
 </ul>
 <div class="sl-heading-wrapper level-h2"><h2 id="how-to-upgrade">How to Upgrade</h2><a class="sl-anchor-link" href="#how-to-upgrade"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24"><path fill="currentcolor" d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 0 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 1 0-1.42-1.42Zm8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 0 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 1 0 1.42 1.42l3.88-3.89a4.49 4.49 0 0 0 0-6.33ZM8.83 15.17a1 1 0 0 0 1.1.22 1 1 0 0 0 .32-.22l4.92-4.92a1 1 0 0 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42Z"></path></svg></span><span class="sr-only">Section titled “How to Upgrade”</span></a></div>
 <div class="sl-heading-wrapper level-h3"><h3 id="step-1-update-your-stack">Step 1: Update Your Stack</h3><a class="sl-anchor-link" href="#step-1-update-your-stack"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24"><path fill="currentcolor" d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 0 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 1 0-1.42-1.42Zm8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 0 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 1 0 1.42 1.42l3.88-3.89a4.49 4.49 0 0 0 0-6.33ZM8.83 15.17a1 1 0 0 0 1.1.22 1 1 0 0 0 .32-.22l4.92-4.92a1 1 0 0 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42Z"></path></svg></span><span class="sr-only">Section titled “Step 1: Update Your Stack”</span></a></div>
-<p>Follow the standard <a href="./deployment.md#updating-an-existing-stack">stack update process</a>:</p>
+<p>Follow the standard <a href="../deployment/#updating-an-existing-stack">stack update process</a>:</p>
 <ol>
 <li>Go to CloudFormation in the AWS Console</li>
 <li>Select your existing IDP stack</li>
@@ -139,7 +139,7 @@ SPDX-License-Identifier: MIT-0</p>
 <ul>
 <li><strong>Do not upgrade</strong> to v0.5.x without first testing in a non-production environment</li>
 <li>You can continue using your v0.4.x deployment as-is</li>
-<li>To upgrade, use the <a href="./lambda-hook-inference.md">Lambda Inference Hooks</a> feature (introduced in v0.4.15) to call your existing SageMaker UDOP endpoint from the unified pattern’s classification step via a custom Lambda function. This allows you to replicate Pattern-3’s classification behavior within the unified architecture.</li>
+<li>To upgrade, use the <a href="../lambda-hook-inference/">Lambda Inference Hooks</a> feature (introduced in v0.4.15) to call your existing SageMaker UDOP endpoint from the unified pattern’s classification step via a custom Lambda function. This allows you to replicate Pattern-3’s classification behavior within the unified architecture.</li>
 </ul>
 <div class="sl-heading-wrapper level-h2"><h2 id="upgrade-details-by-previous-pattern">Upgrade Details by Previous Pattern</h2><a class="sl-anchor-link" href="#upgrade-details-by-previous-pattern"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24"><path fill="currentcolor" d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 0 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 1 0-1.42-1.42Zm8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 0 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 1 0 1.42 1.42l3.88-3.89a4.49 4.49 0 0 0 0-6.33ZM8.83 15.17a1 1 0 0 0 1.1.22 1 1 0 0 0 .32-.22l4.92-4.92a1 1 0 0 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42Z"></path></svg></span><span class="sr-only">Section titled “Upgrade Details by Previous Pattern”</span></a></div>
 <div class="sl-heading-wrapper level-h3"><h3 id="if-you-were-using-pattern-2-pipeline">If You Were Using Pattern-2 (Pipeline)</h3><a class="sl-anchor-link" href="#if-you-were-using-pattern-2-pipeline"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24"><path fill="currentcolor" d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 0 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 1 0-1.42-1.42Zm8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 0 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 1 0 1.42 1.42l3.88-3.89a4.49 4.49 0 0 0 0-6.33ZM8.83 15.17a1 1 0 0 0 1.1.22 1 1 0 0 0 .32-.22l4.92-4.92a1 1 0 0 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42Z"></path></svg></span><span class="sr-only">Section titled “If You Were Using Pattern-2 (Pipeline)”</span></a></div>
@@ -276,9 +276,9 @@ SPDX-License-Identifier: MIT-0</p>
 </ul>
 <div class="sl-heading-wrapper level-h2"><h2 id="need-help">Need Help?</h2><a class="sl-anchor-link" href="#need-help"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24"><path fill="currentcolor" d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 0 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 1 0-1.42-1.42Zm8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 0 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 1 0 1.42 1.42l3.88-3.89a4.49 4.49 0 0 0 0-6.33ZM8.83 15.17a1 1 0 0 0 1.1.22 1 1 0 0 0 .32-.22l4.92-4.92a1 1 0 0 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42Z"></path></svg></span><span class="sr-only">Section titled “Need Help?”</span></a></div>
 <ul>
-<li><a href="./architecture.md">Architecture Overview</a> — How the unified pattern works</li>
-<li><a href="./configuration.md">Configuration Guide</a> — Managing processing settings</li>
-<li><a href="./pattern-1.md">BDA Mode Reference</a> — BDA-specific concepts</li>
-<li><a href="./pattern-2.md">Pipeline Mode Reference</a> — Pipeline-specific concepts</li>
-<li><a href="./troubleshooting.md">Troubleshooting</a> — Common issues and solutions</li>
+<li><a href="../architecture/">Architecture Overview</a> — How the unified pattern works</li>
+<li><a href="../configuration/">Configuration Guide</a> — Managing processing settings</li>
+<li><a href="../pattern-1/">BDA Mode Reference</a> — BDA-specific concepts</li>
+<li><a href="../pattern-2/">Pipeline Mode Reference</a> — Pipeline-specific concepts</li>
+<li><a href="../troubleshooting/">Troubleshooting</a> — Common issues and solutions</li>
 </ul> </div> <footer class="sl-flex astro-3yyafb3n"> <div class="meta sl-flex astro-3yyafb3n">   </div> <div class="pagination-links print:hidden astro-u2l5gyhi" dir="ltr"> <a href="/accelerated-intelligent-document-processing-on-aws/using-notebooks-with-idp-common/" rel="prev" class="astro-u2l5gyhi"> <svg aria-hidden="true" class="astro-u2l5gyhi astro-c6vsoqas" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.5rem;"><path d="M17 11H9.41l3.3-3.29a1.004 1.004 0 1 0-1.42-1.42l-5 5a1 1 0 0 0-.21.33 1 1 0 0 0 0 .76 1 1 0 0 0 .21.33l5 5a1.002 1.002 0 0 0 1.639-.325 1 1 0 0 0-.219-1.095L9.41 13H17a1 1 0 0 0 0-2Z"/></svg> <span class="astro-u2l5gyhi"> Previous <br class="astro-u2l5gyhi"> <span class="link-title astro-u2l5gyhi">Using Notebooks</span> </span> </a>  </div>   </footer>  </div> </div>   </main> </div> </div>  </div> </div>  </body></html>

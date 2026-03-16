@@ -182,7 +182,7 @@ SPDX-License-Identifier: MIT-0</p>
 <li>Pattern-specific CloudWatch Dashboard</li>
 <li>Model Endpoints and Configurations</li>
 </ul>
-<p>For detailed information about configuration capabilities, see <a href="./configuration.md">configuration.md</a>.</p>
+<p>For detailed information about configuration capabilities, see <a href="../configuration/">configuration.md</a>.</p>
 <div class="sl-heading-wrapper level-h2"><h2 id="unified-pattern-architecture">Unified Pattern Architecture</h2><a class="sl-anchor-link" href="#unified-pattern-architecture"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24"><path fill="currentcolor" d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 0 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 1 0-1.42-1.42Zm8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 0 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 1 0 1.42 1.42l3.88-3.89a4.49 4.49 0 0 0 0-6.33ZM8.83 15.17a1 1 0 0 0 1.1.22 1 1 0 0 0 .32-.22l4.92-4.92a1 1 0 0 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42Z"></path></svg></span><span class="sr-only">Section titled “Unified Pattern Architecture”</span></a></div>
 <p>The solution uses a <strong>Unified Pattern</strong> that combines both BDA and pipeline processing modes into a single deployment. The <code dir="auto">use_bda</code> configuration flag (set via the UI) controls which processing path is used at runtime:</p>
 <p><img alt="Unified Architecture" loading="lazy" decoding="async" fetchpriority="auto" width="1241" height="1066" src="/accelerated-intelligent-document-processing-on-aws/_astro/IDP.UnifiedPatterns.drawio.BM_TBHnt_2j9lje.png" ></p>
@@ -199,10 +199,10 @@ SPDX-License-Identifier: MIT-0</p>
 <li><strong>Evaluation</strong> — Compares results against ground truth baselines (when available)</li>
 </ul>
 <div class="sl-heading-wrapper level-h2"><h2 id="deployment">Deployment</h2><a class="sl-anchor-link" href="#deployment"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24"><path fill="currentcolor" d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 0 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 1 0-1.42-1.42Zm8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 0 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 1 0 1.42 1.42l3.88-3.89a4.49 4.49 0 0 0 0-6.33ZM8.83 15.17a1 1 0 0 0 1.1.22 1 1 0 0 0 .32-.22l4.92-4.92a1 1 0 0 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42Z"></path></svg></span><span class="sr-only">Section titled “Deployment”</span></a></div>
-<p>For detailed information on deploying this solution, see <a href="./deployment.md">deployment.md</a>.</p>
+<p>For detailed information on deploying this solution, see <a href="../deployment/">deployment.md</a>.</p>
 <p>The unified pattern is deployed as a single nested stack (<code dir="auto">PATTERNSTACK</code>) containing all 12 Lambda functions for both processing modes. There is no pattern selector parameter — the processing mode is controlled entirely by the <code dir="auto">use_bda</code> configuration flag set via the UI.</p>
 <blockquote>
-<p><strong>Note</strong>: The separate Pattern 1 and Pattern 2 deployments have been deprecated in favor of this unified architecture. See <a href="./pattern-1.md">pattern-1.md</a> and <a href="./pattern-2.md">pattern-2.md</a> for historical reference.</p>
+<p><strong>Note</strong>: The separate Pattern 1 and Pattern 2 deployments have been deprecated in favor of this unified architecture. See <a href="../pattern-1/">pattern-1.md</a> and <a href="../pattern-2/">pattern-2.md</a> for historical reference.</p>
 </blockquote>
 <div class="sl-heading-wrapper level-h2"><h2 id="integrated-monitoring">Integrated Monitoring</h2><a class="sl-anchor-link" href="#integrated-monitoring"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24"><path fill="currentcolor" d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 0 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 1 0-1.42-1.42Zm8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 0 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 1 0 1.42 1.42l3.88-3.89a4.49 4.49 0 0 0 0-6.33ZM8.83 15.17a1 1 0 0 0 1.1.22 1 1 0 0 0 .32-.22l4.92-4.92a1 1 0 0 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42Z"></path></svg></span><span class="sr-only">Section titled “Integrated Monitoring”</span></a></div>
 <p>The solution creates an integrated CloudWatch dashboard that combines metrics from both the main stack and the selected pattern stack:</p>
@@ -229,11 +229,11 @@ SPDX-License-Identifier: MIT-0</p>
 <p>The <code dir="auto">DashboardMerger</code> Lambda function combines these dashboards</p>
 </li>
 </ol>
-<p>For detailed information about monitoring capabilities, see <a href="./monitoring.md">monitoring.md</a>.</p>
+<p>For detailed information about monitoring capabilities, see <a href="../monitoring/">monitoring.md</a>.</p>
 <div class="sl-heading-wrapper level-h2"><h2 id="web-ui-architecture">Web UI Architecture</h2><a class="sl-anchor-link" href="#web-ui-architecture"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24"><path fill="currentcolor" d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 0 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 1 0-1.42-1.42Zm8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 0 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 1 0 1.42 1.42l3.88-3.89a4.49 4.49 0 0 0 0-6.33ZM8.83 15.17a1 1 0 0 0 1.1.22 1 1 0 0 0 .32-.22l4.92-4.92a1 1 0 0 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42Z"></path></svg></span><span class="sr-only">Section titled “Web UI Architecture”</span></a></div>
 <p>The solution includes a React-based web user interface for document management and visualization:</p>
 <p><img alt="Web UI" loading="lazy" decoding="async" fetchpriority="auto" width="1444" height="704" src="/accelerated-intelligent-document-processing-on-aws/_astro/WebUI.Bx_vSjHk_1k1s77.png" ></p>
-<p>For detailed information about the Web UI, its features, and usage, see <a href="./web-ui.md">web-ui.md</a>.</p>
+<p>For detailed information about the Web UI, its features, and usage, see <a href="../web-ui/">web-ui.md</a>.</p>
 <ol>
 <li>
 <p><strong>Authentication</strong>: Amazon Cognito provides secure user authentication and authorization</p>
@@ -286,7 +286,7 @@ SPDX-License-Identifier: MIT-0</p>
 <li>Supports various Bedrock models (Amazon Nova, Anthropic Claude)</li>
 <li>GraphQL API integration allows querying from the UI</li>
 </ul>
-<p>For detailed information about the Knowledge Base integration, see <a href="./knowledge-base.md">knowledge-base.md</a>.</p>
+<p>For detailed information about the Knowledge Base integration, see <a href="../knowledge-base/">knowledge-base.md</a>.</p>
 <div class="sl-heading-wrapper level-h3"><h3 id="accuracy-evaluation">Accuracy Evaluation</h3><a class="sl-anchor-link" href="#accuracy-evaluation"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24"><path fill="currentcolor" d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 0 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 1 0-1.42-1.42Zm8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 0 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 1 0 1.42 1.42l3.88-3.89a4.49 4.49 0 0 0 0-6.33ZM8.83 15.17a1 1 0 0 0 1.1.22 1 1 0 0 0 .32-.22l4.92-4.92a1 1 0 0 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42Z"></path></svg></span><span class="sr-only">Section titled “Accuracy Evaluation”</span></a></div>
 <p>The solution includes a comprehensive evaluation system:</p>
 <ol>
@@ -302,7 +302,7 @@ SPDX-License-Identifier: MIT-0</p>
 <li><strong>UI Integration</strong>: Results visualized in the web interface</li>
 <li><strong>CloudWatch Metrics</strong>: Aggregated accuracy metrics for monitoring</li>
 </ol>
-<p>For detailed information about the evaluation system, see <a href="./evaluation.md">evaluation.md</a>.</p>
+<p>For detailed information about the evaluation system, see <a href="../evaluation/">evaluation.md</a>.</p>
 <div class="sl-heading-wrapper level-h3"><h3 id="bedrock-guardrails-integration">Bedrock Guardrails Integration</h3><a class="sl-anchor-link" href="#bedrock-guardrails-integration"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24"><path fill="currentcolor" d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 0 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 1 0-1.42-1.42Zm8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 0 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 1 0 1.42 1.42l3.88-3.89a4.49 4.49 0 0 0 0-6.33ZM8.83 15.17a1 1 0 0 0 1.1.22 1 1 0 0 0 .32-.22l4.92-4.92a1 1 0 0 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42Z"></path></svg></span><span class="sr-only">Section titled “Bedrock Guardrails Integration”</span></a></div>
 <p>The solution supports optional Amazon Bedrock Guardrails integration:</p>
 <ul>
@@ -339,10 +339,10 @@ SPDX-License-Identifier: MIT-0</p>
 </li>
 <li>Receives the document processing details and output location</li>
 </ul>
-<p>For comprehensive implementation guidance, use cases, and code examples, see <a href="./post-processing-lambda-hook.md">post-processing-lambda-hook.md</a>.</p>
+<p>For comprehensive implementation guidance, use cases, and code examples, see <a href="../post-processing-lambda-hook/">post-processing-lambda-hook.md</a>.</p>
 <div class="sl-heading-wrapper level-h2"><h2 id="additional-documentation">Additional Documentation</h2><a class="sl-anchor-link" href="#additional-documentation"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24"><path fill="currentcolor" d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 0 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 1 0-1.42-1.42Zm8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 0 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 1 0 1.42 1.42l3.88-3.89a4.49 4.49 0 0 0 0-6.33ZM8.83 15.17a1 1 0 0 0 1.1.22 1 1 0 0 0 .32-.22l4.92-4.92a1 1 0 0 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42Z"></path></svg></span><span class="sr-only">Section titled “Additional Documentation”</span></a></div>
 <ul>
-<li><a href="./classification.md">classification.md</a> - Details on document classification capabilities</li>
-<li><a href="./extraction.md">extraction.md</a> - Details on data extraction capabilities</li>
-<li><a href="./troubleshooting.md">troubleshooting.md</a> - Troubleshooting guidance and common issues</li>
+<li><a href="../classification/">classification.md</a> - Details on document classification capabilities</li>
+<li><a href="../extraction/">extraction.md</a> - Details on data extraction capabilities</li>
+<li><a href="../troubleshooting/">troubleshooting.md</a> - Troubleshooting guidance and common issues</li>
 </ul> </div> <footer class="sl-flex astro-3yyafb3n"> <div class="meta sl-flex astro-3yyafb3n">   </div> <div class="pagination-links print:hidden astro-u2l5gyhi" dir="ltr"> <a href="/accelerated-intelligent-document-processing-on-aws/" rel="prev" class="astro-u2l5gyhi"> <svg aria-hidden="true" class="astro-u2l5gyhi astro-c6vsoqas" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.5rem;"><path d="M17 11H9.41l3.3-3.29a1.004 1.004 0 1 0-1.42-1.42l-5 5a1 1 0 0 0-.21.33 1 1 0 0 0 0 .76 1 1 0 0 0 .21.33l5 5a1.002 1.002 0 0 0 1.639-.325 1 1 0 0 0-.219-1.095L9.41 13H17a1 1 0 0 0 0-2Z"/></svg> <span class="astro-u2l5gyhi"> Previous <br class="astro-u2l5gyhi"> <span class="link-title astro-u2l5gyhi">Welcome</span> </span> </a> <a href="/accelerated-intelligent-document-processing-on-aws/deployment/" rel="next" class="astro-u2l5gyhi"> <svg aria-hidden="true" class="astro-u2l5gyhi astro-c6vsoqas" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.5rem;"><path d="M17.92 11.62a1.001 1.001 0 0 0-.21-.33l-5-5a1.003 1.003 0 1 0-1.42 1.42l3.3 3.29H7a1 1 0 0 0 0 2h7.59l-3.3 3.29a1.002 1.002 0 0 0 .325 1.639 1 1 0 0 0 1.095-.219l5-5a1 1 0 0 0 .21-.33 1 1 0 0 0 0-.76Z"/></svg> <span class="astro-u2l5gyhi"> Next <br class="astro-u2l5gyhi"> <span class="link-title astro-u2l5gyhi">Deployment</span> </span> </a> </div>   </footer>  </div> </div>   </main> </div> </div>  </div> </div>  </body></html>
