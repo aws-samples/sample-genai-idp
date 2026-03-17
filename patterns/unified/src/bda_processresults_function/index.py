@@ -165,6 +165,11 @@ def create_pdf_page_images(bda_result_bucket, output_bucket, object_key):
         for page_num in range(len(pdf_document)):
             # Render page to a PIL image
             page = pdf_document[page_num]
+            # Flatten form fields into page content before rendering.
+            # Many fillable PDFs (e.g., government forms) lack appearance
+            # streams for form fields — flatten() forces PDFium to generate
+            # them and merge into page content so render() can display them.
+            page.flatten()
             pil_img = page.render(scale=150 / 72).to_pil()
 
             # Save the image to a BytesIO object as JPEG

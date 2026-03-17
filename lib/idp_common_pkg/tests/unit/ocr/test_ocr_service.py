@@ -353,6 +353,11 @@ class TestOcrService:
             # Verify init_forms() was called to enable fillable PDF form rendering
             mock_pdf_doc.init_forms.assert_called_once()
 
+            # Verify flatten() was called on the page to merge form fields
+            # into page content (needed for PDFs without appearance streams)
+            mock_page = mock_pdf_doc.__getitem__.return_value
+            mock_page.flatten.assert_called_once()
+
     @patch("boto3.client")
     @patch("idp_common.ocr.service.pdfium.PdfDocument")
     def test_process_document_success(

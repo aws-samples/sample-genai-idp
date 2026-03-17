@@ -426,6 +426,12 @@ class OcrService:
                     page_images: Dict[int, bytes] = {}
                     for i in pages_to_render:
                         page = pdf_document[i]
+                        # Flatten form fields into page content before rendering.
+                        # Many fillable PDFs (e.g., government forms) lack appearance
+                        # streams for form fields — flatten() forces PDFium to generate
+                        # them and merge into page content so render() can display them.
+                        # Requires init_forms() to have been called before page retrieval.
+                        page.flatten()
                         page_images[i] = self._extract_page_image(page, True, i + 1)
 
                     pdf_document.close()
