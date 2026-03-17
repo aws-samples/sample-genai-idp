@@ -7,7 +7,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "idp-sdk"
-version = "0.5.3.1"
+version = "0.5.3.2"
 description = "Python SDK for IDP Accelerator - programmatic access to document processing capabilities"
 authors = [{name = "AWS"}]
 license = {text = "MIT-0"}
