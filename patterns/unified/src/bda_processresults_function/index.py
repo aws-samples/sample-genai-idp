@@ -156,6 +156,10 @@ def create_pdf_page_images(bda_result_bucket, output_bucket, object_key):
 
         # Open the PDF using pypdfium2
         pdf_document = pdfium.PdfDocument(pdf_content)
+        # Initialize form rendering engine so fillable PDF form fields
+        # (text inputs, checkboxes, etc.) appear in rendered page images.
+        # Without this, may_draw_forms=True in render() has no effect.
+        pdf_document.init_forms()
 
         # Process each page
         for page_num in range(len(pdf_document)):

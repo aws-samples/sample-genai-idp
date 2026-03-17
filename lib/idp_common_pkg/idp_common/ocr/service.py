@@ -388,6 +388,10 @@ class OcrService:
                 if is_pdf:
                     # Determine which pages need processing (retry-safe: skip completed pages)
                     pdf_document = pdfium.PdfDocument(file_content)
+                    # Initialize form rendering engine so fillable PDF form fields
+                    # (text inputs, checkboxes, etc.) appear in rendered page images.
+                    # Without this, may_draw_forms=True in render() has no effect.
+                    pdf_document.init_forms()
                     num_pages = len(pdf_document)
                     document.num_pages = num_pages
 
