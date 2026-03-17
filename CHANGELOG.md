@@ -7,7 +7,7 @@ SPDX-License-Identifier: MIT-0
 
 ### Added
 
-- **Claude Sonnet 4.6 Model Support** — Added `claude-sonnet-4-6` and `claude-sonnet-4-6:1m` variants (us, eu, global) to all model ID picklists in the configuration schema. Removed deprecated older Claude models (3.x, 4.0, 4.1) — only Haiku 4.5, Sonnet 4.5, Sonnet 4.6, Opus 4.5, and Opus 4.6 are now available.
+- **Removed older Claude models** from Configuration UI picklists (3.x, 4.0, 4.1). Haiku 4.5, Sonnet 4.5, Sonnet 4.6, Opus 4.5, and Opus 4.6 are available for selection in the UI. Existing configurations using older versions still work.
 
 - **Discovery UX Overhaul** — Comprehensive improvements to the Discovery UI experience:
   - **Real-time progress updates** — Live status messages during processing (e.g., "Analyzing document structure with AI...", "Saving to configuration...")

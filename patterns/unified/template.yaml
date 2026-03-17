@@ -289,7 +289,6 @@ Resources:
                   - "global.anthropic.claude-haiku-4-5-20251001-v1:0"
                   - "global.anthropic.claude-sonnet-4-5-20250929-v1:0"
                   - "global.anthropic.claude-sonnet-4-5-20250929-v1:0:1m"
-                  - "the template patterns/unified/template.yaml doesn't seem to have us.anthropic.claude-sonnet-4-6, eu.anthropic.claude-sonnet-4-6, global.anthropic.claude-sonnet-4-6, us.anthropic.claude-sonnet-4-6:1m , eu.anthropic.claude-sonnet-4-6:1m, global.anthropic.claude-sonnet-4-6:1m..   It's supposed to be supported now.. Can you carefully check everu modelId Enum in the config schema and make sure thesese sonnet 4.6 variations ar eincluded in the right spot
                   - "global.anthropic.claude-sonnet-4-6:1m"
                   - "global.anthropic.claude-opus-4-5-20251101-v1:0"
                   - "global.anthropic.claude-opus-4-6-v1"
