@@ -76,6 +76,7 @@ This folder contains detailed documentation on various aspects of the GenAI Inte
 
 - [Well-Architected Framework Assessment](./well-architected.md) - Analysis based on AWS Well-Architected Framework
 - [AWS Services & IAM Roles](./aws-services-and-roles.md) - AWS services used and IAM role requirements
+- [ALB Hosting](./alb-hosting.md) - ALB+S3 hosting for private network and GovCloud deployments
 - [GovCloud Deployment](./govcloud-deployment.md) - Deployment guide for AWS GovCloud regions
 - [EU Region Model Support](./eu-region-model-support.md) - Model availability in EU regions
 

@@ -270,8 +270,9 @@ Key parameters that can be configured during CloudFormation deployment:
 - `ExecutionTimeThresholdMs`: Maximum acceptable execution time before alerting (default: 30000 ms)
 - `LogLevel`: Set logging level (DEBUG, INFO, WARN, ERROR)
 - `WAFAllowedIPv4Ranges`: IP restrictions for web UI access (default: allow all)
-- `CloudFrontPriceClass`: Set CloudFront price class for UI distribution
-- `CloudFrontAllowedGeos`: Optional geographic restrictions for UI access
+- `CloudFrontPriceClass`: Set CloudFront price class for UI distribution (CloudFront hosting only)
+- `CloudFrontAllowedGeos`: Optional geographic restrictions for UI access (CloudFront hosting only)
+- `WebUIHosting`: Select hosting mode — `CloudFront` (default) or `ALB` for VPC-based hosting (see [ALB Hosting](./alb-hosting.md))
 - `CustomConfigPath`: Optional S3 URI to a custom configuration file that overrides pattern presets. Leave blank to use selected pattern configuration. Example: s3://my-bucket/custom-config/config.yaml
 
 ### Integration and Tracing Parameters

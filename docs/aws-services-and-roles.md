@@ -21,7 +21,8 @@ This document outlines the AWS services used by the GenAI Intelligent Document P
 | **AWS Step Functions** | Orchestrates document processing workflows | ✓ | ✓ |
 | **Amazon SQS** | Queues documents for processing and handles throttling | ✓ | ✓ |
 | **Amazon EventBridge** | Triggers document processing workflows when files are uploaded | ✓ | ✓ |
-| **Amazon CloudFront** | Delivers the web UI with global distribution | ✓ | ✓ |
+| **Amazon CloudFront** | Delivers the web UI with global distribution (default hosting mode) | ✓ | ✓ |
+| **Elastic Load Balancing (ALB)** | Alternative web UI hosting via Application Load Balancer for VPC-based deployments (see [ALB Hosting](./alb-hosting.md)) | ✓ | ✓ |
 | **AWS CloudFormation** | Deploys and manages the solution infrastructure | ✓ | |
 | **AWS SAM** | Simplifies serverless application deployment | ✓ | |
 | **AWS CodeBuild** | Builds and packages the web UI assets | ✓ | |
@@ -208,7 +209,7 @@ When deploying this solution, consider the following security best practices:
    * Enable encryption for DynamoDB tables
 
 2. **Network Security**:
-   * Use CloudFront security features (geo-restrictions, HTTPS, etc.)
+   * Use CloudFront security features (geo-restrictions, HTTPS, etc.) or ALB security groups for [VPC-based hosting](./alb-hosting.md)
    * Configure AWS WAF to protect web interfaces
 
 3. **Authentication**:

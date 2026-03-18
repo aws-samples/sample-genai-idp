@@ -295,7 +295,7 @@ The web UI is automatically deployed as part of the CloudFormation stack. The de
 
 1. Creates required Cognito resources (User Pool, Identity Pool)
 2. Builds and deploys the React application to S3
-3. Sets up CloudFront distribution for content delivery
+3. Sets up CloudFront distribution for content delivery (or ALB for VPC-based hosting — see [ALB Hosting](./alb-hosting.md))
 4. Configures necessary IAM roles and permissions
 
 ## Accessing the Web UI
@@ -342,7 +342,7 @@ The web UI implementation includes several security features:
 - All communication is encrypted using HTTPS
 - Authentication tokens are automatically rotated
 - Session timeouts are enforced
-- CloudFront distribution uses secure configuration
+- CloudFront distribution uses secure configuration (or ALB with TLS 1.3 for VPC-based hosting)
 - S3 buckets are configured with appropriate security policies
 - API access is controlled through IAM and Cognito
 - Web Application Firewall (WAF) protection for AppSync API
@@ -371,7 +371,7 @@ The web UI includes built-in monitoring:
 
 - CloudWatch metrics for API and authentication activity
 - Access logs in CloudWatch Logs
-- CloudFront distribution logs
+- CloudFront distribution logs (or ALB access logs for VPC-based hosting)
 - Error tracking and reporting
 - Performance monitoring
 
@@ -379,6 +379,6 @@ To troubleshoot issues:
 
 1. Check CloudWatch Logs for application errors
 2. Verify Cognito user status in the AWS Console
-3. Check CloudFront distribution status
+3. Check CloudFront distribution status (or ALB target group health for VPC-based hosting)
 4. Verify API endpoints are accessible
 5. Review browser console for client-side errors

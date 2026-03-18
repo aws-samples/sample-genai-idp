@@ -29,7 +29,7 @@ SPDX-License-Identifier: MIT-0
 - **DynamoDB**: Tracking and concurrency management
 - **CloudWatch**: Comprehensive monitoring and logging
 - **Web UI**: Browser-based interface for document management and visualization
-  - CloudFront distribution for global availability
+  - CloudFront distribution for global availability (default), or ALB for VPC-based hosting (see [ALB Hosting](./alb-hosting.md))
   - Cognito user authentication
   - GraphQL API for UI-backend interactions
 - **Evaluation**: Document processing accuracy assessment system
@@ -69,7 +69,7 @@ The main template handles all pattern-agnostic resources and infrastructure:
 - CloudWatch Alarms and Dashboard
 - SNS Topics for Alerts
 - Web UI Infrastructure:
-  - CloudFront Distribution
+  - CloudFront Distribution (default) or Application Load Balancer ([ALB Hosting](./alb-hosting.md))
   - S3 Bucket for static web assets
   - CodeBuild project for UI deployment
 - Authentication:
@@ -149,8 +149,8 @@ For detailed information about the Web UI, its features, and usage, see [web-ui.
    - Optional self-signup can be enabled with domain restrictions
    - Identity pools provide secure, temporary AWS credentials
 
-2. **Content Delivery**: CloudFront distribution serves the static web assets
-   - Global availability and low latency
+- **Content Delivery**: CloudFront distribution serves the static web assets (default), or an Application Load Balancer for VPC-based hosting (see [ALB Hosting](./alb-hosting.md))
+   - Global availability and low latency (CloudFront) or private network access (ALB)
    - WAF integration for added security (optional)
    - Geographical restrictions can be applied
 
