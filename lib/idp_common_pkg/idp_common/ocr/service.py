@@ -1152,9 +1152,9 @@ class OcrService:
                 content_type="application/json",
             )
 
-        # Memory cleanup
-        img_bytes = None
-        ocr_img_bytes = None
+        # Memory cleanup - delete references to free large image buffers
+        del img_bytes
+        del ocr_img_bytes
 
         t2 = time.time()
         logger.debug(
