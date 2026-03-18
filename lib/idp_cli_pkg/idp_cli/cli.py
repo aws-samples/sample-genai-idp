@@ -440,10 +440,18 @@ def deploy(
         # Parse additional parameters
         additional_params = {}
         if parameters:
-            for param in parameters.split(","):
-                if "=" in param:
-                    key, value = param.split("=", 1)
-                    additional_params[key.strip()] = value.strip()
+            # Parse key=value pairs separated by commas, but handle values
+            # that themselves contain commas (e.g., subnet lists).
+            # Strategy: split on commas that are followed by a key= pattern.
+            import re
+
+            for match in re.finditer(
+                r"([A-Za-z][A-Za-z0-9]*)=((?:(?![A-Za-z][A-Za-z0-9]*=).)*)",
+                parameters,
+            ):
+                key = match.group(1).strip()
+                value = match.group(2).strip().rstrip(",")
+                additional_params[key] = value
 
         # Deploy stack via SDK (build_parameters is called internally by client.stack.deploy)
         # Debug: show custom config path hint before deploy
