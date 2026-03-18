@@ -1681,7 +1681,7 @@ Resources:
               - !If
                 - UseCloudFrontHosting
                 - !Sub "https://${CloudFrontDistribution.DomainName}"
-                - !GetAtt ALBHostingStack.Outputs.WebUIURL
+                - !GetAtt ALBHOSTINGSTACK.Outputs.WebUIURL
               # For local development only
               - "http://localhost:3000"
             ExposedHeaders:
@@ -1753,7 +1753,7 @@ Resources:
               - !If
                 - UseCloudFrontHosting
                 - !Sub "https://${CloudFrontDistribution.DomainName}"
-                - !GetAtt ALBHostingStack.Outputs.WebUIURL
+                - !GetAtt ALBHOSTINGSTACK.Outputs.WebUIURL
               # For local development only
               - "http://localhost:3000"
             ExposedHeaders:
@@ -1821,7 +1821,7 @@ Resources:
               - !If
                 - UseCloudFrontHosting
                 - !Sub "https://${CloudFrontDistribution.DomainName}"
-                - !GetAtt ALBHostingStack.Outputs.WebUIURL
+                - !GetAtt ALBHOSTINGSTACK.Outputs.WebUIURL
               # For local development only
               - "http://localhost:3000"
             ExposedHeaders:
@@ -2270,7 +2270,7 @@ Resources:
               - !If
                 - UseCloudFrontHosting
                 - !Sub "https://${CloudFrontDistribution.DomainName}"
-                - !GetAtt ALBHostingStack.Outputs.WebUIURL
+                - !GetAtt ALBHOSTINGSTACK.Outputs.WebUIURL
               # For local development only
               - "http://localhost:3000"
             ExposedHeaders:
@@ -2385,7 +2385,7 @@ Resources:
               - !If
                 - UseCloudFrontHosting
                 - !Sub "https://${CloudFrontDistribution.DomainName}"
-                - !GetAtt ALBHostingStack.Outputs.WebUIURL
+                - !GetAtt ALBHOSTINGSTACK.Outputs.WebUIURL
               # For local development only
               - "http://localhost:3000"
             ExposedHeaders:
@@ -2454,7 +2454,7 @@ Resources:
               - !If
                 - UseCloudFrontHosting
                 - !Sub "https://${CloudFrontDistribution.DomainName}"
-                - !GetAtt ALBHostingStack.Outputs.WebUIURL
+                - !GetAtt ALBHOSTINGSTACK.Outputs.WebUIURL
               # For local development only
               - "http://localhost:3000"
             ExposedHeaders:
@@ -2908,7 +2908,7 @@ Resources:
               - !If
                 - UseCloudFrontHosting
                 - !Sub "https://${CloudFrontDistribution.DomainName}"
-                - !GetAtt ALBHostingStack.Outputs.WebUIURL
+                - !GetAtt ALBHOSTINGSTACK.Outputs.WebUIURL
               # For local development only
               - "http://localhost:3000"
             ExposedHeaders:
@@ -3005,7 +3005,7 @@ Resources:
               Resource: !Sub "${WebUIBucket.Arn}/*"
               Condition:
                 StringEquals:
-                  "aws:sourceVpce": !GetAtt ALBHostingStack.Outputs.S3VPCEndpointId
+                  "aws:sourceVpce": !GetAtt ALBHOSTINGSTACK.Outputs.S3VPCEndpointId
             - !Ref AWS::NoValue
           - Effect: "Deny"
             Action:
@@ -5429,7 +5429,7 @@ Resources:
         - !If
           - UseCloudFrontHosting
           - !Sub "https://${CloudFrontDistribution.DomainName}/"
-          - !Sub "${ALBHostingStack.Outputs.WebUIURL}/"
+          - !Sub "${ALBHOSTINGSTACK.Outputs.WebUIURL}/"
         - !Sub "https://${AWS::Region}.quicksight.aws.amazon.com/sn/oauthcallback"
         - https://us-east-1.quicksight.aws.amazon.com/sn/oauthcallback
         - https://us-west-2.quicksight.aws.amazon.com/sn/oauthcallback
@@ -5440,7 +5440,7 @@ Resources:
         - !If
           - UseCloudFrontHosting
           - !Sub "https://${CloudFrontDistribution.DomainName}/"
-          - !Sub "${ALBHostingStack.Outputs.WebUIURL}/"
+          - !Sub "${ALBHOSTINGSTACK.Outputs.WebUIURL}/"
         - !Sub "https://${AWS::Region}.quicksight.aws.amazon.com/sn/oauthcallback"
         - https://us-east-1.quicksight.aws.amazon.com/sn/oauthcallback
         - https://us-west-2.quicksight.aws.amazon.com/sn/oauthcallback
@@ -5481,7 +5481,7 @@ Resources:
             - WebUIURL: !If
                 - UseCloudFrontHosting
                 - !Sub "https://${CloudFrontDistribution.DomainName}/"
-                - !GetAtt ALBHostingStack.Outputs.WebUIURL
+                - !GetAtt ALBHOSTINGSTACK.Outputs.WebUIURL
       AutoVerifiedAttributes:
         - email
       EmailConfiguration:
@@ -5527,7 +5527,7 @@ Resources:
         - !If
           - UseCloudFrontHosting
           - !Sub "https://${CloudFrontDistribution.DomainName}"
-          - !GetAtt ALBHostingStack.Outputs.WebUIURL
+          - !GetAtt ALBHOSTINGSTACK.Outputs.WebUIURL
       AccessTokenValidity: 1
       EnableTokenRevocation: true
       ExplicitAuthFlows:
@@ -6653,7 +6653,7 @@ Resources:
   # ALB Hosting (alternative to CloudFront for GovCloud / private networks)
   ##########################################################################
 
-  ALBHostingStack:
+  ALBHOSTINGSTACK:
     Type: AWS::CloudFormation::Stack
     Condition: UseALBHosting
     Properties:
@@ -6823,7 +6823,7 @@ Resources:
             Value: !If
               - UseCloudFrontHosting
               - !Sub "https://${CloudFrontDistribution.DomainName}/"
-              - !Sub "${ALBHostingStack.Outputs.WebUIURL}/"
+              - !Sub "${ALBHOSTINGSTACK.Outputs.WebUIURL}/"
           - Name: VITE_TEST_SET_BUCKET_NAME
             Value: !Ref TestSetBucket
           - Name: VITE_INPUT_BUCKET_NAME
@@ -7252,7 +7252,7 @@ Outputs:
     Value: !If
       - UseCloudFrontHosting
       - !Sub "https://${CloudFrontDistribution.DomainName}/"
-      - !GetAtt ALBHostingStack.Outputs.WebUIURL
+      - !GetAtt ALBHOSTINGSTACK.Outputs.WebUIURL
   S3InstallBucket:
     Description: Install S3 bucket name
     Value: !Ref InputBucket
