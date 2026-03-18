@@ -56,16 +56,14 @@ Parameters:
 
 Conditions:
   HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
-  UseVpcCidr: !Equals [!Ref ALBAllowedCIDRs, ""]
 
 Resources:
   ##########################################################################
-  # VPC CIDR Lookup (when ALBAllowedCIDRs is empty)
+  # Security Group Ingress Manager (handles single or multiple CIDRs)
   ##########################################################################
 
-  VpcCidrLookupRole:
+  SGIngressManagerRole:
     Type: AWS::IAM::Role
-    Condition: UseVpcCidr
     Properties:
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
@@ -79,14 +77,20 @@ Resources:
         - !Ref PermissionsBoundaryArn
         - !Ref AWS::NoValue
       Policies:
-        - PolicyName: VpcCidrLookup
+        - PolicyName: SGIngressManager
           PolicyDocument:
             Version: "2012-10-17"
             Statement:
               - Effect: Allow
                 Action:
                   - ec2:DescribeVpcs
+                  - ec2:DescribeSecurityGroupRules
                 Resource: "*"
+              - Effect: Allow
+                Action:
+                  - ec2:AuthorizeSecurityGroupIngress
+                  - ec2:RevokeSecurityGroupIngress
+                Resource: !Sub "arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:security-group/*"
               - Effect: Allow
                 Action:
                   - logs:CreateLogGroup
@@ -94,9 +98,8 @@ Resources:
                   - logs:PutLogEvents
                 Resource: !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:*"
 
-  VpcCidrLookupFunction:
+  SGIngressManagerFunction:
     Type: AWS::Lambda::Function
-    Condition: UseVpcCidr
     Metadata:
       cfn_nag:
         rules_to_suppress:
@@ -110,33 +113,94 @@ Resources:
     Properties:
       Runtime: python3.12
       Handler: index.handler
-      Timeout: 30
+      Timeout: 60
       MemorySize: 128
-      Role: !GetAtt VpcCidrLookupRole.Arn
+      Role: !GetAtt SGIngressManagerRole.Arn
       Code:
         ZipFile: |
           import boto3
           import cfnresponse
 
+          ec2 = boto3.client("ec2")
+
+          def get_cidrs(props):
+              """Resolve CIDR list: use provided CIDRs or look up VPC CIDR."""
+              cidr_str = props.get("AllowedCIDRs", "")
+              if cidr_str:
+                  return [c.strip() for c in cidr_str.split(",") if c.strip()]
+              # Fall back to VPC CIDR
+              vpc_id = props["VpcId"]
+              resp = ec2.describe_vpcs(VpcIds=[vpc_id])
+              return [resp["Vpcs"][0]["CidrBlock"]]
+
+          def get_existing_cidrs(sg_id):
+              """Get CIDRs from existing ingress rules tagged by this custom resource."""
+              resp = ec2.describe_security_group_rules(
+                  Filters=[{"Name": "group-id", "Values": [sg_id]}]
+              )
+              return [
+                  r["CidrIpv4"] for r in resp["SecurityGroupRules"]
+                  if not r["IsEgress"] and r.get("CidrIpv4")
+                  and r.get("FromPort") == 443 and r.get("ToPort") == 443
+              ]
+
+          def add_cidrs(sg_id, cidrs):
+              for cidr in cidrs:
+                  try:
+                      ec2.authorize_security_group_ingress(
+                          GroupId=sg_id,
+                          IpPermissions=[{
+                              "IpProtocol": "tcp", "FromPort": 443, "ToPort": 443,
+                              "IpRanges": [{"CidrIp": cidr, "Description": "ALB ingress"}]
+                          }]
+                      )
+                  except ec2.exceptions.ClientError as e:
+                      if "Duplicate" not in str(e):
+                          raise
+
+          def remove_cidrs(sg_id, cidrs):
+              for cidr in cidrs:
+                  try:
+                      ec2.revoke_security_group_ingress(
+                          GroupId=sg_id,
+                          IpPermissions=[{
+                              "IpProtocol": "tcp", "FromPort": 443, "ToPort": 443,
+                              "IpRanges": [{"CidrIp": cidr}]
+                          }]
+                      )
+                  except Exception:
+                      pass  # Best effort on removal
+
           def handler(event, context):
-              if event["RequestType"] == "Delete":
-                  cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
-                  return
               try:
-                  vpc_id = event["ResourceProperties"]["VpcId"]
-                  ec2 = boto3.client("ec2")
-                  resp = ec2.describe_vpcs(VpcIds=[vpc_id])
-                  cidr = resp["Vpcs"][0]["CidrBlock"]
-                  cfnresponse.send(event, context, cfnresponse.SUCCESS, {"CidrBlock": cidr})
+                  props = event["ResourceProperties"]
+                  sg_id = props["SecurityGroupId"]
+
+                  if event["RequestType"] == "Delete":
+                      existing = get_existing_cidrs(sg_id)
+                      remove_cidrs(sg_id, existing)
+                      cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+                      return
+
+                  cidrs = get_cidrs(props)
+
+                  if event["RequestType"] == "Update":
+                      # Remove old rules, add new ones
+                      existing = get_existing_cidrs(sg_id)
+                      to_remove = set(existing) - set(cidrs)
+                      to_add = set(cidrs) - set(existing)
+                      remove_cidrs(sg_id, to_remove)
+                      add_cidrs(sg_id, to_add)
+                  else:
+                      # Create
+                      add_cidrs(sg_id, cidrs)
+
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, {
+                      "CIDRs": ",".join(cidrs),
+                      "RuleCount": str(len(cidrs)),
+                  })
               except Exception as e:
                   cfnresponse.send(event, context, cfnresponse.FAILED, {"Error": str(e)})
-
-  VpcCidrLookup:
-    Type: Custom::VpcCidrLookup
-    Condition: UseVpcCidr
-    Properties:
-      ServiceToken: !GetAtt VpcCidrLookupFunction.Arn
-      VpcId: !Ref VpcId
 
   ##########################################################################
   # Security Groups
@@ -149,20 +213,23 @@ Resources:
         rules_to_suppress:
           - id: W5
             reason: "Egress restricted to VPC endpoint security group on port 443"
+          - id: W9
+            reason: "Ingress rules managed by SGIngressManager custom resource"
     Properties:
       GroupDescription: !Sub "${StackName} ALB Security Group"
       VpcId: !Ref VpcId
-      SecurityGroupIngress:
-        - IpProtocol: tcp
-          FromPort: 443
-          ToPort: 443
-          CidrIp: !If
-            - UseVpcCidr
-            - !GetAtt VpcCidrLookup.CidrBlock
-            - !Select [0, !Split [",", !Ref ALBAllowedCIDRs]]
       Tags:
         - Key: Name
           Value: !Sub "${StackName}-alb-sg"
+
+  SGIngressManagerCustomResource:
+    Type: Custom::SGIngressManager
+    DependsOn: ALBSecurityGroup
+    Properties:
+      ServiceToken: !GetAtt SGIngressManagerFunction.Arn
+      SecurityGroupId: !Ref ALBSecurityGroup
+      VpcId: !Ref VpcId
+      AllowedCIDRs: !Ref ALBAllowedCIDRs
 
   EndpointSecurityGroup:
     Type: AWS::EC2::SecurityGroup
@@ -174,6 +241,13 @@ Resources:
           FromPort: 443
           ToPort: 443
           SourceSecurityGroupId: !Ref ALBSecurityGroup
+          Description: "Allow HTTPS from ALB security group"
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          DestinationSecurityGroupId: !Ref ALBSecurityGroup
+          Description: "Allow HTTPS responses back to ALB security group"
       Tags:
         - Key: Name
           Value: !Sub "${StackName}-s3-endpoint-sg"
@@ -186,6 +260,7 @@ Resources:
       FromPort: 443
       ToPort: 443
       DestinationSecurityGroupId: !Ref EndpointSecurityGroup
+      Description: "Allow HTTPS to S3 VPC endpoint security group"
 
   ##########################################################################
   # S3 Interface VPC Endpoint
@@ -204,14 +279,20 @@ Resources:
       PolicyDocument:
         Version: "2012-10-17"
         Statement:
-          - Sid: AllowWebUIBucketOnly
+          - Sid: AllowWebUIBucketRead
             Effect: Allow
             Principal: "*"
             Action:
-              - "s3:*"
+              - "s3:GetObject"
+            Resource:
+              - !Sub "arn:${AWS::Partition}:s3:::${WebUIBucketName}/*"
+          - Sid: AllowWebUIBucketList
+            Effect: Allow
+            Principal: "*"
+            Action:
+              - "s3:ListBucket"
             Resource:
               - !Sub "arn:${AWS::Partition}:s3:::${WebUIBucketName}"
-              - !Sub "arn:${AWS::Partition}:s3:::${WebUIBucketName}/*"
 
   ##########################################################################
   # ALB Target Group & Target Registration
@@ -313,7 +394,6 @@ Resources:
                   ips = [eni["PrivateIpAddress"] for eni in eni_resp["NetworkInterfaces"]]
 
                   if event["RequestType"] == "Delete":
-                      # Deregister targets
                       targets = [{"Id": ip, "Port": 443} for ip in ips]
                       try:
                           elbv2.deregister_targets(TargetGroupArn=tg_arn, Targets=targets)
@@ -322,7 +402,21 @@ Resources:
                       cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
                       return
 
-                  # Register targets
+                  if event["RequestType"] == "Update":
+                      # Deregister old targets from previous endpoint (if changed)
+                      old_vpce_id = event.get("OldResourceProperties", {}).get("VpcEndpointId", "")
+                      if old_vpce_id and old_vpce_id != vpce_id:
+                          try:
+                              old_resp = ec2.describe_vpc_endpoints(VpcEndpointIds=[old_vpce_id])
+                              old_eni_ids = old_resp["VpcEndpoints"][0]["NetworkInterfaceIds"]
+                              old_eni_resp = ec2.describe_network_interfaces(NetworkInterfaceIds=old_eni_ids)
+                              old_ips = [eni["PrivateIpAddress"] for eni in old_eni_resp["NetworkInterfaces"]]
+                              old_targets = [{"Id": ip, "Port": 443} for ip in old_ips]
+                              elbv2.deregister_targets(TargetGroupArn=tg_arn, Targets=old_targets)
+                          except Exception:
+                              pass  # Old endpoint may no longer exist
+
+                  # Register current targets (Create or Update)
                   targets = [{"Id": ip, "Port": 443} for ip in ips]
                   elbv2.register_targets(TargetGroupArn=tg_arn, Targets=targets)
 
@@ -342,6 +436,9 @@ Resources:
       ServiceToken: !GetAtt RegisterTargetsFunction.Arn
       VpcEndpointId: !Ref S3InterfaceEndpoint
       TargetGroupArn: !Ref S3TargetGroup
+      # UpdateToken changes when the VPC endpoint is replaced, forcing
+      # the custom resource to re-register targets with new ENI IPs
+      UpdateToken: !Sub "${S3InterfaceEndpoint}"
 
   ##########################################################################
   # Application Load Balancer
