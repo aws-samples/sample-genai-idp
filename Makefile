@@ -19,11 +19,17 @@ endif
 
 # Update version across all packages
 # Usage: make version V=0.6.0
+# Validates PEP 440 compliance before updating (e.g., 0.5.3, 1.0.0, 0.6.0.dev1, 1.0.0rc1)
 .PHONY: version
 version:
 ifndef V
 	$(error VERSION is not set. Usage: make version V=x.y.z)
 endif
+	@$(PYTHON) -c "from packaging.version import Version; Version('$(V)')" 2>/dev/null || \
+		(echo -e "$(RED)ERROR: '$(V)' is not a valid PEP 440 version.$(NC)" && \
+		 echo -e "$(YELLOW)Valid examples: 0.5.3, 1.0.0, 0.6.0.dev1, 1.0.0a1, 1.0.0rc1, 1.0.0.post1$(NC)" && \
+		 echo -e "$(YELLOW)Invalid examples: 0.5.3.wip5, 1.0-beta, v1.0.0$(NC)" && \
+		 exit 1)
 	@echo "Updating version to $(V)..."
 	@echo "$(V)" > VERSION
 	@sed -i.bak 's/^version = ".*"/version = "$(V)"/' lib/idp_cli_pkg/pyproject.toml && rm -f lib/idp_cli_pkg/pyproject.toml.bak
