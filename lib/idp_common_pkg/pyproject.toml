@@ -104,7 +104,7 @@ reporting = [
 ]
 
 # Appsync module dependencies
-appsync = ["requests==2.32.4"]
+appsync = ["requests<3.0.0,>=2.32.3"]
 
 # Agents module dependencies
 agents = [
@@ -115,7 +115,7 @@ agents = [
 
 # Code intelligence module dependencies
 code_intel = [
-    "requests==2.32.4",
+    "requests==2.33.0",
     "strands-agents==1.14.0",
     "strands-agents-tools==0.2.22",
     "bedrock-agentcore>=0.1.1",
@@ -127,7 +127,7 @@ code_intel = [
 # Document service factory dependencies (includes both appsync and dynamodb support)
 # This includes all dependencies needed for both backends
 docs_service = [
-  "requests==2.32.4", # Required for appsync module (dynamodb only needs boto3 which is core)
+  "requests==2.33.0", # Required for appsync module (dynamodb only needs boto3 which is core)
   "aws-xray-sdk>=2.14.0", # Required for X-Ray tracing
 ]
 
@@ -171,7 +171,7 @@ all = [
   "munkres>=1.1.4",
   "numpy==1.26.4",
   "pandas==2.2.3",
-  "requests==2.32.4",
+  "requests==2.33.0",
   "pyarrow==20.0.0",
   "openpyxl==3.1.5",
   "python-docx==1.2.0",
