@@ -69,6 +69,109 @@ Parameters:
     ConstraintDescription: >-
       Must be empty or a list of comma separated email domains (example1.com, example2.com)
 
+  # External Identity Provider (Federation)
+
+  ExternalIdPType:
+    Type: String
+    Default: ""
+    AllowedValues:
+      - ""
+      - "SAML"
+      - "OIDC"
+    Description: >-
+      (Optional) Type of external identity provider to federate with Cognito.
+      Choose SAML for providers like PingOne, Okta SAML, or ADFS.
+      Choose OIDC for providers like Okta OIDC, Auth0, or Azure AD.
+      Leave empty to use Cognito-native authentication only.
+
+  ExternalIdPName:
+    Type: String
+    Default: ""
+    Description: >-
+      (Required when ExternalIdPType is set) Display name for the external identity provider (e.g. PingOne, Okta, AzureAD).
+      Must be alphanumeric with hyphens only. This name is used in the Cognito hosted UI sign-in button.
+    AllowedPattern: '^(|[a-zA-Z][a-zA-Z0-9-]{0,31})$'
+    ConstraintDescription: >-
+      Must be empty or start with a letter, contain only alphanumeric characters and hyphens, max 32 characters
+
+  ExternalIdPMetadataURL:
+    Type: String
+    Default: ""
+    Description: >-
+      (Required for SAML) The SAML metadata document URL from your identity provider.
+      For example: https://idp.example.com/saml/metadata
+    AllowedPattern: '^(|https://.+)$'
+    ConstraintDescription: Must be empty or a valid HTTPS URL
+
+  ExternalIdPOIDCIssuer:
+    Type: String
+    Default: ""
+    Description: >-
+      (Required for OIDC) The issuer URL from your OIDC identity provider.
+      For example: https://login.example.com or https://example.okta.com/oauth2/default
+    AllowedPattern: '^(|https://.+)$'
+    ConstraintDescription: Must be empty or a valid HTTPS URL
+
+  ExternalIdPOIDCClientId:
+    Type: String
+    Default: ""
+    Description: >-
+      (Required for OIDC) The client ID registered with your OIDC identity provider.
+
+  ExternalIdPOIDCClientSecret:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: >-
+      (Required for OIDC) The client secret registered with your OIDC identity provider.
+
+  ExternalIdPGroupAttributeName:
+    Type: String
+    Default: ""
+    Description: >-
+      (Optional) The SAML attribute or OIDC claim name that carries group membership from the external IdP.
+      For SAML, this is typically http://schemas.xmlsoap.org/claims/Group or memberOf.
+      For OIDC, this is typically groups. Leave empty to skip automatic group mapping.
+
+  ExternalIdPAdminGroupName:
+    Type: String
+    Default: ""
+    Description: >-
+      (Optional) The group name in your external IdP that should map to the Cognito Admin role.
+      For example: IDP-Admins or cn=Admins,ou=Groups,dc=example,dc=com
+
+  ExternalIdPAuthorGroupName:
+    Type: String
+    Default: ""
+    Description: >-
+      (Optional) The group name in your external IdP that should map to the Cognito Author role.
+      For example: IDP-Authors
+
+  ExternalIdPReviewerGroupName:
+    Type: String
+    Default: ""
+    Description: >-
+      (Optional) The group name in your external IdP that should map to the Cognito Reviewer role.
+      For example: IDP-Reviewers
+
+  ExternalIdPViewerGroupName:
+    Type: String
+    Default: ""
+    Description: >-
+      (Optional) The group name in your external IdP that should map to the Cognito Viewer role.
+      For example: IDP-Viewers
+
+  ExternalIdPAutoLogin:
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: >-
+      (Optional) When enabled and an external IdP is configured, users are automatically redirected
+      to the external IdP for authentication instead of seeing the Cognito login page first.
+      Native Cognito username/password login is still available by navigating directly to the Cognito hosted UI.
+
   # Custom Configuration Path
 
   CustomConfigPath:
@@ -453,6 +556,20 @@ Conditions:
   IsS3VectorsVectorStore: !Equals [ !Ref KnowledgeBaseVectorStore, "S3_VECTORS" ]
   CreateAgentCoreLambda: !Equals [ !Ref EnableMCP, "true" ]
   CreateExternalAppClient: !Equals [ !Ref EnableMCP, "true" ]
+  HasExternalIdP: !Not [ !Equals [ !Ref ExternalIdPType, "" ] ]
+  IsExternalIdPSAML:
+    !And
+      - !Condition HasExternalIdP
+      - !Equals [ !Ref ExternalIdPType, "SAML" ]
+  IsExternalIdPOIDC:
+    !And
+      - !Condition HasExternalIdP
+      - !Equals [ !Ref ExternalIdPType, "OIDC" ]
+  HasExternalIdPGroupMapping: !Not [ !Equals [ !Ref ExternalIdPGroupAttributeName, "" ] ]
+  ShouldMapExternalIdPGroups:
+    !And
+      - !Condition HasExternalIdP
+      - !Condition HasExternalIdPGroupMapping
   UseCloudFrontHosting: !Equals [ !Ref WebUIHosting, "CloudFront" ]
   UseALBHosting: !Equals [ !Ref WebUIHosting, "ALB" ]
   IsMLflowEnabled: !Equals [ !Ref EnableMLflow, "true" ]
@@ -514,6 +631,21 @@ Metadata:
         Parameters:
           - EnableMLflow
           - MlflowTrackingURI
+      - Label:
+          default: "External Identity Provider (Federation)"
+        Parameters:
+          - ExternalIdPType
+          - ExternalIdPName
+          - ExternalIdPMetadataURL
+          - ExternalIdPOIDCIssuer
+          - ExternalIdPOIDCClientId
+          - ExternalIdPOIDCClientSecret
+          - ExternalIdPGroupAttributeName
+          - ExternalIdPAdminGroupName
+          - ExternalIdPAuthorGroupName
+          - ExternalIdPReviewerGroupName
+          - ExternalIdPViewerGroupName
+          - ExternalIdPAutoLogin
       - Label:
           default: "Web UI Hosting"
         Parameters:
@@ -5566,7 +5698,14 @@ Resources:
         - ShouldAllowSignUpEmailDomain
         - PreAuthentication: !GetAtt CognitoUserPoolEmailDomainVerifyFunction.Arn
           PreSignUp: !GetAtt CognitoUserPoolEmailDomainVerifyFunction.Arn
-        - !Ref AWS::NoValue
+          PreTokenGeneration: !If
+            - ShouldMapExternalIdPGroups
+            - !GetAtt ExternalIdPGroupMappingFunction.Arn
+            - !Ref AWS::NoValue
+        - !If
+          - ShouldMapExternalIdPGroups
+          - PreTokenGeneration: !GetAtt ExternalIdPGroupMappingFunction.Arn
+          - !Ref AWS::NoValue
       Policies:
         PasswordPolicy:
           MinimumLength: 8
@@ -5579,11 +5718,18 @@ Resources:
           AttributeDataType: String
           Mutable: false
           Required: true
+        - Name: idp_groups
+          AttributeDataType: String
+          Mutable: true
+          Required: false
+          StringAttributeConstraints:
+            MaxLength: "2048"
       UsernameConfiguration:
         CaseSensitive: false
 
   UserPoolClient:
     Type: AWS::Cognito::UserPoolClient
+    DependsOn: ExternalIdentityProviderReady
     Properties:
       ClientName: !Sub "${AWS::StackName}-Client"
       AllowedOAuthFlows:
@@ -5599,6 +5745,21 @@ Resources:
           - UseCloudFrontHosting
           - !Sub "https://${CloudFrontDistribution.DomainName}"
           - !GetAtt ALBHOSTINGSTACK.Outputs.WebUIURL
+        - !If
+          - UseCloudFrontHosting
+          - !Sub "https://${CloudFrontDistribution.DomainName}/"
+          - !Sub "${ALBHOSTINGSTACK.Outputs.WebUIURL}/"
+      LogoutURLs: !If
+        - HasExternalIdP
+        - - !If
+            - UseCloudFrontHosting
+            - !Sub "https://${CloudFrontDistribution.DomainName}"
+            - !GetAtt ALBHOSTINGSTACK.Outputs.WebUIURL
+          - !If
+            - UseCloudFrontHosting
+            - !Sub "https://${CloudFrontDistribution.DomainName}/"
+            - !Sub "${ALBHOSTINGSTACK.Outputs.WebUIURL}/"
+        - !Ref AWS::NoValue
       AccessTokenValidity: 1
       EnableTokenRevocation: true
       ExplicitAuthFlows:
@@ -5611,10 +5772,224 @@ Resources:
         - email
         - email_verified
         - preferred_username
+        - !If
+          - HasExternalIdP
+          - custom:idp_groups
+          - !Ref AWS::NoValue
       RefreshTokenValidity: 30
-      SupportedIdentityProviders:
-        - COGNITO
+      SupportedIdentityProviders: !If
+        - HasExternalIdP
+        - - COGNITO
+          - !Ref ExternalIdPName
+        - - COGNITO
       UserPoolId: !Ref UserPool
+
+  ##########################################################################
+  # External Identity Provider (SAML/OIDC Federation)
+  ##########################################################################
+
+  # Create conditional dependency on ExternalIdentityProvider
+  ExternalIdentityProviderReady:
+    Type: AWS::CloudFormation::WaitConditionHandle
+    Metadata:
+      ConditionalDependency:
+        !If [
+          HasExternalIdP,
+          !Ref ExternalIdentityProvider,
+          "",
+        ]
+
+  ExternalIdentityProvider:
+    Type: AWS::Cognito::UserPoolIdentityProvider
+    Condition: HasExternalIdP
+    Properties:
+      UserPoolId: !Ref UserPool
+      ProviderName: !Ref ExternalIdPName
+      ProviderType: !Ref ExternalIdPType
+      ProviderDetails: !If
+        - IsExternalIdPSAML
+        - MetadataURL: !Ref ExternalIdPMetadataURL
+        - client_id: !Ref ExternalIdPOIDCClientId
+          client_secret: !Ref ExternalIdPOIDCClientSecret
+          oidc_issuer: !Ref ExternalIdPOIDCIssuer
+          attributes_request_method: GET
+          authorize_scopes: "openid email profile groups"
+      AttributeMapping:
+        email: !If
+          - IsExternalIdPSAML
+          - "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress"
+          - "email"
+        custom:idp_groups: !If
+          - HasExternalIdPGroupMapping
+          - !Ref ExternalIdPGroupAttributeName
+          - !Ref AWS::NoValue
+
+  ExternalIdPGroupMappingFunction:
+    Type: AWS::Serverless::Function
+    Condition: ShouldMapExternalIdPGroups
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: "Function does not require VPC access as it only interacts with AWS services via APIs"
+          - id: W92
+            reason: "Function does not require reserved concurrency as it scales based on demand"
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for Cognito trigger function"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only group name mappings"
+    Properties:
+      PermissionsBoundary:
+        !If [
+          HasPermissionsBoundary,
+          !Ref PermissionsBoundaryArn,
+          !Ref AWS::NoValue,
+        ]
+      Description: Maps external IdP group claims to Cognito groups before token generation
+      Handler: index.handler
+      Runtime: python3.12
+      Timeout: 30
+      MemorySize: 128
+      Environment:
+        Variables:
+          LOG_LEVEL: !Ref LogLevel
+          ADMIN_GROUP_NAME: !Ref ExternalIdPAdminGroupName
+          AUTHOR_GROUP_NAME: !Ref ExternalIdPAuthorGroupName
+          REVIEWER_GROUP_NAME: !Ref ExternalIdPReviewerGroupName
+          VIEWER_GROUP_NAME: !Ref ExternalIdPViewerGroupName
+      LoggingConfig:
+        LogGroup: !Ref ExternalIdPGroupMappingFunctionLogGroup
+      Policies:
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action:
+                - cognito-idp:AdminListGroupsForUser
+                - cognito-idp:AdminAddUserToGroup
+                - cognito-idp:AdminRemoveUserFromGroup
+              Resource: !Sub "arn:${AWS::Partition}:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/*"
+      InlineCode: |
+        """Post-authentication Lambda trigger to map external IdP groups to Cognito groups."""
+        import os
+        import logging
+        import boto3
+
+        logger = logging.getLogger()
+        logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
+
+        cognito = boto3.client("cognito-idp")
+
+        # Mapping: external IdP group name -> Cognito group name
+        GROUP_MAPPING = {}
+        for env_key, cognito_group in [
+            ("ADMIN_GROUP_NAME", "Admin"),
+            ("AUTHOR_GROUP_NAME", "Author"),
+            ("REVIEWER_GROUP_NAME", "Reviewer"),
+            ("VIEWER_GROUP_NAME", "Viewer"),
+        ]:
+            idp_group = os.environ.get(env_key, "").strip()
+            if idp_group:
+                GROUP_MAPPING[idp_group] = cognito_group
+
+        COGNITO_GROUPS = set(GROUP_MAPPING.values())
+
+
+        def handler(event, context):
+            """Handle pre-token-generation trigger from Cognito."""
+            logger.info(f"Pre-token trigger source: {event.get('triggerSource')}")
+
+            # Extract user pool ID from the event (avoids circular CloudFormation dependency)
+            user_pool_id = event.get("userPoolId", "")
+            username = event.get("userName", "")
+            user_attributes = event.get("request", {}).get("userAttributes", {})
+            idp_groups_raw = user_attributes.get("custom:idp_groups", "")
+
+            if not idp_groups_raw:
+                logger.info(f"No IdP groups claim for user {username}")
+                return event
+
+            # Parse IdP groups - handle comma-separated, JSON array, or single value
+            idp_groups = []
+            idp_groups_raw = idp_groups_raw.strip()
+            if idp_groups_raw.startswith("["):
+                import json
+                try:
+                    idp_groups = json.loads(idp_groups_raw)
+                except Exception:
+                    idp_groups = [g.strip().strip('"') for g in idp_groups_raw.strip("[]").split(",")]
+            else:
+                idp_groups = [g.strip() for g in idp_groups_raw.split(",")]
+
+            logger.info(f"User {username} IdP groups: {idp_groups}")
+
+            # Determine target Cognito groups from mapping
+            target_groups = set()
+            for idp_group in idp_groups:
+                if idp_group in GROUP_MAPPING:
+                    target_groups.add(GROUP_MAPPING[idp_group])
+
+            if not target_groups:
+                logger.warning(f"No matching Cognito groups for user {username} with IdP groups {idp_groups}")
+                return event
+
+            # Get current Cognito groups for user
+            try:
+                response = cognito.admin_list_groups_for_user(
+                    UserPoolId=user_pool_id, Username=username
+                )
+                current_groups = {g["GroupName"] for g in response.get("Groups", [])}
+            except Exception as e:
+                logger.error(f"Failed to list groups for user {username}: {e}")
+                return event
+
+            # Add user to target groups they are not already in
+            for group in target_groups - current_groups:
+                try:
+                    cognito.admin_add_user_to_group(
+                        UserPoolId=user_pool_id, Username=username, GroupName=group
+                    )
+                    logger.info(f"Added user {username} to group {group}")
+                except Exception as e:
+                    logger.error(f"Failed to add user {username} to group {group}: {e}")
+
+            # Remove user from managed groups they should no longer be in
+            for group in (current_groups & COGNITO_GROUPS) - target_groups:
+                try:
+                    cognito.admin_remove_user_from_group(
+                        UserPoolId=user_pool_id, Username=username, GroupName=group
+                    )
+                    logger.info(f"Removed user {username} from group {group}")
+                except Exception as e:
+                    logger.error(f"Failed to remove user {username} from group {group}: {e}")
+
+            logger.info(f"User {username} group sync complete. Groups: {target_groups}")
+
+            # Inject groups into the token so they are available immediately on first sign-in
+            event.setdefault("response", {})
+            event["response"]["claimsAndScopeOverrideDetails"] = {
+                "groupOverrideDetails": {
+                    "groupsToOverride": list(target_groups)
+                }
+            }
+
+            return event
+
+  ExternalIdPGroupMappingFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Condition: ShouldMapExternalIdPGroups
+    Properties:
+      KmsKeyId: !GetAtt CustomerManagedEncryptionKey.Arn
+      RetentionInDays: !Ref LogRetentionDays
+
+  ExternalIdPGroupMappingPermission:
+    Type: AWS::Lambda::Permission
+    Condition: ShouldMapExternalIdPGroups
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref ExternalIdPGroupMappingFunction
+      Principal: !Sub "cognito-idp.${AWS::URLSuffix}"
+      SourceAccount: !Ref AWS::AccountId
+      SourceArn: !Sub "arn:${AWS::Partition}:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${UserPool}"
 
   GetDomainLambda:
     DependsOn:
@@ -6889,6 +7264,21 @@ Resources:
               - ShouldAllowSignUpEmailDomain
               - "false"
               - "true"
+          - Name: VITE_COGNITO_DOMAIN
+            Value: !If
+              - HasExternalIdP
+              - !Sub "${GetDomain.OutputString}.auth.${AWS::Region}.amazoncognito.com"
+              - ""
+          - Name: VITE_EXTERNAL_IDP_NAME
+            Value: !If
+              - HasExternalIdP
+              - !Ref ExternalIdPName
+              - ""
+          - Name: VITE_EXTERNAL_IDP_AUTO_LOGIN
+            Value: !If
+              - HasExternalIdP
+              - !Ref ExternalIdPAutoLogin
+              - "false"
           - Name: VITE_CLOUDFRONT_DOMAIN
             Value: !If
               - UseCloudFrontHosting
@@ -7450,6 +7840,9 @@ Outputs:
       VITE_APPSYNC_GRAPHQL_URL=${GraphQLApi.GraphQLUrl}
       VITE_AWS_REGION=${AWS::Region}
       VITE_SETTINGS_PARAMETER=${SettingsParameter}
+      VITE_COGNITO_DOMAIN=${GetDomain.OutputString}.auth.${AWS::Region}.amazoncognito.com
+      VITE_EXTERNAL_IDP_NAME=${ExternalIdPName}
+      VITE_EXTERNAL_IDP_AUTO_LOGIN=${ExternalIdPAutoLogin}
       VITE_TEST_SET_BUCKET_NAME=${TestSetBucket}
       VITE_INPUT_BUCKET_NAME=${InputBucket}
       VITE_LATENCY_OPTIONS=[60, 120, 300, 600, 900, 1800, 3600]

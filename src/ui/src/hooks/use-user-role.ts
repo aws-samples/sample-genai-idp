@@ -49,7 +49,18 @@ const useUserRole = (): UserRoleReturn => {
         // Fetch Cognito groups from auth session
         const session = await fetchAuthSession();
         const userGroups = session?.tokens?.idToken?.payload?.['cognito:groups'] || [];
-        const groupsArray = Array.isArray(userGroups) ? (userGroups as string[]) : [userGroups as string];
+        let groupsArray = Array.isArray(userGroups) ? (userGroups as string[]) : [userGroups as string];
+
+        // For federated users on first login, groups may not be in the initial token.
+        // Force a token refresh to pick up groups assigned by the PreTokenGeneration Lambda.
+        const isFederated = (session?.tokens?.idToken?.payload?.['identities'] as string | undefined) !== undefined;
+        const appGroups = groupsArray.filter((g) => ['Admin', 'Author', 'Reviewer', 'Viewer'].includes(g));
+        if (isFederated && appGroups.length === 0) {
+          const refreshed = await fetchAuthSession({ forceRefresh: true });
+          const refreshedGroups = refreshed?.tokens?.idToken?.payload?.['cognito:groups'] || [];
+          groupsArray = Array.isArray(refreshedGroups) ? (refreshedGroups as string[]) : [refreshedGroups as string];
+        }
+
         setGroups(groupsArray);
 
         // Fetch user profile for allowedConfigVersions (skip for Admin - always unrestricted)

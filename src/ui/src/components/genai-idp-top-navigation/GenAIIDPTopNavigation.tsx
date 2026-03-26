@@ -18,6 +18,24 @@ interface SignOutModalProps {
 const SignOutModal = ({ visible, setVisible }: SignOutModalProps): React.JSX.Element => {
   async function handleSignOut() {
     try {
+      // Set flag to prevent auto-login from immediately signing back in via SSO
+      sessionStorage.setItem('idp_signed_out', 'true');
+
+      // For federated auth, clear local tokens and redirect through Cognito's logout endpoint
+      const cognitoDomain = import.meta.env.VITE_COGNITO_DOMAIN;
+      const clientId = import.meta.env.VITE_USER_POOL_CLIENT_ID;
+      const externalIdP = import.meta.env.VITE_EXTERNAL_IDP_NAME;
+      if (cognitoDomain && clientId && externalIdP) {
+        // Clear Amplify's cached tokens from local storage before redirecting
+        const keysToRemove = Object.keys(localStorage).filter(
+          (k) => k.startsWith('CognitoIdentityServiceProvider') || k.startsWith('amplify'),
+        );
+        keysToRemove.forEach((k) => localStorage.removeItem(k));
+        const logoutUri = encodeURIComponent(window.location.origin + '/');
+        window.location.replace(`https://${cognitoDomain}/logout?client_id=${clientId}&logout_uri=${logoutUri}`);
+        return;
+      }
+
       await signOut();
       logger.debug('signed out');
       window.location.reload();
