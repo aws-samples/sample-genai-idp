@@ -99,6 +99,13 @@ const SchemaBuilder = ({
   const [classToDelete, setClassToDelete] = useState<SchemaClass | null>(null);
   const [showWipeAllModal, setShowWipeAllModal] = useState(false);
   const [aggregatedValidationErrors, setAggregatedValidationErrors] = useState<ValidationError[]>([]);
+
+  const CLASS_NAME_PATTERN = /^[a-zA-Z0-9\-_]+$/;
+  const isClassNameValid = (name: string): boolean => name.trim().length > 0 && CLASS_NAME_PATTERN.test(name.trim());
+  const classNameErrorText = newClassName.trim() && !CLASS_NAME_PATTERN.test(newClassName.trim())
+    ? 'Class name can only contain letters, numbers, hyphens, and underscores'
+    : '';
+    
   const lastExportedSchemaRef = useRef<string | null>(null);
   const lastValidationResultRef = useRef<string | null>(null);
 
@@ -656,7 +663,7 @@ const SchemaBuilder = ({
                   >
                     {isRuleSchema ? 'Cancel' : 'Back'}
                   </Button>
-                  <Button variant="primary" onClick={handleConfirmAddClass} disabled={!newClassName.trim()}>
+                  <Button variant="primary" onClick={handleConfirmAddClass} disabled={!isClassNameValid(newClassName)}>
                     {isRuleSchema ? 'Add Rule Class' : 'Add Class'}
                   </Button>
                 </SpaceBetween>
@@ -757,6 +764,7 @@ const SchemaBuilder = ({
               <FormField
                 label={isRuleSchema ? 'Rule Class Name' : 'Class Name'}
                 description={`A unique name for this ${isRuleSchema ? 'rule' : 'extraction'} class`}
+                errorText={classNameErrorText}
               >
                 <Input
                   value={newClassName}
@@ -919,7 +927,7 @@ const SchemaBuilder = ({
                 >
                   Cancel
                 </Button>
-                <Button variant="primary" onClick={handleConfirmEditClass} disabled={!newClassName.trim()}>
+                <Button variant="primary" onClick={handleConfirmEditClass} disabled={!isClassNameValid(newClassName)}>
                   Save Changes
                 </Button>
               </SpaceBetween>
@@ -927,7 +935,7 @@ const SchemaBuilder = ({
           }
         >
           <SpaceBetween size="m">
-            <FormField label="Class Name" description="A unique name for this extraction class">
+            <FormField label="Class Name" description="A unique name for this extraction class" errorText={classNameErrorText}>
               <Input
                 value={newClassName}
                 onChange={({ detail }) => setNewClassName(detail.value)}
