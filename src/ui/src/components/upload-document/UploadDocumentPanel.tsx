@@ -23,6 +23,7 @@ import { uploadDocument } from '../../graphql/generated';
 import useConfigurationVersions from '../../hooks/use-configuration-versions';
 
 import useSettingsContext from '../../contexts/settings';
+import { SUPPORTED_UPLOAD_EXTENSIONS } from '../common/constants';
 
 const client = generateClient();
 
@@ -206,10 +207,7 @@ const UploadDocumentPanel = (): React.JSX.Element => {
           />
         </FormField>
 
-        <FormField
-          label="Select files to upload"
-          constraintText="Supported formats: PDF, PNG, JPEG, TIFF, Excel (XLSX/XLS). Multiple files allowed."
-        >
+        <FormField label="Select files to upload" constraintText="Multiple files allowed. Excel files are converted on the backend.">
           <FileUpload
             onChange={({ detail }) => handleFileChange(detail.value)}
             value={selectedFiles}
@@ -220,7 +218,7 @@ const UploadDocumentPanel = (): React.JSX.Element => {
               errorIconAriaLabel: 'Error',
               warningIconAriaLabel: 'Warning',
             }}
-            accept=".pdf,.png,.jpg,.jpeg,.tiff,.tif,.xlsx,.xls"
+            accept={SUPPORTED_UPLOAD_EXTENSIONS}
             multiple
             showFileSize
             showFileLastModified

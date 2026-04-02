@@ -5,6 +5,13 @@
 
 export const SYSTEM = 'System' as const;
 
+/** File extensions accepted for document upload across the UI. */
+export const SUPPORTED_UPLOAD_EXTENSIONS = '.pdf,.png,.jpg,.jpeg,.tiff,.tif,.xlsx,.xls' as const;
+
+/** Human-readable label for supported upload formats. */
+export const SUPPORTED_UPLOAD_FORMATS_LABEL =
+  'Supported formats: PDF, PNG, JPEG, TIFF, and Excel (XLSX/XLS). PDF and image files are processed with Textract; Excel files are supported through backend conversion.' as const;
+
 export const LANGUAGE_CODES = [
   { value: '', label: 'Choose a Language' },
   { value: 'af', label: 'Afrikaans' },
