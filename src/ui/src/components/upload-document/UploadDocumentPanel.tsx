@@ -206,7 +206,10 @@ const UploadDocumentPanel = (): React.JSX.Element => {
           />
         </FormField>
 
-        <FormField label="Select files to upload" constraintText="Supported formats: PDF, PNG, JPEG, TIFF. Multiple files allowed.">
+        <FormField
+          label="Select files to upload"
+          constraintText="Supported formats: PDF, PNG, JPEG, TIFF, Excel (XLSX/XLS). Multiple files allowed."
+        >
           <FileUpload
             onChange={({ detail }) => handleFileChange(detail.value)}
             value={selectedFiles}
@@ -217,7 +220,7 @@ const UploadDocumentPanel = (): React.JSX.Element => {
               errorIconAriaLabel: 'Error',
               warningIconAriaLabel: 'Warning',
             }}
-            accept=".pdf,.png,.jpg,.jpeg,.tiff,.tif"
+            accept=".pdf,.png,.jpg,.jpeg,.tiff,.tif,.xlsx,.xls"
             multiple
             showFileSize
             showFileLastModified

@@ -8,7 +8,7 @@ const content = (
   <>
     <p>Upload documents to be processed by the GenAI IDP system.</p>
     <p>
-      <strong>Supported formats:</strong> PDF, PNG, JPEG, TIFF, and other document formats supported by Textract.
+      <strong>Supported formats:</strong> PDF, PNG, JPEG, TIFF, Excel (XLSX/XLS), and other document formats supported by Textract.
     </p>
     <p>
       <strong>Prefix:</strong> Optionally add a prefix to organize your documents (e.g., &quot;invoices/&quot;, &quot;forms/2023/&quot;).

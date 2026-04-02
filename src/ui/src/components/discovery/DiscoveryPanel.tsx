@@ -849,7 +849,7 @@ const DiscoveryPanel = (): React.JSX.Element => {
                 type="file"
                 onChange={handleDocumentFileChange}
                 disabled={isUploading}
-                accept=".pdf,.png,.jpg,.jpeg,.tiff,.tif"
+                accept=".pdf,.png,.jpg,.jpeg,.tiff,.tif,.xlsx,.xls"
               />
               {documentFile && (
                 <Box margin={{ top: 'xs' }}>
