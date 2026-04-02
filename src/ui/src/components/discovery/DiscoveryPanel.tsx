@@ -39,7 +39,7 @@ import { formatConfigVersionLink } from '../test-studio/utils/configVersionUtils
 import type { ConfigVersion } from '../test-studio/utils/configVersionUtils';
 import { useNavigate } from 'react-router-dom';
 import { DISCOVERY_JOB_PATH } from '../../routes/constants';
-import { SUPPORTED_UPLOAD_EXTENSIONS } from '../common/constants';
+import { SUPPORTED_DISCOVERY_EXTENSIONS } from '../common/constants';
 import PdfPageSelector from './PdfPageSelector';
 import type { PageRange } from './PdfPageSelector';
 
@@ -850,7 +850,7 @@ const DiscoveryPanel = (): React.JSX.Element => {
                 type="file"
                 onChange={handleDocumentFileChange}
                 disabled={isUploading}
-                accept={SUPPORTED_UPLOAD_EXTENSIONS}
+                accept={SUPPORTED_DISCOVERY_EXTENSIONS}
               />
               {documentFile && (
                 <Box margin={{ top: 'xs' }}>
