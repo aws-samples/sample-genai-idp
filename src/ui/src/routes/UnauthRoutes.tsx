@@ -5,6 +5,7 @@ import { Navigate, Route, Routes } from 'react-router-dom';
 
 import { Authenticator } from '@aws-amplify/ui-react';
 import { signInWithRedirect } from 'aws-amplify/auth';
+import Button from '@cloudscape-design/components/button';
 
 import { LOGIN_PATH, LOGOUT_PATH, REDIRECT_URL_PARAM } from './constants';
 
@@ -13,8 +14,11 @@ const VITE_SHOULD_HIDE_SIGN_UP = import.meta.env.VITE_SHOULD_HIDE_SIGN_UP ?? 'tr
 const VITE_EXTERNAL_IDP_NAME = import.meta.env.VITE_EXTERNAL_IDP_NAME ?? '';
 const VITE_EXTERNAL_IDP_AUTO_LOGIN = import.meta.env.VITE_EXTERNAL_IDP_AUTO_LOGIN ?? 'false';
 
-// Track whether auto-login redirect has been attempted to prevent loops
-let autoLoginAttempted = false;
+// Track whether auto-login redirect has been attempted to prevent loops.
+// Uses sessionStorage (not a module-level variable) so it survives page refreshes
+// and is consistent with the idp_signed_out flag pattern.
+const getAutoLoginAttempted = () => sessionStorage.getItem('idp_auto_login_attempted') === 'true';
+const setAutoLoginAttempted = () => sessionStorage.setItem('idp_auto_login_attempted', 'true');
 
 const AuthHeader = (): React.JSX.Element => (
   <h1 style={{ textAlign: 'center', margin: '2rem 0' }}>Welcome to GenAI Intelligent Document Processing!</h1>
@@ -25,24 +29,13 @@ const FederatedSignInButton = (): React.JSX.Element | null => {
 
   return (
     <div style={{ textAlign: 'center', margin: '1rem 0' }}>
-      <button
-        type="button"
+      <Button
+        variant="primary"
+        fullWidth
         onClick={() => signInWithRedirect({ provider: { custom: VITE_EXTERNAL_IDP_NAME } })}
-        style={{
-          width: '100%',
-          maxWidth: '400px',
-          padding: '0.75rem 1rem',
-          fontSize: '1rem',
-          fontWeight: 500,
-          color: '#fff',
-          backgroundColor: '#0073bb',
-          border: 'none',
-          borderRadius: '4px',
-          cursor: 'pointer',
-        }}
       >
         Sign in with {VITE_EXTERNAL_IDP_NAME}
-      </button>
+      </Button>
       <div style={{ margin: '1rem 0', color: '#666', fontSize: '0.875rem' }}>— or sign in with username —</div>
     </div>
   );
@@ -61,8 +54,8 @@ const AutoLoginOrAuthenticator = (): React.JSX.Element => {
   const userSignedOut = sessionStorage.getItem('idp_signed_out') === 'true';
 
   // Auto-redirect to external IdP if configured, not already attempted, no error, and user didn't just sign out
-  if (VITE_EXTERNAL_IDP_NAME && VITE_EXTERNAL_IDP_AUTO_LOGIN === 'true' && !autoLoginAttempted && !hasError && !userSignedOut) {
-    autoLoginAttempted = true;
+  if (VITE_EXTERNAL_IDP_NAME && VITE_EXTERNAL_IDP_AUTO_LOGIN === 'true' && !getAutoLoginAttempted() && !hasError && !userSignedOut) {
+    setAutoLoginAttempted();
     signInWithRedirect({ provider: { custom: VITE_EXTERNAL_IDP_NAME } });
     return <div style={{ textAlign: 'center', margin: '4rem 0' }}>Redirecting to {VITE_EXTERNAL_IDP_NAME}...</div>;
   }

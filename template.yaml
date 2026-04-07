@@ -118,12 +118,12 @@ Parameters:
     Description: >-
       (Required for OIDC) The client ID registered with your OIDC identity provider.
 
-  ExternalIdPOIDCClientSecret:
+  ExternalIdPOIDCClientSecretArn:
     Type: String
     Default: ""
-    NoEcho: true
     Description: >-
-      (Required for OIDC) The client secret registered with your OIDC identity provider.
+      (Required for OIDC) The ARN of an AWS Secrets Manager secret containing the OIDC client secret.
+      Create the secret before deploying: aws secretsmanager create-secret --name my-idp-oidc-secret --secret-string "YOUR_CLIENT_SECRET"
 
   ExternalIdPGroupAttributeName:
     Type: String
@@ -639,7 +639,7 @@ Metadata:
           - ExternalIdPMetadataURL
           - ExternalIdPOIDCIssuer
           - ExternalIdPOIDCClientId
-          - ExternalIdPOIDCClientSecret
+          - ExternalIdPOIDCClientSecretArn
           - ExternalIdPGroupAttributeName
           - ExternalIdPAdminGroupName
           - ExternalIdPAuthorGroupName
@@ -5694,6 +5694,11 @@ Resources:
         {####}.
       EmailVerificationSubject: >-
         Account Verification
+      # LambdaConfig condition matrix (ShouldAllowSignUpEmailDomain × ShouldMapExternalIdPGroups):
+      #   EmailDomain=Y, GroupMap=Y → PreAuth + PreSignUp + PreTokenGen
+      #   EmailDomain=Y, GroupMap=N → PreAuth + PreSignUp only
+      #   EmailDomain=N, GroupMap=Y → PreTokenGen only
+      #   EmailDomain=N, GroupMap=N → no LambdaConfig (AWS::NoValue)
       LambdaConfig: !If
         - ShouldAllowSignUpEmailDomain
         - PreAuthentication: !GetAtt CognitoUserPoolEmailDomainVerifyFunction.Arn
@@ -5788,6 +5793,74 @@ Resources:
   # External Identity Provider (SAML/OIDC Federation)
   ##########################################################################
 
+  # Custom Resource Lambda to resolve OIDC client secret from Secrets Manager at deploy time.
+  # This avoids passing the secret as a CloudFormation parameter (visible via describe-stacks API).
+  ResolveOIDCClientSecretFunction:
+    Type: AWS::Serverless::Function
+    Condition: IsExternalIdPOIDC
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: "Function does not require VPC access as it only interacts with AWS services via APIs"
+          - id: W92
+            reason: "Function does not require reserved concurrency as it scales based on demand"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for Cfn Custom Resource function"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
+    Properties:
+      PermissionsBoundary:
+        !If [
+          HasPermissionsBoundary,
+          !Ref PermissionsBoundaryArn,
+          !Ref AWS::NoValue,
+        ]
+      Description: Resolves OIDC client secret from Secrets Manager for Cognito IdP configuration
+      Handler: index.handler
+      Runtime: python3.12
+      Timeout: 30
+      MemorySize: 128
+      LoggingConfig:
+        LogGroup: !Ref ResolveOIDCClientSecretFunctionLogGroup
+      Policies:
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+              Resource: !Ref ExternalIdPOIDCClientSecretArn
+      InlineCode: |
+        import cfnresponse
+        import boto3
+        def handler(event, context):
+            if event['RequestType'] == 'Delete':
+                cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+                return
+            try:
+                secret_arn = event['ResourceProperties']['SecretArn']
+                client = boto3.client('secretsmanager')
+                response = client.get_secret_value(SecretId=secret_arn)
+                # Return secret value as a custom resource attribute (NoEcho by design)
+                cfnresponse.send(event, context, cfnresponse.SUCCESS, {
+                    'SecretValue': response['SecretString']
+                })
+            except Exception as e:
+                cfnresponse.send(event, context, cfnresponse.FAILED, {}, reason=str(e))
+
+  ResolveOIDCClientSecretFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Condition: IsExternalIdPOIDC
+    Properties:
+      KmsKeyId: !GetAtt CustomerManagedEncryptionKey.Arn
+      RetentionInDays: !Ref LogRetentionDays
+
+  ResolveOIDCClientSecret:
+    Type: Custom::ResolveSecret
+    Condition: IsExternalIdPOIDC
+    Properties:
+      ServiceToken: !GetAtt ResolveOIDCClientSecretFunction.Arn
+      SecretArn: !Ref ExternalIdPOIDCClientSecretArn
+
   # Create conditional dependency on ExternalIdentityProvider
   ExternalIdentityProviderReady:
     Type: AWS::CloudFormation::WaitConditionHandle
@@ -5810,10 +5883,10 @@ Resources:
         - IsExternalIdPSAML
         - MetadataURL: !Ref ExternalIdPMetadataURL
         - client_id: !Ref ExternalIdPOIDCClientId
-          client_secret: !Ref ExternalIdPOIDCClientSecret
+          client_secret: !GetAtt ResolveOIDCClientSecret.SecretValue
           oidc_issuer: !Ref ExternalIdPOIDCIssuer
           attributes_request_method: GET
-          authorize_scopes: "openid email profile groups"
+          authorize_scopes: "openid email profile"
       AttributeMapping:
         email: !If
           - IsExternalIdPSAML
@@ -5859,15 +5932,7 @@ Resources:
           VIEWER_GROUP_NAME: !Ref ExternalIdPViewerGroupName
       LoggingConfig:
         LogGroup: !Ref ExternalIdPGroupMappingFunctionLogGroup
-      Policies:
-        - Version: "2012-10-17"
-          Statement:
-            - Effect: Allow
-              Action:
-                - cognito-idp:AdminListGroupsForUser
-                - cognito-idp:AdminAddUserToGroup
-                - cognito-idp:AdminRemoveUserFromGroup
-              Resource: !Sub "arn:${AWS::Partition}:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/*"
+      Policies: []
       InlineCode: |
         """Post-authentication Lambda trigger to map external IdP groups to Cognito groups."""
         import os
@@ -5911,6 +5976,9 @@ Resources:
             # Parse IdP groups - handle comma-separated, JSON array, or single value
             idp_groups = []
             idp_groups_raw = idp_groups_raw.strip()
+            if not idp_groups_raw:
+                logger.info(f"No IdP groups claim for user {username}")
+                return event
             if idp_groups_raw.startswith("["):
                 import json
                 try:
@@ -5980,6 +6048,26 @@ Resources:
     Properties:
       KmsKeyId: !GetAtt CustomerManagedEncryptionKey.Arn
       RetentionInDays: !Ref LogRetentionDays
+
+  # Separate IAM policy scoped to the specific UserPool.
+  # Defined as a standalone resource to avoid a circular dependency:
+  # UserPool → LambdaConfig → Function → Role → UserPool
+  ExternalIdPGroupMappingCognitoPolicy:
+    Type: AWS::IAM::Policy
+    Condition: ShouldMapExternalIdPGroups
+    Properties:
+      PolicyName: ExternalIdPGroupMappingCognitoAccess
+      Roles:
+        - !Ref ExternalIdPGroupMappingFunctionRole
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - cognito-idp:AdminListGroupsForUser
+              - cognito-idp:AdminAddUserToGroup
+              - cognito-idp:AdminRemoveUserFromGroup
+            Resource: !Sub "arn:${AWS::Partition}:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${UserPool}"
 
   ExternalIdPGroupMappingPermission:
     Type: AWS::Lambda::Permission
@@ -7831,25 +7919,38 @@ Outputs:
   SQSDocumentQueueConsoleURL:
     Description: SQS Queue console URL
     Value: !Sub https://${AWS::Region}.console.aws.amazon.com/sqs/v2/home?region=${AWS::Region}#/queues/${DocumentQueue}
+  # NOTE: Federation VITE_ vars below will be empty when ExternalIdPName is not set.
+  # This is expected — !Sub blocks cannot conditionally omit lines. Empty values are
+  # harmless in .env files. The CodeBuild section uses !If for build-time optimization.
   WebUITestEnvFile:
     Description: Copy to create .env file for local UI testing
-    Value: !Sub |-
-      VITE_USER_POOL_ID=${UserPool}
-      VITE_USER_POOL_CLIENT_ID=${UserPoolClient}
-      VITE_IDENTITY_POOL_ID=${IdentityPool}
-      VITE_APPSYNC_GRAPHQL_URL=${GraphQLApi.GraphQLUrl}
-      VITE_AWS_REGION=${AWS::Region}
-      VITE_SETTINGS_PARAMETER=${SettingsParameter}
-      VITE_COGNITO_DOMAIN=${GetDomain.OutputString}.auth.${AWS::Region}.amazoncognito.com
-      VITE_EXTERNAL_IDP_NAME=${ExternalIdPName}
-      VITE_EXTERNAL_IDP_AUTO_LOGIN=${ExternalIdPAutoLogin}
-      VITE_TEST_SET_BUCKET_NAME=${TestSetBucket}
-      VITE_INPUT_BUCKET_NAME=${InputBucket}
-      VITE_LATENCY_OPTIONS=[60, 120, 300, 600, 900, 1800, 3600]
-      VITE_DEFAULT_MAX_LATENCY=60
-      VITE_DEFAULT_TOKENS_BY_STEP={"OCR":4000,"Classification":2000,"Extraction":8000,"Assessment":4000,"Summarization":4000,"default":4000}
-      VITE_DEFAULT_MAX_TOKENS_PER_REQUEST=4000
-      VITE_BDA_TOKENS_PER_PAGE=2000
+    Value: !Join
+      - "\n"
+      - - !Sub "VITE_USER_POOL_ID=${UserPool}"
+        - !Sub "VITE_USER_POOL_CLIENT_ID=${UserPoolClient}"
+        - !Sub "VITE_IDENTITY_POOL_ID=${IdentityPool}"
+        - !Sub "VITE_APPSYNC_GRAPHQL_URL=${GraphQLApi.GraphQLUrl}"
+        - !Sub "VITE_AWS_REGION=${AWS::Region}"
+        - !Sub "VITE_SETTINGS_PARAMETER=${SettingsParameter}"
+        - !If
+          - HasExternalIdP
+          - !Sub "VITE_COGNITO_DOMAIN=${GetDomain.OutputString}.auth.${AWS::Region}.amazoncognito.com"
+          - ""
+        - !If
+          - HasExternalIdP
+          - !Sub "VITE_EXTERNAL_IDP_NAME=${ExternalIdPName}"
+          - ""
+        - !If
+          - HasExternalIdP
+          - !Sub "VITE_EXTERNAL_IDP_AUTO_LOGIN=${ExternalIdPAutoLogin}"
+          - ""
+        - !Sub "VITE_TEST_SET_BUCKET_NAME=${TestSetBucket}"
+        - !Sub "VITE_INPUT_BUCKET_NAME=${InputBucket}"
+        - "VITE_LATENCY_OPTIONS=[60, 120, 300, 600, 900, 1800, 3600]"
+        - "VITE_DEFAULT_MAX_LATENCY=60"
+        - 'VITE_DEFAULT_TOKENS_BY_STEP={"OCR":4000,"Classification":2000,"Extraction":8000,"Assessment":4000,"Summarization":4000,"default":4000}'
+        - "VITE_DEFAULT_MAX_TOKENS_PER_REQUEST=4000"
+        - "VITE_BDA_TOKENS_PER_PAGE=2000"
   ExternalMCPAgentsSecretConsoleURL:
     Description: External MCP Agents secret console URL - configure MCP server credentials here (JSON array format)
     Value: !Sub "https://${AWS::Region}.console.aws.amazon.com/secretsmanager/secret?name=${AWS::StackName}/external-mcp-agents/credentials&region=${AWS::Region}"

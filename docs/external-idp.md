@@ -40,13 +40,39 @@ Both work equally well with this solution. Choose based on what your IdP team pr
 | `ExternalIdPMetadataURL` | SAML only | SAML metadata document URL from your IdP |
 | `ExternalIdPOIDCIssuer` | OIDC only | OIDC issuer URL (e.g., `https://auth.pingone.com/<env-id>/as`) |
 | `ExternalIdPOIDCClientId` | OIDC only | OIDC client ID from your IdP |
-| `ExternalIdPOIDCClientSecret` | OIDC only | OIDC client secret from your IdP |
+| `ExternalIdPOIDCClientSecretArn` | OIDC only | ARN of a Secrets Manager secret containing the OIDC client secret (see [Storing the OIDC Client Secret](#storing-the-oidc-client-secret) below) |
 | `ExternalIdPGroupAttributeName` | Optional | Attribute/claim name carrying group membership |
 | `ExternalIdPAdminGroupName` | Optional | IdP group name that maps to Cognito Admin role |
 | `ExternalIdPAuthorGroupName` | Optional | IdP group name that maps to Cognito Author role |
 | `ExternalIdPReviewerGroupName` | Optional | IdP group name that maps to Cognito Reviewer role |
 | `ExternalIdPViewerGroupName` | Optional | IdP group name that maps to Cognito Viewer role |
 | `ExternalIdPAutoLogin` | Optional | `true` to auto-redirect to IdP, `false` (default) to show login page |
+
+## Storing the OIDC Client Secret
+
+For OIDC federation, the client secret must be stored in AWS Secrets Manager **before** deploying the stack. This ensures the secret never passes through CloudFormation parameters (which are visible via the `describe-stacks` API).
+
+**Create the secret:**
+
+```bash
+aws secretsmanager create-secret \
+  --name "my-idp-oidc-client-secret" \
+  --description "OIDC client secret for GenAI IDP federation" \
+  --secret-string "YOUR_CLIENT_SECRET_HERE" \
+  --region us-east-1
+```
+
+Note the ARN from the output — you'll pass it as the `ExternalIdPOIDCClientSecretArn` parameter during deployment.
+
+**To rotate the secret later:**
+
+```bash
+aws secretsmanager update-secret \
+  --secret-id "my-idp-oidc-client-secret" \
+  --secret-string "NEW_CLIENT_SECRET_HERE"
+```
+
+Then redeploy the stack to pick up the new value.
 
 ## Prerequisites (All Providers)
 
@@ -208,7 +234,7 @@ ExternalIdPType=OIDC,\
 ExternalIdPName=PingOne,\
 ExternalIdPOIDCIssuer=https://auth.pingone.com/<env-id>/as,\
 ExternalIdPOIDCClientId=<your-client-id>,\
-ExternalIdPOIDCClientSecret=<your-client-secret>,\
+ExternalIdPOIDCClientSecretArn=arn:aws:secretsmanager:us-east-1:123456789012:secret:my-pingone-oidc-secret-AbCdEf,\
 ExternalIdPGroupAttributeName=groups,\
 ExternalIdPAdminGroupName=IDP-Admins,\
 ExternalIdPAuthorGroupName=IDP-Authors,\
@@ -341,7 +367,7 @@ ExternalIdPType=OIDC,\
 ExternalIdPName=Okta,\
 ExternalIdPOIDCIssuer=https://<okta-domain>/oauth2/default,\
 ExternalIdPOIDCClientId=<your-client-id>,\
-ExternalIdPOIDCClientSecret=<your-client-secret>,\
+ExternalIdPOIDCClientSecretArn=arn:aws:secretsmanager:us-east-1:123456789012:secret:my-okta-oidc-secret-AbCdEf,\
 ExternalIdPGroupAttributeName=groups,\
 ExternalIdPAdminGroupName=IDP-Admins,\
 ExternalIdPAuthorGroupName=IDP-Authors,\
@@ -482,7 +508,7 @@ ExternalIdPType=OIDC,\
 ExternalIdPName=EntraID,\
 ExternalIdPOIDCIssuer=https://login.microsoftonline.com/<tenant-id>/v2.0,\
 ExternalIdPOIDCClientId=<your-client-id>,\
-ExternalIdPOIDCClientSecret=<your-client-secret>,\
+ExternalIdPOIDCClientSecretArn=arn:aws:secretsmanager:us-east-1:123456789012:secret:my-entraid-oidc-secret-AbCdEf,\
 ExternalIdPGroupAttributeName=groups,\
 ExternalIdPAdminGroupName=<admin-group-object-id>,\
 ExternalIdPAuthorGroupName=<author-group-object-id>,\

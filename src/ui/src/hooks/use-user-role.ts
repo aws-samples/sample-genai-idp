@@ -52,13 +52,18 @@ const useUserRole = (): UserRoleReturn => {
         let groupsArray = Array.isArray(userGroups) ? (userGroups as string[]) : [userGroups as string];
 
         // For federated users on first login, groups may not be in the initial token.
-        // Force a token refresh to pick up groups assigned by the PreTokenGeneration Lambda.
+        // Force a single token refresh to pick up groups assigned by the PreTokenGeneration Lambda.
+        // This only runs once (empty deps array) so it won't cause excessive refresh calls.
         const isFederated = (session?.tokens?.idToken?.payload?.['identities'] as string | undefined) !== undefined;
         const appGroups = groupsArray.filter((g) => ['Admin', 'Author', 'Reviewer', 'Viewer'].includes(g));
         if (isFederated && appGroups.length === 0) {
-          const refreshed = await fetchAuthSession({ forceRefresh: true });
-          const refreshedGroups = refreshed?.tokens?.idToken?.payload?.['cognito:groups'] || [];
-          groupsArray = Array.isArray(refreshedGroups) ? (refreshedGroups as string[]) : [refreshedGroups as string];
+          try {
+            const refreshed = await fetchAuthSession({ forceRefresh: true });
+            const refreshedGroups = refreshed?.tokens?.idToken?.payload?.['cognito:groups'] || [];
+            groupsArray = Array.isArray(refreshedGroups) ? (refreshedGroups as string[]) : [refreshedGroups as string];
+          } catch (refreshErr) {
+            console.warn('Token refresh for federated group sync failed:', refreshErr);
+          }
         }
 
         setGroups(groupsArray);
