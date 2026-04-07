@@ -29,11 +29,7 @@ const FederatedSignInButton = (): React.JSX.Element | null => {
 
   return (
     <div style={{ textAlign: 'center', margin: '1rem 0' }}>
-      <Button
-        variant="primary"
-        fullWidth
-        onClick={() => signInWithRedirect({ provider: { custom: VITE_EXTERNAL_IDP_NAME } })}
-      >
+      <Button variant="primary" fullWidth onClick={() => signInWithRedirect({ provider: { custom: VITE_EXTERNAL_IDP_NAME } })}>
         Sign in with {VITE_EXTERNAL_IDP_NAME}
       </Button>
       <div style={{ margin: '1rem 0', color: '#666', fontSize: '0.875rem' }}>— or sign in with username —</div>
