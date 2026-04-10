@@ -33,7 +33,7 @@
     "ajv": "^8.18.0",
     "ajv-formats": "^2.1.1",
     "aws-amplify": "^6.16.2",
-    "axios": "^1.12.1",
+    "axios": "^1.15.0",
     "brace-expansion": "^2.0.3",
     "chart.js": "^4.5.0",
     "form-data": "^4.0.4",
