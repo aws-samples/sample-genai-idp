@@ -5710,7 +5710,7 @@ Resources:
     Type: AWS::Cognito::UserPoolClient
     Condition: CreateExternalAppClient
     Properties:
-      ClientName: "external-app-client"
+      ClientName: "User-Authorized-MCP-Client"
       UserPoolId: !Ref UserPool
       GenerateSecret: true
       ExplicitAuthFlows:
@@ -5765,9 +5765,11 @@ Resources:
     Condition: CreateAgentCoreLambda
     DependsOn: MCPResourceServer
     Properties:
-      ClientName: "mcp-connector-client"
+      ClientName: "Machine-Authorized-MCP-Client"
       UserPoolId: !Ref UserPool
       GenerateSecret: true
+      EnableTokenRevocation: true
+      PreventUserExistenceErrors: ENABLED
       AllowedOAuthFlows:
         - client_credentials
       AllowedOAuthFlowsUserPoolClient: true
@@ -9081,11 +9083,11 @@ Outputs:
     Value: !GetAtt AgentCoreGateway.GatewayUrl
   MCPClientId:
     Condition: CreateAgentCoreLambda
-    Description: Cognito client ID for user-based authentication with the IDP MCP server. Used by external applications like Amazon QuickSight that require user password authentication.
+    Description: Cognito client ID for user-based (3-legged OAuth) authentication with the IDP MCP server (User-Authorized-MCP-Client)
     Value: !Ref ExternalAppClient
   MCPClientSecret:
     Condition: CreateAgentCoreLambda
-    Description: Cognito client secret for user-based authentication with the IDP MCP server. Used by external applications like Amazon QuickSight that require user password authentication.
+    Description: Cognito client secret for user-based (3-legged OAuth) authentication with the IDP MCP server (User-Authorized-MCP-Client)
     Value: !GetAtt ExternalAppClient.ClientSecret
   MCPUserPool:
     Condition: CreateAgentCoreLambda
@@ -9101,11 +9103,11 @@ Outputs:
     Value: !Sub "https://${GetDomain.OutputString}.auth.${AWS::Region}.amazoncognito.com/oauth2/authorize"
   MCPConnectorClientId:
     Condition: CreateAgentCoreLambda
-    Description: Cognito client ID used by the MCP Connector for machine-to-machine (M2M) authentication with the IDP system
+    Description: Cognito client ID for machine-to-machine (2-legged OAuth) authentication with the IDP MCP server (Machine-Authorized-MCP-Client)
     Value: !Ref MCPConnectorClient
   MCPConnectorClientSecret:
     Condition: CreateAgentCoreLambda
-    Description: Cognito client secret used by the MCP Connector for machine-to-machine (M2M) authentication with the IDP system
+    Description: Cognito client secret for machine-to-machine (2-legged OAuth) authentication with the IDP MCP server (Machine-Authorized-MCP-Client)
     Value: !GetAtt MCPConnectorClient.ClientSecret
   MCPContentBucketConsoleURL:
     Description: MCP server content bucket console URL
