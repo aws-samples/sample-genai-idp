@@ -66,6 +66,10 @@ DEFAULT_INITIAL_BACKOFF = 2  # seconds
 DEFAULT_MAX_BACKOFF = 300  # 5 minutes
 
 
+# Base model names that support cachePoint (without region prefix)
+# Used to check inference profiles by resolving their underlying foundation model
+_CACHEPOINT_BASE_MODELS = set()
+
 # Models that support cachePoint functionality
 CACHEPOINT_SUPPORTED_MODELS = [
     "us.anthropic.claude-3-5-haiku-20241022-v1:0",
@@ -111,6 +115,21 @@ CACHEPOINT_SUPPORTED_MODELS = [
     "global.anthropic.claude-opus-4-6-v1:1m",
 ]
 
+# Build set of base model names (without region/tier prefixes) for inference profile resolution.
+# e.g., "us.anthropic.claude-sonnet-4-6" -> "anthropic.claude-sonnet-4-6"
+# and "eu.amazon.nova-2-lite-v1:0:priority" -> "amazon.nova-2-lite-v1:0"
+for _model_id in CACHEPOINT_SUPPORTED_MODELS:
+    _parts = _model_id.split(".", 1)
+    if len(_parts) == 2 and _parts[0] in ("us", "eu", "global"):
+        _base = _parts[1]
+        # Strip tier suffixes (:priority, :flex) but keep version suffixes (:0, :1m)
+        if _base.endswith(":priority") or _base.endswith(":flex"):
+            _base = _base.rsplit(":", 1)[0]
+        _CACHEPOINT_BASE_MODELS.add(_base)
+
+# Module-level cache for inference profile -> cachepoint support resolution
+_inference_profile_cachepoint_cache: Dict[str, bool] = {}
+
 
 class BedrockClient:
     """Client for interacting with Amazon Bedrock models and custom Lambda hooks."""
@@ -139,6 +158,7 @@ class BedrockClient:
         self.max_backoff = max_backoff
         self.metrics_enabled = metrics_enabled
         self._client = None
+        self._bedrock_control_client = None
         self._lambda_client = None
         self._s3_client = None
 
@@ -165,6 +185,15 @@ class BedrockClient:
         return self._lambda_client
 
     @property
+    def bedrock_control_client(self):
+        """Lazy-loaded Bedrock control plane client for GetInferenceProfile etc."""
+        if self._bedrock_control_client is None:
+            self._bedrock_control_client = boto3.client(
+                "bedrock", region_name=self.region
+            )
+        return self._bedrock_control_client
+
+    @property
     def s3_client(self):
         """Lazy-loaded S3 client for LambdaHook image uploads."""
         if self._s3_client is None:
@@ -172,6 +201,93 @@ class BedrockClient:
                 "s3", region_name=self.region
             )
         return self._s3_client
+
+    def _is_model_cachepoint_supported(self, model_id: str) -> bool:
+        """
+        Check if a model supports cachePoint, including inference profile resolution.
+
+        For standard model IDs (e.g., "us.anthropic.claude-sonnet-4-6"), checks
+        the CACHEPOINT_SUPPORTED_MODELS list directly.
+
+        For inference profile ARNs (containing "inference-profile" or
+        "application-inference-profile"), resolves the underlying foundation
+        model via the GetInferenceProfile API and checks if that base model
+        supports cachePoint. Results are cached to avoid repeated API calls.
+
+        Args:
+            model_id: Bedrock model ID or inference profile ARN
+
+        Returns:
+            True if the model (or underlying model for inference profiles) supports cachePoint
+        """
+        # Fast path: direct match against the known list
+        if model_id in CACHEPOINT_SUPPORTED_MODELS:
+            return True
+
+        # Check if this is an inference profile ARN
+        if "inference-profile" not in model_id:
+            return False
+
+        # Check module-level cache
+        if model_id in _inference_profile_cachepoint_cache:
+            cached = _inference_profile_cachepoint_cache[model_id]
+            logger.debug(
+                f"Inference profile cachepoint support (cached): {model_id} -> {cached}"
+            )
+            return cached
+
+        # Resolve the inference profile to its underlying foundation model
+        try:
+            response = self.bedrock_control_client.get_inference_profile(
+                inferenceProfileIdentifier=model_id
+            )
+            models = response.get("models", [])
+            if not models:
+                logger.warning(
+                    f"Inference profile {model_id} has no models listed. "
+                    "Cannot determine cachePoint support."
+                )
+                _inference_profile_cachepoint_cache[model_id] = False
+                return False
+
+            # Extract the base model name from the first model's ARN.
+            # Model ARN format: arn:aws:bedrock:<region>::foundation-model/<base-model-name>
+            # e.g., "arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-sonnet-4-6"
+            first_model_arn = models[0].get("modelArn", "")
+            if "foundation-model/" in first_model_arn:
+                base_model_name = first_model_arn.split("foundation-model/")[-1]
+            else:
+                logger.warning(
+                    f"Cannot parse foundation model from ARN: {first_model_arn}"
+                )
+                _inference_profile_cachepoint_cache[model_id] = False
+                return False
+
+            supported = base_model_name in _CACHEPOINT_BASE_MODELS
+            _inference_profile_cachepoint_cache[model_id] = supported
+
+            logger.info(
+                f"Resolved inference profile {model_id} -> "
+                f"foundation model '{base_model_name}' -> "
+                f"cachePoint {'supported' if supported else 'not supported'}"
+            )
+            return supported
+
+        except ClientError as e:
+            error_code = e.response["Error"]["Code"]
+            logger.warning(
+                f"Failed to resolve inference profile {model_id} for cachePoint check "
+                f"({error_code}): {e}. Disabling cachePoint for this model."
+            )
+            _inference_profile_cachepoint_cache[model_id] = False
+            return False
+        except Exception as e:
+            logger.warning(
+                f"Unexpected error resolving inference profile {model_id} "
+                f"for cachePoint check: {e}. Disabling cachePoint for this model."
+            )
+            _inference_profile_cachepoint_cache[model_id] = False
+            return False
 
     def __call__(
         self,
@@ -375,7 +491,7 @@ class BedrockClient:
         )
 
         if has_cachepoint_tags:
-            if model_id in CACHEPOINT_SUPPORTED_MODELS:
+            if self._is_model_cachepoint_supported(model_id):
                 # Process content for cachePoint tags with supported model
                 processed_content = self._preprocess_content_for_cachepoint(content)
                 logger.info(
@@ -394,7 +510,9 @@ class BedrockClient:
                         clean_text = item["text"].replace("<<CACHEPOINT>>", "")
                         processed_content.append({"text": clean_text})
                         logger.warning(
-                            f"Removed <<CACHEPOINT>> tags for unsupported model: {model_id}. CachePoint is only supported for: {', '.join(CACHEPOINT_SUPPORTED_MODELS)}"
+                            f"Removed <<CACHEPOINT>> tags for unsupported model: {model_id}. "
+                            "CachePoint is supported for standard cross-region inference profiles "
+                            "and application inference profiles that wrap supported foundation models."
                         )
                     else:
                         # Pass through unchanged

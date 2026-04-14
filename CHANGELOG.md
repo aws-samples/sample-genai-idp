@@ -9,6 +9,12 @@ SPDX-License-Identifier: MIT-0
 
 - **Configuration Version in Metering Database** — Added `config_version` field to the metering database to enable cost tracking and analytics per configuration version. The metering Glue table now includes a `config_version` column, and all metering Parquet files store the configuration version used for each document. Enables Athena queries to compare costs across different configurations, support A/B testing analytics, and optimize per-version costs. Documents without a config version default to "default".
 
+### Fixed
+
+- **Application Inference Profile IAM permissions** — Added `application-inference-profile/*` ARN pattern to `bedrock:InvokeModel` IAM policies across all templates (root, appsync, multi-doc-discovery, and sample templates). PR #236 previously fixed only `patterns/unified/template.yaml`; this completes the fix for all Lambda execution roles. Also added `bedrock:GetInferenceProfile` read permission to support prompt caching resolution. ([#272](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues/272))
+
+- **Prompt caching with application inference profiles** — Fixed `<<CACHEPOINT>>` tags being stripped when using Bedrock application inference profile ARNs as model IDs. The cachepoint check now resolves inference profile ARNs to their underlying foundation model via the `GetInferenceProfile` API, enabling prompt caching for profiles that wrap supported models (Claude, Nova). Results are cached to avoid repeated API calls, with graceful fallback if the API call fails. ([#272](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues/272))
+
 ## [0.5.6]
 
 ### Added
