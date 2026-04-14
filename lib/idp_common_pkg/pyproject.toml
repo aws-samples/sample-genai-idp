@@ -145,7 +145,7 @@ docs_service = [
 
 # Testing dependencies
 test = [
-  "pytest>=7.4.0",
+  "pytest>=9.0.3",
   "pytest-cov>=4.1.0",
   "pytest-xdist>=3.3.1",            # For parallel test execution
   "requests (>=2.32.3,<3.0.0)",
