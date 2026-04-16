@@ -59,7 +59,7 @@
     "uuid": "^11.1.0",
     "vuera": "^0.2.7",
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.2/xlsx-0.20.2.tgz",
-    "dompurify": "^3.4.0"
+    "dompurify": "^3.3.2"
   },
   "scripts": {
     "dev": "vite",
