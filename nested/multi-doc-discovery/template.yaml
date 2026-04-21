@@ -62,8 +62,36 @@ Parameters:
     Description: AppSync GraphQL API ARN for IAM permissions
     Default: ""
 
+  # ── Air-gapped / VPC placement parameters ────────────────────────────────
+  # Leave empty for standard internet-connected deployments.
+  LambdaBaseImage:
+    Type: String
+    Default: ""
+    Description: >-
+      (Optional — air-gapped) Internal ECR URI for the Lambda Python 3.12 base image.
+      Replaces public.ecr.aws/lambda/python:3.12 in the inline Dockerfile.
+      Example: 123456789012.dkr.ecr.us-east-1.amazonaws.com/idp-base:lambda-python-3.12-arm64
+  CodeBuildVpcId:
+    Type: String
+    Default: ""
+    Description: >-
+      (Optional — air-gapped) VPC ID to place CodeBuild in for network isolation.
+      Requires CodeBuildSubnetIds and CodeBuildSecurityGroupId.
+  CodeBuildSubnetIds:
+    Type: String
+    Default: ""
+    Description: >-
+      (Optional — air-gapped) Comma-separated subnet IDs for CodeBuild VPC placement.
+  CodeBuildSecurityGroupId:
+    Type: String
+    Default: ""
+    Description: >-
+      (Optional — air-gapped) Security group ID for CodeBuild VPC placement.
+
 Conditions:
   HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
+  HasLambdaBaseImage: !Not [!Equals [!Ref LambdaBaseImage, ""]]
+  UseCodeBuildVpc: !Not [!Equals [!Ref CodeBuildVpcId, ""]]
 
 Resources:
   ##########################################################################
@@ -162,6 +190,21 @@ Resources:
                   - kms:GenerateDataKey*
                   - kms:DescribeKey
                 Resource: !Ref CustomerManagedEncryptionKeyArn
+              # Required by CodeBuild when placed in a VPC (CodeBuildVpcId is set).
+              - !If
+                - UseCodeBuildVpc
+                - Effect: Allow
+                  Action:
+                    - ec2:CreateNetworkInterface
+                    - ec2:DescribeNetworkInterfaces
+                    - ec2:DeleteNetworkInterface
+                    - ec2:DescribeSubnets
+                    - ec2:DescribeSecurityGroups
+                    - ec2:DescribeVpcs
+                    - ec2:DescribeDhcpOptions
+                    - ec2:CreateNetworkInterfacePermission
+                  Resource: "*"
+                - !Ref AWS::NoValue
 
   DockerBuildProject:
     Type: AWS::CodeBuild::Project
@@ -184,6 +227,9 @@ Resources:
             Value: !GetAtt ECRRepository.RepositoryUri
           - Name: IMAGE_TAG
             Value: latest
+          # ── Air-gapped: override base image if LambdaBaseImage is set ────────
+          - Name: LAMBDA_BASE_IMAGE
+            Value: !If [HasLambdaBaseImage, !Ref LambdaBaseImage, "public.ecr.aws/lambda/python:3.12"]
       Source:
         Type: S3
         Location: !Sub "${ArtifactBucket}/${SourceZipfile}"
@@ -215,13 +261,13 @@ Resources:
                 - echo "Creating Dockerfile..."
                 - |
                   cat > Dockerfile << 'DOCKERFILE'
-                  FROM public.ecr.aws/lambda/python:3.12 AS builder
+                  FROM ${LAMBDA_BASE_IMAGE} AS builder
                   RUN dnf install -y gcc gcc-c++ make && dnf clean all
                   COPY requirements.txt /tmp/requirements.txt
                   RUN pip install --no-cache-dir --target /opt/python -r /tmp/requirements.txt
                   COPY lib/idp_common_pkg /tmp/idp_common_pkg
                   RUN pip install --no-cache-dir --no-deps --target /opt/python /tmp/idp_common_pkg
-                  FROM public.ecr.aws/lambda/python:3.12
+                  FROM ${LAMBDA_BASE_IMAGE}
                   COPY --from=builder /opt/python ${LAMBDA_TASK_ROOT}/../opt/python
                   ENV PYTHONPATH="${LAMBDA_TASK_ROOT}/../opt/python:${LAMBDA_TASK_ROOT}"
                   COPY src/lambda/multi_doc_discovery/*.py ${LAMBDA_TASK_ROOT}/
@@ -234,6 +280,13 @@ Resources:
                 - echo Pushing Docker image to ECR...
                 - docker push $ECR_REPO_URI:$IMAGE_TAG
                 - echo Build completed on `date`
+      VpcConfig: !If
+        - UseCodeBuildVpc
+        - VpcId: !Ref CodeBuildVpcId
+          Subnets: !Split [",", !Ref CodeBuildSubnetIds]
+          SecurityGroupIds:
+            - !Ref CodeBuildSecurityGroupId
+        - !Ref AWS::NoValue
       TimeoutInMinutes: 30
       EncryptionKey: !Ref CustomerManagedEncryptionKeyArn
 
