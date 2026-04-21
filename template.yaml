@@ -693,6 +693,9 @@ Conditions:
   EnableXRayTracingCondition: !Equals [ !Ref EnableXRayTracing, "true" ]
   UsePrivateAppSync: !Equals [ !Ref AppSyncVisibility, "PRIVATE" ]
   HasArtifactsBucketKmsKey: !Not [ !Equals [ !Ref ArtifactsBucketKmsKeyArn, "" ] ]
+  # Air-gapped CodeBuild conditions (used by UICodeBuildServiceRole and UICodeBuildProject)
+  HasArtifactoryCredentials: !Not [ !Equals [ !Ref ArtifactoryCredentialsSecretArn, "" ] ]
+  UseCodeBuildVpc: !Not [ !Equals [ !Ref CodeBuildVpcId, "" ] ]
 
 Metadata:
   cfn-lint:
@@ -7780,6 +7783,31 @@ Resources:
                     - kms:DescribeKey
                   Resource: !Ref ArtifactsBucketKmsKeyArn
                 - !Ref AWS::NoValue
+              # Allow UICodeBuild to read Artifactory credentials from Secrets Manager (air-gapped mode)
+              # Only applies when ArtifactoryCredentialsSecretArn is provided
+              - !If
+                - HasArtifactoryCredentials
+                - Effect: Allow
+                  Action:
+                    - secretsmanager:GetSecretValue
+                  Resource: !Ref ArtifactoryCredentialsSecretArn
+                - !Ref AWS::NoValue
+              # Required by CodeBuild when placed in a VPC (CodeBuildVpcId is set).
+              # CodeBuild needs to create/describe/delete ENIs to attach to the VPC.
+              - !If
+                - UseCodeBuildVpc
+                - Effect: Allow
+                  Action:
+                    - ec2:CreateNetworkInterface
+                    - ec2:DescribeNetworkInterfaces
+                    - ec2:DeleteNetworkInterface
+                    - ec2:DescribeSubnets
+                    - ec2:DescribeSecurityGroups
+                    - ec2:DescribeVpcs
+                    - ec2:DescribeDhcpOptions
+                    - ec2:CreateNetworkInterfacePermission
+                  Resource: "*"
+                - !Ref AWS::NoValue
 
   UICodeBuildProject:
     Type: AWS::CodeBuild::Project
@@ -7908,6 +7936,16 @@ Resources:
             Value: "4000"
           - Name: VITE_BDA_TOKENS_PER_PAGE
             Value: "2000"
+          # ── Air-gapped: internal npm registry URL (optional) ──────────────
+          - Name: NPM_REGISTRY_URL
+            Value: !Ref NpmRegistryUrl
+      VpcConfig: !If
+        - UseCodeBuildVpc
+        - VpcId: !Ref CodeBuildVpcId
+          Subnets: !Ref CodeBuildSubnetIds
+          SecurityGroupIds:
+            - !Ref CodeBuildSecurityGroupId
+        - !Ref AWS::NoValue
       TimeoutInMinutes: 30
 
   StartUICodeBuildExecutionRole:
