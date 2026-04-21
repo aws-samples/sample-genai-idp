@@ -197,13 +197,31 @@ If CodeBuild's subnets have no internet access at all (no NAT Gateway), you can 
 
 - CodeBuild runs entirely within your VPC with no public internet access
 - The subnets need VPC Interface Endpoints for: `ecr.api`, `ecr.dkr`, `codebuild`, `logs`, `secretsmanager` — plus a free S3 **Gateway** endpoint
-- Run the VPC endpoint deployment script with the `--codebuild-endpoints` flag to create them:
+- Run the VPC endpoint deployment script with the `--codebuild-endpoints` flag to create them
+
+**Step A: Create a security group for CodeBuild VPC placement**
+
+```bash
+CB_SG=$(aws ec2 create-security-group \
+  --group-name IDP-codebuild-sg \
+  --description "Security group for CodeBuild VPC placement" \
+  --vpc-id <vpc-id> \
+  --region <region> \
+  --query 'GroupId' --output text)
+echo "CodeBuild SG: $CB_SG"
+```
+
+The default egress rule (allow all outbound) is sufficient — CodeBuild only needs HTTPS (443) to the VPC endpoints.
+
+**Step B: Deploy VPC endpoints including CodeBuild endpoints**
+
+Pass `$CB_SG` as `--security-group-id` (the endpoints will allow inbound HTTPS from this SG):
 
 ```bash
 python scripts/deploy-vpc-endpoints.py \
   --vpc-id <vpc-id> \
   --stack-name IDP-PRIVATE \
-  --security-group-id <codebuild-sg-id> \
+  --security-group-id $CB_SG \
   --subnet-ids <subnet-1>,<subnet-2> \
   --codebuild-endpoints \
   --region <region>
