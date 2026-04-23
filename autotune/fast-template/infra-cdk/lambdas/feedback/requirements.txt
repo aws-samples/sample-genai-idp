@@ -1,0 +1,6 @@
+# Boto3 is included in the Python Lambda runtime, so it's unnecessary to include it here.
+#
+# When setting up your local development environment, you will want to intall, install the Lambda
+# PowerTools. In the CDK code it's installed as a layer, which means it's also not needed here. For
+# local development: pip install "aws-lambda-powertools[all]"
+pydantic

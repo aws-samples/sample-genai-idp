@@ -1,0 +1,5 @@
+# This file is only used for the mkdocs documentation hosting webpage
+nav:
+  - " ": # This an empty section header, which makes every .md file its own subsection
+    - index.md
+    - "*"

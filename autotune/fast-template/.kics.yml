@@ -1,0 +1,21 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# KICS configuration file to exclude files that cause parsing errors
+exclude-paths:
+  - "tests/pytest.ini"
+  - "node_modules/"
+  - ".git/"
+  - ".ruff_cache/"
+  - "infra-cdk/cdk.out/"
+  - "public/"
+  - "*.pyc"
+  - "__pycache__/"
+
+# Exclude file types that aren't security-relevant
+exclude-types:
+  - "log"
+  - "cache"
+
+# Limit memory usage
+max-file-size: 1048576  # 1MB max file size

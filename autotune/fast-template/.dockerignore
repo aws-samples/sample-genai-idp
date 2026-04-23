@@ -1,0 +1,23 @@
+# Exclude large directories to keep build context small
+node_modules/
+.git/
+frontend/node_modules/
+frontend/dist/
+infra-cdk/node_modules/
+infra-cdk/cdk.out/
+.ruff_cache/
+__pycache__/
+*.pyc
+.pytest_cache/
+.coverage
+htmlcov/
+dist/
+build/
+*.egg-info/
+.vscode/
+.idea/
+
+# Keep only what we need for Docker builds
+!gateway/
+!pyproject.toml
+!patterns/
