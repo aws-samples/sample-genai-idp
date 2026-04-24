@@ -118,33 +118,7 @@ Skills (symlinked): `/home/ubuntu/gitlab/idpac-skills/` (30 skills, separate rep
 
 **Skills (30 total, in `/home/ubuntu/gitlab/idpac-skills/`):**
 
-*MLP Priority 1 — Core optimization skills (needed for any dataset):*
-- `choosing-a-bedrock-model` — model selection (quality vs cost)
-- `extraction-prompt-engineering` — per-field schema enrichment
-- `evaluation-method-tuning` — per-field eval methods/thresholds
-- `inference-parameter-tuning` — temperature, top_p, max_tokens
-- `ocr-configuration` — OCR backend, features, image settings
-- `iterative-schema-refinement` — META-SKILL: orchestrates other skills
-- `json-output-fix` — fix JSON parsing failures
-- `token-limit-fix` — fix truncated output
-
-*MLP Priority 2 — Multi-class and advanced:*
-- `multi-class-setup` — classification setup
-- `classification-tuning` — improve classification accuracy
-- `classification-strategy-selection` — holistic vs page-level, regex bypass
-- `document-packet-splitting-tuning` — packet boundary detection
-- `nested-schema-design` — $defs/$ref for grouped fields
-- `extraction-few-shot-examples` — example-based prompting
-- `ground-truth-quality-analysis` — diagnose GT quality issues
-- `no-ground-truth-optimization` — best-effort without GT
-
-*MLP Priority 3 — Specialized/edge cases:*
-- `boolean-field-extraction`, `data-completeness-analysis`, `sparse-field-metric-selection`
-- `visual-spatial-extraction-challenges`, `stepwise-extraction-strategy`
-- `multilingual-documents`, `post-processing-task-decomposition`
-- `prompt-caching-optimization`, `conditional-ocr-cost-optimization`
-- `confidence-threshold-tuning`, `reasoning-enhanced-extraction`
-- `idp-analytics`
+Since skills are just markdown files that need to be copied, there are no priorities in terms of migrating them. They can all be migrated at once.
 
 ### 0.5 Research: IDP Accelerator ↔ AutoTune Integration Requirements
 
@@ -199,24 +173,37 @@ AutoTune and the IDP Accelerator are deployed in the **same AWS account** but as
 **Container notes:** Base image is `uv:python3.13-bookworm-slim`, runs as non-root user `bedrock_agentcore` (uid 1000). Has full Linux userspace but no AWS CLI or idp-cli pre-installed — must add to Dockerfile. Subprocess calls are allowed (ruff config ignores S603/S607).
 
 ---
-## Phase 0: Create a virtual env that we can re-use for building IDPAutoTune and document how to activate/use it in this document.
+### Phase 0 (cont.): Development Virtual Environment
+
+```bash
+# Create (one-time)
+cd autotune && python3 -m venv .venv
+
+# Activate
+source autotune/.venv/bin/activate
+
+# Install idpac package (editable, after Phase 1)
+pip install -e autotune/agent/
+```
+
+The `.venv` directory is already gitignored. Python 3.12.3.
 
 ## Phase 1: Migrate `idpac` Package into FAST/AutoTune Directory
 
 ### 1.1 Copy the package
-- [ ] Copy `idpac/` into the autotune directory (e.g., `autotune/agent/idpac/` or wherever makes sense alongside FAST's agent code. Probably we will remove all of the existing agent patterns and replace basic-strands-agent or whatever with most of this... e.g. the IDPAC agent system prompt will be migrated into a Strands agent system prompt.)
-- [ ] Copy `pyproject.toml` (adjust paths/metadata for the new location)
-- [ ] Copy `OPTIMIZATION-LOG-TEMPLATE.md`
+- [x] Copy `idpac/` into `autotune/agent/idpac/`
+- [x] Copy `pyproject.toml` (adjusted: dropped `uv` dep, updated metadata)
+- [x] Copy `OPTIMIZATION-LOG-TEMPLATE.md`
 
 ### 1.2 Verify the package works standalone
-- [ ] `pip install -e .` from the new location
-- [ ] Smoke test: `python -c "from idpac import IDPACClient, IDPConfig, DatasetAnalyzer; print('OK')"`
-- [ ] Verify `idp-cli` is accessible: `idp-cli --version`
+- [x] `pip install -e autotune/agent/` — installed editable in venv
+- [x] Smoke test: all 7 classes import successfully
+- [x] `idp-cli --version` → v0.5.7 (installed via `pip install -e lib/idp_common_pkg/ -e lib/idp_sdk/ -e lib/idp_cli_pkg/`)
 
 ### 1.3 Update imports and references
-- [ ] Grep for hardcoded paths in idpac modules
-- [ ] Update relative imports for the new directory structure
-- [ ] Verify `IDPACClient._run_idp_cli()` subprocess call still works
+- [x] Grepped for hardcoded paths — none found
+- [x] 4 lazy imports of `idp_common.config.merge_utils` in config.py are correct (idp_common installed in venv)
+- [x] No relative import changes needed — package structure unchanged
 
 ---
 
