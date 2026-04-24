@@ -210,13 +210,25 @@ The `.venv` directory is already gitignored. Python 3.12.3.
 ## Phase 2: Migrate Agent Prompt & Skills
 
 ### 2.1 Migrate the agent prompt
-- [ ] Copy `.kiro/agents/idpac-optimizer.md` into `autotune/agent/prompt.md` (or equivalent FAST agent location, probably the basic-strands-agent rewrite)
-- [ ] Review for interactive-mode assumptions ("ask the user", "wait for confirmation") — note them but don't fix yet
-- [ ] This is a straight port first — autonomy conversion comes later
+- [x] Copied `.kiro/agents/idpac-optimizer.md` → `autotune/agent/prompt.md` (161 lines)
+- [x] Found 5 interactive-mode assumptions, documented as HTML comments at top of file for Phase 6 conversion
+- [x] Straight port — autonomy conversion deferred to Phase 6
 
 ### 2.2 Migrate skills
-- [ ] Copy `.kiro/skills/` into `autotune/agent/skills/`
-- [ ] Research Strands ability to use Skills -- I believe there is a plugin of some kind. Add the relevant info here when you're done. However let's wait to actually implement the agent reading the skills until later, we can do e2e testing without skills for now.
+- [x] Copied `idpac-skills/` → `autotune/agent/skills/` (28 skill directories + README + .kiro)
+- [x] Removed `.git` only, kept `.kiro` for future reference
+- [x] **Strands Skills plugin research:** Skills already use `SKILL.md` frontmatter format matching the [Agent Skills specification](https://agentskills.io/specification). Strands `AgentSkills` plugin is a drop-in fit:
+  ```python
+  from strands import Agent, AgentSkills
+  plugin = AgentSkills(skills="./skills/")  # auto-discovers all SKILL.md files
+  agent = Agent(plugins=[plugin])
+  ```
+  - Plugin injects skill name+description XML into system prompt (lightweight metadata)
+  - Agent calls `skills(skill_name="...")` tool to load full instructions on-demand
+  - Resource files (scripts/, references/, assets/) listed in activation response
+  - Need `file_read`/`shell` tools for the agent to access skill resource files
+  - Activated skills tracked in agent state for session persistence
+  - **Implementation deferred** to Phase 3 (agent build) per plan — e2e testing works without skills
 
 ---
 
