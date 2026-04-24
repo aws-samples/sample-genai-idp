@@ -22,43 +22,129 @@
 ## Phase 0: Setup & Orientation
 
 ### 0.1 Branch setup
-- [ ] `cd /home/ubuntu/gitlab/genaiic-idp-accelerator`
-- [ ] `git checkout develop-private && git pull`
-- [ ] `git checkout -b feature-private/idp-autotune/initial-port`
+- [x] `cd /home/ubuntu/gitlab/genaiic-idp-accelerator`
+- [x] `git checkout develop-private && git pull`
+- [x] `git checkout -b feature-private/idp-autotune/initial-port`
 
 ### 0.2 Clone FAST into the IDP repo
-- [ ] Clone FAST as a standalone directory within the IDP codebase:
+- [x] Clone FAST as a standalone directory within the IDP codebase:
   ```bash
   cd /home/ubuntu/gitlab/genaiic-idp-accelerator
-  git clone https://github.com/awslabs/fullstack-solution-template-for-agentcore.git autotune/
+  git clone https://github.com/awslabs/fullstack-solution-template-for-agentcore.git autotune/fast-template/
   ```
-- [ ] Remove FAST's `.git` directory so it becomes part of the IDP repo:
+- [x] Remove FAST's `.git` directory so it becomes part of the IDP repo:
   ```bash
-  rm -rf autotune/.git
+  rm -rf autotune/fast-template/.git
   ```
-- [ ] Commit as the initial baseline: `git add autotune/ && git commit -m "feat: add FAST template as AutoTune baseline"`
+- [x] Commit as the initial baseline: `git add autotune/ && git commit -m "feat: add FAST template as AutoTune baseline"`
 - [ ] Review the FAST directory structure — understand what's provided (CDK infra, frontend scaffold, agent entry point, Dockerfile, etc.)
 
 ### 0.3 Understand the IDP repo layout
-- [ ] Map the IDP Accelerator repo structure — identify where backend code, CDK infra, web UI, and CLI packages live
-- [ ] Identify the existing test studio / evaluation infrastructure — AutoTune will reuse this
-- [ ] Identify where `idp-cli` commands are defined — AutoTune's agent calls `idp-cli` via subprocess
-- [ ] Locate the `idp-cli` package install path (needed for Dockerfile)
-- When done, update this document in place with that key information.
+- [x] Map the IDP Accelerator repo structure — identify where backend code, CDK infra, web UI, and CLI packages live
+- [x] Identify the existing test studio / evaluation infrastructure — AutoTune will reuse this
+- [x] Identify where `idp-cli` commands are defined — AutoTune's agent calls `idp-cli` via subprocess
+- [x] Locate the `idp-cli` package install path (needed for Dockerfile)
+
+**IDP Repo Structure Findings:**
+
+| Component | Path | Notes |
+|-----------|------|-------|
+| **Main CFN template** | `template.yaml` | Root-level SAM/CloudFormation template |
+| **Backend Lambdas** | `src/lambda/` | 64 Lambda function directories |
+| **Web UI** | `src/ui/` | React frontend |
+| **Nested stacks** | `nested/` | appsync, multi-doc-discovery, bedrockkb, alb-hosting, bda-lending-project |
+| **Processing patterns** | `patterns/` | unified (main), pattern-1 (BDA), pattern-2 (Pipeline), pattern-3 |
+| **Config library** | `config_library/` | Managed configs, pricing, finetuning models |
+
+**Python Packages (all under `lib/`):**
+
+| Package | Path | Install | Description |
+|---------|------|---------|-------------|
+| **idp-cli** | `lib/idp_cli_pkg/` | `pip install -e lib/idp_cli_pkg` | CLI entry point: `idp_cli.cli:main`. Depends on `idp-sdk` and `click`. |
+| **idp-sdk** | `lib/idp_sdk/` | `pip install -e lib/idp_sdk` | Python SDK. Depends on `idp_common`, `boto3`, `pydantic`. |
+| **idp_common** | `lib/idp_common_pkg/` | `pip install -e lib/idp_common_pkg` | Core library: bedrock, config, evaluation, discovery, classification, extraction, etc. |
+| **idp_mcp_connector** | `lib/idp_mcp_connector_pkg/` | `pip install -e lib/idp_mcp_connector_pkg` | MCP connector for external apps |
+
+**idp-cli commands** (defined in `lib/idp_cli_pkg/idp_cli/cli.py`, ~5700 lines): deploy, delete, process, reprocess, run-inference, rerun-inference, status, list-batches, download-results, generate-manifest, config-upload/download/list/delete/activate/validate/create/sync-bda, discover, multi-discover, publish, chat, test-result, test-compare, stop-workflows, load-test, delete-documents
+
+**Test Studio / Evaluation Infrastructure:**
+- `idp_sdk/operations/testing.py` → `TestingOperation` class (test set management)
+- `idp_sdk/operations/evaluation.py` → evaluation operations
+- `idp_sdk/_core/test_studio_processor.py` → test studio processing
+- `idp_sdk/_core/evaluation_processor.py` → evaluation processing
+- `idp_sdk/_core/batch_processor.py` → batch document processing
+- `idp_sdk/_core/progress_monitor.py` → progress monitoring
+- `idp_sdk/_core/stack.py` → stack resource discovery (discovers all IDP resources via CloudFormation outputs)
+- `nested/appsync/src/lambda/test_set_resolver/` → Lambda for test set operations
+
+**Dependency chain for Dockerfile:** `idp_common` → `idp_sdk` → `idp_cli` (install in this order)
 
 ### 0.4 Understand the IDPAC repo layout
-- [ ] Review `/home/ubuntu/gitlab/idp-auto-configurator/idpac/` — the 7 Python modules:
-  - `client.py` (IDPACClient) — core stack interaction via idp-cli subprocess + boto3
-  - `config.py` (IDPConfig) — config.yaml manipulation with dot-notation, auto_fix, validation
-  - `deployer.py` (IDPACDeployer) — stack deploy + test set upload
-  - `evaluations.py` (EvaluationResult) — result parsing/display
-  - `discovery.py` (Discovery) — schema generation via idp-cli discover
-  - `dataset.py` (DatasetAnalyzer) — dataset mode detection (single/multi/packet)
-  - `packet_discovery.py` (PacketSplittingDiscovery) — packet dataset handling
-- [ ] Review `.kiro/agents/idpac-optimizer.md` — the full agent prompt (~16KB). This is the "brain"
-- [ ] Review `.kiro/skills/` — 25 domain knowledge skills. List and categorize by MLP priority
-- [ ] Review `OPTIMIZATION-LOG-TEMPLATE.md` — the current state management mechanism
-- When done, update this document in place with that key information.
+- [x] Review `/home/ubuntu/gitlab/idp-auto-configurator/idpac/` — the 7 Python modules
+- [x] Review `.kiro/agents/idpac-optimizer.md` — the full agent prompt (~16KB). This is the "brain"
+- [x] Review `.kiro/skills/` — 30 domain knowledge skills. List and categorize by MLP priority
+- [x] Review `OPTIMIZATION-LOG-TEMPLATE.md` — the current state management mechanism
+
+**IDPAC Repo Structure Findings:**
+
+Source: `/home/ubuntu/gitlab/idp-auto-configurator/`
+Skills (symlinked): `/home/ubuntu/gitlab/idpac-skills/` (30 skills, separate repo)
+
+**Python Modules (`idpac/`):**
+
+| Module | Class | Lines | Key Responsibilities | Port Notes |
+|--------|-------|-------|---------------------|------------|
+| `client.py` | `IDPACClient` | ~580 | Stack resource discovery via `describe_stacks()`, all idp-cli subprocess calls (upload_config, run_inference, run_evaluation, download_results, compare_evaluations), direct Lambda invocation for test results, S3 downloads for documents/ground-truth | **Core tool — becomes Strands tools.** Resource discovery pattern reusable. Subprocess calls to `idp-cli` stay as-is since idp-cli will be installed in the container. |
+| `config.py` | `IDPConfig` | ~770 | YAML config manipulation with dot-notation get/set, schema validation (x-aws-idp-* attributes), auto_fix for common issues, system defaults merge, comparison | **Port as-is.** Pure Python, no AWS dependencies except optional `idp_common` import for merge_with_defaults. |
+| `deployer.py` | `IDPACDeployer` | ~250 | Stack deployment via idp-cli, test set upload (direct S3 + DynamoDB), stack destruction | **Port as-is.** Test set upload bypasses resolver for reliability. |
+| `evaluations.py` | `EvaluationResult` | ~200 | Parse aggregated/individual evaluation JSON, print summaries, classification metrics, packet-splitting metrics | **Port as-is.** Pure Python, no AWS deps. |
+| `discovery.py` | `Discovery` | ~130 | Thin wrapper around `idp-cli discover` (local mode, no stack needed), single and multi-class discovery | **Port as-is.** Subprocess to idp-cli. |
+| `dataset.py` | `DatasetAnalyzer` | ~280 | Analyze test datasets: detect single/multi/packet mode, list classes, get samples per class, validate ground truth format, compute field density | **Port as-is.** Pure Python filesystem operations. |
+| `packet_discovery.py` | `PacketSplittingDiscovery` | ~200 | Extract sections from packet PDFs (pypdfium2), run discovery per class, create multi-class config | **Port as-is.** Depends on pypdfium2. |
+
+**Agent Prompt (`idpac-optimizer.md`, ~16KB):**
+- Two workflows: Standard (with ground truth) and No Ground Truth
+- Three dataset modes: single-class, multi-class, packet-splitting
+- Heavy emphasis on OPTIMIZATION-LOG.md as state management (update after EVERY action)
+- Agent uses `idpac` package as its toolkit, skills for domain knowledge
+- Optimization focus: OCR config, extraction model/prompts, classification (multi-class), packet splitting
+- Iterative loop: create config → upload as versioned snapshot → run evaluation → analyze → repeat
+
+**OPTIMIZATION-LOG-TEMPLATE.md:**
+- Structured markdown with required fields (AWS profile, stack name, dataset dir, ground truth dir, dataset mode, known classes)
+- Serves as the agent's persistent memory across sessions
+- Logs every action, config version, evaluation run, and finding
+- **For Strands port:** This becomes the agent's state management mechanism. In Phase 6 (autonomous mode), the log will be auto-generated rather than human-readable.
+
+**Skills (30 total, in `/home/ubuntu/gitlab/idpac-skills/`):**
+
+*MLP Priority 1 — Core optimization skills (needed for any dataset):*
+- `choosing-a-bedrock-model` — model selection (quality vs cost)
+- `extraction-prompt-engineering` — per-field schema enrichment
+- `evaluation-method-tuning` — per-field eval methods/thresholds
+- `inference-parameter-tuning` — temperature, top_p, max_tokens
+- `ocr-configuration` — OCR backend, features, image settings
+- `iterative-schema-refinement` — META-SKILL: orchestrates other skills
+- `json-output-fix` — fix JSON parsing failures
+- `token-limit-fix` — fix truncated output
+
+*MLP Priority 2 — Multi-class and advanced:*
+- `multi-class-setup` — classification setup
+- `classification-tuning` — improve classification accuracy
+- `classification-strategy-selection` — holistic vs page-level, regex bypass
+- `document-packet-splitting-tuning` — packet boundary detection
+- `nested-schema-design` — $defs/$ref for grouped fields
+- `extraction-few-shot-examples` — example-based prompting
+- `ground-truth-quality-analysis` — diagnose GT quality issues
+- `no-ground-truth-optimization` — best-effort without GT
+
+*MLP Priority 3 — Specialized/edge cases:*
+- `boolean-field-extraction`, `data-completeness-analysis`, `sparse-field-metric-selection`
+- `visual-spatial-extraction-challenges`, `stepwise-extraction-strategy`
+- `multilingual-documents`, `post-processing-task-decomposition`
+- `prompt-caching-optimization`, `conditional-ocr-cost-optimization`
+- `confidence-threshold-tuning`, `reasoning-enhanced-extraction`
+- `idp-analytics`
 
 ### 0.5 Research: IDP Accelerator ↔ AutoTune Integration Requirements
 
