@@ -150,41 +150,53 @@ Skills (symlinked): `/home/ubuntu/gitlab/idpac-skills/` (30 skills, separate rep
 
 AutoTune and the IDP Accelerator are deployed in the **same AWS account** but as separate stacks. The AutoTune agent needs to call `idp-cli` commands and access IDP resources (S3 buckets, DynamoDB tables, Lambda functions, Step Functions). This requires careful plumbing.
 
-**Questions to answer (update in-place as you research):**
+**Research findings:**
 
-- [ ] **IDP Stack Name:** AutoTune needs to know the parent IDP Accelerator stack name at runtime. How is this provided?
-  - Option A: Environment variable set during CDK deploy (e.g., `IDP_STACK_NAME`)
-  - Option B: CDK parameter / SSM parameter that links the two stacks
-  - Option C: User provides it in the UI when launching a job
-  - **Decision:** _(fill in)_
+- [x] **IDP Stack Name:** How is the IDP stack name provided to AutoTune at runtime?
+  - **Decision: Option C — Loose coupling via env var.** Pass `IDP_STACK_NAME` as an environment variable to the agent container. FAST already sets env vars on the `agentcore.Runtime` construct via `environmentVariables` dict in `backend-stack.ts`. Add it to `config.yaml` under `backend:` and wire through to `envVars["IDP_STACK_NAME"]`. `IDPACClient` already discovers everything dynamically from just the stack name — no cross-stack imports needed.
 
-- [ ] **IAM Permissions:** The AutoTune AgentCore execution role needs access to IDP resources. What specific permissions?
-  - S3: Read/write to IDP's input bucket, output bucket, and test set bucket
-  - DynamoDB: Read/write to IDP's tracking table (for config versions, test set metadata)
-  - Lambda: Invoke IDP's TestResultsResolver Lambda
-  - Step Functions: Start/monitor IDP processing workflows
-  - CloudFormation: DescribeStacks on the IDP stack (to discover resource names via outputs)
-  - Bedrock: InvokeModel for the agent's own LLM calls (separate from IDP's Bedrock usage)
-  - **How to grant:** Cross-stack IAM role? Resource-based policies? CDK constructs that import IDP stack outputs?
-  - **Decision:** _(fill in)_
+- [x] **IAM Permissions:** What permissions does the AutoTune execution role need?
+  - **FAST default role** (in `agentcore-role.ts`) already grants: ECR pull, CloudWatch logs, X-Ray, Bedrock InvokeModel/InvokeModelWithResponseStream, AgentCore memory/identity/code-interpreter, SSM GetParameter, SecretsManager.
+  - **Additional permissions needed for IDP access:**
+    - `cloudformation:DescribeStacks` — on the IDP stack (for resource discovery)
+    - `lambda:ListFunctions` — all functions (IDPACClient paginates to find TestResultsResolver by name pattern)
+    - `lambda:InvokeFunction` — on `*TestResultsResolver*` (for evaluation results)
+    - `s3:GetObject`, `s3:PutObject`, `s3:ListBucket` — on IDP's input, output, and testset buckets
+    - `kms:Decrypt`, `kms:GenerateDataKey` — on IDP's `CustomerManagedEncryptionKeyArn`
+    - DynamoDB access is handled indirectly via `idp-cli` subprocess (ConfigurationTable, TrackingTable)
+  - **How to grant:** Add inline policy statements to the AgentCore role in `backend-stack.ts`. Bucket names aren't known at deploy time (they're IDP stack outputs), so use wildcard patterns like `arn:aws:s3:::*-inputbucket-*` or do a deploy-time lookup via a custom resource. Simplest: grant broad S3/DynamoDB/Lambda permissions scoped to the account.
 
-- [ ] **Resource Discovery:** `IDPACClient.__init__()` discovers IDP resources by calling `describe_stacks()` and parsing CloudFormation outputs (S3 bucket names, Lambda function names). This works if the agent has `cloudformation:DescribeStacks` permission and knows the stack name. Verify this pattern works from inside the AgentCore container.
+- [x] **Resource Discovery:** Verified — `IDPACClient._discover_resources()` calls `describe_stacks()` for 3 bucket names (S3InputBucketName, S3OutputBucketName, S3TestSetBucketName) and paginates `lambda:ListFunctions` to find TestResultsResolver. IDP stack outputs are plain Outputs (NOT `Fn::Export`), so `DescribeStacks` is the only way to read them. This pattern works from any context with the right IAM permissions — no VPC or special networking needed.
 
-- [ ] **idp-cli Credentials:** When `idp-cli` runs as a subprocess inside the container, does it inherit the AgentCore execution role's credentials? Or does it need its own credential setup?
-  - In IDPAC today, `idp-cli` uses the AWS profile from `~/.aws/credentials`
-  - In AgentCore, credentials come from the execution role (instance metadata / task role)
-  - Verify `idp-cli` respects `AWS_DEFAULT_REGION` and role-based credentials (no profile needed)
+- [x] **idp-cli Credentials:** Verified — **idp-cli works with role-based credentials, no profile needed.**
+  - `idp-cli` only sets `AWS_DEFAULT_PROFILE` when `--profile` is explicitly passed. When omitted, boto3 uses its default credential chain.
+  - `IDPACClient._run_idp_cli()` only passes `--profile` when `self.profile` is truthy. With `profile=None`, the flag is omitted.
+  - All boto3 calls in idp-cli use `boto3.client("service", region_name=region)` — no hardcoded profiles.
+  - In AgentCore containers, credentials come from the task role (injected like ECS task roles). boto3 picks these up automatically via the default credential chain.
+  - **Requirement:** Set `AWS_DEFAULT_REGION` env var (FAST already does this) and do NOT pass `--profile`. No code changes needed.
 
-- [ ] **Network Access:** Does the AgentCore container need to be in the same VPC as the IDP stack? Or can it reach IDP resources via public AWS endpoints?
-  - IDP's S3 buckets, DynamoDB tables → accessible via standard AWS API endpoints
-  - IDP's Lambda functions → invoked via AWS SDK, no VPC needed
-  - **But:** Does AgentCore run in a VPC? If so, does it need VPC endpoints for S3/DynamoDB/etc.?
+- [x] **Network Access:** **PUBLIC mode works, no VPC needed.**
+  - FAST defaults to `network_mode: PUBLIC` (configurable to VPC in `config.yaml`).
+  - All IDP resources (S3, DynamoDB, Lambda, CloudFormation) are accessible via standard AWS API endpoints — no VPC peering or endpoints required.
+  - If a customer requires VPC mode, FAST supports it via `backend.vpc` config, but VPC endpoints for S3/DynamoDB/Lambda would need to be configured in the VPC.
 
-- [ ] **CDK Integration:** How does AutoTune's CDK stack reference the IDP stack?
-  - Option A: Import IDP stack outputs (e.g., `Fn::ImportValue`) — requires IDP stack to export them
-  - Option B: Accept IDP stack name as a CDK parameter, look up at deploy time
-  - Option C: Loose coupling — AutoTune just needs the stack name as a runtime config, discovers everything else dynamically (this is what `IDPACClient` already does)
-  - **Recommendation:** Option C is simplest and matches current IDPAC behavior. Just pass `IDP_STACK_NAME` as an env var to the agent container.
+- [x] **CDK Integration:** **No cross-stack references needed.**
+  - IDP stack outputs are NOT exported via `Fn::Export` — they're plain Outputs only readable via `DescribeStacks`.
+  - `IDPACClient` already does runtime discovery from just the stack name. This is the correct pattern.
+  - AutoTune CDK stack only needs to: (1) accept `IDP_STACK_NAME` as config, (2) pass it as env var, (3) grant IAM permissions broad enough to cover IDP resources.
+
+**Key FAST infrastructure files for Phase 2+ reference:**
+
+| File | Purpose |
+|------|---------|
+| `infra-cdk/lib/backend-stack.ts` | Runtime, Gateway, Memory, env vars, IAM additions |
+| `infra-cdk/lib/utils/agentcore-role.ts` | Base IAM role with default permissions |
+| `infra-cdk/lib/utils/config-manager.ts` | Loads/validates config.yaml |
+| `infra-cdk/config.yaml` | User configuration (stack name, network mode, etc.) |
+| `patterns/strands-single-agent/Dockerfile` | Container image (Debian Bookworm, Python 3.13, non-root user) |
+| `patterns/strands-single-agent/basic_agent.py` | Agent entry point |
+
+**Container notes:** Base image is `uv:python3.13-bookworm-slim`, runs as non-root user `bedrock_agentcore` (uid 1000). Has full Linux userspace but no AWS CLI or idp-cli pre-installed — must add to Dockerfile. Subprocess calls are allowed (ruff config ignores S603/S607).
 
 ---
 ## Phase 0: Create a virtual env that we can re-use for building IDPAutoTune and document how to activate/use it in this document.
