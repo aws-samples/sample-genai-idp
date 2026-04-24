@@ -172,6 +172,22 @@ AutoTune and the IDP Accelerator are deployed in the **same AWS account** but as
 
 **Container notes:** Base image is `uv:python3.13-bookworm-slim`, runs as non-root user `bedrock_agentcore` (uid 1000). Has full Linux userspace but no AWS CLI or idp-cli pre-installed — must add to Dockerfile. Subprocess calls are allowed (ruff config ignores S603/S607).
 
+### Persistent State: AgentCore Session Storage (Preview)
+
+**Problem:** The AutoTune agent writes state to the filesystem (OPTIMIZATION-LOG.md, config YAML files, evaluation results). By default, AgentCore compute is ephemeral — if the session stops or times out, all local files are lost. The agent needs to resume optimization runs across session boundaries.
+
+**Solution candidate:** [AgentCore Runtime Persistent Filesystems](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-persistent-filesystems.html) (Preview feature)
+- Adds a `filesystemConfigurations` with `sessionStorage` to the runtime, mounting a persistent directory (e.g., `/mnt/workspace`)
+- Standard POSIX filesystem — `ls`, `cat`, `mkdir`, `git`, `pip` all work
+- Data is async-replicated to durable storage during the session, flushed on graceful shutdown
+- On resume with same `runtimeSessionId`, new compute mounts the same storage — agent picks up where it left off
+- **Lifecycle:** Data deleted after 14 days of inactivity or when runtime version is updated
+- **Limits:** See [session storage limits](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-persistent-filesystems.html#session-storage-limits) in docs
+- **CDK support:** Not yet available. Would need `bedrock-agentcore-control` API calls via custom resource or post-deploy script (`create_agent_runtime` / `update_agent_runtime` with `filesystemConfigurations` param)
+- **Alternative:** Store state in S3 or DynamoDB instead of local filesystem. Less natural for the agent (which currently reads/writes markdown files) but doesn't depend on a preview feature.
+
+**Decision:** TBD — evaluate during Phase 4/5. For local testing (Phase 3), filesystem persistence is not an issue.
+
 ---
 ### Phase 0 (cont.): Development Virtual Environment
 
@@ -237,37 +253,24 @@ The `.venv` directory is already gitignored. Python 3.12.3.
 This is the core porting work. Build a Strands-based agent that wraps the `idpac` toolkit as tools, using the existing IDPAC agent prompt. Test everything locally before touching AgentCore.
 
 ### 3.1 Create Strands tool definitions
-- [ ] Create `autotune/agent/tools.py` — wrap each `idpac` class method as a Strands tool:
-  - `upload_config(config_path, version, description)` → `IDPACClient.upload_config()`
-  - `run_evaluation(test_set_id, config_version)` → `IDPACClient.run_evaluation()`
-  - `get_evaluation_results(batch_id)` → `IDPACClient.get_evaluation_results()`
-  - `compare_evaluations(batch_id_1, batch_id_2)` → `IDPACClient.compare_evaluations()`
-  - `download_results(batch_id, output_dir)` → `IDPACClient.download_results()`
-  - `run_discovery(samples_dir)` → `Discovery.run()`
-  - `analyze_dataset(dataset_path)` → `DatasetAnalyzer` methods
-  - `read_config(path)` / `write_config(path, changes)` → `IDPConfig` methods
-  - `validate_config(path)` → `IDPConfig.validate()`
-  - `auto_fix_config(path)` → `IDPConfig.auto_fix()`
-  - `read_skill(skill_name)` → returns skill content on demand #Note there is probably a Strands plugin for this. However, for now let's actually ignore the skills reading part. We will be able to do e2e testing later. Let's get the strands agent fully autonomous and working before we try adding skills.
-- [ ] Each tool: clear input/output, error handling, docstrings for the LLM
-- [ ] **Connect tools directly to the Strands agent** (not behind AgentCore gateway — that's a later step)
+- [x] Created `autotune/agent/tools.py` — 19 Strands `@tool` wrappers:
+  - Stack: `deploy_stack`, `upload_test_set`
+  - Config: `upload_config`, `download_config`, `list_configs`, `create_default_config`, `validate_config`, `auto_fix_config`, `compare_configs`
+  - Evaluation: `run_evaluation`, `get_evaluation_summary`, `compare_evaluations`, `list_evaluations`, `download_evaluation_results`
+  - Inference: `run_inference`, `download_results`
+  - Dataset: `analyze_dataset`
+  - Discovery: `run_discovery`, `run_multi_class_discovery`
+- [x] Each tool has clear docstrings, error handling, JSON output
+- [x] IDPACClient lazy-initialized from `IDP_STACK_NAME` env var
+- [x] Tools connected directly to agent (not behind AgentCore gateway)
 
 ### 3.2 Create the Strands agent
-- [ ] Create `autotune/agent/agent.py`:
-  ```python
-  from strands import Agent
-  from strands.models import BedrockModel
-  
-  model = BedrockModel(model_id="us.anthropic.claude-sonnet-4-20250514-v1:0")
-  agent = Agent(
-      model=model,
-      system_prompt=open("prompt.md").read(),
-      tools=[...all tools from 3.1...],
-  )
-  ```
-- [ ] Load the IDPAC agent prompt as the system prompt
-- [ ] Wire up all tools
-- [ ] Add `shell` and `filesystem` tools if Strands provides them (IDPAC needs to read/write local files and run subprocess commands)
+- [x] Created `autotune/agent/agent.py` (78 lines):
+  - BedrockModel with Claude Sonnet 4 (configurable via `AUTOTUNE_MODEL_ID`)
+  - System prompt loaded from `prompt.md`
+  - 19 IDPAC tools + 4 community tools (`file_read`, `file_write`, `editor`, `shell`)
+  - `AgentSkills` plugin auto-discovers 28 skills from `skills/` directory
+  - Interactive `main()` for local testing
 
 ### 3.3 Local smoke test (no Docker yet)
 - [ ] Run the Strands agent locally on EC2 (not in a container)
