@@ -34,7 +34,7 @@ export class BackendStack extends cdk.NestedStack {
   public readonly userPoolDomain: cognito.UserPoolDomain
   public feedbackApiUrl: string
   public runtimeArn: string
-  public memoryArn: string
+  // public memoryArn: string  // Disabled — see AgentCore Memory comment in createAgentRuntime()
   private agentName: cdk.CfnParameter
   private userPool: cognito.IUserPool
   private machineClient: cognito.UserPoolClient
@@ -260,51 +260,50 @@ export class BackendStack extends cdk.NestedStack {
     // Create AgentCore execution role
     const agentRole = new AgentCoreRole(this, "AgentCoreRole")
 
-    // Create memory resource with short-term memory (conversation history) as default
-    // To enable long-term strategies (summaries, preferences, facts), see docs/MEMORY_INTEGRATION.md
-    const memory = new cdk.CfnResource(this, "AgentMemory", {
-      type: "AWS::BedrockAgentCore::Memory",
-      properties: {
-        Name: cdk.Names.uniqueResourceName(this, { maxLength: 48 }),
-        EventExpiryDuration: 30,
-        Description: `Short-term memory for ${config.stack_name_base} agent`,
-        MemoryStrategies: [
-          {
-            // Extracts and stores factual information shared by the user across sessions.
-            // Stored under /facts/{actorId} — retrieved on each turn to personalise responses.
-            SemanticMemoryStrategy: {
-              Name: "FactExtractor",
-              Namespaces: ["/facts/{actorId}"],
-            },
-          },
-        ],
-        MemoryExecutionRoleArn: agentRole.roleArn,
-        Tags: {
-          Name: `${config.stack_name_base}_Memory`,
-          ManagedBy: "CDK",
-        },
-      },
-    })
-    const memoryId = memory.getAtt("MemoryId").toString()
-    const memoryArn = memory.getAtt("MemoryArn").toString()
-
-    // Store the memory ARN for access from main stack
-    this.memoryArn = memoryArn
-
-    // Add memory-specific permissions to agent role
-    agentRole.addToPolicy(
-      new iam.PolicyStatement({
-        sid: "MemoryResourceAccess",
-        effect: iam.Effect.ALLOW,
-        actions: [
-          "bedrock-agentcore:CreateEvent",
-          "bedrock-agentcore:GetEvent",
-          "bedrock-agentcore:ListEvents",
-          "bedrock-agentcore:RetrieveMemoryRecords", // Only needed for long-term strategies
-        ],
-        resources: [memoryArn],
-      })
-    )
+    // AgentCore Memory — DISABLED. The agent uses FileSessionManager on /mnt/workspace
+    // for conversation history instead of AgentCoreMemorySessionManager.
+    // To re-enable for long-term memory (semantic fact extraction across sessions),
+    // uncomment this block and the MEMORY_ID env var below.
+    // See autotune/docs/state-persistence.md for rationale.
+    //
+    // const memory = new cdk.CfnResource(this, "AgentMemory", {
+    //   type: "AWS::BedrockAgentCore::Memory",
+    //   properties: {
+    //     Name: cdk.Names.uniqueResourceName(this, { maxLength: 48 }),
+    //     EventExpiryDuration: 30,
+    //     Description: `Short-term memory for ${config.stack_name_base} agent`,
+    //     MemoryStrategies: [
+    //       {
+    //         SemanticMemoryStrategy: {
+    //           Name: "FactExtractor",
+    //           Namespaces: ["/facts/{actorId}"],
+    //         },
+    //       },
+    //     ],
+    //     MemoryExecutionRoleArn: agentRole.roleArn,
+    //     Tags: {
+    //       Name: `${config.stack_name_base}_Memory`,
+    //       ManagedBy: "CDK",
+    //     },
+    //   },
+    // })
+    // const memoryId = memory.getAtt("MemoryId").toString()
+    // const memoryArn = memory.getAtt("MemoryArn").toString()
+    // this.memoryArn = memoryArn
+    //
+    // agentRole.addToPolicy(
+    //   new iam.PolicyStatement({
+    //     sid: "MemoryResourceAccess",
+    //     effect: iam.Effect.ALLOW,
+    //     actions: [
+    //       "bedrock-agentcore:CreateEvent",
+    //       "bedrock-agentcore:GetEvent",
+    //       "bedrock-agentcore:ListEvents",
+    //       "bedrock-agentcore:RetrieveMemoryRecords",
+    //     ],
+    //     resources: [memoryArn],
+    //   })
+    // )
 
     // Add SSM permissions for AgentCore Gateway URL lookup
     agentRole.addToPolicy(
@@ -432,20 +431,14 @@ export class BackendStack extends cdk.NestedStack {
     const envVars: { [key: string]: string } = {
       AWS_REGION: stack.region,
       AWS_DEFAULT_REGION: stack.region,
-      MEMORY_ID: memoryId,
       STACK_NAME: config.stack_name_base,
       GATEWAY_CREDENTIAL_PROVIDER_NAME: `${config.stack_name_base}-runtime-gateway-auth`, // Used by @requires_access_token decorator to look up the correct provider
       // AutoTune: The IDP Accelerator stack that this agent manages.
       // TODO: Move to config.yaml once FAST config schema is extended for AutoTune.
       IDP_STACK_NAME: "kaleko-IDPAutoTune-dev",
-      // Controls whether the agent activates long-term semantic memory retrieval.
-      // The memory resource always includes the SemanticMemoryStrategy (no cost to define it),
-      // but retrieval is only performed when this is "true". See config.yaml: use_long_term_memory.
-      USE_LONG_TERM_MEMORY: config.backend.use_long_term_memory ? "true" : "false",
-      // Retrieval tuning for long-term memory. Only used when USE_LONG_TERM_MEMORY is "true".
-      // See config.yaml: ltm_top_k and ltm_relevance_score.
-      LTM_TOP_K: String(config.backend.ltm_top_k),
-      LTM_RELEVANCE_SCORE: String(config.backend.ltm_relevance_score),
+      // AgentCore Memory env vars removed (MEMORY_ID, USE_LONG_TERM_MEMORY, LTM_TOP_K,
+      // LTM_RELEVANCE_SCORE). Agent uses FileSessionManager on /mnt/workspace instead.
+      // Re-add MEMORY_ID here if re-enabling AgentCore Memory for LTM.
     }
 
     // Add claude-agent-sdk specific environment variable
@@ -512,11 +505,11 @@ export class BackendStack extends cdk.NestedStack {
       value: agentRole.roleArn,
     })
 
-    // Memory ARN output
-    new cdk.CfnOutput(this, "MemoryArn", {
-      description: "ARN of the agent memory resource",
-      value: memoryArn,
-    })
+    // MemoryArn output — disabled, see AgentCore Memory comment above
+    // new cdk.CfnOutput(this, "MemoryArn", {
+    //   description: "ARN of the agent memory resource",
+    //   value: memoryArn,
+    // })
   }
 
   private createRuntimeSSMParameters(config: AppConfig): void {

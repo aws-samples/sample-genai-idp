@@ -1,11 +1,11 @@
 # Strands Single Agent Pattern
 
-This pattern uses the [Strands Agents](https://github.com/strands-agents/strands-agents) framework to build a single agent with Gateway tool access, Code Interpreter, and AgentCore Memory for conversation history.
+This pattern uses the [Strands Agents](https://github.com/strands-agents/strands-agents) framework to build a single agent with Gateway tool access, Code Interpreter, and persistent session storage.
 
 ## Features
 
 - **Token-Level Streaming**: True token-by-token streaming via `agent.stream_async()`
-- **AgentCore Memory**: Conversation history persisted across requests via `AgentCoreMemorySessionManager`, with optional long-term memory for cross-session fact recall
+- **Persistent Sessions**: Conversation history and workspace artifacts persisted on `/mnt/workspace` via AgentCore Persistent Filesystem and Strands `FileSessionManager`
 - **Code Interpreter**: Secure Python execution via `StrandsCodeInterpreterTools`
 - **Gateway Integration**: Access Lambda-based tools through AgentCore Gateway (MCP protocol with OAuth2 auth)
 - **Secure Identity**: User identity extracted from validated JWT token (`RequestContext`), not from payload
@@ -19,8 +19,11 @@ BedrockAgentCoreApp (basic_agent.py)
     |
 Strands Agent (Sonnet model via BedrockModel)
     |
-    +-- AgentCore Memory (conversation history)
-    |     AgentCoreMemorySessionManager
+    +-- FileSessionManager (/mnt/workspace/.sessions/)
+    |     Conversation history as JSON files
+    |
+    +-- Per-session workspace (/mnt/workspace/{session_id}/)
+    |     Optimization logs, configs, eval results
     |
     +-- Code Interpreter
     |     StrandsCodeInterpreterTools (execute_python_securely)
@@ -65,24 +68,18 @@ The agent yields SSE `data: {json}` lines via `agent.stream_async()`. The fronte
 | Result | `{"result": {"stop_reason": "end_turn"}}` | Agent finished |
 | Lifecycle | `{"init_event_loop": true}` / `{"start_event_loop": true}` | Agent lifecycle events |
 
-## Memory Integration
+## Session Persistence
 
-This pattern uses **AgentCore Memory** for conversation persistence and optional long-term recall:
+This pattern uses **FileSessionManager** on AgentCore's persistent filesystem (`/mnt/workspace`):
 
-**Short-term memory** (always active):
-1. `MEMORY_ID` environment variable provides the memory resource ID
-2. `AgentCoreMemoryConfig` is initialized with `memory_id`, `session_id`, and `actor_id` (user ID)
-3. `AgentCoreMemorySessionManager` handles storing/retrieving conversation history
-4. Memory is tied to the `runtimeSessionId` from the client
+1. Conversation history is stored as JSON at `/mnt/workspace/.sessions/{session_id}.json`
+2. Each session gets a working directory at `/mnt/workspace/{session_id}/`
+3. Storage survives compute teardown — AgentCore mounts the same storage when the session resumes
+4. Falls back to `/tmp/workspace` for local Docker testing
 
-**Long-term memory** (opt-in via `use_long_term_memory: true` in `config.yaml`):
-1. The CDK stack passes `USE_LONG_TERM_MEMORY=true` to the agent runtime
-2. The agent configures a `RetrievalConfig` for the `/facts/{actorId}` namespace
-3. AgentCore extracts facts from conversations asynchronously and stores them per user (keyed by Cognito `userId`)
-4. On each turn, relevant facts are retrieved and injected into the agent context, enabling cross-session personalization
-5. Additional costs apply: $0.75/1,000 records stored + $0.50/1,000 retrieval calls
+See [State Persistence](../../../autotune/docs/state-persistence.md) for full details.
 
-See [Memory Integration Guide](../../docs/MEMORY_INTEGRATION.md) for full details.
+**AgentCore Memory (LTM)** — previously used for conversation history via `AgentCoreMemorySessionManager`, now disabled. Can be re-added alongside `FileSessionManager` if cross-session semantic fact extraction is needed. See the commented-out code in `backend-stack.ts`.
 
 ## Security
 

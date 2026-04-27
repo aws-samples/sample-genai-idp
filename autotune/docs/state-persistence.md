@@ -48,6 +48,20 @@ WORKSPACE_DIR = "/mnt/workspace" if os.path.isdir("/mnt/workspace") else "/tmp/w
 SESSIONS_DIR = os.path.join(WORKSPACE_DIR, ".sessions")
 ```
 
+### Why FileSessionManager instead of AgentCoreMemorySessionManager
+
+The FAST template originally used `AgentCoreMemorySessionManager` from the `bedrock-agentcore` SDK. This stores conversation history in the AgentCore Memory managed service — each turn is sent to a cloud API, and on session resume the history is fetched back via API call.
+
+We replaced it with Strands' built-in `FileSessionManager`, which stores conversation history as JSON files at `/mnt/workspace/.sessions/{session_id}.json`.
+
+**Rationale:**
+- **Unified persistence** — conversation history and workspace artifacts (optimization logs, configs, eval results) all live on the same persistent mount. One persistence mechanism instead of two.
+- **Simpler** — no AgentCore Memory service dependency, no `MEMORY_ID` env var, no memory resource to provision.
+- **Faster** — local file read on session resume vs. API call to a cloud service.
+
+**What we gave up:**
+- **Long-term memory (LTM)** — `AgentCoreMemorySessionManager` supports optional semantic fact extraction across sessions via `SemanticMemoryStrategy`. This lets the agent recall facts from previous sessions (e.g., "the user prefers YAML over JSON"). We had this disabled (`USE_LONG_TERM_MEMORY=false`) so there was no practical loss. If cross-session fact recall is needed later, AgentCore Memory can be re-added as a separate concern alongside `FileSessionManager` — the two are not mutually exclusive.
+
 ### Frontend session management
 
 The frontend stores session metadata (ID, name, message history) in `localStorage`. When a user switches to a previous session in the sidebar, the frontend sends requests with that session's ID — AgentCore mounts the corresponding storage, and the agent picks up the conversation.

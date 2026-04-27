@@ -8,16 +8,10 @@ import logging
 import os
 from pathlib import Path
 
-from bedrock_agentcore.memory.integrations.strands.config import (
-    AgentCoreMemoryConfig,
-    RetrievalConfig,
-)
-from bedrock_agentcore.memory.integrations.strands.session_manager import (
-    AgentCoreMemorySessionManager,
-)
 from bedrock_agentcore.runtime import BedrockAgentCoreApp, RequestContext
 from strands import Agent, AgentSkills
 from strands.models import BedrockModel
+from strands.session import FileSessionManager
 from strands_tools import editor, file_read, file_write, shell
 from utils.auth import extract_user_id_from_context
 
@@ -29,44 +23,14 @@ app = BedrockAgentCoreApp()
 
 AGENT_DIR = Path(__file__).parent
 
+# Persistent filesystem mounted by AgentCore (Preview feature).
+# Falls back to /tmp for local Docker testing.
+WORKSPACE_DIR = "/mnt/workspace" if os.path.isdir("/mnt/workspace") else "/tmp/workspace"
+SESSIONS_DIR = os.path.join(WORKSPACE_DIR, ".sessions")
+
 
 def _load_system_prompt() -> str:
     return (AGENT_DIR / "prompt.md").read_text()
-
-
-def _create_session_manager(
-    user_id: str, session_id: str
-) -> AgentCoreMemorySessionManager:
-    """Create an AgentCore memory session manager."""
-    memory_id = os.environ.get("MEMORY_ID")
-    if not memory_id:
-        raise ValueError("MEMORY_ID environment variable is required")
-
-    use_ltm = os.environ.get("USE_LONG_TERM_MEMORY", "false").lower() == "true"
-    top_k = int(os.environ.get("LTM_TOP_K", "10"))
-    relevance_score = float(os.environ.get("LTM_RELEVANCE_SCORE", "0.3"))
-
-    retrieval_config = (
-        {
-            "/facts/{actorId}": RetrievalConfig(
-                top_k=top_k,
-                relevance_score=relevance_score,
-            )
-        }
-        if use_ltm
-        else None
-    )
-
-    config = AgentCoreMemoryConfig(
-        memory_id=memory_id,
-        session_id=session_id,
-        actor_id=user_id,
-        retrieval_config=retrieval_config,
-    )
-    return AgentCoreMemorySessionManager(
-        agentcore_memory_config=config,
-        region_name=os.environ.get("AWS_DEFAULT_REGION", "us-east-1"),
-    )
 
 
 def create_autotune_agent(user_id: str, session_id: str) -> Agent:
@@ -78,7 +42,17 @@ def create_autotune_agent(user_id: str, session_id: str) -> Agent:
         max_tokens=16384,
     )
 
-    session_manager = _create_session_manager(user_id, session_id)
+    # Persistent session storage on /mnt/workspace (AgentCore) or /tmp (local)
+    os.makedirs(SESSIONS_DIR, exist_ok=True)
+    session_manager = FileSessionManager(
+        session_id=session_id,
+        storage_dir=SESSIONS_DIR,
+    )
+
+    # Set agent working directory to persistent workspace
+    session_workspace = os.path.join(WORKSPACE_DIR, session_id)
+    os.makedirs(session_workspace, exist_ok=True)
+    os.chdir(session_workspace)
 
     # Skills plugin — auto-discovers SKILL.md files
     skills_dir = AGENT_DIR / "skills"

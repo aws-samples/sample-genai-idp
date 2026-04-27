@@ -71,11 +71,12 @@ export class FastMainStack extends cdk.Stack {
       exportName: `${props.config.stack_name_base}-RuntimeArn`,
     })
 
-    new cdk.CfnOutput(this, "MemoryArn", {
-      value: this.backendStack.memoryArn,
-      description: "AgentCore Memory ARN",
-      exportName: `${props.config.stack_name_base}-MemoryArn`,
-    })
+    // MemoryArn output — disabled, agent uses FileSessionManager instead
+    // new cdk.CfnOutput(this, "MemoryArn", {
+    //   value: this.backendStack.memoryArn,
+    //   description: "AgentCore Memory ARN",
+    //   exportName: `${props.config.stack_name_base}-MemoryArn`,
+    // })
 
     new cdk.CfnOutput(this, "FeedbackApiUrl", {
       value: this.backendStack.feedbackApiUrl,
