@@ -401,9 +401,13 @@ cdk deploy --require-approval never
 | Deployed | 2026-04-27 |
 
 ### 5.3 AgentCore end-to-end test
-- [ ] Invoke the agent runtime via test script or FAST frontend
-- [ ] Verify it runs a basic tool call (e.g., list_configs)
+- [x] Invoke the agent runtime via programmatic test (Cognito auth → AgentCore runtime endpoint)
+- [x] Verify it runs a basic tool call: `list_configs` connected to IDP stack `kaleko-IDPAutoTune-dev`, returned correct result (no configs yet)
 - [ ] Check CloudWatch logs for observability
+
+**Required fixes during testing:**
+- Added `IDP_STACK_NAME` env var to the runtime (hardcoded in `backend-stack.ts` for now, TODO: move to config.yaml)
+- Added IAM policy `IDPStackAccess` with operational permissions for 10 AWS services (CloudFormation, S3, SQS, Lambda, DynamoDB, SSM, STS, CloudWatch Logs, Step Functions, Bedrock) — scoped to read/operate, not deploy
 
 ### 5.4 Session management
 - [ ] Optimization runs may take 1–3 hours — ensure session keepalive (follow FAST/Kenton patterns)

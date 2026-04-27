@@ -368,6 +368,62 @@ export class BackendStack extends cdk.NestedStack {
       })
     )
 
+    // AutoTune: Permissions for the agent to operate an existing IDP Accelerator stack.
+    // The idpac tools use these services to manage configs, run inference, evaluate results,
+    // and analyze documents. These are operational permissions (not deployment permissions).
+    // TODO: Scope resource ARNs to specific IDP stack once stack name is in config.yaml.
+    agentRole.addToPolicy(
+      new iam.PolicyStatement({
+        sid: "IDPStackAccess",
+        effect: iam.Effect.ALLOW,
+        actions: [
+          // Stack discovery and info
+          "cloudformation:DescribeStacks",
+          "cloudformation:ListStacks",
+          "cloudformation:DescribeStackResources",
+          "cloudformation:ListStackResources",
+          // S3: upload/download configs, test sets, results, documents
+          "s3:GetObject",
+          "s3:PutObject",
+          "s3:ListBucket",
+          "s3:DeleteObject",
+          "s3:HeadObject",
+          "s3:GetBucketLocation",
+          // SQS: submit documents for processing
+          "sqs:SendMessage",
+          "sqs:GetQueueUrl",
+          "sqs:GetQueueAttributes",
+          // Lambda: discover and invoke IDP processing functions
+          "lambda:ListFunctions",
+          "lambda:InvokeFunction",
+          "lambda:GetFunction",
+          // DynamoDB: read document tracking and workflow status
+          "dynamodb:GetItem",
+          "dynamodb:Query",
+          "dynamodb:Scan",
+          "dynamodb:DescribeTable",
+          // SSM: read stack parameters
+          "ssm:GetParameter",
+          "ssm:GetParameters",
+          // STS: identity verification
+          "sts:GetCallerIdentity",
+          // CloudWatch: read execution logs for debugging
+          "logs:GetLogEvents",
+          "logs:DescribeLogStreams",
+          "logs:DescribeLogGroups",
+          "logs:FilterLogEvents",
+          // Step Functions: monitor document processing workflows
+          "states:DescribeExecution",
+          "states:ListExecutions",
+          "states:DescribeStateMachine",
+          // Bedrock: model invocation for discovery/analysis
+          "bedrock:InvokeModel",
+          "bedrock:InvokeModelWithResponseStream",
+        ],
+        resources: ["*"],
+      })
+    )
+
     // Environment variables for the runtime
     const envVars: { [key: string]: string } = {
       AWS_REGION: stack.region,
@@ -375,6 +431,9 @@ export class BackendStack extends cdk.NestedStack {
       MEMORY_ID: memoryId,
       STACK_NAME: config.stack_name_base,
       GATEWAY_CREDENTIAL_PROVIDER_NAME: `${config.stack_name_base}-runtime-gateway-auth`, // Used by @requires_access_token decorator to look up the correct provider
+      // AutoTune: The IDP Accelerator stack that this agent manages.
+      // TODO: Move to config.yaml once FAST config schema is extended for AutoTune.
+      IDP_STACK_NAME: "kaleko-IDPAutoTune-dev",
       // Controls whether the agent activates long-term semantic memory retrieval.
       // The memory resource always includes the SemanticMemoryStrategy (no cost to define it),
       // but retrieval is only performed when this is "true". See config.yaml: use_long_term_memory.
