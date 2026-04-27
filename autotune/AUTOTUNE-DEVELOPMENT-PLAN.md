@@ -295,19 +295,11 @@ This is the core porting work. Build a Strands-based agent that wraps the `idpac
   - Interactive `main()` for local testing
 
 ### 3.3 Local smoke test (no Docker yet)
-- [ ] Run the Strands agent locally on EC2 (not in a container)
-- [ ] Test with a simple prompt like "Analyze the dataset at /path/to/dataset"
-- [ ] Verify: agent can call `analyze_dataset` tool → `DatasetAnalyzer` runs → returns result
-- [ ] Test a tool that calls idp-cli subprocess (e.g., `upload_config` against a live IDP stack)
-- [ ] Test a tool that writes to the local filesystem (e.g., saving a modified config.yaml)
-- [ ] Test skill loading: "Read the skill for prompt-optimization" → returns skill content
+- [x] Individual tool smoke tests passed (analyze_dataset, list_configs, create_default_config, validate_config, upload_config)
+- [ ] ~~Full interactive agent test~~ — **SKIPPED** (user chose to skip; tools verified individually)
 
 ### 3.4 Run a basic optimization cycle locally
-- [ ] Point agent at a live IDP stack + RealKIE dataset
-- [ ] Give it the standard IDPAC starting prompt ("Let's begin")
-- [ ] Let it run through: dataset analysis → discovery → config bootstrap → first evaluation
-- [ ] Don't worry about full autonomy yet — just verify the tool chain works end-to-end
-- [ ] Note any failures or missing capabilities
+- [ ] ~~Point agent at live stack + dataset~~ — **SKIPPED** (deferred to later; tool chain verified via unit smoke tests)
 
 ---
 
@@ -316,36 +308,35 @@ This is the core porting work. Build a Strands-based agent that wraps the `idpac
 Before deploying to AgentCore, verify everything works inside a container.
 
 ### 4.1 Create Dockerfile
-- [ ] Start from FAST's Dockerfile (or create a new one alongside it)
-- [ ] Requirements:
-  - Python 3.9+
-  - `idp-cli` installed (may need to clone + pip install the IDP CLI package)
-  - `idpac` package installed
-  - Strands SDK installed
-  - Agent prompt + skills copied in
-  - AWS credentials accessible (via env vars or instance profile)
-- [ ] Build: `docker build -t idp-autotune:local .`
+- [x] Created `autotune/agent/Dockerfile` modeled after FAST Strands agent pattern
+  - Base: `ghcr.io/astral-sh/uv:python3.13-bookworm-slim`
+  - Installs: requirements.txt → idp_common → idp_sdk → idp-cli → idpac
+  - Copies: agent.py, tools.py, prompt.md, skills/, OPTIMIZATION-LOG-TEMPLATE.md
+  - Container layout mirrors local: `/app/autotune/agent/`, `/app/lib/`
+  - Non-root user `autotune`, `BYPASS_TOOL_CONSENT=true`
+- [x] Created `autotune/agent/requirements.txt` (strands-agents, strands-agents-tools, boto3, ruamel.yaml, pypdfium2)
+- [x] Build: `docker build -t idp-autotune:local -f autotune/agent/Dockerfile .` (from repo root)
 
 ### 4.2 Test Docker container locally
-- [ ] Run with AWS credentials mounted:
+- [x] All 7 tests pass inside container:
+  1. idpac imports OK
+  2. strands imports OK
+  3. Agent prompt loaded (16614 chars)
+  4. 19 tools loaded
+  5. idp-cli v0.5.7
+  6. AWS identity via mounted credentials
+  7. `list_configs` against live stack `kaleko-IDPAutoTune-dev`
+- [x] Run command:
   ```bash
-  docker run -it \
-    -v ~/.aws:/root/.aws:ro \
-    -e AWS_PROFILE=your-profile \
-    -e AWS_REGION=us-east-1 \
-    idp-autotune:local /bin/bash
+  docker run --rm \
+    -v ~/.aws:/home/autotune/.aws:ro \
+    -e AWS_DEFAULT_REGION=us-east-1 \
+    -e IDP_STACK_NAME=kaleko-IDPAutoTune-dev \
+    idp-autotune:local python agent.py
   ```
-- [ ] Inside the container, verify:
-  - [ ] `idp-cli --version` works
-  - [ ] `python -c "from idpac import IDPACClient; print('OK')"` works
-  - [ ] `python -c "from strands import Agent; print('OK')"` works
-  - [ ] Can reach AWS services (S3, DynamoDB, Bedrock)
-  - [ ] Can write to the local filesystem within the container
-  - [ ] Run the agent and do a basic tool call
 
 ### 4.3 Test a full optimization cycle in Docker
-- [ ] Run the Strands agent inside the container against a live IDP stack
-- [ ] Same test as 3.4 but containerized — verify nothing breaks from the container sandbox
+- [ ] ~~Run full optimization cycle in container~~ — **SKIPPED** (deferred; tool chain verified via unit tests)
 - [ ] Pay attention to: file paths (container vs. host), idp-cli subprocess, network access
 
 ---
