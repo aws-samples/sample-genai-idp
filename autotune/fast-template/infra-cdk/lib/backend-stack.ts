@@ -419,6 +419,10 @@ export class BackendStack extends cdk.NestedStack {
           // Bedrock: model invocation for discovery/analysis
           "bedrock:InvokeModel",
           "bedrock:InvokeModelWithResponseStream",
+          // KMS: IDP stack encrypts DynamoDB tables and S3 buckets with KMS
+          "kms:Decrypt",
+          "kms:GenerateDataKey",
+          "kms:DescribeKey",
         ],
         resources: ["*"],
       })
