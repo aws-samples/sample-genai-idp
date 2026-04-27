@@ -341,13 +341,68 @@ Before deploying to AgentCore, verify everything works inside a container.
 
 ---
 
-## Phase 5: Deploy to AgentCore
+## Phase 5: Deploy to AgentCore via FAST
 
-Now that the container works locally, deploy to AgentCore. Follow the FAST deployment instructions.
+Port the AutoTune agent into the FAST template and deploy using its CDK infrastructure.
+
+> **TODO (out of scope):**
+> - **Shared Cognito pool:** Modify the FAST stack to use the existing IDP Accelerator Cognito user pool instead of creating a new one. IDP and IDPAutoTune users should overlap — same pool, same credentials.
+> - **Frontend merge:** Replace the FAST chat frontend with the IDP Accelerator frontend (or add AutoTune as a tab/route in the existing IDP UI). For now, keep the FAST frontend as-is for development.
+
+### 5.1 Port agent into FAST pattern directory
+- [x] No code duplication — CDK build context set to repo root so Dockerfile COPYs from `autotune/agent/` and `lib/` directly
+- [x] Changed `backend-stack.ts` to use `path.resolve(__dirname, "..", "..", "..", "..")` (repo root) as Docker build context
+- [x] Added CDK `exclude` list to prevent asset hasher from scanning the entire repo (CDK hashes the build context for change detection — without excludes it hangs on large repos)
+- [x] Created `Dockerfile.dockerignore` next to the Dockerfile (Docker 19.03+ feature) — allowlists only the paths the build needs (327KB context)
+- [x] Replaced `basic_agent.py` with AutoTune agent using `BedrockAgentCoreApp` entrypoint, IDPAC tools, community tools, AgentSkills plugin
+- [x] Renamed `tools.py` → `idpac_tools.py` in container to avoid collision with FAST's `tools/` directory
+- [x] Updated FAST `requirements.txt`: kept FAST deps (strands-agents, bedrock-agentcore, mcp, PyJWT), added AutoTune deps (strands-agents-tools, ruamel.yaml, pypdfium2)
+
+### 5.2 Deploy backend
+
+**How to deploy:**
+
+```bash
+cd autotune/fast-template/infra-cdk
+npm install
+
+# IMPORTANT: This EC2 instance has two sets of credentials:
+#   1. ~/.aws/credentials [default] profile — your IAM user/role (the one you want)
+#   2. EC2 instance profile — a different account's role
+#
+# CDK (Node.js SDK) picks up the instance profile by default, which targets
+# the wrong account. To force CDK to use your [default] profile:
+#   - AWS_EC2_METADATA_DISABLED=true  → blocks instance profile lookup
+#   - CDK_DEFAULT_ACCOUNT/REGION      → tells CDK which account to target
+#
+# Also: ~/.aws/credentials keys MUST be lowercase (aws_access_key_id, not
+# AWS_ACCESS_KEY_ID). The AWS CLI is case-insensitive but the Node.js SDK is not.
+
+AWS_EC2_METADATA_DISABLED=true \
+CDK_DEFAULT_ACCOUNT=<your-account-id> \
+CDK_DEFAULT_REGION=us-east-1 \
+cdk deploy --require-approval never
+```
+
+- [x] Set `stack_name_base: IDPAutoTune` and `admin_user_email` in `config.yaml`
+- [x] Deployed successfully (~5.5 minutes)
+
+### Deployed FAST Stack
+
+| Resource | Value |
+|----------|-------|
+| Stack name | `IDPAutoTune` |
+| Amplify URL | https://main.duq4hhla5pfaq.amplifyapp.com |
+| Runtime ARN | `IDPAutoTune_FASTAgent-sLV5ho8mzP` |
+| Cognito User Pool | `us-east-1_YiSzEVGq5` |
+| Cognito Client ID | `49aq6o58cr98m9jt7219f4gkha` |
+| Memory ARN | `IDPAutoTuneIDPAutoTunebackend701BF137-o2naLYBdYa` |
+| Feedback API | `https://ceffk8kraj.execute-api.us-east-1.amazonaws.com/prod/` |
+| Deployed | 2026-04-27 |
 
 ### 5.3 AgentCore end-to-end test
-- [ ] Invoke the agent runtime via API
-- [ ] Verify it runs a basic optimization step
+- [ ] Invoke the agent runtime via test script or FAST frontend
+- [ ] Verify it runs a basic tool call (e.g., list_configs)
 - [ ] Check CloudWatch logs for observability
 
 ### 5.4 Session management

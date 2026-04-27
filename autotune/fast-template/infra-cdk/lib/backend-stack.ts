@@ -212,11 +212,34 @@ export class BackendStack extends cdk.NestedStack {
       )
     } else {
       // DOCKER DEPLOYMENT: Use container-based deployment
+      // Build context is the IDP Accelerator repo root so the Dockerfile can
+      // COPY from autotune/agent/ and lib/ without duplicating code.
+      // NOTE: The `exclude` list is for CDK's asset hasher, NOT for Docker.
+      // Docker uses Dockerfile.dockerignore (already filters to 327KB).
+      // Without these excludes, CDK scans the entire repo to compute a
+      // change-detection hash, which hangs on large repos.
       agentRuntimeArtifact = agentcore.AgentRuntimeArtifact.fromAsset(
-        path.resolve(__dirname, "..", ".."), // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
+        path.resolve(__dirname, "..", "..", "..", ".."), // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
         {
           platform: ecr_assets.Platform.LINUX_ARM64,
-          file: `patterns/${pattern}/Dockerfile`,
+          file: `autotune/fast-template/patterns/${pattern}/Dockerfile`,
+          exclude: [
+            ".git",
+            "node_modules",
+            "__pycache__",
+            ".venv",
+            "docs",
+            "images",
+            "samples",
+            "notebooks",
+            "src",
+            "tests",
+            "memory-bank",
+            "autotune/fast-template/frontend",
+            "autotune/fast-template/infra-cdk/cdk.out",
+            "autotune/fast-template/docs",
+            "autotune/fast-template/tests",
+          ],
         }
       )
     }
