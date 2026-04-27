@@ -149,10 +149,12 @@ AutoTune and the IDP Accelerator are deployed in the **same AWS account** but as
   - In AgentCore containers, credentials come from the task role (injected like ECS task roles). boto3 picks these up automatically via the default credential chain.
   - **Requirement:** Set `AWS_DEFAULT_REGION` env var (FAST already does this) and do NOT pass `--profile`. No code changes needed.
 
-- [x] **Network Access:** **PUBLIC mode works, no VPC needed.**
-  - FAST defaults to `network_mode: PUBLIC` (configurable to VPC in `config.yaml`).
-  - All IDP resources (S3, DynamoDB, Lambda, CloudFormation) are accessible via standard AWS API endpoints — no VPC peering or endpoints required.
-  - If a customer requires VPC mode, FAST supports it via `backend.vpc` config, but VPC endpoints for S3/DynamoDB/Lambda would need to be configured in the VPC.
+- [x] **Network Access:** **VPC mode required for S3 Files.**
+  - Originally PUBLIC mode was sufficient since all IDP resources are accessible via standard AWS API endpoints.
+  - **S3 Files requires VPC mode** — the mount target must be in the same VPC as the AgentCore container.
+  - VPC needs: private subnet, NAT gateway (for outbound internet), S3 gateway endpoint, AgentCore interface endpoint.
+  - Reference VPC template: `~/gitlab/s3files-on-agentcore/iac/vpc.yaml`
+  - FAST supports VPC mode via `backend.vpc` config in `config.yaml`.
 
 - [x] **CDK Integration:** **No cross-stack references needed.**
   - IDP stack outputs are NOT exported via `Fn::Export` — they're plain Outputs only readable via `DescribeStacks`.
@@ -172,21 +174,38 @@ AutoTune and the IDP Accelerator are deployed in the **same AWS account** but as
 
 **Container notes:** Base image is `uv:python3.13-bookworm-slim`, runs as non-root user `bedrock_agentcore` (uid 1000). Has full Linux userspace but no AWS CLI or idp-cli pre-installed — must add to Dockerfile. Subprocess calls are allowed (ruff config ignores S603/S607).
 
-### Persistent State: AgentCore Session Storage (Preview)
+### Persistent State: AgentCore Persistent Filesystem (Preview)
 
-**Problem:** The AutoTune agent writes state to the filesystem (OPTIMIZATION-LOG.md, config YAML files, evaluation results). By default, AgentCore compute is ephemeral — if the session stops or times out, all local files are lost. The agent needs to resume optimization runs across session boundaries.
+**Problem:** The AutoTune agent writes state to the filesystem (OPTIMIZATION-LOG.md, config YAML files, evaluation results). By default, AgentCore compute is ephemeral — if the session stops or times out, all local files are lost. The agent needs to resume optimization runs across session boundaries. Chat history must also persist.
 
-**Solution candidate:** [AgentCore Runtime Persistent Filesystems](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-persistent-filesystems.html) (Preview feature)
-- Adds a `filesystemConfigurations` with `sessionStorage` to the runtime, mounting a persistent directory (e.g., `/mnt/workspace`)
-- Standard POSIX filesystem — `ls`, `cat`, `mkdir`, `git`, `pip` all work
-- Data is async-replicated to durable storage during the session, flushed on graceful shutdown
-- On resume with same `runtimeSessionId`, new compute mounts the same storage — agent picks up where it left off
-- **Lifecycle:** Data deleted after 14 days of inactivity or when runtime version is updated
-- **Limits:** See [session storage limits](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-persistent-filesystems.html#session-storage-limits) in docs
-- **CDK support:** Not yet available. Would need `bedrock-agentcore-control` API calls via custom resource or post-deploy script (`create_agent_runtime` / `update_agent_runtime` with `filesystemConfigurations` param)
-- **Alternative:** Store state in S3 or DynamoDB instead of local filesystem. Less natural for the agent (which currently reads/writes markdown files) but doesn't depend on a preview feature.
+**Research:** See [`autotune/planning-docs/session-persistence-research.md`](planning-docs/session-persistence-research.md) for full analysis of 5 options (AgentCore Persistent FS, S3 Workspace Sync, Agent State Dict, S3 Files, Hybrid). Also reviewed Doron Bleiberg's S3 Files + AgentCore reference implementation at `~/gitlab/s3files-on-agentcore/`.
 
-**Decision:** TBD — evaluate during Phase 4/5. For local testing (Phase 3), filesystem persistence is not an issue.
+**Decision: AgentCore Persistent Filesystem (Preview)** — simplest path, no VPC needed, zero custom persistence code.
+
+**How it works:**
+- Add `filesystemConfigurations` with `sessionStorage` to the runtime, mounting `/mnt/workspace`
+- Standard POSIX filesystem — agent reads/writes files normally
+- Data async-replicated to durable storage during the session, flushed on graceful shutdown
+- On resume with same `runtimeSessionId`, new compute mounts the same storage
+- Use Strands `FileSessionManager(storage_dir="/mnt/workspace/.sessions")` for conversation history
+
+**Why not the alternatives:**
+- **S3 Files (Option D):** Ideal but requires a dedicated VPC (~$32/month NAT gateway + infra complexity). IDP Accelerator doesn't use VPCs by default — overkill for file persistence.
+- **S3 Workspace Sync (Option B):** Robust but requires ~100 lines of custom sync code. Good fallback if preview proves unreliable.
+- **Agent State Dict (Option C):** Requires significant agent refactoring.
+
+**Known risks (Preview):**
+- Wiped on runtime version update (every `cdk deploy` that changes the runtime)
+- 14-day inactivity expiry
+- 1GB limit per session (sufficient for our workload)
+- No SLA — acceptable during development, re-evaluate before GA
+- Per-session isolation (no cross-session sharing — fine for AutoTune)
+
+**Fallback:** Option B (S3 Workspace Sync) — agent code barely changes since both use local filesystem.
+
+**CDK gap:** No CDK construct exists. Need a custom resource (Lambda) to call `UpdateAgentRuntime` API with `filesystemConfigurations` param after the runtime is created. See Phase 5.4 for implementation plan.
+
+**Reference implementation for S3 Files (if VPC becomes available later):** `~/gitlab/s3files-on-agentcore/`
 
 ### Dev Stack
 
@@ -409,9 +428,23 @@ cdk deploy --require-approval never
 - Added `IDP_STACK_NAME` env var to the runtime (hardcoded in `backend-stack.ts` for now, TODO: move to config.yaml)
 - Added IAM policy `IDPStackAccess` with operational permissions for 10 AWS services (CloudFormation, S3, SQS, Lambda, DynamoDB, SSM, STS, CloudWatch Logs, Step Functions, Bedrock) — scoped to read/operate, not deploy
 
-### 5.4 Session management
-- [ ] Optimization runs may take 1–3 hours — ensure session keepalive (follow FAST/Kenton patterns)
-- [ ] Store agent state in S3/SSM so it survives session interruptions
+### 5.4 Session persistence via AgentCore Persistent Filesystem
+- [ ] **Test the preview feature manually first** — use AWS CLI/SDK to call `UpdateAgentRuntime` with `filesystemConfigurations` on the existing runtime and verify `/mnt/workspace` is available inside the container
+- [ ] **Switch session manager** — replace `AgentCoreMemorySessionManager` with Strands `FileSessionManager(storage_dir="/mnt/workspace/.sessions")` in `basic_agent.py`
+- [ ] **Update agent working directory** — point OPTIMIZATION-LOG.md, config snapshots, and eval results to `/mnt/workspace/` so they persist across session stop/resume
+- [ ] **Create CDK custom resource** — Lambda that calls `UpdateAgentRuntime` API with `filesystemConfigurations: [{ sessionStorage: { mountPath: "/mnt/workspace" } }]` after the runtime is created
+- [ ] **Test persistence** — invoke agent, write files, stop session, resume with same `runtimeSessionId`, verify files are still there
+- [ ] **Test the "wiped on deploy" risk** — do a `cdk deploy`, verify session storage is reset, confirm agent can recover gracefully (re-discover state from IDP stack)
+- [ ] **Fallback readiness** — if preview proves unreliable, implement Option B (S3 Workspace Sync, ~100 lines) per `autotune/planning-docs/session-persistence-research.md`
+G
+
+G
+
+
+
+
+
+
 
 ---
 

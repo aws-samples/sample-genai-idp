@@ -486,6 +486,15 @@ export class BackendStack extends cdk.NestedStack {
     // Store the runtime ARN
     this.runtimeArn = this.agentRuntime.agentRuntimeArn
 
+    // AutoTune: Enable persistent filesystem on the runtime (Preview feature).
+    // The L2 construct will support `filesystemConfiguration` natively once
+    // aws-cdk PR #35478 is released. Until then, use L1 escape hatch.
+    // TODO: Replace with L2 prop when @aws-cdk/aws-bedrock-agentcore-alpha >= 2.252
+    const cfnRuntime = this.agentRuntime.node.defaultChild as cdk.CfnResource
+    cfnRuntime.addPropertyOverride("FilesystemConfigurations", [
+      { SessionStorage: { MountPath: "/mnt/workspace" } },
+    ])
+
     // Outputs
     new cdk.CfnOutput(this, "AgentRuntimeId", {
       description: "ID of the created agent runtime",

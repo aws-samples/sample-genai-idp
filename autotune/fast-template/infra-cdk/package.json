@@ -21,9 +21,9 @@
   },
   "dependencies": {
     "@aws-cdk/aws-amplify-alpha": "^2.250.0-alpha.0",
-    "@aws-cdk/aws-bedrock-agentcore-alpha": "^2.250.0-alpha.0",
-    "@aws-cdk/aws-bedrock-alpha": "^2.250.0-alpha.0",
-    "@aws-cdk/aws-lambda-python-alpha": "^2.250.0-alpha.0",
+    "@aws-cdk/aws-bedrock-agentcore-alpha": "^2.251.0-alpha.0",
+    "@aws-cdk/aws-bedrock-alpha": "^2.251.0-alpha.0",
+    "@aws-cdk/aws-lambda-python-alpha": "^2.251.0-alpha.0",
     "@aws-sdk/client-bedrock-agentcore": "^3.987.0",
     "aws-cdk-lib": "^2.250.0",
     "constructs": "^10.0.0",
