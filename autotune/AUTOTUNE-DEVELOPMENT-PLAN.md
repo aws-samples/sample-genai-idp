@@ -188,6 +188,28 @@ AutoTune and the IDP Accelerator are deployed in the **same AWS account** but as
 
 **Decision:** TBD — evaluate during Phase 4/5. For local testing (Phase 3), filesystem persistence is not an issue.
 
+### Dev Stack
+
+| Field | Value |
+|-------|-------|
+| Stack name | `kaleko-IDPAutoTune-dev` |
+| Region | `us-east-1` |
+| App URL | https://d189w43awwf9i3.cloudfront.net/ |
+| Input bucket | `kaleko-idpautotune-dev-inputbucket-fzqzjv61uxru` |
+| Output bucket | `kaleko-idpautotune-dev-outputbucket-9tqlxx1kghve` |
+| Deployed | 2026-04-27 |
+| Admin email | kaleko@amazon.com |
+
+### Test Dataset
+
+| Field | Value |
+|-------|-------|
+| Path | `/home/ubuntu/gitlab/idpac-local-test-dataset-OCR` |
+| Format | 45 PNG images with ground truth baselines |
+| Mode | Multi-class (9 classes, 5 samples each) |
+| Classes | BANK_CHECK, COMMERCIAL_LEASE_AGREEMENT, CREDIT_CARD_STATEMENT, DELIVERY_NOTE, EQUIPMENT_INSPECTION, GLOSSARY, PETITION_FORM, REAL_ESTATE, SHIFT_SCHEDULE |
+| Ground truth | Yes — `baseline/` with `sections/1/result.json` per document |
+
 ---
 ### Phase 0 (cont.): Development Virtual Environment
 

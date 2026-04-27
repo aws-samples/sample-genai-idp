@@ -152,9 +152,16 @@ def create_default_config(output_path: str, features: str = "min") -> str:
     Returns:
         JSON with status and output path.
     """
-    client = _get_client()
-    result = client.config_create(output_path, features=features)
-    return json.dumps(result, indent=2)
+    import subprocess
+
+    cmd = ["idp-cli", "config-create", "--features", features, "--output", output_path]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    return json.dumps({
+        "status": "success" if result.returncode == 0 else "failed",
+        "output": output_path,
+        "stdout": result.stdout,
+        "stderr": result.stderr,
+    }, indent=2)
 
 
 @tool
