@@ -261,7 +261,7 @@ export default function ChatInterface() {
   const hasAssistantMessages = messages.some(message => message.role === "assistant")
 
   return (
-    <div className="flex flex-col h-screen w-full">
+    <div className="flex flex-col h-screen w-full" style={{ backgroundColor: "rgba(66, 194, 245, 0.15)" }}>
       {/* Fixed header */}
       <div className="flex-none">
         <ChatHeader onNewChat={startNewChat} canStartNewChat={hasAssistantMessages} />
@@ -281,7 +281,7 @@ export default function ChatInterface() {
 
           {/* Centered welcome message */}
           <div className="text-center mb-6">
-            <h2 className="text-2xl font-bold text-gray-800">Welcome to FAST Chat</h2>
+            <h2 className="text-2xl font-bold text-gray-800">Welcome to IDPAutoTune Temporary Developer Chat</h2>
             <p className="text-gray-600 mt-2">Ask me anything to get started</p>
           </div>
 

@@ -170,7 +170,7 @@ describe("Configuration Verification Tests", () => {
 
     it("should have correct title", () => {
       const indexHtml = readFileSync(resolve(__dirname, "../../index.html"), "utf-8")
-      expect(indexHtml).toContain("<title>Fullstack AgentCore Solution Template</title>")
+      expect(indexHtml).toContain("<title>IDP AutoTune Temporary Developer UI</title>")
     })
 
     it("should have meta description", () => {
