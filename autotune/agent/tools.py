@@ -20,6 +20,16 @@ _deployer = None
 _optimization_state = None
 
 
+def _auto_update_state(phase: str, phase_detail: str) -> None:
+    """Best-effort DynamoDB state update from within tools."""
+    try:
+        state = _get_optimization_state()
+        if state:
+            state.update_phase(phase, phase_detail)
+    except Exception:
+        pass  # Never let state updates break tool execution
+
+
 def _get_client():
     """Get or create the IDPACClient singleton from env vars."""
     global _client
@@ -109,6 +119,7 @@ def upload_config(config_path: str, config_version: str, description: str) -> st
     Returns:
         JSON with status, stdout, stderr.
     """
+    _auto_update_state("configuring", f"Uploading config {config_version}")
     client = _get_client()
     result = client.upload_config(config_path, config_version, description)
     return json.dumps(result, indent=2)
@@ -258,6 +269,7 @@ def run_evaluation(test_set_id: str, context: str, config_version: str) -> str:
     Returns:
         JSON with batch_id, status, stdout, stderr.
     """
+    _auto_update_state("evaluating", f"Running evaluation {config_version}")
     client = _get_client()
     result = client.run_evaluation(test_set_id, context, config_version)
     return json.dumps(result, indent=2)
@@ -365,6 +377,7 @@ def run_inference(
     Returns:
         JSON with batch_id, status, stdout, stderr.
     """
+    _auto_update_state("evaluating", f"Running inference {config_version}")
     client = _get_client()
     result = client.run_inference(
         documents_dir, config_version, file_pattern=file_pattern,
@@ -410,6 +423,7 @@ def analyze_dataset(dataset_path: str) -> str:
     Returns:
         Dataset analysis summary including mode, classes, and any validation errors.
     """
+    _auto_update_state("analyzing", "Analyzing dataset structure")
     from idpac import DatasetAnalyzer
 
     analyzer = DatasetAnalyzer(dataset_path)
@@ -480,6 +494,7 @@ def run_discovery(
     Returns:
         The discovered JSON schema as a string.
     """
+    _auto_update_state("discovering", "Running schema discovery")
     from idpac import Discovery
 
     region = os.environ.get("AWS_DEFAULT_REGION", "us-east-1")
@@ -507,6 +522,7 @@ def run_multi_class_discovery(dataset_path: str, output_config_path: str) -> str
     Returns:
         Summary of discovered classes and config path.
     """
+    _auto_update_state("discovering", "Running multi-class discovery")
     from idpac import DatasetAnalyzer, Discovery, PacketSplittingDiscovery
 
     region = os.environ.get("AWS_DEFAULT_REGION", "us-east-1")

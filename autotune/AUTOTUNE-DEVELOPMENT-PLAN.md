@@ -510,16 +510,15 @@ Convert the agent from interactive chat to autonomous operation. The agent recei
   - The agent's first invocation kicks off the full workflow; the hook's `resume` drives subsequent iterations
 
 ### 6.5 Adapt prompt for autonomous operation
-- [ ] Update `autotune/agent/prompt.md` — replace the 5 interactive assumptions:
+- [x] Update `autotune/agent/prompt.md` — replace the 5 interactive assumptions:
   1. "clarify with the user" about workspace → auto-create workspace using session_id
   2. "Work with the user to fill in required fields" → pre-populate OPTIMIZATION-LOG from test_set_id + optimization_guidance + dataset analysis
   3. "continue where the user last left off" → on resume, read OPTIMIZATION-LOG.md + DynamoDB state
-  4. "user should create ground truth" → note as recommendation in final report
-  5. "stop and instruct the user to set up skills" → remove (skills are bundled)
-- [ ] Add autonomous-specific instructions:
+  4. "user should create ground truth" → ground-truth-only mode, no-GT workflow removed
+  5. "stop and instruct the user to set up skills" → removed (skills are bundled)
+- [x] Add autonomous-specific instructions:
   - "You are running autonomously. Do not ask questions or wait for user input."
-  - "After each evaluation, update the DynamoDB state by calling `update_optimization_state()`" (or instruct via tool)
-  - "When you finish an iteration, end your response with a structured summary so the loop hook can parse your progress"
+  - Tools auto-update DynamoDB state (built into tool implementations, not prompt-driven)
   - "If you detect you are repeating a failed strategy, try a fundamentally different approach"
 
 ### 6.6 Wire up state updates in tools
@@ -542,17 +541,22 @@ Convert the agent from interactive chat to autonomous operation. The agent recei
   - Test cancel via CLI
   - Verify agent produces `idpac_config_final.yaml` and summary
 - [ ] **Edge cases:**
-  - Agent with no ground truth (no-ground-truth workflow)
   - Cancel during a long evaluation run (agent should stop after eval completes, not mid-eval)
   - Resume after cancel (new session, same test set — should start fresh)
 
 ### 6.8 Deferred items (TODO)
+- [ ] **Agent permissions scoping (SECURITY)** — The agent currently has broad IAM permissions. Must scope down before any non-dev use:
+  - Must NOT be able to delete/destroy the IDP stack or production data
+  - Must NOT have internet egress or outbound network access from the account
+  - Arbitrary code execution must use AgentCore CodeInterpreter (sandboxed), not raw `shell`
+  - Review and restrict IAM policies to minimum required actions
+  - Consider Bedrock Guardrails for input/output validation
 - [ ] **SummarizingConversationManager** — add when context overflow is observed in practice. When added, the resume prompt must instruct the agent to re-read OPTIMIZATION-LOG.md to recover summarized-away detail.
 - [ ] **Watchdog timeout** — add `agent.cancel()` from a watchdog thread if AgentCore session timeout proves insufficient.
 - [ ] **Tool limits hook** — custom `BeforeToolCallEvent` hook counting tool invocations, if runaway usage is observed.
 - [ ] **Doom loop detection** — programmatic oscillation detection in the `OptimizationLoopHook`. For v1, rely on prompt instructions + OPTIMIZATION-LOG history.
 - [x] **REST API for cancel + state polling** — `POST /cancel` and `GET /state` endpoints via API Gateway + Lambda, backed by the OptimizationState DynamoDB table. Replaced the FAST feedback API. Cognito-authenticated.
-- [ ] **UI cancel button** — wire frontend to call `POST /cancel` endpoint. For now, use curl or the AWS console.
+- [x] **UI cancel button** — wired in ChatInterface.tsx, calls `POST /cancel` with session ID.
 
 ---
 
