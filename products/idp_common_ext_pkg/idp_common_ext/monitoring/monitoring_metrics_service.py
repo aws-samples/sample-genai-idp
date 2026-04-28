@@ -60,7 +60,9 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from idp_common_ext.monitoring.analytics_cost_service import AnalyticsCostService
-from idp_common_ext.monitoring.cloudwatch_metrics_service import CloudWatchMetricsService
+from idp_common_ext.monitoring.cloudwatch_metrics_service import (
+    CloudWatchMetricsService,
+)
 from idp_common_ext.monitoring.models import TimeRange
 from idp_common_ext.monitoring.operational_document_service import (
     OperationalDocumentService,

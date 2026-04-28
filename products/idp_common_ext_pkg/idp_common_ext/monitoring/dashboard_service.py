@@ -17,7 +17,9 @@ New code should import ``MonitoringMetricsService`` directly::
     from idp_common_ext.monitoring import MonitoringMetricsService
 """
 
-from idp_common_ext.monitoring.monitoring_metrics_service import MonitoringMetricsService
+from idp_common_ext.monitoring.monitoring_metrics_service import (
+    MonitoringMetricsService,
+)
 
 # Legacy alias — do not use in new code
 DashboardService = MonitoringMetricsService

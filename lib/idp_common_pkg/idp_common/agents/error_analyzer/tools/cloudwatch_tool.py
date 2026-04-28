@@ -18,6 +18,8 @@ from typing import Any, Dict, List, Optional
 from strands import tool
 
 from idp_common.config import get_config
+
+from ..config import create_error_response
 from .cloudwatch_logs_service import (
     get_stack_log_groups,
     prioritize_performance_log_groups,
@@ -26,8 +28,6 @@ from .cloudwatch_logs_service import (
     search_log_group,
     search_stack_wide,
 )
-
-from ..config import create_error_response
 from .dynamodb_tool import fetch_document_record
 from .xray_tool import extract_lambda_request_ids
 
