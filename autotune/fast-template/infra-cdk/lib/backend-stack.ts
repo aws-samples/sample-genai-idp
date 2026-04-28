@@ -372,32 +372,37 @@ export class BackendStack extends cdk.NestedStack {
     // AutoTune: Permissions for the agent to operate an existing IDP Accelerator stack.
     // The idpac tools use these services to manage configs, run inference, evaluate results,
     // and analyze documents. These are operational permissions (not deployment permissions).
-    // TODO: Scope resource ARNs to specific IDP stack once stack name is in config.yaml.
+    //
+    // SECURITY: This policy intentionally EXCLUDES destructive actions:
+    //   - No cloudformation:DeleteStack, UpdateStack, CreateStack
+    //   - No s3:DeleteObject (agent should never delete IDP data)
+    //   - No dynamodb:DeleteTable, DeleteItem on IDP tables
+    //   - No lambda:DeleteFunction, UpdateFunctionCode
+    //   - No iam:* (cannot escalate privileges)
+    //
+    // The agent has shell access for debugging (grep, cat, aws cli) but IAM is the
+    // hard security boundary — even if the agent runs `aws cloudformation delete-stack`,
+    // the API call is denied by IAM.
+    //
+    // TODO: Scope resource ARNs to specific IDP stack resources once stack name resolution
+    //       is available at synth time (currently a runtime-only value from config.yaml).
+    // TODO: Restrict network egress — agent container should have no internet access.
+    //       Requires VPC configuration on the AgentCore runtime.
     agentRole.addToPolicy(
       new iam.PolicyStatement({
-        sid: "IDPStackAccess",
+        sid: "IDPStackReadAccess",
         effect: iam.Effect.ALLOW,
         actions: [
-          // Stack discovery and info
+          // Stack discovery and info (read-only)
           "cloudformation:DescribeStacks",
           "cloudformation:ListStacks",
           "cloudformation:DescribeStackResources",
           "cloudformation:ListStackResources",
-          // S3: upload/download configs, test sets, results, documents
+          // S3: read configs, test sets, results, documents
           "s3:GetObject",
-          "s3:PutObject",
           "s3:ListBucket",
-          "s3:DeleteObject",
           "s3:HeadObject",
           "s3:GetBucketLocation",
-          // SQS: submit documents for processing
-          "sqs:SendMessage",
-          "sqs:GetQueueUrl",
-          "sqs:GetQueueAttributes",
-          // Lambda: discover and invoke IDP processing functions
-          "lambda:ListFunctions",
-          "lambda:InvokeFunction",
-          "lambda:GetFunction",
           // DynamoDB: read document tracking and workflow status
           "dynamodb:GetItem",
           "dynamodb:Query",
@@ -420,10 +425,60 @@ export class BackendStack extends cdk.NestedStack {
           // Bedrock: model invocation for discovery/analysis
           "bedrock:InvokeModel",
           "bedrock:InvokeModelWithResponseStream",
-          // KMS: IDP stack encrypts DynamoDB tables and S3 buckets with KMS
+          // KMS: decrypt IDP stack's encrypted resources
           "kms:Decrypt",
           "kms:GenerateDataKey",
           "kms:DescribeKey",
+        ],
+        resources: ["*"],
+      })
+    )
+
+    // AutoTune: Write permissions the agent needs to operate the IDP stack.
+    // Separated from read access for clarity. These are the minimum write
+    // actions needed for config upload, evaluation runs, and inference.
+    agentRole.addToPolicy(
+      new iam.PolicyStatement({
+        sid: "IDPStackWriteAccess",
+        effect: iam.Effect.ALLOW,
+        actions: [
+          // S3: upload configs, test sets, documents for processing
+          "s3:PutObject",
+          // SQS: submit documents for processing
+          "sqs:SendMessage",
+          "sqs:GetQueueUrl",
+          "sqs:GetQueueAttributes",
+          // Lambda: invoke IDP processing functions
+          "lambda:InvokeFunction",
+          "lambda:ListFunctions",
+          "lambda:GetFunction",
+          // DynamoDB: write config versions (upload_config uses PutItem)
+          "dynamodb:PutItem",
+          "dynamodb:UpdateItem",
+        ],
+        resources: ["*"], // TODO: scope to IDP stack resources
+      })
+    )
+
+    // AutoTune: Explicit deny for destructive actions as defense-in-depth.
+    // Even if an Allow is accidentally added elsewhere, these denies take precedence.
+    agentRole.addToPolicy(
+      new iam.PolicyStatement({
+        sid: "DenyDestructiveActions",
+        effect: iam.Effect.DENY,
+        actions: [
+          "cloudformation:DeleteStack",
+          "cloudformation:CreateStack",
+          "cloudformation:UpdateStack",
+          "s3:DeleteObject",
+          "s3:DeleteBucket",
+          "dynamodb:DeleteTable",
+          "lambda:DeleteFunction",
+          "lambda:UpdateFunctionCode",
+          "lambda:UpdateFunctionConfiguration",
+          "iam:*",
+          "organizations:*",
+          "account:*",
         ],
         resources: ["*"],
       })
