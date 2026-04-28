@@ -59,7 +59,6 @@ COPY autotune/agent/tools.py idpac_tools.py
 COPY autotune/agent/state.py optimization_state.py
 COPY autotune/agent/hooks.py optimization_hooks.py
 COPY autotune/agent/prompt.md .
-COPY autotune/agent/OPTIMIZATION-LOG-TEMPLATE.md .
 COPY autotune/agent/skills/ skills/
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \

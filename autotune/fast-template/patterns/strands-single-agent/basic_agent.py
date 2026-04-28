@@ -44,20 +44,46 @@ def _build_initial_prompt(test_set_id: str, optimization_guidance: str) -> str:
     """Construct the first user message that kicks off autonomous optimization."""
     parts = [
         f"Begin autonomous optimization for test set: {test_set_id}",
+        "\nRead OPTIMIZATION-LOG.md for the pre-filled run metadata, then run the "
+        "test set to establish a baseline. Update the log after each step.",
     ]
     if optimization_guidance:
         parts.append(f"\nOptimization guidance from the user:\n{optimization_guidance}")
-    parts.append(
-        "\nStart by reading the current IDP config, then run the test set to "
-        "establish a baseline. Log everything to OPTIMIZATION-LOG.md."
-    )
     return "\n".join(parts)
+
+
+def _create_optimization_log(
+    session_workspace: str,
+    test_set_id: str,
+    optimization_guidance: str,
+) -> None:
+    """Pre-create OPTIMIZATION-LOG.md with run metadata filled in."""
+    idp_stack = os.environ.get("IDP_STACK_NAME", "unknown")
+    region = os.environ.get("AWS_DEFAULT_REGION", os.environ.get("AWS_REGION", "unknown"))
+
+    content = f"""# Optimization Log
+
+This file documents the progress of the current optimization run.
+
+## Run Metadata
+IDP stack name and region: {idp_stack} ({region})
+Input test set: {test_set_id}
+Dataset mode: TBD (determine from test set analysis)
+Optimization guidance: {optimization_guidance or "None provided"}
+
+## Optimization Log
+"""
+    log_path = os.path.join(session_workspace, "OPTIMIZATION-LOG.md")
+    with open(log_path, "w") as f:
+        f.write(content)
 
 
 def create_autotune_agent(
     user_id: str,
     session_id: str,
     state: OptimizationState,
+    test_set_id: str = "",
+    optimization_guidance: str = "",
 ) -> Agent:
     """Create the IDPAutoTune Strands agent with hooks for autonomous operation."""
     model = BedrockModel(
@@ -78,6 +104,10 @@ def create_autotune_agent(
     session_workspace = os.path.join(WORKSPACE_DIR, session_id)
     os.makedirs(session_workspace, exist_ok=True)
     os.chdir(session_workspace)
+
+    # Pre-create OPTIMIZATION-LOG.md with metadata filled in
+    if test_set_id:
+        _create_optimization_log(session_workspace, test_set_id, optimization_guidance)
 
     # Skills plugin — auto-discovers SKILL.md files
     skills_dir = AGENT_DIR / "skills"
@@ -141,7 +171,7 @@ async def invocations(payload, context: RequestContext):
 
     try:
         user_id = extract_user_id_from_context(context)
-        agent = create_autotune_agent(user_id, session_id, state)
+        agent = create_autotune_agent(user_id, session_id, state, test_set_id, optimization_guidance)
 
         async for event in agent.stream_async(initial_prompt):
             yield json.loads(json.dumps(dict(event), default=str))
