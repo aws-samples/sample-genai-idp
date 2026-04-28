@@ -1,0 +1,39 @@
+{
+  "compilerOptions": {
+    // Language / output target
+    "target": "ES2020",
+    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+
+    // JSX — preserve for Vite's React plugin to handle
+    "jsx": "react-jsx",
+
+    // Strict type checking
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+
+    // Declaration output (vite-plugin-dts handles .d.ts generation)
+    "declaration": true,
+    "declarationDir": "dist",
+    "emitDeclarationOnly": false,
+
+    // Path aliases — keep in sync with vite.config.ts resolve.alias
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/*"]
+    },
+
+    // Module interop
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "skipLibCheck": true
+  },
+  "include": ["src"],
+  "exclude": ["node_modules", "dist"]
+}

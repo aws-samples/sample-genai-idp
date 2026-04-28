@@ -40,6 +40,11 @@ export default defineConfig(({ mode }) => ({
     // Increase chunk size warning limit (suppressed for enterprise internal tool)
     chunkSizeWarningLimit: 3000,
     rollupOptions: {
+      // @idp-accelerator/idp-monitor-ui is an optional premium package that is not installed
+      // in open-source builds. Mark it as external so Rollup does not try to resolve it at
+      // build time — the lazy() import in MonitoringShell/MonitoringActivationPage already
+      // handles the missing-package case gracefully at runtime via .catch().
+      external: ['@idp-accelerator/idp-monitor-ui'],
       output: {
         // Manual chunking for better code splitting
         manualChunks: {

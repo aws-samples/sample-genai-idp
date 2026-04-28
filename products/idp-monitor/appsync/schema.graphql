@@ -1,0 +1,86 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# IDPMonitor — AppSync GraphQL Schema
+#
+# This is IDPMonitor's own AppSync API, separate from the Accelerator's
+# main AppSync API. The dashboard UI connects to this endpoint.
+#
+# All responses use AWSJSON scalar for the dashboard data payload to allow
+# flexible schema evolution without requiring schema updates for new metrics.
+# ─────────────────────────────────────────────────────────────────────────────
+
+schema {
+  query: Query
+}
+
+type Query {
+  # Primary dashboard query — fetches all requested sections in one call.
+  # The resolver fetches sections in parallel using ThreadPoolExecutor.
+  getMonitoringDashboard(input: MonitoringQueryInput!): MonitoringDashboardResponse
+
+  # Lightweight subscription status check — used by the UI to determine
+  # whether to show the dashboard or the "Activate IDPMonitor" page.
+  getMonitoringStatus: MonitoringStatusResponse
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Input Types
+# ─────────────────────────────────────────────────────────────────────────────
+
+input MonitoringQueryInput {
+  # Time range preset: 1h | 6h | 24h | 7d | 30d
+  timeRange: String
+
+  # ISO 8601 timestamps for custom ranges (optional — used when timeRange = "custom")
+  startTime: AWSDateTime
+  endTime: AWSDateTime
+
+  # Which dashboard sections to fetch. Omit to fetch all sections.
+  # Valid values: volume | cost | latency | failures | throttles | distribution | config
+  sections: [String!]
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Response Types
+# ─────────────────────────────────────────────────────────────────────────────
+
+type MonitoringDashboardResponse {
+  # Subscription metadata
+  subscriptionStatus: String!   # "active" | "inactive" | "unknown"
+  subscriptionTier: String      # "standard" | "premium" (future use)
+
+  # Dashboard sections — each section is a flexible AWSJSON blob.
+  # See models.py in idp_common/monitoring/ for the full schema of each section.
+  volume: AWSJSON       # DocumentVolumeMetrics
+  cost: AWSJSON         # CostMetrics
+  latency: AWSJSON      # LatencyMetrics (nullable — requires X-Ray)
+  failures: AWSJSON     # FailureMetrics
+  throttles: AWSJSON    # ThrottleMetrics
+  distribution: AWSJSON # DocumentTypeDistribution
+  config: AWSJSON       # ConfigContext
+
+  # Query metadata
+  timeRange: String
+  startTime: AWSDateTime
+  endTime: AWSDateTime
+  generatedAt: AWSDateTime!
+  errors: [SectionError!]
+}
+
+type MonitoringStatusResponse {
+  subscriptionStatus: String!   # "active" | "inactive" | "unknown"
+  stackName: String
+  acceleratorStackName: String
+}
+
+type SectionError {
+  section: String!
+  message: String!
+  code: String
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# AWS Scalar Types
+# ─────────────────────────────────────────────────────────────────────────────
+
+scalar AWSJSON
+scalar AWSDateTime

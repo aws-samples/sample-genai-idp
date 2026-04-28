@@ -9134,3 +9134,48 @@ Outputs:
       security group on all VPC Interface Endpoints they create for this stack.
       See scripts/vpc-endpoints.yaml for the endpoint template.
     Value: !GetAtt LambdaVpcSecurityGroup.GroupId
+  # ── IDPMonitor cross-stack exports ────────────────────────────────────────
+  # These exports are consumed by the IDPMonitor stack (products/idp-monitor/
+  # monitoring-template.yaml) via Fn::ImportValue.
+
+  TrackingTableName:
+    Description: Name of the DynamoDB document tracking table (IDPMonitor cross-stack ref)
+    Value: !Ref TrackingTable
+    Export:
+      Name: !Sub "${AWS::StackName}-TrackingTableName"
+
+  TrackingTableArn:
+    Description: ARN of the DynamoDB document tracking table (IDPMonitor cross-stack ref)
+    Value: !GetAtt TrackingTable.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-TrackingTableArn"
+
+  ConfigurationTableName:
+    Description: Name of the DynamoDB configuration table (IDPMonitor cross-stack ref)
+    Value: !Ref ConfigurationTable
+    Export:
+      Name: !Sub "${AWS::StackName}-ConfigurationTableName"
+
+  ConfigurationTableArn:
+    Description: ARN of the DynamoDB configuration table (IDPMonitor cross-stack ref)
+    Value: !GetAtt ConfigurationTable.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-ConfigurationTableArn"
+
+  ReportingBucketName:
+    Description: Name of the reporting S3 bucket (IDPMonitor cross-stack ref)
+    Value: !If
+      - ShouldCreateReportingBucket
+      - !Ref ReportingBucket
+      - !Ref ReportingBucketName
+    Export:
+      Name: !Sub "${AWS::StackName}-ReportingBucketName"
+
+  ReportingBucketArn:
+    Description: ARN of the reporting S3 bucket (IDPMonitor cross-stack ref)
+    Value: !If
+      - ShouldCreateReportingBucket
+      - !GetAtt ReportingBucket.Arn
+      - !Sub "arn:${AWS::Partition}:s3:::${ReportingBucketName}"
+    Export:
+      Name: !Sub "${AWS::StackName}-ReportingBucketArn"

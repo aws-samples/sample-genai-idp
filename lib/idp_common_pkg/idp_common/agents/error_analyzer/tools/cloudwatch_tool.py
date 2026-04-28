@@ -6,7 +6,7 @@ CloudWatch tools for error analysis.
 
 Public Strands tool functions (:func:`search_cloudwatch_logs`,
 :func:`search_performance_issues`) delegate all heavy lifting to
-:mod:`idp_common.monitoring.cloudwatch_logs_service`, keeping this module
+:mod:`.cloudwatch_logs_service`, keeping this module
 as a thin orchestration layer.
 """
 
@@ -18,7 +18,7 @@ from typing import Any, Dict, List, Optional
 from strands import tool
 
 from idp_common.config import get_config
-from idp_common.monitoring.cloudwatch_logs_service import (
+from .cloudwatch_logs_service import (
     get_stack_log_groups,
     prioritize_performance_log_groups,
     search_by_document_fallback,
