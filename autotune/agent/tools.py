@@ -17,6 +17,7 @@ from strands import tool
 # Lazy-initialized singleton
 _client = None
 _deployer = None
+_optimization_state = None
 
 
 def _get_client():
@@ -535,6 +536,58 @@ def run_multi_class_discovery(dataset_path: str, output_config_path: str) -> str
     return f"Discovery complete. Classes: {classes}. Config: {output_config_path}"
 
 
+# --- Optimization State ---
+
+
+def _get_optimization_state():
+    """Get or create the OptimizationState singleton from env vars."""
+    global _optimization_state
+    if _optimization_state is None:
+        from state import OptimizationState
+
+        session_id = os.environ.get("AUTOTUNE_SESSION_ID", "")
+        if not session_id:
+            return None
+        _optimization_state = OptimizationState(session_id=session_id)
+    return _optimization_state
+
+
+@tool
+def update_optimization_state(
+    phase: str,
+    phase_detail: str = "",
+    iteration: Optional[int] = None,
+    best_accuracy: Optional[float] = None,
+    best_config_version: Optional[str] = None,
+    current_config_version: Optional[str] = None,
+) -> str:
+    """Update the optimization state in DynamoDB so the frontend can show progress.
+
+    Call this before and after long operations (evaluations, inference, discovery)
+    to keep the status display current.
+
+    Args:
+        phase: Current phase (e.g. "evaluating", "analyzing", "configuring", "discovering")
+        phase_detail: Human-readable detail (e.g. "Running evaluation v3...")
+        iteration: Current iteration number (if changed)
+        best_accuracy: Best accuracy so far (if changed)
+        best_config_version: Version name of best config (if changed)
+        current_config_version: Version name of config being tested (if changed)
+    """
+    state = _get_optimization_state()
+    if not state:
+        return "No optimization state available (AUTOTUNE_SESSION_ID not set)"
+    state.update_phase(phase, phase_detail)
+    if iteration is not None and best_accuracy is not None and best_config_version is not None:
+        state.update_metrics(
+            iteration=iteration,
+            best_accuracy=best_accuracy,
+            best_config_version=best_config_version,
+            current_config_version=current_config_version or "",
+        )
+    return f"State updated: phase={phase}, detail={phase_detail}"
+
+
 # --- Collect all tools for the agent ---
 
 ALL_TOOLS = [
@@ -557,4 +610,5 @@ ALL_TOOLS = [
     analyze_dataset,
     run_discovery,
     run_multi_class_discovery,
+    update_optimization_state,
 ]

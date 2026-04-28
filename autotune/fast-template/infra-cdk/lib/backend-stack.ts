@@ -41,6 +41,8 @@ export class BackendStack extends cdk.NestedStack {
   private machineClientSecret: secretsmanager.Secret
   private runtimeCredentialProvider: cdk.CustomResource
   private agentRuntime: agentcore.Runtime
+  private optimizationStateTableName: string
+  private optimizationStateTableArn: string
 
   constructor(scope: Construct, id: string, props: BackendStackProps) {
     super(scope, id, props)
@@ -88,12 +90,11 @@ export class BackendStack extends cdk.NestedStack {
     // Store Cognito configuration in SSM for testing and frontend
     this.createCognitoSSMParameters(props.config)
 
-    // Create Feedback DynamoDB table (example of application data storage)
-    const feedbackTable = this.createFeedbackTable(props.config)
+    // Create AutoTune optimization state table (control plane for autonomous agent)
+    this.createOptimizationStateTable(props.config)
 
-    // Create API Gateway Feedback API resources (example of best-practice API Gateway + Lambda
-    // pattern)
-    this.createFeedbackApi(props.config, props.frontendUrl, feedbackTable)
+    // Create API for optimization state (cancel + progress polling)
+    this.createOptimizationStateApi(props.config, props.frontendUrl)
   }
 
   private createAgentCoreRuntime(config: AppConfig): void {
@@ -427,6 +428,23 @@ export class BackendStack extends cdk.NestedStack {
       })
     )
 
+    // AutoTune: Read/write access to the optimization state table (control plane).
+    // Separate from IDPStackAccess because this is our own table, not the IDP stack's.
+    agentRole.addToPolicy(
+      new iam.PolicyStatement({
+        sid: "OptimizationStateTableAccess",
+        effect: iam.Effect.ALLOW,
+        actions: [
+          "dynamodb:GetItem",
+          "dynamodb:PutItem",
+          "dynamodb:UpdateItem",
+          "dynamodb:DeleteItem",
+          "dynamodb:Query",
+        ],
+        resources: [this.optimizationStateTableArn],
+      })
+    )
+
     // Environment variables for the runtime
     const envVars: { [key: string]: string } = {
       AWS_REGION: stack.region,
@@ -436,6 +454,8 @@ export class BackendStack extends cdk.NestedStack {
       // AutoTune: The IDP Accelerator stack that this agent manages.
       // TODO: Move to config.yaml once FAST config schema is extended for AutoTune.
       IDP_STACK_NAME: "kaleko-IDPAutoTune-dev",
+      // AutoTune: DynamoDB table for optimization state (control plane).
+      AUTOTUNE_STATE_TABLE: this.optimizationStateTableName,
       // AgentCore Memory env vars removed (MEMORY_ID, USE_LONG_TERM_MEMORY, LTM_TOP_K,
       // LTM_RELEVANCE_SCORE). Agent uses FileSessionManager on /mnt/workspace instead.
       // Re-add MEMORY_ID here if re-enabling AgentCore Memory for LTM.
@@ -548,80 +568,61 @@ export class BackendStack extends cdk.NestedStack {
     })
   }
 
-  // Creates a DynamoDB table for storing user feedback.
-  private createFeedbackTable(config: AppConfig): dynamodb.Table {
-    const feedbackTable = new dynamodb.Table(this, "FeedbackTable", {
-      tableName: `${config.stack_name_base}-feedback`,
+  // Creates a DynamoDB table for AutoTune optimization state (control plane).
+  // Read by hooks (cancel check), frontend (progress polling), and agent (state updates).
+  // See autotune/planning-docs/full-autonomy-research.md section 6 for architecture.
+  private createOptimizationStateTable(config: AppConfig): void {
+    const table = new dynamodb.Table(this, "OptimizationStateTable", {
+      tableName: `${config.stack_name_base}-OptimizationState`,
       partitionKey: {
-        name: "feedbackId",
+        name: "session_id",
         type: dynamodb.AttributeType.STRING,
       },
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
       removalPolicy: cdk.RemovalPolicy.DESTROY,
-      pointInTimeRecoverySpecification: {
-        pointInTimeRecoveryEnabled: true,
-      },
       encryption: dynamodb.TableEncryption.AWS_MANAGED,
     })
 
-    // Add GSI for querying by feedbackType with timestamp sorting
-    feedbackTable.addGlobalSecondaryIndex({
-      indexName: "feedbackType-timestamp-index",
-      partitionKey: {
-        name: "feedbackType",
-        type: dynamodb.AttributeType.STRING,
-      },
-      sortKey: {
-        name: "timestamp",
-        type: dynamodb.AttributeType.NUMBER,
-      },
-      projectionType: dynamodb.ProjectionType.ALL,
+    // Store table name in SSM for frontend/external access
+    new ssm.StringParameter(this, "OptimizationStateTableParam", {
+      parameterName: `/${config.stack_name_base}/optimization-state-table`,
+      stringValue: table.tableName,
+      description: "DynamoDB table for AutoTune optimization state",
     })
 
-    return feedbackTable
+    new cdk.CfnOutput(this, "OptimizationStateTableName", {
+      description: "DynamoDB table for AutoTune optimization state",
+      value: table.tableName,
+    })
+
+    // Store for env var injection (used in createAgentCoreRuntime)
+    this.optimizationStateTableName = table.tableName
+    this.optimizationStateTableArn = table.tableArn
   }
 
+  // Creates a DynamoDB table for storing user feedback.
   /**
-   * Creates an API Gateway with Lambda integration for the feedback endpoint.
-   * This is an EXAMPLE implementation demonstrating best practices for API Gateway + Lambda.
+   * Creates an API Gateway with Lambda integration for optimization state.
    *
-   * API Contract - POST /feedback
-   * Authorization: Bearer <cognito-access-token> (required)
+   * Endpoints:
+   *   POST /cancel — Cancel a running optimization (body: { sessionId: string })
+   *   GET  /state  — Get optimization state (query: ?sessionId=xxx)
    *
-   * Request Body:
-   *   sessionId: string (required, max 100 chars, alphanumeric with -_) - Conversation session ID
-   *   message: string (required, max 5000 chars) - Agent's response being rated
-   *   feedbackType: "positive" | "negative" (required) - User's rating
-   *   comment: string (optional, max 5000 chars) - User's explanation for rating
-   *
-   * Success Response (200):
-   *   { success: true, feedbackId: string }
-   *
-   * Error Responses:
-   *   400: { error: string } - Validation failure (missing fields, invalid format)
-   *   401: { error: "Unauthorized" } - Invalid/missing JWT token
-   *   500: { error: "Internal server error" } - DynamoDB or processing error
-   *
-   * Implementation: infra-cdk/lambdas/feedback/index.py
+   * The DynamoDB item schema may evolve as development progresses.
+   * GET /state returns the raw item — frontend should handle unknown/missing fields.
    */
-  private createFeedbackApi(
-    config: AppConfig,
-    frontendUrl: string,
-    feedbackTable: dynamodb.Table
-  ): void {
-    // Create Lambda function for feedback using Python
-    // ARM_64 required — matches Powertools ARM64 layer and avoids cross-platform
-    const feedbackLambda = new PythonFunction(this, "FeedbackLambda", {
-      functionName: `${config.stack_name_base}-feedback`,
+  private createOptimizationStateApi(config: AppConfig, frontendUrl: string): void {
+    const stateLambda = new PythonFunction(this, "OptimizationStateLambda", {
+      functionName: `${config.stack_name_base}-optimization-state`,
       runtime: lambda.Runtime.PYTHON_3_13,
       architecture: lambda.Architecture.ARM_64,
       entry: path.join(__dirname, "..", "lambdas", "feedback"), // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
       handler: "handler",
       environment: {
-        TABLE_NAME: feedbackTable.tableName,
+        TABLE_NAME: this.optimizationStateTableName,
         CORS_ALLOWED_ORIGINS: `${frontendUrl},http://localhost:3000`,
       },
-      timeout: cdk.Duration.seconds(30),
+      timeout: cdk.Duration.seconds(10),
       layers: [
         lambda.LayerVersion.fromLayerVersionArn(
           this,
@@ -631,85 +632,56 @@ export class BackendStack extends cdk.NestedStack {
           }:017000801446:layer:AWSLambdaPowertoolsPythonV3-python313-arm64:18`
         ),
       ],
-      logGroup: new logs.LogGroup(this, "FeedbackLambdaLogGroup", {
-        logGroupName: `/aws/lambda/${config.stack_name_base}-feedback`,
+      logGroup: new logs.LogGroup(this, "OptimizationStateLambdaLogGroup", {
+        logGroupName: `/aws/lambda/${config.stack_name_base}-optimization-state`,
         retention: logs.RetentionDays.ONE_WEEK,
         removalPolicy: cdk.RemovalPolicy.DESTROY,
       }),
     })
 
-    // Grant Lambda permissions to write to DynamoDB
-    feedbackTable.grantWriteData(feedbackLambda)
+    // Cancel needs write, state needs read
+    stateLambda.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ["dynamodb:GetItem", "dynamodb:UpdateItem"],
+        resources: [this.optimizationStateTableArn],
+      })
+    )
 
-    /*
-     * CORS TODO: Wildcard (*) used because Backend deploys before Frontend in nested stack order.
-     * For Lambda proxy integrations, the Lambda's ALLOWED_ORIGINS env var is the primary CORS control.
-     * API Gateway defaultCorsPreflightOptions below only handles OPTIONS preflight requests.
-     * See detailed explanation and fix options in: infra-cdk/lambdas/feedback/index.py
-     */
-    const api = new apigateway.RestApi(this, "FeedbackApi", {
+    const api = new apigateway.RestApi(this, "OptimizationStateApi", {
       restApiName: `${config.stack_name_base}-api`,
-      description: "API for user feedback and future endpoints",
+      description: "AutoTune optimization state and control API",
       defaultCorsPreflightOptions: {
         allowOrigins: [frontendUrl, "http://localhost:3000"],
-        allowMethods: ["POST", "OPTIONS"],
+        allowMethods: ["GET", "POST", "OPTIONS"],
         allowHeaders: ["Content-Type", "Authorization"],
       },
       deployOptions: {
         stageName: "prod",
         throttlingRateLimit: 100,
         throttlingBurstLimit: 200,
-        cachingEnabled: true,
-        cacheDataEncrypted: true,
-        cacheClusterEnabled: true,
-        cacheClusterSize: "0.5",
-        cacheTtl: cdk.Duration.minutes(5),
-        loggingLevel: apigateway.MethodLoggingLevel.INFO,
-        dataTraceEnabled: true,
-        metricsEnabled: true,
-        accessLogDestination: new apigateway.LogGroupLogDestination(
-          new logs.LogGroup(this, "FeedbackApiAccessLogGroup", {
-            logGroupName: `/aws/apigateway/${config.stack_name_base}-api-access`,
-            retention: logs.RetentionDays.ONE_WEEK,
-            removalPolicy: cdk.RemovalPolicy.DESTROY,
-          })
-        ),
-        accessLogFormat: apigateway.AccessLogFormat.jsonWithStandardFields(),
-        tracingEnabled: true,
       },
     })
 
-    // Add request validator for API security
-    const requestValidator = new apigateway.RequestValidator(this, "FeedbackApiRequestValidator", {
-      restApi: api,
-      requestValidatorName: `${config.stack_name_base}-request-validator`,
-      validateRequestBody: true,
-      validateRequestParameters: true,
-    })
-
-    // Create Cognito authorizer
-    const authorizer = new apigateway.CognitoUserPoolsAuthorizer(this, "FeedbackApiAuthorizer", {
+    const authorizer = new apigateway.CognitoUserPoolsAuthorizer(this, "ApiAuthorizer", {
       cognitoUserPools: [this.userPool],
       identitySource: "method.request.header.Authorization",
-      authorizerName: `${config.stack_name_base}-authorizer`,
     })
 
-    // Create /feedback resource and POST method
-    const feedbackResource = api.root.addResource("feedback")
-    feedbackResource.addMethod("POST", new apigateway.LambdaIntegration(feedbackLambda), {
+    const lambdaIntegration = new apigateway.LambdaIntegration(stateLambda)
+    const authOptions = {
       authorizer,
       authorizationType: apigateway.AuthorizationType.COGNITO,
-      requestValidator: requestValidator,
-    })
+    }
 
-    // Store the API URL for access from main stack
+    api.root.addResource("cancel").addMethod("POST", lambdaIntegration, authOptions)
+    api.root.addResource("state").addMethod("GET", lambdaIntegration, authOptions)
+
     this.feedbackApiUrl = api.url
 
-    // Store API URL in SSM for frontend
-    new ssm.StringParameter(this, "FeedbackApiUrlParam", {
-      parameterName: `/${config.stack_name_base}/feedback-api-url`,
+    new ssm.StringParameter(this, "OptimizationStateApiUrlParam", {
+      parameterName: `/${config.stack_name_base}/optimization-state-api-url`,
       stringValue: api.url,
-      description: "Feedback API Gateway URL",
+      description: "AutoTune optimization state API URL",
     })
   }
 
