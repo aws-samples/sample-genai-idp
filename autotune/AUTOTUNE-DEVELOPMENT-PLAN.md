@@ -502,7 +502,7 @@ Convert the agent from interactive chat to autonomous operation. The agent recei
   - If stopping: update DynamoDB status to "complete", write final summary instruction as resume prompt (one last turn to produce the summary)
 
 ### 6.4 Update agent entrypoint for autonomous mode
-- [ ] Modify `basic_agent.py` (`invocations` entrypoint):
+- [x] Modify `basic_agent.py` (`invocations` entrypoint):
   - Parse `test_set_id` and `optimization_guidance` from the payload (in addition to `prompt`)
   - Initialize DynamoDB state item via `OptimizationState.initialize()`
   - Pass hooks to `create_autotune_agent()`: `[CancelCheckHook(state), OptimizationLoopHook(state)]`

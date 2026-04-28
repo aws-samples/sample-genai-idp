@@ -543,7 +543,10 @@ def _get_optimization_state():
     """Get or create the OptimizationState singleton from env vars."""
     global _optimization_state
     if _optimization_state is None:
-        from state import OptimizationState
+        try:
+            from optimization_state import OptimizationState
+        except ImportError:
+            from state import OptimizationState
 
         session_id = os.environ.get("AUTOTUNE_SESSION_ID", "")
         if not session_id:

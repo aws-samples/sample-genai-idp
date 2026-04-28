@@ -13,7 +13,10 @@ import logging
 
 from strands.hooks import AfterInvocationEvent, BeforeToolCallEvent
 
-from state import OptimizationState, STATUS_COMPLETE
+try:
+    from optimization_state import OptimizationState, STATUS_COMPLETE
+except ImportError:
+    from state import OptimizationState, STATUS_COMPLETE
 
 logger = logging.getLogger(__name__)
 
