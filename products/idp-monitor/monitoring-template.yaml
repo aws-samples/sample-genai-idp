@@ -353,6 +353,18 @@ Resources:
             Resource: "*"
 
 # ─────────────────────────────────────────────────────────────────────────────
+# SSM Parameter — written so the Accelerator UI can detect this stack
+# ─────────────────────────────────────────────────────────────────────────────
+
+  MonitoringApiUrlSsmParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub "/idp-monitor/${AcceleratorStackName}/api-url"
+      Type: String
+      Value: !GetAtt MonitoringGraphQLApi.GraphQLUrl
+      Description: !Sub "IDPMonitor API URL for Accelerator stack ${AcceleratorStackName}"
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Outputs
 # ─────────────────────────────────────────────────────────────────────────────
 Outputs:

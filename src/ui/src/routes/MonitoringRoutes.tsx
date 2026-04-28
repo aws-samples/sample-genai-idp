@@ -5,6 +5,7 @@ import { Route, Routes } from 'react-router-dom';
 import { ConsoleLogger } from 'aws-amplify/utils';
 import { Alert, Box, SpaceBetween } from '@cloudscape-design/components';
 import GenAIIDPTopNavigation from '../components/genai-idp-top-navigation';
+import GenAIIDPLayout from '../components/genaiidp-layout';
 import MonitoringLayout from '../components/monitoring/MonitoringLayout';
 
 const logger = new ConsoleLogger('MonitoringRoutes');
@@ -63,9 +64,11 @@ const MonitoringRoutes = (): React.JSX.Element => {
         element={
           <div id="app-layout-wrapper">
             <GenAIIDPTopNavigation />
-            <MonitoringErrorBoundary>
-              <MonitoringLayout />
-            </MonitoringErrorBoundary>
+            <GenAIIDPLayout>
+              <MonitoringErrorBoundary>
+                <MonitoringLayout />
+              </MonitoringErrorBoundary>
+            </GenAIIDPLayout>
           </div>
         }
       />

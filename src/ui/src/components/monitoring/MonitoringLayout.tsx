@@ -20,8 +20,8 @@ import useSettingsContext from '../../contexts/settings';
 const MonitoringLayout = (): React.JSX.Element => {
   const { settings } = useSettingsContext();
 
-  // AWS_STACK_NAME is injected into the SSM settings object by the Accelerator.
-  const stackName = (settings?.AWS_STACK_NAME as string) ?? '';
+  // StackName is the key used in the Accelerator SSM settings parameter.
+  const stackName = (settings?.StackName as string) ?? '';
 
   return <MonitoringShell stackName={stackName} />;
 };
