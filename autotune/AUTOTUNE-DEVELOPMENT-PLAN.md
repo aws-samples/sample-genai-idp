@@ -522,12 +522,13 @@ Convert the agent from interactive chat to autonomous operation. The agent recei
   - "If you detect you are repeating a failed strategy, try a fundamentally different approach"
 
 ### 6.6 Wire up state updates in tools
-- [x] Add a `update_optimization_state` tool (or modify existing tools) so the agent can update DynamoDB phase/detail during long operations:
-  - Before `run_evaluation`: phase="evaluating", phase_detail="Running evaluation {version}..."
-  - Before `run_inference`: phase="evaluating", phase_detail="Running inference..."
-  - During analysis: phase="analyzing", phase_detail="Analyzing evaluation results for {version}"
-  - During config creation: phase="configuring", phase_detail="Creating config v{N}"
-  - During discovery: phase="discovering", phase_detail="Running discovery on dataset"
+- [x] Add `update_optimization_state` tool (#20) for ad-hoc agent state updates
+- [x] Add `_auto_update_state()` helper — key tools auto-update DynamoDB phase on entry:
+  - `run_evaluation` → phase="evaluating"
+  - `run_inference` → phase="evaluating"
+  - `upload_config` → phase="configuring"
+  - `analyze_dataset` → phase="analyzing"
+  - `run_discovery` / `run_multi_class_discovery` → phase="discovering"
 
 ### 6.7 Test autonomous operation
 - [ ] **Local test (no AgentCore):** Run `agent.py` locally with hooks, verify:
@@ -545,12 +546,11 @@ Convert the agent from interactive chat to autonomous operation. The agent recei
   - Resume after cancel (new session, same test set — should start fresh)
 
 ### 6.8 Deferred items (TODO)
-- [ ] **Agent permissions scoping (SECURITY)** — The agent currently has broad IAM permissions. Must scope down before any non-dev use:
-  - Must NOT be able to delete/destroy the IDP stack or production data
-  - Must NOT have internet egress or outbound network access from the account
-  - Arbitrary code execution must use AgentCore CodeInterpreter (sandboxed), not raw `shell`
-  - Review and restrict IAM policies to minimum required actions
-  - Consider Bedrock Guardrails for input/output validation
+- [x] **Agent permissions scoping (SECURITY)** — IAM hardened with explicit Deny policy for destructive actions (DeleteStack, DeleteObject, iam:*, etc.), read/write split, s3:DeleteObject removed. See `autotune/docs/agent-security.md`. Remaining:
+  - [ ] Scope resource ARNs to specific IDP stack resources (currently `*`)
+  - [ ] Restrict network egress via VPC with no internet gateway
+  - [ ] Wire AgentCore CodeInterpreter for sandboxed arbitrary code execution
+  - [ ] Consider Bedrock Guardrails for input/output validation
 - [ ] **SummarizingConversationManager** — add when context overflow is observed in practice. When added, the resume prompt must instruct the agent to re-read OPTIMIZATION-LOG.md to recover summarized-away detail.
 - [ ] **Watchdog timeout** — add `agent.cancel()` from a watchdog thread if AgentCore session timeout proves insufficient.
 - [ ] **Tool limits hook** — custom `BeforeToolCallEvent` hook counting tool invocations, if runaway usage is observed.

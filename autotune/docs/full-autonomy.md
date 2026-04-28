@@ -15,7 +15,7 @@ The agent receives two inputs via the AgentCore invocation payload:
 - **`test_set_id`** (required): ID of a dataset already uploaded and registered in the IDP Accelerator test studio. The agent does not receive raw documents — it uses IDP CLI tools to interact with the stack.
 - **`optimization_guidance`** (optional, default blank): Free-text instructions like "focus on extraction accuracy for address fields" or "cost doesn't matter, maximize accuracy."
 
-These arrive as fields in the JSON payload alongside the standard `prompt` and `runtimeSessionId` fields. When `test_set_id` is present, the entrypoint enters autonomous mode. When absent, it falls back to interactive/dev mode (pass-through of the raw prompt).
+These arrive as fields in the JSON payload alongside the standard `prompt` and `runtimeSessionId` fields. If `test_set_id` is missing, the entrypoint returns an error — there is no interactive fallback.
 
 ## Startup Sequence
 
@@ -208,7 +208,6 @@ These are wired to env vars `IDP_STACK_NAME` and `AUTOTUNE_MODEL_ID` in the Agen
 
 | Feature | Status | Rationale |
 |---------|--------|-----------|
-| Prompt conversion (6.5) | Next | Current prompt has 5 interactive assumptions that contradict autonomous mode |
 | SummarizingConversationManager | Deferred | Monitor context usage first; add when overflow is observed |
 | Watchdog timeout | Deferred | Rely on AgentCore session timeout for v1 |
 | Tool limits (LimitToolCounts) | Deferred | Doesn't exist in strands-agents 1.37.0; max iterations + cancel are sufficient |
@@ -216,6 +215,20 @@ These are wired to env vars `IDP_STACK_NAME` and `AUTOTUNE_MODEL_ID` in the Agen
 | Doom loop detection | Deferred | Agent tracks via OPTIMIZATION-LOG.md; programmatic detection is a refinement |
 | Accuracy plateau detection | Partial | Hook has the structure but relies on agent judgment for v1 |
 | Frontend progress polling | Not started | API exists (`GET /state`), frontend UI not built |
+| Test set ID dropdown | Not started | Currently a text input; needs API endpoint to list test sets from IDP stack |
+| Run history from DynamoDB | Not started | Sidebar currently uses localStorage; should query OptimizationState table |
+| Network isolation | Not started | Agent container needs VPC with no internet egress (see agent-security.md) |
+| Resource ARN scoping | Not started | IAM Allow policies use `resources: "*"`; should scope to IDP stack resources |
+
+## What Was Built
+
+| Feature | Description |
+|---------|-------------|
+| Prompt (6.5) | Rewritten for autonomous, ground-truth-only operation. No-GT workflow removed. |
+| Auto state updates in tools | Key tools (`run_evaluation`, `upload_config`, etc.) auto-update DynamoDB phase via `_auto_update_state()` |
+| IAM hardening | Explicit Deny policy for destructive actions; read/write split; `s3:DeleteObject` removed (see agent-security.md) |
+| Frontend | Test set ID input (required), optimization guidance (optional), cancel button, renamed for optimization runs |
+| OPTIMIZATION-LOG-TEMPLATE.md | Deleted; replaced by f-string in `basic_agent.py._create_optimization_log()` |
 
 ## File Map
 
@@ -224,12 +237,13 @@ These are wired to env vars `IDP_STACK_NAME` and `AUTOTUNE_MODEL_ID` in the Agen
 | Entrypoint | `fast-template/patterns/strands-single-agent/basic_agent.py` | AgentCore entrypoint, startup sequence, agent creation |
 | State helper | `agent/state.py` | `OptimizationState` class — DynamoDB read/write wrapper |
 | Hooks | `agent/hooks.py` | `CancelCheckHook`, `OptimizationLoopHook` |
-| Tools | `agent/tools.py` | 20 IDPAC tools including `update_optimization_state` |
-| System prompt | `agent/prompt.md` | Agent instructions (needs 6.5 update) |
-| CDK backend | `fast-template/infra-cdk/lib/backend-stack.ts` | DynamoDB table, state API, runtime env vars |
+| Tools | `agent/tools.py` | 20 IDPAC tools including `update_optimization_state`, with auto state updates |
+| System prompt | `agent/prompt.md` | Autonomous agent instructions (ground-truth-only) |
+| Security doc | `docs/agent-security.md` | IAM policies, threat model, FAQ |
+| CDK backend | `fast-template/infra-cdk/lib/backend-stack.ts` | DynamoDB table, state API, IAM policies, runtime env vars |
 | CDK main | `fast-template/infra-cdk/lib/fast-main-stack.ts` | Stack outputs including `OptimizationStateApiUrl` |
 | State API Lambda | `fast-template/infra-cdk/lambdas/feedback/index.py` | Cancel + get-state endpoints |
-| Frontend | `fast-template/frontend/src/components/chat/ChatInterface.tsx` | Cancel button, config loading |
-| Deploy script | `fast-template/scripts/deploy-frontend.py` | Generates aws-exports.json with API URL |
+| Frontend | `fast-template/frontend/src/components/chat/ChatInterface.tsx` | Test set ID input, cancel button, optimization guidance |
+| Deploy script | `fast-template/scripts/deploy-frontend.py` | Generates aws-exports.json with `optimizationStateApiUrl` |
 | Config | `fast-template/infra-cdk/config.yaml` | `autotune` section with `idp_stack_name`, `model_id` |
 | Dockerfile | `fast-template/patterns/strands-single-agent/Dockerfile` | Container build, copies state.py/hooks.py as optimization_state.py/optimization_hooks.py |
