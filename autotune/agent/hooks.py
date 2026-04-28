@@ -12,6 +12,7 @@ See autotune/planning-docs/full-autonomy-research.md section 6 for architecture.
 import logging
 
 from strands.hooks import AfterInvocationEvent, BeforeToolCallEvent
+from strands.hooks.registry import HookProvider, HookRegistry
 
 try:
     from optimization_state import OptimizationState, STATUS_COMPLETE
@@ -21,20 +22,23 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
-class CancelCheckHook:
+class CancelCheckHook(HookProvider):
     """Check DynamoDB for cancel signal before every tool call."""
 
     def __init__(self, state: OptimizationState):
         self.state = state
 
-    def __call__(self, event: BeforeToolCallEvent) -> None:
+    def register_hooks(self, registry: HookRegistry, **kwargs) -> None:
+        registry.add_callback(BeforeToolCallEvent, self._check_cancel)
+
+    def _check_cancel(self, event: BeforeToolCallEvent) -> None:
         if self.state.is_cancelled():
             logger.info("Optimization cancelled by user — stopping before tool call")
             self.state.update_phase("cancelled", "Cancelled by user")
             event.cancel_tool = "Optimization cancelled by user"
 
 
-class OptimizationLoopHook:
+class OptimizationLoopHook(HookProvider):
     """Drive the optimization loop and enforce stopping criteria."""
 
     def __init__(self, state: OptimizationState, max_iterations: int = 10, patience: int = 3):
@@ -42,7 +46,10 @@ class OptimizationLoopHook:
         self.max_iterations = max_iterations
         self.patience = patience
 
-    def __call__(self, event: AfterInvocationEvent) -> None:
+    def register_hooks(self, registry: HookRegistry, **kwargs) -> None:
+        registry.add_callback(AfterInvocationEvent, self._check_and_resume)
+
+    def _check_and_resume(self, event: AfterInvocationEvent) -> None:
         if self.state.is_cancelled():
             logger.info("Optimization cancelled — not resuming")
             return

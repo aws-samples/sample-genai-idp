@@ -354,7 +354,6 @@ export default function ChatInterface() {
                       </button>
                     </div>
                   )}
-                  <ChatInput input={input} setInput={setInput} handleSubmit={handleSubmit} isLoading={isLoading} />
                 </div>
               </div>
             </>
