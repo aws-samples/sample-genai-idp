@@ -63,12 +63,19 @@ function isMockEnabled(): boolean {
 // Hook
 // ---------------------------------------------------------------------------
 
+export interface UseMonitoringStatusOptions {
+  /** Override API URL at runtime (e.g. passed from host app settings context). */
+  apiUrl?: string;
+  /** Override API key at runtime. */
+  apiKey?: string;
+}
+
 export interface UseMonitoringStatusResult {
   status: SubscriptionStatus;
   loading: boolean;
 }
 
-export function useMonitoringStatus(): UseMonitoringStatusResult {
+export function useMonitoringStatus(opts?: UseMonitoringStatusOptions): UseMonitoringStatusResult {
   const [status, setStatus] = useState<SubscriptionStatus>('loading');
   const [loading, setLoading] = useState(true);
 
@@ -81,7 +88,7 @@ export function useMonitoringStatus(): UseMonitoringStatusResult {
     }
 
     // Fast path 2: no API URL configured → stack not deployed
-    const apiUrl = getApiUrl();
+    const apiUrl = opts?.apiUrl || getApiUrl();
     if (!apiUrl) {
       setStatus('not_deployed');
       setLoading(false);
@@ -93,7 +100,7 @@ export function useMonitoringStatus(): UseMonitoringStatusResult {
 
     fetchAppSync<{ getMonitoringStatus: { subscriptionStatus: string } }>({
       url: apiUrl,
-      apiKey: getApiKey(),
+      apiKey: opts?.apiKey || getApiKey(),
       query: GET_MONITORING_STATUS,
       variables: {},
     })

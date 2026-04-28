@@ -3,15 +3,19 @@
 import React from 'react';
 import { Route, Routes } from 'react-router-dom';
 import { ConsoleLogger } from 'aws-amplify/utils';
-import { Alert, Box, SpaceBetween } from '@cloudscape-design/components';
+import { Alert, AppLayout, BreadcrumbGroup, Flashbar, Box, SpaceBetween } from '@cloudscape-design/components';
 import GenAIIDPTopNavigation from '../components/genai-idp-top-navigation';
-import GenAIIDPLayout from '../components/genaiidp-layout';
+import Navigation from '../components/genaiidp-layout/navigation';
 import MonitoringLayout from '../components/monitoring/MonitoringLayout';
+import useNotifications from '../hooks/use-notifications';
+import useAppContext from '../contexts/app';
+import { appLayoutLabels } from '../components/common/labels';
+import { MONITORING_PATH } from './constants';
 
 const logger = new ConsoleLogger('MonitoringRoutes');
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Error Boundary — catches render-time exceptions so the whole app doesn't crash
+// Error Boundary
 // ─────────────────────────────────────────────────────────────────────────────
 
 interface ErrorBoundaryState {
@@ -51,6 +55,42 @@ class MonitoringErrorBoundary extends React.Component<React.PropsWithChildren, E
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Monitoring-specific breadcrumbs
+// ─────────────────────────────────────────────────────────────────────────────
+
+const MonitoringBreadcrumbs = (): React.JSX.Element => (
+  <BreadcrumbGroup items={[{ text: 'IDPMonitor', href: `#${MONITORING_PATH}` }]} ariaLabel="Breadcrumbs" />
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Slim AppLayout — nav + breadcrumbs only, no document split panel
+// ─────────────────────────────────────────────────────────────────────────────
+
+const MonitoringAppLayout = (): React.JSX.Element => {
+  const { navigationOpen, setNavigationOpen } = useAppContext();
+  const notifications = useNotifications();
+
+  return (
+    <AppLayout
+      headerSelector="#top-navigation"
+      navigation={<Navigation />}
+      navigationOpen={navigationOpen}
+      onNavigationChange={({ detail }) => setNavigationOpen(detail.open)}
+      breadcrumbs={<MonitoringBreadcrumbs />}
+      notifications={<Flashbar items={notifications as import('@cloudscape-design/components').FlashbarProps.MessageDefinition[]} />}
+      toolsHide={true}
+      splitPanelOpen={false}
+      content={
+        <MonitoringErrorBoundary>
+          <MonitoringLayout />
+        </MonitoringErrorBoundary>
+      }
+      ariaLabels={appLayoutLabels}
+    />
+  );
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Routes
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -64,11 +104,7 @@ const MonitoringRoutes = (): React.JSX.Element => {
         element={
           <div id="app-layout-wrapper">
             <GenAIIDPTopNavigation />
-            <GenAIIDPLayout>
-              <MonitoringErrorBoundary>
-                <MonitoringLayout />
-              </MonitoringErrorBoundary>
-            </GenAIIDPLayout>
+            <MonitoringAppLayout />
           </div>
         }
       />

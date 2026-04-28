@@ -89,6 +89,10 @@ export interface UseMonitoringDashboardOptions {
   refreshIntervalMs?: number;
   /** Which sections to fetch. Omit to fetch all. */
   sections?: string[];
+  /** Override API URL at runtime (e.g. passed from host app settings context). */
+  apiUrl?: string;
+  /** Override API key at runtime. */
+  apiKey?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -129,6 +133,8 @@ export function useMonitoringDashboard(
     endTime,
     refreshIntervalMs = 0,
     sections,
+    apiUrl: runtimeApiUrl,
+    apiKey: runtimeApiKey,
   } = options;
 
   const [data, setData] = useState<MonitoringDashboardData | null>(null);
@@ -152,7 +158,7 @@ export function useMonitoringDashboard(
         await new Promise((r) => setTimeout(r, 300));
         result = buildMockDashboard(timeRange);
       } else {
-        const apiUrl = getApiUrl();
+        const apiUrl = runtimeApiUrl || getApiUrl();
         if (!apiUrl) {
           throw new Error(
             'VITE_IDP_MONITOR_API_URL is not configured. ' +
@@ -162,7 +168,7 @@ export function useMonitoringDashboard(
 
         const raw = await fetchAppSync<RawDashboardResponse>({
           url: apiUrl,
-          apiKey: getApiKey(),
+          apiKey: runtimeApiKey || getApiKey(),
           query: GET_MONITORING_DASHBOARD,
           variables: {
             input: {

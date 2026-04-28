@@ -102,7 +102,7 @@ export default tseslint.config(
       'react-hooks/exhaustive-deps': 'off',
 
       // Import rules
-      'import-x/no-unresolved': ['error', { ignore: ['\\.css$'] }],
+      'import-x/no-unresolved': ['error', { ignore: ['\\.css$', '@idp-accelerator/idp-monitor-ui'] }],
       'import-x/extensions': [
         'error',
         'ignorePackages',

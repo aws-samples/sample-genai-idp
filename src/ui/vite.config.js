@@ -40,11 +40,6 @@ export default defineConfig(({ mode }) => ({
     // Increase chunk size warning limit (suppressed for enterprise internal tool)
     chunkSizeWarningLimit: 3000,
     rollupOptions: {
-      // @idp-accelerator/idp-monitor-ui is an optional premium package that is not installed
-      // in open-source builds. Mark it as external so Rollup does not try to resolve it at
-      // build time — the lazy() import in MonitoringShell/MonitoringActivationPage already
-      // handles the missing-package case gracefully at runtime via .catch().
-      external: ['@idp-accelerator/idp-monitor-ui'],
       output: {
         // Manual chunking for better code splitting
         manualChunks: {
@@ -73,6 +68,15 @@ export default defineConfig(({ mode }) => ({
   define: {
     // Ensure process.env is available for compatibility
     'process.env': {},
+    // IDPMonitor AppSync endpoint — injected at build time via environment variables.
+    // Set VITE_IDP_MONITOR_API_URL and VITE_IDP_MONITOR_API_KEY in your build environment
+    // (CodeBuild env vars, .env.local, etc.) when deploying the IDPMonitor stack.
+    // If not set, useMonitoringStatus returns "not_deployed" and the monitoring activation
+    // page is shown. The dashboard becomes available once the stack is deployed and the
+    // UI is rebuilt with these variables populated.
+    __IDP_MONITOR_API_URL__: JSON.stringify(process.env.VITE_IDP_MONITOR_API_URL ?? ''),
+    __IDP_MONITOR_API_KEY__: JSON.stringify(process.env.VITE_IDP_MONITOR_API_KEY ?? ''),
+    __IDP_MONITOR_MOCK__: JSON.stringify(process.env.VITE_IDP_MONITOR_MOCK ?? ''),
   },
 
   // Optimize dependencies

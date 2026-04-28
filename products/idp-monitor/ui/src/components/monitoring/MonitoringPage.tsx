@@ -27,11 +27,18 @@ import { MonitoringActivationPage } from './MonitoringActivationPage';
 import { MonitoringFilters } from './MonitoringFilters';
 import { MonitoringLayout } from './MonitoringLayout';
 
-export function MonitoringPage(): JSX.Element {
+export interface MonitoringPageProps {
+  /** AppSync API URL — injected at runtime from host app settings context. */
+  apiUrl?: string;
+  /** AppSync API key — injected at runtime from host app settings context. */
+  apiKey?: string;
+}
+
+export function MonitoringPage({ apiUrl, apiKey }: MonitoringPageProps = {}): JSX.Element {
   const [timeRange, setTimeRange] = useState<TimeRangePreset>('24h');
 
   // Lightweight status check — determines whether to show activation page
-  const { status: subscriptionStatus, loading: statusLoading } = useMonitoringStatus();
+  const { status: subscriptionStatus, loading: statusLoading } = useMonitoringStatus({ apiUrl, apiKey });
 
   // Full dashboard fetch — only meaningful once we know stack is deployed
   const {
@@ -39,7 +46,7 @@ export function MonitoringPage(): JSX.Element {
     loading: dashboardLoading,
     error: dashboardError,
     refetch,
-  } = useMonitoringDashboard({ timeRange });
+  } = useMonitoringDashboard({ timeRange, apiUrl, apiKey });
 
   // ── Loading state ──────────────────────────────────────────────────────────
   if (statusLoading) {

@@ -395,3 +395,34 @@ echo ""
 [[ -n "$API_KEY" ]]  && echo "  API Key  : ${API_KEY}"
 echo "  Stack    : ${MONITOR_STACK_NAME}"
 echo ""
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Patch the Accelerator Settings SSM parameter with the monitoring API details
+# so the UI can discover the endpoint at runtime without a rebuild.
+# ─────────────────────────────────────────────────────────────────────────────
+if [[ -n "$API_URL" ]]; then
+  header "Updating Accelerator Settings SSM parameter"
+
+  SETTINGS_PARAM="${STACK_NAME}-Settings"
+  CURRENT_SETTINGS=$(aws_cli ssm get-parameter \
+    --name "$SETTINGS_PARAM" \
+    --query "Parameter.Value" \
+    --output text 2>/dev/null || echo "{}")
+
+  UPDATED_SETTINGS=$(echo "$CURRENT_SETTINGS" | python3 -c "
+import json, sys
+data = json.load(sys.stdin)
+data['IDPMonitorApiUrl'] = '${API_URL}'
+data['IDPMonitorApiKey'] = '${API_KEY}'
+data['IDPMonitorStackName'] = '${MONITOR_STACK_NAME}'
+print(json.dumps(data))
+")
+
+  aws_cli ssm put-parameter \
+    --name "$SETTINGS_PARAM" \
+    --value "$UPDATED_SETTINGS" \
+    --type String \
+    --overwrite \
+    &>/dev/null && success "Settings SSM parameter updated: ${SETTINGS_PARAM}" \
+    || warn "Could not update Settings SSM parameter '${SETTINGS_PARAM}' — update it manually if needed."
+fi

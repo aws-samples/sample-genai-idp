@@ -76,8 +76,6 @@ const ActivationStub: React.FC<MonitoringActivationPageProps> = ({ onActivated, 
 // ---------------------------------------------------------------------------
 
 const PremiumActivationPage = lazy(() => {
-  // @ts-expect-error: @idp-accelerator/idp-monitor-ui is an optional premium package not present in OSS builds
-  // eslint-disable-next-line import-x/no-unresolved
   return import('@idp-accelerator/idp-monitor-ui')
     .then((mod) => ({
       default: mod.MonitoringActivationPage as React.ComponentType<MonitoringActivationPageProps>,

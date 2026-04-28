@@ -13,12 +13,17 @@
  *     localStorage and lazy-load the premium MonitoringPage from
  *     @idp-accelerator/idp-monitor-ui.
  *
- *  3. If @idp-accelerator/idp-monitor-ui is NOT installed, the lazy import
+ *  3. The premium MonitoringPage receives the AppSync API URL + Key read
+ *     from the Accelerator's SSM Settings parameter (written there by
+ *     deploy.sh after the IDPMonitor stack is deployed).
+ *
+ *  4. If @idp-accelerator/idp-monitor-ui is NOT installed, the lazy import
  *     catch renders a graceful "package not available" message.
  */
 
 import React, { Suspense, lazy, useState, useCallback } from 'react';
 import { Alert, Box, Button, Container, Header, SpaceBetween, TextContent } from '@cloudscape-design/components';
+import useSettingsContext from '../../contexts/settings';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -29,6 +34,11 @@ interface MonitoringShellProps {
   stackName: string;
   /** Optional CSS class for the outer wrapper div. */
   className?: string;
+}
+
+interface MonitoringPageProps {
+  apiUrl?: string;
+  apiKey?: string;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -80,14 +90,12 @@ const MonitoringLoadingSkeleton: React.FC = () => (
 // ─────────────────────────────────────────────────────────────────────────────
 
 const PremiumMonitoringPage = lazy(() =>
-  // @ts-expect-error: optional premium package not present in OSS builds
-  // eslint-disable-next-line import-x/no-unresolved
   import('@idp-accelerator/idp-monitor-ui')
-    .then((mod: { MonitoringPage: React.ComponentType<MonitoringShellProps> }) => ({
+    .then((mod: { MonitoringPage: React.ComponentType<MonitoringPageProps> }) => ({
       default: mod.MonitoringPage,
     }))
     .catch(() => ({
-      default: (_props: MonitoringShellProps) => (
+      default: (_props: MonitoringPageProps) => (
         <Box padding="l">
           <Alert type="warning" header="Monitoring package unavailable">
             The <code>@idp-accelerator/idp-monitor-ui</code> package is not installed in this build. Please contact your administrator or
@@ -96,7 +104,7 @@ const PremiumMonitoringPage = lazy(() =>
         </Box>
       ),
     })),
-) as React.LazyExoticComponent<React.ComponentType<MonitoringShellProps>>;
+) as React.LazyExoticComponent<React.ComponentType<MonitoringPageProps>>;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Activation / CTA page — shown before the user enables monitoring
@@ -147,7 +155,13 @@ const ActivationPage: React.FC<ActivationPageProps> = ({ onEnable, stackName }) 
 // ─────────────────────────────────────────────────────────────────────────────
 
 export const MonitoringShell: React.FC<MonitoringShellProps> = ({ stackName, className }) => {
+  const { settings } = useSettingsContext();
   const [activated, setActivated] = useState<boolean>(getPersistedActivated);
+
+  // API URL and Key are written into the Accelerator Settings SSM parameter
+  // by products/idp-monitor/deploy.sh after the IDPMonitor stack deploys.
+  const apiUrl = (settings?.IDPMonitorApiUrl as string) ?? '';
+  const apiKey = (settings?.IDPMonitorApiKey as string) ?? '';
 
   const handleEnable = useCallback(() => {
     setPersistedActivated(true);
@@ -165,7 +179,7 @@ export const MonitoringShell: React.FC<MonitoringShellProps> = ({ stackName, cla
   return (
     <div className={className}>
       <Suspense fallback={<MonitoringLoadingSkeleton />}>
-        <PremiumMonitoringPage stackName={stackName} />
+        <PremiumMonitoringPage apiUrl={apiUrl} apiKey={apiKey} />
       </Suspense>
     </div>
   );
