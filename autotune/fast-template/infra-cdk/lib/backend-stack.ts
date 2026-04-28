@@ -32,7 +32,7 @@ export class BackendStack extends cdk.NestedStack {
   public readonly userPoolId: string
   public readonly userPoolClientId: string
   public readonly userPoolDomain: cognito.UserPoolDomain
-  public feedbackApiUrl: string
+  public optimizationStateApiUrl: string
   public runtimeArn: string
   // public memoryArn: string  // Disabled — see AgentCore Memory comment in createAgentRuntime()
   private agentName: cdk.CfnParameter
@@ -678,7 +678,7 @@ export class BackendStack extends cdk.NestedStack {
     api.root.addResource("cancel").addMethod("POST", lambdaIntegration, authOptions)
     api.root.addResource("state").addMethod("GET", lambdaIntegration, authOptions)
 
-    this.feedbackApiUrl = api.url
+    this.optimizationStateApiUrl = api.url
 
     new ssm.StringParameter(this, "OptimizationStateApiUrlParam", {
       parameterName: `/${config.stack_name_base}/optimization-state-api-url`,

@@ -55,6 +55,7 @@ export default function ChatInterface() {
   const [input, setInput] = useState("")
   const [error, setError] = useState<string | null>(null)
   const [client, setClient] = useState<AgentCoreClient | null>(null)
+  const [stateApiUrl, setStateApiUrl] = useState<string>("")
 
   const { isLoading, setIsLoading } = useGlobal()
   const auth = useAuth()
@@ -104,6 +105,9 @@ export default function ChatInterface() {
             pattern: (config.agentPattern || "strands-single-agent") as AgentPattern,
           })
         )
+        if (config.optimizationStateApiUrl) {
+          setStateApiUrl(config.optimizationStateApiUrl)
+        }
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : "Unknown error"
         setError(`Configuration error: ${errorMessage}`)
@@ -247,6 +251,23 @@ export default function ChatInterface() {
     setError(null)
   }
 
+  const handleCancelOptimization = async () => {
+    if (!stateApiUrl) return
+    try {
+      const idToken = auth.user?.id_token
+      if (!idToken) throw new Error("Authentication required")
+      const resp = await fetch(`${stateApiUrl}cancel`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${idToken}` },
+        body: JSON.stringify({ sessionId: currentSessionId }),
+      })
+      if (!resp.ok) throw new Error(`Cancel failed: ${resp.status}`)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Unknown error"
+      setError(`Failed to cancel: ${msg}`)
+    }
+  }
+
   const handleSessionSelect = (session: ChatSession) => {
     setCurrentSessionId(session.id)
     setInput("")
@@ -299,6 +320,16 @@ export default function ChatInterface() {
               </div>
               <div className="flex-none">
                 <div className="max-w-4xl mx-auto w-full">
+                  {isLoading && stateApiUrl && (
+                    <div className="flex justify-center mb-2">
+                      <button
+                        onClick={handleCancelOptimization}
+                        className="px-4 py-1.5 text-sm bg-red-600 text-white rounded hover:bg-red-700 transition-colors"
+                      >
+                        Cancel Optimization
+                      </button>
+                    </div>
+                  )}
                   <ChatInput input={input} setInput={setInput} handleSubmit={handleSubmit} isLoading={isLoading} />
                 </div>
               </div>
