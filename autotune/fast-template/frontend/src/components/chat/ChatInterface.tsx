@@ -31,13 +31,13 @@ function saveSessions(sessions: ChatSession[]) {
 
 function makeSessionName(messages: Message[]): string {
   const first = messages.find(m => m.role === "user")
-  if (!first) return "New Chat"
+  if (!first) return "New Run"
   return first.content.slice(0, 50) + (first.content.length > 50 ? "…" : "")
 }
 
 function newSession(): ChatSession {
   const now = new Date().toISOString()
-  return { id: crypto.randomUUID(), name: "New Chat", history: [], startDate: now, endDate: now }
+  return { id: crypto.randomUUID(), name: "New Run", history: [], startDate: now, endDate: now }
 }
 
 export default function ChatInterface() {
@@ -53,6 +53,7 @@ export default function ChatInterface() {
   const messages = currentSession?.history ?? []
 
   const [input, setInput] = useState("")
+  const [testSetId, setTestSetId] = useState("")
   const [error, setError] = useState<string | null>(null)
   const [client, setClient] = useState<AgentCoreClient | null>(null)
   const [stateApiUrl, setStateApiUrl] = useState<string>("")
@@ -121,7 +122,11 @@ export default function ChatInterface() {
   }, [messages])
 
   const sendMessage = async (userMessage: string) => {
-    if (!userMessage.trim() || !client) return
+    if (!client) return
+    if (isInitialState && !testSetId.trim()) {
+      setError("Test Set ID is required to start an optimization run")
+      return
+    }
     setError(null)
 
     const newUserMessage: Message = {
@@ -164,7 +169,17 @@ export default function ChatInterface() {
         })
       }
 
-      await client.invoke(userMessage, currentSessionId, accessToken, event => {
+      const extra: Record<string, string> = {}
+      if (testSetId.trim()) {
+        extra.test_set_id = testSetId.trim()
+        extra.optimization_guidance = userMessage
+      }
+
+      await client.invoke(
+        testSetId.trim() ? "Begin optimization" : userMessage,
+        currentSessionId,
+        accessToken,
+        event => {
         switch (event.type) {
           case "text": {
             const prev = segments[segments.length - 1]
@@ -221,7 +236,7 @@ export default function ChatInterface() {
             break
           }
         }
-      })
+      }, extra)
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : "Unknown error"
       setError(`Failed to get response: ${errorMessage}`)
@@ -300,11 +315,18 @@ export default function ChatInterface() {
             <>
               <div className="grow" />
               <div className="text-center mb-6">
-                <h2 className="text-2xl font-bold text-gray-800">Welcome to IDPAutoTune Temporary Developer Chat</h2>
-                <p className="text-gray-600 mt-2">Ask me anything to get started</p>
+                <h2 className="text-2xl font-bold text-gray-800">IDPAutoTune</h2>
+                <p className="text-gray-600 mt-2">Enter a test set ID and optional guidance to start an optimization run</p>
               </div>
-              <div className="px-4 mb-16 max-w-4xl mx-auto w-full">
-                <ChatInput input={input} setInput={setInput} handleSubmit={handleSubmit} isLoading={isLoading} />
+              <div className="px-4 mb-16 max-w-4xl mx-auto w-full space-y-3">
+                <input
+                  type="text"
+                  value={testSetId}
+                  onChange={e => setTestSetId(e.target.value)}
+                  placeholder="Test Set ID (required)"
+                  className="w-full px-3 py-2 border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                <ChatInput input={input} setInput={setInput} handleSubmit={handleSubmit} isLoading={isLoading} placeholder="Optimization guidance (optional)" />
               </div>
               <div className="grow" />
             </>
@@ -320,7 +342,7 @@ export default function ChatInterface() {
               </div>
               <div className="flex-none">
                 <div className="max-w-4xl mx-auto w-full">
-                  {isLoading && stateApiUrl && (
+                  {hasAssistantMessages && stateApiUrl && (
                     <div className="flex justify-center mb-2">
                       <button
                         onClick={handleCancelOptimization}

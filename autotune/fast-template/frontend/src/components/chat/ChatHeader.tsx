@@ -30,7 +30,7 @@ export function ChatHeader({ title, onNewChat, canStartNewChat }: ChatHeaderProp
       <div className="flex items-center gap-2">
         <Button onClick={onNewChat} variant="outline" className="gap-2" disabled={!canStartNewChat}>
           <Plus className="h-4 w-4" />
-          New Chat
+          New Optimization Run
         </Button>
         {isAuthenticated && (
           <AlertDialog>

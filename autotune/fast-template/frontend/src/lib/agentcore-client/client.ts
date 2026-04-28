@@ -38,7 +38,8 @@ export class AgentCoreClient {
     query: string,
     sessionId: string,
     accessToken: string,
-    onEvent: StreamCallback
+    onEvent: StreamCallback,
+    extraPayload?: Record<string, string>
   ): Promise<void> {
     if (!accessToken) throw new Error("No valid access token found.")
     if (!this.runtimeArn) throw new Error("Agent Runtime ARN not configured.")
@@ -63,6 +64,7 @@ export class AgentCoreClient {
       : {
           prompt: query,
           runtimeSessionId: sessionId,
+          ...extraPayload,
         }
 
     // User identity is extracted server-side from the validated JWT token

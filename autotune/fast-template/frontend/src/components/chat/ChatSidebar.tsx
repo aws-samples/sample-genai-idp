@@ -33,12 +33,12 @@ export function ChatSidebar({
       <SidebarHeader className="p-4 space-y-2">
         <Button onClick={onNewChat} className="w-full justify-start gap-2">
           <Plus className="h-4 w-4" />
-          New Chat
+          New Optimization Run
         </Button>
       </SidebarHeader>
       <SidebarContent>
         <SidebarGroup>
-          <SidebarGroupLabel>Recent Chats</SidebarGroupLabel>
+          <SidebarGroupLabel>Recent Optimization Runs</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
               {sessions.map(session => (
