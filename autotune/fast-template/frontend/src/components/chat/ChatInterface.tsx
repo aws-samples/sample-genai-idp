@@ -10,7 +10,6 @@ import { ChatSession, Message, MessageSegment, ToolCall } from "./types"
 import { useGlobal } from "@/app/context/GlobalContext"
 import { AgentCoreClient } from "@/lib/agentcore-client"
 import type { AgentPattern } from "@/lib/agentcore-client"
-import { submitFeedback } from "@/services/feedbackService"
 import { useAuth } from "react-oidc-context"
 import { useDefaultTool } from "@/hooks/useToolRenderer"
 import { ToolCallDisplay } from "./ToolCallDisplay"
@@ -240,25 +239,6 @@ export default function ChatInterface() {
     sendMessage(input)
   }
 
-  const handleFeedbackSubmit = async (
-    messageContent: string,
-    feedbackType: "positive" | "negative",
-    comment: string
-  ) => {
-    try {
-      const idToken = auth.user?.id_token
-      if (!idToken) throw new Error("Authentication required. Please log in again.")
-
-      await submitFeedback(
-        { sessionId: currentSessionId, message: messageContent, feedbackType, comment: comment || undefined },
-        idToken
-      )
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : "Unknown error"
-      setError(`Failed to submit feedback: ${errorMessage}`)
-    }
-  }
-
   const startNewChat = () => {
     const session = newSession()
     setSessions(prev => [session, ...prev])
@@ -314,8 +294,6 @@ export default function ChatInterface() {
                   <ChatMessages
                     messages={messages}
                     messagesEndRef={messagesEndRef}
-                    sessionId={currentSessionId}
-                    onFeedbackSubmit={handleFeedbackSubmit}
                   />
                 </div>
               </div>
