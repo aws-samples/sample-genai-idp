@@ -12,6 +12,7 @@ interface ChatInputProps {
   isLoading: boolean
   className?: string
   placeholder?: string
+  allowEmpty?: boolean
 }
 
 export function ChatInput({
@@ -21,6 +22,7 @@ export function ChatInput({
   isLoading,
   className = "",
   placeholder = "Type your message... (Ctrl+Enter for new line)",
+  allowEmpty = false,
 }: ChatInputProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
@@ -69,7 +71,7 @@ export function ChatInput({
           autoFocus
         />
 
-        <Button type="submit" disabled={!input.trim() || isLoading} className="h-10">
+        <Button type="submit" disabled={(!allowEmpty && !input.trim()) || isLoading} className="h-10">
           {isLoading ? (
             <>
               <Loader2Icon className="mr-2 h-4 w-4 animate-spin" />

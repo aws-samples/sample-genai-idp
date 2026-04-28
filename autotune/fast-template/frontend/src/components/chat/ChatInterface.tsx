@@ -319,14 +319,16 @@ export default function ChatInterface() {
                 <p className="text-gray-600 mt-2">Enter a test set ID and optional guidance to start an optimization run</p>
               </div>
               <div className="px-4 mb-16 max-w-4xl mx-auto w-full space-y-3">
+                {/* TODO: Replace test set ID text input with a dropdown populated from the IDP stack.
+                    Requires a new REST API endpoint + Lambda that calls IDP SDK/CLI to list test sets. */}
                 <input
                   type="text"
                   value={testSetId}
                   onChange={e => setTestSetId(e.target.value)}
                   placeholder="Test Set ID (required)"
-                  className="w-full px-3 py-2 border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-2 border rounded-md text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
-                <ChatInput input={input} setInput={setInput} handleSubmit={handleSubmit} isLoading={isLoading} placeholder="Optimization guidance (optional)" />
+                <ChatInput input={input} setInput={setInput} handleSubmit={handleSubmit} isLoading={isLoading} placeholder="Optimization guidance (optional)" allowEmpty />
               </div>
               <div className="grow" />
             </>

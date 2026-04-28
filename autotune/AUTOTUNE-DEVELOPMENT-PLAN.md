@@ -557,6 +557,8 @@ Convert the agent from interactive chat to autonomous operation. The agent recei
 - [ ] **Doom loop detection** — programmatic oscillation detection in the `OptimizationLoopHook`. For v1, rely on prompt instructions + OPTIMIZATION-LOG history.
 - [x] **REST API for cancel + state polling** — `POST /cancel` and `GET /state` endpoints via API Gateway + Lambda, backed by the OptimizationState DynamoDB table. Replaced the FAST feedback API. Cognito-authenticated.
 - [x] **UI cancel button** — wired in ChatInterface.tsx, calls `POST /cancel` with session ID.
+- [ ] **Test set ID dropdown** — Replace the text input with a dropdown populated from the IDP stack. Requires a new REST API endpoint + Lambda that calls IDP SDK/CLI to list available test sets.
+- [ ] **Optimization run history from DynamoDB** — Replace localStorage-based session list with a list endpoint that queries the OptimizationState DynamoDB table. Current sidebar disappears on browser data clear or different browser.
 
 ---
 
