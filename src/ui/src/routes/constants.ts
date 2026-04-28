@@ -17,3 +17,4 @@ export const USER_MANAGEMENT_PATH = `${DOCUMENTS_PATH}/users`;
 export const AGENT_CHAT_PATH = '/agentchat';
 export const CAPACITY_PLANNING_PATH = `${DOCUMENTS_PATH}/capacity-planning`;
 export const CUSTOM_MODELS_PATH = `${DOCUMENTS_PATH}/custom-models`;
+export const MONITORING_PATH = '/monitoring';

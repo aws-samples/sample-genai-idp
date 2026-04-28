@@ -252,21 +252,44 @@ fi
 if [[ -z "$S3_BUCKET" ]]; then
   header "Resolving S3 artifacts bucket"
 
-  # Look for a bucket tagged or named with the stack name and 'artifacts'.
-  # Use JMESPath | [0] to select only the first match — avoids the space/tab
-  # ambiguity in --output text when multiple buckets match the filter.
+  # Look for a bucket that is a direct resource of the Accelerator stack and
+  # whose logical ID contains "Artifact".  Use --output json + python to get a
+  # single clean string — avoids the "None\nNone\n…" multi-line artefact that
+  # --output text produces when the JMESPath result is null or an empty list.
   S3_BUCKET=$(aws_cli cloudformation list-stack-resources \
     --stack-name "$STACK_NAME" \
-    --query "StackResourceSummaries[?ResourceType=='AWS::S3::Bucket' && contains(LogicalResourceId, 'Artifact')].PhysicalResourceId | [0]" \
-    --output text 2>/dev/null)
-  [[ "$S3_BUCKET" == "None" ]] && S3_BUCKET=""
+    --query "StackResourceSummaries[?ResourceType=='AWS::S3::Bucket' && contains(LogicalResourceId, 'Artifact')].PhysicalResourceId" \
+    --output json 2>/dev/null \
+    | python3 -c "import json,sys; v=json.load(sys.stdin); print(v[0] if v else '')" 2>/dev/null)
 
-  # Fallback: scan all buckets for a match on account+region pattern
+  # Fallback 1: look for any bucket containing 'artifact' and the account ID
   if [[ -z "$S3_BUCKET" ]]; then
     S3_BUCKET=$(aws_cli s3api list-buckets \
-      --query "Buckets[?contains(Name, 'artifact') && contains(Name, '${ACCOUNT_ID}')].Name | [0]" \
-      --output text 2>/dev/null)
-    [[ "$S3_BUCKET" == "None" ]] && S3_BUCKET=""
+      --query "Buckets[?contains(Name, 'artifact') && contains(Name, '${ACCOUNT_ID}')].Name" \
+      --output json 2>/dev/null \
+      | python3 -c "import json,sys; v=json.load(sys.stdin); print(v[0] if v else '')" 2>/dev/null)
+  fi
+
+  # Fallback 2: any bucket matching the common SAM deploy naming pattern
+  # (<prefix>-artifacts-<account>-<region> or idp-*-artifacts-*)
+  if [[ -z "$S3_BUCKET" ]]; then
+    S3_BUCKET=$(aws_cli s3api list-buckets \
+      --query "Buckets[?contains(Name, 'artifact')].Name" \
+      --output json 2>/dev/null \
+      | python3 -c "
+import json, sys, os
+buckets = json.load(sys.stdin)
+account = '${ACCOUNT_ID}'
+region  = '${RESOLVED_REGION}'
+# Prefer buckets that embed both account and region in name
+for b in buckets:
+    if account in b and region in b:
+        print(b); sys.exit(0)
+for b in buckets:
+    if account in b:
+        print(b); sys.exit(0)
+print(buckets[0] if buckets else '')
+" 2>/dev/null)
   fi
 
   if [[ -z "$S3_BUCKET" ]]; then
