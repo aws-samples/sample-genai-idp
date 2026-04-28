@@ -227,8 +227,25 @@ These are wired to env vars `IDP_STACK_NAME` and `AUTOTUNE_MODEL_ID` in the Agen
 | Prompt (6.5) | Rewritten for autonomous, ground-truth-only operation. No-GT workflow removed. |
 | Auto state updates in tools | Key tools (`run_evaluation`, `upload_config`, etc.) auto-update DynamoDB phase via `_auto_update_state()` |
 | IAM hardening | Explicit Deny policy for destructive actions; read/write split; `s3:DeleteObject` removed (see agent-security.md) |
-| Frontend | Test set ID input (required), optimization guidance (optional), cancel button, renamed for optimization runs |
+| Frontend | Test set ID input (required), optimization guidance (optional), cancel button, state polling display, renamed for optimization runs |
+| State polling display | Frontend polls `GET /state` every 2s, shows color-coded status, phase, phase_detail, iteration, updated_at |
+| HookProvider fix | Hooks converted from `__call__` to `HookProvider.register_hooks()` — Strands can't infer event types from class instances |
 | OPTIMIZATION-LOG-TEMPLATE.md | Deleted; replaced by f-string in `basic_agent.py._create_optimization_log()` |
+
+## First Test Run (2026-04-28)
+
+Test set: `realkie-fcc-verified` (RealKIE FCC invoices, single-class, ground truth available).
+
+The agent successfully:
+- Read OPTIMIZATION-LOG.md, identified run parameters
+- Listed existing evaluations, found a prior baseline run
+- Downloaded and read the current IDP config
+- Downloaded evaluation results and analyzed accuracy per document
+- Examined worst-performing documents to identify extraction issues
+- Updated OPTIMIZATION-LOG.md with findings
+- Auto-updated DynamoDB state (phase: analyzing)
+
+The agent died after ~7 minutes with no error. Suspected AgentCore session/streaming timeout. This is the top priority to debug — see dev plan 6.7.
 
 ## File Map
 

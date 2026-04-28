@@ -531,19 +531,35 @@ Convert the agent from interactive chat to autonomous operation. The agent recei
   - `run_discovery` / `run_multi_class_discovery` → phase="discovering"
 
 ### 6.7 Test autonomous operation
-- [ ] **Local test (no AgentCore):** Run `agent.py` locally with hooks, verify:
-  - DynamoDB state item created on start
-  - Phase updates appear during execution
-  - Agent stops after max_iterations or plateau
-  - Cancel via CLI `aws dynamodb update-item` stops agent within one tool call
-- [ ] **AgentCore test:** Deploy and invoke via FAST frontend:
-  - Send optimization request with test_set_id
-  - Monitor DynamoDB state item for live progress
-  - Test cancel via CLI
-  - Verify agent produces `idpac_config_final.yaml` and summary
-- [ ] **Edge cases:**
-  - Cancel during a long evaluation run (agent should stop after eval completes, not mid-eval)
-  - Resume after cancel (new session, same test set — should start fresh)
+- [x] **AgentCore test (partial):** First real test run on 2026-04-28:
+  - ✅ Frontend sends test_set_id + optimization_guidance in payload
+  - ✅ DynamoDB state item created (status=running, phase=initializing)
+  - ✅ OPTIMIZATION-LOG.md pre-created on persistent filesystem
+  - ✅ Agent started successfully, read the log, analyzed dataset, downloaded config, examined evaluation results
+  - ✅ Auto state updates fired (phase changed to "analyzing")
+  - ✅ State polling display in frontend works (shows status, phase, iteration, updated_at)
+  - ❌ Agent session died after ~7 minutes with no error in logs — suspected AgentCore streaming timeout (should be 8 hours per AgentCore docs). DynamoDB state stuck at "running" because cleanup didn't run.
+  - ❌ HookProvider bug caught and fixed during testing (Strands can't infer event types from `__call__` on class instances)
+- [ ] **Debug agent session timeout** — PRIORITY FOR NEXT SESSION. Details:
+  - Agent ran for ~7 minutes then stopped. No ERROR in CloudWatch logs. Last log entry was a normal tool result (file_read).
+  - AgentCore Runtime should support up to 8 hours. The timeout may be:
+    - AgentCore streaming idle timeout (no SSE events sent during long tool calls)
+    - HTTP connection timeout between AgentCore and Bedrock
+    - The `stream_async` generator being closed when the HTTP response stream is terminated
+  - Investigation steps:
+    1. Check AgentCore Runtime configuration for timeout settings (CDK L2 construct props)
+    2. Check if there's a streaming idle timeout vs total session timeout
+    3. Try a simple test: invoke agent with a prompt that just sleeps for 10 minutes via shell tool
+    4. Check if the frontend disconnecting causes the backend to stop (it shouldn't — the agent runs server-side)
+    5. Look at the FAST framework's `BedrockAgentCoreApp` for any timeout configuration
+    6. Check Kenton's long-running app harness for how he handles multi-hour sessions
+- [ ] **Fix stale DynamoDB state on crash** — When the agent session dies unexpectedly, the DynamoDB state stays "running" forever. Options:
+  - Add a TTL or heartbeat: agent updates `updated_at` every N seconds; frontend treats "running" with stale `updated_at` (>5 min) as "unknown/crashed"
+  - Add a cleanup Lambda triggered by AgentCore session end events (if such events exist)
+  - For now: frontend could show "possibly stalled" if updated_at is old
+- [ ] **Cancel via CLI test** — verify `aws dynamodb update-item` stops agent within one tool call
+- [ ] **Full iteration test** — verify agent completes a full optimization loop (analyze → modify config → upload → evaluate → repeat)
+- [ ] **Max iterations test** — verify agent stops after 10 iterations and produces summary
 
 ### 6.8 Deferred items (TODO)
 - [x] **Agent permissions scoping (SECURITY)** — IAM hardened with explicit Deny policy for destructive actions (DeleteStack, DeleteObject, iam:*, etc.), read/write split, s3:DeleteObject removed. See `autotune/docs/agent-security.md`. Remaining:
@@ -556,7 +572,8 @@ Convert the agent from interactive chat to autonomous operation. The agent recei
 - [ ] **Tool limits hook** — custom `BeforeToolCallEvent` hook counting tool invocations, if runaway usage is observed.
 - [ ] **Doom loop detection** — programmatic oscillation detection in the `OptimizationLoopHook`. For v1, rely on prompt instructions + OPTIMIZATION-LOG history.
 - [x] **REST API for cancel + state polling** — `POST /cancel` and `GET /state` endpoints via API Gateway + Lambda, backed by the OptimizationState DynamoDB table. Replaced the FAST feedback API. Cognito-authenticated.
-- [x] **UI cancel button** — wired in ChatInterface.tsx, calls `POST /cancel` with session ID.
+- [x] **UI cancel button** — wired in ChatInterface.tsx, calls `POST /cancel` with session ID. Only shows when status is "running".
+- [x] **Frontend state polling** — Polls `GET /state` every 2s, displays status (color-coded), phase, phase_detail, iteration, updated_at at bottom of run view.
 - [ ] **Test set ID dropdown** — Replace the text input with a dropdown populated from the IDP stack. Requires a new REST API endpoint + Lambda that calls IDP SDK/CLI to list available test sets.
 - [ ] **Optimization run history from DynamoDB** — Replace localStorage-based session list with a list endpoint that queries the OptimizationState DynamoDB table. Current sidebar disappears on browser data clear or different browser.
 - [ ] **Agent stream persistence and replay** — The frontend SSE connection drops during long tool calls (AgentCore idle timeout). The agent keeps running but the user loses visibility. Design:
@@ -567,7 +584,60 @@ Convert the agent from interactive chat to autonomous operation. The agent recei
     - **Option B (S3 + Lambda):** Agent writes to `s3://{bucket}/{session_id}/stream.jsonl`. New API endpoint `GET /stream?sessionId=...` reads from S3. Needs a new S3 bucket in CDK.
   - Also provides full audit trail for debugging and review.
 - [ ] **Optimization log viewer** — Display OPTIMIZATION-LOG.md in the frontend. Same access pattern as stream replay (EFS or S3). Could be a tab/panel alongside the stream view showing the agent's structured optimization history, updated live as the agent writes to it.
-- [ ] **Frontend state polling fallback** — Interim solution before stream replay: when SSE drops, poll `GET /state` every 5s to show phase/iteration/accuracy as a minimal progress indicator.
+
+---
+
+## Next Session Priorities (2026-04-29)
+
+**Start here.** Read this section first when resuming work.
+
+### Priority 1: Debug agent session timeout
+The agent ran successfully for ~7 minutes on its first real test (session `eaa92698`), then silently died. No error in CloudWatch logs. DynamoDB state stuck at "running". AgentCore should support 8-hour sessions. This is the #1 blocker — if the agent can't run for more than 7 minutes, the autonomous optimization loop is useless.
+
+See the investigation steps in 6.7 above. Key files to check:
+- `autotune/fast-template/infra-cdk/lib/backend-stack.ts` — AgentCore Runtime L2 construct configuration
+- The FAST framework's `BedrockAgentCoreApp` source code — look for timeout/keepalive settings
+- Kenton's long-running app harness at `/home/ubuntu/github/sample-long-running-app-harness/` — how does he keep sessions alive for 7+ hours?
+
+### Priority 2: Fix stale state on crash
+When the agent dies unexpectedly, DynamoDB says "running" forever. At minimum, the frontend should detect this (e.g., "running but last updated 15 minutes ago → possibly stalled"). Better: add a heartbeat to the agent that updates `updated_at` every 30 seconds.
+
+### Priority 3: Run a complete optimization loop
+Once the timeout is fixed, run a full end-to-end test:
+1. Start optimization with a real test set
+2. Watch the agent analyze → create config → upload → evaluate → analyze results → iterate
+3. Verify the OptimizationLoopHook resumes correctly after each invocation
+4. Verify DynamoDB state updates (iteration count, best_accuracy, phase changes)
+5. Let it run to max_iterations or convergence
+6. Verify final output: `idpac_config_final.yaml` + summary in OPTIMIZATION-LOG.md
+
+### What's deployed and working (as of 2026-04-28 EOD)
+- **Backend:** AgentCore runtime with autonomous agent (hooks, state, prompt, tools with auto-state-update)
+- **Frontend:** Test set ID input, optimization guidance, cancel button, state polling display, no chat input after run starts
+- **Infrastructure:** DynamoDB state table, optimization state API (cancel + get state), hardened IAM with explicit deny
+- **IDP stack:** `kaleko-IDPAutoTune-dev` in us-east-1 with test set `realkie-fcc-verified` (RealKIE FCC invoices)
+
+### Git state
+- Branch: `feature-private/idp-autotune/initial-port`
+- All work committed, nothing pending
+- Deploy commands:
+  ```bash
+  # Backend
+  cd autotune/fast-template/infra-cdk
+  AWS_EC2_METADATA_DISABLED=true \
+  CDK_DEFAULT_ACCOUNT=$(aws sts get-caller-identity --query Account --output text) \
+  CDK_DEFAULT_REGION=us-east-1 \
+  npx cdk deploy --require-approval never
+
+  # Frontend
+  cd /home/ubuntu/gitlab/genaiic-idp-accelerator
+  python autotune/fast-template/scripts/deploy-frontend.py IDPAutoTune --region us-east-1
+  ```
+
+### Key documentation
+- `autotune/docs/full-autonomy.md` — Architecture decisions and rationale
+- `autotune/docs/agent-security.md` — Security model, IAM policies, threat model, FAQ
+- `autotune/AUTOTUNE-DEVELOPMENT-PLAN.md` — This file
 
 ---
 
