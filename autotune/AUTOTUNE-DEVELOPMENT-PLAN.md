@@ -436,50 +436,110 @@ cdk deploy --require-approval never
 - [ ] **Test persistence** — invoke agent, write files, stop session, resume with same `runtimeSessionId`, verify files are still there
 - [ ] **Test the "wiped on deploy" risk** — do a `cdk deploy`, verify session storage is reset, confirm agent can recover gracefully (re-discover state from IDP stack)
 - [ ] **Fallback readiness** — if preview proves unreliable, implement Option B (S3 Workspace Sync, ~100 lines) per `autotune/planning-docs/session-persistence-research.md`
-G
-
-G
-
-
-
-
-
-
 
 ---
 
 ## Phase 6: Autonomy Conversion & Enhancements
 
-Now that IDPAC runs as-is on AgentCore, convert it from interactive to autonomous.
+Convert the agent from interactive chat to autonomous operation. The agent receives a `test_set_id` + optional `optimization_guidance`, runs to completion (or cancellation), and produces an optimized config.
 
-### 6.1 Adapt prompt for autonomous operation
-- [ ] Replace all "ask the user" / interactive steps with autonomous decision logic
-- [ ] Add stopping criteria (max iterations, accuracy plateau, cost budget)
-- [ ] Add iteration memory instructions (running log of what was tried, worked/failed)
-- [ ] Add doom loop detection (same change tried and reverted multiple times → stop)
-- [ ] Add explainability output (human-readable summary at the end)
+**Design reference:** See [`autotune/planning-docs/full-autonomy-research.md`](planning-docs/full-autonomy-research.md) sections 6–7 for full architecture rationale.
 
-### 6.2 Implement iteration memory
-- [ ] Create `autotune/agent/memory.py`:
-  - Tracks: iterations, config changes, metrics, strategies tried
-  - Serialized to JSON, passed to agent each iteration
-  - Used to generate explainability summary
+**Key architecture decisions:**
+- **Two-layer state:** DynamoDB for control plane (status, phase, cancel signal, metrics — read by hook + frontend), OPTIMIZATION-LOG.md on persistent filesystem for data plane (detailed optimization history — read by agent only)
+- **Optimization loop:** `AfterInvocationEvent.resume` hook drives iteration; `BeforeToolCallEvent` hook checks DynamoDB for cancel before every tool call
+- **Input:** `test_set_id` (required) + `optimization_guidance` (optional free text)
+- **Cancel:** Write `status: "cancelled"` to DynamoDB item; hook stops agent before next tool call
 
-### 6.3 Implement stopping criteria
-- [ ] Create `autotune/agent/stopping.py`:
-  - Max iterations (default: 10)
-  - Accuracy plateau patience (no improvement for N iterations)
-  - Cost budget (optional hard cap)
+### 6.1 Add DynamoDB optimization state table
+- [x] Add a DynamoDB table to the CDK stack (`backend-stack.ts`):
+  - Table name: `{stack_name}-OptimizationState`
+  - Partition key: `session_id` (String)
+  - On-demand billing (pay-per-request)
+  - Pass table name as env var `AUTOTUNE_STATE_TABLE` to the agent runtime
+- [x] Add DynamoDB read/write permissions to the AgentCore IAM role for this table
 
-### 6.4 Implement doom loop detection
-- [ ] Track config change patterns across iterations
-- [ ] Detect: same change applied/reverted, accuracy oscillating, identical tool calls
-- [ ] When detected: inject corrective prompt or terminate with best-so-far
+### 6.2 Create state helper module
+- [x] Create `autotune/agent/state.py`:
+  - `OptimizationState` class — thin wrapper around DynamoDB `get_item` / `update_item`
+  - `update_phase(phase, phase_detail)` — updates phase + phase_detail + updated_at
+  - `update_metrics(iteration, best_accuracy, best_config_version, current_config_version)` — updates metric fields
+  - `set_status(status)` — updates status field (use STATUS_* constants)
+  - `get_status()` → str — reads just the status field
+  - `is_cancelled()` → bool — convenience helper for hooks (encapsulates string comparison)
+  - `initialize(session_id, test_set_id, optimization_guidance, max_iterations)` — creates the initial item with status="running"
+  - STATUS_* constants: `STATUS_RUNNING`, `STATUS_CANCELLED`, `STATUS_COMPLETE`, `STATUS_FAILED`
+  - Lazy-initialized from `AUTOTUNE_STATE_TABLE` env var
+  - All methods handle DynamoDB errors gracefully (log + continue — state tracking failure should not crash the optimization)
 
-### 6.5 Test autonomous operation
-- [ ] Run full autonomous optimization on RealKIE — no human intervention
-- [ ] Verify: stops correctly, memory accumulates, explainability summary generated
-- [ ] Test with multi-class dataset if available
+### 6.3 Create Strands hooks
+- [x] Create `autotune/agent/hooks.py` with two hooks:
+
+**`CancelCheckHook`** (BeforeToolCallEvent):
+  - Before every tool call, read `status` from DynamoDB via `OptimizationState.get_status()`
+  - If status is `"cancelled"`, set `event.cancel_tool = "Optimization cancelled by user"`
+  - Also update DynamoDB phase to reflect cancellation
+
+**`OptimizationLoopHook`** (AfterInvocationEvent):
+  - After each agent invocation completes, read DynamoDB state
+  - Check stopping criteria:
+    - `status == "cancelled"` → don't resume
+    - `iteration >= max_iterations` → don't resume, set status="complete"
+    - Accuracy plateau: if `no_improvement_count >= patience` (default 3) → don't resume, set status="complete"
+  - If continuing: set `event.resume` with a prompt that includes current iteration, best accuracy, and instruction to re-read OPTIMIZATION-LOG.md if context feels stale
+  - If stopping: update DynamoDB status to "complete", write final summary instruction as resume prompt (one last turn to produce the summary)
+
+### 6.4 Update agent entrypoint for autonomous mode
+- [ ] Modify `basic_agent.py` (`invocations` entrypoint):
+  - Parse `test_set_id` and `optimization_guidance` from the payload (in addition to `prompt`)
+  - Initialize DynamoDB state item via `OptimizationState.initialize()`
+  - Pass hooks to `create_autotune_agent()`: `[CancelCheckHook(state), OptimizationLoopHook(state)]`
+  - Construct the initial prompt from `test_set_id` + `optimization_guidance` (not raw user text)
+  - The agent's first invocation kicks off the full workflow; the hook's `resume` drives subsequent iterations
+
+### 6.5 Adapt prompt for autonomous operation
+- [ ] Update `autotune/agent/prompt.md` — replace the 5 interactive assumptions:
+  1. "clarify with the user" about workspace → auto-create workspace using session_id
+  2. "Work with the user to fill in required fields" → pre-populate OPTIMIZATION-LOG from test_set_id + optimization_guidance + dataset analysis
+  3. "continue where the user last left off" → on resume, read OPTIMIZATION-LOG.md + DynamoDB state
+  4. "user should create ground truth" → note as recommendation in final report
+  5. "stop and instruct the user to set up skills" → remove (skills are bundled)
+- [ ] Add autonomous-specific instructions:
+  - "You are running autonomously. Do not ask questions or wait for user input."
+  - "After each evaluation, update the DynamoDB state by calling `update_optimization_state()`" (or instruct via tool)
+  - "When you finish an iteration, end your response with a structured summary so the loop hook can parse your progress"
+  - "If you detect you are repeating a failed strategy, try a fundamentally different approach"
+
+### 6.6 Wire up state updates in tools
+- [x] Add a `update_optimization_state` tool (or modify existing tools) so the agent can update DynamoDB phase/detail during long operations:
+  - Before `run_evaluation`: phase="evaluating", phase_detail="Running evaluation {version}..."
+  - Before `run_inference`: phase="evaluating", phase_detail="Running inference..."
+  - During analysis: phase="analyzing", phase_detail="Analyzing evaluation results for {version}"
+  - During config creation: phase="configuring", phase_detail="Creating config v{N}"
+  - During discovery: phase="discovering", phase_detail="Running discovery on dataset"
+
+### 6.7 Test autonomous operation
+- [ ] **Local test (no AgentCore):** Run `agent.py` locally with hooks, verify:
+  - DynamoDB state item created on start
+  - Phase updates appear during execution
+  - Agent stops after max_iterations or plateau
+  - Cancel via CLI `aws dynamodb update-item` stops agent within one tool call
+- [ ] **AgentCore test:** Deploy and invoke via FAST frontend:
+  - Send optimization request with test_set_id
+  - Monitor DynamoDB state item for live progress
+  - Test cancel via CLI
+  - Verify agent produces `idpac_config_final.yaml` and summary
+- [ ] **Edge cases:**
+  - Agent with no ground truth (no-ground-truth workflow)
+  - Cancel during a long evaluation run (agent should stop after eval completes, not mid-eval)
+  - Resume after cancel (new session, same test set — should start fresh)
+
+### 6.8 Deferred items (TODO)
+- [ ] **SummarizingConversationManager** — add when context overflow is observed in practice. When added, the resume prompt must instruct the agent to re-read OPTIMIZATION-LOG.md to recover summarized-away detail.
+- [ ] **Watchdog timeout** — add `agent.cancel()` from a watchdog thread if AgentCore session timeout proves insufficient.
+- [ ] **Tool limits hook** — custom `BeforeToolCallEvent` hook counting tool invocations, if runaway usage is observed.
+- [ ] **Doom loop detection** — programmatic oscillation detection in the `OptimizationLoopHook`. For v1, rely on prompt instructions + OPTIMIZATION-LOG history.
+- [ ] **UI cancel button** — API Gateway → DynamoDB `UpdateItem` proxy. For now, use `aws dynamodb update-item` CLI.
 
 ---
 
