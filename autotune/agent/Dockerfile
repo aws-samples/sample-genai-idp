@@ -32,7 +32,6 @@ RUN uv pip install --no-cache -e /app/autotune/agent/
 COPY autotune/agent/agent.py /app/autotune/agent/
 COPY autotune/agent/tools.py /app/autotune/agent/
 COPY autotune/agent/prompt.md /app/autotune/agent/
-COPY autotune/agent/OPTIMIZATION-LOG-TEMPLATE.md /app/autotune/agent/
 COPY autotune/agent/skills/ /app/autotune/agent/skills/
 
 WORKDIR /app/autotune/agent
