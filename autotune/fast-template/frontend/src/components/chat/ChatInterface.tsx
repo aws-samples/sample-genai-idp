@@ -57,6 +57,7 @@ export default function ChatInterface() {
   const [error, setError] = useState<string | null>(null)
   const [client, setClient] = useState<AgentCoreClient | null>(null)
   const [stateApiUrl, setStateApiUrl] = useState<string>("")
+  const [agentState, setAgentState] = useState<Record<string, string | number | null> | null>(null)
 
   const { isLoading, setIsLoading } = useGlobal()
   const auth = useAuth()
@@ -120,6 +121,29 @@ export default function ChatInterface() {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [messages])
+
+  // Poll DynamoDB state while a run is active
+  useEffect(() => {
+    if (!stateApiUrl || messages.length === 0) return
+    const idToken = auth.user?.id_token
+    if (!idToken) return
+
+    let active = true
+    const poll = async () => {
+      try {
+        const resp = await fetch(`${stateApiUrl}state?sessionId=${currentSessionId}`, {
+          headers: { Authorization: `Bearer ${idToken}` },
+        })
+        if (resp.ok && active) {
+          const data = await resp.json()
+          if (data.state) setAgentState(data.state)
+        }
+      } catch { /* ignore polling errors */ }
+    }
+    poll()
+    const interval = setInterval(poll, 2000)
+    return () => { active = false; clearInterval(interval) }
+  }, [stateApiUrl, currentSessionId, messages.length, auth.user?.id_token])
 
   const sendMessage = async (userMessage: string) => {
     if (!client) return
@@ -345,13 +369,30 @@ export default function ChatInterface() {
               <div className="flex-none">
                 <div className="max-w-4xl mx-auto w-full">
                   {hasAssistantMessages && stateApiUrl && (
-                    <div className="flex justify-center mb-2">
-                      <button
-                        onClick={handleCancelOptimization}
-                        className="px-4 py-1.5 text-sm bg-red-600 text-white rounded hover:bg-red-700 transition-colors"
-                      >
-                        Cancel Optimization
-                      </button>
+                    <div className="flex flex-col items-center gap-2 mb-2">
+                      {agentState && (
+                        <div className="text-xs text-gray-500 bg-white border rounded px-3 py-1.5 shadow-sm">
+                          <span className={`font-medium ${agentState.status === "running" ? "text-green-600" : agentState.status === "failed" ? "text-red-600" : agentState.status === "complete" ? "text-blue-600" : "text-yellow-600"}`}>
+                            {String(agentState.status ?? "unknown").toUpperCase()}
+                          </span>
+                          {agentState.phase && <span className="mx-1">·</span>}
+                          {agentState.phase && <span>{String(agentState.phase)}</span>}
+                          {agentState.phase_detail && <span className="mx-1">—</span>}
+                          {agentState.phase_detail && <span>{String(agentState.phase_detail)}</span>}
+                          {agentState.iteration != null && <span className="mx-1">·</span>}
+                          {agentState.iteration != null && <span>Iteration {String(agentState.iteration)}/{String(agentState.max_iterations ?? "?")}</span>}
+                          {agentState.updated_at && <span className="mx-1">·</span>}
+                          {agentState.updated_at && <span>Updated {String(agentState.updated_at)}</span>}
+                        </div>
+                      )}
+                      {agentState?.status === "running" && (
+                        <button
+                          onClick={handleCancelOptimization}
+                          className="px-4 py-1.5 text-sm bg-red-600 text-white rounded hover:bg-red-700 transition-colors"
+                        >
+                          Cancel Optimization
+                        </button>
+                      )}
                     </div>
                   )}
                 </div>
