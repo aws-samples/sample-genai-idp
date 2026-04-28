@@ -559,6 +559,15 @@ Convert the agent from interactive chat to autonomous operation. The agent recei
 - [x] **UI cancel button** — wired in ChatInterface.tsx, calls `POST /cancel` with session ID.
 - [ ] **Test set ID dropdown** — Replace the text input with a dropdown populated from the IDP stack. Requires a new REST API endpoint + Lambda that calls IDP SDK/CLI to list available test sets.
 - [ ] **Optimization run history from DynamoDB** — Replace localStorage-based session list with a list endpoint that queries the OptimizationState DynamoDB table. Current sidebar disappears on browser data clear or different browser.
+- [ ] **Agent stream persistence and replay** — The frontend SSE connection drops during long tool calls (AgentCore idle timeout). The agent keeps running but the user loses visibility. Design:
+  - Server-side: In the entrypoint's `async for event` loop, append each event as a JSON line to `/mnt/workspace/{session_id}/agent-stream.jsonl` (and/or S3).
+  - Frontend: When SSE drops or user returns later, fetch the stream log and render all past events.
+  - Two implementation options (decide at implementation time):
+    - **Option A (EFS + AgentCore route):** Serve the file directly from the running AgentCore runtime. No new infra, but depends on AgentCore supporting multiple HTTP routes.
+    - **Option B (S3 + Lambda):** Agent writes to `s3://{bucket}/{session_id}/stream.jsonl`. New API endpoint `GET /stream?sessionId=...` reads from S3. Needs a new S3 bucket in CDK.
+  - Also provides full audit trail for debugging and review.
+- [ ] **Optimization log viewer** — Display OPTIMIZATION-LOG.md in the frontend. Same access pattern as stream replay (EFS or S3). Could be a tab/panel alongside the stream view showing the agent's structured optimization history, updated live as the agent writes to it.
+- [ ] **Frontend state polling fallback** — Interim solution before stream replay: when SSE drops, poll `GET /state` every 5s to show phase/iteration/accuracy as a minimal progress indicator.
 
 ---
 
