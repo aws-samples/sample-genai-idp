@@ -78,6 +78,10 @@ export class BackendStack extends cdk.NestedStack {
     // the gateway that depends on them, while keeping the runtime separate
     // since it doesn't directly depend on the gateway.
 
+    // Create AutoTune optimization state table (control plane for autonomous agent)
+    // Must be created before the runtime so the table name env var is available.
+    this.createOptimizationStateTable(props.config)
+
     // Create AgentCore Gateway (before Runtime)
     this.createAgentCoreGateway(props.config)
 
@@ -89,9 +93,6 @@ export class BackendStack extends cdk.NestedStack {
 
     // Store Cognito configuration in SSM for testing and frontend
     this.createCognitoSSMParameters(props.config)
-
-    // Create AutoTune optimization state table (control plane for autonomous agent)
-    this.createOptimizationStateTable(props.config)
 
     // Create API for optimization state (cancel + progress polling)
     this.createOptimizationStateApi(props.config, props.frontendUrl)
@@ -451,11 +452,12 @@ export class BackendStack extends cdk.NestedStack {
       AWS_DEFAULT_REGION: stack.region,
       STACK_NAME: config.stack_name_base,
       GATEWAY_CREDENTIAL_PROVIDER_NAME: `${config.stack_name_base}-runtime-gateway-auth`, // Used by @requires_access_token decorator to look up the correct provider
-      // AutoTune: The IDP Accelerator stack that this agent manages.
-      // TODO: Move to config.yaml once FAST config schema is extended for AutoTune.
-      IDP_STACK_NAME: "kaleko-IDPAutoTune-dev",
+      // AutoTune: The IDP Accelerator stack that this agent optimizes.
+      IDP_STACK_NAME: config.autotune?.idp_stack_name || "",
       // AutoTune: DynamoDB table for optimization state (control plane).
       AUTOTUNE_STATE_TABLE: this.optimizationStateTableName,
+      // AutoTune: Bedrock model ID for the optimization agent.
+      AUTOTUNE_MODEL_ID: config.autotune?.model_id || "",
       // AgentCore Memory env vars removed (MEMORY_ID, USE_LONG_TERM_MEMORY, LTM_TOP_K,
       // LTM_RELEVANCE_SCORE). Agent uses FileSessionManager on /mnt/workspace instead.
       // Re-add MEMORY_ID here if re-enabling AgentCore Memory for LTM.

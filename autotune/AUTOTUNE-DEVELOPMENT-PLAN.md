@@ -160,6 +160,7 @@ AutoTune and the IDP Accelerator are deployed in the **same AWS account** but as
   - IDP stack outputs are NOT exported via `Fn::Export` — they're plain Outputs only readable via `DescribeStacks`.
   - `IDPACClient` already does runtime discovery from just the stack name. This is the correct pattern.
   - AutoTune CDK stack only needs to: (1) accept `IDP_STACK_NAME` as config, (2) pass it as env var, (3) grant IAM permissions broad enough to cover IDP resources.
+  - **Requirement:** Both stacks must be deployed in the same AWS region. The agent uses `AWS_DEFAULT_REGION` (set from the CDK stack region) for all AWS API calls including IDP stack discovery.
 
 **Key FAST infrastructure files for Phase 2+ reference:**
 
@@ -415,9 +416,20 @@ cdk deploy --require-approval never
 | Runtime ARN | `IDPAutoTune_FASTAgent-sLV5ho8mzP` |
 | Cognito User Pool | `us-east-1_YiSzEVGq5` |
 | Cognito Client ID | `49aq6o58cr98m9jt7219f4gkha` |
-| Memory ARN | `IDPAutoTuneIDPAutoTunebackend701BF137-o2naLYBdYa` |
-| Feedback API | `https://ceffk8kraj.execute-api.us-east-1.amazonaws.com/prod/` |
-| Deployed | 2026-04-27 |
+| Optimization State API | (redeploy needed — replaced feedback API) |
+| Deployed | 2026-04-27 (needs redeploy for Phase 6 changes) |
+
+### FAST `config.yaml` — AutoTune section
+
+```yaml
+autotune:
+  idp_stack_name: kaleko-IDPAutoTune-dev   # IDP stack to optimize (same region)
+  model_id: us.anthropic.claude-sonnet-4-20250514-v1:0
+```
+
+These values are passed as env vars `IDP_STACK_NAME` and `AUTOTUNE_MODEL_ID` to the agent runtime. No more hardcoded values in `backend-stack.ts`.
+
+**Removed:** FAST feedback system (FeedbackDialog, feedbackService, feedback Lambda, feedback DynamoDB table). Replaced with optimization state API (`POST /cancel`, `GET /state`) backed by the OptimizationState DynamoDB table.
 
 ### 5.3 AgentCore end-to-end test
 - [x] Invoke the agent runtime via programmatic test (Cognito auth → AgentCore runtime endpoint)
@@ -425,7 +437,7 @@ cdk deploy --require-approval never
 - [ ] Check CloudWatch logs for observability
 
 **Required fixes during testing:**
-- Added `IDP_STACK_NAME` env var to the runtime (hardcoded in `backend-stack.ts` for now, TODO: move to config.yaml)
+- Added `IDP_STACK_NAME` env var to the runtime (now driven by `config.yaml` autotune section)
 - Added IAM policy `IDPStackAccess` with operational permissions for 10 AWS services (CloudFormation, S3, SQS, Lambda, DynamoDB, SSM, STS, CloudWatch Logs, Step Functions, Bedrock) — scoped to read/operate, not deploy
 
 ### 5.4 Session persistence via AgentCore Persistent Filesystem
@@ -539,7 +551,8 @@ Convert the agent from interactive chat to autonomous operation. The agent recei
 - [ ] **Watchdog timeout** — add `agent.cancel()` from a watchdog thread if AgentCore session timeout proves insufficient.
 - [ ] **Tool limits hook** — custom `BeforeToolCallEvent` hook counting tool invocations, if runaway usage is observed.
 - [ ] **Doom loop detection** — programmatic oscillation detection in the `OptimizationLoopHook`. For v1, rely on prompt instructions + OPTIMIZATION-LOG history.
-- [ ] **UI cancel button** — API Gateway → DynamoDB `UpdateItem` proxy. For now, use `aws dynamodb update-item` CLI.
+- [x] **REST API for cancel + state polling** — `POST /cancel` and `GET /state` endpoints via API Gateway + Lambda, backed by the OptimizationState DynamoDB table. Replaced the FAST feedback API. Cognito-authenticated.
+- [ ] **UI cancel button** — wire frontend to call `POST /cancel` endpoint. For now, use curl or the AWS console.
 
 ---
 

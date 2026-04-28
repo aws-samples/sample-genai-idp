@@ -26,6 +26,13 @@ export interface VpcConfig {
   security_group_ids?: string[]
 }
 
+export interface AutotuneConfig {
+  /** The IDP Accelerator stack that this agent optimizes configs for. Must be in the same region. */
+  idp_stack_name: string
+  /** Bedrock model ID for the optimization agent. */
+  model_id?: string
+}
+
 export interface AppConfig {
   stack_name_base: string
   admin_user_email?: string | null
@@ -36,24 +43,9 @@ export interface AppConfig {
     network_mode: NetworkMode
     /** VPC configuration. Required when network_mode is "VPC". */
     vpc?: VpcConfig
-    /**
-     * Enable long-term memory (SemanticMemoryStrategy) for the agent.
-     * When true, the agent extracts and retrieves facts across sessions.
-     * This incurs additional costs: $0.75/1,000 records stored + $0.50/1,000 retrievals.
-     * Defaults to false.
-     */
-    use_long_term_memory: boolean
-    /**
-     * Number of facts to retrieve per turn when long-term memory is enabled.
-     * Maps to the top_k parameter of RetrievalConfig. Defaults to 10.
-     */
-    ltm_top_k: number
-    /**
-     * Minimum similarity threshold for long-term memory retrieval.
-     * Maps to the relevance_score parameter of RetrievalConfig. Defaults to 0.3.
-     */
-    ltm_relevance_score: number
   }
+  /** AutoTune agent configuration. */
+  autotune?: AutotuneConfig
 }
 
 export class ConfigManager {
@@ -143,10 +135,13 @@ export class ConfigManager {
           deployment_type: deploymentType,
           network_mode: networkMode,
           vpc: vpcConfig,
-          use_long_term_memory: parsedConfig.backend?.use_long_term_memory === true,
-          ltm_top_k: parsedConfig.backend?.ltm_top_k ?? 10,
-          ltm_relevance_score: parsedConfig.backend?.ltm_relevance_score ?? 0.3,
         },
+        autotune: parsedConfig.autotune
+          ? {
+              idp_stack_name: parsedConfig.autotune.idp_stack_name,
+              model_id: parsedConfig.autotune.model_id,
+            }
+          : undefined,
       }
     } catch (error) {
       throw new Error(`Failed to parse configuration file ${configPath}: ${error}`)
