@@ -156,18 +156,19 @@ async def invocations(payload, context: RequestContext):
     # Initialize DynamoDB state before the agent starts
     state = OptimizationState(session_id)
 
-    # Parse test_set_id from payload or prompt
+    # Parse test_set_id from payload
     test_set_id = payload.get("test_set_id", "").strip()
     optimization_guidance = payload.get("optimization_guidance", "").strip()
 
-    if test_set_id:
-        # Autonomous mode: test_set_id provided explicitly
-        state.initialize(test_set_id, optimization_guidance, MAX_ITERATIONS)
-        initial_prompt = _build_initial_prompt(test_set_id, optimization_guidance)
-    else:
-        # Interactive/dev mode: pass through user query, initialize with placeholder
-        state.initialize("interactive", "", MAX_ITERATIONS)
-        initial_prompt = user_query
+    if not test_set_id:
+        yield {
+            "status": "error",
+            "error": "Missing required field: test_set_id",
+        }
+        return
+
+    state.initialize(test_set_id, optimization_guidance, MAX_ITERATIONS)
+    initial_prompt = _build_initial_prompt(test_set_id, optimization_guidance)
 
     try:
         user_id = extract_user_id_from_context(context)
