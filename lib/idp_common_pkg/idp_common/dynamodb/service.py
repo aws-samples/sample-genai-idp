@@ -12,7 +12,7 @@ import datetime
 import json
 import logging
 from decimal import Decimal
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from idp_common.dynamodb.client import DynamoDBClient
 from idp_common.models import Document, Page, Section, Status
@@ -560,6 +560,18 @@ class DocumentDynamoDBService:
         if item:
             return self._dynamodb_item_to_document(item)
         return None
+
+    def batch_get_documents(self, object_keys: List[str]) -> List[Dict[str, Any]]:
+        """Batch get document records by object keys (max 100)."""
+        keys = [{"PK": f"doc#{k}", "SK": "none"} for k in object_keys]
+        items = self.client.batch_get_items(keys)
+        return [
+            {
+                "document_id": item.get("PK", "").replace("doc#", ""),
+                "status": item.get("ObjectStatus", ""),
+            }
+            for item in items
+        ]
 
     def list_documents(
         self,

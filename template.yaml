@@ -557,6 +557,71 @@ Parameters:
     Default: ""
     Description: SageMaker MLflow tracking server ARN
 
+  # Headless API Configuration
+  EnableHeadless:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+    Description: >-
+      Enable headless mode which deploys the Jobs REST API Gateway and supporting Lambda functions.
+      Requires VpcId, PrivateSubnetIds, ApiGatewayVpcEndpointId, and LambdaSecurityGroupId.
+
+  # VPC Configuration
+  DeployInVPC:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+    Description: >-
+      When enabled, deploys all core document processing Lambda functions into the VPC.
+      Requires VpcId, PrivateSubnetIds, and LambdaSecurityGroupId.
+
+  # Jobs API VPC Configuration
+  VpcId:
+    Type: String
+    Default: ""
+    Description: Optional - Existing VPC ID for Jobs API deployment (leave blank to skip Jobs API deployment)
+
+  PrivateSubnetIds:
+    Type: CommaDelimitedList
+    Default: ""
+    Description: Optional - Comma-separated list of at least 2 private subnet IDs in different AZs (required if VpcId is provided)
+
+  ApiGatewayVpcEndpointId:
+    Type: String
+    Default: ""
+    Description: Optional - Existing VPC Endpoint ID for execute-api service (required if VpcId is provided)
+
+  ApiStageName:
+    Type: String
+    Default: beta
+    Description: API Gateway deployment stage name
+
+  LambdaSecurityGroupId:
+    Type: String
+    Default: ""
+    Description: Optional - Existing Security Group ID for VPC-enabled Lambda functions (required if VpcId is provided)
+
+  DeployBastionHost:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+    Description: Whether to deploy a bastion host to facilitate testing of the Private API Gateway
+
+  BastionHostSubnetId:
+    Type: String
+    Default: ""
+    Description: Public Subnet ID where the bastion host will be deployed, if DeployBastionHost is 'true'
+
+  BastionHostSecurityGroupId:
+    Type: String
+    Default: ""
+    Description: Security Group ID for the bastion host to use, if DeployBastionHost is 'true'
+
+  BastionHostAmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2
+    Description: SSM parameter path to the AMI ID for the bastion host
+
 Rules:
   MLflowTrackingURIRequired:
     RuleCondition: !Equals [ !Ref EnableMLflow, "true" ]
@@ -564,7 +629,49 @@ Rules:
       - Assert: !Not [ !Equals [ !Ref MlflowTrackingURI, "" ] ]
         AssertDescription: "MlflowTrackingURI is required when EnableMLflow is true"
 
+  # EnableHeadless=true stands up a Private API Gateway + VPC-resident Lambdas
+  # that !Ref VpcId/PrivateSubnetIds/ApiGatewayVpcEndpointId/LambdaSecurityGroupId
+  # unconditionally. Those params default to empty, so without this rule a
+  # misconfigured deploy would fail deep in CREATE_IN_PROGRESS with an opaque
+  # Lambda/API Gateway error. Fail fast at changeset creation instead.
+  HeadlessRequiresVPC:
+    RuleCondition: !Equals [ !Ref EnableHeadless, "true" ]
+    Assertions:
+      - Assert: !Equals [ !Ref DeployInVPC, "true" ]
+        AssertDescription: "EnableHeadless=true requires DeployInVPC=true (the Jobs API uses a Private API Gateway and VPC-resident Lambdas)."
+      - Assert: !Not [ !Equals [ !Ref VpcId, "" ] ]
+        AssertDescription: "VpcId is required when EnableHeadless=true"
+      - Assert: !Not [ !Equals [ !Ref ApiGatewayVpcEndpointId, "" ] ]
+        AssertDescription: "ApiGatewayVpcEndpointId is required when EnableHeadless=true"
+      - Assert: !Not [ !Equals [ !Ref LambdaSecurityGroupId, "" ] ]
+        AssertDescription: "LambdaSecurityGroupId is required when EnableHeadless=true"
+      # Note: PrivateSubnetIds is a CommaDelimitedList. The Rules-block
+      # intrinsic-function set (Fn::And / Contains / EachMember* / Equals /
+      # If / Not / Or / RefAll / ValueOf*) has no portable way to assert
+      # that a CommaDelimitedList isn't the "one empty string" default.
+      # The remaining VpcId / VpcEndpoint / SG assertions above cover the
+      # common "forgot to pass VPC parameters at all" misconfiguration;
+      # invalid subnet IDs are caught later by the Lambda CreateFunction
+      # call with a clear error rather than a mid-deploy rollback.
+
+  # Bastion host is a developer-convenience layered on top of VPC-secured mode.
+  # It shares the customer-supplied VPC, so DeployInVPC must be true as well.
+  BastionRequiresVPC:
+    RuleCondition: !Equals [ !Ref DeployBastionHost, "true" ]
+    Assertions:
+      - Assert: !Equals [ !Ref DeployInVPC, "true" ]
+        AssertDescription: "DeployBastionHost=true requires DeployInVPC=true"
+      - Assert: !Not [ !Equals [ !Ref BastionHostSubnetId, "" ] ]
+        AssertDescription: "BastionHostSubnetId is required when DeployBastionHost=true"
+      - Assert: !Not [ !Equals [ !Ref BastionHostSecurityGroupId, "" ] ]
+        AssertDescription: "BastionHostSecurityGroupId is required when DeployBastionHost=true"
+
 Conditions:
+  # Headless/VPC/Bastion feature conditions
+  DeployInVPC: !Equals [!Ref DeployInVPC, 'true']
+  DeployApiGateway: !Equals [!Ref EnableHeadless, 'true']
+  ShouldDeployBastionHost: !Equals [!Ref DeployBastionHost, 'true']
+
   HasGuardrailConfig:
     !And [
       !Not [ !Equals [ !Ref BedrockGuardrailId, "" ] ],
@@ -855,6 +962,332 @@ Resources:
       InputString: !Ref "AWS::StackName"
       MaxLength: 25
 
+  ##########################################################################
+  # Jobs REST API (Headless mode)
+  ##########################################################################
+
+  ApiHandlerLogGroup:
+    Type: AWS::Logs::LogGroup
+    Condition: DeployApiGateway
+    Properties:
+      KmsKeyId: !GetAtt CustomerManagedEncryptionKey.Arn
+      RetentionInDays: !Ref LogRetentionDays
+
+  # API Authentication - Cognito User Pool for M2M (client credentials)
+  ApiUserPool:
+    Type: AWS::Cognito::UserPool
+    Condition: DeployApiGateway
+    Properties:
+      UserPoolName: !Sub ${AWS::StackName}-api
+
+  ApiResourceServer:
+    Type: AWS::Cognito::UserPoolResourceServer
+    Condition: DeployApiGateway
+    Properties:
+      Identifier: idp-api
+      Name: IDP API
+      UserPoolId: !Ref ApiUserPool
+      Scopes:
+        - ScopeName: jobs.read
+          ScopeDescription: Read job status
+        - ScopeName: jobs.write
+          ScopeDescription: Create and manage jobs
+
+  ApiAppClient:
+    Type: AWS::Cognito::UserPoolClient
+    Condition: DeployApiGateway
+    DependsOn: ApiResourceServer
+    Properties:
+      ClientName: !Sub ${AWS::StackName}-api-client
+      UserPoolId: !Ref ApiUserPool
+      GenerateSecret: true
+      AllowedOAuthFlows:
+        - client_credentials
+      AllowedOAuthFlowsUserPoolClient: true
+      AllowedOAuthScopes:
+        - idp-api/jobs.read
+        - idp-api/jobs.write
+
+  ApiUserPoolDomain:
+    Type: AWS::Cognito::UserPoolDomain
+    Condition: DeployApiGateway
+    Properties:
+      Domain: !Sub ${AWS::StackName}-api-${AWS::AccountId}
+      UserPoolId: !Ref ApiUserPool
+
+  # Private API Gateway with Cognito Authorization
+  ApiGateway:
+    Type: AWS::Serverless::Api
+    Condition: DeployApiGateway
+    Properties:
+      StageName: !Ref ApiStageName
+      EndpointConfiguration:
+        Type: PRIVATE
+        VPCEndpointIds:
+          - !Ref ApiGatewayVpcEndpointId
+      Auth:
+        DefaultAuthorizer: CognitoAuthorizer
+        Authorizers:
+          CognitoAuthorizer:
+            UserPoolArn: !GetAtt ApiUserPool.Arn
+        ResourcePolicy:
+          CustomStatements:
+            - Effect: Deny
+              Principal: '*'
+              Action: execute-api:Invoke
+              Resource: execute-api:/*
+              Condition:
+                StringNotEquals:
+                  aws:SourceVpce: !Ref ApiGatewayVpcEndpointId
+            - Effect: Allow
+              Principal: '*'
+              Action: execute-api:Invoke
+              Resource: execute-api:/*
+
+  ApiHandlerFunction:
+    Type: AWS::Serverless::Function
+    Condition: DeployApiGateway
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W92
+            reason: Reserved concurrency not required
+    Properties:
+      PermissionsBoundary:
+        !If [
+          HasPermissionsBoundary,
+          !Ref PermissionsBoundaryArn,
+          !Ref AWS::NoValue,
+        ]
+      CodeUri: src/lambda/api_handler/
+      Handler: index.handler
+      Runtime: python3.12
+      MemorySize: 4096
+      Timeout: 30
+      Layers:
+        - !Ref IDPCommonBaseLayer
+      # HeadlessRequiresVPC rule (see top-level Rules: block) already asserts
+      # DeployInVPC=true whenever EnableHeadless=true, so in practice this !If
+      # always takes the first branch when this Function is deployed. The
+      # guard is defense-in-depth: if the coupling is ever relaxed (e.g. a
+      # future "headless API without VPC" pattern), this Function will still
+      # render as a valid no-VpcConfig Lambda rather than fail on empty !Refs.
+      VpcConfig: !If
+        - DeployInVPC
+        - SecurityGroupIds:
+            - !Ref LambdaSecurityGroupId
+          SubnetIds: !Ref PrivateSubnetIds
+        - !Ref AWS::NoValue
+      Environment:
+        Variables:
+          LOG_LEVEL: !Ref LogLevel
+          TRACKING_TABLE: !Ref TrackingTable
+          DOCUMENT_TRACKING_MODE: dynamodb
+          INPUT_BUCKET_NAME: !Ref InputBucket
+          OUTPUT_BUCKET_NAME: !Ref OutputBucket
+          STAGING_BUCKET_NAME: !Ref StagingBucket
+          DATA_RETENTION_IN_DAYS: !Ref DataRetentionInDays
+      LoggingConfig:
+        LogGroup: !Ref ApiHandlerLogGroup
+      Events:
+        PostJob:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ApiGateway
+            Path: /jobs
+            Method: POST
+            Auth:
+              Authorizer: CognitoAuthorizer
+              AuthorizationScopes:
+                - idp-api/jobs.write
+        GetJob:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ApiGateway
+            Path: /jobs/{job_id}
+            Method: GET
+            Auth:
+              Authorizer: CognitoAuthorizer
+              AuthorizationScopes:
+                - idp-api/jobs.read
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref TrackingTable
+        - S3WritePolicy:
+            BucketName: !Ref InputBucket
+        - S3CrudPolicy:
+            BucketName: !Ref OutputBucket
+        - S3WritePolicy:
+            BucketName: !Ref StagingBucket
+        - Statement:
+            - Effect: Allow
+              Action:
+                - kms:Encrypt
+                - kms:Decrypt
+                - kms:ReEncrypt*
+                - kms:GenerateDataKey*
+                - kms:DescribeKey
+              Resource: !GetAtt CustomerManagedEncryptionKey.Arn
+
+  BatchPreProcessorFunction:
+    Type: AWS::Serverless::Function
+    Condition: DeployApiGateway
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W92
+            reason: Reserved concurrency not required
+    Properties:
+      PermissionsBoundary:
+        !If [
+          HasPermissionsBoundary,
+          !Ref PermissionsBoundaryArn,
+          !Ref AWS::NoValue,
+        ]
+      CodeUri: src/lambda/batch_pre_processor/
+      Handler: index.handler
+      Runtime: python3.12
+      MemorySize: 3008
+      Timeout: 900
+      EphemeralStorage:
+        Size: 5120
+      Layers:
+        - !Ref IDPCommonBaseLayer
+      # See ApiHandlerFunction for rationale — HeadlessRequiresVPC rule gates
+      # this at changeset creation; the !If is defense-in-depth.
+      VpcConfig: !If
+        - DeployInVPC
+        - SecurityGroupIds:
+            - !Ref LambdaSecurityGroupId
+          SubnetIds: !Ref PrivateSubnetIds
+        - !Ref AWS::NoValue
+      Environment:
+        Variables:
+          LOG_LEVEL: !Ref LogLevel
+          INPUT_BUCKET_NAME: !Ref InputBucket
+          TRACKING_TABLE: !Ref TrackingTable
+      Events:
+        S3Event:
+          Type: CloudWatchEvent
+          Properties:
+            Pattern:
+              source:
+                - aws.s3
+              detail-type:
+                - "Object Created"
+              detail:
+                bucket:
+                  name:
+                    - !Ref StagingBucket
+                object:
+                  key:
+                    - suffix: .zip
+      Policies:
+        - S3ReadPolicy:
+            BucketName: !Ref StagingBucket
+        - S3WritePolicy:
+            BucketName: !Ref InputBucket
+        - DynamoDBCrudPolicy:
+            TableName: !Ref TrackingTable
+        - Statement:
+            - Effect: Allow
+              Action:
+                - kms:Decrypt
+                - kms:GenerateDataKey*
+              Resource: !GetAtt CustomerManagedEncryptionKey.Arn
+
+  ##########################################################################
+  # Bastion Host (optional - for testing Private API Gateway)
+  ##########################################################################
+
+  BastionKey:
+    Type: AWS::KMS::Key
+    Condition: ShouldDeployBastionHost
+    Properties:
+      Description: 'KMS Key for Bastion Host EBS encryption'
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: Enable IAM User Permissions
+            Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:root'
+            Action: 'kms:*'
+            Resource: '*'
+          - Sid: Allow use of the key for EBS
+            Effect: Allow
+            Principal:
+              Service: !Sub 'ec2.${AWS::URLSuffix}'
+            Action:
+              - kms:Decrypt
+              - kms:DescribeKey
+              - kms:Encrypt
+              - kms:GenerateDataKey*
+              - kms:ReEncrypt*
+            Resource: '*'
+
+  BastionRole:
+    Type: AWS::IAM::Role
+    Condition: ShouldDeployBastionHost
+    Properties:
+      RoleName: !Sub '${AWS::StackName}BastionHost-Role'
+      Description: 'Assumed by bastion host'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: !Sub 'ec2.${AWS::URLSuffix}'
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore'
+
+  BastionInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Condition: ShouldDeployBastionHost
+    Properties:
+      InstanceProfileName: !Sub '${AWS::StackName}BastionHost-InstanceProfile'
+      Roles:
+        - !Ref BastionRole
+
+  BastionLaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Condition: ShouldDeployBastionHost
+    Properties:
+      LaunchTemplateName: !Sub '${AWS::StackName}BastionLaunchTemplate'
+      LaunchTemplateData:
+        ImageId: !Ref BastionHostAmiId
+        InstanceType: t3.small
+        IamInstanceProfile:
+          Arn: !GetAtt BastionInstanceProfile.Arn
+        SecurityGroupIds:
+          - !Ref BastionHostSecurityGroupId
+        BlockDeviceMappings:
+          - DeviceName: '/dev/xvda'
+            Ebs:
+              VolumeSize: 20
+              VolumeType: gp3
+              Encrypted: true
+              KmsKeyId: !Ref BastionKey
+              DeleteOnTermination: true
+        MetadataOptions:
+          HttpTokens: required
+        Monitoring:
+          Enabled: true
+
+  BastionInstance:
+    Type: AWS::EC2::Instance
+    Condition: ShouldDeployBastionHost
+    Properties:
+      LaunchTemplate:
+        LaunchTemplateId: !Ref BastionLaunchTemplate
+        Version: !GetAtt BastionLaunchTemplate.LatestVersionNumber
+      SubnetId: !Ref BastionHostSubnetId
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}BastionHost'
+
   ConfigurationCopyFunction:
     Type: AWS::Serverless::Function
     Metadata:
@@ -878,6 +1311,13 @@ Resources:
       Handler: index.handler
       Runtime: python3.12
       Timeout: 300
+      VpcConfig:
+        !If
+          - DeployInVPC
+          - SecurityGroupIds:
+              - !Ref LambdaSecurityGroupId
+            SubnetIds: !Ref PrivateSubnetIds
+          - !Ref AWS::NoValue
       InlineCode: |
         import boto3
         import cfnresponse
@@ -2014,9 +2454,14 @@ Resources:
               - "Authorization"
               - "x-amz-security-token"
               - "x-amz-meta-config-version"
+            # GET / HEAD are required so the Web UI can read objects via presigned
+            # URLs — e.g. the Document Details "Download" button, which fetches
+            # document assets directly from S3 into a client-side ZIP.
             AllowedMethods:
               - PUT
               - POST
+              - GET
+              - HEAD
             AllowedOrigins:
               - !If
                 - UseCloudFrontHosting
@@ -2065,6 +2510,57 @@ Resources:
             Resource:
               - !Sub "${InputBucket.Arn}/*"
               - !Sub "${InputBucket.Arn}"
+            Condition:
+              Bool:
+                "aws:SecureTransport": false
+
+  StagingBucket:
+    Type: AWS::S3::Bucket
+    Condition: DeployApiGateway
+    UpdateReplacePolicy: Delete
+    DeletionPolicy: Delete
+    Properties:
+      NotificationConfiguration:
+        EventBridgeConfiguration:
+          EventBridgeEnabled: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: aws:kms
+              KMSMasterKeyID: !Ref CustomerManagedEncryptionKey
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: Enabled
+      LoggingConfiguration:
+        DestinationBucketName: !Ref LoggingBucket
+        LogFilePrefix: staging-bucket-logs/
+      LifecycleConfiguration:
+        Rules:
+          - Id: DeleteAfterNDays
+            Status: Enabled
+            ExpirationInDays: !Ref DataRetentionInDays
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 1
+
+  StagingBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Condition: DeployApiGateway
+    Properties:
+      Bucket: !Ref StagingBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: EnforceSSLOnly
+            Effect: Deny
+            Principal: "*"
+            Action: "s3:*"
+            Resource:
+              - !Sub "${StagingBucket.Arn}/*"
+              - !Sub "${StagingBucket.Arn}"
             Condition:
               Bool:
                 "aws:SecureTransport": false
@@ -2164,6 +2660,13 @@ Resources:
       Runtime: python3.12
       Timeout: 900
       MemorySize: 512
+      VpcConfig:
+        !If
+          - DeployInVPC
+          - SecurityGroupIds:
+              - !Ref LambdaSecurityGroupId
+            SubnetIds: !Ref PrivateSubnetIds
+          - !Ref AWS::NoValue
       InlineCode: |
         import boto3
         import cfnresponse
@@ -2267,6 +2770,13 @@ Resources:
       Runtime: python3.12
       Timeout: 900
       MemorySize: 2048
+      VpcConfig:
+        !If
+          - DeployInVPC
+          - SecurityGroupIds:
+              - !Ref LambdaSecurityGroupId
+            SubnetIds: !Ref PrivateSubnetIds
+          - !Ref AWS::NoValue
       LoggingConfig:
         LogGroup: !Ref FccDatasetDeployerLogGroup
       Environment:
@@ -2337,6 +2847,13 @@ Resources:
       Runtime: python3.12
       Timeout: 900
       MemorySize: 2048
+      VpcConfig:
+        !If
+          - DeployInVPC
+          - SecurityGroupIds:
+              - !Ref LambdaSecurityGroupId
+            SubnetIds: !Ref PrivateSubnetIds
+          - !Ref AWS::NoValue
       LoggingConfig:
         LogGroup: !Ref OcrBenchmarkDeployerLogGroup
       Environment:
@@ -2409,6 +2926,13 @@ Resources:
       MemorySize: 3008
       EphemeralStorage:
         Size: 10240
+      VpcConfig:
+        !If
+          - DeployInVPC
+          - SecurityGroupIds:
+              - !Ref LambdaSecurityGroupId
+            SubnetIds: !Ref PrivateSubnetIds
+          - !Ref AWS::NoValue
       LoggingConfig:
         LogGroup: !Ref RvlCdipNmpDeployerLogGroup
       Environment:
@@ -2646,9 +3170,15 @@ Resources:
               - "x-amz-date"
               - "Authorization"
               - "x-amz-security-token"
+            # GET / HEAD are required so the Web UI can read objects via presigned
+            # URLs — e.g. the Document Details "Download" button, which fetches
+            # document outputs (section results, page text, summaries, page images)
+            # directly from S3 into a client-side ZIP.
             AllowedMethods:
               - PUT
               - POST
+              - GET
+              - HEAD
             AllowedOrigins:
               - !If
                 - UseCloudFrontHosting
@@ -3177,9 +3707,15 @@ Resources:
               - "x-amz-date"
               - "Authorization"
               - "x-amz-security-token"
+            # GET / HEAD are required so the Web UI can read baseline objects
+            # via presigned URLs — e.g. the Document Details "Download Baselines"
+            # button, which fetches section baselines directly from S3 into a
+            # client-side ZIP.
             AllowedMethods:
               - PUT
               - POST
+              - GET
+              - HEAD
             AllowedOrigins:
               - !If
                 - UseCloudFrontHosting
@@ -3541,6 +4077,13 @@ Resources:
       Handler: index.handler
       Runtime: python3.12
       Timeout: 30
+      VpcConfig:
+        !If
+          - DeployInVPC
+          - SecurityGroupIds:
+              - !Ref LambdaSecurityGroupId
+            SubnetIds: !Ref PrivateSubnetIds
+          - !Ref AWS::NoValue
       CodeUri: src/lambda/initialize_counter
       Environment:
         Variables:
@@ -3658,6 +4201,13 @@ Resources:
       Handler: index.handler
       Runtime: python3.12
       Timeout: 30
+      VpcConfig:
+        !If
+          - DeployInVPC
+          - SecurityGroupIds:
+              - !Ref LambdaSecurityGroupId
+            SubnetIds: !Ref PrivateSubnetIds
+          - !Ref AWS::NoValue
 
       Layers:
         - !Ref IDPCommonBaseLayer
@@ -3766,6 +4316,13 @@ Resources:
       Handler: index.handler
       Runtime: python3.12
       Timeout: 30
+      VpcConfig:
+        !If
+          - DeployInVPC
+          - SecurityGroupIds:
+              - !Ref LambdaSecurityGroupId
+            SubnetIds: !Ref PrivateSubnetIds
+          - !Ref AWS::NoValue
       CodeUri: src/lambda/update_settings
       LoggingConfig:
         LogGroup: !Ref UpdateSettingsFunctionLogGroup
@@ -3941,11 +4498,16 @@ Resources:
         - !Ref IDPCommonBaseLayer
       Tracing: Active
       VpcConfig: !If
-        - UsePrivateAppSync
-        - SubnetIds: !Ref LambdaSubnetIds
+        - DeployInVPC
+        - SubnetIds: !Ref PrivateSubnetIds
           SecurityGroupIds:
-            - !Ref LambdaVpcSecurityGroup
-        - !Ref AWS::NoValue
+            - !Ref LambdaSecurityGroupId
+        - !If
+          - UsePrivateAppSync
+          - SubnetIds: !Ref LambdaSubnetIds
+            SecurityGroupIds:
+              - !Ref LambdaVpcSecurityGroup
+          - !Ref AWS::NoValue
       DeadLetterQueue:
         Type: SQS
         TargetArn: !GetAtt QueueSenderDLQ.Arn
@@ -4029,11 +4591,16 @@ Resources:
         - !Ref IDPCommonBaseLayer
       Tracing: Active
       VpcConfig: !If
-        - UsePrivateAppSync
-        - SubnetIds: !Ref LambdaSubnetIds
+        - DeployInVPC
+        - SubnetIds: !Ref PrivateSubnetIds
           SecurityGroupIds:
-            - !Ref LambdaVpcSecurityGroup
-        - !Ref AWS::NoValue
+            - !Ref LambdaSecurityGroupId
+        - !If
+          - UsePrivateAppSync
+          - SubnetIds: !Ref LambdaSubnetIds
+            SecurityGroupIds:
+              - !Ref LambdaVpcSecurityGroup
+          - !Ref AWS::NoValue
       LoggingConfig:
         LogGroup: !Ref QueueProcessorLogGroup
       Environment:
@@ -4151,11 +4718,16 @@ Resources:
         - !Ref IDPCommonBaseLayer
       Tracing: Active
       VpcConfig: !If
-        - UsePrivateAppSync
-        - SubnetIds: !Ref LambdaSubnetIds
+        - DeployInVPC
+        - SubnetIds: !Ref PrivateSubnetIds
           SecurityGroupIds:
-            - !Ref LambdaVpcSecurityGroup
-        - !Ref AWS::NoValue
+            - !Ref LambdaSecurityGroupId
+        - !If
+          - UsePrivateAppSync
+          - SubnetIds: !Ref LambdaSubnetIds
+            SecurityGroupIds:
+              - !Ref LambdaVpcSecurityGroup
+          - !Ref AWS::NoValue
       DeadLetterQueue:
         Type: SQS
         TargetArn: !GetAtt WorkflowTrackerDLQ.Arn
@@ -4234,12 +4806,88 @@ Resources:
           Id: TrackWorkflowCompletion
           RetryPolicy:
             MaximumRetryAttempts: 3
+        - !If
+          - DeployApiGateway
+          - Arn: !GetAtt JobTracker.Arn
+            Id: TrackJobCompletion
+            RetryPolicy:
+              MaximumRetryAttempts: 3
+          - !Ref "AWS::NoValue"
 
   WorkflowTrackerPermission:
     Type: AWS::Lambda::Permission
     Properties:
       Action: lambda:InvokeFunction
       FunctionName: !Ref WorkflowTracker
+      Principal: !Sub "events.${AWS::URLSuffix}"
+      SourceArn: !GetAtt WorkflowStateChangeRule.Arn
+
+  ##########################################################################
+  # Job Tracker (Headless mode - tracks API-initiated jobs)
+  ##########################################################################
+
+  JobTrackerDLQ:
+    Type: AWS::SQS::Queue
+    Condition: DeployApiGateway
+    Properties:
+      KmsMasterKeyId: !Ref CustomerManagedEncryptionKey
+
+  JobTrackerLogGroup:
+    Type: AWS::Logs::LogGroup
+    Condition: DeployApiGateway
+    Properties:
+      KmsKeyId: !GetAtt CustomerManagedEncryptionKey.Arn
+      RetentionInDays: !Ref LogRetentionDays
+
+  JobTracker:
+    Type: AWS::Serverless::Function
+    Condition: DeployApiGateway
+    Properties:
+      PermissionsBoundary:
+        !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref "AWS::NoValue"]
+      CodeUri: src/lambda/job_tracker/
+      Handler: index.handler
+      Runtime: python3.12
+      Timeout: 900
+      MemorySize: 3008
+      EphemeralStorage:
+        Size: 5120
+      Layers:
+        - !Ref IDPCommonBaseLayer
+      Tracing: Active
+      DeadLetterQueue:
+        Type: SQS
+        TargetArn: !GetAtt JobTrackerDLQ.Arn
+      LoggingConfig:
+        LogGroup: !Ref JobTrackerLogGroup
+      VpcConfig:
+        SecurityGroupIds:
+          - !Ref LambdaSecurityGroupId
+        SubnetIds: !Ref PrivateSubnetIds
+      Environment:
+        Variables:
+          LOG_LEVEL: !Ref LogLevel
+          TRACKING_TABLE: !Ref TrackingTable
+          OUTPUT_BUCKET: !Ref OutputBucket
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref TrackingTable
+        - S3CrudPolicy:
+            BucketName: !Ref OutputBucket
+        - Statement:
+            - Effect: Allow
+              Action:
+                - kms:Encrypt
+                - kms:Decrypt
+                - kms:GenerateDataKey*
+              Resource: !GetAtt CustomerManagedEncryptionKey.Arn
+
+  JobTrackerPermission:
+    Type: AWS::Lambda::Permission
+    Condition: DeployApiGateway
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref JobTracker
       Principal: !Sub "events.${AWS::URLSuffix}"
       SourceArn: !GetAtt WorkflowStateChangeRule.Arn
 
@@ -4298,6 +4946,13 @@ Resources:
       Handler: index.handler
       Runtime: python3.12
       Timeout: 300
+      VpcConfig:
+        !If
+          - DeployInVPC
+          - SecurityGroupIds:
+              - !Ref LambdaSecurityGroupId
+            SubnetIds: !Ref PrivateSubnetIds
+          - !Ref AWS::NoValue
 
       Layers:
         - !Ref IDPCommonBaseLayer
@@ -4403,11 +5058,16 @@ Resources:
       MemorySize: 1024
       Tracing: Active
       VpcConfig: !If
-        - UsePrivateAppSync
-        - SubnetIds: !Ref LambdaSubnetIds
+        - DeployInVPC
+        - SubnetIds: !Ref PrivateSubnetIds
           SecurityGroupIds:
-            - !Ref LambdaVpcSecurityGroup
-        - !Ref AWS::NoValue
+            - !Ref LambdaSecurityGroupId
+        - !If
+          - UsePrivateAppSync
+          - SubnetIds: !Ref LambdaSubnetIds
+            SecurityGroupIds:
+              - !Ref LambdaVpcSecurityGroup
+          - !Ref AWS::NoValue
       LoggingConfig:
         LogGroup: !Ref SaveReportingDataFunctionV2LogGroup
       Policies:
@@ -4895,6 +5555,13 @@ Resources:
       Runtime: python3.12
       Timeout: 60
       MemorySize: 128
+      VpcConfig:
+        !If
+          - DeployInVPC
+          - SecurityGroupIds:
+              - !Ref LambdaSecurityGroupId
+            SubnetIds: !Ref PrivateSubnetIds
+          - !Ref AWS::NoValue
       Environment:
         Variables:
           LOG_LEVEL: !Ref LogLevel
@@ -4947,6 +5614,13 @@ Resources:
       Handler: index.handler
       Runtime: python3.12
       Timeout: 30
+      VpcConfig:
+        !If
+          - DeployInVPC
+          - SecurityGroupIds:
+              - !Ref LambdaSecurityGroupId
+            SubnetIds: !Ref PrivateSubnetIds
+          - !Ref AWS::NoValue
       LoggingConfig:
         LogGroup: !Ref LookupFunctionLogGroup
       Environment:
@@ -5085,11 +5759,16 @@ Resources:
         - !Ref IDPCommonAgentsLayer
       MemorySize: 1024 # Increase memory for agents with MCP clients and streaming
       VpcConfig: !If
-        - UsePrivateAppSync
-        - SubnetIds: !Ref LambdaSubnetIds
+        - DeployInVPC
+        - SubnetIds: !Ref PrivateSubnetIds
           SecurityGroupIds:
-            - !Ref LambdaVpcSecurityGroup
-        - !Ref AWS::NoValue
+            - !Ref LambdaSecurityGroupId
+        - !If
+          - UsePrivateAppSync
+          - SubnetIds: !Ref LambdaSubnetIds
+            SecurityGroupIds:
+              - !Ref LambdaVpcSecurityGroup
+          - !Ref AWS::NoValue
       Environment:
         Variables:
           LOG_LEVEL: !Ref LogLevel
@@ -5551,11 +6230,16 @@ Resources:
         - !Ref IDPCommonAgentsLayer
       MemorySize: 1024
       VpcConfig: !If
-        - UsePrivateAppSync
-        - SubnetIds: !Ref LambdaSubnetIds
+        - DeployInVPC
+        - SubnetIds: !Ref PrivateSubnetIds
           SecurityGroupIds:
-            - !Ref LambdaVpcSecurityGroup
-        - !Ref AWS::NoValue
+            - !Ref LambdaSecurityGroupId
+        - !If
+          - UsePrivateAppSync
+          - SubnetIds: !Ref LambdaSubnetIds
+            SecurityGroupIds:
+              - !Ref LambdaVpcSecurityGroup
+          - !Ref AWS::NoValue
       Environment:
         Variables:
           LOG_LEVEL: !Ref LogLevel
@@ -6909,6 +7593,13 @@ Resources:
       Runtime: python3.12
       Timeout: 300
       MemorySize: 1024
+      VpcConfig:
+        !If
+          - DeployInVPC
+          - SecurityGroupIds:
+              - !Ref LambdaSecurityGroupId
+            SubnetIds: !Ref PrivateSubnetIds
+          - !Ref AWS::NoValue
       Environment:
         Variables:
           LOG_LEVEL: !Ref LogLevel
@@ -6987,6 +7678,13 @@ Resources:
       Handler: index.handler
       Runtime: python3.12
       Timeout: 60
+      VpcConfig:
+        !If
+          - DeployInVPC
+          - SecurityGroupIds:
+              - !Ref LambdaSecurityGroupId
+            SubnetIds: !Ref PrivateSubnetIds
+          - !Ref AWS::NoValue
       InlineCode: |
         import boto3
         import cfnresponse
@@ -7187,11 +7885,16 @@ Resources:
       Layers:
         - !Ref IDPCommonBaseLayer
       VpcConfig: !If
-        - UsePrivateAppSync
-        - SubnetIds: !Ref LambdaSubnetIds
+        - DeployInVPC
+        - SubnetIds: !Ref PrivateSubnetIds
           SecurityGroupIds:
-            - !Ref LambdaVpcSecurityGroup
-        - !Ref AWS::NoValue
+            - !Ref LambdaSecurityGroupId
+        - !If
+          - UsePrivateAppSync
+          - SubnetIds: !Ref LambdaSubnetIds
+            SecurityGroupIds:
+              - !Ref LambdaVpcSecurityGroup
+          - !Ref AWS::NoValue
       Environment:
         Variables:
           LOG_LEVEL: !Ref LogLevel
@@ -9130,6 +9833,14 @@ Outputs:
     Condition: CreateAgentCoreLambda
     Description: MCP Authorization URL
     Value: !Sub "https://${GetDomain.OutputString}.auth.${AWS::Region}.amazoncognito.com/oauth2/authorize"
+  ApiGatewayEndpoint:
+    Condition: DeployApiGateway
+    Description: Jobs API endpoint URL
+    Value: !Sub "https://${ApiGateway}.execute-api.${AWS::Region}.${AWS::URLSuffix}/${ApiStageName}"
+  ApiClientId:
+    Condition: DeployApiGateway
+    Description: App client ID for API authentication
+    Value: !Ref ApiAppClient
   MCPConnectorClientId:
     Condition: CreateAgentCoreLambda
     Description: Cognito client ID used by the MCP Connector for machine-to-machine (M2M) authentication with the IDP system

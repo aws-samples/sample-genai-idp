@@ -193,6 +193,19 @@ class DynamoDBClient:
             logger.error(f"BotoCore error during get_item: {str(e)}")
             raise DynamoDBError(f"BotoCore error: {str(e)}")
 
+    def batch_get_items(self, keys: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Batch get items from the DynamoDB table (max 100 keys)."""
+        if not keys:
+            return []
+        try:
+            response = self.dynamodb.batch_get_item(
+                RequestItems={self.table.name: {"Keys": keys}}
+            )
+            return response.get("Responses", {}).get(self.table.name, [])
+        except (ClientError, BotoCoreError) as e:
+            logger.error(f"DynamoDB batch_get_item failed: {e}")
+            raise DynamoDBError(f"Batch get failed: {e}")
+
     def transact_write_items(
         self, transact_items: List[Dict[str, Any]]
     ) -> Dict[str, Any]:

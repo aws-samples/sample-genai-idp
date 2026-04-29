@@ -185,6 +185,16 @@ Parameters:
     Default: ""
     Description: Security group ID for Lambda VpcConfig (required when UsePrivateAppSync=true)
 
+  VpcId:
+    Type: String
+    Default: ""
+    Description: "Optional - VPC ID for VPC-secured deployment"
+
+  PrivateSubnetIds:
+    Type: CommaDelimitedList
+    Default: ""
+    Description: "Optional - Comma-separated list of private subnet IDs"
+
   EnableMLflow:
     Type: String
     Default: 'false'
@@ -197,6 +207,7 @@ Parameters:
     Description: SageMaker MLflow tracking server ARN
 
 Conditions:
+  DeployInVPC: !Not [!Equals [!Ref VpcId, ""]]
   HasGuardrailConfig:
     !And [
       !Not [!Equals [!Ref BedrockGuardrailId, ""]],
@@ -2158,6 +2169,24 @@ Resources:
                     - kms:DescribeKey
                   Resource: !Ref ArtifactsBucketKmsKeyArn
                 - !Ref AWS::NoValue
+              # Required for VPC-enabled CodeBuild projects
+              - Effect: Allow
+                Action:
+                  - ec2:CreateNetworkInterface
+                  - ec2:DescribeNetworkInterfaces
+                  - ec2:DeleteNetworkInterface
+                  - ec2:DescribeSecurityGroups
+                  - ec2:DescribeSubnets
+                  - ec2:DescribeVpcs
+                  - ec2:DescribeDhcpOptions
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - ec2:CreateNetworkInterfacePermission
+                Resource: !Sub "arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:network-interface/*"
+                Condition:
+                  StringEquals:
+                    ec2:AuthorizedService: !Sub "codebuild.${AWS::URLSuffix}"
 
   DockerBuildProject:
     Type: AWS::CodeBuild::Project
@@ -2168,6 +2197,14 @@ Resources:
         Unified Docker image builder for GenAIIDP stack - ${AWS::StackName}
       ServiceRole: !GetAtt DockerBuildRole.Arn
       EncryptionKey: !Ref CustomerManagedEncryptionKeyArn
+      VpcConfig:
+        !If
+          - DeployInVPC
+          - VpcId: !Ref VpcId
+            Subnets: !Ref PrivateSubnetIds
+            SecurityGroupIds:
+              - !Ref LambdaSecurityGroupId
+          - !Ref AWS::NoValue
       Artifacts:
         Type: NO_ARTIFACTS
       Source:
@@ -2257,6 +2294,11 @@ Resources:
                   - lambda:RemovePermission
                 Resource:
                   - !Sub "arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:*"
+      ManagedPolicyArns:
+        - !If
+          - DeployInVPC
+          - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"
+          - !Ref AWS::NoValue
 
   CodeBuildTrigger:
     Type: AWS::Serverless::Function
@@ -2280,6 +2322,13 @@ Resources:
       Role: !GetAtt CodeBuildExecutionRole.Arn
       Runtime: python3.12
       Timeout: 60
+      VpcConfig:
+        !If
+          - DeployInVPC
+          - SecurityGroupIds:
+              - !Ref LambdaSecurityGroupId
+            SubnetIds: !Ref PrivateSubnetIds
+          - !Ref AWS::NoValue
       MemorySize: 128
       Handler: index.handler
       CodeUri: ../../src/lambda/start_codebuild
@@ -2441,11 +2490,16 @@ Resources:
       MemorySize: 4096
       Tracing: Active
       VpcConfig: !If
-        - IsPrivateAppSync
-        - SubnetIds: !Ref LambdaSubnetIds
+        - DeployInVPC
+        - SubnetIds: !Ref PrivateSubnetIds
           SecurityGroupIds:
             - !Ref LambdaSecurityGroupId
-        - !Ref AWS::NoValue
+        - !If
+          - IsPrivateAppSync
+          - SubnetIds: !Ref LambdaSubnetIds
+            SecurityGroupIds:
+              - !Ref LambdaSecurityGroupId
+          - !Ref AWS::NoValue
       Environment:
         Variables:
           METRIC_NAMESPACE: !Ref StackName
@@ -2699,11 +2753,16 @@ Resources:
       MemorySize: 4096
       Tracing: Active
       VpcConfig: !If
-        - IsPrivateAppSync
-        - SubnetIds: !Ref LambdaSubnetIds
+        - DeployInVPC
+        - SubnetIds: !Ref PrivateSubnetIds
           SecurityGroupIds:
             - !Ref LambdaSecurityGroupId
-        - !Ref AWS::NoValue
+        - !If
+          - IsPrivateAppSync
+          - SubnetIds: !Ref LambdaSubnetIds
+            SecurityGroupIds:
+              - !Ref LambdaSecurityGroupId
+          - !Ref AWS::NoValue
       Environment:
         Variables:
           METRIC_NAMESPACE: !Ref StackName
@@ -2825,11 +2884,16 @@ Resources:
       MemorySize: 4096
       Tracing: Active
       VpcConfig: !If
-        - IsPrivateAppSync
-        - SubnetIds: !Ref LambdaSubnetIds
+        - DeployInVPC
+        - SubnetIds: !Ref PrivateSubnetIds
           SecurityGroupIds:
             - !Ref LambdaSecurityGroupId
-        - !Ref AWS::NoValue
+        - !If
+          - IsPrivateAppSync
+          - SubnetIds: !Ref LambdaSubnetIds
+            SecurityGroupIds:
+              - !Ref LambdaSecurityGroupId
+          - !Ref AWS::NoValue
       Environment:
         Variables:
           METRIC_NAMESPACE: !Ref StackName
@@ -2963,11 +3027,16 @@ Resources:
       MemorySize: 4096
       Tracing: Active
       VpcConfig: !If
-        - IsPrivateAppSync
-        - SubnetIds: !Ref LambdaSubnetIds
+        - DeployInVPC
+        - SubnetIds: !Ref PrivateSubnetIds
           SecurityGroupIds:
             - !Ref LambdaSecurityGroupId
-        - !Ref AWS::NoValue
+        - !If
+          - IsPrivateAppSync
+          - SubnetIds: !Ref LambdaSubnetIds
+            SecurityGroupIds:
+              - !Ref LambdaSecurityGroupId
+          - !Ref AWS::NoValue
       Environment:
         Variables:
           METRIC_NAMESPACE: !Ref StackName
@@ -3099,11 +3168,16 @@ Resources:
       MemorySize: 4096
       Tracing: Active
       VpcConfig: !If
-        - IsPrivateAppSync
-        - SubnetIds: !Ref LambdaSubnetIds
+        - DeployInVPC
+        - SubnetIds: !Ref PrivateSubnetIds
           SecurityGroupIds:
             - !Ref LambdaSecurityGroupId
-        - !Ref AWS::NoValue
+        - !If
+          - IsPrivateAppSync
+          - SubnetIds: !Ref LambdaSubnetIds
+            SecurityGroupIds:
+              - !Ref LambdaSecurityGroupId
+          - !Ref AWS::NoValue
       Environment:
         Variables:
           METRIC_NAMESPACE: !Ref StackName
@@ -3225,11 +3299,16 @@ Resources:
       Timeout: 900
       MemorySize: 4096
       VpcConfig: !If
-        - IsPrivateAppSync
-        - SubnetIds: !Ref LambdaSubnetIds
+        - DeployInVPC
+        - SubnetIds: !Ref PrivateSubnetIds
           SecurityGroupIds:
             - !Ref LambdaSecurityGroupId
-        - !Ref AWS::NoValue
+        - !If
+          - IsPrivateAppSync
+          - SubnetIds: !Ref LambdaSubnetIds
+            SecurityGroupIds:
+              - !Ref LambdaSecurityGroupId
+          - !Ref AWS::NoValue
       Environment:
         Variables:
           METRIC_NAMESPACE: !Ref StackName
@@ -3319,11 +3398,16 @@ Resources:
       Timeout: 900
       MemorySize: 4096
       VpcConfig: !If
-        - IsPrivateAppSync
-        - SubnetIds: !Ref LambdaSubnetIds
+        - DeployInVPC
+        - SubnetIds: !Ref PrivateSubnetIds
           SecurityGroupIds:
             - !Ref LambdaSecurityGroupId
-        - !Ref AWS::NoValue
+        - !If
+          - IsPrivateAppSync
+          - SubnetIds: !Ref LambdaSubnetIds
+            SecurityGroupIds:
+              - !Ref LambdaSecurityGroupId
+          - !Ref AWS::NoValue
       Environment:
         Variables:
           METRIC_NAMESPACE: !Ref StackName
@@ -3449,11 +3533,16 @@ Resources:
       MemorySize: 4096
       Tracing: Active
       VpcConfig: !If
-        - IsPrivateAppSync
-        - SubnetIds: !Ref LambdaSubnetIds
+        - DeployInVPC
+        - SubnetIds: !Ref PrivateSubnetIds
           SecurityGroupIds:
             - !Ref LambdaSecurityGroupId
-        - !Ref AWS::NoValue
+        - !If
+          - IsPrivateAppSync
+          - SubnetIds: !Ref LambdaSubnetIds
+            SecurityGroupIds:
+              - !Ref LambdaSecurityGroupId
+          - !Ref AWS::NoValue
       Environment:
         Variables:
           LOG_LEVEL: !Ref LogLevel
@@ -3627,11 +3716,16 @@ Resources:
       Timeout: 900
       MemorySize: 4096
       VpcConfig: !If
-        - IsPrivateAppSync
-        - SubnetIds: !Ref LambdaSubnetIds
+        - DeployInVPC
+        - SubnetIds: !Ref PrivateSubnetIds
           SecurityGroupIds:
             - !Ref LambdaSecurityGroupId
-        - !Ref AWS::NoValue
+        - !If
+          - IsPrivateAppSync
+          - SubnetIds: !Ref LambdaSubnetIds
+            SecurityGroupIds:
+              - !Ref LambdaSecurityGroupId
+          - !Ref AWS::NoValue
       Environment:
         Variables:
           METRIC_NAMESPACE: !Ref StackName
@@ -3747,11 +3841,16 @@ Resources:
       Timeout: 900
       MemorySize: 4096
       VpcConfig: !If
-        - IsPrivateAppSync
-        - SubnetIds: !Ref LambdaSubnetIds
+        - DeployInVPC
+        - SubnetIds: !Ref PrivateSubnetIds
           SecurityGroupIds:
             - !Ref LambdaSecurityGroupId
-        - !Ref AWS::NoValue
+        - !If
+          - IsPrivateAppSync
+          - SubnetIds: !Ref LambdaSubnetIds
+            SecurityGroupIds:
+              - !Ref LambdaSecurityGroupId
+          - !Ref AWS::NoValue
       Environment:
         Variables:
           METRIC_NAMESPACE: !Ref StackName

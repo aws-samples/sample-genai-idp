@@ -83,14 +83,14 @@ def handler(event, context):
 
     # Calculate expiry date
     expires_after = int((datetime.now(timezone.utc) + timedelta(days=retentionDays)).timestamp())
-
+    
     # Create document in DynamoDB via document service
     logger.info(f"Creating document via document service: {document.input_key}")
     
     # Create document in document service with TTL
     created_key = document_service.create_document(document, expires_after=expires_after)
     logger.info(f"Document created with key: {created_key}")
-    
+
     # Send serialized document to SQS queue
     doc_json = document.to_json()
     message = {

@@ -35,6 +35,14 @@ High-level service for document operations:
 - `list_documents_date_shard()` - List by date/shard
 - `calculate_ttl()` - Generate TTL timestamps
 
+### JobDynamoDBService
+
+Service for managing batch job records (used by the `/jobs` REST API):
+- `create_job_record()` - Create a job metadata record with optional TTL and metadata
+- `get_job_record()` - Retrieve a job record by job ID (Files map values returned as Status enum)
+- `update_job_files()` - Replace the entire Files map on a job record
+- `update_file_status()` - Update a single file's status within a job record
+
 ## Usage
 
 ### Basic Usage
@@ -94,6 +102,34 @@ hourly_docs = service.list_documents_date_hour(
 )
 ```
 
+### Job Operations
+
+```python
+from idp_common.job_service import create_job_service
+from idp_common.models import Status
+
+# Initialize service (uses TRACKING_TABLE env var)
+job_service = create_job_service()
+
+# Create a job record
+job_service.create_job_record(
+    job_id="a1b2c3d4",
+    metadata={"source": "api"}
+)
+
+# Get job record (Files values returned as Status enum)
+record = job_service.get_job_record("a1b2c3d4")
+
+# Update a single file's status
+job_service.update_file_status("a1b2c3d4", "doc.pdf", Status.COMPLETED)
+
+# Replace entire Files map
+job_service.update_job_files("a1b2c3d4", {
+    "doc_a.pdf": Status.COMPLETED,
+    "doc_b.pdf": Status.IN_PROGRESS,
+})
+```
+
 ## Data Structure Compatibility
 
 The module maintains full compatibility with the existing AppSync schema:
@@ -113,6 +149,15 @@ The module maintains full compatibility with the existing AppSync schema:
 - **SK**: `ts#{timestamp}#id#{ObjectKey}` - Sort key for chronological ordering
 - **ObjectKey**: Document identifier
 - **QueuedTime**: When document was queued
+
+### Job Record Structure
+- **PK**: `job#{job_id}` - Primary partition key
+- **SK**: `metadata` - Sort key (always "metadata" for job records)
+- **Files**: Map of filenames to status values (e.g., `{"doc.pdf": "COMPLETED"}`)
+- **CreatedAt**: ISO 8601 timestamp of job creation
+- **UpdatedAt**: ISO 8601 timestamp of last update
+- **Metadata**: Optional JSON string of job metadata
+- **ExpiresAfter**: Optional TTL timestamp
 
 ## Error Handling
 

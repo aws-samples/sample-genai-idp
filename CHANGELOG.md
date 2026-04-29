@@ -5,6 +5,50 @@ SPDX-License-Identifier: MIT-0
 
 ## [Unreleased]
 
+### Added
+
+- **Document-level Download button on the Document Details page** — A new **Download** dropdown in the Document Details header lets users pull every output artifact for a document in a single click, packaged as a ZIP. Three scopes are offered:
+  - **Download All (ZIP)** — document attributes, metering, summary, evaluation & rule-validation reports, per-section predictions, baselines (when available), per-page text/confidence, and optionally per-page images and/or the source document (checkboxes).
+  - **Download Predictions (ZIP)** — all section result JSONs plus a self-describing `manifest.json`.
+  - **Download Baselines (ZIP)** — all baseline section result JSONs (shown only when an evaluation baseline is available).
+  - **Bucket-mirrored ZIP layout** — files are organised under top-level `output/`, `baseline/`, and `input/` folders that preserve the real S3 key structure, so the archive can be diffed with a direct `aws s3 sync` of the same buckets.
+
+
+- **Headless REST API mode with VPC-secured deployment for GovCloud** — a first-party Jobs REST API for programmatic document submission and status tracking, plus an optional VPC-secured deployment that keeps the API off the public internet. Makes end-to-end GovCloud deployment viable without the UI/AppSync stack, and gives Commercial customers a supported alternative to direct S3 uploads for machine-to-machine integrations.
+  - **Jobs REST API** (new `src/lambda/api_handler/`, `src/lambda/job_tracker/`, `src/lambda/batch_pre_processor/`):
+    - `POST /jobs` — creates a job record and returns a presigned POST URL for the input zip (1-hour expiry, content-type pinned to `application/zip`, 5 GB content-length cap).
+    - `GET /jobs/{job_id}` — returns overall status (`PENDING_UPLOAD` / `IN_PROGRESS` / `SUCCEEDED` / `PARTIALLY_SUCCEEDED` / `FAILED` / `ABORTED`), per-file status map, and — on success — a presigned GET URL for `results.zip`. `SUCCEEDED` is gated on `results.zip` actually being present in the output bucket to avoid racing callers into a 404.
+    - OAuth2 `client_credentials` auth via a dedicated Cognito User Pool + Resource Server (`idp-api/jobs.read`, `idp-api/jobs.write` scopes). Separate from the existing web-UI Cognito pool.
+    - **Per-client job ownership (M1):** each job records its creating Cognito principal (`sub` / `client_id`) as `CreatedBy`. `GET /jobs/{job_id}` returns **HTTP 404** (not 403, to avoid existence-leak) when the caller's principal doesn't match the job's owner. Legacy job records written before this field existed remain readable by any authenticated caller. **Behavior change:** `GET /jobs/{job_id}` on a non-existent job now correctly returns 404; previously returned 400 (a pre-existing response-code bug in the API handler).
+  - **Private API Gateway + bastion tunneling:**
+    - `AWS::Serverless::Api` with `EndpointConfiguration: PRIVATE` bound to a customer-supplied `ApiGatewayVpcEndpointId` and a resource policy that denies all traffic not originating from that VPC endpoint.
+    - Optional `DeployBastionHost=true` spins up an SSM-reachable `t3.small` EC2 with IMDSv2 required, encrypted EBS via a dedicated rotating KMS key, and no inbound SSH. `scripts/bastion.sh <STACK_NAME>` sets up a local SSH tunnel for dev-time API access; `scripts/get_api_token.sh <STACK_NAME>` fetches an OAuth2 bearer token.
+  - **Safe zip extraction in `batch_pre_processor` (M2 + M3):**
+    - `MAX_UNCOMPRESSED_BYTES` (default 20 GiB, env-configurable) and `MAX_ENTRIES` (default 10,000) bounds checked **pre-flight** before any uploads begin. Bound violations write a terminal `FAILED` marker to the job record so the API surfaces the failure.
+    - Per-entry streaming via `zipfile.ZipFile.open()` + `s3.upload_fileobj()` — no more loading whole entries into Lambda memory.
+    - Per-entry failure isolation — one bad file is marked `FAILED` and the rest of the batch still uploads and advances through the pipeline; the job converges to `PARTIALLY_SUCCEEDED` / `FAILED` / `SUCCEEDED` as appropriate.
+  - **New CFN parameters** (all default to off/empty, fully backward-compatible):
+    - `EnableHeadless` (bool) — turns on the Jobs REST API.
+    - `DeployInVPC` (bool) — places all IDP Lambdas in customer-supplied private subnets with a customer-supplied security group.
+    - `VpcId`, `PrivateSubnetIds`, `ApiGatewayVpcEndpointId`, `LambdaSecurityGroupId`, `ApiStageName` — customer-supplied networking.
+    - `DeployBastionHost`, `BastionHostSubnetId`, `BastionHostSecurityGroupId` — optional dev-access bastion.
+  - **CFN fail-fast validation (H1)** — new `Rules:` block entries catch misconfiguration at stack create / update time with clear `AssertDescription` errors, instead of failing deep in resource provisioning:
+    - `HeadlessRequiresVPC` — `EnableHeadless=true` requires `DeployInVPC=true` + non-empty `VpcId` / `ApiGatewayVpcEndpointId` / `LambdaSecurityGroupId`.
+    - `BastionRequiresVPC` — `DeployBastionHost=true` requires `DeployInVPC=true` + non-empty bastion subnet / SG.
+  - Plus **defense-in-depth** on the two API-gated Lambdas: `VpcConfig` is wrapped in `!If [DeployInVPC, …, AWS::NoValue]` so even if the Rules block is ever relaxed, the Lambdas won't fail to create on empty `!Ref` values.
+  - **CLI (`idp-cli`):**
+    - `--headless` now auto-sets the `EnableHeadless=true` stack parameter — they were always used together.
+    - `idp-cli deploy --headless --from-code . --stack-name <NEW>` no longer requires `--admin-email`. The headless template strips the UI Cognito pool and has no `AdminEmail` parameter; passing it through produced `ValidationError: Parameters: [AdminEmail] do not exist in the template`. Now skipped and dropped with a note. Non-headless new-stack creation still requires `--admin-email`.
+  - **Publish pipeline fixes that make headless-to-GovCloud deploys work:**
+    - `cfn-lint` in headless mode now lints `idp-headless.yaml` and skips commercial-only templates (`idp-main.yaml`, `nested/appsync`), which contain `AWS::AppSync::*` / `AWS::CloudFront::*` resources that don't exist in `us-gov-*` regions. Fixes `E3006 Resource type … does not exist`.
+    - E/W classification in `_validate_cfn_lint` now uses `^E\d{4}` / `^W\d{4}` regex anchors. Previously the substring `":E"` also matched resource prefixes like `AWS::EC2::`, inflating warning-severity lines to errors.
+    - `WorkflowStateChangeRule` JobTracker target moved from a conditional `Arn` field (flagged `E3003 'Arn' is a required property`) to a conditional full-target dict via `!If`.
+  - **Documentation:**
+    - New `docs/govcloud-batch-api.md` — REST API reference with schemas, OAuth flow, bastion tunneling setup, and an Authorization model section covering per-client ownership and multi-client behavior.
+    - New `docs/govcloud-architecture.md`, `docs/govcloud-operations.md`, `docs/vpc-secured-mode.md`.
+    - Overhauled `docs/govcloud-deployment.md` with a deployment-variant matrix (Vanilla / Headless API / Headless + VPC / Headless + VPC + Bastion).
+  - **End-to-end test script:** `scripts/e2e_test_headless.py <STACK_NAME> <PATH_TO_FILE>` exercises the full flow (OAuth → POST /jobs → presigned upload → status poll → download results).
+
 ### Security
 
 Hardening response to security review - Highlights:
@@ -60,7 +104,6 @@ Hardening response to security review - Highlights:
   - SQL injection in `test_results_resolver` Athena queries (every
     interpolation is gated by `_validate_sql_input()` with a strict
     allow-list regex).
-
 
 ## [0.5.8]
 

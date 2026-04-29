@@ -18,6 +18,8 @@ from typing import Any, Dict, List, Optional
 class Status(Enum):
     """Document processing status."""
 
+    PENDING_UPLOAD = "PENDING_UPLOAD"  # Pre-s3 upload state only applicable for documents uploaded via /Jobs API
+    IN_PROGRESS = "IN_PROGRESS"  # Batch job file is being processed
     QUEUED = "QUEUED"  # Initial state when document is added to queue
     RUNNING = "RUNNING"  # Step function workflow has started
     OCR = "OCR"  # OCR processing

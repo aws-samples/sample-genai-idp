@@ -585,18 +585,29 @@ def deploy(
             if admin_email:
                 console.print(f"Admin Email: {admin_email}")
         else:
-            # New stack - require admin_email
+            # New stack - require admin_email unless --headless (headless template
+            # strips Cognito and has no AdminEmail parameter, so the value is
+            # unused and would cause a CFN ValidationError if passed through).
             console.print(
                 f"[bold blue]Creating new IDP stack: {stack_name}[/bold blue]"
             )
 
-            if not admin_email:
-                console.print(
-                    "[red]✗ Error: --admin-email is required when creating a new stack[/red]"
-                )
-                sys.exit(1)
+            if headless:
+                # Drop any user-supplied admin_email so it doesn't reach CFN.
+                if admin_email:
+                    console.print(
+                        "[yellow]--admin-email is ignored with --headless "
+                        "(no Cognito in headless template)[/yellow]"
+                    )
+                admin_email = None
+            else:
+                if not admin_email:
+                    console.print(
+                        "[red]✗ Error: --admin-email is required when creating a new stack[/red]"
+                    )
+                    sys.exit(1)
 
-            console.print(f"Admin Email: {admin_email}")
+                console.print(f"Admin Email: {admin_email}")
 
         console.print()
 
@@ -615,6 +626,11 @@ def deploy(
                 key = match.group(1).strip()
                 value = match.group(2).strip().rstrip(",")
                 additional_params[key] = value
+
+        # When --headless is used, auto-set EnableHeadless=true stack parameter so
+        # users don't need to pass it twice. Explicit --parameters values win.
+        if headless and "EnableHeadless" not in additional_params:
+            additional_params["EnableHeadless"] = "true"
 
         # Deploy stack via SDK (build_parameters is called internally by client.stack.deploy)
         # Debug: show custom config path hint before deploy
