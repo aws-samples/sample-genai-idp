@@ -208,6 +208,14 @@ These are wired to env vars `IDP_STACK_NAME`, `AUTOTUNE_MODEL_ID`, and `AUTOTUNE
 
 **Same-region requirement:** The IDP stack must be in the same AWS region as the AutoTune FAST stack. This is a documented requirement, not enforced programmatically. The agent uses IDP CLI tools that read CloudFormation outputs and S3 buckets, which are region-scoped.
 
+## Known Issues
+
+| Issue | Impact | Status |
+|-------|--------|--------|
+| Container disk space (ENOSPC) | Agent fails on long runs after downloading evaluation results + accumulating session history | **Blocking** — top priority for next session |
+| `idp-cli process --monitor` race condition | Batch metadata not in DynamoDB when monitoring starts; workaround: removed `--monitor` flag | Workaround in place; IDP CLI fix needed |
+| Evaluation run silent failure | Some configs cause 75/75 documents to fail with no clear error from `idp-cli` | Needs IDP-side investigation |
+
 ## What's Not Built Yet
 
 | Feature | Status | Rationale |

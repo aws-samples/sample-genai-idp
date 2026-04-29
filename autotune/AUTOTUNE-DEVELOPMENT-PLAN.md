@@ -589,10 +589,54 @@ Convert the agent from interactive chat to autonomous operation. The agent recei
 - [ ] **Configure `idleRuntimeSessionTimeout`** — AgentCore has a configurable idle session timeout (default 15 min, max 8 hours). Set this to a higher value (e.g. 1-2 hours) so long-running optimization loops don't get suspended mid-run. Check if the L2 CDK construct (`@aws-cdk/aws-bedrock-agentcore-alpha`) exposes this property, otherwise use L1 escape hatch (`addPropertyOverride`). This complements the `/ping` HEALTHY_BUSY approach — belt and suspenders.
 - [ ] **Bundle IDP source code in container** — Copy the IDP Accelerator source tree into the Docker image (e.g. `/opt/idp-source/`) and tell the agent where it lives via env var or system prompt. The agent doesn't need the source to run tools, but it reads it to understand how the solution works and to debug issues (e.g. why an evaluation run silently fails). Exclude `node_modules`, `.git`, and build artifacts to keep the image small.
 - [ ] **Automatic optimization log updates via hook/subagent** — The main agent frequently forgets to update OPTIMIZATION-LOG.md despite repeated prompt instructions. Investigate using a Strands hook (e.g. `AfterToolCallEvent`) that triggers a lightweight subagent whose sole job is to append a summary of what just happened to the log. This decouples log maintenance from the main agent's reasoning, ensuring the log stays current without consuming main agent context or relying on it remembering. Consider: cost of extra LLM calls, whether a simple template-based append (no LLM) is sufficient for tool results, and whether the subagent needs the full conversation or just the last tool call/result.
+- [ ] **IDP feature request: hide test execution documents from main document list** — Documents processed during AutoTune evaluation runs currently appear in the IDP UI's main document list, polluting it with hundreds of test documents. Request a filter or flag in IDP so that documents processed via test executions (test studio runs) are excluded from the default document list view.
 
-### 6.9 Fire-and-Forget Architecture with S3 Polling (NEXT UP)
+### 6.9 Fire-and-Forget Architecture with S3 Polling (DONE)
 
-**This is the #1 priority.** Replaces the broken SSE streaming approach. The agent runs fully decoupled from the frontend — no SSE connection needed after the initial request.
+Implemented and deployed. The agent runs fully decoupled from the frontend — no SSE connection needed after the initial request. See `autotune/docs/full-autonomy.md` for full architecture.
+
+### 6.10 Session: April 29 PM — What Was Done
+
+**Deployed and working:**
+- Fire-and-forget entrypoint with background thread
+- Consolidated JSONL stream writing (text, tool_use, tool_result) with timestamps
+- Dedicated S3 stream bucket with 30-day lifecycle
+- `/stream` (offset pagination) and `/log` API endpoints
+- Frontend rewrite: polling-based with Agent Stream + Optimization Log tabs
+- Live heartbeat counter (`♥ Ns ago`) in status bar with POSSIBLY STALLED detection
+- Cancel via `OptimizationCancelled` exception (replaces broken `cancel_tool`)
+- `idleRuntimeSessionTimeout: 7200` (2 hours) via L1 escape hatch
+- Independent background sync thread (heartbeat + S3 sync every 10s, decoupled from event loop)
+- `check_evaluation_status` tool (single-run status via `getTestRunStatus` Lambda)
+- Removed `--monitor` from `run_evaluation` (IDP CLI race condition)
+- `managed: false` forced on all config uploads
+- Prompt fix: datasets are remote (IDP stack), not local filesystem
+
+**Bugs found during testing:**
+- `cancel_tool` didn't stop the agent — it just cancelled individual tools and the agent retried → fixed with exception
+- Heartbeat + S3 sync stalled during long tool calls (5-min `download_results`) because they were inline in the event loop → fixed with independent sync thread
+- Agent tried `analyze_dataset` with local paths for remote datasets → fixed prompt
+- Agent uploaded configs with `managed: true` inherited from Production config → fixed in `upload_config`
+- `--monitor` on `idp-cli process` fails with "Batch not found" race condition → removed flag
+- **Container ran out of disk space (ENOSPC) on long runs — NOT YET FIXED**
+
+### ⚠️ NEXT SESSION: TOP PRIORITY
+
+**Solve the container disk space issue (ENOSPC).** The agent ran successfully for a long time but eventually hit `[Errno 28] No space left on device`. Root cause is likely a combination of:
+- Downloaded evaluation results (75 docs × multiple file types)
+- Strands `FileSessionManager` storing full conversation history with large tool results
+- `stream.jsonl` growing over time
+- Config files and other workspace artifacts
+
+Possible approaches (not yet decided):
+1. Add a `cleanup_results` tool + prompt the agent to clean up after analyzing each iteration
+2. Truncate or cap the Strands session file (may break conversation continuity)
+3. Increase container storage if AgentCore supports it (didn't find a config for this)
+4. Use `/mnt/workspace` (persistent session storage) instead of ephemeral `/app` for large files
+5. Stream results analysis without downloading everything to disk
+6. Some combination of the above
+
+**Do not start other work until this is resolved — it blocks all long-running optimization runs.**
 
 #### Problem being solved
 AgentCore's internal SSE proxy kills the HTTP response stream after ~60s. Our heartbeat/ping approach can't fix this because the proxy is upstream of our container. The agent keeps running but the frontend loses all visibility. We need the frontend to see the agent's full thought process, optimization state, and optimization log — all without depending on a persistent SSE connection.
