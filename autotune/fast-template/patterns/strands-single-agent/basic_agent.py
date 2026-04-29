@@ -5,20 +5,27 @@ Operates autonomously: receives test_set_id + optional optimization_guidance,
 runs iterative optimization to completion (or cancellation), and produces an
 optimized IDP Accelerator config.
 
-Session keepalive: AgentCore has a 15-minute idle timeout. During long tool calls
-(e.g. run_evaluation taking 3+ minutes), no SSE events are yielded, which can
-trigger the timeout. We prevent this with:
-  1. @app.ping handler returning HEALTHY_BUSY while the agent is running
-  2. Heartbeat events yielded every 30s from a background asyncio task
+Architecture: Fire-and-forget. The entrypoint yields a single "started" event
+and returns immediately. The agent runs in a background thread, writing its
+full event stream to a JSONL file on /mnt/workspace and syncing to S3
+periodically. The frontend polls three independent APIs:
+  - GET /state  (DynamoDB) — status, phase, iteration, accuracy
+  - GET /stream (S3 JSONL) — full agent thought process
+  - GET /log    (S3 markdown) — OPTIMIZATION-LOG.md
+
+This decouples the agent from the SSE connection, which AgentCore's internal
+proxy severs after ~60s. See AUTOTUNE-DEVELOPMENT-PLAN.md Phase 6.9.
 """
 
 import asyncio
 import json
 import logging
 import os
+import threading
 import time
 from pathlib import Path
 
+import boto3
 from bedrock_agentcore.runtime import BedrockAgentCoreApp, PingStatus, RequestContext
 from strands import Agent, AgentSkills
 from strands.models import BedrockModel
@@ -28,34 +35,36 @@ from utils.auth import extract_user_id_from_context
 
 from idpac_tools import ALL_TOOLS as IDPAC_TOOLS
 from optimization_state import OptimizationState, STATUS_RUNNING, STATUS_COMPLETE, STATUS_FAILED
-from optimization_hooks import CancelCheckHook, OptimizationLoopHook
+from optimization_hooks import CancelCheckHook, OptimizationCancelled, OptimizationLoopHook
 
 logger = logging.getLogger(__name__)
 
 app = BedrockAgentCoreApp()
 
-# Track whether the agent is actively running (for ping handler)
-_agent_running = False
+# Background threads keyed by session_id. Checked by /ping to report HEALTHY_BUSY.
+_active_sessions: dict[str, threading.Thread] = {}
 
-HEARTBEAT_INTERVAL_SECONDS = 30
+AGENT_DIR = Path(__file__).parent
+WORKSPACE_DIR = "/mnt/workspace" if os.path.isdir("/mnt/workspace") else "/tmp/workspace"
+SESSIONS_DIR = os.path.join(WORKSPACE_DIR, ".sessions")
+MAX_ITERATIONS = 10
+
+# S3 sync config
+STREAM_SYNC_INTERVAL = 10  # seconds between S3 syncs
+STREAM_SYNC_LINES = 10  # or sync after this many new lines
+LOG_SYNC_INTERVAL = 30  # seconds between OPTIMIZATION-LOG.md syncs
 
 
 @app.ping
 def custom_ping_status():
-    """Return HEALTHY_BUSY while agent is running to prevent idle timeout."""
-    if _agent_running:
+    """Return HEALTHY_BUSY while any agent background thread is alive."""
+    # Clean up dead threads
+    for sid in list(_active_sessions):
+        if not _active_sessions[sid].is_alive():
+            del _active_sessions[sid]
+    if _active_sessions:
         return PingStatus.HEALTHY_BUSY
     return PingStatus.HEALTHY
-
-
-AGENT_DIR = Path(__file__).parent
-
-# Persistent filesystem mounted by AgentCore (Preview feature).
-# Falls back to /tmp for local Docker testing.
-WORKSPACE_DIR = "/mnt/workspace" if os.path.isdir("/mnt/workspace") else "/tmp/workspace"
-SESSIONS_DIR = os.path.join(WORKSPACE_DIR, ".sessions")
-
-MAX_ITERATIONS = 10
 
 
 def _load_system_prompt() -> str:
@@ -63,7 +72,6 @@ def _load_system_prompt() -> str:
 
 
 def _build_initial_prompt(test_set_id: str, optimization_guidance: str) -> str:
-    """Construct the first user message that kicks off autonomous optimization."""
     parts = [
         f"Begin autonomous optimization for test set: {test_set_id}",
         "\nRead OPTIMIZATION-LOG.md for the pre-filled run metadata, then run the "
@@ -74,15 +82,9 @@ def _build_initial_prompt(test_set_id: str, optimization_guidance: str) -> str:
     return "\n".join(parts)
 
 
-def _create_optimization_log(
-    session_workspace: str,
-    test_set_id: str,
-    optimization_guidance: str,
-) -> None:
-    """Pre-create OPTIMIZATION-LOG.md with run metadata filled in."""
+def _create_optimization_log(session_workspace: str, test_set_id: str, optimization_guidance: str) -> None:
     idp_stack = os.environ.get("IDP_STACK_NAME", "unknown")
     region = os.environ.get("AWS_DEFAULT_REGION", os.environ.get("AWS_REGION", "unknown"))
-
     content = f"""# Optimization Log
 
 This file documents the progress of the current optimization run.
@@ -95,58 +97,31 @@ Optimization guidance: {optimization_guidance or "None provided"}
 
 ## Optimization Log
 """
-    log_path = os.path.join(session_workspace, "OPTIMIZATION-LOG.md")
-    with open(log_path, "w") as f:
+    with open(os.path.join(session_workspace, "OPTIMIZATION-LOG.md"), "w") as f:
         f.write(content)
 
 
-def create_autotune_agent(
-    user_id: str,
-    session_id: str,
-    state: OptimizationState,
-    test_set_id: str = "",
-    optimization_guidance: str = "",
-) -> Agent:
-    """Create the IDPAutoTune Strands agent with hooks for autonomous operation."""
+def _create_agent(user_id: str, session_id: str, state: OptimizationState,
+                  test_set_id: str, optimization_guidance: str) -> Agent:
     model = BedrockModel(
-        model_id=os.environ.get(
-            "AUTOTUNE_MODEL_ID", "us.anthropic.claude-sonnet-4-20250514-v1:0"
-        ),
+        model_id=os.environ["AUTOTUNE_MODEL_ID"],
         max_tokens=16384,
     )
-
-    # Persistent session storage on /mnt/workspace (AgentCore) or /tmp (local)
     os.makedirs(SESSIONS_DIR, exist_ok=True)
-    session_manager = FileSessionManager(
-        session_id=session_id,
-        storage_dir=SESSIONS_DIR,
-    )
+    session_manager = FileSessionManager(session_id=session_id, storage_dir=SESSIONS_DIR)
 
-    # Set agent working directory to persistent workspace
     session_workspace = os.path.join(WORKSPACE_DIR, session_id)
     os.makedirs(session_workspace, exist_ok=True)
     os.chdir(session_workspace)
 
-    # Pre-create OPTIMIZATION-LOG.md with metadata filled in
     if test_set_id:
         _create_optimization_log(session_workspace, test_set_id, optimization_guidance)
 
-    # Skills plugin — auto-discovers SKILL.md files
     skills_dir = AGENT_DIR / "skills"
-    plugins = []
-    if skills_dir.exists():
-        plugins.append(AgentSkills(skills=str(skills_dir)))
-
-    # IDPAC-specific tools + general-purpose community tools
+    plugins = [AgentSkills(skills=str(skills_dir))] if skills_dir.exists() else []
     tools = IDPAC_TOOLS + [file_read, file_write, editor, shell]
+    hooks = [CancelCheckHook(state), OptimizationLoopHook(state, max_iterations=MAX_ITERATIONS)]
 
-    # Autonomous hooks
-    hooks = [
-        CancelCheckHook(state),
-        OptimizationLoopHook(state, max_iterations=MAX_ITERATIONS),
-    ]
-
-    # TODO: Add SummarizingConversationManager when context overflow is observed
     return Agent(
         name="idp_autotune",
         model=model,
@@ -159,99 +134,207 @@ def create_autotune_agent(
     )
 
 
+def _run_agent_thread(user_id: str, session_id: str, state: OptimizationState,
+                      test_set_id: str, optimization_guidance: str) -> None:
+    """Background thread: runs the agent, writes stream to JSONL, syncs to S3."""
+    s3_bucket = os.environ.get("AUTOTUNE_STREAM_BUCKET", "")
+    s3_prefix = f"autotune-streams/{session_id}"
+    session_workspace = os.path.join(WORKSPACE_DIR, session_id)
+    stream_path = os.path.join(session_workspace, "stream.jsonl")
+    log_path = os.path.join(session_workspace, "OPTIMIZATION-LOG.md")
+
+    s3 = boto3.client("s3") if s3_bucket else None
+
+    def _sync_file(local_path: str, s3_key: str) -> None:
+        if not s3 or not s3_bucket:
+            return
+        try:
+            s3.upload_file(local_path, s3_bucket, s3_key)
+        except Exception:
+            logger.exception("S3 sync failed for %s", s3_key)
+
+    async def _run():
+        agent = _create_agent(user_id, session_id, state, test_set_id, optimization_guidance)
+        initial_prompt = _build_initial_prompt(test_set_id, optimization_guidance)
+
+        lines_since_sync = 0
+        last_stream_sync = time.monotonic()
+        last_log_sync = time.monotonic()
+        last_heartbeat = time.monotonic()
+
+        # Consolidation state — mirrors the frontend SSE parser logic.
+        # Instead of writing every raw streaming delta, we accumulate text
+        # and tool input, then write one clean line per meaningful event.
+        text_buf = ""
+        tool_calls: dict[str, dict] = {}  # toolUseId -> {name, input}
+
+        def _flush_text():
+            nonlocal text_buf, lines_since_sync
+            if text_buf:
+                _write_line({"type": "text", "content": text_buf})
+                text_buf = ""
+
+        def _write_line(obj: dict):
+            nonlocal lines_since_sync
+            obj["ts"] = time.strftime("%H:%M:%S", time.gmtime())
+            try:
+                with open(stream_path, "a") as f:
+                    f.write(json.dumps(obj, default=str) + "\n")
+                lines_since_sync += 1
+            except Exception:
+                logger.exception("Failed to write stream event")
+
+        async for event in agent.stream_async(initial_prompt):
+            try:
+                evt = json.loads(json.dumps(dict(event), default=str))
+            except Exception:
+                continue
+
+            # Text delta — accumulate
+            if isinstance(evt.get("data"), str) and evt["data"]:
+                text_buf += evt["data"]
+
+            # Tool use streaming — accumulate input by toolUseId
+            elif evt.get("current_tool_use"):
+                tool = evt["current_tool_use"]
+                tid = tool.get("toolUseId", "")
+                delta_input = (evt.get("delta") or {}).get("toolUse", {}).get("input", "")
+                if tid not in tool_calls:
+                    # New tool call — flush any pending text first
+                    _flush_text()
+                    tool_calls[tid] = {"name": tool.get("name", "unknown"), "input": ""}
+                if delta_input:
+                    tool_calls[tid]["input"] += delta_input
+
+            # Complete message — contains final assistant text + toolUse, or user toolResult
+            elif evt.get("message"):
+                msg = evt["message"]
+                if msg.get("role") == "assistant":
+                    _flush_text()
+                    # Extract any text blocks from the complete message
+                    for block in (msg.get("content") or []):
+                        if isinstance(block, dict) and block.get("text"):
+                            pass  # Already captured via text deltas above
+                        if isinstance(block, dict) and block.get("toolUse"):
+                            tu = block["toolUse"]
+                            tid = tu.get("toolUseId", "")
+                            if tid in tool_calls:
+                                # Write the consolidated tool call
+                                tc = tool_calls.pop(tid)
+                                _write_line({
+                                    "type": "tool_use",
+                                    "toolUseId": tid,
+                                    "name": tc["name"],
+                                    "input": tc["input"],
+                                })
+                elif msg.get("role") == "user":
+                    for block in (msg.get("content") or []):
+                        if isinstance(block, dict) and block.get("toolResult"):
+                            tr = block["toolResult"]
+                            tid = tr.get("toolUseId", "")
+                            result_parts = []
+                            for c in (tr.get("content") or []):
+                                if isinstance(c, dict) and c.get("text"):
+                                    result_parts.append(c["text"])
+                            result_text = "\n".join(result_parts) if result_parts else json.dumps(tr.get("content", ""), default=str)
+                            # Truncate large results
+                            if len(result_text) > 2000:
+                                result_text = result_text[:2000] + "\n... (truncated)"
+                            _write_line({
+                                "type": "tool_result",
+                                "toolUseId": tid,
+                                "result": result_text,
+                            })
+
+            now = time.monotonic()
+
+            # Sync stream.jsonl to S3 periodically
+            if lines_since_sync >= STREAM_SYNC_LINES or (now - last_stream_sync) >= STREAM_SYNC_INTERVAL:
+                _flush_text()
+                _sync_file(stream_path, f"{s3_prefix}/stream.jsonl")
+                lines_since_sync = 0
+                last_stream_sync = now
+
+            # Sync OPTIMIZATION-LOG.md to S3 periodically
+            if (now - last_log_sync) >= LOG_SYNC_INTERVAL and os.path.exists(log_path):
+                _sync_file(log_path, f"{s3_prefix}/OPTIMIZATION-LOG.md")
+                last_log_sync = now
+
+            # DynamoDB heartbeat every 30s
+            if (now - last_heartbeat) >= 30:
+                state.heartbeat()
+                last_heartbeat = now
+
+        # Flush remaining text
+        _flush_text()
+        # Flush any tool calls that didn't get a message event
+        for tid, tc in tool_calls.items():
+            _write_line({"type": "tool_use", "toolUseId": tid, "name": tc["name"], "input": tc["input"]})
+
+        # Final sync
+        if os.path.exists(stream_path):
+            _sync_file(stream_path, f"{s3_prefix}/stream.jsonl")
+        if os.path.exists(log_path):
+            _sync_file(log_path, f"{s3_prefix}/OPTIMIZATION-LOG.md")
+
+    try:
+        asyncio.run(_run())
+        if state.get_status() == STATUS_RUNNING:
+            state.set_status(STATUS_COMPLETE)
+            state.update_phase("complete", "Optimization finished")
+    except OptimizationCancelled:
+        logger.info("Agent stopped — optimization cancelled by user")
+        # Status already set to "cancelled" by the hook
+    except Exception as e:
+        logger.exception("Agent run failed")
+        state.set_status(STATUS_FAILED)
+        state.update_phase("failed", str(e)[:500])
+    finally:
+        # Final sync of whatever we have
+        if s3 and s3_bucket:
+            for local, key in [(stream_path, f"{s3_prefix}/stream.jsonl"),
+                               (log_path, f"{s3_prefix}/OPTIMIZATION-LOG.md")]:
+                if os.path.exists(local):
+                    try:
+                        s3.upload_file(local, s3_bucket, key)
+                    except Exception:
+                        pass
+
+
 @app.entrypoint
 async def invocations(payload, context: RequestContext):
-    """Main entrypoint — called by AgentCore Runtime on each request.
-
-    Uses an asyncio.Queue to merge agent stream events with periodic heartbeats.
-    This ensures AgentCore always receives events within its idle timeout window,
-    even during long tool calls that produce no streaming output.
-    """
-    global _agent_running
-
+    """Fire-and-forget entrypoint. Starts agent in background thread, returns immediately."""
     user_query = payload.get("prompt")
     session_id = payload.get("runtimeSessionId")
 
     if not all([user_query, session_id]):
-        yield {
-            "status": "error",
-            "error": "Missing required fields: prompt or runtimeSessionId",
-        }
+        yield {"status": "error", "error": "Missing required fields: prompt or runtimeSessionId"}
         return
 
-    # Make session_id available to the update_optimization_state tool
     os.environ["AUTOTUNE_SESSION_ID"] = session_id
-
-    # Initialize DynamoDB state before the agent starts
     state = OptimizationState(session_id)
 
-    # Parse test_set_id from payload
     test_set_id = payload.get("test_set_id", "").strip()
     optimization_guidance = payload.get("optimization_guidance", "").strip()
 
     if not test_set_id:
-        yield {
-            "status": "error",
-            "error": "Missing required field: test_set_id",
-        }
+        yield {"status": "error", "error": "Missing required field: test_set_id"}
         return
 
     state.initialize(test_set_id, optimization_guidance, MAX_ITERATIONS)
-    initial_prompt = _build_initial_prompt(test_set_id, optimization_guidance)
 
-    # Queue merges agent events + heartbeats into a single stream.
-    # None sentinel signals the agent stream is done.
-    queue = asyncio.Queue()
+    user_id = extract_user_id_from_context(context)
 
-    async def _heartbeat_producer():
-        """Yield heartbeat events every HEARTBEAT_INTERVAL_SECONDS.
+    thread = threading.Thread(
+        target=_run_agent_thread,
+        args=(user_id, session_id, state, test_set_id, optimization_guidance),
+        daemon=True,
+        name=f"autotune-{session_id[:8]}",
+    )
+    _active_sessions[session_id] = thread
+    thread.start()
 
-        Also updates DynamoDB updated_at so the frontend can detect stale/crashed sessions.
-        """
-        while True:
-            await asyncio.sleep(HEARTBEAT_INTERVAL_SECONDS)
-            state.heartbeat()
-            await queue.put({"event": "heartbeat", "timestamp": time.time()})
-
-    async def _agent_producer():
-        """Run the agent and push events into the queue."""
-        try:
-            user_id = extract_user_id_from_context(context)
-            agent = create_autotune_agent(
-                user_id, session_id, state, test_set_id, optimization_guidance
-            )
-            async for event in agent.stream_async(initial_prompt):
-                await queue.put(json.loads(json.dumps(dict(event), default=str)))
-
-            # Agent finished normally
-            if state.get_status() == STATUS_RUNNING:
-                state.set_status(STATUS_COMPLETE)
-                state.update_phase("complete", "Optimization finished")
-
-        except Exception as e:
-            logger.exception("Agent run failed")
-            state.set_status(STATUS_FAILED)
-            state.update_phase("failed", str(e)[:500])
-            await queue.put({"status": "error", "error": str(e)})
-        finally:
-            await queue.put(None)  # sentinel
-
-    _agent_running = True
-    heartbeat_task = asyncio.create_task(_heartbeat_producer())
-    agent_task = asyncio.create_task(_agent_producer())
-
-    try:
-        while True:
-            event = await queue.get()
-            if event is None:
-                break
-            yield event
-    finally:
-        _agent_running = False
-        heartbeat_task.cancel()
-        # Ensure agent_task exceptions are surfaced, not silently swallowed
-        if agent_task.done() and agent_task.exception():
-            logger.error("Agent task exception: %s", agent_task.exception())
+    yield {"status": "started", "session_id": session_id}
 
 
 if __name__ == "__main__":
