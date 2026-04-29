@@ -50,9 +50,7 @@ SESSIONS_DIR = os.path.join(WORKSPACE_DIR, ".sessions")
 MAX_ITERATIONS = 10
 
 # S3 sync config
-STREAM_SYNC_INTERVAL = 10  # seconds between S3 syncs
-STREAM_SYNC_LINES = 10  # or sync after this many new lines
-LOG_SYNC_INTERVAL = 30  # seconds between OPTIMIZATION-LOG.md syncs
+SYNC_INTERVAL = 10  # seconds between background sync cycles (heartbeat + S3)
 
 
 @app.ping
@@ -157,30 +155,39 @@ def _run_agent_thread(user_id: str, session_id: str, state: OptimizationState,
         agent = _create_agent(user_id, session_id, state, test_set_id, optimization_guidance)
         initial_prompt = _build_initial_prompt(test_set_id, optimization_guidance)
 
-        lines_since_sync = 0
-        last_stream_sync = time.monotonic()
-        last_log_sync = time.monotonic()
-        last_heartbeat = time.monotonic()
+        # Background sync thread — heartbeat + S3 sync independent of event loop
+        # so they keep running even during long tool calls (e.g. 5-min download_results)
+        sync_stop = threading.Event()
+        def _sync_loop():
+            while not sync_stop.wait(SYNC_INTERVAL):
+                try:
+                    state.heartbeat()
+                except Exception:
+                    pass
+                try:
+                    if os.path.exists(stream_path):
+                        _sync_file(stream_path, f"{s3_prefix}/stream.jsonl")
+                    if os.path.exists(log_path):
+                        _sync_file(log_path, f"{s3_prefix}/OPTIMIZATION-LOG.md")
+                except Exception:
+                    pass
+        sync_thread = threading.Thread(target=_sync_loop, daemon=True)
+        sync_thread.start()
 
-        # Consolidation state — mirrors the frontend SSE parser logic.
-        # Instead of writing every raw streaming delta, we accumulate text
-        # and tool input, then write one clean line per meaningful event.
         text_buf = ""
         tool_calls: dict[str, dict] = {}  # toolUseId -> {name, input}
 
         def _flush_text():
-            nonlocal text_buf, lines_since_sync
+            nonlocal text_buf
             if text_buf:
                 _write_line({"type": "text", "content": text_buf})
                 text_buf = ""
 
         def _write_line(obj: dict):
-            nonlocal lines_since_sync
             obj["ts"] = time.strftime("%H:%M:%S", time.gmtime())
             try:
                 with open(stream_path, "a") as f:
                     f.write(json.dumps(obj, default=str) + "\n")
-                lines_since_sync += 1
             except Exception:
                 logger.exception("Failed to write stream event")
 
@@ -246,24 +253,8 @@ def _run_agent_thread(user_id: str, session_id: str, state: OptimizationState,
                                 "result": result_text,
                             })
 
-            now = time.monotonic()
-
-            # Sync stream.jsonl to S3 periodically
-            if lines_since_sync >= STREAM_SYNC_LINES or (now - last_stream_sync) >= STREAM_SYNC_INTERVAL:
-                _flush_text()
-                _sync_file(stream_path, f"{s3_prefix}/stream.jsonl")
-                lines_since_sync = 0
-                last_stream_sync = now
-
-            # Sync OPTIMIZATION-LOG.md to S3 periodically
-            if (now - last_log_sync) >= LOG_SYNC_INTERVAL and os.path.exists(log_path):
-                _sync_file(log_path, f"{s3_prefix}/OPTIMIZATION-LOG.md")
-                last_log_sync = now
-
-            # DynamoDB heartbeat every 30s
-            if (now - last_heartbeat) >= 30:
-                state.heartbeat()
-                last_heartbeat = now
+        # Stop sync thread
+        sync_stop.set()
 
         # Flush remaining text
         _flush_text()
