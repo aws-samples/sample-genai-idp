@@ -1,7 +1,6 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: MIT-0
 
-/* eslint-disable react/destructuring-assignment, no-nested-ternary, no-use-before-define */
 import React, { useState, useEffect } from 'react';
 import type { SegmentedControlProps, ToggleProps } from '@cloudscape-design/components';
 import { Box, SpaceBetween, Button, Toggle, Alert, SegmentedControl } from '@cloudscape-design/components';
@@ -107,7 +106,7 @@ const TextEditorView = ({ fileContent, onChange, isReadOnly, fileType }: TextEdi
           value={
             fileType === 'json' && typeof fileContent === 'string'
               ? JSON.stringify(JSON.parse(fileContent), null, 2)
-              : fileContent ?? undefined
+              : (fileContent ?? undefined)
           }
           onChange={onChange}
           onMount={handleEditorDidMount}

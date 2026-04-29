@@ -34,7 +34,6 @@ const AppContent = (): React.JSX.Element => {
     setActiveTestRuns((prev) => prev.filter((run) => run.testRunId !== testRunId));
   };
 
-  // eslint-disable-next-line react/jsx-no-constructed-context-values
   const appContextValue = {
     authState,
     awsConfig,

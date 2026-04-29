@@ -7,6 +7,8 @@ import {
   X_AWS_IDP_DOCUMENT_NAME_REGEX,
   X_AWS_IDP_PAGE_CONTENT_REGEX,
   X_AWS_IDP_EXTRACTION_MODEL,
+  X_AWS_IDP_EXCLUDE_FROM_PROCESSING,
+  X_AWS_IDP_EXCLUSION_REASON,
 } from '../constants/schemaConstants';
 
 interface JsonSchemaProperty {
@@ -231,6 +233,11 @@ const convertJsonSchemaToClasses = (jsonSchema: JsonSchemaProperty | JsonSchemaP
         ...(schema[X_AWS_IDP_PAGE_CONTENT_REGEX] ? { [X_AWS_IDP_PAGE_CONTENT_REGEX]: schema[X_AWS_IDP_PAGE_CONTENT_REGEX] } : {}),
         // Preserve extraction model override if it exists in the schema
         ...(schema[X_AWS_IDP_EXTRACTION_MODEL] ? { [X_AWS_IDP_EXTRACTION_MODEL]: schema[X_AWS_IDP_EXTRACTION_MODEL] } : {}),
+        // Preserve excluded-class flags if they exist in the schema
+        ...(schema[X_AWS_IDP_EXCLUDE_FROM_PROCESSING]
+          ? { [X_AWS_IDP_EXCLUDE_FROM_PROCESSING]: schema[X_AWS_IDP_EXCLUDE_FROM_PROCESSING] }
+          : {}),
+        ...(schema[X_AWS_IDP_EXCLUSION_REASON] ? { [X_AWS_IDP_EXCLUSION_REASON]: schema[X_AWS_IDP_EXCLUSION_REASON] } : {}),
       };
       allClasses.push(docTypeClass);
 
@@ -301,6 +308,11 @@ const convertJsonSchemaToClasses = (jsonSchema: JsonSchemaProperty | JsonSchemaP
     ...(jsonSchema[X_AWS_IDP_PAGE_CONTENT_REGEX] ? { [X_AWS_IDP_PAGE_CONTENT_REGEX]: jsonSchema[X_AWS_IDP_PAGE_CONTENT_REGEX] } : {}),
     // Preserve extraction model override if it exists in the schema
     ...(jsonSchema[X_AWS_IDP_EXTRACTION_MODEL] ? { [X_AWS_IDP_EXTRACTION_MODEL]: jsonSchema[X_AWS_IDP_EXTRACTION_MODEL] } : {}),
+    // Preserve excluded-class flags if they exist in the schema
+    ...(jsonSchema[X_AWS_IDP_EXCLUDE_FROM_PROCESSING]
+      ? { [X_AWS_IDP_EXCLUDE_FROM_PROCESSING]: jsonSchema[X_AWS_IDP_EXCLUDE_FROM_PROCESSING] }
+      : {}),
+    ...(jsonSchema[X_AWS_IDP_EXCLUSION_REASON] ? { [X_AWS_IDP_EXCLUSION_REASON]: jsonSchema[X_AWS_IDP_EXCLUSION_REASON] } : {}),
   };
   classes.push(mainClass);
 
@@ -767,6 +779,10 @@ export const useSchemaDesigner = (
           ? { [X_AWS_IDP_PAGE_CONTENT_REGEX]: docTypeClass[X_AWS_IDP_PAGE_CONTENT_REGEX] }
           : {}),
         ...(docTypeClass[X_AWS_IDP_EXTRACTION_MODEL] ? { [X_AWS_IDP_EXTRACTION_MODEL]: docTypeClass[X_AWS_IDP_EXTRACTION_MODEL] } : {}),
+        ...(docTypeClass[X_AWS_IDP_EXCLUDE_FROM_PROCESSING]
+          ? { [X_AWS_IDP_EXCLUDE_FROM_PROCESSING]: docTypeClass[X_AWS_IDP_EXCLUDE_FROM_PROCESSING] }
+          : {}),
+        ...(docTypeClass[X_AWS_IDP_EXCLUSION_REASON] ? { [X_AWS_IDP_EXCLUSION_REASON]: docTypeClass[X_AWS_IDP_EXCLUSION_REASON] } : {}),
       };
 
       console.log('Final schema has $defs?', '$defs' in result);

@@ -372,6 +372,8 @@ export const getDocument = /* GraphQL */ `
         PageIds
         Class
         OutputJSONUri
+        Excluded
+        ExclusionReason
         ConfidenceThresholdAlerts {
           attributeName
           confidence
@@ -731,6 +733,8 @@ export const listDocumentsByDateRange = /* GraphQL */ `
           PageIds
           Class
           OutputJSONUri
+          Excluded
+          ExclusionReason
           ConfidenceThresholdAlerts {
             attributeName
             confidence
@@ -902,6 +906,8 @@ export const onUpdateDocument = /* GraphQL */ `
         PageIds
         Class
         OutputJSONUri
+        Excluded
+        ExclusionReason
         ConfidenceThresholdAlerts {
           attributeName
           confidence

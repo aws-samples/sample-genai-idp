@@ -639,10 +639,10 @@ const SchemaBuilder = ({
             addClassMode === 'choose'
               ? 'Add Class'
               : addClassMode === 'standard'
-              ? 'Import Standard Class'
-              : isRuleSchema
-              ? 'Add Rule Class'
-              : 'Add Custom Class'
+                ? 'Import Standard Class'
+                : isRuleSchema
+                  ? 'Add Rule Class'
+                  : 'Add Custom Class'
           }
           footer={
             addClassMode === 'custom' ? (

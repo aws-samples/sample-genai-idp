@@ -1,8 +1,6 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: MIT-0
 
-/* eslint-disable import/prefer-default-export */
-
 export const getTimestampStr = (): string => {
   const now = new Date();
   const year = now.getFullYear();

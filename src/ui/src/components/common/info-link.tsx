@@ -9,7 +9,6 @@ interface InfoLinkProps {
   onFollow?: LinkProps['onFollow'];
 }
 
-/* eslint-disable jsx-a11y/anchor-is-valid */
 export const InfoLink = ({ id, onFollow }: InfoLinkProps): React.JSX.Element => (
   <Link variant="info" id={id} onFollow={onFollow}>
     Info

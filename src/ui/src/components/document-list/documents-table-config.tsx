@@ -310,7 +310,6 @@ export const DocumentsCommonHeader = ({
     return TIME_PERIOD_DROPDOWN_ITEMS.filter((i) => i.count === props.periodsToLoad)[0]?.text || '';
   };
 
-  // eslint-disable-next-line
   const periodText = getDisplayText();
 
   const hasSelectedItems = selectedItems.length > 0;

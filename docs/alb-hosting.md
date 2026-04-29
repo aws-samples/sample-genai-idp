@@ -22,7 +22,7 @@ ALB hosting is designed for organizations that need the full IDP web UI but cann
 - **Corporate network restrictions** — organizations where users access applications exclusively through VPN or Direct Connect, and public CDN endpoints are blocked by policy
 - **Air-gapped or isolated VPCs** — environments with no internet egress where CloudFront cannot function
 
-> **Note on GovCloud**: GovCloud deployments use a separate headless template (no web UI or AppSync). ALB hosting is not applicable to GovCloud — see [GovCloud Deployment](./govcloud-deployment.md) instead.
+> **Note on Headless / GovCloud**: ALB hosting keeps the **full Web UI** but serves it privately through an ALB. It is **not** the same as a [Headless Deployment](./headless-deployment.md), which removes the UI entirely (along with AppSync, Cognito, WAF). GovCloud always uses headless mode (UI-layer services are unavailable in GovCloud) — see [GovCloud Deployment](./govcloud-deployment.md). Use ALB hosting only when you **do** want the UI but cannot use CloudFront.
 
 ## Architecture
 

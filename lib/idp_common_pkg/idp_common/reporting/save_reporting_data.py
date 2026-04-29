@@ -1265,6 +1265,22 @@ class SaveReportingData:
                     )
                     continue
 
+                # Skip sections whose class is marked as excluded from
+                # processing. Their result.json is a small "skipped" stub and
+                # has no extractable attributes to report on — including it
+                # would pollute the section parquet schema.
+                from idp_common.section_exclusion import is_section_excluded
+
+                if is_section_excluded(section):
+                    logger.info(
+                        "Reporting skipped for excluded section %s "
+                        "(class=%s, reason=%s)",
+                        section.section_id,
+                        section.classification,
+                        section.exclusion_reason or "excluded",
+                    )
+                    continue
+
                 logger.info(
                     f"Processing section {section.section_id} with classification '{section.classification}'"
                 )

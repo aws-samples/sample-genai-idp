@@ -54,7 +54,7 @@ const isHitlCompleted = (status: string | undefined): boolean => {
 };
 
 /* Maps document attributes from API to a format that can be used in tables and panel */
-// eslint-disable-next-line arrow-body-style
+
 const mapDocumentsAttributes = (documents: DocumentApiItem[]): Record<string, unknown>[] => {
   return documents.map((item) => {
     const {

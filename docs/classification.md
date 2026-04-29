@@ -415,6 +415,109 @@ Result: Single section
 Entire document treated as one unit
 ```
 
+## Excluding Static Pages (e.g. Instructions, Legal Boilerplate)
+
+Many forms packages bundle several pages of **static** content alongside
+the pages that actually carry dynamic, applicant-specific data. Think of
+the first four pages of a DS-11 U.S. Passport Application (WARNING
+notice, fee instructions, FEDERAL TAX LAW disclosure, ACTS OR
+CONDITIONS affidavit) — they are identical across every applicant and
+carry no fields to extract.
+
+You can mark a class as *excluded* so that downstream stages
+(extraction, assessment, summarization, rule validation, evaluation)
+will **skip** sections classified as that class, avoiding wasted LLM
+calls, tokens, and noise in accuracy metrics.
+
+https://github.com/user-attachments/assets/3c5106ee-ffaf-48d0-ac57-6de78a221474
+
+### How classification decides a section is "excluded"
+
+The **primary mechanism is the LLM classifier** using each class's
+`description` field. Mark the class as excluded via
+`x-aws-idp-exclude-from-processing: true`; the multimodal page-level
+classifier then picks the class by description like any other class,
+and the `excluded` flag propagates onto the resulting `Section`. This
+is the canonical, robust path — tolerant of form revisions, OCR quirks,
+wording differences, and visual-only pages.
+
+The optional `x-aws-idp-document-page-content-regex` extension is just
+a **tokens-saving fast-path** for pages whose OCR text reliably matches
+a known stable boilerplate phrase; if the regex misses, the LLM still
+classifies the page correctly via the description. Regex alone is not
+a substitute for a well-written class `description`.
+
+### Configuring through the UI
+
+In the Web UI **Configuration Editor → Document Schema**, select a
+document-type class and use the **"Exclude from Processing"** checkbox
+and the **"Exclusion Reason"** text input (appears when the checkbox is
+enabled). Changes round-trip through the standard configuration save
+flow, no YAML editing required.
+
+### Class-level extensions
+
+Add two JSON Schema extensions to the class:
+
+```yaml
+- $schema: https://json-schema.org/draft/2020-12/schema
+  $id: PassportApplicationInstructions
+  type: object
+  x-aws-idp-document-type: PassportApplicationInstructions
+  description: >-
+    Static informational pages of a DS-11 passport application —
+    WARNING notice, fee instructions, FEDERAL TAX LAW, ACTS OR
+    CONDITIONS affidavit. No applicant-specific data.
+
+  # The new, feature-defining flag.
+  x-aws-idp-exclude-from-processing: true
+
+  # Optional human-readable reason, surfaced in UI badges and the
+  # evaluation report.
+  x-aws-idp-exclusion-reason: instructions
+
+  # Optional: use the existing page-content regex fast path so pages
+  # containing these anchor phrases are classified instantly without
+  # an LLM call.
+  x-aws-idp-document-page-content-regex: "(?is)(WARNING:\\s*False statements|FEDERAL TAX LAW\\s*Section 6039E|ACTS OR CONDITIONS)"
+
+  # Excluded classes have no extractable fields.
+  properties: {}
+```
+
+### What happens at each stage
+
+| Stage | Behavior on an excluded section |
+|-------|---------------------------------|
+| **Classification** | Section is classified normally (regex fast path or LLM). The `excluded` and `exclusion_reason` flags are copied from the class config onto the `Section` object. |
+| **Extraction** | `process_document_section` short-circuits and writes a small stub `result.json` with `{"status": "skipped_excluded_class", "excluded": true, ...}`. Zero LLM calls. |
+| **Assessment** (both classic and granular) | Returns without writing anything (no extraction results exist to assess). |
+| **Summarization** | Writes a small `summary.json` stub. No LLM call. |
+| **Rule Validation** | Skips the section in `validate_document_async`. |
+| **Evaluation** | Filters excluded sections out of precision/recall/F1. They still appear in the markdown report under an **Excluded Sections (Not Evaluated)** table so nothing is silently dropped. |
+| **Reporting database** | Excluded sections are skipped when writing the per-section parquet rows (their stub JSON has no attributes to aggregate). |
+| **UI** | Sections panel renders excluded sections with a grey `Skipped: <reason>` badge next to the class name. |
+
+### Backwards compatibility
+
+* If the `x-aws-idp-exclude-from-processing` extension is absent (the
+  existing case), everything behaves as before.
+* Legacy snake_case keys `exclude_from_processing` and
+  `exclusion_reason` are accepted too for hand-authored configs.
+* `Section.to_dict()` only emits the flags when they are set, so
+  documents persisted before the feature still round-trip cleanly.
+
+### End-to-end example
+
+A working sample config for the DS-11 passport application form is
+available at `config_library/unified/ds11-passport-application/`
+(together with a fixture PDF `samples/DS11-USPassportApplication.pdf`).
+A single-file Jupyter notebook walking through the full pipeline —
+OCR → classification (LLM + optional regex) → extraction → assessment
+→ summarization, with side-by-side real vs. stub output inspection —
+ships at
+`notebooks/usecase-specific-examples/ds11-passport-application/demo.ipynb`.
+
 ## Choosing Between Classification Methods
 
 When deciding between Text-Based Holistic Classification and MultiModal Page-Level Classification with Sequence Segmentation, consider these factors:

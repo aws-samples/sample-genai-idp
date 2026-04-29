@@ -1133,6 +1133,161 @@ for bucket in buckets:
 
 ---
 
+## Publish Operations
+
+Operations for building and publishing IDP CloudFormation artifacts to S3. This namespace consolidates what was historically done by the standalone `publish.py` and `scripts/generate_govcloud_template.py` scripts.
+
+Accessed via `client.publish.*`.
+
+### publish.build()
+
+Build and publish IDP CloudFormation artifacts (SAM templates, Lambda functions, Lambda layers, UI, container images) to S3. Optionally also generates a **headless** (no-UI) template variant.
+
+This is the programmatic equivalent of `idp-cli publish` — see [Headless Deployment](./headless-deployment.md) and [IDP CLI — publish](./idp-cli.md#publish) for end-to-end examples.
+
+**Parameters:**
+- `source_dir` (str, required): Path to the IDP project root directory
+- `bucket` (str, optional): S3 bucket basename for artifacts. If omitted, auto-generated as `idp-accelerator-artifacts-{account_id}`. The region is appended automatically.
+- `prefix` (str, optional): S3 key prefix for artifacts (default: `"idp-cli"`)
+- `region` (str, optional): AWS region. Falls back to the client's region, then `AWS_DEFAULT_REGION`.
+- `headless` (bool, optional): If `True`, also generate a **headless (no-UI) template variant**. For GovCloud regions (`us-gov-*`), GovCloud configuration defaults are applied automatically (ARN partition, GovCloud-compatible Bedrock models, `lending-package-sample-govcloud` preset). Default: `False`.
+- `public` (bool, optional): If `True`, make S3 artifacts publicly readable. Default: `False`.
+- `max_workers` (int, optional): Maximum concurrent build workers. Default: auto-detect.
+- `clean_build` (bool, optional): If `True`, delete all checksum files to force a full rebuild. Default: `False`.
+- `no_validate` (bool, optional): If `True`, skip CloudFormation template validation. Default: `False`.
+- `verbose` (bool, optional): If `True`, enable verbose build output. Default: `False`.
+- `lint` (bool, optional): If `True`, enable ruff linting and cfn-lint. Default: `True`.
+
+**Returns:** `PublishResult` with:
+- `success` (bool)
+- `template_path` (str, optional): Local path to the built standard template
+- `template_url` (str, optional): S3 URL of the uploaded standard template
+- `headless_template_path` (str, optional): Local path to the built headless template (only when `headless=True`)
+- `headless_template_url` (str, optional): S3 URL of the uploaded headless template (only when `headless=True`)
+- `bucket` (str, optional): S3 bucket used (region-suffixed)
+- `prefix` (str, optional): S3 prefix used
+- `version` (str, optional): Version string from the project's `VERSION` file
+- `error` (str, optional): Error message if the build failed
+
+**Raises:**
+- `IDPConfigurationError`: If the source directory is invalid or region cannot be determined
+- `IDPStackError`: If the build pipeline fails
+
+```python
+from idp_sdk import IDPClient
+
+client = IDPClient(region="us-east-1")
+
+# Standard build — produces idp-main.yaml
+result = client.publish.build(source_dir=".", region="us-east-1")
+if result.success:
+    print("Template:", result.template_url)
+
+# Build both standard and headless variants
+result = client.publish.build(
+    source_dir=".",
+    region="us-east-1",
+    headless=True,
+)
+if result.success:
+    print("Standard  :", result.template_url)
+    print("Headless  :", result.headless_template_url)
+
+# Build for GovCloud (headless is required — GovCloud config defaults auto-applied)
+result = client.publish.build(
+    source_dir=".",
+    region="us-gov-west-1",
+    headless=True,
+)
+```
+
+### publish.transform_template_headless()
+
+Transform an existing (already-built) CloudFormation template into a **headless** variant by removing UI, AppSync, Cognito, WAF, agent, HITL, knowledge-base, and Test Studio resources. Useful when you already have an `idp-main.yaml` and want to produce the headless variant without rebuilding.
+
+**Parameters:**
+- `source_template` (str, required): Path to the source CloudFormation YAML template
+- `output_path` (str, optional): Path to write the headless template. If omitted, appends `-headless` to the source filename.
+- `update_govcloud_config` (bool, optional): If `True`, additionally update the configuration maps for GovCloud (ARN partition rewrite, GovCloud-compatible Bedrock models, `lending-package-sample-govcloud` preset). Default: `False`.
+- `verbose` (bool, optional): If `True`, enable verbose logging. Default: `False`.
+
+**Returns:** `TemplateTransformResult` with:
+- `success` (bool)
+- `input_path` (str): Path to the source template
+- `output_path` (str, optional): Path to the transformed headless template
+- `error` (str, optional): Error message if transformation failed
+
+```python
+# Transform an already-built template for commercial headless deployment
+result = client.publish.transform_template_headless(
+    source_template="./.aws-sam/idp-main.yaml",
+    output_path="./.aws-sam/idp-headless.yaml",
+)
+
+# Same, but apply GovCloud defaults (for GovCloud deployment)
+result = client.publish.transform_template_headless(
+    source_template="./.aws-sam/idp-main.yaml",
+    output_path="./.aws-sam/idp-headless-govcloud.yaml",
+    update_govcloud_config=True,
+)
+
+if result.success:
+    print("Headless template written to:", result.output_path)
+else:
+    print("Error:", result.error)
+```
+
+### publish.print_deployment_urls()
+
+Print deployment URLs (S3 template URL + 1-click CloudFormation launch link) to stdout. If a headless template URL is provided, also prints the headless variant. Uses the correct console domain for the partition (`aws.amazon.com` vs `amazonaws-us-gov.com`).
+
+**Parameters:**
+- `template_url` (str, required): S3 URL of the main template
+- `region` (str, required): AWS region
+- `headless_template_url` (str, optional): S3 URL of the headless template
+- `stack_name` (str, optional): Default stack name for the 1-click launch URL (default: `"IDP"`)
+
+**Returns:** `None` (prints to stdout)
+
+```python
+client.publish.print_deployment_urls(
+    template_url=result.template_url,
+    region="us-east-1",
+    headless_template_url=result.headless_template_url,
+    stack_name="MyStack",
+)
+```
+
+### Deploying a Headless Stack Programmatically
+
+To build a headless template and deploy it in one flow, combine `publish.build(headless=True)` with `stack.deploy(template_path=...)`:
+
+```python
+from idp_sdk import IDPClient
+
+client = IDPClient(region="us-east-1", stack_name="my-idp-headless")
+
+# Build both variants
+publish_result = client.publish.build(
+    source_dir=".",
+    region="us-east-1",
+    headless=True,
+)
+if not publish_result.success:
+    raise SystemExit(f"Build failed: {publish_result.error}")
+
+# Deploy the headless variant (local path) or the headless URL
+deploy_result = client.stack.deploy(
+    template_path=publish_result.headless_template_path,   # or template_url=publish_result.headless_template_url
+    wait=True,
+)
+print("Deployed:", deploy_result.stack_name, deploy_result.status)
+```
+
+For GovCloud, use `region="us-gov-west-1"` — headless mode is required and GovCloud configuration defaults are applied automatically.
+
+---
+
 ## Configuration Operations
 
 Operations for managing IDP configurations.

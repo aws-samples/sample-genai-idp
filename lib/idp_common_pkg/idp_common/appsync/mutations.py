@@ -35,6 +35,8 @@ mutation UpdateDocument($input: UpdateDocumentInput!) {
             PageIds
             Class
             OutputJSONUri
+            Excluded
+            ExclusionReason
             ConfidenceThresholdAlerts {
                 attributeName
                 confidence
@@ -83,6 +85,8 @@ query GetDocument($objectKey: ID!) {
             PageIds
             Class
             OutputJSONUri
+            Excluded
+            ExclusionReason
             ConfidenceThresholdAlerts {
                 attributeName
                 confidence
@@ -135,6 +139,8 @@ mutation UpdateDocumentSection($input: UpdateDocumentSectionInput!) {
             PageIds
             Class
             OutputJSONUri
+            Excluded
+            ExclusionReason
             ConfidenceThresholdAlerts {
                 attributeName
                 confidence

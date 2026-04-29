@@ -261,7 +261,7 @@ const HighlightedPrompt = ({ text }: { text: string }): React.JSX.Element => {
   let keyCounter = 0;
 
   // Combined regex: match either config-value markers «...» or runtime placeholder markers
-  const combinedRegex = /(\u00AB[\s\S]*?\u00BB)|([📄🖼️📊🔍✅📝📚]\s*\[.*?\])/g;
+  const combinedRegex = /(\u00AB[\s\S]*?\u00BB)|((?:📄|🖼️|📊|🔍|✅|📝|📚)\s*\[.*?\])/gu;
   let lastIndex = 0;
   let match: RegExpExecArray | null;
 

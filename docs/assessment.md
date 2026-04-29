@@ -1237,6 +1237,27 @@ Key metrics to monitor:
 - `assessment_parsing_succeeded`: Success rate of JSON parsing
 - Token consumption logs in CloudWatch
 
+## Skipping Assessment for Excluded Classes
+
+If a document class is marked with
+`x-aws-idp-exclude-from-processing: true` (see
+[Excluding Static Pages in the Classification docs](classification.md#excluding-static-pages-eg-instructions-legal-boilerplate)),
+both `AssessmentService.process_document_section` and
+`GranularAssessmentService.process_document_section` short-circuit for
+sections classified as that class:
+
+- **No LLM call is made** — no confidence scores are produced because no
+  extraction was performed for that section.
+- **No stub file is written** — the extraction stub (`result.json`
+  written by `ExtractionService`) is already authoritative; anything
+  inspecting "what happened to this section?" reads the extraction
+  stub. This avoids duplicating metadata and keeps the output surface
+  minimal for skipped sections.
+- The document is returned unchanged to the caller.
+
+The skip check uses the shared
+`idp_common.section_exclusion.is_section_excluded(section)` helper.
+
 ## Related Documentation
 
 - [Pattern 2 Documentation](./pattern-2.md) - Assessment integration details

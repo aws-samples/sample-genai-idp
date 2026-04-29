@@ -4,7 +4,30 @@ SPDX-License-Identifier: MIT-0
 # Changelog
 
 ## [Unreleased]
+  
+## [0.5.8]
 
+### Added
+
+- **Excluded-class feature — skip static instruction / legal / boilerplate pages** — Government forms and similar packages often bundle static informational pages (legal warnings, fee instructions, tax notices, oaths) alongside the pages that carry applicant data. Mark a document class with `x-aws-idp-exclude-from-processing: true` and all downstream stages (extraction, assessment, summarization, rule validation, evaluation) skip sections classified as that class — making **zero LLM calls** on boilerplate pages.
+  - Optional `x-aws-idp-exclusion-reason` ("instructions", "legal", "cover-page", …) surfaces as a grey **`Skipped: <reason>`** badge in the UI Sections panel and as an **"Excluded Sections (Not Evaluated)"** table in the evaluation markdown report.
+  - Configurable via the **UI Configuration Editor** → Document Schema → select a document-type class → "Exclude from Processing" checkbox + "Exclusion Reason" input.
+  - New end-to-end sample config at `config_library/unified/ds11-passport-application/` with a matching DS-11 U.S. Passport Application PDF fixture and a standalone demo notebook (`notebooks/usecase-specific-examples/ds11-passport-application/`).
+  - Additive: classes without the new flag behave exactly as before.
+  - See `docs/classification.md#excluding-static-pages-eg-instructions-legal-boilerplate`.
+
+### Changed
+
+- **UI dependency cleanup — eliminated 11 of 12 npm deprecation warnings** — Replaced deprecated `@aws-sdk/*` packages with `@smithy/*` equivalents, removed unused Babel plugins, migrated ESLint 8→9 (flat config), upgraded Prettier 2→3, and upgraded jsdom 26→29. Added `"type": "module"` to `package.json`. Also added `caughtErrors: 'none'` to ESLint config to stop flagging unused catch clause variables. Added `FORCE=1` arg to `make ui-lint` to force re-run despite checksum match.
+
+- **Headless deployment documentation generalized** — headless mode is no longer documented as a GovCloud-only capability. New `docs/headless-deployment.md` is the canonical guide covering headless deployment for both Commercial and GovCloud regions (API-only / pipeline integrations, organizational restrictions on UI-layer services, cost optimization, and required for GovCloud). 
+
+## Templates
+   - us-west-2: `https://s3.us-west-2.amazonaws.com/aws-ml-blog-us-west-2/artifacts/genai-idp/idp-main_0.5.8.yaml`
+   - us-east-1: `https://s3.us-east-1.amazonaws.com/aws-ml-blog-us-east-1/artifacts/genai-idp/idp-main_0.5.8.yaml`
+   - eu-central-1: `https://s3.eu-central-1.amazonaws.com/aws-ml-blog-eu-central-1/artifacts/genai-idp/idp-main_0.5.8.yaml`
+  
+  
 ## [0.5.7]
 
 ### Added

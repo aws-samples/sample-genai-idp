@@ -277,6 +277,37 @@ class SummarizationService:
             document.errors.append(error_msg)
             return document, {}
 
+        # Short-circuit: skip sections whose class is marked as excluded
+        # (e.g., static instruction pages). Writes a small skipped-stub
+        # summary so the UI/reporting can display a meaningful message
+        # instead of an empty summary pane.
+        from idp_common.section_exclusion import (
+            is_section_excluded,
+            write_skipped_stub,
+        )
+
+        if is_section_excluded(section):
+            output_bucket = document.output_bucket
+            output_key = (
+                f"{document.input_key}/sections/{section.section_id}/summary.json"
+                if document.input_key
+                else None
+            )
+            write_skipped_stub(
+                document,
+                section,
+                stage="summarization",
+                output_bucket=output_bucket,
+                output_key=output_key,
+            )
+            logger.info(
+                "Summarization skipped for excluded section %s (class=%s, reason=%s)",
+                section.section_id,
+                section.classification,
+                section.exclusion_reason or "excluded",
+            )
+            return document, {}
+
         # Extract information about the section
         class_label = section.classification
         output_bucket = document.output_bucket

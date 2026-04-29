@@ -3,6 +3,7 @@
 
 /* eslint-disable prettier/prettier */
 /* eslint-disable react/no-array-index-key */
+/* eslint-disable @typescript-eslint/no-explicit-any */
 
 // src/components/discovery/DiscoveryPanel.jsx
 import React, { useState, useEffect, useCallback, useRef } from 'react';

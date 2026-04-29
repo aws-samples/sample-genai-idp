@@ -174,6 +174,7 @@ For detailed deployment and testing instructions, see the [Deployment Guide](./d
 - [Architecture](./docs/architecture.md) - Detailed component architecture and data flow
 - [Demo Videos](./docs/demo-videos.md) - Comprehensive collection of feature demonstration videos
 - [Deployment](./docs/deployment.md) - Build, publish, deploy, and test instructions
+- [Headless Deployment](./docs/headless-deployment.md) - Backend-only deployment (no UI/AppSync/Cognito/WAF) for API-only use cases; required for GovCloud
 - [IDP CLI](./docs/idp-cli.md) - Command line interface for batch processing, evaluation workflows, and interactive Agent Chat
 - [Web UI](./docs/web-ui.md) - Web interface features and usage
 - [Agent Analysis](./docs/agent-analysis.md) - Natural language analytics and data visualization feature

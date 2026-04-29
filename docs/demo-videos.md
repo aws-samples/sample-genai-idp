@@ -240,6 +240,15 @@ https://github.com/user-attachments/assets/e82c7be0-ee73-4ad7-8537-87ecf6a1a4c8
 
 ---
 
+### Excluding Static Pages (Instructions, Legal, Boilerplate)
+Mark a document class with `x-aws-idp-exclude-from-processing: true` and the pipeline skips that class's sections through extraction, assessment, summarization, rule validation, and evaluation — zero LLM calls on boilerplate pages. Demo uses a DS-11 U.S. Passport Application (4 static instruction pages + 2 applicant-data pages).
+
+https://github.com/user-attachments/assets/3c5106ee-ffaf-48d0-ac57-6de78a221474
+
+**Related Documentation**: [Excluding Static Pages](./classification.md#excluding-static-pages-eg-instructions-legal-boilerplate)
+
+---
+
 ## Evaluation & Testing
 
 ### Evaluation Framework

@@ -25,6 +25,8 @@ import {
   X_AWS_IDP_DOCUMENT_NAME_REGEX,
   X_AWS_IDP_PAGE_CONTENT_REGEX,
   X_AWS_IDP_EXTRACTION_MODEL,
+  X_AWS_IDP_EXCLUDE_FROM_PROCESSING,
+  X_AWS_IDP_EXCLUSION_REASON,
 } from '../../constants/schemaConstants';
 
 interface SchemaAttribute {
@@ -205,6 +207,34 @@ const SchemaInspector = ({
                   value={(selectedClass[X_AWS_IDP_PAGE_CONTENT_REGEX] as string) || ''}
                   onChange={({ detail }) => onUpdateClass({ [X_AWS_IDP_PAGE_CONTENT_REGEX]: detail.value || undefined })}
                   placeholder="e.g., (?i)(invoice\\s+number|bill\\s+to)"
+                />
+              </FormField>
+
+              <FormField
+                label="Exclude from Processing (Optional)"
+                description="When checked, sections classified as this class are SKIPPED by downstream stages (extraction, assessment, summarization, rule validation, evaluation). Use for static boilerplate pages (instructions, legal notices, cover pages) that carry no extractable data."
+              >
+                <Checkbox
+                  checked={Boolean(selectedClass[X_AWS_IDP_EXCLUDE_FROM_PROCESSING])}
+                  onChange={({ detail }) =>
+                    onUpdateClass({
+                      [X_AWS_IDP_EXCLUDE_FROM_PROCESSING]: detail.checked || undefined,
+                    })
+                  }
+                >
+                  Skip downstream processing for this class
+                </Checkbox>
+              </FormField>
+
+              <FormField
+                label="Exclusion Reason (Optional)"
+                description='Short category shown in the UI Sections panel as a "Skipped: <reason>" badge and in the evaluation markdown report. Common values: "instructions", "legal", "cover-page", "boilerplate". Only used when "Exclude from Processing" is checked.'
+              >
+                <Input
+                  value={(selectedClass[X_AWS_IDP_EXCLUSION_REASON] as string) || ''}
+                  onChange={({ detail }) => onUpdateClass({ [X_AWS_IDP_EXCLUSION_REASON]: detail.value || undefined })}
+                  placeholder="e.g., instructions"
+                  disabled={!selectedClass[X_AWS_IDP_EXCLUDE_FROM_PROCESSING]}
                 />
               </FormField>
 

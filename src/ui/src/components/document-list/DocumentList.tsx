@@ -105,7 +105,7 @@ const DocumentList = (): React.JSX.Element => {
     if (!isDocumentsListLoading && !hasListBeenLoaded) {
       setIsDocumentsListLoading(true);
     }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);
 
   // Filter documents for reviewers - show only pending HITL reviews (not completed/skipped)
   // Note: Server-side RBAC filtering is now applied in the listDocuments resolver.
@@ -313,7 +313,6 @@ const DocumentList = (): React.JSX.Element => {
     actions.setSelectedItems([]);
   };
 
-  /* eslint-disable react/jsx-props-no-spreading */
   return (
     <>
       <Table

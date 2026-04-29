@@ -88,10 +88,8 @@ const GenAIIDPLayout = ({ children }: GenAIIDPLayoutProps): React.JSX.Element =>
     abortWorkflows,
   } = useGraphQlApi({ initialPeriodsToLoad });
 
-  // eslint-disable-next-line prettier/prettier
   const { splitPanelOpen, onSplitPanelToggle, splitPanelSize, onSplitPanelResize } = useSplitPanel(selectedItems);
 
-  // eslint-disable-next-line react/jsx-no-constructed-context-values
   const documentsContextValue = {
     documents,
     getDocumentDetailsFromIds,

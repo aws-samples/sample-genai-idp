@@ -38,7 +38,6 @@ const AuthRoutes = ({ redirectParam }: AuthRoutesProps): React.JSX.Element => {
   const settings = useParameterStore(currentCredentials);
   const { signOut } = useAuthenticator();
 
-  // eslint-disable-next-line react/jsx-no-constructed-context-values
   const settingsContextValue = {
     settings,
   };

@@ -166,6 +166,13 @@ class DocumentAppSyncService:
                     "OutputJSONUri": section.extraction_result_uri or "",
                 }
 
+                # Propagate excluded-class flags so the UI can show "Skipped"
+                # badges and suppress empty extraction/summary panels.
+                if getattr(section, "excluded", False):
+                    section_data["Excluded"] = True
+                    if section.exclusion_reason:
+                        section_data["ExclusionReason"] = section.exclusion_reason
+
                 # Convert confidence threshold alerts
                 if section.confidence_threshold_alerts:
                     alerts_data = []
@@ -403,6 +410,8 @@ class DocumentAppSyncService:
                         page_ids=page_ids,
                         extraction_result_uri=section_data.get("OutputJSONUri"),
                         confidence_threshold_alerts=confidence_threshold_alerts,
+                        excluded=bool(section_data.get("Excluded", False)),
+                        exclusion_reason=section_data.get("ExclusionReason"),
                     )
                 )
 
@@ -567,6 +576,13 @@ class DocumentAppSyncService:
             "Class": section.classification,
             "OutputJSONUri": section.extraction_result_uri or "",
         }
+
+        # Propagate excluded-class flags so the UI can show "Skipped"
+        # badges and suppress empty extraction/summary panels.
+        if getattr(section, "excluded", False):
+            section_data["Excluded"] = True
+            if section.exclusion_reason:
+                section_data["ExclusionReason"] = section.exclusion_reason
 
         # Convert confidence threshold alerts
         if section.confidence_threshold_alerts:

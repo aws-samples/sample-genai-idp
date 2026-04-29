@@ -26,6 +26,17 @@ class DocumentType:
     document_page_content_regex: Optional[str] = None
     """Optional regex pattern to match against page content text. When matched during multi-modal page-level classification, the page is classified as this type."""
 
+    excluded: bool = False
+    """When True, sections classified as this document type are skipped by
+    downstream services (extraction, assessment, summarization, rule_validation,
+    evaluation). Use for classes whose pages contain only static content such
+    as instructions, legal boilerplate, or cover pages."""
+
+    exclusion_reason: Optional[str] = None
+    """Optional short reason/category for why this class is excluded
+    (e.g., "instructions", "legal", "cover-page"). Used for UI badges and
+    evaluation report annotations."""
+
     # Private compiled regex patterns (not included in init)
     _compiled_name_regex: Optional[re.Pattern] = field(default=None, init=False)
     """Compiled regex pattern for document name matching."""

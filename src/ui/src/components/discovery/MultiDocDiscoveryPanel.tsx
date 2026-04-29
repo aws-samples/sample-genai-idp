@@ -1,6 +1,8 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: MIT-0
 
+/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars, react/no-array-index-key */
+
 /**
  * Multi-Document Discovery Panel
  *
@@ -202,7 +204,7 @@ const MultiDocDiscoveryPanel = () => {
       // Clean up subscriptions
       subscriptionsRef.current.forEach((sub) => sub.unsubscribe());
     };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);
 
   // Set up subscriptions for active jobs
   useEffect(() => {

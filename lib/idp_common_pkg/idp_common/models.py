@@ -62,6 +62,16 @@ class Section:
     attributes: Optional[Dict[str, Any]] = None
     confidence_threshold_alerts: List[Dict[str, Any]] = field(default_factory=list)
 
+    # Exclusion flags (populated by ClassificationService from class config)
+    excluded: bool = False
+    """True if the classification of this section is marked for exclusion
+    (e.g., static instruction or legal pages). Downstream services skip
+    excluded sections."""
+
+    exclusion_reason: Optional[str] = None
+    """Optional category (e.g., "instructions", "legal") carried over from
+    the class configuration for UI/report display."""
+
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "Section":
         """Create a Section from a dictionary representation."""
@@ -76,6 +86,8 @@ class Section:
             extraction_result_uri=data.get("extraction_result_uri"),
             attributes=data.get("attributes"),
             confidence_threshold_alerts=data.get("confidence_threshold_alerts", []),
+            excluded=bool(data.get("excluded", False)),
+            exclusion_reason=data.get("exclusion_reason"),
         )
 
     def to_dict(self) -> Dict[str, Any]:
@@ -88,6 +100,8 @@ class Section:
             "extraction_result_uri": self.extraction_result_uri,
             "attributes": self.attributes,
             "confidence_threshold_alerts": self.confidence_threshold_alerts,
+            "excluded": self.excluded,
+            "exclusion_reason": self.exclusion_reason,
         }
 
 
@@ -340,6 +354,12 @@ class Document:
             }
             if section.attributes:
                 section_dict["attributes"] = section.attributes
+            # Only emit exclusion fields when set to keep output compact
+            # and backward-compatible with existing consumers.
+            if section.excluded:
+                section_dict["excluded"] = True
+                if section.exclusion_reason:
+                    section_dict["exclusion_reason"] = section.exclusion_reason
             result["sections"].append(section_dict)
 
         # Add rule_validation_result if present (optional)
@@ -432,6 +452,8 @@ class Document:
                     confidence_threshold_alerts=section_data.get(
                         "confidence_threshold_alerts", []
                     ),
+                    excluded=bool(section_data.get("excluded", False)),
+                    exclusion_reason=section_data.get("exclusion_reason"),
                 )
             )
 

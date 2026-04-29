@@ -29,6 +29,17 @@ X_AWS_IDP_CLASSIFICATION = "x-aws-idp-classification"
 X_AWS_IDP_DOCUMENT_NAME_REGEX = "x-aws-idp-document-name-regex"
 X_AWS_IDP_PAGE_CONTENT_REGEX = "x-aws-idp-document-page-content-regex"
 
+# Classes whose pages contain only static content (instructions, legal
+# boilerplate, cover pages, etc.) can be marked with this extension. When
+# true, downstream services (extraction, assessment, summarization,
+# rule_validation, evaluation) will skip sections classified as this class.
+X_AWS_IDP_EXCLUDE_FROM_PROCESSING = "x-aws-idp-exclude-from-processing"
+
+# Optional short reason/category for why a class is excluded
+# (e.g., "instructions", "legal", "cover-page"). Used for UI badges and
+# evaluation report annotations.
+X_AWS_IDP_EXCLUSION_REASON = "x-aws-idp-exclusion-reason"
+
 # ============================================================================
 # AWS IDP Extraction Extensions
 # ============================================================================

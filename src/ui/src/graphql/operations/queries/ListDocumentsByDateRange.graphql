@@ -17,6 +17,8 @@ query ListDocumentsByDateRange($startDateTime: AWSDateTime!, $endDateTime: AWSDa
         PageIds
         Class
         OutputJSONUri
+        Excluded
+        ExclusionReason
         ConfidenceThresholdAlerts {
           attributeName
           confidence

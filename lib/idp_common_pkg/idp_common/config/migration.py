@@ -25,6 +25,8 @@ from .schema_constants import (
     X_AWS_IDP_ATTRIBUTES_PROMPT,
     X_AWS_IDP_IMAGE_PATH,
     X_AWS_IDP_DOCUMENT_NAME_REGEX,
+    X_AWS_IDP_EXCLUDE_FROM_PROCESSING,
+    X_AWS_IDP_EXCLUSION_REASON,
     X_AWS_IDP_PAGE_CONTENT_REGEX,
     VALID_EVALUATION_METHODS,
     MAX_PROMPT_OVERRIDE_LENGTH,
@@ -166,6 +168,26 @@ def migrate_legacy_to_schema(
         if LEGACY_DOCUMENT_PAGE_CONTENT_REGEX in class_config:
             migrated_class[X_AWS_IDP_PAGE_CONTENT_REGEX] = class_config[
                 LEGACY_DOCUMENT_PAGE_CONTENT_REGEX
+            ]
+
+        # Migrate excluded-class flags (support legacy snake_case and new
+        # x-aws-idp-* keys both as input)
+        if X_AWS_IDP_EXCLUDE_FROM_PROCESSING in class_config:
+            migrated_class[X_AWS_IDP_EXCLUDE_FROM_PROCESSING] = class_config[
+                X_AWS_IDP_EXCLUDE_FROM_PROCESSING
+            ]
+        elif "exclude_from_processing" in class_config:
+            migrated_class[X_AWS_IDP_EXCLUDE_FROM_PROCESSING] = class_config[
+                "exclude_from_processing"
+            ]
+
+        if X_AWS_IDP_EXCLUSION_REASON in class_config:
+            migrated_class[X_AWS_IDP_EXCLUSION_REASON] = class_config[
+                X_AWS_IDP_EXCLUSION_REASON
+            ]
+        elif "exclusion_reason" in class_config:
+            migrated_class[X_AWS_IDP_EXCLUSION_REASON] = class_config[
+                "exclusion_reason"
             ]
 
         legacy_attributes = class_config.get(LEGACY_ATTRIBUTES, [])
@@ -480,6 +502,17 @@ def _convert_classes_to_json_schema(
         if X_AWS_IDP_PAGE_CONTENT_REGEX in doc_type_class:
             schema[X_AWS_IDP_PAGE_CONTENT_REGEX] = doc_type_class[
                 X_AWS_IDP_PAGE_CONTENT_REGEX
+            ]
+
+        # Propagate excluded-class flags into final schema
+        if X_AWS_IDP_EXCLUDE_FROM_PROCESSING in doc_type_class:
+            schema[X_AWS_IDP_EXCLUDE_FROM_PROCESSING] = doc_type_class[
+                X_AWS_IDP_EXCLUDE_FROM_PROCESSING
+            ]
+
+        if X_AWS_IDP_EXCLUSION_REASON in doc_type_class:
+            schema[X_AWS_IDP_EXCLUSION_REASON] = doc_type_class[
+                X_AWS_IDP_EXCLUSION_REASON
             ]
 
         if defs:

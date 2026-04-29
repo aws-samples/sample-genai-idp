@@ -1338,6 +1338,70 @@ The solution uses Stickler from GitHub:
 
 For version details, see `lib/idp_common_pkg/idp_common/evaluation/stickler_version.py`
 
+## Excluded Sections in Evaluation
+
+If a document class is marked with
+`x-aws-idp-exclude-from-processing: true` (see
+[Excluding Static Pages in the Classification docs](classification.md#excluding-static-pages-eg-instructions-legal-boilerplate)),
+`EvaluationService.evaluate_document` treats matching sections
+specially so they don't distort accuracy metrics.
+
+### How excluded sections are handled
+
+- Excluded sections are **filtered out of the section-pairing step** —
+  they are never matched against baseline sections and therefore never
+  contribute precision/recall/F1 noise.
+- Each excluded section is captured in
+  `DocumentEvaluationResult.excluded_sections` as a dict:
+
+  ```python
+  {
+      "section_id": "1",
+      "classification": "PassportApplicationInstructions",
+      "page_ids": ["1", "2", "3", "4"],
+      "exclusion_reason": "instructions",
+  }
+  ```
+
+- The evaluation markdown report gets a dedicated **"Excluded Sections
+  (Not Evaluated)"** table listing each skipped section so reviewers
+  see exactly what was intentionally omitted. Nothing is dropped
+  silently.
+- Classification split metrics (`page_level_accuracy`,
+  `split_accuracy_*`) still consider all sections — the exclusion
+  only removes sections from the per-section attribute-accuracy
+  comparison.
+
+### Example markdown report snippet
+
+```markdown
+## Excluded Sections (Not Evaluated)
+
+| Section ID | Classification                    | Pages         | Reason        |
+|------------|-----------------------------------|---------------|---------------|
+| 1          | PassportApplicationInstructions   | 1, 2, 3, 4    | instructions  |
+
+## Overall Accuracy
+(computed from the 1 remaining active section — excluded section
+is not counted)
+...
+```
+
+### Rationale
+
+Excluded sections carry no extractable fields by definition, so pairing
+them against (typically empty) baseline sections would either:
+
+- Spuriously depress recall if baseline had omitted them (there's
+  "nothing to find"), or
+- Spuriously inflate recall if baseline included empty placeholders.
+
+Filtering at the pairing step avoids both artefacts while the
+annotation table preserves full auditability.
+
+See the end-to-end demo at
+`notebooks/usecase-specific-examples/ds11-passport-application/demo.ipynb`.
+
 ## Troubleshooting Evaluation Issues
 
 Common issues and resolutions:

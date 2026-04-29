@@ -1,6 +1,6 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
-/* eslint-disable react/no-unstable-nested-components, react/no-array-index-key */
+/* eslint-disable react/no-array-index-key */
 import React, { useState, useMemo, useEffect } from 'react';
 import { generateClient } from 'aws-amplify/api';
 import { calculateCapacity as calculateCapacityOp } from '../../graphql/generated';
@@ -222,7 +222,6 @@ const CapacityPlanningLayout = () => {
         setSelectedConfigVersion(versionOptions[0]);
       }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [versions, selectedConfigVersion]); // getVersionOptions is not memoized
 
   // Fetch configuration when selected version changes
@@ -232,7 +231,6 @@ const CapacityPlanningLayout = () => {
       console.log('Fetching configuration for version:', selectedConfigVersion.value);
       fetchConfiguration(selectedConfigVersion.value, true); // Use silent=true to avoid showing loading state
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedConfigVersion]); // fetchConfiguration is not memoized, so we only depend on selectedConfigVersion
 
   // Auto-populate avgPages from processed documents on component mount
@@ -1665,6 +1663,7 @@ const CapacityPlanningLayout = () => {
 
       // Enhanced debugging for empty quota requirements
       if (results.quotaRequirements && Array.isArray(results.quotaRequirements) && results.quotaRequirements.length === 0) {
+        // Intentionally empty: quota requirements may be empty when the backend has no quota data
       }
 
       // Fallback: build quota data from configuration if no quotaRequirements
@@ -2485,7 +2484,7 @@ const CapacityPlanningLayout = () => {
                   header: 'Processing Hours',
                   cell: (item) => (
                     <Select
-                      selectedOption={item.hour ? timeSlotOptions.find((opt) => opt.value === item.hour) ?? null : null}
+                      selectedOption={item.hour ? (timeSlotOptions.find((opt) => opt.value === item.hour) ?? null) : null}
                       onChange={({ detail }) => updateTimeSlot(item.index, 'hour', detail.selectedOption.value ?? '')}
                       options={timeSlotOptions}
                       placeholder="Select processing hour"
@@ -2500,9 +2499,9 @@ const CapacityPlanningLayout = () => {
                     <Select
                       selectedOption={
                         item.documentType && item.documentType !== ''
-                          ? scheduleDocumentTypeOptions.find(
+                          ? (scheduleDocumentTypeOptions.find(
                               (opt) => opt.value === item.documentType && !(opt as { disabled?: boolean }).disabled,
-                            ) ?? null
+                            ) ?? null)
                           : null
                       }
                       onChange={({ detail }) => updateTimeSlot(item.index, 'documentType', detail.selectedOption.value ?? '')}
@@ -3534,7 +3533,7 @@ const CapacityPlanningLayout = () => {
                           <div style={{ fontSize: '12px', lineHeight: '1.4' }}>
                             <div>
                               Peak: {String(peakHour.hour).padStart(2, '0')}:00-
-                              {/* eslint-disable-next-line max-len */}
+                              {}
                               {String(peakHour.hour + 1).padStart(2, '0')}:00 ({peakHour.totalTokens.toLocaleString()} tokens)
                             </div>
                             <div>

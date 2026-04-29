@@ -1279,8 +1279,8 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
                                         typeof value === 'number' && String(metricKey).includes('accuracy')
                                           ? value.toFixed(3)
                                           : value !== null && value !== undefined
-                                          ? value.toString()
-                                          : '0';
+                                            ? value.toString()
+                                            : '0';
                                       return [testRunId, displayValue];
                                     }),
                                   ),

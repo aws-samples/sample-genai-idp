@@ -1,10 +1,8 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: MIT-0
 
-/* eslint-disable indent */
 import * as XLSX from 'xlsx';
 
-// eslint-disable-next-line prettier/prettier
 export const onImportExcelAsync = (file: Event): Promise<Record<string, unknown>[]> =>
   new Promise((resolve, reject) => {
     // Obtener el objeto del archivo cargado
@@ -18,7 +16,7 @@ export const onImportExcelAsync = (file: Event): Promise<Record<string, unknown>
       const workbook = XLSX.read(result, { type: 'binary' });
       let data: Record<string, unknown>[] = []; // almacena los datos obtenidos
       // recorre cada hoja de trabajo para leer (aquí solo se lee la primera tabla por defecto)
-      // eslint-disable-next-line no-restricted-syntax
+
       for (const sheet in workbook.Sheets) {
         // eslint-disable-next-line no-prototype-builtins
         if (workbook.Sheets.hasOwnProperty(sheet)) {

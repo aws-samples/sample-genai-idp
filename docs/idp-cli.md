@@ -29,6 +29,7 @@ https://github.com/user-attachments/assets/3d448a74-ba5b-4a4a-96ad-ec03ac0b4d7d
 - [Quick Start](#quick-start)
 - [Commands Reference](#commands-reference)
   - [deploy](#deploy)
+  - [publish](#publish)
   - [delete](#delete)
   - [process](#process--run-inference)
   - [reprocess](#reprocess--rerun-inference)
@@ -89,6 +90,56 @@ source .venv/bin/activate
 cd lib/idp_cli_pkg
 pip install -e ".[test]"
 ```
+
+## Makefile Shortcuts
+
+The root `Makefile` provides convenience wrappers for the most common `idp-cli` commands. These use the project's `.venv` Python automatically — no need to `source .venv/bin/activate` first.
+
+```bash
+# Publish artifacts to S3
+make publish REGION=us-east-1
+make publish REGION=us-east-1 BUCKET_BASENAME=my-artifacts PREFIX=v1
+make publish REGION=us-gov-west-1 HEADLESS=1
+
+# Deploy / update a stack (--wait is the default)
+make deploy STACK_NAME=my-idp ADMIN_EMAIL=me@example.com
+make deploy STACK_NAME=my-idp-dev ADMIN_EMAIL=me@example.com FROM_CODE=1
+make deploy STACK_NAME=my-idp CUSTOM_CONFIG=./my-config.yaml
+
+# Delete a stack
+make delete-stack STACK_NAME=test-stack FORCE=1 FORCE_DELETE_ALL=1
+```
+
+**First-class Make variables** (common flags):
+
+| Variable | Target(s) | Maps to CLI flag |
+|---|---|---|
+| `REGION` | publish, deploy, delete-stack | `--region` |
+| `STACK_NAME` | deploy, delete-stack | `--stack-name` |
+| `ADMIN_EMAIL` | deploy | `--admin-email` |
+| `FROM_CODE=1` | deploy | `--from-code .` |
+| `HEADLESS=1` | publish, deploy | `--headless` |
+| `PUBLIC=1` | publish | `--public` |
+| `BUCKET_BASENAME` | publish | `--bucket-basename` |
+| `PREFIX` | publish | `--prefix` |
+| `CUSTOM_CONFIG` | deploy | `--custom-config` |
+| `TEMPLATE_URL` | deploy | `--template-url` |
+| `TEMPLATE_FILE` | deploy | `--template-file` |
+| `NO_WAIT=1` | deploy, delete-stack | omits `--wait` |
+| `FORCE=1` | delete-stack | `--force` |
+| `EMPTY_BUCKETS=1` | delete-stack | `--empty-buckets` |
+| `FORCE_DELETE_ALL=1` | delete-stack | `--force-delete-all` |
+
+**Uncommon flags** — pass anything else via `EXTRA_ARGS`:
+
+```bash
+make deploy STACK_NAME=my-idp EXTRA_ARGS="--role-arn arn:aws:iam::123:role/Foo --no-rollback"
+make publish REGION=us-east-1 EXTRA_ARGS="--clean-build --verbose"
+```
+
+Run `make help` to see all available targets, or `idp-cli <command> --help` for the full option reference.
+
+---
 
 ## Quick Start
 
@@ -163,6 +214,7 @@ idp-cli deploy [OPTIONS]
 **Optional Parameters:**
 - `--from-code`: Deploy from local code by building and publishing artifacts (path to project root)
 - `--template-url`: URL to CloudFormation template in S3 (optional, auto-selected based on region)
+- `--template-file`: Local path to a pre-built CloudFormation template (from a previous `publish`)
 - `--custom-config`: Path to local config file or S3 URI
 - `--max-concurrent`: Maximum concurrent workflows (default: 100)
 - `--log-level`: Logging level (`DEBUG`, `INFO`, `WARN`, `ERROR`) (default: INFO)
@@ -172,8 +224,22 @@ idp-cli deploy [OPTIONS]
 - `--no-rollback`: Disable rollback on stack creation failure
 - `--region`: AWS region (optional, auto-detected)
 - `--role-arn`: CloudFormation service role ARN (optional)
+- `--headless`: Deploy a **headless (no-UI) stack** — removes CloudFront, AppSync, Cognito, WAF, agents, HITL, and Test Studio. Required for GovCloud; also valid in Commercial regions for API-only / pipeline integrations. See [Headless Deployment](./headless-deployment.md).
+- `--bucket-basename`: S3 bucket basename for build artifacts (used with `--from-code`; region is appended automatically)
+- `--prefix`: S3 key prefix for build artifacts (default: `idp-cli`, used with `--from-code`)
+- `--public`: Make published S3 artifacts publicly readable (used with `--from-code`)
+- `--build-max-workers`: Maximum concurrent build workers (used with `--from-code`)
+- `--clean-build`: Force full rebuild by deleting checksum files (used with `--from-code`)
+- `--no-validate-template`: Skip CloudFormation template validation
 
-**Note:** `--from-code` and `--template-url` are mutually exclusive. Use `--from-code` for development/testing from local source, or `--template-url` for production deployments.
+**Note:** `--from-code`, `--template-url`, and `--template-file` are mutually exclusive. Use `--from-code` for development/testing from local source, `--template-url` for production deployments from a pre-published template, and `--template-file` to deploy a locally-built template.
+
+**Headless mode:**
+
+- `--headless` can be combined with `--from-code .` (builds both variants and deploys the headless one) or used standalone against a pre-published template (the CLI downloads, transforms to headless, uploads to a temporary S3 location in your account, and deploys).
+- When `--headless` is used without `--from-code`, the region **must** have a pre-published `idp-main.yaml`. For GovCloud (`us-gov-*`) or any unsupported region, add `--from-code .`.
+- GovCloud regions are auto-detected and receive GovCloud-appropriate configuration defaults (ARN partition fixes, GovCloud Bedrock models, `lending-package-sample-govcloud` configuration preset).
+- See the [Headless Deployment Guide](./headless-deployment.md) and [GovCloud Deployment Guide](./govcloud-deployment.md) for details.
 
 **Auto-Monitoring for In-Progress Operations:**
 
@@ -255,7 +321,113 @@ idp-cli deploy \
     --admin-email user@example.com \
     --no-rollback \
     --wait
+
+# Deploy a HEADLESS stack in a commercial region (no UI — API-only)
+# The CLI downloads the published template, transforms it to headless,
+# uploads to a temporary S3 location, and deploys.
+idp-cli deploy \
+    --stack-name my-idp-headless \
+    --region us-east-1 \
+    --headless \
+    --wait
+
+# Deploy a HEADLESS stack from local source (development iteration)
+idp-cli deploy \
+    --stack-name my-idp-headless-dev \
+    --region us-east-1 \
+    --from-code . \
+    --headless \
+    --wait
+
+# Deploy to GovCloud (headless + from-code are both required)
+idp-cli deploy \
+    --stack-name my-idp-govcloud \
+    --region us-gov-west-1 \
+    --from-code . \
+    --headless \
+    --wait
 ```
+
+> **Headless?** See the [Headless Deployment Guide](./headless-deployment.md) for when to use it (not just GovCloud — also API-only / pipeline integrations in Commercial regions) and the [GovCloud Deployment Guide](./govcloud-deployment.md) for GovCloud-specific considerations.
+
+---
+
+### `publish`
+
+Build IDP CloudFormation artifacts locally and publish them to S3. Produces a `template_url` and a 1-click CloudFormation launch URL. Optionally also produces a **headless** (no-UI) template variant.
+
+Use `publish` when you want to build and stage artifacts without deploying immediately — for example, to share the template with other accounts, keep a known-good build, or run a separate deploy step later.
+
+**Usage:**
+```bash
+idp-cli publish [OPTIONS]
+```
+
+**Options:**
+- `--source-dir` (default: `.`): Path to the IDP project root directory
+- `--region` (required): AWS region where artifacts will be uploaded and deployed
+- `--bucket-basename`: S3 bucket basename for artifacts (region is appended automatically; auto-generated if not provided)
+- `--prefix`: S3 key prefix for artifacts (default: `idp-cli`)
+- `--headless`: Also generate a **headless (no-UI) template variant**. For commercial regions this produces `idp-main.yaml` **and** `idp-headless.yaml`; for GovCloud (`us-gov-*`) the headless template is additionally updated with GovCloud configuration defaults (ARN partition, GovCloud Bedrock models, `lending-package-sample-govcloud` preset).
+- `--public`: Make S3 artifacts publicly readable (for shared deployments)
+- `--max-workers`: Maximum concurrent build workers (default: auto-detect)
+- `--clean-build`: Force full rebuild by deleting all checksum files
+- `--no-validate`: Skip CloudFormation template validation
+- `--lint / --no-lint`: Enable/disable ruff linting and cfn-lint (default: enabled)
+- `--verbose`, `-v`: Enable verbose build output
+
+**Prerequisites** (same as `--from-code` deployments):
+- AWS SAM CLI, Docker (for container-image Lambdas), Node.js ≥ 22.12, npm ≥ 10, Python 3.12.
+
+**Examples:**
+
+```bash
+# Standard build and publish (UI + backend)
+idp-cli publish --source-dir . --region us-east-1
+
+# With custom bucket and prefix
+idp-cli publish \
+    --source-dir . \
+    --region us-east-1 \
+    --bucket-basename my-idp-artifacts \
+    --prefix v1
+
+# Build BOTH standard and headless templates
+idp-cli publish --source-dir . --region us-east-1 --headless
+
+# Build a headless template for GovCloud (GovCloud-specific config applied automatically)
+idp-cli publish --source-dir . --region us-gov-west-1 --headless
+
+# Full rebuild with verbose output
+idp-cli publish --source-dir . --region us-east-1 --clean-build --verbose
+
+# Make artifacts publicly readable (shared template)
+idp-cli publish --source-dir . --region us-east-1 --public
+```
+
+**Output:**
+
+On success, `publish` prints:
+
+```
+📦 Template URL (for updating existing stack):
+  https://s3.us-east-1.amazonaws.com/<bucket>/<prefix>/idp-main.yaml
+
+🚀 1-Click Launch (creates new stack):
+  https://us-east-1.console.aws.amazon.com/cloudformation/home?...
+
+🔧 Headless Template URL:                    # only with --headless
+  https://s3.us-east-1.amazonaws.com/<bucket>/<prefix>/idp-headless.yaml
+
+🚀 Headless 1-Click Launch:                  # only with --headless
+  https://us-east-1.console.aws.amazon.com/cloudformation/home?...
+```
+
+**Relationship to `deploy --from-code`:**
+
+`deploy --from-code .` internally runs the same build + publish pipeline and then creates/updates the CloudFormation stack. Use `publish` when you want to decouple the build from the deployment step or share the template with other accounts/regions.
+
+> **Legacy**: The standalone `publish.py` script and `scripts/generate_govcloud_template.py` are deprecated. Use `idp-cli publish` (with or without `--headless`) instead.
 
 ---
 

@@ -1855,6 +1855,39 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
         if not section:
             return document
 
+        # Short-circuit: skip sections whose class is marked
+        # x-aws-idp-exclude-from-processing=true (e.g., static instruction
+        # pages). A stub result.json is written so reporting / UI can show
+        # a meaningful message.
+        from idp_common.section_exclusion import (
+            is_section_excluded,
+            write_skipped_stub,
+        )
+
+        if is_section_excluded(section):
+            output_bucket = document.output_bucket
+            output_key = (
+                f"{document.input_key}/sections/{section.section_id}/result.json"
+                if document.input_key
+                else None
+            )
+            stub_uri = write_skipped_stub(
+                document,
+                section,
+                stage="extraction",
+                output_bucket=output_bucket,
+                output_key=output_key,
+            )
+            if stub_uri:
+                section.extraction_result_uri = stub_uri
+            logger.info(
+                "Extraction skipped for excluded section %s (class=%s, reason=%s)",
+                section.section_id,
+                section.classification,
+                section.exclusion_reason or "excluded",
+            )
+            return document
+
         # Prepare section metadata
         try:
             section_info = self._prepare_section_info(document, section)

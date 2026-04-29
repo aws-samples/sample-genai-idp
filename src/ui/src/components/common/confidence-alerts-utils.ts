@@ -105,7 +105,7 @@ const findExplainabilityData = (section: DocumentSection | null): Record<string,
     // If no specific explainability key found, check if Output contains field-level confidence data
     // Look for nested objects that might contain confidence scores
     const outputKeysArray = Object.keys(section.Output);
-    // eslint-disable-next-line no-restricted-syntax
+
     for (const key of outputKeysArray) {
       const value = section.Output[key];
       if (value && typeof value === 'object' && !Array.isArray(value)) {
@@ -350,7 +350,7 @@ export const getFieldConfidenceInfo = (
   let currentExplainabilityData: Record<string, unknown> = explainabilityData;
 
   // Traverse the path to find the nested explainability data
-  // eslint-disable-next-line no-restricted-syntax
+
   for (const pathSegment of path) {
     if (currentExplainabilityData && typeof currentExplainabilityData === 'object') {
       if (Array.isArray(currentExplainabilityData)) {

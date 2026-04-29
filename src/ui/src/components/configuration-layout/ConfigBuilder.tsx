@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT-0
 
 /* eslint-disable react/no-array-index-key */
-/* eslint-disable no-use-before-define */
+
 import React, { useState, useRef, useEffect } from 'react';
 import {
   Box,
@@ -46,7 +46,7 @@ interface SchemaProperty {
 
 // Extended Box props that allow style, className, event handlers, and relaxed spacing values.
 // Cloudscape Box doesn't type these but passes them through to the DOM element.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+
 type ExtendedBoxProps = Omit<BoxProps, 'padding' | 'margin' | 'display' | 'color'> & {
   [key: string]: unknown;
   style?: React.CSSProperties;
@@ -553,7 +553,7 @@ const ConfigBuilder = ({
 
       if (!Number.isNaN(parseInt(part, 10))) {
         // Skip array indices but continue traversing
-        // eslint-disable-next-line no-continue
+
         continue;
       }
 
@@ -577,12 +577,15 @@ const ConfigBuilder = ({
   const getValueAtPath = (obj: Record<string, unknown>, path: string): unknown => {
     const segments = path.split(/[.[\]]+/).filter(Boolean);
 
-    const result = segments.reduce((acc: Record<string, unknown> | undefined, segment: string) => {
-      if (acc === null || acc === undefined) {
-        return undefined;
-      }
-      return (acc as Record<string, unknown>)[segment] as Record<string, unknown> | undefined;
-    }, obj as Record<string, unknown> | undefined);
+    const result = segments.reduce(
+      (acc: Record<string, unknown> | undefined, segment: string) => {
+        if (acc === null || acc === undefined) {
+          return undefined;
+        }
+        return (acc as Record<string, unknown>)[segment] as Record<string, unknown> | undefined;
+      },
+      obj as Record<string, unknown> | undefined,
+    );
 
     return result;
   };

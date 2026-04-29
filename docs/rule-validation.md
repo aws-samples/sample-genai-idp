@@ -580,6 +580,28 @@ This notebook demonstrates:
 - Consolidating results
 - Viewing output formats
 
+## Skipping Rule Validation for Excluded Classes
+
+If a document class is marked with
+`x-aws-idp-exclude-from-processing: true` (see
+[Excluding Static Pages in the Classification docs](classification.md#excluding-static-pages-eg-instructions-legal-boilerplate)),
+`RuleValidationService.validate_document_async` short-circuits for any
+section classified as that class:
+
+- **No LLM call is made** inside the per-section `process_one_section`
+  coroutine — it returns immediately with `(section_responses={}, 0, False)`
+  meaning "no rule responses, zero chunks created, no chunking needed".
+- **No output file is written** — rule validation has no per-section
+  artifact of its own, and the extraction stub (`result.json`) already
+  records that this section was skipped.
+- Rule validation aggregation simply sees zero responses for the
+  skipped section and proceeds normally with the active sections.
+
+This keeps rule validation clean on mixed documents (e.g. a DS-11
+passport application package where only the 2 form pages need rule
+checks — the 4 boilerplate pages are noise and produce no rule
+triggers).
+
 ## Best Practices
 
 1. **Start Simple**: Begin with a few clear rules and expand gradually

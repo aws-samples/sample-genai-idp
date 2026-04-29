@@ -21,7 +21,7 @@ import {
   Badge,
 } from '@cloudscape-design/components';
 import Editor, { type OnMount } from '@monaco-editor/react';
-// eslint-disable-next-line import/no-extraneous-dependencies
+
 import yaml from 'js-yaml';
 import ReactMarkdown from 'react-markdown';
 import { useLocation } from 'react-router-dom';
@@ -588,7 +588,6 @@ const ConfigurationLayout = (): React.JSX.Element => {
     const handleHashChange = (): void => {
       // For SPA hash-based routing, intercept navigation when there are unsaved changes
       if (hasUnsavedChanges) {
-        // eslint-disable-next-line no-alert
         const confirmed = window.confirm('You have unsaved configuration changes. Are you sure you want to leave?');
         if (!confirmed) {
           // Restore the hash to the config page
@@ -2742,8 +2741,8 @@ const ConfigurationLayout = (): React.JSX.Element => {
               (newVersionName.length > 50
                 ? 'Version name cannot exceed 50 characters'
                 : !/^[a-zA-Z0-9_-]+$/.test(newVersionName)
-                ? 'Version name can only contain letters, numbers, hyphens, and underscores'
-                : '')
+                  ? 'Version name can only contain letters, numbers, hyphens, and underscores'
+                  : '')
             }
           >
             <Input

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT-0
 
 /* eslint-disable prettier/prettier */
-/* eslint-disable prefer-destructuring */
+ 
 
 import React, { useState, useEffect, useRef, memo } from 'react';
 import {
@@ -1199,7 +1199,7 @@ const FormFieldRenderer = memo<Record<string, any>>(
           </div>
         );
 
-      case 'object':
+      case 'object': {
         if (value === null) {
           return (
             <FormField label={label}>
@@ -1307,7 +1307,7 @@ const FormFieldRenderer = memo<Record<string, any>>(
                       // Handle nested structure like explainabilityInfo[0].NAME_DETAILS.LAST_NAME
                       const currentPath = [...path, key];
                       const [firstExplainabilityItem] = explainabilityInfo;
-                      // eslint-disable-next-line prefer-destructuring
+                       
                       let fieldInfo = firstExplainabilityItem;
 
                       // Navigate through the path to find the field info
@@ -1392,6 +1392,7 @@ const FormFieldRenderer = memo<Record<string, any>>(
             )}
           </ExtBox>
         );
+      }
 
       case 'null':
         // Handle null values - make them editable like other field types

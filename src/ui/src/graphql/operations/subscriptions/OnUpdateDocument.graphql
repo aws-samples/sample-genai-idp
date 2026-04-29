@@ -14,6 +14,8 @@ subscription OnUpdateDocument {
       PageIds
       Class
       OutputJSONUri
+      Excluded
+      ExclusionReason
       ConfidenceThresholdAlerts {
         attributeName
         confidence

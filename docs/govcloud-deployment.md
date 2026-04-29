@@ -2,293 +2,214 @@
 title: "GovCloud Deployment Guide"
 ---
 
+Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+SPDX-License-Identifier: MIT-0
+
 # GovCloud Deployment Guide
 
 ## Overview
 
-The GenAI IDP Accelerator now supports "headless" deployment to AWS GovCloud regions through a specialized template generation script. This solution addresses two key GovCloud requirements:
+Deploying the GenAI IDP Accelerator to an AWS GovCloud region (`us-gov-west-1`, `us-gov-east-1`) has a few unique requirements compared to a standard Commercial deployment:
 
-1. **ARN Partition Compatibility**: All ARN references use `arn:${AWS::Partition}:` instead of `arn:aws:` to work in both commercial and GovCloud regions
-2. **Service Compatibility**: Removes services not available in GovCloud (AppSync, CloudFront, WAF, Cognito UI components)
+1. **Headless is required.** The UI-layer services used by a standard deployment (CloudFront, AppSync, Cognito, WAF for CloudFront) are not available in GovCloud, so GovCloud stacks must use the [Headless Deployment](./headless-deployment.md) mode.
+2. **Build from source is required.** Public IDP CloudFormation templates are not published to GovCloud regions, so GovCloud stacks must be built locally with `idp-cli deploy --from-code .`.
+3. **ARN partition compatibility.** All ARN references in the template use `arn:${AWS::Partition}:` instead of `arn:aws:` so they resolve correctly in the `aws-us-gov` partition.
+4. **GovCloud configuration defaults.** The CLI automatically applies GovCloud-appropriate configuration defaults (GovCloud-compatible Bedrock models, the `lending-package-sample-govcloud` configuration preset).
 
-## Architecture Differences
+> **Note**: "Headless" mode itself is not GovCloud-specific — it can be used in Commercial regions too (for API-only / pipeline integrations). See [Headless Deployment](./headless-deployment.md) for the generic guide. This document covers **only** GovCloud-specific considerations on top of headless.
 
-### Standard AWS Deployment
+## GovCloud-Specific Requirements
 
-```mermaid
-graph TB
-    A[Users] --> B[CloudFront Distribution]
-    B --> C[React Web UI]
-    C --> D[AppSync GraphQL API]
-    D --> E[Cognito Authentication]
-    E --> F[Core Processing Engine]
-    F --> G[Document Workflows]
-    G --> H[S3 Storage]
-```
+### Region Support
 
-### GovCloud Deployment
+Supported GovCloud regions:
 
-```mermaid
-graph TB
-    A[Direct S3 Upload] --> F[Core Processing Engine]
-    F --> G[Document Workflows]
-    G --> H[S3 Storage]
-    I[CLI Tools] --> F
-    J[SDK Integration] --> F
-```
+- `us-gov-west-1`
+- `us-gov-east-1`
 
-## Deployment Process
+Bedrock and Bedrock Data Automation (BDA) model availability varies between the two regions — check [Bedrock in GovCloud](https://docs.aws.amazon.com/bedrock/latest/userguide/models-regions.html) for your target region before deploying.
 
-### Dependencies
+### Default Bedrock Models (GovCloud)
 
-You need to have the following packages installed on your computer:
+The CLI sets GovCloud-compatible defaults when `--region us-gov-*` is detected:
 
-1. bash shell (Linux, MacOS, Windows-WSL)
-2. aws (AWS CLI)
-3. [sam (AWS SAM)](https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/install-sam-cli.html)
-4. python 3.12 (required to generate templates)
-5. Node.js >=22.12.0
-6. npm >=10.0.0
-7. A local Docker daemon
-8. Python packages for the IDP CLI and SDK. Run `make setup-venv` from the project root to create a `.venv` and install all required packages (idp-cli, idp-sdk, idp_common). Activate with `source .venv/bin/activate`.
+- `amazon.nova-lite-v1:0`
+- `amazon.nova-pro-v1:0`
+- `us.anthropic.claude-3-5-sonnet-20240620-v1:0`
+- `anthropic.claude-3-7-sonnet-20250219-v1:0`
 
-### Deploy to GovCloud
+You must enable access to these models in the Bedrock console of the target GovCloud account/region before the first run.
 
-Build and deploy to GovCloud with a single command. The `--from-code .` flag builds from your local source code (required for GovCloud since public templates are not published for GovCloud regions), and `--headless` strips UI, AppSync, Cognito, and WAF resources:
+### Default Configuration Preset
+
+The default `ConfigurationPreset` for GovCloud deployments is `lending-package-sample-govcloud`, which uses the GovCloud-compatible model IDs above. You can supply your own configuration with `--custom-config`.
+
+### ARN Partition Compatibility
+
+The headless template transformation rewrites all `arn:aws:` references to `arn:${AWS::Partition}:`, so the same template can deploy in either partition. This happens automatically when the CLI detects a `us-gov-*` region.
+
+## Dependencies
+
+You need the following installed on the machine that runs the deploy:
+
+1. Bash shell (Linux, macOS, Windows-WSL)
+2. AWS CLI (configured with GovCloud credentials)
+3. [AWS SAM CLI](https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/install-sam-cli.html)
+4. Python 3.12
+5. Node.js ≥ 22.12
+6. npm ≥ 10
+7. A local Docker daemon (for container-image Lambda builds)
+8. The IDP CLI / SDK venv: run `make setup-venv` from the project root, then `source .venv/bin/activate`
+
+## Deploy to GovCloud
+
+Build and deploy to GovCloud with a single command. `--from-code .` builds from your local source (required for GovCloud), and `--headless` strips UI / AppSync / Cognito / WAF resources:
 
 ```bash
 idp-cli deploy \
-  --stack-name my-idp-headless-stack \
+  --stack-name my-idp-govcloud \
   --region us-gov-west-1 \
   --from-code . \
   --headless \
   --wait
 ```
 
-> **Note**: The CLI creates an S3 bucket automatically. Customize with `--bucket-basename` and `--prefix`.
+> The CLI creates an S3 bucket for build artifacts automatically in your GovCloud account. Customize with `--bucket-basename` and `--prefix` if needed.
 
-> **Legacy**: The `scripts/generate_govcloud_template.py` script is deprecated. Use `idp-cli deploy --headless --from-code .` instead.
+> **Legacy**: The `scripts/generate_govcloud_template.py` script is deprecated. Use `idp-cli deploy --headless --from-code .` instead — it's the same transformation, exposed through the CLI / SDK with additional features (template upload, validation, 1-click launch URL).
 
-## Services Removed in GovCloud
+### What the CLI Does Automatically for GovCloud
 
-The following services are automatically removed from the GovCloud template:
+When the region begins with `us-gov-`, `idp-cli publish --headless` and `idp-cli deploy --headless` additionally:
 
-### Web UI Components (11 resources removed)
+- Rewrite ARN references to use `arn:${AWS::Partition}:`
+- Update the default `ConfigurationPreset` to `lending-package-sample-govcloud`
+- Update default Bedrock model IDs to GovCloud-supported models
+- Validate the transformed template via the CloudFormation `ValidateTemplate` API
 
-- CloudFront distribution and origin access identity
-- WebUI S3 bucket and build pipeline
-- CodeBuild project for UI deployment
-- Security headers policy
+See [Headless Deployment](./headless-deployment.md) for the full list of resources removed and retained by the headless transformation.
 
-### API Layer (136 resources removed)
+## Accessing a GovCloud Stack
 
-- AppSync GraphQL API and schema
-- All GraphQL resolvers and data sources (50+ resolvers)
-- Lambda resolver functions (20+ functions)
-- **Test Studio Resources (36 resources)**: All test management Lambda functions, AppSync resolvers, data sources, SQS queues, and supporting infrastructure added in v0.4.6
-- API authentication and authorization
-- Chat infrastructure (ChatMessagesTable, ChatSessionsTable)
-- Agent chat processors and resolvers
+Since the Web UI is not deployed, interact with the system through one of:
 
-### Authentication (14 resources removed)
+- **Direct S3 upload** to the Input bucket (see stack Outputs)
+- **IDP CLI** (`idp-cli process`, `idp-cli status`, `idp-cli download-results`)
+- **IDP SDK** (`client.document.process(...)`, etc.)
+- **CloudWatch dashboards** and **Step Functions console** for monitoring
 
-- Cognito User Pool and Identity Pool
-- User pool client and domain
-- Admin user and group management
-- Email verification functions
-
-### WAF Security (6 resources removed)
-
-- WAF WebACL and IP sets
-- IP set updater functions
-- CloudFront protection rules
-
-### Agent & Analytics Features (14 resources removed)
-
-- AgentTable and agent job tracking
-- Agent request handler and processor functions
-- **MCP/AgentCore Gateway Resources (7 resources)**: MCP integration components that depend on Cognito authentication (AgentCoreAnalyticsLambdaFunction, AgentCoreGatewayManagerFunction, AgentCoreGatewayExecutionRole, AgentCoreGateway, ExternalAppClient, and log groups)
-- External MCP agent credentials secret
-- Knowledge base query functions
-- Chat with document features
-- Text-to-SQL query capabilities
-
-### HITL Support (11 resources removed)
-
-- SageMaker A2I Human-in-the-Loop
-- Private workforce configuration
-- Human review workflows
-- A2I flow definition and human task UI
-- Cognito client for A2I integration
-
-## Core Services Retained
-
-The following essential services remain available:
-
-### Document Processing
-
-- ✅ All 3 processing patterns (BDA, Textract+Bedrock, Textract+SageMaker+Bedrock)
-- ✅ Complete 6-step pipeline (OCR, Classification, Extraction, Assessment, Summarization, Evaluation)
-- ✅ Step Functions workflows
-- ✅ Lambda function processing
-- ✅ Custom prompt Lambda integration
-
-### Storage & Data
-
-- ✅ S3 buckets (Input, Output, Working, Configuration, Logging)
-- ✅ DynamoDB tables (Tracking, Configuration, Concurrency)
-- ✅ Data encryption with customer-managed KMS keys
-- ✅ Lifecycle policies and data retention
-
-### Monitoring & Operations
-
-- ✅ CloudWatch dashboards and metrics
-- ✅ CloudWatch alarms and SNS notifications
-- ✅ Lambda function logging and tracing
-- ✅ Step Functions execution logging
-
-### Integration
-
-- ✅ SQS queues for document processing
-- ✅ EventBridge rules for workflow orchestration
-- ✅ Post-processing Lambda hooks
-- ✅ Evaluation and reporting systems
-
-## Access Methods
-
-Without the web UI, you can interact with the system through:
-
-### 1. Direct S3 Upload
-
-````bash
-# Upload documents directly to input bucket
-aws s3 cp my-document.pdf s3://InputBucket/my-document.pdf
-
-
-### 2. Check progress
-Using the lookup script
-```bash
-# Use the lookup script to check document status
-./scripts/lookup_file_status.sh documents/my-document.pdf MyStack
-````
-
-Or navigate to the AWS Step Functions workflow using the link in the stack Outputs tab in CloudFormation, to visually monitor workflow progress.
+See the [Headless Deployment — Access Methods](./headless-deployment.md#access-methods-no-web-ui) section for details and code samples.
 
 ## Monitoring & Troubleshooting
 
 ### CloudWatch Dashboards
 
-Access monitoring through CloudWatch console:
-
-- Navigate to CloudWatch → Dashboards
-- Find dashboard: `{StackName}-{Region}`
-- View processing metrics, error rates, and performance
+- Navigate to **CloudWatch → Dashboards**
+- Dashboard name: `{StackName}-{Region}`
+- View processing metrics, error rates, performance
 
 ### CloudWatch Logs
 
-Monitor processing through log groups:
-
-- `/aws/lambda/{StackName}-*` - Lambda function logs
-- `/aws/vendedlogs/states/{StackName}/workflow` - Step Functions logs
-- `/{StackName}/lambda/*` - Pattern-specific logs
+- `/aws/lambda/{StackName}-*` — Lambda function logs
+- `/aws/vendedlogs/states/{StackName}/workflow` — Step Functions logs
+- `/{StackName}/lambda/*` — pattern-specific logs
 
 ### Alarms and Notifications
 
-- SNS topic receives alerts for errors and performance issues
-- Configure email subscriptions to the AlertsTopic
+- The SNS `AlertsTopic` receives alerts for errors and performance issues — subscribe your ops email.
 
-## Limitations in GovCloud Version
+### Common GovCloud Issues
 
-The following features are not available:
+**Bedrock model access not enabled**
 
-### ❌ Removed Features
+- Enable model access in the Bedrock console for the GovCloud region.
+- GovCloud uses `amazon.nova-lite-v1:0`, `amazon.nova-pro-v1:0`, `us.anthropic.claude-3-5-sonnet-20240620-v1:0`, and `anthropic.claude-3-7-sonnet-20250219-v1:0` by default.
+
+**`ConfigurationPreset` AllowedValues error**
+
+- Use a recent CLI version — `lending-package-sample-govcloud` is included in the base template `AllowedValues` and `ConfigurationMap`.
+
+**`GraphQLApi.Arn` unresolved reference error**
+
+- Fixed in recent CLI versions (Discovery resources are now included in the headless removal list). Upgrade and rebuild.
+
+**IAM permissions**
+
+- Ensure the deploying identity has permissions for CloudFormation, S3, IAM, Lambda, Step Functions, DynamoDB, SQS, EventBridge, CloudWatch, and Bedrock in the GovCloud partition.
+
+## Limitations (GovCloud = Headless)
+
+Because GovCloud deployments are always headless, the following standard-deployment features are **not** available:
 
 - Web-based user interface
-- Real-time document status updates via websockets
-- Interactive configuration management
-- User authentication and authorization via Cognito
-- CloudFront content delivery and caching
-- WAF security rules and IP filtering
-- Analytics query interface
-- Document knowledge base chat interface
+- Real-time document status updates via WebSockets
+- Interactive configuration management UI
+- Cognito-backed user authentication
+- CloudFront content delivery and WAF protection
+- Agent Companion Chat / Agent Analytics / Knowledge-base chat
+- Test Studio (UI)
+- Human-in-the-Loop review UI (A2I)
 
-### ✅ Available Workarounds
-
-- Use S3 direct upload instead of web UI
-- Monitor through CloudWatch instead of real-time UI
-- Edit configuration files in S3 directly
-- Use CLI/SDK for authentication needs
-- Access content directly from S3
-- Implement custom security at application level
-- Query data through Athena directly
-- Use the lookup function for document queries
+See [Headless Deployment — Features Not Available](./headless-deployment.md#features-not-available-in-headless-mode) for complete details and workarounds.
 
 ## Best Practices
 
 ### Security
 
-1. **IAM Roles**: Use least-privilege IAM roles
-2. **Encryption**: Enable encryption at rest and in transit
-3. **Network**: Deploy in private subnets if required
-4. **Access Control**: Implement custom authentication as needed
+1. **IAM**: Use least-privilege IAM roles for automation and CI/CD.
+2. **Encryption**: Customer-managed KMS keys are enabled by default.
+3. **Network**: Deploy Lambda functions in private subnets if required (see [Deployment in Private Network](./deployment-private-network.md)).
+4. **Access Control**: Implement custom authentication at your application / network layer (IAM, VPC, API Gateway, SSO).
 
 ### Operations
 
-1. **Monitoring**: Set up CloudWatch alarms for critical metrics
-2. **Logging**: Configure appropriate log retention policies
-3. **Backup**: Implement backup strategies for important data
-4. **Updates**: Plan for template updates and maintenance
+1. **Monitoring**: Set up CloudWatch alarms for critical metrics; subscribe to `AlertsTopic`.
+2. **Logging**: Configure appropriate log-retention policies.
+3. **Backup**: Implement backup strategies for configuration and reporting data.
+4. **Updates**: Re-run `idp-cli deploy --headless --from-code .` to apply changes.
 
 ### Performance
 
-1. **Concurrency**: Adjust `MaxConcurrentWorkflows` based on load
-2. **Timeouts**: Configure appropriate timeout values
-3. **Memory**: Optimize Lambda memory settings
-4. **Batching**: Use appropriate batch sizes for processing
+1. **Concurrency**: Adjust `MaxConcurrentWorkflows` based on load.
+2. **Timeouts**: Configure appropriate timeout values.
+3. **Memory**: Optimize Lambda memory settings.
+4. **Batching**: Use appropriate batch sizes for processing.
 
-## Troubleshooting
-
-### Common Issues
-
-**Missing Dependencies**
-
-- Ensure all Bedrock models are enabled in the region.  GovCloud deployment uses amazon.nova-lite-v1:0, amazon.nova-pro-v1:0, us.anthropic.claude-3-5-sonnet-20240620-v1:0, and anthropic.claude-3-7-sonnet-20250219-v1:0 by default
-- Verify IAM permissions for service roles
-- Check S3 bucket policies and access
-
-**Processing Failures**
-
-- Check CloudWatch logs for detailed error messages
-- Verify document formats are supported
-- Confirm configuration settings are valid
-
-### Support Resources
-
-1. **AWS Documentation**: [GovCloud User Guide](https://docs.aws.amazon.com/govcloud-us/)
-2. **Bedrock in GovCloud**: [Model Availability](https://docs.aws.amazon.com/bedrock/latest/userguide/models-regions.html)
-3. **Service Limits**: [GovCloud Service Quotas](https://docs.aws.amazon.com/govcloud-us/latest/UserGuide/govcloud-limits.html)
+See [Capacity Planning](./capacity-planning.md) for details.
 
 ## Migration from Commercial AWS
 
-If migrating an existing deployment:
+If migrating an existing Commercial-region deployment to GovCloud:
 
-1. **Export Configuration**: Download all configuration from existing stack
-2. **Export Data**: Copy any baseline or reference data
-3. **Deploy GovCloud**: Use the generated template
-4. **Import Configuration**: Upload configuration to new stack
-5. **Validate**: Test processing with sample documents
+1. **Export configuration**: download configuration from the source stack (`idp-cli config-download ...`).
+2. **Export data**: copy any baseline or reference data you need.
+3. **Deploy to GovCloud**: use `idp-cli deploy --headless --from-code .` as described above.
+4. **Import configuration**: upload configuration to the new stack (`idp-cli config-upload ...`).
+5. **Validate**: process a sample document end-to-end.
 
 ## Cost Considerations
 
-GovCloud pricing may differ from commercial regions:
+GovCloud pricing differs from commercial regions:
 
 - Review [GovCloud Pricing](https://aws.amazon.com/govcloud-us/pricing/)
-- Update cost estimates in configuration files
-- Monitor actual usage through billing dashboards
+- Update cost estimates in your configuration accordingly
+- Monitor actual usage through the billing dashboard
 
 ## Compliance Notes
 
-- The GovCloud version maintains the same security features
-- Data encryption and retention policies are preserved
-- All processing remains within GovCloud boundaries
+- Data encryption and retention policies are preserved (same as Commercial deployments)
+- All processing remains within the GovCloud boundary
 - No data egress to commercial AWS regions
+
+## Support Resources
+
+- [AWS GovCloud User Guide](https://docs.aws.amazon.com/govcloud-us/)
+- [Bedrock Model Availability](https://docs.aws.amazon.com/bedrock/latest/userguide/models-regions.html)
+- [GovCloud Service Quotas](https://docs.aws.amazon.com/govcloud-us/latest/UserGuide/govcloud-limits.html)
+
+## Related Documentation
+
+- [Headless Deployment](./headless-deployment.md) — the generic headless-mode guide (required reading for GovCloud)
+- [IDP CLI](./idp-cli.md) — `deploy --headless`, `publish --headless`, and all processing commands
+- [IDP SDK](./idp-sdk.md) — programmatic SDK including `publish.build(headless=True)`
+- [Deployment Guide](./deployment.md) — general build / publish / deploy reference

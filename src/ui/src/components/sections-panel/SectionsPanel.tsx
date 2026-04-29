@@ -17,6 +17,7 @@ import {
   Textarea,
   Modal,
   Alert,
+  Badge,
 } from '@cloudscape-design/components';
 import type { ButtonDropdownProps } from '@cloudscape-design/components';
 import { generateClient } from 'aws-amplify/api';
@@ -41,6 +42,11 @@ interface SectionItem {
   OriginalId?: string | null;
   isModified?: boolean;
   isNew?: boolean;
+  // True when the class is marked with x-aws-idp-exclude-from-processing=true
+  // (e.g., static instruction pages). No extraction / assessment / summary
+  // is performed for excluded sections; the UI renders a "Skipped" badge.
+  Excluded?: boolean;
+  ExclusionReason?: string | null;
 }
 
 interface PageItem {
@@ -78,7 +84,21 @@ interface SectionsPanelProps {
 
 // Cell renderer components
 const IdCell = ({ item }: { item: SectionItem }): React.JSX.Element => <span>{item.Id}</span>;
-const ClassCell = ({ item }: { item: SectionItem }): React.JSX.Element => <span>{item.Class}</span>;
+
+// Render the class name, annotated with a "Skipped" badge when the section's
+// classification was marked x-aws-idp-exclude-from-processing=true in config.
+const ClassCell = ({ item }: { item: SectionItem }): React.JSX.Element => {
+  if (item.Excluded) {
+    return (
+      <SpaceBetween direction="horizontal" size="xs">
+        <span style={{ color: '#5f6b7a' }}>{item.Class}</span>
+        <Badge color="grey">Skipped: {item.ExclusionReason || 'excluded'}</Badge>
+      </SpaceBetween>
+    );
+  }
+  return <span>{item.Class}</span>;
+};
+
 const PageIdsCell = ({ item }: { item: SectionItem }): React.JSX.Element => <span>{item.PageIds.join(', ')}</span>;
 
 // Confidence alerts cell showing only count

@@ -37,6 +37,7 @@ export default defineConfig({
           items: [
             { label: "Architecture", slug: "architecture" },
             { label: "Deployment", slug: "deployment" },
+            { label: "Headless Deployment", slug: "headless-deployment" },
             { label: "ALB Hosting", slug: "alb-hosting" },
             { label: "Private Network Deployment", slug: "deployment-private-network" },
             { label: "Configuration", slug: "configuration" },

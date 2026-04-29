@@ -746,6 +746,21 @@ class RuleValidationService:
                 section_responses = {}
                 nonlocal chunking_occurred  # Allow modification of outer scope variable
 
+                # Short-circuit: skip sections whose class is marked as
+                # excluded (e.g., static instruction pages). No rule
+                # validation is meaningful for boilerplate content.
+                from idp_common.section_exclusion import is_section_excluded
+
+                if is_section_excluded(section):
+                    logger.info(
+                        "Rule validation skipped for excluded section %s "
+                        "(class=%s, reason=%s)",
+                        section.section_id,
+                        section.classification,
+                        section.exclusion_reason or "excluded",
+                    )
+                    return section_responses, 0, False
+
                 # Read text from section pages (following summarization service pattern)
                 sorted_page_ids = sorted(section.page_ids, key=int)
                 all_text = ""

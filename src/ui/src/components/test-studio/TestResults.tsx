@@ -25,7 +25,7 @@ import {
   CollectionPreferences,
 } from '@cloudscape-design/components';
 import { useCollection } from '@cloudscape-design/collection-hooks';
-// eslint-disable-next-line import/no-extraneous-dependencies
+
 import yaml from 'js-yaml';
 import { generateClient } from 'aws-amplify/api';
 import { getTestRun, startTestRun, getTestSets } from '../../graphql/generated';
@@ -175,8 +175,8 @@ const ComprehensiveBreakdown = ({
                               typeof value === 'number' && key.includes('accuracy')
                                 ? value.toFixed(3)
                                 : value !== null && value !== undefined
-                                ? value.toString()
-                                : '0',
+                                  ? value.toString()
+                                  : '0',
                           }))
                       : []),
                   ]}

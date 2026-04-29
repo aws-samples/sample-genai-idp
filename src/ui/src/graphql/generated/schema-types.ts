@@ -1048,6 +1048,8 @@ export type QuotasUsed = {
 export type Section = {
   Class?: Maybe<Scalars['String']['output']>;
   ConfidenceThresholdAlerts?: Maybe<Array<Maybe<ConfidenceThresholdAlert>>>;
+  Excluded?: Maybe<Scalars['Boolean']['output']>;
+  ExclusionReason?: Maybe<Scalars['String']['output']>;
   Id?: Maybe<Scalars['String']['output']>;
   OutputJSONUri?: Maybe<Scalars['String']['output']>;
   PageIds?: Maybe<Array<Maybe<Scalars['Int']['output']>>>;
@@ -1056,6 +1058,8 @@ export type Section = {
 export type SectionInput = {
   Class?: InputMaybe<Scalars['String']['input']>;
   ConfidenceThresholdAlerts?: InputMaybe<Array<InputMaybe<ConfidenceThresholdAlertInput>>>;
+  Excluded?: InputMaybe<Scalars['Boolean']['input']>;
+  ExclusionReason?: InputMaybe<Scalars['String']['input']>;
   Id?: InputMaybe<Scalars['String']['input']>;
   OutputJSONUri?: InputMaybe<Scalars['String']['input']>;
   PageIds?: InputMaybe<Array<InputMaybe<Scalars['Int']['input']>>>;

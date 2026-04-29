@@ -706,6 +706,20 @@ class AssessmentService:
             document.errors.append(error_msg)
             return document
 
+        # Short-circuit: skip sections whose class is marked as excluded
+        # (e.g., static instruction pages). No extraction ran, so no
+        # assessment is needed or meaningful.
+        from idp_common.section_exclusion import is_section_excluded
+
+        if is_section_excluded(section):
+            logger.info(
+                "Assessment skipped for excluded section %s (class=%s, reason=%s)",
+                section.section_id,
+                section.classification,
+                section.exclusion_reason or "excluded",
+            )
+            return document
+
         # Check if section has extraction results to assess
         if not section.extraction_result_uri:
             error_msg = f"Section {section_id} has no extraction results to assess"

@@ -1,0 +1,254 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: MIT-0
+
+# DS-11 U.S. Passport Application sample configuration.
+#
+# The DS-11 form distributed by the U.S. State Department is a 6-page PDF
+# where the first 4 pages are static content (legal warning, fee
+# information, federal tax law notice, acts-or-conditions affidavit) and
+# only pages 5–6 contain the actual application form fields.
+#
+# This config demonstrates the x-aws-idp-exclude-from-processing class
+# extension: the PassportApplicationInstructions class is marked as
+# excluded, so downstream services (extraction, assessment, summarization,
+# rule_validation, evaluation) will skip sections that are classified as
+# this class and therefore:
+#   - Make zero LLM calls on the instruction pages
+#   - Write a small "skipped_excluded_class" stub result.json per section
+#   - Annotate the evaluation markdown report with an "Excluded Sections"
+#     table instead of artificially depressing accuracy metrics
+#
+# See docs/classification.md#excluding-static-pages for details.
+
+use_bda: false
+
+notes: "DS-11 US Passport Application sample - demonstrates excluding static instruction/legal pages from extraction using x-aws-idp-exclude-from-processing."
+
+classes:
+  # ------------------------------------------------------------------
+  # Excluded class: static instruction / legal / tax / oath pages
+  # ------------------------------------------------------------------
+  - $schema: https://json-schema.org/draft/2020-12/schema
+    $id: PassportApplicationInstructions
+    type: object
+    x-aws-idp-document-type: PassportApplicationInstructions
+    description: >-
+      Static informational pages of a DS-11 U.S. Passport Application
+      package. Includes the "WARNING: False statements..." legal notice,
+      the passport fee/payment instructions, the "FEDERAL TAX LAW"
+      disclosure under Section 6039E, and the "ACTS OR CONDITIONS"
+      affidavit. These pages contain only boilerplate that is identical
+      across all applications and carry no applicant-specific data. They
+      should be skipped by extraction / assessment / summarization /
+      evaluation.
+
+    # Mark the class so downstream services know to skip these sections.
+    x-aws-idp-exclude-from-processing: true
+    x-aws-idp-exclusion-reason: instructions
+
+    # Optional regex fast-path. Primary classification for this class is
+    # the LLM using the `description` field above — that is the canonical
+    # mechanism and the one that remains robust to form revisions, OCR
+    # quirks, wording differences, etc.
+    #
+    # This regex is an *optional* optimization: if a page's OCR text
+    # matches, the page is short-circuited as
+    # PassportApplicationInstructions without sending it to the LLM,
+    # saving tokens on boilerplate pages we know are 100% stable across
+    # every DS-11 filing. If the regex misses (e.g. a revised form), the
+    # LLM classifier still catches the page via the description.
+    #
+    # Anchor must appear on the static pages (1-4) but NOT on the form
+    # pages (5-6). The phrase below is from the federal tax-law
+    # disclosure which occupies an entire page of the instructions block
+    # and is unique to that page.
+    x-aws-idp-document-page-content-regex: "(?is)FEDERAL TAX LAW\\s*Section 6039E"
+
+    # No `properties`: nothing to extract from boilerplate pages. The
+    # class still has description so the LLM classifier can recognize
+    # it visually on scanned documents where OCR text isn't available.
+    properties: {}
+
+  # ------------------------------------------------------------------
+  # Active class: the actual DS-11 application form fields
+  # ------------------------------------------------------------------
+  - $schema: https://json-schema.org/draft/2020-12/schema
+    $id: PassportApplication
+    type: object
+    x-aws-idp-document-type: PassportApplication
+    description: >-
+      The DS-11 APPLICATION FOR A U.S. PASSPORT form itself (typically
+      the last 2 pages of the package). Contains the applicant's
+      personal details (name, date and place of birth, social security
+      number, sex), parent information, mailing and permanent addresses,
+      travel plans (departure date, return date, countries to be
+      visited), employment details, and contact phone numbers. These
+      are the pages where the applicant fills in their own data.
+
+    # No regex fast-path for the active class — we rely entirely on the
+    # LLM multimodal classifier using the `description` above. Regex is
+    # too brittle for dynamic form content that can vary across
+    # revisions, applicants, and OCR quality.
+    $defs:
+      Name:
+        type: object
+        description: >-
+          A person's full name broken into First, Middle, Last, and
+          Suffix components.
+        properties:
+          FirstName:
+            type: string
+            description: Given name.
+            x-aws-idp-evaluation-method: EXACT
+          MiddleName:
+            type: string
+            description: Middle name or initial.
+            x-aws-idp-evaluation-method: EXACT
+          LastName:
+            type: string
+            description: Family name / surname.
+            x-aws-idp-evaluation-method: EXACT
+          Suffix:
+            type: string
+            description: Name suffix such as Jr., Sr., III.
+            x-aws-idp-evaluation-method: EXACT
+      Address:
+        type: object
+        description: A U.S. postal address with street, apt, city, state, zip.
+        properties:
+          Street:
+            type: string
+            description: Street, RFD, URB (no P.O. Box for permanent address).
+            x-aws-idp-evaluation-method: FUZZY
+            x-aws-idp-evaluation-threshold: 0.85
+          ApartmentOrUnit:
+            type: string
+            description: Apartment or unit number.
+            x-aws-idp-evaluation-method: EXACT
+          City:
+            type: string
+            description: City name.
+            x-aws-idp-evaluation-method: EXACT
+          State:
+            type: string
+            description: Two-letter US state code.
+            x-aws-idp-evaluation-method: EXACT
+          ZipCode:
+            type: string
+            description: 5- or 9-digit US zip code.
+            x-aws-idp-evaluation-method: EXACT
+      Parent:
+        type: object
+        description: Mother / Father / Parent identity information.
+        properties:
+          FirstAndMiddleName:
+            type: string
+            description: Parent's first and middle name(s).
+            x-aws-idp-evaluation-method: FUZZY
+            x-aws-idp-evaluation-threshold: 0.85
+          LastNameAtBirth:
+            type: string
+            description: Parent's last name at birth.
+            x-aws-idp-evaluation-method: EXACT
+          DateOfBirth:
+            type: string
+            format: date
+            description: Parent's date of birth (mm/dd/yyyy).
+            x-aws-idp-evaluation-method: EXACT
+          PlaceOfBirth:
+            type: string
+            description: Parent's place of birth.
+            x-aws-idp-evaluation-method: FUZZY
+            x-aws-idp-evaluation-threshold: 0.85
+    properties:
+      LastName:
+        type: string
+        description: Applicant's last name (field 1).
+        x-aws-idp-evaluation-method: EXACT
+      FirstName:
+        type: string
+        description: Applicant's first name (field 1).
+        x-aws-idp-evaluation-method: EXACT
+      MiddleName:
+        type: string
+        description: Applicant's middle name (field 1).
+        x-aws-idp-evaluation-method: EXACT
+      DateOfBirth:
+        type: string
+        format: date
+        description: Applicant's date of birth in mm/dd/yyyy (field 2).
+        x-aws-idp-evaluation-method: EXACT
+      Sex:
+        type: string
+        description: Applicant's sex (M/F) from field 3.
+        x-aws-idp-evaluation-method: EXACT
+      PlaceOfBirth:
+        type: string
+        description: >-
+          Applicant's place of birth — City & State if in the U.S., or
+          City & Country (field 4).
+        x-aws-idp-evaluation-method: FUZZY
+        x-aws-idp-evaluation-threshold: 0.85
+      SSN:
+        type: string
+        description: Applicant's Social Security Number (field 5).
+        x-aws-idp-evaluation-method: EXACT
+      Occupation:
+        type: string
+        description: Applicant's occupation (field 13).
+        x-aws-idp-evaluation-method: FUZZY
+        x-aws-idp-evaluation-threshold: 0.85
+      Employer:
+        type: string
+        description: Applicant's employer or school (field 14).
+        x-aws-idp-evaluation-method: FUZZY
+        x-aws-idp-evaluation-threshold: 0.85
+      PhoneHome:
+        type: string
+        description: Home phone number.
+        x-aws-idp-evaluation-method: EXACT
+      PhoneCell:
+        type: string
+        description: Cell phone number.
+        x-aws-idp-evaluation-method: EXACT
+      PhoneWork:
+        type: string
+        description: Work phone number.
+        x-aws-idp-evaluation-method: EXACT
+      Parents:
+        type: array
+        description: Mother / Father / Parent information (fields 10 and 11).
+        x-aws-idp-evaluation-method: HUNGARIAN
+        items:
+          $ref: "#/$defs/Parent"
+      MailingAddress:
+        description: Applicant's mailing address.
+        $ref: "#/$defs/Address"
+      PermanentAddress:
+        description: >-
+          Applicant's permanent address if different from mailing address
+          or if mailing is a P.O. Box (field 19).
+        $ref: "#/$defs/Address"
+      TravelPlans:
+        type: object
+        description: Travel plans (field 18).
+        properties:
+          DepartureDate:
+            type: string
+            format: date
+            description: Planned departure date.
+            x-aws-idp-evaluation-method: EXACT
+          ReturnDate:
+            type: string
+            format: date
+            description: Planned return date.
+            x-aws-idp-evaluation-method: EXACT
+          CountriesToBeVisited:
+            type: string
+            description: Countries to be visited.
+            x-aws-idp-evaluation-method: FUZZY
+            x-aws-idp-evaluation-threshold: 0.85
+      AdditionalContactPhone:
+        type: string
+        description: Additional emergency contact phone number (field 12).
+        x-aws-idp-evaluation-method: EXACT

@@ -20,7 +20,7 @@ import {
   RadioGroup,
 } from '@cloudscape-design/components';
 import Editor from '@monaco-editor/react';
-// eslint-disable-next-line import/no-extraneous-dependencies
+
 import yaml from 'js-yaml';
 import usePricing from '../../hooks/use-pricing';
 import useUserRole from '../../hooks/use-user-role';

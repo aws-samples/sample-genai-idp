@@ -77,6 +77,21 @@ export const X_AWS_IDP_PAGE_CONTENT_REGEX = 'x-aws-idp-document-page-content-reg
 // Per-class extraction model override (overrides extraction.model)
 export const X_AWS_IDP_EXTRACTION_MODEL = 'x-aws-idp-extraction-model';
 
+/**
+ * Mark a class as excluded from downstream processing. When true, sections
+ * classified as this class are skipped by extraction, assessment,
+ * summarization, rule validation, and evaluation. Useful for static
+ * boilerplate (instructions, legal warnings, cover pages, etc.).
+ */
+export const X_AWS_IDP_EXCLUDE_FROM_PROCESSING = 'x-aws-idp-exclude-from-processing';
+
+/**
+ * Optional short category for why a class is excluded
+ * (e.g. "instructions", "legal", "cover-page"). Shown in UI section badges
+ * and in evaluation report annotations.
+ */
+export const X_AWS_IDP_EXCLUSION_REASON = 'x-aws-idp-exclusion-reason';
+
 // ============================================================================
 // AWS IDP List-Specific Extensions
 // ============================================================================

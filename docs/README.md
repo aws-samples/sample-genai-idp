@@ -13,6 +13,7 @@ This folder contains detailed documentation on various aspects of the GenAI Inte
 
 - [Architecture](./architecture.md) - Detailed component architecture and data flow
 - [Deployment](./deployment.md) - Build, publish, deploy, and test instructions
+- [Headless Deployment](./headless-deployment.md) - Backend-only deployment (no UI/AppSync/Cognito/WAF) — for API-only / pipeline integrations in Commercial regions and required for GovCloud
 - [Configuration](./configuration.md) - Configuration and customization options
 - [Configuration Versions](./configuration-versions.md) - Managing multiple configuration versions
 - [IDP Configuration Best Practices](./idp-configuration-best-practices.md) - Guidelines for effective configuration design
@@ -76,8 +77,8 @@ This folder contains detailed documentation on various aspects of the GenAI Inte
 
 - [Well-Architected Framework Assessment](./well-architected.md) - Analysis based on AWS Well-Architected Framework
 - [AWS Services & IAM Roles](./aws-services-and-roles.md) - AWS services used and IAM role requirements
-- [ALB Hosting](./alb-hosting.md) - ALB+S3 hosting for private network and GovCloud deployments
-- [GovCloud Deployment](./govcloud-deployment.md) - Deployment guide for AWS GovCloud regions
+- [ALB Hosting](./alb-hosting.md) - ALB+S3 hosting to serve the full Web UI from within a VPC (alternative to CloudFront)
+- [GovCloud Deployment](./govcloud-deployment.md) - GovCloud-specific considerations on top of headless deployment
 - [EU Region Model Support](./eu-region-model-support.md) - Model availability in EU regions
 
 ## Development Setup

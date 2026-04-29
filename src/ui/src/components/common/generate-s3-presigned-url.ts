@@ -1,8 +1,8 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
-import { HttpRequest } from '@aws-sdk/protocol-http';
+import { HttpRequest } from '@smithy/protocol-http';
 import { S3RequestPresigner } from '@aws-sdk/s3-request-presigner';
-import { parseUrl } from '@aws-sdk/url-parser';
+import { parseUrl } from '@smithy/url-parser';
 import { Sha256 } from '@aws-crypto/sha256-browser';
 import { formatUrl } from '@aws-sdk/util-format-url';
 import { ConsoleLogger } from 'aws-amplify/utils';
