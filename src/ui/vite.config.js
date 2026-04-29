@@ -40,6 +40,12 @@ export default defineConfig(({ mode }) => ({
     // Increase chunk size warning limit (suppressed for enterprise internal tool)
     chunkSizeWarningLimit: 3000,
     rollupOptions: {
+      // NOTE: @idp-accelerator/idp-monitor-ui is intentionally NOT marked external
+      // in this repo (genaiic-idp-monitor). The package is always installed here
+      // via "file:../../products/idp-monitor/ui" and must be bundled so that the
+      // dynamic import() in MonitoringShell.tsx resolves successfully at runtime.
+      // (In the open-source genaiic-idp-accelerator repo the package is marked
+      // external because it may not be installed there.)
       output: {
         // Manual chunking for better code splitting
         manualChunks: {
@@ -62,6 +68,10 @@ export default defineConfig(({ mode }) => ({
     },
     // Ensure proper module resolution
     extensions: ['.mjs', '.ts', '.tsx', '.js', '.jsx', '.json'],
+    // Deduplicate React — prevents "Cannot read properties of null (reading 'useEffect')"
+    // when @idp-accelerator/idp-monitor-ui is bundled inline (its recharts dependency
+    // would otherwise pull in a second React instance at runtime).
+    dedupe: ['react', 'react-dom', 'react/jsx-runtime', '@cloudscape-design/components'],
   },
 
   // Define global constants

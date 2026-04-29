@@ -60,19 +60,19 @@ export function LatencyChartWidget({ latency, isLoading }: LatencyChartWidgetPro
         <ColumnLayout columns={4} variant="text-grid">
           <div>
             <Box variant="awsui-key-label">Samples</Box>
-            <Box variant="h2">{latency.sampleCount.toLocaleString()}</Box>
+            <Box variant="h2">{(latency.sampleCount ?? 0).toLocaleString()}</Box>
           </div>
           <div>
             <Box variant="awsui-key-label">P50 (median)</Box>
-            <Box variant="h2">{fmtMs(latency.p50Ms)}</Box>
+            <Box variant="h2">{latency.p50Ms != null ? fmtMs(latency.p50Ms) : '—'}</Box>
           </div>
           <div>
             <Box variant="awsui-key-label">P90</Box>
-            <Box variant="h2">{fmtMs(latency.p90Ms)}</Box>
+            <Box variant="h2">{latency.p90Ms != null ? fmtMs(latency.p90Ms) : '—'}</Box>
           </div>
           <div>
             <Box variant="awsui-key-label">P99</Box>
-            <Box variant="h2">{fmtMs(latency.p99Ms)}</Box>
+            <Box variant="h2">{latency.p99Ms != null ? fmtMs(latency.p99Ms) : '—'}</Box>
           </div>
         </ColumnLayout>
       </Box>

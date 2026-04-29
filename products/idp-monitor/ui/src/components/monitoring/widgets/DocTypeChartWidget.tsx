@@ -54,7 +54,7 @@ export function DocTypeChartWidget({
     }));
 
   const subtitle = distribution
-    ? `${distribution.totalDocuments.toLocaleString()} total · ${distribution.classificationLevel}-level`
+    ? `${(distribution.totalDocuments ?? 0).toLocaleString()} total · ${distribution.classificationLevel ?? ''}-level`
     : undefined;
 
   return (

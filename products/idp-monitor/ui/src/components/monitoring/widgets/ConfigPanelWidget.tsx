@@ -61,17 +61,17 @@ export function ConfigPanelWidget({ config, isLoading }: ConfigPanelWidgetProps)
             </div>
             <div>
               <Box variant="awsui-key-label">Version History</Box>
-              <Box variant="h2">{config.versionHistory.length} versions</Box>
+              <Box variant="h2">{config.versionHistory?.length ?? 0} versions</Box>
             </div>
           </ColumnLayout>
 
-          {config.documentClasses.length > 0 && (
+          {(config.documentClasses?.length ?? 0) > 0 && (
             <Box margin={{ top: 'l' }}>
               <Box variant="awsui-key-label" margin={{ bottom: 'xs' }}>
                 Configured Classes
               </Box>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                {config.documentClasses.map((cls) => (
+                {(config.documentClasses ?? []).map((cls) => (
                   <Badge key={cls} color="blue">
                     {cls}
                   </Badge>
@@ -80,7 +80,7 @@ export function ConfigPanelWidget({ config, isLoading }: ConfigPanelWidgetProps)
             </Box>
           )}
 
-          {config.versionHistory.length > 0 && (
+          {(config.versionHistory?.length ?? 0) > 0 && (
             <Box margin={{ top: 'l' }}>
               <ExpandableSection
                 headerText="Version History"

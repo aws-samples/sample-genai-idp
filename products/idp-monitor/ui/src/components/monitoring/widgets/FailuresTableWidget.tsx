@@ -62,7 +62,7 @@ export function FailuresTableWidget({ failures, isLoading }: FailuresTableWidget
       header={
         <Header
           variant="h2"
-          counter={failures ? `(${failures.totalFailures.toLocaleString()})` : undefined}
+          counter={failures ? `(${(failures.totalFailures ?? 0).toLocaleString()})` : undefined}
         >
           Recent Failures
         </Header>

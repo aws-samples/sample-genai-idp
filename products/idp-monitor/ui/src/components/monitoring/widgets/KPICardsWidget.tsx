@@ -42,7 +42,8 @@ function KPICard({ label, value, description }: KPICardProps): JSX.Element {
   );
 }
 
-function formatNumber(n: number): string {
+function formatNumber(n: number | undefined | null): string {
+  if (n == null) return '—';
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
   return n.toLocaleString();
@@ -76,11 +77,11 @@ export function KPICardsWidget({ volume, isLoading }: KPICardsWidgetProps): JSX.
           />
           <KPICard
             label="Success Rate"
-            value={`${volume.successRate.toFixed(1)}%`}
+            value={volume.successRate != null ? `${volume.successRate.toFixed(1)}%` : '—'}
           />
           <KPICard
             label="Throughput"
-            value={`${volume.throughputPerHour.toFixed(1)}/hr`}
+            value={volume.throughputPerHour != null ? `${volume.throughputPerHour.toFixed(1)}/hr` : '—'}
             description="docs per hour"
           />
           <KPICard

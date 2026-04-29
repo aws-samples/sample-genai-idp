@@ -87,10 +87,13 @@ export function ThrottleWidget({ throttles, isLoading }: ThrottleWidgetProps): J
         </Box>
       ) : (
         <ColumnLayout columns={2} variant="text-grid">
-          <ThrottleRow label="Lambda Throttles" metric={throttles.lambdaThrottles} />
-          <ThrottleRow label="Bedrock Rate Limits" metric={throttles.bedrockThrottles} />
-          <ThrottleRow label="Textract Throttles" metric={throttles.textractThrottles} />
-          <ThrottleRow label="SQS Message Age" metric={throttles.sqsMessageAge} />
+          {throttles.lambdaThrottles && <ThrottleRow label="Lambda Throttles" metric={throttles.lambdaThrottles} />}
+          {throttles.bedrockThrottles && <ThrottleRow label="Bedrock Rate Limits" metric={throttles.bedrockThrottles} />}
+          {throttles.textractThrottles && <ThrottleRow label="Textract Throttles" metric={throttles.textractThrottles} />}
+          {throttles.sqsMessageAge && <ThrottleRow label="SQS Message Age" metric={throttles.sqsMessageAge} />}
+          {!throttles.lambdaThrottles && !throttles.bedrockThrottles && !throttles.textractThrottles && !throttles.sqsMessageAge && (
+            <Box color="text-body-secondary">No throttle metrics available.</Box>
+          )}
         </ColumnLayout>
       )}
     </Container>

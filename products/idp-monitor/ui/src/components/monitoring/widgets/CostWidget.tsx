@@ -22,13 +22,15 @@ interface CostWidgetProps {
   isLoading: boolean;
 }
 
-function formatTokens(n: number): string {
+function formatTokens(n: number | undefined | null): string {
+  if (n == null) return '—';
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
   return n.toLocaleString();
 }
 
-function formatCost(usd: number): string {
+function formatCost(usd: number | undefined | null): string {
+  if (usd == null) return '—';
   if (usd < 0.01) return `$${usd.toFixed(5)}`;
   return `$${usd.toFixed(4)}`;
 }
@@ -75,12 +77,12 @@ export function CostWidget({ cost, isLoading }: CostWidgetProps): JSX.Element {
             <div>
               <Box variant="awsui-key-label">Models Used</Box>
               <Box variant="h1" fontSize="display-l">
-                {cost.perModelBreakdown.length}
+                {cost.perModelBreakdown?.length ?? 0}
               </Box>
             </div>
           </ColumnLayout>
 
-          {cost.perModelBreakdown.length > 0 && (
+          {(cost.perModelBreakdown?.length ?? 0) > 0 && (
             <Box margin={{ top: 'l' }}>
               <Table
                 variant="embedded"
@@ -98,7 +100,7 @@ export function CostWidget({ cost, isLoading }: CostWidgetProps): JSX.Element {
                   {
                     id: 'docs',
                     header: 'Docs',
-                    cell: (row) => row.documentCount.toLocaleString(),
+                    cell: (row) => (row.documentCount ?? 0).toLocaleString(),
                     sortingField: 'documentCount',
                   },
                   {
