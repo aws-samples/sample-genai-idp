@@ -75,6 +75,7 @@ export default function ChatInterface() {
   const [client, setClient] = useState<AgentCoreClient | null>(null)
   const [stateApiUrl, setStateApiUrl] = useState<string>("")
   const [agentState, setAgentState] = useState<Record<string, string | number | null> | null>(null)
+  const [now, setNow] = useState(Date.now())
 
   // Stream polling state
   const [streamOffset, setStreamOffset] = useState(0)
@@ -149,6 +150,13 @@ export default function ChatInterface() {
   useEffect(() => {
     streamEndRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [streamItems, activeTab])
+
+  // 1s tick for heartbeat age display
+  useEffect(() => {
+    if (agentState?.status !== "running") return
+    const t = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(t)
+  }, [agentState?.status])
 
   // Poll DynamoDB state while a run is active
   useEffect(() => {
@@ -434,6 +442,10 @@ export default function ChatInterface() {
                         {agentState.best_accuracy != null && Number(agentState.best_accuracy) > 0 && (
                           <span>· Best: {String(agentState.best_accuracy)}%</span>
                         )}
+                        {agentState.status === "running" && agentState.last_heartbeat_at && (() => {
+                          const ago = Math.floor((now - new Date(String(agentState.last_heartbeat_at)).getTime()) / 1000)
+                          return <span>· ♥ {ago}s ago</span>
+                        })()}
                       </div>
                     )}
                     {agentState?.status === "running" && (
