@@ -1,5 +1,6 @@
 # Let's exclude some whole directories until we are ready to format them individually
 extend-exclude = [
+    "autotune",
     "lib/appsync_helper_pkg",
     "lib/get_config_pkg",
     "lib/idp_common_pkg/idp_common/bedrock",

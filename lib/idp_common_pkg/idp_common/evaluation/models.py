@@ -627,7 +627,11 @@ class DocumentEvaluationResult:
                 for metric, value in sr.metrics.items():
                     if metric == "evaluation_failed":
                         continue  # Skip the flag itself in the table
-                    formatted_value = f"{value:.4f}" if isinstance(value, (int, float)) else str(value)
+                    formatted_value = (
+                        f"{value:.4f}"
+                        if isinstance(value, (int, float))
+                        else str(value)
+                    )
                     metrics_table += f"| {metric} | {formatted_value} | ❌ Failed |\n"
                 sections.append(metrics_table)
                 sections.append("")
