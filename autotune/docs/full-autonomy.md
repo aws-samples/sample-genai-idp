@@ -272,13 +272,18 @@ When the SSE stream is severed, AgentCore cancels the async generator (`Cancelle
 Instead of fighting the SSE timeout, we decouple the agent from the HTTP connection entirely:
 
 1. **Entrypoint** returns immediately after starting the agent in a background thread
-2. **Agent** runs autonomously, writing consolidated events to a JSONL file and syncing to a dedicated S3 stream bucket periodically
-3. **Frontend** polls three independent data sources:
+2. **Agent** runs autonomously, writing consolidated events to a local JSONL file
+3. **Background sync thread** runs independently of the agent event loop, every 10s:
+   - Syncs `stream.jsonl` to S3
+   - Syncs `OPTIMIZATION-LOG.md` to S3
+   - Updates DynamoDB `last_heartbeat_at`
+4. **Frontend** polls three independent data sources:
    - `GET /state` (DynamoDB) — status, phase, iteration, accuracy (every 2s)
    - `GET /stream` (S3 JSONL) — full agent thought process with offset pagination (every 3-5s)
    - `GET /log` (S3 markdown) — OPTIMIZATION-LOG.md content (every 5-10s)
-4. **Ping handler** checks background thread liveness (not generator state), so it correctly reports `HEALTHY_BUSY` even after the SSE generator is cancelled
-5. **DynamoDB heartbeat** runs in the background thread alongside the agent, updating `last_heartbeat_at` every 30s for stale detection
+5. **Ping handler** checks background thread liveness (not generator state), so it correctly reports `HEALTHY_BUSY` even after the SSE generator is cancelled
+
+**Why a separate sync thread:** The agent event loop blocks during long tool calls (e.g. `download_results` takes 5+ minutes). If heartbeat and S3 sync were inline in the event loop, they'd stall for the duration of the tool call — causing the frontend to show "POSSIBLY STALLED" and the user to lose visibility. The sync thread runs on its own schedule regardless of what the agent is doing.
 
 This gives full visibility into the agent's work without any dependency on a persistent HTTP connection. See dev plan Phase 6.9 for detailed implementation spec.
 
@@ -298,7 +303,7 @@ The agent uses belt-and-suspenders to prevent AgentCore from killing the session
 
 2. **`/ping` returning `HEALTHY_BUSY`** — the ping handler checks `_active_sessions` (a dict of background threads). If any thread is alive, returns `HEALTHY_BUSY`. This tells AgentCore the container is actively working. Unlike the old generator-based approach, this survives SSE stream cancellation because it's tied to thread liveness, not generator state.
 
-3. **DynamoDB `last_heartbeat_at`** — updated every 30s by the background thread. This is NOT for AgentCore — it's for the frontend. If `status` is "running" but `last_heartbeat_at` is >2 minutes old, the UI shows "POSSIBLY STALLED" in yellow. This detects cases where the background thread itself has crashed.
+3. **DynamoDB `last_heartbeat_at`** — updated every 10s by the background sync thread. This is NOT for AgentCore — it's for the frontend. If `status` is "running" but `last_heartbeat_at` is >2 minutes old, the UI shows "POSSIBLY STALLED" in yellow. This detects cases where the background thread itself has crashed.
 
 ## File Map
 
