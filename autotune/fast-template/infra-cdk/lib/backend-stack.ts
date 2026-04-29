@@ -582,6 +582,15 @@ export class BackendStack extends cdk.NestedStack {
       { SessionStorage: { MountPath: "/mnt/workspace" } },
     ])
 
+    // AutoTune: Set idle session timeout to 2 hours (default is 15 min).
+    // Long optimization runs can take 30+ minutes with no /ping activity
+    // between tool calls. Using L1 escape hatch to avoid CDK bug (aws-cdk#36376)
+    // where omitting lifecycleConfiguration sets timeout to 60s instead of default.
+    cfnRuntime.addPropertyOverride("LifecycleConfiguration", {
+      IdleRuntimeSessionTimeout: 7200, // 2 hours
+      MaxLifetime: 28800, // 8 hours (default)
+    })
+
     // Outputs
     new cdk.CfnOutput(this, "AgentRuntimeId", {
       description: "ID of the created agent runtime",
