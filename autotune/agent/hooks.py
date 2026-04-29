@@ -22,8 +22,16 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
+class OptimizationCancelled(Exception):
+    """Raised when the user cancels the optimization run."""
+    pass
+
+
 class CancelCheckHook(HookProvider):
-    """Check DynamoDB for cancel signal before every tool call."""
+    """Check DynamoDB for cancel signal before every tool call.
+
+    Raises OptimizationCancelled to immediately halt the agent.
+    """
 
     def __init__(self, state: OptimizationState):
         self.state = state
@@ -33,9 +41,9 @@ class CancelCheckHook(HookProvider):
 
     def _check_cancel(self, event: BeforeToolCallEvent) -> None:
         if self.state.is_cancelled():
-            logger.info("Optimization cancelled by user — stopping before tool call")
+            logger.info("Optimization cancelled by user — raising to stop agent")
             self.state.update_phase("cancelled", "Cancelled by user")
-            event.cancel_tool = "Optimization cancelled by user"
+            raise OptimizationCancelled("Optimization cancelled by user")
 
 
 class OptimizationLoopHook(HookProvider):
