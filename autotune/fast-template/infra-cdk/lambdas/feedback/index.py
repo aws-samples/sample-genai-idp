@@ -1,14 +1,13 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: LicenseRef-AWS-Proprietary
 
-"""AutoTune Optimization State API Lambda Handler.
+"""AutoTune Optimization State & Stream API Lambda Handler.
 
 Endpoints:
   POST /cancel  — Cancel a running optimization (writes status=cancelled to DynamoDB)
-  GET  /state   — Retrieve current optimization state for a session
-
-The DynamoDB item schema may evolve. GET /state returns the raw item as-is
-so the frontend should handle unknown/missing fields gracefully.
+  GET  /state   — Get optimization state (query: ?sessionId=xxx)
+  GET  /stream  — Get agent event stream JSONL (query: ?sessionId=xxx&offset=N)
+  GET  /log     — Get OPTIMIZATION-LOG.md content (query: ?sessionId=xxx)
 """
 
 import os
@@ -21,6 +20,7 @@ from aws_lambda_powertools.logging.correlation_paths import API_GATEWAY_REST
 from aws_lambda_powertools.utilities.typing import LambdaContext
 
 TABLE_NAME = os.environ["TABLE_NAME"]
+STREAM_BUCKET = os.environ.get("STREAM_BUCKET", "")
 CORS_ALLOWED_ORIGINS = os.environ.get("CORS_ALLOWED_ORIGINS", "*")
 
 cors_origins = [o.strip() for o in CORS_ALLOWED_ORIGINS.split(",") if o.strip()]
@@ -33,18 +33,17 @@ cors_config = CORSConfig(
 
 dynamodb = boto3.resource("dynamodb")
 table = dynamodb.Table(TABLE_NAME)
+s3 = boto3.client("s3")
 logger = Logger()
 app = APIGatewayRestResolver(cors=cors_config)
 
 
 @app.post("/cancel")
 def cancel_optimization() -> Dict[str, Any]:
-    """Cancel a running optimization by setting status=cancelled."""
     body = app.current_event.json_body or {}
     session_id = body.get("sessionId", "").strip()
     if not session_id:
         return {"error": "sessionId is required"}, 400
-
     try:
         table.update_item(
             Key={"session_id": session_id},
@@ -60,28 +59,84 @@ def cancel_optimization() -> Dict[str, Any]:
 
 @app.get("/state")
 def get_state() -> Dict[str, Any]:
-    """Retrieve optimization state for a session. Returns raw DynamoDB item."""
     session_id = app.current_event.get_query_string_value("sessionId", "").strip()
     if not session_id:
         return {"error": "sessionId query parameter is required"}, 400
-
     try:
         resp = table.get_item(Key={"session_id": session_id})
         item = resp.get("Item")
         if not item:
             return {"error": "Session not found"}, 404
-        # Return raw item — frontend should handle unknown/missing fields.
-        # Convert Decimal to float/int for JSON serialization.
         return {"state": _serialize(item)}
     except Exception as e:
         logger.exception("Failed to get optimization state")
         return {"error": str(e)}, 500
 
 
-def _serialize(obj):
-    """Convert DynamoDB Decimals to Python numbers for JSON."""
-    import decimal
+@app.get("/stream")
+def get_stream() -> Dict[str, Any]:
+    """Return agent event stream lines from S3 JSONL, starting at byte offset."""
+    session_id = app.current_event.get_query_string_value("sessionId", "").strip()
+    if not session_id:
+        return {"error": "sessionId query parameter is required"}, 400
+    if not STREAM_BUCKET:
+        return {"error": "Stream bucket not configured"}, 500
 
+    offset = int(app.current_event.get_query_string_value("offset", "0") or "0")
+    s3_key = f"autotune-streams/{session_id}/stream.jsonl"
+
+    try:
+        range_header = f"bytes={offset}-" if offset > 0 else None
+        kwargs = {"Bucket": STREAM_BUCKET, "Key": s3_key}
+        if range_header:
+            kwargs["Range"] = range_header
+
+        resp = s3.get_object(**kwargs)
+        body = resp["Body"].read()
+        content_length = resp.get("ContentLength", len(body))
+
+        lines = body.decode("utf-8", errors="replace").rstrip("\n").split("\n") if body else []
+        # Filter empty lines
+        lines = [l for l in lines if l.strip()]
+
+        next_offset = offset + len(body)
+        return {"lines": lines, "nextOffset": next_offset, "totalBytes": next_offset}
+    except s3.exceptions.NoSuchKey:
+        return {"lines": [], "nextOffset": offset, "totalBytes": 0}
+    except Exception as e:
+        error_code = getattr(e, "response", {}).get("Error", {}).get("Code", "")
+        if error_code == "NoSuchKey":
+            return {"lines": [], "nextOffset": offset, "totalBytes": 0}
+        if error_code == "InvalidRange":
+            return {"lines": [], "nextOffset": offset, "totalBytes": offset}
+        logger.exception("Failed to get stream")
+        return {"error": str(e)}, 500
+
+
+@app.get("/log")
+def get_log() -> Dict[str, Any]:
+    """Return OPTIMIZATION-LOG.md content from S3."""
+    session_id = app.current_event.get_query_string_value("sessionId", "").strip()
+    if not session_id:
+        return {"error": "sessionId query parameter is required"}, 400
+    if not STREAM_BUCKET:
+        return {"error": "Stream bucket not configured"}, 500
+
+    s3_key = f"autotune-streams/{session_id}/OPTIMIZATION-LOG.md"
+    try:
+        resp = s3.get_object(Bucket=STREAM_BUCKET, Key=s3_key)
+        content = resp["Body"].read().decode("utf-8", errors="replace")
+        return {"content": content}
+    except Exception as e:
+        error_code = getattr(e, "response", {}).get("Error", {}).get("Code", "")
+        if error_code == "NoSuchKey":
+            return {"content": ""}
+        logger.exception("Failed to get optimization log")
+        return {"error": str(e)}, 500
+
+
+def _serialize(obj):
+    import decimal
     if isinstance(obj, dict):
         return {k: _serialize(v) for k, v in obj.items()}
     if isinstance(obj, list):

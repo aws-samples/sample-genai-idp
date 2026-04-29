@@ -14,4 +14,4 @@ autotune:
   # The IDP Accelerator stack that this agent optimizes configs for.
   idp_stack_name: kaleko-IDPAutoTune-dev
   # Bedrock model ID for the optimization agent.
-  model_id: us.anthropic.claude-sonnet-4-20250514-v1:0
+  model_id: us.anthropic.claude-opus-4-6-v1

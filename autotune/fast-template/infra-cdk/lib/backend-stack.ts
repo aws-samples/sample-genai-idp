@@ -43,6 +43,8 @@ export class BackendStack extends cdk.NestedStack {
   private agentRuntime: agentcore.Runtime
   private optimizationStateTableName: string
   private optimizationStateTableArn: string
+  private streamBucketName: string
+  private streamBucketArn: string
 
   constructor(scope: Construct, id: string, props: BackendStackProps) {
     super(scope, id, props)
@@ -81,6 +83,9 @@ export class BackendStack extends cdk.NestedStack {
     // Create AutoTune optimization state table (control plane for autonomous agent)
     // Must be created before the runtime so the table name env var is available.
     this.createOptimizationStateTable(props.config)
+
+    // Create AutoTune stream bucket (agent writes stream.jsonl + OPTIMIZATION-LOG.md here)
+    this.createStreamBucket(props.config)
 
     // Create AgentCore Gateway (before Runtime)
     this.createAgentCoreGateway(props.config)
@@ -501,6 +506,16 @@ export class BackendStack extends cdk.NestedStack {
       })
     )
 
+    // AutoTune: Write access to the stream bucket for agent event stream + optimization log.
+    agentRole.addToPolicy(
+      new iam.PolicyStatement({
+        sid: "StreamBucketWriteAccess",
+        effect: iam.Effect.ALLOW,
+        actions: ["s3:PutObject"],
+        resources: [`${this.streamBucketArn}/autotune-streams/*`],
+      })
+    )
+
     // Environment variables for the runtime
     const envVars: { [key: string]: string } = {
       AWS_REGION: stack.region,
@@ -508,11 +523,13 @@ export class BackendStack extends cdk.NestedStack {
       STACK_NAME: config.stack_name_base,
       GATEWAY_CREDENTIAL_PROVIDER_NAME: `${config.stack_name_base}-runtime-gateway-auth`, // Used by @requires_access_token decorator to look up the correct provider
       // AutoTune: The IDP Accelerator stack that this agent optimizes.
-      IDP_STACK_NAME: config.autotune?.idp_stack_name || "",
+      IDP_STACK_NAME: config.autotune!.idp_stack_name,
       // AutoTune: DynamoDB table for optimization state (control plane).
       AUTOTUNE_STATE_TABLE: this.optimizationStateTableName,
       // AutoTune: Bedrock model ID for the optimization agent.
-      AUTOTUNE_MODEL_ID: config.autotune?.model_id || "",
+      AUTOTUNE_MODEL_ID: config.autotune!.model_id,
+      // AutoTune: S3 bucket for agent stream data (stream.jsonl + OPTIMIZATION-LOG.md).
+      AUTOTUNE_STREAM_BUCKET: this.streamBucketName,
       // AgentCore Memory env vars removed (MEMORY_ID, USE_LONG_TERM_MEMORY, LTM_TOP_K,
       // LTM_RELEVANCE_SCORE). Agent uses FileSessionManager on /mnt/workspace instead.
       // Re-add MEMORY_ID here if re-enabling AgentCore Memory for LTM.
@@ -657,6 +674,26 @@ export class BackendStack extends cdk.NestedStack {
     this.optimizationStateTableArn = table.tableArn
   }
 
+  // Creates an S3 bucket for agent stream data (stream.jsonl + OPTIMIZATION-LOG.md).
+  // The agent runtime writes to this bucket; the Lambda reads from it for /stream and /log endpoints.
+  private createStreamBucket(config: AppConfig): void {
+    const bucket = new s3.Bucket(this, "StreamBucket", {
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+      autoDeleteObjects: true,
+      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
+      encryption: s3.BucketEncryption.S3_MANAGED,
+      lifecycleRules: [{ expiration: cdk.Duration.days(30), prefix: "autotune-streams/" }],
+    })
+
+    new cdk.CfnOutput(this, "AutoTuneStreamBucketName", {
+      description: "S3 bucket for AutoTune agent stream data",
+      value: bucket.bucketName,
+    })
+
+    this.streamBucketName = bucket.bucketName
+    this.streamBucketArn = bucket.bucketArn
+  }
+
   // Creates a DynamoDB table for storing user feedback.
   /**
    * Creates an API Gateway with Lambda integration for optimization state.
@@ -677,6 +714,7 @@ export class BackendStack extends cdk.NestedStack {
       handler: "handler",
       environment: {
         TABLE_NAME: this.optimizationStateTableName,
+        STREAM_BUCKET: this.streamBucketName,
         CORS_ALLOWED_ORIGINS: `${frontendUrl},http://localhost:3000`,
       },
       timeout: cdk.Duration.seconds(10),
@@ -701,6 +739,14 @@ export class BackendStack extends cdk.NestedStack {
       new iam.PolicyStatement({
         actions: ["dynamodb:GetItem", "dynamodb:UpdateItem"],
         resources: [this.optimizationStateTableArn],
+      })
+    )
+
+    // Stream and log endpoints need S3 read access
+    stateLambda.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ["s3:GetObject"],
+        resources: [`${this.streamBucketArn}/autotune-streams/*`],
       })
     )
 
@@ -732,6 +778,8 @@ export class BackendStack extends cdk.NestedStack {
 
     api.root.addResource("cancel").addMethod("POST", lambdaIntegration, authOptions)
     api.root.addResource("state").addMethod("GET", lambdaIntegration, authOptions)
+    api.root.addResource("stream").addMethod("GET", lambdaIntegration, authOptions)
+    api.root.addResource("log").addMethod("GET", lambdaIntegration, authOptions)
 
     this.optimizationStateApiUrl = api.url
 

@@ -30,7 +30,7 @@ export interface AutotuneConfig {
   /** The IDP Accelerator stack that this agent optimizes configs for. Must be in the same region. */
   idp_stack_name: string
   /** Bedrock model ID for the optimization agent. */
-  model_id?: string
+  model_id: string
 }
 
 export interface AppConfig {
