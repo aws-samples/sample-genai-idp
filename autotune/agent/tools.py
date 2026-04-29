@@ -338,6 +338,21 @@ def list_evaluations(time_period_hours: int = 168) -> str:
 
 
 @tool
+def check_evaluation_status(test_run_id: str) -> str:
+    """Check the status of a single evaluation run by its ID.
+
+    Args:
+        test_run_id: The test run ID (e.g. 'RealKIE-FCC-Verified-20260429-174653').
+
+    Returns:
+        JSON with status, filesCount, completedFiles, failedFiles, progress.
+    """
+    client = _get_client()
+    result = client.check_evaluation_status(test_run_id)
+    return json.dumps(result, indent=2, default=str)
+
+
+@tool
 def download_evaluation_results(batch_id: str, output_dir: str) -> str:
     """Download individual evaluation files for a completed run.
 
@@ -623,6 +638,7 @@ ALL_TOOLS = [
     get_evaluation_summary,
     compare_evaluations,
     list_evaluations,
+    check_evaluation_status,
     download_evaluation_results,
     run_inference,
     download_results,

@@ -256,7 +256,6 @@ class IDPACClient:
         test_set_id: str,
         context: str,
         config_version: str,
-        monitor: bool = True,
     ) -> dict:
         """Launch evaluation job on a test set.
 
@@ -264,20 +263,20 @@ class IDPACClient:
             test_set_id: Test set ID (not name)
             context: Description of the run
             config_version: Configuration version to use (e.g., 'v1', 'Production').
-            monitor: Monitor until completion
 
         Returns:
             Dict with batch_id, status, files_count, completed, failed,
             success_rate, duration info, and full output
         """
+        # TODO: Re-enable --monitor once IDP CLI fixes the race condition where
+        # batch metadata hasn't propagated to DynamoDB when monitoring starts.
+        # Currently errors with "Batch not found" immediately after queuing.
         args = [
             "process",
             "--test-set", test_set_id,
             "--context", context,
             "--config-version", config_version,
         ]
-        if monitor:
-            args.append("--monitor")
 
         result = self._run_idp_cli(args)
 
@@ -311,6 +310,12 @@ class IDPACClient:
         """
         return self._invoke_test_results_lambda(
             "getTestRuns", {"timePeriodHours": time_period_hours}
+        )
+
+    def check_evaluation_status(self, test_run_id: str) -> dict:
+        """Check status of a single evaluation run."""
+        return self._invoke_test_results_lambda(
+            "getTestRunStatus", {"testRunId": test_run_id}
         )
 
     def get_evaluation_summary(
