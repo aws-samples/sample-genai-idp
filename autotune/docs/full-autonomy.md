@@ -117,10 +117,12 @@ Two Strands hooks drive autonomous operation. Both receive an `OptimizationState
 ### CancelCheckHook (BeforeToolCallEvent)
 
 Runs before every tool call. Reads `status` from DynamoDB. If `status == "cancelled"`:
-- Sets `event.cancel_tool = "Optimization cancelled by user"` (prevents the tool from executing)
-- Updates phase to "cancelled"
+- Raises `OptimizationCancelled` exception, which immediately halts the agent
+- Updates phase to "cancelled" before raising
 
-**Why check before every tool call:** The agent may be in the middle of a long reasoning chain. Checking before each tool call is the earliest safe point to interrupt — the agent sees the cancellation message and can write a summary before exiting.
+The exception propagates up through `agent.stream_async()` and is caught by the background thread in `basic_agent.py`, which does a final S3 sync of the stream and log files.
+
+**Why raise instead of `cancel_tool`:** The original implementation used `event.cancel_tool`, which only cancels the individual tool call. The agent interpreted this as "tool failed" and kept retrying indefinitely. Raising an exception is the only reliable way to stop the agent mid-invocation.
 
 **Cost of DynamoDB reads:** One `GetItem` per tool call. At ~20 tool calls per iteration and 10 iterations, that's ~200 reads per optimization run. At $0.25 per million reads, this is negligible.
 
@@ -163,18 +165,20 @@ DynamoDB cancel flag, checked before every tool call.
 
 ## Optimization State API
 
-REST API (API Gateway + Lambda) replacing the old feedback API:
+REST API (API Gateway + Lambda) for optimization control and monitoring:
 
-| Endpoint | Method | Body | Response |
-|----------|--------|------|----------|
-| `/cancel` | POST | `{ "sessionId": "..." }` | `{ "status": "cancelled" }` |
-| `/state` | GET | Query param `sessionId` | Raw DynamoDB item |
+| Endpoint | Method | Params | Response |
+|----------|--------|--------|----------|
+| `/cancel` | POST | Body: `{ "sessionId": "..." }` | `{ "status": "cancelled" }` |
+| `/state` | GET | Query: `sessionId` | Raw DynamoDB item |
+| `/stream` | GET | Query: `sessionId`, `offset` (byte offset) | `{ "lines": [...], "nextOffset": N }` |
+| `/log` | GET | Query: `sessionId` | `{ "content": "..." }` (OPTIMIZATION-LOG.md) |
 
-Both endpoints require Cognito JWT authentication. The Lambda reads/writes the same DynamoDB table as the agent.
+All endpoints require Cognito JWT authentication. A single Lambda handles all four routes, reading from DynamoDB (`/state`, `/cancel`) and the dedicated S3 stream bucket (`/stream`, `/log`).
 
-**Why a Lambda instead of API Gateway → DynamoDB direct integration:** Simpler to implement and debug. The Lambda is ~50 lines of Python. Direct integration would require VTL templates for request/response mapping, which are harder to maintain.
+**`/stream` pagination:** The frontend tracks a byte offset. Each poll sends `offset=N`, the Lambda reads the JSONL file from that byte position, returns new lines and `nextOffset`. This avoids re-reading the entire file on each poll.
 
-**CDK output:** `OptimizationStateApiUrl` (renamed from the old `FeedbackApiUrl` through the full chain: CDK output → deploy-frontend.py → aws-exports.json → frontend config).
+**S3 stream bucket:** A dedicated bucket (`StreamBucket`) with 30-day lifecycle expiration on the `autotune-streams/` prefix. Separate from the Amplify staging bucket to avoid mixing concerns. The agent runtime has `s3:PutObject` and the Lambda has `s3:GetObject` on this bucket.
 
 ## Agent Tools for State Updates
 
@@ -197,10 +201,10 @@ autotune:
   idp_stack_name: "IDP"
 
   # Bedrock model ID for the optimization agent.
-  model_id: "us.anthropic.claude-sonnet-4-20250514-v1:0"
+  model_id: "us.anthropic.claude-opus-4-6-v1"
 ```
 
-These are wired to env vars `IDP_STACK_NAME` and `AUTOTUNE_MODEL_ID` in the AgentCore runtime container.
+These are wired to env vars `IDP_STACK_NAME`, `AUTOTUNE_MODEL_ID`, and `AUTOTUNE_STREAM_BUCKET` in the AgentCore runtime container. Both `idp_stack_name` and `model_id` are required — CDK synth will fail if either is missing.
 
 **Same-region requirement:** The IDP stack must be in the same AWS region as the AutoTune FAST stack. This is a documented requirement, not enforced programmatically. The agent uses IDP CLI tools that read CloudFormation outputs and S3 buckets, which are region-scoped.
 
@@ -209,28 +213,34 @@ These are wired to env vars `IDP_STACK_NAME` and `AUTOTUNE_MODEL_ID` in the Agen
 | Feature | Status | Rationale |
 |---------|--------|-----------|
 | SummarizingConversationManager | Deferred | Monitor context usage first; add when overflow is observed |
-| Watchdog timeout | Deferred | Rely on AgentCore session timeout for v1 |
+| Watchdog timeout | Deferred | Rely on AgentCore session timeout (2h idle, 8h max) for v1 |
 | Tool limits (LimitToolCounts) | Deferred | Doesn't exist in strands-agents 1.37.0; max iterations + cancel are sufficient |
 | Programmatic tool retry | Deferred | Rely on model's natural retry behavior for v1 |
 | Doom loop detection | Deferred | Agent tracks via OPTIMIZATION-LOG.md; programmatic detection is a refinement |
 | Accuracy plateau detection | Partial | Hook has the structure but relies on agent judgment for v1 |
-| Frontend progress polling | Not started | API exists (`GET /state`), frontend UI not built |
 | Test set ID dropdown | Not started | Currently a text input; needs API endpoint to list test sets from IDP stack |
 | Run history from DynamoDB | Not started | Sidebar currently uses localStorage; should query OptimizationState table |
+| Resume interrupted runs | Not started | AgentCore supports resume with same runtimeSessionId; needs UI button + re-init logic |
 | Network isolation | Not started | Agent container needs VPC with no internet egress (see agent-security.md) |
 | Resource ARN scoping | Not started | IAM Allow policies use `resources: "*"`; should scope to IDP stack resources |
+| WebSocket streaming | Future | `InvokeAgentRuntimeWithWebSocketStream` via `/ws` on port 8080 bypasses SSE proxy; add once fire-and-forget is stable |
 
 ## What Was Built
 
 | Feature | Description |
 |---------|-------------|
+| Fire-and-forget entrypoint | Agent runs in background thread, entrypoint returns immediately. Survives SSE proxy timeout. |
+| S3 stream + log sync | Consolidated JSONL stream + OPTIMIZATION-LOG.md synced to dedicated S3 bucket every 10s/30s |
+| Stream/log polling API | `GET /stream` (JSONL with offset pagination) and `GET /log` (markdown content) endpoints |
+| Idle session timeout | `idleRuntimeSessionTimeout: 7200` (2 hours) via CloudFormation LifecycleConfiguration |
+| Resilient ping handler | Checks background thread liveness, not generator state. Survives SSE cancellation. |
+| DynamoDB heartbeat | Background thread updates `last_heartbeat_at` every 30s for frontend stale detection |
+| Cancel via exception | `OptimizationCancelled` exception immediately halts agent (replaces broken `cancel_tool` approach) |
 | Prompt (6.5) | Rewritten for autonomous, ground-truth-only operation. No-GT workflow removed. |
 | Auto state updates in tools | Key tools (`run_evaluation`, `upload_config`, etc.) auto-update DynamoDB phase via `_auto_update_state()` |
 | IAM hardening | Explicit Deny policy for destructive actions; read/write split; `s3:DeleteObject` removed (see agent-security.md) |
-| Frontend | Test set ID input (required), optimization guidance (optional), cancel button, state polling display, renamed for optimization runs |
-| State polling display | Frontend polls `GET /state` every 2s, shows color-coded status, phase, phase_detail, iteration, updated_at |
+| Frontend | Polling-based UI with Agent Stream tab (consolidated events + timestamps) and Optimization Log tab. Status bar, cancel button, stale detection. |
 | HookProvider fix | Hooks converted from `__call__` to `HookProvider.register_hooks()` — Strands can't infer event types from class instances |
-| OPTIMIZATION-LOG-TEMPLATE.md | Deleted; replaced by f-string in `basic_agent.py._create_optimization_log()` |
 
 ## First Test Run (2026-04-28)
 
@@ -262,7 +272,7 @@ When the SSE stream is severed, AgentCore cancels the async generator (`Cancelle
 Instead of fighting the SSE timeout, we decouple the agent from the HTTP connection entirely:
 
 1. **Entrypoint** returns immediately after starting the agent in a background thread
-2. **Agent** runs autonomously, writing its full event stream to a JSONL file and syncing to S3
+2. **Agent** runs autonomously, writing consolidated events to a JSONL file and syncing to a dedicated S3 stream bucket periodically
 3. **Frontend** polls three independent data sources:
    - `GET /state` (DynamoDB) — status, phase, iteration, accuracy (every 2s)
    - `GET /stream` (S3 JSONL) — full agent thought process with offset pagination (every 3-5s)
@@ -271,6 +281,24 @@ Instead of fighting the SSE timeout, we decouple the agent from the HTTP connect
 5. **DynamoDB heartbeat** runs in the background thread alongside the agent, updating `last_heartbeat_at` every 30s for stale detection
 
 This gives full visibility into the agent's work without any dependency on a persistent HTTP connection. See dev plan Phase 6.9 for detailed implementation spec.
+
+### Stream Consolidation
+
+The backend consolidates raw Strands streaming events before writing to JSONL. Instead of dumping every text delta and tool input chunk (which produced ~58MB for a single run), it accumulates text and tool inputs and writes one clean line per meaningful event:
+
+- `{"type": "text", "content": "...", "ts": "HH:MM:SS"}` — consolidated text block
+- `{"type": "tool_use", "toolUseId": "...", "name": "...", "input": "...", "ts": "HH:MM:SS"}` — one line per tool call
+- `{"type": "tool_result", "toolUseId": "...", "result": "...", "ts": "HH:MM:SS"}` — tool result (truncated to 2KB)
+
+### Three Layers of Session Protection
+
+The agent uses belt-and-suspenders to prevent AgentCore from killing the session:
+
+1. **`idleRuntimeSessionTimeout: 7200`** (2 hours) — configured via CloudFormation `LifecycleConfiguration` on the runtime. Prevents the platform from suspending the VM for idle even if `/ping` is not working correctly. Default was 15 minutes, which was too short for optimization runs with long tool calls. Set via L1 escape hatch (`addPropertyOverride`) due to a known CDK bug (aws-cdk#36376) where omitting the property sets it to 60s instead of the service default.
+
+2. **`/ping` returning `HEALTHY_BUSY`** — the ping handler checks `_active_sessions` (a dict of background threads). If any thread is alive, returns `HEALTHY_BUSY`. This tells AgentCore the container is actively working. Unlike the old generator-based approach, this survives SSE stream cancellation because it's tied to thread liveness, not generator state.
+
+3. **DynamoDB `last_heartbeat_at`** — updated every 30s by the background thread. This is NOT for AgentCore — it's for the frontend. If `status` is "running" but `last_heartbeat_at` is >2 minutes old, the UI shows "POSSIBLY STALLED" in yellow. This detects cases where the background thread itself has crashed.
 
 ## File Map
 
@@ -284,8 +312,8 @@ This gives full visibility into the agent's work without any dependency on a per
 | Security doc | `docs/agent-security.md` | IAM policies, threat model, FAQ |
 | CDK backend | `fast-template/infra-cdk/lib/backend-stack.ts` | DynamoDB table, state API, IAM policies, runtime env vars |
 | CDK main | `fast-template/infra-cdk/lib/fast-main-stack.ts` | Stack outputs including `OptimizationStateApiUrl` |
-| State API Lambda | `fast-template/infra-cdk/lambdas/feedback/index.py` | Cancel + get-state endpoints |
-| Frontend | `fast-template/frontend/src/components/chat/ChatInterface.tsx` | Test set ID input, cancel button, optimization guidance |
+| State API Lambda | `fast-template/infra-cdk/lambdas/feedback/index.py` | Cancel, get-state, get-stream, get-log endpoints |
+| Frontend | `fast-template/frontend/src/components/chat/ChatInterface.tsx` | Polling-based UI with stream/log tabs, cancel button |
 | Deploy script | `fast-template/scripts/deploy-frontend.py` | Generates aws-exports.json with `optimizationStateApiUrl` |
 | Config | `fast-template/infra-cdk/config.yaml` | `autotune` section with `idp_stack_name`, `model_id` |
 | Dockerfile | `fast-template/patterns/strands-single-agent/Dockerfile` | Container build, copies state.py/hooks.py as optimization_state.py/optimization_hooks.py |
