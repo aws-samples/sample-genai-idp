@@ -1,13 +1,13 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: MIT-0
 
-import boto3
 import json
 import logging
 import traceback
 from datetime import datetime
-from typing import Dict, Any, List, Optional
-from idp_common.utils.settings_helper import get_setting
+from typing import Any, Dict, List, Optional
+
+import boto3
 
 # Configure detailed logging
 logger = logging.getLogger()
@@ -15,6 +15,31 @@ logger.setLevel(logging.INFO)
 
 # Create boto3 client with logging
 stepfunctions = boto3.client('stepfunctions')
+
+# --- inline log sanitizer ---------------------------------------------------
+# Minimal inline redactor. Kept here rather than importing from idp_common to
+# avoid adding a Lambda Layer dependency to this resolver. If this file grows
+# to need idp_common anyway, promote to
+# `from idp_common.utils.log_sanitizer import sanitize_event_for_logging`.
+_LOG_SENSITIVE_KEYS = (
+    "password", "secret", "token", "authorization", "apikey", "api_key",
+    "cookie", "credential", "claims", "identity",
+)
+
+
+def _sanitize_for_log(obj):
+    """Deep-copy `obj` redacting values whose keys match the denylist."""
+    if isinstance(obj, dict):
+        out = {}
+        for k, v in obj.items():
+            if isinstance(k, str) and any(s in k.lower() for s in _LOG_SENSITIVE_KEYS):
+                out[k] = "***REDACTED***" if v is not None else None
+            else:
+                out[k] = _sanitize_for_log(v)
+        return out
+    if isinstance(obj, list):
+        return [_sanitize_for_log(v) for v in obj]
+    return obj
 
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """
@@ -29,7 +54,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """
     try:
         # Log incoming request
-        logger.info(f"Received request: {json.dumps(event)}")
+        logger.info(f"Received request: {json.dumps(_sanitize_for_log(event))}")
         
         execution_arn = event['arguments']['executionArn']
         logger.info(f"Getting execution details for: {execution_arn}")

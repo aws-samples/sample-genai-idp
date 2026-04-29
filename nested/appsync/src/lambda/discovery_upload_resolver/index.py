@@ -4,12 +4,14 @@
 # src/lambda/discovery_upload_resolver/index.py
 
 import json
-import os
-import boto3
 import logging
+import os
 import uuid
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
+
+import boto3
 from botocore.config import Config
+from idp_common.utils.log_sanitizer import sanitize_event_for_logging
 
 logger = logging.getLogger()
 logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
@@ -34,7 +36,7 @@ def handler(event, context):
     - startMultiDocDiscovery: Start multi-document discovery pipeline
     - uploadMultiDocDiscoveryZip: Upload zip file for multi-doc discovery
     """
-    logger.info(f"Received event: {json.dumps(event)}")
+    logger.info(f"Received event: {json.dumps(sanitize_event_for_logging(event))}")
 
     # Route based on which GraphQL field is being resolved
     field_name = event.get('info', {}).get('fieldName', 'uploadDiscoveryDocument')

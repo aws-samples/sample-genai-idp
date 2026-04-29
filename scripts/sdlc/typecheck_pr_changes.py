@@ -162,7 +162,7 @@ def main() -> int:
     for f in files:
         print(f"  • {f}")
 
-    print(f"\n🔬 Running type checks on changed files...\n")
+    print("\n🔬 Running type checks on changed files...\n")
 
     temp_config = create_temp_config(files)
 

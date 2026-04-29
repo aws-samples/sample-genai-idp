@@ -18,6 +18,7 @@ from textwrap import dedent
 
 import boto3
 
+
 def run_command(cmd, check=True, timeout=None):
     """Run shell command and return result
 
@@ -279,7 +280,7 @@ def cleanup_iam_resources(stack_name):
 
 def test_step3_default_config(stack_name):
     """Step 3: Test with default config (Pipeline mode)"""
-    print(f"Step 3: Testing with default config (Pipeline mode)...")
+    print("Step 3: Testing with default config (Pipeline mode)...")
     batch_id = "test-default"
     sample_file = "lending_package.pdf"
     verify_string = "ANYTOWN, USA 12345"
@@ -322,7 +323,7 @@ def test_step3_default_config(stack_name):
 
 def test_step4_bda_mode(stack_name):
     """Step 4: Upload and test BDA config (sync without activation for parallel execution)"""
-    print(f"Step 4: Testing with BDA mode...")
+    print("Step 4: Testing with BDA mode...")
     config_version = "test-bda"
     config_path = "config_library/unified/lending-package-sample/config.yaml"
 
@@ -336,14 +337,14 @@ def test_step4_bda_mode(stack_name):
         bda_config_path = tmp.name
 
     try:
-        print(f"Uploading BDA config (use_bda: true)")
+        print("Uploading BDA config (use_bda: true)")
         cmd = f"idp-cli config-upload --stack-name {stack_name} --config-file {bda_config_path} --config-version {config_version}"
         run_command(cmd)
 
-        print(f"Syncing BDA config to create blueprints (without activation)")
+        print("Syncing BDA config to create blueprints (without activation)")
         cmd = f"idp-cli config-sync-bda --stack-name {stack_name} --config-version {config_version}"
         run_command(cmd)
-        print(f"✅ BDA config synced (will use --config-version for inference)")
+        print("✅ BDA config synced (will use --config-version for inference)")
 
         batch_id = "test-bda"
         sample_file = "lending_package.pdf"
@@ -378,7 +379,7 @@ def test_step4_bda_mode(stack_name):
 
 def test_step5_rule_validation(stack_name):
     """Step 5: Test rule validation"""
-    print(f"Step 5: Testing rule validation...")
+    print("Step 5: Testing rule validation...")
     config_version = "rule-validation"
     config_path = "config_library/unified/rule-validation/config.yaml"
     sample_file = "Prior-Auth-12345678.pdf"
@@ -424,13 +425,13 @@ def test_step5_rule_validation(stack_name):
 
 def test_step6_multi_document(stack_name):
     """Step 6: Test multi-document batch processing"""
-    print(f"Step 6: Testing multi-document batch processing...")
+    print("Step 6: Testing multi-document batch processing...")
     batch_id = "test-multi-batch"
     sample_dir = "samples/w2"
     file_pattern = "W2_XL_input_clean_100[0-2].pdf"
 
     try:
-        print(f"Processing 3 W-2 documents in parallel...")
+        print("Processing 3 W-2 documents in parallel...")
         cmd = f"idp-cli run-inference --stack-name {stack_name} --dir {sample_dir} --file-pattern '{file_pattern}' --batch-id {batch_id} --monitor"
         run_command(cmd)
 
@@ -438,7 +439,7 @@ def test_step6_multi_document(stack_name):
         cmd = f"idp-cli download-results --stack-name {stack_name} --batch-id {batch_id} --output-dir {result_dir}"
         run_command(cmd)
 
-        print(f"Verifying all documents processed successfully...")
+        print("Verifying all documents processed successfully...")
         cmd = f"find {result_dir} -path '*/sections/*/result.json' | wc -l"
         result = run_command(cmd, check=False)
         extraction_count = int(result.stdout.strip())
@@ -457,7 +458,7 @@ def test_step6_multi_document(stack_name):
 
 def test_step7_test_studio(stack_name):
     """Step 7: Test Studio - Run evaluation against pre-deployed test set using idp-cli test-result"""
-    print(f"Step 7: Testing Test Studio with pre-deployed test set...")
+    print("Step 7: Testing Test Studio with pre-deployed test set...")
 
     try:
         cf_client = boto3.client('cloudformation')
@@ -471,7 +472,7 @@ def test_step7_test_studio(stack_name):
                 break
 
         if not test_set_bucket:
-            print(f"⚠️  S3TestSetBucketName not found in stack outputs, skipping Test Studio test")
+            print("⚠️  S3TestSetBucketName not found in stack outputs, skipping Test Studio test")
             return {"success": True}
 
         s3_client = boto3.client('s3')
@@ -501,7 +502,7 @@ def test_step7_test_studio(stack_name):
             result = run_command(cmd, check=False)
 
             if result.returncode != 0:
-                print(f"⚠️  Test set processing failed")
+                print("⚠️  Test set processing failed")
                 return {"success": False, "error": f"Test Studio test failed for {test_set_name}"}
 
             # Extract test run ID from output
@@ -512,19 +513,19 @@ def test_step7_test_studio(stack_name):
                     break
 
             if not test_run_id:
-                print(f"⚠️  Could not extract test run ID from output, skipping result verification")
+                print("⚠️  Could not extract test run ID from output, skipping result verification")
                 return {"success": True}
 
             print(f"Test run ID: {test_run_id}")
-            print(f"Retrieving test results using idp-cli test-result...")
+            print("Retrieving test results using idp-cli test-result...")
 
             # Use idp-cli test-result command to get results (triggers evaluation and waits)
             cmd = f"idp-cli test-result --stack-name {stack_name} --test-run-id {test_run_id} --wait --timeout 600"
             result = run_command(cmd, check=False)
 
             if result.returncode != 0:
-                print(f"❌ Test result retrieval failed")
-                return {"success": False, "error": f"Test Studio test result retrieval failed"}
+                print("❌ Test result retrieval failed")
+                return {"success": False, "error": "Test Studio test result retrieval failed"}
 
             # Parse output for accuracy check
             overall_accuracy = None
@@ -547,7 +548,7 @@ def test_step7_test_studio(stack_name):
                     print(f"⚠️  Low accuracy detected: {overall_accuracy:.2%} (threshold: 30%)")
                 return {"success": True}
             else:
-                print(f"⚠️  Could not parse accuracy from output, but test completed")
+                print("⚠️  Could not parse accuracy from output, but test completed")
                 return {"success": True}
 
         except Exception as e:
@@ -562,19 +563,19 @@ def test_step7_test_studio(stack_name):
 
 def test_step8_agentic_extraction(stack_name):
     """Step 8: Test agentic extraction with large table"""
-    print(f"Step 8: Testing agentic extraction with Nuveen (532 fund items)...")
+    print("Step 8: Testing agentic extraction with Nuveen (532 fund items)...")
 
     try:
-        print(f"Uploading nuveen.yaml configuration...")
+        print("Uploading nuveen.yaml configuration...")
         cmd = f"idp-cli config-upload --stack-name {stack_name} --config-file scripts/sdlc/config/nuveen.yaml --config-version agentic-nuveen --no-validate"
         run_command(cmd, check=False)
 
-        print(f"Running agentic extraction on samples/Nuveen.pdf (this will take ~9 minutes)...")
+        print("Running agentic extraction on samples/Nuveen.pdf (this will take ~9 minutes)...")
         cmd = f"idp-cli run-inference --stack-name {stack_name} --dir samples/ --file-pattern Nuveen.pdf --config-version agentic-nuveen --monitor"
         result = run_command(cmd, check=False)
 
         if result.returncode != 0:
-            print(f"❌ Agentic extraction command failed")
+            print("❌ Agentic extraction command failed")
             return {"success": False, "error": "Agentic extraction command failed"}
 
         batch_id = None
@@ -608,16 +609,16 @@ def test_step8_agentic_extraction(stack_name):
                 fund_count = len(fund_info)
                 if fund_count == 532:
                     print(f"  ✓ FundInformation count correct: {fund_count} items")
-                    print(f"✅ Agentic extraction test completed successfully")
+                    print("✅ Agentic extraction test completed successfully")
                     return {"success": True}
                 else:
                     print(f"❌ FundInformation count mismatch: expected 532, got {fund_count}")
                     return {"success": False, "error": f"Agentic extraction test failed: expected 532 fund items, got {fund_count}"}
             else:
-                print(f"❌ Result file not found")
+                print("❌ Result file not found")
                 return {"success": False, "error": "Agentic extraction test failed: result file not found"}
         else:
-            print(f"❌ Could not extract batch ID from output")
+            print("❌ Could not extract batch ID from output")
             return {"success": False, "error": "Agentic extraction test failed: could not extract batch ID"}
 
     except Exception as e:
@@ -627,21 +628,21 @@ def test_step8_agentic_extraction(stack_name):
 
 def test_step9_single_doc_discovery(stack_name):
     """Step 9: Test single-document discovery"""
-    print(f"Step 9: Testing single-document discovery...")
+    print("Step 9: Testing single-document discovery...")
 
     try:
         sample_file = "samples/insurance_package_single.pdf"
         config_version = "test-discovery"
         print(f"Running discovery on {sample_file}...")
         print(f"Saving to config version: {config_version}")
-        print(f"This will take approximately 3-5 minutes...")
+        print("This will take approximately 3-5 minutes...")
 
         cmd = f"idp-cli discover --stack-name {stack_name} -d {sample_file} --config-version {config_version}"
         result = run_command(cmd, check=True, timeout=300)
 
-        print(f"Verifying discovered class saved to configuration...")
+        print("Verifying discovered class saved to configuration...")
 
-        config_file = f"/tmp/discovery-config.yaml"  # nosec B108
+        config_file = "/tmp/discovery-config.yaml"  # nosec B108
         cmd = f"idp-cli config-download --stack-name {stack_name} --config-version {config_version} --output {config_file}"
         run_command(cmd, check=True)
 
@@ -669,7 +670,7 @@ def test_step9_single_doc_discovery(stack_name):
 
 def test_step10_multi_doc_discovery(stack_name):
     """Step 10: Test multi-document discovery"""
-    print(f"Step 10: Testing multi-document discovery...")
+    print("Step 10: Testing multi-document discovery...")
 
     try:
         test_dir = "/tmp/multidoc-test"  # nosec B108
@@ -701,7 +702,7 @@ def test_step10_multi_doc_discovery(stack_name):
             raise RuntimeError(f"Expected {len(sample_files)} files but found {copied_files}")
 
         print(f"Running multi-document discovery on {test_dir}...")
-        print(f"This will take approximately 2-3 minutes...")
+        print("This will take approximately 2-3 minutes...")
 
         cmd = f"idp-cli discover-multidoc --dir {test_dir} -o /tmp/multidoc-schemas"
         run_command(cmd, check=True, timeout=240)
@@ -711,7 +712,7 @@ def test_step10_multi_doc_discovery(stack_name):
         schema_count = int(count_result.stdout.strip()) if count_result.stdout.strip() else 0
 
         if schema_count == 0:
-            print(f"❌ Multi-document discovery completed but no schemas found")
+            print("❌ Multi-document discovery completed but no schemas found")
             return {"success": False, "error": "Multi-document discovery test failed: no schemas generated"}
 
         print(f"  ✓ Generated {schema_count} schema(s)")
@@ -719,18 +720,18 @@ def test_step10_multi_doc_discovery(stack_name):
         cmd = "find /tmp/multidoc-schemas -name '*.json' | head -1"
         first_schema = run_command(cmd, check=True).stdout.strip()
         if not first_schema:
-            print(f"❌ Could not find generated schema file")
+            print("❌ Could not find generated schema file")
             return {"success": False, "error": "Multi-document discovery test failed: could not find generated schema file"}
 
         with open(first_schema, "r") as f:
             schema_json = json.load(f)
 
         if "$schema" not in schema_json or "properties" not in schema_json:
-            print(f"❌ Generated schema missing required fields ($schema, properties)")
+            print("❌ Generated schema missing required fields ($schema, properties)")
             return {"success": False, "error": "Multi-document discovery test failed: schema missing required fields"}
 
-        print(f"  ✓ Schema structure validated")
-        print(f"✅ Multi-document discovery test completed")
+        print("  ✓ Schema structure validated")
+        print("✅ Multi-document discovery test completed")
         return {"success": True}
 
     except Exception as e:
@@ -740,7 +741,7 @@ def test_step10_multi_doc_discovery(stack_name):
 
 def test_step11_test_compare(stack_name):
     """Step 11: Test Compare - Compare results from multiple test runs using idp-cli test-compare"""
-    print(f"Step 11: Testing test-compare command...")
+    print("Step 11: Testing test-compare command...")
 
     try:
         cf_client = boto3.client('cloudformation')
@@ -754,7 +755,7 @@ def test_step11_test_compare(stack_name):
                 break
 
         if not test_set_bucket:
-            print(f"⚠️  S3TestSetBucketName not found in stack outputs, skipping test-compare test")
+            print("⚠️  S3TestSetBucketName not found in stack outputs, skipping test-compare test")
             return {"success": True}
 
         s3_client = boto3.client('s3')
@@ -822,14 +823,14 @@ def test_step11_test_compare(stack_name):
                 result = run_command(cmd, check=False)
 
                 if result.returncode != 0:
-                    print(f"❌ test-compare command failed")
+                    print("❌ test-compare command failed")
                     return {"success": False, "error": "test-compare command failed"}
 
                 # Find and load the comparison JSON file
                 comparison_files = [f for f in os.listdir(tmpdir) if f.startswith('comparison-') and f.endswith('.json')]
 
                 if not comparison_files:
-                    print(f"⚠️  No comparison JSON file generated")
+                    print("⚠️  No comparison JSON file generated")
                     return {"success": False, "error": "No comparison JSON file generated"}
 
                 comparison_file = os.path.join(tmpdir, comparison_files[0])
@@ -839,7 +840,7 @@ def test_step11_test_compare(stack_name):
 
                 # Validate JSON structure contains expected data
                 if 'metrics' not in comparison_data:
-                    print(f"⚠️  Comparison data missing 'metrics' field")
+                    print("⚠️  Comparison data missing 'metrics' field")
                     return {"success": False, "error": "Comparison data missing 'metrics' field"}
 
                 metrics = comparison_data['metrics']
@@ -860,9 +861,9 @@ def test_step11_test_compare(stack_name):
                         print(f"⚠️  Test run {test_run_id} missing metrics: {', '.join(missing_metrics)}")
                         return {"success": False, "error": f"Test run missing metrics: {', '.join(missing_metrics)}"}
 
-                print(f"  ✓ Comparison JSON contains both test runs")
-                print(f"  ✓ All required metrics present")
-                print(f"✅ test-compare test completed successfully")
+                print("  ✓ Comparison JSON contains both test runs")
+                print("  ✓ All required metrics present")
+                print("✅ test-compare test completed successfully")
                 return {"success": True}
 
         except Exception as e:
@@ -892,10 +893,10 @@ def deploy_and_test_stack(stack_name, admin_email, template_url):
         cmd += f" --parameters PermissionsBoundaryArn={permissions_boundary_arn}"
         
         run_command(cmd)
-        print(f"✅ Deployment completed")
+        print("✅ Deployment completed")
 
         # Step 2: Test stack status
-        print(f"Step 2: Verifying stack status...")
+        print("Step 2: Verifying stack status...")
         cmd = f"aws cloudformation describe-stacks --stack-name {stack_name} --query 'Stacks[0].StackStatus' --output text"
         result = run_command(cmd)
 
@@ -907,7 +908,7 @@ def deploy_and_test_stack(stack_name, admin_email, template_url):
                 "error": f"Stack deployment failed with status: {result.stdout.strip()}"
             }
 
-        print(f"✅ Stack is healthy")
+        print("✅ Stack is healthy")
 
         # Run tests 3-10 in parallel (Step 4 BDA now uses config-sync-bda + --config-version, no activation race)
         print(f"\n{'='*80}")
@@ -969,7 +970,7 @@ def deploy_and_test_stack(stack_name, admin_email, template_url):
 
         result = test_step11_test_compare(stack_name)
         if result["success"]:
-            print(f"✅ Step 11: test-compare passed")
+            print("✅ Step 11: test-compare passed")
         else:
             print(f"❌ Step 11: test-compare failed: {result.get('error', 'Unknown error')}")
             return {
@@ -978,7 +979,7 @@ def deploy_and_test_stack(stack_name, admin_email, template_url):
                 "error": f"Step 11: test-compare failed: {result.get('error', 'Unknown error')}"
             }
 
-        print(f"✅ All tests passed")
+        print("✅ All tests passed")
         return {
             "stack_name": stack_name,
             "success": True
@@ -1015,16 +1016,16 @@ def run_inference_test(stack_name, sample_file, batch_id, verify_string, result_
         if config_version:
             cmd += f" --config-version {config_version}"
         run_command(cmd)
-        print(f"✅ Inference completed")
+        print("✅ Inference completed")
 
         # Download results
-        print(f"Downloading results...")
+        print("Downloading results...")
         result_dir = f"/tmp/result-{batch_id}"  # nosec B108 - isolated CodeBuild environment
         cmd = f"idp-cli download-results --stack-name {stack_name} --batch-id {batch_id} --output-dir {result_dir}"
         run_command(cmd)
 
         # Verify result content
-        print(f"Verifying result content...")
+        print("Verifying result content...")
 
         # Find result file
         cmd = f"find {result_dir} -path '*/{result_location}' | head -1"
@@ -1034,7 +1035,7 @@ def run_inference_test(stack_name, sample_file, batch_id, verify_string, result_
         if not result_file:
             cmd = f"find {result_dir} -name 'result.json' | head -10"
             debug_result = run_command(cmd, check=False)
-            print(f"Found result.json files:")
+            print("Found result.json files:")
             print(debug_result.stdout)
             print(f"❌ No result file found at {result_location}")
             return False

@@ -7520,7 +7520,22 @@ Resources:
         SecurityHeadersConfig:
           ContentSecurityPolicy:
             Override: true
-            ContentSecurityPolicy: "script-src 'self' 'unsafe-inline' 'unsafe-eval' https:; object-src 'self' blob: data: https:; base-uri 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline' https:; connect-src 'self' https: wss://*.amazonaws.com wss://*.appsync-realtime-api.*.amazonaws.com wss://*.execute-api.*.amazonaws.com ws://localhost:*;"
+            # Tightened CSP:
+            #   - object-src: was 'self' blob: data: https:; now 'none'
+            #     (we don't embed <object>/<embed>/<applet>; strips a class
+            #     of plugin-execution XSS).
+            #   - connect-src: was `https:` (any https origin). Tightened to
+            #     AWS service hostnames so exfiltration to an arbitrary
+            #     attacker-controlled https:// origin is blocked. Realtime
+            #     subscriptions (wss) and localhost:* (dev) retained. The
+            #     `amplify://` and `blob:` schemes are not used.
+            #   - script-src/style-src: 'unsafe-inline' and 'unsafe-eval'
+            #     retained pending Monaco editor compatibility work
+            #     (tracked as Talos finding #12 phase 2).
+            #   - img-src: retains `https:` to allow user-supplied
+            #     document thumbnails from any S3 / CloudFront origin.
+            ContentSecurityPolicy: "script-src 'self' 'unsafe-inline' 'unsafe-eval' https:; object-src 'none'; base-uri 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline' https:; connect-src 'self' https://*.amazonaws.com https://*.amazoncognito.com https://cognito-idp.*.amazonaws.com https://cognito-identity.*.amazonaws.com https://*.appsync-api.*.amazonaws.com https://*.execute-api.*.amazonaws.com https://*.s3.*.amazonaws.com https://*.s3-accelerate.amazonaws.com wss://*.amazonaws.com wss://*.appsync-realtime-api.*.amazonaws.com wss://*.execute-api.*.amazonaws.com ws://localhost:*;"
+
           StrictTransportSecurity:
             Override: true
             AccessControlMaxAgeSec: 31536000

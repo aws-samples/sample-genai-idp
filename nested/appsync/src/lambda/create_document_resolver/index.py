@@ -1,12 +1,13 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: MIT-0
 
-import os
-import boto3
 import json
 import logging
+import os
 from decimal import Decimal
-from robust_list_deletion import delete_list_entries_robust, calculate_shard
+
+import boto3
+from robust_list_deletion import calculate_shard, delete_list_entries_robust
 
 # Configure logging
 logger = logging.getLogger()
@@ -16,6 +17,31 @@ logging.getLogger('idp_common.bedrock.client').setLevel(os.environ.get("BEDROCK_
 
 dynamodb = boto3.resource('dynamodb')
 
+# --- inline log sanitizer ---------------------------------------------------
+# Minimal inline redactor. Kept here rather than importing from idp_common to
+# avoid adding a Lambda Layer dependency to this resolver. If this file grows
+# to need idp_common anyway, promote to
+# `from idp_common.utils.log_sanitizer import sanitize_event_for_logging`.
+_LOG_SENSITIVE_KEYS = (
+    "password", "secret", "token", "authorization", "apikey", "api_key",
+    "cookie", "credential", "claims", "identity",
+)
+
+
+def _sanitize_for_log(obj):
+    """Deep-copy `obj` redacting values whose keys match the denylist."""
+    if isinstance(obj, dict):
+        out = {}
+        for k, v in obj.items():
+            if isinstance(k, str) and any(s in k.lower() for s in _LOG_SENSITIVE_KEYS):
+                out[k] = "***REDACTED***" if v is not None else None
+            else:
+                out[k] = _sanitize_for_log(v)
+        return out
+    if isinstance(obj, list):
+        return [_sanitize_for_log(v) for v in obj]
+    return obj
+
 class DecimalEncoder(json.JSONEncoder):
     def default(self, obj):
         if isinstance(obj, Decimal):
@@ -23,7 +49,7 @@ class DecimalEncoder(json.JSONEncoder):
         return super(DecimalEncoder, self).default(obj)
 
 def handler(event, context):
-    logger.info(f"Create document resolver invoked with event: {json.dumps(event)}")
+    logger.info(f"Create document resolver invoked with event: {json.dumps(_sanitize_for_log(event))}")
     
     try:
         # Extract input data from full AppSync context

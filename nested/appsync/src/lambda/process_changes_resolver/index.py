@@ -11,6 +11,7 @@ from idp_common.docs_service import create_document_service
 
 # Import IDP Common modules
 from idp_common.models import Section, Status
+from idp_common.utils.log_sanitizer import sanitize_event_for_logging
 
 logger = logging.getLogger()
 logger.setLevel(os.environ.get('LOG_LEVEL', 'INFO'))
@@ -23,7 +24,7 @@ sqs_client = boto3.client('sqs')
 QUEUE_URL = os.environ.get('QUEUE_URL')
 
 def handler(event, context):
-    logger.info(f"ProcessChanges resolver invoked with event: {json.dumps(event)}")
+    logger.info(f"ProcessChanges resolver invoked with event: {json.dumps(sanitize_event_for_logging(event))}")
     
     # Add comprehensive error handling
     try:

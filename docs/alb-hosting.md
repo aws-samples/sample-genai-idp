@@ -271,3 +271,77 @@ aws cloudformation describe-stacks \
 | Geo restrictions | ✅ Built-in | ❌ (use security groups/NACLs) |
 | SPA routing | S3 error document | ALB URL rewrite transform |
 | TLS termination | CloudFront edge | ALB in VPC |
+| Security response headers | ✅ Built-in via `SecurityHeadersPolicy` (X-Frame-Options, HSTS, CSP, X-Content-Type-Options, Referrer-Policy) | ❌ Not emitted by ALB — customer-responsibility (see below) |
+
+## Security Hardening for ALB-Hosted Deployments
+
+The default (CloudFront) deployment applies a strict set of HTTP
+response headers via the `SecurityHeadersPolicy` CloudFront
+`ResponseHeadersPolicy`:
+
+- `X-Frame-Options: SAMEORIGIN` — anti-clickjacking
+- `Strict-Transport-Security: max-age=...` — HSTS
+- `X-Content-Type-Options: nosniff`
+- `Referrer-Policy: strict-origin-when-cross-origin`
+- `Content-Security-Policy` — the tightened CSP (see
+  `docs/web-ui.md` for the full policy)
+
+When you deploy with `WebUIHosting=ALB` (used for GovCloud and
+private-network deployments), these headers are **not** injected
+automatically. ALB does not offer a native "response headers policy"
+for forwarded responses, and the UI is served directly from a
+private S3 VPC endpoint via listener-rule forwards — there is no
+intermediate layer that can add headers.
+
+**Recommended mitigations for ALB deployments:**
+
+### Option 1 (recommended) — Front the ALB with CloudFront
+
+Deploy a CloudFront distribution in front of the ALB and attach a
+`ResponseHeadersPolicy` that injects the same set of headers used
+by the default stack. This gives you identical security posture to
+the default CloudFront deployment while keeping the ALB for
+VPC-reachability. Sample policy snippet:
+
+```yaml
+AlbSecurityHeadersPolicy:
+  Type: AWS::CloudFront::ResponseHeadersPolicy
+  Properties:
+    ResponseHeadersPolicyConfig:
+      Name: !Sub "${AWS::StackName}-alb-headers"
+      SecurityHeadersConfig:
+        FrameOptions:
+          FrameOption: SAMEORIGIN
+          Override: true
+        StrictTransportSecurity:
+          AccessControlMaxAgeSec: 31536000
+          IncludeSubdomains: true
+          Preload: true
+          Override: true
+        ContentTypeOptions:
+          Override: true
+        ReferrerPolicy:
+          ReferrerPolicy: strict-origin-when-cross-origin
+          Override: true
+```
+
+### Option 2 — Lambda@ALB header-injection target
+
+Insert a small Lambda as an ALB target for the UI listener rules
+that injects the security headers into every response. Adds cold-
+start latency but avoids the CloudFront dependency.
+
+### Option 3 — Accept the residual risk (GovCloud / private VPC)
+
+In a closed private-network deployment where the UI is only reachable
+from corporate-managed endpoints, the realistic clickjacking risk is
+low because there is no untrusted web origin that could embed the UI
+in an iframe. Customers operating in this mode may choose to accept
+the residual risk, documented in the organization's deployment
+threat model.
+
+### Upstream tracking
+
+This is tracked as **finding #14** in the Talos Mitigation Report
+(`threat-modeling/Mitigation Report 04252026.md`). The default
+(CloudFront) deployment is not affected.

@@ -938,7 +938,14 @@ STDERR:
                 CFLoader.add_constructor(func, construct_unknown)
 
             with open(template_path, "r", encoding="utf-8") as f:
-                template = yaml.load(f, Loader=CFLoader)  # nosec B506 - CFLoader required for CloudFormation intrinsic functions
+                # nosec B506 - CFLoader extends yaml.SafeLoader (see class
+                # definition above); it is NOT the default unsafe yaml.Loader.
+                # Only a fixed list of CloudFormation intrinsic function tags
+                # (!Ref, !Sub, !GetAtt, ...) is registered, and their
+                # constructor only returns scalars/sequences/mappings.
+                # Input is a developer-committed CloudFormation template
+                # bundled with the SDK, not untrusted user input.
+                template = yaml.load(f, Loader=CFLoader)  # nosec B506
 
             if not template or not isinstance(template, dict):
                 raise Exception(f"Failed to parse YAML template: {template_path}")

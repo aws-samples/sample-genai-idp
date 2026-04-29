@@ -1,11 +1,11 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: MIT-0
 
-import pytest
-import json
 from datetime import datetime
-from unittest.mock import Mock, patch
-from index import parse_execution_history, find_step_name_for_failure_event
+
+import pytest
+from index import find_step_name_for_failure_event, parse_execution_history
+
 
 @pytest.mark.unit
 def test_parse_execution_history_with_failure():

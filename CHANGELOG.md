@@ -4,8 +4,66 @@ SPDX-License-Identifier: MIT-0
 # Changelog
 
 ## [Unreleased]
-  
+
+### Security
+
+Hardening response to security review - Highlights:
+
+- **Stored XSS defense-in-depth (frontend).** Introduced
+  `SafeMarkdown` wrapper (`src/ui/src/components/common/SafeMarkdown.tsx`)
+  that pairs `rehype-raw` with `rehype-sanitize` using an allow-list
+  schema (retains `<details>`/`<summary>`, custom `<documentid>`,
+  tables, code blocks, and a narrow `white-space: pre-line` style
+  pattern; strips `<script>`, event handlers, `javascript:` URLs,
+  `<iframe>`, `<object>`, `<embed>`). Migrated all six legacy
+  `ReactMarkdown + rehypeRaw` call sites across
+  `MarkdownViewer.tsx`, `DocumentsQueryLayout.tsx`,
+  `TextDisplay.tsx`, `AgentChatLayout.tsx`, and `AgentToolComponent.tsx`.
+- **Stored XSS fix in Knowledge Base resolver (backend).**
+  `query_knowledgebase_resolver` now HTML-escapes citation snippets,
+  document titles, and URLs via `html.escape()` before embedding them
+  in the rendered markdown.
+- **Chat session ownership enforced.** `getChatMessages`
+  (`get_agent_chat_messages_resolver`) now verifies that the calling
+  Cognito user owns the requested `sessionId` by looking up
+  `(userId, sessionId)` in `ChatSessionsTable`. Can be temporarily
+  disabled via `ENFORCE_CHAT_SESSION_OWNERSHIP=false` env var for
+  legacy-session migration. Fails closed on DynamoDB errors.
+- **S3 URI allow-list in `getFileContents`.** The resolver now
+  rejects any `s3Uri` whose bucket is not one of the IDP stack's
+  configured buckets, preventing use as a generic S3-read gadget.
+  Also fixes a latent bucket-name parsing bug and validates the
+  URI scheme.
+- **Log sanitization utility.** New
+  `idp_common.utils.log_sanitizer.sanitize_event_for_logging()`
+  deep-copies and redacts Cognito claims, identity blobs, auth
+  tokens, and API keys from events before they are emitted to
+  CloudWatch. Truncates common document-content fields to 500
+  characters. Applied to `reprocess_document_resolver`,
+  `query_knowledgebase_resolver`, and `get_agent_chat_messages_resolver`
+  as reference integrations (rollout to remaining resolvers is tracked
+  for a follow-up release). 15 unit tests added.
+- **CSP hardening (Phase 1).** Tightened CloudFront
+  `SecurityHeadersPolicy`: `object-src 'none'` (was
+  `'self' blob: data: https:`), `connect-src` restricted to AWS
+  service hostnames (was `https:`). `unsafe-eval` / `unsafe-inline`
+  removal deferred pending Monaco-editor compatibility verification.
+- **False-positive documentation.** Added explanatory comments and
+  `nosec` justifications for:
+  - Jinja2 autoescape disabled in `discovery_agent.py`
+    (templates produce LLM prompts, not HTML).
+  - Unsafe `yaml.load` findings in
+    `scripts/sdlc/validate_service_role_permissions.py` and
+    `lib/idp_sdk/idp_sdk/_core/publish.py` (both use
+    `CFNLoader`/`CFLoader` subclassing `yaml.SafeLoader`; input is
+    developer-committed CloudFormation templates, not user input).
+  - SQL injection in `test_results_resolver` Athena queries (every
+    interpolation is gated by `_validate_sql_input()` with a strict
+    allow-list regex).
+
+
 ## [0.5.8]
+
 
 ### Added
 

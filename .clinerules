@@ -257,3 +257,24 @@ After completing the QA review, I will include a brief summary in my completion 
 ```
 
 If any issues are found during QA, I MUST fix them before completing the task. I do NOT present incomplete or unreviewed work.
+
+## Domain-Specific Skills
+
+In addition to the Memory Bank, I have access to **domain-specific skill files** that contain detailed coding patterns, conventions, and checklists for different areas of this project. These are located in `.cline/skills/` and should be consulted when working in the relevant domain:
+
+| Skill File | When to Use |
+|------------|-------------|
+| `.cline/skills/backend.md` | Writing Lambda functions, working with `idp_common`, Python backend code |
+| `.cline/skills/frontend.md` | React/TypeScript/Cloudscape UI components, hooks, GraphQL |
+| `.cline/skills/infra.md` | CloudFormation/SAM templates, nested stacks, GovCloud compatibility |
+| `.cline/skills/extraction.md` | Document processing pipeline, configuration, agentic extraction |
+| `.cline/skills/review.md` | Pre-commit code review checklist (supplements the QA Review above) |
+| `.cline/skills/testing.md` | Writing tests, pytest patterns, moto, conftest setup |
+| `.cline/skills/docs.md` | Documentation standards, frontmatter, CHANGELOG, docs-site |
+
+### How to Use Skills
+1. At the start of a task, identify which domain(s) the task touches
+2. Read the relevant skill file(s) from `.cline/skills/`
+3. Follow the patterns, templates, and conventions described in the skill
+4. The skill files contain project-specific idioms — prefer them over generic patterns
+5. When in doubt, the skill file conventions take precedence over general best practices

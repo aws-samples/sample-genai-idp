@@ -3,8 +3,9 @@
 
 import React, { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
-import rehypeRaw from 'rehype-raw';
 import { Box, Button, Spinner, Header, Grid, Container, SpaceBetween, Input, Link } from '@cloudscape-design/components';
+import SafeMarkdown from '../common/SafeMarkdown';
+
 import { generateClient } from 'aws-amplify/api';
 import { ConsoleLogger } from 'aws-amplify/utils';
 
@@ -166,8 +167,7 @@ export const DocumentsQueryLayout = (): React.JSX.Element => {
                     <Spinner />
                   </div>
                 ) : (
-                  <ReactMarkdown
-                    rehypePlugins={[rehypeRaw]}
+                  <SafeMarkdown
                     components={
                       {
                         documentid: CustomLink,
@@ -175,7 +175,7 @@ export const DocumentsQueryLayout = (): React.JSX.Element => {
                     }
                   >
                     {entry.value}
-                  </ReactMarkdown>
+                  </SafeMarkdown>
                 )}
               </ValueWithLabel>
             ))
