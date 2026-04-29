@@ -247,6 +247,31 @@ The agent successfully:
 
 The agent died after ~7 minutes with no error. Suspected AgentCore session/streaming timeout. This is the top priority to debug — see dev plan 6.7.
 
+## Session Keepalive → Fire-and-Forget Architecture
+
+### The SSE Problem (discovered 2026-04-29)
+
+AgentCore's internal proxy layer (between the `InvokeAgentRuntime` API and the container) severs the SSE response stream after ~60-90 seconds with a TCP reset. This is a known issue reported by multiple internal teams. The 15-minute timeout documented in AgentCore docs is the Gateway layer timeout, not the proxy timeout.
+
+Our initial fix (heartbeat events every 30s + `PingStatus.HEALTHY_BUSY` ping handler) didn't work because the proxy is upstream of our container — heartbeats reach the container but the response pipe back to the client is already cut.
+
+When the SSE stream is severed, AgentCore cancels the async generator (`CancelledError`), which kills our heartbeat task. However, the agent itself continues running if it was started as a separate asyncio task (confirmed via OTel traces).
+
+### Solution: Fire-and-Forget + S3 Polling
+
+Instead of fighting the SSE timeout, we decouple the agent from the HTTP connection entirely:
+
+1. **Entrypoint** returns immediately after starting the agent in a background thread
+2. **Agent** runs autonomously, writing its full event stream to a JSONL file and syncing to S3
+3. **Frontend** polls three independent data sources:
+   - `GET /state` (DynamoDB) — status, phase, iteration, accuracy (every 2s)
+   - `GET /stream` (S3 JSONL) — full agent thought process with offset pagination (every 3-5s)
+   - `GET /log` (S3 markdown) — OPTIMIZATION-LOG.md content (every 5-10s)
+4. **Ping handler** checks background thread liveness (not generator state), so it correctly reports `HEALTHY_BUSY` even after the SSE generator is cancelled
+5. **DynamoDB heartbeat** runs in the background thread alongside the agent, updating `last_heartbeat_at` every 30s for stale detection
+
+This gives full visibility into the agent's work without any dependency on a persistent HTTP connection. See dev plan Phase 6.9 for detailed implementation spec.
+
 ## File Map
 
 | Component | File | Description |

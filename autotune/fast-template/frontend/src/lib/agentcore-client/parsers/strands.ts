@@ -82,6 +82,13 @@ export const parseStrandsChunk: ChunkParser = (line, callback) => {
       callback({ type: "lifecycle", event })
       return
     }
+
+    // Heartbeat keepalive events from the backend (every 30s during long tool calls).
+    // Displayed in the frontend for debugging only — remove once session stability is confirmed.
+    if (json.event === "heartbeat") {
+      callback({ type: "heartbeat", timestamp: json.timestamp ?? Date.now() / 1000 })
+      return
+    }
   } catch {
     console.debug("Failed to parse strands event:", data)
   }

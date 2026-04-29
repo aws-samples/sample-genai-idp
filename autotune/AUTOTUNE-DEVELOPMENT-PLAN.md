@@ -540,23 +540,31 @@ Convert the agent from interactive chat to autonomous operation. The agent recei
   - ✅ State polling display in frontend works (shows status, phase, iteration, updated_at)
   - ❌ Agent session died after ~7 minutes with no error in logs — suspected AgentCore streaming timeout (should be 8 hours per AgentCore docs). DynamoDB state stuck at "running" because cleanup didn't run.
   - ❌ HookProvider bug caught and fixed during testing (Strands can't infer event types from `__call__` on class instances)
-- [ ] **Debug agent session timeout** — PRIORITY FOR NEXT SESSION. Details:
-  - Agent ran for ~7 minutes then stopped. No ERROR in CloudWatch logs. Last log entry was a normal tool result (file_read).
-  - AgentCore Runtime should support up to 8 hours. The timeout may be:
-    - AgentCore streaming idle timeout (no SSE events sent during long tool calls)
-    - HTTP connection timeout between AgentCore and Bedrock
-    - The `stream_async` generator being closed when the HTTP response stream is terminated
-  - Investigation steps:
-    1. Check AgentCore Runtime configuration for timeout settings (CDK L2 construct props)
-    2. Check if there's a streaming idle timeout vs total session timeout
-    3. Try a simple test: invoke agent with a prompt that just sleeps for 10 minutes via shell tool
-    4. Check if the frontend disconnecting causes the backend to stop (it shouldn't — the agent runs server-side)
-    5. Look at the FAST framework's `BedrockAgentCoreApp` for any timeout configuration
-    6. Check Kenton's long-running app harness for how he handles multi-hour sessions
-- [ ] **Fix stale DynamoDB state on crash** — When the agent session dies unexpectedly, the DynamoDB state stays "running" forever. Options:
-  - Add a TTL or heartbeat: agent updates `updated_at` every N seconds; frontend treats "running" with stale `updated_at` (>5 min) as "unknown/crashed"
-  - Add a cleanup Lambda triggered by AgentCore session end events (if such events exist)
-  - For now: frontend could show "possibly stalled" if updated_at is old
+- [x] **Debug agent session timeout** — ROOT CAUSE UPDATED (2026-04-29):
+  - **Original hypothesis (WRONG):** 15-minute idle timeout. We added heartbeat yields every 30s + ping handler.
+  - **Actual root cause: ~60s SSE proxy timeout.** AgentCore Runtime has an internal proxy layer between the `InvokeAgentRuntime` API and the container. This proxy severs the SSE response stream after ~60-90s with a TCP reset — no error, no graceful close. The agent process keeps running server-side (confirmed via OTel traces showing tool calls continuing for minutes after the frontend lost connection). This is a **known issue** reported by multiple teams internally.
+  - **Evidence from our testing (2026-04-29):**
+    - Frontend received ♥ 2 heartbeats (= 60s), then "Failed to get response: network error"
+    - DynamoDB `last_heartbeat_at` stopped at 13:15:07 (60s after start) — heartbeat asyncio task was killed when generator was cancelled
+    - OTel traces in CloudWatch show the agent continued working: reading evaluation reports, analyzing results, calling editor tool — all AFTER the SSE stream died
+    - Agent process survived but our `_agent_running` flag was cleared by the generator's `finally` block, so `/ping` flipped to `Healthy`
+  - **Key findings from AgentCore team (internal Slack research):**
+    - The ~60s timeout is in the Runtime's internal proxy, NOT the 15-min Gateway timeout
+    - When the SSE stream is severed, AgentCore cancels the async generator → `CancelledError` / `GeneratorExit`
+    - If `/ping` flips to `Healthy` after cancel, the VM gets suspended after 900s idle
+    - AgentCore runs multiple container replicas; only the one that received `/invocations` knows about active work. Others report `Healthy`. Ping is round-robined across all replicas.
+    - **WebSocket alternative exists:** `InvokeAgentRuntimeWithWebSocketStream` via `wss://` bypasses the SSE proxy. Container needs `/ws` endpoint on port 8080. Good future option for real-time streaming.
+    - **Fire-and-forget pattern (recommended by AgentCore team):** Return immediately from entrypoint, agent runs in background. Use `add_async_task`/`complete_async_task` for tracking. Clients poll back via subsequent invocations or external APIs.
+    - **Resilient ping pattern (from Egor Klevak's "Maple" implementation):** Don't clear active task tracking on `CancelledError`. Only transition to `Healthy` when background work truly finishes. Use 120s cooldown. Cross-replica coordination via DynamoDB.
+  - **Slack channels for follow-up:** `#bedrock-agentcore-runtime-interest` (Adi Avadhanam, Abhimanyu Siwach), `#bedrock-agentcore-gateway-interest` (Thomas Veppumthara). Zach Daniels has an open thread about the exact 60-90s SSE drop (no resolution as of Apr 10).
+  - **Decision: Fire-and-forget + S3 polling (see Phase 6.9 below).** AutoTune is autonomous — real-time SSE streaming of agent thinking is nice-to-have, not essential. We already have DynamoDB state polling. Agent writes its full thought process + optimization log to S3, frontend polls new API endpoints. Completely decoupled from SSE connection lifetime.
+  - **Future:** Switch to WebSocket (`/ws` on port 8080) for real-time streaming once fire-and-forget is proven stable.
+  - **Code changes from the heartbeat attempt are still in the codebase** (`basic_agent.py` has the asyncio.Queue pattern, `state.py` has `heartbeat()` method, frontend has heartbeat counter). These will be replaced/simplified in Phase 6.9.
+- [x] **Fix stale DynamoDB state on crash** — Implemented heartbeat approach (2026-04-29):
+  - Backend: heartbeat producer calls `state.heartbeat()` every 30s, updating `last_heartbeat_at` in DynamoDB (separate from `updated_at` which tracks real agent/tool state changes)
+  - Added `OptimizationState.heartbeat()` method in `state.py`
+  - Frontend: if status is "running" but `last_heartbeat_at` is >2 min stale, shows "POSSIBLY STALLED" in yellow instead of "RUNNING" in green
+  - **Note:** The heartbeat mechanism will be reworked in Phase 6.9 — instead of an asyncio task in the generator (which dies when SSE drops), the heartbeat will run in the background agent thread alongside the agent itself.
 - [ ] **Cancel via CLI test** — verify `aws dynamodb update-item` stops agent within one tool call
 - [ ] **Full iteration test** — verify agent completes a full optimization loop (analyze → modify config → upload → evaluate → repeat)
 - [ ] **Max iterations test** — verify agent stops after 10 iterations and produces summary
@@ -576,50 +584,201 @@ Convert the agent from interactive chat to autonomous operation. The agent recei
 - [x] **Frontend state polling** — Polls `GET /state` every 2s, displays status (color-coded), phase, phase_detail, iteration, updated_at at bottom of run view.
 - [ ] **Test set ID dropdown** — Replace the text input with a dropdown populated from the IDP stack. Requires a new REST API endpoint + Lambda that calls IDP SDK/CLI to list available test sets.
 - [ ] **Optimization run history from DynamoDB** — Replace localStorage-based session list with a list endpoint that queries the OptimizationState DynamoDB table. Current sidebar disappears on browser data clear or different browser.
-- [ ] **Agent stream persistence and replay** — The frontend SSE connection drops during long tool calls (AgentCore idle timeout). The agent keeps running but the user loses visibility. Design:
-  - Server-side: In the entrypoint's `async for event` loop, append each event as a JSON line to `/mnt/workspace/{session_id}/agent-stream.jsonl` (and/or S3).
-  - Frontend: When SSE drops or user returns later, fetch the stream log and render all past events.
-  - Two implementation options (decide at implementation time):
-    - **Option A (EFS + AgentCore route):** Serve the file directly from the running AgentCore runtime. No new infra, but depends on AgentCore supporting multiple HTTP routes.
-    - **Option B (S3 + Lambda):** Agent writes to `s3://{bucket}/{session_id}/stream.jsonl`. New API endpoint `GET /stream?sessionId=...` reads from S3. Needs a new S3 bucket in CDK.
-  - Also provides full audit trail for debugging and review.
-- [ ] **Optimization log viewer** — Display OPTIMIZATION-LOG.md in the frontend. Same access pattern as stream replay (EFS or S3). Could be a tab/panel alongside the stream view showing the agent's structured optimization history, updated live as the agent writes to it.
+
+### 6.9 Fire-and-Forget Architecture with S3 Polling (NEXT UP)
+
+**This is the #1 priority.** Replaces the broken SSE streaming approach. The agent runs fully decoupled from the frontend — no SSE connection needed after the initial request.
+
+#### Problem being solved
+AgentCore's internal SSE proxy kills the HTTP response stream after ~60s. Our heartbeat/ping approach can't fix this because the proxy is upstream of our container. The agent keeps running but the frontend loses all visibility. We need the frontend to see the agent's full thought process, optimization state, and optimization log — all without depending on a persistent SSE connection.
+
+#### Architecture overview
+
+```
+Frontend (React)                    API Gateway + Lambda           S3 (staging bucket)           AgentCore Container
+     │                                     │                            │                              │
+     │── POST /invoke ────────────────────►│── InvokeAgentRuntime ────►│                              │
+     │◄─ 200 OK (immediate) ──────────────│                            │                              │
+     │                                     │                            │                     ┌────────┤
+     │                                     │                            │                     │ Agent  │
+     │── GET /state (poll 2s) ────────────►│── DynamoDB GetItem ──────►│                     │ runs   │
+     │◄─ {status,phase,iteration,...} ─────│                            │                     │ in bg  │
+     │                                     │                            │                     │ thread │
+     │── GET /stream?offset=N (poll 3s) ──►│── S3 GetObject ──────────►│◄── stream.jsonl ───│        │
+     │◄─ [new JSONL lines] ───────────────│                            │                     │        │
+     │                                     │                            │                     │        │
+     │── GET /log (poll 5s) ──────────────►│── S3 GetObject ──────────►│◄── OPT-LOG.md ─────│        │
+     │◄─ markdown content ────────────────│                            │                     │        │
+     │                                     │                            │                     │        │
+     │── POST /cancel ────────────────────►│── DynamoDB UpdateItem ───►│                     │ checks │
+     │                                     │                            │                     │ cancel │
+     │                                     │                            │                     └────────┤
+```
+
+#### Three data sources the frontend polls
+
+| Endpoint | Source | Poll interval | What it shows | Already exists? |
+|----------|--------|---------------|---------------|-----------------|
+| `GET /state?sessionId=...` | DynamoDB | 2s | Status, phase, phase_detail, iteration, best_accuracy, updated_at, last_heartbeat_at | **YES** — already implemented and working |
+| `GET /stream?sessionId=...&offset=N` | S3 | 3-5s | Full agent thought process as JSONL — every LLM response chunk, tool call, tool result, error | **NO** — new endpoint needed |
+| `GET /log?sessionId=...` | S3 | 5-10s | OPTIMIZATION-LOG.md content — the agent's structured optimization history | **NO** — new endpoint needed |
+
+#### Backend changes needed
+
+**1. Refactor `basic_agent.py` entrypoint to fire-and-forget:**
+
+The current entrypoint is an async generator that yields events. This needs to change to:
+- Receive the invocation payload (test_set_id, optimization_guidance, session_id)
+- Initialize DynamoDB state
+- Start the agent in a **background thread** (not an asyncio task in the generator)
+- Yield a single `{"status": "started", "session_id": "..."}` response and return immediately
+- The background thread runs `agent.stream_async()`, writes events to local file + S3, updates DynamoDB state, handles completion/failure
+
+Key implementation details:
+- Use `threading.Thread(target=_run_agent, daemon=True)` for the background agent
+- The background thread must handle its own event loop (`asyncio.run()` or `loop.run_until_complete()`) since it's not in the entrypoint's async context
+- The `/ping` handler checks a module-level `_active_sessions: dict[str, threading.Thread]` — returns `HEALTHY_BUSY` if any thread is alive. This survives generator cancellation because it's not tied to the generator.
+- DynamoDB heartbeat runs in the same background thread (e.g., a separate `threading.Timer` or integrated into the stream-writing loop)
+
+**2. Stream writing (in the background thread):**
+
+```python
+# Pseudocode for the background thread's main loop
+stream_path = f"/mnt/workspace/{session_id}/stream.jsonl"
+s3_key = f"autotune-streams/{session_id}/stream.jsonl"
+lines_since_sync = 0
+
+async for event in agent.stream_async(initial_prompt):
+    event_dict = json.loads(json.dumps(dict(event), default=str))
+    # Append to local JSONL file
+    with open(stream_path, "a") as f:
+        f.write(json.dumps(event_dict) + "\n")
+    lines_since_sync += 1
+    # Sync to S3 every 10 lines or every 10 seconds (whichever comes first)
+    if lines_since_sync >= 10:
+        s3.upload_file(stream_path, bucket, s3_key)
+        lines_since_sync = 0
+# Final sync on completion
+s3.upload_file(stream_path, bucket, s3_key)
+```
+
+**3. Optimization log syncing (in the background thread):**
+
+The agent writes OPTIMIZATION-LOG.md to `/mnt/workspace/{session_id}/OPTIMIZATION-LOG.md` (it already does this). Add periodic S3 sync:
+- After each tool call that modifies the log (detected by file mtime change), upload to `s3://{bucket}/autotune-streams/{session_id}/OPTIMIZATION-LOG.md`
+- Or simpler: sync every 30s alongside the heartbeat
+
+**4. S3 bucket:** Use the existing staging bucket (`IDPAutoTune` stack's `StagingBucketName` output: `idpautotune-idpautotuneampli-stagingbucket9644c37c-p7dvaqozwzd7`). Add IAM permissions for the Lambda to read from it. The agent's IAM role already has S3 write access.
+
+**5. New Lambda for `GET /stream` and `GET /log`:**
+
+Can be a single Lambda with path-based routing:
+- `GET /stream?sessionId=...&offset=N` — reads `s3://bucket/autotune-streams/{sessionId}/stream.jsonl`, returns lines starting from byte offset N. Response includes `nextOffset` so the frontend knows where to resume.
+- `GET /log?sessionId=...` — reads `s3://bucket/autotune-streams/{sessionId}/OPTIMIZATION-LOG.md`, returns the full markdown content.
+- Both endpoints are Cognito-authenticated (same as existing `/state` and `/cancel`).
+- Add to the existing API Gateway REST API in `backend-stack.ts`.
+
+#### Frontend changes needed
+
+**1. Remove SSE streaming dependency:**
+- The `startRun()` function in `ChatInterface.tsx` currently calls `agentCoreClient.invoke()` which opens an SSE connection and streams events. Change this to:
+  - Call the invoke endpoint (fire-and-forget — just triggers the agent)
+  - Immediately start polling all three endpoints
+  - Don't expect streaming events from the invoke call
+
+**2. Add stream polling and rendering:**
+- New `useEffect` or interval that polls `GET /stream?sessionId=...&offset=N` every 3-5s
+- Track `offset` in state, pass it on each poll, update from `nextOffset` in response
+- Render JSONL events incrementally:
+  - LLM text chunks → append to a running markdown block
+  - Tool calls → collapsible panel showing tool name + input summary
+  - Tool results → expand the panel with output summary (truncated for large results)
+  - Errors → red text block
+
+**3. Add optimization log viewer:**
+- New tab or panel that polls `GET /log?sessionId=...` every 5-10s
+- Renders the markdown content (use existing markdown renderer if available, or `react-markdown`)
+- Auto-scrolls to bottom on update
+
+**4. Keep existing state polling as-is** — it already works and shows status/phase/iteration.
+
+#### CDK changes needed
+
+In `autotune/fast-template/infra-cdk/lib/backend-stack.ts`:
+- Add two new API Gateway resources: `/stream` (GET) and `/log` (GET)
+- New Lambda function (or extend existing optimization-state Lambda) to handle both endpoints
+- Grant the Lambda `s3:GetObject` on the staging bucket prefix `autotune-streams/*`
+- Grant the agent's AgentCore IAM role `s3:PutObject` on the same prefix (may already be covered)
+- Pass the staging bucket name as env var to both the Lambda and the agent runtime
+
+#### Files that will be modified
+
+| File | Change |
+|------|--------|
+| `autotune/fast-template/patterns/strands-single-agent/basic_agent.py` | Major refactor: fire-and-forget entrypoint, background thread, stream writing, S3 sync, resilient ping |
+| `autotune/agent/state.py` | Move heartbeat into background thread context (minor) |
+| `autotune/fast-template/infra-cdk/lib/backend-stack.ts` | New Lambda, API Gateway routes, IAM permissions |
+| `autotune/fast-template/infra-cdk/lib/lambdas/optimization-state/index.py` | Add `/stream` and `/log` handlers (or new Lambda file) |
+| `autotune/fast-template/frontend/src/components/chat/ChatInterface.tsx` | Remove SSE dependency, add stream + log polling, add log viewer tab |
+| `autotune/fast-template/frontend/src/lib/agentcore-client/` | May need changes to the invoke call to not expect streaming response |
+
+#### What we can delete/simplify after this
+
+- The asyncio.Queue heartbeat pattern in `basic_agent.py` (replaced by background thread)
+- The heartbeat SSE event parsing in the frontend Strands parser (`parsers/strands.ts`)
+- The `heartbeat` type in `types.ts`
+- The `heartbeatCount` state and ♥ display in `ChatInterface.tsx` (debug only, no longer needed)
+- The SSE streaming event rendering logic (replaced by JSONL polling)
 
 ---
 
-## Next Session Priorities (2026-04-29)
+## Next Session Priorities (2026-04-29 — updated 13:40 UTC)
 
 **Start here.** Read this section first when resuming work.
 
-### Priority 1: Debug agent session timeout
-The agent ran successfully for ~7 minutes on its first real test (session `eaa92698`), then silently died. No error in CloudWatch logs. DynamoDB state stuck at "running". AgentCore should support 8-hour sessions. This is the #1 blocker — if the agent can't run for more than 7 minutes, the autonomous optimization loop is useless.
+### Priority 1: Implement Fire-and-Forget Architecture (Phase 6.9)
 
-See the investigation steps in 6.7 above. Key files to check:
-- `autotune/fast-template/infra-cdk/lib/backend-stack.ts` — AgentCore Runtime L2 construct configuration
-- The FAST framework's `BedrockAgentCoreApp` source code — look for timeout/keepalive settings
-- Kenton's long-running app harness at `/home/ubuntu/github/sample-long-running-app-harness/` — how does he keep sessions alive for 7+ hours?
+This is the critical path. The SSE streaming approach is broken due to a known AgentCore proxy timeout at ~60s (see detailed analysis in Phase 6.7 above). The fix is to decouple the agent from the SSE connection entirely.
 
-### Priority 2: Fix stale state on crash
-When the agent dies unexpectedly, DynamoDB says "running" forever. At minimum, the frontend should detect this (e.g., "running but last updated 15 minutes ago → possibly stalled"). Better: add a heartbeat to the agent that updates `updated_at` every 30 seconds.
+**Implementation order:**
 
-### Priority 3: Run a complete optimization loop
-Once the timeout is fixed, run a full end-to-end test:
-1. Start optimization with a real test set
-2. Watch the agent analyze → create config → upload → evaluate → analyze results → iterate
-3. Verify the OptimizationLoopHook resumes correctly after each invocation
-4. Verify DynamoDB state updates (iteration count, best_accuracy, phase changes)
+1. **Refactor `basic_agent.py`** — Change the entrypoint from an async generator to fire-and-forget. Agent runs in a background thread. Entrypoint yields one `{"status": "started"}` event and returns. Background thread runs `agent.stream_async()`, writes events to local JSONL file, syncs to S3 periodically, updates DynamoDB heartbeat. Fix `/ping` to check background thread liveness (not generator state).
+
+2. **Add S3 stream + log syncing** — In the background thread, write each agent event to `/mnt/workspace/{session_id}/stream.jsonl` and sync to `s3://staging-bucket/autotune-streams/{session_id}/stream.jsonl` every 10 events or 10s. Also sync `OPTIMIZATION-LOG.md` to S3 every 30s.
+
+3. **Add `GET /stream` and `GET /log` Lambda endpoints** — Single Lambda handling both routes. Reads from S3, returns JSONL lines (with offset pagination) or markdown content. Add to existing API Gateway. Cognito-authenticated.
+
+4. **Update frontend** — Remove SSE streaming dependency. Add polling for `/stream` (3-5s) and `/log` (5-10s). Render agent events from JSONL. Add optimization log viewer tab/panel.
+
+5. **Deploy and test** — Run a full optimization loop. Verify: agent survives past 60s, frontend shows live thought process via polling, optimization log updates in real time, cancel still works.
+
+**Key files to read before starting:**
+- `autotune/fast-template/patterns/strands-single-agent/basic_agent.py` — current entrypoint (will be heavily refactored)
+- `autotune/agent/state.py` — DynamoDB state helper (heartbeat method needs to move to background thread)
+- `autotune/fast-template/infra-cdk/lib/backend-stack.ts` — CDK stack (add new Lambda + API routes)
+- `autotune/fast-template/infra-cdk/lib/lambdas/optimization-state/index.py` — existing state Lambda (extend or create sibling)
+- `autotune/fast-template/frontend/src/components/chat/ChatInterface.tsx` — frontend (remove SSE, add polling)
+- Phase 6.9 in this document for the full architecture diagram and implementation details
+
+### Priority 2: Run a complete optimization loop
+Once fire-and-forget is working, run a full end-to-end test:
+1. Start optimization with test set `realkie-fcc-verified`
+2. Watch the agent analyze → create config → upload → evaluate → analyze results → iterate (via polling, not SSE)
+3. Verify DynamoDB state updates (iteration count, best_accuracy, phase changes)
+4. Verify stream.jsonl and OPTIMIZATION-LOG.md appear in S3 and are viewable in frontend
 5. Let it run to max_iterations or convergence
-6. Verify final output: `idpac_config_final.yaml` + summary in OPTIMIZATION-LOG.md
+6. Verify final output: optimized config + summary in OPTIMIZATION-LOG.md
 
-### What's deployed and working (as of 2026-04-28 EOD)
-- **Backend:** AgentCore runtime with autonomous agent (hooks, state, prompt, tools with auto-state-update)
-- **Frontend:** Test set ID input, optimization guidance, cancel button, state polling display, no chat input after run starts
-- **Infrastructure:** DynamoDB state table, optimization state API (cancel + get state), hardened IAM with explicit deny
+### What's deployed and working (as of 2026-04-29 13:40 UTC)
+- **Backend:** AgentCore runtime with autonomous agent (hooks, state, prompt, 20 tools with auto-state-update). Has the heartbeat/SSE code that doesn't work due to proxy timeout — needs refactoring to fire-and-forget.
+- **Frontend:** Test set ID input, optimization guidance, cancel button, state polling display (works), SSE streaming (broken at ~60s), heartbeat counter (stops at ♥ 2). Needs refactoring to polling-only.
+- **Infrastructure:** DynamoDB state table, optimization state API (`POST /cancel` + `GET /state`), hardened IAM with explicit deny. Needs: `GET /stream` + `GET /log` endpoints.
 - **IDP stack:** `kaleko-IDPAutoTune-dev` in us-east-1 with test set `realkie-fcc-verified` (RealKIE FCC invoices)
+- **Agent behavior confirmed working:** OTel traces show the agent successfully analyzing datasets, reading evaluation reports, identifying extraction problems (date formats, over-extraction), and attempting config modifications — all happening server-side after the SSE stream died. The agent logic is solid; only the visibility/streaming is broken.
 
 ### Git state
 - Branch: `feature-private/idp-autotune/initial-port`
-- All work committed, nothing pending
+- Uncommitted changes from today's heartbeat work (needs commit before starting Phase 6.9)
 - Deploy commands:
   ```bash
   # Backend
@@ -635,9 +794,49 @@ Once the timeout is fixed, run a full end-to-end test:
   ```
 
 ### Key documentation
-- `autotune/docs/full-autonomy.md` — Architecture decisions and rationale
+- `autotune/docs/full-autonomy.md` — Architecture decisions and rationale (has a Session Keepalive section that needs updating to reflect fire-and-forget decision)
 - `autotune/docs/agent-security.md` — Security model, IAM policies, threat model, FAQ
 - `autotune/AUTOTUNE-DEVELOPMENT-PLAN.md` — This file
+
+---
+
+## Logging & Debugging Quick Reference
+
+### Where to find logs
+
+**CloudWatch log group:** `/aws/bedrock-agentcore/runtimes/IDPAutoTune_FASTAgent-sLV5ho8mzP-DEFAULT`
+
+**Log streams:** Each container instance gets its own stream named `YYYY/MM/DD/[runtime-logs]<uuid>`. Streams are sorted by `LastEventTime` descending. The most recent stream is usually the current/latest container — but AgentCore spins up multiple containers, so you may need to check 2–3 streams.
+
+**What's in the logs:** Only OpenTelemetry trace data (Bedrock model calls, tool inputs/outputs as JSON spans). Our own `logger.info()` / `logger.error()` calls do NOT appear — they go to stdout/stderr which AgentCore doesn't route to CloudWatch. All streams show 0 `storedBytes` despite having content (CloudWatch metadata lag).
+
+**Quick commands:**
+```bash
+# List recent streams
+aws logs describe-log-streams \
+  --log-group-name "/aws/bedrock-agentcore/runtimes/IDPAutoTune_FASTAgent-sLV5ho8mzP-DEFAULT" \
+  --order-by LastEventTime --descending --limit 5 --region us-east-1 \
+  --query 'logStreams[*].{name:logStreamName,lastEvent:lastEventTimestamp}' --output table
+
+# Read a stream (the OTel JSON is huge — pipe through jq or python for readability)
+aws logs get-log-events \
+  --log-group-name "/aws/bedrock-agentcore/runtimes/IDPAutoTune_FASTAgent-sLV5ho8mzP-DEFAULT" \
+  --log-stream-name "<stream-name>" --region us-east-1 --limit 50 \
+  --query 'events[*].message' --output text
+
+# Check DynamoDB state (fastest way to see if agent is alive)
+aws dynamodb get-item \
+  --table-name "IDPAutoTune-OptimizationState" \
+  --key '{"session_id": {"S": "<session-id>"}}' --region us-east-1 \
+  --query 'Item.{status:status.S,phase:phase.S,phase_detail:phase_detail.S,updated_at:updated_at.S,last_heartbeat_at:last_heartbeat_at.S,iteration:iteration.S}' \
+  --output table
+```
+
+### Known logging problems (TODO)
+- [ ] **Python logger output is invisible.** Our `logging.getLogger()` calls go to stdout but AgentCore only ships OTel spans to CloudWatch. Need to either: (a) configure the OTel logging handler to capture Python logs, or (b) add a custom CloudWatch Logs handler that writes directly to a separate log group we control.
+- [ ] **OTel spans are unreadable.** Tool call inputs/outputs are embedded in deeply nested JSON blobs with HTML-encoded evaluation reports. Need a log parsing script or CloudWatch Insights query to extract just tool names, errors, and timing.
+- [ ] **No error visibility.** When the agent crashes or the SSE stream drops, there's no error logged anywhere we can easily find. The `_agent_producer` exception handler writes to the queue, but if the queue consumer is already dead (SSE closed), the error is swallowed.
+- [ ] **Session ID not in log stream names.** Have to correlate by timestamp to figure out which stream belongs to which session.
 
 ---
 

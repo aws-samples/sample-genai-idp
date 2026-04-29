@@ -58,6 +58,8 @@ export default function ChatInterface() {
   const [client, setClient] = useState<AgentCoreClient | null>(null)
   const [stateApiUrl, setStateApiUrl] = useState<string>("")
   const [agentState, setAgentState] = useState<Record<string, string | number | null> | null>(null)
+  // Debug: count heartbeat keepalive events received from backend (remove once stable)
+  const [heartbeatCount, setHeartbeatCount] = useState(0)
 
   const { isLoading, setIsLoading } = useGlobal()
   const auth = useAuth()
@@ -259,6 +261,11 @@ export default function ChatInterface() {
             }
             break
           }
+          case "heartbeat": {
+            // Debug: count heartbeats received — remove once session stability is confirmed
+            setHeartbeatCount(c => c + 1)
+            break
+          }
         }
       }, extra)
     } catch (err) {
@@ -372,8 +379,18 @@ export default function ChatInterface() {
                     <div className="flex flex-col items-center gap-2 mb-2">
                       {agentState && (
                         <div className="text-xs text-gray-500 bg-white border rounded px-3 py-1.5 shadow-sm">
-                          <span className={`font-medium ${agentState.status === "running" ? "text-green-600" : agentState.status === "failed" ? "text-red-600" : agentState.status === "complete" ? "text-blue-600" : "text-yellow-600"}`}>
-                            {String(agentState.status ?? "unknown").toUpperCase()}
+                          <span className={`font-medium ${
+                            agentState.status === "running"
+                              ? (agentState.last_heartbeat_at && (Date.now() - new Date(String(agentState.last_heartbeat_at)).getTime()) > 120000)
+                                ? "text-yellow-600"
+                                : "text-green-600"
+                              : agentState.status === "failed" ? "text-red-600"
+                              : agentState.status === "complete" ? "text-blue-600"
+                              : "text-yellow-600"
+                          }`}>
+                            {agentState.status === "running" && agentState.last_heartbeat_at && (Date.now() - new Date(String(agentState.last_heartbeat_at)).getTime()) > 120000
+                              ? "POSSIBLY STALLED"
+                              : String(agentState.status ?? "unknown").toUpperCase()}
                           </span>
                           {agentState.phase && <span className="mx-1">·</span>}
                           {agentState.phase && <span>{String(agentState.phase)}</span>}
@@ -383,6 +400,9 @@ export default function ChatInterface() {
                           {agentState.iteration != null && <span>Iteration {String(agentState.iteration)}/{String(agentState.max_iterations ?? "?")}</span>}
                           {agentState.updated_at && <span className="mx-1">·</span>}
                           {agentState.updated_at && <span>Updated {String(agentState.updated_at)}</span>}
+                          {/* Debug: remove heartbeat display once session stability is confirmed */}
+                          {heartbeatCount > 0 && <span className="mx-1">·</span>}
+                          {heartbeatCount > 0 && <span className="text-gray-400">♥ {heartbeatCount}</span>}
                         </div>
                       )}
                       {agentState?.status === "running" && (

@@ -4,14 +4,22 @@ Runs as a Strands agent on AgentCore via the FAST BedrockAgentCoreApp entrypoint
 Operates autonomously: receives test_set_id + optional optimization_guidance,
 runs iterative optimization to completion (or cancellation), and produces an
 optimized IDP Accelerator config.
+
+Session keepalive: AgentCore has a 15-minute idle timeout. During long tool calls
+(e.g. run_evaluation taking 3+ minutes), no SSE events are yielded, which can
+trigger the timeout. We prevent this with:
+  1. @app.ping handler returning HEALTHY_BUSY while the agent is running
+  2. Heartbeat events yielded every 30s from a background asyncio task
 """
 
+import asyncio
 import json
 import logging
 import os
+import time
 from pathlib import Path
 
-from bedrock_agentcore.runtime import BedrockAgentCoreApp, RequestContext
+from bedrock_agentcore.runtime import BedrockAgentCoreApp, PingStatus, RequestContext
 from strands import Agent, AgentSkills
 from strands.models import BedrockModel
 from strands.session import FileSessionManager
@@ -25,6 +33,20 @@ from optimization_hooks import CancelCheckHook, OptimizationLoopHook
 logger = logging.getLogger(__name__)
 
 app = BedrockAgentCoreApp()
+
+# Track whether the agent is actively running (for ping handler)
+_agent_running = False
+
+HEARTBEAT_INTERVAL_SECONDS = 30
+
+
+@app.ping
+def custom_ping_status():
+    """Return HEALTHY_BUSY while agent is running to prevent idle timeout."""
+    if _agent_running:
+        return PingStatus.HEALTHY_BUSY
+    return PingStatus.HEALTHY
+
 
 AGENT_DIR = Path(__file__).parent
 
@@ -139,7 +161,14 @@ def create_autotune_agent(
 
 @app.entrypoint
 async def invocations(payload, context: RequestContext):
-    """Main entrypoint — called by AgentCore Runtime on each request."""
+    """Main entrypoint — called by AgentCore Runtime on each request.
+
+    Uses an asyncio.Queue to merge agent stream events with periodic heartbeats.
+    This ensures AgentCore always receives events within its idle timeout window,
+    even during long tool calls that produce no streaming output.
+    """
+    global _agent_running
+
     user_query = payload.get("prompt")
     session_id = payload.get("runtimeSessionId")
 
@@ -170,23 +199,59 @@ async def invocations(payload, context: RequestContext):
     state.initialize(test_set_id, optimization_guidance, MAX_ITERATIONS)
     initial_prompt = _build_initial_prompt(test_set_id, optimization_guidance)
 
+    # Queue merges agent events + heartbeats into a single stream.
+    # None sentinel signals the agent stream is done.
+    queue = asyncio.Queue()
+
+    async def _heartbeat_producer():
+        """Yield heartbeat events every HEARTBEAT_INTERVAL_SECONDS.
+
+        Also updates DynamoDB updated_at so the frontend can detect stale/crashed sessions.
+        """
+        while True:
+            await asyncio.sleep(HEARTBEAT_INTERVAL_SECONDS)
+            state.heartbeat()
+            await queue.put({"event": "heartbeat", "timestamp": time.time()})
+
+    async def _agent_producer():
+        """Run the agent and push events into the queue."""
+        try:
+            user_id = extract_user_id_from_context(context)
+            agent = create_autotune_agent(
+                user_id, session_id, state, test_set_id, optimization_guidance
+            )
+            async for event in agent.stream_async(initial_prompt):
+                await queue.put(json.loads(json.dumps(dict(event), default=str)))
+
+            # Agent finished normally
+            if state.get_status() == STATUS_RUNNING:
+                state.set_status(STATUS_COMPLETE)
+                state.update_phase("complete", "Optimization finished")
+
+        except Exception as e:
+            logger.exception("Agent run failed")
+            state.set_status(STATUS_FAILED)
+            state.update_phase("failed", str(e)[:500])
+            await queue.put({"status": "error", "error": str(e)})
+        finally:
+            await queue.put(None)  # sentinel
+
+    _agent_running = True
+    heartbeat_task = asyncio.create_task(_heartbeat_producer())
+    agent_task = asyncio.create_task(_agent_producer())
+
     try:
-        user_id = extract_user_id_from_context(context)
-        agent = create_autotune_agent(user_id, session_id, state, test_set_id, optimization_guidance)
-
-        async for event in agent.stream_async(initial_prompt):
-            yield json.loads(json.dumps(dict(event), default=str))
-
-        # If we get here without cancel/failure, mark complete
-        if state.get_status() == STATUS_RUNNING:
-            state.set_status(STATUS_COMPLETE)
-            state.update_phase("complete", "Optimization finished")
-
-    except Exception as e:
-        logger.exception("Agent run failed")
-        state.set_status(STATUS_FAILED)
-        state.update_phase("failed", str(e)[:500])
-        yield {"status": "error", "error": str(e)}
+        while True:
+            event = await queue.get()
+            if event is None:
+                break
+            yield event
+    finally:
+        _agent_running = False
+        heartbeat_task.cancel()
+        # Ensure agent_task exceptions are surfaced, not silently swallowed
+        if agent_task.done() and agent_task.exception():
+            logger.error("Agent task exception: %s", agent_task.exception())
 
 
 if __name__ == "__main__":

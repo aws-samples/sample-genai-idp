@@ -58,6 +58,7 @@ class OptimizationState:
                     "optimization_guidance": optimization_guidance,
                     "started_at": _now(),
                     "updated_at": _now(),
+                    "last_heartbeat_at": _now(),
                 }
             )
         except Exception:
@@ -103,6 +104,13 @@ class OptimizationState:
             "SET phase = :p, phase_detail = :d, updated_at = :t",
             {":p": phase, ":d": phase_detail, ":t": _now()},
         )
+
+    def heartbeat(self) -> None:
+        """Touch last_heartbeat_at for stale session detection.
+
+        Separate from updated_at, which tracks the last agent/tool state change.
+        """
+        self._update_expr("SET last_heartbeat_at = :t", {":t": _now()})
 
     def update_metrics(
         self,

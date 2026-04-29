@@ -24,6 +24,7 @@ export type StreamEvent =
   | { type: "message"; role: string; content: unknown[] }
   | { type: "result"; stopReason: string }
   | { type: "lifecycle"; event: string }
+  | { type: "heartbeat"; timestamp: number }
 
 /** Callback invoked with each stream event */
 export type StreamCallback = (event: StreamEvent) => void
