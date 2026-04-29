@@ -3,9 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { ChatHeader } from "./ChatHeader"
 import { ChatInput } from "./ChatInput"
-import { ChatMessages } from "./ChatMessages"
 import { ChatSidebar } from "./ChatSidebar"
-import { ChatSession, Message, MessageSegment, ToolCall } from "./types"
+import { ChatSession, Message } from "./types"
 
 import { useGlobal } from "@/app/context/GlobalContext"
 import { AgentCoreClient } from "@/lib/agentcore-client"
@@ -40,6 +39,24 @@ function newSession(): ChatSession {
   return { id: crypto.randomUUID(), name: "New Run", history: [], startDate: now, endDate: now }
 }
 
+// Parsed stream event types matching the consolidated JSONL from the backend
+type StreamItem =
+  | { type: "text"; content: string; ts?: string }
+  | { type: "tool_use"; toolUseId: string; name: string; input: string; ts?: string }
+  | { type: "tool_result"; toolUseId: string; result: string; ts?: string }
+
+function parseStreamLine(line: string): StreamItem | null {
+  try {
+    const evt = JSON.parse(line)
+    if (evt.type === "text" && evt.content) return evt
+    if (evt.type === "tool_use") return evt
+    if (evt.type === "tool_result") return evt
+    return null
+  } catch {
+    return null
+  }
+}
+
 export default function ChatInterface() {
   const [sessions, setSessions] = useState<ChatSession[]>(() => {
     const saved = loadSessions()
@@ -58,23 +75,28 @@ export default function ChatInterface() {
   const [client, setClient] = useState<AgentCoreClient | null>(null)
   const [stateApiUrl, setStateApiUrl] = useState<string>("")
   const [agentState, setAgentState] = useState<Record<string, string | number | null> | null>(null)
-  // Debug: count heartbeat keepalive events received from backend (remove once stable)
-  const [heartbeatCount, setHeartbeatCount] = useState(0)
+
+  // Stream polling state
+  const [streamOffset, setStreamOffset] = useState(0)
+  const [streamItems, setStreamItems] = useState<StreamItem[]>([])
+  // Optimization log polling state
+  const [optimizationLog, setOptimizationLog] = useState("")
+  // Tab: "stream" or "log"
+  const [activeTab, setActiveTab] = useState<"stream" | "log">("stream")
 
   const { isLoading, setIsLoading } = useGlobal()
   const auth = useAuth()
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const streamEndRef = useRef<HTMLDivElement>(null)
 
   useDefaultTool(({ name, args, status, result }) => (
     <ToolCallDisplay name={name} args={args} status={status} result={result} />
   ))
 
-  // Persist sessions to localStorage whenever they change
   useEffect(() => {
     saveSessions(sessions)
   }, [sessions])
 
-  // Helper to update messages for the current session
   const setMessages = useCallback(
     (updater: Message[] | ((prev: Message[]) => Message[])) => {
       setSessions(prev =>
@@ -93,7 +115,6 @@ export default function ChatInterface() {
     [currentSessionId]
   )
 
-  // Load agent configuration and create client on mount
   useEffect(() => {
     async function loadConfig() {
       try {
@@ -124,6 +145,11 @@ export default function ChatInterface() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [messages])
 
+  // Auto-scroll stream view on new items AND on tab switch
+  useEffect(() => {
+    streamEndRef.current?.scrollIntoView({ behavior: "smooth" })
+  }, [streamItems, activeTab])
+
   // Poll DynamoDB state while a run is active
   useEffect(() => {
     if (!stateApiUrl || messages.length === 0) return
@@ -147,6 +173,68 @@ export default function ChatInterface() {
     return () => { active = false; clearInterval(interval) }
   }, [stateApiUrl, currentSessionId, messages.length, auth.user?.id_token])
 
+  // Poll agent stream (JSONL) while running
+  useEffect(() => {
+    if (!stateApiUrl || !agentState || !["running", "complete", "failed", "cancelled"].includes(String(agentState.status))) return
+    const idToken = auth.user?.id_token
+    if (!idToken) return
+
+    let active = true
+    let currentOffset = streamOffset
+    const poll = async () => {
+      try {
+        const resp = await fetch(`${stateApiUrl}stream?sessionId=${currentSessionId}&offset=${currentOffset}`, {
+          headers: { Authorization: `Bearer ${idToken}` },
+        })
+        if (resp.ok && active) {
+          const data = await resp.json()
+          if (data.lines && data.lines.length > 0) {
+            const newItems = data.lines.map(parseStreamLine).filter(Boolean) as StreamItem[]
+            if (newItems.length > 0) {
+              setStreamItems(prev => [...prev, ...newItems])
+            }
+            currentOffset = data.nextOffset
+            setStreamOffset(data.nextOffset)
+          }
+        }
+      } catch { /* ignore */ }
+    }
+    poll()
+    const isRunning = agentState.status === "running"
+    const interval = setInterval(poll, isRunning ? 3000 : 10000)
+    if (!isRunning) {
+      setTimeout(() => { if (active) clearInterval(interval) }, 5000)
+    }
+    return () => { active = false; clearInterval(interval) }
+  }, [stateApiUrl, currentSessionId, agentState?.status, auth.user?.id_token])
+
+  // Poll optimization log while running
+  useEffect(() => {
+    if (!stateApiUrl || !agentState || !["running", "complete", "failed", "cancelled"].includes(String(agentState.status))) return
+    const idToken = auth.user?.id_token
+    if (!idToken) return
+
+    let active = true
+    const poll = async () => {
+      try {
+        const resp = await fetch(`${stateApiUrl}log?sessionId=${currentSessionId}`, {
+          headers: { Authorization: `Bearer ${idToken}` },
+        })
+        if (resp.ok && active) {
+          const data = await resp.json()
+          if (data.content) setOptimizationLog(data.content)
+        }
+      } catch { /* ignore */ }
+    }
+    poll()
+    const isRunning = agentState.status === "running"
+    const interval = setInterval(poll, isRunning ? 5000 : 15000)
+    if (!isRunning) {
+      setTimeout(() => { if (active) clearInterval(interval) }, 10000)
+    }
+    return () => { active = false; clearInterval(interval) }
+  }, [stateApiUrl, currentSessionId, agentState?.status, auth.user?.id_token])
+
   const sendMessage = async (userMessage: string) => {
     if (!client) return
     if (isInitialState && !testSetId.trim()) {
@@ -154,6 +242,10 @@ export default function ChatInterface() {
       return
     }
     setError(null)
+
+    setStreamOffset(0)
+    setStreamItems([])
+    setOptimizationLog("")
 
     const newUserMessage: Message = {
       role: "user",
@@ -164,36 +256,9 @@ export default function ChatInterface() {
     setInput("")
     setIsLoading(true)
 
-    const assistantResponse: Message = {
-      role: "assistant",
-      content: "",
-      timestamp: new Date().toISOString(),
-    }
-    setMessages(prev => [...prev, assistantResponse])
-
     try {
       const accessToken = auth.user?.access_token
       if (!accessToken) throw new Error("Authentication required. Please log in again.")
-
-      const segments: MessageSegment[] = []
-      const toolCallMap = new Map<string, ToolCall>()
-
-      const updateMessage = () => {
-        const content = segments
-          .filter((s): s is Extract<MessageSegment, { type: "text" }> => s.type === "text")
-          .map(s => s.content)
-          .join("")
-
-        setMessages(prev => {
-          const updated = [...prev]
-          updated[updated.length - 1] = {
-            ...updated[updated.length - 1],
-            content,
-            segments: [...segments],
-          }
-          return updated
-        })
-      }
 
       const extra: Record<string, string> = {}
       if (testSetId.trim()) {
@@ -205,80 +270,19 @@ export default function ChatInterface() {
         testSetId.trim() ? "Begin optimization" : userMessage,
         currentSessionId,
         accessToken,
-        event => {
-        switch (event.type) {
-          case "text": {
-            const prev = segments[segments.length - 1]
-            if (prev && prev.type === "tool") {
-              for (const tc of toolCallMap.values()) {
-                if (tc.status === "streaming" || tc.status === "executing") {
-                  tc.status = "complete"
-                }
-              }
-            }
-            const last = segments[segments.length - 1]
-            if (last && last.type === "text") {
-              last.content += event.content
-            } else {
-              segments.push({ type: "text", content: event.content })
-            }
-            updateMessage()
-            break
-          }
-          case "tool_use_start": {
-            const tc: ToolCall = {
-              toolUseId: event.toolUseId,
-              name: event.name,
-              input: "",
-              status: "streaming",
-            }
-            toolCallMap.set(event.toolUseId, tc)
-            segments.push({ type: "tool", toolCall: tc })
-            updateMessage()
-            break
-          }
-          case "tool_use_delta": {
-            const tc = toolCallMap.get(event.toolUseId)
-            if (tc) tc.input += event.input
-            updateMessage()
-            break
-          }
-          case "tool_result": {
-            const tc = toolCallMap.get(event.toolUseId)
-            if (tc) {
-              tc.result = event.result
-              tc.status = "complete"
-            }
-            updateMessage()
-            break
-          }
-          case "message": {
-            if (event.role === "assistant") {
-              for (const tc of toolCallMap.values()) {
-                if (tc.status === "streaming") tc.status = "executing"
-              }
-              updateMessage()
-            }
-            break
-          }
-          case "heartbeat": {
-            // Debug: count heartbeats received — remove once session stability is confirmed
-            setHeartbeatCount(c => c + 1)
-            break
-          }
-        }
-      }, extra)
+        () => {},
+        extra
+      )
+
+      const startedMessage: Message = {
+        role: "assistant",
+        content: "Optimization started. Monitoring progress below...",
+        timestamp: new Date().toISOString(),
+      }
+      setMessages(prev => [...prev, startedMessage])
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : "Unknown error"
-      setError(`Failed to get response: ${errorMessage}`)
-      setMessages(prev => {
-        const updated = [...prev]
-        updated[updated.length - 1] = {
-          ...updated[updated.length - 1],
-          content: "I apologize, but I encountered an error processing your request. Please try again.",
-        }
-        return updated
-      })
+      setError(`Failed to start optimization: ${errorMessage}`)
     } finally {
       setIsLoading(false)
     }
@@ -295,6 +299,10 @@ export default function ChatInterface() {
     setCurrentSessionId(session.id)
     setInput("")
     setError(null)
+    setAgentState(null)
+    setStreamOffset(0)
+    setStreamItems([])
+    setOptimizationLog("")
   }
 
   const handleCancelOptimization = async () => {
@@ -318,10 +326,48 @@ export default function ChatInterface() {
     setCurrentSessionId(session.id)
     setInput("")
     setError(null)
+    setAgentState(null)
+    setStreamOffset(0)
+    setStreamItems([])
+    setOptimizationLog("")
   }
 
   const isInitialState = messages.length === 0
   const hasAssistantMessages = messages.some(m => m.role === "assistant")
+
+  // Merge tool_use + tool_result by toolUseId for display
+  const toolResults = new Map<string, string>()
+  for (const item of streamItems) {
+    if (item.type === "tool_result") toolResults.set(item.toolUseId, item.result)
+  }
+
+  const renderedStream = streamItems.map((item, i) => {
+    if (item.type === "text") {
+      return (
+        <div key={i} className="whitespace-pre-wrap text-gray-800 my-2">
+          {item.ts && <span className="text-xs text-gray-400 mr-2">[{item.ts}]</span>}
+          {item.content}
+        </div>
+      )
+    }
+    if (item.type === "tool_use") {
+      const result = toolResults.get(item.toolUseId)
+      return (
+        <div key={i} className="flex items-start gap-2">
+          {item.ts && <span className="text-xs text-gray-400 mt-1.5 shrink-0">[{item.ts}]</span>}
+          <div className="grow">
+            <ToolCallDisplay
+              name={item.name}
+              args={item.input}
+              status="complete"
+              result={result}
+            />
+          </div>
+        </div>
+      )
+    }
+    return null
+  }).filter(Boolean)
 
   return (
     <SidebarProvider>
@@ -350,8 +396,6 @@ export default function ChatInterface() {
                 <p className="text-gray-600 mt-2">Enter a test set ID and optional guidance to start an optimization run</p>
               </div>
               <div className="px-4 mb-16 max-w-4xl mx-auto w-full space-y-3">
-                {/* TODO: Replace test set ID text input with a dropdown populated from the IDP stack.
-                    Requires a new REST API endpoint + Lambda that calls IDP SDK/CLI to list test sets. */}
                 <input
                   type="text"
                   value={testSetId}
@@ -365,53 +409,93 @@ export default function ChatInterface() {
             </>
           ) : (
             <>
-              <div className="grow overflow-hidden">
-                <div className="max-w-4xl mx-auto w-full h-full">
-                  <ChatMessages
-                    messages={messages}
-                    messagesEndRef={messagesEndRef}
-                  />
+              {/* Status bar */}
+              {hasAssistantMessages && stateApiUrl && (
+                <div className="flex-none px-4 py-2 border-b bg-white/80">
+                  <div className="max-w-4xl mx-auto flex items-center gap-3">
+                    {agentState && (
+                      <div className="text-xs text-gray-500 flex items-center gap-2 flex-wrap">
+                        <span className={`font-medium ${
+                          agentState.status === "running"
+                            ? (agentState.last_heartbeat_at && (Date.now() - new Date(String(agentState.last_heartbeat_at)).getTime()) > 120000)
+                              ? "text-yellow-600"
+                              : "text-green-600"
+                            : agentState.status === "failed" ? "text-red-600"
+                            : agentState.status === "complete" ? "text-blue-600"
+                            : "text-yellow-600"
+                        }`}>
+                          {agentState.status === "running" && agentState.last_heartbeat_at && (Date.now() - new Date(String(agentState.last_heartbeat_at)).getTime()) > 120000
+                            ? "POSSIBLY STALLED"
+                            : String(agentState.status ?? "unknown").toUpperCase()}
+                        </span>
+                        {agentState.phase && <span>· {String(agentState.phase)}</span>}
+                        {agentState.phase_detail && <span>— {String(agentState.phase_detail)}</span>}
+                        {agentState.iteration != null && <span>· Iteration {String(agentState.iteration)}/{String(agentState.max_iterations ?? "?")}</span>}
+                        {agentState.best_accuracy != null && Number(agentState.best_accuracy) > 0 && (
+                          <span>· Best: {String(agentState.best_accuracy)}%</span>
+                        )}
+                      </div>
+                    )}
+                    {agentState?.status === "running" && (
+                      <button
+                        onClick={handleCancelOptimization}
+                        className="ml-auto px-3 py-1 text-xs bg-red-600 text-white rounded hover:bg-red-700 transition-colors"
+                      >
+                        Cancel
+                      </button>
+                    )}
+                  </div>
                 </div>
-              </div>
-              <div className="flex-none">
-                <div className="max-w-4xl mx-auto w-full">
-                  {hasAssistantMessages && stateApiUrl && (
-                    <div className="flex flex-col items-center gap-2 mb-2">
-                      {agentState && (
-                        <div className="text-xs text-gray-500 bg-white border rounded px-3 py-1.5 shadow-sm">
-                          <span className={`font-medium ${
-                            agentState.status === "running"
-                              ? (agentState.last_heartbeat_at && (Date.now() - new Date(String(agentState.last_heartbeat_at)).getTime()) > 120000)
-                                ? "text-yellow-600"
-                                : "text-green-600"
-                              : agentState.status === "failed" ? "text-red-600"
-                              : agentState.status === "complete" ? "text-blue-600"
-                              : "text-yellow-600"
-                          }`}>
-                            {agentState.status === "running" && agentState.last_heartbeat_at && (Date.now() - new Date(String(agentState.last_heartbeat_at)).getTime()) > 120000
-                              ? "POSSIBLY STALLED"
-                              : String(agentState.status ?? "unknown").toUpperCase()}
-                          </span>
-                          {agentState.phase && <span className="mx-1">·</span>}
-                          {agentState.phase && <span>{String(agentState.phase)}</span>}
-                          {agentState.phase_detail && <span className="mx-1">—</span>}
-                          {agentState.phase_detail && <span>{String(agentState.phase_detail)}</span>}
-                          {agentState.iteration != null && <span className="mx-1">·</span>}
-                          {agentState.iteration != null && <span>Iteration {String(agentState.iteration)}/{String(agentState.max_iterations ?? "?")}</span>}
-                          {agentState.updated_at && <span className="mx-1">·</span>}
-                          {agentState.updated_at && <span>Updated {String(agentState.updated_at)}</span>}
-                          {/* Debug: remove heartbeat display once session stability is confirmed */}
-                          {heartbeatCount > 0 && <span className="mx-1">·</span>}
-                          {heartbeatCount > 0 && <span className="text-gray-400">♥ {heartbeatCount}</span>}
-                        </div>
+              )}
+
+              {/* Tab bar */}
+              {hasAssistantMessages && (
+                <div className="flex-none border-b bg-white/60">
+                  <div className="max-w-4xl mx-auto flex">
+                    <button
+                      onClick={() => setActiveTab("stream")}
+                      className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+                        activeTab === "stream"
+                          ? "border-blue-500 text-blue-700"
+                          : "border-transparent text-gray-500 hover:text-gray-700"
+                      }`}
+                    >
+                      Agent Stream {streamItems.length > 0 && `(${streamItems.length})`}
+                    </button>
+                    <button
+                      onClick={() => setActiveTab("log")}
+                      className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+                        activeTab === "log"
+                          ? "border-blue-500 text-blue-700"
+                          : "border-transparent text-gray-500 hover:text-gray-700"
+                      }`}
+                    >
+                      Optimization Log
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Content area */}
+              <div className="grow overflow-hidden">
+                <div className="max-w-4xl mx-auto w-full h-full overflow-y-auto p-4">
+                  {activeTab === "stream" ? (
+                    <div className="space-y-1">
+                      {renderedStream.length > 0 ? renderedStream : (
+                        <p className="text-gray-400 text-center mt-8">
+                          {agentState?.status === "running" ? "Waiting for agent events..." : "No stream data available"}
+                        </p>
                       )}
-                      {agentState?.status === "running" && (
-                        <button
-                          onClick={handleCancelOptimization}
-                          className="px-4 py-1.5 text-sm bg-red-600 text-white rounded hover:bg-red-700 transition-colors"
-                        >
-                          Cancel Optimization
-                        </button>
+                      <div ref={streamEndRef} />
+                    </div>
+                  ) : (
+                    <div className="prose prose-sm max-w-none bg-white p-6 rounded border">
+                      {optimizationLog ? (
+                        <pre className="whitespace-pre-wrap text-sm text-gray-800">{optimizationLog}</pre>
+                      ) : (
+                        <p className="text-gray-400 text-center mt-8">
+                          {agentState?.status === "running" ? "Waiting for optimization log..." : "No optimization log available"}
+                        </p>
                       )}
                     </div>
                   )}
