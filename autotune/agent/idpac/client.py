@@ -126,7 +126,8 @@ class IDPACClient:
         """Upload config to deployed stack via DynamoDB (fast).
 
         Writes the configuration directly to DynamoDB, completing in seconds.
-        Each version is a named, independent snapshot.
+        Each version is a named, independent snapshot. Always marks configs
+        as custom (managed=false) to prevent IDP from overwriting them.
 
         Args:
             config_path: Path to config YAML or JSON file
@@ -137,6 +138,15 @@ class IDPACClient:
         Returns:
             Dict with status, stdout, stderr
         """
+        # Strip managed flag — AutoTune configs are always custom
+        import yaml
+        with open(config_path, "r") as f:
+            data = yaml.safe_load(f)
+        if isinstance(data, dict) and data.get("managed"):
+            data["managed"] = False
+            with open(config_path, "w") as f:
+                yaml.dump(data, f, default_flow_style=False, sort_keys=False)
+
         args = [
             "config-upload",
             "--stack-name", self.stack_name,
