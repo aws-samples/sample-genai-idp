@@ -659,9 +659,59 @@ Implemented and deployed. The agent runs fully decoupled from the frontend — n
 
 - [ ] **Session resume after ENOSPC** — Implement "Resume" button in the UI for runs that fail with ENOSPC. Reuse the same `runtimeSessionId` to get a fresh microVM with the same persistent storage (`/mnt/workspace`). The agent reads OPTIMIZATION-LOG.md on resume and continues where it left off. This pairs with the optimization run history feature — session IDs need to be visible in the UI so users can identify and resume failed runs. See also the existing "Resume interrupted runs" TODO in 6.8.
 
+### 6.12 Session: April 30 PM — Run History, Resume, Tool Audit, Bug Fixes
+
+**Run history + resume UI (deployed):**
+- Added `GET /runs` Lambda endpoint — DynamoDB Scan with projection, paginated, sorted by `started_at` desc
+- Added `/runs` route to API Gateway with Cognito auth
+- Rewrote `ChatSidebar.tsx` — fetches from `/runs` API (polls every 10s), shows session_id (8 chars), status icon (color-coded), test_set_id, accuracy, iteration count, date
+- Rewrote `ChatInterface.tsx` — replaced localStorage session list with `/runs` API, `currentSessionId` null for new run form
+- Added Resume button for failed/cancelled runs — calls `client.invoke()` with same `sessionId` + `resume: "true"`
+- Backend resume logic in `basic_agent.py` — skips `state.initialize()`, sets status back to running, uses `_build_resume_prompt()` telling agent to read OPTIMIZATION-LOG.md
+
+**S3SessionManager (deployed, confirmed working):**
+- Root cause of ENOSPC: `FileSessionManager` wrote ~650 files per run (one JSON per message + .tmp atomic writes), exhausting NFS metadata budget
+- Switched to `S3SessionManager` — same per-message structure but S3 objects in stream bucket
+- `/mnt/workspace` now at 0.0 MB (only OPTIMIZATION-LOG.md, too small to register)
+- Active run survived well past previous 42-min failure point — **ENOSPC workaround confirmed**
+- Added `s3:GetObject`, `s3:DeleteObject`, `s3:ListBucket` to agent role
+
+**Optimization loop stop bug (fixed):**
+- `OptimizationLoopHook._check_and_resume()` kept setting `event.resume` after max iterations because it checked iteration count but not status
+- Agent looped forever saying "as I said, we are done"
+- Fix: check `status == complete` at top of hook and return without resuming
+
+**Tool audit — 4 new tools added (21 → 25):**
+- `download_single_document_results` — investigate a single document's extraction/eval output
+- `download_ground_truth` — get baseline for comparison (handles single + packet-splitting)
+- `parse_evaluation_results` — structured analysis via `EvaluationResult` class
+- `config_edit` — dot-notation get/set/save/add_class on config YAML (replaces need for shell + IDPConfig)
+
+**Docstring enrichments:**
+- `validate_config` — lists all 6 checks and why they cause 0% accuracy
+- `auto_fix_config` — lists all 7 available fixes with which are opt-in
+- `check_evaluation_status` — documents all 5 status values with terminal/non-terminal
+
+**Test dataset uploaded:** `davids-test-dataset` (45 PNG images, 9 classes, 5 samples each) from `/home/ubuntu/gitlab/idpac-local-test-dataset-OCR`
+
+**Commits pushed:**
+- `0974095a` — fix: switch to S3SessionManager to eliminate NFS ENOSPC
+- `48fe4ebc` — feat: optimization run history from DynamoDB + resume button
+- `f1a1776a` — docs: S3SessionManager lessons learned, ENOSPC root cause
+- `be5c26721` — fix: stop optimization loop when status is already complete
+- `89195e43c` — docs: add reward hacking and cost observability TODOs
+
 ### ⚠️ NEXT SESSION: TOP PRIORITY
 
-**ENOSPC fix deployed (6.11).** Switched from FileSessionManager to S3SessionManager — zero session files on NFS now. Run a full end-to-end optimization loop to verify the agent survives past the previous ~42 min failure point. If it still hits ENOSPC, the only file on NFS is OPTIMIZATION-LOG.md (~1 KB).
+**See `autotune/planning-docs/next-steps-2026-05-01.md` for detailed next steps.**
+
+**Next priorities (in order):**
+1. **Silent evaluation failure investigation** — IDP-side bug where eval runs get stuck at 0 completed files. Standalone doc at `autotune/planning-docs/silent-eval-failure-investigation.md`. Will be worked in parallel by IDP team.
+2. **Reward hacking guardrail** — Hard guardrail in `upload_config` to prevent agent from modifying metric definitions.
+3. **Cost observability** — Track token usage and estimated cost per run.
+4. **Automatic optimization log updates** — Hook-based approach to keep the log current.
+
+**Resume testing:** Will be tested organically while working on other features.
 
 #### Problem being solved
 AgentCore's internal SSE proxy kills the HTTP response stream after ~60s. Our heartbeat/ping approach can't fix this because the proxy is upstream of our container. The agent keeps running but the frontend loses all visibility. We need the frontend to see the agent's full thought process, optimization state, and optimization log — all without depending on a persistent SSE connection.
