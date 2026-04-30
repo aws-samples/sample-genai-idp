@@ -1,10 +1,27 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 import React from 'react';
-import { createRoot } from 'react-dom/client';
+import ReactDOM, { createRoot } from 'react-dom/client';
+import * as ReactJSXRuntime from 'react/jsx-runtime';
 import './index.css';
 
 import App from './App';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Expose shared dependencies for runtime-loaded extension bundles.
+//
+// The IDPMonitor UI bundle (loaded at runtime from /extensions/idp-monitor-ui.js)
+// is built as a UMD module that externalises React and Cloudscape. Those
+// externals are resolved via window.__IDP_EXTENSIONS_DEPS__ so the extension
+// bundle shares the SAME React instance as the host app — preventing the
+// "multiple React copies" / broken-hooks problem.
+// ─────────────────────────────────────────────────────────────────────────────
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+(window as any)['__IDP_EXTENSIONS_DEPS__'] = {
+  React,
+  ReactDOM,
+  ReactJSXRuntime,
+};
 
 // Suppress ResizeObserver loop error - this is a benign browser timing issue
 const originalConsoleError = console.error;

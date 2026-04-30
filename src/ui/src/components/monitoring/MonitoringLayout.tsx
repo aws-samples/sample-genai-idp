@@ -2,15 +2,17 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * MonitoringLayout — top-level layout wrapper for the /monitoring route in the
- * open-source IDP Accelerator UI.
+ * MonitoringLayout — top-level layout wrapper for the /monitoring route.
  *
  * Reads the Accelerator stack name from the SettingsContext (populated from
  * SSM Parameter Store at login time) and passes it down to MonitoringShell.
  *
  * MonitoringShell then:
- *   - Lazy-loads the premium @idp-accelerator/idp-monitor-ui package if installed
- *   - Falls back to a "not installed" placeholder when the package is absent
+ *   - Checks for IDPMonitorUiUrl in settings (written by deploy.sh)
+ *   - If present: dynamically imports the UMD bundle at runtime from
+ *     /extensions/idp-monitor-ui.js (same-origin, no CORS) — NO build-time
+ *     dependency on @idp-accelerator/idp-monitor-ui required
+ *   - If absent: shows the "Deploy IDPMonitor" instructions page
  */
 
 import React from 'react';

@@ -3,94 +3,99 @@
 
 /**
  * MonitoringActivationPage — shown when the user navigates to /monitoring
- * but has not yet activated IDPMonitor (subscription pending / not configured).
+ * but the IDPMonitor stack has not been deployed yet.
  *
- * This is a thin re-export of the premium component. If the premium package
- * is not installed, a minimal built-in fallback is rendered instead.
+ * This is a built-in static component — it has NO dependency on the
+ * @idp-accelerator/idp-monitor-ui package. The IDP Accelerator builds and
+ * deploys independently of the IDPMonitor stack.
  *
- * The premium `MonitoringActivationPage` (from `@idp-accelerator/idp-monitor-ui`)
- * includes:
- *  - Subscription status check call-to-action
- *  - AWS Marketplace / activation key entry UI
- *  - Stack deployment instructions
- *
- * This open-source stub just shows a static message pointing to the docs.
+ * The monitoring dashboard UI is loaded at RUNTIME from the Accelerator's
+ * S3/CloudFront origin once the IDPMonitor stack has been deployed and
+ * deploy.sh has copied the UI bundle and patched the SSM settings parameter.
  */
 
-import React, { Suspense, lazy } from 'react';
+import React from 'react';
+import { Alert, Box, Button, Container, Header, SpaceBetween, TextContent } from '@cloudscape-design/components';
 
 interface MonitoringActivationPageProps {
-  /** Called when the user successfully activates a subscription. */
-  onActivated?: () => void;
+  /** Stack name to display in the deploy command. */
+  stackName?: string;
+  /** Called when the user clicks "I already deployed it" to force a page refresh. */
+  onRefresh?: () => void;
   /** Optional CSS class for the wrapper. */
   className?: string;
 }
 
-// ---------------------------------------------------------------------------
-// Fallback — shown when @idp-accelerator/idp-monitor-ui is not installed.
-// Declared BEFORE the lazy() call so TypeScript sees the type unambiguously.
-// ---------------------------------------------------------------------------
-
-const ActivationStub: React.FC<MonitoringActivationPageProps> = ({ onActivated, className }) => (
+export const MonitoringActivationPage: React.FC<MonitoringActivationPageProps> = ({ stackName, onRefresh, className }) => (
   <div
     className={className}
     style={{
       display: 'flex',
       flexDirection: 'column',
       alignItems: 'center',
-      justifyContent: 'center',
-      minHeight: '400px',
+      justifyContent: 'flex-start',
       padding: '2rem',
-      textAlign: 'center',
     }}
   >
-    <div style={{ fontSize: '3rem', marginBottom: '1rem' }}>🔐</div>
-    <h2 style={{ fontSize: '1.5rem', fontWeight: 600, marginBottom: '0.5rem' }}>Activate IDPMonitor</h2>
-    <p style={{ maxWidth: '480px', lineHeight: 1.6, color: '#6b7280', marginBottom: '1.5rem' }}>
-      IDPMonitor provides production observability for your IDP Accelerator pipeline. Subscribe via AWS Marketplace or contact your
-      administrator for an activation key.
-    </p>
-    {onActivated && (
-      <button
-        onClick={onActivated}
-        style={{
-          padding: '0.625rem 1.25rem',
-          backgroundColor: '#2563eb',
-          color: '#fff',
-          border: 'none',
-          borderRadius: '6px',
-          fontSize: '0.875rem',
-          fontWeight: 500,
-          cursor: 'pointer',
-        }}
-      >
-        I have an activation key
-      </button>
-    )}
+    <div style={{ maxWidth: '700px', width: '100%' }}>
+      <Box padding={{ top: 'xxl', horizontal: 'xxl' }}>
+        <SpaceBetween size="l">
+          <Container
+            header={
+              <Header variant="h1" description="Enable real-time observability for your IDP Accelerator pipeline">
+                IDPMonitor — Monitoring Dashboard
+              </Header>
+            }
+          >
+            <SpaceBetween size="m">
+              <Alert type="info">
+                The <strong>IDPMonitor</strong> stack has not been deployed yet, or the monitoring configuration has not been written to
+                your Accelerator settings.
+              </Alert>
+
+              <TextContent>
+                <h3>Getting Started</h3>
+                <p>
+                  Deploy the <strong>IDPMonitor</strong> stack alongside your existing Accelerator stack using the <code>deploy.sh</code>{' '}
+                  script:
+                </p>
+                <pre
+                  style={{
+                    background: '#f4f4f4',
+                    padding: '0.75rem',
+                    borderRadius: '4px',
+                    fontSize: '0.85rem',
+                    overflow: 'auto',
+                  }}
+                >
+                  {`cd products/idp-monitor\n./deploy.sh --stack-name ${stackName || '<your-accelerator-stack-name>'}`}
+                </pre>
+                <p>The deploy script will automatically:</p>
+                <ol>
+                  <li>Deploy the AppSync monitoring API and backend Lambda functions</li>
+                  <li>Copy the monitoring UI bundle to your Accelerator&apos;s S3 bucket</li>
+                  <li>Update your Accelerator SSM settings with the monitoring endpoint</li>
+                  <li>Invalidate the CloudFront cache</li>
+                </ol>
+                <p>
+                  Once complete, <strong>refresh this page</strong> — the monitoring dashboard will load automatically without requiring a
+                  rebuild or redeployment of the Accelerator.
+                </p>
+              </TextContent>
+
+              {onRefresh && (
+                <Box>
+                  <Button variant="primary" onClick={onRefresh}>
+                    {'I deployed IDPMonitor \u2014 Refresh'}
+                  </Button>
+                </Box>
+              )}
+            </SpaceBetween>
+          </Container>
+        </SpaceBetween>
+      </Box>
+    </div>
   </div>
-);
-
-// ---------------------------------------------------------------------------
-// Lazy-load the premium activation page; fall back to the stub above.
-// The variable is cast explicitly so TypeScript accepts our custom props.
-// ---------------------------------------------------------------------------
-
-const PremiumActivationPage = lazy(() => {
-  return import('@idp-accelerator/idp-monitor-ui')
-    .then((mod) => ({
-      default: mod.MonitoringActivationPage as React.ComponentType<MonitoringActivationPageProps>,
-    }))
-    .catch(() => ({ default: ActivationStub }));
-}) as unknown as React.LazyExoticComponent<React.ComponentType<MonitoringActivationPageProps>>;
-
-// ---------------------------------------------------------------------------
-// Public component
-// ---------------------------------------------------------------------------
-
-export const MonitoringActivationPage: React.FC<MonitoringActivationPageProps> = ({ onActivated, className }) => (
-  <Suspense fallback={<div style={{ minHeight: '400px' }} />}>
-    <PremiumActivationPage onActivated={onActivated} className={className} />
-  </Suspense>
 );
 
 export default MonitoringActivationPage;

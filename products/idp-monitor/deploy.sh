@@ -397,8 +397,118 @@ echo "  Stack    : ${MONITOR_STACK_NAME}"
 echo ""
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Build the IDPMonitor UI bundle (needed before the S3 copy step below).
+# The library vite build produces:
+#   products/idp-monitor/ui/dist/idp-monitor-ui.umd.js  — browser-loadable UMD
+#   products/idp-monitor/ui/dist/idp-monitor-ui.js       — ESM for npm consumers
+# ─────────────────────────────────────────────────────────────────────────────
+UI_DIST_DIR="${SCRIPT_DIR}/ui/dist"
+UI_UMD_BUNDLE="${UI_DIST_DIR}/idp-monitor-ui.umd.js"
+
+if [[ ! -f "$UI_UMD_BUNDLE" ]]; then
+  header "Building IDPMonitor UI bundle"
+  if command -v npm &>/dev/null; then
+    (cd "${SCRIPT_DIR}/ui" && npm install --silent && npm run build)
+    success "IDPMonitor UI bundle built: ${UI_UMD_BUNDLE}"
+  else
+    warn "npm not found — skipping UI bundle build. Ensure ui/dist/idp-monitor-ui.umd.js exists."
+  fi
+else
+  info "IDPMonitor UI bundle already built: ${UI_UMD_BUNDLE}"
+fi
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Copy the IDPMonitor UI bundle to the Accelerator's WebUI S3 bucket.
+#
+# The bundle is served from the Accelerator's own CloudFront origin at:
+#   /extensions/idp-monitor-ui.js
+#
+# This avoids any cross-origin (CORS) issues and means no new CloudFront
+# distribution is required in the IDPMonitor stack. The Accelerator UI
+# loads the bundle at runtime via:
+#   import(/* @vite-ignore */ settings.IDPMonitorUiUrl)
+# ─────────────────────────────────────────────────────────────────────────────
+WEBAPP_BUCKET=$(aws_cli cloudformation list-stack-resources \
+  --stack-name "$STACK_NAME" \
+  --query "StackResourceSummaries[?ResourceType=='AWS::S3::Bucket' && contains(LogicalResourceId, 'WebUI')].PhysicalResourceId" \
+  --output json 2>/dev/null \
+  | python3 -c "import json,sys; v=json.load(sys.stdin); print(v[0] if v else '')" 2>/dev/null)
+
+# Fallback: look for bucket with 'webui' or 'webapp' in name under this stack
+if [[ -z "$WEBAPP_BUCKET" ]]; then
+  WEBAPP_BUCKET=$(aws_cli cloudformation list-stack-resources \
+    --stack-name "$STACK_NAME" \
+    --query "StackResourceSummaries[?ResourceType=='AWS::S3::Bucket'].PhysicalResourceId" \
+    --output json 2>/dev/null \
+    | python3 -c "
+import json, sys
+buckets = json.load(sys.stdin)
+for b in buckets:
+    bl = b.lower()
+    if 'webui' in bl or 'webapp' in bl or 'web-ui' in bl or 'web-app' in bl:
+        print(b); break
+" 2>/dev/null)
+fi
+
+UI_MONITOR_URL=""
+
+if [[ -n "$WEBAPP_BUCKET" ]] && [[ -f "$UI_UMD_BUNDLE" ]]; then
+  header "Copying IDPMonitor UI bundle to Accelerator S3 bucket"
+  info "Bucket : ${WEBAPP_BUCKET}"
+  info "Source : ${UI_UMD_BUNDLE}"
+  info "Target : s3://${WEBAPP_BUCKET}/extensions/idp-monitor-ui.js"
+
+  aws_cli s3 cp "$UI_UMD_BUNDLE" \
+    "s3://${WEBAPP_BUCKET}/extensions/idp-monitor-ui.js" \
+    --content-type "application/javascript" \
+    --cache-control "no-cache, no-store, must-revalidate" \
+    && success "UI bundle uploaded to s3://${WEBAPP_BUCKET}/extensions/idp-monitor-ui.js" \
+    || warn "Failed to copy UI bundle to S3 — monitoring UI will not load until this is resolved."
+
+  UI_MONITOR_URL="/extensions/idp-monitor-ui.js"
+else
+  if [[ -z "$WEBAPP_BUCKET" ]]; then
+    warn "Could not resolve the Accelerator WebUI S3 bucket — UI bundle not copied."
+    warn "Copy it manually:  aws s3 cp ${UI_UMD_BUNDLE} s3://<webapp-bucket>/extensions/idp-monitor-ui.js"
+  fi
+  if [[ ! -f "$UI_UMD_BUNDLE" ]]; then
+    warn "UI bundle not found at ${UI_UMD_BUNDLE} — skipping S3 copy."
+    warn "Build it first:  cd ${SCRIPT_DIR}/ui && npm run build"
+  fi
+fi
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Invalidate the Accelerator's CloudFront distribution so the new bundle is
+# served immediately without waiting for TTL expiry.
+# ─────────────────────────────────────────────────────────────────────────────
+if [[ -n "$UI_MONITOR_URL" ]]; then
+  CF_DIST_ID=$(aws_cli cloudformation list-stack-resources \
+    --stack-name "$STACK_NAME" \
+    --query "StackResourceSummaries[?ResourceType=='AWS::CloudFront::Distribution'].PhysicalResourceId" \
+    --output json 2>/dev/null \
+    | python3 -c "import json,sys; v=json.load(sys.stdin); print(v[0] if v else '')" 2>/dev/null)
+
+  if [[ -n "$CF_DIST_ID" ]]; then
+    aws_cli cloudfront create-invalidation \
+      --distribution-id "$CF_DIST_ID" \
+      --paths "/extensions/idp-monitor-ui.js" \
+      &>/dev/null && success "CloudFront invalidation created for /extensions/idp-monitor-ui.js" \
+      || warn "CloudFront invalidation failed — cached bundle may serve for up to 24 h."
+  fi
+fi
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Patch the Accelerator Settings SSM parameter with the monitoring API details
 # so the UI can discover the endpoint at runtime without a rebuild.
+#
+# Fields written:
+#   IDPMonitorApiUrl   — AppSync GraphQL endpoint URL
+#   IDPMonitorApiKey   — AppSync API key
+#   IDPMonitorStackName — Monitor stack name (for cross-stack reference)
+#   IDPMonitorUiUrl    — Relative URL of the UI bundle on the Accelerator origin
+#                        e.g. "/extensions/idp-monitor-ui.js"
+#                        MonitoringShell.tsx reads this at runtime and loads
+#                        the bundle via dynamic import() — no rebuild needed.
 # ─────────────────────────────────────────────────────────────────────────────
 if [[ -n "$API_URL" ]]; then
   header "Updating Accelerator Settings SSM parameter"
@@ -415,6 +525,7 @@ data = json.load(sys.stdin)
 data['IDPMonitorApiUrl'] = '${API_URL}'
 data['IDPMonitorApiKey'] = '${API_KEY}'
 data['IDPMonitorStackName'] = '${MONITOR_STACK_NAME}'
+data['IDPMonitorUiUrl'] = '${UI_MONITOR_URL}'
 print(json.dumps(data))
 ")
 

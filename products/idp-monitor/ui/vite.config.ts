@@ -19,12 +19,20 @@ export default defineConfig({
     lib: {
       entry: resolve(__dirname, 'src/index.ts'),
       name: 'IDPMonitorUI',
+      // Produce two outputs:
+      //   1. idp-monitor-ui.js     — ESM for library consumers (npm install)
+      //   2. idp-monitor-ui.umd.js — UMD for runtime browser loading via
+      //      dynamic import() from the Accelerator's S3/CloudFront origin.
+      //      This file is what deploy.sh copies to /extensions/idp-monitor-ui.js
+      //      on the Accelerator's S3 bucket.
       formats: ['es', 'umd'],
       fileName: (format) =>
-        format === 'es' ? 'idp-monitor-ui.js' : 'idp-monitor-ui.umd.cjs',
+        format === 'es' ? 'idp-monitor-ui.js' : 'idp-monitor-ui.umd.js',
     },
     rollupOptions: {
-      // Externalize everything the host app already provides
+      // Externalize everything the host app (IDP Accelerator) already provides.
+      // The Accelerator exposes these on window.__IDP_EXTENSIONS_DEPS__ so the
+      // UMD bundle can reference them without bundling its own copies.
       external: [
         'react',
         'react-dom',
@@ -32,15 +40,20 @@ export default defineConfig({
         /^@cloudscape-design\/.*/,
       ],
       output: {
+        // UMD globals — must match what the Accelerator exposes on window.
+        // See genaiic-idp-monitor/src/ui/src/index.tsx and
+        //     genaiic-idp-accelerator/src/ui/src/index.tsx where
+        // window.__IDP_EXTENSIONS_DEPS__ is populated.
         globals: (id: string) => {
-          if (id === 'react') return 'React';
-          if (id === 'react-dom') return 'ReactDOM';
-          if (id === 'react/jsx-runtime') return 'ReactJSXRuntime';
-          if (id === '@cloudscape-design/collection-hooks') return 'CloudscapeCollectionHooks';
+          if (id === 'react') return 'window.__IDP_EXTENSIONS_DEPS__.React';
+          if (id === 'react-dom') return 'window.__IDP_EXTENSIONS_DEPS__.ReactDOM';
+          if (id === 'react/jsx-runtime') return 'window.__IDP_EXTENSIONS_DEPS__.ReactJSXRuntime';
+          if (id === '@cloudscape-design/collection-hooks') return 'window.__IDP_EXTENSIONS_DEPS__.CloudscapeCollectionHooks';
           // Per-component sub-path imports: @cloudscape-design/components/box → CloudscapeBox
           if (id.startsWith('@cloudscape-design/components/')) {
             const name = id.split('/').pop() ?? 'Component';
-            return 'Cloudscape' + name.charAt(0).toUpperCase() + name.slice(1).replace(/-([a-z])/g, (_, c: string) => c.toUpperCase());
+            const pascalName = name.charAt(0).toUpperCase() + name.slice(1).replace(/-([a-z])/g, (_, c: string) => c.toUpperCase());
+            return `window.__IDP_EXTENSIONS_DEPS__.Cloudscape${pascalName}`;
           }
           return id;
         },
