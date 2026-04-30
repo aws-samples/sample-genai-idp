@@ -7,8 +7,6 @@ SPDX-License-Identifier: MIT-0
 
 ### Added
 
-- **Managed configuration upload rejection** — `idp-cli config upload` now rejects configuration files with `managed: true` to prevent users from accidentally creating stack-managed configurations that would be overwritten on stack updates. All user-uploaded configurations automatically have `managed: false` set, ensuring they persist across stack lifecycle events.
-
 - **Document-level Download button on the Document Details page** — A new **Download** dropdown in the Document Details header lets users pull every output artifact for a document in a single click, packaged as a ZIP. Three scopes are offered:
   - **Download All (ZIP)** — document attributes, metering, summary, evaluation & rule-validation reports, per-section predictions, baselines (when available), per-page text/confidence, and optionally per-page images and/or the source document (checkboxes).
   - **Download Predictions (ZIP)** — all section result JSONs plus a self-describing `manifest.json`.
@@ -51,6 +49,8 @@ SPDX-License-Identifier: MIT-0
     - New `docs/govcloud-architecture.md`, `docs/govcloud-operations.md`, `docs/vpc-secured-mode.md`.
     - Overhauled `docs/govcloud-deployment.md` with a deployment-variant matrix (Vanilla / Headless API / Headless + VPC / Headless + VPC + Bastion).
   - **End-to-end test script:** `scripts/e2e_test_headless.py <STACK_NAME> <PATH_TO_FILE>` exercises the full flow (OAuth → POST /jobs → presigned upload → status poll → download results).
+
+- **Managed configuration upload rejection** — `idp-cli config upload` now rejects configuration files with `managed: true` to prevent users from accidentally creating stack-managed configurations that would be overwritten on stack updates. All user-uploaded configurations automatically have `managed: false` set, ensuring they persist across stack lifecycle events.
 
 ### Security
 
