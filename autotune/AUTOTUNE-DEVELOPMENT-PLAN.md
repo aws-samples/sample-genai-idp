@@ -646,11 +646,20 @@ Implemented and deployed. The agent runs fully decoupled from the frontend — n
 
 **Current status:** Two-filesystem strategy deployed and verified. `/mnt/workspace` stays at ~1.5 MB (down from ~46 MB). Agent now survives ~42 minutes / 8 iterations (up from ~20 min). Still hits ENOSPC due to confirmed AgentCore NFS bug — even 1.59 MB triggers it eventually. **Not blocked on this** — proceeding with other development. The workaround is session resume (see TODO below).
 
+**Root cause identified:** Strands `FileSessionManager` writes **one JSON file per message** (~320 files per 8-iteration run). Each file creation consumes NFS metadata (inodes, directory entries). The ~50 MB metadata budget is exhausted despite only 1.13 MB of actual data. This is compounded by a known AgentCore NFS bug that causes premature ENOSPC.
+
+**Final fix: switched to `S3SessionManager`.**
+- Conversation history stored as S3 objects in the stream bucket instead of NFS files
+- Zero files on `/mnt/workspace` from sessions — only `OPTIMIZATION-LOG.md` remains on NFS
+- Same per-message storage structure, just S3 objects instead of local files
+- Added `s3:GetObject`, `s3:DeleteObject`, `s3:ListBucket` to agent role for stream bucket
+- See `autotune/docs/state-persistence.md` for full lessons learned
+
 - [ ] **Session resume after ENOSPC** — Implement "Resume" button in the UI for runs that fail with ENOSPC. Reuse the same `runtimeSessionId` to get a fresh microVM with the same persistent storage (`/mnt/workspace`). The agent reads OPTIMIZATION-LOG.md on resume and continues where it left off. This pairs with the optimization run history feature — session IDs need to be visible in the UI so users can identify and resume failed runs. See also the existing "Resume interrupted runs" TODO in 6.8.
 
 ### ⚠️ NEXT SESSION: TOP PRIORITY
 
-**ENOSPC fix deployed (6.11).** Run a full end-to-end optimization loop to verify the two-filesystem strategy works. If the agent still hits ENOSPC, check disk-usage.jsonl in S3 to identify what's filling up.
+**ENOSPC fix deployed (6.11).** Switched from FileSessionManager to S3SessionManager — zero session files on NFS now. Run a full end-to-end optimization loop to verify the agent survives past the previous ~42 min failure point. If it still hits ENOSPC, the only file on NFS is OPTIMIZATION-LOG.md (~1 KB).
 
 #### Problem being solved
 AgentCore's internal SSE proxy kills the HTTP response stream after ~60s. Our heartbeat/ping approach can't fix this because the proxy is upstream of our container. The agent keeps running but the frontend loses all visibility. We need the frontend to see the agent's full thought process, optimization state, and optimization log — all without depending on a persistent SSE connection.
