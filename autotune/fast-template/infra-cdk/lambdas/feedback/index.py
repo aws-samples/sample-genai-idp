@@ -8,6 +8,7 @@ Endpoints:
   GET  /state   — Get optimization state (query: ?sessionId=xxx)
   GET  /stream  — Get agent event stream JSONL (query: ?sessionId=xxx&offset=N)
   GET  /log     — Get OPTIMIZATION-LOG.md content (query: ?sessionId=xxx)
+  GET  /runs    — List all optimization runs
 """
 
 import os
@@ -132,6 +133,29 @@ def get_log() -> Dict[str, Any]:
         if error_code == "NoSuchKey":
             return {"content": ""}
         logger.exception("Failed to get optimization log")
+        return {"error": str(e)}, 500
+
+
+@app.get("/runs")
+def list_runs() -> Dict[str, Any]:
+    """List all optimization runs, most recent first."""
+    projection = "session_id, #s, test_set_id, best_accuracy, iteration, started_at, updated_at, phase, phase_detail, optimization_guidance"
+    try:
+        items = []
+        kwargs = {
+            "ProjectionExpression": projection,
+            "ExpressionAttributeNames": {"#s": "status"},
+        }
+        while True:
+            resp = table.scan(**kwargs)
+            items.extend(resp.get("Items", []))
+            if "LastEvaluatedKey" not in resp:
+                break
+            kwargs["ExclusiveStartKey"] = resp["LastEvaluatedKey"]
+        items.sort(key=lambda x: x.get("started_at", ""), reverse=True)
+        return {"runs": [_serialize(i) for i in items]}
+    except Exception as e:
+        logger.exception("Failed to list runs")
         return {"error": str(e)}, 500
 
 

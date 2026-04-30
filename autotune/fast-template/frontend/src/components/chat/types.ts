@@ -30,3 +30,17 @@ export interface ChatSession {
   startDate: string
   endDate: string
 }
+
+// Run summary from DynamoDB (GET /runs endpoint)
+export interface RunSummary {
+  session_id: string
+  status: string
+  test_set_id?: string
+  best_accuracy?: number | string
+  iteration?: number | string
+  started_at?: string
+  updated_at?: string
+  phase?: string
+  phase_detail?: string
+  optimization_guidance?: string
+}

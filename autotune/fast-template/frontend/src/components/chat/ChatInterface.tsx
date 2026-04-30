@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { ChatHeader } from "./ChatHeader"
 import { ChatInput } from "./ChatInput"
 import { ChatSidebar } from "./ChatSidebar"
-import { ChatSession, Message } from "./types"
+import { Message, RunSummary } from "./types"
 
 import { useGlobal } from "@/app/context/GlobalContext"
 import { AgentCoreClient } from "@/lib/agentcore-client"
@@ -14,29 +14,21 @@ import { useDefaultTool } from "@/hooks/useToolRenderer"
 import { ToolCallDisplay } from "./ToolCallDisplay"
 import { SidebarProvider, SidebarInset } from "@/components/ui/sidebar"
 
-const SESSIONS_KEY = "idpautotune-sessions"
+const MESSAGES_KEY = "idpautotune-messages"
 
-function loadSessions(): ChatSession[] {
+function loadMessages(sessionId: string): Message[] {
   try {
-    return JSON.parse(localStorage.getItem(SESSIONS_KEY) || "[]")
-  } catch {
-    return []
-  }
+    const all = JSON.parse(localStorage.getItem(MESSAGES_KEY) || "{}")
+    return all[sessionId] ?? []
+  } catch { return [] }
 }
 
-function saveSessions(sessions: ChatSession[]) {
-  localStorage.setItem(SESSIONS_KEY, JSON.stringify(sessions))
-}
-
-function makeSessionName(messages: Message[]): string {
-  const first = messages.find(m => m.role === "user")
-  if (!first) return "New Run"
-  return first.content.slice(0, 50) + (first.content.length > 50 ? "…" : "")
-}
-
-function newSession(): ChatSession {
-  const now = new Date().toISOString()
-  return { id: crypto.randomUUID(), name: "New Run", history: [], startDate: now, endDate: now }
+function saveMessages(sessionId: string, messages: Message[]) {
+  try {
+    const all = JSON.parse(localStorage.getItem(MESSAGES_KEY) || "{}")
+    all[sessionId] = messages
+    localStorage.setItem(MESSAGES_KEY, JSON.stringify(all))
+  } catch { /* ignore */ }
 }
 
 // Parsed stream event types matching the consolidated JSONL from the backend
@@ -52,22 +44,13 @@ function parseStreamLine(line: string): StreamItem | null {
     if (evt.type === "tool_use") return evt
     if (evt.type === "tool_result") return evt
     return null
-  } catch {
-    return null
-  }
+  } catch { return null }
 }
 
 export default function ChatInterface() {
-  const [sessions, setSessions] = useState<ChatSession[]>(() => {
-    const saved = loadSessions()
-    return saved.length > 0 ? saved : [newSession()]
-  })
-  const [currentSessionId, setCurrentSessionId] = useState<string>(
-    () => sessions[0]?.id ?? newSession().id
-  )
-
-  const currentSession = sessions.find(s => s.id === currentSessionId)!
-  const messages = currentSession?.history ?? []
+  const [runs, setRuns] = useState<RunSummary[]>([])
+  const [currentSessionId, setCurrentSessionId] = useState<string | null>(null)
+  const [, setMessagesState] = useState<Message[]>([])
 
   const [input, setInput] = useState("")
   const [testSetId, setTestSetId] = useState("")
@@ -87,35 +70,33 @@ export default function ChatInterface() {
 
   const { isLoading, setIsLoading } = useGlobal()
   const auth = useAuth()
-  const messagesEndRef = useRef<HTMLDivElement>(null)
   const streamEndRef = useRef<HTMLDivElement>(null)
 
   useDefaultTool(({ name, args, status, result }) => (
     <ToolCallDisplay name={name} args={args} status={status} result={result} />
   ))
 
+  // Load messages from localStorage when session changes
   useEffect(() => {
-    saveSessions(sessions)
-  }, [sessions])
+    if (currentSessionId) {
+      setMessagesState(loadMessages(currentSessionId))
+    } else {
+      setMessagesState([])
+    }
+  }, [currentSessionId])
 
   const setMessages = useCallback(
     (updater: Message[] | ((prev: Message[]) => Message[])) => {
-      setSessions(prev =>
-        prev.map(s => {
-          if (s.id !== currentSessionId) return s
-          const newHistory = typeof updater === "function" ? updater(s.history) : updater
-          return {
-            ...s,
-            history: newHistory,
-            name: makeSessionName(newHistory) || s.name,
-            endDate: new Date().toISOString(),
-          }
-        })
-      )
+      setMessagesState(prev => {
+        const next = typeof updater === "function" ? updater(prev) : updater
+        if (currentSessionId) saveMessages(currentSessionId, next)
+        return next
+      })
     },
     [currentSessionId]
   )
 
+  // Load config
   useEffect(() => {
     async function loadConfig() {
       try {
@@ -123,7 +104,6 @@ export default function ChatInterface() {
         if (!response.ok) throw new Error("Failed to load configuration")
         const config = await response.json()
         if (!config.agentRuntimeArn) throw new Error("Agent Runtime ARN not found in configuration")
-
         setClient(
           new AgentCoreClient({
             runtimeArn: config.agentRuntimeArn,
@@ -131,22 +111,38 @@ export default function ChatInterface() {
             pattern: (config.agentPattern || "strands-single-agent") as AgentPattern,
           })
         )
-        if (config.optimizationStateApiUrl) {
-          setStateApiUrl(config.optimizationStateApiUrl)
-        }
+        if (config.optimizationStateApiUrl) setStateApiUrl(config.optimizationStateApiUrl)
       } catch (err) {
-        const errorMessage = err instanceof Error ? err.message : "Unknown error"
-        setError(`Configuration error: ${errorMessage}`)
+        setError(`Configuration error: ${err instanceof Error ? err.message : "Unknown error"}`)
       }
     }
     loadConfig()
   }, [])
 
+  // Poll /runs for sidebar
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
-  }, [messages])
+    if (!stateApiUrl) return
+    const idToken = auth.user?.id_token
+    if (!idToken) return
 
-  // Auto-scroll stream view on new items AND on tab switch
+    let active = true
+    const poll = async () => {
+      try {
+        const resp = await fetch(`${stateApiUrl}runs`, {
+          headers: { Authorization: `Bearer ${idToken}` },
+        })
+        if (resp.ok && active) {
+          const data = await resp.json()
+          if (data.runs) setRuns(data.runs)
+        }
+      } catch { /* ignore */ }
+    }
+    poll()
+    const interval = setInterval(poll, 10000)
+    return () => { active = false; clearInterval(interval) }
+  }, [stateApiUrl, auth.user?.id_token])
+
+  // Auto-scroll stream view
   useEffect(() => {
     streamEndRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [streamItems, activeTab])
@@ -158,9 +154,9 @@ export default function ChatInterface() {
     return () => clearInterval(t)
   }, [agentState?.status])
 
-  // Poll DynamoDB state while a run is active
+  // Poll DynamoDB state while viewing a session
   useEffect(() => {
-    if (!stateApiUrl || messages.length === 0) return
+    if (!stateApiUrl || !currentSessionId) return
     const idToken = auth.user?.id_token
     if (!idToken) return
 
@@ -174,16 +170,16 @@ export default function ChatInterface() {
           const data = await resp.json()
           if (data.state) setAgentState(data.state)
         }
-      } catch { /* ignore polling errors */ }
+      } catch { /* ignore */ }
     }
     poll()
     const interval = setInterval(poll, 2000)
     return () => { active = false; clearInterval(interval) }
-  }, [stateApiUrl, currentSessionId, messages.length, auth.user?.id_token])
+  }, [stateApiUrl, currentSessionId, auth.user?.id_token])
 
-  // Poll agent stream (JSONL) while running
+  // Poll agent stream (JSONL)
   useEffect(() => {
-    if (!stateApiUrl || !agentState || !["running", "complete", "failed", "cancelled"].includes(String(agentState.status))) return
+    if (!stateApiUrl || !currentSessionId || !agentState || !["running", "complete", "failed", "cancelled"].includes(String(agentState.status))) return
     const idToken = auth.user?.id_token
     if (!idToken) return
 
@@ -198,9 +194,7 @@ export default function ChatInterface() {
           const data = await resp.json()
           if (data.lines && data.lines.length > 0) {
             const newItems = data.lines.map(parseStreamLine).filter(Boolean) as StreamItem[]
-            if (newItems.length > 0) {
-              setStreamItems(prev => [...prev, ...newItems])
-            }
+            if (newItems.length > 0) setStreamItems(prev => [...prev, ...newItems])
             currentOffset = data.nextOffset
             setStreamOffset(data.nextOffset)
           }
@@ -216,9 +210,9 @@ export default function ChatInterface() {
     return () => { active = false; clearInterval(interval) }
   }, [stateApiUrl, currentSessionId, agentState?.status, auth.user?.id_token])
 
-  // Poll optimization log while running
+  // Poll optimization log
   useEffect(() => {
-    if (!stateApiUrl || !agentState || !["running", "complete", "failed", "cancelled"].includes(String(agentState.status))) return
+    if (!stateApiUrl || !currentSessionId || !agentState || !["running", "complete", "failed", "cancelled"].includes(String(agentState.status))) return
     const idToken = auth.user?.id_token
     if (!idToken) return
 
@@ -243,68 +237,84 @@ export default function ChatInterface() {
     return () => { active = false; clearInterval(interval) }
   }, [stateApiUrl, currentSessionId, agentState?.status, auth.user?.id_token])
 
-  const sendMessage = async (userMessage: string) => {
+  const invokeAgent = async (sessionId: string, testSet: string, guidance: string, isResume: boolean) => {
     if (!client) return
-    if (isInitialState && !testSetId.trim()) {
-      setError("Test Set ID is required to start an optimization run")
-      return
-    }
     setError(null)
-
-    setStreamOffset(0)
-    setStreamItems([])
-    setOptimizationLog("")
-
-    const newUserMessage: Message = {
-      role: "user",
-      content: userMessage,
-      timestamp: new Date().toISOString(),
-    }
-    setMessages(prev => [...prev, newUserMessage])
-    setInput("")
     setIsLoading(true)
 
     try {
       const accessToken = auth.user?.access_token
       if (!accessToken) throw new Error("Authentication required. Please log in again.")
 
-      const extra: Record<string, string> = {}
-      if (testSetId.trim()) {
-        extra.test_set_id = testSetId.trim()
-        extra.optimization_guidance = userMessage
+      const extra: Record<string, string> = {
+        test_set_id: testSet,
+        optimization_guidance: guidance,
       }
+      if (isResume) extra.resume = "true"
 
       await client.invoke(
-        testSetId.trim() ? "Begin optimization" : userMessage,
-        currentSessionId,
+        isResume ? "Resume optimization" : "Begin optimization",
+        sessionId,
         accessToken,
         () => {},
         extra
       )
 
-      const startedMessage: Message = {
+      const msg: Message = {
         role: "assistant",
-        content: "Optimization started. Monitoring progress below...",
+        content: isResume ? "Resuming optimization..." : "Optimization started. Monitoring progress below...",
         timestamp: new Date().toISOString(),
       }
-      setMessages(prev => [...prev, startedMessage])
+      setMessages(prev => [...prev, msg])
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : "Unknown error"
-      setError(`Failed to start optimization: ${errorMessage}`)
+      setError(`Failed to ${isResume ? "resume" : "start"} optimization: ${err instanceof Error ? err.message : "Unknown error"}`)
     } finally {
       setIsLoading(false)
     }
   }
 
+  const sendMessage = async (userMessage: string) => {
+    if (!testSetId.trim()) {
+      setError("Test Set ID is required to start an optimization run")
+      return
+    }
+
+    const sessionId = crypto.randomUUID()
+    setCurrentSessionId(sessionId)
+    setStreamOffset(0)
+    setStreamItems([])
+    setOptimizationLog("")
+    setAgentState(null)
+
+    const userMsg: Message = { role: "user", content: userMessage || "(no guidance)", timestamp: new Date().toISOString() }
+    // Save immediately since setMessages depends on currentSessionId which just changed
+    saveMessages(sessionId, [userMsg])
+    setMessagesState([userMsg])
+
+    await invokeAgent(sessionId, testSetId.trim(), userMessage, false)
+  }
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     sendMessage(input)
+    setInput("")
+  }
+
+  const handleResume = async () => {
+    if (!currentSessionId || !agentState) return
+    setStreamOffset(0)
+    setStreamItems([])
+    setOptimizationLog("")
+    await invokeAgent(
+      currentSessionId,
+      String(agentState.test_set_id ?? ""),
+      String(agentState.optimization_guidance ?? ""),
+      true
+    )
   }
 
   const startNewChat = () => {
-    const session = newSession()
-    setSessions(prev => [session, ...prev])
-    setCurrentSessionId(session.id)
+    setCurrentSessionId(null)
     setInput("")
     setError(null)
     setAgentState(null)
@@ -314,7 +324,7 @@ export default function ChatInterface() {
   }
 
   const handleCancelOptimization = async () => {
-    if (!stateApiUrl) return
+    if (!stateApiUrl || !currentSessionId) return
     try {
       const idToken = auth.user?.id_token
       if (!idToken) throw new Error("Authentication required")
@@ -325,14 +335,12 @@ export default function ChatInterface() {
       })
       if (!resp.ok) throw new Error(`Cancel failed: ${resp.status}`)
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "Unknown error"
-      setError(`Failed to cancel: ${msg}`)
+      setError(`Failed to cancel: ${err instanceof Error ? err.message : "Unknown error"}`)
     }
   }
 
-  const handleSessionSelect = (session: ChatSession) => {
-    setCurrentSessionId(session.id)
-    setInput("")
+  const handleRunSelect = (run: RunSummary) => {
+    setCurrentSessionId(run.session_id)
     setError(null)
     setAgentState(null)
     setStreamOffset(0)
@@ -340,8 +348,8 @@ export default function ChatInterface() {
     setOptimizationLog("")
   }
 
-  const isInitialState = messages.length === 0
-  const hasAssistantMessages = messages.some(m => m.role === "assistant")
+  const isInitialState = currentSessionId === null
+  const isResumable = agentState && ["failed", "cancelled"].includes(String(agentState.status))
 
   // Merge tool_use + tool_result by toolUseId for display
   const toolResults = new Map<string, string>()
@@ -364,12 +372,7 @@ export default function ChatInterface() {
         <div key={i} className="flex items-start gap-2">
           {item.ts && <span className="text-xs text-gray-400 mt-1.5 shrink-0">[{item.ts}]</span>}
           <div className="grow">
-            <ToolCallDisplay
-              name={item.name}
-              args={item.input}
-              status="complete"
-              result={result}
-            />
+            <ToolCallDisplay name={item.name} args={item.input} status="complete" result={result} />
           </div>
         </div>
       )
@@ -380,15 +383,15 @@ export default function ChatInterface() {
   return (
     <SidebarProvider>
       <ChatSidebar
-        sessions={sessions}
-        currentSessionId={currentSessionId}
-        onSessionSelect={handleSessionSelect}
+        runs={runs}
+        currentSessionId={currentSessionId ?? undefined}
+        onRunSelect={handleRunSelect}
         onNewChat={startNewChat}
       />
       <SidebarInset>
         <div className="flex flex-col h-screen w-full" style={{ backgroundColor: "rgba(66, 194, 245, 0.15)" }}>
           <div className="flex-none">
-            <ChatHeader onNewChat={startNewChat} canStartNewChat={hasAssistantMessages} />
+            <ChatHeader onNewChat={startNewChat} canStartNewChat={!isInitialState} />
             {error && (
               <div className="bg-red-50 border-l-4 border-red-500 p-4 mx-4 mt-2">
                 <p className="text-sm text-red-700">{error}</p>
@@ -418,7 +421,7 @@ export default function ChatInterface() {
           ) : (
             <>
               {/* Status bar */}
-              {hasAssistantMessages && stateApiUrl && (
+              {stateApiUrl && (
                 <div className="flex-none px-4 py-2 border-b bg-white/80">
                   <div className="max-w-4xl mx-auto flex items-center gap-3">
                     {agentState && (
@@ -448,45 +451,54 @@ export default function ChatInterface() {
                         })()}
                       </div>
                     )}
-                    {agentState?.status === "running" && (
-                      <button
-                        onClick={handleCancelOptimization}
-                        className="ml-auto px-3 py-1 text-xs bg-red-600 text-white rounded hover:bg-red-700 transition-colors"
-                      >
-                        Cancel
-                      </button>
-                    )}
+                    <div className="ml-auto flex gap-2">
+                      {isResumable && (
+                        <button
+                          onClick={handleResume}
+                          disabled={isLoading}
+                          className="px-3 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700 transition-colors disabled:opacity-50"
+                        >
+                          Resume
+                        </button>
+                      )}
+                      {agentState?.status === "running" && (
+                        <button
+                          onClick={handleCancelOptimization}
+                          className="px-3 py-1 text-xs bg-red-600 text-white rounded hover:bg-red-700 transition-colors"
+                        >
+                          Cancel
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </div>
               )}
 
               {/* Tab bar */}
-              {hasAssistantMessages && (
-                <div className="flex-none border-b bg-white/60">
-                  <div className="max-w-4xl mx-auto flex">
-                    <button
-                      onClick={() => setActiveTab("stream")}
-                      className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-                        activeTab === "stream"
-                          ? "border-blue-500 text-blue-700"
-                          : "border-transparent text-gray-500 hover:text-gray-700"
-                      }`}
-                    >
-                      Agent Stream {streamItems.length > 0 && `(${streamItems.length})`}
-                    </button>
-                    <button
-                      onClick={() => setActiveTab("log")}
-                      className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-                        activeTab === "log"
-                          ? "border-blue-500 text-blue-700"
-                          : "border-transparent text-gray-500 hover:text-gray-700"
-                      }`}
-                    >
-                      Optimization Log
-                    </button>
-                  </div>
+              <div className="flex-none border-b bg-white/60">
+                <div className="max-w-4xl mx-auto flex">
+                  <button
+                    onClick={() => setActiveTab("stream")}
+                    className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+                      activeTab === "stream"
+                        ? "border-blue-500 text-blue-700"
+                        : "border-transparent text-gray-500 hover:text-gray-700"
+                    }`}
+                  >
+                    Agent Stream {streamItems.length > 0 && `(${streamItems.length})`}
+                  </button>
+                  <button
+                    onClick={() => setActiveTab("log")}
+                    className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+                      activeTab === "log"
+                        ? "border-blue-500 text-blue-700"
+                        : "border-transparent text-gray-500 hover:text-gray-700"
+                    }`}
+                  >
+                    Optimization Log
+                  </button>
                 </div>
-              )}
+              </div>
 
               {/* Content area */}
               <div className="grow overflow-hidden">
