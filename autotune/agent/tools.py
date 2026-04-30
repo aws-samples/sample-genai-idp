@@ -126,18 +126,21 @@ def upload_config(config_path: str, config_version: str, description: str) -> st
 
 
 @tool
-def download_config(output_path: str, config_version: str) -> str:
+def download_config(config_version: str) -> str:
     """Download a config version from the deployed stack.
 
     Args:
-        output_path: Local file path to save the config.
         config_version: Version to download (e.g., 'v1', 'Production').
 
     Returns:
-        JSON with status and output path.
+        JSON with status and path where config was saved.
     """
+    scratch = os.environ.get("AUTOTUNE_SCRATCH_DIR", "/tmp/autotune-data")
+    output_path = os.path.join(scratch, "configs", f"{config_version}.yaml")
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
     client = _get_client()
     result = client.config_download(output_path, config_version)
+    result["output_path"] = output_path
     return json.dumps(result, indent=2)
 
 
@@ -154,23 +157,25 @@ def list_configs() -> str:
 
 
 @tool
-def create_default_config(output_path: str, features: str = "min") -> str:
+def create_default_config(features: str = "min") -> str:
     """Generate a config template from system defaults.
 
     Args:
-        output_path: Where to save the generated config.
         features: Feature set - 'min', 'core', or 'all'.
 
     Returns:
-        JSON with status and output path.
+        JSON with status and path where config was saved.
     """
     import subprocess
 
+    scratch = os.environ.get("AUTOTUNE_SCRATCH_DIR", "/tmp/autotune-data")
+    output_path = os.path.join(scratch, "configs", f"default-{features}.yaml")
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
     cmd = ["idp-cli", "config-create", "--features", features, "--output", output_path]
     result = subprocess.run(cmd, capture_output=True, text=True)
     return json.dumps({
         "status": "success" if result.returncode == 0 else "failed",
-        "output": output_path,
+        "output_path": output_path,
         "stdout": result.stdout,
         "stderr": result.stderr,
     }, indent=2)
@@ -199,7 +204,6 @@ def validate_config(config_path: str) -> str:
 @tool
 def auto_fix_config(
     config_path: str,
-    output_path: str,
     fixes: Optional[list[str]] = None,
 ) -> str:
     """Apply automatic fixes to common config schema issues.
@@ -210,7 +214,6 @@ def auto_fix_config(
 
     Args:
         config_path: Path to input config YAML file.
-        output_path: Path to save the fixed config.
         fixes: List of specific fixes to apply, or None for all safe fixes.
 
     Returns:
@@ -218,6 +221,9 @@ def auto_fix_config(
     """
     from idpac import IDPConfig
 
+    scratch = os.environ.get("AUTOTUNE_SCRATCH_DIR", "/tmp/autotune-data")
+    output_path = os.path.join(scratch, "configs", "fixed-" + os.path.basename(config_path))
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
     config = IDPConfig(config_path)
     fixed = config.auto_fix(fixes)
     saved = fixed.save(output_path)
@@ -276,7 +282,7 @@ def run_evaluation(test_set_id: str, context: str, config_version: str) -> str:
 
 
 @tool
-def get_evaluation_summary(batch_id: str, output_file: Optional[str] = None) -> str:
+def get_evaluation_summary(batch_id: str, save_json: bool = False) -> str:
     """Get aggregated metrics for a completed evaluation run.
 
     Returns overall accuracy, per-file scores (top/bottom 3), classification
@@ -284,12 +290,18 @@ def get_evaluation_summary(batch_id: str, output_file: Optional[str] = None) -> 
 
     Args:
         batch_id: Test run ID from run_evaluation.
-        output_file: Optional path to save full JSON results.
+        save_json: If true, saves full JSON results to scratch directory.
 
     Returns:
         Formatted evaluation summary.
     """
     from idpac.evaluations import EvaluationResult
+
+    output_file = None
+    if save_json:
+        scratch = os.environ.get("AUTOTUNE_SCRATCH_DIR", "/tmp/autotune-data")
+        output_file = os.path.join(scratch, "eval-summaries", f"{batch_id}.json")
+        os.makedirs(os.path.dirname(output_file), exist_ok=True)
 
     client = _get_client()
     data = client.get_evaluation_summary(batch_id, output_file)
@@ -307,18 +319,17 @@ def get_evaluation_summary(batch_id: str, output_file: Optional[str] = None) -> 
 
 
 @tool
-def compare_evaluations(batch_ids: list[str], output_file: Optional[str] = None) -> str:
+def compare_evaluations(batch_ids: list[str]) -> str:
     """Compare two or more evaluation runs side by side.
 
     Args:
         batch_ids: List of test run IDs to compare.
-        output_file: Optional path to save JSON comparison.
 
     Returns:
         JSON comparison of metrics and config diffs.
     """
     client = _get_client()
-    result = client.compare_evaluations(batch_ids, output_file)
+    result = client.compare_evaluations(batch_ids, None)
     return json.dumps(result, indent=2, default=str)
 
 
@@ -353,18 +364,27 @@ def check_evaluation_status(test_run_id: str) -> str:
 
 
 @tool
-def download_evaluation_results(batch_id: str, output_dir: str) -> str:
-    """Download individual evaluation files for a completed run.
+def download_evaluation_results(batch_id: str) -> str:
+    """Download per-document evaluation accuracy files for a completed test run.
+
+    Downloads the accuracy comparison files that score extraction output against
+    ground truth baselines. Use this to see which documents/fields scored well or
+    poorly. For the raw extraction output itself, use download_raw_processing_results instead.
+
+    Files are saved to the scratch directory automatically.
 
     Args:
         batch_id: Test run ID.
-        output_dir: Local directory to save results.
 
     Returns:
-        JSON with download status and file count.
+        JSON with download status, file count, and output_dir where files were saved.
     """
+    scratch = os.environ.get("AUTOTUNE_SCRATCH_DIR", "/tmp/autotune-data")
+    output_dir = os.path.join(scratch, "eval-results", batch_id)
+    os.makedirs(output_dir, exist_ok=True)
     client = _get_client()
     result = client.download_evaluation_results(batch_id, output_dir)
+    result["output_dir"] = output_dir
     return json.dumps(result, indent=2)
 
 
@@ -402,23 +422,31 @@ def run_inference(
 
 
 @tool
-def download_results(
+def download_raw_processing_results(
     batch_id: str,
-    output_dir: str,
     file_types: str = "sections",
 ) -> str:
-    """Download processing results (extraction output, OCR pages, etc.).
+    """Download raw processing output files (extraction JSON, OCR pages, etc.).
+
+    Downloads the actual output produced by the IDP pipeline — what the model
+    extracted from each document. Use this to inspect extraction results directly.
+    For accuracy scores comparing against ground truth, use download_evaluation_results instead.
+
+    Files are saved to the scratch directory automatically.
 
     Args:
         batch_id: Batch ID from run_inference or run_evaluation.
-        output_dir: Local directory to save results.
         file_types: What to download: 'sections', 'pages', 'summary', 'evaluation', or 'all'.
 
     Returns:
-        JSON with status and output directory.
+        JSON with status and output_dir where files were saved.
     """
+    scratch = os.environ.get("AUTOTUNE_SCRATCH_DIR", "/tmp/autotune-data")
+    output_dir = os.path.join(scratch, "raw-results", batch_id)
+    os.makedirs(output_dir, exist_ok=True)
     client = _get_client()
     result = client.download_results(batch_id, output_dir, file_types)
+    result["output_dir"] = output_dir
     return json.dumps(result, indent=2)
 
 
@@ -495,16 +523,15 @@ def analyze_dataset(dataset_path: str) -> str:
 def run_discovery(
     document_path: str,
     ground_truth_path: Optional[str] = None,
-    output_path: Optional[str] = None,
 ) -> str:
     """Discover a document class schema from a sample document.
 
     Runs idp-cli discover in local mode (calls Bedrock directly, no stack needed).
+    Saves discovered schema to scratch directory.
 
     Args:
         document_path: Path to a sample document (PDF or image).
         ground_truth_path: Optional path to ground truth JSON for better schema.
-        output_path: Optional path to save the discovered schema JSON.
 
     Returns:
         The discovered JSON schema as a string.
@@ -516,29 +543,33 @@ def run_discovery(
     profile = os.environ.get("AWS_PROFILE") or None
     discovery = Discovery(region=region, profile=profile)
 
-    if output_path:
-        schema = discovery.discover_and_save(document_path, output_path, ground_truth_path)
-    else:
-        schema = discovery.discover(document_path, ground_truth_path)
+    scratch = os.environ.get("AUTOTUNE_SCRATCH_DIR", "/tmp/autotune-data")
+    output_path = os.path.join(scratch, "discovery", os.path.basename(document_path) + ".schema.json")
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    schema = discovery.discover_and_save(document_path, output_path, ground_truth_path)
     return json.dumps(schema, indent=2)
 
 
 @tool
-def run_multi_class_discovery(dataset_path: str, output_config_path: str) -> str:
+def run_multi_class_discovery(dataset_path: str) -> str:
     """Discover schemas for all classes in a dataset and create a config.
 
     For packet-splitting datasets, extracts representative sections from packets.
     For multi-class datasets, uses one sample per class.
+    Config is saved to the scratch directory.
 
     Args:
         dataset_path: Path to dataset with input/ and baseline/ dirs.
-        output_config_path: Where to save the generated config YAML.
 
     Returns:
-        Summary of discovered classes and config path.
+        Summary of discovered classes and path where config was saved.
     """
     _auto_update_state("discovering", "Running multi-class discovery")
     from idpac import DatasetAnalyzer, Discovery, PacketSplittingDiscovery
+
+    scratch = os.environ.get("AUTOTUNE_SCRATCH_DIR", "/tmp/autotune-data")
+    output_config_path = os.path.join(scratch, "configs", "discovered-config.yaml")
+    os.makedirs(os.path.dirname(output_config_path), exist_ok=True)
 
     region = os.environ.get("AWS_DEFAULT_REGION", "us-east-1")
     profile = os.environ.get("AWS_PROFILE") or None
@@ -548,7 +579,7 @@ def run_multi_class_discovery(dataset_path: str, output_config_path: str) -> str
         psd = PacketSplittingDiscovery(dataset_path, region=region, profile=profile)
         config = psd.discover_and_create_config(output_config_path)
         classes = config.get_class_names()
-        return f"Packet-splitting discovery complete. Classes: {classes}. Config: {output_config_path}"
+        return f"Packet-splitting discovery complete. Classes: {classes}. Config saved to: {output_config_path}"
 
     # Multi-class or single-class
     samples = analyzer.get_samples_by_class(n=1)
@@ -564,7 +595,7 @@ def run_multi_class_discovery(dataset_path: str, output_config_path: str) -> str
         config.add_class(s)
     config.save(output_config_path)
     classes = config.get_class_names()
-    return f"Discovery complete. Classes: {classes}. Config: {output_config_path}"
+    return f"Discovery complete. Classes: {classes}. Config saved to: {output_config_path}"
 
 
 # --- Optimization State ---
@@ -641,7 +672,7 @@ ALL_TOOLS = [
     check_evaluation_status,
     download_evaluation_results,
     run_inference,
-    download_results,
+    download_raw_processing_results,
     analyze_dataset,
     run_discovery,
     run_multi_class_discovery,

@@ -47,6 +47,7 @@ _active_sessions: dict[str, threading.Thread] = {}
 AGENT_DIR = Path(__file__).parent
 WORKSPACE_DIR = "/mnt/workspace" if os.path.isdir("/mnt/workspace") else "/tmp/workspace"
 SESSIONS_DIR = os.path.join(WORKSPACE_DIR, ".sessions")
+SCRATCH_DIR = "/tmp/autotune-data"  # Ephemeral 8.8GB overlay — bulk downloads go here, not /mnt/workspace
 MAX_ITERATIONS = 10
 
 # S3 sync config
@@ -112,6 +113,11 @@ def _create_agent(user_id: str, session_id: str, state: OptimizationState,
     os.makedirs(session_workspace, exist_ok=True)
     os.chdir(session_workspace)
 
+    # Scratch dir for bulk downloads — on ephemeral overlay, not NFS
+    session_scratch = os.path.join(SCRATCH_DIR, session_id)
+    os.makedirs(session_scratch, exist_ok=True)
+    os.environ["AUTOTUNE_SCRATCH_DIR"] = session_scratch
+
     if test_set_id:
         _create_optimization_log(session_workspace, test_set_id, optimization_guidance)
 
@@ -132,13 +138,57 @@ def _create_agent(user_id: str, session_id: str, state: OptimizationState,
     )
 
 
+def _snapshot_disk_usage(output_path: str) -> None:
+    """Append a disk usage snapshot as a JSONL line."""
+    import subprocess
+    snapshot = {"ts": time.strftime("%H:%M:%S", time.gmtime()), "epoch": time.time()}
+
+    # df for overall filesystem usage
+    try:
+        df = subprocess.run(["df", "-h"], capture_output=True, text=True, timeout=5)
+        snapshot["df"] = df.stdout
+    except Exception:
+        pass
+
+    # Pure-Python walk of /mnt/workspace — reliable on NFS unlike du
+    for scan_root in [WORKSPACE_DIR, "/tmp"]:
+        if not os.path.isdir(scan_root):
+            continue
+        key = scan_root.replace("/", "_").strip("_")
+        dir_sizes: dict[str, int] = {}  # relative dir -> total bytes
+        try:
+            for root, dirs, fnames in os.walk(scan_root):
+                rel = os.path.relpath(root, scan_root)
+                # Track at depth 0 and 1 only
+                parts = rel.split(os.sep)
+                bucket = parts[0] if rel != "." else "."
+                for fn in fnames:
+                    try:
+                        sz = os.path.getsize(os.path.join(root, fn))
+                    except OSError:
+                        sz = 0
+                    dir_sizes[bucket] = dir_sizes.get(bucket, 0) + sz
+            total = sum(dir_sizes.values())
+            snapshot[f"{key}_total_mb"] = round(total / 1024 / 1024, 2)
+            # Top dirs by size
+            top = sorted(dir_sizes.items(), key=lambda x: -x[1])[:15]
+            snapshot[f"{key}_dirs"] = {d: round(s / 1024 / 1024, 2) for d, s in top}
+        except Exception:
+            pass
+
+    with open(output_path, "a") as f:
+        f.write(json.dumps(snapshot, default=str) + "\n")
+
+
 def _run_agent_thread(user_id: str, session_id: str, state: OptimizationState,
                       test_set_id: str, optimization_guidance: str) -> None:
     """Background thread: runs the agent, writes stream to JSONL, syncs to S3."""
     s3_bucket = os.environ.get("AUTOTUNE_STREAM_BUCKET", "")
     s3_prefix = f"autotune-streams/{session_id}"
     session_workspace = os.path.join(WORKSPACE_DIR, session_id)
-    stream_path = os.path.join(session_workspace, "stream.jsonl")
+    session_scratch = os.environ.get("AUTOTUNE_SCRATCH_DIR", os.path.join(SCRATCH_DIR, session_id))
+    os.makedirs(session_scratch, exist_ok=True)
+    stream_path = os.path.join(session_scratch, "stream.jsonl")
     log_path = os.path.join(session_workspace, "OPTIMIZATION-LOG.md")
 
     s3 = boto3.client("s3") if s3_bucket else None
@@ -157,6 +207,7 @@ def _run_agent_thread(user_id: str, session_id: str, state: OptimizationState,
 
         # Background sync thread — heartbeat + S3 sync independent of event loop
         # so they keep running even during long tool calls (e.g. 5-min download_results)
+        disk_usage_path = os.path.join(session_scratch, "disk-usage.jsonl")
         sync_stop = threading.Event()
         def _sync_loop():
             while not sync_stop.wait(SYNC_INTERVAL):
@@ -169,6 +220,12 @@ def _run_agent_thread(user_id: str, session_id: str, state: OptimizationState,
                         _sync_file(stream_path, f"{s3_prefix}/stream.jsonl")
                     if os.path.exists(log_path):
                         _sync_file(log_path, f"{s3_prefix}/OPTIMIZATION-LOG.md")
+                except Exception:
+                    pass
+                # Disk usage snapshot for debugging ENOSPC
+                try:
+                    _snapshot_disk_usage(disk_usage_path)
+                    _sync_file(disk_usage_path, f"{s3_prefix}/disk-usage.jsonl")
                 except Exception:
                     pass
         sync_thread = threading.Thread(target=_sync_loop, daemon=True)
