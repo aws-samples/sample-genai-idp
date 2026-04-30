@@ -506,13 +506,14 @@ export class BackendStack extends cdk.NestedStack {
       })
     )
 
-    // AutoTune: Write access to the stream bucket for agent event stream + optimization log.
+    // AutoTune: Read/write access to the stream bucket for agent event stream,
+    // optimization log, and Strands S3SessionManager (conversation history).
     agentRole.addToPolicy(
       new iam.PolicyStatement({
-        sid: "StreamBucketWriteAccess",
+        sid: "StreamBucketAccess",
         effect: iam.Effect.ALLOW,
-        actions: ["s3:PutObject"],
-        resources: [`${this.streamBucketArn}/autotune-streams/*`],
+        actions: ["s3:PutObject", "s3:GetObject", "s3:DeleteObject", "s3:ListBucket"],
+        resources: [this.streamBucketArn, `${this.streamBucketArn}/*`],
       })
     )
 
@@ -743,10 +744,10 @@ export class BackendStack extends cdk.NestedStack {
       }),
     })
 
-    // Cancel needs write, state needs read
+    // Cancel needs write, state needs read, runs needs scan
     stateLambda.addToRolePolicy(
       new iam.PolicyStatement({
-        actions: ["dynamodb:GetItem", "dynamodb:UpdateItem"],
+        actions: ["dynamodb:GetItem", "dynamodb:UpdateItem", "dynamodb:Scan"],
         resources: [this.optimizationStateTableArn],
       })
     )
@@ -789,6 +790,7 @@ export class BackendStack extends cdk.NestedStack {
     api.root.addResource("state").addMethod("GET", lambdaIntegration, authOptions)
     api.root.addResource("stream").addMethod("GET", lambdaIntegration, authOptions)
     api.root.addResource("log").addMethod("GET", lambdaIntegration, authOptions)
+    api.root.addResource("runs").addMethod("GET", lambdaIntegration, authOptions)
 
     this.optimizationStateApiUrl = api.url
 

@@ -29,7 +29,7 @@ import boto3
 from bedrock_agentcore.runtime import BedrockAgentCoreApp, PingStatus, RequestContext
 from strands import Agent, AgentSkills
 from strands.models import BedrockModel
-from strands.session import FileSessionManager
+from strands.session import S3SessionManager
 from strands_tools import editor, file_read, file_write, shell
 from utils.auth import extract_user_id_from_context
 
@@ -46,7 +46,6 @@ _active_sessions: dict[str, threading.Thread] = {}
 
 AGENT_DIR = Path(__file__).parent
 WORKSPACE_DIR = "/mnt/workspace" if os.path.isdir("/mnt/workspace") else "/tmp/workspace"
-SESSIONS_DIR = os.path.join(WORKSPACE_DIR, ".sessions")
 SCRATCH_DIR = "/tmp/autotune-data"  # Ephemeral 8.8GB overlay — bulk downloads go here, not /mnt/workspace
 MAX_ITERATIONS = 10
 
@@ -81,6 +80,22 @@ def _build_initial_prompt(test_set_id: str, optimization_guidance: str) -> str:
     return "\n".join(parts)
 
 
+def _build_resume_prompt(test_set_id: str, optimization_guidance: str) -> str:
+    parts = [
+        f"You are resuming an interrupted optimization run for test set: {test_set_id}",
+        "\nThe previous run was interrupted (likely by a disk space error). Your "
+        "conversation history and OPTIMIZATION-LOG.md on the persistent filesystem "
+        "contain everything from the previous run.",
+        "\nRead OPTIMIZATION-LOG.md to understand what has been done so far, then "
+        "continue the optimization from where it left off. Do NOT repeat work that "
+        "was already completed — check the log for which iterations, configs, and "
+        "evaluations have already been run.",
+    ]
+    if optimization_guidance:
+        parts.append(f"\nOriginal optimization guidance from the user:\n{optimization_guidance}")
+    return "\n".join(parts)
+
+
 def _create_optimization_log(session_workspace: str, test_set_id: str, optimization_guidance: str) -> None:
     idp_stack = os.environ.get("IDP_STACK_NAME", "unknown")
     region = os.environ.get("AWS_DEFAULT_REGION", os.environ.get("AWS_REGION", "unknown"))
@@ -101,13 +116,20 @@ Optimization guidance: {optimization_guidance or "None provided"}
 
 
 def _create_agent(user_id: str, session_id: str, state: OptimizationState,
-                  test_set_id: str, optimization_guidance: str) -> Agent:
+                  test_set_id: str, optimization_guidance: str, is_resume: bool = False) -> Agent:
     model = BedrockModel(
         model_id=os.environ["AUTOTUNE_MODEL_ID"],
         max_tokens=16384,
     )
-    os.makedirs(SESSIONS_DIR, exist_ok=True)
-    session_manager = FileSessionManager(session_id=session_id, storage_dir=SESSIONS_DIR)
+    # Session history on S3 — avoids NFS metadata pressure that causes ENOSPC.
+    # FileSessionManager writes one file per message (~300 files per run),
+    # exhausting the ~50MB NFS metadata budget. S3 has no such limit.
+    s3_bucket = os.environ.get("AUTOTUNE_STREAM_BUCKET", "")
+    session_manager = S3SessionManager(
+        session_id=session_id,
+        bucket=s3_bucket,
+        prefix="autotune-sessions",
+    ) if s3_bucket else None
 
     session_workspace = os.path.join(WORKSPACE_DIR, session_id)
     os.makedirs(session_workspace, exist_ok=True)
@@ -118,7 +140,7 @@ def _create_agent(user_id: str, session_id: str, state: OptimizationState,
     os.makedirs(session_scratch, exist_ok=True)
     os.environ["AUTOTUNE_SCRATCH_DIR"] = session_scratch
 
-    if test_set_id:
+    if test_set_id and not is_resume:
         _create_optimization_log(session_workspace, test_set_id, optimization_guidance)
 
     skills_dir = AGENT_DIR / "skills"
@@ -181,7 +203,7 @@ def _snapshot_disk_usage(output_path: str) -> None:
 
 
 def _run_agent_thread(user_id: str, session_id: str, state: OptimizationState,
-                      test_set_id: str, optimization_guidance: str) -> None:
+                      test_set_id: str, optimization_guidance: str, is_resume: bool = False) -> None:
     """Background thread: runs the agent, writes stream to JSONL, syncs to S3."""
     s3_bucket = os.environ.get("AUTOTUNE_STREAM_BUCKET", "")
     s3_prefix = f"autotune-streams/{session_id}"
@@ -202,8 +224,8 @@ def _run_agent_thread(user_id: str, session_id: str, state: OptimizationState,
             logger.exception("S3 sync failed for %s", s3_key)
 
     async def _run():
-        agent = _create_agent(user_id, session_id, state, test_set_id, optimization_guidance)
-        initial_prompt = _build_initial_prompt(test_set_id, optimization_guidance)
+        agent = _create_agent(user_id, session_id, state, test_set_id, optimization_guidance, is_resume)
+        initial_prompt = _build_resume_prompt(test_set_id, optimization_guidance) if is_resume else _build_initial_prompt(test_set_id, optimization_guidance)
 
         # Background sync thread — heartbeat + S3 sync independent of event loop
         # so they keep running even during long tool calls (e.g. 5-min download_results)
@@ -364,18 +386,24 @@ async def invocations(payload, context: RequestContext):
 
     test_set_id = payload.get("test_set_id", "").strip()
     optimization_guidance = payload.get("optimization_guidance", "").strip()
+    is_resume = payload.get("resume", "").strip().lower() == "true"
 
     if not test_set_id:
         yield {"status": "error", "error": "Missing required field: test_set_id"}
         return
 
-    state.initialize(test_set_id, optimization_guidance, MAX_ITERATIONS)
+    if is_resume:
+        # Resume: don't re-initialize — just flip status back to running
+        state.set_status(STATUS_RUNNING)
+        state.update_phase("resuming", "Resuming after interruption")
+    else:
+        state.initialize(test_set_id, optimization_guidance, MAX_ITERATIONS)
 
     user_id = extract_user_id_from_context(context)
 
     thread = threading.Thread(
         target=_run_agent_thread,
-        args=(user_id, session_id, state, test_set_id, optimization_guidance),
+        args=(user_id, session_id, state, test_set_id, optimization_guidance, is_resume),
         daemon=True,
         name=f"autotune-{session_id[:8]}",
     )
