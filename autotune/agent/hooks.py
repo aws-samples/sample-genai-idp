@@ -62,19 +62,23 @@ class OptimizationLoopHook(HookProvider):
             logger.info("Optimization cancelled — not resuming")
             return
 
+        status = self.state.get_status()
+        if status == STATUS_COMPLETE:
+            logger.info("Optimization already complete — not resuming")
+            return
+
         current = self.state.get_state()
         iteration = int(current.get("iteration", 0))
 
-        # Max iterations reached
+        # Max iterations reached — one final turn for summary, then stop
         if iteration >= self.max_iterations:
             logger.info("Max iterations (%d) reached — completing", self.max_iterations)
             self.state.set_status(STATUS_COMPLETE)
             self.state.update_phase("complete", "Max iterations reached")
-            # One final turn to produce summary
             event.resume = (
                 "You have reached the maximum number of iterations. "
                 "Write a final summary of the optimization run and copy the best "
-                "config to idpac_config_final.yaml."
+                "config to idpac_config_final.yaml. This is your last turn."
             )
             return
 
