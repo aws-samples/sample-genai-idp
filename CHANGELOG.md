@@ -52,6 +52,10 @@ SPDX-License-Identifier: MIT-0
 
 - **Managed configuration upload rejection** — `idp-cli config upload` now rejects configuration files with `managed: true` to prevent users from accidentally creating stack-managed configurations that would be overwritten on stack updates. All user-uploaded configurations automatically have `managed: false` set, ensuring they persist across stack lifecycle events.
 
+### Fixed
+
+- **Evaluation markdown/report rendering resilience** — two defensive fixes that keep evaluation and test-results pages from crashing when upstream data is non-numeric or empty.
+
 ### Security
 
 Hardening response to security review - Highlights:
