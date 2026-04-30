@@ -2,7 +2,7 @@
 IDPMonitor — AppSync Lambda Resolver
 
 This is the ONLY place in IDPMonitor where subscription entitlement is checked.
-The foundation services in idp_common/monitoring/ are subscription-unaware.
+The foundation services in idp_common_ext/monitoring/ are subscription-unaware.
 
 Flow:
   1. Parse AppSync event (field name + arguments)
@@ -10,7 +10,19 @@ Flow:
   3. For getMonitoringDashboard:
        a. Check subscription entitlement
        b. If not entitled: return subscriptionStatus="inactive" with empty sections
-       c. If entitled: call MonitoringMetricsService (or return mock data in dev mode)
+       c. If entitled: call MonitoringMetricsService → transform output → return
+
+Data flow (real data path):
+  MonitoringMetricsService.get_dashboard_data()
+    → { kpis, statusBreakdown, docTypeDistribution, volumeOverTime,
+        latencyByStep, recentFailures, configInfo, throttleReport, ... }
+  _transform_to_appsync_response()
+    → { volume, cost, latency, failures, throttles, distribution, config }
+  Lambda returns the mapped AppSync schema fields
+
+Fallback (dev/mock):
+  _build_mock_dashboard() is kept for local dev when the layer is unavailable.
+  It is only used if MonitoringMetricsService cannot be imported.
 
 Environment variables:
   SUBSCRIPTION_VALIDATION_MODE  "marketplace" | "none"  (default: "none")
@@ -38,10 +50,39 @@ TRACKING_TABLE_NAME = os.environ.get("TRACKING_TABLE_NAME", "")
 CONFIGURATION_TABLE_NAME = os.environ.get("CONFIGURATION_TABLE_NAME", "")
 REPORTING_BUCKET_NAME = os.environ.get("REPORTING_BUCKET_NAME", "")
 
-# ── Lazy imports (available via Lambda layer) ─────────────────────────────────
-# Uncomment when idp_common layer is attached:
-# from idp_common_ext.monitoring.monitoring_metrics_service import MonitoringMetricsService
-# from idp_common.subscription.license_checker import LicenseChecker
+# ── Import MonitoringMetricsService from idp_common_ext layer ─────────────────
+# The layer is attached via the IdpCommonExtLayer Lambda Layer defined in
+# monitoring-template.yaml. If the import fails (e.g. local dev without the
+# layer), _MONITORING_SERVICE_AVAILABLE is set to False and mock data is used.
+try:
+    from idp_common_ext.monitoring import MonitoringMetricsService, TimeRange
+
+    _MONITORING_SERVICE_AVAILABLE = True
+    logger.info("idp_common_ext.monitoring imported successfully")
+except ImportError as _exc:
+    _MONITORING_SERVICE_AVAILABLE = False
+    logger.warning(
+        "idp_common_ext not available (layer missing?): %s — falling back to mock data",
+        _exc,
+    )
+
+# ── Time range string → hours mapping ────────────────────────────────────────
+_TIME_RANGE_HOURS: dict[str, int] = {
+    "1h": 1,
+    "6h": 6,
+    "12h": 12,
+    "24h": 24,
+    "2d": 48,
+    "7d": 168,
+    "14d": 336,
+    "30d": 720,
+}
+
+
+def _parse_time_range(time_range: str) -> "TimeRange":
+    """Convert a UI time-range shorthand string to a TimeRange object."""
+    hours = _TIME_RANGE_HOURS.get(str(time_range).lower(), 24)
+    return TimeRange.last_n_hours(hours)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -118,46 +159,369 @@ def _handle_get_dashboard(event: dict[str, Any]) -> dict[str, Any]:
         }
 
     # ── Step 2: Fetch dashboard data ────────────────────────────────────────
-    if SUBSCRIPTION_VALIDATION_MODE == "none":
-        # Dev/testing mode — return realistic mock data so the UI renders fully
-        logger.info("Dev mode — returning mock dashboard data")
-        dashboard = _build_mock_dashboard(time_range)
+    section_errors: list[dict[str, Any]] = []
+
+    if _MONITORING_SERVICE_AVAILABLE:
+        # Real data path — MonitoringMetricsService fetches DynamoDB / CloudWatch / X-Ray
+        logger.info(
+            "Fetching real monitoring data via MonitoringMetricsService "
+            "(time_range=%s, sections=%s)",
+            time_range,
+            sections,
+        )
+        try:
+            tr = _parse_time_range(time_range)
+            svc = MonitoringMetricsService()
+            raw = svc.get_dashboard_data(
+                time_range=tr,
+                include_sections=sections,  # None = all operational sections
+            )
+            dashboard = _transform_to_appsync_response(raw, time_range)
+        except Exception as exc:  # noqa: BLE001
+            logger.error(
+                "MonitoringMetricsService failed: %s — falling back to mock data",
+                exc,
+                exc_info=True,
+            )
+            section_errors.append(
+                {
+                    "section": "all",
+                    "message": str(exc),
+                    "code": type(exc).__name__,
+                }
+            )
+            dashboard = _build_mock_dashboard(time_range)
     else:
-        # Production mode — call MonitoringMetricsService
-        # TODO: Uncomment when idp_common layer is attached
-        # service = MonitoringMetricsService(
-        #     tracking_table=TRACKING_TABLE_NAME,
-        #     config_table=CONFIGURATION_TABLE_NAME,
-        #     reporting_bucket=REPORTING_BUCKET_NAME,
-        #     stack_name=ACCELERATOR_STACK_NAME,
-        #     time_range=time_range,
-        #     start_time=start_time,
-        #     end_time=end_time,
-        # )
-        # dashboard = service.get_dashboard_data(sections=sections)
-        dashboard = _build_mock_dashboard(
-            time_range
-        )  # placeholder until service is ready
+        # Layer unavailable — use mock data (local dev / CI)
+        logger.info(
+            "MonitoringMetricsService unavailable — returning mock dashboard data"
+        )
+        dashboard = _build_mock_dashboard(time_range)
 
     logger.info(
-        "Dashboard data fetched for time_range=%s sections=%s", time_range, sections
+        "Dashboard response assembled for time_range=%s sections=%s errors=%d",
+        time_range,
+        sections,
+        len(section_errors),
     )
 
     return {
         "subscriptionStatus": "active",
         "subscriptionTier": "standard",
-        "volume": json.dumps(dashboard["volume"]),
-        "cost": json.dumps(dashboard["cost"]),
-        "latency": json.dumps(dashboard["latency"]),
-        "failures": json.dumps(dashboard["failures"]),
-        "throttles": json.dumps(dashboard["throttles"]),
-        "distribution": json.dumps(dashboard["distribution"]),
-        "config": json.dumps(dashboard["config"]),
+        "volume": dashboard.get("volume"),
+        "cost": dashboard.get("cost"),
+        "latency": dashboard.get("latency"),
+        "failures": dashboard.get("failures"),
+        "throttles": dashboard.get("throttles"),
+        "distribution": dashboard.get("distribution"),
+        "config": dashboard.get("config"),
         "timeRange": time_range,
         "startTime": start_time,
         "endTime": end_time,
         "generatedAt": generated_at,
+        "errors": section_errors,
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Transform MonitoringMetricsService output → AppSync schema format
+#
+# MonitoringMetricsService.get_dashboard_data() returns a normalized dict:
+#   {
+#     "kpis": { totalDocs, totalPages, totalInputTokens, ... },
+#     "statusBreakdown": { successCount, failureCount, pendingCount },
+#     "docTypeDistribution": [{ name, count, percentage }],
+#     "volumeOverTime": [{ date, count, completed, failed }],
+#     "latencyByStep": { ... },
+#     "recentFailures": [{ documentId, status, classification, ... }],
+#     "configInfo": { activeVersion, documentTypesCount, ... },
+#     "throttleReport": { ... },
+#     "queriedAt": str,
+#     "dataSources": list[str],
+#   }
+#
+# AppSync schema expects AWSJSON fields:
+#   volume, cost, latency, failures, throttles, distribution, config
+#
+# The Lambda is the canonical place to perform this mapping — the service
+# output format (MonitoringMetricsService) is the standard; the Lambda
+# adapts it to the AppSync schema.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _transform_to_appsync_response(
+    raw: dict[str, Any],
+    time_range: str,
+) -> dict[str, Any]:
+    """
+    Transform MonitoringMetricsService normalized output to AppSync AWSJSON fields.
+
+    Args:
+        raw:        Output from MonitoringMetricsService.get_dashboard_data()
+        time_range: Original time range string (e.g. "24h") for metadata fields
+
+    Returns:
+        Dict with keys: volume, cost, latency, failures, throttles, distribution, config
+    """
+    kpis = raw.get("kpis") or {}
+    status = raw.get("statusBreakdown") or {}
+    volume_over_time = raw.get("volumeOverTime") or []
+
+    # ── volume ───────────────────────────────────────────────────────────────
+    # Combines kpis (totals), statusBreakdown, and volumeOverTime (time series)
+    total_docs = kpis.get("totalDocs", 0)
+    success_count = status.get("successCount", 0)
+    failure_count = status.get("failureCount", 0)
+    pending_count = status.get("pendingCount", 0)
+    success_rate = kpis.get("successRate", 0.0)
+
+    # Build timeSeries from volumeOverTime buckets
+    time_series = [
+        {
+            "timestamp": bucket.get("date", ""),
+            "completed": bucket.get("completed", 0),
+            "failed": bucket.get("failed", 0),
+            "total": bucket.get("count", 0),
+        }
+        for bucket in volume_over_time
+    ]
+
+    # Compute throughput per hour (total docs / time range hours)
+    range_hours = _TIME_RANGE_HOURS.get(str(time_range).lower(), 24)
+    throughput_per_hour = round(total_docs / range_hours, 1) if range_hours > 0 else 0.0
+
+    volume = {
+        "totalDocuments": total_docs,
+        "completedDocuments": success_count,
+        "failedDocuments": failure_count,
+        "inProgressDocuments": pending_count,
+        "successRate": round(success_rate * 100, 1)
+        if success_rate <= 1.0
+        else success_rate,
+        "throughputPerHour": throughput_per_hour,
+        "totalPages": kpis.get("totalPages", 0),
+        "timeRange": time_range,
+        "statusBreakdown": {
+            "completed": success_count,
+            "failed": failure_count,
+            "inProgress": pending_count,
+            "queued": 0,
+        },
+        "timeSeries": time_series,
+    }
+
+    # ── cost ─────────────────────────────────────────────────────────────────
+    # Sourced from kpis (token counts + cost totals)
+    total_input_tokens = kpis.get("totalInputTokens", 0)
+    total_output_tokens = kpis.get("totalOutputTokens", 0)
+    total_cost = kpis.get("totalCost", 0.0)
+
+    cost = {
+        "totalInputTokens": total_input_tokens,
+        "totalOutputTokens": total_output_tokens,
+        "totalTokens": total_input_tokens + total_output_tokens,
+        "estimatedCostUsd": round(total_cost, 6),
+        "avgCostPerDoc": kpis.get("avgCostPerDoc", 0.0),
+        "dataSource": "dynamodb",
+        # Athena-enriched fields (populated when AnalyticsCostService is configured)
+        "perModelBreakdown": raw.get("modelUsage") or [],
+        "historicalTrend": raw.get("costTrends") or [],
+        "tokenUtilization": raw.get("tokenUtilization"),
+    }
+
+    # ── latency ───────────────────────────────────────────────────────────────
+    # Sourced from latencyByStep (X-Ray service performance summary)
+    latency_raw = raw.get("latencyByStep") or {}
+    latency = _transform_latency(latency_raw)
+
+    # ── failures ──────────────────────────────────────────────────────────────
+    # Sourced from recentFailures (normalized list from OperationalDocumentService)
+    failures_list = raw.get("recentFailures") or []
+    failures = {
+        "totalFailures": kpis.get("criticalErrors", len(failures_list)),
+        "hasMore": False,
+        "recentFailures": [
+            {
+                "documentId": f.get("documentId", ""),
+                "batchId": "",
+                "documentClass": f.get("classification", ""),
+                "pageCount": f.get("numPages", 0),
+                "failedAt": f.get("timestamp", ""),
+                "errorMessage": f.get("errorMessage", ""),
+                "errorCode": "",
+                "stage": "",
+            }
+            for f in failures_list
+        ],
+    }
+
+    # ── throttles ─────────────────────────────────────────────────────────────
+    # Sourced from throttleReport (CloudWatchMetricsService)
+    throttle_raw = raw.get("throttleReport") or {}
+    throttles = _transform_throttles(throttle_raw, kpis)
+
+    # ── distribution ──────────────────────────────────────────────────────────
+    # Sourced from docTypeDistribution (normalized list)
+    dist_list = raw.get("docTypeDistribution") or []
+    distribution = {
+        "totalDocuments": total_docs,
+        "classificationLevel": "document",
+        "classes": [
+            {
+                "className": d.get("name", ""),
+                "count": d.get("count", 0),
+                "percentage": d.get("percentage", 0.0),
+            }
+            for d in dist_list
+        ],
+    }
+
+    # ── config ────────────────────────────────────────────────────────────────
+    # Sourced from configInfo (OperationalDocumentService / configuration table)
+    config_raw = raw.get("configInfo") or {}
+    config = {
+        "activeVersion": config_raw.get("activeVersion", ""),
+        "documentClassCount": config_raw.get("documentTypesCount", 0),
+        "documentClasses": [],  # detailed class list not included in configInfo summary
+        "versionHistory": [
+            {
+                "version": v,
+                "createdAt": "",
+                "isActive": v == config_raw.get("activeVersion"),
+            }
+            for v in (config_raw.get("configVersions") or [])
+        ],
+    }
+
+    return {
+        "volume": volume,
+        "cost": cost,
+        "latency": latency,
+        "failures": failures,
+        "throttles": throttles,
+        "distribution": distribution,
+        "config": config,
         "errors": [],
+    }
+
+
+def _transform_latency(latency_raw: dict[str, Any]) -> dict[str, Any]:
+    """
+    Transform X-Ray service performance summary into the UI latency format.
+
+    The xray_service.get_service_performance_summary() returns a dict whose
+    exact shape depends on what X-Ray has traced.  We defensively extract
+    p50/p90/p99 values at the top level and per-service/stage breakdowns.
+    """
+
+    # Top-level percentiles — xray_service may return these at the root or
+    # nested under a "overall" / "aggregate" key.
+    def _ms(val: Any) -> int:
+        """Convert seconds float or ms int to integer ms."""
+        if val is None:
+            return 0
+        try:
+            f = float(val)
+            # heuristic: values < 1000 are likely already seconds
+            return int(f * 1000) if f < 1000 else int(f)
+        except (TypeError, ValueError):
+            return 0
+
+    overall = latency_raw.get("overall") or latency_raw
+    p50 = _ms(overall.get("p50_ms") or overall.get("p50") or overall.get("median_ms"))
+    p90 = _ms(overall.get("p90_ms") or overall.get("p90"))
+    p99 = _ms(overall.get("p99_ms") or overall.get("p99"))
+    sample_count = int(overall.get("sample_count") or overall.get("count") or 0)
+
+    # Per-stage / per-service breakdown
+    per_stage = []
+    stages_raw = (
+        latency_raw.get("by_service")
+        or latency_raw.get("per_stage")
+        or latency_raw.get("services")
+        or {}
+    )
+    if isinstance(stages_raw, dict):
+        for stage_name, stage_data in stages_raw.items():
+            if isinstance(stage_data, dict):
+                per_stage.append(
+                    {
+                        "stageName": stage_name,
+                        "p50Ms": _ms(
+                            stage_data.get("p50_ms")
+                            or stage_data.get("p50")
+                            or stage_data.get("median_ms")
+                        ),
+                        "p90Ms": _ms(stage_data.get("p90_ms") or stage_data.get("p90")),
+                        "p99Ms": _ms(stage_data.get("p99_ms") or stage_data.get("p99")),
+                    }
+                )
+    elif isinstance(stages_raw, list):
+        for stage_data in stages_raw:
+            per_stage.append(
+                {
+                    "stageName": stage_data.get("name", stage_data.get("service", "")),
+                    "p50Ms": _ms(
+                        stage_data.get("p50_ms")
+                        or stage_data.get("p50")
+                        or stage_data.get("median_ms")
+                    ),
+                    "p90Ms": _ms(stage_data.get("p90_ms") or stage_data.get("p90")),
+                    "p99Ms": _ms(stage_data.get("p99_ms") or stage_data.get("p99")),
+                }
+            )
+
+    return {
+        "p50Ms": p50,
+        "p90Ms": p90,
+        "p99Ms": p99,
+        "sampleCount": sample_count,
+        "xRayEnabled": bool(latency_raw),
+        "perStage": per_stage,
+    }
+
+
+def _transform_throttles(
+    throttle_raw: dict[str, Any],
+    kpis: dict[str, Any],
+) -> dict[str, Any]:
+    """
+    Transform CloudWatchMetricsService throttle report into the UI throttles format.
+
+    CloudWatchMetricsService.get_throttle_report() returns a dict whose shape
+    is implementation-defined.  We extract per-service counts defensively.
+    """
+    total_events = int(
+        kpis.get("throttleEvents", 0) or throttle_raw.get("total_events", 0) or 0
+    )
+
+    def _extract_service(key: str) -> dict[str, Any]:
+        """Extract count for a named service from the throttle report."""
+        # The throttle report may use snake_case or camelCase service keys
+        val = throttle_raw.get(key) or throttle_raw.get(key.replace("_", "")) or {}
+        count = int(val.get("count", 0) if isinstance(val, dict) else val or 0)
+        severity = "ok" if count == 0 else ("warning" if count < 10 else "critical")
+        return {"count": count, "severity": severity, "threshold": 10}
+
+    lambda_t = _extract_service("lambda")
+    bedrock_t = _extract_service("bedrock")
+    textract_t = _extract_service("textract")
+
+    # Overall severity — highest severity across services
+    severity_order = {"ok": 0, "warning": 1, "critical": 2}
+    max_severity = max(
+        [lambda_t["severity"], bedrock_t["severity"], textract_t["severity"]],
+        key=lambda s: severity_order.get(s, 0),
+        default="ok",
+    )
+
+    return {
+        "overallSeverity": max_severity,
+        "totalEvents": total_events,
+        "lambdaThrottles": lambda_t,
+        "bedrockThrottles": bedrock_t,
+        "textractThrottles": textract_t,
+        "sqsMessageAge": {"count": 0, "severity": "ok", "threshold": 300},
     }
 
 
@@ -198,13 +562,14 @@ def _check_entitlement() -> str:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Mock data — realistic sample dashboard data for dev/testing
+# Mock data — kept for local dev when idp_common_ext layer is unavailable
 # ─────────────────────────────────────────────────────────────────────────────
 
 
 def _build_mock_dashboard(time_range: str) -> dict[str, Any]:
     """
     Returns a realistic mock dashboard payload for dev/testing.
+    Only used when MonitoringMetricsService is not available (layer missing).
     Mirrors the TypeScript types in products/idp-monitor/ui/src/types/monitoring.ts.
     """
     now = datetime.now(timezone.utc)
@@ -247,7 +612,8 @@ def _build_mock_dashboard(time_range: str) -> dict[str, Any]:
         "totalOutputTokens": 980_000,
         "totalTokens": 5_800_000,
         "estimatedCostUsd": 8.74,
-        "dataSource": "dynamodb",
+        "avgCostPerDoc": 0.007,
+        "dataSource": "mock",
         "perModelBreakdown": [
             {
                 "modelId": "anthropic.claude-3-5-sonnet-20241022-v2:0",
@@ -314,6 +680,7 @@ def _build_mock_dashboard(time_range: str) -> dict[str, Any]:
 
     throttles = {
         "overallSeverity": "warning",
+        "totalEvents": 15,
         "lambdaThrottles": {"count": 3, "severity": "warning", "threshold": 5},
         "bedrockThrottles": {"count": 12, "severity": "warning", "threshold": 10},
         "textractThrottles": {"count": 0, "severity": "ok", "threshold": 5},

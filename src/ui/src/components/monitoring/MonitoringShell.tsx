@@ -11,20 +11,16 @@
  *     activation / instructions page.
  *
  *  2. If IDPMonitorUiUrl IS present → the IDPMonitor stack is deployed.
- *     Dynamically import the monitor UI bundle at runtime from the URL
- *     (served from the same CloudFront / S3 origin at /extensions/idp-monitor-ui.js).
- *     This means:
- *       - The IDP Accelerator builds and deploys with ZERO dependency on
- *         @idp-accelerator/idp-monitor-ui at build time.
- *       - The IDP Monitor stack copies its built ESM/UMD bundle to the
- *         Accelerator's S3 bucket and writes the URL into SSM via deploy.sh.
- *       - The two stacks are fully independent — either can be deployed,
- *         updated, or deleted without affecting the other's build.
+ *     Dynamically loads the monitor UI UMD bundle at runtime by injecting a
+ *     <script> tag. The UMD bundle writes its exports to window.IDPMonitorUI
+ *     and reads shared React/Cloudscape instances from window.__IDP_EXTENSIONS_DEPS__
+ *     (populated by the host app in index.tsx).
  *
  *  3. The runtime-loaded MonitoringPage receives apiUrl + apiKey props from
  *     the Accelerator Settings SSM parameter (written by deploy.sh).
  *
- *  4. If the dynamic import fails for any reason, a graceful error alert is shown.
+ *  4. If loading fails for any reason, a graceful error alert is shown with
+ *     a retry button.
  */
 
 import React, { Suspense, lazy, useEffect, useRef } from 'react';
@@ -45,6 +41,18 @@ interface MonitoringShellProps {
 interface MonitoringPageProps {
   apiUrl?: string;
   apiKey?: string;
+}
+
+interface IDPMonitorUILib {
+  MonitoringPage: React.ComponentType<MonitoringPageProps>;
+  [key: string]: unknown;
+}
+
+declare global {
+  interface Window {
+    IDPMonitorUI?: IDPMonitorUILib;
+    __IDP_EXTENSIONS_DEPS__?: Record<string, unknown>;
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -97,11 +105,70 @@ const NotDeployedPage: React.FC<{ stackName: string }> = ({ stackName }) => (
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Runtime-loaded MonitoringPage
+// UMD script-tag loader
 //
-// We use a factory function so the lazy() is re-created whenever the uiUrl
-// changes (i.e. after a first load failure). The key trick: wrap with a React
-// key so the Suspense boundary remounts when the URL changes.
+// The /extensions/idp-monitor-ui.js file is a UMD bundle. UMD bundles do not
+// use ES module export statements — instead they execute an IIFE that:
+//   1. Reads shared deps (React, Cloudscape) from window.__IDP_EXTENSIONS_DEPS__
+//   2. Writes exports to window.IDPMonitorUI
+//
+// We must load it via a <script> tag (not import()) so the browser executes
+// it as a classic script. After load, we read window.IDPMonitorUI.MonitoringPage.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Cache of in-flight or completed script loads keyed by URL */
+const scriptLoadCache = new Map<string, Promise<IDPMonitorUILib>>();
+
+function loadUmdBundle(url: string): Promise<IDPMonitorUILib> {
+  // Return cached promise if already loading / loaded
+  const cached = scriptLoadCache.get(url);
+  if (cached) return cached;
+
+  // If the bundle was already injected and window.IDPMonitorUI is populated, resolve immediately
+  if (window.IDPMonitorUI?.MonitoringPage) {
+    const resolved = Promise.resolve(window.IDPMonitorUI as IDPMonitorUILib);
+    scriptLoadCache.set(url, resolved);
+    return resolved;
+  }
+
+  const promise = new Promise<IDPMonitorUILib>((resolve, reject) => {
+    // Remove any stale script tags with this URL (e.g. from a previous failed load)
+    const existing = document.querySelector(`script[data-idp-monitor-ui]`);
+    if (existing) existing.remove();
+
+    const script = document.createElement('script');
+    script.src = url;
+    script.setAttribute('data-idp-monitor-ui', 'true');
+    script.crossOrigin = 'anonymous';
+
+    script.onload = () => {
+      const lib = window.IDPMonitorUI;
+      if (lib?.MonitoringPage) {
+        resolve(lib as IDPMonitorUILib);
+      } else {
+        reject(
+          new Error(
+            `UMD bundle loaded from "${url}" but window.IDPMonitorUI.MonitoringPage was not found. Check that the bundle is built correctly and that window.__IDP_EXTENSIONS_DEPS__ is populated.`,
+          ),
+        );
+      }
+    };
+
+    script.onerror = () => {
+      reject(new Error(`Failed to load monitoring UI bundle from "${url}". Check network and S3 bucket permissions.`));
+    };
+
+    document.head.appendChild(script);
+  });
+
+  // Don't cache failed loads so retry works
+  promise.catch(() => scriptLoadCache.delete(url));
+  scriptLoadCache.set(url, promise);
+  return promise;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Lazy wrapper that loads via UMD script tag
 // ─────────────────────────────────────────────────────────────────────────────
 
 function createRemoteMonitoringPage(
@@ -109,15 +176,8 @@ function createRemoteMonitoringPage(
   onLoadError: (err: Error) => void,
 ): React.LazyExoticComponent<React.ComponentType<MonitoringPageProps>> {
   return lazy(() =>
-    // @vite-ignore — intentional runtime dynamic import from a URL string
-    import(/* @vite-ignore */ uiUrl)
-      .then((mod: Record<string, unknown>) => {
-        const MonitoringPage = mod['MonitoringPage'] as React.ComponentType<MonitoringPageProps> | undefined;
-        if (!MonitoringPage) {
-          throw new Error(`IDPMonitor UI bundle loaded from "${uiUrl}" but did not export a MonitoringPage component.`);
-        }
-        return { default: MonitoringPage };
-      })
+    loadUmdBundle(uiUrl)
+      .then((lib) => ({ default: lib.MonitoringPage }))
       .catch((err: Error) => {
         console.error('[MonitoringShell] Failed to load monitoring UI bundle:', err);
         onLoadError(err);
@@ -159,16 +219,16 @@ export const MonitoringShell: React.FC<MonitoringShellProps> = ({ stackName, cla
 
   // Keep a stable ref to the lazy component, recreated only when uiUrl or retryKey changes
   const RemotePageRef = useRef<React.LazyExoticComponent<React.ComponentType<MonitoringPageProps>> | null>(null);
-  if (!RemotePageRef.current || retryKey > 0) {
+  if (!RemotePageRef.current) {
     RemotePageRef.current = createRemoteMonitoringPage(uiUrl, (err) => setLoadError(err));
   }
   const RemotePage = RemotePageRef.current;
 
-  // Reset error state when the URL changes (e.g. after redeployment)
+  // Reset error state + recreate lazy component when the URL changes or user retries
   useEffect(() => {
     setLoadError(null);
     RemotePageRef.current = createRemoteMonitoringPage(uiUrl, (err) => setLoadError(err));
-  }, [uiUrl]);
+  }, [uiUrl, retryKey]);
 
   // ── Case 1: IDPMonitor stack not deployed ─────────────────────────────────
   if (!uiUrl || !apiUrl) {
@@ -179,22 +239,9 @@ export const MonitoringShell: React.FC<MonitoringShellProps> = ({ stackName, cla
     );
   }
 
-  // ── Case 2: Monitor deployed — load bundle from runtime URL ───────────────
+  // ── Case 2: Monitor deployed — load UMD bundle via script tag ─────────────
   return (
     <div className={className}>
-      {loadError && (
-        <Box padding={{ bottom: 's' }}>
-          <Button
-            variant="link"
-            onClick={() => {
-              setLoadError(null);
-              setRetryKey((k) => k + 1);
-            }}
-          >
-            Retry loading monitoring dashboard
-          </Button>
-        </Box>
-      )}
       <Suspense fallback={<MonitoringLoadingSkeleton />} key={`remote-monitoring-${retryKey}`}>
         <RemotePage apiUrl={apiUrl} apiKey={apiKey} />
       </Suspense>

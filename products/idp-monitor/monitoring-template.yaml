@@ -248,6 +248,24 @@ Resources:
       ResponseMappingTemplate: |
         $util.toJson($context.result)
 
+  # ── Lambda Layer — idp_common_ext premium monitoring services ─────────────
+
+  IdpCommonExtLayer:
+    Type: AWS::Serverless::LayerVersion
+    Properties:
+      LayerName: !Sub "${AcceleratorStackName}-idp-common-ext"
+      Description: >
+        IDPMonitor premium extension library (idp_common_ext).
+        Provides MonitoringMetricsService and all supporting monitoring
+        services (OperationalDocumentService, CloudWatchMetricsService,
+        AnalyticsCostService, xray_service, etc.).
+      ContentUri: ../idp_common_ext_pkg/
+      CompatibleRuntimes:
+        - python3.12
+      RetentionPolicy: Delete
+    Metadata:
+      BuildMethod: python3.12
+
   # ── Lambda Resolver ──────────────────────────────────────────────────────
 
   MonitoringDashboardResolver:
@@ -256,6 +274,8 @@ Resources:
       FunctionName: !Sub "${AcceleratorStackName}-idp-monitor-dashboard-resolver"
       CodeUri: lambda/monitoring_dashboard_resolver/
       Handler: index.lambda_handler
+      Layers:
+        - !Ref IdpCommonExtLayer
       Description: >
         AppSync Lambda resolver for IDPMonitor dashboard. Enforces subscription
         entitlement check and aggregates monitoring data from DynamoDB, CloudWatch,

@@ -9,7 +9,8 @@
  *   - If IDPMonitor stack is not deployed → renders <MonitoringActivationPage />
  *   - If deployed (subscriber) → renders full dashboard with filters + widgets
  *
- * All widgets share a single time range selection managed here.
+ * Widget visibility is persisted in localStorage and managed via the
+ * WidgetSelector modal (opened by the Customize button in the filter bar).
  */
 
 import Alert from '@cloudscape-design/components/alert';
@@ -18,14 +19,20 @@ import ContentLayout from '@cloudscape-design/components/content-layout';
 import Header from '@cloudscape-design/components/header';
 import SpaceBetween from '@cloudscape-design/components/space-between';
 import Spinner from '@cloudscape-design/components/spinner';
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 
 import { useMonitoringDashboard } from '../../hooks/useMonitoringDashboard';
 import { useMonitoringStatus } from '../../hooks/useMonitoringStatus';
 import type { TimeRangePreset } from '../../types/monitoring';
+import {
+  DEFAULT_WIDGET_VISIBILITY,
+  loadWidgetVisibility,
+} from '../../types/widgets';
+import type { WidgetVisibilityMap } from '../../types/widgets';
 import { MonitoringActivationPage } from './MonitoringActivationPage';
 import { MonitoringFilters } from './MonitoringFilters';
 import { MonitoringLayout } from './MonitoringLayout';
+import { WidgetSelector } from './WidgetSelector';
 
 export interface MonitoringPageProps {
   /** AppSync API URL — injected at runtime from host app settings context. */
@@ -36,6 +43,10 @@ export interface MonitoringPageProps {
 
 export function MonitoringPage({ apiUrl, apiKey }: MonitoringPageProps = {}): JSX.Element {
   const [timeRange, setTimeRange] = useState<TimeRangePreset>('24h');
+  const [widgetVisibility, setWidgetVisibility] = useState<WidgetVisibilityMap>(
+    () => loadWidgetVisibility(DEFAULT_WIDGET_VISIBILITY),
+  );
+  const [customizeOpen, setCustomizeOpen] = useState(false);
 
   // Lightweight status check — determines whether to show activation page
   const { status: subscriptionStatus, loading: statusLoading } = useMonitoringStatus({ apiUrl, apiKey });
@@ -47,6 +58,11 @@ export function MonitoringPage({ apiUrl, apiKey }: MonitoringPageProps = {}): JS
     error: dashboardError,
     refetch,
   } = useMonitoringDashboard({ timeRange, apiUrl, apiKey });
+
+  const handleWidgetVisibilityConfirm = useCallback((visibility: WidgetVisibilityMap) => {
+    setWidgetVisibility(visibility);
+    setCustomizeOpen(false);
+  }, []);
 
   // ── Loading state ──────────────────────────────────────────────────────────
   if (statusLoading) {
@@ -81,66 +97,78 @@ export function MonitoringPage({ apiUrl, apiKey }: MonitoringPageProps = {}): JS
   const isLoading = dashboardLoading;
 
   return (
-    <ContentLayout
-      header={
-        <Header
-          variant="h1"
-          description="Real-time visibility into your IDP pipeline"
-          actions={
-            <MonitoringFilters
-              timeRange={timeRange}
-              onTimeRangeChange={setTimeRange}
-              onRefresh={refetch}
-              isLoading={isLoading}
-            />
-          }
-        >
-          IDPMonitor Dashboard
-        </Header>
-      }
-    >
-      <SpaceBetween size="l">
-        {dashboardError && (
-          <Alert
-            type="error"
-            header="Failed to load monitoring data"
-            dismissible
-          >
-            {dashboardError.message}
-          </Alert>
-        )}
-
-        {dashboard?.errors && dashboard.errors.length > 0 && (
-          <Alert type="warning" header="Some sections could not be loaded">
-            {dashboard.errors.map((e) => (
-              <Box key={e.section}>
-                <strong>{e.section}</strong>: {e.message}
-              </Box>
-            ))}
-          </Alert>
-        )}
-
-        {/* Show skeleton layout immediately (widgets show their own spinners) */}
-        {(dashboard || isLoading) && (
-          <MonitoringLayout
-            dashboard={
-              dashboard ?? {
-                subscriptionStatus: 'active',
-                generatedAt: new Date().toISOString(),
-                errors: [],
-              }
+    <>
+      <ContentLayout
+        header={
+          <Header
+            variant="h1"
+            description="Real-time visibility into your IDP pipeline"
+            actions={
+              <MonitoringFilters
+                timeRange={timeRange}
+                onTimeRangeChange={setTimeRange}
+                onRefresh={refetch}
+                onCustomize={() => setCustomizeOpen(true)}
+                isLoading={isLoading}
+              />
             }
-            isLoading={isLoading}
-            timeRange={timeRange}
-          />
-        )}
+          >
+            Monitoring Dashboard
+          </Header>
+        }
+      >
+        <SpaceBetween size="l">
+          {dashboardError && (
+            <Alert
+              type="error"
+              header="Failed to load monitoring data"
+              dismissible
+            >
+              {dashboardError.message}
+            </Alert>
+          )}
 
-        {!isLoading && !dashboard && !dashboardError && (
-          <Box textAlign="center" color="text-body-secondary" padding="xxxl">
-            No monitoring data available for the selected time range.
-          </Box>
-        )}
-      </SpaceBetween>
-    </ContentLayout>
+          {dashboard?.errors && dashboard.errors.length > 0 && (
+            <Alert type="warning" header="Some sections could not be loaded">
+              {dashboard.errors.map((e) => (
+                <Box key={e.section}>
+                  <strong>{e.section}</strong>: {e.message}
+                </Box>
+              ))}
+            </Alert>
+          )}
+
+          {/* Show skeleton layout immediately (widgets show their own spinners) */}
+          {(dashboard || isLoading) && (
+            <MonitoringLayout
+              dashboard={
+                dashboard ?? {
+                  subscriptionStatus: 'active',
+                  generatedAt: new Date().toISOString(),
+                  errors: [],
+                }
+              }
+              isLoading={isLoading}
+              timeRange={timeRange}
+              widgetVisibility={widgetVisibility}
+            />
+          )}
+
+          {!isLoading && !dashboard && !dashboardError && (
+            <Box textAlign="center" color="text-body-secondary" padding="xxxl">
+              No monitoring data available for the selected time range.
+            </Box>
+          )}
+        </SpaceBetween>
+      </ContentLayout>
+
+      {/* Customize Dashboard Modal */}
+      <WidgetSelector
+        visible={customizeOpen}
+        currentVisibility={widgetVisibility}
+        onConfirm={handleWidgetVisibilityConfirm}
+        onDismiss={() => setCustomizeOpen(false)}
+      />
+    </>
   );
 }

@@ -8,25 +8,26 @@
  * Receives the full dashboard data object and distributes
  * section data to each widget.
  *
- * Layout:
- *   Row 1: KPICardsWidget          (full width)
- *   Row 2: VolumeChartWidget (2/3) | SuccessFailureWidget (1/3)
- *   Row 3: DocTypeChartWidget (1/2) | CostWidget (1/2)
- *   Row 4: LatencyChartWidget (1/2) | ThrottleWidget (1/2)
- *   Row 5: FailuresTableWidget     (full width)
- *   Row 6: ConfigPanelWidget       (full width)
+ * Layout (matches IDP Accelerator reference implementation):
+ *   Row 1: KPICardsWidget           (full width)
+ *   Row 2: VolumeChartWidget        (full width)
+ *   Row 3: DocTypeChartWidget (1/2) | ConfigPanelWidget (1/2)
+ *   Row 4: LatencyChartWidget       (full width)
+ *   Row 5: FailuresTableWidget      (full width)
+ *   Row 6: ThrottleWidget           (full width, conditional)
+ *   Empty state when all widgets hidden
  */
 
+import Box from '@cloudscape-design/components/box';
 import SpaceBetween from '@cloudscape-design/components/space-between';
 
 import type { MonitoringDashboardData } from '../../types/monitoring';
+import type { WidgetVisibilityMap } from '../../types/widgets';
 import { ConfigPanelWidget } from './widgets/ConfigPanelWidget';
-import { CostWidget } from './widgets/CostWidget';
 import { DocTypeChartWidget } from './widgets/DocTypeChartWidget';
 import { FailuresTableWidget } from './widgets/FailuresTableWidget';
 import { KPICardsWidget } from './widgets/KPICardsWidget';
 import { LatencyChartWidget } from './widgets/LatencyChartWidget';
-import { SuccessFailureWidget } from './widgets/SuccessFailureWidget';
 import { ThrottleWidget } from './widgets/ThrottleWidget';
 import { VolumeChartWidget } from './widgets/VolumeChartWidget';
 
@@ -34,73 +35,86 @@ interface MonitoringLayoutProps {
   dashboard: MonitoringDashboardData;
   isLoading: boolean;
   timeRange?: string;
+  widgetVisibility: WidgetVisibilityMap;
 }
 
 export function MonitoringLayout({
   dashboard,
   isLoading,
   timeRange,
+  widgetVisibility,
 }: MonitoringLayoutProps): JSX.Element {
+  const allHidden = Object.values(widgetVisibility).every((v) => !v);
+
+  if (allHidden) {
+    return (
+      <Box textAlign="center" color="text-body-secondary" padding="xxl">
+        <Box variant="h3">No widgets visible</Box>
+        <Box padding={{ top: 'xs' }}>
+          Click <strong>Customize</strong> in the filter bar to select widgets to display.
+        </Box>
+      </Box>
+    );
+  }
+
   return (
     <SpaceBetween size="l">
-      {/* Row 1 — KPI Summary bar */}
-      <KPICardsWidget volume={dashboard.volume} isLoading={isLoading} />
+      {/* Row 1 — KPI Summary bar (full width) */}
+      {widgetVisibility.kpiCards && (
+        <KPICardsWidget volume={dashboard.volume} cost={dashboard.cost} isLoading={isLoading} />
+      )}
 
-      {/* Row 2 — Volume chart + Status donut  (2/3 | 1/3) */}
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: '2fr 1fr',
-          gap: '20px',
-          alignItems: 'start',
-        }}
-      >
+      {/* Row 2 — Volume chart (full width) */}
+      {widgetVisibility.volumeChart && (
         <VolumeChartWidget
           timeSeries={dashboard.volume?.timeSeries}
           isLoading={isLoading}
           timeRange={timeRange}
         />
-        <SuccessFailureWidget
-          statusBreakdown={dashboard.volume?.statusBreakdown}
-          successRate={dashboard.volume?.successRate}
-          isLoading={isLoading}
-        />
-      </div>
+      )}
 
-      {/* Row 3 — Doc type distribution + Cost  (1/2 | 1/2) */}
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: '1fr 1fr',
-          gap: '20px',
-          alignItems: 'start',
-        }}
-      >
-        <DocTypeChartWidget
-          distribution={dashboard.distribution}
-          isLoading={isLoading}
-        />
-        <CostWidget cost={dashboard.cost} isLoading={isLoading} />
-      </div>
+      {/* Row 3 — Doc type distribution (1/2) | Active Config (1/2) */}
+      {(widgetVisibility.docTypes || widgetVisibility.configPanel) && (
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns:
+              widgetVisibility.docTypes && widgetVisibility.configPanel
+                ? '1fr 1fr'
+                : '1fr',
+            gap: '20px',
+            alignItems: 'start',
+          }}
+        >
+          {widgetVisibility.docTypes && (
+            <DocTypeChartWidget
+              distribution={dashboard.distribution}
+              isLoading={isLoading}
+            />
+          )}
+          {widgetVisibility.configPanel && (
+            <ConfigPanelWidget
+              config={dashboard.config}
+              isLoading={isLoading}
+            />
+          )}
+        </div>
+      )}
 
-      {/* Row 4 — Latency + Throttles  (1/2 | 1/2) */}
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: '1fr 1fr',
-          gap: '20px',
-          alignItems: 'start',
-        }}
-      >
+      {/* Row 4 — Latency by step (full width) */}
+      {widgetVisibility.latencyChart && (
         <LatencyChartWidget latency={dashboard.latency} isLoading={isLoading} />
-        <ThrottleWidget throttles={dashboard.throttles} isLoading={isLoading} />
-      </div>
+      )}
 
       {/* Row 5 — Recent Failures table (full width) */}
-      <FailuresTableWidget failures={dashboard.failures} isLoading={isLoading} />
+      {widgetVisibility.failuresTable && (
+        <FailuresTableWidget failures={dashboard.failures} isLoading={isLoading} />
+      )}
 
-      {/* Row 6 — Config panel (full width) */}
-      <ConfigPanelWidget config={dashboard.config} isLoading={isLoading} />
+      {/* Row 6 — Throttle events (full width, only when events exist) */}
+      {widgetVisibility.throttleEvents && (
+        <ThrottleWidget throttles={dashboard.throttles} isLoading={isLoading} />
+      )}
     </SpaceBetween>
   );
 }

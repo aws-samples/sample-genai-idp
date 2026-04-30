@@ -15,12 +15,67 @@ import App from './App';
 // externals are resolved via window.__IDP_EXTENSIONS_DEPS__ so the extension
 // bundle shares the SAME React instance as the host app — preventing the
 // "multiple React copies" / broken-hooks problem.
+//
+// The keys here MUST match the globals map in the UMD bundle's vite.config.ts
+// rollupOptions.output.globals. Any missing entry will cause the UMD IIFE to
+// receive `undefined` for that dependency and throw at render time.
 // ─────────────────────────────────────────────────────────────────────────────
+
+// Cloudscape component imports — lazily imported inline so they don't affect
+// the host app's own chunk splitting, but are available before any extension
+// script tag fires.
+import CloudscapeAlert from '@cloudscape-design/components/alert';
+import CloudscapeBox from '@cloudscape-design/components/box';
+import CloudscapeButton from '@cloudscape-design/components/button';
+import CloudscapeBadge from '@cloudscape-design/components/badge';
+import CloudscapeContainer from '@cloudscape-design/components/container';
+import CloudscapeContentLayout from '@cloudscape-design/components/content-layout';
+import CloudscapeColumnLayout from '@cloudscape-design/components/column-layout';
+import CloudscapeExpandableSection from '@cloudscape-design/components/expandable-section';
+import CloudscapeHeader from '@cloudscape-design/components/header';
+import CloudscapeLink from '@cloudscape-design/components/link';
+import CloudscapePagination from '@cloudscape-design/components/pagination';
+import CloudscapeSelect from '@cloudscape-design/components/select';
+import CloudscapeSpaceBetween from '@cloudscape-design/components/space-between';
+import CloudscapeSpinner from '@cloudscape-design/components/spinner';
+import CloudscapeStatusIndicator from '@cloudscape-design/components/status-indicator';
+import CloudscapeTable from '@cloudscape-design/components/table';
+import CloudscapeTextFilter from '@cloudscape-design/components/text-filter';
+import CloudscapeModal from '@cloudscape-design/components/modal';
+import CloudscapeButtonDropdown from '@cloudscape-design/components/button-dropdown';
+import CloudscapeCheckbox from '@cloudscape-design/components/checkbox';
+import CloudscapeProgressBar from '@cloudscape-design/components/progress-bar';
+import * as CloudscapeCollectionHooks from '@cloudscape-design/collection-hooks';
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 (window as any)['__IDP_EXTENSIONS_DEPS__'] = {
+  // React core
   React,
   ReactDOM,
   ReactJSXRuntime,
+  // Cloudscape components — names match UMD globals map in products/idp-monitor/ui/vite.config.ts
+  CloudscapeAlert,
+  CloudscapeBox,
+  CloudscapeButton,
+  CloudscapeBadge,
+  CloudscapeContainer,
+  CloudscapeContentLayout,
+  CloudscapeColumnLayout,
+  CloudscapeExpandableSection,
+  CloudscapeHeader,
+  CloudscapeLink,
+  CloudscapePagination,
+  CloudscapeSelect,
+  CloudscapeSpaceBetween,
+  CloudscapeSpinner,
+  CloudscapeStatusIndicator,
+  CloudscapeTable,
+  CloudscapeTextFilter,
+  CloudscapeModal,
+  CloudscapeButtonDropdown,
+  CloudscapeCheckbox,
+  CloudscapeProgressBar,
+  CloudscapeCollectionHooks,
 };
 
 // Suppress ResizeObserver loop error - this is a benign browser timing issue

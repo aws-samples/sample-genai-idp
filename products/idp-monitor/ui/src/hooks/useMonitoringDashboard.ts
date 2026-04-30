@@ -111,10 +111,23 @@ export interface UseMonitoringDashboardResult {
 // Helper: parse AWSJSON section fields
 // ---------------------------------------------------------------------------
 
-function parseAWSJSON(raw: string | undefined): unknown {
+function parseAWSJSON(raw: string | undefined | unknown): unknown {
   if (!raw) return undefined;
+  // If it's already an object (AppSync returned a proper map), use it directly
+  if (typeof raw === 'object') return raw;
+  if (typeof raw !== 'string') return undefined;
   try {
-    return JSON.parse(raw);
+    const parsed = JSON.parse(raw);
+    // Handle double-encoded strings: Lambda returned json.dumps(dict) → AppSync serialized again
+    // Result: a string that itself is a JSON string.  Parse one more time if needed.
+    if (typeof parsed === 'string') {
+      try {
+        return JSON.parse(parsed);
+      } catch {
+        return parsed;
+      }
+    }
+    return parsed;
   } catch {
     return undefined;
   }

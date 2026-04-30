@@ -5,6 +5,7 @@
  * IDPMonitor Widget — Volume Over Time Chart
  *
  * Stacked bar chart showing completed vs. failed document counts over time.
+ * Matches the IDP Accelerator reference visual style.
  */
 
 import Box from '@cloudscape-design/components/box';
@@ -30,6 +31,88 @@ interface VolumeChartWidgetProps {
   timeRange?: string;
 }
 
+// Matching the accelerator color palette (20% transparency)
+const COLORS = {
+  completed: 'rgba(103,177,115,0.8)',
+  failed: 'rgba(242,139,139,0.8)',
+};
+
+const CustomTooltip = ({
+  active,
+  payload,
+  label,
+}: {
+  active?: boolean;
+  payload?: { name: string; value: number; color: string }[];
+  label?: string;
+}) => {
+  if (!active || !payload || payload.length === 0) return null;
+  const total = payload.reduce((s, p) => s + p.value, 0);
+  return (
+    <div
+      style={{
+        background: '#fff',
+        border: '1px solid #d5dbdb',
+        borderRadius: 4,
+        padding: '10px 14px',
+        fontSize: 13,
+        boxShadow: '0 2px 6px rgba(0,0,0,0.12)',
+      }}
+    >
+      <div style={{ fontWeight: 700, marginBottom: 6 }}>{label}</div>
+      {payload.map((p) => (
+        <div key={p.name} style={{ color: p.color, marginBottom: 2 }}>
+          {p.name.charAt(0).toUpperCase() + p.name.slice(1)}:{' '}
+          <strong>{p.value.toLocaleString()}</strong>
+        </div>
+      ))}
+      <div
+        style={{
+          borderTop: '1px solid #eee',
+          marginTop: 6,
+          paddingTop: 4,
+          color: '#555',
+        }}
+      >
+        Total: <strong>{total.toLocaleString()}</strong>
+      </div>
+    </div>
+  );
+};
+
+const CustomLegend = () => (
+  <div
+    style={{
+      display: 'flex',
+      justifyContent: 'center',
+      gap: 20,
+      paddingTop: 8,
+      fontSize: 12,
+    }}
+  >
+    {[
+      { label: 'Completed', color: COLORS.completed },
+      { label: 'Failed', color: COLORS.failed },
+    ].map(({ label, color }) => (
+      <div
+        key={label}
+        style={{ display: 'flex', alignItems: 'center', gap: 5 }}
+      >
+        <span
+          style={{
+            width: 10,
+            height: 10,
+            background: color,
+            display: 'inline-block',
+            borderRadius: 2,
+          }}
+        />
+        <span style={{ color: '#555' }}>{label}</span>
+      </div>
+    ))}
+  </div>
+);
+
 function formatTimestamp(ts: string, timeRange?: string): string {
   const d = new Date(ts);
   const longRange = timeRange === '7d' || timeRange === '30d';
@@ -44,48 +127,102 @@ export function VolumeChartWidget({
   isLoading,
   timeRange,
 }: VolumeChartWidgetProps): JSX.Element {
-  const data = (timeSeries ?? []).map((p) => ({
+  const safeData = (timeSeries ?? []).map((p) => ({
     ...p,
     label: formatTimestamp(p.timestamp, timeRange),
   }));
 
-  return (
-    <Container header={<Header variant="h2">Volume Over Time</Header>}>
-      {isLoading && !timeSeries ? (
+  const totalDocs = safeData.reduce((s, d) => s + d.completed + d.failed, 0);
+  const totalFailures = safeData.reduce((s, d) => s + d.failed, 0);
+  const tickInterval =
+    safeData.length > 12 ? Math.ceil(safeData.length / 12) - 1 : 0;
+
+  if (isLoading && !timeSeries) {
+    return (
+      <Container header={<Header variant="h2">Processing Volume</Header>}>
         <Box textAlign="center" padding="l">
           <Spinner size="large" />
         </Box>
-      ) : data.length === 0 ? (
-        <Box textAlign="center" color="text-body-secondary" padding="l">
-          No volume data available for the selected time range.
+      </Container>
+    );
+  }
+
+  if (safeData.length === 0) {
+    return (
+      <Container
+        header={
+          <Header
+            variant="h2"
+            description="0 documents processed · 0 failures"
+          >
+            Processing Volume
+          </Header>
+        }
+      >
+        <Box color="text-body-secondary" textAlign="center" padding="l">
+          No volume data available for this time range.
         </Box>
-      ) : (
-        <ResponsiveContainer width="100%" height={240}>
-          <BarChart data={data} margin={{ top: 8, right: 16, left: 0, bottom: 0 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border-divider-default, #e9ebed)" />
+      </Container>
+    );
+  }
+
+  return (
+    <Container
+      header={
+        <Header
+          variant="h2"
+          description={`${totalDocs.toLocaleString()} documents processed · ${totalFailures.toLocaleString()} failures`}
+        >
+          Processing Volume
+        </Header>
+      }
+    >
+      <Box padding={{ top: 's' }}>
+        <ResponsiveContainer width="100%" height={220}>
+          <BarChart
+            data={safeData}
+            margin={{ top: 4, right: 16, left: 0, bottom: 0 }}
+            barCategoryGap="20%"
+          >
+            <CartesianGrid
+              strokeDasharray="3 3"
+              stroke="#e8e8e8"
+              vertical={false}
+            />
             <XAxis
               dataKey="label"
-              tick={{ fontSize: 11 }}
-              interval="preserveStartEnd"
+              tick={{ fontSize: 11, fill: '#555' }}
+              interval={tickInterval}
+              axisLine={false}
+              tickLine={false}
             />
-            <YAxis tick={{ fontSize: 11 }} allowDecimals={false} />
-            <Tooltip />
-            <Legend verticalAlign="top" height={28} />
+            <YAxis
+              tick={{ fontSize: 11, fill: '#555' }}
+              axisLine={false}
+              tickLine={false}
+              width={48}
+              tickFormatter={(v) =>
+                v >= 1000 ? `${(v / 1000).toFixed(0)}K` : v
+              }
+            />
+            <Tooltip content={<CustomTooltip />} cursor={{ fill: 'rgba(0,0,0,0.04)' }} />
+            <Legend content={<CustomLegend />} />
             <Bar
               dataKey="completed"
-              name="Completed"
+              name="completed"
               stackId="a"
-              fill="var(--color-charts-green-400, #067f68)"
+              fill={COLORS.completed}
             />
             <Bar
               dataKey="failed"
-              name="Failed"
+              name="failed"
               stackId="a"
-              fill="var(--color-charts-red-400, #ce3311)"
+              fill={COLORS.failed}
+              radius={[2, 2, 0, 0]}
             />
           </BarChart>
         </ResponsiveContainer>
-      )}
+      </Box>
     </Container>
   );
 }

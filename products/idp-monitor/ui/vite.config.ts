@@ -62,6 +62,13 @@ export default defineConfig({
     sourcemap: true,
     minify: false,
   },
+  define: {
+    // recharts (and its D3 deps) reference process.env.NODE_ENV at runtime.
+    // Vite library builds do NOT inject process shims automatically, so we
+    // must replace this at build time or the UMD bundle crashes in the browser
+    // with "ReferenceError: process is not defined".
+    'process.env.NODE_ENV': JSON.stringify('production'),
+  },
   resolve: {
     alias: {
       '@': resolve(__dirname, 'src'),

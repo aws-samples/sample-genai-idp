@@ -59,7 +59,7 @@ class MonitoringErrorBoundary extends React.Component<React.PropsWithChildren, E
 // ─────────────────────────────────────────────────────────────────────────────
 
 const MonitoringBreadcrumbs = (): React.JSX.Element => (
-  <BreadcrumbGroup items={[{ text: 'IDPMonitor', href: `#${MONITORING_PATH}` }]} ariaLabel="Breadcrumbs" />
+  <BreadcrumbGroup items={[{ text: 'Monitoring', href: `#${MONITORING_PATH}` }]} ariaLabel="Breadcrumbs" />
 );
 
 // ─────────────────────────────────────────────────────────────────────────────

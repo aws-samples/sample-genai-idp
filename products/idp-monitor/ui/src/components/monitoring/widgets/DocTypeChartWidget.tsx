@@ -4,23 +4,30 @@
 /**
  * IDPMonitor Widget — Document Type Distribution
  *
- * Horizontal bar chart showing the breakdown of processed document classes.
+ * Hybrid pie/bar chart showing volume by document class.
+ * Top 5 → pie chart; Top 10+ → horizontal bar chart.
+ * Matches IDP Accelerator reference visual style.
  */
 
 import Box from '@cloudscape-design/components/box';
 import Container from '@cloudscape-design/components/container';
 import Header from '@cloudscape-design/components/header';
+import Select from '@cloudscape-design/components/select';
 import Spinner from '@cloudscape-design/components/spinner';
 import {
   Bar,
   BarChart,
   CartesianGrid,
   Cell,
+  LabelList,
+  Pie,
+  PieChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
 } from 'recharts';
+import { useState } from 'react';
 
 import type { DocumentTypeDistribution } from '../../../types/monitoring';
 
@@ -29,85 +36,311 @@ interface DocTypeChartWidgetProps {
   isLoading: boolean;
 }
 
-const BAR_COLORS = [
-  '#0972d3',
-  '#067f68',
-  '#8456ce',
-  '#e07941',
-  '#ce3311',
-  '#539fe5',
-  '#2ea597',
-  '#a783e1',
+const PALETTE = [
+  'rgba(0,115,187,0.8)',
+  'rgba(228,121,17,0.8)',
+  'rgba(29,129,2,0.8)',
+  'rgba(137,86,200,0.8)',
+  'rgba(199,85,26,0.8)',
+  'rgba(83,141,213,0.8)',
 ];
+const OTHERS_COLOR = 'rgba(176,184,193,0.8)';
+
+const CustomTooltip = ({
+  active,
+  payload,
+}: {
+  active?: boolean;
+  payload?: { name?: string; value: number; payload: { name?: string; pct?: number; percent?: number; count?: number } }[];
+}) => {
+  if (!active || !payload || payload.length === 0) return null;
+  const item = payload[0];
+  const d = item.payload;
+  const displayName = d.name ?? item.name ?? '';
+  const count = d.count ?? item.value;
+  const pct = d.percent !== undefined ? d.percent * 100 : d.pct ?? 0;
+  return (
+    <div
+      style={{
+        background: '#fff',
+        border: '1px solid #d5dbdb',
+        borderRadius: 4,
+        padding: '8px 12px',
+        fontSize: 13,
+        boxShadow: '0 2px 6px rgba(0,0,0,0.12)',
+      }}
+    >
+      <strong>{displayName}</strong>: {count.toLocaleString()}
+      <br />
+      <span style={{ color: '#555' }}>{pct.toFixed(1)}%</span>
+    </div>
+  );
+};
+
+const PieLegend = ({
+  items,
+}: {
+  items: { label: string; color: string; count: number; percentage: string }[];
+}) => (
+  <div
+    style={{
+      display: 'flex',
+      justifyContent: 'center',
+      gap: 16,
+      paddingTop: 16,
+      fontSize: 13,
+      flexWrap: 'wrap',
+    }}
+  >
+    {items.map(({ label, color, count, percentage }) => (
+      <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <span
+          style={{
+            width: 12,
+            height: 12,
+            background: color,
+            display: 'inline-block',
+            borderRadius: '50%',
+          }}
+        />
+        <span style={{ color: '#16191f', fontWeight: 500 }}>{label}</span>
+        <span style={{ color: '#555' }}>
+          {count.toLocaleString()} ({percentage}%)
+        </span>
+      </div>
+    ))}
+  </div>
+);
 
 export function DocTypeChartWidget({
   distribution,
   isLoading,
 }: DocTypeChartWidgetProps): JSX.Element {
-  const data = (distribution?.classes ?? [])
-    .slice()
-    .sort((a, b) => b.count - a.count)
-    .map((c) => ({
-      name: c.className,
-      count: c.count,
-      pct: c.percentage,
-    }));
+  const [displayLimit, setDisplayLimit] = useState<number>(5);
+
+  const sorted = [...(distribution?.classes ?? [])].sort(
+    (a, b) => b.count - a.count,
+  );
 
   const subtitle = distribution
-    ? `${(distribution.totalDocuments ?? 0).toLocaleString()} total · ${distribution.classificationLevel ?? ''}-level`
+    ? `${(distribution.totalDocuments ?? 0).toLocaleString()} total documents`
     : undefined;
+
+  if (isLoading && !distribution) {
+    return (
+      <Container header={<Header variant="h2">Document Types</Header>}>
+        <Box textAlign="center" padding="l">
+          <Spinner size="large" />
+        </Box>
+      </Container>
+    );
+  }
+
+  if (sorted.length === 0) {
+    return (
+      <Container
+        header={<Header variant="h2" description={subtitle}>Document Types</Header>}
+      >
+        <Box color="text-body-secondary" textAlign="center" padding="l">
+          No document type data available for this time range.
+        </Box>
+      </Container>
+    );
+  }
+
+  const usePieChart = displayLimit <= 5;
+  const topNForPie = 6;
+  const total = sorted.reduce((s, d) => s + d.count, 0);
+
+  const limitOptions = [
+    { label: 'Top 5', value: '5' },
+    { label: 'Top 10', value: '10' },
+    { label: 'Top 15', value: '15' },
+    { label: 'Top 20', value: '20' },
+  ];
+  const selectedOption =
+    limitOptions.find((o) => parseInt(o.value) === displayLimit) ?? limitOptions[0];
+
+  // ── Pie mode ────────────────────────────────────────────────────────────────
+  if (usePieChart) {
+    const topN = sorted.slice(0, topNForPie);
+    const remaining = sorted.slice(topNForPie);
+
+    const pieData: { name: string; value: number; percent: number; count: number }[] = topN.map((c) => ({
+      name: c.className,
+      value: c.count,
+      count: c.count,
+      percent: total > 0 ? c.count / total : 0,
+    }));
+
+    if (remaining.length > 0) {
+      const othersCount = remaining.reduce((s, c) => s + c.count, 0);
+      pieData.push({
+        name: `Others (${remaining.length} types)`,
+        value: othersCount,
+        count: othersCount,
+        percent: total > 0 ? othersCount / total : 0,
+      });
+    }
+
+    const legendItems = pieData.map((item, idx) => {
+      const isOthers = item.name.startsWith('Others (');
+      return {
+        label: item.name,
+        color: isOthers ? OTHERS_COLOR : PALETTE[idx % PALETTE.length],
+        count: item.count,
+        percentage: (item.percent * 100).toFixed(1),
+      };
+    });
+
+    return (
+      <Container
+        header={
+          <Header
+            variant="h2"
+            description={subtitle}
+            actions={
+              <Select
+                selectedOption={selectedOption}
+                onChange={({ detail }) =>
+                  setDisplayLimit(parseInt(detail.selectedOption.value!))
+                }
+                options={limitOptions}
+                expandToViewport
+              />
+            }
+          >
+            Document Types
+          </Header>
+        }
+      >
+        <ResponsiveContainer width="100%" height={200}>
+          <PieChart>
+            <Pie
+              data={pieData}
+              cx="50%"
+              cy="50%"
+              innerRadius={50}
+              outerRadius={80}
+              paddingAngle={2}
+              dataKey="value"
+            >
+              {pieData.map((entry, idx) => {
+                const isOthers = entry.name.startsWith('Others (');
+                return (
+                  <Cell
+                    key={entry.name}
+                    fill={isOthers ? OTHERS_COLOR : PALETTE[idx % PALETTE.length]}
+                  />
+                );
+              })}
+            </Pie>
+            <Tooltip content={<CustomTooltip />} />
+          </PieChart>
+        </ResponsiveContainer>
+        <PieLegend items={legendItems} />
+      </Container>
+    );
+  }
+
+  // ── Bar mode ─────────────────────────────────────────────────────────────────
+  const topN = sorted.slice(0, displayLimit);
+  const remaining = sorted.slice(displayLimit);
+
+  const barData: { name: string; count: number; pct: number }[] = topN.map((c) => ({
+    name: c.className,
+    count: c.count,
+    pct: c.percentage,
+  }));
+
+  if (remaining.length > 0) {
+    const othersCount = remaining.reduce((s, c) => s + c.count, 0);
+    const othersPct = remaining.reduce((s, c) => s + c.percentage, 0);
+    barData.push({
+      name: `Others (${remaining.length} types)`,
+      count: othersCount,
+      pct: othersPct,
+    });
+  }
+
+  const maxCount = barData.length > 0 ? Math.max(...barData.map((d) => d.count)) : 0;
 
   return (
     <Container
       header={
-        <Header variant="h2" description={subtitle}>
-          Document Type Distribution
+        <Header
+          variant="h2"
+          description={subtitle}
+          actions={
+            <Select
+              selectedOption={selectedOption}
+              onChange={({ detail }) =>
+                setDisplayLimit(parseInt(detail.selectedOption.value!))
+              }
+              options={limitOptions}
+              expandToViewport
+            />
+          }
+        >
+          Document Types
         </Header>
       }
     >
-      {isLoading && !distribution ? (
-        <Box textAlign="center" padding="l">
-          <Spinner size="large" />
-        </Box>
-      ) : data.length === 0 ? (
-        <Box textAlign="center" color="text-body-secondary" padding="l">
-          No distribution data available.
-        </Box>
-      ) : (
-        <ResponsiveContainer width="100%" height={Math.max(180, data.length * 36)}>
+      <Box padding={{ top: 's' }}>
+        <ResponsiveContainer
+          width="100%"
+          height={Math.max(220, barData.length * 44)}
+        >
           <BarChart
-            data={data}
             layout="vertical"
-            margin={{ top: 4, right: 32, left: 8, bottom: 4 }}
+            data={barData}
+            margin={{ top: 4, right: 60, left: 8, bottom: 0 }}
+            barCategoryGap="25%"
           >
             <CartesianGrid
               strokeDasharray="3 3"
+              stroke="#e8e8e8"
               horizontal={false}
-              stroke="var(--color-border-divider-default, #e9ebed)"
             />
-            <XAxis type="number" tick={{ fontSize: 11 }} allowDecimals={false} />
+            <XAxis
+              type="number"
+              domain={[0, Math.ceil(maxCount * 1.15)]}
+              tick={{ fontSize: 11, fill: '#555' }}
+              axisLine={false}
+              tickLine={false}
+              tickFormatter={(v) =>
+                v >= 1000 ? `${(v / 1000).toFixed(0)}K` : v.toString()
+              }
+            />
             <YAxis
               type="category"
               dataKey="name"
-              width={130}
-              tick={{ fontSize: 11 }}
+              tick={{ fontSize: 12, fill: '#16191f' }}
+              axisLine={false}
+              tickLine={false}
+              width={140}
             />
-            <Tooltip
-              formatter={(value: number, _name: string, props: { payload?: { pct?: number } }) =>
-                [`${value.toLocaleString()} (${(props.payload?.pct ?? 0).toFixed(1)}%)`, 'Count']
-              }
-            />
-            <Bar dataKey="count" name="Documents" radius={[0, 3, 3, 0]}>
-              {data.map((_entry, index) => (
-                <Cell
-                  key={`cell-${index}`}
-                  fill={BAR_COLORS[index % BAR_COLORS.length]}
-                />
-              ))}
+            <Tooltip content={<CustomTooltip />} cursor={{ fill: 'rgba(0,0,0,0.04)' }} />
+            <Bar dataKey="count" radius={[0, 3, 3, 0]}>
+              <LabelList
+                dataKey="count"
+                position="right"
+                style={{ fontSize: 11, fill: '#333', fontWeight: 700 }}
+                formatter={(v: unknown) => Number(v).toLocaleString()}
+              />
+              {barData.map((entry, i) => {
+                const isOthers = entry.name.startsWith('Others (');
+                return (
+                  <Cell
+                    key={entry.name}
+                    fill={isOthers ? OTHERS_COLOR : PALETTE[i % PALETTE.length]}
+                  />
+                );
+              })}
             </Bar>
           </BarChart>
         </ResponsiveContainer>
-      )}
+      </Box>
     </Container>
   );
 }

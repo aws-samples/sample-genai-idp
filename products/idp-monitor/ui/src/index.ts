@@ -26,7 +26,6 @@ export { MonitoringFilters } from './components/monitoring/MonitoringFilters';
 // ---------------------------------------------------------------------------
 export { KPICardsWidget } from './components/monitoring/widgets/KPICardsWidget';
 export { VolumeChartWidget } from './components/monitoring/widgets/VolumeChartWidget';
-export { SuccessFailureWidget } from './components/monitoring/widgets/SuccessFailureWidget';
 export { DocTypeChartWidget } from './components/monitoring/widgets/DocTypeChartWidget';
 export { CostWidget } from './components/monitoring/widgets/CostWidget';
 export { LatencyChartWidget } from './components/monitoring/widgets/LatencyChartWidget';

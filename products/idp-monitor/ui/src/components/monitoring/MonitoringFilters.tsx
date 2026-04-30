@@ -5,16 +5,15 @@
  * IDPMonitor — Monitoring Filters Bar
  *
  * Right-aligned filter controls displayed above the widget grid.
- * Contains:
- *   - Time range dropdown (1h | 6h | 24h | 7d | 30d)
- *   - Manual refresh button
- *   - Auto-refresh interval selector (off | 30s | 1m | 5m)
+ * Matches the look and feel of the Documents page filter bar:
+ *   - ButtonDropdown for time range (e.g. "Time: Last 24 hours")
+ *   - Icon-only Refresh button
+ *   - Icon-only Customize button (opens WidgetSelector modal)
  */
 
 import Button from '@cloudscape-design/components/button';
-import Select from '@cloudscape-design/components/select';
+import ButtonDropdown from '@cloudscape-design/components/button-dropdown';
 import SpaceBetween from '@cloudscape-design/components/space-between';
-import { useState } from 'react';
 
 import type { TimeRangePreset } from '../../types/monitoring';
 
@@ -22,63 +21,54 @@ interface MonitoringFiltersProps {
   timeRange: TimeRangePreset;
   onTimeRangeChange: (range: TimeRangePreset) => void;
   onRefresh: () => void;
+  onCustomize: () => void;
   isLoading: boolean;
 }
 
-const TIME_RANGE_OPTIONS = [
-  { label: 'Last 1 hour', value: '1h' },
-  { label: 'Last 6 hours', value: '6h' },
-  { label: 'Last 24 hours', value: '24h' },
-  { label: 'Last 7 days', value: '7d' },
-  { label: 'Last 30 days', value: '30d' },
-];
-
-const AUTO_REFRESH_OPTIONS = [
-  { label: 'Auto-refresh: off', value: 'off' },
-  { label: 'Every 30 seconds', value: '30s' },
-  { label: 'Every 1 minute', value: '1m' },
-  { label: 'Every 5 minutes', value: '5m' },
+const TIME_RANGE_ITEMS = [
+  { id: '1h', text: 'Last 1 hour' },
+  { id: '6h', text: 'Last 6 hours' },
+  { id: '24h', text: 'Last 24 hours' },
+  { id: '7d', text: 'Last 7 days' },
+  { id: '30d', text: 'Last 30 days' },
 ];
 
 export function MonitoringFilters({
   timeRange,
   onTimeRangeChange,
   onRefresh,
+  onCustomize,
   isLoading,
 }: MonitoringFiltersProps): JSX.Element {
-  const [autoRefresh, setAutoRefresh] = useState(AUTO_REFRESH_OPTIONS[0]);
-
-  const selectedTimeRange =
-    TIME_RANGE_OPTIONS.find((o) => o.value === timeRange) ?? TIME_RANGE_OPTIONS[2];
+  const selectedLabel = TIME_RANGE_ITEMS.find((o) => o.id === timeRange)?.text ?? 'Last 24 hours';
 
   return (
-    <SpaceBetween size="xs" direction="horizontal">
-      <Select
-        selectedOption={selectedTimeRange}
-        onChange={({ detail }) =>
-          onTimeRangeChange(detail.selectedOption.value as TimeRangePreset)
-        }
-        options={TIME_RANGE_OPTIONS}
-        disabled={isLoading}
-        ariaLabel="Select time range"
-      />
-      <Select
-        selectedOption={autoRefresh}
-        onChange={({ detail }) =>
-          setAutoRefresh(detail.selectedOption as (typeof AUTO_REFRESH_OPTIONS)[0])
-        }
-        options={AUTO_REFRESH_OPTIONS}
-        disabled={isLoading}
-        ariaLabel="Auto-refresh interval"
-      />
-      <Button
-        iconName="refresh"
-        onClick={onRefresh}
+    <SpaceBetween size="xxs" direction="horizontal">
+      <ButtonDropdown
         loading={isLoading}
-        ariaLabel="Refresh dashboard"
+        disabled={isLoading}
+        items={TIME_RANGE_ITEMS}
+        onItemClick={({ detail }) => onTimeRangeChange(detail.id as TimeRangePreset)}
       >
-        Refresh
-      </Button>
+        {`Time: ${selectedLabel}`}
+      </ButtonDropdown>
+      <span title="Refresh dashboard">
+        <Button
+          iconName="refresh"
+          variant="normal"
+          loading={isLoading}
+          onClick={onRefresh}
+          ariaLabel="Refresh"
+        />
+      </span>
+      <span title="Customize dashboard widgets">
+        <Button
+          iconName="settings"
+          variant="normal"
+          onClick={onCustomize}
+          ariaLabel="Customize"
+        />
+      </span>
     </SpaceBetween>
   );
 }

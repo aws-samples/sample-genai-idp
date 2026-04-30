@@ -14,7 +14,6 @@ export { MonitoringLayout } from './MonitoringLayout';
 // Widgets
 export { KPICardsWidget } from './widgets/KPICardsWidget';
 export { VolumeChartWidget } from './widgets/VolumeChartWidget';
-export { SuccessFailureWidget } from './widgets/SuccessFailureWidget';
 export { DocTypeChartWidget } from './widgets/DocTypeChartWidget';
 export { CostWidget } from './widgets/CostWidget';
 export { LatencyChartWidget } from './widgets/LatencyChartWidget';
