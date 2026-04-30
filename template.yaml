@@ -436,7 +436,7 @@ Parameters:
       (Required when WebUIHosting=ALB or AppSyncVisibility=PRIVATE) VPC ID.
       When using ALB hosting, this is the VPC for the ALB and S3 VPC endpoint.
       When using private AppSync (AppSyncVisibility=PRIVATE), this VPC ID is
-      also used for the Lambda security group — private AppSync requires all
+      also used for the Lambda security group - private AppSync requires all
       Lambda functions to be in the same VPC as the AppSync VPC endpoint, so
       ALB hosting and private AppSync always use the same VPC.
 
@@ -492,7 +492,7 @@ Parameters:
     Description: >-
       (Required when AppSyncVisibility=PRIVATE) Comma-separated private subnet
       IDs for Lambda functions. Should be private subnets with no direct
-      internet route — Lambda traffic reaches AWS services via VPC endpoints.
+      internet route - Lambda traffic reaches AWS services via VPC endpoints.
       Can be the same as ALBSubnetIds for simpler deployments, or different
       private subnets for stricter network isolation. Minimum 2 subnets in
       different Availability Zones recommended.
@@ -558,69 +558,137 @@ Parameters:
     Description: SageMaker MLflow tracking server ARN
 
   # Headless API Configuration
+  # ------------------------------------------------------------------------
+  # Headless API Deployment (required for GovCloud)
+  #
+  # These parameters control the optional "headless" deployment mode, where
+  # the stack deploys a private Jobs REST API (API Gateway + Lambda) instead
+  # of (or in addition to) the web UI. This mode is REQUIRED for GovCloud
+  # regions because the UI-layer services (AppSync, CloudFront, Cognito UI
+  # pool) aren't available there. In Commercial regions the mode is OPTIONAL
+  # and useful for API-only / machine-to-machine integrations.
+  #
+  # All parameters below default to OFF / empty. Leaving them at defaults
+  # keeps the stack as a pure web-UI deployment with no Jobs API, no VPC
+  # placement of Lambdas, and no bastion EC2.
+  #
+  # See docs/govcloud-deployment.md for deployment patterns and
+  # docs/govcloud-batch-api.md for the Jobs API reference.
+  # ------------------------------------------------------------------------
+
   EnableHeadless:
     Type: String
     Default: 'false'
     AllowedValues: ['true', 'false']
     Description: >-
-      Enable headless mode which deploys the Jobs REST API Gateway and supporting Lambda functions.
-      Requires VpcId, PrivateSubnetIds, ApiGatewayVpcEndpointId, and LambdaSecurityGroupId.
+      Set to 'true' to deploy the headless Jobs REST API (Private API Gateway
+      + /jobs endpoints + supporting Lambdas). Default 'false' = no Jobs API
+      is deployed. Required for GovCloud. When 'true', you must also set
+      DeployInVPC=true and populate VpcId, PrivateSubnetIds,
+      ApiGatewayVpcEndpointId, and LambdaSecurityGroupId.
 
-  # VPC Configuration
   DeployInVPC:
     Type: String
     Default: 'false'
     AllowedValues: ['true', 'false']
     Description: >-
-      When enabled, deploys all core document processing Lambda functions into the VPC.
-      Requires VpcId, PrivateSubnetIds, and LambdaSecurityGroupId.
+      Set to 'true' to place all document-processing Lambdas inside the
+      customer-supplied VPC (required for Headless API deployments and for
+      any compliance/exfil-control use cases). Default 'false' = Lambdas run
+      in the default AWS-owned network. When 'true', you must populate
+      VpcId, PrivateSubnetIds, and LambdaSecurityGroupId.
 
-  # Jobs API VPC Configuration
   VpcId:
     Type: String
     Default: ""
-    Description: Optional - Existing VPC ID for Jobs API deployment (leave blank to skip Jobs API deployment)
+    Description: >-
+      Required when DeployInVPC=true. The customer-owned VPC that Lambdas
+      and (if Headless) the Private API Gateway VPC endpoint are attached
+      to. Leave empty for non-VPC deployments.
 
   PrivateSubnetIds:
     Type: CommaDelimitedList
     Default: ""
-    Description: Optional - Comma-separated list of at least 2 private subnet IDs in different AZs (required if VpcId is provided)
-
-  ApiGatewayVpcEndpointId:
-    Type: String
-    Default: ""
-    Description: Optional - Existing VPC Endpoint ID for execute-api service (required if VpcId is provided)
-
-  ApiStageName:
-    Type: String
-    Default: beta
-    Description: API Gateway deployment stage name
+    Description: >-
+      Required when DeployInVPC=true. Comma-separated list of at least 2
+      private subnet IDs in different AZs within VpcId. Lambdas are
+      attached to these subnets. Leave empty for non-VPC deployments.
 
   LambdaSecurityGroupId:
     Type: String
     Default: ""
-    Description: Optional - Existing Security Group ID for VPC-enabled Lambda functions (required if VpcId is provided)
+    Description: >-
+      Required when DeployInVPC=true. Security group attached to all
+      VPC-resident Lambdas. Must allow outbound HTTPS to AWS service
+      endpoints (either via VPC endpoints or a NAT gateway). Leave empty
+      for non-VPC deployments.
+
+  ApiGatewayVpcEndpointId:
+    Type: String
+    Default: ""
+    Description: >-
+      Required when EnableHeadless=true. The com.amazonaws.<region>.execute-api
+      Interface VPC endpoint that the Private API Gateway is bound to. The
+      API's resource policy denies all traffic not sourced from this VPCE.
+      Leave empty if EnableHeadless=false.
+
+  ApiStageName:
+    Type: String
+    Default: 'beta'
+    Description: >-
+      Stage name for the Headless Jobs API Gateway (e.g. 'beta', 'prod').
+      Ignored when EnableHeadless=false.
+
+  # ------------------------------------------------------------------------
+  # Headless API Deployment - Bastion Host (optional, requires VPC Secured Mode)
+  #
+  # The bastion host is an OPTIONAL developer-convenience feature for
+  # reaching the Private API Gateway from outside the VPC during
+  # development. It provisions a small EC2 instance (Amazon Linux 2, t3.small,
+  # IMDSv2-required, encrypted EBS, no inbound SSH) reachable via AWS SSM
+  # Session Manager. Use scripts/bastion.sh to establish a local tunnel
+  # through it for running scripts/e2e_test_headless.py or similar.
+  #
+  # These parameters are ONLY used when DeployBastionHost=true AND
+  # DeployInVPC=true (the bastion shares the customer-supplied VPC).
+  # Nothing is deployed if DeployBastionHost=false (the default).
+  # ------------------------------------------------------------------------
 
   DeployBastionHost:
     Type: String
     Default: 'false'
     AllowedValues: ['true', 'false']
-    Description: Whether to deploy a bastion host to facilitate testing of the Private API Gateway
+    Description: >-
+      Set to 'true' to provision an SSM-reachable bastion EC2 for dev-time
+      access to the Private API Gateway (useful for running e2e tests or
+      calling the API from a local machine). Default 'false' = no EC2 is
+      deployed. Requires DeployInVPC=true and the two Bastion* parameters
+      below. Typically only used in dev accounts.
 
   BastionHostSubnetId:
     Type: String
     Default: ""
-    Description: Public Subnet ID where the bastion host will be deployed, if DeployBastionHost is 'true'
+    Description: >-
+      Required when DeployBastionHost=true. A PUBLIC subnet in VpcId where
+      the bastion EC2 will launch. The subnet needs SSM egress so Session
+      Manager can reach the instance. Leave empty when DeployBastionHost=false.
 
   BastionHostSecurityGroupId:
     Type: String
     Default: ""
-    Description: Security Group ID for the bastion host to use, if DeployBastionHost is 'true'
+    Description: >-
+      Required when DeployBastionHost=true. Security group attached to the
+      bastion EC2. No inbound SSH rule is needed - SSM Session Manager is
+      the only ingress path. Leave empty when DeployBastionHost=false.
 
   BastionHostAmiId:
     Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
     Default: /aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2
-    Description: SSM parameter path to the AMI ID for the bastion host
+    Description: >-
+      SSM Parameter Store path for the AMI to use on the bastion EC2. The
+      default resolves to the latest Amazon Linux 2 AMI and is the right
+      choice for almost all deployments. Only change if you need a custom
+      hardened AMI. Ignored when DeployBastionHost=false.
 
 Rules:
   MLflowTrackingURIRequired:
@@ -811,7 +879,24 @@ Metadata:
           - AppSyncVisibility
           - LambdaSubnetIds
       - Label:
-          default: "Advanced — Artifact Bucket"
+          default: "Headless API Deployment (required for GovCloud)"
+        Parameters:
+          - EnableHeadless
+          - DeployInVPC
+          - VpcId
+          - PrivateSubnetIds
+          - LambdaSecurityGroupId
+          - ApiGatewayVpcEndpointId
+          - ApiStageName
+      - Label:
+          default: "Headless API Deployment - Bastion Host (optional, requires VPC Secured Mode)"
+        Parameters:
+          - DeployBastionHost
+          - BastionHostSubnetId
+          - BastionHostSecurityGroupId
+          - BastionHostAmiId
+      - Label:
+          default: "Advanced - Artifact Bucket"
         Parameters:
           - ArtifactsBucketKmsKeyArn
       - Label:
@@ -895,6 +980,28 @@ Metadata:
         default: "Lambda Subnet IDs (required when AppSyncVisibility=PRIVATE)"
       ArtifactsBucketKmsKeyArn:
         default: "Artifacts Bucket KMS Key ARN (optional, for pre-created KMS-encrypted bucket)"
+      EnableHeadless:
+        default: "Enable Headless API (Jobs REST API, required for GovCloud)"
+      DeployInVPC:
+        default: "Enable VPC Secured Mode (required when Headless API is enabled)"
+      VpcId:
+        default: "VPC ID (required when VPC Secured Mode is enabled)"
+      PrivateSubnetIds:
+        default: "Private Subnet IDs (required when VPC Secured Mode is enabled)"
+      LambdaSecurityGroupId:
+        default: "Lambda Security Group ID (required when VPC Secured Mode is enabled)"
+      ApiGatewayVpcEndpointId:
+        default: "API Gateway VPC Endpoint ID (required when Headless API is enabled)"
+      ApiStageName:
+        default: "API Gateway Stage Name (Headless API)"
+      DeployBastionHost:
+        default: "Deploy Bastion Host (optional, for dev access to Private API)"
+      BastionHostSubnetId:
+        default: "Bastion Host - Subnet ID (required when Bastion Host is enabled)"
+      BastionHostSecurityGroupId:
+        default: "Bastion Host - Security Group ID (required when Bastion Host is enabled)"
+      BastionHostAmiId:
+        default: "Bastion Host - AMI ID (SSM parameter path, leave default for Amazon Linux 2)"
 
 Resources:
   # Custom resource to enforce max length of StackName - prevent downstream failures
