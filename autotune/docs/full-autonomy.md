@@ -212,7 +212,7 @@ These are wired to env vars `IDP_STACK_NAME`, `AUTOTUNE_MODEL_ID`, and `AUTOTUNE
 
 | Issue | Impact | Status |
 |-------|--------|--------|
-| Container disk space (ENOSPC) | Agent fails on long runs after downloading evaluation results + accumulating session history | **Blocking** — top priority for next session |
+| Container disk space (ENOSPC) | Agent fails after ~42 min due to AgentCore NFS bug — even 1.59 MB on `/mnt/workspace` triggers it. Two-filesystem workaround deployed (bulk data on `/tmp`). | **AgentCore service bug** — reported in Slack, awaiting fix. Workaround: session resume. |
 | `idp-cli process --monitor` race condition | Batch metadata not in DynamoDB when monitoring starts; workaround: removed `--monitor` flag | Workaround in place; IDP CLI fix needed |
 | Evaluation run silent failure | Some configs cause 75/75 documents to fail with no clear error from `idp-cli` | Needs IDP-side investigation |
 

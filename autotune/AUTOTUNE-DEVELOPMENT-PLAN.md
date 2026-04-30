@@ -590,6 +590,7 @@ Convert the agent from interactive chat to autonomous operation. The agent recei
 - [ ] **Bundle IDP source code in container** — Copy the IDP Accelerator source tree into the Docker image (e.g. `/opt/idp-source/`) and tell the agent where it lives via env var or system prompt. The agent doesn't need the source to run tools, but it reads it to understand how the solution works and to debug issues (e.g. why an evaluation run silently fails). Exclude `node_modules`, `.git`, and build artifacts to keep the image small.
 - [ ] **Automatic optimization log updates via hook/subagent** — The main agent frequently forgets to update OPTIMIZATION-LOG.md despite repeated prompt instructions. Investigate using a Strands hook (e.g. `AfterToolCallEvent`) that triggers a lightweight subagent whose sole job is to append a summary of what just happened to the log. This decouples log maintenance from the main agent's reasoning, ensuring the log stays current without consuming main agent context or relying on it remembering. Consider: cost of extra LLM calls, whether a simple template-based append (no LLM) is sufficient for tool results, and whether the subagent needs the full conversation or just the last tool call/result.
 - [ ] **IDP feature request: hide test execution documents from main document list** — Documents processed during AutoTune evaluation runs currently appear in the IDP UI's main document list, polluting it with hundreds of test documents. Request a filter or flag in IDP so that documents processed via test executions (test studio runs) are excluded from the default document list view.
+- [ ] **Small validation runs before full evaluation** — Add a `max_files` parameter to `run_evaluation` tool so the agent can launch a quick sanity check on 2–3 files before scaling to the full test set. This catches malformed configs early (e.g. the 75/75 failure) without wasting time and disk space on a full run. Update the agent prompt to instruct it to always run a small validation first, then scale up only after confirming the config works. Check if `idp-cli process` supports a file limit flag; if not, may need to filter the file list before submission.
 
 ### 6.9 Fire-and-Forget Architecture with S3 Polling (DONE)
 
@@ -618,25 +619,38 @@ Implemented and deployed. The agent runs fully decoupled from the frontend — n
 - Agent tried `analyze_dataset` with local paths for remote datasets → fixed prompt
 - Agent uploaded configs with `managed: true` inherited from Production config → fixed in `upload_config`
 - `--monitor` on `idp-cli process` fails with "Batch not found" race condition → removed flag
-- **Container ran out of disk space (ENOSPC) on long runs — NOT YET FIXED**
+- **Container ran out of disk space (ENOSPC) on long runs — FIX IN PROGRESS (see 6.11)**
+
+### 6.11 Session: April 30 — ENOSPC Fix (Two-Filesystem Strategy)
+
+**Root cause:** AgentCore persistent filesystem (`/mnt/workspace`, NFS mount) has a ~50 MB metadata limit separate from the 1 GB data limit. Creating hundreds of small files (evaluation results: 586 files per iteration) exhausts the metadata budget. Additionally, `df -h` always reports 0% used on the NFS mount — usage is invisible. A known AgentCore bug (reported by Walkley He, April 13, `#bedrock-agentcore-runtime-interest`) causes premature ENOSPC even with minimal data written. See `autotune/docs/state-persistence.md` for full investigation.
+
+**Fix: two-filesystem strategy.**
+- `/mnt/workspace` (1 GB NFS, persistent): ONLY `.sessions/` (Strands history) and `OPTIMIZATION-LOG.md`
+- `/tmp/autotune-data/{session_id}/` (8.8 GB overlay, ephemeral): everything else — configs, downloaded results, evaluation results, stream.jsonl, disk-usage.jsonl, discovery output
+
+**Changes:**
+- Added `SCRATCH_DIR = "/tmp/autotune-data"` constant in `basic_agent.py`
+- Session scratch dir created at `/tmp/autotune-data/{session_id}`, exported as `AUTOTUNE_SCRATCH_DIR` env var
+- Moved `stream.jsonl` and `disk-usage.jsonl` from `/mnt/workspace` to scratch
+- All download/config tools hardcode scratch dir paths — agent no longer chooses output locations
+- Tools return `output_path` / `output_dir` in their response so the agent knows where files landed
+- Removed `output_dir`/`output_path` params from: `download_config`, `create_default_config`, `auto_fix_config`, `download_evaluation_results`, `download_raw_processing_results`, `run_discovery`, `run_multi_class_discovery`, `compare_evaluations`
+- Added disk usage monitoring (pure-Python `os.walk` every 10s, uploaded to S3)
+
+**TODO: Revisit when AgentCore improves:**
+- [ ] AgentCore NFS bug fix — monitor `#bedrock-agentcore-runtime-interest` for resolution. Posted details in Slack thread, awaiting response.
+- [ ] AgentCore Runtime Instances (June 2026 target) — EC2-based, no NFS quota issues
+- [ ] Storage limit increase at GA — customers have requested 10-30 GB
+- [ ] S3 Files mount — unlimited storage but requires VPC (~$32/month NAT gateway)
+
+**Current status:** Two-filesystem strategy deployed and verified. `/mnt/workspace` stays at ~1.5 MB (down from ~46 MB). Agent now survives ~42 minutes / 8 iterations (up from ~20 min). Still hits ENOSPC due to confirmed AgentCore NFS bug — even 1.59 MB triggers it eventually. **Not blocked on this** — proceeding with other development. The workaround is session resume (see TODO below).
+
+- [ ] **Session resume after ENOSPC** — Implement "Resume" button in the UI for runs that fail with ENOSPC. Reuse the same `runtimeSessionId` to get a fresh microVM with the same persistent storage (`/mnt/workspace`). The agent reads OPTIMIZATION-LOG.md on resume and continues where it left off. This pairs with the optimization run history feature — session IDs need to be visible in the UI so users can identify and resume failed runs. See also the existing "Resume interrupted runs" TODO in 6.8.
 
 ### ⚠️ NEXT SESSION: TOP PRIORITY
 
-**Solve the container disk space issue (ENOSPC).** The agent ran successfully for a long time but eventually hit `[Errno 28] No space left on device`. Root cause is likely a combination of:
-- Downloaded evaluation results (75 docs × multiple file types)
-- Strands `FileSessionManager` storing full conversation history with large tool results
-- `stream.jsonl` growing over time
-- Config files and other workspace artifacts
-
-Possible approaches (not yet decided):
-1. Add a `cleanup_results` tool + prompt the agent to clean up after analyzing each iteration
-2. Truncate or cap the Strands session file (may break conversation continuity)
-3. Increase container storage if AgentCore supports it (didn't find a config for this)
-4. Use `/mnt/workspace` (persistent session storage) instead of ephemeral `/app` for large files
-5. Stream results analysis without downloading everything to disk
-6. Some combination of the above
-
-**Do not start other work until this is resolved — it blocks all long-running optimization runs.**
+**ENOSPC fix deployed (6.11).** Run a full end-to-end optimization loop to verify the two-filesystem strategy works. If the agent still hits ENOSPC, check disk-usage.jsonl in S3 to identify what's filling up.
 
 #### Problem being solved
 AgentCore's internal SSE proxy kills the HTTP response stream after ~60s. Our heartbeat/ping approach can't fix this because the proxy is upstream of our container. The agent keeps running but the frontend loses all visibility. We need the frontend to see the agent's full thought process, optimization state, and optimization log — all without depending on a persistent SSE connection.
