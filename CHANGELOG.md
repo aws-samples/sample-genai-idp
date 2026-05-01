@@ -5,6 +5,8 @@ SPDX-License-Identifier: MIT-0
 
 ## [Unreleased]
 
+## [0.5.8]
+
 ### Added
 
 - **Policy Discovery & Rule Validation Policy Classification**: Upload a regulatory document (e.g., an NCCI Medicare policy manual) and automatically extract structured validation rules from it. A new "Policy Discovery" tab in the Discovery page walks you through the process, and the extracted rules feed directly into the rule validation workflow.
@@ -118,6 +120,12 @@ Hardening response to security review - Highlights:
   - SQL injection in `test_results_resolver` Athena queries (every
     interpolation is gated by `_validate_sql_input()` with a strict
     allow-list regex).
+
+## Templates
+   - us-west-2: `https://s3.us-west-2.amazonaws.com/aws-ml-blog-us-west-2/artifacts/genai-idp/idp-main_0.5.9.yaml`
+   - us-east-1: `https://s3.us-east-1.amazonaws.com/aws-ml-blog-us-east-1/artifacts/genai-idp/idp-main_0.5.9.yaml`
+   - eu-central-1: `https://s3.eu-central-1.amazonaws.com/aws-ml-blog-eu-central-1/artifacts/genai-idp/idp-main_0.5.9.yaml`
+  
 
 ## [0.5.8]
 
