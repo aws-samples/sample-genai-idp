@@ -61,9 +61,9 @@ export default function ChatInterface() {
   const [now, setNow] = useState(Date.now())
 
   // Stream polling state
-  const [streamOffset, setStreamOffset] = useState(0)
   const [streamItems, setStreamItems] = useState<StreamItem[]>([])
-  // Optimization log polling state
+  // Use ref for offset so polling closure always sees current value
+  const streamOffsetRef = useRef(0)  // Optimization log polling state
   const [optimizationLog, setOptimizationLog] = useState("")
   // Tab: "stream" or "log"
   const [activeTab, setActiveTab] = useState<"stream" | "log">("stream")
@@ -184,10 +184,9 @@ export default function ChatInterface() {
     if (!idToken) return
 
     let active = true
-    let currentOffset = streamOffset
     const poll = async () => {
       try {
-        const resp = await fetch(`${stateApiUrl}stream?sessionId=${currentSessionId}&offset=${currentOffset}`, {
+        const resp = await fetch(`${stateApiUrl}stream?sessionId=${currentSessionId}&offset=${streamOffsetRef.current}`, {
           headers: { Authorization: `Bearer ${idToken}` },
         })
         if (resp.ok && active) {
@@ -195,8 +194,7 @@ export default function ChatInterface() {
           if (data.lines && data.lines.length > 0) {
             const newItems = data.lines.map(parseStreamLine).filter(Boolean) as StreamItem[]
             if (newItems.length > 0) setStreamItems(prev => [...prev, ...newItems])
-            currentOffset = data.nextOffset
-            setStreamOffset(data.nextOffset)
+            streamOffsetRef.current = data.nextOffset
           }
         }
       } catch { /* ignore */ }
@@ -281,7 +279,7 @@ export default function ChatInterface() {
 
     const sessionId = crypto.randomUUID()
     setCurrentSessionId(sessionId)
-    setStreamOffset(0)
+    streamOffsetRef.current = 0
     setStreamItems([])
     setOptimizationLog("")
     setAgentState(null)
@@ -302,7 +300,7 @@ export default function ChatInterface() {
 
   const handleResume = async () => {
     if (!currentSessionId || !agentState) return
-    setStreamOffset(0)
+    streamOffsetRef.current = 0
     setStreamItems([])
     setOptimizationLog("")
     await invokeAgent(
@@ -318,7 +316,7 @@ export default function ChatInterface() {
     setInput("")
     setError(null)
     setAgentState(null)
-    setStreamOffset(0)
+    streamOffsetRef.current = 0
     setStreamItems([])
     setOptimizationLog("")
   }
@@ -343,7 +341,7 @@ export default function ChatInterface() {
     setCurrentSessionId(run.session_id)
     setError(null)
     setAgentState(null)
-    setStreamOffset(0)
+    streamOffsetRef.current = 0
     setStreamItems([])
     setOptimizationLog("")
   }
