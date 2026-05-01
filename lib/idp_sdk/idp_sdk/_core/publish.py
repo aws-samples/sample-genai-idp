@@ -64,6 +64,7 @@ class IDPPublisher:
         self._is_lib_changed = False
         self.skip_validation = False
         self.lint_enabled = True
+        self.headless = False  # Set by operations layer when --headless is requested
         self.account_id = None
         self._layer_arns = {}  # Store built layer ARNs for template injection
 
@@ -938,7 +939,14 @@ STDERR:
                 CFLoader.add_constructor(func, construct_unknown)
 
             with open(template_path, "r", encoding="utf-8") as f:
-                template = yaml.load(f, Loader=CFLoader)  # nosec B506 - CFLoader required for CloudFormation intrinsic functions
+                # nosec B506 - CFLoader extends yaml.SafeLoader (see class
+                # definition above); it is NOT the default unsafe yaml.Loader.
+                # Only a fixed list of CloudFormation intrinsic function tags
+                # (!Ref, !Sub, !GetAtt, ...) is registered, and their
+                # constructor only returns scalars/sequences/mappings.
+                # Input is a developer-committed CloudFormation template
+                # bundled with the SDK, not untrusted user input.
+                template = yaml.load(f, Loader=CFLoader)  # nosec B506
 
             if not template or not isinstance(template, dict):
                 raise Exception(f"Failed to parse YAML template: {template_path}")
@@ -2075,15 +2083,33 @@ STDERR:
         # List of templates to lint (packaged templates after token replacement)
         templates_to_lint = []
 
-        # Main packaged template
+        # In headless mode (GovCloud), the main template still contains UI/AppSync
+        # /CloudFront/Cognito resources that will be stripped by the headless transformer
+        # later in the publish flow. Linting them here always fails for GovCloud regions
+        # because those resource types don't exist. Skip the main template and any nested
+        # templates that contain headless-stripped resources — the outer publish flow
+        # lints the generated idp-headless.yaml separately.
         main_packaged = ".aws-sam/idp-main.yaml"
-        if os.path.exists(main_packaged):
+        if self.headless:
+            headless_packaged = ".aws-sam/idp-headless.yaml"
+            if os.path.exists(headless_packaged):
+                templates_to_lint.append(("Headless template", headless_packaged))
+            else:
+                self.console.print(
+                    "[dim]Skipping main template lint — headless transformation runs later.[/dim]"
+                )
+        elif os.path.exists(main_packaged):
             templates_to_lint.append(("Main template", main_packaged))
 
         # Nested templates (packaged versions)
+        # In headless mode, skip nested templates that contain resources stripped by the
+        # headless transformer (currently: nested/appsync, which contains AWS::AppSync::*).
+        headless_skip_nested = {"appsync"} if self.headless else set()
         nested_dir = "nested"
         if os.path.exists(nested_dir):
             for nested_name in os.listdir(nested_dir):
+                if nested_name in headless_skip_nested:
+                    continue
                 nested_packaged = os.path.join(
                     nested_dir, nested_name, ".aws-sam", "packaged.yaml"
                 )
@@ -2121,12 +2147,19 @@ STDERR:
                 lines = output.strip().split("\n") if output.strip() else []
 
                 # Separate errors from warnings
+                # cfn-lint output lines start with the rule code (e.g., "E3003 ..." or
+                # "W1030 ..."). Use regex matching so that rule codes elsewhere in the
+                # message (e.g., ARN prefixes like "AWS::EC2::") don't cause
+                # misclassification.
+                import re
+
                 for line in lines:
-                    if not line.strip():
+                    stripped = line.strip()
+                    if not stripped:
                         continue
-                    if line.strip().startswith("E") or ":E" in line:
+                    if re.match(r"^E\d{4}\b", stripped):
                         all_errors.append(f"[{template_name}] {line}")
-                    elif line.strip().startswith("W") or ":W" in line:
+                    elif re.match(r"^W\d{4}\b", stripped):
                         all_warnings.append(f"[{template_name}] {line}")
 
         # Report results

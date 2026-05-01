@@ -92,6 +92,13 @@ This folder contains detailed documentation on various aspects of the GenAI Inte
 
 - [Migration v0.4 to v0.5](./migration-v04-to-v05.md) - Upgrading from v0.4.x to v0.5.x (Unified Pattern)
 
+### GovCloud
+
+- [GovCloud Deployment Guide](./govcloud-deployment.md) - Deployment packages, prerequisites, and deploy commands
+- [GovCloud Architecture](./govcloud-architecture.md) - Services removed vs. retained, limitations, and workarounds
+- [Batch Jobs REST API](./govcloud-batch-api.md) - API reference, authentication, and bastion tunnel setup
+- [GovCloud Operations](./govcloud-operations.md) - Monitoring, troubleshooting, and best practices
+
 ## Screenshots and Diagrams
 
 The documentation references several screenshots and diagrams from the `../images` folder:

@@ -10,12 +10,15 @@ notes: "Lending package sample - processes payslips, driver licenses, bank check
 
 classification:
   model: amazon.nova-pro-v1:0
+  max_tokens: "4096"
 extraction:
   model: amazon.nova-pro-v1:0
+  max_tokens: "10000"
 summarization:
   model: anthropic.claude-3-7-sonnet-20250219-v1:0
 assessment:
   model: amazon.nova-lite-v1:0
+  max_tokens: "10000"
 evaluation:
   model: anthropic.claude-3-7-sonnet-20250219-v1:0
 discovery:

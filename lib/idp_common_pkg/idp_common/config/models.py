@@ -809,7 +809,7 @@ class ChatCompanionConfig(BaseModel):
     """Chat companion agent configuration"""
 
     model_id: str = Field(
-        default="us.anthropic.claude-sonnet-4-20250514-v1:0",
+        default="global.anthropic.claude-sonnet-4-6",
         description="Bedrock model ID for chat companion",
     )
 
@@ -1305,6 +1305,7 @@ class DiscoveryModelConfig(BaseModel):
         return int(v)
 
 
+
 class MultiDocumentDiscoveryConfig(BaseModel):
     """Multi-document discovery configuration for batch clustering.
 
@@ -1393,6 +1394,65 @@ class MultiDocumentDiscoveryConfig(BaseModel):
         return int(v)
 
 
+class RuleDiscoveryAgenticConfig(BaseModel):
+    """Agentic rule discovery configuration"""
+
+    enabled: bool = Field(default=False, description="Enable agentic rule discovery")
+    review_agent: bool = Field(
+        default=False, description="Enable review agent for rule discovery"
+    )
+    review_agent_model: str | None = Field(
+        default=None,
+        description="Model used for reviewing and correcting rule discovery work",
+    )
+
+
+class RuleDiscoveryConfig(BaseModel):
+    """Rule discovery configuration for extracting rules from policy documents"""
+
+    model: str = Field(
+        default="global.anthropic.claude-sonnet-4-6",
+        description="Bedrock model ID for rule discovery",
+    )
+    system_prompt: str = Field(
+        default="", description="System prompt for rule discovery"
+    )
+    task_prompt: str = Field(
+        default="", description="Task prompt template for rule discovery"
+    )
+    temperature: float = Field(default=0.0, ge=0.0, le=1.0)
+    top_p: float = Field(default=0.0, ge=0.0, le=1.0)
+    top_k: float = Field(default=5.0, ge=0.0)
+    max_tokens: int = Field(default=64000, gt=0)
+    agentic: RuleDiscoveryAgenticConfig = Field(
+        default_factory=RuleDiscoveryAgenticConfig,
+        description="Agentic rule discovery configuration",
+    )
+
+    @field_validator("temperature", "top_p", "top_k", mode="before")
+    @classmethod
+    def parse_float(cls, v: Any) -> float:
+        """Parse float from string or number"""
+        if isinstance(v, str):
+            return float(v) if v else 0.0
+        return float(v)
+
+    @field_validator("max_tokens", mode="before")
+    @classmethod
+    def parse_int(cls, v: Any) -> int:
+        """Parse int from string or number"""
+        if isinstance(v, str):
+            return int(v) if v else 0
+        return int(v)
+
+    @model_validator(mode="after")
+    def set_default_review_agent_model(self) -> Self:
+        """Set review_agent_model to rule discovery model if not specified."""
+        if not self.agentic.review_agent_model:
+            self.agentic.review_agent_model = self.model
+        return self
+
+
 class DiscoveryConfig(BaseModel):
     """Discovery configuration"""
 
@@ -1411,6 +1471,10 @@ class DiscoveryConfig(BaseModel):
     multi_document: MultiDocumentDiscoveryConfig = Field(
         default_factory=MultiDocumentDiscoveryConfig,
         description="Configuration for multi-document batch discovery using embedding clustering",
+    )
+    rules: RuleDiscoveryConfig = Field(
+        default_factory=RuleDiscoveryConfig,
+        description="Configuration for rules discovery from policy documents",
     )
 
 
@@ -1432,6 +1496,7 @@ IDP_CONFIG_DEPRECATED_FIELDS = {
     "BdaLastSyncedAt",
     "_config_format",
     "_config_storage",
+    "rule_classes",  # Renamed to policy_classes in v0.5.9
 }
 
 
@@ -1536,8 +1601,8 @@ class IDPConfig(BaseModel):
     classes: List[Dict[str, Any]] = Field(
         default_factory=list, description="Document class definitions (JSON Schema)"
     )
-    rule_classes: List[Dict[str, Any]] = Field(
-        default_factory=list, description="Rule class definitions for rule validation (JSON Schema)"
+    policy_classes: List[Dict[str, Any]] = Field(
+        default_factory=list, description="Policy class definitions for rule validation (JSON Schema). Also receives rule classes extracted by Policy Discovery."
     )
     discovery: DiscoveryConfig = Field(
         default_factory=DiscoveryConfig, description="Discovery configuration"
@@ -1555,9 +1620,6 @@ class IDPConfig(BaseModel):
     # Rule validation specific fields (used in pattern-2/rule-validation)
     summary: Optional[Dict[str, Any]] = Field(
         default=None, description="Summary configuration for rule validation"
-    )
-    rule_types: Optional[List[str]] = Field(
-        default=None, description="List of rule types for validation"
     )
 
 
@@ -1578,6 +1640,13 @@ class IDPConfig(BaseModel):
         logger = logging.getLogger(__name__)
 
         if isinstance(data, dict):
+            # Migrate rule_classes → policy_classes (renamed in v0.5.9)
+            if "rule_classes" in data and "policy_classes" not in data:
+                data["policy_classes"] = data.pop("rule_classes")
+                logger.info("Migrated config key 'rule_classes' → 'policy_classes'")
+            elif "rule_classes" in data:
+                del data["rule_classes"]
+
             # Get all field names defined in the model
             defined_fields = set(cls.model_fields.keys())
 
@@ -1784,7 +1853,11 @@ class ConfigurationRecord(BaseModel):
         # - "Schema" -> SchemaConfig
         # - "Config#version" -> IDPConfig
         # - "DefaultPricing", "CustomPricing" -> PricingConfig
-        config_data["config_type"] = config_type
+        # Legacy non-versioned "Default" / "Custom" keys map to IDPConfig
+        if config_type in ("Default", "Custom"):
+            config_data["config_type"] = "Config"
+        else:
+            config_data["config_type"] = config_type
 
         # Auto-migrate legacy format if needed
         if config_data.get("classes"):
@@ -1798,16 +1871,16 @@ class ConfigurationRecord(BaseModel):
                     config_data["classes"]
                 )
 
-        # Auto-migrate legacy format for rule_classes if needed
-        if config_data.get("rule_classes"):
+        # Auto-migrate legacy format for policy_classes if needed
+        if config_data.get("policy_classes"):
             from .migration import is_legacy_format, migrate_legacy_to_schema
 
-            if is_legacy_format(config_data["rule_classes"]):
+            if is_legacy_format(config_data["policy_classes"]):
                 logger.info(
-                    f"Migrating {config_type} rule_classes to JSON Schema format"
+                    f"Migrating {config_type} policy_classes to JSON Schema format"
                 )
-                config_data["rule_classes"] = migrate_legacy_to_schema(
-                    config_data["rule_classes"]
+                config_data["policy_classes"] = migrate_legacy_to_schema(
+                    config_data["policy_classes"]
                 )
 
         # Remove legacy pricing field (now stored separately as DefaultPricing/CustomPricing)

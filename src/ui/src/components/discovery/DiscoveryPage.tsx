@@ -21,12 +21,17 @@ const DiscoveryPage = () => {
         {
           id: 'single-doc',
           label: 'Single Document',
-          content: <DiscoveryPanel />,
+          content: <DiscoveryPanel discoveryType="classes" />,
         },
         {
           id: 'multi-doc',
           label: 'Multiple Documents',
           content: <MultiDocDiscoveryPanel />,
+        },
+        {
+          id: 'rules',
+          label: 'Policy Discovery',
+          content: <DiscoveryPanel discoveryType="rules" />,
         },
       ]}
     />

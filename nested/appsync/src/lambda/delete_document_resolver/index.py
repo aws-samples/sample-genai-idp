@@ -15,8 +15,8 @@ import os
 from typing import List
 
 import boto3
-
 from idp_common.delete_documents import delete_single_document
+from idp_common.utils.log_sanitizer import sanitize_event_for_logging
 
 # Configure logging
 logger = logging.getLogger()
@@ -29,7 +29,7 @@ s3 = boto3.client("s3")
 
 def handler(event, context):
     """Handle document deletion requests from AppSync."""
-    logger.info(f"Delete document resolver invoked with event: {json.dumps(event)}")
+    logger.info(f"Delete document resolver invoked with event: {json.dumps(sanitize_event_for_logging(event))}")
 
     try:
         object_keys: List[str] = event["arguments"]["objectKeys"]

@@ -103,8 +103,8 @@ const SchemaInspector = ({
   isRuleSchema = false,
 }: SchemaInspectorProps): React.JSX.Element => {
   // Dynamic labels based on schema type
-  const typeLabel = isRuleSchema ? 'rule' : 'document';
-  const TypeLabel = isRuleSchema ? 'Rule' : 'Document';
+  const typeLabel = isRuleSchema ? 'policy' : 'document';
+  const TypeLabel = isRuleSchema ? 'Policy' : 'Document';
 
   // Show class-level settings when class is selected but no attribute is selected
   if (selectedClass && (!selectedAttribute || !selectedAttributeName)) {
@@ -138,12 +138,12 @@ const SchemaInspector = ({
 
     return (
       <Box>
-        <Header variant="h3">{isRuleSchema ? 'Rule Class Properties' : `Class Inspector: ${selectedClass.name}`}</Header>
+        <Header variant="h3">{isRuleSchema ? 'Policy Class Properties' : `Class Inspector: ${selectedClass.name}`}</Header>
         <SpaceBetween size="m">
           <FormField
             label={`${TypeLabel} Type`}
             description={`${TypeLabel} types become top-level schemas. ${
-              isRuleSchema ? 'Uncheck this for non-rule-type classes.' : 'Shared classes are reusable definitions.'
+              isRuleSchema ? 'Uncheck this for non-policy-type classes.' : 'Shared classes are reusable definitions.'
             }`}
           >
             <Checkbox
@@ -172,7 +172,10 @@ const SchemaInspector = ({
             )
           )}
 
-          <FormField label={isRuleSchema ? 'Rule Class Description' : 'Class Description'} description="Describe the purpose of this class">
+          <FormField
+            label={isRuleSchema ? 'Policy Class Description' : 'Class Description'}
+            description="Describe the purpose of this class"
+          >
             <Textarea
               value={selectedClass.description || ''}
               onChange={({ detail }) => onUpdateClass({ description: detail.value || undefined })}
@@ -181,144 +184,164 @@ const SchemaInspector = ({
             />
           </FormField>
 
-          {!!selectedClass[X_AWS_IDP_DOCUMENT_TYPE] && !isRuleSchema && (
+          {!!selectedClass[X_AWS_IDP_DOCUMENT_TYPE] && (
             <>
-              <ExamplesEditor
-                examples={(selectedClass[X_AWS_IDP_EXAMPLES] as Example[]) || []}
-                onChange={(examples) => onUpdateClass({ [X_AWS_IDP_EXAMPLES]: examples })}
-              />
+              {!isRuleSchema && (
+                <ExamplesEditor
+                  examples={(selectedClass[X_AWS_IDP_EXAMPLES] as Example[]) || []}
+                  onChange={(examples) => onUpdateClass({ [X_AWS_IDP_EXAMPLES]: examples })}
+                />
+              )}
 
               <FormField
-                label={`${TypeLabel} Name Regex (Optional)`}
-                description={`Pattern to match ${typeLabel} ID/name. When matched, instantly classifies all pages as this type (single-class configs only). Use case-insensitive patterns like (?i).*(invoice|bill).*`}
+                label="Document Name Regex"
+                description={
+                  isRuleSchema
+                    ? 'Pattern to match document ID/name. When matched, instantly classifies all pages as this type policy (single-class configs only). Use case-insensitive patterns like (?i).*(medicare|global).*'
+                    : `Pattern to match ${typeLabel} ID/name. When matched, instantly classifies all pages as this type (single-class configs only). Use case-insensitive patterns like (?i).*(invoice|bill).*`
+                }
               >
                 <Input
                   value={(selectedClass[X_AWS_IDP_DOCUMENT_NAME_REGEX] as string) || ''}
                   onChange={({ detail }) => onUpdateClass({ [X_AWS_IDP_DOCUMENT_NAME_REGEX]: detail.value || undefined })}
-                  placeholder="e.g., (?i).*(invoice|bill).*"
+                  placeholder={isRuleSchema ? 'e.g., (?i).*(medicare|global).*' : 'e.g., (?i).*(invoice|bill).*'}
                 />
               </FormField>
 
               <FormField
-                label="Page Content Regex (Optional)"
-                description="Pattern to match page text content. When matched during page-level classification, classifies the page as this type. Use case-insensitive patterns like (?i)(invoice\\s+number|amount\\s+due)"
+                label="Page Content Regex"
+                description={
+                  isRuleSchema
+                    ? 'Pattern to match page text content. When matched, classifies the document as this policy. Use case-insensitive patterns like (?i)(medicare\\s+number|amount\\s+due)'
+                    : 'Pattern to match page text content. When matched during page-level classification, classifies the page as this type. Use case-insensitive patterns like (?i)(invoice\\s+number|amount\\s+due)'
+                }
               >
                 <Input
                   value={(selectedClass[X_AWS_IDP_PAGE_CONTENT_REGEX] as string) || ''}
                   onChange={({ detail }) => onUpdateClass({ [X_AWS_IDP_PAGE_CONTENT_REGEX]: detail.value || undefined })}
-                  placeholder="e.g., (?i)(invoice\\s+number|bill\\s+to)"
+                  placeholder={isRuleSchema ? 'e.g., (?i)(medicare\\s+number)' : 'e.g., (?i)(invoice\\s+number|bill\\s+to)'}
                 />
               </FormField>
 
-              <FormField
-                label="Exclude from Processing (Optional)"
-                description="When checked, sections classified as this class are SKIPPED by downstream stages (extraction, assessment, summarization, rule validation, evaluation). Use for static boilerplate pages (instructions, legal notices, cover pages) that carry no extractable data."
-              >
-                <Checkbox
-                  checked={Boolean(selectedClass[X_AWS_IDP_EXCLUDE_FROM_PROCESSING])}
-                  onChange={({ detail }) =>
-                    onUpdateClass({
-                      [X_AWS_IDP_EXCLUDE_FROM_PROCESSING]: detail.checked || undefined,
-                    })
-                  }
-                >
-                  Skip downstream processing for this class
-                </Checkbox>
-              </FormField>
+              {!isRuleSchema && (
+                <>
+                  <FormField
+                    label="Exclude from Processing (Optional)"
+                    description="When checked, sections classified as this class are SKIPPED by downstream stages (extraction, assessment, summarization, rule validation, evaluation). Use for static boilerplate pages (instructions, legal notices, cover pages) that carry no extractable data."
+                  >
+                    <Checkbox
+                      checked={Boolean(selectedClass[X_AWS_IDP_EXCLUDE_FROM_PROCESSING])}
+                      onChange={({ detail }) =>
+                        onUpdateClass({
+                          [X_AWS_IDP_EXCLUDE_FROM_PROCESSING]: detail.checked || undefined,
+                        })
+                      }
+                    >
+                      Skip downstream processing for this class
+                    </Checkbox>
+                  </FormField>
 
-              <FormField
-                label="Exclusion Reason (Optional)"
-                description='Short category shown in the UI Sections panel as a "Skipped: <reason>" badge and in the evaluation markdown report. Common values: "instructions", "legal", "cover-page", "boilerplate". Only used when "Exclude from Processing" is checked.'
-              >
-                <Input
-                  value={(selectedClass[X_AWS_IDP_EXCLUSION_REASON] as string) || ''}
-                  onChange={({ detail }) => onUpdateClass({ [X_AWS_IDP_EXCLUSION_REASON]: detail.value || undefined })}
-                  placeholder="e.g., instructions"
-                  disabled={!selectedClass[X_AWS_IDP_EXCLUDE_FROM_PROCESSING]}
-                />
-              </FormField>
+                  <FormField
+                    label="Exclusion Reason (Optional)"
+                    description='Short category shown in the UI Sections panel as a "Skipped: <reason>" badge and in the evaluation markdown report. Common values: "instructions", "legal", "cover-page", "boilerplate". Only used when "Exclude from Processing" is checked.'
+                  >
+                    <Input
+                      value={(selectedClass[X_AWS_IDP_EXCLUSION_REASON] as string) || ''}
+                      onChange={({ detail }) => onUpdateClass({ [X_AWS_IDP_EXCLUSION_REASON]: detail.value || undefined })}
+                      placeholder="e.g., instructions"
+                      disabled={!selectedClass[X_AWS_IDP_EXCLUDE_FROM_PROCESSING]}
+                    />
+                  </FormField>
 
-              <FormField
-                label="Extraction Model Override (Optional)"
-                description="Override the global extraction model for this class. When set, this model is used instead of the global extraction.model setting. Select empty to use the default."
-              >
-                <Select
-                  selectedOption={
-                    (selectedClass[X_AWS_IDP_EXTRACTION_MODEL] as string)
-                      ? {
-                          label: selectedClass[X_AWS_IDP_EXTRACTION_MODEL] as string,
-                          value: selectedClass[X_AWS_IDP_EXTRACTION_MODEL] as string,
+                  <FormField
+                    label="Extraction Model Override (Optional)"
+                    description="Override the global extraction model for this class. When set, this model is used instead of the global extraction.model setting. Select empty to use the default."
+                  >
+                    <Select
+                      selectedOption={
+                        (selectedClass[X_AWS_IDP_EXTRACTION_MODEL] as string)
+                          ? {
+                              label: selectedClass[X_AWS_IDP_EXTRACTION_MODEL] as string,
+                              value: selectedClass[X_AWS_IDP_EXTRACTION_MODEL] as string,
+                            }
+                          : { label: '(Use global default)', value: '' }
+                      }
+                      onChange={({ detail }) => onUpdateClass({ [X_AWS_IDP_EXTRACTION_MODEL]: detail.selectedOption.value || undefined })}
+                      options={[
+                        { label: '(Use global default)', value: '' },
+                        { label: 'us.amazon.nova-lite-v1:0', value: 'us.amazon.nova-lite-v1:0' },
+                        { label: 'us.amazon.nova-pro-v1:0', value: 'us.amazon.nova-pro-v1:0' },
+                        { label: 'us.amazon.nova-premier-v1:0', value: 'us.amazon.nova-premier-v1:0' },
+                        { label: 'us.amazon.nova-2-lite-v1:0', value: 'us.amazon.nova-2-lite-v1:0' },
+                        { label: 'us.anthropic.claude-haiku-4-5-20251001-v1:0', value: 'us.anthropic.claude-haiku-4-5-20251001-v1:0' },
+                        { label: 'us.anthropic.claude-sonnet-4-5-20250929-v1:0', value: 'us.anthropic.claude-sonnet-4-5-20250929-v1:0' },
+                        { label: 'us.anthropic.claude-sonnet-4-6', value: 'us.anthropic.claude-sonnet-4-6' },
+                        { label: 'us.anthropic.claude-sonnet-4-6:1m', value: 'us.anthropic.claude-sonnet-4-6:1m' },
+                        { label: 'us.anthropic.claude-opus-4-5-20251101-v1:0', value: 'us.anthropic.claude-opus-4-5-20251101-v1:0' },
+                        { label: 'us.anthropic.claude-opus-4-6-v1', value: 'us.anthropic.claude-opus-4-6-v1' },
+                        { label: 'us.anthropic.claude-opus-4-6-v1:1m', value: 'us.anthropic.claude-opus-4-6-v1:1m' },
+                        { label: 'us.anthropic.claude-opus-4-7', value: 'us.anthropic.claude-opus-4-7' },
+                        { label: 'us.anthropic.claude-opus-4-7:1m', value: 'us.anthropic.claude-opus-4-7:1m' },
+                        { label: 'eu.amazon.nova-lite-v1:0', value: 'eu.amazon.nova-lite-v1:0' },
+                        { label: 'eu.amazon.nova-pro-v1:0', value: 'eu.amazon.nova-pro-v1:0' },
+                        { label: 'eu.amazon.nova-2-lite-v1:0', value: 'eu.amazon.nova-2-lite-v1:0' },
+                        { label: 'eu.anthropic.claude-haiku-4-5-20251001-v1:0', value: 'eu.anthropic.claude-haiku-4-5-20251001-v1:0' },
+                        { label: 'eu.anthropic.claude-sonnet-4-5-20250929-v1:0', value: 'eu.anthropic.claude-sonnet-4-5-20250929-v1:0' },
+                        { label: 'eu.anthropic.claude-sonnet-4-6', value: 'eu.anthropic.claude-sonnet-4-6' },
+                        { label: 'eu.anthropic.claude-sonnet-4-6:1m', value: 'eu.anthropic.claude-sonnet-4-6:1m' },
+                        { label: 'eu.anthropic.claude-opus-4-5-20251101-v1:0', value: 'eu.anthropic.claude-opus-4-5-20251101-v1:0' },
+                        { label: 'eu.anthropic.claude-opus-4-6-v1', value: 'eu.anthropic.claude-opus-4-6-v1' },
+                        { label: 'eu.anthropic.claude-opus-4-6-v1:1m', value: 'eu.anthropic.claude-opus-4-6-v1:1m' },
+                        { label: 'eu.anthropic.claude-opus-4-7', value: 'eu.anthropic.claude-opus-4-7' },
+                        { label: 'eu.anthropic.claude-opus-4-7:1m', value: 'eu.anthropic.claude-opus-4-7:1m' },
+                        { label: 'global.amazon.nova-2-lite-v1:0', value: 'global.amazon.nova-2-lite-v1:0' },
+                        {
+                          label: 'global.anthropic.claude-haiku-4-5-20251001-v1:0',
+                          value: 'global.anthropic.claude-haiku-4-5-20251001-v1:0',
+                        },
+                        {
+                          label: 'global.anthropic.claude-sonnet-4-5-20250929-v1:0',
+                          value: 'global.anthropic.claude-sonnet-4-5-20250929-v1:0',
+                        },
+                        { label: 'global.anthropic.claude-sonnet-4-6', value: 'global.anthropic.claude-sonnet-4-6' },
+                        { label: 'global.anthropic.claude-sonnet-4-6:1m', value: 'global.anthropic.claude-sonnet-4-6:1m' },
+                        {
+                          label: 'global.anthropic.claude-opus-4-5-20251101-v1:0',
+                          value: 'global.anthropic.claude-opus-4-5-20251101-v1:0',
+                        },
+                        { label: 'global.anthropic.claude-opus-4-6-v1', value: 'global.anthropic.claude-opus-4-6-v1' },
+                        { label: 'global.anthropic.claude-opus-4-6-v1:1m', value: 'global.anthropic.claude-opus-4-6-v1:1m' },
+                        { label: 'global.anthropic.claude-opus-4-7', value: 'global.anthropic.claude-opus-4-7' },
+                        { label: 'global.anthropic.claude-opus-4-7:1m', value: 'global.anthropic.claude-opus-4-7:1m' },
+                      ]}
+                      filteringType="auto"
+                      placeholder="Select model override"
+                    />
+                  </FormField>
+
+                  <Header {...({ variant: 'h5' } as Record<string, unknown>)}>Evaluation Configuration</Header>
+
+                  <FormField
+                    label="Overall Match Threshold"
+                    description={`Minimum weighted score for ${typeLabel}-level baseline evaluation match (0-1)`}
+                  >
+                    <Input
+                      type="number"
+                      {...({ step: '0.01', min: '0', max: '1' } as Record<string, unknown>)}
+                      value={(selectedClass[X_AWS_IDP_EVALUATION_MATCH_THRESHOLD] as number)?.toString() || '0.8'}
+                      onChange={({ detail }) => {
+                        const value = detail.value ? parseFloat(detail.value) : 0.8;
+                        if (value >= 0 && value <= 1) {
+                          onUpdateClass({
+                            [X_AWS_IDP_EVALUATION_MATCH_THRESHOLD]: value,
+                          });
                         }
-                      : { label: '(Use global default)', value: '' }
-                  }
-                  onChange={({ detail }) => onUpdateClass({ [X_AWS_IDP_EXTRACTION_MODEL]: detail.selectedOption.value || undefined })}
-                  options={[
-                    { label: '(Use global default)', value: '' },
-                    { label: 'us.amazon.nova-lite-v1:0', value: 'us.amazon.nova-lite-v1:0' },
-                    { label: 'us.amazon.nova-pro-v1:0', value: 'us.amazon.nova-pro-v1:0' },
-                    { label: 'us.amazon.nova-premier-v1:0', value: 'us.amazon.nova-premier-v1:0' },
-                    { label: 'us.amazon.nova-2-lite-v1:0', value: 'us.amazon.nova-2-lite-v1:0' },
-                    { label: 'us.anthropic.claude-haiku-4-5-20251001-v1:0', value: 'us.anthropic.claude-haiku-4-5-20251001-v1:0' },
-                    { label: 'us.anthropic.claude-sonnet-4-5-20250929-v1:0', value: 'us.anthropic.claude-sonnet-4-5-20250929-v1:0' },
-                    { label: 'us.anthropic.claude-sonnet-4-6', value: 'us.anthropic.claude-sonnet-4-6' },
-                    { label: 'us.anthropic.claude-sonnet-4-6:1m', value: 'us.anthropic.claude-sonnet-4-6:1m' },
-                    { label: 'us.anthropic.claude-opus-4-5-20251101-v1:0', value: 'us.anthropic.claude-opus-4-5-20251101-v1:0' },
-                    { label: 'us.anthropic.claude-opus-4-6-v1', value: 'us.anthropic.claude-opus-4-6-v1' },
-                    { label: 'us.anthropic.claude-opus-4-6-v1:1m', value: 'us.anthropic.claude-opus-4-6-v1:1m' },
-                    { label: 'us.anthropic.claude-opus-4-7', value: 'us.anthropic.claude-opus-4-7' },
-                    { label: 'us.anthropic.claude-opus-4-7:1m', value: 'us.anthropic.claude-opus-4-7:1m' },
-                    { label: 'eu.amazon.nova-lite-v1:0', value: 'eu.amazon.nova-lite-v1:0' },
-                    { label: 'eu.amazon.nova-pro-v1:0', value: 'eu.amazon.nova-pro-v1:0' },
-                    { label: 'eu.amazon.nova-2-lite-v1:0', value: 'eu.amazon.nova-2-lite-v1:0' },
-                    { label: 'eu.anthropic.claude-haiku-4-5-20251001-v1:0', value: 'eu.anthropic.claude-haiku-4-5-20251001-v1:0' },
-                    { label: 'eu.anthropic.claude-sonnet-4-5-20250929-v1:0', value: 'eu.anthropic.claude-sonnet-4-5-20250929-v1:0' },
-                    { label: 'eu.anthropic.claude-sonnet-4-6', value: 'eu.anthropic.claude-sonnet-4-6' },
-                    { label: 'eu.anthropic.claude-sonnet-4-6:1m', value: 'eu.anthropic.claude-sonnet-4-6:1m' },
-                    { label: 'eu.anthropic.claude-opus-4-5-20251101-v1:0', value: 'eu.anthropic.claude-opus-4-5-20251101-v1:0' },
-                    { label: 'eu.anthropic.claude-opus-4-6-v1', value: 'eu.anthropic.claude-opus-4-6-v1' },
-                    { label: 'eu.anthropic.claude-opus-4-6-v1:1m', value: 'eu.anthropic.claude-opus-4-6-v1:1m' },
-                    { label: 'eu.anthropic.claude-opus-4-7', value: 'eu.anthropic.claude-opus-4-7' },
-                    { label: 'eu.anthropic.claude-opus-4-7:1m', value: 'eu.anthropic.claude-opus-4-7:1m' },
-                    { label: 'global.amazon.nova-2-lite-v1:0', value: 'global.amazon.nova-2-lite-v1:0' },
-                    { label: 'global.anthropic.claude-haiku-4-5-20251001-v1:0', value: 'global.anthropic.claude-haiku-4-5-20251001-v1:0' },
-                    {
-                      label: 'global.anthropic.claude-sonnet-4-5-20250929-v1:0',
-                      value: 'global.anthropic.claude-sonnet-4-5-20250929-v1:0',
-                    },
-                    { label: 'global.anthropic.claude-sonnet-4-6', value: 'global.anthropic.claude-sonnet-4-6' },
-                    { label: 'global.anthropic.claude-sonnet-4-6:1m', value: 'global.anthropic.claude-sonnet-4-6:1m' },
-                    { label: 'global.anthropic.claude-opus-4-5-20251101-v1:0', value: 'global.anthropic.claude-opus-4-5-20251101-v1:0' },
-                    { label: 'global.anthropic.claude-opus-4-6-v1', value: 'global.anthropic.claude-opus-4-6-v1' },
-                    { label: 'global.anthropic.claude-opus-4-6-v1:1m', value: 'global.anthropic.claude-opus-4-6-v1:1m' },
-                    { label: 'global.anthropic.claude-opus-4-7', value: 'global.anthropic.claude-opus-4-7' },
-                    { label: 'global.anthropic.claude-opus-4-7:1m', value: 'global.anthropic.claude-opus-4-7:1m' },
-                  ]}
-                  filteringType="auto"
-                  placeholder="Select model override"
-                />
-              </FormField>
-
-              <Header {...({ variant: 'h5' } as Record<string, unknown>)}>Evaluation Configuration</Header>
-
-              <FormField
-                label="Overall Match Threshold"
-                description={`Minimum weighted score for ${typeLabel}-level baseline evaluation match (0-1)`}
-              >
-                <Input
-                  type="number"
-                  {...({ step: '0.01', min: '0', max: '1' } as Record<string, unknown>)}
-                  value={(selectedClass[X_AWS_IDP_EVALUATION_MATCH_THRESHOLD] as number)?.toString() || '0.8'}
-                  onChange={({ detail }) => {
-                    const value = detail.value ? parseFloat(detail.value) : 0.8;
-                    if (value >= 0 && value <= 1) {
-                      onUpdateClass({
-                        [X_AWS_IDP_EVALUATION_MATCH_THRESHOLD]: value,
-                      });
-                    }
-                  }}
-                  placeholder="0.8"
-                />
-              </FormField>
+                      }}
+                      placeholder="0.8"
+                    />
+                  </FormField>
+                </>
+              )}
             </>
           )}
 

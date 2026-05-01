@@ -123,6 +123,7 @@ class PublishOperation:
             os.chdir(source_dir)
             try:
                 publisher = IDPPublisher(verbose=verbose)
+                publisher.headless = headless
                 publisher.run(publish_args)
             except SystemExit as e:
                 if e.code != 0:

@@ -295,6 +295,7 @@ export type Document = DynamoDbBase & {
   PageCount?: Maybe<Scalars['Int']['output']>;
   Pages?: Maybe<Array<Maybe<Page>>>;
   QueuedTime?: Maybe<Scalars['AWSDateTime']['output']>;
+  RuleValidationResult?: Maybe<Scalars['AWSJSON']['output']>;
   RuleValidationResultUri?: Maybe<Scalars['String']['output']>;
   SK: Scalars['ID']['output'];
   Sections?: Maybe<Array<Maybe<Section>>>;
@@ -757,6 +758,7 @@ export type MutationUpdateUserArgs = {
 export type MutationUploadDiscoveryDocumentArgs = {
   bucket?: InputMaybe<Scalars['String']['input']>;
   contentType?: InputMaybe<Scalars['String']['input']>;
+  discoveryType?: InputMaybe<Scalars['String']['input']>;
   fileName: Scalars['String']['input'];
   groundTruthFileName?: InputMaybe<Scalars['String']['input']>;
   pageLabels?: InputMaybe<Array<InputMaybe<Scalars['String']['input']>>>;
@@ -1260,6 +1262,7 @@ export type UpdateDocumentInput = {
   PageCount?: InputMaybe<Scalars['Int']['input']>;
   Pages?: InputMaybe<Array<InputMaybe<PageInput>>>;
   QueuedTime?: InputMaybe<Scalars['AWSDateTime']['input']>;
+  RuleValidationResult?: InputMaybe<Scalars['AWSJSON']['input']>;
   RuleValidationResultUri?: InputMaybe<Scalars['String']['input']>;
   Sections?: InputMaybe<Array<InputMaybe<SectionInput>>>;
   SummaryReportUri?: InputMaybe<Scalars['String']['input']>;
@@ -1587,6 +1590,7 @@ export type UploadDiscoveryDocumentMutationVariables = Exact<{
   pageRanges?: InputMaybe<Array<InputMaybe<Scalars['String']['input']>> | InputMaybe<Scalars['String']['input']>>;
   pageLabels?: InputMaybe<Array<InputMaybe<Scalars['String']['input']>> | InputMaybe<Scalars['String']['input']>>;
   skipJobCreation?: InputMaybe<Scalars['Boolean']['input']>;
+  discoveryType?: InputMaybe<Scalars['String']['input']>;
 }>;
 
 

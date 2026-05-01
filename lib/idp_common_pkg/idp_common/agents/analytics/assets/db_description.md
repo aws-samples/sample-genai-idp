@@ -25,12 +25,12 @@ The solution creates several predefined tables in the Glue Data Catalog:
 
 5. Rule Validation Summary Table (rule_validation_summary)
    * Contains document-level rule validation results
-   * Columns include: document_id, input_key, validation_date, overall_status, total_rule_types, total_rules, pass_count, fail_count, information_not_found_count
+   * Columns include: document_id, input_key, validation_date, overall_status, total_policy_types, total_rules, pass_count, fail_count, information_not_found_count
    * Partitioned by date (YYYY-MM-DD format)
 
 6. Rule Validation Details Table (rule_validation_details)
    * Contains individual rule validation results
-   * Columns include: document_id, rule_type, rule, recommendation, reasoning, supporting_pages, validation_date
+   * Columns include: document_id, policy_type, rule, recommendation, reasoning, supporting_pages, validation_date
    * Partitioned by date (YYYY-MM-DD format)
 
 ### Dynamic Document Section Tables

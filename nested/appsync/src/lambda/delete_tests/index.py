@@ -3,9 +3,10 @@ Lambda function to delete test runs and their associated data.
 """
 
 import json
-import os
-import boto3
 import logging
+import os
+
+import boto3
 from botocore.exceptions import ClientError
 
 # Configure logging

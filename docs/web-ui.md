@@ -286,6 +286,34 @@ The Document Process Flow visualization is particularly useful for troubleshooti
 - Analyze execution times to identify performance bottlenecks
 - Inspect the input and output of each step to verify data transformation
 
+## Download Document Data
+
+The Document Details page exposes a **Download** dropdown in the page header that packages the document's outputs into a single ZIP archive, suitable for sharing, archival, or downstream analysis outside the IDP console.
+
+### Folder layout
+
+The ZIP preserves the **real S3 key structure** under three top-level folders that mirror their source buckets:
+
+- `output/<key>` — files from the **OutputBucket** (section results, page OCR/confidence, page images, summary, evaluation, rule validation)
+- `baseline/<key>` — files from the **EvaluationBaselineBucket** (ground-truth section results)
+- `input/<key>` — files from the **InputBucket** (the original uploaded source document, optional)
+
+This makes the archive directly comparable to the output of an `aws s3 sync` of the same buckets — users can diff, script against, or re-upload the archive without translating paths.
+
+A self-describing `manifest.json` is written at the ZIP root capturing the export timestamp, scope, document attributes, bucket-to-folder mapping, and the list of files included. If any individual file cannot be fetched (for example, a permissions error), the download continues and the failure is recorded under `errors[]` in the manifest rather than aborting the whole archive.
+
+### Scope options
+
+- **Download All (ZIP)** — every output artifact for the document (summary, evaluation & rule-validation reports, per-section predictions, baselines when available, per-page text and confidence). The options dialog offers two checkboxes:
+  - **Include page images** (off by default) — includes the rendered page image for each page (can significantly increase archive size).
+  - **Include source document** (off by default) — includes the original uploaded file from the **InputBucket** under `input/<key>`.
+- **Download Predictions (ZIP)** — only the per-section `sections/<id>/result.json` files (under `output/`) plus the `manifest.json` and `document-attributes.json`.
+- **Download Baselines (ZIP)** — only the per-section `sections/<id>/result.json` files from the **EvaluationBaselineBucket** (under `baseline/`). This option is shown only when an evaluation baseline is available.
+
+### Fetching mechanics
+
+Every file in the archive is fetched directly from S3 using a short-lived presigned URL generated client-side with your browser's Cognito credentials, preserving binary content byte-for-byte. A progress modal reports status during the download and offers a **Cancel** button for large documents. The per-section **Download Data** / **Download Baseline** buttons in the Sections panel remain available for single-file downloads.
+
 ## Chat with Document
 
 The "Chat with Document" feature is available at the bottom of the Document Detail view. This feature uses the same model that's configured to do the summarization to provide a RAG interface to the document that's the details are displayed for. No other document is taken in to account except the document you're viewing the details of. Note that this feature will only work after the document status is marked as complete.

@@ -291,7 +291,13 @@ class DiscoveryAgent:
             os.path.dirname(os.path.abspath(__file__)), "prompts"
         )
         template_loader = FileSystemLoader(searchpath=template_dir)
-        env = Environment(loader=template_loader)
+        # nosec B701 - autoescape intentionally disabled.
+        # These Jinja2 templates render LLM prompt text (plain text), not HTML.
+        # Enabling HTML autoescape would corrupt prompt characters (&, <, >) and
+        # degrade LLM behavior without providing any security benefit, since the
+        # output is sent to Bedrock as a prompt, not rendered in a browser.
+        # Template inputs (max_sample_size) are developer-controlled integers.
+        env = Environment(loader=template_loader, autoescape=False)  # nosec B701
         template = env.get_template("extraction_prompt.jinja2")
         return template.render(max_sample_size=self.max_sample_size)
 
@@ -561,7 +567,14 @@ class DiscoveryAgent:
             os.path.dirname(os.path.abspath(__file__)), "prompts"
         )
         template_loader = FileSystemLoader(searchpath=template_dir)
-        env = Environment(loader=template_loader)
+        # nosec B701 - autoescape intentionally disabled.
+        # This Jinja2 template renders LLM prompt text (plain text), not HTML.
+        # Enabling HTML autoescape would corrupt prompt characters (&, <, >) and
+        # degrade LLM behavior without providing any security benefit, since the
+        # output is sent to Bedrock as a prompt, not rendered in a browser.
+        # Template inputs (results_dict) are internally-constructed from
+        # clustering results; they are not rendered as HTML anywhere downstream.
+        env = Environment(loader=template_loader, autoescape=False)  # nosec B701
         template = env.get_template("reflection_prompt.jinja2")
         prompt_text = template.render(results=results_dict)
 

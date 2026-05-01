@@ -212,6 +212,10 @@ const ConfigurationLayout = (): React.JSX.Element => {
     const urlParams = new URLSearchParams(hash.split('?')[1] || '');
     const versionParam = urlParams.get('version');
     const tabParam = urlParams.get('tab');
+    const highlightParam = urlParams.get('highlight');
+    if (highlightParam !== highlightClassName) {
+      setHighlightClassName(highlightParam);
+    }
 
     // Apply version from URL if it differs from current selection (or no selection yet)
     if (versionParam && versions.length > 0 && versionParam !== selectedVersion) {
@@ -532,6 +536,11 @@ const ConfigurationLayout = (): React.JSX.Element => {
   const [importError, setImportError] = useState<string | null>(null);
   const [extractionSchema, setExtractionSchema] = useState<unknown[] | null>(null);
   const [ruleSchema, setRuleSchema] = useState<unknown[] | null>(null);
+  const [highlightClassName, setHighlightClassName] = useState<string | null>(() => {
+    const hash = window.location.hash;
+    const params = new URLSearchParams(hash.split('?')[1] || '');
+    return params.get('highlight');
+  });
   const [showMigrationModal, setShowMigrationModal] = useState(false);
   const [pendingImportConfig, setPendingImportConfig] = useState<Record<string, unknown> | null>(null);
   const [pendingImportSource, setPendingImportSource] = useState<{ type: string; name: string } | null>(null); // Track import source for version naming
@@ -676,9 +685,9 @@ const ConfigurationLayout = (): React.JSX.Element => {
         setExtractionSchema(mergedConfig.classes as unknown[]);
       }
 
-      // Initialize rule schema from config (stored in rule_classes field)
-      if (mergedConfig.rule_classes) {
-        setRuleSchema(mergedConfig.rule_classes as unknown[]);
+      // Initialize rule schema from config (stored in policy_classes field)
+      if (mergedConfig.policy_classes) {
+        setRuleSchema(mergedConfig.policy_classes as unknown[]);
       }
 
       // Set both JSON and YAML content
@@ -805,9 +814,9 @@ const ConfigurationLayout = (): React.JSX.Element => {
           // Skip validation if value is undefined (already handled by required check)
           if (value === undefined) return;
 
-          // Skip deep validation for classes and rule_classes fields - they have their own complex JSON Schema structure
+          // Skip deep validation for classes and policy_classes fields - they have their own complex JSON Schema structure
           // Just check they're arrays if present
-          if (key === 'classes' || key === 'rule_classes') {
+          if (key === 'classes' || key === 'policy_classes') {
             if (!Array.isArray(value)) {
               errors.push({ message: `Field '${key}' must be an array` });
             }
@@ -1437,18 +1446,18 @@ const ConfigurationLayout = (): React.JSX.Element => {
           }
         }
 
-        // CRITICAL: Always include the current rule schema (rule_classes) if it exists OR is explicitly empty
+        // CRITICAL: Always include the current rule schema (policy_classes) if it exists OR is explicitly empty
         // This ensures empty arrays are saved (to wipe all rule classes) and prevents schema loss
-        if (formValues.rule_classes && Array.isArray(formValues.rule_classes)) {
-          builtObject.rule_classes = formValues.rule_classes;
-          console.log('DEBUG: Including rule schema (rule_classes) in save:', formValues.rule_classes);
+        if (formValues.policy_classes && Array.isArray(formValues.policy_classes)) {
+          builtObject.policy_classes = formValues.policy_classes;
+          console.log('DEBUG: Including rule schema (policy_classes) in save:', formValues.policy_classes);
         }
 
-        // CRITICAL: Always include the current rule schema (rule_classes) if it exists OR is explicitly empty
+        // CRITICAL: Always include the current rule schema (policy_classes) if it exists OR is explicitly empty
         // This ensures empty arrays are saved (to wipe all rule classes) and prevents schema loss
-        if (formValues.rule_classes && Array.isArray(formValues.rule_classes)) {
-          builtObject.rule_classes = formValues.rule_classes;
-          console.log('DEBUG: Including rule schema (rule_classes) in save:', formValues.rule_classes);
+        if (formValues.policy_classes && Array.isArray(formValues.policy_classes)) {
+          builtObject.policy_classes = formValues.policy_classes;
+          console.log('DEBUG: Including rule schema (policy_classes) in save:', formValues.policy_classes);
         }
 
         // CRITICAL: If there are no differences AND no schema changes AND no description changes, don't send update to backend
@@ -2600,16 +2609,17 @@ const ConfigurationLayout = (): React.JSX.Element => {
                     }
                   }}
                   ruleSchema={ruleSchema}
+                  highlightClassName={highlightClassName}
                   onRuleSchemaChange={(schemaData: unknown, isDirty: boolean) => {
                     setRuleSchema(schemaData as unknown[] | null);
                     if (isDirty) {
                       const updatedConfig = { ...formValues };
-                      // CRITICAL: Always set rule_classes, even if empty array
+                      // CRITICAL: Always set policy_classes, even if empty array
                       if (schemaData === null) {
-                        updatedConfig.rule_classes = [];
+                        updatedConfig.policy_classes = [];
                       } else if (Array.isArray(schemaData)) {
-                        // Store as 'rule_classes' field with JSON Schema content
-                        updatedConfig.rule_classes = schemaData;
+                        // Store as 'policy_classes' field with JSON Schema content
+                        updatedConfig.policy_classes = schemaData;
                       }
                       setFormValues(updatedConfig);
                       setJsonContent(JSON.stringify(updatedConfig, null, 2));

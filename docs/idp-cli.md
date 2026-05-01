@@ -2083,6 +2083,8 @@ idp-cli config-download --stack-name my-stack
 
 Upload a configuration file to a deployed IDP stack.
 
+> **Note:** Configurations with `managed: true` cannot be uploaded via CLI. Managed configurations are stack-controlled and automatically overwritten during stack updates. Remove `managed: true` from your configuration file before uploading.
+
 **Usage:**
 ```bash
 idp-cli config-upload [OPTIONS]

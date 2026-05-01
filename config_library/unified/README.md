@@ -86,7 +86,6 @@ See the main [README.md](../README.md) for more detailed instructions on creatin
 | [lending-package-sample-govcloud](./lending-package-sample-govcloud/) | GovCloud-compatible lending package processing | |
 | [ocr-benchmark](./ocr-benchmark/) | OCR benchmarking configuration | |
 | [realkie-fcc-verified](./realkie-fcc-verified/) | Real estate FCC verification documents | |
-| [rule-extraction](./rule-extraction/) | Rule-based extraction configuration | Custom extraction rules |
 | [rule-validation](./rule-validation/) | Rule validation configuration | Custom validation rules |
 | [rvl-cdip](./rvl-cdip/) | RVL-CDIP document classification benchmark | 16 document classes |
 | [rvl-cdip-with-few-shot-examples](./rvl-cdip-with-few-shot-examples/) | RVL-CDIP with few-shot learning examples | Custom prompts with `{FEW_SHOT_EXAMPLES}` |

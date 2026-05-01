@@ -2,7 +2,7 @@ import { useState, useCallback, useEffect } from 'react';
 import { produce } from 'immer';
 import {
   X_AWS_IDP_DOCUMENT_TYPE,
-  X_AWS_IDP_RULE_TYPE,
+  X_AWS_IDP_POLICY_TYPE,
   X_AWS_IDP_EXAMPLES,
   X_AWS_IDP_DOCUMENT_NAME_REGEX,
   X_AWS_IDP_PAGE_CONTENT_REGEX,
@@ -757,7 +757,7 @@ export const useSchemaDesigner = (
       );
 
       // Use conditional field names based on schema type
-      const typeField = isRuleSchema ? X_AWS_IDP_RULE_TYPE : X_AWS_IDP_DOCUMENT_TYPE;
+      const typeField = isRuleSchema ? X_AWS_IDP_POLICY_TYPE : X_AWS_IDP_DOCUMENT_TYPE;
       const propertiesField = isRuleSchema ? 'rule_properties' : 'properties';
 
       const result: JsonSchemaProperty = {

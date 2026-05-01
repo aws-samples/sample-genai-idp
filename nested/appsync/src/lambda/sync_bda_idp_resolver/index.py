@@ -1,11 +1,13 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: MIT-0
 
-import json
 import logging
 import os
+import time
 from typing import Any, Dict
 
+import boto3
+from boto3.dynamodb.conditions import Key as DDBKey
 from idp_common.bda.bda_blueprint_service import (
     BdaBlueprintService,  # type: ignore[import-untyped]
 )
@@ -14,6 +16,62 @@ from idp_common.config import ConfigurationManager
 logger = logging.getLogger()
 logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 logging.getLogger('idp_common.bedrock.client').setLevel(os.environ.get("BEDROCK_LOG_LEVEL", "INFO"))
+
+
+# ----- Caller-scope enforcement for multi-user deployments ---------------
+# When a customer deploys this stack with multiple Cognito users and
+# restricts authors via `allowedConfigVersions` stored in the
+# UsersTable (EmailIndex), syncBdaIdp MUST NOT let those authors
+# mutate BDA projects tied to versions outside their scope. This
+# mirrors the same check now performed in configuration_resolver.
+_dynamodb = boto3.resource("dynamodb")
+_user_scope_cache: dict = {}
+_USER_SCOPE_CACHE_TTL = 60  # seconds
+
+
+def _get_caller_info(event: Dict[str, Any]) -> Dict[str, Any]:
+    identity = event.get("identity") or {}
+    claims = identity.get("claims") or {}
+    groups = claims.get("cognito:groups") or []
+    if isinstance(groups, str):
+        groups = [groups]
+    username = claims.get("cognito:username") or claims.get("sub") or ""
+    email = claims.get("email") or identity.get("username") or username
+    return {
+        "email": email,
+        "username": username,
+        "groups": groups,
+        "is_admin": "Admin" in groups,
+    }
+
+
+def _get_user_allowed_config_versions(caller_email: str):
+    """Look up the caller's `allowedConfigVersions` with a per-container TTL cache."""
+    users_table_name = os.environ.get("USERS_TABLE_NAME", "")
+    if not users_table_name or not caller_email:
+        return None
+    now = time.time()
+    cached = _user_scope_cache.get(caller_email)
+    if cached and (now - cached["timestamp"]) < _USER_SCOPE_CACHE_TTL:
+        return cached["scope"]
+    try:
+        users_table = _dynamodb.Table(users_table_name)
+        resp = users_table.query(
+            IndexName="EmailIndex",
+            KeyConditionExpression=DDBKey("email").eq(caller_email),
+        )
+        items = resp.get("Items", [])
+        if items:
+            scope = items[0].get("allowedConfigVersions")
+            result = list(scope) if scope and len(scope) > 0 else None
+        else:
+            result = None
+    except Exception as e:
+        logger.warning(f"Failed to look up user scope for {caller_email}: {e}")
+        result = None
+    _user_scope_cache[caller_email] = {"scope": result, "timestamp": now}
+    return result
+
 
 
 
@@ -34,8 +92,13 @@ def handler(event: Dict[str, Any], context) -> Dict[str, Any]:
     """
     try:
         logger.info("Starting BDA/IDP sync")
-        logger.info(f"Event: {json.dumps(event, default=str)}")
-        
+        # NOTE: do NOT log full event — it contains identity.claims which
+        # carries Cognito PII. Log only the resolver-specific arguments.
+        logger.info(
+            "syncBdaIdp invoked by operation=%s",
+            (event.get("info") or {}).get("fieldName", "unknown"),
+        )
+
         # Get arguments
         arguments = event.get('arguments', {})
         sync_direction = arguments.get('direction', 'bidirectional')
@@ -43,8 +106,40 @@ def handler(event: Dict[str, Any], context) -> Dict[str, Any]:
         versionName = arguments.get('versionName', 'default')
         explicit_bda_arn = arguments.get('bdaProjectArn')  # Optional: user-provided ARN
         save_arn = arguments.get('saveArn', True)  # Whether to save the ARN to version tracking
-        
-        logger.info(f"Sync direction: {sync_direction}, mode: {sync_mode}, version: {versionName}, explicit ARN: {explicit_bda_arn}")
+
+        # RBAC: scope-enforce for non-admins. An Author with restricted
+        # `allowedConfigVersions` must not be able to invoke syncBdaIdp
+        # against a version (and its linked BDA project) outside their
+        # scope. Admins are unrestricted.
+        caller = _get_caller_info(event)
+        if not caller["is_admin"]:
+            allowed_versions = _get_user_allowed_config_versions(caller["email"])
+            if allowed_versions and versionName not in allowed_versions:
+                logger.warning(
+                    "Rejecting syncBdaIdp: caller %s is scoped to %s but requested "
+                    "versionName=%r",
+                    caller["email"],
+                    sorted(allowed_versions),
+                    versionName,
+                )
+                return {
+                    "success": False,
+                    "error": {
+                        "type": "Unauthorized",
+                        "message": (
+                            f"Access denied: version '{versionName}' is not in "
+                            "your allowed scope"
+                        ),
+                    },
+                    "processedClasses": [],
+                    "direction": sync_direction,
+                }
+
+        logger.info(
+            f"Sync direction: {sync_direction}, mode: {sync_mode}, "
+            f"version: {versionName}, explicit ARN: {explicit_bda_arn}"
+        )
+
         
         # Initialize ConfigurationManager for BDA project tracking
         config_table = os.environ.get('CONFIGURATION_TABLE_NAME')

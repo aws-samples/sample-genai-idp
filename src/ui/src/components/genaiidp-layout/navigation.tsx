@@ -56,6 +56,12 @@ export const adminNavItems = [
     items: [
       {
         type: 'link',
+        text: 'Documentation',
+        href: 'https://aws-solutions-library-samples.github.io/accelerated-intelligent-document-processing-on-aws/',
+        external: true,
+      },
+      {
+        type: 'link',
         text: 'README',
         href: 'https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/blob/main/README.md',
         external: true,
@@ -99,6 +105,12 @@ export const authorNavItems = [
     items: [
       {
         type: 'link',
+        text: 'Documentation',
+        href: 'https://aws-solutions-library-samples.github.io/accelerated-intelligent-document-processing-on-aws/',
+        external: true,
+      },
+      {
+        type: 'link',
         text: 'README',
         href: 'https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/blob/main/README.md',
         external: true,
@@ -129,6 +141,12 @@ export const viewerNavItems = [
     type: 'section',
     text: 'Resources',
     items: [
+      {
+        type: 'link',
+        text: 'Documentation',
+        href: 'https://aws-solutions-library-samples.github.io/accelerated-intelligent-document-processing-on-aws/',
+        external: true,
+      },
       {
         type: 'link',
         text: 'README',
