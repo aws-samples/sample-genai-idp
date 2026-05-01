@@ -826,20 +826,31 @@ def download_input_document(batch_id: str, filename: str) -> str:
     Use this to visually inspect a source document — e.g., to understand why
     extraction failed, verify ground truth, or check document quality.
 
+    IMPORTANT: Do NOT use file_read on image files — it does not support images
+    and will crash the run. Use the image_reader tool instead for PNG/JPEG/etc.
+
     Args:
         batch_id: Test run ID (e.g., 'RealKIE-FCC-Verified-20260429-174653').
         filename: Document filename (e.g., 'invoice-001.pdf').
 
     Returns:
-        Local file path where the document was saved.
+        JSON with the local file path and which tool to use for viewing.
     """
     scratch = os.environ.get("AUTOTUNE_SCRATCH_DIR", "/tmp/autotune-data")
     output_path = os.path.join(scratch, "input-documents", batch_id, filename)
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     client = _get_client()
     document_id = f"{batch_id}/{filename}"
-    result = client.download_input_document(document_id, output_path)
-    return json.dumps({"path": result})
+    client.download_input_document(document_id, output_path)
+
+    ext = os.path.splitext(filename)[1].lower()
+    image_exts = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".tiff", ".tif", ".bmp"}
+    viewer = "image_reader" if ext in image_exts else "file_read"
+    return json.dumps({
+        "path": output_path,
+        "view_with": viewer,
+        "note": f"Use the {viewer} tool to view this file. Do NOT use file_read on images.",
+    })
 
 
 # --- Collect all tools for the agent ---
