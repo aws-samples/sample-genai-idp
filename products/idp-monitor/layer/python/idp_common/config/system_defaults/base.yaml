@@ -1,0 +1,42 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: MIT-0
+
+# =============================================================================
+# BASE SYSTEM DEFAULTS (COMPOSITE)
+# =============================================================================
+# This file aggregates all modular base files for backward compatibility.
+# Pattern files can inherit from this file directly, OR from specific modules.
+#
+# MODULAR FILES:
+#   - base-notes.yaml:             Configuration notes/description
+#   - base-classes.yaml:           Document class definitions
+#   - base-ocr.yaml:               Textract OCR configuration
+#   - base-classification.yaml:    LLM classification settings
+#   - base-extraction.yaml:        LLM extraction settings
+#   - base-assessment.yaml:        LLM confidence scoring
+#   - base-summarization.yaml:     Document summarization
+#   - base-evaluation.yaml:        Evaluation/testing
+#   - base-criteria-validation.yaml: Criteria validation
+#   - base-agents.yaml:            Error analyzer and chat companion
+#   - base-discovery.yaml:         Schema discovery settings
+#
+# MERGE HIERARCHY (highest to lowest priority):
+#   1. User's custom config (explicit values only)
+#   2. Pattern-specific defaults (pattern-X.yaml)
+#   3. Base defaults (this file or modules)
+#   4. Pydantic model fallbacks (code-level)
+# =============================================================================
+
+# Inherit from all modular base files
+_inherits:
+  - base-notes.yaml
+  - base-classes.yaml
+  - base-ocr.yaml
+  - base-classification.yaml
+  - base-extraction.yaml
+  - base-assessment.yaml
+  - base-summarization.yaml
+  - base-evaluation.yaml
+  - base-criteria-validation.yaml
+  - base-agents.yaml
+  - base-discovery.yaml

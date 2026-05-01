@@ -1,0 +1,164 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: MIT-0
+
+# =============================================================================
+# BASE ASSESSMENT - LLM assessment/confidence scoring defaults
+# =============================================================================
+
+assessment:
+  enabled: true
+  validation_enabled: false
+  hitl_enabled: false
+  default_confidence_threshold: '0.8'
+  image:
+    target_height: ""
+    target_width: ""
+  granular:
+    enabled: true
+    max_workers: "20"
+    simple_batch_size: "3"
+    list_batch_size: "1"
+  model: us.amazon.nova-lite-v1:0
+  top_p: "0.0"
+  max_tokens: "10000"
+  top_k: "5"
+  temperature: "0.0"
+  system_prompt: >-
+    You are a document analysis assessment expert. Your role is to evaluate the confidence and accuracy of data extraction results by analyzing them against source documents.
+    Provide accurate confidence scores for each assessment.
+    When bounding boxes are requested, provide precise coordinate locations where information appears in the document.
+  task_prompt: >-
+    <background>
+    You are an expert document analysis assessment system. Your task is to evaluate the confidence of extraction results for a document of class {DOCUMENT_CLASS} and provide precise spatial localization for each field.
+    </background>
+
+    <task>
+    Analyze the extraction results against the source document and provide confidence assessments AND bounding box coordinates for each extracted attribute. Consider factors such as:
+    1. Text clarity and OCR quality in the source regions 
+    2. Alignment between extracted values and document content 
+    3. Presence of clear evidence supporting the extraction 
+    4. Potential ambiguity or uncertainty in the source material 
+    5. Completeness and accuracy of the extracted information
+    6. Precise spatial location of each field in the document
+    </task>
+
+    <assessment-guidelines>
+    For each attribute, provide: 
+    - A confidence score between 0.0 and 1.0 where:
+       - 1.0 = Very high confidence, clear and unambiguous evidence
+       - 0.8-0.9 = High confidence, strong evidence with minor uncertainty
+       - 0.6-0.7 = Medium confidence, reasonable evidence but some ambiguity
+       - 0.4-0.5 = Low confidence, weak or unclear evidence
+       - 0.0-0.3 = Very low confidence, little to no supporting evidence
+    - A clear explanation of the confidence reasoning
+    - Precise spatial coordinates where the field appears in the document
+
+    Guidelines: 
+    - Base assessments on actual document content and OCR quality 
+    - Consider both text-based evidence and visual/layout clues 
+    - Account for OCR confidence scores when provided 
+    - Be objective and specific in reasoning 
+    - If an extraction appears incorrect, score accordingly with explanation
+    - Provide tight, accurate bounding boxes around the actual text
+    </assessment-guidelines>
+
+    <spatial-localization-guidelines>
+    For each field, provide bounding box coordinates:
+    - bbox: [x1, y1, x2, y2] coordinates in normalized 0-1000 scale
+    - page: Page number where the field appears (starting from 1)
+
+    Coordinate system:
+    - Use normalized scale 0-1000 for both x and y axes
+    - x1, y1 = top-left corner of bounding box  
+    - x2, y2 = bottom-right corner of bounding box
+    - Ensure x2 > x1 and y2 > y1
+    - Make bounding boxes tight around the actual text content
+    - If a field spans multiple lines, create a bounding box that encompasses all relevant text
+    </spatial-localization-guidelines>
+
+    <final-instructions>
+    Analyze the extraction results against the source document and provide confidence assessments with spatial localization. Return a JSON object with the following structure based on the attribute type:
+
+    For SIMPLE attributes: 
+    {
+      "simple_attribute_name": {
+        "confidence": 0.85,
+        "bbox": [100, 200, 300, 250],
+        "page": 1
+      }
+    }
+
+    For GROUP attributes (nested object structure): 
+    {
+      "group_attribute_name": {
+        "sub_attribute_1": {
+          "confidence": 0.90,
+          "bbox": [150, 300, 250, 320],
+          "page": 1
+        },
+        "sub_attribute_2": {
+          "confidence": 0.75,
+          "bbox": [150, 325, 280, 345],
+          "page": 1
+        }
+      }
+    }
+
+    For LIST attributes (array of assessed items): 
+    {
+      "list_attribute_name": [
+        {
+          "item_attribute_1": {
+            "confidence": 0.95,
+            "bbox": [100, 400, 200, 420],
+            "page": 1
+          },
+          "item_attribute_2": {
+            "confidence": 0.88,
+            "bbox": [250, 400, 350, 420],
+            "page": 1
+          }
+        },
+        {
+          "item_attribute_1": {
+            "confidence": 0.92,
+            "bbox": [100, 425, 200, 445],
+            "page": 1
+          },
+          "item_attribute_2": {
+            "confidence": 0.70,
+            "bbox": [250, 425, 350, 445],
+            "page": 1
+          }
+        }
+      ]
+    }
+
+    IMPORTANT:  
+    - For LIST attributes like "Transactions", assess EACH individual item in the list separately with individual bounding boxes
+    - Each transaction should be assessed as a separate object in the array with its own spatial coordinates
+    - Do NOT provide aggregate assessments for list items - assess each one individually with precise locations
+    - Include assessments AND bounding boxes for ALL attributes present in the extraction results
+    - Match the exact structure of the extracted data
+    - Provide page numbers for all bounding boxes (starting from 1)
+    </final-instructions>
+
+    <<CACHEPOINT>>
+
+    <document-image>
+    {DOCUMENT_IMAGE}
+    </document-image>
+
+    <ocr-text-confidence-results>
+    {OCR_TEXT_CONFIDENCE}
+    </ocr-text-confidence-results>
+
+    <<CACHEPOINT>>
+
+    <attributes-definitions>
+    {ATTRIBUTE_NAMES_AND_DESCRIPTIONS}
+    </attributes-definitions>
+
+    <extraction-results>
+    {EXTRACTION_RESULTS}
+    </extraction-results>

@@ -1,0 +1,32 @@
+You are an expert document processing engineer reviewing the results of an automated document clustering and schema generation pipeline.
+
+## Clustering Results Summary
+
+The following document clusters were discovered and schemas were generated for each:
+
+{% for cluster_id, result in results.items() %}
+### Cluster {{ cluster_id }}
+- **Classification**: {{ result.get('classification', 'Unknown') }}
+- **Schema**: {{ result.get('json_schema', {}) | tojson(indent=2) }}
+{% endfor %}
+
+## Your Task
+
+Please provide a comprehensive reflection report that includes:
+
+1. **Overview**: Summarize the document types discovered and how many clusters were found
+2. **Schema Quality Assessment**: For each cluster's schema:
+   - Is the document type classification reasonable?
+   - Are the fields comprehensive and well-structured?
+   - Are there any obvious missing fields or incorrect groupings?
+   - Are the data types appropriate?
+3. **Cross-Cluster Analysis**:
+   - Are there any clusters that might be duplicates (same document type)?
+   - Are there clusters that could benefit from being merged or split?
+   - Is the overall clustering quality good?
+4. **Recommendations**:
+   - Suggested improvements to any schemas
+   - Any concerns about the discovered document types
+   - Readiness assessment for production use
+
+Format your response as a clear markdown report.

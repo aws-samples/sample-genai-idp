@@ -1,0 +1,30 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: MIT-0
+
+# =============================================================================
+# BASE OCR - Textract OCR defaults
+# =============================================================================
+
+ocr:
+  # OCR backend: "textract" (AWS Textract) or "bedrock" (LLM-based)
+  backend: "textract"
+  
+  # For bedrock backend only - model and prompts
+  model_id: "us.amazon.nova-2-lite-v1:0"
+  system_prompt: "You are an expert OCR system. Extract all text from the provided image accurately, preserving layout where possible."
+  task_prompt: "Extract all text from this document image. Preserve the layout, including paragraphs, tables, and formatting."
+  
+  # Textract features to enable
+  # Options: LAYOUT, TABLES, FORMS, SIGNATURES, QUERIES
+  features:
+    - name: LAYOUT
+  
+  # Concurrent API call workers
+  max_workers: 20
+  
+  # Image preprocessing settings
+  image:
+    target_width: null
+    target_height: null
+    dpi: null
+    preprocessing: null

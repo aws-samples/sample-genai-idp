@@ -254,17 +254,11 @@ Resources:
     Type: AWS::Serverless::LayerVersion
     Properties:
       LayerName: !Sub "${AcceleratorStackName}-idp-common-ext"
-      Description: >
-        IDPMonitor premium extension library (idp_common_ext).
-        Provides MonitoringMetricsService and all supporting monitoring
-        services (OperationalDocumentService, CloudWatchMetricsService,
-        AnalyticsCostService, xray_service, etc.).
-      ContentUri: ../idp_common_ext_pkg/
+      Description: "IDPMonitor extension layer — bundles idp_common + idp_common_ext with monitoring services."
+      ContentUri: layer/
       CompatibleRuntimes:
         - python3.12
       RetentionPolicy: Delete
-    Metadata:
-      BuildMethod: python3.12
 
   # ── Lambda Resolver ──────────────────────────────────────────────────────
 
@@ -317,6 +311,7 @@ Resources:
             Action:
               - dynamodb:Query
               - dynamodb:GetItem
+              - dynamodb:Scan
             Resource:
               Fn::ImportValue: !Sub "${AcceleratorStackName}-ConfigurationTableArn"
 
@@ -365,6 +360,13 @@ Resources:
                 - "${BucketArn}/*"
                 - BucketArn:
                     Fn::ImportValue: !Sub "${AcceleratorStackName}-ReportingBucketArn"
+
+          # KMS — decrypt DynamoDB table data (tables use CMK encryption)
+          - Effect: Allow
+            Action:
+              - kms:Decrypt
+              - kms:DescribeKey
+            Resource: !Sub "arn:aws:kms:${AWS::Region}:${AWS::AccountId}:key/*"
 
           # AWS Marketplace — entitlement check
           - Effect: Allow

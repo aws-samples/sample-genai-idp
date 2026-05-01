@@ -1,0 +1,10 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: MIT-0
+
+# =============================================================================
+# BASE CLASSES - Document class definitions section
+# =============================================================================
+
+# Document classes - MUST be defined by user
+# Format: JSON Schema with x-aws-idp-* extensions
+classes: []

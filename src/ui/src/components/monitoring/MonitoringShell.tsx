@@ -4,27 +4,26 @@
 /**
  * MonitoringShell — integration shell for the IDP Accelerator UI.
  *
- * Rendering logic:
+ * Rendering logic (3-state flow):
  *
  *  1. Settings are loaded from SSM at login time. If IDPMonitorUiUrl is NOT
  *     present → the IDPMonitor stack has not been deployed → show the
  *     activation / instructions page.
  *
- *  2. If IDPMonitorUiUrl IS present → the IDPMonitor stack is deployed.
- *     Dynamically loads the monitor UI UMD bundle at runtime by injecting a
- *     <script> tag. The UMD bundle writes its exports to window.IDPMonitorUI
- *     and reads shared React/Cloudscape instances from window.__IDP_EXTENSIONS_DEPS__
- *     (populated by the host app in index.tsx).
+ *  2. If IDPMonitorUiUrl IS present but the user has not yet activated the
+ *     subscription in this session → show the "Enable Subscription" page.
+ *     This is a UI gate (sessionStorage-based) that will be replaced by
+ *     real subscription validation via AWS Marketplace later.
  *
- *  3. The runtime-loaded MonitoringPage receives apiUrl + apiKey props from
- *     the Accelerator Settings SSM parameter (written by deploy.sh).
+ *  3. Once the user clicks "Enable Monitoring" → dynamically loads the
+ *     monitor UI UMD bundle at runtime and renders the dashboard.
  *
  *  4. If loading fails for any reason, a graceful error alert is shown with
  *     a retry button.
  */
 
-import React, { Suspense, lazy, useEffect, useRef } from 'react';
-import { Alert, Box, Button, Container, Header, SpaceBetween, Spinner, TextContent } from '@cloudscape-design/components';
+import React, { Suspense, lazy, useEffect, useRef, useState } from 'react';
+import { Alert, Box, Button, Container, Header, Icon, SpaceBetween, Spinner, TextContent } from '@cloudscape-design/components';
 import useSettingsContext from '../../contexts/settings';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -54,6 +53,12 @@ declare global {
     __IDP_EXTENSIONS_DEPS__?: Record<string, unknown>;
   }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Constants
+// ─────────────────────────────────────────────────────────────────────────────
+
+const SESSION_STORAGE_KEY = 'idp-monitor-activated';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Loading skeleton
@@ -97,6 +102,47 @@ const NotDeployedPage: React.FC<{ stackName: string }> = ({ stackName }) => (
               {`cd products/idp-monitor\n./deploy.sh --stack-name ${stackName || '<your-stack-name>'}`}
             </pre>
             <p>Once deployed, refresh this page — the monitoring dashboard will load automatically.</p>
+          </TextContent>
+        </SpaceBetween>
+      </Container>
+    </SpaceBetween>
+  </Box>
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Subscription Activation page
+// Shown when the monitor stack IS deployed but user hasn't activated yet
+// (sessionStorage gate — to be replaced with real Marketplace subscription later)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const ActivationPage: React.FC<{ onActivate: () => void }> = ({ onActivate }) => (
+  <Box padding={{ top: 'xxl', horizontal: 'xxl' }}>
+    <SpaceBetween size="l">
+      <Container
+        header={
+          <Header variant="h1" description="Real-time observability for your IDP Accelerator pipeline">
+            Monitoring Dashboard
+          </Header>
+        }
+      >
+        <SpaceBetween size="l">
+          <TextContent>
+            <p>
+              The <strong>IDPMonitor</strong> stack is deployed and ready. Click below to enable the monitoring dashboard for this session.
+            </p>
+          </TextContent>
+
+          <Box textAlign="center" padding={{ top: 'm', bottom: 'm' }}>
+            <Button variant="primary" iconName="status-positive" onClick={onActivate}>
+              Enable Monitoring
+            </Button>
+          </Box>
+
+          <TextContent>
+            <p style={{ fontSize: '0.85rem', color: '#5f6b7a' }}>
+              <Icon name="status-info" size="small" /> This will activate the monitoring dashboard for your current session. In a future
+              release, this will be gated by an AWS Marketplace subscription.
+            </p>
           </TextContent>
         </SpaceBetween>
       </Container>
@@ -227,9 +273,29 @@ export const MonitoringShell: React.FC<MonitoringShellProps> = ({ stackName, cla
     isLocalDev,
   });
 
+  // ── Subscription activation gate (sessionStorage) ─────────────────────────
+  // This is a temporary UI gate. In a future release, this will be replaced by
+  // a real subscription check via AWS Marketplace entitlement API.
+  const [isActivated, setIsActivated] = useState<boolean>(() => {
+    try {
+      return sessionStorage.getItem(SESSION_STORAGE_KEY) === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  const handleActivate = () => {
+    try {
+      sessionStorage.setItem(SESSION_STORAGE_KEY, 'true');
+    } catch {
+      // sessionStorage may be unavailable in some environments
+    }
+    setIsActivated(true);
+  };
+
   // Track load errors so we can show a retry button
-  const [loadError, setLoadError] = React.useState<Error | null>(null);
-  const [retryKey, setRetryKey] = React.useState(0);
+  const [_loadError, setLoadError] = useState<Error | null>(null);
+  const [retryKey, _setRetryKey] = useState(0);
 
   // Keep a stable ref to the lazy component. Recreate it synchronously during render
   // when uiUrl or retryKey changes — NOT in a useEffect (which fires after render and
@@ -238,7 +304,7 @@ export const MonitoringShell: React.FC<MonitoringShellProps> = ({ stackName, cla
   const lastUiUrlRef = useRef<string>('');
   const lastRetryKeyRef = useRef<number>(-1);
 
-  if (uiUrl && (lastUiUrlRef.current !== uiUrl || lastRetryKeyRef.current !== retryKey)) {
+  if (uiUrl && isActivated && (lastUiUrlRef.current !== uiUrl || lastRetryKeyRef.current !== retryKey)) {
     lastUiUrlRef.current = uiUrl;
     lastRetryKeyRef.current = retryKey;
     RemotePageRef.current = createRemoteMonitoringPage(uiUrl, (err) => setLoadError(err));
@@ -250,7 +316,7 @@ export const MonitoringShell: React.FC<MonitoringShellProps> = ({ stackName, cla
     if (uiUrl) {
       setLoadError(null);
     }
-  }, [uiUrl, retryKey]);
+  }, [uiUrl, retryKey, setLoadError]);
 
   // ── Case 1: IDPMonitor stack not deployed ─────────────────────────────────
   if (!uiUrl || !apiUrl) {
@@ -261,11 +327,31 @@ export const MonitoringShell: React.FC<MonitoringShellProps> = ({ stackName, cla
     );
   }
 
-  // ── Case 2: Monitor deployed — load UMD bundle via script tag ─────────────
+  // ── Case 2: Stack deployed but subscription not activated ─────────────────
+  if (!isActivated) {
+    return (
+      <div className={className}>
+        <ActivationPage onActivate={handleActivate} />
+      </div>
+    );
+  }
+
+  // ── Case 3: Monitor deployed & activated — load UMD bundle via script tag ─
+  if (!RemotePage) {
+    return (
+      <div className={className}>
+        <MonitoringLoadingSkeleton />
+      </div>
+    );
+  }
+
+  // Re-assign to a const that TypeScript narrows to non-null for valid JSX usage
+  const MonitoringComponent: React.LazyExoticComponent<React.ComponentType<MonitoringPageProps>> = RemotePage;
+
   return (
     <div className={className}>
       <Suspense fallback={<MonitoringLoadingSkeleton />} key={`remote-monitoring-${retryKey}`}>
-        <RemotePage apiUrl={apiUrl} apiKey={apiKey} />
+        <MonitoringComponent apiUrl={apiUrl} apiKey={apiKey} />
       </Suspense>
     </div>
   );

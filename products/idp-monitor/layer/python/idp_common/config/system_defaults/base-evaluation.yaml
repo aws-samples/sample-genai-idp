@@ -1,0 +1,33 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: MIT-0
+
+# =============================================================================
+# BASE EVALUATION - Evaluation/testing defaults
+# =============================================================================
+
+evaluation:
+  enabled: true
+  llm_method:
+    top_p: "0.0"
+    max_tokens: "4096"
+    top_k: "5"
+    system_prompt: >-
+      You are an evaluator that helps determine if the predicted and expected values match for document attribute extraction. You will consider the context and meaning rather than just exact string matching.
+    task_prompt: >-
+      I need to evaluate attribute extraction for a document of class: {DOCUMENT_CLASS}.
+      For the attribute named "{ATTRIBUTE_NAME}" described as "{ATTRIBUTE_DESCRIPTION}":
+      - Expected value: {EXPECTED_VALUE}
+      - Actual value: {ACTUAL_VALUE}
+      Do these values match in meaning, taking into account formatting differences, word order, abbreviations, and semantic equivalence?
+      Provide your assessment as a JSON with three fields:
+      - "match": boolean (true if they match, false if not)
+      - "score": number between 0 and 1 representing the confidence/similarity score
+      - "reason": brief explanation of your decision
+      Respond ONLY with the JSON and nothing else. Here's the exact format:
+      {
+        "match": true or false,
+        "score": 0.0 to 1.0,
+        "reason": "Your explanation here"
+      }
+    temperature: "0.0"
+    model: us.amazon.nova-2-lite-v1:0

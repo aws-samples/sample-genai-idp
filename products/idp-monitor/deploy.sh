@@ -300,6 +300,16 @@ print(buckets[0] if buckets else '')
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Pre-build: Lambda Layer (idp_common + idp_common_ext + boto3)
+# Must run BEFORE sam build so the layer/ directory has the python/ content.
+# ─────────────────────────────────────────────────────────────────────────────
+if [[ "$NO_BUILD" == "false" ]]; then
+  header "Building Lambda layer (idp_common + idp_common_ext)"
+  bash "${SCRIPT_DIR}/layer/build-layer.sh"
+  success "Lambda layer build complete"
+fi
+
+# ─────────────────────────────────────────────────────────────────────────────
 # SAM Build
 # ─────────────────────────────────────────────────────────────────────────────
 if [[ "$NO_BUILD" == "false" ]]; then

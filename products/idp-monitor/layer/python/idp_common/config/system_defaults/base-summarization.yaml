@@ -1,0 +1,83 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: MIT-0
+
+# =============================================================================
+# BASE SUMMARIZATION - Document summarization defaults
+# =============================================================================
+
+summarization:
+  enabled: true
+  model: us.amazon.nova-pro-v1:0
+  top_p: "0.0"
+  max_tokens: "4096"
+  top_k: "5"
+  temperature: "0.0"
+  system_prompt: >-
+    You are a document summarization expert who can analyze and summarize documents from various domains including medical, financial, legal, and general business documents. Your task is to create a summary that captures the key information, main points, and important details from the document. Your output must be in valid JSON format. \nSummarization Style: Balanced\\nCreate a balanced summary that provides a moderate level of detail. Include the main points and key supporting information, while maintaining the document's overall structure. Aim for a comprehensive yet concise summary.\n Your output MUST be in valid JSON format with markdown content. You MUST strictly adhere to the output format specified in the instructions.
+
+  task_prompt: >-
+    <document-text>
+    {DOCUMENT_TEXT}
+    </document-text>
+
+    <extracted-attributes>
+    {EXTRACTION_RESULTS}
+    </extracted-attributes>
+
+    Analyze the provided document (<document-text>) along with the extracted attributes (<extracted-attributes>) to create a comprehensive and accurate summary.
+
+    CRITICAL INSTRUCTION: You MUST return your response as valid JSON with the
+    EXACT structure shown at the end of these instructions. Do not include any
+    explanations, notes, or text outside of the JSON structure.
+
+    Create a summary that captures the essential information from the document.
+    Your summary should:
+
+    1. **Integrate Extracted Attributes**: Begin with a "Key Information" section that highlights the most important extracted attributes in a structured format (use tables or lists as appropriate)
+
+    2. **Validate and Reference**: Cross-reference the document text with extracted values to ensure accuracy. When mentioning specific values, prefer the extracted attributes when they are available
+
+    3. **Maintain Document Structure**: Preserve the original document's organizational structure where appropriate, using the extracted attributes to enhance each section
+
+    4. **Highlight Critical Data**: Emphasize important extracted values such as:
+       - Names, addresses, and identification numbers
+       - Dates and time periods
+       - Monetary amounts and financial figures
+       - Status indicators and classifications
+       - Any calculated or derived values
+
+    5. **Use Markdown Formatting**: Apply markdown for better readability:
+       - Use headers (##, ###) for sections
+       - Create tables for structured data from extracted attributes
+       - Use **bold** for important values and *italics* for emphasis
+       - Create lists (bullet or numbered) for multiple items
+
+    6. **Provide Context**: For each extracted value mentioned, provide brief context from the document text to explain its significance
+
+    7. **Citation System**: Cite all facts using inline citations in the format [Cite-X, Page-Y] where X is a sequential citation number and Y is the page number. Format citations as markdown links: [[Cite-1, Page-3]](#cite-1-page-3)
+
+    8. **Data Completeness**: If extracted attributes are missing or empty, note this in the summary and rely more heavily on the document text
+
+    9. **References Section**: At the end, include a "References" section listing all citations with their exact text from the source document
+
+    Structure your summary as follows:
+    - **Key Information** (from extracted attributes)
+    - **Document Overview**
+    - **Detailed Sections** (based on document structure)
+    - **Summary and Conclusions**
+    - **References**
+
+    Output Format:
+
+    You MUST return ONLY valid JSON with the following structure and nothing
+    else:
+
+    ```json
+    {
+      "summary": "A comprehensive summary in markdown format that integrates extracted attributes with document text, includes inline citations linked to a references section at the bottom"
+    }
+    ```
+
+    Do not include any text, explanations, or notes outside of this JSON
+    structure. The JSON must be properly formatted and parseable.
+ 

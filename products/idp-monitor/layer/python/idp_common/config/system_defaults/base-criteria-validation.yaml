@@ -1,0 +1,21 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: MIT-0
+
+# =============================================================================
+# BASE CRITERIA VALIDATION - Document criteria validation defaults
+# =============================================================================
+
+criteria_validation:
+  model: us.anthropic.claude-3-5-sonnet-20240620-v1:0
+  temperature: 0.0
+  top_k: 20
+  top_p: 0.01
+  max_tokens: 4096
+  semaphore: 3  # Number of concurrent API calls
+  max_chunk_size: 180000  # Maximum tokens per chunk
+  token_size: 4  # Average characters per token
+  overlap_percentage: 10  # Chunk overlap percentage
+  response_prefix: "<response>"
+  system_prompt: ""
+  task_prompt: ""
+  criteria: []

@@ -111,7 +111,9 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
 
     if field_name == "getMonitoringStatus":
         result = _handle_get_status()
-        logger.info("<<< getMonitoringStatus response: %s", json.dumps(result, default=str))
+        logger.info(
+            "<<< getMonitoringStatus response: %s", json.dumps(result, default=str)
+        )
         return result
 
     if field_name == "getMonitoringDashboard":
@@ -260,7 +262,9 @@ def _handle_get_dashboard(event: dict[str, Any]) -> dict[str, Any]:
         time_range,
         sections,
         len(section_errors),
-        dashboard.get("volume", {}).get("totalDocuments") if dashboard.get("volume") else "N/A",
+        dashboard.get("volume", {}).get("totalDocuments")
+        if dashboard.get("volume")
+        else "N/A",
     )
 
     return {
@@ -415,17 +419,23 @@ def _transform_to_appsync_response(
     for v in config_versions:
         if isinstance(v, dict):
             ver_name = v.get("versionName", v.get("name", str(v)))
-            version_history.append({
-                "version": ver_name,
-                "createdAt": v.get("createdAt", ""),
-                "isActive": v.get("isActive", ver_name == config_raw.get("activeVersion")),
-            })
+            version_history.append(
+                {
+                    "version": ver_name,
+                    "createdAt": v.get("createdAt", ""),
+                    "isActive": v.get(
+                        "isActive", ver_name == config_raw.get("activeVersion")
+                    ),
+                }
+            )
         else:
-            version_history.append({
-                "version": str(v),
-                "createdAt": "",
-                "isActive": str(v) == config_raw.get("activeVersion"),
-            })
+            version_history.append(
+                {
+                    "version": str(v),
+                    "createdAt": "",
+                    "isActive": str(v) == config_raw.get("activeVersion"),
+                }
+            )
     config = {
         "activeVersion": config_raw.get("activeVersion", ""),
         "documentClassCount": config_raw.get("documentTypesCount", 0),
@@ -581,8 +591,15 @@ def _check_entitlement() -> str:
 # ─────────────────────────────────────────────────────────────────────────────
 
 _INFRA_PATTERNS = (
-    "s3", "sqs", "dynamodb", "stepfunctions", "appsync-api",
-    "amazonaws.com", "Table-", "Queue-", "Bucket-",
+    "s3",
+    "sqs",
+    "dynamodb",
+    "stepfunctions",
+    "appsync-api",
+    "amazonaws.com",
+    "Table-",
+    "Queue-",
+    "Bucket-",
 )
 
 
@@ -597,7 +614,9 @@ def _is_infrastructure_stage(name: str) -> bool:
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def _supplement_from_dynamodb(dashboard: dict[str, Any], time_range: str) -> dict[str, Any]:
+def _supplement_from_dynamodb(
+    dashboard: dict[str, Any], time_range: str
+) -> dict[str, Any]:
     """
     Fill in missing data (pages, tokens, doc types, config, timeSeries, latency)
     by scanning the DynamoDB tracking table directly.
@@ -622,20 +641,31 @@ def _supplement_from_dynamodb(dashboard: dict[str, Any], time_range: str) -> dic
         for s in latency.get("perStage", [])
     )
 
-    if not (needs_pages or needs_tokens or needs_dist or needs_config or needs_timeline or needs_latency):
+    if not (
+        needs_pages
+        or needs_tokens
+        or needs_dist
+        or needs_config
+        or needs_timeline
+        or needs_latency
+    ):
         logger.info("All data complete — no DynamoDB supplement needed")
         return dashboard
 
     logger.info(
         "Supplementing data from DynamoDB: needs_pages=%s, needs_tokens=%s, "
         "needs_dist=%s, needs_config=%s",
-        needs_pages, needs_tokens, needs_dist, needs_config,
+        needs_pages,
+        needs_tokens,
+        needs_dist,
+        needs_config,
     )
 
     try:
-        import boto3  # noqa: PLC0415
         from collections import defaultdict  # noqa: PLC0415
         from decimal import Decimal  # noqa: PLC0415
+
+        import boto3  # noqa: PLC0415
 
         dynamodb = boto3.resource("dynamodb")
 
@@ -699,7 +729,9 @@ def _supplement_from_dynamodb(dashboard: dict[str, Any], time_range: str) -> dic
             logger.info(
                 "DynamoDB supplement results: total_pages=%d, input_tokens=%d, "
                 "output_tokens=%d, doc_types=%s",
-                total_pages, total_input_tokens, total_output_tokens,
+                total_pages,
+                total_input_tokens,
+                total_output_tokens,
                 dict(doc_type_counts),
             )
 
@@ -713,7 +745,9 @@ def _supplement_from_dynamodb(dashboard: dict[str, Any], time_range: str) -> dic
                 cost["totalOutputTokens"] = total_output_tokens
                 cost["totalTokens"] = total_input_tokens + total_output_tokens
                 # Estimate cost (rough: $0.003/1K input, $0.015/1K output for Claude)
-                est_cost = (total_input_tokens * 0.003 + total_output_tokens * 0.015) / 1000
+                est_cost = (
+                    total_input_tokens * 0.003 + total_output_tokens * 0.015
+                ) / 1000
                 cost["estimatedCostUsd"] = round(est_cost, 6)
                 total_docs = volume.get("totalDocuments", 1) or 1
                 cost["avgCostPerDoc"] = round(est_cost / total_docs, 6)
@@ -725,13 +759,17 @@ def _supplement_from_dynamodb(dashboard: dict[str, Any], time_range: str) -> dic
                 for name, count in sorted(
                     doc_type_counts.items(), key=lambda x: x[1], reverse=True
                 ):
-                    classes.append({
-                        "className": name,
-                        "count": count,
-                        "percentage": round((count / total_classified) * 100, 1),
-                    })
+                    classes.append(
+                        {
+                            "className": name,
+                            "count": count,
+                            "percentage": round((count / total_classified) * 100, 1),
+                        }
+                    )
                 distribution["classes"] = classes
-                distribution["totalDocuments"] = volume.get("totalDocuments", total_classified)
+                distribution["totalDocuments"] = volume.get(
+                    "totalDocuments", total_classified
+                )
 
         # ── Supplement config from configuration table ─────────────────────
         if CONFIGURATION_TABLE_NAME and needs_config:
@@ -749,7 +787,11 @@ def _supplement_from_dynamodb(dashboard: dict[str, Any], time_range: str) -> dic
                     active_item = items[0]
                     # Configuration key is like "Config#default"
                     cfg_key = active_item.get("Configuration", "")
-                    version_name = cfg_key.replace("Config#", "") if cfg_key.startswith("Config#") else cfg_key
+                    version_name = (
+                        cfg_key.replace("Config#", "")
+                        if cfg_key.startswith("Config#")
+                        else cfg_key
+                    )
                     config["activeVersion"] = version_name
                     config["documentClassCount"] = len(items)  # All active configs
 
@@ -793,13 +835,17 @@ def _supplement_from_dynamodb(dashboard: dict[str, Any], time_range: str) -> dic
                     buckets[bucket_key] = {"completed": 0, "failed": 0, "total": 0}
 
                 for item in items:
-                    ts_str = item.get("CompletionTime") or item.get("WorkflowStartTime", "")
+                    ts_str = item.get("CompletionTime") or item.get(
+                        "WorkflowStartTime", ""
+                    )
                     status = item.get("ObjectStatus") or item.get("WorkflowStatus", "")
                     if not ts_str:
                         continue
                     try:
                         if "T" in str(ts_str):
-                            ts = datetime.fromisoformat(str(ts_str).replace("Z", "+00:00"))
+                            ts = datetime.fromisoformat(
+                                str(ts_str).replace("Z", "+00:00")
+                            )
                         else:
                             continue
                         if ts < start:
@@ -813,7 +859,12 @@ def _supplement_from_dynamodb(dashboard: dict[str, Any], time_range: str) -> dic
                         bucket_key = bucket_time.strftime("%Y-%m-%dT%H:00:00+00:00")
                         if bucket_key in buckets:
                             buckets[bucket_key]["total"] += 1
-                            if status in ("COMPLETED", "SUCCEEDED", "completed", "success"):
+                            if status in (
+                                "COMPLETED",
+                                "SUCCEEDED",
+                                "completed",
+                                "success",
+                            ):
                                 buckets[bucket_key]["completed"] += 1
                             elif status in ("FAILED", "ERROR", "failed", "error"):
                                 buckets[bucket_key]["failed"] += 1
@@ -824,12 +875,14 @@ def _supplement_from_dynamodb(dashboard: dict[str, Any], time_range: str) -> dic
 
                 # Build time series from buckets
                 time_series = [
-                    {"timestamp": k, **v}
-                    for k, v in sorted(buckets.items())
+                    {"timestamp": k, **v} for k, v in sorted(buckets.items())
                 ]
                 if any(b["total"] > 0 for b in time_series):
                     volume["timeSeries"] = time_series
-                    logger.info("TimeSeries supplement: %d buckets with data", sum(1 for b in time_series if b["total"] > 0))
+                    logger.info(
+                        "TimeSeries supplement: %d buckets with data",
+                        sum(1 for b in time_series if b["total"] > 0),
+                    )
             except Exception as exc:
                 logger.warning("TimeSeries supplement failed: %s", exc)
 
@@ -883,22 +936,32 @@ def _supplement_from_dynamodb(dashboard: dict[str, Any], time_range: str) -> dic
                         p50 = durations[n // 2] if n > 0 else 0
                         p90 = durations[int(n * 0.9)] if n > 1 else p50
                         p99 = durations[int(n * 0.99)] if n > 2 else p90
-                        per_stage.append({
-                            "stageName": step_name,
-                            "p50Ms": p50,
-                            "p90Ms": p90,
-                            "p99Ms": p99,
-                        })
+                        per_stage.append(
+                            {
+                                "stageName": step_name,
+                                "p50Ms": p50,
+                                "p90Ms": p90,
+                                "p99Ms": p99,
+                            }
+                        )
                         all_durations.extend(durations)
 
                     all_durations.sort()
                     n_all = len(all_durations)
                     latency["perStage"] = per_stage
                     latency["p50Ms"] = all_durations[n_all // 2] if n_all > 0 else 0
-                    latency["p90Ms"] = all_durations[int(n_all * 0.9)] if n_all > 1 else 0
-                    latency["p99Ms"] = all_durations[int(n_all * 0.99)] if n_all > 2 else 0
+                    latency["p90Ms"] = (
+                        all_durations[int(n_all * 0.9)] if n_all > 1 else 0
+                    )
+                    latency["p99Ms"] = (
+                        all_durations[int(n_all * 0.99)] if n_all > 2 else 0
+                    )
                     latency["sampleCount"] = n_all
-                    logger.info("Latency supplement: %d steps, %d samples", len(per_stage), n_all)
+                    logger.info(
+                        "Latency supplement: %d steps, %d samples",
+                        len(per_stage),
+                        n_all,
+                    )
             except Exception as exc:
                 logger.warning("Latency supplement failed: %s", exc)
 
