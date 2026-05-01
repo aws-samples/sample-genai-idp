@@ -1028,3 +1028,6 @@ policy_classes:
                       ]
           }
     $id: separate_procedure
+
+rule_validation:
+  enabled: true
