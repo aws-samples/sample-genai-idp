@@ -403,3 +403,38 @@ Check:
 - Node.js version >= 22.12.0
 - Run `npm ci` in `src/ui/` to install dependencies
 - Check `src/ui/.checksum` if builds are being skipped unexpectedly
+
+## Skill Files
+
+Domain-specific coding conventions, checklists, and workflows live in
+`.claude/skills/`. Consult the relevant skill file whenever a task touches
+that domain:
+
+| Skill File | When to Use |
+|------------|-------------|
+| `.claude/skills/backend-lambda.md` | Writing Lambda handlers or `idp_common` Python code |
+| `.claude/skills/frontend-ui.md` | React / TypeScript / Cloudscape UI changes |
+| `.claude/skills/infrastructure.md` | CloudFormation / SAM templates, nested stacks, GovCloud |
+| `.claude/skills/extraction-pipeline.md` | Document processing pipeline, configuration, agentic extraction |
+| `.claude/skills/code-review.md` | Pre-commit self-review checklist for your own changes |
+| `.claude/skills/pr-review.md` | Reviewing an external GitHub PR or GitLab MR at a URL (e.g. `review <url>`) |
+| `.claude/skills/testing-qa.md` | Writing tests, pytest patterns, moto, conftest setup |
+| `.claude/skills/documentation.md` | Documentation standards, frontmatter, CHANGELOG, docs-site |
+
+### Reviewing External PRs / MRs
+
+When the user asks `review <MR/PR URL>` (or similar), load
+`.claude/skills/pr-review.md` and produce a structured review answering:
+
+1. Is this a good PR?
+2. Safe? No regressions?
+3. Good UX?
+4. No security issues?
+5. Well documented?
+6. Safe to merge?
+
+The expected target branch for this repo is `develop` — flag any PR/MR that
+targets a different branch as the first finding. The review is read-only: do
+not push, merge, approve, or post comments on the PR/MR unless the user
+explicitly asks.
+
