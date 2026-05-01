@@ -591,7 +591,7 @@ Convert the agent from interactive chat to autonomous operation. The agent recei
 - [ ] **Automatic optimization log updates via hook/subagent** — The main agent frequently forgets to update OPTIMIZATION-LOG.md despite repeated prompt instructions. Investigate using a Strands hook (e.g. `AfterToolCallEvent`) that triggers a lightweight subagent whose sole job is to append a summary of what just happened to the log. This decouples log maintenance from the main agent's reasoning, ensuring the log stays current without consuming main agent context or relying on it remembering. Consider: cost of extra LLM calls, whether a simple template-based append (no LLM) is sufficient for tool results, and whether the subagent needs the full conversation or just the last tool call/result.
 - [ ] **IDP feature request: hide test execution documents from main document list** — Documents processed during AutoTune evaluation runs currently appear in the IDP UI's main document list, polluting it with hundreds of test documents. Request a filter or flag in IDP so that documents processed via test executions (test studio runs) are excluded from the default document list view.
 - [ ] **Small validation runs before full evaluation** — Add a `max_files` parameter to `run_evaluation` tool so the agent can launch a quick sanity check on 2–3 files before scaling to the full test set. This catches malformed configs early (e.g. the 75/75 failure) without wasting time and disk space on a full run. Update the agent prompt to instruct it to always run a small validation first, then scale up only after confirming the config works. Check if `idp-cli process` supports a file limit flag; if not, may need to filter the file list before submission.
-- [ ] **Prevent reward hacking via config manipulation** — The agent can modify evaluation/accuracy metric definitions in the config (e.g. changing field matching rules, relaxing thresholds, redefining what counts as "correct") to artificially inflate accuracy scores without actually improving extraction quality. Identify which config sections control evaluation metrics vs. extraction behavior, and either: (a) make `upload_config` strip/reject changes to metric-defining sections, (b) add a config diff check in the `run_evaluation` tool that flags metric definition changes, or (c) lock those sections in the prompt with explicit "never modify" instructions. Option (a) is the hard guardrail; (c) alone is insufficient since the agent can ignore prompt instructions.
+- [ ] **Prevent reward hacking via config manipulation** — The agent can modify evaluation/accuracy metric definitions in the config (e.g. changing field matching rules, relaxing thresholds, redefining what counts as "correct") to artificially inflate accuracy scores without actually improving extraction quality. Identify which config sections control evaluation metrics vs. extraction behavior, and either: (a) make `upload_config` strip/reject changes to metric-defining sections, (b) add a config diff check in the `run_evaluation` tool that flags metric definition changes, or (c) lock those sections in the prompt with explicit "never modify" instructions. Option (a) is the hard guardrail; (c) alone is insufficient since the agent can ignore prompt instructions. **Upstream discussion needed:** The root issue is that IDP Accelerator bundles inference config and evaluation config into a single YAML document. `x-aws-idp-evaluation-method`, `x-aws-idp-evaluation-threshold`, and `x-aws-idp-evaluation-weight` live inline on schema fields alongside extraction definitions. If these were separated into distinct configs (inference config vs. evaluation config), AutoTune would simply not have access to the evaluation config — no guardrail logic needed. Discuss with IDP team whether this separation is feasible upstream.
 - [ ] **Cost observability per optimization run** — Track and display the total cost of each optimization run. Two cost components: (1) **Bedrock model costs** — the agent's own token usage (Opus input/output tokens) plus any model calls made by IDP pipeline evaluation runs (Sonnet/Nova for extraction, classification, assessment). Strands exposes token counts via callbacks; IDP evaluation summaries include cost breakdowns. (2) **AgentCore compute costs** — microVM runtime hours. At minimum, aggregate token counts and estimated dollar cost in the DynamoDB state item and display in the UI status bar and run history sidebar. Ideally also write a cost summary section to OPTIMIZATION-LOG.md at the end of each run.
 - [ ] **Research harness engineering** — Study emerging best practices for building reliable scaffolding around autonomous agents. Highly relevant to AutoTune's optimization loop, tool design, error recovery, and guardrails. Sources: [Anthropic: Building Effective Managed Agents](https://www.anthropic.com/engineering/managed-agents), [OpenAI: Harness Engineering](https://openai.com/index/harness-engineering/), plus arxiv papers on agent reliability, tool-use scaffolding, and reward hacking prevention. Apply findings to improve hooks, prompt design, loop control, and cost/quality tradeoffs.
 
@@ -702,17 +702,48 @@ Implemented and deployed. The agent runs fully decoupled from the frontend — n
 - `be5c26721` — fix: stop optimization loop when status is already complete
 - `89195e43c` — docs: add reward hacking and cost observability TODOs
 
+### 6.13 Session: May 1 — Image Handling Fixes, Tool Hardening, Harness Engineering
+
+**Stream tab resume bug (fixed, deployed):**
+- `streamOffset` was React state captured in polling closure — on resume, `setStreamOffset(0)` hadn't flushed when the effect re-ran
+- Fix: replaced `useState` with `useRef` for `streamOffsetRef` so polling always reads current value
+
+**download_input_document tool (added, then hardened):**
+- Added tool wrapping `IDPACClient.download_input_document` — downloads raw source docs (PDF/PNG/etc.) to scratch
+- Returns `view_with` field: `"image_reader"` for images, `"file_read"` for others
+- Added auto-resize for images >4MB (Pillow halves dimensions iteratively) to stay under Bedrock's 5MB inline limit
+
+**image_reader tool (added to agent):**
+- Was missing from agent's tool list — agent had no way to view images
+- Added `from strands_tools import image_reader` and included in tools list
+
+**FileReadSafetyHook (new hook, deployed):**
+- `BeforeToolCallEvent` hook that forces `mode="view"` on every `file_read` call
+- Prevents agent from using `document` mode which crashes on images (Bedrock rejects image/png as document MIME type)
+- Root cause of the crash: `file_read` document mode sends PNG bytes as a Bedrock document block, but Bedrock only accepts xlsx/txt/pdf/csv/md/doc/html/xls/docx as documents. The `ValidationException` is a model-level error (happens when sending tool result back to model), not a tool error — Strands can't recover because the bad content is already in conversation state.
+
+**Reward hacking — upstream config separation note:**
+- Added note to dev plan: IDP Accelerator bundles inference config and evaluation config in one YAML. `x-aws-idp-evaluation-*` attributes live inline on schema fields. If separated upstream, AutoTune simply wouldn't have access to eval config — no guardrail needed. Discuss with IDP team.
+
+**Harness engineering research TODO added:**
+- Sources: Anthropic managed agents post, OpenAI harness engineering post, arxiv papers
+- Relevant to optimization loop, tool design, error recovery, guardrails
+
+**Commits pushed:**
+- `c0719cce5` — fix: stream tab not updating on resume — use ref for poll offset
+- `c0719cce5` — feat: add download_input_document tool (26 tools total)
+- `ad695ad3` — fix: prevent image/png crash — add image_reader tool, steer agent away from file_read on images
+- `58a8435a` — fix: FileReadSafetyHook forces mode=view, add harness engineering research TODO
+
 ### ⚠️ NEXT SESSION: TOP PRIORITY
 
-**See `autotune/planning-docs/next-steps-2026-05-01.md` for detailed next steps.**
+**See `autotune/planning-docs/next-steps-2026-05-04.md` for detailed Monday next steps.**
 
 **Next priorities (in order):**
-1. **Silent evaluation failure investigation** — IDP-side bug where eval runs get stuck at 0 completed files. Standalone doc at `autotune/planning-docs/silent-eval-failure-investigation.md`. Will be worked in parallel by IDP team.
-2. **Reward hacking guardrail** — Hard guardrail in `upload_config` to prevent agent from modifying metric definitions.
+1. **Silent evaluation failure investigation** — IDP-side bug where eval runs get stuck at 0 completed files. Create standalone investigation doc for colleague.
+2. **Reward hacking guardrail** — Hard guardrail in `upload_config` + discuss upstream config separation with IDP team.
 3. **Cost observability** — Track token usage and estimated cost per run.
 4. **Automatic optimization log updates** — Hook-based approach to keep the log current.
-
-**Resume testing:** Will be tested organically while working on other features.
 
 #### Problem being solved
 AgentCore's internal SSE proxy kills the HTTP response stream after ~60s. Our heartbeat/ping approach can't fix this because the proxy is upstream of our container. The agent keeps running but the frontend loses all visibility. We need the frontend to see the agent's full thought process, optimization state, and optimization log — all without depending on a persistent SSE connection.

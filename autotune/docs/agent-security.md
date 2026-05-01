@@ -118,6 +118,14 @@ The `OptimizationLoopHook` enforces a maximum iteration count (default: 10). Aft
 
 AgentCore also enforces a session timeout at the platform level, which acts as a backstop if the hook fails.
 
+### Layer 6: Tool Safety Hooks
+
+The `FileReadSafetyHook` intercepts every `file_read` tool call via `BeforeToolCallEvent` and forces `mode="view"`. This prevents the agent from using `document` mode, which sends raw file bytes to Bedrock as a document content block — Bedrock rejects image formats (PNG, JPEG, etc.) with a `ValidationException` that crashes the entire run unrecoverably. The agent uses `image_reader` for images instead.
+
+### Layer 7: Reward Hacking Prevention (TODO)
+
+The agent can modify evaluation metric definitions in the config (`x-aws-idp-evaluation-method`, `x-aws-idp-evaluation-threshold`, `x-aws-idp-evaluation-weight`) to inflate accuracy without improving extraction. Planned guardrail in `upload_config` to strip/reject changes to these fields. See also upstream discussion about separating inference and evaluation configs in the IDP Accelerator.
+
 ## FAQ
 
 **Q: Can the agent delete my IDP stack?**

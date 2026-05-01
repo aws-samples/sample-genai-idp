@@ -67,7 +67,7 @@ Additionally, a **known AgentCore NFS bug** (reported by Walkley He, April 13, `
 |---|---|---|---|
 | Apr 29 | All data on /mnt (results + sessions + configs) | ~46 MB | ENOSPC at ~20 min |
 | Apr 30 AM | Moved bulk downloads to /tmp, kept sessions + configs on /mnt | ~1.59 MB | ENOSPC at ~42 min |
-| Apr 30 PM | Moved sessions to S3, only OPTIMIZATION-LOG.md on /mnt | ~0.25 MB | **Pending verification** |
+| Apr 30 PM | Moved sessions to S3, only OPTIMIZATION-LOG.md on /mnt | ~0.25 MB | **Confirmed working** — survived 1+ hours, zero NFS files |
 
 ### The fix: S3SessionManager
 
