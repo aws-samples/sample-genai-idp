@@ -819,6 +819,29 @@ def config_edit(config_path: str, operations: list[dict]) -> str:
     return json.dumps(results, indent=2, default=str)
 
 
+@tool
+def download_input_document(batch_id: str, filename: str) -> str:
+    """Download a raw input document (PDF, PNG, etc.) from the IDP input bucket.
+
+    Use this to visually inspect a source document — e.g., to understand why
+    extraction failed, verify ground truth, or check document quality.
+
+    Args:
+        batch_id: Test run ID (e.g., 'RealKIE-FCC-Verified-20260429-174653').
+        filename: Document filename (e.g., 'invoice-001.pdf').
+
+    Returns:
+        Local file path where the document was saved.
+    """
+    scratch = os.environ.get("AUTOTUNE_SCRATCH_DIR", "/tmp/autotune-data")
+    output_path = os.path.join(scratch, "input-documents", batch_id, filename)
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    client = _get_client()
+    document_id = f"{batch_id}/{filename}"
+    result = client.download_input_document(document_id, output_path)
+    return json.dumps({"path": result})
+
+
 # --- Collect all tools for the agent ---
 
 ALL_TOOLS = [
@@ -840,6 +863,7 @@ ALL_TOOLS = [
     download_evaluation_results,
     download_single_document_results,
     download_ground_truth,
+    download_input_document,
     parse_evaluation_results,
     run_inference,
     download_raw_processing_results,
