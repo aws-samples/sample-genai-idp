@@ -102,52 +102,54 @@ class RuleValidationService:
             self._semaphore = asyncio.Semaphore(self.semaphore_limit)
         return self._semaphore
 
-    def _get_rule_types(self, config: Dict[str, Any]) -> List[str]:
+    def _get_policy_types(self, config: Dict[str, Any]) -> List[str]:
         """
-        Extract rule types from rule_classes configuration.
+        Extract policy types from policy_classes configuration.
 
         Args:
             config: Configuration dictionary
 
         Returns:
-            List of rule type strings
+            List of policy type strings
         """
-        rule_classes = config.get("rule_classes", [])
-        rule_types = [
-            rule_class.get("x-aws-idp-rule-type")
-            for rule_class in rule_classes
-            if rule_class.get("x-aws-idp-rule-type")
+        policy_classes = config.get("policy_classes", [])
+        policy_types = [
+            policy_class.get("x-aws-idp-policy-type")
+            for policy_class in policy_classes
+            if policy_class.get("x-aws-idp-policy-type")
         ]
         logger.debug(
-            f"Extracted {len(rule_types)} rule types from rule_classes: {rule_types}"
+            f"Extracted {len(policy_types)} policy types from policy_classes: {policy_types}"
         )
-        return rule_types
+        return policy_types
 
-    def _get_rule_questions(self, config: Dict[str, Any], rule_type: str) -> List[str]:
+    def _get_rule_questions(
+        self, config: Dict[str, Any], policy_type: str
+    ) -> List[str]:
         """
-        Extract rule questions for a specific rule type from rule_classes.
+        Extract rule questions for a specific policy type from policy_classes.
 
         Args:
             config: Configuration dictionary
-            rule_type: Rule type to get questions for
+            policy_type: Policy type to get questions for
 
         Returns:
             List of rule question strings
         """
-        rule_classes = config.get("rule_classes", [])
-        for rule_class in rule_classes:
-            if rule_class.get("x-aws-idp-rule-type") == rule_type:
-                rule_properties = rule_class.get("rule_properties", {})
+        policy_classes = config.get("policy_classes", [])
+        for policy_class in policy_classes:
+            if policy_class.get("x-aws-idp-policy-type") == policy_type:
+                rule_properties = policy_class.get("rule_properties", {})
                 questions = [
                     prop.get("description")
                     for prop in rule_properties.values()
                     if prop.get("description")
                 ]
                 logger.debug(
-                    f"Extracted {len(questions)} questions for rule_type '{rule_type}': {questions}"
+                    f"Extracted {len(questions)} questions for policy_type '{policy_type}': {questions}"
                 )
                 return questions
-        logger.warning(f"No questions found for rule_type '{rule_type}'")
+        logger.warning(f"No questions found for policy_type '{policy_type}'")
         return []
 
     def _chunk_text_with_overlap(
@@ -449,7 +451,7 @@ class RuleValidationService:
         self,
         rule: str,
         user_history: str,
-        rule_type: str,
+        policy_type: str,
         config: Dict[str, Any],
         extraction_results: Dict[str, Any] = None,
     ) -> Dict[str, Any]:
@@ -459,7 +461,7 @@ class RuleValidationService:
         Args:
             rule: The rule question to evaluate
             user_history: The user history text
-            rule_type: Type of rule
+            policy_type: Type of policy
             config: Configuration for the validation
             extraction_results: Optional extraction results to include in the prompt
 
@@ -475,7 +477,7 @@ class RuleValidationService:
 
                 # Log start of processing with context
                 logger.debug(
-                    f"DEBUG:ASYNC_START task_id={task_id} rule_type='{rule_type}' rule='{rule[:60]}...' thread_id={asyncio.current_task()}"
+                    f"DEBUG:ASYNC_START task_id={task_id} policy_type='{policy_type}' rule='{rule[:60]}...' thread_id={asyncio.current_task()}"
                 )
 
                 start_time = time.time()
@@ -490,7 +492,7 @@ class RuleValidationService:
                 placeholders = {
                     "DOCUMENT_TEXT": user_history,
                     "rule": rule,
-                    "rule_type": rule_type,
+                    "policy_type": policy_type,
                     "recommendation_options": config_obj.rule_validation.recommendation_options
                     or "",
                 }
@@ -514,7 +516,7 @@ class RuleValidationService:
 
                 # Log before LLM invocation
                 logger.debug(
-                    f"DEBUG:LLM_INVOKE_START task_id={task_id} rule_type='{rule_type}' rule='{rule[:60]}...' model='{model_id}'"
+                    f"DEBUG:LLM_INVOKE_START task_id={task_id} policy_type='{policy_type}' rule='{rule[:60]}...' model='{model_id}'"
                 )
 
                 # Invoke the model
@@ -531,14 +533,14 @@ class RuleValidationService:
 
                 call_duration = time.time() - start_time
                 logger.debug(
-                    f"DEBUG:LLM_RESPONSE task_id={task_id} rule_type='{rule_type}' rule='{rule[:60]}...' duration={call_duration:.2f}s response_keys={list(response.keys()) if response else 'None'}"
+                    f"DEBUG:LLM_RESPONSE task_id={task_id} policy_type='{policy_type}' rule='{rule[:60]}...' duration={call_duration:.2f}s response_keys={list(response.keys()) if response else 'None'}"
                 )
 
                 # Extract and parse response
                 response_text = bedrock.extract_text_from_response(response)
 
                 logger.debug(
-                    f"DEBUG:PARSED_RESPONSE task_id={task_id} rule_type='{rule_type}' rule='{rule[:60]}...' response_length={len(response_text)} response_text={response_text[:200]}..."
+                    f"DEBUG:PARSED_RESPONSE task_id={task_id} policy_type='{policy_type}' rule='{rule[:60]}...' response_length={len(response_text)} response_text={response_text[:200]}..."
                 )
 
                 # Parse JSON response
@@ -558,14 +560,14 @@ class RuleValidationService:
                 except json.JSONDecodeError:
                     logger.error(f"Failed to parse response as JSON: {response_text}")
                     response_dict = {
-                        "rule_type": rule_type,
+                        "policy_type": policy_type,
                         "rule": rule,
                         "extracted_facts": [],
                         "extraction_summary": f"Failed to parse response: {response_text}",
                     }
 
                 # Add rule context to response
-                response_dict["rule_type"] = rule_type
+                response_dict["policy_type"] = policy_type
                 response_dict["rule"] = rule
 
                 # Validate response with FactExtractionResponse model
@@ -601,25 +603,25 @@ class RuleValidationService:
             except Exception as e:
                 logger.error(f"Error processing rule question: {str(e)}")
                 return {
-                    "rule_type": rule_type,
+                    "policy_type": policy_type,
                     "rule": rule,
                     "supporting_pages": [],
                     "recommendation": "Information Not Found",
                     "reasoning": f"Error during processing: {str(e)}",
                 }
 
-    async def _process_rule_type(
+    async def _process_policy_type(
         self,
-        rule_type: str,
+        policy_type: str,
         user_history: str,
         config: Dict[str, Any],
         extraction_results: Dict[str, Any] = None,
     ) -> List[Dict[str, Any]]:
         """
-        Process all rule questions for a specific rule type.
+        Process all rule questions for a specific policy type.
 
         Args:
-            rule_type: The rule type to process
+            policy_type: The policy type to process
             user_history: The user history text
             config: Configuration for the validation
             extraction_results: Optional extraction results to include in the prompt
@@ -630,10 +632,12 @@ class RuleValidationService:
         start_time = time.time()
 
         try:
-            # Get rule questions from rule_classes
-            rule_questions = self._get_rule_questions(config, rule_type)
+            # Get rule questions from policy_classes
+            rule_questions = self._get_rule_questions(config, policy_type)
             if not rule_questions:
-                raise ValueError(f"No rule questions found for type: {rule_type}")
+                raise ValueError(
+                    f"No rule questions found for policy type: {policy_type}"
+                )
 
             # Process all questions concurrently
             tasks = []
@@ -641,7 +645,7 @@ class RuleValidationService:
                 task = self._process_rule_question(
                     rule=rule,
                     user_history=user_history,
-                    rule_type=rule_type,
+                    policy_type=policy_type,
                     config=config,
                     extraction_results=extraction_results,
                 )
@@ -653,15 +657,17 @@ class RuleValidationService:
             # Track timing
             duration = time.time() - start_time
             self.timing_metrics["criteria_processing_time"].append(
-                {"rule_type": rule_type, "duration": duration}
+                {"policy_type": policy_type, "duration": duration}
             )
 
-            logger.info(f"Processed rule type {rule_type} in {duration:.2f} seconds")
+            logger.info(
+                f"Processed policy type {policy_type} in {duration:.2f} seconds"
+            )
 
             return responses
 
         except Exception as e:
-            logger.error(f"Error processing rule type {rule_type}: {str(e)}")
+            logger.error(f"Error processing policy type {policy_type}: {str(e)}")
             raise
 
     def _update_document_status(
@@ -830,37 +836,69 @@ class RuleValidationService:
                 # Create section URI for reference (removed unused variable)
 
                 for chunk_idx, chunk in enumerate(chunks):
-                    # Process each rule type concurrently
+                    # Process each policy type concurrently
+                    # Filter by matched_policy_types - skip if None or empty
+                    all_policy_types = self._get_policy_types(config)
+                    if (
+                        document.rule_validation_result
+                        and document.rule_validation_result.matched_policy_types
+                    ):
+                        policy_types_to_process = [
+                            pt
+                            for pt in all_policy_types
+                            if pt
+                            in document.rule_validation_result.matched_policy_types
+                        ]
+                        logger.info(
+                            f"Filtering policy types by matched_policy_types: {policy_types_to_process}"
+                        )
+                    elif (
+                        document.rule_validation_result
+                        and document.rule_validation_result.matched_policy_types
+                        is not None
+                    ):
+                        # matched_policy_types is empty list - skip processing
+                        logger.info(
+                            "matched_policy_types is empty - skipping rule validation"
+                        )
+                        policy_types_to_process = []
+                    else:
+                        # No rule_validation_result set - skip processing
+                        logger.info(
+                            "No matched_policy_types set - skipping rule validation"
+                        )
+                        policy_types_to_process = []
+
                     tasks = []
-                    for rule_type in self._get_rule_types(config):
-                        task = self._process_rule_type(
-                            rule_type=rule_type,
+                    for policy_type in policy_types_to_process:
+                        task = self._process_policy_type(
+                            policy_type=policy_type,
                             user_history=chunk,
                             config=config,
                             extraction_results=extraction_results,
                         )
                         tasks.append(task)
 
-                    # Wait for all rule types to complete
+                    # Wait for all policy types to complete
                     responses = await asyncio.gather(*tasks)
 
                     # Organize responses for this section
-                    for rule_idx, rule_type in enumerate(self._get_rule_types(config)):
-                        if rule_type not in section_responses:
-                            section_responses[rule_type] = (
+                    for policy_idx, policy_type in enumerate(policy_types_to_process):
+                        if policy_type not in section_responses:
+                            section_responses[policy_type] = (
                                 {} if multiple_sections else []
                             )
 
                         if multiple_sections:
                             # For multiple sections, organize by rule
-                            for response in responses[rule_idx]:
+                            for response in responses[policy_idx]:
                                 rule = response["rule"]
-                                if rule not in section_responses[rule_type]:
-                                    section_responses[rule_type][rule] = []
-                                section_responses[rule_type][rule].append(response)
+                                if rule not in section_responses[policy_type]:
+                                    section_responses[policy_type][rule] = []
+                                section_responses[policy_type][rule].append(response)
                         else:
                             # For single section, just append
-                            section_responses[rule_type].extend(responses[rule_idx])
+                            section_responses[policy_type].extend(responses[policy_idx])
 
                 return section_responses, chunks_count, chunking_occurred
 
@@ -878,19 +916,19 @@ class RuleValidationService:
                 if section_chunking:
                     chunking_occurred = True
 
-                for rule_type, responses in section_responses.items():
-                    if rule_type not in all_responses:
-                        all_responses[rule_type] = {} if multiple_sections else []
+                for policy_type, responses in section_responses.items():
+                    if policy_type not in all_responses:
+                        all_responses[policy_type] = {} if multiple_sections else []
 
                     if multiple_sections:
                         # Merge responses from multiple sections
                         for rule, rule_responses in responses.items():
-                            if rule not in all_responses[rule_type]:
-                                all_responses[rule_type][rule] = []
-                            all_responses[rule_type][rule].extend(rule_responses)
+                            if rule not in all_responses[policy_type]:
+                                all_responses[policy_type][rule] = []
+                            all_responses[policy_type][rule].extend(rule_responses)
                     else:
                         # Extend responses for single section
-                        all_responses[rule_type].extend(responses)
+                        all_responses[policy_type].extend(responses)
 
             # Save section results to S3 with chunking metadata
             output_bucket = document.output_bucket

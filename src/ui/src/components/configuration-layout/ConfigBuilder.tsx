@@ -428,6 +428,7 @@ interface ConfigBuilderProps {
   ruleSchema?: Record<string, unknown> | unknown[] | null;
   onRuleSchemaChange?: ((schema: unknown, isDirty: boolean) => void) | null;
   onRuleSchemaValidate?: ((isValid: boolean, errors: unknown[]) => void) | null;
+  highlightClassName?: string | null;
   versionDescription?: string;
   onDescriptionChange?: ((description: string) => void) | null;
 }
@@ -450,6 +451,7 @@ const ConfigBuilder = ({
   ruleSchema = null,
   onRuleSchemaChange = null,
   onRuleSchemaValidate = null,
+  highlightClassName = null,
   versionDescription = '',
   onDescriptionChange = null,
 }: ConfigBuilderProps): React.JSX.Element => {
@@ -1711,12 +1713,12 @@ const ConfigBuilder = ({
               </ExtBox>
             ),
           },
-          // Only show Rule Schema tab for Pattern2
+          // Only show Policy Schema tab for Pattern2
           ...(showRuleSchema
             ? [
                 {
                   id: 'rule-schema',
-                  label: 'Rule Schema',
+                  label: 'Policy Schema',
                   content: (
                     <ExtBox style={{ height: 'calc(70vh - 60px)' }}>
                       <SchemaBuilder
@@ -1724,6 +1726,7 @@ const ConfigBuilder = ({
                         onChange={onRuleSchemaChange}
                         onValidate={onRuleSchemaValidate}
                         isRuleSchema={true}
+                        highlightClassName={highlightClassName}
                       />
                     </ExtBox>
                   ),

@@ -79,6 +79,7 @@ type Document implements DynamoDbBase @aws_cognito_user_pools @aws_iam {
   EvaluationStatus: String
   SummaryReportUri: String
   RuleValidationResultUri: String
+  RuleValidationResult: AWSJSON
   ExpiresAfter: AWSTimestamp
   HITLStatus: String
   HITLReviewURL: String
@@ -315,6 +316,7 @@ input UpdateDocumentInput {
   EvaluationStatus: String
   SummaryReportUri: String
   RuleValidationResultUri: String
+  RuleValidationResult: AWSJSON
   HITLStatus: String
   HITLReviewURL: String
   HITLTriggered: Boolean
@@ -720,6 +722,7 @@ type Mutation {
     pageRanges: [String]
     pageLabels: [String]
     skipJobCreation: Boolean
+    discoveryType: String
   ): DisPresignedUrlResponse!
     @aws_auth(cognito_groups: ["Admin", "Author"])
   autoDetectSections(

@@ -1,7 +1,7 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: MIT-0
 
-/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars */
+/* eslint-disable @typescript-eslint/no-explicit-any */
 
 /**
  * Discovery Job Details Page
@@ -207,6 +207,8 @@ const DiscoveryJobDetails = (): React.JSX.Element => {
   }
 
   const isMultiDoc = job.jobType === 'multi-document';
+  const isPolicyJob =
+    job.jobType === 'rules' || (typeof job.discoveredClassName === 'string' && job.discoveredClassName.startsWith('policy_rules'));
   const isTerminal = ['COMPLETED', 'FAILED', 'OPTIMIZATION_COMPLETED', 'OPTIMIZATION_FAILED'].includes(job.status);
   const classes = isMultiDoc ? parseDiscoveredClasses(job.discoveredClasses) : [];
 
@@ -227,11 +229,17 @@ const DiscoveryJobDetails = (): React.JSX.Element => {
     }
   };
 
-  /** Build a link to the config editor's Document Schema tab for a given class. */
+  /**
+   * Build a link to the config editor for a given class.
+   * Rules-discovery classes (whose name starts with "policy_rules") are saved
+   * into `policy_classes`, which is rendered by the Policy Schema tab.
+   * Regular discovery classes go to the Document Schema tab.
+   */
   const getConfigLink = (className: string): string => {
     const params = new URLSearchParams();
     if (job.version) params.set('version', job.version);
-    params.set('tab', 'extraction-schema');
+    params.set('tab', isPolicyJob ? 'rule-schema' : 'extraction-schema');
+    params.set('highlight', className);
     return `#${CONFIGURATION_PATH}?${params.toString()}`;
   };
 
@@ -241,7 +249,10 @@ const DiscoveryJobDetails = (): React.JSX.Element => {
       <BreadcrumbGroup
         items={[
           { text: 'Discovery', href: `#${DISCOVERY_PATH}` },
-          { text: isMultiDoc ? 'Multi-Document Job' : 'Single Document Job', href: '#' },
+          {
+            text: isPolicyJob ? 'Policy Discovery Job' : isMultiDoc ? 'Multi-Document Job' : 'Single Document Job',
+            href: '#',
+          },
         ]}
       />
 

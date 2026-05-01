@@ -32,6 +32,9 @@ scratch/
 node_modules/
 package-lock.json
 
+# Jupyter
+.ipynb_checkpoints/
+
 # Docs site (Astro Starlight) - build artifacts and symlinks
 docs-site/.astro/
 docs-site/dist/

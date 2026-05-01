@@ -16,7 +16,7 @@ import {
 import { useSchemaDesigner } from '../../hooks/useSchemaDesigner';
 import { useSchemaValidation } from '../../hooks/useSchemaValidation';
 import { useDebounce } from '../../hooks/useDebounce';
-import { TYPE_OPTIONS, X_AWS_IDP_DOCUMENT_TYPE } from '../../constants/schemaConstants';
+import { TYPE_OPTIONS, X_AWS_IDP_DOCUMENT_TYPE, X_AWS_IDP_POLICY_TYPE } from '../../constants/schemaConstants';
 import SchemaCanvas from './SchemaCanvas';
 import SchemaInspector from './SchemaInspector';
 import SchemaPreviewTabs from './SchemaPreviewTabs';
@@ -58,7 +58,8 @@ const SchemaBuilder = ({
   onChange = null,
   onValidate = null,
   isRuleSchema = false,
-}: SchemaBuilderProps): React.JSX.Element => {
+  highlightClassName = null,
+}: SchemaBuilderProps & { highlightClassName?: string | null }): React.JSX.Element => {
   const {
     classes,
     selectedClassId,
@@ -125,6 +126,26 @@ const SchemaBuilder = ({
       }
     }
   }, [currentSchema, isDirty, onChange]);
+
+  // When the caller passes a highlightClassName (e.g. from the Policy Discovery
+  // job's "View in Configuration" link), auto-select the matching class and
+  // scroll its card into view so the user lands on the newly extracted rules.
+  const highlightAppliedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!highlightClassName || classes.length === 0) return;
+    if (highlightAppliedRef.current === highlightClassName) return;
+    const match = classes.find((c) => c.name === highlightClassName);
+    if (!match) return;
+    setSelectedClassId(match.id);
+    highlightAppliedRef.current = highlightClassName;
+    // Defer scroll until after DOM paints the selection outline
+    setTimeout(() => {
+      const el = document.querySelector(`[data-schema-class-id="${match.id}"]`);
+      if (el instanceof HTMLElement) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    }, 100);
+  }, [highlightClassName, classes, setSelectedClassId]);
 
   useEffect(() => {
     if (onValidate && debouncedClasses.length > 0) {
@@ -247,13 +268,13 @@ const SchemaBuilder = ({
   const _sharedCount = classes.filter((c) => !c[X_AWS_IDP_DOCUMENT_TYPE]).length;
 
   // Dynamic labels based on schema type
-  const typeLabel = isRuleSchema ? 'rule' : 'document';
-  const _typeLabelPlural = isRuleSchema ? 'rules' : 'documents';
+  const typeLabel = isRuleSchema ? 'policy' : 'document';
+  const typeLabelPlural = isRuleSchema ? 'rules' : 'documents';
   const TypeLabel = isRuleSchema ? 'Rule' : 'Document';
   const TypesLabel = isRuleSchema ? 'Rules' : 'Documents';
-  const _classLabel = isRuleSchema ? 'Rule Class' : 'Class';
-  const classesLabel = isRuleSchema ? 'Rule Classes' : 'Classes';
-  const _attributeLabel = isRuleSchema ? 'Rule' : 'Attribute';
+  const classLabel = isRuleSchema ? 'Policy Class' : 'Class';
+  const classesLabel = isRuleSchema ? 'Policy Classes' : 'Classes';
+  const attributeLabel = isRuleSchema ? 'Rule' : 'Attribute';
   const attributesLabel = isRuleSchema ? 'Rules' : 'Attributes';
   const sharedLabel = isRuleSchema ? 'Recommendation Options' : 'Shared Classes';
 
@@ -333,7 +354,7 @@ const SchemaBuilder = ({
                   <Box>
                     <SpaceBetween direction="horizontal" size="xs">
                       <Button onClick={handleAddClass} iconName="add-plus">
-                        {isRuleSchema ? 'Add Rule Class' : 'Add Class'}
+                        {isRuleSchema ? 'Add Policy Class' : 'Add Class'}
                       </Button>
                       <Button onClick={handleAddAttribute} disabled={!selectedClassId} iconName="add-plus">
                         {isRuleSchema ? 'Add Rule' : 'Add Attribute'}
@@ -396,6 +417,7 @@ const SchemaBuilder = ({
                         .map((cls) => (
                           <Container key={cls.id} disableContentPaddings={false}>
                             <div
+                              data-schema-class-id={cls.id}
                               role="button"
                               tabIndex={0}
                               onClick={() => setSelectedClassId(cls.id)}
@@ -473,6 +495,7 @@ const SchemaBuilder = ({
                           .map((cls) => (
                             <Container key={cls.id} disableContentPaddings={false}>
                               <div
+                                data-schema-class-id={cls.id}
                                 role="button"
                                 tabIndex={0}
                                 onClick={() => setSelectedClassId(cls.id)}
@@ -641,162 +664,49 @@ const SchemaBuilder = ({
               : addClassMode === 'standard'
                 ? 'Import Standard Class'
                 : isRuleSchema
-                  ? 'Add Rule Class'
+                  ? 'Add Policy Class'
                   : 'Add Custom Class'
           }
           footer={
-            addClassMode === 'custom' ? (
-              <Box float="right">
-                <SpaceBetween direction="horizontal" size="xs">
-                  <Button
-                    variant="link"
-                    onClick={() => {
-                      if (!isRuleSchema) {
-                        setAddClassMode('choose');
-                        setNewClassName('');
-                        setNewClassDescription('');
-                      } else {
-                        setShowAddClassModal(false);
-                        setNewClassName('');
-                        setNewClassDescription('');
-                      }
-                    }}
-                  >
-                    {isRuleSchema ? 'Cancel' : 'Back'}
-                  </Button>
-                  <Button variant="primary" onClick={handleConfirmAddClass} disabled={!isClassNameValid(newClassName)}>
-                    {isRuleSchema ? 'Add Rule Class' : 'Add Class'}
-                  </Button>
-                </SpaceBetween>
-              </Box>
-            ) : addClassMode === 'choose' ? (
-              <Box float="right">
+            <Box float="right">
+              <SpaceBetween direction="horizontal" size="xs">
                 <Button
                   variant="link"
                   onClick={() => {
                     setShowAddClassModal(false);
-                    setAddClassMode('choose');
+                    setNewClassName('');
+                    setNewClassDescription('');
                   }}
                 >
                   Cancel
                 </Button>
-              </Box>
-            ) : undefined /* standard mode has its own footer via StandardClassCatalog */
+                <Button variant="primary" onClick={handleConfirmAddClass} disabled={!newClassName.trim()}>
+                  {isRuleSchema ? 'Add Policy Class' : 'Add Class'}
+                </Button>
+              </SpaceBetween>
+            </Box>
           }
         >
-          {addClassMode === 'choose' && (
-            <SpaceBetween size="l">
-              <Box variant="p">How would you like to create your class?</Box>
-              <ColumnLayout columns={2}>
-                <div
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => setAddClassMode('custom')}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') setAddClassMode('custom');
-                  }}
-                  style={{
-                    padding: '20px',
-                    border: '2px solid #e9ebed',
-                    borderRadius: '12px',
-                    cursor: 'pointer',
-                    textAlign: 'center',
-                    transition: 'all 0.2s ease',
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.borderColor = '#0972d3';
-                    e.currentTarget.style.backgroundColor = '#f2f8fd';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.borderColor = '#e9ebed';
-                    e.currentTarget.style.backgroundColor = 'transparent';
-                  }}
-                >
-                  <SpaceBetween size="s">
-                    <Box fontSize="heading-m">📝</Box>
-                    <Box fontWeight="bold" fontSize="body-m">
-                      Custom Class
-                    </Box>
-                    <Box fontSize="body-s" color="text-body-secondary">
-                      Define your own class with custom fields and attributes
-                    </Box>
-                  </SpaceBetween>
-                </div>
-                <div
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => setAddClassMode('standard')}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') setAddClassMode('standard');
-                  }}
-                  style={{
-                    padding: '20px',
-                    border: '2px solid #e9ebed',
-                    borderRadius: '12px',
-                    cursor: 'pointer',
-                    textAlign: 'center',
-                    transition: 'all 0.2s ease',
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.borderColor = '#0972d3';
-                    e.currentTarget.style.backgroundColor = '#f2f8fd';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.borderColor = '#e9ebed';
-                    e.currentTarget.style.backgroundColor = 'transparent';
-                  }}
-                >
-                  <SpaceBetween size="s">
-                    <Box fontSize="heading-m">📦</Box>
-                    <Box fontWeight="bold" fontSize="body-m">
-                      Standard Class
-                    </Box>
-                    <Box fontSize="body-s" color="text-body-secondary">
-                      Choose from pre-built classes for common document types (Invoice, Receipt, etc.)
-                    </Box>
-                  </SpaceBetween>
-                </div>
-              </ColumnLayout>
-            </SpaceBetween>
-          )}
-
-          {addClassMode === 'custom' && (
-            <SpaceBetween size="m">
-              <FormField
-                label={isRuleSchema ? 'Rule Class Name' : 'Class Name'}
-                description={`A unique name for this ${isRuleSchema ? 'rule' : 'extraction'} class`}
-                errorText={classNameErrorText}
-              >
-                <Input
-                  value={newClassName}
-                  onChange={({ detail }) => setNewClassName(detail.value)}
-                  placeholder={isRuleSchema ? 'e.g., ComplianceRules, SafetyChecks' : 'e.g., Invoice, Customer, Address'}
-                />
-              </FormField>
-              <FormField label="Description (Optional)" description="Describe what this class represents">
-                <Textarea
-                  value={newClassDescription}
-                  onChange={({ detail }) => setNewClassDescription(detail.value)}
-                  placeholder="e.g., Invoice document with line items"
-                  rows={3}
-                />
-              </FormField>
-            </SpaceBetween>
-          )}
-
-          {addClassMode === 'standard' && (
-            <StandardClassCatalog
-              onImport={(schemas) => {
-                addStandardClasses(schemas as Record<string, unknown>[]);
-                setShowAddClassModal(false);
-                setAddClassMode('choose');
-              }}
-              existingClassNames={classes.map((c) => c.name)}
-              onCancel={() => {
-                setAddClassMode('choose');
-              }}
-            />
-          )}
+          <SpaceBetween size="m">
+            <FormField
+              label={isRuleSchema ? 'Policy Class Name' : 'Class Name'}
+              description={`A unique name for this ${isRuleSchema ? 'rule' : 'extraction'} class`}
+            >
+              <Input
+                value={newClassName}
+                onChange={({ detail }) => setNewClassName(detail.value)}
+                placeholder={isRuleSchema ? 'e.g., ComplianceRules, SafetyChecks' : 'e.g., Invoice, Customer, Address'}
+              />
+            </FormField>
+            <FormField label="Description (Optional)" description="Describe what this class represents">
+              <Textarea
+                value={newClassDescription}
+                onChange={({ detail }) => setNewClassDescription(detail.value)}
+                placeholder="e.g., Invoice document with line items"
+                rows={3}
+              />
+            </FormField>
+          </SpaceBetween>
         </Modal>
 
         <Modal

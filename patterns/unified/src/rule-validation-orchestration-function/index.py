@@ -43,14 +43,44 @@ def handler(event, context):
         # Get working bucket for loading compressed states
         working_bucket = os.environ.get('WORKING_BUCKET')
         
-        # Get base document from ProcessResults output (already has all sections)
-        base_document_data = event.get("Result", {}).get("document", {})
+        # Get base document from PolicyClassificationResult (has rule_validation_result with matched_policy_types)
+        # Fall back to Result.document if PolicyClassificationResult not available
+        policy_classification_result = event.get("PolicyClassificationResult", {})
+        if policy_classification_result.get("document"):
+            base_document_data = policy_classification_result.get("document", {})
+            logger.info("Loading document from PolicyClassificationResult")
+        else:
+            base_document_data = event.get("Result", {}).get("document", {})
+            logger.info("Loading document from Result (PolicyClassificationResult not available)")
         document = Document.load_document(base_document_data, working_bucket, logger)
         
         logger.info(f"Processing rule validation consolidation for document: {document.id}")
         logger.info(f"Document input_key: {document.input_key}")
         logger.info(f"Document output_bucket: {document.output_bucket}")
         logger.info(f"Document has {len(document.sections)} sections from ProcessResults")
+        
+        # Update document status
+        document.status = Status.RULE_VALIDATION_ORCHESTRATOR
+        
+        # Intelligent Rule Validation Orchestration detection: Skip if document already has consolidated results
+        if (document.rule_validation_result and 
+            document.rule_validation_result.section_results):
+            logger.info(f"Skipping rule validation orchestration - document already has section results")
+            
+            # Add Lambda metering for skip execution
+            try:
+                lambda_metering = calculate_lambda_metering("RuleValidation", context, start_time)
+                document.metering = merge_metering_data(document.metering, lambda_metering)
+            except Exception as e:
+                logger.warning(f"Failed to add Lambda metering for orchestration skip: {str(e)}")
+            
+            # Return existing result without reprocessing
+            response = {
+                "document": document.serialize_document(working_bucket, "rule_validation_orchestration_skip", logger)
+            }
+            
+            logger.info(f"Rule validation orchestration skipped - Response: {json.dumps(response, default=str)}")
+            return response
         
         # Get rule validation results from Map state
         rule_validation_results = event.get("RuleValidationResults", [])
@@ -120,9 +150,6 @@ def handler(event, context):
             })
             logger.info(f"Added {len(section_results)} section results to consolidated result")
             logger.info(f"Chunking occurred: {chunking_occurred}")
-        
-        # Update document status
-        updated_document.status = Status.RULE_VALIDATION_ORCHESTRATOR
         
         # Track Lambda metering
         lambda_metering = calculate_lambda_metering("RuleValidation", context, start_time)

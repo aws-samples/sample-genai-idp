@@ -108,7 +108,7 @@ The `rule_validation_summary` table contains document-level rule validation resu
 | input_key | string | S3 key of the input document |
 | validation_date | timestamp | When the validation was performed |
 | overall_status | string | Overall validation status (COMPLETE, FAILED, etc.) |
-| total_rule_types | int | Number of rule types evaluated |
+| total_policy_types | int | Number of policy types evaluated |
 | total_rules | int | Total number of rules evaluated |
 | pass_count | int | Number of rules that passed |
 | fail_count | int | Number of rules that failed |
@@ -123,7 +123,7 @@ The `rule_validation_details` table contains individual rule validation results:
 | Column | Type | Description |
 |--------|------|-------------|
 | document_id | string | Unique identifier for the document |
-| rule_type | string | Category/type of the rule |
+| policy_type | string | Category/type of the policy class |
 | rule | string | Description of the specific rule being validated |
 | recommendation | string | Validation result (Pass, Fail, Information Not Found) |
 | reasoning | string | Explanation for the recommendation |

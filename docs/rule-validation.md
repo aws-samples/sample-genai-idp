@@ -112,7 +112,8 @@ Want to see it in action first? We provide a complete healthcare example with sa
 
 ## Key Features
 
-- **Multi-Level Validation Workflow**: Section-level evaluation, rule type consolidation, and orchestrated summary generation
+- **Multi-Level Validation Workflow**: Policy classification, section-level evaluation, rule type consolidation, and orchestrated summary generation
+- **Policy Classification**: Automatically determines which policy types apply to a document before validation
 - **Asynchronous Processing**: Concurrent evaluation of multiple rules with built-in rate limiting
 - **Intelligent Chunking**: Page-aware text chunking that preserves page boundaries and context
   - `chunks_created: 0` = No chunking (section processed as whole)
@@ -147,21 +148,38 @@ Want to see it in action first? We provide a complete healthcare example with sa
 Rule validation is integrated into the pipeline mode workflow after extraction:
 
 ```
-OCR → Classification → Extraction → Rule Validation → Orchestration
+OCR → Classification → Extraction → Policy Classification → Rule Validation (Map) → Orchestration
 ```
 
-The workflow uses AWS Step Functions Map state to process sections in parallel, then consolidates results in a final orchestration step.
+The workflow includes:
+1. **Policy Classification Step**: Determines which policy types apply to the document
+2. **Rule Validation Map State**: Processes sections in parallel for matched policy types only
+3. **Orchestration Step**: Consolidates results and makes final compliance decisions
+
+## Human-in-the-Loop (HITL)
+
+HITL review for rule validation results is not supported in the current version and will be added in a future release. When HITL is enabled for extraction, rule validation automatically skips on the second execution and reuses results from the first run.
+
+### No-Policy-Match Behavior
+
+When a document doesn't match any configured policy class (e.g., the document name and page content don't match any `policy_classes` patterns), rule validation is skipped gracefully:
+
+- A formatted Markdown summary is saved to S3 and displayed in the Web UI
+- The message includes the document name and guidance on configuring policy classes
+- The Step Functions workflow bypasses the rule validation Map state — no errors are raised
 
 ## Configuration
 
-### Two-Step Rule Validation Approach
+### Three-Step Rule Validation Approach
 
-Rule validation uses a two-step approach to improve accuracy and handle large documents effectively:
+Rule validation uses a three-step approach to improve accuracy and handle large documents effectively:
 
-1. **Fact Extraction**: Extracts relevant facts from document sections
-2. **Orchestrator**: Consolidates facts and makes final compliance decisions
+1. **Policy Classification**: Determines which policy types apply to the document
+2. **Fact Extraction**: Extracts relevant facts from document sections for matched policies
+3. **Orchestrator**: Consolidates facts and makes final compliance decisions
 
 This separation provides several benefits:
+- Only relevant policy types are processed, reducing cost and time
 - Large documents can be processed in chunks without losing context
 - Fact-finding is separated from decision-making for clearer reasoning
 - Multiple pieces of evidence are synthesized into accurate compliance determinations
@@ -194,7 +212,7 @@ rule_validation:
     task_prompt: |
       Extract relevant facts from the document text for the given rule.
       Document Text: {DOCUMENT_TEXT}
-      Rule Type: {rule_type}
+      Policy Type: {policy_type}
       Rule: {rule}
   
   # Step 2: Orchestrator Configuration
@@ -228,7 +246,7 @@ rule_validation:
 - `system_prompt`: Defines the role and behavior of the fact extraction assistant
 - `task_prompt`: Instructions for extracting facts, with these placeholders:
   - `{DOCUMENT_TEXT}`: The actual document content
-  - `{rule_type}`: The category of rule being evaluated
+  - `{policy_type}`: The category of policy class being evaluated
   - `{rule}`: The specific rule text
 
 **Orchestrator Parameters**:
@@ -237,21 +255,21 @@ rule_validation:
 - `system_prompt`: Defines the role and behavior of the compliance orchestrator
 - `task_prompt`: Instructions for making decisions, with these placeholders:
   - `{extracted_evidence}`: Facts gathered from all chunks and sections
-  - `{policy_class}`: The category of rule being evaluated
+  - `{policy_class}`: The category of policy class being evaluated
   - `{rule}`: The specific rule text
 
-### Rule Classes
+### Policy Classes
 
-Define rule types and specific rules to evaluate:
+Define policy types and specific rules to evaluate:
 
 ```yaml
-rule_classes:
-  - rule_type: "global_periods"
+policy_classes:
+  - policy_type: "global_periods"
     questions:
       - "If a procedure has a global period of 000 or 010 days, it is defined as a minor surgical procedure..."
       - "If a procedure has a global period of 090 days, it is defined as a major surgical procedure..."
   
-  - rule_type: "same_day_service_rules"
+  - policy_type: "same_day_service_rules"
     questions:
       - "Since National Correct Coding Initiative (NCCI) Procedure-to-Procedure (PTP) edits are applied..."
 ```
@@ -295,13 +313,13 @@ rule_validation:
     Rejected: Criteria not met.
     Pending: Additional documentation required.
 
-rule_classes:
-  - rule_type: "loan_eligibility"
+policy_classes:
+  - policy_type: "loan_eligibility"
     questions:
       - "Applicant must have minimum credit score of 650..."
       - "Debt-to-income ratio must not exceed 43%..."
   
-  - rule_type: "documentation_requirements"
+  - policy_type: "documentation_requirements"
     questions:
       - "Two years of tax returns must be provided..."
       - "Proof of employment must be current within 30 days..."
@@ -347,18 +365,18 @@ The statistics in the final summary will automatically use your custom options:
        }
    ```
 
-### Organizing Rule Types
+### Organizing Policy Types
 
-Group related rules into logical rule types:
+Group related rules into logical policy types:
 
 ```yaml
-rule_classes:
-  - rule_type: "eligibility_rules"
+policy_classes:
+  - policy_type: "eligibility_rules"
     questions:
       - "Patient must be enrolled in insurance plan..."
       - "Coverage must be active on date of service..."
   
-  - rule_type: "medical_necessity"
+  - policy_type: "medical_necessity"
     questions:
       - "Procedure must be medically necessary..."
       - "Documentation must support diagnosis..."
@@ -374,7 +392,7 @@ Located at `s3://{bucket}/{document_id}/rule_validation/consolidated/consolidate
 {
   "document_id": "doc_123",
   "overall_status": "COMPLETE",
-  "total_rule_types": 4,
+  "total_policy_types": 4,
   "overall_statistics": {
     "total_rules": 15,
     "recommendation_counts": {
@@ -497,6 +515,7 @@ Monitor rule validation performance:
 ### Logs
 
 Check CloudWatch logs for:
+- `rule-validation-policy-classification-function`: Policy classification logs
 - `rule-validation-function`: Section-level evaluation logs
 - `rule-validation-orchestration-function`: Orchestration logs
 
