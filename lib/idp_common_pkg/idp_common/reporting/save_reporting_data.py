@@ -1581,7 +1581,7 @@ class SaveReportingData:
                 ("input_key", pa.string()),
                 ("validation_date", pa.timestamp("ms")),
                 ("overall_status", pa.string()),
-                ("total_rule_types", pa.int32()),
+                ("total_policy_types", pa.int32()),
                 ("total_rules", pa.int32()),
                 ("pass_count", pa.int32()),
                 ("fail_count", pa.int32()),
@@ -1592,7 +1592,7 @@ class SaveReportingData:
         rule_details_schema = pa.schema(
             [
                 ("document_id", pa.string()),
-                ("rule_type", pa.string()),
+                ("policy_type", pa.string()),
                 ("rule", pa.string()),
                 ("recommendation", pa.string()),
                 ("reasoning", pa.string()),
@@ -1628,7 +1628,7 @@ class SaveReportingData:
             "input_key": document.input_key,
             "validation_date": validation_date,
             "overall_status": rule_validation_data.get("overall_status", "UNKNOWN"),
-            "total_rule_types": rule_validation_data.get("total_rule_types", 0),
+            "total_policy_types": rule_validation_data.get("total_policy_types", 0),
             "total_rules": overall_stats.get("total_rules", 0),
             "pass_count": recommendation_counts.get("Pass", 0),
             "fail_count": recommendation_counts.get("Fail", 0),
@@ -1653,13 +1653,13 @@ class SaveReportingData:
         rule_records = []
         rule_details = rule_validation_data.get("rule_details", {})
 
-        for rule_type, rule_stats in rule_details.items():
+        for policy_type, rule_stats in rule_details.items():
             rules_list = rule_stats.get("rules", [])
             for rule_detail in rules_list:
                 rule_records.append(
                     {
                         "document_id": document_id,
-                        "rule_type": rule_type,
+                        "policy_type": policy_type,
                         "rule": rule_detail.get("rule", "Unknown"),
                         "recommendation": rule_detail.get("recommendation", "Unknown"),
                         "reasoning": rule_detail.get("reasoning", ""),

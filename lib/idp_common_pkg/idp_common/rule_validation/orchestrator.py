@@ -73,7 +73,7 @@ class RuleValidationOrchestratorService:
             summary = {
                 "document_id": None,  # Will be set when we have access to document
                 "overall_status": "COMPLETE",
-                "total_rule_types": len(all_responses),
+                "total_policy_types": len(all_responses),
                 "rule_summary": {},
                 "overall_statistics": {
                     "total_rules": 0,
@@ -87,8 +87,8 @@ class RuleValidationOrchestratorService:
             total_rules = 0
             recommendation_counts = {}
 
-            # Process each rule type
-            for rule_type, responses in all_responses.items():
+            # Process each policy type
+            for policy_type, responses in all_responses.items():
                 rule_stats = {
                     "total_rules": 0,
                     "recommendation_counts": {},
@@ -158,10 +158,10 @@ class RuleValidationOrchestratorService:
                 else:
                     rule_stats["pass_percentage"] = 0.0
 
-                summary["rule_details"][rule_type] = rule_stats
+                summary["rule_details"][policy_type] = rule_stats
 
                 # Create rule summary
-                summary["rule_summary"][rule_type] = {
+                summary["rule_summary"][policy_type] = {
                     "status": "COMPLETE",
                     "total_rules": rule_stats["total_rules"],
                     **rule_stats["recommendation_counts"],
@@ -213,7 +213,7 @@ class RuleValidationOrchestratorService:
                 "document_id": None,
                 "overall_status": "ERROR",
                 "error": str(e),
-                "total_rule_types": len(all_responses) if all_responses else 0,
+                "total_policy_types": len(all_responses) if all_responses else 0,
                 "generated_at": datetime.now().isoformat(),
             }
 
@@ -242,7 +242,7 @@ class RuleValidationOrchestratorService:
             tasks = []
             task_metadata = []
 
-            for rule_type, rule_content in responses.items():
+            for policy_type, rule_content in responses.items():
                 # rule_content is a list of responses, group by rule
                 rule_groups = {}
                 for response in rule_content:
@@ -258,7 +258,7 @@ class RuleValidationOrchestratorService:
                         {
                             "extracted_evidence": json.dumps(rule_responses),
                             "rule": rule,
-                            "policy_class": rule_type,  # Use rule_type as policy_class
+                            "policy_class": policy_type,
                             "recommendation_options": config_obj.rule_validation.recommendation_options
                             or "",
                         },
@@ -282,29 +282,29 @@ class RuleValidationOrchestratorService:
                         max_tokens=summary_config.max_tokens,
                     )
                     tasks.append(task)
-                    task_metadata.append({"rule_type": rule_type, "rule": rule})
+                    task_metadata.append({"policy_type": policy_type, "rule": rule})
 
             # Execute all tasks in parallel with semaphore control
             results = await asyncio.gather(*tasks, return_exceptions=True)
 
-            # Organize results by rule_type
+            # Organize results by policy_type
             for i, result in enumerate(results):
                 if isinstance(result, Exception):
                     logger.error(f"Error in summarization task: {str(result)}")
                     continue
 
                 metadata = task_metadata[i]
-                rule_type = metadata["rule_type"]
+                policy_type = metadata["policy_type"]
                 rule = metadata["rule"]
 
-                if rule_type not in final_responses:
-                    final_responses[rule_type] = []
+                if policy_type not in final_responses:
+                    final_responses[policy_type] = []
 
-                if result:
-                    # Add rule_type and rule to the result (code stitches these values)
-                    result["rule_type"] = rule_type
+                if isinstance(result, dict) and result:
+                    # Add policy_type and rule to the result
+                    result["policy_type"] = policy_type
                     result["rule"] = rule
-                    final_responses[rule_type].append(result)
+                    final_responses[policy_type].append(result)
 
             return final_responses
 
@@ -444,16 +444,16 @@ class RuleValidationOrchestratorService:
 
                     # Extract responses from section result structure
                     if "responses" in section_responses:
-                        for rule_type, responses in section_responses[
+                        for policy_type, responses in section_responses[
                             "responses"
                         ].items():
-                            if rule_type not in all_responses:
-                                all_responses[rule_type] = []
+                            if policy_type not in all_responses:
+                                all_responses[policy_type] = []
 
                             if isinstance(responses, list):
-                                all_responses[rule_type].extend(responses)
+                                all_responses[policy_type].extend(responses)
                             else:
-                                all_responses[rule_type].append(responses)
+                                all_responses[policy_type].append(responses)
 
             logger.info(f"Loaded results from {len(section_files)} section files")
             return all_responses, chunking_occurred
@@ -462,11 +462,11 @@ class RuleValidationOrchestratorService:
             logger.error(f"Error loading section results: {str(e)}")
             return {}
 
-    def save_rule_type_responses(
+    def save_policy_type_responses(
         self, all_responses: Dict[str, Any], document_input_key: str, output_bucket: str
     ) -> List[str]:
         """
-        Save responses by rule type to S3.
+        Save responses by policy type to S3.
         """
         output_uris = []
 
@@ -478,9 +478,9 @@ class RuleValidationOrchestratorService:
             "responses",
         }
 
-        for rule_type, responses in all_responses.items():
-            if rule_type not in metadata_fields:
-                output_key = f"{document_input_key}/rule_validation/consolidated/{rule_type}_responses.json"
+        for policy_type, responses in all_responses.items():
+            if policy_type not in metadata_fields:
+                output_key = f"{document_input_key}/rule_validation/consolidated/{policy_type}_responses.json"
                 output_uri = f"s3://{output_bucket}/{output_key}"
 
                 # Save to S3
@@ -589,16 +589,16 @@ tr:hover {
         rule_details = consolidated_summary.get("rule_details", {})
         if rule_details:
             md_parts.append("## Table of Contents\n\n")
-            for idx, rule_type in enumerate(rule_details.keys(), 1):
-                formatted_name = rule_type.replace("_", " ").title()
-                anchor = rule_type.lower().replace("_", "-")
+            for idx, policy_type in enumerate(rule_details.keys(), 1):
+                formatted_name = policy_type.replace("_", " ").title()
+                anchor = policy_type.lower().replace("_", "-")
                 md_parts.append(f"{idx}. [{formatted_name}](#{anchor})\n")
             md_parts.append("\n")
 
         # Rule Details by Type
-        for idx, (rule_type, details) in enumerate(rule_details.items(), 1):
-            formatted_name = rule_type.replace("_", " ").title()
-            anchor = rule_type.lower().replace("_", "-")
+        for idx, (policy_type, details) in enumerate(rule_details.items(), 1):
+            formatted_name = policy_type.replace("_", " ").title()
+            anchor = policy_type.lower().replace("_", "-")
 
             md_parts.append(f'## {idx}. {formatted_name} <a id="{anchor}"></a>\n\n')
 
@@ -794,7 +794,7 @@ tr:hover {
                     f"Single section ({num_sections}) with no chunking - storing results directly"
                 )
                 # For single section with no chunking, just store the section results directly
-                output_uris = self.save_rule_type_responses(
+                output_uris = self.save_policy_type_responses(
                     all_responses, document.input_key, document.output_bucket
                 )
 
@@ -841,8 +841,8 @@ tr:hover {
                 logger.info("Running LLM summarization for multiple sections")
                 all_responses = await self._summarize_responses(all_responses, config)
 
-            # Save rule type responses
-            output_uris = self.save_rule_type_responses(
+            # Save policy type responses
+            output_uris = self.save_policy_type_responses(
                 all_responses, document.input_key, document.output_bucket
             )
 
@@ -867,13 +867,34 @@ tr:hover {
                 else 0
             )
 
+            # Preserve matched_policy_types and matched_page_ids from policy classification
+            existing_matched_policy_types = None
+            existing_matched_page_ids = None
+            if document.rule_validation_result:
+                existing_matched_policy_types = (
+                    document.rule_validation_result.matched_policy_types
+                )
+                existing_matched_page_ids = (
+                    document.rule_validation_result.matched_page_ids
+                )
+
             # Store consolidated result in document
             document.rule_validation_result = RuleValidationResult.for_consolidation(
                 document_id=document.id,
-                rule_type_uris=output_uris,
+                policy_type_uris=output_uris,
                 summary_uri=summary_output_uri,
                 sections_processed=sections_processed,
             )
+
+            # Restore matched_policy_types and matched_page_ids from policy classification
+            if existing_matched_policy_types is not None:
+                document.rule_validation_result.matched_policy_types = (
+                    existing_matched_policy_types
+                )
+            if existing_matched_page_ids is not None:
+                document.rule_validation_result.matched_page_ids = (
+                    existing_matched_page_ids
+                )
 
             # Merge summarization metering into document
             document.metering = utils.merge_metering_data(

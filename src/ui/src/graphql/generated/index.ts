@@ -1182,8 +1182,8 @@ export const updateUser = /* GraphQL */ `
 ` as GeneratedMutation<UpdateUserMutationVariables, UpdateUserMutation>;
 
 export const uploadDiscoveryDocument = /* GraphQL */ `
-  mutation UploadDiscoveryDocument($fileName: String!, $contentType: String, $prefix: String, $bucket: String, $groundTruthFileName: String, $version: String, $pageRanges: [String], $pageLabels: [String], $skipJobCreation: Boolean) {
-    uploadDiscoveryDocument(fileName: $fileName, contentType: $contentType, prefix: $prefix, bucket: $bucket, groundTruthFileName: $groundTruthFileName, version: $version, pageRanges: $pageRanges, pageLabels: $pageLabels, skipJobCreation: $skipJobCreation) {
+  mutation UploadDiscoveryDocument($fileName: String!, $contentType: String, $prefix: String, $bucket: String, $groundTruthFileName: String, $version: String, $pageRanges: [String], $pageLabels: [String], $skipJobCreation: Boolean, $discoveryType: String) {
+    uploadDiscoveryDocument(fileName: $fileName, contentType: $contentType, prefix: $prefix, bucket: $bucket, groundTruthFileName: $groundTruthFileName, version: $version, pageRanges: $pageRanges, pageLabels: $pageLabels, skipJobCreation: $skipJobCreation, discoveryType: $discoveryType) {
       presignedUrl
       objectKey
       usePostMethod

@@ -16,7 +16,14 @@ The /notebooks/examples directory contains a complete set of modular Jupyter not
 The modular approach breaks down the IDP pipeline into discrete, manageable steps:
 
 ```
-Step 0: Setup → Step 1: OCR → Step 2: Classification → Step 3: Extraction → Step 4: Assessment → Step 5: Summarization → Step 6: Evaluation
+Step 0: Setup → Step 1: OCR → Step 2: Classification → Step 3: Extraction → Step 4: Assessment
+                                                                                    ↓
+                                                              ┌─────────────────────┴─────────────────────┐
+                                                              ↓                                           ↓
+                                               Step 5: Rule Validation (Optional)          Step 6: Summarization
+                                               For healthcare/medical documents                    ↓
+                                                              ↓                           Step 7: Evaluation
+                                                              └───────────────────────────────────┘
 ```
 
 ### Key Benefits
@@ -25,6 +32,7 @@ Step 0: Setup → Step 1: OCR → Step 2: Classification → Step 3: Extraction 
 - **Modular Configuration**: Separate YAML configuration files for different components
 - **Data Persistence**: Each step saves results for the next step to consume
 - **Easy Experimentation**: Modify configurations without changing code
+- **Optional Rule Validation**: Skip or include business rule validation based on use case
 - **Comprehensive Evaluation**: Professional-grade evaluation with the EvaluationService
 - **Debugging Friendly**: Isolate issues to specific processing steps
 
@@ -38,8 +46,9 @@ notebooks/examples/
 ├── step2_classification.ipynb         # Document classification 
 ├── step3_extraction.ipynb             # Structured data extraction
 ├── step4_assessment.ipynb             # Confidence assessment and explainability
-├── step5_summarization.ipynb          # Content summarization
-├── step6_evaluation.ipynb             # Final evaluation and reporting
+├── step5_rule_validation.ipynb        # Policy classification and rule validation
+├── step6_summarization.ipynb          # Content summarization
+├── step7_evaluation.ipynb             # Final evaluation and reporting
 ├── config/                            # Modular configuration files
 │   ├── main.yaml                      # Main pipeline configuration
 │   ├── classes.yaml                   # Document classification definitions
@@ -47,6 +56,7 @@ notebooks/examples/
 │   ├── classification.yaml            # Classification method configuration
 │   ├── extraction.yaml                # Extraction method configuration
 │   ├── assessment.yaml                # Assessment method configuration
+│   ├── rule_validation.yaml           # Rule validation configuration
 │   ├── summarization.yaml             # Summarization method configuration
 │   └── evaluation.yaml                # Evaluation method configuration
 └── data/                              # Step-by-step processing results
@@ -55,8 +65,9 @@ notebooks/examples/
     ├── step2_classification/          # Classification results
     ├── step3_extraction/              # Extraction results
     ├── step4_assessment/              # Assessment results
-    ├── step5_summarization/           # Summarization results
-    └── step6_evaluation/              # Final evaluation results
+    ├── step5_rule_validation/         # Rule validation results
+    ├── step6_summarization/           # Summarization results
+    └── step7_evaluation/              # Final evaluation results
 ```
 
 ## 🚀 Quick Start
@@ -87,12 +98,18 @@ jupyter notebook step3_extraction.ipynb
 # 5. Assess confidence and explainability
 jupyter notebook step4_assessment.ipynb
 
-# 6. Generate summaries
-jupyter notebook step5_summarization.ipynb
+# 6. (OPTIONAL) Validate business rules - for healthcare/medical documents only
+# Skip this step if using lending package or non-medical documents
+jupyter notebook step5_rule_validation.ipynb
 
-# 7. Evaluate results and generate reports
-jupyter notebook step6_evaluation.ipynb
+# 7. Generate summaries
+jupyter notebook step6_summarization.ipynb
+
+# 8. Evaluate results and generate reports
+jupyter notebook step7_evaluation.ipynb
 ```
+
+> **Note**: Step 5 (Rule Validation) is optional and designed for healthcare/medical document workflows. If you're using the default lending package sample, skip step 5 and proceed directly from step 4 to step 6.
 
 ### Running Individual Steps
 
@@ -115,6 +132,7 @@ Configuration is split across multiple YAML files for better organization:
 - **`config/classification.yaml`**: Classification model and method configuration
 - **`config/extraction.yaml`**: Extraction model and prompting configuration
 - **`config/assessment.yaml`**: Assessment model and confidence thresholds
+- **`config/rule_validation.yaml`**: Rule validation and policy classification settings
 - **`config/summarization.yaml`**: Summarization models and output formats
 - **`config/evaluation.yaml`**: Evaluation metrics and reporting settings
 
@@ -198,13 +216,28 @@ Each step produces:
 - **Outputs**: Confidence scores and reasoning for each extracted attribute
 - **Key Features**: Confidence assessment, hallucination detection, explainability
 
-### Step 5: Summarization (`step5_summarization.ipynb`)
+### Step 5: Rule Validation (`step5_rule_validation.ipynb`) - OPTIONAL
+- **Purpose**: Validate business rules and compliance requirements
+- **Inputs**: Document with extraction results
+- **Outputs**: Policy classification results, rule validation results per section
+- **Key Features**: Policy classification, regex-based filtering, rule validation, result consolidation
+
+> ⚠️ **Important**: Rule validation is an **optional step** designed for **healthcare/medical document use cases** (e.g., prior authorization, Medicare/Medicaid forms). The default sample documents (lending package) are **not compatible** with rule validation. 
+>
+> **To use rule validation:**
+> 1. Use healthcare-related sample documents that match the policy class regex patterns
+> 2. Configure `config/rule_validation.yaml` with appropriate `policy_classes` and rules
+> 3. See [Rule Validation Documentation](./rule-validation.md) for detailed configuration
+>
+> **To skip rule validation:** Proceed directly from Step 4 (Assessment) to Step 6 (Summarization)
+
+### Step 6: Summarization (`step6_summarization.ipynb`)
 - **Purpose**: Generate human-readable summaries of processing results
 - **Inputs**: Document with assessed extractions
 - **Outputs**: Section and document-level summaries in multiple formats
 - **Key Features**: Multi-format output (JSON, Markdown, HTML), customizable templates
 
-### Step 6: Evaluation (`step6_evaluation.ipynb`)
+### Step 7: Evaluation (`step7_evaluation.ipynb`)
 - **Purpose**: Comprehensive evaluation of pipeline performance and accuracy
 - **Inputs**: Document with complete processing results
 - **Outputs**: Evaluation reports, accuracy metrics, performance analysis

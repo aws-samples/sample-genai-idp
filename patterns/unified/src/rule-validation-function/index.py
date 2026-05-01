@@ -54,7 +54,7 @@ def handler(event, context):
     logger.info(f"Full document content: {json.dumps(full_document.to_dict(), default=str)}")
 
     # X-Ray annotations
-    xray_recorder.put_annotation('document_id', {full_document.id})
+    xray_recorder.put_annotation('document_id', full_document.id)
     xray_recorder.put_annotation('processing_stage', 'rule_validation')
     
     # Get the section ID directly from the Map state input
@@ -81,27 +81,34 @@ def handler(event, context):
     section_index = next(i for i, s in enumerate(full_document.sections) if s.section_id == section_id)
     logger.info(f"Section {section_id} is at index {section_index} in the Sections array")
     
-    # Check if rule validation is enabled in configuration
-    if not config.rule_validation.enabled:
-        logger.info(f"Rule validation is disabled in configuration for section {section_id}, skipping processing")
-        
-        # Add Lambda metering for rule validation skip execution
-        try:
-            lambda_metering = calculate_lambda_metering("RuleValidation", context, start_time)
-            full_document.metering = merge_metering_data(full_document.metering, lambda_metering)
-        except Exception as e:
-            logger.warning(f"Failed to add Lambda metering for rule validation skip: {str(e)}")
-        
-        # Return the section without processing
-        response = {
-            "section_id": section_id,
-            "document": full_document.serialize_document(working_bucket, f"rule_validation_skip_{section_id}", logger)
-        }
-        
-        logger.info(f"Rule validation skipped - Response: {json.dumps(response, default=str)}")
-        return response
-    else:
-        logger.info(f"Processing section {section_id} - rule validation is enabled, proceeding with processing")
+    # Intelligent Rule Validation detection: Skip if section already has rule validation results
+    if (full_document.rule_validation_result and 
+        full_document.rule_validation_result.section_results):
+        # Check if this specific section was already processed
+        section_already_processed = any(
+            sr.get("section_id") == section_id 
+            for sr in full_document.rule_validation_result.section_results
+        )
+        if section_already_processed:
+            logger.info(f"Skipping rule validation for section {section_id} - already has rule validation results")
+            
+            # Add Lambda metering for rule validation skip execution
+            try:
+                lambda_metering = calculate_lambda_metering("RuleValidation", context, start_time)
+                full_document.metering = merge_metering_data(full_document.metering, lambda_metering)
+            except Exception as e:
+                logger.warning(f"Failed to add Lambda metering for rule validation skip: {str(e)}")
+            
+            # Return the section without processing
+            response = {
+                "section_id": section_id,
+                "document": full_document.serialize_document(working_bucket, f"rule_validation_skip_{section_id}", logger)
+            }
+            
+            logger.info(f"Rule validation skipped - Response: {json.dumps(response, default=str)}")
+            return response
+    
+    logger.info(f"Processing section {section_id} - no existing rule validation results found, proceeding with processing")
     
     # Update document status to RULE_VALIDATION using lightweight status-only update
     # This reduces DynamoDB WCU consumption by ~94% (~500 bytes vs ~100KB)

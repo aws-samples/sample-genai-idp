@@ -1703,6 +1703,76 @@ Resources:
                     default: 3
                     minimum: 1
                     order: 9
+              rules:
+                order: 5
+                type: object
+                sectionLabel: Policy Discovery
+                description: Configuration for extracting policy rules from regulatory documents
+                properties:
+                  model:
+                    type: string
+                    description: Bedrock model ID for policy rule extraction
+                    enum:
+                      [
+                        "us.anthropic.claude-sonnet-4-6",
+                        "us.anthropic.claude-sonnet-4-6:1m",
+                        "us.anthropic.claude-opus-4-6-v1",
+                        "us.anthropic.claude-opus-4-6-v1:1m",
+                        "us.anthropic.claude-opus-4-7",
+                        "us.anthropic.claude-opus-4-7:1m",
+                        "eu.anthropic.claude-sonnet-4-6",
+                        "eu.anthropic.claude-sonnet-4-6:1m",
+                        "eu.anthropic.claude-opus-4-6-v1",
+                        "eu.anthropic.claude-opus-4-6-v1:1m",
+                        "eu.anthropic.claude-opus-4-7",
+                        "eu.anthropic.claude-opus-4-7:1m",
+                        "global.anthropic.claude-sonnet-4-6",
+                        "global.anthropic.claude-sonnet-4-6:1m",
+                        "global.anthropic.claude-opus-4-6-v1",
+                        "global.anthropic.claude-opus-4-6-v1:1m",
+                        "global.anthropic.claude-opus-4-7",
+                        "global.anthropic.claude-opus-4-7:1m"
+                      ]
+                    default: "global.anthropic.claude-sonnet-4-6"
+                    order: 0
+                  temperature:
+                    type: number
+                    description: "Sampling temperature for rule extraction (0.0 recommended for consistent extraction)"
+                    minimum: 0.0
+                    maximum: 1.0
+                    default: 0.0
+                    order: 1
+                  top_p:
+                    type: number
+                    description: "Top P for rule extraction"
+                    minimum: 0.0
+                    maximum: 1.0
+                    default: 0.0
+                    order: 2
+                  top_k:
+                    type: number
+                    description: "Top K for rule extraction"
+                    minimum: 1
+                    maximum: 100
+                    default: 5
+                    order: 3
+                  max_tokens:
+                    type: number
+                    description: "Maximum output tokens for rule extraction"
+                    minimum: 1000
+                    maximum: 128000
+                    default: 64000
+                    order: 4
+                  system_prompt:
+                    type: string
+                    format: textarea
+                    description: System prompt for policy rule extraction
+                    order: 5
+                  task_prompt:
+                    type: string
+                    format: textarea
+                    description: Task prompt for policy rule extraction
+                    order: 6
           agents:
             order: 11
             type: object
@@ -1941,7 +2011,7 @@ Resources:
                   task_prompt:
                     type: string
                     format: textarea
-                    description: Task prompt for fact extraction - supports placeholders {DOCUMENT_TEXT} (replaced with document content), {recommendation_options} (replaced with available recommendation options), {rule_type} (replaced with rule type), and {rule} (replaced with rule description). Optionally use <<CACHEPOINT>> to separate static and dynamic elements of prompt for Bedrock prompt caching.
+                    description: Task prompt for fact extraction - supports placeholders {DOCUMENT_TEXT} (replaced with document content), {recommendation_options} (replaced with available recommendation options), {policy_type} (replaced with policy type), and {rule} (replaced with rule description). Optionally use <<CACHEPOINT>> to separate static and dynamic elements of prompt for Bedrock prompt caching.
                     order: 6
               rule_validation_orchestrator:
                 type: object
@@ -3677,6 +3747,101 @@ Resources:
       LogGroupName: !Sub "/${AWS::StackName}/lambda/TestExecutionAggregationFunction"
       RetentionInDays: !Ref LogRetentionDays
 
+  RuleValidationPolicyClassificationFunction:
+    Type: AWS::Serverless::Function
+    DependsOn: DockerBuildRun
+    Metadata:
+      SkipBuild: True
+      cfn_nag:
+        rules_to_suppress:
+          - id: W11
+            reason: "Cloudwatch does not support resource-level permissions"
+          - id: W89
+            reason: "This Lambda function does not require VPC access as it only interacts with AWS services via AWS APIs"
+          - id: W92
+            reason: "Function does not require concurrent execution limits as it is designed to scale based on demand"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for this function as StepFunctions will handle retries"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only configuration values like feature flags and non-sensitive settings"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
+    Properties:
+      PermissionsBoundary:
+        !If [
+          HasPermissionsBoundary,
+          !Ref PermissionsBoundaryArn,
+          !Ref AWS::NoValue,
+        ]
+      PackageType: Image
+      ImageUri: !Sub "${ECRRepository.RepositoryUri}:rule-validation-policy-classification-function-${ImageVersion}"
+      Architectures:
+        - arm64
+      ImageConfig:
+        Command:
+          - "index.handler"
+      Timeout: 300
+      MemorySize: 1024
+      Environment:
+        Variables:
+          METRIC_NAMESPACE: !Ref StackName
+          CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
+          LOG_LEVEL: !Ref LogLevel
+          APPSYNC_API_URL: !Ref AppSyncApiUrl
+          TRACKING_TABLE: !Ref TrackingTable
+          DOCUMENT_TRACKING_MODE: !If [HasAppSyncApi, "appsync", "dynamodb"]
+          WORKING_BUCKET: !Ref WorkingBucket
+          OUTPUT_BUCKET: !Ref OutputBucket
+          REPORTING_BUCKET: !Ref ReportingBucket
+          SAVE_REPORTING_FUNCTION_NAME: !Ref SaveReportingFunctionName
+      LoggingConfig:
+        LogGroup: !Ref RuleValidationPolicyClassificationFunctionLogGroup
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - !Ref LambdaECRAccessPolicy
+        - S3ReadPolicy:
+            BucketName: !Ref InputBucket
+        - S3CrudPolicy:
+            BucketName: !Ref OutputBucket
+        - S3CrudPolicy:
+            BucketName: !Ref WorkingBucket
+        - S3CrudPolicy:
+            BucketName: !Ref ReportingBucket
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ConfigurationTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref TrackingTable
+        - Statement:
+            - Effect: Allow
+              Action: cloudwatch:PutMetricData
+              Resource: "*"
+            - Effect: Allow
+              Action:
+                - kms:Encrypt
+                - kms:Decrypt
+                - kms:ReEncrypt*
+                - kms:GenerateDataKey*
+                - kms:DescribeKey
+              Resource: !Ref CustomerManagedEncryptionKeyArn
+            - !If
+              - HasAppSyncApi
+              - Effect: Allow
+                Action:
+                  - appsync:GraphQL
+                Resource:
+                  - !Sub "${AppSyncApiArn}/types/Mutation/*"
+              - !Ref AWS::NoValue
+            - Effect: Allow
+              Action:
+                - lambda:InvokeFunction
+              Resource:
+                - !Sub "arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:${SaveReportingFunctionName}"
+
+  RuleValidationPolicyClassificationFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+      LogGroupName: !Sub "/${AWS::StackName}/lambda/RuleValidationPolicyClassificationFunction"
+      RetentionInDays: !Ref LogRetentionDays
+
   RuleValidationFunction:
     Type: AWS::Serverless::Function
     DependsOn: DockerBuildRun
@@ -4039,6 +4204,7 @@ Resources:
         ExtractionFunctionArn: !GetAtt ExtractionFunction.Arn
         AssessmentFunctionArn: !GetAtt AssessmentFunction.Arn
         PipelineProcessResultsLambdaArn: !GetAtt ProcessResultsFunction.Arn
+        RuleValidationPolicyClassificationLambdaArn: !GetAtt RuleValidationPolicyClassificationFunction.Arn
         RuleValidationLambdaArn: !GetAtt RuleValidationFunction.Arn
         RuleValidationOrchestrationLambdaArn: !GetAtt RuleValidationOrchestrationFunction.Arn
         # Shared tail functions
@@ -4069,6 +4235,8 @@ Resources:
             FunctionName: !Ref AssessmentFunction
         - LambdaInvokePolicy:
             FunctionName: !Ref ProcessResultsFunction
+        - LambdaInvokePolicy:
+            FunctionName: !Ref RuleValidationPolicyClassificationFunction
         - LambdaInvokePolicy:
             FunctionName: !Ref RuleValidationFunction
         - LambdaInvokePolicy:

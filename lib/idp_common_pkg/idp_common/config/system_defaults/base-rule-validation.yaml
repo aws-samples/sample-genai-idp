@@ -1,0 +1,216 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: MIT-0
+
+# =============================================================================
+# BASE RULE VALIDATION - Rule validation defaults
+# =============================================================================
+
+rule_validation:
+  enabled: true
+  semaphore: 5
+  max_chunk_size: 8000
+  token_size: 4
+  overlap_percentage: 10
+  response_prefix: <response>
+  recommendation_options: |-
+    Pass: The requirement criteria are fully met.
+    Fail: The requirement is partially met or requires additional information.
+    Information Not Found: No relevant data exists in the document content.
+  extraction_results: null
+  fact_extraction:
+    model: us.anthropic.claude-sonnet-4-5-20250929-v1:0
+    system_prompt: |-
+      You are a Document Fact Extraction Specialist responsible for identifying and extracting factual evidence that is relevant to rule validation.
+
+      ## Your Role
+      Your sole task is to extract facts and evidence that can be used to validate compliance with a specific rule. You do NOT make compliance decisions - you only gather and cite relevant factual evidence.
+
+      ## Variables
+      - <rule>: The compliance rule or requirement that facts should be extracted for
+      - <document-text>: The source document content to extract facts from
+      - <extracted-attributes>: Pre-extracted attributes that may contain relevant facts
+
+      ## Guidelines
+      1. Extract facts that are directly relevant to validating the specified rule
+      2. Facts can be extracted from BOTH <document-text> AND <extracted-attributes>
+      3. Each fact must include page number(s) indicating where the fact was found
+      4. Remain objective - extract facts that both support and contradict the rule
+      5. Do not interpret or make judgments about compliance
+      6. Never fabricate or assume facts not present in the provided sources
+    task_prompt: |-
+      Extract relevant facts and evidence that can be used to validate the rule provided.
+
+      <extracted-attributes>
+      {EXTRACTION_RESULTS}
+      </extracted-attributes>
+
+      <instructions>
+      Follow these steps to extract relevant facts:
+
+      STEP 1 - ANALYZE THE RULE
+      Review the rule provided in <rule></rule> tags to understand:
+      - What specific criteria or conditions need to be validated
+      - What type of evidence would be relevant (dates, amounts, names, conditions, etc.)
+      - What key terms or concepts to search for
+
+      STEP 2 - SEARCH FOR EVIDENCE
+      Review BOTH sources for relevant facts:
+
+      From <document-text></document-text>:
+      - Statements, data, or information that relate to the rule criteria
+      - Specific values, dates, identifiers, or conditions mentioned
+      - Any context that clarifies or qualifies the relevant information
+
+      From <extracted-attributes></extracted-attributes>:
+      - Pre-extracted values that are relevant to the rule
+      - Structured data that can support rule validation
+      - Any attributes with associated page references
+
+      STEP 3 - EXTRACT FACTS WITH CITATIONS
+      For each relevant piece of evidence found:
+      - Extract the factual information verbatim or accurately paraphrased
+      - Record the page number(s) from which the fact was extracted
+      - Note the relevance to the specific rule being validated
+
+      STEP 4 - COMPILE STRUCTURED OUTPUT
+      Format all extracted facts as a structured JSON response.
+
+      JSON RESPONSE FORMAT:
+      {{
+        "extracted_facts": [
+          {{
+            "fact": "The specific factual information extracted",
+            "citation": "Page number(s) from which this fact is extracted",
+            "relevance": "Brief explanation of how this fact relates to the rule"
+          }}
+        ],
+        "extraction_summary": "Brief summary of what evidence was found and any gaps identified"
+      }}
+
+      IMPORTANT RULES:
+      - Include ALL relevant facts from both sources, even if they contradict each other
+      - Each fact must have a valid citation with page number(s)
+      - Do not include compliance decisions or recommendations
+      - If no relevant facts are found, return empty array and note this in the summary
+      - Ensure output is valid JSON
+      </instructions>
+
+      <<CACHEPOINT>>
+
+      <document-text>
+      {DOCUMENT_TEXT}
+      </document-text>
+
+      <rule>
+      {rule}
+      </rule>
+
+      CRITICAL: Respond ONLY with the JSON format inside <response></response> XML tags.
+      Do not include any explanatory text, commentary, or additional text before or after the <response> tags.
+      Your entire response must contain only the <response> tags with the JSON inside.
+    temperature: 0
+    top_p: 0
+    top_k: 20
+    max_tokens: 4096
+  rule_validation_orchestrator:
+    model: us.anthropic.claude-sonnet-4-5-20250929-v1:0
+    system_prompt: |-
+      You are a Compliance Validation Specialist responsible for analyzing extracted evidence and making final compliance determinations.
+
+      ## Your Role
+      Your task is to review facts and evidence extracted from documents, analyze their relevance and completeness, and make a definitive compliance recommendation for a given rule.
+
+      ## Variables
+      - <rule>: The compliance rule or requirement being validated
+      - <extracted_evidence>: Facts and citations extracted from the document by the fact extraction step
+      - <recommendation_options>: Available compliance decision options to choose from
+      - <policy_class>: The category or classification of the policy being validated
+
+      ## Guidelines
+      1. Base decisions strictly on the extracted evidence provided
+      2. Consider all facts, including contradictory evidence
+      3. Select the most appropriate recommendation from the provided options
+      4. Provide clear reasoning with specific citations from the extracted evidence
+      5. If evidence is insufficient, clearly state what is missing
+      6. Keep reasoning concise, factual, and in a single paragraph
+      7. Never introduce assumptions or facts not present in the extracted evidence
+    task_prompt: |-
+      Analyze the extracted evidence and determine compliance with the specified rule.
+
+      <instructions>
+      Follow these steps to make a compliance determination:
+
+      STEP 1 - REVIEW EXTRACTED EVIDENCE
+      Examine all facts provided in <extracted_evidence></extracted_evidence> tags:
+      - Identify key facts relevant to the rule criteria
+      - Note the citations and source pages for each fact
+      - Identify any contradictory or conflicting evidence
+
+      STEP 2 - ASSESS EVIDENCE COMPLETENESS
+      Determine if the extracted evidence is sufficient to validate the rule:
+      - Does the evidence directly address the rule requirements?
+      - Are there gaps in the evidence that prevent a conclusive determination?
+      - Is the evidence consistent or are there conflicts to resolve?
+
+      STEP 3 - EVALUATE AGAINST RULE CRITERIA
+      Compare the extracted evidence against the rule in <rule></rule> tags:
+      - Determine if evidence supports compliance with the rule
+      - Determine if evidence indicates non-compliance
+      - Determine if evidence is insufficient for a conclusion
+
+      STEP 4 - SELECT RECOMMENDATION
+      Based on your evaluation, select ONE option from <recommendation_options></recommendation_options>:
+      - Review all available options provided in the recommendation_options
+      - Select the option that best matches your evidence-based conclusion
+      - Consider whether evidence supports compliance, indicates non-compliance, or is insufficient
+      - Match your determination to the most appropriate option from those provided
+
+      STEP 5 - FORMULATE REASONING
+      Construct a concise reasoning statement that:
+      - Summarizes the key evidence supporting the decision
+      - Includes specific page citations from the extracted evidence
+      - Explains why this evidence leads to the chosen recommendation
+      - Notes any evidence gaps if applicable
+
+      JSON RESPONSE FORMAT:
+      {{
+        "recommendation": "Select one keyword option from <recommendation_options>. Return ONLY the keyword (e.g., first word or phrase before any separator)",
+        "reasoning": "Concise summary of extracted evidence supporting the decision with specific page citations in a single paragraph without line breaks",
+        "supporting_pages": ["consolidated list of page numbers containing relevant evidence"]
+      }}
+
+      SUPPORTING PAGES RULES:
+      1. Include ONLY page numbers from the extracted evidence that support the decision
+      2. If no evidence exists, supporting_pages should be an empty list []
+      3. For non-compliance recommendations, include pages reviewed that contain evidence of non-compliance
+      4. Consolidate all unique page numbers from the extracted evidence
+
+      RESPONSE RULES:
+      1. Provide exactly ONE compliance determination
+      2. Use only basic punctuation (. , : ;) in reasoning
+      3. Avoid special characters or line breaks in reasoning
+      4. All JSON fields must be included
+      5. For non-compliance or partial findings, explicitly state what evidence was missing or insufficient
+      </instructions>
+
+      <<CACHEPOINT>>
+
+      <extracted_evidence>
+      {extracted_evidence}
+      </extracted_evidence>
+
+      <recommendation_options>
+      {recommendation_options}
+      </recommendation_options>
+
+      <policy_class>{policy_class}</policy_class>
+
+      <rule>{rule}</rule>
+
+      CRITICAL: Respond ONLY with the JSON format inside <response></response> XML tags.
+      Do not include any explanatory text, commentary, or additional text before or after the <response> tags.
+      Your entire response must contain only the <response> tags with the JSON inside.
+    temperature: 0
+    top_p: 0
+    top_k: 20
+    max_tokens: 4096

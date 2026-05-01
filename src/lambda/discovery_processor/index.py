@@ -12,6 +12,7 @@ import boto3
 import requests
 from aws_requests_auth.aws_auth import AWSRequestsAuth
 from idp_common.discovery.classes_discovery import ClassesDiscovery
+from idp_common.discovery.rules_discovery import RulesDiscovery
 
 logger = logging.getLogger()
 logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
@@ -61,11 +62,18 @@ def handler(event, context):
 
             logger.info(f"Processing discovery job: {job_id} with version: {version}, page_range: {page_range}, class_name_hint: {class_name_hint}")
 
+            # Determine discovery type: "classes" (default) or "rules"
+            discovery_type = message_body.get('discoveryType', 'classes')
+            logger.info(f"Discovery type: {discovery_type}")
+
             # Update job status to IN_PROGRESS
             update_job_status(job_id, 'IN_PROGRESS', status_message="Starting discovery processing...")
 
-            # Process the discovery job
-            result = process_discovery_job(job_id, document_key, ground_truth_key, bucket, version, page_range, class_name_hint)
+            # Route to the appropriate discovery handler
+            if discovery_type == 'rules':
+                result = process_rules_discovery_job(job_id, document_key, bucket, version)
+            else:
+                result = process_discovery_job(job_id, document_key, ground_truth_key, bucket, version, page_range, class_name_hint)
             results.append(result)
 
         except Exception as e:
@@ -315,6 +323,105 @@ def process_discovery_job(job_id, document_key, ground_truth_key, bucket, versio
         logger.error(f"Error processing discovery job {job_id}: {str(e)}")
         error_msg = _get_user_friendly_error(str(e))
         update_job_status(job_id, 'FAILED', error_message=error_msg)
+        raise
+
+
+def process_rules_discovery_job(job_id, document_key, bucket, version=None):
+    """
+    Process a rules discovery job using RulesDiscovery.
+
+    Extracts business rules from a policy document and saves them as
+    rule_classes in the DynamoDB configuration table. These rule_classes
+    are then consumed by RuleValidationService at runtime.
+
+    Args:
+        job_id (str): Unique job identifier
+        document_key (str): S3 key for the policy document
+        bucket (str): S3 bucket name
+
+    Returns:
+        dict: Processing result
+    """
+    try:
+        logger.info(
+            f"Processing rules discovery job {job_id}: "
+            f"document={document_key}, bucket={bucket}"
+        )
+
+        region = os.environ.get("AWS_REGION")
+
+        # Wait for the browser-side S3 upload to complete before reading the
+        # object. Without this the SQS-triggered invocation can race the upload
+        # and fail with NoSuchKey.
+        update_job_status(
+            job_id,
+            'IN_PROGRESS',
+            status_message="Waiting for document upload to complete...",
+        )
+        _wait_for_s3_object(bucket, document_key)
+
+        update_job_status(
+            job_id,
+            'IN_PROGRESS',
+            status_message="Extracting policy rules from document...",
+        )
+
+        # Initialize RulesDiscovery — loads config from DynamoDB
+        rules_discovery = RulesDiscovery(
+            input_bucket=bucket,
+            input_prefix=document_key,
+            region=region,
+            version=version,
+        )
+
+        # Extract rules from the policy document
+        # This calls _extract_rules() (agentic or traditional based on config)
+        # and _save_rules_to_config() which persists rule_classes to DynamoDB
+        result = rules_discovery.discovery_rules_from_document(
+            input_bucket=bucket,
+            input_prefix=document_key,
+        )
+
+        rule_classes = result.get("rules", [])
+        num_rule_classes = len(rule_classes)
+        num_rules = sum(len(rc.get("rule_properties") or {}) for rc in rule_classes)
+        saved_type = (
+            rule_classes[0].get("x-aws-idp-rule-type")
+            or rule_classes[0].get("x-aws-idp-policy-type")
+            if rule_classes
+            else None
+        )
+
+        logger.info(
+            f"Successfully extracted {num_rule_classes} rule classes "
+            f"({num_rules} rules total) from policy document for job {job_id}"
+        )
+
+        # Update job status to COMPLETED with a human-readable summary so the
+        # UI stops displaying "Starting discovery processing..." and users can
+        # jump to Configuration → Policy Schema to see the appended rules.
+        saved_version = getattr(rules_discovery, "version", None) or "active version"
+        success_message = (
+            f"Extracted {num_rules} rules — appended to policy_classes in "
+            f"version '{saved_version}'. View in Configuration → Policy Schema."
+        )
+        update_job_status(
+            job_id,
+            'COMPLETED',
+            discovered_class_name=saved_type,
+            status_message=success_message,
+        )
+
+        return {
+            "status": result["status"],
+            "jobId": job_id,
+            "numRuleClasses": num_rule_classes,
+            "message": success_message,
+        }
+
+    except Exception as e:
+        logger.error(f"Error processing rules discovery job {job_id}: {str(e)}")
+        update_job_status(job_id, 'FAILED', str(e))
         raise
 
 

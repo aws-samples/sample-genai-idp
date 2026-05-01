@@ -1,0 +1,1 @@
+../../lib/idp_common_pkg[rule_validation,docs_service]  # policy classification module and document service with dependencies

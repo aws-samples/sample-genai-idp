@@ -3,19 +3,23 @@ SPDX-License-Identifier: MIT-0
 
 # Rule Validation Service
 
-The Rule Validation Service component provides functionality to validate extracted document information against predefined business rules and compliance criteria using a two-step LLM-based evaluation approach.
+The Rule Validation Service validates extracted document information against predefined business rules using a three-step approach: regex-based policy classification, LLM-based fact extraction, and LLM-based compliance decisioning.
 
 ## Overview
 
-The rule validation service uses a two-step approach:
-1. **Fact Extraction**: Extracts relevant facts from document sections
-2. **Orchestrator**: Consolidates facts and makes final compliance decisions
-
-This architecture enables better handling of large documents, separation of fact-finding from decision-making, and more accurate compliance determinations from multiple evidence sources.
+The rule validation service uses a three-step approach:
+1. **Policy Classification (regex)**: Determines which policy types apply to the document via filename / page-content regex patterns. No LLM call.
+2. **Fact Extraction (LLM)**: Extracts relevant facts from document sections for matched policy types.
+3. **Orchestrator (LLM)**: Consolidates facts and makes final compliance decisions.
 
 ## Features
 
-- **Two-Step Validation Workflow**:
+- **Policy Classification**:
+  - Deterministic regex matching against `x-aws-idp-document-name-regex` and `x-aws-idp-document-page-content-regex`
+  - Filters rule validation to only relevant policy types
+  - Reduces processing time and costs by skipping irrelevant policies
+- **Three-Step Validation Workflow**:
+  - Policy classification to identify applicable policy types
   - Fact extraction from document sections with intelligent chunking
   - Orchestrator consolidates facts across sections for final decisions
   - Separation of evidence gathering from compliance determination
@@ -47,14 +51,19 @@ This architecture enables better handling of large documents, separation of fact
 
 ### Service Components
 
-1. **RuleValidationService** (`service.py`):
-   - Section-level fact extraction
+1. **PolicyClassificationService** (`policy_classification.py`):
+   - Deterministic regex-based classifier — no LLM call
+   - Matches document ID and page-content text against policy-class regex patterns
+   - Returns matched policy types and page IDs
+
+2. **RuleValidationService** (`service.py`):
+   - Section-level fact extraction for matched policy types
    - Intelligent page-aware chunking
    - Concurrent rule processing with rate limiting
    - Extracts facts with citations and relevance
    - Returns `FactExtractionResponse` with extracted_facts and extraction_summary
 
-2. **RuleValidationOrchestratorService** (`orchestrator.py`):
+3. **RuleValidationOrchestratorService** (`orchestrator.py`):
    - Loads fact extraction results from S3
    - Consolidates facts across sections using LLM
    - Makes final compliance decisions per rule
@@ -65,29 +74,41 @@ This architecture enables better handling of large documents, separation of fact
 ### Data Flow
 
 ```
-Document Sections
+Document
     ↓
-Fact Extraction (RuleValidationService)
+Policy Classification (regex)
+    ↓ (identifies applicable policy types)
+Document Sections (filtered by matched policies)
+    ↓
+Fact Extraction (LLM)
     ↓ (stores extracted facts in S3)
     ↓ (multiple chunks per section if needed)
-Orchestrator Consolidation (RuleValidationOrchestratorService)
-    ↓ (LLM consolidates facts → compliance decision)
+Orchestrator Consolidation (LLM)
+    ↓ (consolidates facts → compliance decision)
 Final Compliance Decision
     ↓
 Output (JSON + Markdown)
 ```
 
-### Two-Step Approach Details
+### Three-Step Approach Details
 
-**Step 1: Fact Extraction**
-- Input: Document text + Rule
+**Step 1: Policy Classification (regex)**
+- Input: Document + Policy class definitions with regex patterns
+- Output: `PolicyClassificationResult`
+  - `matched_policy_types`: List of applicable policy types
+  - `matched_page_ids`: Page IDs where page-content regex matched
+- Deterministic regex matching — no LLM call
+- Subsequent steps only process matched policy types
+
+**Step 2: Fact Extraction**
+- Input: Document text + Rules (filtered by matched policy types)
 - Output: `FactExtractionResponse`
   - `extracted_facts`: List of facts with citations
   - `extraction_summary`: Summary of findings
 - LLM focuses on finding relevant evidence
 - No compliance decision made at this stage
 
-**Step 2: Orchestrator**
+**Step 3: Orchestrator**
 - Input: All extracted facts from all chunks/sections
 - Output: `LLMResponse`
   - `recommendation`: Pass/Fail/Information Not Found
@@ -103,14 +124,14 @@ Output (JSON + Markdown)
 
 #### FactExtractionResponse
 Response model from fact extraction step:
-- **rule_type**: Type of rule being evaluated
+- **policy_type**: Type of policy class being evaluated
 - **rule**: The specific rule description
 - **extracted_facts**: List of facts with citation and relevance
 - **extraction_summary**: Summary of extracted evidence
 
 #### LLMResponse
 Validated response model from orchestrator with automatic data cleaning:
-- **rule_type**: Type of rule being evaluated (e.g., "global_periods", "same_day_service_rules")
+- **policy_type**: Type of policy class being evaluated (e.g., "global_periods", "same_day_service_rules")
 - **rule**: The specific rule description being validated
 - **supporting_pages**: List of page IDs that support the recommendation
 - **recommendation**: Validated recommendation (customizable, default: Pass/Fail/Info Not Found)
@@ -121,7 +142,7 @@ Features:
 - Reasoning text cleaned of special characters
 - Supporting pages validated as list format
 - Whitespace automatically stripped
-- `rule_type` and `rule` added by code (not from LLM response)
+- `policy_type` and `rule` added by code (not from LLM response)
 
 #### Section Response Structure
 ```python
@@ -130,9 +151,9 @@ Features:
     "chunking_occurred": True,  # True if section was chunked
     "chunks_created": 2,  # Number of chunks (0 = no chunking, 2+ = chunked)
     "responses": {
-        "rule_type_1": [
+        "policy_type_1": [
             {
-                "rule_type": "global_periods",
+                "policy_type": "global_periods",
                 "rule": "Rule description",
                 "supporting_pages": ["1", "3"],
                 "recommendation": "Pass",
@@ -148,9 +169,9 @@ Features:
 {
     "document_id": "doc_123",
     "overall_status": "COMPLETE",
-    "total_rule_types": 4,
+    "total_policy_types": 4,
     "rule_summary": {
-        "rule_type_1": {
+        "policy_type_1": {
             "status": "COMPLETE",
             "total_rules": 5,
             "Pass": 4,
@@ -167,7 +188,7 @@ Features:
     },
     "supporting_pages": ["1", "2", "3", "4"],
     "rule_details": {
-        "rule_type_1": {
+        "policy_type_1": {
             "total_rules": 5,
             "recommendation_counts": {"Pass": 4, "Fail": 1},
             "rules": [...]
@@ -209,7 +230,7 @@ rule_validation:
     {DOCUMENT_TEXT}
     </document-text>
     
-    <rule-type>{rule_type}</rule-type>
+    <policy-type>{policy_type}</policy-type>
     <rule>{rule}</rule>
 ```
 
@@ -238,17 +259,17 @@ rule_validation_orchestrator:
     </options>
     
     <criteria>
-    <rule_type>{rule_type}</rule_type>
+    <policy_type>{policy_type}</policy_type>
     <rule>{rule}</rule>
     </criteria>
 ```
 
-### Rule Classes Configuration
+### Policy Classes Configuration
 
 ```yaml
-rule_classes:
+policy_classes:
   - $schema: https://json-schema.org/draft/2020-12/schema
-    x-aws-idp-rule-type: global_periods
+    x-aws-idp-policy-type: global_periods
     type: object
     rule_properties:
       minor_surgery_000_010:
@@ -430,7 +451,7 @@ If no page markers found:
 ```python
 # If LLM response parsing fails
 response_dict = {
-    "rule_type": rule_type,
+    "policy_type": policy_type,
     "rule": rule,
     "supporting_pages": [],
     "recommendation": "Error",
@@ -487,7 +508,7 @@ self.token_metrics = utils.merge_metering_data(
 {
   "document_id": "doc_123",
   "overall_status": "COMPLETE",
-  "total_rule_types": 4,
+  "total_policy_types": 4,
   "rule_summary": {...},
   "overall_statistics": {
     "total_rules": 20,
@@ -651,8 +672,8 @@ print("\nOverall Statistics:")
 print(json.dumps(summary['overall_statistics'], indent=2))
 
 print("\nRule Summary:")
-for rule_type, stats in summary['rule_summary'].items():
-    print(f"\n{rule_type}:")
+for policy_type, stats in summary['rule_summary'].items():
+    print(f"\n{policy_type}:")
     print(f"  Total rules: {stats['total_rules']}")
     for rec, count in stats.items():
         if rec not in ['status', 'total_rules']:

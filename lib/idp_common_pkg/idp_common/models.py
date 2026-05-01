@@ -29,6 +29,7 @@ class Status(Enum):
     POSTPROCESSING = "POSTPROCESSING"  # Document summarization
     HITL_IN_PROGRESS = "HITL_IN_PROGRESS"  # Human-in-the-loop review in progress
     SUMMARIZING = "SUMMARIZING"  # Document summarization
+    RULE_VALIDATION_POLICY_CLASSIFICATION = "RULE_VALIDATION_POLICY_CLASSIFICATION"  # Policy classification for rule validation
     RULE_VALIDATION = "RULE_VALIDATION"  # Rule validation processing
     RULE_VALIDATION_ORCHESTRATOR = "RULE_VALIDATION_ORCHESTRATOR"  # Rule validation orchestration and consolidation
     EVALUATING = "EVALUATING"  # Document evaluation
@@ -117,6 +118,8 @@ class RuleValidationResult:
     metadata: Optional[Dict[str, Any]] = None
     output_uri: Optional[str] = None
     errors: Optional[List[str]] = None
+    matched_policy_types: Optional[List[str]] = None
+    matched_page_ids: Optional[Dict[str, str]] = None
 
     @classmethod
     def for_section(
@@ -150,7 +153,7 @@ class RuleValidationResult:
     def for_consolidation(
         cls,
         document_id: str,
-        rule_type_uris: List[str],
+        policy_type_uris: List[str],
         summary_uri: str,
         sections_processed: int = 0,
         section_results: Optional[List[Dict[str, Any]]] = None,
@@ -159,7 +162,7 @@ class RuleValidationResult:
         return cls(
             request_id=document_id,
             summary={
-                "rule_type_uris": rule_type_uris,
+                "policy_type_uris": policy_type_uris,
                 "consolidated_summary_uri": summary_uri,
             },
             section_results=section_results,  # Preserve section results from Map state
@@ -373,6 +376,8 @@ class Document:
                 "metadata": self.rule_validation_result.metadata,
                 "output_uri": self.rule_validation_result.output_uri,
                 "errors": self.rule_validation_result.errors,
+                "matched_policy_types": self.rule_validation_result.matched_policy_types,
+                "matched_page_ids": self.rule_validation_result.matched_page_ids,
             }
 
         # Add HITL metadata if it has any values
@@ -483,6 +488,8 @@ class Document:
                 metadata=rv_data.get("metadata"),
                 output_uri=rv_data.get("output_uri"),
                 errors=rv_data.get("errors"),
+                matched_policy_types=rv_data.get("matched_policy_types"),
+                matched_page_ids=rv_data.get("matched_page_ids"),
             )
 
         return document
