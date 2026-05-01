@@ -1602,7 +1602,7 @@ class IDPConfig(BaseModel):
         default_factory=list, description="Document class definitions (JSON Schema)"
     )
     policy_classes: List[Dict[str, Any]] = Field(
-        default_factory=list, description="Policy class definitions for rule validation (JSON Schema). Also receives rule classes extracted by Rules Discovery."
+        default_factory=list, description="Policy class definitions for rule validation (JSON Schema). Also receives rule classes extracted by Policy Discovery."
     )
     discovery: DiscoveryConfig = Field(
         default_factory=DiscoveryConfig, description="Discovery configuration"

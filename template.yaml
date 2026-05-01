@@ -45,8 +45,6 @@ Mappings:
       ConfigPath: "ocr-benchmark"
     rule-validation:
       ConfigPath: "rule-validation"
-    rule-extraction:
-      ConfigPath: "rule-extraction"
     lending-package-sample-govcloud:
       ConfigPath: "lending-package-sample-govcloud"
 
@@ -198,7 +196,6 @@ Parameters:
       - "realkie-fcc-verified"
       - "ocr-benchmark"
       - "rule-validation"
-      - "rule-extraction"
     Description: >-
       Select the configuration preset. Each configuration contains pre-tuned settings for specific document processing scenarios - see https://github.com/aws-samples/sample-genai-idp/blob/main/config_library/README.md. Note: Custom Configuration Path overrides this when provided.
 

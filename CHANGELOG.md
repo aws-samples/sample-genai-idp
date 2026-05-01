@@ -11,7 +11,8 @@ SPDX-License-Identifier: MIT-0
   - A new policy classification step runs before rule validation, matching each document against your configured `policy_classes` using regex patterns on document names and page content. Only matching policy rules are evaluated, so unrelated rules are skipped automatically.
   - The configuration key `rule_classes` has been renamed to `policy_classes` for clarity. Existing configs will need to update this key.
   - The Schema Builder now has dedicated support for editing policy classes with policy-specific labels, and extraction-only settings are hidden when editing policy schemas.
-  - A "Policy Discovery" section has been added to Discovery Configuration in the UI, letting you choose the model, temperature, and prompts used for rule extraction.
+  - A "Policy Discovery" section has been added to Discovery Configuration in the UI, letting you choose the model, temperature, and prompts used for Policy Discovery.
+  - The legacy `rule-extraction` configuration preset has been removed. Use **Policy Discovery** on the Discovery tab instead — it writes extracted rules directly into the active config's `policy_classes`.
 
 - **Document-level Download button on the Document Details page** — A new **Download** dropdown in the Document Details header lets users pull every output artifact for a document in a single click, packaged as a ZIP. Three scopes are offered:
   - **Download All (ZIP)** — document attributes, metering, summary, evaluation & rule-validation reports, per-section predictions, baselines (when available), per-page text/confidence, and optionally per-page images and/or the source document (checkboxes).

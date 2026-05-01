@@ -51,22 +51,13 @@ Rule validation works for any industry using this two-step process:
 - A policy document containing your rules (PDF format)
   - Examples: compliance manuals, regulatory guidelines, coding policies, underwriting rules
 
-**How to do it:**
-1. **Enable Rule Extraction**
-   - Option A: Deploy stack with the **rule-extraction** configuration preset
-   - Option B: Import **rule-extraction** from Config Library in the UI
+**How to do it:** Use **Policy Discovery** — see [docs/policy-discovery.md](./policy-discovery.md) for the full walkthrough. In short:
 
-2. **Upload Your Policy Document**
-   - Click "Upload Document" in the Web UI
-   - Select your policy document
-   - System automatically extracts structured rules
+1. In the Web UI, open the **Discovery** tab and switch to **Policy Discovery** mode.
+2. Upload your policy PDF. Policy Discovery parses it into structured rules and writes them to the active configuration version's `policy_classes` field.
+3. Review the extracted rules in **Configuration → Policy Schema**, then save the version.
 
-3. **Review and Export Rules**
-   - View extracted rule types and individual rules
-   - Review for accuracy
-   - Copy the rules you want to use for validation
-
-**Skip this step if:** You already have your rules in a structured format.
+**Skip this step if:** You already have your rules in a structured format — paste them directly into the Policy Schema editor.
 
 #### Step 2: Validate Your Documents Against Rules
 
@@ -108,7 +99,7 @@ Want to see it in action first? We provide a complete healthcare example with sa
 - **Sample NCCI policy manual**: `samples/rule-validation/NCCI Medicare Policy Manual.pdf`
   - Source: [CMS NCCI Policy Manual Chapter 5 (2024)](https://www.cms.gov/files/document/medicare-ncci-policy-manual-2024-chapter-5.pdf)
   - Contains medical coding rules and guidelines
-- Pre-configured rule extraction and validation configs
+- Pre-configured Policy Discovery and rule validation configs
 
 ## Key Features
 
@@ -576,7 +567,7 @@ We provide a complete healthcare example demonstrating prior authorization valid
   - Contains medical coding rules, bundling guidelines, and compliance requirements
 
 **Configuration Files:**
-- **Step 1 - Rule Extraction**: `config_library/unified/rule-extraction/config.yaml`
+- **Step 1 - Policy Discovery**: extracted rules are written into `policy_classes` on the active config version (see [docs/policy-discovery.md](./policy-discovery.md))
 - **Step 2 - Rule Validation**: `config_library/unified/rule-validation/config.yaml`
 
 This example includes:

@@ -1711,7 +1711,7 @@ Resources:
                 properties:
                   model:
                     type: string
-                    description: Bedrock model ID for policy rule extraction
+                    description: Bedrock model ID for Policy Discovery
                     enum:
                       [
                         "us.anthropic.claude-sonnet-4-6",
@@ -1737,28 +1737,28 @@ Resources:
                     order: 0
                   temperature:
                     type: number
-                    description: "Sampling temperature for rule extraction (0.0 recommended for consistent extraction)"
+                    description: "Sampling temperature for Policy Discovery (0.0 recommended for consistent extraction)"
                     minimum: 0.0
                     maximum: 1.0
                     default: 0.0
                     order: 1
                   top_p:
                     type: number
-                    description: "Top P for rule extraction"
+                    description: "Top P for Policy Discovery"
                     minimum: 0.0
                     maximum: 1.0
                     default: 0.0
                     order: 2
                   top_k:
                     type: number
-                    description: "Top K for rule extraction"
+                    description: "Top K for Policy Discovery"
                     minimum: 1
                     maximum: 100
                     default: 5
                     order: 3
                   max_tokens:
                     type: number
-                    description: "Maximum output tokens for rule extraction"
+                    description: "Maximum output tokens for Policy Discovery"
                     minimum: 1000
                     maximum: 128000
                     default: 64000
@@ -1766,12 +1766,12 @@ Resources:
                   system_prompt:
                     type: string
                     format: textarea
-                    description: System prompt for policy rule extraction
+                    description: System prompt for Policy Discovery
                     order: 5
                   task_prompt:
                     type: string
                     format: textarea
-                    description: Task prompt for policy rule extraction
+                    description: Task prompt for Policy Discovery
                     order: 6
           agents:
             order: 11

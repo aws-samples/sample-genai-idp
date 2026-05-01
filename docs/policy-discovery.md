@@ -165,7 +165,7 @@ A single Bedrock LLM call that analyzes the full policy document in one pass and
 **How it Works:**
 1. Policy PDF is uploaded to the discovery bucket
 2. The Discovery Processor invokes `RulesDiscovery._extract_rules`
-3. The policy document (as image or text) is sent to the configured Bedrock model with the rule-extraction prompt
+3. The policy document (as image or text) is sent to the configured Bedrock model with the Policy Discovery prompt
 4. The response is parsed as JSON and each rule object is validated for the required fields (`$schema`, `$id`, `rule_properties`, etc.)
 5. Valid rules are reshaped and appended to `policy_classes`
 
