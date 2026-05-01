@@ -113,43 +113,20 @@ export function KPICardsWidget({ volume, cost, isLoading }: KPICardsWidgetProps)
           subValue={`${pagesPerDoc} pages / doc`}
         />
 
-        {/* 3 — Tokens */}
-        {totalTokens > 0 ? (
-          <KPICard
-            label="Tokens"
-            value={formatTokens(totalTokens)}
-            subValue={`↑ ${formatTokens(totalInputTokens)} input`}
-            subValue2={`↓ ${formatTokens(totalOutputTokens)} output`}
-          />
-        ) : (
-          <KPICard
-            label="Throughput"
-            value={
-              volume.throughputPerHour != null
-                ? `${volume.throughputPerHour.toFixed(1)}/hr`
-                : '—'
-            }
-            subValue="docs per hour"
-          />
-        )}
+        {/* 3 — Tokens (always shown) */}
+        <KPICard
+          label="Tokens"
+          value={formatTokens(totalTokens)}
+          subValue={totalTokens > 0 ? `↑ ${formatTokens(totalInputTokens)} input` : 'No token data yet'}
+          subValue2={totalTokens > 0 ? `↓ ${formatTokens(totalOutputTokens)} output` : undefined}
+        />
 
-        {/* 4 — Cost (or failed count if no cost data) */}
-        {totalCost > 0 ? (
-          <KPICard
-            label="Est. Cost"
-            value={`$${totalCost.toFixed(2)}`}
-            subValue={`$${costPerDoc.toFixed(5)} / document`}
-          />
-        ) : (
-          <KPICard
-            label="Failed"
-            value={(volume.failedDocuments ?? 0).toLocaleString()}
-            subValue="documents failed"
-            accent={
-              (volume.failedDocuments ?? 0) > 0 ? '#d13212' : undefined
-            }
-          />
-        )}
+        {/* 4 — Cost (always shown) */}
+        <KPICard
+          label="Est. Cost"
+          value={totalCost > 0 ? `$${totalCost.toFixed(2)}` : '$0.00'}
+          subValue={totalCost > 0 ? `$${costPerDoc.toFixed(5)} / document` : 'No cost data yet'}
+        />
       </ColumnLayout>
     </Container>
   );

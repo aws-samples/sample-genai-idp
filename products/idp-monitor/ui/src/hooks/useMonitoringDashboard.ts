@@ -7,7 +7,6 @@
  *
  * Features:
  *   - Configurable time range (1h | 6h | 24h | 7d | 30d | custom)
- *   - Mock data bypass when VITE_IDP_MONITOR_MOCK=true (no deployed stack needed)
  *   - AWSJSON deserialization for each section
  *   - Manual refresh + configurable auto-refresh interval
  *   - Per-section error surfacing
@@ -20,14 +19,12 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { MonitoringDashboardData, TimeRangePreset } from '../types/monitoring';
 import { GET_MONITORING_DASHBOARD } from '../graphql/queries';
 import { fetchAppSync } from '../lib/appsync-client';
-import { buildMockDashboard } from '../lib/mock-data';
 
 // ---------------------------------------------------------------------------
-// Env helpers (mirrors useMonitoringStatus.ts)
+// Env helpers
 // ---------------------------------------------------------------------------
 declare const __IDP_MONITOR_API_URL__: string | undefined;
 declare const __IDP_MONITOR_API_KEY__: string | undefined;
-declare const __IDP_MONITOR_MOCK__: string | undefined;
 
 function getApiUrl(): string {
   if (typeof __IDP_MONITOR_API_URL__ !== 'undefined' && __IDP_MONITOR_API_URL__) {
@@ -41,14 +38,6 @@ function getApiKey(): string {
     return __IDP_MONITOR_API_KEY__;
   }
   return import.meta.env.VITE_IDP_MONITOR_API_KEY ?? '';
-}
-
-function isMockEnabled(): boolean {
-  const val =
-    (typeof __IDP_MONITOR_MOCK__ !== 'undefined' ? __IDP_MONITOR_MOCK__ : undefined) ??
-    import.meta.env.VITE_IDP_MONITOR_MOCK ??
-    '';
-  return val === 'true' || val === '1';
 }
 
 // ---------------------------------------------------------------------------
@@ -164,53 +153,59 @@ export function useMonitoringDashboard(
     setError(null);
 
     try {
-      let result: MonitoringDashboardData;
-
-      if (isMockEnabled()) {
-        // Local dev: return mock data immediately (simulates ~300ms network)
-        await new Promise((r) => setTimeout(r, 300));
-        result = buildMockDashboard(timeRange);
-      } else {
-        const apiUrl = runtimeApiUrl || getApiUrl();
-        if (!apiUrl) {
-          throw new Error(
-            'VITE_IDP_MONITOR_API_URL is not configured. ' +
-              'Set it in .env or enable mock mode with VITE_IDP_MONITOR_MOCK=true.'
-          );
-        }
-
-        const raw = await fetchAppSync<RawDashboardResponse>({
-          url: apiUrl,
-          apiKey: runtimeApiKey || getApiKey(),
-          query: GET_MONITORING_DASHBOARD,
-          variables: {
-            input: {
-              timeRange,
-              ...(startTime ? { startTime } : {}),
-              ...(endTime ? { endTime } : {}),
-              ...(sections ? { sections } : {}),
-            },
-          },
-        });
-
-        const gql = raw.getMonitoringDashboard;
-        result = {
-          subscriptionStatus: gql.subscriptionStatus as MonitoringDashboardData['subscriptionStatus'],
-          subscriptionTier: gql.subscriptionTier as MonitoringDashboardData['subscriptionTier'],
-          volume: parseAWSJSON(gql.volume) as MonitoringDashboardData['volume'],
-          cost: parseAWSJSON(gql.cost) as MonitoringDashboardData['cost'],
-          latency: parseAWSJSON(gql.latency) as MonitoringDashboardData['latency'],
-          failures: parseAWSJSON(gql.failures) as MonitoringDashboardData['failures'],
-          throttles: parseAWSJSON(gql.throttles) as MonitoringDashboardData['throttles'],
-          distribution: parseAWSJSON(gql.distribution) as MonitoringDashboardData['distribution'],
-          config: parseAWSJSON(gql.config) as MonitoringDashboardData['config'],
-          timeRange: gql.timeRange,
-          startTime: gql.startTime,
-          endTime: gql.endTime,
-          generatedAt: gql.generatedAt,
-          errors: gql.errors ?? [],
-        };
+      const apiUrl = runtimeApiUrl || getApiUrl();
+      console.log('[IDPMonitor:Dashboard] fetchData called', {
+        runtimeApiUrl: runtimeApiUrl ? `${runtimeApiUrl.slice(0, 40)}...` : '(none)',
+        resolvedApiUrl: apiUrl ? `${apiUrl.slice(0, 40)}...` : '(none)',
+        hasApiKey: !!(runtimeApiKey || getApiKey()),
+        timeRange,
+      });
+      if (!apiUrl) {
+        throw new Error(
+          'VITE_IDP_MONITOR_API_URL is not configured. Set it in .env or pass apiUrl as a prop.'
+        );
       }
+
+      const raw = await fetchAppSync<RawDashboardResponse>({
+        url: apiUrl,
+        apiKey: runtimeApiKey || getApiKey(),
+        query: GET_MONITORING_DASHBOARD,
+        variables: {
+          input: {
+            timeRange,
+            ...(startTime ? { startTime } : {}),
+            ...(endTime ? { endTime } : {}),
+            ...(sections ? { sections } : {}),
+          },
+        },
+      });
+
+      const gql = raw.getMonitoringDashboard;
+      const result: MonitoringDashboardData = {
+        subscriptionStatus: gql.subscriptionStatus as MonitoringDashboardData['subscriptionStatus'],
+        subscriptionTier: gql.subscriptionTier as MonitoringDashboardData['subscriptionTier'],
+        volume: parseAWSJSON(gql.volume) as MonitoringDashboardData['volume'],
+        cost: parseAWSJSON(gql.cost) as MonitoringDashboardData['cost'],
+        latency: parseAWSJSON(gql.latency) as MonitoringDashboardData['latency'],
+        failures: parseAWSJSON(gql.failures) as MonitoringDashboardData['failures'],
+        throttles: parseAWSJSON(gql.throttles) as MonitoringDashboardData['throttles'],
+        distribution: parseAWSJSON(gql.distribution) as MonitoringDashboardData['distribution'],
+        config: parseAWSJSON(gql.config) as MonitoringDashboardData['config'],
+        timeRange: gql.timeRange,
+        startTime: gql.startTime,
+        endTime: gql.endTime,
+        generatedAt: gql.generatedAt,
+        errors: gql.errors ?? [],
+      };
+
+      console.log('[IDPMonitor:Dashboard] Data received ✓', {
+        subscriptionStatus: result.subscriptionStatus,
+        hasVolume: !!result.volume,
+        hasLatency: !!result.latency,
+        hasFailures: !!result.failures,
+        generatedAt: result.generatedAt,
+        errorCount: result.errors?.length ?? 0,
+      });
 
       if (!cancelledRef.current) {
         setData(result);
@@ -224,7 +219,7 @@ export function useMonitoringDashboard(
         setLoading(false);
       }
     }
-  }, [timeRange, startTime, endTime, sections]);
+  }, [timeRange, startTime, endTime, sections, runtimeApiUrl, runtimeApiKey]);
 
   // Initial fetch + re-fetch when options change
   useEffect(() => {

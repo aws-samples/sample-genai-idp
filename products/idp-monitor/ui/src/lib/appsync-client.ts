@@ -52,6 +52,14 @@ export async function fetchAppSync<TData = unknown>(
 ): Promise<TData> {
   const { url, apiKey, accessToken, query, variables = {} } = opts;
 
+  console.log('[IDPMonitor:AppSync] Request →', {
+    url,
+    hasApiKey: !!apiKey,
+    hasAccessToken: !!accessToken,
+    queryPreview: query?.slice(0, 80),
+    variables,
+  });
+
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
   };
@@ -69,9 +77,9 @@ export async function fetchAppSync<TData = unknown>(
   });
 
   if (!response.ok) {
-    throw new Error(
-      `AppSync request failed: HTTP ${response.status} ${response.statusText}`,
-    );
+    const errMsg = `AppSync request failed: HTTP ${response.status} ${response.statusText}`;
+    console.error('[IDPMonitor:AppSync] HTTP Error:', errMsg);
+    throw new Error(errMsg);
   }
 
   const json = (await response.json()) as {
@@ -79,7 +87,15 @@ export async function fetchAppSync<TData = unknown>(
     errors?: Array<{ message: string; errorType?: string }>;
   };
 
+  console.log('[IDPMonitor:AppSync] Response ←', {
+    hasData: !!json.data,
+    hasErrors: !!(json.errors && json.errors.length > 0),
+    errorCount: json.errors?.length ?? 0,
+    dataKeys: json.data ? Object.keys(json.data) : [],
+  });
+
   if (json.errors && json.errors.length > 0) {
+    console.error('[IDPMonitor:AppSync] GraphQL Errors:', json.errors);
     throw new AppSyncError(json.errors);
   }
 

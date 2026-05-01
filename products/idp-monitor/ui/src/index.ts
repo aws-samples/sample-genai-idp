@@ -81,7 +81,3 @@ export type {
 // ---------------------------------------------------------------------------
 export { GET_MONITORING_DASHBOARD, GET_MONITORING_STATUS } from './graphql/queries';
 
-// ---------------------------------------------------------------------------
-// Mock data builder (for testing / Storybook)
-// ---------------------------------------------------------------------------
-export { buildMockDashboard } from './lib/mock-data';

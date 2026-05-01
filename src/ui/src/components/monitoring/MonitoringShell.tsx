@@ -209,25 +209,47 @@ export const MonitoringShell: React.FC<MonitoringShellProps> = ({ stackName, cla
   // IDPMonitorUiUrl is the relative (or absolute) URL to the monitor UI bundle.
   // Written to SSM by deploy.sh when the IDPMonitor stack is deployed.
   // e.g. "/extensions/idp-monitor-ui.js"
-  const uiUrl = (settings?.IDPMonitorUiUrl as string | undefined) ?? '';
+  const rawUiUrl = (settings?.IDPMonitorUiUrl as string | undefined) ?? '';
   const apiUrl = (settings?.IDPMonitorApiUrl as string | undefined) ?? '';
   const apiKey = (settings?.IDPMonitorApiKey as string | undefined) ?? '';
+
+  // In local dev (localhost), always use the relative path so the Vite dev
+  // server middleware serves the locally-built UMD bundle instead of fetching
+  // a stale bundle from S3/CloudFront.
+  const isLocalDev = typeof window !== 'undefined' && window.location.hostname === 'localhost';
+  const uiUrl = isLocalDev && rawUiUrl ? '/extensions/idp-monitor-ui.js' : rawUiUrl;
+
+  console.log('[MonitoringShell] Config:', {
+    rawUiUrl: rawUiUrl ? rawUiUrl.slice(0, 60) : '(empty)',
+    effectiveUiUrl: uiUrl,
+    apiUrl: apiUrl ? `${apiUrl.slice(0, 40)}...` : '(empty)',
+    hasApiKey: !!apiKey,
+    isLocalDev,
+  });
 
   // Track load errors so we can show a retry button
   const [loadError, setLoadError] = React.useState<Error | null>(null);
   const [retryKey, setRetryKey] = React.useState(0);
 
-  // Keep a stable ref to the lazy component, recreated only when uiUrl or retryKey changes
+  // Keep a stable ref to the lazy component. Recreate it synchronously during render
+  // when uiUrl or retryKey changes — NOT in a useEffect (which fires after render and
+  // would cause the Suspense to render the stale lazy-with-empty-URL first).
   const RemotePageRef = useRef<React.LazyExoticComponent<React.ComponentType<MonitoringPageProps>> | null>(null);
-  if (!RemotePageRef.current) {
+  const lastUiUrlRef = useRef<string>('');
+  const lastRetryKeyRef = useRef<number>(-1);
+
+  if (uiUrl && (lastUiUrlRef.current !== uiUrl || lastRetryKeyRef.current !== retryKey)) {
+    lastUiUrlRef.current = uiUrl;
+    lastRetryKeyRef.current = retryKey;
     RemotePageRef.current = createRemoteMonitoringPage(uiUrl, (err) => setLoadError(err));
   }
   const RemotePage = RemotePageRef.current;
 
-  // Reset error state + recreate lazy component when the URL changes or user retries
+  // Reset error state when uiUrl or retryKey changes (the lazy is already recreated above)
   useEffect(() => {
-    setLoadError(null);
-    RemotePageRef.current = createRemoteMonitoringPage(uiUrl, (err) => setLoadError(err));
+    if (uiUrl) {
+      setLoadError(null);
+    }
   }, [uiUrl, retryKey]);
 
   // ── Case 1: IDPMonitor stack not deployed ─────────────────────────────────

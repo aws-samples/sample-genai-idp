@@ -5,10 +5,8 @@
  * and whether the subscription is active.
  *
  * Strategy:
- *   1. If VITE_IDP_MONITOR_API_URL / VITE_IDP_MONITOR_API_KEY are not set
- *      in the host app env → return status "not_deployed" immediately (no API call)
- *   2. If USE_MOCK_DATA is truthy → return "active" immediately (local dev bypass)
- *   3. Otherwise → POST a lightweight getMonitoringStatus query to AppSync
+ *   1. If VITE_IDP_MONITOR_API_URL is not set → return status "not_deployed" immediately
+ *   2. Otherwise → POST a lightweight getMonitoringStatus query to AppSync
  *
  * Returns:
  *   {
@@ -16,13 +14,10 @@
  *     loading: boolean
  *   }
  *
- * How to wire the API URL in the host app:
+ * How to wire the API URL:
  *   Add to .env (or CodeBuild VITE_ env vars):
  *     VITE_IDP_MONITOR_API_URL=https://<id>.appsync-api.<region>.amazonaws.com/graphql
  *     VITE_IDP_MONITOR_API_KEY=da2-xxxxxxxxxxxxxxxxxxxx
- *
- * How to enable mock mode for local dev (no deployed stack required):
- *     VITE_IDP_MONITOR_MOCK=true
  */
 
 import { useEffect, useState } from 'react';
@@ -35,7 +30,6 @@ import { fetchAppSync } from '../lib/appsync-client';
 // ---------------------------------------------------------------------------
 declare const __IDP_MONITOR_API_URL__: string | undefined;
 declare const __IDP_MONITOR_API_KEY__: string | undefined;
-declare const __IDP_MONITOR_MOCK__: string | undefined;
 
 function getApiUrl(): string {
   if (typeof __IDP_MONITOR_API_URL__ !== 'undefined' && __IDP_MONITOR_API_URL__) {
@@ -49,14 +43,6 @@ function getApiKey(): string {
     return __IDP_MONITOR_API_KEY__;
   }
   return import.meta.env.VITE_IDP_MONITOR_API_KEY ?? '';
-}
-
-function isMockEnabled(): boolean {
-  const val =
-    (typeof __IDP_MONITOR_MOCK__ !== 'undefined' ? __IDP_MONITOR_MOCK__ : undefined) ??
-    import.meta.env.VITE_IDP_MONITOR_MOCK ??
-    '';
-  return val === 'true' || val === '1';
 }
 
 // ---------------------------------------------------------------------------
@@ -80,14 +66,7 @@ export function useMonitoringStatus(opts?: UseMonitoringStatusOptions): UseMonit
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Fast path 1: mock mode
-    if (isMockEnabled()) {
-      setStatus('active');
-      setLoading(false);
-      return;
-    }
-
-    // Fast path 2: no API URL configured → stack not deployed
+    // Fast path: no API URL configured → stack not deployed
     const apiUrl = opts?.apiUrl || getApiUrl();
     if (!apiUrl) {
       setStatus('not_deployed');
@@ -122,7 +101,7 @@ export function useMonitoringStatus(opts?: UseMonitoringStatusOptions): UseMonit
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [opts?.apiUrl, opts?.apiKey]);
 
   return { status, loading };
 }
