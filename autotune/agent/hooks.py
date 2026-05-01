@@ -46,6 +46,20 @@ class CancelCheckHook(HookProvider):
             raise OptimizationCancelled("Optimization cancelled by user")
 
 
+class FileReadSafetyHook(HookProvider):
+    """Force file_read to always use mode='view' to prevent document-mode crashes on images."""
+
+    def register_hooks(self, registry: HookRegistry, **kwargs) -> None:
+        registry.add_callback(BeforeToolCallEvent, self._enforce_view_mode)
+
+    def _enforce_view_mode(self, event: BeforeToolCallEvent) -> None:
+        if event.tool_use.get("name") == "file_read":
+            tool_input = event.tool_use.get("input", {})
+            if tool_input.get("mode") != "view":
+                logger.info("FileReadSafetyHook: overriding mode=%s to view", tool_input.get("mode"))
+                tool_input["mode"] = "view"
+
+
 class OptimizationLoopHook(HookProvider):
     """Drive the optimization loop and enforce stopping criteria."""
 

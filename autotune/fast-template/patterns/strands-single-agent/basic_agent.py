@@ -35,7 +35,7 @@ from utils.auth import extract_user_id_from_context
 
 from idpac_tools import ALL_TOOLS as IDPAC_TOOLS
 from optimization_state import OptimizationState, STATUS_RUNNING, STATUS_COMPLETE, STATUS_FAILED
-from optimization_hooks import CancelCheckHook, OptimizationCancelled, OptimizationLoopHook
+from optimization_hooks import CancelCheckHook, FileReadSafetyHook, OptimizationCancelled, OptimizationLoopHook
 
 logger = logging.getLogger(__name__)
 
@@ -146,7 +146,7 @@ def _create_agent(user_id: str, session_id: str, state: OptimizationState,
     skills_dir = AGENT_DIR / "skills"
     plugins = [AgentSkills(skills=str(skills_dir))] if skills_dir.exists() else []
     tools = IDPAC_TOOLS + [file_read, file_write, editor, shell, image_reader]
-    hooks = [CancelCheckHook(state), OptimizationLoopHook(state, max_iterations=MAX_ITERATIONS)]
+    hooks = [CancelCheckHook(state), FileReadSafetyHook(), OptimizationLoopHook(state, max_iterations=MAX_ITERATIONS)]
 
     return Agent(
         name="idp_autotune",
