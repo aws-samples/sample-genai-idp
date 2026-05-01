@@ -20,9 +20,7 @@ Rule Validation automatically checks if your documents meet specific business ru
 
 The healthcare examples we provide show what's possible, but you can customize this for any industry.
 
-
-https://github.com/user-attachments/assets/5d115b90-ff52-4e17-ab70-d259efe5a183
-
+https://github.com/user-attachments/assets/bac617ec-edb0-4719-827f-175571a4b9f5
 
 ## Getting Started
 
