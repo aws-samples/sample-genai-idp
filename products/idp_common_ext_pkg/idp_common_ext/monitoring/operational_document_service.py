@@ -279,6 +279,40 @@ class OperationalDocumentService:
             "unclassified": unclassified,
         }
 
+    def get_config_version_distribution(
+        self,
+        time_range: Any,
+    ) -> Dict[str, Any]:
+        """
+        Return a breakdown of documents by the config version they were processed with.
+
+        Returns:
+            ``{
+                "by_version": {"v1.0": N, "v1.1": N, ...},
+                "total": int,
+                "no_version": int,
+            }``
+        """
+        docs = self._fetch_all_documents(
+            start_date_time=time_range.start_time,
+            end_date_time=time_range.end_time,
+        )
+
+        by_version: Dict[str, int] = defaultdict(int)
+        no_version = 0
+        for doc in docs:
+            config_version = getattr(doc, "config_version", None)
+            if not config_version:
+                no_version += 1
+            else:
+                by_version[config_version] += 1
+
+        return {
+            "by_version": dict(by_version),
+            "total": len(docs),
+            "no_version": no_version,
+        }
+
     # -------------------------------------------------------------------------
     # Volume over time (time-series bucketing)
     # -------------------------------------------------------------------------

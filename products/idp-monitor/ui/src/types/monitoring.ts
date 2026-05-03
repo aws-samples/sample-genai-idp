@@ -158,16 +158,13 @@ export interface DocumentClassCount {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export interface ConfigContext {
-  activeVersion: string;
-  documentClassCount: number;
-  documentClasses: string[];
-  versionHistory: ConfigVersion[];
+  versionDistribution: ConfigVersionUsage[];
+  totalVersions: number;
 }
 
-export interface ConfigVersion {
+export interface ConfigVersionUsage {
   version: string;
-  createdAt: string;            // ISO 8601
-  isActive: boolean;
+  documentCount: number;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

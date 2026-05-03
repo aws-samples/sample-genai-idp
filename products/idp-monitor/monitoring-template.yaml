@@ -49,6 +49,12 @@ Parameters:
     Default: "INFO"
     AllowedValues: ["DEBUG", "INFO", "WARNING", "ERROR"]
 
+  ApiKeyExpires:
+    Type: Number
+    Description: >
+      Unix timestamp (seconds since epoch) when the API key expires.
+      Calculated dynamically by deploy.sh (365 days from deployment time).
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Conditions
 # ─────────────────────────────────────────────────────────────────────────────
@@ -154,7 +160,7 @@ Resources:
     Properties:
       ApiId: !GetAtt MonitoringGraphQLApi.ApiId
       Description: !Sub "IDPMonitor dev API key for ${AcceleratorStackName}"
-      Expires: 1777777777
+      Expires: !Ref ApiKeyExpires
 
   # ── IAM — AppSync → CloudWatch Logs ──────────────────────────────────────
 

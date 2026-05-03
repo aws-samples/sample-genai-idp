@@ -362,6 +362,7 @@ class DocumentDynamoDBService:
             evaluation_report_uri=item.get("EvaluationReportUri"),
             summary_report_uri=item.get("SummaryReportUri"),
             trace_id=item.get("TraceId"),
+            config_version=item.get("ConfigVersion"),
         )
 
         # Convert status

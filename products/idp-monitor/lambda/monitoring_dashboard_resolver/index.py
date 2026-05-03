@@ -413,34 +413,18 @@ def _transform_to_appsync_response(
     }
 
     # ── config ────────────────────────────────────────────────────────────────
-    config_raw = raw.get("configInfo") or {}
-    config_versions = config_raw.get("configVersions") or []
-    version_history = []
-    for v in config_versions:
-        if isinstance(v, dict):
-            ver_name = v.get("versionName", v.get("name", str(v)))
-            version_history.append(
-                {
-                    "version": ver_name,
-                    "createdAt": v.get("createdAt", ""),
-                    "isActive": v.get(
-                        "isActive", ver_name == config_raw.get("activeVersion")
-                    ),
-                }
-            )
-        else:
-            version_history.append(
-                {
-                    "version": str(v),
-                    "createdAt": "",
-                    "isActive": str(v) == config_raw.get("activeVersion"),
-                }
-            )
+    # configVersionDistribution is array of {name, value} showing which versions
+    # were actually used to process documents
+    config_version_dist = raw.get("configVersionDistribution") or []
     config = {
-        "activeVersion": config_raw.get("activeVersion", ""),
-        "documentClassCount": config_raw.get("documentTypesCount", 0),
-        "documentClasses": [],
-        "versionHistory": version_history,
+        "versionDistribution": [
+            {
+                "version": item.get("name", ""),
+                "documentCount": item.get("value", 0),
+            }
+            for item in config_version_dist
+        ],
+        "totalVersions": len(config_version_dist),
     }
 
     return {

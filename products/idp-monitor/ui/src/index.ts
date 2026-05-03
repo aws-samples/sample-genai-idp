@@ -70,7 +70,7 @@ export type {
   DocumentClassCount,
   // Config section
   ConfigContext,
-  ConfigVersion,
+  ConfigVersionUsage,
   // UI helpers
   TimeRangePreset,
   DashboardSection,

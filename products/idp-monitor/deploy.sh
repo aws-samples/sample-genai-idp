@@ -321,6 +321,11 @@ else
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Calculate API key expiration (365 days from now)
+# ─────────────────────────────────────────────────────────────────────────────
+API_KEY_EXPIRES=$(python3 -c "from datetime import datetime, timedelta; print(int((datetime.now() + timedelta(days=365)).timestamp()))")
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Assemble parameter overrides
 # ─────────────────────────────────────────────────────────────────────────────
 PARAM_OVERRIDES=(
@@ -328,6 +333,7 @@ PARAM_OVERRIDES=(
   "AuthMode=${AUTH_MODE}"
   "LogLevel=${LOG_LEVEL}"
   "SubscriptionValidationMode=${SUBSCRIPTION_MODE}"
+  "ApiKeyExpires=${API_KEY_EXPIRES}"
 )
 
 if [[ "$AUTH_MODE" == "AMAZON_COGNITO_USER_POOLS" ]]; then
@@ -415,16 +421,14 @@ echo ""
 UI_DIST_DIR="${SCRIPT_DIR}/ui/dist"
 UI_UMD_BUNDLE="${UI_DIST_DIR}/idp-monitor-ui.umd.js"
 
-if [[ ! -f "$UI_UMD_BUNDLE" ]]; then
-  header "Building IDPMonitor UI bundle"
-  if command -v npm &>/dev/null; then
-    (cd "${SCRIPT_DIR}/ui" && npm install --silent && npm run build)
-    success "IDPMonitor UI bundle built: ${UI_UMD_BUNDLE}"
-  else
-    warn "npm not found — skipping UI bundle build. Ensure ui/dist/idp-monitor-ui.umd.js exists."
-  fi
+# Always rebuild UI to ensure latest changes are included
+header "Building IDPMonitor UI bundle"
+if command -v npm &>/dev/null; then
+  (cd "${SCRIPT_DIR}/ui" && npm install --silent && npm run build)
+  success "IDPMonitor UI bundle built: ${UI_UMD_BUNDLE}"
 else
-  info "IDPMonitor UI bundle already built: ${UI_UMD_BUNDLE}"
+  error "npm not found — cannot build UI bundle. Install Node.js 22.12+ and npm."
+  exit 1
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
