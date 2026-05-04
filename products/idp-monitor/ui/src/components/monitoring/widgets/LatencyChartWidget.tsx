@@ -32,11 +32,23 @@ function fmtMs(ms: number | null | undefined): string {
   return `${Math.round(ms)}ms`;
 }
 
-function stageStatusBadge(p99Ms: number | null | undefined): JSX.Element {
-  const v = p99Ms ?? 0;
-  if (v > 30_000) return <Badge color="red">Slow</Badge>;
-  if (v > 10_000) return <Badge color="severity-medium">Moderate</Badge>;
-  return <Badge color="green">Healthy</Badge>;
+/** Per-step speed thresholds (in ms) based on typical service performance */
+const STEP_THRESHOLDS: Record<string, { fast: number; normal: number }> = {
+  'OCR':            { fast: 30_000, normal: 60_000 },   // Textract: <30s fast, 30-60s normal, >60s slow
+  'Classification': { fast: 5_000,  normal: 15_000 },   // Bedrock: <5s fast, 5-15s normal, >15s slow
+  'Extraction':     { fast: 10_000, normal: 30_000 },   // Bedrock: <10s fast, 10-30s normal, >30s slow
+  'Assessment':     { fast: 5_000,  normal: 15_000 },   // Bedrock: <5s fast, 5-15s normal, >15s slow
+  'Enrichment':     { fast: 5_000,  normal: 15_000 },   // Bedrock: <5s fast, 5-15s normal, >15s slow
+};
+
+const DEFAULT_THRESHOLDS = { fast: 10_000, normal: 30_000 };
+
+function stageStatusBadge(p50Ms: number | null | undefined, stageName?: string): JSX.Element {
+  const v = p50Ms ?? 0;
+  const thresholds = (stageName && STEP_THRESHOLDS[stageName]) || DEFAULT_THRESHOLDS;
+  if (v > thresholds.normal) return <Badge color="red">Critical</Badge>;
+  if (v > thresholds.fast) return <Badge color="severity-medium">Slow</Badge>;
+  return <Badge color="green">Normal</Badge>;
 }
 
 const infoPopover = (
@@ -86,13 +98,17 @@ export function LatencyChartWidget({ latency, isLoading }: LatencyChartWidgetPro
     (a, b) => (PIPELINE_ORDER[a.stageName] ?? 99) - (PIPELINE_ORDER[b.stageName] ?? 99)
   );
 
+  // Calculate end-to-end as sum of per-step averages (more accurate than backend p50)
+  const endToEndMs = stageRows.reduce((sum, s) => sum + (s.p50Ms ?? 0), 0);
+  const displayEndToEnd = endToEndMs > 0 ? endToEndMs : latency.p50Ms;
+
   return (
     <Container
       header={
         <Header
           variant="h2"
           info={infoPopover}
-          description={`Average time ${fmtMs(latency.p50Ms)}`}
+          description={`Average end-to-end per document: ${fmtMs(displayEndToEnd)}`}
         >
           Processing Speed
         </Header>
@@ -107,7 +123,7 @@ export function LatencyChartWidget({ latency, isLoading }: LatencyChartWidgetPro
           columnDefinitions={[
             {
               id: 'step',
-              header: 'Pipeline Step',
+              header: 'Step',
               cell: (item) => item.stageName,
               width: 180,
             },
@@ -120,7 +136,7 @@ export function LatencyChartWidget({ latency, isLoading }: LatencyChartWidgetPro
             {
               id: 'status',
               header: 'Status',
-              cell: (item) => stageStatusBadge(item.p99Ms),
+              cell: (item) => stageStatusBadge(item.p50Ms, item.stageName),
               width: 150,
             },
           ]}

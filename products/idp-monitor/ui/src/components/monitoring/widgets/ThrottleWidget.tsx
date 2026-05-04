@@ -36,6 +36,7 @@ const SERVICE_DESCRIPTIONS: Record<string, string> = {
   'Lambda Throttles': 'Concurrent execution limits for pipeline functions',
   'Bedrock Rate Limits': 'Foundation model invocation throttle events',
   'Textract Throttles': 'Document analysis API rate limit events',
+  'DynamoDB Throttles': 'Document metadata table read/write capacity events',
   'SQS Message Age': 'Queue processing delay beyond threshold',
 };
 
@@ -102,6 +103,7 @@ export function ThrottleWidget({
     { service: 'Lambda Throttles', description: SERVICE_DESCRIPTIONS['Lambda Throttles'], metric: throttles.lambdaThrottles },
     { service: 'Bedrock Rate Limits', description: SERVICE_DESCRIPTIONS['Bedrock Rate Limits'], metric: throttles.bedrockThrottles },
     { service: 'Textract Throttles', description: SERVICE_DESCRIPTIONS['Textract Throttles'], metric: throttles.textractThrottles },
+    { service: 'DynamoDB Throttles', description: SERVICE_DESCRIPTIONS['DynamoDB Throttles'], metric: throttles.dynamodbThrottles! },
     { service: 'SQS Message Age', description: SERVICE_DESCRIPTIONS['SQS Message Age'], metric: throttles.sqsMessageAge },
   ].filter((r): r is ServiceRow => r.metric != null);
 

@@ -39,9 +39,11 @@ export interface MonitoringPageProps {
   apiUrl?: string;
   /** AppSync API key — injected at runtime from host app settings context. */
   apiKey?: string;
+  /** Called when user clicks "Investigate" on a failed document. Host app opens TroubleshootModal. */
+  onInvestigate?: (documentId: string) => void;
 }
 
-export function MonitoringPage({ apiUrl, apiKey }: MonitoringPageProps = {}): JSX.Element {
+export function MonitoringPage({ apiUrl, apiKey, onInvestigate }: MonitoringPageProps = {}): JSX.Element {
   const [timeRange, setTimeRange] = useState<TimeRangePreset>('24h');
   const [widgetVisibility, setWidgetVisibility] = useState<WidgetVisibilityMap>(
     () => loadWidgetVisibility(DEFAULT_WIDGET_VISIBILITY),
@@ -151,6 +153,7 @@ export function MonitoringPage({ apiUrl, apiKey }: MonitoringPageProps = {}): JS
               isLoading={isLoading}
               timeRange={timeRange}
               widgetVisibility={widgetVisibility}
+              onInvestigate={onInvestigate}
             />
           )}
 

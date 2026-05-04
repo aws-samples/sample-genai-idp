@@ -22,9 +22,10 @@
  *     a retry button.
  */
 
-import React, { Suspense, lazy, useEffect, useRef, useState } from 'react';
+import React, { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Box, Button, Container, Header, Icon, SpaceBetween, Spinner, TextContent } from '@cloudscape-design/components';
 import useSettingsContext from '../../contexts/settings';
+import TroubleshootModal from '../document-panel/TroubleshootModal';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -40,6 +41,7 @@ interface MonitoringShellProps {
 interface MonitoringPageProps {
   apiUrl?: string;
   apiKey?: string;
+  onInvestigate?: (documentId: string) => void;
 }
 
 interface IDPMonitorUILib {
@@ -252,6 +254,15 @@ function createRemoteMonitoringPage(
 export const MonitoringShell: React.FC<MonitoringShellProps> = ({ stackName, className }) => {
   const { settings } = useSettingsContext();
 
+  // ── Troubleshoot modal state (for Investigate action in failures table) ───
+  const [troubleshootDocId, setTroubleshootDocId] = useState<string | null>(null);
+  const [isTroubleshootVisible, setIsTroubleshootVisible] = useState(false);
+
+  const handleInvestigate = useCallback((documentId: string) => {
+    setTroubleshootDocId(documentId);
+    setIsTroubleshootVisible(true);
+  }, []);
+
   // IDPMonitorUiUrl is the relative (or absolute) URL to the monitor UI bundle.
   // Written to SSM by deploy.sh when the IDPMonitor stack is deployed.
   // e.g. "/extensions/idp-monitor-ui.js"
@@ -351,8 +362,15 @@ export const MonitoringShell: React.FC<MonitoringShellProps> = ({ stackName, cla
   return (
     <div className={className}>
       <Suspense fallback={<MonitoringLoadingSkeleton />} key={`remote-monitoring-${retryKey}`}>
-        <MonitoringComponent apiUrl={apiUrl} apiKey={apiKey} />
+        <MonitoringComponent apiUrl={apiUrl} apiKey={apiKey} onInvestigate={handleInvestigate} />
       </Suspense>
+
+      {/* Troubleshoot Modal — opened by "Investigate" button in Recent Failures */}
+      <TroubleshootModal
+        visible={isTroubleshootVisible}
+        onDismiss={() => setIsTroubleshootVisible(false)}
+        documentItem={troubleshootDocId ? { objectKey: troubleshootDocId } : null}
+      />
     </div>
   );
 };

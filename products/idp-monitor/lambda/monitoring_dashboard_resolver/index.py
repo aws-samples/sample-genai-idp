@@ -384,7 +384,14 @@ def _transform_to_appsync_response(
                 "batchId": "",
                 "documentClass": f.get("classification", ""),
                 "pageCount": f.get("numPages", 0),
-                "failedAt": f.get("timestamp", ""),
+                "failedAt": (
+                    f.get("timestamp")
+                    or f.get("failedAt")
+                    or f.get("CompletionTime")
+                    or f.get("WorkflowStartTime")
+                    or f.get("createdAt")
+                    or ""
+                ),
                 "errorMessage": f.get("errorMessage", ""),
                 "errorCode": "",
                 "stage": "",
@@ -538,10 +545,16 @@ def _transform_throttles(
     lambda_t = _extract_service("lambda")
     bedrock_t = _extract_service("bedrock")
     textract_t = _extract_service("textract")
+    dynamodb_t = _extract_service("dynamodb")
 
     severity_order = {"ok": 0, "warning": 1, "critical": 2}
     max_severity = max(
-        [lambda_t["severity"], bedrock_t["severity"], textract_t["severity"]],
+        [
+            lambda_t["severity"],
+            bedrock_t["severity"],
+            textract_t["severity"],
+            dynamodb_t["severity"],
+        ],
         key=lambda s: severity_order.get(s, 0),
         default="ok",
     )
@@ -552,6 +565,7 @@ def _transform_throttles(
         "lambdaThrottles": lambda_t,
         "bedrockThrottles": bedrock_t,
         "textractThrottles": textract_t,
+        "dynamodbThrottles": dynamodb_t,
         "sqsMessageAge": {"count": 0, "severity": "ok", "threshold": 300},
     }
 
@@ -1145,6 +1159,7 @@ def _build_empty_dashboard(time_range: str) -> dict[str, Any]:
         "lambdaThrottles": {"count": 0, "severity": "ok", "threshold": 10},
         "bedrockThrottles": {"count": 0, "severity": "ok", "threshold": 10},
         "textractThrottles": {"count": 0, "severity": "ok", "threshold": 10},
+        "dynamodbThrottles": {"count": 0, "severity": "ok", "threshold": 10},
         "sqsMessageAge": {"count": 0, "severity": "ok", "threshold": 300},
     }
 

@@ -128,6 +128,7 @@ export interface ThrottleMetrics {
   lambdaThrottles: ThrottleMetric;
   bedrockThrottles: ThrottleMetric;
   textractThrottles: ThrottleMetric;
+  dynamodbThrottles?: ThrottleMetric;
   sqsMessageAge: ThrottleMetric;
 }
 

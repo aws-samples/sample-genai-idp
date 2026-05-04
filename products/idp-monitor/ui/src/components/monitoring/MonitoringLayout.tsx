@@ -8,13 +8,12 @@
  * Receives the full dashboard data object and distributes
  * section data to each widget.
  *
- * Layout (matches IDP Accelerator reference implementation):
- *   Row 1: KPICardsWidget           (full width)
- *   Row 2: VolumeChartWidget        (full width)
- *   Row 3: DocTypeChartWidget (1/2) | ConfigPanelWidget (1/2)
- *   Row 4: LatencyChartWidget       (full width)
- *   Row 5: FailuresTableWidget      (full width)
- *   Row 6: ThrottleWidget           (full width, conditional)
+ * Layout:
+ *   Row 1: KPICardsWidget               (full width)
+ *   Row 2: VolumeChartWidget            (full width)
+ *   Row 3: DocTypeChartWidget (1/2)   | ConfigPanelWidget (1/2)
+ *   Row 4: LatencyChartWidget (1/2)   | ThrottleWidget (1/2)
+ *   Row 5: FailuresTableWidget          (full width)
  *   Empty state when all widgets hidden
  */
 
@@ -36,6 +35,7 @@ interface MonitoringLayoutProps {
   isLoading: boolean;
   timeRange?: string;
   widgetVisibility: WidgetVisibilityMap;
+  onInvestigate?: (documentId: string) => void;
 }
 
 export function MonitoringLayout({
@@ -43,6 +43,7 @@ export function MonitoringLayout({
   isLoading,
   timeRange,
   widgetVisibility,
+  onInvestigate,
 }: MonitoringLayoutProps): JSX.Element {
   const allHidden = Object.values(widgetVisibility).every((v) => !v);
 
@@ -84,7 +85,7 @@ export function MonitoringLayout({
                 ? '1fr 1fr'
                 : '1fr',
             gap: '20px',
-            alignItems: 'start',
+            alignItems: 'stretch',
           }}
         >
           {widgetVisibility.docTypes && (
@@ -103,19 +104,31 @@ export function MonitoringLayout({
         </div>
       )}
 
-      {/* Row 4 — Latency by step (full width) */}
-      {widgetVisibility.latencyChart && (
-        <LatencyChartWidget latency={dashboard.latency} isLoading={isLoading} />
+      {/* Row 4 — Processing Speed (1/2) | Service Performance (1/2) */}
+      {(widgetVisibility.latencyChart || widgetVisibility.throttleEvents) && (
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns:
+              widgetVisibility.latencyChart && widgetVisibility.throttleEvents
+                ? '1fr 1fr'
+                : '1fr',
+            gap: '20px',
+            alignItems: 'stretch',
+          }}
+        >
+          {widgetVisibility.latencyChart && (
+            <LatencyChartWidget latency={dashboard.latency} isLoading={isLoading} />
+          )}
+          {widgetVisibility.throttleEvents && (
+            <ThrottleWidget throttles={dashboard.throttles} isLoading={isLoading} />
+          )}
+        </div>
       )}
 
-      {/* Row 5 — Service Performance (full width) */}
-      {widgetVisibility.throttleEvents && (
-        <ThrottleWidget throttles={dashboard.throttles} isLoading={isLoading} />
-      )}
-
-      {/* Row 6 — Recent Failures table (full width, last) */}
+      {/* Row 5 — Recent Failures table (full width, last) */}
       {widgetVisibility.failuresTable && (
-        <FailuresTableWidget failures={dashboard.failures} isLoading={isLoading} />
+        <FailuresTableWidget failures={dashboard.failures} isLoading={isLoading} onInvestigate={onInvestigate} />
       )}
     </SpaceBetween>
   );

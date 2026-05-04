@@ -4,8 +4,7 @@
 /**
  * IDPMonitor Widget — Document Type Distribution
  *
- * Donut chart showing volume by document class with inline labels on slices.
- * Uses the same visual approach as the Configurations widget for consistency.
+ * Donut chart showing volume by document class with legend.
  * Falls back to horizontal bar chart for large numbers of types (>6).
  */
 
@@ -81,48 +80,6 @@ const CustomTooltip = ({
   );
 };
 
-// Custom label renderer — renders labels directly on/near the pie slices
-const renderCustomLabel = ({
-  cx,
-  cy,
-  midAngle,
-  outerRadius,
-  name,
-  percent,
-}: {
-  cx: number;
-  cy: number;
-  midAngle: number;
-  innerRadius: number;
-  outerRadius: number;
-  name: string;
-  percent: number;
-}) => {
-  // Only render labels for slices > 6% to avoid overlap
-  if (percent < 0.06) return null;
-
-  const RADIAN = Math.PI / 180;
-  const radius = outerRadius + 20;
-  const x = cx + radius * Math.cos(-midAngle * RADIAN);
-  const y = cy + radius * Math.sin(-midAngle * RADIAN);
-
-  // Truncate long names
-  const displayName = name.length > 14 ? name.slice(0, 12) + '…' : name;
-
-  return (
-    <text
-      x={x}
-      y={y}
-      fill="#16191f"
-      textAnchor={x > cx ? 'start' : 'end'}
-      dominantBaseline="central"
-      style={{ fontSize: 11, fontWeight: 500 }}
-    >
-      {displayName} ({(percent * 100).toFixed(0)}%)
-    </text>
-  );
-};
-
 export function DocTypeChartWidget({
   distribution,
   isLoading,
@@ -184,12 +141,12 @@ export function DocTypeChartWidget({
   const selectedOption =
     limitOptions.find((o) => parseInt(o.value) === displayLimit) ?? limitOptions[0];
 
-  // ── Donut mode (inline labels, no bottom legend) ────────────────────────────
+  // ── Donut mode (legend below chart) ─────────────────────────────────────────
   if (useDonutChart) {
     const topN = sorted.slice(0, 6);
     const remaining = sorted.slice(6);
 
-    const pieData: { name: string; value: number; percent: number; count: number }[] = topN.map((c) => ({
+    const pieData: { name: string; value: number; count: number; percent: number }[] = topN.map((c) => ({
       name: c.className,
       value: c.count,
       count: c.count,
@@ -237,9 +194,11 @@ export function DocTypeChartWidget({
                 cy="50%"
                 innerRadius={50}
                 outerRadius={78}
+                startAngle={90}
+                endAngle={-270}
                 paddingAngle={2}
                 dataKey="value"
-                label={renderCustomLabel}
+                label={false}
                 labelLine={false}
               >
                 {pieData.map((entry, idx) => {
@@ -263,23 +222,25 @@ export function DocTypeChartWidget({
               justifyContent: 'center',
               gap: '8px 16px',
               paddingTop: 8,
-              fontSize: 11,
+              fontSize: 12,
             }}
           >
             {pieData.map((entry, idx) => {
               const isOthers = entry.name.startsWith('Others (');
               return (
-                <div key={entry.name} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                <div key={entry.name} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
                   <span
                     style={{
-                      width: 9,
-                      height: 9,
+                      width: 10,
+                      height: 10,
                       background: isOthers ? OTHERS_COLOR : PALETTE[idx % PALETTE.length],
                       display: 'inline-block',
                       borderRadius: 2,
                     }}
                   />
-                  <span style={{ color: '#555' }}>{entry.name}</span>
+                  <span style={{ color: '#16191f' }}>
+                    {entry.name} ({entry.count.toLocaleString()})
+                  </span>
                 </div>
               );
             })}
