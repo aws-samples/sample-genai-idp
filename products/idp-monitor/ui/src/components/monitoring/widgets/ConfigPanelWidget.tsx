@@ -2,17 +2,19 @@
 // SPDX-License-Identifier: MIT-0
 
 /**
- * IDPMonitor Widget — Configurations (Donut Chart)
+ * IDPMonitor Widget — Configurations
  *
- * Displays the currently deployed IDP configuration context with a donut
- * chart showing document classes. Uses inline labels on slices to preserve
- * space instead of a bottom legend.
+ * Donut chart showing how many documents were processed by each configured
+ * document class. Header shows total configurations count and active version.
  */
 
 import Box from '@cloudscape-design/components/box';
+import ColumnLayout from '@cloudscape-design/components/column-layout';
 import Container from '@cloudscape-design/components/container';
 import ExpandableSection from '@cloudscape-design/components/expandable-section';
 import Header from '@cloudscape-design/components/header';
+import Icon from '@cloudscape-design/components/icon';
+import Popover from '@cloudscape-design/components/popover';
 import Spinner from '@cloudscape-design/components/spinner';
 import StatusIndicator from '@cloudscape-design/components/status-indicator';
 import Table from '@cloudscape-design/components/table';
@@ -52,7 +54,7 @@ const CustomTooltip = ({
   payload,
 }: {
   active?: boolean;
-  payload?: { name?: string; value: number; payload: { name: string; percentage: number } }[];
+  payload?: { name?: string; value: number; payload: { name: string; count: number; percentage: number } }[];
 }) => {
   if (!active || !payload || payload.length === 0) return null;
   const item = payload[0];
@@ -69,12 +71,12 @@ const CustomTooltip = ({
     >
       <strong>{item.payload.name}</strong>
       <br />
-      <span style={{ color: '#555' }}>{item.payload.percentage.toFixed(1)}%</span>
+      {item.payload.count.toLocaleString()} documents ({item.payload.percentage.toFixed(1)}%)
     </div>
   );
 };
 
-// Custom label renderer — renders labels directly on/near the pie slices
+// Inline label for donut slices
 const renderCustomLabel = ({
   cx,
   cy,
@@ -91,17 +93,12 @@ const renderCustomLabel = ({
   name: string;
   percent: number;
 }) => {
-  // Only render labels for slices > 8% to avoid overlap
   if (percent < 0.08) return null;
-
   const RADIAN = Math.PI / 180;
-  const radius = outerRadius + 20;
+  const radius = outerRadius + 18;
   const x = cx + radius * Math.cos(-midAngle * RADIAN);
   const y = cy + radius * Math.sin(-midAngle * RADIAN);
-
-  // Truncate long names
   const displayName = name.length > 14 ? name.slice(0, 12) + '…' : name;
-
   return (
     <text
       x={x}
@@ -116,14 +113,23 @@ const renderCustomLabel = ({
   );
 };
 
-export function ConfigPanelWidget({ config, distribution, isLoading }: ConfigPanelWidgetProps): JSX.Element {
-  const subtitle = config
-    ? `Active: v${config.activeVersion} · ${config.documentClassCount} document types`
-    : undefined;
+const infoPopover = (
+  <Popover
+    header="Configurations"
+    content="Shows the total number of document configurations in the system and how many documents were processed by each configuration."
+    triggerType="custom"
+    size="medium"
+  >
+    <Box color="text-status-info" display="inline-block" margin={{ left: 'xs' }}>
+      <Icon name="status-info" variant="link" />
+    </Box>
+  </Popover>
+);
 
+export function ConfigPanelWidget({ config, distribution, isLoading }: ConfigPanelWidgetProps): JSX.Element {
   if (isLoading && !config) {
     return (
-      <Container header={<Header variant="h2">Configurations</Header>}>
+      <Container header={<Header variant="h2" info={infoPopover}>Configurations</Header>}>
         <Box textAlign="center" padding="l">
           <Spinner size="large" />
         </Box>
@@ -133,7 +139,7 @@ export function ConfigPanelWidget({ config, distribution, isLoading }: ConfigPan
 
   if (!config) {
     return (
-      <Container header={<Header variant="h2">Configurations</Header>}>
+      <Container header={<Header variant="h2" info={infoPopover}>Configurations</Header>}>
         <Box textAlign="center" color="text-body-secondary" padding="l">
           No configuration data available.
         </Box>
@@ -141,26 +147,28 @@ export function ConfigPanelWidget({ config, distribution, isLoading }: ConfigPan
     );
   }
 
-  // Build donut chart data — prefer distribution data (has counts), fall back
-  // to config.documentClasses (equal weight) if distribution unavailable
+  const totalDocs = distribution?.totalDocuments ?? 0;
+
+  // Build pie data: documents processed per configuration (document class)
   const distClasses = distribution?.classes ?? [];
   const configClasses = config.documentClasses ?? [];
 
-  let pieData: { name: string; value: number; percentage: number }[];
+  let pieData: { name: string; value: number; count: number; percentage: number }[];
 
   if (distClasses.length > 0) {
-    // Use actual distribution counts
     const total = distClasses.reduce((s, c) => s + c.count, 0);
     pieData = distClasses.map((cls) => ({
       name: cls.className,
       value: cls.count,
+      count: cls.count,
       percentage: total > 0 ? (cls.count / total) * 100 : 0,
     }));
   } else if (configClasses.length > 0) {
-    // Equal weight fallback
+    // No processing data yet — show equal-weight placeholders
     pieData = configClasses.map((cls) => ({
       name: cls,
       value: 1,
+      count: 0,
       percentage: configClasses.length > 0 ? 100 / configClasses.length : 0,
     }));
   } else {
@@ -170,23 +178,53 @@ export function ConfigPanelWidget({ config, distribution, isLoading }: ConfigPan
   return (
     <Container
       header={
-        <Header variant="h2" description={subtitle}>
+        <Header
+          variant="h2"
+          info={infoPopover}
+          description={`${config.documentClassCount} configurations · ${totalDocs.toLocaleString()} documents processed`}
+        >
           Configurations
         </Header>
       }
     >
       <Box>
-        {/* Donut Chart */}
+        {/* Key metrics */}
+        <Box margin={{ bottom: 's' }}>
+          <ColumnLayout columns={2} variant="text-grid">
+            <div>
+              <Box variant="awsui-key-label" color="text-status-inactive">
+                Total Configurations
+              </Box>
+              <Box variant="h2">
+                <span style={{ fontSize: '1.3rem', fontWeight: 700, color: '#16191f' }}>
+                  {config.documentClassCount}
+                </span>
+              </Box>
+            </div>
+            <div>
+              <Box variant="awsui-key-label" color="text-status-inactive">
+                Active Version
+              </Box>
+              <Box variant="h2">
+                <span style={{ fontSize: '1.3rem', fontWeight: 700, color: '#16191f' }}>
+                  v{config.activeVersion}
+                </span>
+              </Box>
+            </div>
+          </ColumnLayout>
+        </Box>
+
+        {/* Donut Chart — documents per configuration */}
         {pieData.length > 0 && (
-          <Box padding={{ top: 'xs', bottom: 's' }}>
-            <ResponsiveContainer width="100%" height={200}>
+          <Box padding={{ top: 'xs', bottom: 'xs' }}>
+            <ResponsiveContainer width="100%" height={180}>
               <PieChart>
                 <Pie
                   data={pieData}
                   cx="50%"
                   cy="50%"
-                  innerRadius={45}
-                  outerRadius={70}
+                  innerRadius={42}
+                  outerRadius={68}
                   paddingAngle={2}
                   dataKey="value"
                   label={renderCustomLabel}
@@ -202,16 +240,44 @@ export function ConfigPanelWidget({ config, distribution, isLoading }: ConfigPan
                 <Tooltip content={<CustomTooltip />} />
               </PieChart>
             </ResponsiveContainer>
+            {/* Legend */}
+            <div
+              style={{
+                display: 'flex',
+                flexWrap: 'wrap',
+                justifyContent: 'center',
+                gap: '6px 14px',
+                paddingTop: 6,
+                fontSize: 11,
+              }}
+            >
+              {pieData.map((entry, idx) => (
+                <div key={entry.name} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <span
+                    style={{
+                      width: 9,
+                      height: 9,
+                      background: PALETTE[idx % PALETTE.length],
+                      display: 'inline-block',
+                      borderRadius: 2,
+                    }}
+                  />
+                  <span style={{ color: '#555' }}>
+                    {entry.name}{entry.count > 0 ? ` (${entry.count.toLocaleString()})` : ''}
+                  </span>
+                </div>
+              ))}
+            </div>
           </Box>
         )}
 
         {pieData.length === 0 && (
           <Box color="text-body-secondary" textAlign="center" padding="s">
-            No document classes configured.
+            No configurations found.
           </Box>
         )}
 
-        {/* Version History (expandable) */}
+        {/* Version History */}
         {(config.versionHistory?.length ?? 0) > 0 && (
           <Box margin={{ top: 's' }}>
             <ExpandableSection
@@ -226,7 +292,7 @@ export function ConfigPanelWidget({ config, distribution, isLoading }: ConfigPan
                     header: 'Version',
                     cell: (row) => (
                       <Box fontWeight={row.isActive ? 'bold' : 'normal'}>
-                        {row.version}
+                        v{row.version}
                       </Box>
                     ),
                   },

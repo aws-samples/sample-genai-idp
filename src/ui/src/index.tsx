@@ -33,8 +33,10 @@ import CloudscapeContentLayout from '@cloudscape-design/components/content-layou
 import CloudscapeColumnLayout from '@cloudscape-design/components/column-layout';
 import CloudscapeExpandableSection from '@cloudscape-design/components/expandable-section';
 import CloudscapeHeader from '@cloudscape-design/components/header';
+import CloudscapeIcon from '@cloudscape-design/components/icon';
 import CloudscapeLink from '@cloudscape-design/components/link';
 import CloudscapePagination from '@cloudscape-design/components/pagination';
+import CloudscapePopover from '@cloudscape-design/components/popover';
 import CloudscapeSelect from '@cloudscape-design/components/select';
 import CloudscapeSpaceBetween from '@cloudscape-design/components/space-between';
 import CloudscapeSpinner from '@cloudscape-design/components/spinner';
@@ -63,8 +65,10 @@ import * as CloudscapeCollectionHooks from '@cloudscape-design/collection-hooks'
   CloudscapeColumnLayout,
   CloudscapeExpandableSection,
   CloudscapeHeader,
+  CloudscapeIcon,
   CloudscapeLink,
   CloudscapePagination,
+  CloudscapePopover,
   CloudscapeSelect,
   CloudscapeSpaceBetween,
   CloudscapeSpinner,

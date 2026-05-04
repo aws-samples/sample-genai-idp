@@ -11,6 +11,8 @@
 import Box from '@cloudscape-design/components/box';
 import Container from '@cloudscape-design/components/container';
 import Header from '@cloudscape-design/components/header';
+import Icon from '@cloudscape-design/components/icon';
+import Popover from '@cloudscape-design/components/popover';
 import Spinner from '@cloudscape-design/components/spinner';
 import {
   Bar,
@@ -144,9 +146,22 @@ export function VolumeChartWidget({
   const tickInterval =
     safeData.length > 12 ? Math.ceil(safeData.length / 12) - 1 : 0;
 
+  const infoPopover = (
+    <Popover
+      header="Processing Volume"
+      content="Number of documents processed over time, broken down by completion status (completed, failed, pending)."
+      triggerType="custom"
+      size="medium"
+    >
+      <Box color="text-status-info" display="inline-block" margin={{ left: 'xs' }}>
+        <Icon name="status-info" variant="link" />
+      </Box>
+    </Popover>
+  );
+
   if (isLoading && !timeSeries) {
     return (
-      <Container header={<Header variant="h2">Processing Volume</Header>}>
+      <Container header={<Header variant="h2" info={infoPopover}>Processing Volume</Header>}>
         <Box textAlign="center" padding="l">
           <Spinner size="large" />
         </Box>
@@ -161,6 +176,7 @@ export function VolumeChartWidget({
         header={
           <Header
             variant="h2"
+            info={infoPopover}
             description={`0 documents processed · 0 failures${emptyPendingStr}`}
           >
             Processing Volume
@@ -181,6 +197,7 @@ export function VolumeChartWidget({
       header={
         <Header
           variant="h2"
+          info={infoPopover}
           description={`${totalDocs.toLocaleString()} documents processed · ${totalFailures.toLocaleString()} failures${pendingStr}`}
         >
           Processing Volume

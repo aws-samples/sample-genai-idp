@@ -12,6 +12,8 @@
 import Box from '@cloudscape-design/components/box';
 import Container from '@cloudscape-design/components/container';
 import Header from '@cloudscape-design/components/header';
+import Icon from '@cloudscape-design/components/icon';
+import Popover from '@cloudscape-design/components/popover';
 import Select from '@cloudscape-design/components/select';
 import Spinner from '@cloudscape-design/components/spinner';
 import {
@@ -135,9 +137,22 @@ export function DocTypeChartWidget({
     ? `${(distribution.totalDocuments ?? 0).toLocaleString()} total documents`
     : undefined;
 
+  const infoPopover = (
+    <Popover
+      header="Document Types"
+      content="Distribution of processed documents by classification type (e.g., invoices, contracts, receipts)."
+      triggerType="custom"
+      size="medium"
+    >
+      <Box color="text-status-info" display="inline-block" margin={{ left: 'xs' }}>
+        <Icon name="status-info" variant="link" />
+      </Box>
+    </Popover>
+  );
+
   if (isLoading && !distribution) {
     return (
-      <Container header={<Header variant="h2">Document Types</Header>}>
+      <Container header={<Header variant="h2" info={infoPopover}>Document Types</Header>}>
         <Box textAlign="center" padding="l">
           <Spinner size="large" />
         </Box>
@@ -148,7 +163,7 @@ export function DocTypeChartWidget({
   if (sorted.length === 0) {
     return (
       <Container
-        header={<Header variant="h2" description={subtitle}>Document Types</Header>}
+        header={<Header variant="h2" info={infoPopover} description={subtitle}>Document Types</Header>}
       >
         <Box color="text-body-secondary" textAlign="center" padding="l">
           No document type data available for this time range.
@@ -196,6 +211,7 @@ export function DocTypeChartWidget({
         header={
           <Header
             variant="h2"
+            info={infoPopover}
             description={subtitle}
             actions={
               <Select
@@ -213,7 +229,7 @@ export function DocTypeChartWidget({
         }
       >
         <Box padding={{ top: 'xs' }}>
-          <ResponsiveContainer width="100%" height={220}>
+          <ResponsiveContainer width="100%" height={200}>
             <PieChart>
               <Pie
                 data={pieData}
@@ -239,6 +255,35 @@ export function DocTypeChartWidget({
               <Tooltip content={<CustomTooltip />} />
             </PieChart>
           </ResponsiveContainer>
+          {/* Legend */}
+          <div
+            style={{
+              display: 'flex',
+              flexWrap: 'wrap',
+              justifyContent: 'center',
+              gap: '8px 16px',
+              paddingTop: 8,
+              fontSize: 11,
+            }}
+          >
+            {pieData.map((entry, idx) => {
+              const isOthers = entry.name.startsWith('Others (');
+              return (
+                <div key={entry.name} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <span
+                    style={{
+                      width: 9,
+                      height: 9,
+                      background: isOthers ? OTHERS_COLOR : PALETTE[idx % PALETTE.length],
+                      display: 'inline-block',
+                      borderRadius: 2,
+                    }}
+                  />
+                  <span style={{ color: '#555' }}>{entry.name}</span>
+                </div>
+              );
+            })}
+          </div>
         </Box>
       </Container>
     );

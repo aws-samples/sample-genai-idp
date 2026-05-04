@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT-0
 
 /**
- * IDPMonitor Widget — Pipeline Latency (Simplified for non-technical users)
+ * IDPMonitor Widget — Processing Speed
  *
  * Shows the typical processing time and per-step breakdown with status badges.
  * Focuses on clarity for non-technical users.
@@ -14,6 +14,8 @@ import Box from '@cloudscape-design/components/box';
 import ColumnLayout from '@cloudscape-design/components/column-layout';
 import Container from '@cloudscape-design/components/container';
 import Header from '@cloudscape-design/components/header';
+import Icon from '@cloudscape-design/components/icon';
+import Popover from '@cloudscape-design/components/popover';
 import Spinner from '@cloudscape-design/components/spinner';
 import Table from '@cloudscape-design/components/table';
 
@@ -38,10 +40,23 @@ function stageStatusBadge(p99Ms: number | null | undefined): JSX.Element {
   return <Badge color="green">Healthy</Badge>;
 }
 
+const infoPopover = (
+  <Popover
+    header="Processing Speed"
+    content="Time taken to process documents through each pipeline step. Shows typical (median) processing time and health status per step."
+    triggerType="custom"
+    size="medium"
+  >
+    <Box color="text-status-info" display="inline-block" margin={{ left: 'xs' }}>
+      <Icon name="status-info" variant="link" />
+    </Box>
+  </Popover>
+);
+
 export function LatencyChartWidget({ latency, isLoading }: LatencyChartWidgetProps): JSX.Element {
   if (isLoading && !latency) {
     return (
-      <Container header={<Header variant="h2">Pipeline Latency</Header>}>
+      <Container header={<Header variant="h2" info={infoPopover}>Processing Speed</Header>}>
         <Box textAlign="center" padding="l">
           <Spinner size="large" />
         </Box>
@@ -51,10 +66,10 @@ export function LatencyChartWidget({ latency, isLoading }: LatencyChartWidgetPro
 
   if (!latency || !latency.xRayEnabled) {
     return (
-      <Container header={<Header variant="h2">Pipeline Latency</Header>}>
+      <Container header={<Header variant="h2" info={infoPopover}>Processing Speed</Header>}>
         <Alert type="info" header="X-Ray tracing not enabled">
           Enable AWS X-Ray tracing on the IDP pipeline Lambda functions to view
-          end-to-end and per-stage latency metrics.
+          end-to-end and per-stage processing speed metrics.
         </Alert>
       </Container>
     );
@@ -63,7 +78,7 @@ export function LatencyChartWidget({ latency, isLoading }: LatencyChartWidgetPro
   const stageRows: StageLatency[] = latency.perStage ?? [];
 
   return (
-    <Container header={<Header variant="h2">Pipeline Latency</Header>}>
+    <Container header={<Header variant="h2" info={infoPopover}>Processing Speed</Header>}>
       {/* Summary metrics */}
       <Box margin={{ bottom: 'l' }}>
         <ColumnLayout columns={2} variant="text-grid">
