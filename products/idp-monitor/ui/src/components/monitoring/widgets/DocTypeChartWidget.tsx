@@ -4,9 +4,9 @@
 /**
  * IDPMonitor Widget — Document Type Distribution
  *
- * Hybrid pie/bar chart showing volume by document class.
- * Top 5 → pie chart; Top 10+ → horizontal bar chart.
- * Matches IDP Accelerator reference visual style.
+ * Donut chart showing volume by document class with inline labels on slices.
+ * Uses the same visual approach as the Configurations widget for consistency.
+ * Falls back to horizontal bar chart for large numbers of types (>6).
  */
 
 import Box from '@cloudscape-design/components/box';
@@ -43,6 +43,8 @@ const PALETTE = [
   'rgba(137,86,200,0.8)',
   'rgba(199,85,26,0.8)',
   'rgba(83,141,213,0.8)',
+  'rgba(54,179,126,0.8)',
+  'rgba(255,153,31,0.8)',
 ];
 const OTHERS_COLOR = 'rgba(176,184,193,0.8)';
 
@@ -77,40 +79,47 @@ const CustomTooltip = ({
   );
 };
 
-const PieLegend = ({
-  items,
+// Custom label renderer — renders labels directly on/near the pie slices
+const renderCustomLabel = ({
+  cx,
+  cy,
+  midAngle,
+  outerRadius,
+  name,
+  percent,
 }: {
-  items: { label: string; color: string; count: number; percentage: string }[];
-}) => (
-  <div
-    style={{
-      display: 'flex',
-      justifyContent: 'center',
-      gap: 16,
-      paddingTop: 16,
-      fontSize: 13,
-      flexWrap: 'wrap',
-    }}
-  >
-    {items.map(({ label, color, count, percentage }) => (
-      <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-        <span
-          style={{
-            width: 12,
-            height: 12,
-            background: color,
-            display: 'inline-block',
-            borderRadius: '50%',
-          }}
-        />
-        <span style={{ color: '#16191f', fontWeight: 500 }}>{label}</span>
-        <span style={{ color: '#555' }}>
-          {count.toLocaleString()} ({percentage}%)
-        </span>
-      </div>
-    ))}
-  </div>
-);
+  cx: number;
+  cy: number;
+  midAngle: number;
+  innerRadius: number;
+  outerRadius: number;
+  name: string;
+  percent: number;
+}) => {
+  // Only render labels for slices > 6% to avoid overlap
+  if (percent < 0.06) return null;
+
+  const RADIAN = Math.PI / 180;
+  const radius = outerRadius + 20;
+  const x = cx + radius * Math.cos(-midAngle * RADIAN);
+  const y = cy + radius * Math.sin(-midAngle * RADIAN);
+
+  // Truncate long names
+  const displayName = name.length > 14 ? name.slice(0, 12) + '…' : name;
+
+  return (
+    <text
+      x={x}
+      y={y}
+      fill="#16191f"
+      textAnchor={x > cx ? 'start' : 'end'}
+      dominantBaseline="central"
+      style={{ fontSize: 11, fontWeight: 500 }}
+    >
+      {displayName} ({(percent * 100).toFixed(0)}%)
+    </text>
+  );
+};
 
 export function DocTypeChartWidget({
   distribution,
@@ -148,8 +157,7 @@ export function DocTypeChartWidget({
     );
   }
 
-  const usePieChart = displayLimit <= 5;
-  const topNForPie = 6;
+  const useDonutChart = displayLimit <= 6;
   const total = sorted.reduce((s, d) => s + d.count, 0);
 
   const limitOptions = [
@@ -161,10 +169,10 @@ export function DocTypeChartWidget({
   const selectedOption =
     limitOptions.find((o) => parseInt(o.value) === displayLimit) ?? limitOptions[0];
 
-  // ── Pie mode ────────────────────────────────────────────────────────────────
-  if (usePieChart) {
-    const topN = sorted.slice(0, topNForPie);
-    const remaining = sorted.slice(topNForPie);
+  // ── Donut mode (inline labels, no bottom legend) ────────────────────────────
+  if (useDonutChart) {
+    const topN = sorted.slice(0, 6);
+    const remaining = sorted.slice(6);
 
     const pieData: { name: string; value: number; percent: number; count: number }[] = topN.map((c) => ({
       name: c.className,
@@ -176,22 +184,12 @@ export function DocTypeChartWidget({
     if (remaining.length > 0) {
       const othersCount = remaining.reduce((s, c) => s + c.count, 0);
       pieData.push({
-        name: `Others (${remaining.length} types)`,
+        name: `Others (${remaining.length})`,
         value: othersCount,
         count: othersCount,
         percent: total > 0 ? othersCount / total : 0,
       });
     }
-
-    const legendItems = pieData.map((item, idx) => {
-      const isOthers = item.name.startsWith('Others (');
-      return {
-        label: item.name,
-        color: isOthers ? OTHERS_COLOR : PALETTE[idx % PALETTE.length],
-        count: item.count,
-        percentage: (item.percent * 100).toFixed(1),
-      };
-    });
 
     return (
       <Container
@@ -214,36 +212,39 @@ export function DocTypeChartWidget({
           </Header>
         }
       >
-        <ResponsiveContainer width="100%" height={200}>
-          <PieChart>
-            <Pie
-              data={pieData}
-              cx="50%"
-              cy="50%"
-              innerRadius={50}
-              outerRadius={80}
-              paddingAngle={2}
-              dataKey="value"
-            >
-              {pieData.map((entry, idx) => {
-                const isOthers = entry.name.startsWith('Others (');
-                return (
-                  <Cell
-                    key={entry.name}
-                    fill={isOthers ? OTHERS_COLOR : PALETTE[idx % PALETTE.length]}
-                  />
-                );
-              })}
-            </Pie>
-            <Tooltip content={<CustomTooltip />} />
-          </PieChart>
-        </ResponsiveContainer>
-        <PieLegend items={legendItems} />
+        <Box padding={{ top: 'xs' }}>
+          <ResponsiveContainer width="100%" height={220}>
+            <PieChart>
+              <Pie
+                data={pieData}
+                cx="50%"
+                cy="50%"
+                innerRadius={50}
+                outerRadius={78}
+                paddingAngle={2}
+                dataKey="value"
+                label={renderCustomLabel}
+                labelLine={false}
+              >
+                {pieData.map((entry, idx) => {
+                  const isOthers = entry.name.startsWith('Others (');
+                  return (
+                    <Cell
+                      key={entry.name}
+                      fill={isOthers ? OTHERS_COLOR : PALETTE[idx % PALETTE.length]}
+                    />
+                  );
+                })}
+              </Pie>
+              <Tooltip content={<CustomTooltip />} />
+            </PieChart>
+          </ResponsiveContainer>
+        </Box>
       </Container>
     );
   }
 
-  // ── Bar mode ─────────────────────────────────────────────────────────────────
+  // ── Bar mode (for many items) ────────────────────────────────────────────────
   const topN = sorted.slice(0, displayLimit);
   const remaining = sorted.slice(displayLimit);
 

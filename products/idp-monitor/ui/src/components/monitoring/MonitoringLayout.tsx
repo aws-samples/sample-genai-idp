@@ -68,6 +68,7 @@ export function MonitoringLayout({
       {widgetVisibility.volumeChart && (
         <VolumeChartWidget
           timeSeries={dashboard.volume?.timeSeries}
+          statusBreakdown={dashboard.volume?.statusBreakdown}
           isLoading={isLoading}
           timeRange={timeRange}
         />
@@ -95,6 +96,7 @@ export function MonitoringLayout({
           {widgetVisibility.configPanel && (
             <ConfigPanelWidget
               config={dashboard.config}
+              distribution={dashboard.distribution}
               isLoading={isLoading}
             />
           )}

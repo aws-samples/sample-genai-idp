@@ -154,7 +154,7 @@ Resources:
     Properties:
       ApiId: !GetAtt MonitoringGraphQLApi.ApiId
       Description: !Sub "IDPMonitor dev API key for ${AcceleratorStackName}"
-      Expires: 1777777777
+      Expires: 1809313200
 
   # ── IAM — AppSync → CloudWatch Logs ──────────────────────────────────────
 

@@ -23,10 +23,11 @@ import {
   YAxis,
 } from 'recharts';
 
-import type { VolumeTimeSeriesPoint } from '../../../types/monitoring';
+import type { StatusBreakdown, VolumeTimeSeriesPoint } from '../../../types/monitoring';
 
 interface VolumeChartWidgetProps {
   timeSeries: VolumeTimeSeriesPoint[] | null | undefined;
+  statusBreakdown?: StatusBreakdown | null;
   isLoading: boolean;
   timeRange?: string;
 }
@@ -35,6 +36,7 @@ interface VolumeChartWidgetProps {
 const COLORS = {
   completed: 'rgba(103,177,115,0.8)',
   failed: 'rgba(242,139,139,0.8)',
+  pending: 'rgba(236,182,55,0.8)',
 };
 
 const CustomTooltip = ({
@@ -93,6 +95,7 @@ const CustomLegend = () => (
     {[
       { label: 'Completed', color: COLORS.completed },
       { label: 'Failed', color: COLORS.failed },
+      { label: 'Pending', color: COLORS.pending },
     ].map(({ label, color }) => (
       <div
         key={label}
@@ -124,16 +127,20 @@ function formatTimestamp(ts: string, timeRange?: string): string {
 
 export function VolumeChartWidget({
   timeSeries,
+  statusBreakdown,
   isLoading,
   timeRange,
 }: VolumeChartWidgetProps): JSX.Element {
   const safeData = (timeSeries ?? []).map((p) => ({
     ...p,
+    pending: Math.max(0, (p.total ?? 0) - p.completed - p.failed),
     label: formatTimestamp(p.timestamp, timeRange),
   }));
 
   const totalDocs = safeData.reduce((s, d) => s + d.completed + d.failed, 0);
   const totalFailures = safeData.reduce((s, d) => s + d.failed, 0);
+  const totalPending = (statusBreakdown?.inProgress ?? 0) + (statusBreakdown?.queued ?? 0)
+    || safeData.reduce((s, d) => s + d.pending, 0);
   const tickInterval =
     safeData.length > 12 ? Math.ceil(safeData.length / 12) - 1 : 0;
 
@@ -148,12 +155,13 @@ export function VolumeChartWidget({
   }
 
   if (safeData.length === 0) {
+    const emptyPendingStr = totalPending > 0 ? ` · ${totalPending.toLocaleString()} pending` : '';
     return (
       <Container
         header={
           <Header
             variant="h2"
-            description="0 documents processed · 0 failures"
+            description={`0 documents processed · 0 failures${emptyPendingStr}`}
           >
             Processing Volume
           </Header>
@@ -166,12 +174,14 @@ export function VolumeChartWidget({
     );
   }
 
+  const pendingStr = totalPending > 0 ? ` · ${totalPending.toLocaleString()} pending` : '';
+
   return (
     <Container
       header={
         <Header
           variant="h2"
-          description={`${totalDocs.toLocaleString()} documents processed · ${totalFailures.toLocaleString()} failures`}
+          description={`${totalDocs.toLocaleString()} documents processed · ${totalFailures.toLocaleString()} failures${pendingStr}`}
         >
           Processing Volume
         </Header>
@@ -218,6 +228,12 @@ export function VolumeChartWidget({
               name="failed"
               stackId="a"
               fill={COLORS.failed}
+            />
+            <Bar
+              dataKey="pending"
+              name="pending"
+              stackId="a"
+              fill={COLORS.pending}
               radius={[2, 2, 0, 0]}
             />
           </BarChart>
