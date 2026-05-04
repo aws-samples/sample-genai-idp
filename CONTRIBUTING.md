@@ -204,14 +204,14 @@ make ui-start STACK_NAME=my-idp-stack
 | `make docs-build` | Build documentation site (no serve) |
 | `make docs-deploy` | Deploy docs to GitHub Pages (from local build) |
 
-### Security (DSR)
+### Security (SRT)
 
 | Command | Description |
 |---------|-------------|
-| `make dsr` | Run full DSR workflow (setup → scan → optional fix) |
-| `make dsr-setup` | Set up DSR tool |
-| `make dsr-scan` | Run DSR security scan |
-| `make dsr-fix` | Run DSR interactive fix |
+| `make srt` | Run full SRT workflow (setup → scan → optional fix) |
+| `make srt-setup` | Download and configure SRT tool |
+| `make srt-scan` | Run SRT security assessment |
+| `make srt-fix` | Run SRT interactive fix |
 
 ## Coding Standards
 

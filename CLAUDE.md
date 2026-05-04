@@ -64,7 +64,7 @@ make lint-cicd
 ### Testing
 
 ```bash
-# Run all tests (idp_common_pkg + idp_cli)
+# Run all tests (idp_common_pkg + idp_cli + srt security scan)
 make test
 
 # Run tests in idp_common_pkg only
@@ -83,6 +83,26 @@ cd idp_cli && python -m pytest -v
 pytest -m "unit"
 pytest -m "integration"
 ```
+
+### Security Scanning
+
+The project includes automated security scanning with the [Sample Security Review Tool (SRT)](https://github.com/aws-samples/sample-security-review-tool):
+
+```bash
+# Run full SRT workflow (setup → scan → optional fix)
+make srt
+
+# Or run individual steps:
+make srt-setup     # Download and configure SRT
+make srt-scan      # Run security assessment
+make srt-fix       # Interactive fix mode
+```
+
+**CI/CD Integration:**
+- SRT automatically runs on merge requests targeting `develop` branch (GitLab CI `security_review` stage)
+- Does not run on feature branch pushes to avoid blocking development
+- Pipeline fails if high-priority security findings are detected
+- Provides security gate before code is merged to `develop`
 
 ### IDP CLI Commands
 
