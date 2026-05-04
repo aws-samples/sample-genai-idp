@@ -104,7 +104,7 @@ export function MonitoringPage({ apiUrl, apiKey, onInvestigate }: MonitoringPage
         header={
           <Header
             variant="h1"
-            description="Real-time visibility into your IDP pipeline"
+            description="Real-time visibility into document processing"
             actions={
               <MonitoringFilters
                 timeRange={timeRange}

@@ -4,8 +4,8 @@
 /**
  * IDPMonitor Widget — Service Performance
  *
- * Simple table showing each monitored AWS service with a description
- * and status indicator. No dropdown/expandable sections.
+ * Simple table showing each monitored AWS service with a subtitle description
+ * and status badge. Two columns: Service (with subtitle) and Status.
  */
 
 import Badge from '@cloudscape-design/components/badge';
@@ -33,11 +33,11 @@ interface ServiceRow {
 }
 
 const SERVICE_DESCRIPTIONS: Record<string, string> = {
-  'Lambda Throttles': 'Concurrent execution limits for pipeline functions',
-  'Bedrock Rate Limits': 'Foundation model invocation throttle events',
-  'Textract Throttles': 'Document analysis API rate limit events',
-  'DynamoDB Throttles': 'Document metadata table read/write capacity events',
-  'SQS Message Age': 'Queue processing delay beyond threshold',
+  'Lambda': 'Concurrent execution limits for pipeline functions',
+  'Bedrock': 'Foundation model invocation throttle events',
+  'Textract': 'Document analysis API rate limit events',
+  'DynamoDB': 'Read/write capacity and throughput limit events',
+  'SQS': 'Queue processing delay beyond threshold',
 };
 
 type BadgeColor = 'green' | 'severity-medium' | 'red';
@@ -57,7 +57,7 @@ const BADGE_LABEL: Record<SeverityLevel, string> = {
 const infoPopover = (
   <Popover
     header="Service Performance"
-    content="Monitors throttling and rate-limiting events across AWS services used by the IDP pipeline. OK means no throttle events detected in the selected time range."
+    content="Monitors throttling and rate-limiting events across AWS services used by the IDP pipeline. Normal means no throttle events detected in the selected time range."
     triggerType="custom"
     size="medium"
   >
@@ -91,20 +91,12 @@ export function ThrottleWidget({
     );
   }
 
-  const overallSeverity = (throttles.overallSeverity ?? 'ok') as SeverityLevel;
-  const overallLabel =
-    overallSeverity === 'ok'
-      ? 'All services within normal limits'
-      : overallSeverity === 'warning'
-        ? 'Some services need attention'
-        : 'Critical issues detected';
-
   const rows: ServiceRow[] = [
-    { service: 'Lambda Throttles', description: SERVICE_DESCRIPTIONS['Lambda Throttles'], metric: throttles.lambdaThrottles },
-    { service: 'Bedrock Rate Limits', description: SERVICE_DESCRIPTIONS['Bedrock Rate Limits'], metric: throttles.bedrockThrottles },
-    { service: 'Textract Throttles', description: SERVICE_DESCRIPTIONS['Textract Throttles'], metric: throttles.textractThrottles },
-    { service: 'DynamoDB Throttles', description: SERVICE_DESCRIPTIONS['DynamoDB Throttles'], metric: throttles.dynamodbThrottles! },
-    { service: 'SQS Message Age', description: SERVICE_DESCRIPTIONS['SQS Message Age'], metric: throttles.sqsMessageAge },
+    { service: 'Lambda', description: SERVICE_DESCRIPTIONS['Lambda'], metric: throttles.lambdaThrottles },
+    { service: 'Bedrock', description: SERVICE_DESCRIPTIONS['Bedrock'], metric: throttles.bedrockThrottles },
+    { service: 'Textract', description: SERVICE_DESCRIPTIONS['Textract'], metric: throttles.textractThrottles },
+    { service: 'DynamoDB', description: SERVICE_DESCRIPTIONS['DynamoDB'], metric: throttles.dynamodbThrottles! },
+    { service: 'SQS', description: SERVICE_DESCRIPTIONS['SQS'], metric: throttles.sqsMessageAge },
   ].filter((r): r is ServiceRow => r.metric != null);
 
   return (
@@ -113,7 +105,7 @@ export function ThrottleWidget({
         <Header
           variant="h2"
           info={infoPopover}
-          description={overallLabel}
+          description="Issues related to throttling or quota limits"
         >
           Service Performance
         </Header>
@@ -127,15 +119,12 @@ export function ThrottleWidget({
             id: 'service',
             header: 'Service',
             cell: (row) => (
-              <Box fontWeight="bold">{row.service}</Box>
-            ),
-            width: 180,
-          },
-          {
-            id: 'description',
-            header: 'Description',
-            cell: (row) => (
-              <Box color="text-body-secondary">{row.description}</Box>
+              <Box>
+                <Box fontWeight="bold">{row.service}</Box>
+                <Box color="text-body-secondary" fontSize="body-s">
+                  {row.description}
+                </Box>
+              </Box>
             ),
           },
           {
@@ -149,7 +138,7 @@ export function ThrottleWidget({
                 </Badge>
               );
             },
-            width: 150,
+            width: 120,
           },
         ]}
         sortingDisabled

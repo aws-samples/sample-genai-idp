@@ -3,14 +3,13 @@
 import React from 'react';
 import { Route, Routes } from 'react-router-dom';
 import { ConsoleLogger } from 'aws-amplify/utils';
-import { Alert, AppLayout, BreadcrumbGroup, Flashbar, Box, SpaceBetween } from '@cloudscape-design/components';
+import { Alert, AppLayout, Flashbar, Box, SpaceBetween } from '@cloudscape-design/components';
 import GenAIIDPTopNavigation from '../components/genai-idp-top-navigation';
 import Navigation from '../components/genaiidp-layout/navigation';
 import MonitoringLayout from '../components/monitoring/MonitoringLayout';
 import useNotifications from '../hooks/use-notifications';
 import useAppContext from '../contexts/app';
 import { appLayoutLabels } from '../components/common/labels';
-import { MONITORING_PATH } from './constants';
 
 const logger = new ConsoleLogger('MonitoringRoutes');
 
@@ -55,14 +54,6 @@ class MonitoringErrorBoundary extends React.Component<React.PropsWithChildren, E
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Monitoring-specific breadcrumbs
-// ─────────────────────────────────────────────────────────────────────────────
-
-const MonitoringBreadcrumbs = (): React.JSX.Element => (
-  <BreadcrumbGroup items={[{ text: 'Monitoring', href: `#${MONITORING_PATH}` }]} ariaLabel="Breadcrumbs" />
-);
-
-// ─────────────────────────────────────────────────────────────────────────────
 // Slim AppLayout — nav + breadcrumbs only, no document split panel
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -76,7 +67,6 @@ const MonitoringAppLayout = (): React.JSX.Element => {
       navigation={<Navigation />}
       navigationOpen={navigationOpen}
       onNavigationChange={({ detail }) => setNavigationOpen(detail.open)}
-      breadcrumbs={<MonitoringBreadcrumbs />}
       notifications={<Flashbar items={notifications as import('@cloudscape-design/components').FlashbarProps.MessageDefinition[]} />}
       toolsHide={true}
       splitPanelOpen={false}

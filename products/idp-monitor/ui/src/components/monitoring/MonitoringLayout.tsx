@@ -89,17 +89,21 @@ export function MonitoringLayout({
           }}
         >
           {widgetVisibility.docTypes && (
-            <DocTypeChartWidget
-              distribution={dashboard.distribution}
-              isLoading={isLoading}
-            />
+            <div style={{ minWidth: 0, display: 'grid' }}>
+              <DocTypeChartWidget
+                distribution={dashboard.distribution}
+                isLoading={isLoading}
+              />
+            </div>
           )}
           {widgetVisibility.configPanel && (
-            <ConfigPanelWidget
-              config={dashboard.config}
-              distribution={dashboard.distribution}
-              isLoading={isLoading}
-            />
+            <div style={{ minWidth: 0, display: 'grid' }}>
+              <ConfigPanelWidget
+                config={dashboard.config}
+                distribution={dashboard.distribution}
+                isLoading={isLoading}
+              />
+            </div>
           )}
         </div>
       )}
@@ -118,10 +122,14 @@ export function MonitoringLayout({
           }}
         >
           {widgetVisibility.latencyChart && (
-            <LatencyChartWidget latency={dashboard.latency} isLoading={isLoading} />
+            <div style={{ minWidth: 0, display: 'grid' }}>
+              <LatencyChartWidget latency={dashboard.latency} isLoading={isLoading} />
+            </div>
           )}
           {widgetVisibility.throttleEvents && (
-            <ThrottleWidget throttles={dashboard.throttles} isLoading={isLoading} />
+            <div style={{ minWidth: 0, display: 'grid' }}>
+              <ThrottleWidget throttles={dashboard.throttles} isLoading={isLoading} />
+            </div>
           )}
         </div>
       )}
