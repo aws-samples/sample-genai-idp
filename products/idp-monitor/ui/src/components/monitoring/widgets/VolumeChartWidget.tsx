@@ -38,7 +38,7 @@ interface VolumeChartWidgetProps {
 const COLORS = {
   completed: 'rgba(103,177,115,0.8)',
   failed: 'rgba(242,139,139,0.8)',
-  pending: 'rgba(236,182,55,0.8)',
+  pending: 'rgba(176,184,193,0.8)',
 };
 
 const CustomTooltip = ({
@@ -96,8 +96,8 @@ const CustomLegend = () => (
   >
     {[
       { label: 'Completed', color: COLORS.completed },
-      { label: 'Failed', color: COLORS.failed },
       { label: 'Pending', color: COLORS.pending },
+      { label: 'Failed', color: COLORS.failed },
     ].map(({ label, color }) => (
       <div
         key={label}
@@ -133,16 +133,29 @@ export function VolumeChartWidget({
   isLoading,
   timeRange,
 }: VolumeChartWidgetProps): JSX.Element {
-  const safeData = (timeSeries ?? []).map((p) => ({
-    ...p,
-    pending: Math.max(0, (p.total ?? 0) - p.completed - p.failed),
-    label: formatTimestamp(p.timestamp, timeRange),
-  }));
+  // Calculate pending from statusBreakdown (current snapshot) or per-bucket derivation
+  const snapshotPending = (statusBreakdown?.inProgress ?? 0) + (statusBreakdown?.queued ?? 0);
+
+  const safeData = (timeSeries ?? []).map((p, idx, arr) => {
+    // Per-bucket pending from total - completed - failed
+    let bucketPending = Math.max(0, (p.total ?? 0) - p.completed - p.failed);
+
+    // If no per-bucket pending detected but we have snapshot pending,
+    // assign all pending to the most recent bucket so it's visible in the chart
+    if (bucketPending === 0 && snapshotPending > 0 && idx === arr.length - 1) {
+      bucketPending = snapshotPending;
+    }
+
+    return {
+      ...p,
+      pending: bucketPending,
+      label: formatTimestamp(p.timestamp, timeRange),
+    };
+  });
 
   const totalDocs = safeData.reduce((s, d) => s + d.completed + d.failed, 0);
   const totalFailures = safeData.reduce((s, d) => s + d.failed, 0);
-  const totalPending = (statusBreakdown?.inProgress ?? 0) + (statusBreakdown?.queued ?? 0)
-    || safeData.reduce((s, d) => s + d.pending, 0);
+  const totalPending = snapshotPending || safeData.reduce((s, d) => s + d.pending, 0);
   const tickInterval =
     safeData.length > 12 ? Math.ceil(safeData.length / 12) - 1 : 0;
 
@@ -177,7 +190,7 @@ export function VolumeChartWidget({
           <Header
             variant="h2"
             info={infoPopover}
-            description={`0 documents processed · 0 failures${emptyPendingStr}`}
+            description={`0 completed${emptyPendingStr} · 0 failed`}
           >
             Processing Volume
           </Header>
@@ -190,6 +203,7 @@ export function VolumeChartWidget({
     );
   }
 
+  const totalCompleted = totalDocs - totalFailures;
   const pendingStr = totalPending > 0 ? ` · ${totalPending.toLocaleString()} pending` : '';
 
   return (
@@ -198,7 +212,7 @@ export function VolumeChartWidget({
         <Header
           variant="h2"
           info={infoPopover}
-          description={`${totalDocs.toLocaleString()} documents processed · ${totalFailures.toLocaleString()} failures${pendingStr}`}
+          description={`${totalCompleted.toLocaleString()} completed${pendingStr} · ${totalFailures.toLocaleString()} failed`}
         >
           Processing Volume
         </Header>
@@ -241,16 +255,16 @@ export function VolumeChartWidget({
               fill={COLORS.completed}
             />
             <Bar
-              dataKey="failed"
-              name="failed"
-              stackId="a"
-              fill={COLORS.failed}
-            />
-            <Bar
               dataKey="pending"
               name="pending"
               stackId="a"
               fill={COLORS.pending}
+            />
+            <Bar
+              dataKey="failed"
+              name="failed"
+              stackId="a"
+              fill={COLORS.failed}
               radius={[2, 2, 0, 0]}
             />
           </BarChart>

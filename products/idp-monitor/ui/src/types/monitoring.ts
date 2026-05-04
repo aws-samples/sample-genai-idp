@@ -168,6 +168,7 @@ export interface ConfigVersion {
   version: string;
   createdAt: string;            // ISO 8601
   isActive: boolean;
+  documentCount?: number;       // documents processed during this version
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

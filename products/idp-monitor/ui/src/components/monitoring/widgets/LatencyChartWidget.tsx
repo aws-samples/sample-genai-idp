@@ -11,7 +11,6 @@
 import Alert from '@cloudscape-design/components/alert';
 import Badge from '@cloudscape-design/components/badge';
 import Box from '@cloudscape-design/components/box';
-import ColumnLayout from '@cloudscape-design/components/column-layout';
 import Container from '@cloudscape-design/components/container';
 import Header from '@cloudscape-design/components/header';
 import Icon from '@cloudscape-design/components/icon';
@@ -78,32 +77,17 @@ export function LatencyChartWidget({ latency, isLoading }: LatencyChartWidgetPro
   const stageRows: StageLatency[] = latency.perStage ?? [];
 
   return (
-    <Container header={<Header variant="h2" info={infoPopover}>Processing Speed</Header>}>
-      {/* Summary metrics */}
-      <Box margin={{ bottom: 'l' }}>
-        <ColumnLayout columns={2} variant="text-grid">
-          <div>
-            <Box variant="awsui-key-label" color="text-status-inactive">
-              Typical Processing Time
-            </Box>
-            <Box variant="h2">
-              <span style={{ fontSize: '1.4rem', fontWeight: 700, color: '#16191f' }}>
-                {fmtMs(latency.p50Ms)}
-              </span>
-            </Box>
-          </div>
-          <div>
-            <Box variant="awsui-key-label" color="text-status-inactive">
-              Documents Measured
-            </Box>
-            <Box variant="h2">
-              <span style={{ fontSize: '1.4rem', fontWeight: 700, color: '#16191f' }}>
-                {(latency.sampleCount ?? 0).toLocaleString()}
-              </span>
-            </Box>
-          </div>
-        </ColumnLayout>
-      </Box>
+    <Container
+      header={
+        <Header
+          variant="h2"
+          info={infoPopover}
+          description={`Average time ${fmtMs(latency.p50Ms)}`}
+        >
+          Processing Speed
+        </Header>
+      }
+    >
 
       {/* Per-stage breakdown */}
       {stageRows.length > 0 && (

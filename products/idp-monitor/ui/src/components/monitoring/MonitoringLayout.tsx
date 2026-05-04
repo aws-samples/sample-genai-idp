@@ -108,14 +108,14 @@ export function MonitoringLayout({
         <LatencyChartWidget latency={dashboard.latency} isLoading={isLoading} />
       )}
 
-      {/* Row 5 — Recent Failures table (full width) */}
-      {widgetVisibility.failuresTable && (
-        <FailuresTableWidget failures={dashboard.failures} isLoading={isLoading} />
-      )}
-
-      {/* Row 6 — Throttle events (full width, only when events exist) */}
+      {/* Row 5 — Service Performance (full width) */}
       {widgetVisibility.throttleEvents && (
         <ThrottleWidget throttles={dashboard.throttles} isLoading={isLoading} />
+      )}
+
+      {/* Row 6 — Recent Failures table (full width, last) */}
+      {widgetVisibility.failuresTable && (
+        <FailuresTableWidget failures={dashboard.failures} isLoading={isLoading} />
       )}
     </SpaceBetween>
   );

@@ -804,6 +804,87 @@ def _supplement_from_dynamodb(
             except Exception as exc:
                 logger.warning("Config table supplement failed: %s", exc)
 
+        # ── Supplement per-version document counts ─────────────────────────
+        # Count documents processed during each version's active period
+        # by matching document completion timestamps to version deploy windows.
+        version_history = config.get("versionHistory") or []
+        if TRACKING_TABLE_NAME and version_history:
+            try:
+                from datetime import timedelta  # noqa: PLC0415
+
+                table = dynamodb.Table(TRACKING_TABLE_NAME)
+                response = table.scan(
+                    FilterExpression="ItemType = :doc",
+                    ExpressionAttributeValues={":doc": "document"},
+                    ProjectionExpression="CompletionTime, WorkflowStartTime",
+                    Limit=2000,
+                )
+                doc_items = response.get("Items", [])
+
+                # Parse version deploy dates and sort descending
+                version_windows = []
+                for v in version_history:
+                    created = v.get("createdAt", "")
+                    ts = None
+                    if created:
+                        try:
+                            ts = datetime.fromisoformat(
+                                str(created).replace("Z", "+00:00")
+                            )
+                        except (ValueError, TypeError):
+                            pass
+                    version_windows.append(
+                        {"version": v.get("version", ""), "deployedAt": ts, "count": 0}
+                    )
+
+                # Sort by deploy time descending (most recent first)
+                version_windows.sort(
+                    key=lambda x: (
+                        x["deployedAt"] or datetime.min.replace(tzinfo=timezone.utc)
+                    ),
+                    reverse=True,
+                )
+
+                # For each document, find which version window it belongs to
+                for item in doc_items:
+                    ts_str = item.get("CompletionTime") or item.get(
+                        "WorkflowStartTime", ""
+                    )
+                    if not ts_str:
+                        continue
+                    try:
+                        doc_ts = datetime.fromisoformat(
+                            str(ts_str).replace("Z", "+00:00")
+                        )
+                    except (ValueError, TypeError):
+                        continue
+
+                    # Find the version that was active when this doc was processed
+                    assigned = False
+                    for vw in version_windows:
+                        if vw["deployedAt"] and doc_ts >= vw["deployedAt"]:
+                            vw["count"] += 1
+                            assigned = True
+                            break
+                    # If doc is older than all versions, assign to oldest
+                    if not assigned and version_windows:
+                        version_windows[-1]["count"] += 1
+
+                # Write counts back to version_history
+                version_count_map = {
+                    vw["version"]: vw["count"] for vw in version_windows
+                }
+                for v in version_history:
+                    v["documentCount"] = version_count_map.get(v.get("version", ""), 0)
+
+                config["versionHistory"] = version_history
+                logger.info(
+                    "Per-version doc counts: %s",
+                    {vw["version"]: vw["count"] for vw in version_windows},
+                )
+            except Exception as exc:
+                logger.warning("Per-version document count supplement failed: %s", exc)
+
         # ── Supplement timeSeries from tracking table ──────────────────────
         # Fields: CompletionTime, WorkflowStartTime, ObjectStatus/WorkflowStatus
         if TRACKING_TABLE_NAME and needs_timeline:

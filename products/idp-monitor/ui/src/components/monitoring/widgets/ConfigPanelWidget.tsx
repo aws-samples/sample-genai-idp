@@ -149,27 +149,27 @@ export function ConfigPanelWidget({ config, distribution, isLoading }: ConfigPan
 
   const totalDocs = distribution?.totalDocuments ?? 0;
 
-  // Build pie data: documents processed per configuration (document class)
-  const distClasses = distribution?.classes ?? [];
-  const configClasses = config.documentClasses ?? [];
+  // Build pie data: documents processed per configuration version
+  const versionHistory = config.versionHistory ?? [];
+  const versionsWithCounts = versionHistory.filter((v) => (v.documentCount ?? 0) > 0);
 
   let pieData: { name: string; value: number; count: number; percentage: number }[];
 
-  if (distClasses.length > 0) {
-    const total = distClasses.reduce((s, c) => s + c.count, 0);
-    pieData = distClasses.map((cls) => ({
-      name: cls.className,
-      value: cls.count,
-      count: cls.count,
-      percentage: total > 0 ? (cls.count / total) * 100 : 0,
+  if (versionsWithCounts.length > 0) {
+    const total = versionsWithCounts.reduce((s, v) => s + (v.documentCount ?? 0), 0);
+    pieData = versionsWithCounts.map((v) => ({
+      name: `v${v.version}`,
+      value: v.documentCount ?? 0,
+      count: v.documentCount ?? 0,
+      percentage: total > 0 ? ((v.documentCount ?? 0) / total) * 100 : 0,
     }));
-  } else if (configClasses.length > 0) {
-    // No processing data yet — show equal-weight placeholders
-    pieData = configClasses.map((cls) => ({
-      name: cls,
+  } else if (versionHistory.length > 0) {
+    // No per-version doc counts yet — show equal-weight placeholders
+    pieData = versionHistory.map((v) => ({
+      name: `v${v.version}`,
       value: 1,
       count: 0,
-      percentage: configClasses.length > 0 ? 100 / configClasses.length : 0,
+      percentage: versionHistory.length > 0 ? 100 / versionHistory.length : 0,
     }));
   } else {
     pieData = [];

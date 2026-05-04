@@ -2,22 +2,20 @@
 // SPDX-License-Identifier: MIT-0
 
 /**
- * IDPMonitor Widget — Throttle & Performance Events
+ * IDPMonitor Widget — Service Performance
  *
- * Shows severity-badged rows for each monitored service.
- * OK services are collapsed in an ExpandableSection.
- * Matches IDP Accelerator reference visual style.
+ * Simple table showing each monitored AWS service with a description
+ * and status indicator. No dropdown/expandable sections.
  */
 
 import Badge from '@cloudscape-design/components/badge';
 import Box from '@cloudscape-design/components/box';
-import ColumnLayout from '@cloudscape-design/components/column-layout';
 import Container from '@cloudscape-design/components/container';
-import ExpandableSection from '@cloudscape-design/components/expandable-section';
 import Header from '@cloudscape-design/components/header';
-import SpaceBetween from '@cloudscape-design/components/space-between';
+import Icon from '@cloudscape-design/components/icon';
+import Popover from '@cloudscape-design/components/popover';
 import Spinner from '@cloudscape-design/components/spinner';
-import StatusIndicator from '@cloudscape-design/components/status-indicator';
+import Table from '@cloudscape-design/components/table';
 
 import type { ThrottleMetric, ThrottleMetrics } from '../../../types/monitoring';
 
@@ -27,6 +25,20 @@ interface ThrottleWidgetProps {
 }
 
 type SeverityLevel = 'ok' | 'warning' | 'critical';
+
+interface ServiceRow {
+  service: string;
+  description: string;
+  metric: ThrottleMetric;
+}
+
+const SERVICE_DESCRIPTIONS: Record<string, string> = {
+  'Lambda Throttles': 'Concurrent execution limits for pipeline functions',
+  'Bedrock Rate Limits': 'Foundation model invocation throttle events',
+  'Textract Throttles': 'Document analysis API rate limit events',
+  'SQS Message Age': 'Queue processing delay beyond threshold',
+};
+
 type BadgeColor = 'green' | 'severity-medium' | 'red';
 
 const BADGE_COLOR: Record<SeverityLevel, BadgeColor> = {
@@ -35,64 +47,24 @@ const BADGE_COLOR: Record<SeverityLevel, BadgeColor> = {
   critical: 'red',
 };
 
-const STATUS_LABEL: Record<SeverityLevel, string> = {
-  ok: 'OK',
-  warning: 'WARNING',
-  critical: 'CRITICAL',
+const BADGE_LABEL: Record<SeverityLevel, string> = {
+  ok: 'Healthy',
+  warning: 'Warning',
+  critical: 'Critical',
 };
 
-interface ServiceInfo {
-  label: string;
-  metric: ThrottleMetric | undefined;
-}
-
-interface ServiceRowProps {
-  label: string;
-  metric: ThrottleMetric;
-}
-
-function ServiceRow({ label, metric }: ServiceRowProps): JSX.Element {
-  const severity = (metric.severity ?? 'ok') as SeverityLevel;
-  return (
-    <div
-      style={{
-        display: 'flex',
-        alignItems: 'flex-start',
-        justifyContent: 'space-between',
-        padding: '10px 0',
-        borderBottom: '1px solid #f0f0f0',
-        gap: 12,
-      }}
-    >
-      <div style={{ flex: 1 }}>
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 10,
-            marginBottom: 4,
-          }}
-        >
-          <span style={{ fontWeight: 600, fontSize: 13, color: '#16191f' }}>
-            {label}
-          </span>
-          <Badge color={BADGE_COLOR[severity]}>{STATUS_LABEL[severity]}</Badge>
-        </div>
-        <Box color="text-body-secondary" fontSize="body-s">
-          Threshold: {metric.threshold}
-        </Box>
-      </div>
-      <div style={{ textAlign: 'right', minWidth: 60 }}>
-        <span style={{ fontSize: '1.3rem', fontWeight: 700, color: '#16191f' }}>
-          {metric.count}
-        </span>
-        <Box color="text-body-secondary" fontSize="body-s">
-          events
-        </Box>
-      </div>
-    </div>
-  );
-}
+const infoPopover = (
+  <Popover
+    header="Service Performance"
+    content="Monitors throttling and rate-limiting events across AWS services used by the IDP pipeline. OK means no throttle events detected in the selected time range."
+    triggerType="custom"
+    size="medium"
+  >
+    <Box color="text-status-info" display="inline-block" margin={{ left: 'xs' }}>
+      <Icon name="status-info" variant="link" />
+    </Box>
+  </Popover>
+);
 
 export function ThrottleWidget({
   throttles,
@@ -100,7 +72,7 @@ export function ThrottleWidget({
 }: ThrottleWidgetProps): JSX.Element {
   if (isLoading && !throttles) {
     return (
-      <Container header={<Header variant="h2">Throttle &amp; Performance</Header>}>
+      <Container header={<Header variant="h2" info={infoPopover}>Service Performance</Header>}>
         <Box textAlign="center" padding="l">
           <Spinner size="large" />
         </Box>
@@ -110,84 +82,76 @@ export function ThrottleWidget({
 
   if (!throttles) {
     return (
-      <Container header={<Header variant="h2">Throttle &amp; Performance</Header>}>
+      <Container header={<Header variant="h2" info={infoPopover}>Service Performance</Header>}>
         <Box textAlign="center" color="text-body-secondary" padding="l">
-          No throttle data available.
+          No service performance data available.
         </Box>
       </Container>
     );
   }
 
   const overallSeverity = (throttles.overallSeverity ?? 'ok') as SeverityLevel;
-  const overallIndicatorType =
-    overallSeverity === 'critical' ? 'error' : overallSeverity === 'warning' ? 'warning' : 'success';
-
-  const allServices: ServiceInfo[] = [
-    { label: 'Lambda Throttles', metric: throttles.lambdaThrottles },
-    { label: 'Bedrock Rate Limits', metric: throttles.bedrockThrottles },
-    { label: 'Textract Throttles', metric: throttles.textractThrottles },
-    { label: 'SQS Message Age', metric: throttles.sqsMessageAge },
-  ].filter((s): s is { label: string; metric: ThrottleMetric } => s.metric != null);
-
-  const elevated = allServices.filter(
-    (s) => s.metric?.severity === 'critical' || s.metric?.severity === 'warning',
-  );
-  const okServices = allServices.filter((s) => s.metric?.severity === 'ok');
-
   const overallLabel =
-    elevated.length > 0
-      ? `${elevated.length} service(s) need attention`
-      : 'All services within normal limits';
+    overallSeverity === 'ok'
+      ? 'All services within normal limits'
+      : overallSeverity === 'warning'
+        ? 'Some services need attention'
+        : 'Critical issues detected';
+
+  const rows: ServiceRow[] = [
+    { service: 'Lambda Throttles', description: SERVICE_DESCRIPTIONS['Lambda Throttles'], metric: throttles.lambdaThrottles },
+    { service: 'Bedrock Rate Limits', description: SERVICE_DESCRIPTIONS['Bedrock Rate Limits'], metric: throttles.bedrockThrottles },
+    { service: 'Textract Throttles', description: SERVICE_DESCRIPTIONS['Textract Throttles'], metric: throttles.textractThrottles },
+    { service: 'SQS Message Age', description: SERVICE_DESCRIPTIONS['SQS Message Age'], metric: throttles.sqsMessageAge },
+  ].filter((r): r is ServiceRow => r.metric != null);
 
   return (
     <Container
       header={
         <Header
           variant="h2"
-          description={
-            <StatusIndicator type={overallIndicatorType}>
-              {overallLabel}
-            </StatusIndicator>
-          }
+          info={infoPopover}
+          description={overallLabel}
         >
-          Throttle &amp; Performance
+          Service Performance
         </Header>
       }
     >
-      <SpaceBetween size="xxs">
-        {/* Elevated (critical + warning) — always visible */}
-        {elevated.map((s) => (
-          <ServiceRow key={s.label} label={s.label} metric={s.metric!} />
-        ))}
-
-        {/* OK services — collapsed */}
-        {okServices.length > 0 && (
-          <ExpandableSection
-            headerText={`${okServices.length} service(s) OK`}
-            variant="footer"
-          >
-            <ColumnLayout columns={okServices.length} variant="text-grid">
-              {okServices.map((s) => (
-                <div
-                  key={s.label}
-                  style={{ display: 'flex', alignItems: 'center', gap: 8 }}
-                >
-                  <span style={{ fontSize: 13, color: '#16191f' }}>
-                    {s.label}
-                  </span>
-                  <Badge color="green">OK</Badge>
-                </div>
-              ))}
-            </ColumnLayout>
-          </ExpandableSection>
-        )}
-
-        {allServices.length === 0 && (
-          <Box color="text-body-secondary" padding={{ top: 's' }}>
-            No throttle metrics available.
-          </Box>
-        )}
-      </SpaceBetween>
+      <Table
+        variant="embedded"
+        items={rows}
+        columnDefinitions={[
+          {
+            id: 'service',
+            header: 'Service',
+            cell: (row) => (
+              <Box fontWeight="bold">{row.service}</Box>
+            ),
+            width: 180,
+          },
+          {
+            id: 'description',
+            header: 'Description',
+            cell: (row) => (
+              <Box color="text-body-secondary">{row.description}</Box>
+            ),
+          },
+          {
+            id: 'status',
+            header: 'Status',
+            cell: (row) => {
+              const severity = (row.metric.severity ?? 'ok') as SeverityLevel;
+              return (
+                <Badge color={BADGE_COLOR[severity]}>
+                  {BADGE_LABEL[severity]}
+                </Badge>
+              );
+            },
+            width: 150,
+          },
+        ]}
+        sortingDisabled
+      />
     </Container>
   );
 }
