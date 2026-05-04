@@ -795,12 +795,33 @@ def _supplement_from_dynamodb(
                     config["activeVersion"] = version_name
                     config["documentClassCount"] = len(items)  # All active configs
 
-                # Count total configs (document classes configured)
+                # Get all configuration names (document classes)
                 response = config_table.scan(
                     FilterExpression=Attr("Configuration").begins_with("Config#"),
-                    Select="COUNT",
+                    ProjectionExpression="Configuration, DocumentType, #n",
+                    ExpressionAttributeNames={"#n": "Name"},
                 )
-                config["documentClassCount"] = response.get("Count", 0)
+                all_configs = response.get("Items", [])
+                config["documentClassCount"] = len(all_configs)
+
+                # Extract document class names from configurations
+                doc_classes = []
+                for cfg_item in all_configs:
+                    # Try DocumentType first, then Name, then parse from Configuration key
+                    doc_type = (
+                        cfg_item.get("DocumentType") or cfg_item.get("Name") or ""
+                    )
+                    if not doc_type:
+                        cfg_k = cfg_item.get("Configuration", "")
+                        doc_type = (
+                            cfg_k.replace("Config#", "")
+                            if cfg_k.startswith("Config#")
+                            else cfg_k
+                        )
+                    if doc_type:
+                        doc_classes.append(doc_type)
+                config["documentClasses"] = doc_classes
+                logger.info("Config document classes: %s", doc_classes)
             except Exception as exc:
                 logger.warning("Config table supplement failed: %s", exc)
 

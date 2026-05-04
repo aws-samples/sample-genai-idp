@@ -74,7 +74,17 @@ export function LatencyChartWidget({ latency, isLoading }: LatencyChartWidgetPro
     );
   }
 
-  const stageRows: StageLatency[] = latency.perStage ?? [];
+  // Sort stages by pipeline execution order
+  const PIPELINE_ORDER: Record<string, number> = {
+    'OCR': 1,
+    'Classification': 2,
+    'Extraction': 3,
+    'Assessment': 4,
+    'Enrichment': 5,
+  };
+  const stageRows: StageLatency[] = [...(latency.perStage ?? [])].sort(
+    (a, b) => (PIPELINE_ORDER[a.stageName] ?? 99) - (PIPELINE_ORDER[b.stageName] ?? 99)
+  );
 
   return (
     <Container
@@ -99,11 +109,11 @@ export function LatencyChartWidget({ latency, isLoading }: LatencyChartWidgetPro
               id: 'step',
               header: 'Pipeline Step',
               cell: (item) => item.stageName,
-              width: 220,
+              width: 180,
             },
             {
               id: 'typical',
-              header: 'Typical Time',
+              header: 'Average Time',
               cell: (item) => fmtMs(item.p50Ms),
               width: 140,
             },
@@ -111,7 +121,7 @@ export function LatencyChartWidget({ latency, isLoading }: LatencyChartWidgetPro
               id: 'status',
               header: 'Status',
               cell: (item) => stageStatusBadge(item.p99Ms),
-              width: 120,
+              width: 150,
             },
           ]}
           sortingDisabled

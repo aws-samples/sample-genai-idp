@@ -48,8 +48,8 @@ const BADGE_COLOR: Record<SeverityLevel, BadgeColor> = {
 };
 
 const BADGE_LABEL: Record<SeverityLevel, string> = {
-  ok: 'Healthy',
-  warning: 'Warning',
+  ok: 'Normal',
+  warning: 'Degraded',
   critical: 'Critical',
 };
 

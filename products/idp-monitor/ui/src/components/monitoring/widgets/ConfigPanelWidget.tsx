@@ -149,13 +149,15 @@ export function ConfigPanelWidget({ config, distribution, isLoading }: ConfigPan
 
   const totalDocs = distribution?.totalDocuments ?? 0;
 
-  // Build pie data: documents processed per configuration version
+  // Build pie data: prefer per-version doc counts, fall back to distribution (per doc type)
   const versionHistory = config.versionHistory ?? [];
   const versionsWithCounts = versionHistory.filter((v) => (v.documentCount ?? 0) > 0);
+  const distClasses = distribution?.classes ?? [];
 
   let pieData: { name: string; value: number; count: number; percentage: number }[];
 
   if (versionsWithCounts.length > 0) {
+    // Per-version document counts available
     const total = versionsWithCounts.reduce((s, v) => s + (v.documentCount ?? 0), 0);
     pieData = versionsWithCounts.map((v) => ({
       name: `v${v.version}`,
@@ -163,13 +165,29 @@ export function ConfigPanelWidget({ config, distribution, isLoading }: ConfigPan
       count: v.documentCount ?? 0,
       percentage: total > 0 ? ((v.documentCount ?? 0) / total) * 100 : 0,
     }));
-  } else if (versionHistory.length > 0) {
-    // No per-version doc counts yet — show equal-weight placeholders
+  } else if (versionHistory.length > 1) {
+    // Multiple versions but no doc counts — show equal-weight placeholders
     pieData = versionHistory.map((v) => ({
       name: `v${v.version}`,
       value: 1,
       count: 0,
-      percentage: versionHistory.length > 0 ? 100 / versionHistory.length : 0,
+      percentage: 100 / versionHistory.length,
+    }));
+  } else if (distClasses.length > 0) {
+    // Fall back to document type distribution — filter to configured classes only
+    const configuredClasses = config.documentClasses ?? [];
+    const filteredDist = configuredClasses.length > 0
+      ? distClasses.filter((cls) =>
+          configuredClasses.some((cc) => cc.toLowerCase() === cls.className.toLowerCase())
+        )
+      : distClasses;
+    const displayDist = filteredDist.length > 0 ? filteredDist : distClasses;
+    const total = displayDist.reduce((s, c) => s + c.count, 0);
+    pieData = displayDist.map((cls) => ({
+      name: cls.className,
+      value: cls.count,
+      count: cls.count,
+      percentage: total > 0 ? (cls.count / total) * 100 : 0,
     }));
   } else {
     pieData = [];
