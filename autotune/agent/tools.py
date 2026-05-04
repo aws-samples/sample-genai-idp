@@ -846,6 +846,23 @@ def download_input_document(batch_id: str, filename: str) -> str:
     ext = os.path.splitext(filename)[1].lower()
     image_exts = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".tiff", ".tif", ".bmp"}
     viewer = "image_reader" if ext in image_exts else "file_read"
+
+    # Resize large images to stay under Bedrock's 5MB inline limit
+    if ext in image_exts and os.path.getsize(output_path) > 4 * 1024 * 1024:
+        try:
+            from PIL import Image
+            img = Image.open(output_path)
+            # Halve dimensions until under 4MB
+            while os.path.getsize(output_path) > 4 * 1024 * 1024:
+                img = img.resize((img.width // 2, img.height // 2), Image.LANCZOS)
+                save_fmt = "JPEG" if ext in {".jpg", ".jpeg"} else "PNG"
+                img.save(output_path, format=save_fmt)
+        except Exception as e:
+            return json.dumps({
+                "path": output_path,
+                "warning": f"Image is too large for inline viewing ({os.path.getsize(output_path)} bytes) and resize failed: {e}. Inspect OCR output or ground truth instead.",
+            })
+
     return json.dumps({
         "path": output_path,
         "view_with": viewer,
