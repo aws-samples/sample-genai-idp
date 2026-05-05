@@ -120,9 +120,18 @@ Optimization guidance: {optimization_guidance or "None provided"}
 
 def _create_agent(user_id: str, session_id: str, state: OptimizationState,
                   test_set_id: str, optimization_guidance: str, is_resume: bool = False) -> Agent:
+    # Prompt caching: system prompt cached via cachePoint, tools via cache_tools,
+    # messages via CacheConfig(strategy="auto") which places a cache point at the
+    # end of the last user message each turn. This is Claude-specific; for other
+    # models see: https://strandsagents.com/docs/user-guide/concepts/model-providers/amazon-bedrock/#caching
+    from strands.models import CacheConfig
+    from strands.types.content import SystemContentBlock
+
     model = BedrockModel(
         model_id=os.environ["AUTOTUNE_MODEL_ID"],
         max_tokens=16384,
+        cache_tools="default",
+        cache_config=CacheConfig(strategy="auto"),
     )
     # Session history on S3 — /mnt/workspace is disabled due to AgentCore NFS ENOSPC bug.
     s3_bucket = os.environ.get("AUTOTUNE_STREAM_BUCKET", "")
@@ -151,7 +160,10 @@ def _create_agent(user_id: str, session_id: str, state: OptimizationState,
     agent = Agent(
         name="idp_autotune",
         model=model,
-        system_prompt=_load_system_prompt(),
+        system_prompt=[
+            SystemContentBlock(text=_load_system_prompt()),
+            SystemContentBlock(cachePoint={"type": "default"}),
+        ],
         tools=tools,
         plugins=plugins,
         hooks=hooks,
