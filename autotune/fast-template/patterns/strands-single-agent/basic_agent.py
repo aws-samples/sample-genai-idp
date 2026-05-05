@@ -34,9 +34,10 @@ from strands_tools import file_read, image_reader
 from utils.auth import extract_user_id_from_context
 
 from code_interpreter_tools import execute_python_analysis
-from idpac_tools import ALL_TOOLS as IDPAC_TOOLS
+from idpac_tools import ALL_TOOLS as IDPAC_TOOLS, get_eval_cost_usd, seed_eval_cost
 from optimization_state import OptimizationState, STATUS_RUNNING, STATUS_COMPLETE, STATUS_FAILED
 from optimization_hooks import CancelCheckHook, FileReadSafetyHook, OptimizationCancelled, OptimizationLoopHook
+from pricing import calculate_agent_cost
 
 logger = logging.getLogger(__name__)
 
@@ -229,8 +230,14 @@ def _run_agent_thread(user_id: str, session_id: str, state: OptimizationState,
         agent = _create_agent(user_id, session_id, state, test_set_id, optimization_guidance, is_resume)
         initial_prompt = _build_resume_prompt(test_set_id, optimization_guidance) if is_resume else _build_initial_prompt(test_set_id, optimization_guidance)
 
-        # Background sync thread — heartbeat + S3 sync independent of event loop
-        # so they keep running even during long tool calls (e.g. 5-min download_results)
+        # Seed eval cost from DDB on resume
+        if is_resume:
+            prev_state = state.get_state()
+            seed_eval_cost(float(prev_state.get("eval_cost_usd", 0)))
+
+        model_id = os.environ.get("AUTOTUNE_MODEL_ID", "")
+
+        # Background sync thread — heartbeat + S3 sync + cost sync
         disk_usage_path = os.path.join(session_scratch, "disk-usage.jsonl")
         sync_stop = threading.Event()
         def _sync_loop():
@@ -244,6 +251,21 @@ def _run_agent_thread(user_id: str, session_id: str, state: OptimizationState,
                         _sync_file(stream_path, f"{s3_prefix}/stream.jsonl")
                     if os.path.exists(log_path):
                         _sync_file(log_path, f"{s3_prefix}/OPTIMIZATION-LOG.md")
+                except Exception:
+                    pass
+                # Cost sync
+                try:
+                    usage = agent.event_loop_metrics.accumulated_usage
+                    it = usage.get("inputTokens", 0)
+                    ot = usage.get("outputTokens", 0)
+                    cr = usage.get("cacheReadInputTokens", 0)
+                    cw = usage.get("cacheWriteInputTokens", 0)
+                    agent_cost = calculate_agent_cost(model_id, it, ot, cr, cw)
+                    state.update_cost(
+                        agent_input_tokens=it, agent_output_tokens=ot,
+                        agent_cache_read_tokens=cr, agent_cache_write_tokens=cw,
+                        agent_cost_usd=agent_cost, eval_cost_usd=get_eval_cost_usd(),
+                    )
                 except Exception:
                     pass
                 # Disk usage snapshot for debugging ENOSPC

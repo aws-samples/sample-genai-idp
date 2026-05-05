@@ -71,21 +71,19 @@ The agent frequently launches runs with configs that pass `validate_config` but 
 
 See `autotune/docs/reward-hacking-guardrail.md` for full details.
 
-## Priority 3: Cost Observability
+## Priority 3: Cost Observability ✅ DONE (2026-05-05)
 
 **What:** Track and display total cost per optimization run.
 
-**Cost components:**
-1. **Agent token usage** — Opus input/output tokens via Strands callbacks
-2. **IDP pipeline costs** — `get_evaluation_summary` returns `totalCost` and `costBreakdown`
-3. **AgentCore compute** — microVM runtime hours (CloudWatch metrics)
+**Implemented:**
 
-**Implementation:**
-1. Add cost fields to DynamoDB state item
-2. `AfterInvocationEvent` hook to update token counts
-3. Accumulate eval costs from `get_evaluation_summary`
-4. Display in UI status bar and run history sidebar
-5. Write cost summary to OPTIMIZATION-LOG.md at end of run
+1. **Agent cost** — Strands `accumulated_usage` (input/output/cache tokens) priced via `config_library/pricing.yaml` lookup
+2. **Eval cost** — Accumulated from `costBreakdown.totalCost` in `get_evaluation_summary` responses
+3. **DynamoDB state** — `agent_cost_usd`, `eval_cost_usd`, `agent_input_tokens`, `agent_output_tokens`, `agent_cache_read_tokens`, `agent_cache_write_tokens` synced every 10s
+4. **Resume-safe** — Eval cost seeded from DDB on resume
+5. **Frontend** — Status bar shows `Cost: $X.XX (agent $X.XX + eval $X.XX)` live
+
+Key files: `autotune/agent/pricing.py`, `autotune/agent/state.py` (`update_cost`), `autotune/agent/tools.py` (eval cost accumulator), `basic_agent.py` (sync loop), `ChatInterface.tsx` (display).
 
 ## Priority 4: Automatic Optimization Log Updates
 

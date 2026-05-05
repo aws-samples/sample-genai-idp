@@ -45,6 +45,9 @@ COPY autotune/agent/pyproject.toml /app/autotune/agent/pyproject.toml
 COPY autotune/agent/idpac/ /app/autotune/agent/idpac/
 RUN uv pip install --no-cache -e /app/autotune/agent/
 
+# --- Pricing data ---
+COPY config_library/pricing.yaml /app/config_library/pricing.yaml
+
 # Create non-root user
 RUN useradd -m -u 1000 bedrock_agentcore
 USER bedrock_agentcore
@@ -57,6 +60,7 @@ COPY autotune/fast-template/patterns/strands-single-agent/tools/ tools/
 COPY autotune/fast-template/patterns/utils/ utils/
 COPY autotune/agent/tools.py idpac_tools.py
 COPY autotune/agent/code_interpreter_tools.py code_interpreter_tools.py
+COPY autotune/agent/pricing.py pricing.py
 COPY autotune/agent/state.py optimization_state.py
 COPY autotune/agent/hooks.py optimization_hooks.py
 COPY autotune/agent/prompt.md .

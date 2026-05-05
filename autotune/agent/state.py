@@ -132,6 +132,31 @@ class OptimizationState:
             },
         )
 
+    def update_cost(
+        self,
+        agent_input_tokens: int = 0,
+        agent_output_tokens: int = 0,
+        agent_cache_read_tokens: int = 0,
+        agent_cache_write_tokens: int = 0,
+        agent_cost_usd: float = 0.0,
+        eval_cost_usd: float = 0.0,
+    ) -> None:
+        """Update token usage and cost (agent + eval tracked separately)."""
+        self._update_expr(
+            "SET agent_input_tokens = :it, agent_output_tokens = :ot, "
+            "agent_cache_read_tokens = :cr, agent_cache_write_tokens = :cw, "
+            "agent_cost_usd = :ac, eval_cost_usd = :ec, updated_at = :t",
+            {
+                ":it": agent_input_tokens,
+                ":ot": agent_output_tokens,
+                ":cr": agent_cache_read_tokens,
+                ":cw": agent_cache_write_tokens,
+                ":ac": str(round(agent_cost_usd, 4)),
+                ":ec": str(round(eval_cost_usd, 4)),
+                ":t": _now(),
+            },
+        )
+
     def _update_expr(
         self, expr: str, values: dict, names: Optional[dict] = None
     ) -> None:

@@ -443,6 +443,9 @@ export default function ChatInterface() {
                         {agentState.best_accuracy != null && Number(agentState.best_accuracy) > 0 && (
                           <span>· Best: {String(agentState.best_accuracy)}%</span>
                         )}
+                        {(Number(agentState.agent_cost_usd || 0) > 0 || Number(agentState.eval_cost_usd || 0) > 0) && (
+                          <span>· Cost: ${(Number(agentState.agent_cost_usd || 0) + Number(agentState.eval_cost_usd || 0)).toFixed(2)} (agent ${Number(agentState.agent_cost_usd || 0).toFixed(2)} + eval ${Number(agentState.eval_cost_usd || 0).toFixed(2)})</span>
+                        )}
                         {agentState.status === "running" && agentState.last_heartbeat_at && (() => {
                           const ago = Math.floor((now - new Date(String(agentState.last_heartbeat_at)).getTime()) / 1000)
                           return <span>· ♥ {ago}s ago</span>

@@ -19,6 +19,20 @@ _client = None
 _deployer = None
 _optimization_state = None
 
+# Accumulated eval pipeline cost (seeded from DDB on resume, updated by get_evaluation_summary)
+_eval_cost_usd: float = 0.0
+
+
+def get_eval_cost_usd() -> float:
+    """Return current accumulated eval cost."""
+    return _eval_cost_usd
+
+
+def seed_eval_cost(value: float) -> None:
+    """Seed the eval cost accumulator (e.g. from DDB on resume)."""
+    global _eval_cost_usd
+    _eval_cost_usd = value
+
 
 def _auto_update_state(phase: str, phase_detail: str) -> None:
     """Best-effort DynamoDB state update from within tools."""
@@ -327,6 +341,7 @@ def get_evaluation_summary(batch_id: str, save_json: bool = False) -> str:
     Returns:
         Formatted evaluation summary.
     """
+    global _eval_cost_usd
     from idpac.evaluations import EvaluationResult
 
     output_file = None
@@ -337,6 +352,14 @@ def get_evaluation_summary(batch_id: str, save_json: bool = False) -> str:
 
     client = _get_client()
     data = client.get_evaluation_summary(batch_id, output_file)
+
+    # Accumulate eval pipeline cost
+    cost_breakdown = data.get("costBreakdown", {})
+    if isinstance(cost_breakdown, dict):
+        total = cost_breakdown.get("totalCost", 0)
+        if total:
+            _eval_cost_usd += float(total)
+
     er = EvaluationResult(data)
 
     import io
