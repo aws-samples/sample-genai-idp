@@ -10,14 +10,19 @@ See autotune/planning-docs/full-autonomy-research.md section 6 for architecture.
 """
 
 import logging
+import os
 
-from strands.hooks import AfterInvocationEvent, BeforeToolCallEvent
+from strands.hooks import AfterInvocationEvent, AfterModelCallEvent, BeforeToolCallEvent
 from strands.hooks.registry import HookProvider, HookRegistry
 
 try:
     from optimization_state import OptimizationState, STATUS_COMPLETE
+    from pricing import calculate_agent_cost
+    from idpac_tools import get_eval_cost_usd
 except ImportError:
     from state import OptimizationState, STATUS_COMPLETE
+    from pricing import calculate_agent_cost
+    from tools import get_eval_cost_usd
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +63,33 @@ class FileReadSafetyHook(HookProvider):
             if tool_input.get("mode") != "view":
                 logger.info("FileReadSafetyHook: overriding mode=%s to view", tool_input.get("mode"))
                 tool_input["mode"] = "view"
+
+
+class CostTrackingHook(HookProvider):
+    """Update DynamoDB with token cost after every model call."""
+
+    def __init__(self, state: OptimizationState):
+        self.state = state
+        self.metrics = None  # Set to agent.event_loop_metrics after Agent() construction
+        self.model_id = os.environ.get("AUTOTUNE_MODEL_ID", "")
+
+    def register_hooks(self, registry: HookRegistry, **kwargs) -> None:
+        registry.add_callback(AfterModelCallEvent, self._update_cost)
+
+    def _update_cost(self, event: AfterModelCallEvent) -> None:
+        if not self.metrics:
+            return
+        usage = self.metrics.accumulated_usage
+        it = usage.get("inputTokens", 0)
+        ot = usage.get("outputTokens", 0)
+        cr = usage.get("cacheReadInputTokens", 0)
+        cw = usage.get("cacheWriteInputTokens", 0)
+        agent_cost = calculate_agent_cost(self.model_id, it, ot, cr, cw)
+        self.state.update_cost(
+            agent_input_tokens=it, agent_output_tokens=ot,
+            agent_cache_read_tokens=cr, agent_cache_write_tokens=cw,
+            agent_cost_usd=agent_cost, eval_cost_usd=get_eval_cost_usd(),
+        )
 
 
 class OptimizationLoopHook(HookProvider):

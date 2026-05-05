@@ -34,10 +34,9 @@ from strands_tools import file_read, image_reader
 from utils.auth import extract_user_id_from_context
 
 from code_interpreter_tools import execute_python_analysis
-from idpac_tools import ALL_TOOLS as IDPAC_TOOLS, get_eval_cost_usd, seed_eval_cost
+from idpac_tools import ALL_TOOLS as IDPAC_TOOLS, seed_eval_cost
 from optimization_state import OptimizationState, STATUS_RUNNING, STATUS_COMPLETE, STATUS_FAILED
-from optimization_hooks import CancelCheckHook, FileReadSafetyHook, OptimizationCancelled, OptimizationLoopHook
-from pricing import calculate_agent_cost
+from optimization_hooks import CancelCheckHook, CostTrackingHook, FileReadSafetyHook, OptimizationCancelled, OptimizationLoopHook
 
 logger = logging.getLogger(__name__)
 
@@ -146,9 +145,10 @@ def _create_agent(user_id: str, session_id: str, state: OptimizationState,
     skills_dir = AGENT_DIR / "skills"
     plugins = [AgentSkills(skills=str(skills_dir))] if skills_dir.exists() else []
     tools = IDPAC_TOOLS + [file_read, image_reader, execute_python_analysis]
-    hooks = [CancelCheckHook(state), FileReadSafetyHook(), OptimizationLoopHook(state, max_iterations=MAX_ITERATIONS)]
+    cost_hook = CostTrackingHook(state)
+    hooks = [CancelCheckHook(state), FileReadSafetyHook(), cost_hook, OptimizationLoopHook(state, max_iterations=MAX_ITERATIONS)]
 
-    return Agent(
+    agent = Agent(
         name="idp_autotune",
         model=model,
         system_prompt=_load_system_prompt(),
@@ -158,6 +158,8 @@ def _create_agent(user_id: str, session_id: str, state: OptimizationState,
         session_manager=session_manager,
         trace_attributes={"user.id": user_id, "session.id": session_id},
     )
+    cost_hook.metrics = agent.event_loop_metrics
+    return agent
 
 
 def _snapshot_disk_usage(output_path: str) -> None:
@@ -237,45 +239,18 @@ def _run_agent_thread(user_id: str, session_id: str, state: OptimizationState,
                 except Exception:
                     logger.warning("Could not restore OPTIMIZATION-LOG.md from S3")
 
-        model_id = os.environ.get("AUTOTUNE_MODEL_ID", "")
-
-        # Background sync thread — heartbeat + S3 sync + cost sync
+        # Background sync thread — heartbeat + S3 sync
         disk_usage_path = os.path.join(session_dir, "disk-usage.jsonl")
         sync_stop = threading.Event()
         def _sync_loop():
             while not sync_stop.wait(SYNC_INTERVAL):
-                try:
-                    state.heartbeat()
-                except Exception:
-                    pass
-                try:
-                    if os.path.exists(stream_path):
-                        _sync_file(stream_path, f"{s3_prefix}/stream.jsonl")
-                    if os.path.exists(log_path):
-                        _sync_file(log_path, f"{s3_prefix}/OPTIMIZATION-LOG.md")
-                except Exception:
-                    pass
-                # Cost sync
-                try:
-                    usage = agent.event_loop_metrics.accumulated_usage
-                    it = usage.get("inputTokens", 0)
-                    ot = usage.get("outputTokens", 0)
-                    cr = usage.get("cacheReadInputTokens", 0)
-                    cw = usage.get("cacheWriteInputTokens", 0)
-                    agent_cost = calculate_agent_cost(model_id, it, ot, cr, cw)
-                    state.update_cost(
-                        agent_input_tokens=it, agent_output_tokens=ot,
-                        agent_cache_read_tokens=cr, agent_cache_write_tokens=cw,
-                        agent_cost_usd=agent_cost, eval_cost_usd=get_eval_cost_usd(),
-                    )
-                except Exception:
-                    pass
-                # Disk usage snapshot for debugging ENOSPC
-                try:
-                    _snapshot_disk_usage(disk_usage_path)
-                    _sync_file(disk_usage_path, f"{s3_prefix}/disk-usage.jsonl")
-                except Exception:
-                    pass
+                state.heartbeat()
+                if os.path.exists(stream_path):
+                    _sync_file(stream_path, f"{s3_prefix}/stream.jsonl")
+                if os.path.exists(log_path):
+                    _sync_file(log_path, f"{s3_prefix}/OPTIMIZATION-LOG.md")
+                _snapshot_disk_usage(disk_usage_path)
+                _sync_file(disk_usage_path, f"{s3_prefix}/disk-usage.jsonl")
         sync_thread = threading.Thread(target=_sync_loop, daemon=True)
         sync_thread.start()
 
