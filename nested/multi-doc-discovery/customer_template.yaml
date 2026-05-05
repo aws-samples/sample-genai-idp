@@ -57,57 +57,39 @@ Parameters:
     Type: String
     Description: AppSync GraphQL API URL for real-time status updates
     Default: ""
-  AppSyncApiArn:
-    Type: String
-    Description: AppSync GraphQL API ARN for IAM permissions
-    Default: ""
-
-  # ── Air-gapped / VPC placement parameters ────────────────────────────────
-  # Leave empty for standard internet-connected deployments.
-  LambdaBaseImage:
-    Type: String
-    Default: ""
-    Description: >-
-      (Optional — air-gapped) Internal ECR URI for the Lambda Python 3.12 base image.
-      Replaces public.ecr.aws/lambda/python:3.12 in the inline Dockerfile.
-      Example: 123456789012.dkr.ecr.us-east-1.amazonaws.com/idp-base:lambda-python-3.12-arm64
   CodeBuildVpcId:
     Type: String
     Default: ""
     Description: >-
       (Optional — air-gapped) VPC ID to place CodeBuild in for network isolation.
+      When set, both DockerBuildProject and UICodeBuildProject run inside this VPC.
       Requires CodeBuildSubnetIds and CodeBuildSecurityGroupId.
+      The subnets must have VPC endpoints for ECR (ecr.api, ecr.dkr), S3 (Gateway),
+      Secrets Manager, Logs, and CodeBuild — run scripts/deploy-vpc-endpoints.py
+      --codebuild-endpoints to create them.
+
   CodeBuildSubnetIds:
     Type: String
     Default: ""
     Description: >-
       (Optional — air-gapped) Comma-separated subnet IDs for CodeBuild VPC placement.
+      Required when CodeBuildVpcId is set.
+
   CodeBuildSecurityGroupId:
     Type: String
     Default: ""
+    AllowedPattern: '^(sg-([0-9A-Fa-f]{8}|[0-9A-Fa-f]{17}))?$'
     Description: >-
       (Optional — air-gapped) Security group ID for CodeBuild VPC placement.
-  ArtifactoryDockerUrl:
+      Required when CodeBuildVpcId is set. Must allow outbound HTTPS (443) to VPC endpoints.
+  AppSyncApiArn:
     Type: String
+    Description: AppSync GraphQL API ARN for IAM permissions
     Default: ""
-    Description: >-
-      (Optional — air-gapped) Artifactory Docker registry hostname that CodeBuild logs into
-      before pulling LAMBDA_BASE_IMAGE. Required when image is stored in Artifactory.
-      Must be used with ArtifactoryCredentialsSecretArn. Example: artifactory.company.com
-  ArtifactoryCredentialsSecretArn:
-    Type: String
-    Default: ""
-    Description: >-
-      (Optional — air-gapped) ARN of Secrets Manager secret containing Artifactory Docker
-      credentials. JSON format: {"username":"...","password":"..."}.
-    AllowedPattern: "^(|arn:aws[a-z-]*:secretsmanager:[a-z0-9-]+:[0-9]{12}:secret:.+)$"
 
 Conditions:
   HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
-  HasLambdaBaseImage: !Not [!Equals [!Ref LambdaBaseImage, ""]]
   UseCodeBuildVpc: !Not [!Equals [!Ref CodeBuildVpcId, ""]]
-  HasArtifactoryDockerUrl: !Not [!Equals [!Ref ArtifactoryDockerUrl, ""]]
-  HasArtifactoryCredentials: !Not [!Equals [!Ref ArtifactoryCredentialsSecretArn, ""]]
 
 Resources:
   ##########################################################################
@@ -200,41 +182,47 @@ Resources:
                   - !Sub "arn:${AWS::Partition}:s3:::${ArtifactBucket}/*"
               - Effect: Allow
                 Action:
+                  - secretsmanager:GetSecretValue
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${AWS::StackName}/registry/*"
+              - Effect: Allow
+                Action:
+                  - ec2:CreateNetworkInterface
+                  - ec2:DescribeNetworkInterfaces
+                  - ec2:DeleteNetworkInterface
+                  - ec2:DescribeSubnets
+                  - ec2:DescribeSecurityGroups
+                  - ec2:DescribeVpcs
+                  - ec2:DescribeDhcpOptions
+                  - ec2:CreateNetworkInterfacePermission
+                Resource: "*"
+              - Effect: Allow
+                Action:
                   - kms:Encrypt
                   - kms:Decrypt
                   - kms:ReEncrypt*
                   - kms:GenerateDataKey*
                   - kms:DescribeKey
                 Resource: !Ref CustomerManagedEncryptionKeyArn
-              # Required by CodeBuild when placed in a VPC (CodeBuildVpcId is set).
-              - !If
-                - UseCodeBuildVpc
-                - Effect: Allow
-                  Action:
-                    - ec2:CreateNetworkInterface
-                    - ec2:DescribeNetworkInterfaces
-                    - ec2:DeleteNetworkInterface
-                    - ec2:DescribeSubnets
-                    - ec2:DescribeSecurityGroups
-                    - ec2:DescribeVpcs
-                    - ec2:DescribeDhcpOptions
-                    - ec2:CreateNetworkInterfacePermission
-                  Resource: "*"
-                - !Ref AWS::NoValue
-              # Allow CodeBuild to read Artifactory credentials from Secrets Manager (air-gapped).
-              - !If
-                - HasArtifactoryCredentials
-                - Effect: Allow
-                  Action:
-                    - secretsmanager:GetSecretValue
-                  Resource: !Ref ArtifactoryCredentialsSecretArn
-                - !Ref AWS::NoValue
 
   DockerBuildProject:
     Type: AWS::CodeBuild::Project
+    Metadata:
+      cfn-lint:
+        config:
+          ignore_checks:
+            - W1033  # Subnets: Fn::Split resolves to [""] when CodeBuildSubnetIds is empty (optional param guarded by UseCodeBuildVpc condition)
+            - W1030  # CodeBuildSecurityGroupId defaults to "" (optional param guarded by UseCodeBuildVpc condition)
     Properties:
       Description: Build Docker image for Multi-Document Discovery Lambda functions
       ServiceRole: !GetAtt CodeBuildRole.Arn
+      VpcConfig: !If
+        - UseCodeBuildVpc
+        - VpcId: !Ref CodeBuildVpcId
+          Subnets: !Split [",", !Ref CodeBuildSubnetIds]
+          SecurityGroupIds:
+            - !Ref CodeBuildSecurityGroupId
+        - !Ref AWS::NoValue
       Artifacts:
         Type: NO_ARTIFACTS
       Environment:
@@ -251,14 +239,18 @@ Resources:
             Value: !GetAtt ECRRepository.RepositoryUri
           - Name: IMAGE_TAG
             Value: latest
-          # ── Air-gapped: override base image if LambdaBaseImage is set ────────
-          - Name: LAMBDA_BASE_IMAGE
-            Value: !If [HasLambdaBaseImage, !Ref LambdaBaseImage, "public.ecr.aws/lambda/python:3.12"]
-          # ── Air-gapped: Artifactory Docker registry ───────────────────────────
-          - Name: ARTIFACTORY_DOCKER_URL
-            Value: !If [HasArtifactoryDockerUrl, !Ref ArtifactoryDockerUrl, ""]
-          - Name: ARTIFACTORY_CREDENTIALS_SECRET_ARN
-            Value: !If [HasArtifactoryCredentials, !Ref ArtifactoryCredentialsSecretArn, ""]
+          - Name: PIP_CONF
+            Type: SECRETS_MANAGER
+            Value: !Sub "${StackName}/registry/pip"
+          - Name: DOCKER_REGISTRY_USER
+            Type: SECRETS_MANAGER
+            Value: !Sub "${StackName}/registry/docker:username"
+          - Name: DOCKER_REGISTRY_PASS
+            Type: SECRETS_MANAGER
+            Value: !Sub "${StackName}/registry/docker:password"
+          - Name: DOCKER_REGISTRY_URL
+            Type: SECRETS_MANAGER
+            Value: !Sub "${StackName}/registry/docker:registry"
       Source:
         Type: S3
         Location: !Sub "${ArtifactBucket}/${SourceZipfile}"
@@ -269,21 +261,11 @@ Resources:
               commands:
                 - echo Logging in to Amazon ECR...
                 - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com
-                - |
-                  if [ -n "$ARTIFACTORY_DOCKER_URL" ] && [ -n "$ARTIFACTORY_CREDENTIALS_SECRET_ARN" ]; then
-                    echo "Artifactory mode: logging into $ARTIFACTORY_DOCKER_URL via Secrets Manager"
-                    SECRET=$(aws secretsmanager get-secret-value \
-                      --secret-id "$ARTIFACTORY_CREDENTIALS_SECRET_ARN" \
-                      --query SecretString --output text)
-                    AF_USER=$(echo "$SECRET" | python3 -c "import sys,json; print(json.load(sys.stdin)['username'])")
-                    AF_PASS=$(echo "$SECRET" | python3 -c "import sys,json; print(json.load(sys.stdin)['password'])")
-                    echo "$AF_PASS" | docker login "$ARTIFACTORY_DOCKER_URL" \
-                      --username "$AF_USER" --password-stdin
-                    echo "Artifactory Docker login successful"
-                    unset AF_USER AF_PASS SECRET
-                  else
-                    echo "Standard mode: no Artifactory Docker registry configured"
-                  fi
+                - echo "Logging into private Docker registry..."
+                - echo "$DOCKER_REGISTRY_PASS" | docker login --username "$DOCKER_REGISTRY_USER" --password-stdin "$DOCKER_REGISTRY_URL"
+                - echo "Setting up private pip configuration..."
+                - mkdir -p /root/.config/pip
+                - echo "$PIP_CONF" > /root/.config/pip/pip.conf
             build:
               commands:
                 - echo "Source directory contents:"
@@ -300,18 +282,19 @@ Resources:
                   strands-agents==1.14.0
                   boto3>=1.34.0
                   pyyaml>=6.0.0
-                  pydantic>=2.0.0
+                  pydantic==2.13.2
                   REQS
                 - echo "Creating Dockerfile..."
                 - |
                   cat > Dockerfile << 'DOCKERFILE'
-                  FROM ${LAMBDA_BASE_IMAGE} AS builder
+                  # syntax=docker/dockerfile:1
+                  FROM moddel-art.mdtc.itp01.p.fhlmc.com/md-docker/lambda/python:3.12.2025.08.10.12-arm64 AS builder
                   RUN dnf install -y gcc gcc-c++ make && dnf clean all
                   COPY requirements.txt /tmp/requirements.txt
-                  RUN pip install --no-cache-dir --target /opt/python -r /tmp/requirements.txt
+                  RUN --mount=type=secret,id=pipconf,target=/etc/pip.conf PIP_CONFIG_FILE=/etc/pip.conf pip install --no-cache-dir --target /opt/python -r /tmp/requirements.txt
                   COPY lib/idp_common_pkg /tmp/idp_common_pkg
-                  RUN pip install --no-cache-dir --no-deps --target /opt/python /tmp/idp_common_pkg
-                  FROM ${LAMBDA_BASE_IMAGE}
+                  RUN --mount=type=secret,id=pipconf,target=/etc/pip.conf PIP_CONFIG_FILE=/etc/pip.conf pip install --no-cache-dir --no-deps --target /opt/python /tmp/idp_common_pkg
+                  FROM moddel-art.mdtc.itp01.p.fhlmc.com/md-docker/lambda/python:3.12.2025.08.10.12-arm64
                   COPY --from=builder /opt/python ${LAMBDA_TASK_ROOT}/../opt/python
                   ENV PYTHONPATH="${LAMBDA_TASK_ROOT}/../opt/python:${LAMBDA_TASK_ROOT}"
                   COPY src/lambda/multi_doc_discovery/*.py ${LAMBDA_TASK_ROOT}/
@@ -322,15 +305,8 @@ Resources:
             post_build:
               commands:
                 - echo Pushing Docker image to ECR...
-                - docker push $ECR_REPO_URI:$IMAGE_TAG
+                - docker build --secret id=pipconf,src=/root/.config/pip/pip.conf -t $ECR_REPO_URI:$IMAGE_TAG .
                 - echo Build completed on `date`
-      VpcConfig: !If
-        - UseCodeBuildVpc
-        - VpcId: !Ref CodeBuildVpcId
-          Subnets: !Split [",", !Ref CodeBuildSubnetIds]
-          SecurityGroupIds:
-            - !Ref CodeBuildSecurityGroupId
-        - !Ref AWS::NoValue
       TimeoutInMinutes: 30
       EncryptionKey: !Ref CustomerManagedEncryptionKeyArn
 
@@ -665,3 +641,4 @@ Outputs:
   ECRRepositoryUri:
     Description: URI of the ECR repository
     Value: !GetAtt ECRRepository.RepositoryUri
+ 

@@ -4,6 +4,10 @@ title: "Deploying IDP in a Private Network"
 
 # Deploying IDP in a Private Network
 
+> 🤖 **Deploying with AI assistance?**
+> If you are using an AI assistant (Amazon Q, Claude, Cline, Copilot, etc.) to help with this deployment, point it at the **[AI-Assisted Deployment Runbook](./ai-deployment-runbook.md)** instead.
+> That document is structured specifically for AI agents — it tells the AI what questions to ask, what AWS CLI commands to run for discovery, and how to assemble the exact deploy command for your environment.
+
 This runbook deploys the GenAI IDP Accelerator in a **fully private / air-gapped environment**:
 
 - Web UI served via an **internal ALB** (no CloudFront)

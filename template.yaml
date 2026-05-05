@@ -7449,6 +7449,8 @@ Resources:
         CodeBuildVpcId: !Ref CodeBuildVpcId
         CodeBuildSubnetIds: !Join [",", !Ref CodeBuildSubnetIds]
         CodeBuildSecurityGroupId: !Ref CodeBuildSecurityGroupId
+        ArtifactoryDockerUrl: !Ref ArtifactoryDockerUrl
+        ArtifactoryCredentialsSecretArn: !Ref ArtifactoryCredentialsSecretArn
 
   # --- Step Functions State Machine ---
 
