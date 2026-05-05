@@ -2,14 +2,16 @@
 # SPDX-License-Identifier: MIT-0
 
 import json
-import os
-import boto3
 import logging
+import os
 from datetime import datetime, timezone
 
-# Import IDP Common modules
-from idp_common.models import Document, Status
+import boto3
 from idp_common.docs_service import create_document_service
+
+# Import IDP Common modules
+from idp_common.models import Status
+from idp_common.utils.log_sanitizer import sanitize_event_for_logging
 from idp_common.utils.settings_helper import get_setting
 
 logger = logging.getLogger()
@@ -45,7 +47,7 @@ def handler(event, context):
     them as ABORTED so the queue processor skips them. For documents with active
     workflows, it calls StopExecution on the Step Functions execution.
     """
-    logger.info(f"Abort workflow resolver invoked with event: {json.dumps(event)}")
+    logger.info(f"Abort workflow resolver invoked with event: {json.dumps(sanitize_event_for_logging(event))}")
     
     try:
         # Extract arguments from GraphQL event

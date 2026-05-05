@@ -47,6 +47,16 @@ X_AWS_IDP_EXCLUSION_REASON = "x-aws-idp-exclusion-reason"
 X_AWS_IDP_EXTRACTION_MODEL = "x-aws-idp-extraction-model"
 
 # ============================================================================
+# AWS IDP Policy/Rule Type Extensions
+# ============================================================================
+# Marks a schema as a policy/rule type (for rule validation)
+X_AWS_IDP_POLICY_TYPE = "x-aws-idp-policy-type"
+
+# Note: Policy classes use the same regex fields as document types
+# X_AWS_IDP_DOCUMENT_NAME_REGEX - Pattern to match document name for policy filtering
+# X_AWS_IDP_PAGE_CONTENT_REGEX - Pattern to match page content for policy filtering
+
+# ============================================================================
 # Legacy Attribute Type Values (for migration only)
 # ============================================================================
 # These map to standard JSON Schema types:

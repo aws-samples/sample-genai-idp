@@ -9,7 +9,8 @@ between document records and list entries, preventing orphaned list entries.
 """
 
 import logging
-from typing import Dict, Any, Optional, List
+from typing import Any, Dict, List, Optional
+
 from boto3.dynamodb.conditions import Key
 
 logger = logging.getLogger(__name__)

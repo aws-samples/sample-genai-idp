@@ -10,6 +10,7 @@ import logging
 import os
 
 from idp_common.agents.factory import agent_factory
+from idp_common.utils.log_sanitizer import sanitize_event_for_logging
 
 # Configure logging
 logger = logging.getLogger()
@@ -27,7 +28,7 @@ def handler(event, context):
     Returns:
         List of available agents with metadata
     """
-    logger.info(f"Received event: {json.dumps(event)}")
+    logger.info(f"Received event: {json.dumps(sanitize_event_for_logging(event))}")
     
     try:
         # Get list of available agents from factory

@@ -2,30 +2,90 @@
 # SPDX-License-Identifier: MIT-0
 
 import json
-import os
-import boto3
 import logging
-from datetime import datetime, timezone, timedelta
+import os
+import time
+from datetime import datetime, timedelta, timezone
+
+import boto3
+from boto3.dynamodb.conditions import Key as DDBKey
+from idp_common.docs_service import create_document_service
 
 # Import IDP Common modules
 from idp_common.models import Document, Status
-from idp_common.docs_service import create_document_service
+from idp_common.utils.log_sanitizer import sanitize_event_for_logging
 
 logger = logging.getLogger()
-logger.setLevel(os.environ.get('LOG_LEVEL', 'INFO'))
+logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 
 # Initialize AWS clients
-sqs_client = boto3.client('sqs')
-s3_client = boto3.client('s3')
+sqs_client = boto3.client("sqs")
+s3_client = boto3.client("s3")
+_dynamodb = boto3.resource("dynamodb")
+
+
+# ----- Caller-scope enforcement for multi-user RBAC deployments ----------
+# See docs/rbac.md. When a customer assigns a non-admin user
+# `allowedConfigVersions` in UsersTable (EmailIndex), reprocessDocument
+# MUST NOT accept a `version` argument outside that scope. Mirrors the
+# same check performed in sync_bda_idp_resolver and configuration_resolver.
+_user_scope_cache: dict = {}
+_USER_SCOPE_CACHE_TTL = 60  # seconds
+
+
+def _get_caller_info(event):
+    """Extract caller's email and groups from AppSync event identity."""
+    identity = event.get("identity") or {}
+    claims = identity.get("claims") or {}
+    groups = claims.get("cognito:groups") or []
+    if isinstance(groups, str):
+        groups = [groups]
+    username = claims.get("cognito:username") or claims.get("sub") or ""
+    email = claims.get("email") or identity.get("username") or username
+    return {
+        "email": email,
+        "username": username,
+        "groups": groups,
+        "is_admin": "Admin" in groups,
+    }
+
+
+def _get_user_allowed_config_versions(caller_email):
+    """Look up the caller's `allowedConfigVersions` from UsersTable (TTL-cached)."""
+    users_table_name = os.environ.get("USERS_TABLE_NAME", "")
+    if not users_table_name or not caller_email:
+        return None
+    now = time.time()
+    cached = _user_scope_cache.get(caller_email)
+    if cached and (now - cached["timestamp"]) < _USER_SCOPE_CACHE_TTL:
+        return cached["scope"]
+    try:
+        users_table = _dynamodb.Table(users_table_name)
+        resp = users_table.query(
+            IndexName="EmailIndex",
+            KeyConditionExpression=DDBKey("email").eq(caller_email),
+        )
+        items = resp.get("Items", [])
+        if items:
+            scope = items[0].get("allowedConfigVersions")
+            result = list(scope) if scope and len(scope) > 0 else None
+        else:
+            result = None
+    except Exception as e:
+        logger.warning(f"Failed to look up user scope for {caller_email}: {e}")
+        result = None
+    _user_scope_cache[caller_email] = {"scope": result, "timestamp": now}
+    return result
 
 # Initialize document service (same as queue_sender - defaults to AppSync)
 document_service = create_document_service()
 
 # Environment variables
-queue_url = os.environ.get('QUEUE_URL')
-input_bucket = os.environ.get('INPUT_BUCKET')
-output_bucket = os.environ.get('OUTPUT_BUCKET')
-retentionDays = int(os.environ.get('DATA_RETENTION_IN_DAYS', '365'))
+queue_url = os.environ.get("QUEUE_URL")
+input_bucket = os.environ.get("INPUT_BUCKET")
+output_bucket = os.environ.get("OUTPUT_BUCKET")
+retentionDays = int(os.environ.get("DATA_RETENTION_IN_DAYS", "365"))
+
 
 def _delete_output_data(input_key):
     """Delete previous processing output from the S3 output bucket.
@@ -42,17 +102,16 @@ def _delete_output_data(input_key):
     """
     prefix = f"{input_key}/"
     try:
-        paginator = s3_client.get_paginator('list_objects_v2')
+        paginator = s3_client.get_paginator("list_objects_v2")
         deleted = 0
         for page in paginator.paginate(Bucket=output_bucket, Prefix=prefix):
-            objects = page.get('Contents', [])
+            objects = page.get("Contents", [])
             if objects:
                 # delete_objects accepts up to 1000 keys per call
                 for i in range(0, len(objects), 1000):
-                    batch = [{'Key': obj['Key']} for obj in objects[i:i + 1000]]
+                    batch = [{"Key": obj["Key"]} for obj in objects[i : i + 1000]]
                     s3_client.delete_objects(
-                        Bucket=output_bucket,
-                        Delete={'Objects': batch, 'Quiet': True}
+                        Bucket=output_bucket, Delete={"Objects": batch, "Quiet": True}
                     )
                     deleted += len(batch)
         if deleted:
@@ -65,8 +124,14 @@ def _delete_output_data(input_key):
 
 
 def handler(event, context):
-    logger.info(f"Reprocess resolver invoked with event: {json.dumps(event)}")
-    
+    # Log a redacted copy of the event — never the raw event, which contains
+    # AppSync identity.claims (Cognito sub, email, groups) and may include
+    # attacker-influenced fields (object keys derived from filenames).
+    logger.info(
+        f"Reprocess resolver invoked with event: "
+        f"{json.dumps(sanitize_event_for_logging(event))}"
+    )
+
     try:
         # Validate environment variables
         if not input_bucket:
@@ -75,18 +140,45 @@ def handler(event, context):
             raise Exception("OUTPUT_BUCKET environment variable is not set")
         if not queue_url:
             raise Exception("QUEUE_URL environment variable is not set")
-        
+
         # Extract arguments from GraphQL event
-        args = event.get('arguments', {})
-        object_keys = args.get('objectKeys', [])
-        version = args.get('version')  # Optional version parameter
-        
+        args = event.get("arguments", {})
+        object_keys = args.get("objectKeys", [])
+        version = args.get("version")  # Optional version parameter
+
         if not object_keys:
             logger.error("objectKeys is required but not provided")
             return False
-        
-        logger.info(f"Reprocessing {len(object_keys)} documents" + (f" with version: {version}" if version else ""))
-        
+
+        # RBAC: scope-enforce the `version` argument for non-admins. Authors
+        # with `allowedConfigVersions` restricted to a subset of versions
+        # must not be able to reprocess documents against a version outside
+        # their scope. Admins are unrestricted. If no scope is set, all
+        # callers are unrestricted (preserves pre-fix behavior for single-
+        # user / pre-RBAC deployments).
+        if version:
+            caller = _get_caller_info(event)
+            if not caller["is_admin"]:
+                allowed_versions = _get_user_allowed_config_versions(caller["email"])
+                if allowed_versions and version not in allowed_versions:
+                    logger.warning(
+                        "Rejecting reprocessDocument: caller %s is scoped to %s "
+                        "but requested version=%r",
+                        caller["email"],
+                        sorted(allowed_versions),
+                        version,
+                    )
+                    # Raise so AppSync propagates a GraphQL error to the client.
+                    raise PermissionError(
+                        f"Access denied: version '{version}' is not in your "
+                        "allowed scope"
+                    )
+
+        logger.info(
+            f"Reprocessing {len(object_keys)} documents"
+            + (f" with version: {version}" if version else "")
+        )
+
         # Process each document
         success_count = 0
         for object_key in object_keys:
@@ -94,41 +186,51 @@ def handler(event, context):
                 reprocess_document(object_key, version)
                 success_count += 1
             except Exception as e:
-                logger.error(f"Error reprocessing document {object_key}: {str(e)}", exc_info=True)
+                logger.error(
+                    f"Error reprocessing document {object_key}: {str(e)}", exc_info=True
+                )
                 # Continue with other documents even if one fails
-        
-        logger.info(f"Successfully queued {success_count}/{len(object_keys)} documents for reprocessing")
+
+        logger.info(
+            f"Successfully queued {success_count}/{len(object_keys)} documents for reprocessing"
+        )
         return True
-        
+
     except Exception as e:
         logger.error(f"Error in reprocess handler: {str(e)}", exc_info=True)
         raise e
+
 
 def reprocess_document(object_key, version=None):
     """
     Reprocess a document by creating a fresh Document object and queueing it.
     This exactly mirrors the queue_sender pattern for consistency and avoids
     S3 copy operations that can trigger duplicate events for large files.
-    
+
     Args:
         object_key: S3 object key of the document to reprocess
         version: Optional configuration version to use for reprocessing
     """
-    logger.info(f"Reprocessing document: {object_key}" + (f" with version: {version}" if version else ""))
-    
+    logger.info(
+        f"Reprocessing document: {object_key}"
+        + (f" with version: {version}" if version else "")
+    )
+
     # Verify file exists in S3
     try:
         s3_client.head_object(Bucket=input_bucket, Key=object_key)
     except Exception as e:
-        raise ValueError(f"Document {object_key} not found in S3 bucket {input_bucket}: {str(e)}")
-    
+        raise ValueError(
+            f"Document {object_key} not found in S3 bucket {input_bucket}: {str(e)}"
+        )
+
     # Delete previous output data from S3 so the OCR retry-safe recovery
     # mechanism doesn't reinstall stale results from the previous run.
     _delete_output_data(object_key)
-    
+
     # Create a fresh Document object (same as queue_sender does)
     current_time = datetime.now(timezone.utc).isoformat()
-    
+
     document = Document(
         id=object_key,  # Document ID is the object key
         input_bucket=input_bucket,
@@ -141,36 +243,34 @@ def reprocess_document(object_key, version=None):
         sections=[],
         config_version=version,  # Set the configuration version if provided
     )
-    
+
     logger.info(f"Created fresh document object for reprocessing: {object_key}")
-    
+
     # Calculate expiry date (same as queue_sender)
-    expires_after = int((datetime.now(timezone.utc) + timedelta(days=retentionDays)).timestamp())
-    
+    expires_after = int(
+        (datetime.now(timezone.utc) + timedelta(days=retentionDays)).timestamp()
+    )
+
     # Create document in DynamoDB via document service (same as queue_sender - uses AppSync by default)
     logger.info(f"Creating document via document service: {document.input_key}")
-    created_key = document_service.create_document(document, expires_after=expires_after)
+    created_key = document_service.create_document(
+        document, expires_after=expires_after
+    )
     logger.info(f"Document created with key: {created_key}")
-    
+
     # Send serialized document to SQS queue (same as queue_sender)
     doc_json = document.to_json()
     message = {
-        'QueueUrl': queue_url,
-        'MessageBody': doc_json,
-        'MessageAttributes': {
-            'EventType': {
-                'StringValue': 'DocumentReprocessed',
-                'DataType': 'String'
-            },
-            'ObjectKey': {
-                'StringValue': object_key,
-                'DataType': 'String'
-            }
-        }
+        "QueueUrl": queue_url,
+        "MessageBody": doc_json,
+        "MessageAttributes": {
+            "EventType": {"StringValue": "DocumentReprocessed", "DataType": "String"},
+            "ObjectKey": {"StringValue": object_key, "DataType": "String"},
+        },
     }
     logger.info(f"Sending document to SQS queue: {object_key}")
     response = sqs_client.send_message(**message)
     logger.info(f"SQS response: {response}")
-    
+
     logger.info(f"Successfully reprocessed document: {object_key}")
-    return response.get('MessageId')
+    return response.get("MessageId")

@@ -1,14 +1,16 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: MIT-0
 
-import boto3
-import os
-import logging
-import json
 import concurrent.futures
+import json
+import logging
+import os
 import time
-from botocore.exceptions import ClientError
+
+import boto3
 from botocore.config import Config
+from botocore.exceptions import ClientError
+from idp_common.utils.log_sanitizer import sanitize_event_for_logging
 
 logger = logging.getLogger()
 logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
@@ -230,8 +232,8 @@ def update_document_copy_status(object_key, evaluation_status=None):
     
     try:
         # Import at function level to avoid circular imports
-        from idp_common.models import Document, Status
         from idp_common.docs_service import create_document_service
+        from idp_common.models import Document, Status
         
         logger.info("Imported required modules")
         
@@ -353,7 +355,7 @@ def handler(event, context):
     1. API Gateway/AppSync invocation (normal GraphQL mutation)
     2. Asynchronous invocation from another Lambda instance
     """
-    logger.info(f"Received event: {json.dumps(event)}")
+    logger.info(f"Received event: {json.dumps(sanitize_event_for_logging(event))}")
     logger.info(f"Lambda context: {context.function_name}, remaining time: {context.get_remaining_time_in_millis()}ms")
     logger.info(f"Environment variables: OUTPUT_BUCKET={os.environ.get('OUTPUT_BUCKET')}, EVALUATION_BASELINE_BUCKET={os.environ.get('EVALUATION_BASELINE_BUCKET')}")
 

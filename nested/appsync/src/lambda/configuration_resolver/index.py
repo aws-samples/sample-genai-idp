@@ -1,24 +1,25 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: MIT-0
 
-from idp_common.config.configuration_manager import ConfigurationManager
-from idp_common.config.models import SchemaConfig, IDPConfig, PricingConfig
-from idp_common.config.constants import (
-    CONFIG_TYPE_SCHEMA,
-    CONFIG_TYPE_DEFAULT_PRICING,
-    CONFIG_TYPE_CUSTOM_PRICING,
-    CONFIG_TYPE_CONFIG,
-    DEFAULT_VERSION,
-)
-from pydantic import ValidationError
-import os
 import json
 import logging
+import os
 import re
 import time
 
 import boto3
 from boto3.dynamodb.conditions import Key as DDBKey
+from idp_common.config.configuration_manager import ConfigurationManager
+from idp_common.config.constants import (
+    CONFIG_TYPE_CONFIG,
+    CONFIG_TYPE_DEFAULT_PRICING,
+    CONFIG_TYPE_SCHEMA,
+    DEFAULT_VERSION,
+)
+from idp_common.config.models import IDPConfig, PricingConfig
+from idp_common.utils.log_sanitizer import sanitize_event_for_logging
+
+from pydantic import ValidationError
 
 logger = logging.getLogger()
 logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
@@ -122,7 +123,7 @@ def handler(event, context):
         }
     }
     """
-    logger.info(f"Event received: {json.dumps(event)}")
+    logger.info(f"Event received: {json.dumps(sanitize_event_for_logging(event))}")
 
     # Extract the GraphQL operation type
     operation = event["info"]["fieldName"]
@@ -183,6 +184,18 @@ def handler(event, context):
                         "message": "Description cannot exceed 200 characters",
                     },
                 }
+            # RBAC: scope-enforce non-admin writes. If the caller has
+            # a restricted `allowedConfigVersions` scope, they MUST NOT
+            # be able to update any version outside that scope, even
+            # for plain updateConfiguration (without saveAsVersion).
+            if allowed_versions and version not in allowed_versions:
+                return {
+                    "success": False,
+                    "error": {
+                        "type": "Unauthorized",
+                        "message": f"Access denied: version '{version}' is not in your allowed scope",
+                    },
+                }
             # RBAC: "Save as Version" and "Save as Default" are Admin-only operations.
             # The updateConfiguration mutation allows Admin+Author at the schema level,
             # but saveAsVersion and saveAsDefault flags require Admin role.
@@ -209,11 +222,35 @@ def handler(event, context):
         elif operation == "setActiveVersion":
             args = event["arguments"]
             version = args.get("versionName")
+            # RBAC: scope-enforce. A scoped Author cannot flip the
+            # active version pointer onto something outside their scope,
+            # which would otherwise redirect new document processing to a
+            # config they aren't trusted with.
+            if allowed_versions and version and version not in allowed_versions:
+                return {
+                    "success": False,
+                    "error": {
+                        "type": "Unauthorized",
+                        "message": f"Access denied: version '{version}' is not in your allowed scope",
+                    },
+                }
             return handle_set_active_version(manager, version)
         elif operation == "deleteConfigVersion":
             args = event["arguments"]
             version = args.get("versionName")
+            # RBAC: scope-enforce. A scoped Author cannot delete a
+            # version outside their scope. (Deletion of `default` is
+            # also blocked inside handle_delete_config_version.)
+            if allowed_versions and version and version not in allowed_versions:
+                return {
+                    "success": False,
+                    "error": {
+                        "type": "Unauthorized",
+                        "message": f"Access denied: version '{version}' is not in your allowed scope",
+                    },
+                }
             return handle_delete_config_version(manager, version)
+
         elif operation == "getPricing":
             return handle_get_pricing(manager)
         elif operation == "updatePricing":
@@ -857,7 +894,9 @@ def handle_delete_config_version(manager, version, delete_bda_project=True):
                 if bda_arn:
                     logger.info(f"Attempting to delete linked BDA project: {bda_arn}")
                     try:
-                        from idp_common.bda.bda_blueprint_service import BdaBlueprintService
+                        from idp_common.bda.bda_blueprint_service import (
+                            BdaBlueprintService,
+                        )
                         bda_service = BdaBlueprintService(dataAutomationProjectArn=bda_arn)
                         bda_service.delete_project(bda_arn)
                         bda_cleanup_message = f" Linked BDA project deleted: {bda_arn}"

@@ -20,10 +20,10 @@ Exit codes:
     1 - One or more buildspec files have errors
 """
 
+import glob
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
-import glob
+from typing import Any, Dict, List
 
 try:
     import yaml
@@ -196,7 +196,7 @@ class BuildspecValidator:
 
         # Print summary
         if self.buildspec.get("phases"):
-            print(f"\nSummary:")
+            print("\nSummary:")
             print(f"  Version: {self.buildspec.get('version', 'N/A')}")
             print(f"  Phases: {', '.join(self.buildspec['phases'].keys())}")
             for phase, content in self.buildspec["phases"].items():

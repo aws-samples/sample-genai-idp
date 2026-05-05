@@ -91,7 +91,22 @@ const formatElapsed = (startIso: string | undefined): string => {
   return `${mins}:${secs.toString().padStart(2, '0')}`;
 };
 
-const DiscoveryPanel = (): React.JSX.Element => {
+interface DiscoveryPanelProps {
+  discoveryType?: 'classes' | 'rules';
+}
+
+/**
+ * Determine whether classes-discovery-only controls (mode selector, ground
+ * truth file input, page range selector) should be visible.
+ *
+ * Exported for unit testing — Policy Discovery (discoveryType='rules') hides
+ * all three controls unconditionally because they don't apply to whole-
+ * document rule extraction.
+ */
+export const shouldShowClassesDiscoveryControls = (discoveryType: 'classes' | 'rules' = 'classes'): boolean =>
+  discoveryType !== 'rules';
+
+const DiscoveryPanel = ({ discoveryType = 'classes' }: DiscoveryPanelProps = {}): React.JSX.Element => {
   const navigate = useNavigate();
   const { settings } = useSettingsContext();
   const { versions, loading: versionsLoading, getVersionOptions } = useConfigurationVersions();
@@ -486,6 +501,7 @@ const DiscoveryPanel = (): React.JSX.Element => {
           version: selectedVersion?.value,
           pageRanges: pageRangeStrings,
           pageLabels: pageLabelStrings,
+          discoveryType,
         },
       });
 
@@ -862,8 +878,8 @@ const DiscoveryPanel = (): React.JSX.Element => {
             <div />
           </ColumnLayout>
 
-          {/* Discovery Mode selector — only shown for PDFs */}
-          {isPdf && documentFile && (
+          {/* Discovery Mode selector — only shown for PDFs in classes (not rules/policy) mode */}
+          {isPdf && documentFile && shouldShowClassesDiscoveryControls(discoveryType) && (
             <FormField label="Discovery Mode">
               <Tiles
                 value={discoveryMode}
@@ -893,8 +909,8 @@ const DiscoveryPanel = (): React.JSX.Element => {
             </FormField>
           )}
 
-          {/* Single-class mode: Ground Truth file input — only shown after document is selected */}
-          {documentFile && (discoveryMode === 'single' || !isPdf) && (
+          {/* Single-class mode: Ground Truth file input — only shown after document is selected (not for policy/rules) */}
+          {documentFile && (discoveryMode === 'single' || !isPdf) && shouldShowClassesDiscoveryControls(discoveryType) && (
             <FormField label="Ground Truth File (optional)" description="JSON file with expected field structure to guide discovery">
               <input
                 type="file"
@@ -916,7 +932,7 @@ const DiscoveryPanel = (): React.JSX.Element => {
           )}
 
           {/* Multi-section mode: Page Range Selector */}
-          {discoveryMode === 'multi' && isPdf && documentFile && (
+          {discoveryMode === 'multi' && isPdf && documentFile && shouldShowClassesDiscoveryControls(discoveryType) && (
             <PdfPageSelector
               file={documentFile}
               pageRanges={pageRanges}

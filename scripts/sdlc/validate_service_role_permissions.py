@@ -3,11 +3,18 @@
 Validate CloudFormation service role has sufficient permissions for IDP deployment
 """
 
-import yaml
-import sys
 import os
+import sys
 
-# Custom YAML loader that ignores CloudFormation intrinsic functions
+import yaml
+
+
+# Custom YAML loader that ignores CloudFormation intrinsic functions.
+# CFNLoader subclasses yaml.SafeLoader (NOT yaml.Loader), so no unsafe
+# Python-object constructors are ever enabled. The only customization is
+# a no-op multi-constructor for `!`-prefixed tags (e.g. !Ref, !Sub, !GetAtt)
+# so that real CloudFormation templates parse. This is the standard pattern
+# for inspecting CFN templates with PyYAML.
 class CFNLoader(yaml.SafeLoader):
     pass
 
@@ -21,7 +28,12 @@ def extract_aws_services_from_template(template_path):
     """Extract AWS services used in a CloudFormation template"""
     try:
         with open(template_path, 'r') as f:
-            template = yaml.load(f, Loader=CFNLoader)  # nosec B506 - CFNLoader required for CloudFormation intrinsic functions
+            # nosec B506 - CFNLoader extends yaml.SafeLoader; it is NOT the
+            # default unsafe yaml.Loader. Input is a developer-committed
+            # CloudFormation template supplied by the caller (CLI path arg),
+            # not untrusted user input.
+            template = yaml.load(f, Loader=CFNLoader)  # nosec B506
+
         
         services = set()
         if template and 'Resources' in template:

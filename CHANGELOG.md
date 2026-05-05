@@ -4,8 +4,135 @@ SPDX-License-Identifier: MIT-0
 # Changelog
 
 ## [Unreleased]
+
+### Changed
+
+- **Replaced DSR with open-source SRT security scanning tool** — Migrated from deprecated internal DSR (Design Security Review) tool to the actively maintained open-source [Sample Security Review Tool (SRT)](https://github.com/aws-samples/sample-security-review-tool). Added automated security scanning in GitLab CI/CD pipeline that runs on merge requests targeting `develop` branch. Pipeline fails if security findings are detected, providing a security gate before production deployments. New Makefile targets: `make srt`, `make srt-setup`, `make srt-scan`, `make srt-fix`. Updated documentation in CLAUDE.md, CONTRIBUTING.md, and scripts/README.md.
   
+## [0.5.9]
+
+### Added
+
+- **Policy Discovery & Rule Validation Policy Classification**: Upload a regulatory document (e.g., an NCCI Medicare policy manual) and automatically extract structured validation rules from it. A new "Policy Discovery" tab in the Discovery page walks you through the process, and the extracted rules feed directly into the rule validation workflow.
+  - A new policy classification step runs before rule validation, matching each document against your configured `policy_classes` using regex patterns on document names and page content. Only matching policy rules are evaluated, so unrelated rules are skipped automatically.
+  - The configuration key `rule_classes` has been renamed to `policy_classes` for clarity. Existing configs will need to update this key.
+  - The Schema Builder now has dedicated support for editing policy classes with policy-specific labels, and extraction-only settings are hidden when editing policy schemas.
+  - A "Policy Discovery" section has been added to Discovery Configuration in the UI, letting you choose the model, temperature, and prompts used for Policy Discovery.
+  - The legacy `rule-extraction` configuration preset has been removed. Use **Policy Discovery** on the Discovery tab instead — it writes extracted rules directly into the active config's `policy_classes`.
+
+- **Document-level Download button on the Document Details page** — A new **Download** dropdown in the Document Details header lets users pull every output artifact for a document in a single click, packaged as a ZIP. Three scopes are offered:
+  - **Download All (ZIP)** — document attributes, metering, summary, evaluation & rule-validation reports, per-section predictions, baselines (when available), per-page text/confidence, and optionally per-page images and/or the source document (checkboxes).
+  - **Download Predictions (ZIP)** — all section result JSONs plus a self-describing `manifest.json`.
+  - **Download Baselines (ZIP)** — all baseline section result JSONs (shown only when an evaluation baseline is available).
+  - **Bucket-mirrored ZIP layout** — files are organised under top-level `output/`, `baseline/`, and `input/` folders that preserve the real S3 key structure, so the archive can be diffed with a direct `aws s3 sync` of the same buckets.
+
+
+- **Headless REST API mode with VPC-secured deployment for GovCloud** — a first-party Jobs REST API for programmatic document submission and status tracking, plus an optional VPC-secured deployment that keeps the API off the public internet. Makes end-to-end GovCloud deployment viable without the UI/AppSync stack, and gives Commercial customers a supported alternative to direct S3 uploads for machine-to-machine integrations.
+  - **Jobs REST API** (new `src/lambda/api_handler/`, `src/lambda/job_tracker/`, `src/lambda/batch_pre_processor/`):
+    - `POST /jobs` — creates a job record and returns a presigned POST URL for the input zip (1-hour expiry, content-type pinned to `application/zip`, 5 GB content-length cap).
+    - `GET /jobs/{job_id}` — returns overall status (`PENDING_UPLOAD` / `IN_PROGRESS` / `SUCCEEDED` / `PARTIALLY_SUCCEEDED` / `FAILED` / `ABORTED`), per-file status map, and — on success — a presigned GET URL for `results.zip`. `SUCCEEDED` is gated on `results.zip` actually being present in the output bucket to avoid racing callers into a 404.
+    - OAuth2 `client_credentials` auth via a dedicated Cognito User Pool + Resource Server (`idp-api/jobs.read`, `idp-api/jobs.write` scopes). Separate from the existing web-UI Cognito pool.
+    - **Per-client job ownership (M1):** each job records its creating Cognito principal (`sub` / `client_id`) as `CreatedBy`. `GET /jobs/{job_id}` returns **HTTP 404** (not 403, to avoid existence-leak) when the caller's principal doesn't match the job's owner. Legacy job records written before this field existed remain readable by any authenticated caller. **Behavior change:** `GET /jobs/{job_id}` on a non-existent job now correctly returns 404; previously returned 400 (a pre-existing response-code bug in the API handler).
+  - **Private API Gateway + bastion tunneling:**
+    - `AWS::Serverless::Api` with `EndpointConfiguration: PRIVATE` bound to a customer-supplied `ApiGatewayVpcEndpointId` and a resource policy that denies all traffic not originating from that VPC endpoint.
+    - Optional `DeployBastionHost=true` spins up an SSM-reachable `t3.small` EC2 with IMDSv2 required, encrypted EBS via a dedicated rotating KMS key, and no inbound SSH. `scripts/bastion.sh <STACK_NAME>` sets up a local SSH tunnel for dev-time API access; `scripts/get_api_token.sh <STACK_NAME>` fetches an OAuth2 bearer token.
+  - **Safe zip extraction in `batch_pre_processor` (M2 + M3):**
+    - `MAX_UNCOMPRESSED_BYTES` (default 20 GiB, env-configurable) and `MAX_ENTRIES` (default 10,000) bounds checked **pre-flight** before any uploads begin. Bound violations write a terminal `FAILED` marker to the job record so the API surfaces the failure.
+    - Per-entry streaming via `zipfile.ZipFile.open()` + `s3.upload_fileobj()` — no more loading whole entries into Lambda memory.
+    - Per-entry failure isolation — one bad file is marked `FAILED` and the rest of the batch still uploads and advances through the pipeline; the job converges to `PARTIALLY_SUCCEEDED` / `FAILED` / `SUCCEEDED` as appropriate.
+  - **New CFN parameters** (all default to off/empty, fully backward-compatible):
+    - `EnableHeadless` (bool) — turns on the Jobs REST API.
+    - `DeployInVPC` (bool) — places all IDP Lambdas in customer-supplied private subnets with a customer-supplied security group.
+    - `VpcId`, `PrivateSubnetIds`, `ApiGatewayVpcEndpointId`, `LambdaSecurityGroupId`, `ApiStageName` — customer-supplied networking.
+    - `DeployBastionHost`, `BastionHostSubnetId`, `BastionHostSecurityGroupId` — optional dev-access bastion.
+    - **CloudFormation console UX** - the 11 new parameters are grouped into two dedicated `AWS::CloudFormation::Interface` sections ("Headless API Deployment (required for GovCloud)" and "Headless API Deployment - Bastion Host (optional, requires VPC Secured Mode)") with friendlier `ParameterLabels` and rewritten `Description` text. Each description now explicitly states when the parameter is required, what the default behavior is (no Jobs API / no Lambda VPC placement / no bastion EC2 unless explicitly enabled), and which companion parameters it depends on. Ensures Quick-Start users who click the README's "Launch Stack" button see clear opt-in sections rather than assuming the bastion host or Jobs API is always deployed.
+  - **CFN fail-fast validation (H1)** — new `Rules:` block entries catch misconfiguration at stack create / update time with clear `AssertDescription` errors, instead of failing deep in resource provisioning:
+    - `HeadlessRequiresVPC` — `EnableHeadless=true` requires `DeployInVPC=true` + non-empty `VpcId` / `ApiGatewayVpcEndpointId` / `LambdaSecurityGroupId`.
+    - `BastionRequiresVPC` — `DeployBastionHost=true` requires `DeployInVPC=true` + non-empty bastion subnet / SG.
+  - Plus **defense-in-depth** on the two API-gated Lambdas: `VpcConfig` is wrapped in `!If [DeployInVPC, …, AWS::NoValue]` so even if the Rules block is ever relaxed, the Lambdas won't fail to create on empty `!Ref` values.
+  - **CLI (`idp-cli`):**
+    - `--headless` now auto-sets the `EnableHeadless=true` stack parameter — they were always used together.
+    - `idp-cli deploy --headless --from-code . --stack-name <NEW>` no longer requires `--admin-email`. The headless template strips the UI Cognito pool and has no `AdminEmail` parameter; passing it through produced `ValidationError: Parameters: [AdminEmail] do not exist in the template`. Now skipped and dropped with a note. Non-headless new-stack creation still requires `--admin-email`.
+  - **Publish pipeline fixes that make headless-to-GovCloud deploys work:**
+    - `cfn-lint` in headless mode now lints `idp-headless.yaml` and skips commercial-only templates (`idp-main.yaml`, `nested/appsync`), which contain `AWS::AppSync::*` / `AWS::CloudFront::*` resources that don't exist in `us-gov-*` regions. Fixes `E3006 Resource type … does not exist`.
+    - E/W classification in `_validate_cfn_lint` now uses `^E\d{4}` / `^W\d{4}` regex anchors. Previously the substring `":E"` also matched resource prefixes like `AWS::EC2::`, inflating warning-severity lines to errors.
+    - `WorkflowStateChangeRule` JobTracker target moved from a conditional `Arn` field (flagged `E3003 'Arn' is a required property`) to a conditional full-target dict via `!If`.
+  - **Documentation:**
+    - New `docs/govcloud-batch-api.md` — REST API reference with schemas, OAuth flow, bastion tunneling setup, and an Authorization model section covering per-client ownership and multi-client behavior.
+    - New `docs/govcloud-architecture.md`, `docs/govcloud-operations.md`, `docs/vpc-secured-mode.md`.
+    - Overhauled `docs/govcloud-deployment.md` with a deployment-variant matrix (Vanilla / Headless API / Headless + VPC / Headless + VPC + Bastion).
+  - **End-to-end test script:** `scripts/e2e_test_headless.py <STACK_NAME> <PATH_TO_FILE>` exercises the full flow (OAuth → POST /jobs → presigned upload → status poll → download results).
+
+- **Managed configuration upload rejection** — `idp-cli config upload` now rejects configuration files with `managed: true` to prevent users from accidentally creating stack-managed configurations that would be overwritten on stack updates. All user-uploaded configurations automatically have `managed: false` set, ensuring they persist across stack lifecycle events.
+
+### Fixed
+
+- **Evaluation markdown/report rendering resilience** — two defensive fixes that keep evaluation and test-results pages from crashing when upstream data is non-numeric or empty.
+
+### Security
+
+Hardening response to security review - Highlights:
+
+- **Stored XSS defense-in-depth (frontend).** Introduced
+  `SafeMarkdown` wrapper (`src/ui/src/components/common/SafeMarkdown.tsx`)
+  that pairs `rehype-raw` with `rehype-sanitize` using an allow-list
+  schema (retains `<details>`/`<summary>`, custom `<documentid>`,
+  tables, code blocks, and a narrow `white-space: pre-line` style
+  pattern; strips `<script>`, event handlers, `javascript:` URLs,
+  `<iframe>`, `<object>`, `<embed>`). Migrated all six legacy
+  `ReactMarkdown + rehypeRaw` call sites across
+  `MarkdownViewer.tsx`, `DocumentsQueryLayout.tsx`,
+  `TextDisplay.tsx`, `AgentChatLayout.tsx`, and `AgentToolComponent.tsx`.
+- **Stored XSS fix in Knowledge Base resolver (backend).**
+  `query_knowledgebase_resolver` now HTML-escapes citation snippets,
+  document titles, and URLs via `html.escape()` before embedding them
+  in the rendered markdown.
+- **Chat session ownership enforced.** `getChatMessages`
+  (`get_agent_chat_messages_resolver`) now verifies that the calling
+  Cognito user owns the requested `sessionId` by looking up
+  `(userId, sessionId)` in `ChatSessionsTable`. Can be temporarily
+  disabled via `ENFORCE_CHAT_SESSION_OWNERSHIP=false` env var for
+  legacy-session migration. Fails closed on DynamoDB errors.
+- **S3 URI allow-list in `getFileContents`.** The resolver now
+  rejects any `s3Uri` whose bucket is not one of the IDP stack's
+  configured buckets, preventing use as a generic S3-read gadget.
+  Also fixes a latent bucket-name parsing bug and validates the
+  URI scheme.
+- **Log sanitization utility.** New
+  `idp_common.utils.log_sanitizer.sanitize_event_for_logging()`
+  deep-copies and redacts Cognito claims, identity blobs, auth
+  tokens, and API keys from events before they are emitted to
+  CloudWatch. Truncates common document-content fields to 500
+  characters. Applied to `reprocess_document_resolver`,
+  `query_knowledgebase_resolver`, and `get_agent_chat_messages_resolver`
+  as reference integrations (rollout to remaining resolvers is tracked
+  for a follow-up release). 15 unit tests added.
+- **CSP hardening (Phase 1).** Tightened CloudFront
+  `SecurityHeadersPolicy`: `object-src 'none'` (was
+  `'self' blob: data: https:`), `connect-src` restricted to AWS
+  service hostnames (was `https:`). `unsafe-eval` / `unsafe-inline`
+  removal deferred pending Monaco-editor compatibility verification.
+- **False-positive documentation.** Added explanatory comments and
+  `nosec` justifications for:
+  - Jinja2 autoescape disabled in `discovery_agent.py`
+    (templates produce LLM prompts, not HTML).
+  - Unsafe `yaml.load` findings in
+    `scripts/sdlc/validate_service_role_permissions.py` and
+    `lib/idp_sdk/idp_sdk/_core/publish.py` (both use
+    `CFNLoader`/`CFLoader` subclassing `yaml.SafeLoader`; input is
+    developer-committed CloudFormation templates, not user input).
+  - SQL injection in `test_results_resolver` Athena queries (every
+    interpolation is gated by `_validate_sql_input()` with a strict
+    allow-list regex).
+
+## Templates
+   - us-west-2: `https://s3.us-west-2.amazonaws.com/aws-ml-blog-us-west-2/artifacts/genai-idp/idp-main_0.5.9.yaml`
+   - us-east-1: `https://s3.us-east-1.amazonaws.com/aws-ml-blog-us-east-1/artifacts/genai-idp/idp-main_0.5.9.yaml`
+   - eu-central-1: `https://s3.eu-central-1.amazonaws.com/aws-ml-blog-eu-central-1/artifacts/genai-idp/idp-main_0.5.9.yaml`
+  
+
 ## [0.5.8]
+
 
 ### Added
 

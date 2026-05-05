@@ -104,6 +104,7 @@ query GetDocument($objectKey: ID!) {
         EvaluationReportUri
         EvaluationStatus
         SummaryReportUri
+        RuleValidationResult
         RuleValidationResultUri
         ExpiresAfter
         HITLStatus

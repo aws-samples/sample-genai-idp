@@ -23,7 +23,7 @@ __pycache__
 .kiro
 notebooks/examples/data
 .idea/
-.dsr/
+.srt/
 *tmp-dev-assets*
 scratch/
 .mcp.json
@@ -31,6 +31,9 @@ scratch/
 # Node.js / npm
 node_modules/
 package-lock.json
+
+# Jupyter
+.ipynb_checkpoints/
 
 # Docs site (Astro Starlight) - build artifacts and symlinks
 docs-site/.astro/

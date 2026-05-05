@@ -17,9 +17,10 @@ The defaults are organized into modular files:
 - base-assessment.yaml: LLM confidence scoring
 - base-summarization.yaml: Document summarization
 - base-evaluation.yaml: Evaluation/testing
-- base-criteria-validation.yaml: Criteria validation
+- base-rule-validation.yaml: Rule validation settings
 - base-agents.yaml: Error analyzer and chat companion
 - base-discovery.yaml: Schema discovery
+- base-rule-discovery.yaml: Rule discovery from policy documents
 - pattern-1.yaml: BDA pattern (selective inheritance)
 - pattern-2.yaml: Bedrock LLM pattern (full inheritance)
 

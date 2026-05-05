@@ -5,10 +5,9 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Box, Button, SpaceBetween } from '@cloudscape-design/components';
 import { generateClient } from 'aws-amplify/api';
 import { ConsoleLogger } from 'aws-amplify/utils';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
-import rehypeRaw from 'rehype-raw';
+import SafeMarkdown from '../common/SafeMarkdown';
 import { getFileContents } from '../../graphql/generated';
+
 import './MarkdownViewer.css';
 
 interface MarkdownViewerProps {
@@ -194,9 +193,7 @@ const MarkdownViewer = ({
         } as Record<string, unknown>)}
       >
         {content ? (
-          <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>
-            {content}
-          </ReactMarkdown>
+          <SafeMarkdown>{content}</SafeMarkdown>
         ) : (
           <Box textAlign="center" padding="l">
             No content to display
@@ -263,9 +260,7 @@ const MarkdownViewer = ({
           maxHeight: 'calc(100vh - 400px)',
         }}
       >
-        <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>
-          {content}
-        </ReactMarkdown>
+        <SafeMarkdown>{content}</SafeMarkdown>
       </div>
     </Box>
   );

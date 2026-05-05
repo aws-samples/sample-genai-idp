@@ -283,7 +283,7 @@ def get_rule_validation_tables_description() -> str:
 - `input_key` (string): S3 key of the input document
 - `validation_date` (timestamp): When the validation was performed
 - `overall_status` (string): Overall validation status (COMPLETE, FAILED, etc.)
-- `total_rule_types` (int): Number of rule types evaluated
+- `total_policy_types` (int): Number of policy types evaluated
 - `total_rules` (int): Total number of rules evaluated
 - `pass_count` (int): Number of rules that passed
 - `fail_count` (int): Number of rules that failed
@@ -297,7 +297,7 @@ def get_rule_validation_tables_description() -> str:
 
 #### Schema:
 - `document_id` (string): Unique identifier for the document
-- `rule_type` (string): Category/type of the rule
+- `policy_type` (string): Category/type of the policy class
 - `rule` (string): Description of the specific rule being validated
 - `recommendation` (string): Validation result (Pass, Fail, Information Not Found)
 - `reasoning` (string): Explanation for the recommendation
@@ -317,9 +317,9 @@ SELECT "document_id", "fail_count"
 FROM rule_validation_summary WHERE "fail_count" > 0
 
 -- Most common failures
-SELECT "rule_type", "rule", COUNT(*) as count
+SELECT "policy_type", "rule", COUNT(*) as count
 FROM rule_validation_details WHERE "recommendation" = 'Fail'
-GROUP BY "rule_type", "rule" ORDER BY count DESC LIMIT 10
+GROUP BY "policy_type", "rule" ORDER BY count DESC LIMIT 10
 ```
 """
 

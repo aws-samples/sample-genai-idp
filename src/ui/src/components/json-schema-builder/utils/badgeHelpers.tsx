@@ -3,10 +3,6 @@ import { Badge } from '@cloudscape-design/components';
 
 export const DOCUMENT_TYPE_BADGE_COLOR = 'blue';
 
-interface DocumentTypeBadgeProps {
-  isRuleSchema?: boolean;
-}
-
 interface BadgeInfo {
   text: string;
   color: string;
@@ -25,8 +21,8 @@ interface SchemaAttribute {
   [key: string]: unknown;
 }
 
-export const DocumentTypeBadge = ({ isRuleSchema = false }: DocumentTypeBadgeProps): React.JSX.Element => (
-  <Badge color={DOCUMENT_TYPE_BADGE_COLOR}>{isRuleSchema ? 'Rule Type' : 'Document Type'}</Badge>
+export const DocumentTypeBadge = ({ isRuleSchema = false }: { isRuleSchema?: boolean }): React.JSX.Element => (
+  <Badge color={DOCUMENT_TYPE_BADGE_COLOR}>{isRuleSchema ? 'Policy Type' : 'Document Type'}</Badge>
 );
 
 export const getTypeColor = (type: string | undefined): string => {

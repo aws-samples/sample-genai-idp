@@ -4,9 +4,10 @@
 # src/lambda/upload_resolver/index.py
 
 import json
-import os
-import boto3
 import logging
+import os
+
+import boto3
 from botocore.config import Config
 
 logger = logging.getLogger()
@@ -21,6 +22,31 @@ s3_config = Config(
 )
 s3_client = boto3.client('s3', config=s3_config)
 
+# --- inline log sanitizer ---------------------------------------------------
+# Minimal inline redactor. Kept here rather than importing from idp_common to
+# avoid adding a Lambda Layer dependency to this resolver. If this file grows
+# to need idp_common anyway, promote to
+# `from idp_common.utils.log_sanitizer import sanitize_event_for_logging`.
+_LOG_SENSITIVE_KEYS = (
+    "password", "secret", "token", "authorization", "apikey", "api_key",
+    "cookie", "credential", "claims", "identity",
+)
+
+
+def _sanitize_for_log(obj):
+    """Deep-copy `obj` redacting values whose keys match the denylist."""
+    if isinstance(obj, dict):
+        out = {}
+        for k, v in obj.items():
+            if isinstance(k, str) and any(s in k.lower() for s in _LOG_SENSITIVE_KEYS):
+                out[k] = "***REDACTED***" if v is not None else None
+            else:
+                out[k] = _sanitize_for_log(v)
+        return out
+    if isinstance(obj, list):
+        return [_sanitize_for_log(v) for v in obj]
+    return obj
+
 def handler(event, context):
     """
     Generates a presigned POST URL for S3 uploads through an AppSync resolver.
@@ -32,7 +58,7 @@ def handler(event, context):
     Returns:
         dict: A dictionary containing the presigned URL data and object key
     """
-    logger.info(f"Received event: {json.dumps(event)}")
+    logger.info(f"Received event: {json.dumps(_sanitize_for_log(event))}")
     
     try:
         # Extract variables from the event

@@ -1,19 +1,12 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: MIT-0
 import json
-import boto3
 import logging
-import botocore
-import html
-import mimetypes
-import base64
-import hashlib
 import os
-import re 
-from urllib.parse import urlparse
+
+import boto3
 from botocore.exceptions import ClientError
 from idp_common.bedrock.client import BedrockClient
-from idp_common.utils.settings_helper import get_setting
 
 # Set up logging
 logger = logging.getLogger()
@@ -121,7 +114,7 @@ def handler(event, context):
     response_data = {}
 
     try:
-        # logger.info(f"Received event: {json.dumps(event)}")
+        # logger.info(f"Received event: {json.dumps(sanitize_event_for_logging(event))}")
         objectKey = event['arguments']['s3Uri']
         prompt = event['arguments']['prompt']
         history = event['arguments']['history']

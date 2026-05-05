@@ -2052,11 +2052,22 @@ Resources:
         Variables:
           LOG_LEVEL: !Ref LogLevel
           CHAT_MESSAGES_TABLE: !Ref ChatMessagesTableName
+          # ChatSessionsTable is consulted to verify that the calling Cognito
+          # user owns the requested sessionId before returning messages.
+          CHAT_SESSIONS_TABLE: !Ref ChatSessionsTableName
+          # Feature flag to disable ownership enforcement in case of legacy
+          # session migration. Defaults to "true" (enforce). Customers should
+          # only set this to "false" temporarily during data backfill.
+          ENFORCE_CHAT_SESSION_OWNERSHIP: "true"
       LoggingConfig:
         LogGroup: !Ref GetAgentChatMessagesFunctionLogGroup
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref ChatMessagesTableName
+        # Read-only access to the sessions table is required to validate
+        # that the caller owns the requested sessionId (authorization check).
+        - DynamoDBReadPolicy:
+            TableName: !Ref ChatSessionsTableName
         - Statement:
             - Effect: Allow
               Action:
@@ -2070,6 +2081,7 @@ Resources:
 
   ##########################################################################
   # GetAgentChatMessagesDataSource
+
   ##########################################################################
   GetAgentChatMessagesDataSource:
     Type: AWS::AppSync::DataSource
@@ -2136,10 +2148,22 @@ Resources:
       Description: Lambda function to return file contents via GraphQL API
       MemorySize: 512
       Timeout: 60
+      Environment:
+        Variables:
+          LOG_LEVEL: !Ref LogLevel
+          # Bucket allow-list — the resolver will reject any s3Uri whose
+          # bucket is not one of these. Prevents use of this resolver as
+          # a generic S3-read gadget (Talos finding #4 hardening).
+          INPUT_BUCKET: !Ref InputBucketName
+          OUTPUT_BUCKET: !Ref OutputBucketName
+          CONFIGURATION_BUCKET: !Ref ConfigurationBucketName
+          EVALUATION_BASELINE_BUCKET: !Ref EvaluationBaselineBucketName
+          REPORTING_BUCKET: !Ref ReportingBucketName
       LoggingConfig:
         LogGroup: !Ref GetFileContentsResolverFunctionLogGroup
       Policies:
         - S3ReadPolicy:
+
             BucketName: !If
               - ShouldCreateEvaluationBaselineBucket
               - !Ref EvaluationBaselineBucketName
@@ -2785,6 +2809,10 @@ Resources:
           QUEUE_URL: !Ref DocumentQueueUrl
           APPSYNC_API_URL: !Ref GraphQLApiUrl
           DATA_RETENTION_IN_DAYS: !Ref DataRetentionInDays
+          # RBAC: resolve caller's allowedConfigVersions from UsersTable to
+          # enforce config-version scope on the `version` argument. Empty
+          # string in single-user / pre-RBAC deployments (fail-open).
+          USERS_TABLE_NAME: !Ref UsersTableName
       LoggingConfig:
         LogGroup: !Ref ReprocessDocumentResolverFunctionLogGroup
       Policies:
@@ -2810,6 +2838,15 @@ Resources:
                 - kms:GenerateDataKey*
                 - kms:DescribeKey
               Resource: !Ref CustomerManagedEncryptionKeyArn
+            # RBAC: read-only lookup of caller's `allowedConfigVersions`
+            # via UsersTable `EmailIndex`.
+            - Effect: Allow
+              Action:
+                - dynamodb:Query
+                - dynamodb:GetItem
+              Resource:
+                - !Ref UsersTableArn
+                - !Sub "${UsersTableArn}/index/*"
 
 
   ##########################################################################
@@ -2891,6 +2928,11 @@ Resources:
           LOG_LEVEL: !Ref LogLevel
           CONFIGURATION_TABLE_NAME: !Ref ConfigurationTableName
           STACK_NAME: !Ref StackName
+          # Used for RBAC scope enforcement: the resolver queries the
+          # UsersTable EmailIndex to look up `allowedConfigVersions` for
+          # non-admin callers and rejects syncBdaIdp calls against a
+          # version outside their scope.
+          USERS_TABLE_NAME: !Ref UsersTableName
       LoggingConfig:
         LogGroup: !Ref SyncBdaIdpResolverFunctionLogGroup
       Policies:
@@ -2899,6 +2941,16 @@ Resources:
             TableName: !Ref ConfigurationTableName
         - S3ReadPolicy:
             BucketName: !Ref ConfigurationBucketName
+        # Read-only access on UsersTable + EmailIndex for scope enforcement.
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:Query
+                - dynamodb:GetItem
+              Resource:
+                - !Ref UsersTableArn
+                - !Sub "${UsersTableArn}/index/*"
+
         - Statement:
             # CloudWatch metrics permission
             - Effect: Allow

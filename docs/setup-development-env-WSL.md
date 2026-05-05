@@ -85,16 +85,20 @@ node --version (Example: v22.12.0)
 npm --version (Example: 11.0.0)
 ```
 ### 4.2 Install the IDP CLI
-```
-cd accelerated-intelligent-document-processing-on-aws/lib/idp_cli_pkg
-pip install -e .
-cd ../..
+
+⚠️ **Critical**: Install packages in this exact order to avoid "No such command" errors.
+
+```bash
+cd accelerated-intelligent-document-processing-on-aws
+pip install -e lib/idp_common_pkg
+pip install -e lib/idp_sdk
+pip install -e lib/idp_cli_pkg
 ```
 
+> **Note**: This installs the `idp-cli` command along with all required Python dependencies.
+
 ### 4.3 Test Build Process
-```
-cd accelerated-intelligent-document-processing-on-aws
-```
+
 ```bash
 # Test CLI help
 idp-cli publish --help

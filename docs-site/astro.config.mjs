@@ -40,6 +40,7 @@ export default defineConfig({
             { label: "Headless Deployment", slug: "headless-deployment" },
             { label: "ALB Hosting", slug: "alb-hosting" },
             { label: "Private Network Deployment", slug: "deployment-private-network" },
+            { label: "VPC-Secured Mode", slug: "vpc-secured-mode" },
             { label: "Configuration", slug: "configuration" },
             {
               label: "Configuration Versions",
@@ -68,6 +69,7 @@ export default defineConfig({
             { label: "BDA Mode Reference", slug: "pattern-1" },
             { label: "Pipeline Mode Reference", slug: "pattern-2" },
             { label: "Discovery", slug: "discovery" },
+            { label: "Policy Discovery", slug: "policy-discovery" },
           ],
         },
         {
@@ -157,7 +159,16 @@ export default defineConfig({
               slug: "rbac",
             },
             { label: "External Identity Provider", slug: "external-idp" },
-            { label: "GovCloud Deployment", slug: "govcloud-deployment" },
+            {
+              label: "GovCloud",
+              collapsed: false,
+              items: [
+                { label: "Deployment", slug: "govcloud-deployment" },
+                { label: "Architecture", slug: "govcloud-architecture" },
+                { label: "Operations", slug: "govcloud-operations" },
+                { label: "Batch API", slug: "govcloud-batch-api" },
+              ],
+            },
             {
               label: "EU Region Model Support",
               slug: "eu-region-model-support",

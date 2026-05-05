@@ -2,9 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import React, { useState } from 'react';
 import { Box, Spinner, Button, Modal, Header, SpaceBetween, Tabs } from '@cloudscape-design/components';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
-import rehypeRaw from 'rehype-raw';
+import SafeMarkdown from '../common/SafeMarkdown';
+
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { atelierLakesideLight } from 'react-syntax-highlighter/dist/esm/styles/hljs';
 
@@ -387,11 +386,7 @@ const AgentToolComponentBase = ({
 
     // Handle markdown content - render as markdown instead of highlighting
     if (detectedType === 'markdown') {
-      return (
-        <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>
-          {cleanedContent}
-        </ReactMarkdown>
-      );
+      return <SafeMarkdown>{cleanedContent}</SafeMarkdown>;
     }
 
     // Handle other code types with syntax highlighting
@@ -400,11 +395,7 @@ const AgentToolComponentBase = ({
     }
 
     // Fallback to ReactMarkdown for text content
-    return (
-      <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>
-        {cleanedContent}
-      </ReactMarkdown>
-    );
+    return <SafeMarkdown>{cleanedContent}</SafeMarkdown>;
   };
 
   // Determine the overall status and display
