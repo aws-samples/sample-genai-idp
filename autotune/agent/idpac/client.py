@@ -467,6 +467,59 @@ class IDPACClient:
         
         return {"files": downloaded, "count": len(downloaded)}
 
+    def list_test_set_files(self, test_set_id: str) -> list[str]:
+        """List all document filenames in a test set.
+
+        Args:
+            test_set_id: Test set ID
+
+        Returns:
+            List of filenames (e.g., ['invoice-001.pdf', 'receipt-002.pdf'])
+        """
+        prefix = f"{test_set_id}/input/"
+        paginator = self._s3.get_paginator('list_objects_v2')
+        filenames = set()
+        for page in paginator.paginate(Bucket=self.testset_bucket, Prefix=prefix):
+            for obj in page.get('Contents', []):
+                # Key format: {test_set_id}/input/{filename}
+                key = obj['Key']
+                name = key[len(prefix):]
+                if name:
+                    filenames.add(name)
+        return sorted(filenames)
+
+    def download_test_set(self, test_set_id: str, output_dir: str) -> dict:
+        """Download entire test set (input + baseline) to local directory.
+
+        Creates the standard dataset layout:
+            output_dir/input/{filename}
+            output_dir/baseline/{filename}/sections/{N}/result.json
+
+        Args:
+            test_set_id: Test set ID
+            output_dir: Local directory to save to
+
+        Returns:
+            Dict with file counts and output_dir path.
+        """
+        import os
+        paginator = self._s3.get_paginator('list_objects_v2')
+        prefix = f"{test_set_id}/"
+        input_count = 0
+        baseline_count = 0
+        for page in paginator.paginate(Bucket=self.testset_bucket, Prefix=prefix):
+            for obj in page.get('Contents', []):
+                key = obj['Key']
+                relative = key[len(prefix):]
+                local_path = os.path.join(output_dir, relative)
+                os.makedirs(os.path.dirname(local_path), exist_ok=True)
+                self._s3.download_file(self.testset_bucket, key, local_path)
+                if relative.startswith("input/"):
+                    input_count += 1
+                elif relative.startswith("baseline/"):
+                    baseline_count += 1
+        return {"output_dir": output_dir, "input_files": input_count, "baseline_files": baseline_count}
+
     def download_ground_truth(self, test_set_id: str, filename: str, output_path: str) -> str:
         """Download ground truth (baseline) for a single document.
 

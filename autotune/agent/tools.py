@@ -743,6 +743,51 @@ def download_single_document_results(batch_id: str, filename: str) -> str:
 
 
 @tool
+def list_test_set_files(test_set_id: str, max_files_to_return: int = 50) -> str:
+    """List document filenames in a test set.
+
+    Use this to discover what files exist before downloading ground truth
+    or input documents.
+
+    Args:
+        test_set_id: Test set ID (e.g., 'davids-test-dataset').
+        max_files_to_return: Max filenames to return (default 50).
+
+    Returns:
+        JSON with list of filenames, count returned, and total count.
+    """
+    client = _get_client()
+    files = client.list_test_set_files(test_set_id)
+    total = len(files)
+    files = files[:max_files_to_return]
+    return json.dumps({"test_set_id": test_set_id, "files": files, "count": len(files), "total": total}, indent=2)
+
+
+@tool
+def download_test_set(test_set_id: str) -> str:
+    """Download an entire test set (input documents + ground truth baselines) locally.
+
+    Creates the standard dataset layout required by analyze_dataset and
+    run_multi_class_discovery:
+        {output_dir}/input/{filename}
+        {output_dir}/baseline/{filename}/sections/{N}/result.json
+
+    Args:
+        test_set_id: Test set ID (e.g., 'davids-test-dataset').
+
+    Returns:
+        JSON with output directory path and file counts.
+    """
+    _auto_update_state("downloading", f"Downloading test set {test_set_id}")
+    scratch = os.environ["AUTOTUNE_SCRATCH_DIR"]
+    output_dir = os.path.join(scratch, "datasets", test_set_id)
+    os.makedirs(output_dir, exist_ok=True)
+    client = _get_client()
+    result = client.download_test_set(test_set_id, output_dir)
+    return json.dumps(result, indent=2)
+
+
+@tool
 def download_ground_truth(test_set_id: str, filename: str) -> str:
     """Download ground truth baseline for a single document.
 
@@ -750,9 +795,14 @@ def download_ground_truth(test_set_id: str, filename: str) -> str:
     For packet-splitting datasets with multiple sections per document, this
     downloads all sections.
 
+    NOTE: This requires an exact filename. To discover filenames in a test set,
+    first run an evaluation (even with n_files=1) and use download_evaluation_results
+    to see the list of files. Or use run_discovery which processes the test set
+    directly without needing filenames.
+
     Args:
         test_set_id: Test set ID (e.g., 'davids-test-dataset').
-        filename: Document filename (e.g., 'invoice-001.pdf').
+        filename: Exact document filename (e.g., 'invoice-001.pdf'). Wildcards not supported.
 
     Returns:
         JSON with output path(s) where ground truth was saved.
@@ -1243,6 +1293,8 @@ ALL_TOOLS = [
     download_single_document_results,
     download_ground_truth,
     download_input_document,
+    list_test_set_files,
+    download_test_set,
     parse_evaluation_results,
     run_inference,
     download_raw_processing_results,

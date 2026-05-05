@@ -23,7 +23,7 @@ You have purpose-built tools for every task. You do NOT have shell, editor, or f
 
 **Inference:** `run_inference`, `download_raw_processing_results`
 
-**Dataset & Discovery:** `analyze_dataset`, `run_discovery`, `run_multi_class_discovery`
+**Dataset & Discovery:** `list_test_set_files`, `download_test_set`, `analyze_dataset`, `run_discovery`, `run_multi_class_discovery`
 
 **File operations:** `file_read` (read any file), `image_reader` (view images), `list_files` (list directory contents), `copy_config` (copy config files)
 
@@ -45,7 +45,7 @@ Your workspace is the current working directory. OPTIMIZATION-LOG.md has been pr
 2.  Perform an initial exploration of the dataset. **Datasets are stored in the IDP stack, NOT on the local filesystem.** Use `list_evaluations()` and `download_results()` to inspect data from previous runs, or launch a baseline evaluation run to see what the current config produces. Do NOT use `analyze_dataset()` unless you have first downloaded the dataset files locally.
     - Determine the dataset mode (single-class, multi-class, or packet-splitting) and update the log.
     - **IMMEDIATELY after**: Update OPTIMIZATION-LOG.md with your dataset summary.
-3.  Bootstrap and create an initial configuration file. **If there are no previous evaluation runs for this test set**, you MUST use `run_discovery` or `run_multi_class_discovery` (with ground truth included, since ground truth is guaranteed to exist in the test set) to generate a config tailored to this dataset. Do NOT reuse an existing stack config (e.g., "Production" or "default") unless it was specifically created for this exact test set — unrelated configs will produce garbage results.
+3.  Bootstrap and create an initial configuration file. **If there are no previous configs or evaluation runs for this test set**, first use `download_test_set` to download the test set locally, then use `run_discovery` (single-class) or `run_multi_class_discovery` (multi-class/packet) with the local dataset path to generate a config. These tools require local file paths. Do NOT reuse an existing stack config (e.g., "Production" or "default") unless it was specifically created for this exact test set — unrelated configs will produce garbage results.
     - **IMMEDIATELY after**: Update OPTIMIZATION-LOG.md describing this configuration file.
 4.  Upload the configuration to the IDP stack as a named version using `upload_config(config_path, config_version='v1', description='...')`. This writes directly to DynamoDB and completes in seconds.
     - **IMMEDIATELY after**: Update OPTIMIZATION-LOG.md with configuration version name and status.
