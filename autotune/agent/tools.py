@@ -146,7 +146,7 @@ def download_config(config_version: str) -> str:
     Returns:
         JSON with status and path where config was saved.
     """
-    scratch = os.environ.get("AUTOTUNE_SCRATCH_DIR", "/tmp/autotune-data")
+    scratch = os.environ["AUTOTUNE_SCRATCH_DIR"]
     output_path = os.path.join(scratch, "configs", f"{config_version}.yaml")
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     client = _get_client()
@@ -179,7 +179,7 @@ def create_default_config(features: str = "min") -> str:
     """
     import subprocess
 
-    scratch = os.environ.get("AUTOTUNE_SCRATCH_DIR", "/tmp/autotune-data")
+    scratch = os.environ["AUTOTUNE_SCRATCH_DIR"]
     output_path = os.path.join(scratch, "configs", f"default-{features}.yaml")
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     cmd = ["idp-cli", "config-create", "--features", features, "--output", output_path]
@@ -245,7 +245,7 @@ def auto_fix_config(
     """
     from idpac import IDPConfig
 
-    scratch = os.environ.get("AUTOTUNE_SCRATCH_DIR", "/tmp/autotune-data")
+    scratch = os.environ["AUTOTUNE_SCRATCH_DIR"]
     output_path = os.path.join(scratch, "configs", "fixed-" + os.path.basename(config_path))
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     config = IDPConfig(config_path)
@@ -323,7 +323,7 @@ def get_evaluation_summary(batch_id: str, save_json: bool = False) -> str:
 
     output_file = None
     if save_json:
-        scratch = os.environ.get("AUTOTUNE_SCRATCH_DIR", "/tmp/autotune-data")
+        scratch = os.environ["AUTOTUNE_SCRATCH_DIR"]
         output_file = os.path.join(scratch, "eval-summaries", f"{batch_id}.json")
         os.makedirs(os.path.dirname(output_file), exist_ok=True)
 
@@ -410,7 +410,7 @@ def download_evaluation_results(batch_id: str) -> str:
     Returns:
         JSON with download status, file count, and output_dir where files were saved.
     """
-    scratch = os.environ.get("AUTOTUNE_SCRATCH_DIR", "/tmp/autotune-data")
+    scratch = os.environ["AUTOTUNE_SCRATCH_DIR"]
     output_dir = os.path.join(scratch, "eval-results", batch_id)
     os.makedirs(output_dir, exist_ok=True)
     client = _get_client()
@@ -473,7 +473,7 @@ def download_raw_processing_results(
     Returns:
         JSON with status and output_dir where files were saved.
     """
-    scratch = os.environ.get("AUTOTUNE_SCRATCH_DIR", "/tmp/autotune-data")
+    scratch = os.environ["AUTOTUNE_SCRATCH_DIR"]
     output_dir = os.path.join(scratch, "raw-results", batch_id)
     os.makedirs(output_dir, exist_ok=True)
     client = _get_client()
@@ -576,7 +576,7 @@ def run_discovery(
     profile = os.environ.get("AWS_PROFILE") or None
     discovery = Discovery(region=region, profile=profile)
 
-    scratch = os.environ.get("AUTOTUNE_SCRATCH_DIR", "/tmp/autotune-data")
+    scratch = os.environ["AUTOTUNE_SCRATCH_DIR"]
     output_path = os.path.join(scratch, "discovery", os.path.basename(document_path) + ".schema.json")
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     schema = discovery.discover_and_save(document_path, output_path, ground_truth_path)
@@ -600,7 +600,7 @@ def run_multi_class_discovery(dataset_path: str) -> str:
     _auto_update_state("discovering", "Running multi-class discovery")
     from idpac import DatasetAnalyzer, Discovery, PacketSplittingDiscovery
 
-    scratch = os.environ.get("AUTOTUNE_SCRATCH_DIR", "/tmp/autotune-data")
+    scratch = os.environ["AUTOTUNE_SCRATCH_DIR"]
     output_config_path = os.path.join(scratch, "configs", "discovered-config.yaml")
     os.makedirs(os.path.dirname(output_config_path), exist_ok=True)
 
@@ -701,7 +701,7 @@ def download_single_document_results(batch_id: str, filename: str) -> str:
     Returns:
         JSON with download status, file count, and output_dir.
     """
-    scratch = os.environ.get("AUTOTUNE_SCRATCH_DIR", "/tmp/autotune-data")
+    scratch = os.environ["AUTOTUNE_SCRATCH_DIR"]
     output_dir = os.path.join(scratch, "single-doc-results", batch_id, filename)
     os.makedirs(output_dir, exist_ok=True)
     client = _get_client()
@@ -726,7 +726,7 @@ def download_ground_truth(test_set_id: str, filename: str) -> str:
     Returns:
         JSON with output path(s) where ground truth was saved.
     """
-    scratch = os.environ.get("AUTOTUNE_SCRATCH_DIR", "/tmp/autotune-data")
+    scratch = os.environ["AUTOTUNE_SCRATCH_DIR"]
     # Try all-sections first (works for both packet and single-class)
     output_dir = os.path.join(scratch, "ground-truth", test_set_id, filename)
     os.makedirs(output_dir, exist_ok=True)
@@ -868,7 +868,7 @@ def download_input_document(batch_id: str, filename: str) -> str:
     Returns:
         JSON with the local file path and which tool to use for viewing.
     """
-    scratch = os.environ.get("AUTOTUNE_SCRATCH_DIR", "/tmp/autotune-data")
+    scratch = os.environ["AUTOTUNE_SCRATCH_DIR"]
     output_path = os.path.join(scratch, "input-documents", batch_id, filename)
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     client = _get_client()
@@ -922,7 +922,7 @@ def write_optimization_log(operation: str, content: str = "", old_str: str = "",
     Returns:
         JSON with status and file path.
     """
-    workspace = os.environ.get("AUTOTUNE_WORKSPACE_DIR", "/mnt/workspace")
+    workspace = os.environ["AUTOTUNE_WORKSPACE_DIR"]
     log_path = os.path.join(workspace, "OPTIMIZATION-LOG.md")
 
     try:
@@ -1006,7 +1006,7 @@ def copy_config(source_name: str, dest_name: str) -> str:
         JSON with the full path of the new copy.
     """
     import shutil
-    scratch = os.environ.get("AUTOTUNE_SCRATCH_DIR", "/tmp/autotune-data")
+    scratch = os.environ["AUTOTUNE_SCRATCH_DIR"]
     configs_dir = os.path.join(scratch, "configs")
     os.makedirs(configs_dir, exist_ok=True)
 
@@ -1112,7 +1112,7 @@ def write_optimization_log(operation: str, content: str = "", old_str: str = "",
     Returns:
         JSON with status and file path.
     """
-    workspace = os.environ.get("AUTOTUNE_WORKSPACE_DIR", "/mnt/workspace")
+    workspace = os.environ["AUTOTUNE_WORKSPACE_DIR"]
     log_path = os.path.join(workspace, "OPTIMIZATION-LOG.md")
 
     try:
@@ -1196,7 +1196,7 @@ def copy_config(source_name: str, dest_name: str) -> str:
         JSON with the full path of the new copy.
     """
     import shutil
-    scratch = os.environ.get("AUTOTUNE_SCRATCH_DIR", "/tmp/autotune-data")
+    scratch = os.environ["AUTOTUNE_SCRATCH_DIR"]
     configs_dir = os.path.join(scratch, "configs")
     os.makedirs(configs_dir, exist_ok=True)
 

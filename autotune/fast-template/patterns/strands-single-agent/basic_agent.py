@@ -140,6 +140,7 @@ def _create_agent(user_id: str, session_id: str, state: OptimizationState,
     session_scratch = os.path.join(SCRATCH_DIR, session_id)
     os.makedirs(session_scratch, exist_ok=True)
     os.environ["AUTOTUNE_SCRATCH_DIR"] = session_scratch
+    os.environ["AUTOTUNE_WORKSPACE_DIR"] = session_workspace
 
     if test_set_id and not is_resume:
         _create_optimization_log(session_workspace, test_set_id, optimization_guidance)
