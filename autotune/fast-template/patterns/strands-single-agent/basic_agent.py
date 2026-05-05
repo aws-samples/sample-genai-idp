@@ -243,7 +243,7 @@ def _run_agent_thread(user_id: str, session_id: str, state: OptimizationState,
         # On resume: restore OPTIMIZATION-LOG.md from S3 and seed eval cost
         if is_resume:
             prev_state = state.get_state()
-            seed_eval_cost(float(prev_state.get("eval_cost_usd", 0)))
+            seed_eval_cost(float(prev_state.get("eval_cost_usd", 0)), prev_state.get("eval_seen_batches", ""))
             if s3 and s3_bucket:
                 try:
                     s3.download_file(s3_bucket, f"{s3_prefix}/OPTIMIZATION-LOG.md", log_path)

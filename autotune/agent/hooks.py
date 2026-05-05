@@ -18,11 +18,11 @@ from strands.hooks.registry import HookProvider, HookRegistry
 try:
     from optimization_state import OptimizationState, STATUS_COMPLETE
     from pricing import calculate_agent_cost
-    from idpac_tools import get_eval_cost_usd
+    from idpac_tools import get_eval_cost_usd, get_eval_seen_batches
 except ImportError:
     from state import OptimizationState, STATUS_COMPLETE
     from pricing import calculate_agent_cost
-    from tools import get_eval_cost_usd
+    from tools import get_eval_cost_usd, get_eval_seen_batches
 
 logger = logging.getLogger(__name__)
 
@@ -89,6 +89,7 @@ class CostTrackingHook(HookProvider):
             agent_input_tokens=it, agent_output_tokens=ot,
             agent_cache_read_tokens=cr, agent_cache_write_tokens=cw,
             agent_cost_usd=agent_cost, eval_cost_usd=get_eval_cost_usd(),
+            eval_seen_batches=get_eval_seen_batches(),
         )
 
 

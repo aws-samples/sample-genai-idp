@@ -21,6 +21,7 @@ _optimization_state = None
 
 # Accumulated eval pipeline cost (seeded from DDB on resume, updated by get_evaluation_summary)
 _eval_cost_usd: float = 0.0
+_eval_cost_seen_batches: set = set()
 
 
 def get_eval_cost_usd() -> float:
@@ -28,10 +29,22 @@ def get_eval_cost_usd() -> float:
     return _eval_cost_usd
 
 
-def seed_eval_cost(value: float) -> None:
-    """Seed the eval cost accumulator (e.g. from DDB on resume)."""
+def get_eval_seen_batches() -> str:
+    """Return comma-separated batch IDs already counted for eval cost."""
+    return ",".join(sorted(_eval_cost_seen_batches))
+
+
+def seed_eval_cost(value: float, seen_batches: str = "") -> None:
+    """Seed the eval cost accumulator (e.g. from DDB on resume).
+    
+    Args:
+        value: Total eval cost so far.
+        seen_batches: Comma-separated batch IDs already counted.
+    """
     global _eval_cost_usd
     _eval_cost_usd = value
+    if seen_batches:
+        _eval_cost_seen_batches.update(seen_batches.split(","))
 
 
 def _auto_update_state(phase: str, phase_detail: str) -> None:
@@ -356,9 +369,10 @@ def get_evaluation_summary(batch_id: str, save_json: bool = False) -> str:
     client = _get_client()
     data = client.get_evaluation_summary(batch_id, output_file)
 
-    # Accumulate eval pipeline cost
+    # Accumulate eval pipeline cost (deduplicated by batch_id)
     total = data.get("totalCost", 0)
-    if total:
+    if total and batch_id not in _eval_cost_seen_batches:
+        _eval_cost_seen_batches.add(batch_id)
         _eval_cost_usd += float(total)
 
     er = EvaluationResult(data)
