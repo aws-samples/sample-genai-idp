@@ -6,7 +6,7 @@
 Provides sandboxed Python execution via AgentCore CodeInterpreter.
 No filesystem access to the host, no AWS credentials — safe for arbitrary
 agent-generated code. The agent can load local files into the sandbox
-before execution via the `files` parameter, preserving their original paths.
+before execution via the `files` parameter.
 """
 
 import json
@@ -42,21 +42,16 @@ def _invoke_code_interpreter_tool(tool_name: str, arguments: dict) -> dict:
 
 
 def _collect_files(paths: list[str], max_total_bytes: int = 10 * 1024 * 1024) -> list[dict]:
-    """Collect files from local paths, preserving their full filesystem paths.
+    """Collect files from local paths into writeFiles format.
 
-    Files are placed in the sandbox at the same absolute path they have on the
-    host, so the agent can reference them with identical paths in its code.
-
-    Supports individual files and directories (recursively collects all files).
-    Skips binary files and files that exceed the size budget.
-
-    Returns:
-        List of {"path": <full_path>, "text": <content>} dicts.
+    Files are written to the sandbox's working directory using their basename.
+    Directories are written preserving their internal structure under the
+    directory's basename.
     """
     files_to_write = []
     total_bytes = 0
 
-    def _add_file(local_path: str):
+    def _add_file(local_path: str, sandbox_path: str):
         nonlocal total_bytes
         try:
             size = os.path.getsize(local_path)
@@ -65,7 +60,7 @@ def _collect_files(paths: list[str], max_total_bytes: int = 10 * 1024 * 1024) ->
                 return
             with open(local_path, "r") as f:
                 content = f.read()
-            files_to_write.append({"path": local_path, "text": content})
+            files_to_write.append({"path": sandbox_path, "text": content})
             total_bytes += size
         except (UnicodeDecodeError, OSError) as e:
             logger.warning(f"Skipping {local_path}: {e}")
@@ -73,11 +68,14 @@ def _collect_files(paths: list[str], max_total_bytes: int = 10 * 1024 * 1024) ->
     for path in paths:
         path = os.path.abspath(os.path.expanduser(path))
         if os.path.isfile(path):
-            _add_file(path)
+            _add_file(path, os.path.basename(path))
         elif os.path.isdir(path):
+            dir_name = os.path.basename(path.rstrip("/"))
             for root, _, filenames in os.walk(path):
                 for fname in sorted(filenames):
-                    _add_file(os.path.join(root, fname))
+                    full = os.path.join(root, fname)
+                    rel = os.path.relpath(full, path)
+                    _add_file(full, os.path.join(dir_name, rel))
         else:
             logger.warning(f"Path does not exist: {path}")
 
@@ -108,8 +106,12 @@ def execute_python_analysis(code: str, description: str = "", files: list[str] =
     credentials.
 
     To get data into the sandbox, pass file/directory paths via the `files`
-    parameter. These are copied into the sandbox at their ORIGINAL paths,
-    so you can use the same paths in your code that you see from other tools.
+    parameter. Files appear in the sandbox's working directory:
+    - Single files: available as their basename (e.g., "results.json")
+    - Directories: available as dirname/relative_path (e.g., "eval-results/doc1/results.json")
+
+    Use the DIRECTORY name (last component of the path) in your code, not the
+    full original path.
 
     Args:
         code: Python code to execute. Use print() for output.
@@ -119,16 +121,17 @@ def execute_python_analysis(code: str, description: str = "", files: list[str] =
                (JSON, CSV, YAML, TXT, MD). Binary files are skipped.
 
     Returns:
-        JSON with execution results.
+        JSON with execution results including list of files loaded into sandbox.
     """
     try:
-        client = _get_code_interpreter_client()
+        _get_code_interpreter_client()
 
-        # Load files into sandbox if provided
+        loaded_files = []
         if files:
             files_to_write = _collect_files(files)
             if files_to_write:
                 _invoke_code_interpreter_tool("writeFiles", {"content": files_to_write})
+                loaded_files = [f["path"] for f in files_to_write]
                 logger.info(f"Wrote {len(files_to_write)} files into sandbox")
 
         if description:
@@ -138,7 +141,13 @@ def execute_python_analysis(code: str, description: str = "", files: list[str] =
             "executeCode",
             {"code": code, "language": "python", "clearContext": False},
         )
-        return json.dumps(result, indent=2)
+
+        output = {"result": result}
+        if loaded_files:
+            output["sandbox_files"] = loaded_files[:20]
+            if len(loaded_files) > 20:
+                output["sandbox_files_note"] = f"{len(loaded_files)} total files loaded (showing first 20)"
+        return json.dumps(output, indent=2)
     except Exception as e:
         logger.error(f"Code execution failed: {e}")
         return json.dumps({"error": f"Code execution failed: {str(e)}"})

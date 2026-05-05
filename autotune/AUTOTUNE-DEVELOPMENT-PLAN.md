@@ -1,4 +1,4 @@
-# IDPAutoTune — Development Plan
+f# IDPAutoTune — Development Plan
 
 **Purpose:** Step-by-step coding/implementation TODOs for porting IDPAC into the IDP Accelerator codebase as the "IDPAutoTune" paid feature. Work through these items sequentially in your Kiro terminal session.
 
