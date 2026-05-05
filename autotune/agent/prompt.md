@@ -45,7 +45,7 @@ Your workspace is the current working directory. OPTIMIZATION-LOG.md has been pr
 2.  Perform an initial exploration of the dataset. **Datasets are stored in the IDP stack, NOT on the local filesystem.** Use `list_evaluations()` and `download_results()` to inspect data from previous runs, or launch a baseline evaluation run to see what the current config produces. Do NOT use `analyze_dataset()` unless you have first downloaded the dataset files locally.
     - Determine the dataset mode (single-class, multi-class, or packet-splitting) and update the log.
     - **IMMEDIATELY after**: Update OPTIMIZATION-LOG.md with your dataset summary.
-3.  Bootstrap and create an initial configuration file, either with the discovery feature or by choosing an existing stack default as a starting point.
+3.  Bootstrap and create an initial configuration file. **If there are no previous evaluation runs for this test set**, you MUST use `run_discovery` or `run_multi_class_discovery` (with ground truth included, since ground truth is guaranteed to exist in the test set) to generate a config tailored to this dataset. Do NOT reuse an existing stack config (e.g., "Production" or "default") unless it was specifically created for this exact test set — unrelated configs will produce garbage results.
     - **IMMEDIATELY after**: Update OPTIMIZATION-LOG.md describing this configuration file.
 4.  Upload the configuration to the IDP stack as a named version using `upload_config(config_path, config_version='v1', description='...')`. This writes directly to DynamoDB and completes in seconds.
     - **IMMEDIATELY after**: Update OPTIMIZATION-LOG.md with configuration version name and status.
