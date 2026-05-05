@@ -11,6 +11,8 @@
 import Box from '@cloudscape-design/components/box';
 import Container from '@cloudscape-design/components/container';
 import Header from '@cloudscape-design/components/header';
+import Icon from '@cloudscape-design/components/icon';
+import Popover from '@cloudscape-design/components/popover';
 import Spinner from '@cloudscape-design/components/spinner';
 import {
   Bar,
@@ -23,10 +25,11 @@ import {
   YAxis,
 } from 'recharts';
 
-import type { VolumeTimeSeriesPoint } from '../../../types/monitoring';
+import type { StatusBreakdown, VolumeTimeSeriesPoint } from '../../../types/monitoring';
 
 interface VolumeChartWidgetProps {
   timeSeries: VolumeTimeSeriesPoint[] | null | undefined;
+  statusBreakdown?: StatusBreakdown | null;
   isLoading: boolean;
   timeRange?: string;
 }
@@ -35,6 +38,7 @@ interface VolumeChartWidgetProps {
 const COLORS = {
   completed: 'rgba(103,177,115,0.8)',
   failed: 'rgba(242,139,139,0.8)',
+  pending: 'rgba(176,184,193,0.8)',
 };
 
 const CustomTooltip = ({
@@ -92,6 +96,7 @@ const CustomLegend = () => (
   >
     {[
       { label: 'Completed', color: COLORS.completed },
+      { label: 'Pending', color: COLORS.pending },
       { label: 'Failed', color: COLORS.failed },
     ].map(({ label, color }) => (
       <div
@@ -124,22 +129,52 @@ function formatTimestamp(ts: string, timeRange?: string): string {
 
 export function VolumeChartWidget({
   timeSeries,
+  statusBreakdown,
   isLoading,
   timeRange,
 }: VolumeChartWidgetProps): JSX.Element {
-  const safeData = (timeSeries ?? []).map((p) => ({
-    ...p,
-    label: formatTimestamp(p.timestamp, timeRange),
-  }));
+  // Calculate pending from statusBreakdown (current snapshot) or per-bucket derivation
+  const snapshotPending = (statusBreakdown?.inProgress ?? 0) + (statusBreakdown?.queued ?? 0);
+
+  const safeData = (timeSeries ?? []).map((p, idx, arr) => {
+    // Per-bucket pending from total - completed - failed
+    let bucketPending = Math.max(0, (p.total ?? 0) - p.completed - p.failed);
+
+    // If no per-bucket pending detected but we have snapshot pending,
+    // assign all pending to the most recent bucket so it's visible in the chart
+    if (bucketPending === 0 && snapshotPending > 0 && idx === arr.length - 1) {
+      bucketPending = snapshotPending;
+    }
+
+    return {
+      ...p,
+      pending: bucketPending,
+      label: formatTimestamp(p.timestamp, timeRange),
+    };
+  });
 
   const totalDocs = safeData.reduce((s, d) => s + d.completed + d.failed, 0);
   const totalFailures = safeData.reduce((s, d) => s + d.failed, 0);
+  const totalPending = snapshotPending || safeData.reduce((s, d) => s + d.pending, 0);
   const tickInterval =
     safeData.length > 12 ? Math.ceil(safeData.length / 12) - 1 : 0;
 
+  const infoPopover = (
+    <Popover
+      header="Processing Volume"
+      content="Number of documents processed over time, broken down by completion status (completed, failed, pending)."
+      triggerType="custom"
+      size="medium"
+    >
+      <Box color="text-status-info" display="inline-block" margin={{ left: 'xs' }}>
+        <Icon name="status-info" variant="link" />
+      </Box>
+    </Popover>
+  );
+
   if (isLoading && !timeSeries) {
     return (
-      <Container header={<Header variant="h2">Processing Volume</Header>}>
+      <Container header={<Header variant="h2" info={infoPopover}>Processing Volume</Header>}>
         <Box textAlign="center" padding="l">
           <Spinner size="large" />
         </Box>
@@ -148,12 +183,14 @@ export function VolumeChartWidget({
   }
 
   if (safeData.length === 0) {
+    const emptyPendingStr = totalPending > 0 ? ` · ${totalPending.toLocaleString()} pending` : '';
     return (
       <Container
         header={
           <Header
             variant="h2"
-            description="0 documents processed · 0 failures"
+            info={infoPopover}
+            description={`0 completed${emptyPendingStr} · 0 failed`}
           >
             Processing Volume
           </Header>
@@ -166,12 +203,16 @@ export function VolumeChartWidget({
     );
   }
 
+  const totalCompleted = totalDocs - totalFailures;
+  const pendingStr = totalPending > 0 ? ` · ${totalPending.toLocaleString()} pending` : '';
+
   return (
     <Container
       header={
         <Header
           variant="h2"
-          description={`${totalDocs.toLocaleString()} documents processed · ${totalFailures.toLocaleString()} failures`}
+          info={infoPopover}
+          description={`${totalCompleted.toLocaleString()} completed${pendingStr} · ${totalFailures.toLocaleString()} failed`}
         >
           Processing Volume
         </Header>
@@ -212,6 +253,12 @@ export function VolumeChartWidget({
               name="completed"
               stackId="a"
               fill={COLORS.completed}
+            />
+            <Bar
+              dataKey="pending"
+              name="pending"
+              stackId="a"
+              fill={COLORS.pending}
             />
             <Bar
               dataKey="failed"

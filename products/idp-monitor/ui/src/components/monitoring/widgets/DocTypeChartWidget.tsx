@@ -4,14 +4,15 @@
 /**
  * IDPMonitor Widget — Document Type Distribution
  *
- * Hybrid pie/bar chart showing volume by document class.
- * Top 5 → pie chart; Top 10+ → horizontal bar chart.
- * Matches IDP Accelerator reference visual style.
+ * Donut chart showing volume by document class with legend.
+ * Falls back to horizontal bar chart for large numbers of types (>6).
  */
 
 import Box from '@cloudscape-design/components/box';
 import Container from '@cloudscape-design/components/container';
 import Header from '@cloudscape-design/components/header';
+import Icon from '@cloudscape-design/components/icon';
+import Popover from '@cloudscape-design/components/popover';
 import Select from '@cloudscape-design/components/select';
 import Spinner from '@cloudscape-design/components/spinner';
 import {
@@ -43,6 +44,8 @@ const PALETTE = [
   'rgba(137,86,200,0.8)',
   'rgba(199,85,26,0.8)',
   'rgba(83,141,213,0.8)',
+  'rgba(54,179,126,0.8)',
+  'rgba(255,153,31,0.8)',
 ];
 const OTHERS_COLOR = 'rgba(176,184,193,0.8)';
 
@@ -77,41 +80,6 @@ const CustomTooltip = ({
   );
 };
 
-const PieLegend = ({
-  items,
-}: {
-  items: { label: string; color: string; count: number; percentage: string }[];
-}) => (
-  <div
-    style={{
-      display: 'flex',
-      justifyContent: 'center',
-      gap: 16,
-      paddingTop: 16,
-      fontSize: 13,
-      flexWrap: 'wrap',
-    }}
-  >
-    {items.map(({ label, color, count, percentage }) => (
-      <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-        <span
-          style={{
-            width: 12,
-            height: 12,
-            background: color,
-            display: 'inline-block',
-            borderRadius: '50%',
-          }}
-        />
-        <span style={{ color: '#16191f', fontWeight: 500 }}>{label}</span>
-        <span style={{ color: '#555' }}>
-          {count.toLocaleString()} ({percentage}%)
-        </span>
-      </div>
-    ))}
-  </div>
-);
-
 export function DocTypeChartWidget({
   distribution,
   isLoading,
@@ -126,9 +94,22 @@ export function DocTypeChartWidget({
     ? `${(distribution.totalDocuments ?? 0).toLocaleString()} total documents`
     : undefined;
 
+  const infoPopover = (
+    <Popover
+      header="Document Types"
+      content="Distribution of processed documents by classification type (e.g., invoices, contracts, receipts)."
+      triggerType="custom"
+      size="medium"
+    >
+      <Box color="text-status-info" display="inline-block" margin={{ left: 'xs' }}>
+        <Icon name="status-info" variant="link" />
+      </Box>
+    </Popover>
+  );
+
   if (isLoading && !distribution) {
     return (
-      <Container header={<Header variant="h2">Document Types</Header>}>
+      <Container header={<Header variant="h2" info={infoPopover}>Document Types</Header>}>
         <Box textAlign="center" padding="l">
           <Spinner size="large" />
         </Box>
@@ -139,7 +120,7 @@ export function DocTypeChartWidget({
   if (sorted.length === 0) {
     return (
       <Container
-        header={<Header variant="h2" description={subtitle}>Document Types</Header>}
+        header={<Header variant="h2" info={infoPopover} description={subtitle}>Document Types</Header>}
       >
         <Box color="text-body-secondary" textAlign="center" padding="l">
           No document type data available for this time range.
@@ -148,8 +129,7 @@ export function DocTypeChartWidget({
     );
   }
 
-  const usePieChart = displayLimit <= 5;
-  const topNForPie = 6;
+  const useDonutChart = displayLimit <= 6;
   const total = sorted.reduce((s, d) => s + d.count, 0);
 
   const limitOptions = [
@@ -161,12 +141,12 @@ export function DocTypeChartWidget({
   const selectedOption =
     limitOptions.find((o) => parseInt(o.value) === displayLimit) ?? limitOptions[0];
 
-  // ── Pie mode ────────────────────────────────────────────────────────────────
-  if (usePieChart) {
-    const topN = sorted.slice(0, topNForPie);
-    const remaining = sorted.slice(topNForPie);
+  // ── Donut mode (legend below chart) ─────────────────────────────────────────
+  if (useDonutChart) {
+    const topN = sorted.slice(0, 6);
+    const remaining = sorted.slice(6);
 
-    const pieData: { name: string; value: number; percent: number; count: number }[] = topN.map((c) => ({
+    const pieData: { name: string; value: number; count: number; percent: number }[] = topN.map((c) => ({
       name: c.className,
       value: c.count,
       count: c.count,
@@ -176,28 +156,19 @@ export function DocTypeChartWidget({
     if (remaining.length > 0) {
       const othersCount = remaining.reduce((s, c) => s + c.count, 0);
       pieData.push({
-        name: `Others (${remaining.length} types)`,
+        name: `Others (${remaining.length})`,
         value: othersCount,
         count: othersCount,
         percent: total > 0 ? othersCount / total : 0,
       });
     }
 
-    const legendItems = pieData.map((item, idx) => {
-      const isOthers = item.name.startsWith('Others (');
-      return {
-        label: item.name,
-        color: isOthers ? OTHERS_COLOR : PALETTE[idx % PALETTE.length],
-        count: item.count,
-        percentage: (item.percent * 100).toFixed(1),
-      };
-    });
-
     return (
       <Container
         header={
           <Header
             variant="h2"
+            info={infoPopover}
             description={subtitle}
             actions={
               <Select
@@ -214,36 +185,72 @@ export function DocTypeChartWidget({
           </Header>
         }
       >
-        <ResponsiveContainer width="100%" height={200}>
-          <PieChart>
-            <Pie
-              data={pieData}
-              cx="50%"
-              cy="50%"
-              innerRadius={50}
-              outerRadius={80}
-              paddingAngle={2}
-              dataKey="value"
-            >
-              {pieData.map((entry, idx) => {
-                const isOthers = entry.name.startsWith('Others (');
-                return (
-                  <Cell
-                    key={entry.name}
-                    fill={isOthers ? OTHERS_COLOR : PALETTE[idx % PALETTE.length]}
+        <Box padding={{ top: 'xs' }}>
+          <ResponsiveContainer width="100%" height={200}>
+            <PieChart>
+              <Pie
+                data={pieData}
+                cx="50%"
+                cy="50%"
+                innerRadius={50}
+                outerRadius={78}
+                startAngle={90}
+                endAngle={-270}
+                paddingAngle={2}
+                dataKey="value"
+                label={false}
+                labelLine={false}
+              >
+                {pieData.map((entry, idx) => {
+                  const isOthers = entry.name.startsWith('Others (');
+                  return (
+                    <Cell
+                      key={entry.name}
+                      fill={isOthers ? OTHERS_COLOR : PALETTE[idx % PALETTE.length]}
+                    />
+                  );
+                })}
+              </Pie>
+              <Tooltip content={<CustomTooltip />} />
+            </PieChart>
+          </ResponsiveContainer>
+          {/* Legend */}
+          <div
+            style={{
+              display: 'flex',
+              flexWrap: 'wrap',
+              justifyContent: 'center',
+              gap: '8px 16px',
+              paddingTop: 8,
+              fontSize: 12,
+            }}
+          >
+            {pieData.map((entry, idx) => {
+              const isOthers = entry.name.startsWith('Others (');
+              return (
+                <div key={entry.name} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                  <span
+                    style={{
+                      width: 10,
+                      height: 10,
+                      background: isOthers ? OTHERS_COLOR : PALETTE[idx % PALETTE.length],
+                      display: 'inline-block',
+                      borderRadius: 2,
+                    }}
                   />
-                );
-              })}
-            </Pie>
-            <Tooltip content={<CustomTooltip />} />
-          </PieChart>
-        </ResponsiveContainer>
-        <PieLegend items={legendItems} />
+                  <span style={{ color: '#16191f' }}>
+                    {entry.name} ({entry.count.toLocaleString()})
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </Box>
       </Container>
     );
   }
 
-  // ── Bar mode ─────────────────────────────────────────────────────────────────
+  // ── Bar mode (for many items) ────────────────────────────────────────────────
   const topN = sorted.slice(0, displayLimit);
   const remaining = sorted.slice(displayLimit);
 

@@ -2,16 +2,17 @@
 // SPDX-License-Identifier: MIT-0
 
 /**
- * IDPMonitor Widget — Config Version Distribution
+ * IDPMonitor Widget — Configurations
  *
- * Hybrid pie/bar chart showing volume by config version.
- * Top 5 → pie chart; Top 10+ → horizontal bar chart.
- * Matches Document Types widget visual style.
+ * Donut chart showing how many documents were processed by each configured
+ * document class. Header shows total configurations count and active version.
  */
 
 import Box from '@cloudscape-design/components/box';
 import Container from '@cloudscape-design/components/container';
 import Header from '@cloudscape-design/components/header';
+import Icon from '@cloudscape-design/components/icon';
+import Popover from '@cloudscape-design/components/popover';
 import Select from '@cloudscape-design/components/select';
 import Spinner from '@cloudscape-design/components/spinner';
 import {
@@ -43,7 +44,10 @@ const PALETTE = [
   'rgba(137,86,200,0.8)',
   'rgba(199,85,26,0.8)',
   'rgba(83,141,213,0.8)',
+  'rgba(54,179,126,0.8)',
+  'rgba(255,153,31,0.8)',
 ];
+
 const OTHERS_COLOR = 'rgba(176,184,193,0.8)';
 
 const CustomTooltip = ({
@@ -51,14 +55,14 @@ const CustomTooltip = ({
   payload,
 }: {
   active?: boolean;
-  payload?: { name?: string; value: number; payload: { name?: string; pct?: number; percent?: number; count?: number } }[];
+  payload?: { name?: string; value: number; payload: { name?: string; pct?: number; percent?: number; count?: number; percentage?: number } }[];
 }) => {
   if (!active || !payload || payload.length === 0) return null;
   const item = payload[0];
   const d = item.payload;
   const displayName = d.name ?? item.name ?? '';
   const count = d.count ?? item.value;
-  const pct = d.percent !== undefined ? d.percent * 100 : d.pct ?? 0;
+  const pct = d.percent !== undefined ? d.percent * 100 : (d.percentage ?? d.pct ?? 0);
   return (
     <div
       style={{
@@ -112,9 +116,20 @@ const PieLegend = ({
   </div>
 );
 
-export function ConfigPanelWidget({ config, isLoading }: ConfigPanelWidgetProps): JSX.Element {
-  console.log('[ConfigPanelWidget] Received props:', { config, isLoading });
+const infoPopover = (
+  <Popover
+    header="Config Version Distribution"
+    content="Shows how many documents were processed by each configuration version."
+    triggerType="custom"
+    size="medium"
+  >
+    <Box color="text-status-info" display="inline-block" margin={{ left: 'xs' }}>
+      <Icon name="status-info" variant="link" />
+    </Box>
+  </Popover>
+);
 
+export function ConfigPanelWidget({ config, isLoading }: ConfigPanelWidgetProps): JSX.Element {
   const [displayLimit, setDisplayLimit] = useState<number>(5);
 
   const sorted = [...(config?.versionDistribution ?? [])].sort(
@@ -126,7 +141,7 @@ export function ConfigPanelWidget({ config, isLoading }: ConfigPanelWidgetProps)
 
   if (isLoading && !config) {
     return (
-      <Container header={<Header variant="h2">Config Version Distribution</Header>}>
+      <Container header={<Header variant="h2" info={infoPopover}>Config Version Distribution</Header>}>
         <Box textAlign="center" padding="l">
           <Spinner size="large" />
         </Box>
@@ -137,7 +152,7 @@ export function ConfigPanelWidget({ config, isLoading }: ConfigPanelWidgetProps)
   if (sorted.length === 0) {
     return (
       <Container
-        header={<Header variant="h2" description={subtitle}>Config Version Distribution</Header>}
+        header={<Header variant="h2" description={subtitle} info={infoPopover}>Config Version Distribution</Header>}
       >
         <Box color="text-body-secondary" textAlign="center" padding="l">
           No config version data available for this time range.
@@ -196,6 +211,7 @@ export function ConfigPanelWidget({ config, isLoading }: ConfigPanelWidgetProps)
           <Header
             variant="h2"
             description={subtitle}
+            info={infoPopover}
             actions={
               <Select
                 selectedOption={selectedOption}
@@ -268,6 +284,7 @@ export function ConfigPanelWidget({ config, isLoading }: ConfigPanelWidgetProps)
         <Header
           variant="h2"
           description={subtitle}
+          info={infoPopover}
           actions={
             <Select
               selectedOption={selectedOption}

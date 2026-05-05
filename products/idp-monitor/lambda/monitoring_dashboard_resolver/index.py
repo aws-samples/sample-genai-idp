@@ -384,7 +384,14 @@ def _transform_to_appsync_response(
                 "batchId": "",
                 "documentClass": f.get("classification", ""),
                 "pageCount": f.get("numPages", 0),
-                "failedAt": f.get("timestamp", ""),
+                "failedAt": (
+                    f.get("timestamp")
+                    or f.get("failedAt")
+                    or f.get("CompletionTime")
+                    or f.get("WorkflowStartTime")
+                    or f.get("createdAt")
+                    or ""
+                ),
                 "errorMessage": f.get("errorMessage", ""),
                 "errorCode": "",
                 "stage": "",
@@ -522,10 +529,16 @@ def _transform_throttles(
     lambda_t = _extract_service("lambda")
     bedrock_t = _extract_service("bedrock")
     textract_t = _extract_service("textract")
+    dynamodb_t = _extract_service("dynamodb")
 
     severity_order = {"ok": 0, "warning": 1, "critical": 2}
     max_severity = max(
-        [lambda_t["severity"], bedrock_t["severity"], textract_t["severity"]],
+        [
+            lambda_t["severity"],
+            bedrock_t["severity"],
+            textract_t["severity"],
+            dynamodb_t["severity"],
+        ],
         key=lambda s: severity_order.get(s, 0),
         default="ok",
     )
@@ -536,6 +549,7 @@ def _transform_throttles(
         "lambdaThrottles": lambda_t,
         "bedrockThrottles": bedrock_t,
         "textractThrottles": textract_t,
+        "dynamodbThrottles": dynamodb_t,
         "sqsMessageAge": {"count": 0, "severity": "ok", "threshold": 300},
     }
 
@@ -779,14 +793,116 @@ def _supplement_from_dynamodb(
                     config["activeVersion"] = version_name
                     config["documentClassCount"] = len(items)  # All active configs
 
-                # Count total configs (document classes configured)
+                # Get all configuration names (document classes)
                 response = config_table.scan(
                     FilterExpression=Attr("Configuration").begins_with("Config#"),
-                    Select="COUNT",
+                    ProjectionExpression="Configuration, DocumentType, #n",
+                    ExpressionAttributeNames={"#n": "Name"},
                 )
-                config["documentClassCount"] = response.get("Count", 0)
+                all_configs = response.get("Items", [])
+                config["documentClassCount"] = len(all_configs)
+
+                # Extract document class names from configurations
+                doc_classes = []
+                for cfg_item in all_configs:
+                    # Try DocumentType first, then Name, then parse from Configuration key
+                    doc_type = (
+                        cfg_item.get("DocumentType") or cfg_item.get("Name") or ""
+                    )
+                    if not doc_type:
+                        cfg_k = cfg_item.get("Configuration", "")
+                        doc_type = (
+                            cfg_k.replace("Config#", "")
+                            if cfg_k.startswith("Config#")
+                            else cfg_k
+                        )
+                    if doc_type:
+                        doc_classes.append(doc_type)
+                config["documentClasses"] = doc_classes
+                logger.info("Config document classes: %s", doc_classes)
             except Exception as exc:
                 logger.warning("Config table supplement failed: %s", exc)
+
+        # ── Supplement per-version document counts ─────────────────────────
+        # Count documents processed during each version's active period
+        # by matching document completion timestamps to version deploy windows.
+        version_history = config.get("versionHistory") or []
+        if TRACKING_TABLE_NAME and version_history:
+            try:
+                from datetime import timedelta  # noqa: PLC0415
+
+                table = dynamodb.Table(TRACKING_TABLE_NAME)
+                response = table.scan(
+                    FilterExpression="ItemType = :doc",
+                    ExpressionAttributeValues={":doc": "document"},
+                    ProjectionExpression="CompletionTime, WorkflowStartTime",
+                    Limit=2000,
+                )
+                doc_items = response.get("Items", [])
+
+                # Parse version deploy dates and sort descending
+                version_windows = []
+                for v in version_history:
+                    created = v.get("createdAt", "")
+                    ts = None
+                    if created:
+                        try:
+                            ts = datetime.fromisoformat(
+                                str(created).replace("Z", "+00:00")
+                            )
+                        except (ValueError, TypeError):
+                            pass
+                    version_windows.append(
+                        {"version": v.get("version", ""), "deployedAt": ts, "count": 0}
+                    )
+
+                # Sort by deploy time descending (most recent first)
+                version_windows.sort(
+                    key=lambda x: (
+                        x["deployedAt"] or datetime.min.replace(tzinfo=timezone.utc)
+                    ),
+                    reverse=True,
+                )
+
+                # For each document, find which version window it belongs to
+                for item in doc_items:
+                    ts_str = item.get("CompletionTime") or item.get(
+                        "WorkflowStartTime", ""
+                    )
+                    if not ts_str:
+                        continue
+                    try:
+                        doc_ts = datetime.fromisoformat(
+                            str(ts_str).replace("Z", "+00:00")
+                        )
+                    except (ValueError, TypeError):
+                        continue
+
+                    # Find the version that was active when this doc was processed
+                    assigned = False
+                    for vw in version_windows:
+                        if vw["deployedAt"] and doc_ts >= vw["deployedAt"]:
+                            vw["count"] += 1
+                            assigned = True
+                            break
+                    # If doc is older than all versions, assign to oldest
+                    if not assigned and version_windows:
+                        version_windows[-1]["count"] += 1
+
+                # Write counts back to version_history
+                version_count_map = {
+                    vw["version"]: vw["count"] for vw in version_windows
+                }
+                for v in version_history:
+                    v["documentCount"] = version_count_map.get(v.get("version", ""), 0)
+
+                config["versionHistory"] = version_history
+                logger.info(
+                    "Per-version doc counts: %s",
+                    {vw["version"]: vw["count"] for vw in version_windows},
+                )
+            except Exception as exc:
+                logger.warning("Per-version document count supplement failed: %s", exc)
 
         # ── Supplement timeSeries from tracking table ──────────────────────
         # Fields: CompletionTime, WorkflowStartTime, ObjectStatus/WorkflowStatus
@@ -1027,6 +1143,7 @@ def _build_empty_dashboard(time_range: str) -> dict[str, Any]:
         "lambdaThrottles": {"count": 0, "severity": "ok", "threshold": 10},
         "bedrockThrottles": {"count": 0, "severity": "ok", "threshold": 10},
         "textractThrottles": {"count": 0, "severity": "ok", "threshold": 10},
+        "dynamodbThrottles": {"count": 0, "severity": "ok", "threshold": 10},
         "sqsMessageAge": {"count": 0, "severity": "ok", "threshold": 300},
     }
 
