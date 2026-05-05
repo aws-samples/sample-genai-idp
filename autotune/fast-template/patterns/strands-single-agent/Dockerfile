@@ -56,6 +56,7 @@ COPY autotune/fast-template/patterns/strands-single-agent/basic_agent.py .
 COPY autotune/fast-template/patterns/strands-single-agent/tools/ tools/
 COPY autotune/fast-template/patterns/utils/ utils/
 COPY autotune/agent/tools.py idpac_tools.py
+COPY autotune/agent/code_interpreter_tools.py code_interpreter_tools.py
 COPY autotune/agent/state.py optimization_state.py
 COPY autotune/agent/hooks.py optimization_hooks.py
 COPY autotune/agent/prompt.md .

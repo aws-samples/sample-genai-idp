@@ -12,6 +12,7 @@
 !autotune/agent/pyproject.toml
 !autotune/agent/idpac/
 !autotune/agent/tools.py
+!autotune/agent/code_interpreter_tools.py
 !autotune/agent/state.py
 !autotune/agent/hooks.py
 !autotune/agent/prompt.md
