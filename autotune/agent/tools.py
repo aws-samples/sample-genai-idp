@@ -905,53 +905,6 @@ def download_input_document(batch_id: str, filename: str) -> str:
 # --- Collect all tools for the agent ---
 
 @tool
-def write_optimization_log(operation: str, content: str = "", old_str: str = "", new_str: str = "") -> str:
-    """Write to the OPTIMIZATION-LOG.md file in the session workspace.
-
-    This is the ONLY way to write to the optimization log. Supports three operations:
-    - create: Overwrite the entire file with new content
-    - append: Append text to the end of the file
-    - str_replace: Find and replace a specific string in the file
-
-    Args:
-        operation: One of 'create', 'append', or 'str_replace'.
-        content: Text content for 'create' or 'append' operations.
-        old_str: String to find (for 'str_replace' only). Must match exactly.
-        new_str: Replacement string (for 'str_replace' only).
-
-    Returns:
-        JSON with status and file path.
-    """
-    workspace = os.environ["AUTOTUNE_WORKSPACE_DIR"]
-    log_path = os.path.join(workspace, "OPTIMIZATION-LOG.md")
-
-    try:
-        if operation == "create":
-            with open(log_path, "w") as f:
-                f.write(content)
-        elif operation == "append":
-            with open(log_path, "a") as f:
-                f.write(content)
-        elif operation == "str_replace":
-            if not os.path.exists(log_path):
-                return json.dumps({"error": "OPTIMIZATION-LOG.md does not exist. Use 'create' first."})
-            with open(log_path, "r") as f:
-                text = f.read()
-            if old_str not in text:
-                return json.dumps({"error": f"old_str not found in OPTIMIZATION-LOG.md. First 200 chars of file: {text[:200]}"})
-            if text.count(old_str) > 1:
-                return json.dumps({"error": "old_str matches multiple locations. Provide more context to make it unique."})
-            text = text.replace(old_str, new_str, 1)
-            with open(log_path, "w") as f:
-                f.write(text)
-        else:
-            return json.dumps({"error": f"Unknown operation: {operation}. Use 'create', 'append', or 'str_replace'."})
-        return json.dumps({"status": "ok", "path": log_path})
-    except Exception as e:
-        return json.dumps({"error": str(e)})
-
-
-@tool
 def list_files(directory: str = ".", max_depth: int = 2) -> str:
     """List files and directories at a given path.
 
@@ -1100,8 +1053,10 @@ def write_optimization_log(operation: str, content: str = "", old_str: str = "",
 
     This is the ONLY way to write to the optimization log. Supports three operations:
     - create: Overwrite the entire file with new content
-    - append: Append text to the end of the file
+    - append: Append text to the end of the file (a timestamp line is prepended automatically)
     - str_replace: Find and replace a specific string in the file
+
+    A timestamp is automatically added on each append operation.
 
     Args:
         operation: One of 'create', 'append', or 'str_replace'.
@@ -1112,6 +1067,8 @@ def write_optimization_log(operation: str, content: str = "", old_str: str = "",
     Returns:
         JSON with status and file path.
     """
+    from datetime import datetime, timezone
+
     workspace = os.environ["AUTOTUNE_WORKSPACE_DIR"]
     log_path = os.path.join(workspace, "OPTIMIZATION-LOG.md")
 
@@ -1120,8 +1077,9 @@ def write_optimization_log(operation: str, content: str = "", old_str: str = "",
             with open(log_path, "w") as f:
                 f.write(content)
         elif operation == "append":
+            timestamp = datetime.now(timezone.utc).strftime("[%Y-%m-%d %H:%M:%S UTC]")
             with open(log_path, "a") as f:
-                f.write(content)
+                f.write(f"\n{timestamp}\n{content}")
         elif operation == "str_replace":
             if not os.path.exists(log_path):
                 return json.dumps({"error": "OPTIMIZATION-LOG.md does not exist. Use 'create' first."})
