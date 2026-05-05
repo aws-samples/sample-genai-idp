@@ -9,22 +9,31 @@
  */
 
 import Box from '@cloudscape-design/components/box';
-import ColumnLayout from '@cloudscape-design/components/column-layout';
 import Container from '@cloudscape-design/components/container';
-import ExpandableSection from '@cloudscape-design/components/expandable-section';
 import Header from '@cloudscape-design/components/header';
 import Icon from '@cloudscape-design/components/icon';
 import Popover from '@cloudscape-design/components/popover';
+import Select from '@cloudscape-design/components/select';
 import Spinner from '@cloudscape-design/components/spinner';
-import StatusIndicator from '@cloudscape-design/components/status-indicator';
-import Table from '@cloudscape-design/components/table';
-import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts';
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Cell,
+  LabelList,
+  Pie,
+  PieChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts';
+import { useState } from 'react';
 
-import type { ConfigContext, DocumentTypeDistribution } from '../../../types/monitoring';
+import type { ConfigContext } from '../../../types/monitoring';
 
 interface ConfigPanelWidgetProps {
   config: ConfigContext | null | undefined;
-  distribution?: DocumentTypeDistribution | null;
   isLoading: boolean;
 }
 
@@ -39,25 +48,21 @@ const PALETTE = [
   'rgba(255,153,31,0.8)',
 ];
 
-function formatDate(iso: string): string {
-  return new Date(iso).toLocaleString(undefined, {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-}
+const OTHERS_COLOR = 'rgba(176,184,193,0.8)';
 
 const CustomTooltip = ({
   active,
   payload,
 }: {
   active?: boolean;
-  payload?: { name?: string; value: number; payload: { name: string; count: number; percentage: number } }[];
+  payload?: { name?: string; value: number; payload: { name?: string; pct?: number; percent?: number; count?: number; percentage?: number } }[];
 }) => {
   if (!active || !payload || payload.length === 0) return null;
   const item = payload[0];
+  const d = item.payload;
+  const displayName = d.name ?? item.name ?? '';
+  const count = d.count ?? item.value;
+  const pct = d.percent !== undefined ? d.percent * 100 : (d.percentage ?? d.pct ?? 0);
   return (
     <div
       style={{
@@ -69,54 +74,52 @@ const CustomTooltip = ({
         boxShadow: '0 2px 6px rgba(0,0,0,0.12)',
       }}
     >
-      <strong>{item.payload.name}</strong>
+      <strong>{displayName}</strong>: {count.toLocaleString()}
       <br />
-      {item.payload.count.toLocaleString()} documents ({item.payload.percentage.toFixed(1)}%)
+      <span style={{ color: '#555' }}>{pct.toFixed(1)}%</span>
     </div>
   );
 };
 
-// Inline label for donut slices
-const renderCustomLabel = ({
-  cx,
-  cy,
-  midAngle,
-  outerRadius,
-  name,
-  percent,
+const PieLegend = ({
+  items,
 }: {
-  cx: number;
-  cy: number;
-  midAngle: number;
-  innerRadius: number;
-  outerRadius: number;
-  name: string;
-  percent: number;
-}) => {
-  if (percent < 0.08) return null;
-  const RADIAN = Math.PI / 180;
-  const radius = outerRadius + 18;
-  const x = cx + radius * Math.cos(-midAngle * RADIAN);
-  const y = cy + radius * Math.sin(-midAngle * RADIAN);
-  const displayName = name.length > 14 ? name.slice(0, 12) + '…' : name;
-  return (
-    <text
-      x={x}
-      y={y}
-      fill="#16191f"
-      textAnchor={x > cx ? 'start' : 'end'}
-      dominantBaseline="central"
-      style={{ fontSize: 11, fontWeight: 500 }}
-    >
-      {displayName} ({(percent * 100).toFixed(0)}%)
-    </text>
-  );
-};
+  items: { label: string; color: string; count: number; percentage: string }[];
+}) => (
+  <div
+    style={{
+      display: 'flex',
+      justifyContent: 'center',
+      gap: 16,
+      paddingTop: 16,
+      fontSize: 13,
+      flexWrap: 'wrap',
+    }}
+  >
+    {items.map(({ label, color, count, percentage }) => (
+      <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <span
+          style={{
+            width: 12,
+            height: 12,
+            background: color,
+            display: 'inline-block',
+            borderRadius: '50%',
+          }}
+        />
+        <span style={{ color: '#16191f', fontWeight: 500 }}>{label}</span>
+        <span style={{ color: '#555' }}>
+          {count.toLocaleString()} ({percentage}%)
+        </span>
+      </div>
+    ))}
+  </div>
+);
 
 const infoPopover = (
   <Popover
-    header="Configurations"
-    content="Shows the total number of document configurations in the system and how many documents were processed by each configuration."
+    header="Config Version Distribution"
+    content="Shows how many documents were processed by each configuration version."
     triggerType="custom"
     size="medium"
   >
@@ -126,10 +129,19 @@ const infoPopover = (
   </Popover>
 );
 
-export function ConfigPanelWidget({ config, distribution, isLoading }: ConfigPanelWidgetProps): JSX.Element {
+export function ConfigPanelWidget({ config, isLoading }: ConfigPanelWidgetProps): JSX.Element {
+  const [displayLimit, setDisplayLimit] = useState<number>(5);
+
+  const sorted = [...(config?.versionDistribution ?? [])].sort(
+    (a, b) => b.documentCount - a.documentCount,
+  );
+
+  const total = sorted.reduce((s, v) => s + v.documentCount, 0);
+  const subtitle = total > 0 ? `${total.toLocaleString()} total documents` : undefined;
+
   if (isLoading && !config) {
     return (
-      <Container header={<Header variant="h2" info={infoPopover}>Configurations</Header>}>
+      <Container header={<Header variant="h2" info={infoPopover}>Config Version Distribution</Header>}>
         <Box textAlign="center" padding="l">
           <Spinner size="large" />
         </Box>
@@ -137,205 +149,211 @@ export function ConfigPanelWidget({ config, distribution, isLoading }: ConfigPan
     );
   }
 
-  if (!config) {
+  if (sorted.length === 0) {
     return (
-      <Container header={<Header variant="h2" info={infoPopover}>Configurations</Header>}>
-        <Box textAlign="center" color="text-body-secondary" padding="l">
-          No configuration data available.
+      <Container
+        header={<Header variant="h2" description={subtitle} info={infoPopover}>Config Version Distribution</Header>}
+      >
+        <Box color="text-body-secondary" textAlign="center" padding="l">
+          No config version data available for this time range.
         </Box>
       </Container>
     );
   }
 
-  const totalDocs = distribution?.totalDocuments ?? 0;
+  const usePieChart = displayLimit <= 5;
+  const topNForPie = 6;
 
-  // Build pie data: prefer per-version doc counts, fall back to distribution (per doc type)
-  const versionHistory = config.versionHistory ?? [];
-  const versionsWithCounts = versionHistory.filter((v) => (v.documentCount ?? 0) > 0);
-  const distClasses = distribution?.classes ?? [];
+  const limitOptions = [
+    { label: 'Top 5', value: '5' },
+    { label: 'Top 10', value: '10' },
+    { label: 'Top 15', value: '15' },
+    { label: 'Top 20', value: '20' },
+  ];
+  const selectedOption =
+    limitOptions.find((o) => parseInt(o.value) === displayLimit) ?? limitOptions[0];
 
-  let pieData: { name: string; value: number; count: number; percentage: number }[];
+  // ── Pie mode ────────────────────────────────────────────────────────────────
+  if (usePieChart) {
+    const topN = sorted.slice(0, topNForPie);
+    const remaining = sorted.slice(topNForPie);
 
-  if (versionsWithCounts.length > 0) {
-    // Per-version document counts available
-    const total = versionsWithCounts.reduce((s, v) => s + (v.documentCount ?? 0), 0);
-    pieData = versionsWithCounts.map((v) => ({
-      name: `v${v.version}`,
-      value: v.documentCount ?? 0,
-      count: v.documentCount ?? 0,
-      percentage: total > 0 ? ((v.documentCount ?? 0) / total) * 100 : 0,
+    const pieData: { name: string; value: number; percent: number; count: number }[] = topN.map((v) => ({
+      name: v.version,
+      value: v.documentCount,
+      count: v.documentCount,
+      percent: total > 0 ? v.documentCount / total : 0,
     }));
-  } else if (versionHistory.length > 1) {
-    // Multiple versions but no doc counts — show equal-weight placeholders
-    pieData = versionHistory.map((v) => ({
-      name: `v${v.version}`,
-      value: 1,
-      count: 0,
-      percentage: 100 / versionHistory.length,
-    }));
-  } else if (distClasses.length > 0) {
-    // Fall back to document type distribution — filter to configured classes only
-    const configuredClasses = config.documentClasses ?? [];
-    const filteredDist = configuredClasses.length > 0
-      ? distClasses.filter((cls) =>
-          configuredClasses.some((cc) => cc.toLowerCase() === cls.className.toLowerCase())
-        )
-      : distClasses;
-    const displayDist = filteredDist.length > 0 ? filteredDist : distClasses;
-    const total = displayDist.reduce((s, c) => s + c.count, 0);
-    pieData = displayDist.map((cls) => ({
-      name: cls.className,
-      value: cls.count,
-      count: cls.count,
-      percentage: total > 0 ? (cls.count / total) * 100 : 0,
-    }));
-  } else {
-    pieData = [];
+
+    if (remaining.length > 0) {
+      const othersCount = remaining.reduce((s, v) => s + v.documentCount, 0);
+      pieData.push({
+        name: `Others (${remaining.length} versions)`,
+        value: othersCount,
+        count: othersCount,
+        percent: total > 0 ? othersCount / total : 0,
+      });
+    }
+
+    const legendItems = pieData.map((item, idx) => {
+      const isOthers = item.name.startsWith('Others (');
+      return {
+        label: item.name,
+        color: isOthers ? OTHERS_COLOR : PALETTE[idx % PALETTE.length],
+        count: item.count,
+        percentage: (item.percent * 100).toFixed(1),
+      };
+    });
+
+    return (
+      <Container
+        header={
+          <Header
+            variant="h2"
+            description={subtitle}
+            info={infoPopover}
+            actions={
+              <Select
+                selectedOption={selectedOption}
+                onChange={({ detail }) =>
+                  setDisplayLimit(parseInt(detail.selectedOption.value!))
+                }
+                options={limitOptions}
+                expandToViewport
+              />
+            }
+          >
+            Config Version Distribution
+          </Header>
+        }
+      >
+        <ResponsiveContainer width="100%" height={200}>
+          <PieChart>
+            <Pie
+              data={pieData}
+              cx="50%"
+              cy="50%"
+              innerRadius={50}
+              outerRadius={80}
+              paddingAngle={2}
+              dataKey="value"
+            >
+              {pieData.map((entry, idx) => {
+                const isOthers = entry.name.startsWith('Others (');
+                return (
+                  <Cell
+                    key={entry.name}
+                    fill={isOthers ? OTHERS_COLOR : PALETTE[idx % PALETTE.length]}
+                  />
+                );
+              })}
+            </Pie>
+            <Tooltip content={<CustomTooltip />} />
+          </PieChart>
+        </ResponsiveContainer>
+        <PieLegend items={legendItems} />
+      </Container>
+    );
   }
+
+  // ── Bar mode ─────────────────────────────────────────────────────────────────
+  const topN = sorted.slice(0, displayLimit);
+  const remaining = sorted.slice(displayLimit);
+
+  const barData: { name: string; count: number; pct: number }[] = topN.map((v) => ({
+    name: v.version,
+    count: v.documentCount,
+    pct: total > 0 ? (v.documentCount / total) * 100 : 0,
+  }));
+
+  if (remaining.length > 0) {
+    const othersCount = remaining.reduce((s, v) => s + v.documentCount, 0);
+    const othersPct = total > 0 ? (othersCount / total) * 100 : 0;
+    barData.push({
+      name: `Others (${remaining.length} versions)`,
+      count: othersCount,
+      pct: othersPct,
+    });
+  }
+
+  const maxCount = barData.length > 0 ? Math.max(...barData.map((d) => d.count)) : 0;
 
   return (
     <Container
       header={
         <Header
           variant="h2"
+          description={subtitle}
           info={infoPopover}
-          description={`${config.documentClassCount} configurations · ${totalDocs.toLocaleString()} documents processed`}
+          actions={
+            <Select
+              selectedOption={selectedOption}
+              onChange={({ detail }) =>
+                setDisplayLimit(parseInt(detail.selectedOption.value!))
+              }
+              options={limitOptions}
+              expandToViewport
+            />
+          }
         >
-          Configurations
+          Config Version Distribution
         </Header>
       }
     >
-      <Box>
-        {/* Key metrics */}
-        <Box margin={{ bottom: 's' }}>
-          <ColumnLayout columns={2} variant="text-grid">
-            <div>
-              <Box variant="awsui-key-label" color="text-status-inactive">
-                Total Configurations
-              </Box>
-              <Box variant="h2">
-                <span style={{ fontSize: '1.3rem', fontWeight: 700, color: '#16191f' }}>
-                  {config.documentClassCount}
-                </span>
-              </Box>
-            </div>
-            <div>
-              <Box variant="awsui-key-label" color="text-status-inactive">
-                Active Version
-              </Box>
-              <Box variant="h2">
-                <span style={{ fontSize: '1.3rem', fontWeight: 700, color: '#16191f' }}>
-                  v{config.activeVersion}
-                </span>
-              </Box>
-            </div>
-          </ColumnLayout>
-        </Box>
-
-        {/* Donut Chart — documents per configuration */}
-        {pieData.length > 0 && (
-          <Box padding={{ top: 'xs', bottom: 'xs' }}>
-            <ResponsiveContainer width="100%" height={180}>
-              <PieChart>
-                <Pie
-                  data={pieData}
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={42}
-                  outerRadius={68}
-                  paddingAngle={2}
-                  dataKey="value"
-                  label={renderCustomLabel}
-                  labelLine={false}
-                >
-                  {pieData.map((entry, idx) => (
-                    <Cell
-                      key={entry.name}
-                      fill={PALETTE[idx % PALETTE.length]}
-                    />
-                  ))}
-                </Pie>
-                <Tooltip content={<CustomTooltip />} />
-              </PieChart>
-            </ResponsiveContainer>
-            {/* Legend */}
-            <div
-              style={{
-                display: 'flex',
-                flexWrap: 'wrap',
-                justifyContent: 'center',
-                gap: '6px 14px',
-                paddingTop: 6,
-                fontSize: 11,
-              }}
-            >
-              {pieData.map((entry, idx) => (
-                <div key={entry.name} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                  <span
-                    style={{
-                      width: 9,
-                      height: 9,
-                      background: PALETTE[idx % PALETTE.length],
-                      display: 'inline-block',
-                      borderRadius: 2,
-                    }}
-                  />
-                  <span style={{ color: '#555' }}>
-                    {entry.name}{entry.count > 0 ? ` (${entry.count.toLocaleString()})` : ''}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </Box>
-        )}
-
-        {pieData.length === 0 && (
-          <Box color="text-body-secondary" textAlign="center" padding="s">
-            No configurations found.
-          </Box>
-        )}
-
-        {/* Version History */}
-        {(config.versionHistory?.length ?? 0) > 0 && (
-          <Box margin={{ top: 's' }}>
-            <ExpandableSection
-              headerText="Version History"
-              variant="default"
-            >
-              <Table
-                variant="embedded"
-                columnDefinitions={[
-                  {
-                    id: 'version',
-                    header: 'Version',
-                    cell: (row) => (
-                      <Box fontWeight={row.isActive ? 'bold' : 'normal'}>
-                        v{row.version}
-                      </Box>
-                    ),
-                  },
-                  {
-                    id: 'status',
-                    header: 'Status',
-                    cell: (row) =>
-                      row.isActive ? (
-                        <StatusIndicator type="success">Active</StatusIndicator>
-                      ) : (
-                        <StatusIndicator type="stopped">Inactive</StatusIndicator>
-                      ),
-                  },
-                  {
-                    id: 'createdAt',
-                    header: 'Deployed At',
-                    cell: (row) => formatDate(row.createdAt),
-                  },
-                ]}
-                items={config.versionHistory}
-                sortingDisabled
+      <Box padding={{ top: 's' }}>
+        <ResponsiveContainer
+          width="100%"
+          height={Math.max(220, barData.length * 44)}
+        >
+          <BarChart
+            layout="vertical"
+            data={barData}
+            margin={{ top: 4, right: 60, left: 8, bottom: 0 }}
+            barCategoryGap="25%"
+          >
+            <CartesianGrid
+              strokeDasharray="3 3"
+              stroke="#e8e8e8"
+              horizontal={false}
+            />
+            <XAxis
+              type="number"
+              domain={[0, Math.ceil(maxCount * 1.15)]}
+              tick={{ fontSize: 11, fill: '#555' }}
+              axisLine={false}
+              tickLine={false}
+              tickFormatter={(v) =>
+                v >= 1000 ? `${(v / 1000).toFixed(0)}K` : v.toString()
+              }
+            />
+            <YAxis
+              type="category"
+              dataKey="name"
+              tick={{ fontSize: 12, fill: '#16191f' }}
+              axisLine={false}
+              tickLine={false}
+              width={140}
+            />
+            <Tooltip content={<CustomTooltip />} cursor={{ fill: 'rgba(0,0,0,0.04)' }} />
+            <Bar dataKey="count" radius={[0, 3, 3, 0]}>
+              <LabelList
+                dataKey="count"
+                position="right"
+                style={{ fontSize: 11, fill: '#333', fontWeight: 700 }}
+                formatter={(v: unknown) => Number(v).toLocaleString()}
               />
-            </ExpandableSection>
-          </Box>
-        )}
+              {barData.map((entry, i) => {
+                const isOthers = entry.name.startsWith('Others (');
+                return (
+                  <Cell
+                    key={entry.name}
+                    fill={isOthers ? OTHERS_COLOR : PALETTE[i % PALETTE.length]}
+                  />
+                );
+              })}
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
       </Box>
     </Container>
   );

@@ -245,7 +245,9 @@ class MonitoringMetricsService:
             )
 
         if "config" in sections:
-            tasks["config"] = lambda: self._operational.get_active_config_info()
+            tasks["config"] = lambda: self._operational.get_config_version_distribution(
+                time_range
+            )
 
         if "throttles" in sections:
             tasks["throttles"] = lambda: self._cw_metrics.get_throttle_report(
@@ -341,13 +343,15 @@ class MonitoringMetricsService:
                 throttle=results.get("throttles"),
             ),
             "statusBreakdown": self._normalize_status_breakdown(results.get("status")),
+            "configVersionDistribution": self._normalize_config_version_distribution(
+                results.get("config")
+            ),
             "docTypeDistribution": self._normalize_doc_type_distribution(
                 results.get("doc_types")
             ),
             "volumeOverTime": self._normalize_volume_over_time(results.get("timeline")),
             "latencyByStep": results.get("latency"),
             "recentFailures": self._normalize_recent_failures(results.get("failures")),
-            "configInfo": self._normalize_config_info(results.get("config")),
             "throttleReport": results.get("throttles"),
             # Analytics sections (None when Athena not configured)
             "tokenUtilization": results.get("token_usage"),
@@ -545,26 +549,32 @@ class MonitoringMetricsService:
         return result
 
     @staticmethod
-    def _normalize_config_info(
+    def _normalize_config_version_distribution(
         config: Optional[Dict[str, Any]],
-    ) -> Optional[Dict[str, Any]]:
+    ) -> List[Dict[str, Any]]:
         """
-        Convert internal config info to camelCase consumer format.
+        Convert internal config version dict to flat array for charting.
 
         Internal format:
-            {"active_version": str, "document_class_count": int,
-             "versions_available": int, "versions": list}
+            {"by_version": {"v1.0": 50, "v1.1": 100}, "total": 150,
+             "no_version": 0}
 
         Normalized output:
-            {"activeVersion": str, "documentTypesCount": int,
-             "lastUpdatedAt": str | None, "configVersions": list}
+            [
+                {"name": "v1.0", "value": 50},
+                {"name": "v1.1", "value": 100},
+                {"name": "No Version", "value": 0}
+            ]
         """
-        if config is None:
-            return None
+        if not config:
+            return []
 
-        return {
-            "activeVersion": config.get("active_version"),
-            "documentTypesCount": config.get("document_class_count", 0),
-            "lastUpdatedAt": config.get("last_updated_at"),
-            "configVersions": config.get("versions", []),
-        }
+        by_version = config.get("by_version", {}) or {}
+        no_version = config.get("no_version", 0)
+
+        result = [{"name": k, "value": v} for k, v in by_version.items()]
+
+        if no_version > 0:
+            result.append({"name": "No Version", "value": no_version})
+
+        return result

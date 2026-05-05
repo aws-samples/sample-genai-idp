@@ -100,7 +100,6 @@ export function MonitoringLayout({
             <div style={{ minWidth: 0, display: 'grid' }}>
               <ConfigPanelWidget
                 config={dashboard.config}
-                distribution={dashboard.distribution}
                 isLoading={isLoading}
               />
             </div>

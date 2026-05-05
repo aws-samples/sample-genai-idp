@@ -131,7 +131,10 @@ export function ThrottleWidget({
             id: 'status',
             header: 'Status',
             cell: (row) => {
-              const severity = (row.metric.severity ?? 'ok') as SeverityLevel;
+              const rawSeverity = row.metric.severity ?? 'ok';
+              const severity: SeverityLevel = ['ok', 'warning', 'critical'].includes(rawSeverity)
+                ? rawSeverity as SeverityLevel
+                : 'ok';
               return (
                 <Badge color={BADGE_COLOR[severity]}>
                   {BADGE_LABEL[severity]}
