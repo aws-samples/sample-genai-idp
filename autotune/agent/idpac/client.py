@@ -266,6 +266,7 @@ class IDPACClient:
         test_set_id: str,
         context: str,
         config_version: str,
+        n_files: int = 1,
     ) -> dict:
         """Launch evaluation job on a test set.
 
@@ -273,6 +274,7 @@ class IDPACClient:
             test_set_id: Test set ID (not name)
             context: Description of the run
             config_version: Configuration version to use (e.g., 'v1', 'Production').
+            n_files: Max files to process. 0 = all files, default 1.
 
         Returns:
             Dict with batch_id, status, files_count, completed, failed,
@@ -287,6 +289,8 @@ class IDPACClient:
             "--context", context,
             "--config-version", config_version,
         ]
+        if n_files > 0:
+            args += ["--number-of-files", str(n_files)]
 
         result = self._run_idp_cli(args)
 

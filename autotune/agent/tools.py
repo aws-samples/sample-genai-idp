@@ -286,22 +286,30 @@ def compare_configs(path1: str, path2: str) -> str:
 
 
 @tool
-def run_evaluation(test_set_id: str, context: str, config_version: str) -> str:
+def run_evaluation(test_set_id: str, context: str, config_version: str, n_files: int = 1) -> str:
     """Launch an evaluation run on a test set with a specific config version.
 
-    Monitors until completion. Can take several minutes depending on dataset size.
+    IMPORTANT: Defaults to processing only 1 file as a validation check. After
+    confirming the config works (evaluation produces valid output), re-run with
+    n_files=0 to process all files.
 
     Args:
         test_set_id: Test set ID (e.g., 'cli-uploaded-test-set').
         context: Description of this run (e.g., 'v1 baseline run').
         config_version: Config version to evaluate (e.g., 'v1').
+        n_files: Number of files to process. Default 1 (validation run).
+                 Set to 0 to process all files in the test set.
 
     Returns:
         JSON with batch_id, status, stdout, stderr.
     """
+    if n_files == 0:
+        print(f"Running evaluation on all files with config '{config_version}'")
+    else:
+        print(f"Running evaluation with {n_files} file(s) with config '{config_version}'")
     _auto_update_state("evaluating", f"Running evaluation {config_version}")
     client = _get_client()
-    result = client.run_evaluation(test_set_id, context, config_version)
+    result = client.run_evaluation(test_set_id, context, config_version, n_files=n_files)
     return json.dumps(result, indent=2)
 
 
