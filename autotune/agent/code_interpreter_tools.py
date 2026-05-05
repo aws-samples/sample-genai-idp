@@ -110,8 +110,10 @@ def execute_python_analysis(code: str, description: str = "", files: list[str] =
     - Single files: available as their basename (e.g., "results.json")
     - Directories: available as dirname/relative_path (e.g., "eval-results/doc1/results.json")
 
-    Use the DIRECTORY name (last component of the path) in your code, not the
-    full original path.
+    IMPORTANT: In your code, use ONLY the directory basename as the root path.
+    Example: if you pass files=["/tmp/autotune-data/abc123/ground-truth/my-dataset"],
+    the files will be at "my-dataset/..." in the sandbox — NOT at the original
+    absolute path. The response will confirm the exact sandbox root paths to use.
 
     Args:
         code: Python code to execute. Use print() for output.
@@ -144,9 +146,15 @@ def execute_python_analysis(code: str, description: str = "", files: list[str] =
 
         output = {"result": result}
         if loaded_files:
-            output["sandbox_files"] = loaded_files[:20]
-            if len(loaded_files) > 20:
-                output["sandbox_files_note"] = f"{len(loaded_files)} total files loaded (showing first 20)"
+            # Show the sandbox root paths the agent should use in code
+            roots = sorted(set(f.split("/")[0] for f in loaded_files))
+            output["sandbox_paths"] = roots
+            output["sandbox_paths_note"] = (
+                "Use these as your base paths in code. "
+                "Files are at: <root>/<relative_path>. "
+                "Do NOT use the original absolute paths — they don't exist in the sandbox."
+            )
+            output["sandbox_file_count"] = len(loaded_files)
         return json.dumps(output, indent=2)
     except Exception as e:
         logger.error(f"Code execution failed: {e}")
