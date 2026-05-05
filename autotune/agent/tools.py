@@ -357,11 +357,9 @@ def get_evaluation_summary(batch_id: str, save_json: bool = False) -> str:
     data = client.get_evaluation_summary(batch_id, output_file)
 
     # Accumulate eval pipeline cost
-    cost_breakdown = data.get("costBreakdown", {})
-    if isinstance(cost_breakdown, dict):
-        total = cost_breakdown.get("totalCost", 0)
-        if total:
-            _eval_cost_usd += float(total)
+    total = data.get("totalCost", 0)
+    if total:
+        _eval_cost_usd += float(total)
 
     er = EvaluationResult(data)
 
