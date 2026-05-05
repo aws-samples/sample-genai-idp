@@ -154,6 +154,9 @@ def upload_config(config_path: str, config_version: str, description: str) -> st
 def download_config(config_version: str) -> str:
     """Download a config version from the deployed stack.
 
+    Downloads to a 'downloaded/' subdirectory to avoid overwriting local working
+    configs. Use copy_config to copy a downloaded config into your working configs.
+
     Args:
         config_version: Version to download (e.g., 'v1', 'Production').
 
@@ -161,7 +164,7 @@ def download_config(config_version: str) -> str:
         JSON with status and path where config was saved.
     """
     scratch = os.environ["AUTOTUNE_SCRATCH_DIR"]
-    output_path = os.path.join(scratch, "configs", f"{config_version}.yaml")
+    output_path = os.path.join(scratch, "configs", "downloaded", f"{config_version}.yaml")
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     client = _get_client()
     result = client.config_download(output_path, config_version)
