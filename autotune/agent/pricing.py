@@ -13,9 +13,10 @@ _PRICING: Optional[dict] = None
 
 def _load_pricing() -> dict:
     """Load pricing.yaml into {model_id: {unit: price_per_token}}."""
+    here = Path(__file__).resolve().parent
     candidates = [
-        Path("/app/config_library/pricing.yaml"),
-        Path(__file__).resolve().parents[2] / "config_library" / "pricing.yaml",
+        Path("/app/config_library/pricing.yaml"),  # Docker container
+        here.parent.parent / "config_library" / "pricing.yaml",  # repo root (local dev)
     ]
     for p in candidates:
         if p.exists():
