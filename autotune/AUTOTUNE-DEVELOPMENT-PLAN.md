@@ -648,6 +648,9 @@ Implemented and deployed. The agent runs fully decoupled from the frontend — n
 - [ ] Storage limit increase at GA — customers have requested 10-30 GB
 - [ ] S3 Files mount — unlimited storage but requires VPC (~$32/month NAT gateway)
 
+**TODO: Cost reduction:**
+- [ ] Investigate Bedrock prompt caching / Strands message caching — agent cost is very high, likely because conversation history is re-sent in full on every model call (N² token growth). Strands may not be using `<<CACHEPOINT>>` or Bedrock's prompt caching API. Options: (1) enable Bedrock prompt caching on the BedrockModel, (2) summarize/truncate older messages, (3) use Strands `context_window_strategy` if available.
+
 **Current status:** Two-filesystem strategy deployed and verified. `/mnt/workspace` stays at ~1.5 MB (down from ~46 MB). Agent now survives ~42 minutes / 8 iterations (up from ~20 min). Still hits ENOSPC due to confirmed AgentCore NFS bug — even 1.59 MB triggers it eventually. **Not blocked on this** — proceeding with other development. The workaround is session resume (see TODO below).
 
 **Root cause identified:** Strands `FileSessionManager` writes **one JSON file per message** (~320 files per 8-iteration run). Each file creation consumes NFS metadata (inodes, directory entries). The ~50 MB metadata budget is exhausted despite only 1.13 MB of actual data. This is compounded by a known AgentCore NFS bug that causes premature ENOSPC.
