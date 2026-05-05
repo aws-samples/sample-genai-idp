@@ -26,6 +26,16 @@
 
 **What:** IDP evaluation runs sometimes get stuck at 0 completed files, RUNNING status indefinitely. The agent wastes entire iterations waiting for runs that will never complete.
 
+### Sub-issue: `validate_config` passes configs that break the pipeline
+
+The agent frequently launches runs with configs that pass `validate_config` but produce garbage results — e.g., the LLM responds "I don't see any document or image attached" for all 75 files, indicating OCR output wasn't passed to the extraction model. These are avoidable failures that waste full test executions (minutes of wall time + cost).
+
+**Action items:**
+1. Collect 3-5 broken configs (save to `autotune/planning-docs/broken-configs/` with failure mode notes)
+2. Root-cause each in the IDP pipeline code (extraction Lambda, prompt assembly, OCR handoff)
+3. Add validation rules to `idp-cli validate-config` (`lib/idp_common_pkg/`) to catch these patterns pre-upload
+4. File with IDP service team if fix is non-trivial
+
 **Evidence from session `ed4e4ec5`:**
 - v2 run: all 75 files failed with "I don't see any document or image attached" (extraction model didn't receive OCR output)
 - v1, v3 runs: stuck at 0 completed files, RUNNING status for 20+ minutes
