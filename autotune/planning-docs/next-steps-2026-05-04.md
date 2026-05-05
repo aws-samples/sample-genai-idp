@@ -78,12 +78,13 @@ See `autotune/docs/reward-hacking-guardrail.md` for full details.
 **Implemented:**
 
 1. **Agent cost** — Strands `accumulated_usage` (input/output/cache tokens) priced via `config_library/pricing.yaml` lookup
-2. **Eval cost** — Accumulated from `costBreakdown.totalCost` in `get_evaluation_summary` responses
-3. **DynamoDB state** — `agent_cost_usd`, `eval_cost_usd`, `agent_input_tokens`, `agent_output_tokens`, `agent_cache_read_tokens`, `agent_cache_write_tokens` synced every 10s
-4. **Resume-safe** — Eval cost seeded from DDB on resume
+2. **Eval cost** — Accumulated from top-level `totalCost` in `get_evaluation_summary` responses, deduplicated by batch_id
+3. **DynamoDB state** — `agent_cost_usd`, `eval_cost_usd`, `eval_seen_batches`, token counts — updated in real-time via `CostTrackingHook` (AfterModelCallEvent)
+4. **Resume-safe** — Eval cost + seen batch IDs seeded from DDB on resume
 5. **Frontend** — Status bar shows `Cost: $X.XX (agent $X.XX + eval $X.XX)` live
+6. **Prompt caching** — System prompt, tools, and messages cached via `CacheConfig(strategy="auto")` + `cache_tools="default"` + `SystemContentBlock(cachePoint)`. Cache reads are 10x cheaper than input tokens ($0.50/M vs $5.00/M on Opus).
 
-Key files: `autotune/agent/pricing.py`, `autotune/agent/state.py` (`update_cost`), `autotune/agent/tools.py` (eval cost accumulator), `basic_agent.py` (sync loop), `ChatInterface.tsx` (display).
+Key files: `autotune/agent/pricing.py`, `autotune/agent/state.py` (`update_cost`), `autotune/agent/hooks.py` (`CostTrackingHook`), `autotune/agent/tools.py` (eval cost accumulator), `basic_agent.py` (agent creation with caching), `ChatInterface.tsx` (display).
 
 ## Priority 4: Automatic Optimization Log Updates
 
