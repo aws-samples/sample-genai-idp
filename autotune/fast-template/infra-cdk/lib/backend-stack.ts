@@ -267,8 +267,8 @@ export class BackendStack extends cdk.NestedStack {
     // Create AgentCore execution role
     const agentRole = new AgentCoreRole(this, "AgentCoreRole")
 
-    // AgentCore Memory — DISABLED. The agent uses FileSessionManager on /mnt/workspace
-    // for conversation history instead of AgentCoreMemorySessionManager.
+    // AgentCore Memory — DISABLED. The agent uses S3SessionManager for conversation
+    // history (stored in the stream bucket) instead of AgentCoreMemorySessionManager.
     // To re-enable for long-term memory (semantic fact extraction across sessions),
     // uncomment this block and the MEMORY_ID env var below.
     // See autotune/docs/state-persistence.md for rationale.
@@ -532,8 +532,7 @@ export class BackendStack extends cdk.NestedStack {
       // AutoTune: S3 bucket for agent stream data (stream.jsonl + OPTIMIZATION-LOG.md).
       AUTOTUNE_STREAM_BUCKET: this.streamBucketName,
       // AgentCore Memory env vars removed (MEMORY_ID, USE_LONG_TERM_MEMORY, LTM_TOP_K,
-      // LTM_RELEVANCE_SCORE). Agent uses FileSessionManager on /mnt/workspace instead.
-      // Re-add MEMORY_ID here if re-enabling AgentCore Memory for LTM.
+      // LTM_RELEVANCE_SCORE). Agent uses S3SessionManager instead.
     }
 
     // Add claude-agent-sdk specific environment variable
@@ -574,19 +573,17 @@ export class BackendStack extends cdk.NestedStack {
     // Store the runtime ARN
     this.runtimeArn = this.agentRuntime.agentRuntimeArn
 
-    // AutoTune: Enable persistent filesystem on the runtime (Preview feature).
-    // The L2 construct will support `filesystemConfiguration` natively once
-    // aws-cdk PR #35478 is released. Until then, use L1 escape hatch.
-    // TODO: Replace with L2 prop when @aws-cdk/aws-bedrock-agentcore-alpha >= 2.252
-    const cfnRuntime = this.agentRuntime.node.defaultChild as cdk.CfnResource
-    cfnRuntime.addPropertyOverride("FilesystemConfigurations", [
-      { SessionStorage: { MountPath: "/mnt/workspace" } },
-    ])
+    // TODO: Re-enable persistent filesystem once AgentCore fixes the NFS ENOSPC bug.
+    // The NFS mount triggers ENOSPC even with 0 bytes of data due to a metadata budget
+    // bug (known issue, reported April 2026 in #bedrock-agentcore-runtime-interest).
+    // All state now lives on /tmp + S3 sync instead.
+    // const cfnRuntime = this.agentRuntime.node.defaultChild as cdk.CfnResource
+    // cfnRuntime.addPropertyOverride("FilesystemConfigurations", [
+    //   { SessionStorage: { MountPath: "/mnt/workspace" } },
+    // ])
 
     // AutoTune: Set idle session timeout to 2 hours (default is 15 min).
-    // Long optimization runs can take 30+ minutes with no /ping activity
-    // between tool calls. Using L1 escape hatch to avoid CDK bug (aws-cdk#36376)
-    // where omitting lifecycleConfiguration sets timeout to 60s instead of default.
+    const cfnRuntime = this.agentRuntime.node.defaultChild as cdk.CfnResource
     cfnRuntime.addPropertyOverride("LifecycleConfiguration", {
       IdleRuntimeSessionTimeout: 7200, // 2 hours
       MaxLifetime: 28800, // 8 hours (default)

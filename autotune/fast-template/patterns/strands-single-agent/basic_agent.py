@@ -7,14 +7,14 @@ optimized IDP Accelerator config.
 
 Architecture: Fire-and-forget. The entrypoint yields a single "started" event
 and returns immediately. The agent runs in a background thread, writing its
-full event stream to a JSONL file on /mnt/workspace and syncing to S3
+full event stream to a JSONL file on /tmp and syncing to S3
 periodically. The frontend polls three independent APIs:
   - GET /state  (DynamoDB) — status, phase, iteration, accuracy
   - GET /stream (S3 JSONL) — full agent thought process
   - GET /log    (S3 markdown) — OPTIMIZATION-LOG.md
 
-This decouples the agent from the SSE connection, which AgentCore's internal
-proxy severs after ~60s. See AUTOTUNE-DEVELOPMENT-PLAN.md Phase 6.9.
+All state lives on /tmp + S3 sync. /mnt/workspace (AgentCore persistent FS)
+is NOT used due to a known ENOSPC bug in the NFS metadata layer.
 """
 
 import asyncio
@@ -47,8 +47,10 @@ app = BedrockAgentCoreApp()
 _active_sessions: dict[str, threading.Thread] = {}
 
 AGENT_DIR = Path(__file__).parent
-WORKSPACE_DIR = "/mnt/workspace" if os.path.isdir("/mnt/workspace") else "/tmp/workspace"
-SCRATCH_DIR = "/tmp/autotune-data"  # Ephemeral 8.8GB overlay — bulk downloads go here, not /mnt/workspace
+# TODO: Revisit /mnt/workspace once AgentCore persistent filesystem ENOSPC bug is fixed.
+# The NFS mount triggers ENOSPC even with 0 bytes of data due to a metadata budget bug
+# (known issue, reported April 2026). For now, all state lives on /tmp + S3 sync.
+SCRATCH_DIR = "/tmp/autotune-data"
 MAX_ITERATIONS = 10
 
 # S3 sync config
@@ -123,9 +125,7 @@ def _create_agent(user_id: str, session_id: str, state: OptimizationState,
         model_id=os.environ["AUTOTUNE_MODEL_ID"],
         max_tokens=16384,
     )
-    # Session history on S3 — avoids NFS metadata pressure that causes ENOSPC.
-    # FileSessionManager writes one file per message (~300 files per run),
-    # exhausting the ~50MB NFS metadata budget. S3 has no such limit.
+    # Session history on S3 — /mnt/workspace is disabled due to AgentCore NFS ENOSPC bug.
     s3_bucket = os.environ.get("AUTOTUNE_STREAM_BUCKET", "")
     session_manager = S3SessionManager(
         session_id=session_id,
@@ -133,14 +133,11 @@ def _create_agent(user_id: str, session_id: str, state: OptimizationState,
         prefix="autotune-sessions",
     ) if s3_bucket else None
 
-    session_workspace = os.path.join(WORKSPACE_DIR, session_id)
+    session_workspace = os.path.join(SCRATCH_DIR, session_id)
     os.makedirs(session_workspace, exist_ok=True)
     os.chdir(session_workspace)
 
-    # Scratch dir for bulk downloads — on ephemeral overlay, not NFS
-    session_scratch = os.path.join(SCRATCH_DIR, session_id)
-    os.makedirs(session_scratch, exist_ok=True)
-    os.environ["AUTOTUNE_SCRATCH_DIR"] = session_scratch
+    os.environ["AUTOTUNE_SCRATCH_DIR"] = session_workspace
     os.environ["AUTOTUNE_WORKSPACE_DIR"] = session_workspace
 
     if test_set_id and not is_resume:
@@ -175,8 +172,8 @@ def _snapshot_disk_usage(output_path: str) -> None:
     except Exception:
         pass
 
-    # Pure-Python walk of /mnt/workspace — reliable on NFS unlike du
-    for scan_root in [WORKSPACE_DIR, "/tmp"]:
+    # Pure-Python walk of /tmp
+    for scan_root in ["/tmp"]:
         if not os.path.isdir(scan_root):
             continue
         key = scan_root.replace("/", "_").strip("_")
@@ -210,11 +207,10 @@ def _run_agent_thread(user_id: str, session_id: str, state: OptimizationState,
     """Background thread: runs the agent, writes stream to JSONL, syncs to S3."""
     s3_bucket = os.environ.get("AUTOTUNE_STREAM_BUCKET", "")
     s3_prefix = f"autotune-streams/{session_id}"
-    session_workspace = os.path.join(WORKSPACE_DIR, session_id)
-    session_scratch = os.environ.get("AUTOTUNE_SCRATCH_DIR", os.path.join(SCRATCH_DIR, session_id))
-    os.makedirs(session_scratch, exist_ok=True)
-    stream_path = os.path.join(session_scratch, "stream.jsonl")
-    log_path = os.path.join(session_workspace, "OPTIMIZATION-LOG.md")
+    session_dir = os.path.join(SCRATCH_DIR, session_id)
+    os.makedirs(session_dir, exist_ok=True)
+    stream_path = os.path.join(session_dir, "stream.jsonl")
+    log_path = os.path.join(session_dir, "OPTIMIZATION-LOG.md")
 
     s3 = boto3.client("s3") if s3_bucket else None
 
@@ -230,15 +226,21 @@ def _run_agent_thread(user_id: str, session_id: str, state: OptimizationState,
         agent = _create_agent(user_id, session_id, state, test_set_id, optimization_guidance, is_resume)
         initial_prompt = _build_resume_prompt(test_set_id, optimization_guidance) if is_resume else _build_initial_prompt(test_set_id, optimization_guidance)
 
-        # Seed eval cost from DDB on resume
+        # On resume: restore OPTIMIZATION-LOG.md from S3 and seed eval cost
         if is_resume:
             prev_state = state.get_state()
             seed_eval_cost(float(prev_state.get("eval_cost_usd", 0)))
+            if s3 and s3_bucket:
+                try:
+                    s3.download_file(s3_bucket, f"{s3_prefix}/OPTIMIZATION-LOG.md", log_path)
+                    logger.info("Restored OPTIMIZATION-LOG.md from S3")
+                except Exception:
+                    logger.warning("Could not restore OPTIMIZATION-LOG.md from S3")
 
         model_id = os.environ.get("AUTOTUNE_MODEL_ID", "")
 
         # Background sync thread — heartbeat + S3 sync + cost sync
-        disk_usage_path = os.path.join(session_scratch, "disk-usage.jsonl")
+        disk_usage_path = os.path.join(session_dir, "disk-usage.jsonl")
         sync_stop = threading.Event()
         def _sync_loop():
             while not sync_stop.wait(SYNC_INTERVAL):
