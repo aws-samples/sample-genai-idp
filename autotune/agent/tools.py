@@ -30,6 +30,17 @@ def _auto_update_state(phase: str, phase_detail: str) -> None:
         pass  # Never let state updates break tool execution
 
 
+def _list_dir_files(directory: str, max_files: int = 100) -> list[str]:
+    """List files in a directory recursively (for enriching download tool responses)."""
+    files = []
+    for root, _, filenames in os.walk(directory):
+        for name in sorted(filenames):
+            files.append(os.path.join(root, name))
+            if len(files) >= max_files:
+                return files
+    return files
+
+
 def _get_client():
     """Get or create the IDPACClient singleton from env vars."""
     global _client
@@ -405,6 +416,7 @@ def download_evaluation_results(batch_id: str) -> str:
     client = _get_client()
     result = client.download_evaluation_results(batch_id, output_dir)
     result["output_dir"] = output_dir
+    result["files"] = _list_dir_files(output_dir)
     return json.dumps(result, indent=2)
 
 
@@ -467,6 +479,7 @@ def download_raw_processing_results(
     client = _get_client()
     result = client.download_results(batch_id, output_dir, file_types)
     result["output_dir"] = output_dir
+    result["files"] = _list_dir_files(output_dir)
     return json.dumps(result, indent=2)
 
 
@@ -694,6 +707,7 @@ def download_single_document_results(batch_id: str, filename: str) -> str:
     client = _get_client()
     result = client.download_single_document_results(batch_id, filename, output_dir)
     result["output_dir"] = output_dir
+    result["files"] = _list_dir_files(output_dir)
     return json.dumps(result, indent=2)
 
 
@@ -720,12 +734,13 @@ def download_ground_truth(test_set_id: str, filename: str) -> str:
     try:
         result = client.download_ground_truth_all_sections(test_set_id, filename, output_dir)
         result["output_dir"] = output_dir
+        result["files"] = _list_dir_files(output_dir)
         return json.dumps(result, indent=2)
     except Exception:
         # Fall back to single-file download
         output_path = os.path.join(output_dir, "result.json")
         client.download_ground_truth(test_set_id, filename, output_path)
-        return json.dumps({"output_path": output_path}, indent=2)
+        return json.dumps({"output_path": output_path, "files": [output_path]}, indent=2)
 
 
 @tool
@@ -775,13 +790,17 @@ def config_edit(config_path: str, operations: list[dict]) -> str:
     Operations:
     - {"op": "get", "field": "extraction.model"} — Read a value
     - {"op": "set", "field": "extraction.model", "value": "us.anthropic.claude-sonnet-4-5-20250929-v1:0"} — Set a value
-    - {"op": "set", "field": "classes.0.properties.Amount.x-aws-idp-evaluation-method", "value": "NUMERIC_EXACT"} — Set nested field
     - {"op": "add_class", "schema": {"$id": "INVOICE", ...}} — Add a document class
     - {"op": "get_class_names"} — List configured class names
     - {"op": "save"} — Save to original path
     - {"op": "save", "output_path": "path/to/new.yaml"} — Save to new path
 
     Dot notation supports array indices: 'classes.0.$id', 'classes.1.properties'.
+
+    LOCKED FIELDS: You cannot modify x-aws-idp-evaluation-method,
+    x-aws-idp-evaluation-threshold, or x-aws-idp-evaluation-weight attributes.
+    These control how accuracy is measured and are locked to prevent inflating
+    scores without improving extraction quality.
 
     Args:
         config_path: Path to config YAML file.
@@ -792,23 +811,36 @@ def config_edit(config_path: str, operations: list[dict]) -> str:
     """
     from idpac import IDPConfig
 
+    LOCKED_PREFIXES = ("x-aws-idp-evaluation-method", "x-aws-idp-evaluation-threshold", "x-aws-idp-evaluation-weight")
+
     config = IDPConfig(config_path)
     results = []
     for op in operations:
         action = op.get("op", "")
         try:
-            if action == "get":
+            if action == "set":
+                field = op.get("field", "")
+                # Reject writes to evaluation metric attributes
+                if any(locked in field for locked in LOCKED_PREFIXES):
+                    results.append({"op": "set", "field": field, "error": "LOCKED: Evaluation metric attributes (x-aws-idp-evaluation-method/threshold/weight) cannot be modified. These define how accuracy is measured and must remain unchanged."})
+                    continue
+                config.set(field, op["value"])
+                results.append({"op": "set", "field": field, "status": "ok"})
+            elif action == "get":
                 val = config.get(op["field"])
                 results.append({"op": "get", "field": op["field"], "value": val})
-            elif action == "set":
-                config.set(op["field"], op["value"])
-                results.append({"op": "set", "field": op["field"], "status": "ok"})
             elif action == "save":
                 path = op.get("output_path")
                 saved = config.save(path)
                 results.append({"op": "save", "path": saved})
             elif action == "add_class":
-                config.add_class(op["schema"])
+                # Check if the schema contains locked evaluation attributes
+                schema = op.get("schema", {})
+                schema_str = json.dumps(schema)
+                if any(locked in schema_str for locked in LOCKED_PREFIXES):
+                    results.append({"op": "add_class", "error": "LOCKED: Cannot add class schema containing x-aws-idp-evaluation-* attributes. Remove evaluation attributes from the schema and retry."})
+                    continue
+                config.add_class(schema)
                 results.append({"op": "add_class", "status": "ok"})
             elif action == "get_class_names":
                 results.append({"op": "get_class_names", "classes": config.get_class_names()})
@@ -872,6 +904,336 @@ def download_input_document(batch_id: str, filename: str) -> str:
 
 # --- Collect all tools for the agent ---
 
+@tool
+def write_optimization_log(operation: str, content: str = "", old_str: str = "", new_str: str = "") -> str:
+    """Write to the OPTIMIZATION-LOG.md file in the session workspace.
+
+    This is the ONLY way to write to the optimization log. Supports three operations:
+    - create: Overwrite the entire file with new content
+    - append: Append text to the end of the file
+    - str_replace: Find and replace a specific string in the file
+
+    Args:
+        operation: One of 'create', 'append', or 'str_replace'.
+        content: Text content for 'create' or 'append' operations.
+        old_str: String to find (for 'str_replace' only). Must match exactly.
+        new_str: Replacement string (for 'str_replace' only).
+
+    Returns:
+        JSON with status and file path.
+    """
+    workspace = os.environ.get("AUTOTUNE_WORKSPACE_DIR", "/mnt/workspace")
+    log_path = os.path.join(workspace, "OPTIMIZATION-LOG.md")
+
+    try:
+        if operation == "create":
+            with open(log_path, "w") as f:
+                f.write(content)
+        elif operation == "append":
+            with open(log_path, "a") as f:
+                f.write(content)
+        elif operation == "str_replace":
+            if not os.path.exists(log_path):
+                return json.dumps({"error": "OPTIMIZATION-LOG.md does not exist. Use 'create' first."})
+            with open(log_path, "r") as f:
+                text = f.read()
+            if old_str not in text:
+                return json.dumps({"error": f"old_str not found in OPTIMIZATION-LOG.md. First 200 chars of file: {text[:200]}"})
+            if text.count(old_str) > 1:
+                return json.dumps({"error": "old_str matches multiple locations. Provide more context to make it unique."})
+            text = text.replace(old_str, new_str, 1)
+            with open(log_path, "w") as f:
+                f.write(text)
+        else:
+            return json.dumps({"error": f"Unknown operation: {operation}. Use 'create', 'append', or 'str_replace'."})
+        return json.dumps({"status": "ok", "path": log_path})
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+
+@tool
+def list_files(directory: str = ".", max_depth: int = 2) -> str:
+    """List files and directories at a given path.
+
+    Use this to explore downloaded results, configs, or scratch directories.
+    Returns a tree-like listing with file sizes.
+
+    Args:
+        directory: Path to list. Defaults to current working directory.
+        max_depth: Maximum recursion depth (0 = just the directory itself, 1 = immediate children, 2 = one level of subdirs). Max 4.
+
+    Returns:
+        JSON with the file listing.
+    """
+    max_depth = min(max_depth, 4)
+    if not os.path.exists(directory):
+        return json.dumps({"error": f"Path does not exist: {directory}"})
+
+    entries = []
+    base_depth = directory.rstrip("/").count("/")
+
+    for root, dirs, files in os.walk(directory):
+        current_depth = root.rstrip("/").count("/") - base_depth
+        if current_depth >= max_depth:
+            dirs.clear()
+            continue
+        for name in sorted(dirs):
+            entries.append({"path": os.path.join(root, name), "type": "dir"})
+        for name in sorted(files):
+            fpath = os.path.join(root, name)
+            try:
+                size = os.path.getsize(fpath)
+            except OSError:
+                size = -1
+            entries.append({"path": fpath, "type": "file", "size_bytes": size})
+
+    return json.dumps({"directory": directory, "count": len(entries), "entries": entries[:500]}, indent=2)
+
+
+@tool
+def copy_config(source_name: str, dest_name: str) -> str:
+    """Copy a config YAML file to a new name within the scratch configs directory.
+
+    Use this to create a new config version from an existing one before editing.
+    Both source and dest are relative names (e.g., 'v1.yaml', 'v2.yaml') — they
+    are resolved within the scratch configs directory automatically.
+
+    Args:
+        source_name: Source config filename (e.g., 'v1.yaml').
+        dest_name: Destination config filename (e.g., 'v2.yaml').
+
+    Returns:
+        JSON with the full path of the new copy.
+    """
+    import shutil
+    scratch = os.environ.get("AUTOTUNE_SCRATCH_DIR", "/tmp/autotune-data")
+    configs_dir = os.path.join(scratch, "configs")
+    os.makedirs(configs_dir, exist_ok=True)
+
+    src = os.path.join(configs_dir, source_name)
+    dst = os.path.join(configs_dir, dest_name)
+
+    if not os.path.exists(src):
+        # Also check scratch root (download_config puts files there)
+        alt_src = os.path.join(scratch, source_name)
+        if os.path.exists(alt_src):
+            src = alt_src
+        else:
+            return json.dumps({"error": f"Source not found: {src} (also checked {alt_src})"})
+
+    shutil.copy2(src, dst)
+    return json.dumps({"status": "ok", "source": src, "dest": dst})
+
+
+@tool
+def wait_seconds(seconds: int) -> str:
+    """Wait for a specified number of seconds.
+
+    Use this when waiting for evaluation runs to complete. Check status
+    with check_evaluation_status after waiting.
+
+    Args:
+        seconds: Number of seconds to wait. Maximum 300 (5 minutes).
+
+    Returns:
+        JSON confirming the wait completed.
+    """
+    import time as _time
+    seconds = min(max(seconds, 1), 300)
+    _time.sleep(seconds)
+    return json.dumps({"status": "ok", "waited_seconds": seconds})
+
+
+@tool
+def execute_python_analysis(code: str) -> str:
+    """Execute Python code for data analysis in a sandboxed environment.
+
+    Use this for:
+    - Parsing and aggregating JSON evaluation results
+    - Computing confusion matrices or accuracy breakdowns
+    - Statistical analysis of extraction quality
+    - Any data transformation or calculation
+
+    The sandbox has access to standard Python libraries (json, collections,
+    statistics, re, etc.) but NO filesystem access and NO AWS credentials.
+    Pass data inline in the code string.
+
+    Args:
+        code: Python code to execute. Use print() for output.
+
+    Returns:
+        JSON with execution results (stdout/stderr).
+    """
+    region = os.environ.get("AWS_DEFAULT_REGION", "us-east-1")
+    try:
+        from bedrock_agentcore.tools.code_interpreter_client import CodeInterpreter
+        client = CodeInterpreter(region)
+        client.start()
+        try:
+            response = client.invoke(
+                "executeCode",
+                {"code": code, "language": "python", "clearContext": False},
+            )
+            results = []
+            for event in response.get("stream", []):
+                if "result" in event:
+                    results.append(event["result"])
+            return json.dumps(results, indent=2) if results else json.dumps({"output": "No results returned"})
+        finally:
+            client.stop()
+    except ImportError:
+        # Fallback: run in-process with restricted builtins (local dev only)
+        import io
+        import contextlib
+        stdout = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(stdout):
+                exec(code, {"__builtins__": __builtins__})  # noqa: S102
+            return json.dumps({"output": stdout.getvalue()})
+        except Exception as e:
+            return json.dumps({"error": str(e), "partial_output": stdout.getvalue()})
+
+
+@tool
+def write_optimization_log(operation: str, content: str = "", old_str: str = "", new_str: str = "") -> str:
+    """Write to the OPTIMIZATION-LOG.md file in the session workspace.
+
+    This is the ONLY way to write to the optimization log. Supports three operations:
+    - create: Overwrite the entire file with new content
+    - append: Append text to the end of the file
+    - str_replace: Find and replace a specific string in the file
+
+    Args:
+        operation: One of 'create', 'append', or 'str_replace'.
+        content: Text content for 'create' or 'append' operations.
+        old_str: String to find (for 'str_replace' only). Must match exactly.
+        new_str: Replacement string (for 'str_replace' only).
+
+    Returns:
+        JSON with status and file path.
+    """
+    workspace = os.environ.get("AUTOTUNE_WORKSPACE_DIR", "/mnt/workspace")
+    log_path = os.path.join(workspace, "OPTIMIZATION-LOG.md")
+
+    try:
+        if operation == "create":
+            with open(log_path, "w") as f:
+                f.write(content)
+        elif operation == "append":
+            with open(log_path, "a") as f:
+                f.write(content)
+        elif operation == "str_replace":
+            if not os.path.exists(log_path):
+                return json.dumps({"error": "OPTIMIZATION-LOG.md does not exist. Use 'create' first."})
+            with open(log_path, "r") as f:
+                text = f.read()
+            if old_str not in text:
+                return json.dumps({"error": f"old_str not found in OPTIMIZATION-LOG.md. First 200 chars of file: {text[:200]}"})
+            if text.count(old_str) > 1:
+                return json.dumps({"error": "old_str matches multiple locations. Provide more context to make it unique."})
+            text = text.replace(old_str, new_str, 1)
+            with open(log_path, "w") as f:
+                f.write(text)
+        else:
+            return json.dumps({"error": f"Unknown operation: {operation}. Use 'create', 'append', or 'str_replace'."})
+        return json.dumps({"status": "ok", "path": log_path})
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+
+@tool
+def list_files(directory: str = ".", max_depth: int = 2) -> str:
+    """List files and directories at a given path.
+
+    Use this to explore downloaded results, configs, or scratch directories.
+    Returns a listing with file sizes.
+
+    Args:
+        directory: Path to list. Defaults to current working directory.
+        max_depth: Maximum recursion depth (1 = immediate children, 2 = one level of subdirs). Max 4.
+
+    Returns:
+        JSON with the file listing.
+    """
+    max_depth = min(max(max_depth, 1), 4)
+    if not os.path.exists(directory):
+        return json.dumps({"error": f"Path does not exist: {directory}"})
+
+    entries = []
+    base_depth = directory.rstrip("/").count("/")
+
+    for root, dirs, files in os.walk(directory):
+        current_depth = root.rstrip("/").count("/") - base_depth
+        if current_depth >= max_depth:
+            dirs.clear()
+            continue
+        for name in sorted(dirs):
+            entries.append({"path": os.path.join(root, name), "type": "dir"})
+        for name in sorted(files):
+            fpath = os.path.join(root, name)
+            try:
+                size = os.path.getsize(fpath)
+            except OSError:
+                size = -1
+            entries.append({"path": fpath, "type": "file", "size_bytes": size})
+
+    return json.dumps({"directory": directory, "count": len(entries), "entries": entries[:500]}, indent=2)
+
+
+@tool
+def copy_config(source_name: str, dest_name: str) -> str:
+    """Copy a config YAML file to a new name within the scratch configs directory.
+
+    Use this to create a new config version from an existing one before editing.
+    Both source and dest are relative names (e.g., 'v1.yaml', 'v2.yaml') — they
+    are resolved within the scratch configs directory automatically.
+
+    Args:
+        source_name: Source config filename (e.g., 'v1.yaml').
+        dest_name: Destination config filename (e.g., 'v2.yaml').
+
+    Returns:
+        JSON with the full path of the new copy.
+    """
+    import shutil
+    scratch = os.environ.get("AUTOTUNE_SCRATCH_DIR", "/tmp/autotune-data")
+    configs_dir = os.path.join(scratch, "configs")
+    os.makedirs(configs_dir, exist_ok=True)
+
+    src = os.path.join(configs_dir, source_name)
+    dst = os.path.join(configs_dir, dest_name)
+
+    if not os.path.exists(src):
+        # Also check scratch root (download_config puts files there)
+        alt_src = os.path.join(scratch, source_name)
+        if os.path.exists(alt_src):
+            src = alt_src
+        else:
+            return json.dumps({"error": f"Source not found: {src} (also checked {alt_src})"})
+
+    shutil.copy2(src, dst)
+    return json.dumps({"status": "ok", "source": src, "dest": dst})
+
+
+@tool
+def wait_seconds(seconds: int) -> str:
+    """Wait for a specified number of seconds.
+
+    Use this when waiting for evaluation runs to complete. Check status
+    with check_evaluation_status after waiting.
+
+    Args:
+        seconds: Number of seconds to wait. Maximum 300 (5 minutes).
+
+    Returns:
+        JSON confirming the wait completed.
+    """
+    import time as _time
+    seconds = min(max(seconds, 1), 300)
+    _time.sleep(seconds)
+    return json.dumps({"status": "ok", "waited_seconds": seconds})
+
+
 ALL_TOOLS = [
     deploy_stack,
     upload_test_set,
@@ -899,4 +1261,8 @@ ALL_TOOLS = [
     run_discovery,
     run_multi_class_discovery,
     update_optimization_state,
+    write_optimization_log,
+    list_files,
+    copy_config,
+    wait_seconds,
 ]

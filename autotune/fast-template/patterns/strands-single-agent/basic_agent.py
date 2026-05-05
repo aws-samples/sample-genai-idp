@@ -30,9 +30,10 @@ from bedrock_agentcore.runtime import BedrockAgentCoreApp, PingStatus, RequestCo
 from strands import Agent, AgentSkills
 from strands.models import BedrockModel
 from strands.session import S3SessionManager
-from strands_tools import editor, file_read, file_write, image_reader, shell
+from strands_tools import file_read, image_reader
 from utils.auth import extract_user_id_from_context
 
+from code_interpreter_tools import execute_python_analysis
 from idpac_tools import ALL_TOOLS as IDPAC_TOOLS
 from optimization_state import OptimizationState, STATUS_RUNNING, STATUS_COMPLETE, STATUS_FAILED
 from optimization_hooks import CancelCheckHook, FileReadSafetyHook, OptimizationCancelled, OptimizationLoopHook
@@ -145,7 +146,7 @@ def _create_agent(user_id: str, session_id: str, state: OptimizationState,
 
     skills_dir = AGENT_DIR / "skills"
     plugins = [AgentSkills(skills=str(skills_dir))] if skills_dir.exists() else []
-    tools = IDPAC_TOOLS + [file_read, file_write, editor, shell, image_reader]
+    tools = IDPAC_TOOLS + [file_read, image_reader, execute_python_analysis]
     hooks = [CancelCheckHook(state), FileReadSafetyHook(), OptimizationLoopHook(state, max_iterations=MAX_ITERATIONS)]
 
     return Agent(
