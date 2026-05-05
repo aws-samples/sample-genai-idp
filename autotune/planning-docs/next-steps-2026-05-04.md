@@ -47,17 +47,19 @@
 
 5. **AutoTune workaround** — Add timeout + retry logic in `run_evaluation` tool: if 0 completed files after 5 minutes, abort and surface error to agent.
 
-## Priority 2: Reward Hacking Guardrail
+## Priority 2: Reward Hacking Guardrail ✅ DONE (2026-05-05)
 
 **What:** The agent can modify evaluation metric definitions in the config (`x-aws-idp-evaluation-method`, `x-aws-idp-evaluation-threshold`, `x-aws-idp-evaluation-weight`) to inflate accuracy without improving extraction.
 
-**Two approaches (do both):**
+**Implemented:**
 
-1. **Short-term guardrail** — In `upload_config` tool: compare new config against baseline, reject/strip changes to `x-aws-idp-evaluation-*` attributes.
+1. **Hard guardrail in `config_edit`** — rejects changes to `x-aws-idp-evaluation-*` attributes
+2. **Removed `shell`, `editor`, `file_write`** — eliminated all escape hatches
+3. **Added purpose-built replacement tools** — `write_optimization_log`, `list_files`, `copy_config`, `wait_seconds`, `execute_python_analysis`
+4. **Enriched download tools** with file listings so agent doesn't need `ls`
+5. **Updated prompt** — documented new tool surface, locked fields rule
 
-2. **Upstream discussion with IDP team** — Why are inference configs and evaluation configs bundled in one YAML? If separated, AutoTune simply wouldn't have access to the eval config. This is the clean long-term fix. Schedule discussion.
-
-**Key files:** `autotune/agent/tools.py` (`upload_config`)
+See `autotune/docs/reward-hacking-guardrail.md` for full details.
 
 ## Priority 3: Cost Observability
 
