@@ -86,6 +86,20 @@ See `autotune/docs/reward-hacking-guardrail.md` for full details.
 
 Key files: `autotune/agent/pricing.py`, `autotune/agent/state.py` (`update_cost`), `autotune/agent/hooks.py` (`CostTrackingHook`), `autotune/agent/tools.py` (eval cost accumulator), `basic_agent.py` (agent creation with caching), `ChatInterface.tsx` (display).
 
+## What was done Monday afternoon (May 5)
+
+- **Removed /mnt/workspace entirely** — AgentCore NFS is broken (ENOSPC bug). All state now on /tmp + S3 sync. Disabled `FilesystemConfigurations` in CDK. OPTIMIZATION-LOG.md restored from S3 on resume. Updated `state-persistence.md`.
+- **Real-time cost tracking** — Moved from 10s sync loop to `CostTrackingHook` (AfterModelCallEvent). Cost appears in DDB immediately after each model call.
+- **Fixed pricing.yaml path** — `parents[2]` threw IndexError in container (`/app/pricing.py` only has 2 parents).
+- **Fixed eval cost source** — `totalCost` is top-level in eval summary, not inside `costBreakdown`.
+- **Eval cost deduplication** — Tracks seen batch_ids to prevent double-counting. Persisted to DDB for resume.
+- **Prompt caching** — Enabled system prompt, tool, and message caching via `CacheConfig(strategy="auto")`. 10x cheaper input token reads.
+- **Added `list_test_set_files` and `download_test_set` tools** — Agent can now list/download test set files locally for discovery.
+- **Fixed `download_config` clobbering** — Now saves to `configs/downloaded/` subdir instead of overwriting working configs.
+- **Cost-per-page awareness** — Prompt instructs agent to explore accuracy/cost tradeoff. Eval summary now shows `costPerPage` and per-stage cost breakdown.
+- **Clarified 1-file validation** — Prompt now says it's one-time only, then always `n_files=0`.
+- **Removed silent exception swallowing** — Sync loop no longer hides errors.
+
 ## Priority 4: Automatic Optimization Log Updates
 
 **What:** Agent frequently forgets to update OPTIMIZATION-LOG.md.
