@@ -60,6 +60,9 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from idp_common_ext.monitoring.analytics_cost_service import AnalyticsCostService
+from idp_common_ext.monitoring.analytics_document_service import (
+    AnalyticsDocumentService,
+)
 from idp_common_ext.monitoring.cloudwatch_metrics_service import (
     CloudWatchMetricsService,
 )
@@ -117,6 +120,7 @@ class MonitoringMetricsService:
         # New parameters — analytics services (optional)
         operational_service: Optional[OperationalDocumentService] = None,
         analytics_cost_service: Optional[AnalyticsCostService] = None,
+        analytics_document_service: Optional[AnalyticsDocumentService] = None,
         analytics_eval_service: Optional[Any] = None,  # AnalyticsEvaluationService
     ) -> None:
         """
@@ -130,6 +134,10 @@ class MonitoringMetricsService:
             analytics_cost_service:      Optional pre-built ``AnalyticsCostService``.
                                          When provided and configured, cost/token sections
                                          are served from Athena instead of DynamoDB.
+            analytics_document_service:  Optional pre-built ``AnalyticsDocumentService``.
+                                         When provided and configured, volume/timeline/
+                                         doc_types/config sections are served from Athena
+                                         instead of DynamoDB.
             analytics_eval_service:      Optional pre-built ``AnalyticsEvaluationService``.
                                          Reserved for future evaluation sections.
         """
@@ -144,6 +152,7 @@ class MonitoringMetricsService:
         # Analytics services — auto-create if not provided.
         # AnalyticsCostService.is_configured() gates actual Athena calls.
         self._analytics_cost = analytics_cost_service or AnalyticsCostService()
+        self._analytics_doc = analytics_document_service or AnalyticsDocumentService()
         self._analytics_eval = analytics_eval_service  # optional, not auto-created
 
     # -------------------------------------------------------------------------
@@ -222,32 +231,69 @@ class MonitoringMetricsService:
         # Build task map: section_name → callable (no-arg lambdas)
         tasks: Dict[str, Any] = {}
 
-        # ── Operational sections ─────────────────────────────────────
+        # ── Operational sections — route to Athena when configured ────
         if "volume" in sections:
-            tasks["volume"] = lambda: self._operational.get_volume_metrics(time_range)
+            if self._analytics_doc.is_configured():
+                logger.debug(
+                    "volume section: routing to Athena AnalyticsDocumentService"
+                )
+                tasks["volume"] = lambda: self._analytics_doc.get_volume_metrics(
+                    time_range
+                )
+            else:
+                tasks["volume"] = lambda: self._operational.get_volume_metrics(
+                    time_range
+                )
 
         if "status" in sections:
+            # Status breakdown (COMPLETED/FAILED/PENDING) requires DynamoDB
+            # because metering only has completed documents.
             tasks["status"] = lambda: self._operational.get_status_breakdown(time_range)
 
         if "doc_types" in sections:
-            tasks["doc_types"] = lambda: (
-                self._operational.get_document_type_distribution(time_range)
-            )
+            if self._analytics_doc.is_configured():
+                logger.debug(
+                    "doc_types section: routing to Athena AnalyticsDocumentService"
+                )
+                tasks["doc_types"] = lambda: (
+                    self._analytics_doc.get_document_type_distribution(time_range)
+                )
+            else:
+                tasks["doc_types"] = lambda: (
+                    self._operational.get_document_type_distribution(time_range)
+                )
 
         if "timeline" in sections:
-            tasks["timeline"] = lambda: self._operational.get_volume_over_time(
-                time_range
-            )
+            if self._analytics_doc.is_configured():
+                logger.debug(
+                    "timeline section: routing to Athena AnalyticsDocumentService"
+                )
+                tasks["timeline"] = lambda: self._analytics_doc.get_volume_over_time(
+                    time_range
+                )
+            else:
+                tasks["timeline"] = lambda: self._operational.get_volume_over_time(
+                    time_range
+                )
 
         if "failures" in sections:
+            # Recent failures require DynamoDB (error messages not in Athena)
             tasks["failures"] = lambda: self._operational.get_recent_failures(
                 time_range
             )
 
         if "config" in sections:
-            tasks["config"] = lambda: self._operational.get_config_version_distribution(
-                time_range
-            )
+            if self._analytics_doc.is_configured():
+                logger.debug(
+                    "config section: routing to Athena AnalyticsDocumentService"
+                )
+                tasks["config"] = lambda: (
+                    self._analytics_doc.get_config_version_distribution(time_range)
+                )
+            else:
+                tasks["config"] = lambda: (
+                    self._operational.get_config_version_distribution(time_range)
+                )
 
         if "throttles" in sections:
             tasks["throttles"] = lambda: self._cw_metrics.get_throttle_report(

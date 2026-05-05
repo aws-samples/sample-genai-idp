@@ -18,6 +18,7 @@ Public API::
         OperationalDocumentService,
         CloudWatchMetricsService,
         AnalyticsCostService,
+        AnalyticsDocumentService,
         AnalyticsEvaluationService,
         AnalyticsAthenaService,
         DashboardService,
@@ -35,6 +36,9 @@ from idp_common_ext.monitoring.analytics_athena_service import (
 )
 from idp_common_ext.monitoring.analytics_cost_service import (
     AnalyticsCostService,
+)
+from idp_common_ext.monitoring.analytics_document_service import (
+    AnalyticsDocumentService,
 )
 from idp_common_ext.monitoring.analytics_evaluation_service import (
     AnalyticsEvaluationService,
@@ -196,6 +200,7 @@ __all__ = [
     "AnalyticsNotConfiguredError",
     "AnalyticsQueryError",
     "AnalyticsCostService",
+    "AnalyticsDocumentService",
     "AnalyticsEvaluationService",
     # Unified entry points
     "MonitoringMetricsService",
