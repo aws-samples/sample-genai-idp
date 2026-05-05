@@ -22,7 +22,7 @@ def _round_floats(obj: Any, sig_figs: int = 4) -> Any:
 class EvaluationResult:
     """Parser for IDP evaluation results."""
 
-    EXCLUDE_KEYS = {'costBreakdown', 'config'}
+    EXCLUDE_KEYS = {'config'}
 
     def __init__(self, data: Dict[str, Any]):
         self.data = data
@@ -45,11 +45,26 @@ class EvaluationResult:
         Args:
             top_bottom_n: Show only top N and bottom N files from weightedOverallScores.
         
-        Excludes costBreakdown and config, rounds floats to 4 significant digits.
+        Excludes config, rounds floats to 4 significant digits.
         For individual file results, use print_individual_summary() (not yet implemented).
         """
         filtered = {k: v for k, v in self.data.items() if k not in self.EXCLUDE_KEYS}
         
+        # Add cost per page
+        total_cost = self.data.get('totalCost', 0)
+        files_count = self.data.get('completedFiles', 0) or self.data.get('filesCount', 0)
+        if total_cost and files_count:
+            filtered['costPerPage'] = round(total_cost / files_count, 4)
+
+        # Summarize costBreakdown to per-stage totals (avoid verbose per-item detail)
+        if 'costBreakdown' in filtered and isinstance(filtered['costBreakdown'], dict):
+            stage_costs = {}
+            for stage, items in filtered['costBreakdown'].items():
+                if isinstance(items, dict):
+                    stage_total = sum(v.get('estimated_cost', 0) for v in items.values() if isinstance(v, dict))
+                    stage_costs[stage] = round(stage_total, 4)
+            filtered['costBreakdown'] = stage_costs
+
         # Filter weightedOverallScores to top/bottom N
         if 'weightedOverallScores' in filtered and filtered['weightedOverallScores']:
             scores = filtered['weightedOverallScores']

@@ -121,6 +121,6 @@ Packet-splitting optimization strategy:
 - **CRITICAL: Always use `upload_config()` with a named `config_version`**. Always pass `config_version` to `run_evaluation()` matching the version you uploaded. This ensures every evaluation is traceable to a specific config.
 - Always use `IDPConfig` class to read/modify configs (never read raw YAML files directly).
 - Name new configs descriptively: `<base>-optimized<N>.yaml`.
-- Focus on `overallAccuracy` as the default primary metric if there is no other guidance provided.
+- Focus on `overallAccuracy` as the default primary metric, but also focus on cost per page. Explore both extremes — see how accurate you can get at any cost, and see how cheap you can get while maintaining reasonable accuracy. You are encouraged to explore drastic changes like enabling/disabling OCR (`ocr.backend: "none"`), trying cheaper extraction models, or using BDA mode to really explore the accuracy/cost tradeoff space.
 - Investigate documents with 0% accuracy first.
 - For multi-class datasets, check `splitClassificationMetrics` to determine if low accuracy is due to misclassification or extraction errors.
