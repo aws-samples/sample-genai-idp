@@ -722,6 +722,8 @@ def update_optimization_state(
     if not state:
         return "No optimization state available (AUTOTUNE_SESSION_ID not set)"
     state.update_phase(phase, phase_detail)
+    if phase == "complete":
+        state.set_status("complete")
     if iteration is not None and best_accuracy is not None and best_config_version is not None:
         state.update_metrics(
             iteration=iteration,
