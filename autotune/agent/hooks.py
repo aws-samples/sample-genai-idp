@@ -70,6 +70,7 @@ class CostTrackingHook(HookProvider):
     def __init__(self, state: OptimizationState):
         self.state = state
         self.metrics = None  # Set to agent.event_loop_metrics after Agent() construction
+        self.agent_messages = None  # Set to agent.messages after Agent() construction
         self.model_id = os.environ.get("AUTOTUNE_MODEL_ID", "")
 
     def register_hooks(self, registry: HookRegistry, **kwargs) -> None:
@@ -84,14 +85,8 @@ class CostTrackingHook(HookProvider):
         cr = usage.get("cacheReadInputTokens", 0)
         cw = usage.get("cacheWriteInputTokens", 0)
         agent_cost = calculate_agent_cost(self.model_id, it, ot, cr, cw)
-        # Context window % = last call's full input context (non-cached + cached)
-        # Bedrock reports inputTokens as non-cached only; total context = inputTokens + cacheReadInputTokens
-        last_cycle_usage = self._get_last_cycle_usage()
-        if last_cycle_usage:
-            context_tokens = last_cycle_usage.get("inputTokens", 0) + last_cycle_usage.get("cacheReadInputTokens", 0)
-        else:
-            context_tokens = 0
-        context_pct = context_tokens / self.CONTEXT_WINDOW_TOKENS * 100
+        # Context window %: read from the last assistant message metadata (per-call usage)
+        context_pct = self._compute_context_pct()
         self.state.update_cost(
             agent_input_tokens=it, agent_output_tokens=ot,
             agent_cache_read_tokens=cr, agent_cache_write_tokens=cw,
@@ -100,12 +95,18 @@ class CostTrackingHook(HookProvider):
             context_window_pct=context_pct,
         )
 
-    def _get_last_cycle_usage(self):
-        """Get usage dict from the most recent cycle."""
-        invocations = self.metrics.agent_invocations
-        if invocations and invocations[-1].cycles:
-            return invocations[-1].cycles[-1].usage
-        return None
+    def _compute_context_pct(self) -> float:
+        """Get context window fill % from the most recent assistant message metadata."""
+        if not self.agent_messages:
+            return 0.0
+        # Walk backwards to find last assistant message with usage metadata
+        for msg in reversed(self.agent_messages):
+            if msg.get("role") == "assistant":
+                usage = msg.get("metadata", {}).get("usage", {})
+                if usage:
+                    context_tokens = usage.get("inputTokens", 0) + usage.get("cacheReadInputTokens", 0)
+                    return context_tokens / self.CONTEXT_WINDOW_TOKENS * 100
+        return 0.0
 
 
 class OptimizationLoopHook(HookProvider):

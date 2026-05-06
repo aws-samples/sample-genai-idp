@@ -30,22 +30,21 @@ class ProactiveContextManager(SummarizingConversationManager):
 
     def apply_management(self, agent, **kwargs):
         """After each agent cycle, check if we've crossed the threshold."""
-        invocations = agent.event_loop_metrics.agent_invocations
-        if not invocations or not invocations[-1].cycles:
-            return
-        last_usage = invocations[-1].cycles[-1].usage
-        context_tokens = last_usage.get("inputTokens", 0) + last_usage.get("cacheReadInputTokens", 0)
-        if context_tokens == 0:
-            return
-        pct = context_tokens / CONTEXT_WINDOW_TOKENS * 100
-
-        if pct >= self.threshold_pct:
-            logger.info(
-                "Context at %.1f%% (threshold %.1f%%) — summarizing and injecting log re-read",
-                pct, self.threshold_pct,
-            )
-            self.reduce_context(agent)
-            self._inject_log_reread(agent)
+        # Get context size from last assistant message metadata
+        for msg in reversed(agent.messages):
+            if msg.get("role") == "assistant":
+                usage = msg.get("metadata", {}).get("usage", {})
+                if usage:
+                    context_tokens = usage.get("inputTokens", 0) + usage.get("cacheReadInputTokens", 0)
+                    pct = context_tokens / CONTEXT_WINDOW_TOKENS * 100
+                    if pct >= self.threshold_pct:
+                        logger.info(
+                            "Context at %.1f%% (threshold %.1f%%) — summarizing and injecting log re-read",
+                            pct, self.threshold_pct,
+                        )
+                        self.reduce_context(agent)
+                        self._inject_log_reread(agent)
+                    return
 
     def _inject_log_reread(self, agent):
         """Append a user message instructing the agent to re-read the optimization log."""

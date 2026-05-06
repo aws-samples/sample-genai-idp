@@ -174,6 +174,7 @@ def _create_agent(user_id: str, session_id: str, state: OptimizationState,
         trace_attributes={"user.id": user_id, "session.id": session_id},
     )
     cost_hook.metrics = agent.event_loop_metrics
+    cost_hook.agent_messages = agent.messages
     return agent
 
 
