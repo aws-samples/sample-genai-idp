@@ -49,6 +49,9 @@ class CancelCheckHook(HookProvider):
             logger.info("Optimization cancelled by user — raising to stop agent")
             self.state.update_phase("cancelled", "Cancelled by user")
             raise OptimizationCancelled("Optimization cancelled by user")
+        if self.state.get_status() == STATUS_COMPLETE:
+            logger.info("Optimization complete — raising to stop agent")
+            raise OptimizationCancelled("Optimization complete")
 
 
 class FileReadSafetyHook(HookProvider):
