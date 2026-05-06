@@ -114,7 +114,15 @@ Key files: `autotune/agent/pricing.py`, `autotune/agent/state.py` (`update_cost`
 - **IAM scoping** — Replaced `resources: ["*"]` with IDP-stack-scoped ARNs for S3, DynamoDB, Lambda, SQS. Removed unused `DeleteItem` and `s3:DeleteObject` from own-resource policies.
 - **Fixed status overwrite bug** — Agent setting `status=complete` then calling another tool caused `OptimizationCancelled` to propagate as generic `Exception`, overwriting status to `failed`. Fix: `except Exception` branch now checks `is_terminal()` first. Also added docstring warning that `status='complete'` must be the last tool call.
 
-## Priority 4: Automatic Optimization Log Updates
+## Priority 4: Investigate Multi-Class Discovery Quality
+
+**What:** `run_multi_class_discovery` passes ground truth to `Discovery.discover_multi_class()`, but the returned schemas often don't match the ground truth structure (e.g., flat properties instead of nested arrays, wrong field groupings). This is an IDP service-level issue — the discovery model isn't using the GT effectively.
+
+**Action:** Send to IDP service team to investigate. The `Discovery.discover()` method receives a `ground_truth_path` but the output schema diverges significantly from the GT structure.
+
+**Observed:** `davids-test-dataset` with 9 classes — GLOSSARY, BANK_CHECK, SHIFT_SCHEDULE all had structural mismatches between discovered schema and ground truth.
+
+## Priority 5: Automatic Optimization Log Updates
 
 **What:** Agent frequently forgets to update OPTIMIZATION-LOG.md.
 
