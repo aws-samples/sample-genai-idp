@@ -149,14 +149,19 @@ def upload_config(config_path: str, config_version: str, description: str) -> st
 
     Writes directly to DynamoDB, completes in seconds.
 
+    IMPORTANT: Config version names MUST include the test set name as a prefix,
+    e.g. 'davids-test-set-v3', 'realkie-fcc-v7'. Short names like 'v3' are rejected.
+
     Args:
         config_path: Path to config YAML file.
-        config_version: Version name (e.g., 'v1', 'v2').
+        config_version: Version name (e.g., 'davids-test-set-v3', 'realkie-fcc-v7').
         description: Description of what changed in this version.
 
     Returns:
         JSON with status, stdout, stderr.
     """
+    if len(config_version) < 5:
+        return json.dumps({"error": f"Config version name '{config_version}' is too short. Include the test set name as prefix, e.g. 'davids-test-set-v3'."})
     _auto_update_status("configuring", f"Uploading config {config_version}")
     client = _get_client()
     result = client.upload_config(config_path, config_version, description)
