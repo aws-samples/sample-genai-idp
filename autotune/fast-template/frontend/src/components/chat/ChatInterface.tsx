@@ -149,7 +149,7 @@ export default function ChatInterface() {
 
   // 1s tick for heartbeat age display
   useEffect(() => {
-    if (agentState?.status !== "running") return
+    if (!agentState?.status || ["complete", "failed", "cancelled"].includes(String(agentState.status))) return
     const t = setInterval(() => setNow(Date.now()), 1000)
     return () => clearInterval(t)
   }, [agentState?.status])
@@ -179,11 +179,12 @@ export default function ChatInterface() {
 
   // Poll agent stream (JSONL)
   useEffect(() => {
-    if (!stateApiUrl || !currentSessionId || !agentState || !["running", "complete", "failed", "cancelled"].includes(String(agentState.status))) return
+    if (!stateApiUrl || !currentSessionId || !agentState?.status) return
     const idToken = auth.user?.id_token
     if (!idToken) return
 
     let active = true
+    const isTerminal = ["complete", "failed", "cancelled"].includes(String(agentState.status))
     const poll = async () => {
       try {
         const resp = await fetch(`${stateApiUrl}stream?sessionId=${currentSessionId}&offset=${streamOffsetRef.current}`, {
@@ -200,9 +201,8 @@ export default function ChatInterface() {
       } catch { /* ignore */ }
     }
     poll()
-    const isRunning = agentState.status === "running"
-    const interval = setInterval(poll, isRunning ? 3000 : 10000)
-    if (!isRunning) {
+    const interval = setInterval(poll, isTerminal ? 10000 : 3000)
+    if (isTerminal) {
       setTimeout(() => { if (active) clearInterval(interval) }, 5000)
     }
     return () => { active = false; clearInterval(interval) }
@@ -210,11 +210,12 @@ export default function ChatInterface() {
 
   // Poll optimization log
   useEffect(() => {
-    if (!stateApiUrl || !currentSessionId || !agentState || !["running", "complete", "failed", "cancelled"].includes(String(agentState.status))) return
+    if (!stateApiUrl || !currentSessionId || !agentState?.status) return
     const idToken = auth.user?.id_token
     if (!idToken) return
 
     let active = true
+    const isTerminal = ["complete", "failed", "cancelled"].includes(String(agentState.status))
     const poll = async () => {
       try {
         const resp = await fetch(`${stateApiUrl}log?sessionId=${currentSessionId}`, {
@@ -227,9 +228,8 @@ export default function ChatInterface() {
       } catch { /* ignore */ }
     }
     poll()
-    const isRunning = agentState.status === "running"
-    const interval = setInterval(poll, isRunning ? 5000 : 15000)
-    if (!isRunning) {
+    const interval = setInterval(poll, isTerminal ? 15000 : 5000)
+    if (isTerminal) {
       setTimeout(() => { if (active) clearInterval(interval) }, 10000)
     }
     return () => { active = false; clearInterval(interval) }
@@ -422,23 +422,22 @@ export default function ChatInterface() {
               {stateApiUrl && (
                 <div className="flex-none px-4 py-2 border-b bg-white/80">
                   <div className="max-w-4xl mx-auto flex items-center gap-3">
-                    {agentState && (
+                    {agentState && (() => {
+                      const status = String(agentState.status ?? "unknown")
+                      const isTerminal = ["complete", "failed", "cancelled"].includes(status)
+                      const heartbeatAge = agentState.last_heartbeat_at ? now - new Date(String(agentState.last_heartbeat_at)).getTime() : 0
+                      const isStale = !isTerminal && heartbeatAge > 120000
+                      const color = status === "failed" ? "text-red-600"
+                        : status === "complete" ? "text-blue-600"
+                        : status === "cancelled" ? "text-yellow-600"
+                        : isStale ? "text-yellow-600"
+                        : "text-green-600"
+                      return (
                       <div className="text-xs text-gray-500 flex items-center gap-2 flex-wrap">
-                        <span className={`font-medium ${
-                          agentState.status === "running"
-                            ? (agentState.last_heartbeat_at && (Date.now() - new Date(String(agentState.last_heartbeat_at)).getTime()) > 120000)
-                              ? "text-yellow-600"
-                              : "text-green-600"
-                            : agentState.status === "failed" ? "text-red-600"
-                            : agentState.status === "complete" ? "text-blue-600"
-                            : "text-yellow-600"
-                        }`}>
-                          {agentState.status === "running" && agentState.last_heartbeat_at && (Date.now() - new Date(String(agentState.last_heartbeat_at)).getTime()) > 120000
-                            ? "POSSIBLY STALLED"
-                            : String(agentState.status ?? "unknown").toUpperCase()}
+                        <span className={`font-medium ${color}`}>
+                          {isStale ? "POSSIBLY STALLED" : status.toUpperCase()}
                         </span>
-                        {agentState.phase && <span>· {String(agentState.phase)}</span>}
-                        {agentState.phase_detail && <span>— {String(agentState.phase_detail)}</span>}
+                        {agentState.status_detail && <span>— {String(agentState.status_detail)}</span>}
                         {agentState.iteration != null && <span>· Iteration {String(agentState.iteration)}/{String(agentState.max_iterations ?? "?")}</span>}
                         {agentState.best_accuracy != null && Number(agentState.best_accuracy) > 0 && (
                           <span>· Best: {String(agentState.best_accuracy)}%</span>
@@ -446,12 +445,13 @@ export default function ChatInterface() {
                         {(Number(agentState.agent_cost_usd || 0) > 0 || Number(agentState.eval_cost_usd || 0) > 0) && (
                           <span>· Cost: ${(Number(agentState.agent_cost_usd || 0) + Number(agentState.eval_cost_usd || 0)).toFixed(2)} (agent ${Number(agentState.agent_cost_usd || 0).toFixed(2)} + eval ${Number(agentState.eval_cost_usd || 0).toFixed(2)})</span>
                         )}
-                        {agentState.status === "running" && agentState.last_heartbeat_at && (() => {
-                          const ago = Math.floor((now - new Date(String(agentState.last_heartbeat_at)).getTime()) / 1000)
+                        {!isTerminal && agentState.last_heartbeat_at && (() => {
+                          const ago = Math.floor(heartbeatAge / 1000)
                           return <span>· ♥ {ago}s ago</span>
                         })()}
                       </div>
-                    )}
+                      )
+                    })()}
                     <div className="ml-auto flex gap-2">
                       {isResumable && (
                         <button
@@ -462,7 +462,7 @@ export default function ChatInterface() {
                           Resume
                         </button>
                       )}
-                      {agentState?.status === "running" && (
+                      {agentState && !["complete", "failed", "cancelled"].includes(String(agentState.status)) && (
                         <button
                           onClick={handleCancelOptimization}
                           className="px-3 py-1 text-xs bg-red-600 text-white rounded hover:bg-red-700 transition-colors"
@@ -508,7 +508,7 @@ export default function ChatInterface() {
                     <div className="space-y-1">
                       {renderedStream.length > 0 ? renderedStream : (
                         <p className="text-gray-400 text-center mt-8">
-                          {agentState?.status === "running" ? "Waiting for agent events..." : "No stream data available"}
+                          {agentState?.status && !["complete", "failed", "cancelled"].includes(String(agentState.status)) ? "Waiting for agent events..." : "No stream data available"}
                         </p>
                       )}
                       <div ref={streamEndRef} />
@@ -519,7 +519,7 @@ export default function ChatInterface() {
                         <pre className="whitespace-pre-wrap text-sm text-gray-800">{optimizationLog}</pre>
                       ) : (
                         <p className="text-gray-400 text-center mt-8">
-                          {agentState?.status === "running" ? "Waiting for optimization log..." : "No optimization log available"}
+                          {agentState?.status && !["complete", "failed", "cancelled"].includes(String(agentState.status)) ? "Waiting for optimization log..." : "No optimization log available"}
                         </p>
                       )}
                     </div>

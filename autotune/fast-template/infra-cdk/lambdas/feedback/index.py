@@ -46,11 +46,13 @@ def cancel_optimization() -> Dict[str, Any]:
     if not session_id:
         return {"error": "sessionId is required"}, 400
     try:
+        import time
+        now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         table.update_item(
             Key={"session_id": session_id},
-            UpdateExpression="SET #s = :c",
+            UpdateExpression="SET #s = :c, status_detail = :d, updated_at = :t",
             ExpressionAttributeNames={"#s": "status"},
-            ExpressionAttributeValues={":c": "cancelled"},
+            ExpressionAttributeValues={":c": "cancelled", ":d": "Cancelled by user", ":t": now},
         )
         return {"success": True, "sessionId": session_id, "status": "cancelled"}
     except Exception as e:
@@ -139,7 +141,7 @@ def get_log() -> Dict[str, Any]:
 @app.get("/runs")
 def list_runs() -> Dict[str, Any]:
     """List all optimization runs, most recent first."""
-    projection = "session_id, #s, test_set_id, best_accuracy, iteration, started_at, updated_at, phase, phase_detail, optimization_guidance"
+    projection = "session_id, #s, status_detail, test_set_id, best_accuracy, iteration, started_at, updated_at, optimization_guidance"
     try:
         items = []
         kwargs = {

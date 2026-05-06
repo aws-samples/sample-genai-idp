@@ -1,6 +1,6 @@
 "use client"
 
-import { Activity, CheckCircle, XCircle, AlertTriangle, Plus, Clock } from "lucide-react"
+import { Activity, CheckCircle, XCircle, AlertTriangle, Plus } from "lucide-react"
 import { RunSummary } from "./types"
 import {
   Sidebar,
@@ -23,7 +23,6 @@ type ChatSidebarProps = {
 }
 
 const STATUS_CONFIG: Record<string, { icon: typeof Activity; color: string }> = {
-  running: { icon: Activity, color: "text-green-600" },
   complete: { icon: CheckCircle, color: "text-blue-600" },
   failed: { icon: XCircle, color: "text-red-600" },
   cancelled: { icon: AlertTriangle, color: "text-yellow-600" },
@@ -44,7 +43,7 @@ export function ChatSidebar({ runs, currentSessionId, onRunSelect, onNewChat }: 
           <SidebarGroupContent>
             <SidebarMenu>
               {runs.map(run => {
-                const cfg = STATUS_CONFIG[run.status] ?? { icon: Clock, color: "text-gray-400" }
+                const cfg = STATUS_CONFIG[run.status] ?? { icon: Activity, color: "text-green-600" }
                 const Icon = cfg.icon
                 const shortId = run.session_id.slice(0, 8)
                 const accuracy = run.best_accuracy != null && Number(run.best_accuracy) > 0

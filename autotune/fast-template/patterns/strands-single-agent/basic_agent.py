@@ -35,7 +35,7 @@ from utils.auth import extract_user_id_from_context
 
 from code_interpreter_tools import execute_python_analysis
 from idpac_tools import ALL_TOOLS as IDPAC_TOOLS, seed_eval_cost
-from optimization_state import OptimizationState, STATUS_RUNNING, STATUS_COMPLETE, STATUS_FAILED
+from optimization_state import OptimizationState, TERMINAL_STATUSES
 from optimization_hooks import CancelCheckHook, CostTrackingHook, FileReadSafetyHook, OptimizationCancelled, OptimizationLoopHook
 
 logger = logging.getLogger(__name__)
@@ -362,16 +362,13 @@ def _run_agent_thread(user_id: str, session_id: str, state: OptimizationState,
 
     try:
         asyncio.run(_run())
-        if state.get_status() == STATUS_RUNNING:
-            state.set_status(STATUS_COMPLETE)
-            state.update_phase("complete", "Optimization finished")
+        if not state.is_terminal():
+            state.set_status("complete", "Optimization finished")
     except OptimizationCancelled:
-        logger.info("Agent stopped — optimization cancelled by user")
-        # Status already set to "cancelled" by the hook
+        logger.info("Agent stopped — optimization in terminal state")
     except Exception as e:
         logger.exception("Agent run failed")
-        state.set_status(STATUS_FAILED)
-        state.update_phase("failed", str(e)[:500])
+        state.set_status("failed", str(e)[:500])
     finally:
         # Final sync of whatever we have
         if s3 and s3_bucket:
@@ -406,9 +403,8 @@ async def invocations(payload, context: RequestContext):
         return
 
     if is_resume:
-        # Resume: don't re-initialize — just flip status back to running
-        state.set_status(STATUS_RUNNING)
-        state.update_phase("resuming", "Resuming after interruption")
+        # Resume: don't re-initialize — just flip status back to active
+        state.set_status("resuming", "Resuming after interruption")
     else:
         state.initialize(test_set_id, optimization_guidance, MAX_ITERATIONS)
 

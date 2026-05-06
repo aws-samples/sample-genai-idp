@@ -3,11 +3,10 @@
 
 """Optimization state tracking via DynamoDB (control plane).
 
-Provides a thin wrapper around a DynamoDB table for tracking optimization
-run status, phase, and metrics. Read by hooks (cancel check) and frontend
-(progress polling). Written by the agent and externally for cancel.
-
-See autotune/planning-docs/full-autonomy-research.md section 6 for architecture.
+Single `status` field controls both lifecycle and UI display.
+Terminal statuses (agent stops): complete, failed, cancelled
+Active statuses (agent runs): initializing, evaluating, analyzing, configuring,
+    discovering, downloading, finalizing, resuming
 """
 
 import logging
@@ -19,10 +18,7 @@ import boto3
 
 logger = logging.getLogger(__name__)
 
-STATUS_RUNNING = "running"
-STATUS_CANCELLED = "cancelled"
-STATUS_COMPLETE = "complete"
-STATUS_FAILED = "failed"
+TERMINAL_STATUSES = frozenset({"complete", "failed", "cancelled"})
 
 
 class OptimizationState:
@@ -42,74 +38,52 @@ class OptimizationState:
         max_iterations: int = 10,
     ) -> None:
         """Create the initial state item for a new optimization run."""
-        try:
-            self._table.put_item(
-                Item={
-                    "session_id": self.session_id,
-                    "status": STATUS_RUNNING,
-                    "phase": "initializing",
-                    "phase_detail": "Starting optimization run",
-                    "iteration": 0,
-                    "max_iterations": max_iterations,
-                    "best_accuracy": 0,
-                    "best_config_version": "",
-                    "current_config_version": "",
-                    "test_set_id": test_set_id,
-                    "optimization_guidance": optimization_guidance,
-                    "started_at": _now(),
-                    "updated_at": _now(),
-                    "last_heartbeat_at": _now(),
-                }
-            )
-        except Exception:
-            logger.exception("Failed to initialize optimization state")
-
-    def is_cancelled(self) -> bool:
-        """Check if the run has been cancelled. Used by hooks."""
-        return self.get_status() == STATUS_CANCELLED
+        self._table.put_item(
+            Item={
+                "session_id": self.session_id,
+                "status": "initializing",
+                "status_detail": "Starting optimization run",
+                "iteration": 0,
+                "max_iterations": max_iterations,
+                "best_accuracy": 0,
+                "best_config_version": "",
+                "current_config_version": "",
+                "test_set_id": test_set_id,
+                "optimization_guidance": optimization_guidance,
+                "started_at": _now(),
+                "updated_at": _now(),
+                "last_heartbeat_at": _now(),
+            }
+        )
 
     def get_status(self) -> str:
-        """Read just the status field. Returns 'unknown' on error."""
-        try:
-            resp = self._table.get_item(
-                Key={"session_id": self.session_id},
-                ProjectionExpression="#s",
-                ExpressionAttributeNames={"#s": "status"},
-            )
-            return resp.get("Item", {}).get("status", "unknown")
-        except Exception:
-            logger.exception("Failed to read optimization status")
-            return "unknown"
+        """Read the status field."""
+        resp = self._table.get_item(
+            Key={"session_id": self.session_id},
+            ProjectionExpression="#s",
+            ExpressionAttributeNames={"#s": "status"},
+        )
+        return resp.get("Item", {}).get("status", "unknown")
+
+    def is_terminal(self) -> bool:
+        """Check if the run is in a terminal state (complete/failed/cancelled)."""
+        return self.get_status() in TERMINAL_STATUSES
 
     def get_state(self) -> dict:
-        """Read the full state item. Returns empty dict on error."""
-        try:
-            resp = self._table.get_item(Key={"session_id": self.session_id})
-            return resp.get("Item", {})
-        except Exception:
-            logger.exception("Failed to read optimization state")
-            return {}
+        """Read the full state item."""
+        resp = self._table.get_item(Key={"session_id": self.session_id})
+        return resp.get("Item", {})
 
-    def set_status(self, status: str) -> None:
-        """Update the status field (use STATUS_* constants)."""
+    def set_status(self, status: str, detail: str = "") -> None:
+        """Set the status and optional detail."""
         self._update_expr(
-            "SET #s = :s, updated_at = :t",
-            {":s": status, ":t": _now()},
+            "SET #s = :s, status_detail = :d, updated_at = :t",
+            {":s": status, ":d": detail, ":t": _now()},
             {"#s": "status"},
         )
 
-    def update_phase(self, phase: str, phase_detail: str = "") -> None:
-        """Update phase and phase_detail."""
-        self._update_expr(
-            "SET phase = :p, phase_detail = :d, updated_at = :t",
-            {":p": phase, ":d": phase_detail, ":t": _now()},
-        )
-
     def heartbeat(self) -> None:
-        """Touch last_heartbeat_at for stale session detection.
-
-        Separate from updated_at, which tracks the last agent/tool state change.
-        """
+        """Touch last_heartbeat_at for stale session detection."""
         self._update_expr("SET last_heartbeat_at = :t", {":t": _now()})
 
     def update_metrics(
@@ -165,17 +139,14 @@ class OptimizationState:
         self, expr: str, values: dict, names: Optional[dict] = None
     ) -> None:
         """Run an UpdateItem with the given expression."""
-        try:
-            kwargs = {
-                "Key": {"session_id": self.session_id},
-                "UpdateExpression": expr,
-                "ExpressionAttributeValues": values,
-            }
-            if names:
-                kwargs["ExpressionAttributeNames"] = names
-            self._table.update_item(**kwargs)
-        except Exception:
-            logger.exception("Failed to update optimization state")
+        kwargs = {
+            "Key": {"session_id": self.session_id},
+            "UpdateExpression": expr,
+            "ExpressionAttributeValues": values,
+        }
+        if names:
+            kwargs["ExpressionAttributeNames"] = names
+        self._table.update_item(**kwargs)
 
 
 def _now() -> str:

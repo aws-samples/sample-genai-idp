@@ -3,10 +3,8 @@
 
 """Strands hooks for autonomous optimization loop and cancel checking.
 
-CancelCheckHook: Checks DynamoDB before every tool call; cancels if externally cancelled.
+CancelCheckHook: Checks DynamoDB before every tool call; stops if terminal.
 OptimizationLoopHook: Drives the optimization loop via AfterInvocationEvent.resume.
-
-See autotune/planning-docs/full-autonomy-research.md section 6 for architecture.
 """
 
 import logging
@@ -16,11 +14,11 @@ from strands.hooks import AfterInvocationEvent, AfterModelCallEvent, BeforeToolC
 from strands.hooks.registry import HookProvider, HookRegistry
 
 try:
-    from optimization_state import OptimizationState, STATUS_COMPLETE
+    from optimization_state import OptimizationState, TERMINAL_STATUSES
     from pricing import calculate_agent_cost
     from idpac_tools import get_eval_cost_usd, get_eval_seen_batches
 except ImportError:
-    from state import OptimizationState, STATUS_COMPLETE
+    from state import OptimizationState, TERMINAL_STATUSES
     from pricing import calculate_agent_cost
     from tools import get_eval_cost_usd, get_eval_seen_batches
 
@@ -28,30 +26,24 @@ logger = logging.getLogger(__name__)
 
 
 class OptimizationCancelled(Exception):
-    """Raised when the user cancels the optimization run."""
+    """Raised when the optimization run is stopped (cancelled, complete, or failed)."""
     pass
 
 
 class CancelCheckHook(HookProvider):
-    """Check DynamoDB for cancel signal before every tool call.
-
-    Raises OptimizationCancelled to immediately halt the agent.
-    """
+    """Check DynamoDB before every tool call. Raises OptimizationCancelled if terminal."""
 
     def __init__(self, state: OptimizationState):
         self.state = state
 
     def register_hooks(self, registry: HookRegistry, **kwargs) -> None:
-        registry.add_callback(BeforeToolCallEvent, self._check_cancel)
+        registry.add_callback(BeforeToolCallEvent, self._check)
 
-    def _check_cancel(self, event: BeforeToolCallEvent) -> None:
-        if self.state.is_cancelled():
-            logger.info("Optimization cancelled by user — raising to stop agent")
-            self.state.update_phase("cancelled", "Cancelled by user")
-            raise OptimizationCancelled("Optimization cancelled by user")
-        if self.state.get_status() == STATUS_COMPLETE:
-            logger.info("Optimization complete — raising to stop agent")
-            raise OptimizationCancelled("Optimization complete")
+    def _check(self, event: BeforeToolCallEvent) -> None:
+        if self.state.is_terminal():
+            status = self.state.get_status()
+            logger.info("Optimization in terminal state (%s) — raising to stop agent", status)
+            raise OptimizationCancelled(f"Optimization {status}")
 
 
 class FileReadSafetyHook(HookProvider):
@@ -108,43 +100,32 @@ class OptimizationLoopHook(HookProvider):
         registry.add_callback(AfterInvocationEvent, self._check_and_resume)
 
     def _check_and_resume(self, event: AfterInvocationEvent) -> None:
-        if self.state.is_cancelled():
-            logger.info("Optimization cancelled — not resuming")
-            return
-
-        status = self.state.get_status()
-        if status == STATUS_COMPLETE:
-            logger.info("Optimization already complete — not resuming")
+        if self.state.is_terminal():
+            logger.info("Optimization in terminal state — not resuming")
             return
 
         current = self.state.get_state()
         iteration = int(current.get("iteration", 0))
-        phase = current.get("phase", "")
+        status = current.get("status", "")
 
-        # Agent was finalizing and finished its turn — force complete if it didn't do it itself
-        if phase == "finalizing":
+        # Agent was finalizing and finished its turn — force complete
+        if status == "finalizing":
             logger.info("Finalizing turn complete — marking done")
-            self.state.set_status(STATUS_COMPLETE)
-            self.state.update_phase("complete", "Optimization finished")
+            self.state.set_status("complete", "Optimization finished")
             return
 
         # Max iterations reached — give agent one final turn to summarize
         if iteration >= self.max_iterations:
             logger.info("Max iterations (%d) reached — giving final turn", self.max_iterations)
-            self.state.update_phase("finalizing", "Writing final summary")
+            self.state.set_status("finalizing", "Writing final summary")
             event.resume = (
                 "You have reached the maximum number of iterations. "
                 "Download and review results from your best run, write a final "
                 "summary to OPTIMIZATION-LOG.md, then call "
-                "update_optimization_state(phase='complete', phase_detail='...'). "
+                "update_optimization_state(status='complete', status_detail='...'). "
                 "Do NOT launch new evaluations."
             )
             return
-
-        # Accuracy plateau detection
-        # TODO: Track no_improvement_count in DynamoDB once the agent reports
-        # accuracy per iteration. For now, rely on the agent's own judgment
-        # via OPTIMIZATION-LOG.md and prompt instructions.
 
         # Continue optimization
         best_accuracy = current.get("best_accuracy", 0)

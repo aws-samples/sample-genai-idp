@@ -47,12 +47,12 @@ def seed_eval_cost(value: float, seen_batches: str = "") -> None:
         _eval_cost_seen_batches.update(seen_batches.split(","))
 
 
-def _auto_update_state(phase: str, phase_detail: str) -> None:
-    """Best-effort DynamoDB state update from within tools."""
+def _auto_update_status(status: str, detail: str) -> None:
+    """Best-effort DynamoDB status update from within tools."""
     try:
         state = _get_optimization_state()
         if state:
-            state.update_phase(phase, phase_detail)
+            state.set_status(status, detail)
     except Exception:
         pass  # Never let state updates break tool execution
 
@@ -157,7 +157,7 @@ def upload_config(config_path: str, config_version: str, description: str) -> st
     Returns:
         JSON with status, stdout, stderr.
     """
-    _auto_update_state("configuring", f"Uploading config {config_version}")
+    _auto_update_status("configuring", f"Uploading config {config_version}")
     client = _get_client()
     result = client.upload_config(config_path, config_version, description)
     return json.dumps(result, indent=2)
@@ -333,12 +333,12 @@ def run_evaluation(test_set_id: str, context: str, config_version: str, n_files:
     Returns:
         JSON with batch_id, status, stdout, stderr.
     """
-    # Block new evaluations during finalizing phase
+    # Block new evaluations during finalizing status
     state = _get_optimization_state()
     if state:
         current = state.get_state()
-        if current.get("phase") == "finalizing":
-            return json.dumps({"error": "Cannot launch evaluations during finalizing phase. Write your summary and call update_optimization_state(phase='complete')."})
+        if current.get("status") == "finalizing":
+            return json.dumps({"error": "Cannot launch evaluations during finalizing. Write your summary and call update_optimization_state(status='complete')."})
 
     if n_files == 0:
         print(f"Running evaluation on all files with config '{config_version}'")
@@ -354,7 +354,7 @@ def run_evaluation(test_set_id: str, context: str, config_version: str, n_files:
             )
     else:
         print(f"Running evaluation with {n_files} file(s) with config '{config_version}'")
-    _auto_update_state("evaluating", f"Running evaluation {config_version}")
+    _auto_update_status("evaluating", f"Running evaluation {config_version}")
     client = _get_client()
     result = client.run_evaluation(test_set_id, context, config_version, n_files=n_files)
     return json.dumps(result, indent=2)
@@ -507,7 +507,7 @@ def run_inference(
     Returns:
         JSON with batch_id, status, stdout, stderr.
     """
-    _auto_update_state("evaluating", f"Running inference {config_version}")
+    _auto_update_status("evaluating", f"Running inference {config_version}")
     client = _get_client()
     result = client.run_inference(
         documents_dir, config_version, file_pattern=file_pattern,
@@ -562,7 +562,7 @@ def analyze_dataset(dataset_path: str) -> str:
     Returns:
         Dataset analysis summary including mode, classes, and any validation errors.
     """
-    _auto_update_state("analyzing", "Analyzing dataset structure")
+    _auto_update_status("analyzing", "Analyzing dataset structure")
     from idpac import DatasetAnalyzer
 
     analyzer = DatasetAnalyzer(dataset_path)
@@ -632,7 +632,7 @@ def run_discovery(
     Returns:
         The discovered JSON schema as a string.
     """
-    _auto_update_state("discovering", "Running schema discovery")
+    _auto_update_status("discovering", "Running schema discovery")
     from idpac import Discovery
 
     region = os.environ.get("AWS_DEFAULT_REGION", "us-east-1")
@@ -660,7 +660,7 @@ def run_multi_class_discovery(dataset_path: str) -> str:
     Returns:
         Summary of discovered classes and path where config was saved.
     """
-    _auto_update_state("discovering", "Running multi-class discovery")
+    _auto_update_status("discovering", "Running multi-class discovery")
     from idpac import DatasetAnalyzer, Discovery, PacketSplittingDiscovery
 
     scratch = os.environ["AUTOTUNE_SCRATCH_DIR"]
@@ -715,8 +715,8 @@ def _get_optimization_state():
 
 @tool
 def update_optimization_state(
-    phase: str,
-    phase_detail: str = "",
+    status: str,
+    status_detail: str = "",
     best_accuracy: Optional[float] = None,
     best_config_version: Optional[str] = None,
     best_cost_per_page_usd: Optional[float] = None,
@@ -724,15 +724,15 @@ def update_optimization_state(
 ) -> str:
     """Update the optimization state in DynamoDB so the frontend can show progress.
 
-    Call this to report progress for phases not covered by built-in tool state
-    updates (e.g., during manual analysis or when making decisions).
+    Call this to report progress not covered by built-in tool status updates
+    (e.g., during manual analysis or when making decisions).
 
     Note: Iteration count is managed automatically (incremented on each full
     evaluation run with n_files=0). You do not need to track iterations.
 
     Args:
-        phase: Current phase (e.g. "evaluating", "analyzing", "configuring", "discovering", "complete")
-        phase_detail: Human-readable detail (e.g. "Analyzing field-level accuracy...")
+        status: Current status (e.g. "evaluating", "analyzing", "configuring", "discovering", "complete")
+        status_detail: Human-readable detail (e.g. "Analyzing field-level accuracy...")
         best_accuracy: Best accuracy so far (if changed)
         best_config_version: Version name of best config (if changed)
         best_cost_per_page_usd: Cost per page in USD of the best config (e.g. 0.09 means $0.09/page)
@@ -741,9 +741,7 @@ def update_optimization_state(
     state = _get_optimization_state()
     if not state:
         return "No optimization state available (AUTOTUNE_SESSION_ID not set)"
-    state.update_phase(phase, phase_detail)
-    if phase == "complete":
-        state.set_status("complete")
+    state.set_status(status, status_detail)
     if best_accuracy is not None and best_config_version is not None:
         current = state.get_state()
         state.update_metrics(
@@ -753,7 +751,7 @@ def update_optimization_state(
             current_config_version=current_config_version or "",
             best_cost_per_page_usd=best_cost_per_page_usd or 0.0,
         )
-    return f"State updated: phase={phase}, detail={phase_detail}"
+    return f"State updated: status={status}, detail={status_detail}"
 
 
 @tool
@@ -817,7 +815,7 @@ def download_test_set(test_set_id: str) -> str:
     Returns:
         JSON with output directory path and file counts.
     """
-    _auto_update_state("downloading", f"Downloading test set {test_set_id}")
+    _auto_update_status("downloading", f"Downloading test set {test_set_id}")
     scratch = os.environ["AUTOTUNE_SCRATCH_DIR"]
     output_dir = os.path.join(scratch, "datasets", test_set_id)
     os.makedirs(output_dir, exist_ok=True)
