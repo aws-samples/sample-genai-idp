@@ -132,7 +132,7 @@ Relevant to: optimization loop design, tool design, error recovery, guardrails, 
 ## Other TODO items
 
 Tracked in `AUTOTUNE-DEVELOPMENT-PLAN.md` section 6.8:
-- Test set ID dropdown in UI
+- ~~Test set ID dropdown in UI~~ (deprioritized — will use AppSync when integrated into main IDP UI)
 - Bundle IDP source code in container
 - SummarizingConversationManager
 - Doom loop detection
