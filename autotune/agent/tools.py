@@ -590,10 +590,10 @@ def analyze_dataset(dataset_path: str) -> str:
     classes = analyzer.get_class_names()
     lines.append(f"Classes ({len(classes)}): {', '.join(classes)}")
 
-    # Samples per class
-    samples = analyzer.get_samples_by_class(n=3)
-    for cls, paths in samples.items():
-        lines.append(f"  {cls}: {len(paths)} sample(s)")
+    # Samples per class (get all to count, but only use 3 for discovery)
+    all_samples = analyzer.get_samples_by_class(n=9999)
+    for cls, paths in all_samples.items():
+        lines.append(f"  {cls}: {len(paths)} file(s)")
 
     # Validation
     errors = analyzer.validate_ground_truth_format()
