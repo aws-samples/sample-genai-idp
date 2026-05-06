@@ -30,10 +30,14 @@ class ProactiveContextManager(SummarizingConversationManager):
 
     def apply_management(self, agent, **kwargs):
         """After each agent cycle, check if we've crossed the threshold."""
-        latest_context = agent.event_loop_metrics.latest_context_size
-        if not latest_context:
+        invocations = agent.event_loop_metrics.agent_invocations
+        if not invocations or not invocations[-1].cycles:
             return
-        pct = latest_context / CONTEXT_WINDOW_TOKENS * 100
+        last_usage = invocations[-1].cycles[-1].usage
+        context_tokens = last_usage.get("inputTokens", 0) + last_usage.get("cacheReadInputTokens", 0)
+        if context_tokens == 0:
+            return
+        pct = context_tokens / CONTEXT_WINDOW_TOKENS * 100
 
         if pct >= self.threshold_pct:
             logger.info(

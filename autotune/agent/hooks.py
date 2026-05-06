@@ -84,9 +84,14 @@ class CostTrackingHook(HookProvider):
         cr = usage.get("cacheReadInputTokens", 0)
         cw = usage.get("cacheWriteInputTokens", 0)
         agent_cost = calculate_agent_cost(self.model_id, it, ot, cr, cw)
-        # latest_context_size = inputTokens from the most recent model call (= actual context fill)
-        latest_context = self.metrics.latest_context_size or 0
-        context_pct = latest_context / self.CONTEXT_WINDOW_TOKENS * 100
+        # Context window % = last call's full input context (non-cached + cached)
+        # Bedrock reports inputTokens as non-cached only; total context = inputTokens + cacheReadInputTokens
+        last_cycle_usage = self._get_last_cycle_usage()
+        if last_cycle_usage:
+            context_tokens = last_cycle_usage.get("inputTokens", 0) + last_cycle_usage.get("cacheReadInputTokens", 0)
+        else:
+            context_tokens = 0
+        context_pct = context_tokens / self.CONTEXT_WINDOW_TOKENS * 100
         self.state.update_cost(
             agent_input_tokens=it, agent_output_tokens=ot,
             agent_cache_read_tokens=cr, agent_cache_write_tokens=cw,
@@ -94,6 +99,13 @@ class CostTrackingHook(HookProvider):
             eval_seen_batches=get_eval_seen_batches(),
             context_window_pct=context_pct,
         )
+
+    def _get_last_cycle_usage(self):
+        """Get usage dict from the most recent cycle."""
+        invocations = self.metrics.agent_invocations
+        if invocations and invocations[-1].cycles:
+            return invocations[-1].cycles[-1].usage
+        return None
 
 
 class OptimizationLoopHook(HookProvider):
