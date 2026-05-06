@@ -732,6 +732,10 @@ def update_optimization_state(
     Call this to report progress not covered by built-in tool status updates
     (e.g., during manual analysis or when making decisions).
 
+    IMPORTANT: Setting status='complete' immediately terminates the optimization loop.
+    No further tool calls will execute after this. Always finish ALL other work first
+    (writing to OPTIMIZATION-LOG.md, copying configs, etc.) BEFORE setting status to complete.
+
     Note: Iteration count is managed automatically (incremented on each full
     evaluation run with n_files=0). You do not need to track iterations.
 

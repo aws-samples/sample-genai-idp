@@ -369,7 +369,8 @@ def _run_agent_thread(user_id: str, session_id: str, state: OptimizationState,
         logger.info("Agent stopped — optimization in terminal state")
     except Exception as e:
         logger.exception("Agent run failed")
-        state.set_status("failed", str(e)[:500])
+        if not state.is_terminal():
+            state.set_status("failed", str(e)[:500])
     finally:
         # Final sync of whatever we have
         if s3 and s3_bucket:
