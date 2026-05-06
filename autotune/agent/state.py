@@ -129,7 +129,7 @@ class OptimizationState:
                 ":a": str(best_accuracy),
                 ":b": best_config_version,
                 ":c": current_config_version,
-                ":cpp": str(round(best_cost_per_page_usd, 4)),
+                ":cpp": str(round(best_cost_per_page_usd, 5)),
                 ":t": _now(),
             },
         )
