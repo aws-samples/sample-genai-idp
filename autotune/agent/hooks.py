@@ -91,10 +91,10 @@ class CostTrackingHook(HookProvider):
 class OptimizationLoopHook(HookProvider):
     """Drive the optimization loop and enforce stopping criteria."""
 
-    def __init__(self, state: OptimizationState, max_iterations: int = 10, patience: int = 3):
+    def __init__(self, state: OptimizationState, max_iterations: int = 10, max_cost_usd: float = 500.0):
         self.state = state
         self.max_iterations = max_iterations
-        self.patience = patience
+        self.max_cost_usd = max_cost_usd
 
     def register_hooks(self, registry: HookRegistry, **kwargs) -> None:
         registry.add_callback(AfterInvocationEvent, self._check_and_resume)
@@ -120,6 +120,20 @@ class OptimizationLoopHook(HookProvider):
             self.state.set_status("finalizing", "Writing final summary")
             event.resume = (
                 "You have reached the maximum number of iterations. "
+                "Download and review results from your best run, write a final "
+                "summary to OPTIMIZATION-LOG.md, then call "
+                "update_optimization_state(status='complete', status_detail='...'). "
+                "Do NOT launch new evaluations."
+            )
+            return
+
+        # Max cost reached — give agent one final turn to summarize
+        total_cost = float(current.get("agent_cost_usd", 0)) + float(current.get("eval_cost_usd", 0))
+        if total_cost >= self.max_cost_usd:
+            logger.info("Max cost ($%.2f >= $%.2f) reached — giving final turn", total_cost, self.max_cost_usd)
+            self.state.set_status("finalizing", f"Cost limit reached (${total_cost:.2f})")
+            event.resume = (
+                f"You have reached the maximum cost limit (${total_cost:.2f} >= ${self.max_cost_usd:.2f}). "
                 "Download and review results from your best run, write a final "
                 "summary to OPTIMIZATION-LOG.md, then call "
                 "update_optimization_state(status='complete', status_detail='...'). "

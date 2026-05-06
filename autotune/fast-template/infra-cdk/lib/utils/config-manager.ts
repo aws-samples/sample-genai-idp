@@ -31,6 +31,8 @@ export interface AutotuneConfig {
   idp_stack_name: string
   /** Bedrock model ID for the optimization agent. */
   model_id: string
+  /** Maximum cost (USD) per optimization run before triggering stop. Default: 500. */
+  max_cost_usd?: number
 }
 
 export interface AppConfig {

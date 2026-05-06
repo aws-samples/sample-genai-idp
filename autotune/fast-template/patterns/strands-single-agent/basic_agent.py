@@ -51,6 +51,7 @@ AGENT_DIR = Path(__file__).parent
 # (known issue, reported April 2026). For now, all state lives on /tmp + S3 sync.
 SCRATCH_DIR = "/tmp/autotune-data"
 MAX_ITERATIONS = 10
+MAX_COST_USD = float(os.environ.get("AUTOTUNE_MAX_COST_USD", "500"))
 
 # S3 sync config
 SYNC_INTERVAL = 10  # seconds between background sync cycles (heartbeat + S3)
@@ -155,7 +156,7 @@ def _create_agent(user_id: str, session_id: str, state: OptimizationState,
     plugins = [AgentSkills(skills=str(skills_dir))] if skills_dir.exists() else []
     tools = IDPAC_TOOLS + [file_read, image_reader, execute_python_analysis]
     cost_hook = CostTrackingHook(state)
-    hooks = [CancelCheckHook(state), FileReadSafetyHook(), cost_hook, OptimizationLoopHook(state, max_iterations=MAX_ITERATIONS)]
+    hooks = [CancelCheckHook(state), FileReadSafetyHook(), cost_hook, OptimizationLoopHook(state, max_iterations=MAX_ITERATIONS, max_cost_usd=MAX_COST_USD)]
 
     agent = Agent(
         name="idp_autotune",
