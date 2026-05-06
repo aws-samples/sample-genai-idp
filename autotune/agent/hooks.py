@@ -84,7 +84,9 @@ class CostTrackingHook(HookProvider):
         cr = usage.get("cacheReadInputTokens", 0)
         cw = usage.get("cacheWriteInputTokens", 0)
         agent_cost = calculate_agent_cost(self.model_id, it, ot, cr, cw)
-        context_pct = (it + ot) / self.CONTEXT_WINDOW_TOKENS * 100 if self.CONTEXT_WINDOW_TOKENS else 0
+        # latest_context_size = inputTokens from the most recent model call (= actual context fill)
+        latest_context = self.metrics.latest_context_size or 0
+        context_pct = latest_context / self.CONTEXT_WINDOW_TOKENS * 100
         self.state.update_cost(
             agent_input_tokens=it, agent_output_tokens=ot,
             agent_cache_read_tokens=cr, agent_cache_write_tokens=cw,
