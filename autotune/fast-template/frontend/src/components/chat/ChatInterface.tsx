@@ -404,7 +404,7 @@ export default function ChatInterface() {
                 <h2 className="text-2xl font-bold text-gray-800">IDPAutoTune</h2>
                 <p className="text-gray-600 mt-2">Enter a test set ID and optional guidance to start an optimization run</p>
               </div>
-              <div className="px-4 mb-16 max-w-4xl mx-auto w-full space-y-3">
+              <div className="px-4 mb-16 max-w-full w-full space-y-3">
                 <input
                   type="text"
                   value={testSetId}
@@ -421,7 +421,7 @@ export default function ChatInterface() {
               {/* Status bar */}
               {stateApiUrl && (
                 <div className="flex-none px-4 py-2 border-b bg-white/80">
-                  <div className="max-w-4xl mx-auto flex items-center gap-3">
+                  <div className="max-w-full flex items-center gap-3">
                     {agentState && (() => {
                       const status = String(agentState.status ?? "unknown")
                       const isTerminal = ["complete", "failed", "cancelled"].includes(status)
@@ -480,7 +480,7 @@ export default function ChatInterface() {
 
               {/* Tab bar */}
               <div className="flex-none border-b bg-white/60">
-                <div className="max-w-4xl mx-auto flex">
+                <div className="max-w-full flex">
                   <button
                     onClick={() => setActiveTab("stream")}
                     className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
@@ -506,7 +506,7 @@ export default function ChatInterface() {
 
               {/* Content area */}
               <div className="grow overflow-hidden">
-                <div className="max-w-4xl mx-auto w-full h-full overflow-y-auto p-4">
+                <div className="max-w-full w-full h-full overflow-y-auto p-4">
                   {activeTab === "stream" ? (
                     <div className="space-y-1">
                       {renderedStream.length > 0 ? renderedStream : (
