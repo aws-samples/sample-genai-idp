@@ -4,9 +4,10 @@
 /**
  * IDPMonitor Widget — Recent Failures Table
  *
- * Simplified 4-column table: Document, Error Message, Time, Action.
- * The "Investigate" action triggers the onInvestigate callback which
- * the host app uses to open the TroubleshootModal.
+ * 5-column table: Document, Error Message, Stage, Time, Action.
+ * - "Troubleshoot" action triggers the onInvestigate callback which
+ *   the host app uses to open the TroubleshootModal.
+ * - "Reprocess" action triggers the onReprocess callback to retry processing.
  */
 
 import Box from '@cloudscape-design/components/box';
@@ -26,8 +27,10 @@ import type { FailedDocument, FailureMetrics } from '../../../types/monitoring';
 interface FailuresTableWidgetProps {
   failures: FailureMetrics | null | undefined;
   isLoading: boolean;
-  /** Called when user clicks "Investigate" on a failed document */
+  /** Called when user clicks "Troubleshoot" on a failed document */
   onInvestigate?: (documentId: string) => void;
+  /** Called when user clicks "Reprocess" on a failed document */
+  onReprocess?: (documentId: string) => void;
 }
 
 function formatDate(iso: string): string {
@@ -47,8 +50,10 @@ export function FailuresTableWidget({
   failures,
   isLoading,
   onInvestigate,
+  onReprocess,
 }: FailuresTableWidgetProps): JSX.Element {
   const items: FailedDocument[] = failures?.recentFailures ?? [];
+  const totalFailures = failures?.totalFailures ?? 0;
 
   const [filterText, setFilterText] = useState('');
   const [currentPageIndex, setCurrentPageIndex] = useState(1);
@@ -70,13 +75,17 @@ export function FailuresTableWidget({
   const startIndex = (currentPageIndex - 1) * pageSize;
   const pageItems = filtered.slice(startIndex, startIndex + pageSize);
 
+  // Build description text (consistent with other widgets)
+  const descriptionText = failures
+    ? `${totalFailures.toLocaleString()} failed document${totalFailures !== 1 ? 's' : ''}`
+    : undefined;
+
   return (
     <Container
       header={
         <Header
           variant="h2"
-          counter={failures ? `(${(failures.totalFailures ?? 0).toLocaleString()})` : undefined}
-          description="Recent document processing failures"
+          description={descriptionText}
         >
           Recent Failures
         </Header>
@@ -110,19 +119,19 @@ export function FailuresTableWidget({
                 cell: (r) => {
                   const parts = r.documentId.split('/');
                   const filename = parts.pop() ?? r.documentId;
-                  const batchPath = parts.join('/');
+                  const docClass = r.documentClass || '';
                   return (
                     <Box>
-                      <Box fontWeight="bold">{filename}</Box>
-                      {batchPath && (
+                      <Box>{filename}</Box>
+                      {docClass && (
                         <Box color="text-body-secondary" fontSize="body-s">
-                          {batchPath}
+                          {docClass}
                         </Box>
                       )}
                     </Box>
                   );
                 },
-                minWidth: 220,
+                minWidth: 200,
               },
               {
                 id: 'errorMessage',
@@ -130,15 +139,38 @@ export function FailuresTableWidget({
                 cell: (r) => {
                   const msg = r.errorMessage ?? r.errorCode ?? '—';
                   return (
-                    <span
-                      title={msg}
-                      style={{ fontSize: 13, color: '#545b64' }}
-                    >
-                      {msg.length > 80 ? msg.slice(0, 80) + '…' : msg}
+                    <Box>
+                      <span
+                        title={msg}
+                        style={{
+                          fontSize: 13,
+                          color: '#545b64',
+                          display: '-webkit-box',
+                          WebkitLineClamp: 2,
+                          WebkitBoxOrient: 'vertical',
+                          overflow: 'hidden',
+                          lineHeight: '1.4',
+                        }}
+                      >
+                        {msg}
+                      </span>
+                    </Box>
+                  );
+                },
+                minWidth: 260,
+              },
+              {
+                id: 'stage',
+                header: 'Stage',
+                cell: (r) => {
+                  const stage = r.stage || '—';
+                  return (
+                    <span style={{ fontSize: 13 }}>
+                      {stage}
                     </span>
                   );
                 },
-                minWidth: 280,
+                minWidth: 100,
               },
               {
                 id: 'time',
@@ -146,19 +178,26 @@ export function FailuresTableWidget({
                 cell: (r) => (
                   <span style={{ fontSize: 13 }}>{formatDate(r.failedAt)}</span>
                 ),
-                minWidth: 140,
+                minWidth: 130,
               },
               {
                 id: 'action',
                 header: 'Action',
                 cell: (r) => (
-                  <Button
-                    variant="inline-link"
-                    iconName="search"
-                    onClick={() => onInvestigate?.(r.documentId)}
-                  >
-                    Investigate
-                  </Button>
+                  <SpaceBetween size="xxs" direction="vertical">
+                    <Button
+                      variant="inline-link"
+                      onClick={() => onInvestigate?.(r.documentId)}
+                    >
+                      Troubleshoot
+                    </Button>
+                    <Button
+                      variant="inline-link"
+                      onClick={() => onReprocess?.(r.documentId)}
+                    >
+                      Reprocess
+                    </Button>
+                  </SpaceBetween>
                 ),
                 minWidth: 120,
               },

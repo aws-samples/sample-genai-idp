@@ -42,6 +42,7 @@ interface MonitoringPageProps {
   apiUrl?: string;
   apiKey?: string;
   onInvestigate?: (documentId: string) => void;
+  onReprocess?: (documentId: string) => void;
 }
 
 interface IDPMonitorUILib {
@@ -254,13 +255,21 @@ function createRemoteMonitoringPage(
 export const MonitoringShell: React.FC<MonitoringShellProps> = ({ stackName, className }) => {
   const { settings } = useSettingsContext();
 
-  // ── Troubleshoot modal state (for Investigate action in failures table) ───
+  // ── Troubleshoot modal state (for Troubleshoot action in failures table) ──
   const [troubleshootDocId, setTroubleshootDocId] = useState<string | null>(null);
   const [isTroubleshootVisible, setIsTroubleshootVisible] = useState(false);
 
   const handleInvestigate = useCallback((documentId: string) => {
     setTroubleshootDocId(documentId);
     setIsTroubleshootVisible(true);
+  }, []);
+
+  // ── Reprocess handler (for Reprocess action in failures table) ────────────
+  const handleReprocess = useCallback((documentId: string) => {
+    // TODO: Integrate with actual reprocessing API (e.g., Step Functions restart)
+    console.log('[MonitoringShell] Reprocess requested for document:', documentId);
+    // For now, show a confirmation in the console. Will be wired to the
+    // reprocessing API once available.
   }, []);
 
   // IDPMonitorUiUrl is the relative (or absolute) URL to the monitor UI bundle.
@@ -362,7 +371,7 @@ export const MonitoringShell: React.FC<MonitoringShellProps> = ({ stackName, cla
   return (
     <div className={className}>
       <Suspense fallback={<MonitoringLoadingSkeleton />} key={`remote-monitoring-${retryKey}`}>
-        <MonitoringComponent apiUrl={apiUrl} apiKey={apiKey} onInvestigate={handleInvestigate} />
+        <MonitoringComponent apiUrl={apiUrl} apiKey={apiKey} onInvestigate={handleInvestigate} onReprocess={handleReprocess} />
       </Suspense>
 
       {/* Troubleshoot Modal — opened by "Investigate" button in Recent Failures */}

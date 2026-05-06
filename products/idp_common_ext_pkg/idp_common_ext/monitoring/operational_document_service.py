@@ -421,9 +421,10 @@ class OperationalDocumentService:
                         "document_id": str,
                         "status": str,
                         "classification": str | None,
-                        "timestamp": str,          # queued_time or start_time
+                        "timestamp": str,          # completion_time or start_time
                         "num_pages": int,
                         "error_message": str | None,
+                        "stage": str | None,
                     }
                 ],
                 "total_failed": int,
@@ -438,7 +439,13 @@ class OperationalDocumentService:
         failed_docs = [d for d in docs if d.status == Status.FAILED]
 
         def _doc_timestamp(doc: Any) -> str:
-            return doc.queued_time or doc.start_time or ""
+            # Prefer completion_time (when failure occurred), fall back to others
+            return (
+                getattr(doc, "completion_time", "")
+                or getattr(doc, "queued_time", "")
+                or getattr(doc, "start_time", "")
+                or ""
+            )
 
         failed_docs.sort(key=_doc_timestamp, reverse=True)
         total_failed = len(failed_docs)
@@ -450,13 +457,60 @@ class OperationalDocumentService:
             if doc.sections:
                 classification = doc.sections[0].classification
 
+            # ── Extract error message from multiple sources ──────────────
             error_message = None
+            # 1. Check metering dict for error_message
             if isinstance(getattr(doc, "metering", None), dict):
                 error_message = doc.metering.get("error_message")
+            # 2. Check top-level error_message attribute
             if error_message is None:
                 top_level = getattr(doc, "error_message", None)
-                if isinstance(top_level, str):
+                if isinstance(top_level, str) and top_level:
                     error_message = top_level
+            # 3. Check raw DynamoDB item for common error fields
+            if error_message is None:
+                raw = getattr(doc, "raw", None) or {}
+                error_message = (
+                    raw.get("ErrorMessage")
+                    or raw.get("Error")
+                    or raw.get("FailureReason")
+                    or raw.get("StepFunctionError")
+                    or None
+                )
+            # 4. Check metering dict keys for step-level errors
+            if error_message is None and isinstance(
+                getattr(doc, "metering", None), dict
+            ):
+                for key, val in doc.metering.items():
+                    if isinstance(val, dict) and val.get("error"):
+                        error_message = val["error"]
+                        break
+
+            # ── Extract failed stage from metering or raw item ───────────
+            stage = None
+            raw = getattr(doc, "raw", None) or {}
+            # Check raw item for FailedStep / FailedStage
+            stage = raw.get("FailedStep") or raw.get("FailedStage") or None
+            # If not found, try to infer from metering keys with errors
+            if stage is None and isinstance(getattr(doc, "metering", None), dict):
+                for key, val in doc.metering.items():
+                    if isinstance(val, dict) and val.get("error"):
+                        # Key format: "StepName/lambda/duration" or just "StepName"
+                        stage = key.split("/")[0]
+                        break
+
+            # ── Determine best timestamp (when the failure occurred) ─────
+            timestamp = (
+                getattr(doc, "completion_time", "")
+                or getattr(doc, "queued_time", "")
+                or getattr(doc, "start_time", "")
+                or None
+            )
+            # Also check raw item for CompletionTime
+            if not timestamp:
+                timestamp = (
+                    raw.get("CompletionTime") or raw.get("WorkflowStartTime") or None
+                )
 
             failures.append(
                 {
@@ -467,9 +521,10 @@ class OperationalDocumentService:
                     if hasattr(doc.status, "value")
                     else str(doc.status),
                     "classification": classification,
-                    "timestamp": doc.queued_time or doc.start_time or None,
+                    "timestamp": timestamp,
                     "num_pages": doc.num_pages or 0,
                     "error_message": error_message,
+                    "stage": stage,
                 }
             )
 

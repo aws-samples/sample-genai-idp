@@ -394,7 +394,7 @@ def _transform_to_appsync_response(
                 ),
                 "errorMessage": f.get("errorMessage", ""),
                 "errorCode": "",
-                "stage": "",
+                "stage": f.get("stage", ""),
             }
             for f in failures_list
         ],

@@ -36,6 +36,7 @@ interface MonitoringLayoutProps {
   timeRange?: string;
   widgetVisibility: WidgetVisibilityMap;
   onInvestigate?: (documentId: string) => void;
+  onReprocess?: (documentId: string) => void;
 }
 
 export function MonitoringLayout({
@@ -44,6 +45,7 @@ export function MonitoringLayout({
   timeRange,
   widgetVisibility,
   onInvestigate,
+  onReprocess,
 }: MonitoringLayoutProps): JSX.Element {
   const allHidden = Object.values(widgetVisibility).every((v) => !v);
 
@@ -135,7 +137,7 @@ export function MonitoringLayout({
 
       {/* Row 5 — Recent Failures table (full width, last) */}
       {widgetVisibility.failuresTable && (
-        <FailuresTableWidget failures={dashboard.failures} isLoading={isLoading} onInvestigate={onInvestigate} />
+        <FailuresTableWidget failures={dashboard.failures} isLoading={isLoading} onInvestigate={onInvestigate} onReprocess={onReprocess} />
       )}
     </SpaceBetween>
   );

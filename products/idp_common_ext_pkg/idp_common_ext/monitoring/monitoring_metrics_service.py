@@ -574,7 +574,8 @@ class MonitoringMetricsService:
 
         Normalized output:
             [{"documentId": str, "status": str, "classification": str,
-              "timestamp": str, "numPages": int, "errorMessage": str}, ...]
+              "timestamp": str, "numPages": int, "errorMessage": str,
+              "stage": str | None}, ...]
         """
         if failures is None:
             return []
@@ -590,6 +591,7 @@ class MonitoringMetricsService:
                     "timestamp": item.get("timestamp"),
                     "numPages": item.get("num_pages", 0),
                     "errorMessage": item.get("error_message"),
+                    "stage": item.get("stage"),
                 }
             )
         return result
