@@ -131,12 +131,16 @@ The exception propagates up through `agent.stream_async()` and is caught by the 
 Runs after each agent invocation completes. Decides whether to continue:
 
 1. **Check cancel** — if cancelled, don't resume (let the agent exit).
-2. **Check max iterations** — if `iteration >= max_iterations`, set status to "complete" and resume with a final prompt asking the agent to write a summary and save the best config.
-3. **Otherwise** — resume with a prompt that includes current iteration count, best accuracy so far, and instruction to read OPTIMIZATION-LOG.md.
+2. **Check complete** — if status is already "complete", don't resume.
+3. **Check finalizing** — if `phase == "finalizing"`, the agent just finished its summary turn. Force `status=complete` and stop.
+4. **Check max iterations** — if `iteration >= max_iterations`, set `phase="finalizing"` (status stays "running") and resume with a final prompt telling the agent to write a summary. The agent gets one more turn to download results, write OPTIMIZATION-LOG.md, and call `update_optimization_state(phase="complete")`.
+5. **Otherwise** — resume with a prompt that includes current iteration count, best accuracy so far, and instruction to continue.
+
+**Iteration counting:** Iterations are incremented deterministically by `run_evaluation` when called with `n_files=0` (full evaluation run). The agent does not manage iteration counts.
+
+**Finalizing guardrails:** During the finalizing phase, `run_evaluation` refuses to launch new runs (returns an error). Once the agent calls `update_optimization_state(phase="complete")`, status becomes "complete" and `CancelCheckHook` kills the agent on the next tool call.
 
 **Why `event.resume` instead of a Python loop:** Strands' `AfterInvocationEvent.resume` is the SDK's built-in mechanism for multi-turn autonomous operation. It handles conversation history, context management, and streaming correctly. A manual loop around `agent()` calls would need to replicate all of that.
-
-**Accuracy plateau detection:** Not yet implemented programmatically. For v1, the agent tracks this itself via OPTIMIZATION-LOG.md and its own judgment. The hook will be extended with `patience` (stop after N iterations with no improvement) once the agent reliably reports accuracy per iteration to DynamoDB.
 
 ## Cancellation
 

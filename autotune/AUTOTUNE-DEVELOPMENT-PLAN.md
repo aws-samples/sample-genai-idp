@@ -567,7 +567,7 @@ Convert the agent from interactive chat to autonomous operation. The agent recei
   - **Note:** The heartbeat mechanism will be reworked in Phase 6.9 — instead of an asyncio task in the generator (which dies when SSE drops), the heartbeat will run in the background agent thread alongside the agent itself.
 - [ ] **Cancel via CLI test** — verify `aws dynamodb update-item` stops agent within one tool call
 - [ ] **Full iteration test** — verify agent completes a full optimization loop (analyze → modify config → upload → evaluate → repeat)
-- [ ] **Max iterations test** — verify agent stops after 10 iterations and produces summary
+- [x] **Max iterations test** — Deterministic iteration counting (auto-incremented on `run_evaluation(n_files=0)`). At max iterations, agent enters "finalizing" phase with one turn to summarize. `run_evaluation` refuses during finalizing. Agent calls `update_optimization_state(phase="complete")` to trigger hard stop via `CancelCheckHook`. `best_cost_per_page_usd` tracked in DDB alongside `best_accuracy`.
 
 ### 6.8 Deferred items (TODO)
 - [x] **Agent permissions scoping (SECURITY)** — IAM hardened with explicit Deny policy for destructive actions (DeleteStack, DeleteObject, iam:*, etc.), read/write split, s3:DeleteObject removed. See `autotune/docs/agent-security.md`. Remaining:

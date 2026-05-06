@@ -100,6 +100,14 @@ Key files: `autotune/agent/pricing.py`, `autotune/agent/state.py` (`update_cost`
 - **Clarified 1-file validation** — Prompt now says it's one-time only, then always `n_files=0`.
 - **Removed silent exception swallowing** — Sync loop no longer hides errors.
 
+## What was done Tuesday (May 6)
+
+- **Fixed status not set to complete** — `update_optimization_state(phase="complete")` now also sets `status=complete`.
+- **Agent stops on complete** — `CancelCheckHook` raises `OptimizationCancelled` when `status=complete`.
+- **Deterministic iteration counting** — Each `run_evaluation(n_files=0)` auto-increments iteration. Agent no longer manages iteration numbers.
+- **Finalizing phase** — When max iterations reached, agent gets one final turn to summarize. `run_evaluation` refuses during finalizing. Agent calls `phase="complete"` when done, which triggers hard stop.
+- **`best_cost_per_page_usd`** — Added to DDB metrics alongside `best_accuracy`. 5 decimal places.
+
 ## Priority 4: Automatic Optimization Log Updates
 
 **What:** Agent frequently forgets to update OPTIMIZATION-LOG.md.
