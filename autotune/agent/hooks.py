@@ -67,11 +67,12 @@ class CostTrackingHook(HookProvider):
     # model.get_config().get("context_window_limit")
     CONTEXT_WINDOW_TOKENS = 1_000_000  # Claude Opus 4-6-v1
 
-    def __init__(self, state: OptimizationState):
+    def __init__(self, state: OptimizationState, max_cost_usd: float = 500.0):
         self.state = state
         self.metrics = None  # Set to agent.event_loop_metrics after Agent() construction
         self.agent_messages = None  # Set to agent.messages after Agent() construction
         self.model_id = os.environ.get("AUTOTUNE_MODEL_ID", "")
+        self.max_cost_usd = max_cost_usd
 
     def register_hooks(self, registry: HookRegistry, **kwargs) -> None:
         registry.add_callback(AfterModelCallEvent, self._update_cost)
@@ -85,15 +86,24 @@ class CostTrackingHook(HookProvider):
         cr = usage.get("cacheReadInputTokens", 0)
         cw = usage.get("cacheWriteInputTokens", 0)
         agent_cost = calculate_agent_cost(self.model_id, it, ot, cr, cw)
+        eval_cost = get_eval_cost_usd()
         # Context window %: read from the last assistant message metadata (per-call usage)
         context_pct = self._compute_context_pct()
         self.state.update_cost(
             agent_input_tokens=it, agent_output_tokens=ot,
             agent_cache_read_tokens=cr, agent_cache_write_tokens=cw,
-            agent_cost_usd=agent_cost, eval_cost_usd=get_eval_cost_usd(),
+            agent_cost_usd=agent_cost, eval_cost_usd=eval_cost,
             eval_seen_batches=get_eval_seen_batches(),
             context_window_pct=context_pct,
         )
+        # Enforce max cost mid-turn: set status to finalizing so OptimizationLoopHook
+        # picks it up at end of invocation and gives the agent one final turn
+        total_cost = agent_cost + eval_cost
+        if total_cost >= self.max_cost_usd and not self.state.is_terminal():
+            current_status = self.state.get_status()
+            if current_status != "finalizing":
+                logger.info("Max cost ($%.2f >= $%.2f) exceeded mid-turn — setting finalizing", total_cost, self.max_cost_usd)
+                self.state.set_status("finalizing", f"Cost limit reached (${total_cost:.2f})")
 
     def _compute_context_pct(self) -> float:
         """Get context window fill % from the most recent assistant message metadata."""

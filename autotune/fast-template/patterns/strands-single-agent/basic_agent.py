@@ -156,7 +156,7 @@ def _create_agent(user_id: str, session_id: str, state: OptimizationState,
     skills_dir = AGENT_DIR / "skills"
     plugins = [AgentSkills(skills=str(skills_dir))] if skills_dir.exists() else []
     tools = IDPAC_TOOLS + [file_read, image_reader, execute_python_analysis]
-    cost_hook = CostTrackingHook(state)
+    cost_hook = CostTrackingHook(state, max_cost_usd=MAX_COST_USD)
     hooks = [CancelCheckHook(state), FileReadSafetyHook(), cost_hook, OptimizationLoopHook(state, max_iterations=MAX_ITERATIONS, max_cost_usd=MAX_COST_USD)]
 
     agent = Agent(
