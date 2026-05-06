@@ -623,7 +623,7 @@ def analyze_dataset(dataset_path: str) -> str:
 @tool
 def run_discovery(
     document_path: str,
-    ground_truth_path: Optional[str] = None,
+    ground_truth_path: str,
 ) -> str:
     """Discover a document class schema from a sample document.
 
@@ -632,13 +632,16 @@ def run_discovery(
 
     Args:
         document_path: Path to a sample document (PDF or image).
-        ground_truth_path: Optional path to ground truth JSON for better schema.
+        ground_truth_path: Path to ground truth JSON — required for accurate schema discovery.
 
     Returns:
         The discovered JSON schema as a string.
     """
     _auto_update_status("discovering", "Running schema discovery")
     from idpac import Discovery
+
+    if not ground_truth_path or not os.path.exists(ground_truth_path):
+        return f"ERROR: ground_truth_path is required and must exist. Got: {ground_truth_path}"
 
     region = os.environ.get("AWS_DEFAULT_REGION", "us-east-1")
     profile = os.environ.get("AWS_PROFILE") or None
@@ -677,6 +680,8 @@ def run_multi_class_discovery(dataset_path: str) -> str:
     analyzer = DatasetAnalyzer(dataset_path)
 
     if analyzer.is_packet_splitting():
+        if not analyzer.baseline_dir.exists():
+            return "ERROR: No baseline/ directory found. Discovery requires ground truth."
         psd = PacketSplittingDiscovery(dataset_path, region=region, profile=profile)
         config = psd.discover_and_create_config(output_config_path)
         classes = config.get_class_names()
@@ -685,6 +690,12 @@ def run_multi_class_discovery(dataset_path: str) -> str:
     # Multi-class or single-class
     samples = analyzer.get_samples_by_class(n=1)
     gt = analyzer.get_ground_truth_by_class(n=1)
+    if not gt:
+        return "ERROR: No ground truth found in dataset. Discovery requires ground truth (baseline/ dir with result.json files)."
+    # Ensure every class has ground truth
+    missing_gt = [c for c in samples if c not in gt or not gt[c]]
+    if missing_gt:
+        return f"ERROR: Classes missing ground truth: {missing_gt}. Discovery requires ground truth for all classes."
     discovery = Discovery(region=region, profile=profile)
     schemas = discovery.discover_multi_class(samples, gt)
 
