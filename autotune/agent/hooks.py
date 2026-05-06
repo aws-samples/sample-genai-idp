@@ -119,16 +119,25 @@ class OptimizationLoopHook(HookProvider):
 
         current = self.state.get_state()
         iteration = int(current.get("iteration", 0))
+        phase = current.get("phase", "")
 
-        # Max iterations reached — one final turn for summary, then stop
-        if iteration >= self.max_iterations:
-            logger.info("Max iterations (%d) reached — completing", self.max_iterations)
+        # Agent was finalizing and finished its turn — force complete if it didn't do it itself
+        if phase == "finalizing":
+            logger.info("Finalizing turn complete — marking done")
             self.state.set_status(STATUS_COMPLETE)
-            self.state.update_phase("complete", "Max iterations reached")
+            self.state.update_phase("complete", "Optimization finished")
+            return
+
+        # Max iterations reached — give agent one final turn to summarize
+        if iteration >= self.max_iterations:
+            logger.info("Max iterations (%d) reached — giving final turn", self.max_iterations)
+            self.state.update_phase("finalizing", "Writing final summary")
             event.resume = (
                 "You have reached the maximum number of iterations. "
-                "Write a final summary of the optimization run and copy the best "
-                "config to idpac_config_final.yaml. This is your last turn."
+                "Download and review results from your best run, write a final "
+                "summary to OPTIMIZATION-LOG.md, then call "
+                "update_optimization_state(phase='complete', phase_detail='...'). "
+                "Do NOT launch new evaluations."
             )
             return
 

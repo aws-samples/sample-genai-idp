@@ -333,12 +333,17 @@ def run_evaluation(test_set_id: str, context: str, config_version: str, n_files:
     Returns:
         JSON with batch_id, status, stdout, stderr.
     """
+    # Block new evaluations during finalizing phase
+    state = _get_optimization_state()
+    if state:
+        current = state.get_state()
+        if current.get("phase") == "finalizing":
+            return json.dumps({"error": "Cannot launch evaluations during finalizing phase. Write your summary and call update_optimization_state(phase='complete')."})
+
     if n_files == 0:
         print(f"Running evaluation on all files with config '{config_version}'")
         # Full evaluation = one iteration. Auto-increment.
-        state = _get_optimization_state()
         if state:
-            current = state.get_state()
             iteration = int(current.get("iteration", 0)) + 1
             state.update_metrics(
                 iteration=iteration,
