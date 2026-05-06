@@ -16,6 +16,7 @@
 !autotune/agent/pricing.py
 !autotune/agent/state.py
 !autotune/agent/hooks.py
+!autotune/agent/context_manager.py
 !autotune/agent/prompt.md
 !autotune/agent/skills/
 
