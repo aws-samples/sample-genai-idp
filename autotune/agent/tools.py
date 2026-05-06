@@ -350,6 +350,7 @@ def run_evaluation(test_set_id: str, context: str, config_version: str, n_files:
                 best_accuracy=float(current.get("best_accuracy", 0)),
                 best_config_version=current.get("best_config_version", ""),
                 current_config_version=config_version,
+                best_cost_per_page_usd=float(current.get("best_cost_per_page_usd", 0)),
             )
     else:
         print(f"Running evaluation with {n_files} file(s) with config '{config_version}'")
@@ -718,6 +719,7 @@ def update_optimization_state(
     phase_detail: str = "",
     best_accuracy: Optional[float] = None,
     best_config_version: Optional[str] = None,
+    best_cost_per_page_usd: Optional[float] = None,
     current_config_version: Optional[str] = None,
 ) -> str:
     """Update the optimization state in DynamoDB so the frontend can show progress.
@@ -733,6 +735,7 @@ def update_optimization_state(
         phase_detail: Human-readable detail (e.g. "Analyzing field-level accuracy...")
         best_accuracy: Best accuracy so far (if changed)
         best_config_version: Version name of best config (if changed)
+        best_cost_per_page_usd: Cost per page in USD of the best config (e.g. 0.09 means $0.09/page)
         current_config_version: Version name of config being tested (if changed)
     """
     state = _get_optimization_state()
@@ -748,6 +751,7 @@ def update_optimization_state(
             best_accuracy=best_accuracy,
             best_config_version=best_config_version,
             current_config_version=current_config_version or "",
+            best_cost_per_page_usd=best_cost_per_page_usd or 0.0,
         )
     return f"State updated: phase={phase}, detail={phase_detail}"
 

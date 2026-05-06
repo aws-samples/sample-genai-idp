@@ -118,16 +118,18 @@ class OptimizationState:
         best_accuracy: float,
         best_config_version: str,
         current_config_version: str = "",
+        best_cost_per_page_usd: float = 0.0,
     ) -> None:
         """Update iteration metrics."""
         self._update_expr(
             "SET iteration = :i, best_accuracy = :a, best_config_version = :b, "
-            "current_config_version = :c, updated_at = :t",
+            "current_config_version = :c, best_cost_per_page_usd = :cpp, updated_at = :t",
             {
                 ":i": iteration,
                 ":a": str(best_accuracy),
                 ":b": best_config_version,
                 ":c": current_config_version,
+                ":cpp": str(round(best_cost_per_page_usd, 4)),
                 ":t": _now(),
             },
         )
