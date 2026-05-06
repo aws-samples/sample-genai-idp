@@ -15,3 +15,5 @@ autotune:
   idp_stack_name: kaleko-IDPAutoTune-dev
   # Bedrock model ID for the optimization agent.
   model_id: us.anthropic.claude-opus-4-6-v1
+  # Maximum cost (USD) per run before triggering stop.
+  max_cost_usd: 10
