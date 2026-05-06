@@ -335,6 +335,17 @@ def run_evaluation(test_set_id: str, context: str, config_version: str, n_files:
     """
     if n_files == 0:
         print(f"Running evaluation on all files with config '{config_version}'")
+        # Full evaluation = one iteration. Auto-increment.
+        state = _get_optimization_state()
+        if state:
+            current = state.get_state()
+            iteration = int(current.get("iteration", 0)) + 1
+            state.update_metrics(
+                iteration=iteration,
+                best_accuracy=float(current.get("best_accuracy", 0)),
+                best_config_version=current.get("best_config_version", ""),
+                current_config_version=config_version,
+            )
     else:
         print(f"Running evaluation with {n_files} file(s) with config '{config_version}'")
     _auto_update_state("evaluating", f"Running evaluation {config_version}")
@@ -700,20 +711,21 @@ def _get_optimization_state():
 def update_optimization_state(
     phase: str,
     phase_detail: str = "",
-    iteration: Optional[int] = None,
     best_accuracy: Optional[float] = None,
     best_config_version: Optional[str] = None,
     current_config_version: Optional[str] = None,
 ) -> str:
     """Update the optimization state in DynamoDB so the frontend can show progress.
 
-    Call this before and after long operations (evaluations, inference, discovery)
-    to keep the status display current.
+    Call this to report progress for phases not covered by built-in tool state
+    updates (e.g., during manual analysis or when making decisions).
+
+    Note: Iteration count is managed automatically (incremented on each full
+    evaluation run with n_files=0). You do not need to track iterations.
 
     Args:
-        phase: Current phase (e.g. "evaluating", "analyzing", "configuring", "discovering")
-        phase_detail: Human-readable detail (e.g. "Running evaluation v3...")
-        iteration: Current iteration number (if changed)
+        phase: Current phase (e.g. "evaluating", "analyzing", "configuring", "discovering", "complete")
+        phase_detail: Human-readable detail (e.g. "Analyzing field-level accuracy...")
         best_accuracy: Best accuracy so far (if changed)
         best_config_version: Version name of best config (if changed)
         current_config_version: Version name of config being tested (if changed)
@@ -724,9 +736,10 @@ def update_optimization_state(
     state.update_phase(phase, phase_detail)
     if phase == "complete":
         state.set_status("complete")
-    if iteration is not None and best_accuracy is not None and best_config_version is not None:
+    if best_accuracy is not None and best_config_version is not None:
+        current = state.get_state()
         state.update_metrics(
-            iteration=iteration,
+            iteration=int(current.get("iteration", 0)),
             best_accuracy=best_accuracy,
             best_config_version=best_config_version,
             current_config_version=current_config_version or "",
