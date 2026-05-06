@@ -113,6 +113,19 @@ Key files: `autotune/agent/pricing.py`, `autotune/agent/state.py` (`update_cost`
 - **Max cost stop** — `OptimizationLoopHook` triggers finalizing when `agent_cost_usd + eval_cost_usd >= max_cost_usd` (default $500, configurable in `config.yaml`). Same flow as max iterations.
 - **IAM scoping** — Replaced `resources: ["*"]` with IDP-stack-scoped ARNs for S3, DynamoDB, Lambda, SQS. Removed unused `DeleteItem` and `s3:DeleteObject` from own-resource policies.
 - **Fixed status overwrite bug** — Agent setting `status=complete` then calling another tool caused `OptimizationCancelled` to propagate as generic `Exception`, overwriting status to `failed`. Fix: `except Exception` branch now checks `is_terminal()` first. Also added docstring warning that `status='complete'` must be the last tool call.
+- **Proactive context management** — Custom `ProactiveContextManager` subclasses `SummarizingConversationManager`. Triggers at 50% context fill (configurable). After summarizing, injects full OPTIMIZATION-LOG.md content so agent retains memory.
+- **Context window % in UI** — `CostTrackingHook` reads `inputTokens + cacheReadInputTokens` from last assistant message metadata and writes `context_window_pct` to DDB. Frontend displays `· Context: X.X%` in status bar.
+- **Collapsible sidebar** — Left panel with runs list is now collapsible via hamburger button in header.
+- **Full-width chat** — Removed `max-w-4xl` constraint, chat expands to window width.
+- **Discovery requires ground truth** — `run_discovery` now requires `ground_truth_path` (no longer optional). `run_multi_class_discovery` validates GT exists for all classes before proceeding.
+- **analyze_dataset file count fix** — Reports actual file count per class (was capped at 3).
+
+## Next up
+
+1. **Max allowable cost per page at run launch** — User inputs a cost-per-page ceiling when starting a run. Agent must respect this when optimizing configs (e.g., won't choose a config that exceeds the limit). Better aligned with business use cases than total run cost alone.
+2. **Test proactive context summarization** — Verify the `ProactiveContextManager` triggers correctly at 50% and that the log re-read works.
+3. **Verify context window % accuracy** — Confirm the displayed percentage matches actual context fill (inputTokens + cacheReadInputTokens from Bedrock response).
+4. **Test max cost stop** — Config currently set to $1 for testing. Verify finalizing triggers correctly.
 
 ## Priority 4: Investigate Multi-Class Discovery Quality
 
