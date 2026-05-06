@@ -63,6 +63,10 @@ class FileReadSafetyHook(HookProvider):
 class CostTrackingHook(HookProvider):
     """Update DynamoDB with token cost after every model call."""
 
+    # TODO: After strands-agents > 1.37.0 (May 7 2026), replace with
+    # model.get_config().get("context_window_limit")
+    CONTEXT_WINDOW_TOKENS = 1_000_000  # Claude Opus 4-6-v1
+
     def __init__(self, state: OptimizationState):
         self.state = state
         self.metrics = None  # Set to agent.event_loop_metrics after Agent() construction
@@ -80,11 +84,13 @@ class CostTrackingHook(HookProvider):
         cr = usage.get("cacheReadInputTokens", 0)
         cw = usage.get("cacheWriteInputTokens", 0)
         agent_cost = calculate_agent_cost(self.model_id, it, ot, cr, cw)
+        context_pct = (it + ot) / self.CONTEXT_WINDOW_TOKENS * 100 if self.CONTEXT_WINDOW_TOKENS else 0
         self.state.update_cost(
             agent_input_tokens=it, agent_output_tokens=ot,
             agent_cache_read_tokens=cr, agent_cache_write_tokens=cw,
             agent_cost_usd=agent_cost, eval_cost_usd=get_eval_cost_usd(),
             eval_seen_batches=get_eval_seen_batches(),
+            context_window_pct=context_pct,
         )
 
 

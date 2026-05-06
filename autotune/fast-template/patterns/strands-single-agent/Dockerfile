@@ -63,6 +63,7 @@ COPY autotune/agent/code_interpreter_tools.py code_interpreter_tools.py
 COPY autotune/agent/pricing.py pricing.py
 COPY autotune/agent/state.py optimization_state.py
 COPY autotune/agent/hooks.py optimization_hooks.py
+COPY autotune/agent/context_manager.py proactive_context_manager.py
 COPY autotune/agent/prompt.md .
 COPY autotune/agent/skills/ skills/
 

@@ -117,12 +117,14 @@ class OptimizationState:
         agent_cost_usd: float = 0.0,
         eval_cost_usd: float = 0.0,
         eval_seen_batches: str = "",
+        context_window_pct: float = 0.0,
     ) -> None:
         """Update token usage and cost (agent + eval tracked separately)."""
         self._update_expr(
             "SET agent_input_tokens = :it, agent_output_tokens = :ot, "
             "agent_cache_read_tokens = :cr, agent_cache_write_tokens = :cw, "
-            "agent_cost_usd = :ac, eval_cost_usd = :ec, eval_seen_batches = :esb, updated_at = :t",
+            "agent_cost_usd = :ac, eval_cost_usd = :ec, eval_seen_batches = :esb, "
+            "context_window_pct = :cwp, updated_at = :t",
             {
                 ":it": agent_input_tokens,
                 ":ot": agent_output_tokens,
@@ -131,6 +133,7 @@ class OptimizationState:
                 ":ac": str(round(agent_cost_usd, 4)),
                 ":ec": str(round(eval_cost_usd, 4)),
                 ":esb": eval_seen_batches,
+                ":cwp": str(round(context_window_pct, 1)),
                 ":t": _now(),
             },
         )

@@ -37,6 +37,7 @@ from code_interpreter_tools import execute_python_analysis
 from idpac_tools import ALL_TOOLS as IDPAC_TOOLS, seed_eval_cost
 from optimization_state import OptimizationState, TERMINAL_STATUSES
 from optimization_hooks import CancelCheckHook, CostTrackingHook, FileReadSafetyHook, OptimizationCancelled, OptimizationLoopHook
+from proactive_context_manager import ProactiveContextManager
 
 logger = logging.getLogger(__name__)
 
@@ -168,6 +169,7 @@ def _create_agent(user_id: str, session_id: str, state: OptimizationState,
         tools=tools,
         plugins=plugins,
         hooks=hooks,
+        conversation_manager=ProactiveContextManager(),
         session_manager=session_manager,
         trace_attributes={"user.id": user_id, "session.id": session_id},
     )

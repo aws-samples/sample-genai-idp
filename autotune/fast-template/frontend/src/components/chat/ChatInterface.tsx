@@ -445,6 +445,9 @@ export default function ChatInterface() {
                         {(Number(agentState.agent_cost_usd || 0) > 0 || Number(agentState.eval_cost_usd || 0) > 0) && (
                           <span>· Cost: ${(Number(agentState.agent_cost_usd || 0) + Number(agentState.eval_cost_usd || 0)).toFixed(2)} (agent ${Number(agentState.agent_cost_usd || 0).toFixed(2)} + eval ${Number(agentState.eval_cost_usd || 0).toFixed(2)})</span>
                         )}
+                        {Number(agentState.context_window_pct || 0) > 0 && (
+                          <span>· Context: {Number(agentState.context_window_pct).toFixed(0)}%</span>
+                        )}
                         {!isTerminal && agentState.last_heartbeat_at && (() => {
                           const ago = Math.floor(heartbeatAge / 1000)
                           return <span>· ♥ {ago}s ago</span>
