@@ -110,6 +110,9 @@ Key files: `autotune/agent/pricing.py`, `autotune/agent/state.py` (`update_cost`
 - **Consolidated status+phase into single `status` field** — Removed `phase`/`phase_detail` entirely. Single `status` field carries both lifecycle and activity info. Terminal statuses (`complete`, `failed`, `cancelled`) stop the agent. Active statuses (`evaluating`, `analyzing`, `configuring`, etc.) mean it's running. Frontend updated. See `autotune/planning-docs/consolidate-status-phase.md`.
 - **Config version naming enforcement** — `upload_config` rejects names shorter than 5 chars, requires test set name prefix.
 - **Optimization log formatting** — Added blank line before timestamp on append.
+- **Max cost stop** — `OptimizationLoopHook` triggers finalizing when `agent_cost_usd + eval_cost_usd >= max_cost_usd` (default $500, configurable in `config.yaml`). Same flow as max iterations.
+- **IAM scoping** — Replaced `resources: ["*"]` with IDP-stack-scoped ARNs for S3, DynamoDB, Lambda, SQS. Removed unused `DeleteItem` and `s3:DeleteObject` from own-resource policies.
+- **Fixed status overwrite bug** — Agent setting `status=complete` then calling another tool caused `OptimizationCancelled` to propagate as generic `Exception`, overwriting status to `failed`. Fix: `except Exception` branch now checks `is_terminal()` first. Also added docstring warning that `status='complete'` must be the last tool call.
 
 ## Priority 4: Automatic Optimization Log Updates
 

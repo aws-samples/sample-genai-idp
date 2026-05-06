@@ -385,14 +385,14 @@ export class BackendStack extends cdk.NestedStack {
     //   - No lambda:DeleteFunction, UpdateFunctionCode
     //   - No iam:* (cannot escalate privileges)
     //
-    // The agent has shell access for debugging (grep, cat, aws cli) but IAM is the
-    // hard security boundary — even if the agent runs `aws cloudformation delete-stack`,
-    // the API call is denied by IAM.
-    //
-    // TODO: Scope resource ARNs to specific IDP stack resources once stack name resolution
-    //       is available at synth time (currently a runtime-only value from config.yaml).
-    // TODO: Restrict network egress — agent container should have no internet access.
-    //       Requires VPC configuration on the AgentCore runtime.
+    // Resource scoping: IDP stack resources follow naming conventions:
+    //   S3 buckets: {stack-name-lowercase}-{resource}-{random}
+    //   DynamoDB tables: {stack-name}-{Table}-{random}
+    //   Lambda functions: contain the stack name
+    //   SQS queues: {stack-name}-{Queue}-{random}
+    const idpStackName = config.autotune!.idp_stack_name
+    const idpStackNameLower = idpStackName.toLowerCase()
+
     agentRole.addToPolicy(
       new iam.PolicyStatement({
         sid: "IDPStackReadAccess",
@@ -403,16 +403,6 @@ export class BackendStack extends cdk.NestedStack {
           "cloudformation:ListStacks",
           "cloudformation:DescribeStackResources",
           "cloudformation:ListStackResources",
-          // S3: read configs, test sets, results, documents
-          "s3:GetObject",
-          "s3:ListBucket",
-          "s3:HeadObject",
-          "s3:GetBucketLocation",
-          // DynamoDB: read document tracking and workflow status
-          "dynamodb:GetItem",
-          "dynamodb:Query",
-          "dynamodb:Scan",
-          "dynamodb:DescribeTable",
           // SSM: read stack parameters
           "ssm:GetParameter",
           "ssm:GetParameters",
@@ -427,41 +417,107 @@ export class BackendStack extends cdk.NestedStack {
           "states:DescribeExecution",
           "states:ListExecutions",
           "states:DescribeStateMachine",
-          // Bedrock: model invocation for discovery/analysis
-          "bedrock:InvokeModel",
-          "bedrock:InvokeModelWithResponseStream",
-          // KMS: decrypt IDP stack's encrypted resources
-          "kms:Decrypt",
-          "kms:GenerateDataKey",
-          "kms:DescribeKey",
         ],
         resources: ["*"],
       })
     )
 
-    // AutoTune: Write permissions the agent needs to operate the IDP stack.
-    // Separated from read access for clarity. These are the minimum write
-    // actions needed for config upload, evaluation runs, and inference.
+    // S3 read access scoped to IDP stack buckets
     agentRole.addToPolicy(
       new iam.PolicyStatement({
-        sid: "IDPStackWriteAccess",
+        sid: "IDPStackS3Read",
         effect: iam.Effect.ALLOW,
-        actions: [
-          // S3: upload configs, test sets, documents for processing
-          "s3:PutObject",
-          // SQS: submit documents for processing
-          "sqs:SendMessage",
-          "sqs:GetQueueUrl",
-          "sqs:GetQueueAttributes",
-          // Lambda: invoke IDP processing functions
-          "lambda:InvokeFunction",
-          "lambda:ListFunctions",
-          "lambda:GetFunction",
-          // DynamoDB: write config versions (upload_config uses PutItem)
-          "dynamodb:PutItem",
-          "dynamodb:UpdateItem",
+        actions: ["s3:GetObject", "s3:ListBucket", "s3:HeadObject", "s3:GetBucketLocation"],
+        resources: [
+          `arn:aws:s3:::${idpStackNameLower}-*`,
+          `arn:aws:s3:::${idpStackNameLower}-*/*`,
         ],
-        resources: ["*"], // TODO: scope to IDP stack resources
+      })
+    )
+
+    // S3 write access scoped to IDP stack buckets (upload configs, test sets, documents)
+    agentRole.addToPolicy(
+      new iam.PolicyStatement({
+        sid: "IDPStackS3Write",
+        effect: iam.Effect.ALLOW,
+        actions: ["s3:PutObject"],
+        resources: [`arn:aws:s3:::${idpStackNameLower}-*/*`],
+      })
+    )
+
+    // DynamoDB read access scoped to IDP stack tables
+    agentRole.addToPolicy(
+      new iam.PolicyStatement({
+        sid: "IDPStackDynamoDBRead",
+        effect: iam.Effect.ALLOW,
+        actions: ["dynamodb:GetItem", "dynamodb:Query", "dynamodb:Scan", "dynamodb:DescribeTable"],
+        resources: [
+          `arn:aws:dynamodb:${this.region}:${this.account}:table/${idpStackName}-*`,
+          `arn:aws:dynamodb:${this.region}:${this.account}:table/${idpStackName}-*/index/*`,
+        ],
+      })
+    )
+
+    // DynamoDB write access scoped to IDP stack tables (config upload uses PutItem)
+    agentRole.addToPolicy(
+      new iam.PolicyStatement({
+        sid: "IDPStackDynamoDBWrite",
+        effect: iam.Effect.ALLOW,
+        actions: ["dynamodb:PutItem", "dynamodb:UpdateItem"],
+        resources: [`arn:aws:dynamodb:${this.region}:${this.account}:table/${idpStackName}-*`],
+      })
+    )
+
+    // Lambda invoke scoped to IDP stack functions
+    agentRole.addToPolicy(
+      new iam.PolicyStatement({
+        sid: "IDPStackLambdaInvoke",
+        effect: iam.Effect.ALLOW,
+        actions: ["lambda:InvokeFunction", "lambda:GetFunction"],
+        resources: [`arn:aws:lambda:${this.region}:${this.account}:function:*${idpStackName}*`],
+      })
+    )
+
+    // Lambda list (does not support resource-level permissions)
+    agentRole.addToPolicy(
+      new iam.PolicyStatement({
+        sid: "LambdaList",
+        effect: iam.Effect.ALLOW,
+        actions: ["lambda:ListFunctions"],
+        resources: ["*"],
+      })
+    )
+
+    // SQS access scoped to IDP stack queues
+    agentRole.addToPolicy(
+      new iam.PolicyStatement({
+        sid: "IDPStackSQS",
+        effect: iam.Effect.ALLOW,
+        actions: ["sqs:SendMessage", "sqs:GetQueueUrl", "sqs:GetQueueAttributes"],
+        resources: [`arn:aws:sqs:${this.region}:${this.account}:${idpStackName}-*`],
+      })
+    )
+
+    // Bedrock model invocation (needed for IDP extraction/classification and agent itself)
+    agentRole.addToPolicy(
+      new iam.PolicyStatement({
+        sid: "BedrockModelAccess",
+        effect: iam.Effect.ALLOW,
+        actions: ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"],
+        resources: [
+          `arn:aws:bedrock:${this.region}::foundation-model/*`,
+          `arn:aws:bedrock:${this.region}:${this.account}:inference-profile/*`,
+        ],
+      })
+    )
+
+    // KMS decrypt for IDP stack encrypted resources (if KMS key exists)
+    agentRole.addToPolicy(
+      new iam.PolicyStatement({
+        sid: "KMSAccess",
+        effect: iam.Effect.ALLOW,
+        actions: ["kms:Decrypt", "kms:GenerateDataKey", "kms:DescribeKey"],
+        resources: [`arn:aws:kms:${this.region}:${this.account}:key/*`],
       })
     )
 
@@ -499,7 +555,6 @@ export class BackendStack extends cdk.NestedStack {
           "dynamodb:GetItem",
           "dynamodb:PutItem",
           "dynamodb:UpdateItem",
-          "dynamodb:DeleteItem",
           "dynamodb:Query",
         ],
         resources: [this.optimizationStateTableArn],
@@ -512,7 +567,7 @@ export class BackendStack extends cdk.NestedStack {
       new iam.PolicyStatement({
         sid: "StreamBucketAccess",
         effect: iam.Effect.ALLOW,
-        actions: ["s3:PutObject", "s3:GetObject", "s3:DeleteObject", "s3:ListBucket"],
+        actions: ["s3:PutObject", "s3:GetObject", "s3:ListBucket"],
         resources: [this.streamBucketArn, `${this.streamBucketArn}/*`],
       })
     )

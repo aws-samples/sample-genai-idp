@@ -53,7 +53,15 @@ The agent can write to S3 (upload configs and documents), SQS (submit documents 
 - If the agent tries to create an IAM role or policy, the API call returns `AccessDenied`.
 - If a prompt injection in a document tells the agent to "delete all S3 objects", the agent may attempt it, but IAM blocks every delete call.
 
-**TODO: Resource scoping.** The Allow policies currently use `resources: ["*"]`. Once the IDP stack name is resolvable at CDK synth time, these should be scoped to specific IDP stack resources (S3 buckets, DynamoDB tables, Lambda functions, etc.). The Deny policy intentionally uses `"*"` and should stay that way.
+**TODO: Resource scoping.** ~~The Allow policies currently use `resources: ["*"]`.~~ **DONE.** IDP stack resources are scoped using the stack name from `config.yaml`:
+- S3: `arn:aws:s3:::{stack-name-lowercase}-*`
+- DynamoDB: `arn:aws:dynamodb:{region}:{account}:table/{stack-name}-*`
+- Lambda invoke: `arn:aws:lambda:{region}:{account}:function:*{stack-name}*`
+- SQS: `arn:aws:sqs:{region}:{account}:{stack-name}-*`
+- Bedrock: scoped to foundation models and inference profiles in the account
+- KMS: scoped to keys in the account/region
+
+Remaining `resources: ["*"]` (cannot be scoped per AWS API design): `cloudformation:DescribeStacks`, `cloudformation:ListStacks`, `sts:GetCallerIdentity`, `logs:*`, `states:*`, `lambda:ListFunctions`.
 
 ### Layer 2: Curated Tools
 
@@ -68,15 +76,15 @@ The agent also has access to general-purpose tools:
 
 | Tool | Access level | Purpose |
 |------|-------------|---------|
-| `shell` | Unrestricted commands, but IAM-bounded | Debugging: grep, cat, ls, aws cli read commands |
 | `file_read` | Read any file on the filesystem | Inspect configs, logs, results |
-| `file_write` / `editor` | Write to the filesystem | Create/modify config files, optimization log |
-| `use_aws` | boto3 wrapper, IAM-bounded | AWS API calls for debugging |
-| `execute_python_securely` | Sandboxed CodeInterpreter | Arbitrary Python in isolated environment |
+| `execute_python_analysis` | Sandboxed Python execution | Data analysis, metric computation |
+| `write_optimization_log` | Write to OPTIMIZATION-LOG.md only | Structured log updates |
+| `config_edit` | Edit config YAML files only | Modify extraction/classification configs |
+| `copy_config` | Copy config files | Duplicate configs for iteration |
+| `list_files` | List directory contents | Navigate filesystem |
+| `wait_seconds` | Sleep | Wait for async operations |
 
-**Why we keep `shell`:** The agent frequently uses `grep`, `cat`, `ls`, `diff`, and read-only AWS CLI commands for debugging. Removing `shell` would significantly reduce the agent's ability to investigate issues. IAM is the hard boundary — `shell` commands that attempt destructive AWS API calls are denied by IAM.
-
-**Why CodeInterpreter for arbitrary Python:** When the agent needs to run data analysis code (parsing evaluation results, computing metrics, generating charts), it should use AgentCore CodeInterpreter. This runs in a completely isolated sandbox with no access to the host filesystem, AWS credentials, or network. The agent must explicitly copy files into the sandbox if it wants to analyze them.
+**Removed tools:** `shell`, `editor`, `file_write`, `use_aws` — eliminated to close escape hatches around reward hacking guardrails. IAM remains the hard boundary regardless.
 
 ### Layer 3: Network Isolation
 
@@ -112,19 +120,19 @@ The agent can be stopped at any time via:
 
 The `CancelCheckHook` reads the DynamoDB status before every tool call. If cancelled, the current tool is blocked and the agent stops. See `autotune/docs/full-autonomy.md` for details.
 
-### Layer 5: Iteration Limits
+### Layer 5: Iteration and Cost Limits
 
-The `OptimizationLoopHook` enforces a maximum iteration count (default: 10). After the limit is reached, the agent is given one final turn to write a summary, then the session ends. This prevents runaway optimization loops.
+The `OptimizationLoopHook` enforces two stopping criteria:
+- **Max iterations** (default: 10) — after this many full evaluation cycles
+- **Max cost** (default: $500, configurable via `max_cost_usd` in config.yaml) — when agent + eval cost exceeds this threshold
+
+After either limit is reached, the agent is given one final turn to write a summary, then the session ends. This prevents runaway optimization loops and unbounded spending.
 
 AgentCore also enforces a session timeout at the platform level, which acts as a backstop if the hook fails.
 
 ### Layer 6: Tool Safety Hooks
 
 The `FileReadSafetyHook` intercepts every `file_read` tool call via `BeforeToolCallEvent` and forces `mode="view"`. This prevents the agent from using `document` mode, which sends raw file bytes to Bedrock as a document content block — Bedrock rejects image formats (PNG, JPEG, etc.) with a `ValidationException` that crashes the entire run unrecoverably. The agent uses `image_reader` for images instead.
-
-### Layer 7: Reward Hacking Prevention (TODO)
-
-The agent can modify evaluation metric definitions in the config (`x-aws-idp-evaluation-method`, `x-aws-idp-evaluation-threshold`, `x-aws-idp-evaluation-weight`) to inflate accuracy without improving extraction. Planned guardrail in `upload_config` to strip/reject changes to these fields. See also upstream discussion about separating inference and evaluation configs in the IDP Accelerator.
 
 ## FAQ
 
@@ -156,7 +164,7 @@ The agent has `shell` access, but all AWS API calls are IAM-bounded. For Python 
 IAM Deny always takes precedence over Allow. The `DenyDestructiveActions` policy cannot be overridden by any Allow statement on the same role. The only way to bypass it is to remove the Deny policy itself, which requires a CDK code change and deployment.
 
 **Q: Can the agent write to DynamoDB tables it shouldn't?**
-The agent has `dynamodb:PutItem` and `UpdateItem` on `*` (TODO: scope this). However, it cannot `DeleteTable` or `DeleteItem` on IDP tables (explicit Deny). The optimization state table has its own scoped policy. Scoping the write permissions to specific IDP tables is a planned improvement.
+The agent has `dynamodb:PutItem` and `UpdateItem` scoped to `table/{idp-stack-name}-*`. It cannot write to tables outside the IDP stack. It cannot `DeleteTable` or `DeleteItem` on any table (explicit Deny covers DeleteTable; DynamoDB write policy only includes PutItem/UpdateItem).
 
 ## IAM Policy Reference
 
@@ -168,7 +176,16 @@ All policies are defined in `autotune/fast-template/infra-cdk/lib/backend-stack.
 | `CodeInterpreterAccess` | Allow | CodeInterpreter resources | Sandboxed Python execution |
 | `OAuth2CredentialProviderAccess` | Allow | OAuth2 resources | AgentCore authentication |
 | `SecretsManagerOAuth2Access` | Allow | Specific secrets | OAuth2 token retrieval |
-| `IDPStackReadAccess` | Allow | `*` (TODO: scope) | Read IDP stack resources |
-| `IDPStackWriteAccess` | Allow | `*` (TODO: scope) | Write configs, submit documents |
+| `IDPStackReadAccess` | Allow | `*` (APIs that don't support resource scoping) | CloudFormation, STS, Logs, Step Functions |
+| `IDPStackS3Read` | Allow | `{idp-stack-lowercase}-*` | Read IDP S3 buckets |
+| `IDPStackS3Write` | Allow | `{idp-stack-lowercase}-*/*` | Upload configs, test sets |
+| `IDPStackDynamoDBRead` | Allow | `table/{idp-stack}-*` | Read IDP DynamoDB tables |
+| `IDPStackDynamoDBWrite` | Allow | `table/{idp-stack}-*` | Write config versions |
+| `IDPStackLambdaInvoke` | Allow | `function:*{idp-stack}*` | Invoke IDP processing functions |
+| `LambdaList` | Allow | `*` | List functions (API requires `*`) |
+| `IDPStackSQS` | Allow | `{idp-stack}-*` | Submit documents for processing |
+| `BedrockModelAccess` | Allow | Foundation models + inference profiles | Model invocation |
+| `KMSAccess` | Allow | Keys in account/region | Decrypt IDP encrypted resources |
 | `DenyDestructiveActions` | **Deny** | `*` | Block all destructive operations |
 | `OptimizationStateTableAccess` | Allow | State table ARN | Read/write optimization state |
+| `StreamBucketAccess` | Allow | Stream bucket ARN | Agent event stream + optimization log |
