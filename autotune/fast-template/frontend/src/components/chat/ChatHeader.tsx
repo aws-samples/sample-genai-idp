@@ -1,6 +1,7 @@
 import { Button } from "@/components/ui/button"
 import { Plus } from "lucide-react"
 import { useAuth } from "@/hooks/useAuth"
+import { SidebarTrigger } from "@/components/ui/sidebar"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -24,7 +25,8 @@ export function ChatHeader({ title, onNewChat, canStartNewChat }: ChatHeaderProp
 
   return (
     <header className="flex items-center justify-between p-4 border-b w-full">
-      <div className="flex items-center">
+      <div className="flex items-center gap-2">
+        <SidebarTrigger />
         <h1 className="text-xl font-bold">{title || "IDP AutoTune Temporary Developer UI"}</h1>
       </div>
       <div className="flex items-center gap-2">

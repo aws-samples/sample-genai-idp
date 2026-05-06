@@ -30,7 +30,7 @@ const STATUS_CONFIG: Record<string, { icon: typeof Activity; color: string }> = 
 
 export function ChatSidebar({ runs, currentSessionId, onRunSelect, onNewChat }: ChatSidebarProps) {
   return (
-    <Sidebar>
+    <Sidebar collapsible="offcanvas">
       <SidebarHeader className="p-4 space-y-2">
         <Button onClick={onNewChat} className="w-full justify-start gap-2">
           <Plus className="h-4 w-4" />
