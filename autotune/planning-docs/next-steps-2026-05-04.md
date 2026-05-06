@@ -103,10 +103,13 @@ Key files: `autotune/agent/pricing.py`, `autotune/agent/state.py` (`update_cost`
 ## What was done Tuesday (May 6)
 
 - **Fixed status not set to complete** — `update_optimization_state(phase="complete")` now also sets `status=complete`.
-- **Agent stops on complete** — `CancelCheckHook` raises `OptimizationCancelled` when `status=complete`.
+- **Agent stops on complete** — `CancelCheckHook` raises `OptimizationCancelled` when status is terminal.
 - **Deterministic iteration counting** — Each `run_evaluation(n_files=0)` auto-increments iteration. Agent no longer manages iteration numbers.
-- **Finalizing phase** — When max iterations reached, agent gets one final turn to summarize. `run_evaluation` refuses during finalizing. Agent calls `phase="complete"` when done, which triggers hard stop.
+- **Finalizing status** — When max iterations reached, agent gets one final turn to summarize. `run_evaluation` refuses during finalizing. Agent calls `status='complete'` when done, which triggers hard stop.
 - **`best_cost_per_page_usd`** — Added to DDB metrics alongside `best_accuracy`. 5 decimal places.
+- **Consolidated status+phase into single `status` field** — Removed `phase`/`phase_detail` entirely. Single `status` field carries both lifecycle and activity info. Terminal statuses (`complete`, `failed`, `cancelled`) stop the agent. Active statuses (`evaluating`, `analyzing`, `configuring`, etc.) mean it's running. Frontend updated. See `autotune/planning-docs/consolidate-status-phase.md`.
+- **Config version naming enforcement** — `upload_config` rejects names shorter than 5 chars, requires test set name prefix.
+- **Optimization log formatting** — Added blank line before timestamp on append.
 
 ## Priority 4: Automatic Optimization Log Updates
 

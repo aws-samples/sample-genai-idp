@@ -26,9 +26,8 @@ When a request arrives with `test_set_id`, the entrypoint (`basic_agent.py`) per
 2. **Create DynamoDB state item** — `OptimizationState.initialize()` writes the initial item:
    ```
    session_id: <uuid from runtimeSessionId>
-   status: "running"
-   phase: "initializing"
-   phase_detail: "Starting optimization run"
+   status: "initializing"
+   status_detail: "Starting optimization run"
    iteration: 0
    max_iterations: 10
    test_set_id: <from payload>
@@ -62,8 +61,8 @@ When a request arrives with `test_set_id`, the entrypoint (`basic_agent.py`) per
    This is not a generic "let's get started" — it gives the agent specific instructions and points it to the pre-filled log.
 
 6. **On exit**, the entrypoint updates DynamoDB:
-   - Normal completion (agent finishes without error and status is still "running") → `status: "complete"`
-   - Exception → `status: "failed"`, phase_detail contains the error message
+   - Normal completion (agent finishes without error and status is not terminal) → `status: "complete"`
+   - Exception → `status: "failed"`, status_detail contains the error message
    - Cancellation is handled by the hooks (see below), not the entrypoint
 
 ## Two-Layer State Architecture
@@ -80,18 +79,21 @@ State is split between two stores, each serving a different purpose:
 | Field | Type | Written by |
 |-------|------|-----------|
 | `session_id` | String (PK) | Entrypoint (initialize) |
-| `status` | String: running/cancelled/complete/failed | Entrypoint, hooks, cancel API |
-| `phase` | String: initializing/evaluating/analyzing/configuring | Agent (via tool) |
-| `phase_detail` | String | Agent (via tool) |
-| `iteration` | Number | Agent (via tool) |
+| `status` | String: initializing/evaluating/analyzing/configuring/discovering/finalizing/complete/failed/cancelled | Entrypoint, hooks, cancel API, agent (via tool) |
+| `status_detail` | String | Agent (via tool), hooks |
+| `iteration` | Number | Auto-incremented by `run_evaluation(n_files=0)` |
 | `max_iterations` | Number | Entrypoint (initialize) |
 | `best_accuracy` | Number | Agent (via tool) |
 | `best_config_version` | String | Agent (via tool) |
+| `best_cost_per_page_usd` | String | Agent (via tool) |
 | `current_config_version` | String | Agent (via tool) |
 | `test_set_id` | String | Entrypoint (initialize) |
 | `optimization_guidance` | String | Entrypoint (initialize) |
 | `started_at` | String (ISO 8601) | Entrypoint (initialize) |
 | `updated_at` | String (ISO 8601) | Every write |
+| `last_heartbeat_at` | String (ISO 8601) | Background sync thread |
+| `agent_cost_usd` | String | CostTrackingHook |
+| `eval_cost_usd` | String | CostTrackingHook |
 
 **Why DynamoDB:**
 - Externally writable — cancel signal from CLI or API, no need to reach into the agent's process
@@ -186,9 +188,11 @@ All endpoints require Cognito JWT authentication. A single Lambda handles all fo
 
 ## Agent Tools for State Updates
 
-The agent updates DynamoDB via a dedicated tool (`update_optimization_state`, tool #20). This is a Strands `@tool`-decorated function, not a direct DynamoDB call in the prompt. The tool accepts:
-- `phase` and `phase_detail` (always)
-- `iteration`, `best_accuracy`, `best_config_version`, `current_config_version` (optional)
+The agent updates DynamoDB via a dedicated tool (`update_optimization_state`). This is a Strands `@tool`-decorated function, not a direct DynamoDB call in the prompt. The tool accepts:
+- `status` and `status_detail` (always)
+- `best_accuracy`, `best_config_version`, `best_cost_per_page_usd`, `current_config_version` (optional)
+
+Iteration count is managed automatically — incremented each time `run_evaluation(n_files=0)` is called.
 
 The tool lazy-initializes an `OptimizationState` instance from the `AUTOTUNE_SESSION_ID` env var (set by the entrypoint).
 
