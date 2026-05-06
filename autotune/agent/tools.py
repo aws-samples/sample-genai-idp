@@ -1202,7 +1202,7 @@ def write_optimization_log(operation: str, content: str = "", old_str: str = "",
         elif operation == "append":
             timestamp = datetime.now(timezone.utc).strftime("[%Y-%m-%d %H:%M:%S UTC]")
             with open(log_path, "a") as f:
-                f.write(f"\n{timestamp}\n{content}")
+                f.write(f"\n\n{timestamp}\n{content}")
         elif operation == "str_replace":
             if not os.path.exists(log_path):
                 return json.dumps({"error": "OPTIMIZATION-LOG.md does not exist. Use 'create' first."})
