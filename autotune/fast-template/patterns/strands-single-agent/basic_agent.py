@@ -36,7 +36,7 @@ from utils.auth import extract_user_id_from_context
 from code_interpreter_tools import execute_python_analysis
 from idpac_tools import ALL_TOOLS as IDPAC_TOOLS, seed_eval_cost
 from optimization_state import OptimizationState, TERMINAL_STATUSES
-from optimization_hooks import CancelCheckHook, CostTrackingHook, FileReadSafetyHook, OptimizationCancelled, OptimizationLoopHook
+from optimization_hooks import CancelCheckHook, CostTrackingHook, FileReadSafetyHook, OptimizationCancelled, OptimizationLoopHook, ServiceUnavailableRetryHook
 from proactive_context_manager import ProactiveContextManager
 
 logger = logging.getLogger(__name__)
@@ -157,7 +157,7 @@ def _create_agent(user_id: str, session_id: str, state: OptimizationState,
     plugins = [AgentSkills(skills=str(skills_dir))] if skills_dir.exists() else []
     tools = IDPAC_TOOLS + [file_read, image_reader, execute_python_analysis]
     cost_hook = CostTrackingHook(state, max_cost_usd=MAX_COST_USD)
-    hooks = [CancelCheckHook(state), FileReadSafetyHook(), cost_hook, OptimizationLoopHook(state, max_iterations=MAX_ITERATIONS, max_cost_usd=MAX_COST_USD)]
+    hooks = [ServiceUnavailableRetryHook(), CancelCheckHook(state), FileReadSafetyHook(), cost_hook, OptimizationLoopHook(state, max_iterations=MAX_ITERATIONS, max_cost_usd=MAX_COST_USD)]
 
     agent = Agent(
         name="idp_autotune",

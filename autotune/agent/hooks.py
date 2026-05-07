@@ -30,6 +30,22 @@ class OptimizationCancelled(Exception):
     pass
 
 
+class ServiceUnavailableRetryHook(HookProvider):
+    """Retry on Bedrock serviceUnavailableException (not handled by Strands natively)."""
+
+    def register_hooks(self, registry: HookRegistry, **kwargs) -> None:
+        registry.add_callback(AfterModelCallEvent, self._retry_on_unavailable)
+
+    def _retry_on_unavailable(self, event: AfterModelCallEvent) -> None:
+        if event.exception:
+            from botocore.exceptions import ClientError
+            if isinstance(event.exception, ClientError):
+                error_code = event.exception.response.get("Error", {}).get("Code")
+                if error_code in ("serviceUnavailableException", "ServiceUnavailableException"):
+                    logger.warning("Bedrock serviceUnavailable — setting retry=True")
+                    event.retry = True
+
+
 class CancelCheckHook(HookProvider):
     """Check DynamoDB before every tool call. Raises OptimizationCancelled if terminal."""
 
