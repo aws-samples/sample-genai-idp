@@ -29,6 +29,13 @@ SPDX-License-Identifier: MIT-0
 ### Changed
 
 - **Replaced DSR with open-source SRT security scanning tool** — Migrated from deprecated internal DSR (Design Security Review) tool to the actively maintained open-source [Sample Security Review Tool (SRT)](https://github.com/aws-samples/sample-security-review-tool). Added automated security scanning in GitLab CI/CD pipeline that runs on merge requests targeting `develop` branch. Pipeline fails if security findings are detected, providing a security gate before production deployments. New Makefile targets: `make srt`, `make srt-setup`, `make srt-scan`, `make srt-fix`. Updated documentation in CLAUDE.md, CONTRIBUTING.md, and scripts/README.md.
+
+### Fixed
+
+- **`idp-cli discover` silently ignored mismatched ground truth files** — When `-g` ground truth files didn't match any `-d` document by filename stem, the CLI printed a yellow warning but exited `0` and ran discovery without ground truth. This produced subtly worse results that were hard to diagnose (common trigger: IDP test-set ground truth stored as `baseline/<doc>/sections/1/result.json`, whose stem is always `result`). Two behavioral changes:
+  - **Single document + single ground truth** (`-d 1 file, -g 1 file`): now paired by position regardless of filename stem — filenames no longer need to match for this common case.
+  - **Batch mode** (multiple `-d` or multiple `-g`): unmatched `-g` files are now a fatal error (exit `1`) with a clear message showing unmatched ground truth files and available document stems. Also detects and errors on duplicate ground truth filename stems, which previously overwrote each other silently.
+  ([#310](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues/310))
   
 ## [0.5.9]
 
@@ -174,8 +181,7 @@ Hardening response to security review - Highlights:
    - us-west-2: `https://s3.us-west-2.amazonaws.com/aws-ml-blog-us-west-2/artifacts/genai-idp/idp-main_0.5.8.yaml`
    - us-east-1: `https://s3.us-east-1.amazonaws.com/aws-ml-blog-us-east-1/artifacts/genai-idp/idp-main_0.5.8.yaml`
    - eu-central-1: `https://s3.eu-central-1.amazonaws.com/aws-ml-blog-eu-central-1/artifacts/genai-idp/idp-main_0.5.8.yaml`
-  
-  
+
 ## [0.5.7]
 
 ### Added
