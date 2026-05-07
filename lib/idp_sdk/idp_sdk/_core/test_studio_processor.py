@@ -19,6 +19,9 @@ logger = logging.getLogger(__name__)
 class TestStudioProcessor:
     """Processes Test Studio operations (test result retrieval and comparison)."""
 
+    # Tell pytest not to collect this class as a test (name starts with "Test").
+    __test__ = False
+
     def __init__(self, stack_name: str, region: Optional[str] = None):
         """Initialize Test Studio processor.
 
