@@ -64,6 +64,7 @@ class DiscoveryOperation:
         page_range: Optional[str] = None,
         class_name_hint: Optional[str] = None,
         auto_detect: bool = False,
+        model_id: Optional[str] = None,
         **kwargs,
     ) -> "DiscoveryResult | DiscoveryBatchResult":
         """Run discovery on a single document to generate a document class schema.
@@ -84,6 +85,12 @@ class DiscoveryOperation:
                 provided, the LLM will use this as the $id value.
             auto_detect: If True, auto-detect section boundaries first, then
                 discover each section. Returns DiscoveryBatchResult.
+            model_id: Optional Bedrock model ID override (e.g.,
+                ``us.anthropic.claude-opus-4-6-v1``). When provided, this
+                replaces the discovery ``model_id`` from the system defaults
+                or stack config for this call only. Applies to both
+                with-ground-truth and without-ground-truth modes, and to
+                auto-detect when combined with ``auto_detect=True``.
             **kwargs: Additional parameters.
 
         Returns:
@@ -100,7 +107,7 @@ class DiscoveryOperation:
         # If auto_detect is True, detect sections first then discover each
         if auto_detect:
             return self._run_auto_detect_and_discover(
-                doc_path, config_version, stack_name
+                doc_path, config_version, stack_name, model_id=model_id
             )
 
         gt_data = None
@@ -126,6 +133,7 @@ class DiscoveryOperation:
                 config_version,
                 page_range=page_range,
                 class_name_hint=class_name_hint,
+                model_id=model_id,
             )
         else:
             return self._run_local(
@@ -134,23 +142,25 @@ class DiscoveryOperation:
                 gt_data,
                 page_range=page_range,
                 class_name_hint=class_name_hint,
+                model_id=model_id,
             )
 
     def auto_detect_sections(
         self,
         document_path: str,
         stack_name: Optional[str] = None,
+        model_id: Optional[str] = None,
     ) -> AutoDetectResult:
         """Detect document section boundaries using LLM analysis.
 
         Sends the full PDF to Amazon Bedrock and asks it to identify where
         different document types begin and end within a multi-page package.
 
-        Requires a stack connection (uses the stack's auto_split discovery config).
-
         Args:
             document_path: Local path to a PDF document.
             stack_name: Optional stack name override.
+            model_id: Optional Bedrock model ID override for section detection.
+                When provided, replaces the configured ``auto_split.model_id``.
 
         Returns:
             AutoDetectResult with detected section boundaries.
@@ -166,9 +176,11 @@ class DiscoveryOperation:
         resolved_stack = stack_name or self._client._stack_name
 
         if resolved_stack:
-            return self._auto_detect_with_stack(resolved_stack, doc_path, file_bytes)
+            return self._auto_detect_with_stack(
+                resolved_stack, doc_path, file_bytes, model_id=model_id
+            )
         else:
-            return self._auto_detect_local(doc_path, file_bytes)
+            return self._auto_detect_local(doc_path, file_bytes, model_id=model_id)
 
     def run_multi_section(
         self,
@@ -176,6 +188,7 @@ class DiscoveryOperation:
         page_ranges: List[Dict[str, Any]],
         config_version: Optional[str] = None,
         stack_name: Optional[str] = None,
+        model_id: Optional[str] = None,
     ) -> DiscoveryBatchResult:
         """Discover multiple document classes from page ranges in a single PDF.
 
@@ -190,6 +203,8 @@ class DiscoveryOperation:
                           {"start": 3, "end": 5, "label": "Invoice"}]
             config_version: Configuration version to save to (stack mode only).
             stack_name: Optional stack name override.
+            model_id: Optional Bedrock model ID override. Applied to every
+                per-range discovery call.
 
         Returns:
             DiscoveryBatchResult with one result per page range.
@@ -211,6 +226,7 @@ class DiscoveryOperation:
                 stack_name=stack_name,
                 page_range=range_str,
                 class_name_hint=label,
+                model_id=model_id,
             )
             # Annotate result with page range info
             result.page_range = range_str
@@ -231,10 +247,11 @@ class DiscoveryOperation:
         doc_path: Path,
         config_version: Optional[str],
         stack_name: Optional[str],
+        model_id: Optional[str] = None,
     ) -> DiscoveryBatchResult:
         """Auto-detect sections then discover each one."""
         detect_result = self.auto_detect_sections(
-            document_path=str(doc_path), stack_name=stack_name
+            document_path=str(doc_path), stack_name=stack_name, model_id=model_id
         )
 
         if detect_result.status != "SUCCESS" or not detect_result.sections:
@@ -254,6 +271,7 @@ class DiscoveryOperation:
             page_ranges=page_ranges,
             config_version=config_version,
             stack_name=stack_name,
+            model_id=model_id,
         )
 
     def _auto_detect_with_stack(
@@ -261,6 +279,7 @@ class DiscoveryOperation:
         stack_name: str,
         doc_path: Path,
         file_bytes: bytes,
+        model_id: Optional[str] = None,
     ) -> AutoDetectResult:
         """Auto-detect sections using stack config."""
         try:
@@ -279,6 +298,7 @@ class DiscoveryOperation:
                 input_bucket="local",
                 input_prefix=doc_path.name,
                 file_bytes=file_bytes,
+                model_id=model_id,
             )
 
             return AutoDetectResult(
@@ -306,6 +326,7 @@ class DiscoveryOperation:
         self,
         doc_path: Path,
         file_bytes: bytes,
+        model_id: Optional[str] = None,
     ) -> AutoDetectResult:
         """Auto-detect sections using system defaults (no stack needed)."""
         try:
@@ -316,7 +337,8 @@ class DiscoveryOperation:
             discovery_cfg = defaults.get("discovery", {})
             auto_cfg = discovery_cfg.get("auto_split", {})
 
-            model_id = auto_cfg.get("model_id", "us.amazon.nova-pro-v1:0")
+            # Caller override wins over system default
+            model_id = model_id or auto_cfg.get("model_id", "us.amazon.nova-pro-v1:0")
             system_prompt = auto_cfg.get(
                 "system_prompt",
                 "You are an expert document analyst. Your task is to identify "
@@ -398,6 +420,7 @@ class DiscoveryOperation:
         config_version: Optional[str],
         page_range: Optional[str] = None,
         class_name_hint: Optional[str] = None,
+        model_id: Optional[str] = None,
     ) -> DiscoveryResult:
         """Stack-connected mode: uses stack config, saves schema to DynamoDB."""
         try:
@@ -442,6 +465,7 @@ class DiscoveryOperation:
                     ground_truth_data=gt_data,
                     save_to_config=save,
                     page_range=page_range,
+                    model_id=model_id,
                 )
             else:
                 result = discovery.discovery_classes_with_document(
@@ -451,6 +475,7 @@ class DiscoveryOperation:
                     save_to_config=save,
                     page_range=page_range,
                     class_name_hint=class_name_hint,
+                    model_id=model_id,
                 )
 
             schema = result.get("schema")
@@ -483,6 +508,7 @@ class DiscoveryOperation:
         max_retries: int = 3,
         page_range: Optional[str] = None,
         class_name_hint: Optional[str] = None,
+        model_id: Optional[str] = None,
     ) -> DiscoveryResult:
         """Local mode: uses system defaults, no stack needed, no config save."""
         try:
@@ -508,7 +534,8 @@ class DiscoveryOperation:
                 else discovery_cfg.get("without_ground_truth", {})
             )
 
-            model_id = mode_cfg.get("model_id", "us.amazon.nova-pro-v1:0")
+            # Caller override wins over system default
+            model_id = model_id or mode_cfg.get("model_id", "us.amazon.nova-pro-v1:0")
             system_prompt = mode_cfg.get(
                 "system_prompt",
                 "You are an expert in processing forms. Extracting data from images and documents",
@@ -827,6 +854,7 @@ class DiscoveryOperation:
         ground_truth_paths: Optional[List[Optional[str]]] = None,
         config_version: Optional[str] = None,
         stack_name: Optional[str] = None,
+        model_id: Optional[str] = None,
         **kwargs,
     ) -> DiscoveryBatchResult:
         """Run discovery on multiple documents sequentially.
@@ -836,6 +864,8 @@ class DiscoveryOperation:
             ground_truth_paths: Optional list of ground truth file paths.
             config_version: Configuration version to save to.
             stack_name: Optional stack name override.
+            model_id: Optional Bedrock model ID override. Applied to every
+                document in the batch.
 
         Returns:
             DiscoveryBatchResult with overall stats and per-document results.
@@ -858,6 +888,7 @@ class DiscoveryOperation:
                 ground_truth_path=gt_path,
                 config_version=config_version,
                 stack_name=stack_name,
+                model_id=model_id,
             )
             results.append(result)
 

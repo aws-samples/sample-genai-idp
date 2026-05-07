@@ -7,6 +7,8 @@ SPDX-License-Identifier: MIT-0
 
 ### Added
 
+- **`idp-cli discover --model-id` flag** — override the Bedrock model used by `idp-cli discover` for a single invocation (e.g. `--model-id us.anthropic.claude-opus-4-6-v1`). Threads from the CLI through the SDK (`client.discovery.*`) and `idp_common.discovery.ClassesDiscovery` down to `bedrock.invoke_model`. Applies to with-ground-truth, without-ground-truth, `--auto-detect`, and `--page-range` modes; backward-compatible (omitting the flag uses the configured model). ([#309](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues/309))
+
 - **Bedrock circuit breaker** — a CFN-parameterized circuit breaker that pauses new workflow starts when Bedrock is unhealthy and auto-recovers once the service comes back, so transient Bedrock outages no longer burn through SQS retries or leave documents half-processed. Off by default for full backward compatibility.
   - New `circuit_breaker_manager` Lambda (`src/lambda/circuit_breaker_manager/`) owns state transitions in the existing `ConcurrencyTable` under `counter_id = "circuit_breaker"`. Three states: `CLOSED` (normal), `OPEN` (block new workflow starts), `HALF_OPEN` (probe traffic allowed).
   - **Triggers:** (1) CloudWatch Alarm state changes on Bedrock error metrics fan out via SNS → `circuit_breaker_manager`; (2) an EventBridge-scheduled health check promotes `OPEN → HALF_OPEN` once `RECOVERY_TIMEOUT_SECONDS` has elapsed.
@@ -36,6 +38,7 @@ SPDX-License-Identifier: MIT-0
   - **Single document + single ground truth** (`-d 1 file, -g 1 file`): now paired by position regardless of filename stem — filenames no longer need to match for this common case.
   - **Batch mode** (multiple `-d` or multiple `-g`): unmatched `-g` files are now a fatal error (exit `1`) with a clear message showing unmatched ground truth files and available document stems. Also detects and errors on duplicate ground truth filename stems, which previously overwrote each other silently.
   ([#310](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues/310))
+
   
 ## [0.5.9]
 
@@ -181,7 +184,8 @@ Hardening response to security review - Highlights:
    - us-west-2: `https://s3.us-west-2.amazonaws.com/aws-ml-blog-us-west-2/artifacts/genai-idp/idp-main_0.5.8.yaml`
    - us-east-1: `https://s3.us-east-1.amazonaws.com/aws-ml-blog-us-east-1/artifacts/genai-idp/idp-main_0.5.8.yaml`
    - eu-central-1: `https://s3.eu-central-1.amazonaws.com/aws-ml-blog-eu-central-1/artifacts/genai-idp/idp-main_0.5.8.yaml`
-
+  
+  
 ## [0.5.7]
 
 ### Added

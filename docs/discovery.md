@@ -375,7 +375,27 @@ result = discovery.discovery_classes_with_document(
     page_range="3-5",
     class_name_hint="W2 Form"
 )
+
+# Override the Bedrock model for a single call
+# (e.g. swap in Claude Opus without editing base-discovery.yaml or redeploying)
+result = discovery.discovery_classes_with_document(
+    input_bucket="my-bucket",
+    input_prefix="lending_package.pdf",
+    page_range="3-5",
+    class_name_hint="W2 Form",
+    model_id="us.anthropic.claude-opus-4-6-v1",
+)
 ```
+
+> **Model override (issue [#309](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues/309)):**
+> `auto_detect_sections`, `discovery_classes_with_document`, and
+> `discovery_classes_with_document_and_ground_truth` all accept an optional
+> `model_id` parameter. When supplied, it replaces the configured discovery
+> model (`auto_split.model_id`, `without_ground_truth.model_id`, or
+> `with_ground_truth.model_id`) for that call only — behavior is unchanged
+> when the parameter is `None`. This is exposed end-to-end through the
+> [SDK](./idp-sdk.md#discoveryrun) and the
+> [CLI](./idp-cli.md#discover) as `--model-id`.
 
 #### How Page Extraction Works
 
