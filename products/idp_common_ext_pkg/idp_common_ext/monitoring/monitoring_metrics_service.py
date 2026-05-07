@@ -592,6 +592,7 @@ class MonitoringMetricsService:
                     "numPages": item.get("num_pages", 0),
                     "errorMessage": item.get("error_message"),
                     "stage": item.get("stage"),
+                    "configVersion": item.get("config_version"),
                 }
             )
         return result

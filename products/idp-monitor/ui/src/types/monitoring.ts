@@ -117,6 +117,7 @@ export interface FailedDocument {
   errorMessage?: string;
   errorCode?: string;
   stage?: string;               // pipeline stage where failure occurred
+  configVersion?: string;       // config version used during processing
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

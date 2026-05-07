@@ -451,6 +451,23 @@ class OperationalDocumentService:
         total_failed = len(failed_docs)
         failed_docs = failed_docs[:limit]
 
+        # ── Enrich failed docs with full attributes from base table ──────
+        # The GSI (TypeDateIndex) does NOT project Metering, Sections, Pages,
+        # or Errors. Do a follow-up GetItem for each failed doc to get full data.
+        enriched_docs = []
+        for doc in failed_docs:
+            object_key = getattr(doc, "input_key", None) or getattr(doc, "id", None)
+            if object_key:
+                try:
+                    full_doc = self._db.get_document(object_key)
+                    if full_doc:
+                        enriched_docs.append(full_doc)
+                        continue
+                except Exception as e:
+                    logger.debug("Failed to enrich doc %s: %s", object_key, e)
+            enriched_docs.append(doc)
+        failed_docs = enriched_docs
+
         failures = []
         for doc in failed_docs:
             classification = None
@@ -459,16 +476,30 @@ class OperationalDocumentService:
 
             # ── Extract error message from multiple sources ──────────────
             error_message = None
-            # 1. Check metering dict for error_message
-            if isinstance(getattr(doc, "metering", None), dict):
-                error_message = doc.metering.get("error_message")
-            # 2. Check top-level error_message attribute
-            if error_message is None:
+            # 1. Check doc.errors list (List[str]) — primary error source
+            errors_list = getattr(doc, "errors", None)
+            if errors_list and isinstance(errors_list, list) and len(errors_list) > 0:
+                error_message = "; ".join(str(e) for e in errors_list if e)
+            # 2. Check metering dict for error_message or error key
+            if not error_message and isinstance(getattr(doc, "metering", None), dict):
+                error_message = (
+                    doc.metering.get("error_message")
+                    or doc.metering.get("error")
+                    or None
+                )
+            # 3. Check metering dict keys for step-level errors
+            if not error_message and isinstance(getattr(doc, "metering", None), dict):
+                for key, val in doc.metering.items():
+                    if isinstance(val, dict) and val.get("error"):
+                        error_message = val["error"]
+                        break
+            # 4. Check top-level error_message attribute (some models)
+            if not error_message:
                 top_level = getattr(doc, "error_message", None)
                 if isinstance(top_level, str) and top_level:
                     error_message = top_level
-            # 3. Check raw DynamoDB item for common error fields
-            if error_message is None:
+            # 5. Check raw DynamoDB item for common error fields
+            if not error_message:
                 raw = getattr(doc, "raw", None) or {}
                 error_message = (
                     raw.get("ErrorMessage")
@@ -477,27 +508,40 @@ class OperationalDocumentService:
                     or raw.get("StepFunctionError")
                     or None
                 )
-            # 4. Check metering dict keys for step-level errors
-            if error_message is None and isinstance(
-                getattr(doc, "metering", None), dict
-            ):
-                for key, val in doc.metering.items():
-                    if isinstance(val, dict) and val.get("error"):
-                        error_message = val["error"]
-                        break
-
-            # ── Extract failed stage from metering or raw item ───────────
+            # ── Extract failed stage from metering or metadata ───────────
             stage = None
-            raw = getattr(doc, "raw", None) or {}
-            # Check raw item for FailedStep / FailedStage
-            stage = raw.get("FailedStep") or raw.get("FailedStage") or None
-            # If not found, try to infer from metering keys with errors
+            # 1. Check metadata dict for failed_step / stage info
+            metadata = getattr(doc, "metadata", None) or {}
+            if isinstance(metadata, dict):
+                stage = (
+                    metadata.get("failed_step") or metadata.get("failed_stage") or None
+                )
+            # 2. Try to infer from metering keys (last step with duration = failure point)
             if stage is None and isinstance(getattr(doc, "metering", None), dict):
+                # First check for explicit error entries
                 for key, val in doc.metering.items():
                     if isinstance(val, dict) and val.get("error"):
-                        # Key format: "StepName/lambda/duration" or just "StepName"
                         stage = key.split("/")[0]
                         break
+                # If no error entry, the last metering key is likely the failed step
+                if stage is None and doc.metering:
+                    last_step = None
+                    for key in doc.metering.keys():
+                        step_name = key.split("/")[0]
+                        if step_name and step_name not in ("total",):
+                            last_step = step_name
+                    stage = last_step
+            # 3. Check raw DynamoDB item if available
+            if stage is None:
+                raw = getattr(doc, "raw", None) or {}
+                if isinstance(raw, dict):
+                    stage = raw.get("FailedStep") or raw.get("FailedStage") or None
+
+            # 6. Fallback: generate descriptive error message from context
+            if not error_message and stage:
+                error_message = f"Processing failed during {stage} step"
+            elif not error_message:
+                error_message = "Processing failed (no error details available)"
 
             # ── Determine best timestamp (when the failure occurred) ─────
             timestamp = (
@@ -525,6 +569,7 @@ class OperationalDocumentService:
                     "num_pages": doc.num_pages or 0,
                     "error_message": error_message,
                     "stage": stage,
+                    "config_version": getattr(doc, "config_version", None),
                 }
             )
 

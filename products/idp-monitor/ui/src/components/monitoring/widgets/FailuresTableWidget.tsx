@@ -87,7 +87,7 @@ export function FailuresTableWidget({
           variant="h2"
           description={descriptionText}
         >
-          Recent Failures
+          Document Failures
         </Header>
       }
     >
@@ -107,6 +107,8 @@ export function FailuresTableWidget({
                 : undefined
             }
           />
+          <div className="failures-table-top-aligned">
+          <style>{`.failures-table-top-aligned td { vertical-align: top; }`}</style>
           <Table
             variant="embedded"
             loading={isLoading}
@@ -120,12 +122,14 @@ export function FailuresTableWidget({
                   const parts = r.documentId.split('/');
                   const filename = parts.pop() ?? r.documentId;
                   const docClass = r.documentClass || '';
+                  const configVer = r.configVersion || '';
+                  const subtitle = [docClass, configVer].filter(Boolean).join(' | ');
                   return (
                     <Box>
                       <Box>{filename}</Box>
-                      {docClass && (
+                      {subtitle && (
                         <Box color="text-body-secondary" fontSize="body-s">
-                          {docClass}
+                          {subtitle}
                         </Box>
                       )}
                     </Box>
@@ -239,6 +243,7 @@ export function FailuresTableWidget({
               />
             }
           />
+          </div>
         </SpaceBetween>
       )}
     </Container>
