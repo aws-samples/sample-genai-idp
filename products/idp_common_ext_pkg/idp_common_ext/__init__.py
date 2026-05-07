@@ -19,4 +19,7 @@ the open-source ``lib/`` packages.
 """
 
 __version__ = "0.1.0"
+
+from idp_common_ext import cli, mcp, monitoring, sdk, subscription  # noqa: E402, F401
+
 __all__ = ["monitoring", "subscription", "cli", "sdk", "mcp"]

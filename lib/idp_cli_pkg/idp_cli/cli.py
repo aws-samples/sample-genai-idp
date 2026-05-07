@@ -343,7 +343,7 @@ def cli():
 )
 def deploy(
     stack_name: str,
-    admin_email: str,
+    admin_email: Optional[str],
     from_code: Optional[str],
     template_url: str,
     template_file: Optional[str],
