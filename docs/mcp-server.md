@@ -589,15 +589,15 @@ When MCP is enabled, the stack creates **two separate Cognito User Pool Clients*
 
 | CloudFormation Resource | Client Name | OAuth Flow | Purpose |
 |------------------------|-------------|-----------|---------|
-| `ExternalAppClient` | `external-app-client` | `authorization_code` | External apps, QuickSight integration |
-| `MCPConnectorClient` | `mcp-connector-client` | `client_credentials` | MCP Connector machine-to-machine (M2M) auth — no user login required |
+| `ExternalAppClient` | `user-authorized-mcp-client` | `authorization_code` | External apps, QuickSight integration |
+| `MCPConnectorClient` | `machine-authorized-mcp-client` | `client_credentials` | MCP Connector machine-to-machine (M2M) auth — no user login required |
 
 ### External App Client
 
 The `ExternalAppClient` is used for external applications requiring user-based login (e.g., Amazon QuickSight).
 
 **Client Configuration:**
-- **Client Name**: `external-app-client`
+- **Client Name**: `user-authorized-mcp-client`
 - **Client Secret**: Generated automatically
 - **Auth Flows**: USER_PASSWORD_AUTH, ADMIN_USER_PASSWORD_AUTH, REFRESH_TOKEN_AUTH
 - **OAuth Flows**: Authorization code flow
@@ -613,7 +613,7 @@ The `ExternalAppClient` is used for external applications requiring user-based l
 The `MCPConnectorClient` is used by AI coding assistants (Cline, Amazon Q, etc.) that connect to the IDP MCP server via machine-to-machine (M2M) OAuth — authentication happens automatically in the background without any user login prompt.
 
 **Client Configuration:**
-- **Client Name**: `mcp-connector-client`
+- **Client Name**: `machine-authorized-mcp-client`
 - **Client Secret**: Generated automatically
 - **OAuth Flows**: `client_credentials` (machine-to-machine (M2M) — no user login or browser redirect required)
 - **OAuth Scopes**: `idp-mcp-connector/access`

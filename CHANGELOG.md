@@ -5,6 +5,15 @@ SPDX-License-Identifier: MIT-0
 
 ## [Unreleased]
 
+### Changed
+- **MCP Cognito Client Rename (BREAKING CHANGE)** — Renamed Cognito User Pool app client names for clarity:
+  - `external-app-client` → `user-authorized-mcp-client` (3-legged OAuth / authorization code flow)
+  - `mcp-connector-client` → `machine-authorized-mcp-client` (2-legged OAuth / client credentials flow)
+  - Added `EnableTokenRevocation` and `PreventUserExistenceErrors` to machine-authorized client
+  - Removed duplicate `QuickM2MClient` resource and outputs
+  - Updated stack output descriptions with OAuth flow types and use-case context
+  - **⚠️ Upgrade note**: Any existing deployment using the current credentials (MCP Connector instances, QuickSight integrations, external apps) will break after a stack update and will need to be reconfigured. After updating, retrieve new client IDs and secrets from CloudFormation outputs and update your MCP Connector and external app configurations.
+
 ## [0.5.6]
 
 ### Added
