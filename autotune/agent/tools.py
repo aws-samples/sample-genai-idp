@@ -621,6 +621,10 @@ def analyze_dataset(dataset_path: str) -> str:
 
 
 @tool
+# TODO: After idp-cli adds --model-id flag (expected after May 15 2026),
+# pass a stronger model (e.g. us.anthropic.claude-opus-4-6-v1) to both
+# run_discovery and run_multi_class_discovery. Default Nova Pro fails on
+# complex documents.
 def run_discovery(
     document_path: str,
     ground_truth_path: str,
