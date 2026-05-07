@@ -1,4 +1,4 @@
-stack_name_base: IDPAutoTune
+stack_name_base: kaleko-FAST-IDPAT-dev
 
 # Optional: Set to automatically create an admin user and email credentials
 admin_user_email: kaleko@amazon.com
@@ -16,4 +16,4 @@ autotune:
   # Bedrock model ID for the optimization agent.
   model_id: us.anthropic.claude-opus-4-6-v1
   # Maximum cost (USD) per run before triggering stop.
-  max_cost_usd: 1
+  max_cost_usd: 100

@@ -404,18 +404,18 @@ CDK_DEFAULT_REGION=us-east-1 \
 cdk deploy --require-approval never
 ```
 
-- [x] Set `stack_name_base: IDPAutoTune` and `admin_user_email` in `config.yaml`
+- [x] Set `stack_name_base: kaleko-FAST-IDPAT-dev` and `admin_user_email` in `config.yaml`
 - [x] Deployed successfully (~5.5 minutes)
 
 ### Deployed FAST Stack
 
 | Resource | Value |
 |----------|-------|
-| Stack name | `IDPAutoTune` |
-| Amplify URL | https://main.duq4hhla5pfaq.amplifyapp.com |
-| Runtime ARN | `IDPAutoTune_FASTAgent-sLV5ho8mzP` |
-| Cognito User Pool | `us-east-1_YiSzEVGq5` |
-| Cognito Client ID | `49aq6o58cr98m9jt7219f4gkha` |
+| Stack name | `kaleko-FAST-IDPAT-dev` |
+| Amplify URL | https://main.d2hvyoqfm7h5q6.amplifyapp.com |
+| Runtime ARN | `kaleko_FAST_IDPAT_dev_FASTAgent-WAw5CWGCNu` |
+| Cognito User Pool | `us-east-1_wEzgYbMZX` |
+| Cognito Client ID | `4ikeg5usiicq7u3685bkpbtqj` |
 | Optimization State API | (redeploy needed — replaced feedback API) |
 | Deployed | 2026-04-27 (needs redeploy for Phase 6 changes) |
 
@@ -829,7 +829,7 @@ The agent writes OPTIMIZATION-LOG.md to `/mnt/workspace/{session_id}/OPTIMIZATIO
 - After each tool call that modifies the log (detected by file mtime change), upload to `s3://{bucket}/autotune-streams/{session_id}/OPTIMIZATION-LOG.md`
 - Or simpler: sync every 30s alongside the heartbeat
 
-**4. S3 bucket:** Use the existing staging bucket (`IDPAutoTune` stack's `StagingBucketName` output: `idpautotune-idpautotuneampli-stagingbucket9644c37c-p7dvaqozwzd7`). Add IAM permissions for the Lambda to read from it. The agent's IAM role already has S3 write access.
+**4. S3 bucket:** Use the existing staging bucket (`kaleko-FAST-IDPAT-dev` stack's `StagingBucketName` output: `kaleko-fast-idpat-dev-kaleko-stagingbucket9644c37c-j5hldek3ynk5`). Add IAM permissions for the Lambda to read from it. The agent's IAM role already has S3 write access.
 
 **5. New Lambda for `GET /stream` and `GET /log`:**
 
@@ -951,7 +951,7 @@ Once fire-and-forget is working, run a full end-to-end test:
 
   # Frontend
   cd /home/ubuntu/gitlab/genaiic-idp-accelerator
-  python autotune/fast-template/scripts/deploy-frontend.py IDPAutoTune --region us-east-1
+  python autotune/fast-template/scripts/deploy-frontend.py kaleko-FAST-IDPAT-dev --region us-east-1
   ```
 
 ### Key documentation
@@ -965,7 +965,7 @@ Once fire-and-forget is working, run a full end-to-end test:
 
 ### Where to find logs
 
-**CloudWatch log group:** `/aws/bedrock-agentcore/runtimes/IDPAutoTune_FASTAgent-sLV5ho8mzP-DEFAULT`
+**CloudWatch log group:** `/aws/bedrock-agentcore/runtimes/kaleko_FAST_IDPAT_dev_FASTAgent-WAw5CWGCNu-DEFAULT`
 
 **Log streams:** Each container instance gets its own stream named `YYYY/MM/DD/[runtime-logs]<uuid>`. Streams are sorted by `LastEventTime` descending. The most recent stream is usually the current/latest container — but AgentCore spins up multiple containers, so you may need to check 2–3 streams.
 
@@ -975,19 +975,19 @@ Once fire-and-forget is working, run a full end-to-end test:
 ```bash
 # List recent streams
 aws logs describe-log-streams \
-  --log-group-name "/aws/bedrock-agentcore/runtimes/IDPAutoTune_FASTAgent-sLV5ho8mzP-DEFAULT" \
+  --log-group-name "/aws/bedrock-agentcore/runtimes/kaleko_FAST_IDPAT_dev_FASTAgent-WAw5CWGCNu-DEFAULT" \
   --order-by LastEventTime --descending --limit 5 --region us-east-1 \
   --query 'logStreams[*].{name:logStreamName,lastEvent:lastEventTimestamp}' --output table
 
 # Read a stream (the OTel JSON is huge — pipe through jq or python for readability)
 aws logs get-log-events \
-  --log-group-name "/aws/bedrock-agentcore/runtimes/IDPAutoTune_FASTAgent-sLV5ho8mzP-DEFAULT" \
+  --log-group-name "/aws/bedrock-agentcore/runtimes/kaleko_FAST_IDPAT_dev_FASTAgent-WAw5CWGCNu-DEFAULT" \
   --log-stream-name "<stream-name>" --region us-east-1 --limit 50 \
   --query 'events[*].message' --output text
 
 # Check DynamoDB state (fastest way to see if agent is alive)
 aws dynamodb get-item \
-  --table-name "IDPAutoTune-OptimizationState" \
+  --table-name "kaleko-FAST-IDPAT-dev-OptimizationState" \
   --key '{"session_id": {"S": "<session-id>"}}' --region us-east-1 \
   --query 'Item.{status:status.S,phase:phase.S,phase_detail:phase_detail.S,updated_at:updated_at.S,last_heartbeat_at:last_heartbeat_at.S,iteration:iteration.S}' \
   --output table

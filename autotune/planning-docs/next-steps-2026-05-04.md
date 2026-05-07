@@ -11,7 +11,7 @@
 - **Image resize** — `download_input_document` auto-resizes images >4MB for Bedrock's 5MB limit
 - **Model:** `us.anthropic.claude-opus-4-6-v1`
 - **IDP stack:** `kaleko-IDPAutoTune-dev` with test sets `realkie-fcc-verified` (75 FCC invoices) and `davids-test-dataset` (45 multi-class images)
-- **Amplify URL:** https://main.duq4hhla5pfaq.amplifyapp.com
+- **Amplify URL:** https://main.d2hvyoqfm7h5q6.amplifyapp.com
 
 ## What was done Friday (May 1)
 
@@ -172,7 +172,7 @@ AWS_EC2_METADATA_DISABLED=true CDK_DEFAULT_ACCOUNT=$(aws sts get-caller-identity
 
 # Frontend
 cd /home/ubuntu/gitlab/genaiic-idp-accelerator
-python autotune/fast-template/scripts/deploy-frontend.py IDPAutoTune --region us-east-1
+python autotune/fast-template/scripts/deploy-frontend.py kaleko-FAST-IDPAT-dev --region us-east-1
 
 # Lint before frontend deploy
 cd autotune/fast-template/frontend && npx tsc --noEmit && npm run lint

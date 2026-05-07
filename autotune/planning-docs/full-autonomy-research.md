@@ -392,7 +392,7 @@ The `BeforeToolCallEvent` hook reads the `status` field from DynamoDB before eac
 To cancel during development:
 ```bash
 aws dynamodb update-item \
-  --table-name IDPAutoTune-OptimizationState \
+  --table-name kaleko-FAST-IDPAT-dev-OptimizationState \
   --key '{"session_id": {"S": "SESSION_ID_HERE"}}' \
   --update-expression 'SET #s = :c' \
   --expression-attribute-names '{"#s": "status"}' \

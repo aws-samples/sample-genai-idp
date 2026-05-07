@@ -31,7 +31,7 @@ The dedicated stream bucket (`AUTOTUNE_STREAM_BUCKET`) stores everything that ne
 
 ### DynamoDB — Control plane
 
-`IDPAutoTune-OptimizationState` table stores run metadata: status, phase, iteration, accuracy, cost, heartbeat. Polled by frontend via `GET /state`.
+`kaleko-FAST-IDPAT-dev-OptimizationState` table stores run metadata: status, phase, iteration, accuracy, cost, heartbeat. Polled by frontend via `GET /state`.
 
 ## Session Resume
 
