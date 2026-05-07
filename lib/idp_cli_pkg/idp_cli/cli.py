@@ -4512,6 +4512,16 @@ def config_sync_bda(
     is_flag=True,
     help="Only detect section boundaries (use with --auto-detect). Prints boundaries without running discovery.",
 )
+@click.option(
+    "--model-id",
+    default=None,
+    help=(
+        "Override the Bedrock model ID used for discovery "
+        "(e.g., 'us.anthropic.claude-opus-4-6-v1'). When omitted, the "
+        "discovery model from the stack config (stack mode) or system "
+        "defaults (local mode) is used."
+    ),
+)
 def discover(
     stack_name: str,
     document: tuple,
@@ -4524,6 +4534,7 @@ def discover(
     page_label: tuple,
     auto_detect: bool,
     detect_only: bool,
+    model_id: Optional[str],
 ):
     """
     Discover document class schema from sample document(s)
@@ -4574,6 +4585,10 @@ def discover(
 
       # Stack mode (saves to config)
       idp-cli discover --stack-name my-stack -d ./invoice.pdf --config-version v2
+
+      # Override the discovery model (e.g. use Claude Opus instead of the default)
+      idp-cli discover -d ./invoice.pdf -g ./invoice.json \\
+          --model-id us.anthropic.claude-opus-4-6-v1
     """
     import json
     from pathlib import Path
@@ -4596,6 +4611,8 @@ def discover(
             if stack_name:
                 console.print(f"Stack: {stack_name}")
             console.print(f"Document: {doc_path}")
+            if model_id:
+                console.print(f"Model ID override: {model_id}")
             console.print()
 
             if detect_only:
@@ -4604,7 +4621,8 @@ def discover(
                     "[cyan]Detecting section boundaries with AI...[/cyan]"
                 ):
                     detect_result = client.discovery.auto_detect_sections(
-                        document_path=doc_path
+                        document_path=doc_path,
+                        model_id=model_id,
                     )
 
                 if detect_result.status != "SUCCESS":
@@ -4642,6 +4660,7 @@ def discover(
                     document_path=doc_path,
                     config_version=config_version,
                     auto_detect=True,
+                    model_id=model_id,
                 )
 
             # batch_result is DiscoveryBatchResult
@@ -4688,6 +4707,8 @@ def discover(
                 console.print(f"Stack: {stack_name}")
             console.print(f"Document: {doc_path}")
             console.print(f"Page ranges: {len(page_range)}")
+            if model_id:
+                console.print(f"Model ID override: {model_id}")
             console.print()
 
             # Build page_ranges list
@@ -4711,6 +4732,7 @@ def discover(
                     document_path=doc_path,
                     page_ranges=page_ranges_list,
                     config_version=config_version,
+                    model_id=model_id,
                 )
 
             all_schemas = []
@@ -4821,6 +4843,8 @@ def discover(
             console.print(f"Class hint: {class_hint}")
         if config_version:
             console.print(f"Config Version: {config_version}")
+        if model_id:
+            console.print(f"Model ID override: {model_id}")
         console.print()
 
         # Process documents
@@ -4850,6 +4874,7 @@ def discover(
                     ground_truth_path=matched_gt,
                     config_version=config_version,
                     class_name_hint=class_hint,
+                    model_id=model_id,
                 )
 
             if result.status == "SUCCESS":

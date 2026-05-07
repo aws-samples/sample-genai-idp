@@ -2385,6 +2385,10 @@ idp-cli discover -d ./lending_package.pdf --auto-detect --detect-only -o section
 
 # Stack mode (saves to config)
 idp-cli discover --stack-name my-stack -d ./invoice.pdf --config-version v2
+
+# Override the Bedrock model (e.g. use Claude Opus instead of the configured default)
+idp-cli discover -d ./invoice.pdf -g ./invoice.json \
+    --model-id us.anthropic.claude-opus-4-6-v1
 ```
 
 | Option | Description |
@@ -2399,6 +2403,7 @@ idp-cli discover --stack-name my-stack -d ./invoice.pdf --config-version v2
 | `--page-label` | Label for corresponding `--page-range` (e.g., "W2 Form"). Used as class name hint per range. |
 | `--auto-detect` | Auto-detect document section boundaries using AI, then discover each section. |
 | `--detect-only` | Only detect section boundaries (use with `--auto-detect`). Prints boundaries without running discovery. |
+| `--model-id` | Override the Bedrock model ID used for discovery (e.g., `us.anthropic.claude-opus-4-6-v1`). When omitted, the discovery model from the stack config (stack mode) or system defaults (local mode) is used. Applies to with-ground-truth, without-ground-truth, `--auto-detect`, and `--page-range` modes. |
 | `--region` | AWS region |
 
 ---
