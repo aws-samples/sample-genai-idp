@@ -321,25 +321,69 @@
                 {
                     "Variable": "$.Result.rule_validation_enabled",
                     "BooleanEquals": true,
-                    "Next": "ProcessRuleValidationSections"
+                    "Next": "PolicyClassificationStep"
                 }
             ],
             "Default": "SetEmptyRuleValidationResult"
+        },
+        "PolicyClassificationStep": {
+            "Type": "Task",
+            "Resource": "${RuleValidationPolicyClassificationLambdaArn}",
+            "Retry": [
+                {
+                    "ErrorEquals": [
+                        "Sandbox.Timedout",
+                        "Lambda.ServiceException",
+                        "Lambda.AWSLambdaException",
+                        "Lambda.SdkClientException",
+                        "Lambda.TooManyRequestsException",
+                        "ServiceQuotaExceededException",
+                        "ThrottlingException",
+                        "ProvisionedThroughputExceededException",
+                        "RequestLimitExceeded",
+                        "ServiceUnavailableException"
+                    ],
+                    "IntervalSeconds": 2,
+                    "MaxAttempts": 6,
+                    "BackoffRate": 2
+                }
+            ],
+            "ResultPath": "$.PolicyClassificationResult",
+            "Next": "CheckPolicyMatch"
+        },
+        "CheckPolicyMatch": {
+            "Type": "Choice",
+            "Choices": [
+                {
+                    "Variable": "$.PolicyClassificationResult.skip_rule_validation",
+                    "BooleanEquals": true,
+                    "Next": "SetSkippedRuleValidationResult"
+                }
+            ],
+            "Default": "ProcessRuleValidationSections"
+        },
+        "SetSkippedRuleValidationResult": {
+            "Type": "Pass",
+            "Parameters": {
+                "document.$": "$.PolicyClassificationResult.document"
+            },
+            "ResultPath": "$.RuleValidationOrchestrationResult",
+            "Next": "SummarizationStep"
         },
         "SetEmptyRuleValidationResult": {
             "Type": "Pass",
             "Parameters": {
                 "document.$": "$.Result.document"
             },
-            "ResultPath": "$.Result",
+            "ResultPath": "$.RuleValidationOrchestrationResult",
             "Next": "SummarizationStep"
         },
         "ProcessRuleValidationSections": {
             "Type": "Map",
-            "ItemsPath": "$.Result.document.sections",
+            "ItemsPath": "$.PolicyClassificationResult.document.sections",
             "ItemSelector": {
                 "execution_arn.$": "$$.Execution.Id",
-                "document.$": "$.Result.document",
+                "document.$": "$.PolicyClassificationResult.document",
                 "section_id.$": "$$.Map.Item.Value"
             },
             "MaxConcurrency": 10,
@@ -400,7 +444,7 @@
                     "BackoffRate": 2.5
                 }
             ],
-            "ResultPath": "$.Result",
+            "ResultPath": "$.RuleValidationOrchestrationResult",
             "Next": "SummarizationStep"
         },
         "CheckHITLRequired": {
@@ -424,7 +468,7 @@
             "Resource": "${SummarizationLambdaArn}",
             "Parameters": {
                 "execution_arn.$": "$$.Execution.Id",
-                "document.$": "$.Result.document"
+                "document.$": "$.RuleValidationOrchestrationResult.document"
             },
             "ResultPath": "$.Result",
             "OutputPath": "$.Result.document",

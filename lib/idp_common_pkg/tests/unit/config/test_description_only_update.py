@@ -71,12 +71,14 @@ def test_description_only_update():
 
 @pytest.mark.unit
 def test_description_only_update_with_rule_classes():
-    """Test description update when rule_classes is included but unchanged."""
+    """Test description update when a legacy rule_classes input is migrated
+    to policy_classes (renamed in v0.5.9)."""
 
     # Mock the DynamoDB table
     mock_table = Mock()
 
-    # Mock existing version record with rule_classes
+    # Mock existing version record with legacy rule_classes field. The
+    # IDPConfig pre-validator migrates this to policy_classes on load.
     existing_record = {
         "Configuration": "Config#test-version",
         "CreatedAt": "2024-01-01T00:00:00Z",
@@ -103,9 +105,10 @@ def test_description_only_update_with_rule_classes():
     manager = ConfigurationManager(table_name="test-table")
     manager.table = mock_table
 
-    # Test description update with unchanged rule_classes
+    # Test description update with legacy rule_classes payload; the
+    # ConfigurationManager migrates it through the IDPConfig validator.
     result = manager.handle_update_custom_configuration(
-        custom_config='{"rule_classes": []}',  # Same as existing
+        custom_config='{"rule_classes": []}',  # Legacy input; migrated to policy_classes
         version="test-version",
         description="updated description",
     )
@@ -118,11 +121,12 @@ def test_description_only_update_with_rule_classes():
     assert saved_item["Description"] == "updated description"
     assert "UpdatedAt" in saved_item
 
-    # In full-config mode, rule_classes is preserved in the saved config
-    # (no longer stripped by auto-cleanup since we save complete configs)
-    # Config data is compressed, so decompress to verify field presence
+    # In full-config mode the saved config preserves all fields. The legacy
+    # rule_classes key is migrated to policy_classes on the way in, so the
+    # persisted record only has the canonical key.
     decompressed_item = ConfigurationManager._decompress_item(saved_item)
-    assert "rule_classes" in decompressed_item  # Full config preserves all fields
+    assert "policy_classes" in decompressed_item  # Canonical post-migration key
+    assert "rule_classes" not in decompressed_item  # Legacy key stripped by migration
 
 
 @pytest.mark.unit

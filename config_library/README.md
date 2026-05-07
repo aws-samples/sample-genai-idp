@@ -105,7 +105,6 @@ config_library/
 │   ├── lending-package-sample-govcloud/
 │   ├── ocr-benchmark/
 │   ├── realkie-fcc-verified/
-│   ├── rule-extraction/
 │   ├── rule-validation/
 │   ├── rvl-cdip/
 │   └── rvl-cdip-with-few-shot-examples/

@@ -30,8 +30,9 @@ phases:
       - export FUNCTION_rule_validation="patterns/unified/src/rule-validation-function"
       - export FUNCTION_rule_validation_orchestration="patterns/unified/src/rule-validation-orchestration-function"
       - export FUNCTION_mlflow_logger="patterns/unified/src/mlflow_logger_function"
+      - export FUNCTION_rule_validation_policy_classification="patterns/unified/src/rule-validation-policy-classification-function"
       - |
-        for func_var in FUNCTION_bda_invoke FUNCTION_bda_completion FUNCTION_bda_processresults FUNCTION_ocr FUNCTION_classification FUNCTION_extraction FUNCTION_assessment FUNCTION_processresults FUNCTION_summarization FUNCTION_evaluation FUNCTION_test_execution_aggregation FUNCTION_rule_validation FUNCTION_rule_validation_orchestration FUNCTION_mlflow_logger; do
+        for func_var in FUNCTION_bda_invoke FUNCTION_bda_completion FUNCTION_bda_processresults FUNCTION_ocr FUNCTION_classification FUNCTION_extraction FUNCTION_assessment FUNCTION_processresults FUNCTION_summarization FUNCTION_evaluation FUNCTION_test_execution_aggregation FUNCTION_rule_validation FUNCTION_rule_validation_orchestration FUNCTION_mlflow_logger FUNCTION_rule_validation_policy_classification; do
           func_path="${!func_var}"
           func_name=$(basename "$func_path" | sed 's/_/-/g')
           echo "Building ${func_name} from ${func_path}..."

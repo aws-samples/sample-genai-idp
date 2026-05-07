@@ -198,20 +198,20 @@ To add a new PA document section:
 
 2. Test the configuration with sample documents containing the new section.
 
-### Adding New Rule Types
+### Adding New Policy Types
 
-To add a new rule validation type:
+To add a new policy type for rule validation:
 
-1. Add a new entry to the `rule_classes` array in `config.yaml`:
+1. Add a new entry to the `policy_classes` array in `config.yaml`:
    ```yaml
    - $schema: https://json-schema.org/draft/2020-12/schema
-     x-aws-idp-rule-type: your_rule_type
+     x-aws-idp-policy-type: your_policy_type
      type: object
      rule_properties:
        your_rule:
          type: string
          description: Description of the validation rule
-     $id: your_rule_type
+     $id: your_policy_type
    ```
 
 2. The rule will automatically be evaluated during the rule validation step.
@@ -257,11 +257,11 @@ Rule validation results are automatically stored in AWS Glue tables for analytic
 Two tables are created in the ReportingDatabase:
 
 1. **rule_validation_summary**: Document-level summary with pass/fail counts
-   - Columns: document_id, input_key, validation_date, overall_status, total_rule_types, total_rules, pass_count, fail_count, information_not_found_count
+   - Columns: document_id, input_key, validation_date, overall_status, total_policy_types, total_rules, pass_count, fail_count, information_not_found_count
    - Partitioned by date (YYYY-MM-DD format)
 
 2. **rule_validation_details**: Individual rule results with recommendations
-   - Columns: document_id, rule_type, rule, recommendation, reasoning, supporting_pages, validation_date
+   - Columns: document_id, policy_type, rule, recommendation, reasoning, supporting_pages, validation_date
    - Partitioned by date (YYYY-MM-DD format)
 
 ### Agent Companion Chat
@@ -277,7 +277,7 @@ See [Agent Companion Chat documentation](../../../docs/agent-companion-chat.md) 
 
 ### Automatic Skipping
 
-When no rules are configured (`rule_classes: []`), the rule validation workflow is automatically skipped:
+When no rules are configured (`policy_classes: []`), the rule validation workflow is automatically skipped:
 - No Lambda invocations for rule validation
 - No orchestration processing
 - Reduces processing time and costs

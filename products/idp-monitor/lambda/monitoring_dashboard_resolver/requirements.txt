@@ -1,0 +1,7 @@
+# IDPMonitor — Lambda Resolver Dependencies
+#
+# idp_common is provided via Lambda Layer (exported from Accelerator stack).
+# Only list dependencies NOT already in the shared layer here.
+
+# No additional dependencies at this time.
+# idp_common (monitoring, subscription) → provided via Lambda Layer

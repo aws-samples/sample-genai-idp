@@ -5,6 +5,39 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import svgr from 'vite-plugin-svgr';
 import { resolve } from 'path';
+import fs from 'fs';
+
+// ---------------------------------------------------------------------------
+// Local dev plugin: serve the locally-built UMD bundle at
+// /extensions/idp-monitor-ui.js so MonitoringShell doesn't fetch
+// the stale bundle from S3/CloudFront during local development.
+// ---------------------------------------------------------------------------
+const UMD_BUNDLE_PATH = resolve(
+  __dirname,
+  '../../products/idp-monitor/ui/dist/idp-monitor-ui.umd.js',
+);
+
+function serveLocalMonitorBundle() {
+  return {
+    name: 'serve-local-monitor-bundle',
+    configureServer(server) {
+      server.middlewares.use('/extensions/idp-monitor-ui.js', (req, res, next) => {
+        if (fs.existsSync(UMD_BUNDLE_PATH)) {
+          res.setHeader('Content-Type', 'application/javascript');
+          res.setHeader('Cache-Control', 'no-cache');
+          fs.createReadStream(UMD_BUNDLE_PATH).pipe(res);
+        } else {
+          console.warn(
+            '[vite] Local UMD bundle not found at:',
+            UMD_BUNDLE_PATH,
+            '\nRun: cd products/idp-monitor/ui && npm run build',
+          );
+          next();
+        }
+      });
+    },
+  };
+}
 
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => ({
@@ -18,6 +51,9 @@ export default defineConfig(({ mode }) => ({
 
     // Enable SVG import as React components
     svgr(),
+
+    // Serve local UMD bundle in dev mode
+    serveLocalMonitorBundle(),
   ],
 
   // Ensure all .js and .jsx files are treated as JSX
@@ -31,6 +67,7 @@ export default defineConfig(({ mode }) => ({
     open: true,
     // Enable CORS for AWS Amplify
     cors: true,
+    fs: { strict: false },
   },
 
   // Build configuration
@@ -40,6 +77,12 @@ export default defineConfig(({ mode }) => ({
     // Increase chunk size warning limit (suppressed for enterprise internal tool)
     chunkSizeWarningLimit: 3000,
     rollupOptions: {
+      // NOTE: @idp-accelerator/idp-monitor-ui is intentionally NOT marked external
+      // in this repo (genaiic-idp-monitor). The package is always installed here
+      // via "file:../../products/idp-monitor/ui" and must be bundled so that the
+      // dynamic import() in MonitoringShell.tsx resolves successfully at runtime.
+      // (In the open-source genaiic-idp-accelerator repo the package is marked
+      // external because it may not be installed there.)
       output: {
         // Manual chunking for better code splitting
         manualChunks: {
@@ -62,12 +105,24 @@ export default defineConfig(({ mode }) => ({
     },
     // Ensure proper module resolution
     extensions: ['.mjs', '.ts', '.tsx', '.js', '.jsx', '.json'],
+    // Deduplicate React — prevents "Cannot read properties of null (reading 'useEffect')"
+    // when @idp-accelerator/idp-monitor-ui is bundled inline (its recharts dependency
+    // would otherwise pull in a second React instance at runtime).
+    dedupe: ['react', 'react-dom', 'react/jsx-runtime', '@cloudscape-design/components'],
   },
 
   // Define global constants
   define: {
     // Ensure process.env is available for compatibility
     'process.env': {},
+    // IDPMonitor AppSync endpoint — injected at build time via environment variables.
+    // Set VITE_IDP_MONITOR_API_URL and VITE_IDP_MONITOR_API_KEY in your build environment
+    // (CodeBuild env vars, .env.local, etc.) when deploying the IDPMonitor stack.
+    // If not set, useMonitoringStatus returns "not_deployed" and the monitoring activation
+    // page is shown. The dashboard becomes available once the stack is deployed and the
+    // UI is rebuilt with these variables populated.
+    __IDP_MONITOR_API_URL__: JSON.stringify(process.env.VITE_IDP_MONITOR_API_URL ?? ''),
+    __IDP_MONITOR_API_KEY__: JSON.stringify(process.env.VITE_IDP_MONITOR_API_KEY ?? ''),
   },
 
   // Optimize dependencies

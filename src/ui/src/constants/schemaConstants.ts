@@ -64,8 +64,8 @@ export const TYPE_COLORS = {
 /** Marks a schema as a document type (top-level class) */
 export const X_AWS_IDP_DOCUMENT_TYPE = 'x-aws-idp-document-type';
 
-/** Marks a schema as a rule type (for rule validation) */
-export const X_AWS_IDP_RULE_TYPE = 'x-aws-idp-rule-type';
+/** Marks a schema as a policy type (for rule validation) */
+export const X_AWS_IDP_POLICY_TYPE = 'x-aws-idp-policy-type';
 
 /** Classification metadata for document type */
 export const X_AWS_IDP_CLASSIFICATION = 'x-aws-idp-classification';

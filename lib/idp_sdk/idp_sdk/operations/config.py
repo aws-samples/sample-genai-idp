@@ -323,6 +323,21 @@ class ConfigOperation:
                 success=False, error=f"Failed to load config: {e}"
             )
 
+        # Check if config has managed=true and reject it
+        if isinstance(user_config, dict) and user_config.get("managed") is True:
+            return ConfigUploadResult(
+                success=False,
+                error="Cannot upload managed configuration via CLI. Managed configs are stack-controlled and overwritten on stack updates. Remove 'managed: true' from your config or set 'managed: false'.",
+            )
+
+        # Ensure managed field is explicitly set to false for user-uploaded configs.
+        # Force-write this field even if absent to protect against future model defaults
+        # changing — if the ConfigurationManager later defaults managed to true,
+        # user-uploaded configs would be incorrectly marked as stack-managed and
+        # overwritten on stack updates.
+        if isinstance(user_config, dict):
+            user_config["managed"] = False
+
         if validate:
             result = self.validate(config_file, pattern=pattern or "pattern-2")
             if not result.valid:

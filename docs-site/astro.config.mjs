@@ -69,6 +69,7 @@ export default defineConfig({
             { label: "BDA Mode Reference", slug: "pattern-1" },
             { label: "Pipeline Mode Reference", slug: "pattern-2" },
             { label: "Discovery", slug: "discovery" },
+            { label: "Policy Discovery", slug: "policy-discovery" },
           ],
         },
         {

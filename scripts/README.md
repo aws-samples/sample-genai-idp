@@ -7,7 +7,7 @@ This directory contains utility scripts for building, testing, deploying, and op
 ```
 scripts/
 ├── setup/               # Development environment setup scripts
-├── dsr/                 # DSR (Deliverable Security Review) integration
+├── srt/                 # SRT (Sample Security Review Tool) integration
 ├── sdlc/                # SDLC CI/CD scripts and infrastructure
 │   ├── cfn/             # CloudFormation templates for CI/CD pipeline
 │   └── [scripts]        # CI/CD automation scripts
@@ -19,8 +19,8 @@ scripts/
 ### `setup/` - Development Environment Setup
 Setup scripts for different operating systems. See [setup/README.md](setup/README.md).
 
-### `dsr/` - DSR Security Scanning
-DSR (Deliverable Security Review) integration for automated security scanning. See [dsr/README.md](dsr/README.md).
+### `srt/` - SRT Security Scanning
+SRT (Sample Security Review Tool) integration for automated security scanning. See [srt/README.md](srt/README.md).
 
 ### `sdlc/` - SDLC CI/CD Scripts and Infrastructure
 CloudFormation templates and scripts for CI/CD pipeline infrastructure.

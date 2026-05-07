@@ -15,6 +15,7 @@ import DocumentsQueryRoutes from './DocumentsQueryRoutes';
 import DocumentsAnalyticsRoutes from './DocumentsAnalyticsRoutes';
 import TestStudioRoutes from './TestStudioRoutes';
 import AgentChatRoutes from './AgentChatRoutes';
+import MonitoringRoutes from './MonitoringRoutes';
 
 import {
   DOCUMENTS_PATH,
@@ -25,6 +26,7 @@ import {
   DOCUMENTS_ANALYTICS_PATH,
   TEST_STUDIO_PATH,
   AGENT_CHAT_PATH,
+  MONITORING_PATH,
 } from './constants';
 
 const logger = new ConsoleLogger('AuthRoutes');
@@ -46,6 +48,7 @@ const AuthRoutes = ({ redirectParam }: AuthRoutesProps): React.JSX.Element => {
   return (
     <SettingsContext.Provider value={settingsContextValue}>
       <Routes>
+        <Route path={`${MONITORING_PATH}/*`} element={<MonitoringRoutes />} />
         <Route path={`${AGENT_CHAT_PATH}/*`} element={<AgentChatRoutes />} />
         <Route path={`${DOCUMENTS_KB_QUERY_PATH}/*`} element={<DocumentsQueryRoutes />} />
         <Route path={`${DOCUMENTS_ANALYTICS_PATH}/*`} element={<DocumentsAnalyticsRoutes />} />

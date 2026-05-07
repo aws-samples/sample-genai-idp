@@ -61,6 +61,10 @@ const safeSchema = {
     // CustomLink React component in DocumentsQueryLayout.tsx via the
     // `components` prop.
     'documentid',
+    // Table structure tags used by rule validation summary
+    'colgroup',
+    'col',
+    'style',
   ],
   // Extend per-tag attribute allow-lists. defaultSchema already permits
   // a safe set for most tags. We add:
@@ -76,6 +80,12 @@ const safeSchema = {
     div: [...(defaultSchema.attributes?.div ?? []), 'className'],
     a: [...(defaultSchema.attributes?.a ?? []), 'target', 'rel'],
     img: [...(defaultSchema.attributes?.img ?? []), 'alt', 'width', 'height'],
+    // Table elements: allow style for rule validation summary layout
+    table: [...(defaultSchema.attributes?.table ?? []), 'style'],
+    th: [...(defaultSchema.attributes?.th ?? []), 'style'],
+    td: [...(defaultSchema.attributes?.td ?? []), 'style'],
+    col: [...(defaultSchema.attributes?.col ?? []), 'style'],
+    colgroup: defaultSchema.attributes?.['*'] ?? [],
     // details/summary have no attributes of interest beyond the tag itself.
     details: [...(defaultSchema.attributes?.['*'] ?? []), 'open'],
     summary: defaultSchema.attributes?.['*'] ?? [],

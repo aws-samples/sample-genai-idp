@@ -1,0 +1,423 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  IDPMonitor — Standalone monitoring dashboard for IDP Accelerator.
+  Deploys independently from the Accelerator stack. Resolves all Accelerator
+  resource references via CloudFormation cross-stack exports (Fn::ImportValue).
+  Requires the Accelerator stack to be deployed first.
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Parameters
+# ─────────────────────────────────────────────────────────────────────────────
+Parameters:
+
+  AcceleratorStackName:
+    Type: String
+    Description: >
+      Name of the deployed IDP Accelerator CloudFormation stack.
+      Used to resolve cross-stack resource references via Fn::ImportValue
+      and to name IDPMonitor resources consistently.
+
+  SubscriptionValidationMode:
+    Type: String
+    Default: "none"
+    AllowedValues:
+      - "marketplace"
+      - "none"
+    Description: >
+      Subscription validation mechanism. Use 'marketplace' for AWS Marketplace
+      entitlement checks. Use 'none' to disable validation (dev/testing only).
+
+  AuthMode:
+    Type: String
+    Default: "API_KEY"
+    AllowedValues:
+      - "API_KEY"
+      - "AMAZON_COGNITO_USER_POOLS"
+    Description: >
+      AppSync authentication mode. Use API_KEY for dev/testing.
+      Use AMAZON_COGNITO_USER_POOLS for production deployments.
+
+  CognitoUserPoolId:
+    Type: String
+    Default: ""
+    Description: >
+      Cognito User Pool ID — required only when AuthMode = AMAZON_COGNITO_USER_POOLS.
+
+  LogLevel:
+    Type: String
+    Default: "INFO"
+    AllowedValues: ["DEBUG", "INFO", "WARNING", "ERROR"]
+
+  ApiKeyExpires:
+    Type: Number
+    Description: >
+      Unix timestamp (seconds since epoch) when the API key expires.
+      Calculated dynamically by deploy.sh (365 days from deployment time).
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Conditions
+# ─────────────────────────────────────────────────────────────────────────────
+Conditions:
+  UseApiKeyAuth: !Equals [!Ref AuthMode, "API_KEY"]
+  UseCognitoAuth: !Equals [!Ref AuthMode, "AMAZON_COGNITO_USER_POOLS"]
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Globals
+# ─────────────────────────────────────────────────────────────────────────────
+Globals:
+  Function:
+    Runtime: python3.12
+    Timeout: 60
+    MemorySize: 512
+    Environment:
+      Variables:
+        LOG_LEVEL: !Ref LogLevel
+        ACCELERATOR_STACK_NAME: !Ref AcceleratorStackName
+        SUBSCRIPTION_VALIDATION_MODE: !Ref SubscriptionValidationMode
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Resources
+# ─────────────────────────────────────────────────────────────────────────────
+Resources:
+
+  # ── AppSync API ──────────────────────────────────────────────────────────
+
+  MonitoringGraphQLApi:
+    Type: AWS::AppSync::GraphQLApi
+    Properties:
+      Name: !Sub "${AcceleratorStackName}-idp-monitor-api"
+      AuthenticationType: !Ref AuthMode
+      UserPoolConfig: !If
+        - UseCognitoAuth
+        - UserPoolId: !Ref CognitoUserPoolId
+          AwsRegion: !Ref AWS::Region
+          DefaultAction: ALLOW
+        - !Ref AWS::NoValue
+      LogConfig:
+        CloudWatchLogsRoleArn: !GetAtt AppSyncCloudWatchRole.Arn
+        FieldLogLevel: ERROR
+      XrayEnabled: false
+
+  MonitoringGraphQLSchema:
+    Type: AWS::AppSync::GraphQLSchema
+    Properties:
+      ApiId: !GetAtt MonitoringGraphQLApi.ApiId
+      Definition: |
+        # IDPMonitor — AppSync GraphQL Schema
+        schema {
+          query: Query
+        }
+
+        type Query {
+          getMonitoringDashboard(input: MonitoringQueryInput!): MonitoringDashboardResponse
+          getMonitoringStatus: MonitoringStatusResponse
+        }
+
+        input MonitoringQueryInput {
+          timeRange: String
+          startTime: AWSDateTime
+          endTime: AWSDateTime
+          sections: [String!]
+        }
+
+        type MonitoringDashboardResponse {
+          subscriptionStatus: String!
+          subscriptionTier: String
+          volume: AWSJSON
+          cost: AWSJSON
+          latency: AWSJSON
+          failures: AWSJSON
+          throttles: AWSJSON
+          distribution: AWSJSON
+          config: AWSJSON
+          timeRange: String
+          startTime: AWSDateTime
+          endTime: AWSDateTime
+          generatedAt: AWSDateTime!
+          errors: [SectionError!]
+        }
+
+        type MonitoringStatusResponse {
+          subscriptionStatus: String!
+          stackName: String
+          acceleratorStackName: String
+        }
+
+        type SectionError {
+          section: String!
+          message: String!
+          code: String
+        }
+
+        scalar AWSJSON
+        scalar AWSDateTime
+
+  # API Key — only created when AuthMode = API_KEY
+  MonitoringApiKey:
+    Type: AWS::AppSync::ApiKey
+    Condition: UseApiKeyAuth
+    Properties:
+      ApiId: !GetAtt MonitoringGraphQLApi.ApiId
+      Description: !Sub "IDPMonitor dev API key for ${AcceleratorStackName}"
+      Expires: !Ref ApiKeyExpires
+
+  # ── IAM — AppSync → CloudWatch Logs ──────────────────────────────────────
+
+  AppSyncCloudWatchRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${AcceleratorStackName}-idp-monitor-appsync-cw-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: appsync.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSAppSyncPushToCloudWatchLogs
+
+  # ── IAM — AppSync → Lambda ────────────────────────────────────────────────
+
+  AppSyncLambdaInvokeRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${AcceleratorStackName}-idp-monitor-appsync-invoke-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: appsync.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: InvokeDashboardResolver
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource: !GetAtt MonitoringDashboardResolver.Arn
+
+  # ── AppSync Data Source ───────────────────────────────────────────────────
+
+  MonitoringLambdaDataSource:
+    Type: AWS::AppSync::DataSource
+    Properties:
+      ApiId: !GetAtt MonitoringGraphQLApi.ApiId
+      Name: MonitoringLambdaDataSource
+      Type: AWS_LAMBDA
+      LambdaConfig:
+        LambdaFunctionArn: !GetAtt MonitoringDashboardResolver.Arn
+      ServiceRoleArn: !GetAtt AppSyncLambdaInvokeRole.Arn
+
+  # ── AppSync Resolvers ─────────────────────────────────────────────────────
+
+  GetMonitoringDashboardResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: MonitoringGraphQLSchema
+    Properties:
+      ApiId: !GetAtt MonitoringGraphQLApi.ApiId
+      TypeName: Query
+      FieldName: getMonitoringDashboard
+      DataSourceName: !GetAtt MonitoringLambdaDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version": "2018-05-29",
+          "operation": "Invoke",
+          "payload": {
+            "info": { "fieldName": "getMonitoringDashboard" },
+            "arguments": $util.toJson($context.args)
+          }
+        }
+      ResponseMappingTemplate: |
+        $util.toJson($context.result)
+
+  GetMonitoringStatusResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: MonitoringGraphQLSchema
+    Properties:
+      ApiId: !GetAtt MonitoringGraphQLApi.ApiId
+      TypeName: Query
+      FieldName: getMonitoringStatus
+      DataSourceName: !GetAtt MonitoringLambdaDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version": "2018-05-29",
+          "operation": "Invoke",
+          "payload": {
+            "info": { "fieldName": "getMonitoringStatus" },
+            "arguments": {}
+          }
+        }
+      ResponseMappingTemplate: |
+        $util.toJson($context.result)
+
+  # ── Lambda Layer — idp_common_ext premium monitoring services ─────────────
+
+  IdpCommonExtLayer:
+    Type: AWS::Serverless::LayerVersion
+    Properties:
+      LayerName: !Sub "${AcceleratorStackName}-idp-common-ext"
+      Description: "IDPMonitor extension layer — bundles idp_common + idp_common_ext with monitoring services."
+      ContentUri: layer/
+      CompatibleRuntimes:
+        - python3.12
+      RetentionPolicy: Delete
+
+  # ── Lambda Resolver ──────────────────────────────────────────────────────
+
+  MonitoringDashboardResolver:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${AcceleratorStackName}-idp-monitor-dashboard-resolver"
+      CodeUri: lambda/monitoring_dashboard_resolver/
+      Handler: index.lambda_handler
+      Layers:
+        - !Ref IdpCommonExtLayer
+      Description: >
+        AppSync Lambda resolver for IDPMonitor dashboard. Enforces subscription
+        entitlement check and aggregates monitoring data from DynamoDB, CloudWatch,
+        X-Ray, and Athena.
+      Environment:
+        Variables:
+          TRACKING_TABLE_NAME:
+            Fn::ImportValue: !Sub "${AcceleratorStackName}-TrackingTableName"
+          CONFIGURATION_TABLE_NAME:
+            Fn::ImportValue: !Sub "${AcceleratorStackName}-ConfigurationTableName"
+          REPORTING_BUCKET_NAME:
+            Fn::ImportValue: !Sub "${AcceleratorStackName}-ReportingBucketName"
+      Policies:
+        - !Ref MonitoringDashboardResolverPolicy
+
+  MonitoringDashboardResolverPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Sub "${AcceleratorStackName}-idp-monitor-resolver-policy"
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+
+          # DynamoDB — read from Accelerator tracking table
+          - Effect: Allow
+            Action:
+              - dynamodb:Query
+              - dynamodb:Scan
+              - dynamodb:GetItem
+            Resource:
+              - Fn::ImportValue: !Sub "${AcceleratorStackName}-TrackingTableArn"
+              - !Sub
+                - "${TableArn}/index/*"
+                - TableArn:
+                    Fn::ImportValue: !Sub "${AcceleratorStackName}-TrackingTableArn"
+
+          # DynamoDB — read from Accelerator configuration table
+          - Effect: Allow
+            Action:
+              - dynamodb:Query
+              - dynamodb:GetItem
+              - dynamodb:Scan
+            Resource:
+              Fn::ImportValue: !Sub "${AcceleratorStackName}-ConfigurationTableArn"
+
+          # CloudWatch — read metrics
+          - Effect: Allow
+            Action:
+              - cloudwatch:GetMetricData
+              - cloudwatch:GetMetricStatistics
+              - cloudwatch:ListMetrics
+            Resource: "*"
+
+          # X-Ray — read traces
+          - Effect: Allow
+            Action:
+              - xray:GetTraceSummaries
+              - xray:BatchGetTraces
+              - xray:GetServiceGraph
+            Resource: "*"
+
+          # Athena — query historical data
+          - Effect: Allow
+            Action:
+              - athena:StartQueryExecution
+              - athena:GetQueryExecution
+              - athena:GetQueryResults
+              - athena:StopQueryExecution
+            Resource: "*"
+
+          # Glue — resolve table metadata for Athena
+          - Effect: Allow
+            Action:
+              - glue:GetTable
+              - glue:GetDatabase
+              - glue:GetPartitions
+            Resource: "*"
+
+          # S3 — read reporting data + write Athena query results
+          - Effect: Allow
+            Action:
+              - s3:GetObject
+              - s3:PutObject
+              - s3:ListBucket
+            Resource:
+              - Fn::ImportValue: !Sub "${AcceleratorStackName}-ReportingBucketArn"
+              - !Sub
+                - "${BucketArn}/*"
+                - BucketArn:
+                    Fn::ImportValue: !Sub "${AcceleratorStackName}-ReportingBucketArn"
+
+          # KMS — decrypt DynamoDB table data (tables use CMK encryption)
+          - Effect: Allow
+            Action:
+              - kms:Decrypt
+              - kms:DescribeKey
+            Resource: !Sub "arn:aws:kms:${AWS::Region}:${AWS::AccountId}:key/*"
+
+          # AWS Marketplace — entitlement check
+          - Effect: Allow
+            Action:
+              - aws-marketplace:GetEntitlements
+            Resource: "*"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SSM Parameter — written so the Accelerator UI can detect this stack
+# ─────────────────────────────────────────────────────────────────────────────
+
+  MonitoringApiUrlSsmParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub "/idp-monitor/${AcceleratorStackName}/api-url"
+      Type: String
+      Value: !GetAtt MonitoringGraphQLApi.GraphQLUrl
+      Description: !Sub "IDPMonitor API URL for Accelerator stack ${AcceleratorStackName}"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Outputs
+# ─────────────────────────────────────────────────────────────────────────────
+Outputs:
+
+  MonitoringApiUrl:
+    Description: IDPMonitor AppSync GraphQL API URL
+    Value: !GetAtt MonitoringGraphQLApi.GraphQLUrl
+    Export:
+      Name: !Sub "${AcceleratorStackName}-idp-monitor-api-url"
+
+  MonitoringApiId:
+    Description: IDPMonitor AppSync API ID
+    Value: !GetAtt MonitoringGraphQLApi.ApiId
+    Export:
+      Name: !Sub "${AcceleratorStackName}-idp-monitor-api-id"
+
+  MonitoringApiKey:
+    Description: IDPMonitor AppSync API Key (only when AuthMode=API_KEY)
+    Condition: UseApiKeyAuth
+    Value: !GetAtt MonitoringApiKey.ApiKey
+    Export:
+      Name: !Sub "${AcceleratorStackName}-idp-monitor-api-key"
+
+  MonitoringDashboardResolverArn:
+    Description: ARN of the IDPMonitor dashboard resolver Lambda
+    Value: !GetAtt MonitoringDashboardResolver.Arn
+    Export:
+      Name: !Sub "${AcceleratorStackName}-idp-monitor-resolver-arn"

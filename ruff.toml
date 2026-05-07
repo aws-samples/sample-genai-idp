@@ -13,6 +13,7 @@ extend-exclude = [
     "patterns",
     "src",
     "scripts",
+    "products/idp-monitor/layer/python",
 ]
 
 # Exclude a variety of commonly ignored directories.

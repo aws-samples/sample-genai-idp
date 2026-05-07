@@ -5,7 +5,20 @@ SPDX-License-Identifier: MIT-0
 
 ## [Unreleased]
 
+### Changed
+
+- **Replaced DSR with open-source SRT security scanning tool** — Migrated from deprecated internal DSR (Design Security Review) tool to the actively maintained open-source [Sample Security Review Tool (SRT)](https://github.com/aws-samples/sample-security-review-tool). Added automated security scanning in GitLab CI/CD pipeline that runs on merge requests targeting `develop` branch. Pipeline fails if security findings are detected, providing a security gate before production deployments. New Makefile targets: `make srt`, `make srt-setup`, `make srt-scan`, `make srt-fix`. Updated documentation in CLAUDE.md, CONTRIBUTING.md, and scripts/README.md.
+  
+## [0.5.9]
+
 ### Added
+
+- **Policy Discovery & Rule Validation Policy Classification**: Upload a regulatory document (e.g., an NCCI Medicare policy manual) and automatically extract structured validation rules from it. A new "Policy Discovery" tab in the Discovery page walks you through the process, and the extracted rules feed directly into the rule validation workflow.
+  - A new policy classification step runs before rule validation, matching each document against your configured `policy_classes` using regex patterns on document names and page content. Only matching policy rules are evaluated, so unrelated rules are skipped automatically.
+  - The configuration key `rule_classes` has been renamed to `policy_classes` for clarity. Existing configs will need to update this key.
+  - The Schema Builder now has dedicated support for editing policy classes with policy-specific labels, and extraction-only settings are hidden when editing policy schemas.
+  - A "Policy Discovery" section has been added to Discovery Configuration in the UI, letting you choose the model, temperature, and prompts used for Policy Discovery.
+  - The legacy `rule-extraction` configuration preset has been removed. Use **Policy Discovery** on the Discovery tab instead — it writes extracted rules directly into the active config's `policy_classes`.
 
 - **Document-level Download button on the Document Details page** — A new **Download** dropdown in the Document Details header lets users pull every output artifact for a document in a single click, packaged as a ZIP. Three scopes are offered:
   - **Download All (ZIP)** — document attributes, metering, summary, evaluation & rule-validation reports, per-section predictions, baselines (when available), per-page text/confidence, and optionally per-page images and/or the source document (checkboxes).
@@ -32,6 +45,7 @@ SPDX-License-Identifier: MIT-0
     - `DeployInVPC` (bool) — places all IDP Lambdas in customer-supplied private subnets with a customer-supplied security group.
     - `VpcId`, `PrivateSubnetIds`, `ApiGatewayVpcEndpointId`, `LambdaSecurityGroupId`, `ApiStageName` — customer-supplied networking.
     - `DeployBastionHost`, `BastionHostSubnetId`, `BastionHostSecurityGroupId` — optional dev-access bastion.
+    - **CloudFormation console UX** - the 11 new parameters are grouped into two dedicated `AWS::CloudFormation::Interface` sections ("Headless API Deployment (required for GovCloud)" and "Headless API Deployment - Bastion Host (optional, requires VPC Secured Mode)") with friendlier `ParameterLabels` and rewritten `Description` text. Each description now explicitly states when the parameter is required, what the default behavior is (no Jobs API / no Lambda VPC placement / no bastion EC2 unless explicitly enabled), and which companion parameters it depends on. Ensures Quick-Start users who click the README's "Launch Stack" button see clear opt-in sections rather than assuming the bastion host or Jobs API is always deployed.
   - **CFN fail-fast validation (H1)** — new `Rules:` block entries catch misconfiguration at stack create / update time with clear `AssertDescription` errors, instead of failing deep in resource provisioning:
     - `HeadlessRequiresVPC` — `EnableHeadless=true` requires `DeployInVPC=true` + non-empty `VpcId` / `ApiGatewayVpcEndpointId` / `LambdaSecurityGroupId`.
     - `BastionRequiresVPC` — `DeployBastionHost=true` requires `DeployInVPC=true` + non-empty bastion subnet / SG.
@@ -48,6 +62,12 @@ SPDX-License-Identifier: MIT-0
     - New `docs/govcloud-architecture.md`, `docs/govcloud-operations.md`, `docs/vpc-secured-mode.md`.
     - Overhauled `docs/govcloud-deployment.md` with a deployment-variant matrix (Vanilla / Headless API / Headless + VPC / Headless + VPC + Bastion).
   - **End-to-end test script:** `scripts/e2e_test_headless.py <STACK_NAME> <PATH_TO_FILE>` exercises the full flow (OAuth → POST /jobs → presigned upload → status poll → download results).
+
+- **Managed configuration upload rejection** — `idp-cli config upload` now rejects configuration files with `managed: true` to prevent users from accidentally creating stack-managed configurations that would be overwritten on stack updates. All user-uploaded configurations automatically have `managed: false` set, ensuring they persist across stack lifecycle events.
+
+### Fixed
+
+- **Evaluation markdown/report rendering resilience** — two defensive fixes that keep evaluation and test-results pages from crashing when upstream data is non-numeric or empty.
 
 ### Security
 
@@ -104,6 +124,12 @@ Hardening response to security review - Highlights:
   - SQL injection in `test_results_resolver` Athena queries (every
     interpolation is gated by `_validate_sql_input()` with a strict
     allow-list regex).
+
+## Templates
+   - us-west-2: `https://s3.us-west-2.amazonaws.com/aws-ml-blog-us-west-2/artifacts/genai-idp/idp-main_0.5.9.yaml`
+   - us-east-1: `https://s3.us-east-1.amazonaws.com/aws-ml-blog-us-east-1/artifacts/genai-idp/idp-main_0.5.9.yaml`
+   - eu-central-1: `https://s3.eu-central-1.amazonaws.com/aws-ml-blog-eu-central-1/artifacts/genai-idp/idp-main_0.5.9.yaml`
+  
 
 ## [0.5.8]
 

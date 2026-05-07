@@ -318,7 +318,7 @@ https://github.com/user-attachments/assets/bcd18e62-4795-44ea-9554-637062fd21d7
 ### Rule Validation Demo
 Automatically validate documents against business rules and compliance requirements using AI. Includes rule extraction from policy documents, configurable rule schemas, and detailed Pass/Fail reporting with supporting evidence.
 
-https://github.com/user-attachments/assets/5d115b90-ff52-4e17-ab70-d259efe5a183
+https://github.com/user-attachments/assets/bac617ec-edb0-4719-827f-175571a4b9f5
 
 **Related Documentation**: [Rule Validation Documentation](./rule-validation.md)
 

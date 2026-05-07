@@ -1,0 +1,96 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: MIT-0
+
+# =============================================================================
+# BASE RULE DISCOVERY - Rule extraction from policy documents defaults
+# =============================================================================
+
+discovery:
+  rules:
+    model: global.anthropic.claude-sonnet-4-6
+    temperature: "0.0"
+    top_p: "0.0"
+    top_k: "5"
+    max_tokens: "64000"
+    agentic:
+      enabled: false
+      review_agent: false
+    system_prompt: >-
+      You are an expert in analyzing policy documents and extracting
+      business rules, regulations, and compliance requirements.
+      Extract rules as structured, actionable validation statements.
+    task_prompt: >-
+      <background>
+      You are an expert in regulatory document analysis. Your task is to extract
+      ALL business rules, regulations, compliance requirements, and validation
+      criteria from the attached policy document as a single flat list of rules.
+      </background>
+
+      <task>
+      Analyze the policy document thoroughly, page by page. For each rule found:
+
+      1. Give the rule a short, descriptive snake_case name (e.g., "bundled_services_not_separate",
+         "modifier_59_distinct_sites", "prior_auth_required")
+
+      2. Write a clear, actionable description — phrased as a yes/no validation question
+         or checkable statement
+
+      3. Include specific codes, numbers, thresholds, or conditions mentioned
+
+      4. Note any exceptions or special cases within the description
+
+      5. Reference the page number or section where the rule was found
+      </task>
+
+      <extraction-guidelines>
+      Guidelines:
+      - Extract rules VERBATIM from the document where possible
+      - Each rule should be a self-contained, evaluable statement
+      - Rules should be specific enough to validate a transaction against
+      - Do NOT classify or categorize the rules — output one flat list
+      - Use descriptive snake_case names as rule identifiers (NOT generic "rule_1", "rule_2")
+      - Each rule description should be phrased as a validation question or checkable statement
+      - Do NOT interpret or infer rules not explicitly stated in the document
+      - Process ALL pages of the document
+      - If a rule has exceptions, include them in the description
+      </extraction-guidelines>
+
+      <output-format>
+      Return ONLY a valid JSON array containing exactly ONE object.
+      All rules go into a single "rule_properties" dict with descriptive snake_case keys:
+
+      [
+          {
+              "x-aws-idp-rule-type": "policy_rules",
+              "description": "All rules extracted from the policy document",
+              "rule_properties": {
+                  "bundled_services_not_separate": {
+                      "description": "Are bundled services (exploration, lysis of adhesions, closure, anesthesia) NOT reported separately from the primary surgical procedure?",
+                      "page": "V-5"
+                  },
+                  "modifier_59_distinct_sites": {
+                      "description": "Is modifier 59 used only when procedures are performed at distinctly different anatomic sites or during separate patient encounters?",
+                      "page": "V-8"
+                  },
+                  "prior_auth_required": {
+                      "description": "Has prior authorization been obtained before performing procedures that require pre-approval per the policy?",
+                      "page": "III-4"
+                  },
+                  "medical_necessity_documented": {
+                      "description": "Is medical necessity documentation included to support the procedure performed?",
+                      "page": "IV-1"
+                  }
+              }
+          }
+      ]
+      </output-format>
+
+      <final-instructions>
+      Extract rules from the attached policy document by:
+      1. Reading every page systematically to identify all stated rules
+      2. Giving each rule a short, descriptive snake_case name
+      3. Phrasing each rule as a yes/no validation question
+      4. Including page references for traceability
+      5. Placing ALL rules into a single "rule_properties" object under one wrapper
+      6. Do NOT include any text outside the JSON array - return ONLY valid JSON
+      </final-instructions>

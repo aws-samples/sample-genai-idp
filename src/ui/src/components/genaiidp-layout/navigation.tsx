@@ -20,6 +20,7 @@ import {
   AGENT_CHAT_PATH,
   CAPACITY_PLANNING_PATH,
   CUSTOM_MODELS_PATH,
+  MONITORING_PATH,
 } from '../../routes/constants';
 
 export const documentsNavHeader = { text: 'Tools', href: `#${DEFAULT_PATH}` };
@@ -30,6 +31,7 @@ export const adminNavItems = [
   { type: 'link', text: 'Upload Document(s)', href: `#${UPLOAD_DOCUMENT_PATH}` },
   { type: 'link', text: 'Document KB', href: `#${DOCUMENTS_KB_QUERY_PATH}` },
   { type: 'link', text: 'Agent Companion Chat', href: `#${AGENT_CHAT_PATH}` },
+  { type: 'link', text: 'Monitoring', href: `#${MONITORING_PATH}` },
   {
     type: 'section',
     text: 'Configuration',
@@ -54,6 +56,12 @@ export const adminNavItems = [
     type: 'section',
     text: 'Resources',
     items: [
+      {
+        type: 'link',
+        text: 'Documentation',
+        href: 'https://aws-solutions-library-samples.github.io/accelerated-intelligent-document-processing-on-aws/',
+        external: true,
+      },
       {
         type: 'link',
         text: 'README',
@@ -99,6 +107,12 @@ export const authorNavItems = [
     items: [
       {
         type: 'link',
+        text: 'Documentation',
+        href: 'https://aws-solutions-library-samples.github.io/accelerated-intelligent-document-processing-on-aws/',
+        external: true,
+      },
+      {
+        type: 'link',
         text: 'README',
         href: 'https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/blob/main/README.md',
         external: true,
@@ -129,6 +143,12 @@ export const viewerNavItems = [
     type: 'section',
     text: 'Resources',
     items: [
+      {
+        type: 'link',
+        text: 'Documentation',
+        href: 'https://aws-solutions-library-samples.github.io/accelerated-intelligent-document-processing-on-aws/',
+        external: true,
+      },
       {
         type: 'link',
         text: 'README',
@@ -287,6 +307,8 @@ const Navigation = ({
     activeHref = `#${DOCUMENTS_PATH}`;
   } else if (path === AGENT_CHAT_PATH) {
     activeHref = `#${AGENT_CHAT_PATH}`;
+  } else if (path.startsWith(MONITORING_PATH)) {
+    activeHref = `#${MONITORING_PATH}`;
   }
 
   // Create navigation items with deployment info

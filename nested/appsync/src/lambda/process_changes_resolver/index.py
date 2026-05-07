@@ -221,6 +221,13 @@ def handler(event, context):
         # Sort sections by starting page ID
         document.sections.sort(key=lambda s: min([int(pid) for pid in s.page_ids] + [float('inf')]))
 
+        # Clear rule validation data when sections are modified
+        if modified_sections or modified_pages:
+            clear_rule_validation_data(document.output_bucket, document.input_key)
+            # Reset rule validation result on document
+            document.rule_validation_result = None
+            logger.info("Cleared rule validation data for reprocessing")
+
         logger.info(f"Document updated with {len(document.sections)} sections and {len(document.pages)} pages")
 
         # Log uncompressed document for troubleshooting
@@ -384,3 +391,29 @@ def clear_extraction_data(s3_uri):
         
     except Exception as e:
         logger.warning(f"Failed to clear extraction data {s3_uri}: {str(e)}")
+
+
+def clear_rule_validation_data(bucket, input_key):
+    """Clear all rule validation data for a document from S3"""
+    try:
+        prefix = f"{input_key}/rule_validation/"
+        
+        # List all objects with the prefix
+        response = s3_client.list_objects_v2(Bucket=bucket, Prefix=prefix)
+        
+        if "Contents" not in response:
+            logger.info(f"No rule validation files found at {prefix}")
+            return
+        
+        # Delete all objects
+        objects_to_delete = [{"Key": obj["Key"]} for obj in response["Contents"]]
+        
+        if objects_to_delete:
+            s3_client.delete_objects(
+                Bucket=bucket,
+                Delete={"Objects": objects_to_delete}
+            )
+            logger.info(f"Cleared {len(objects_to_delete)} rule validation files from {prefix}")
+        
+    except Exception as e:
+        logger.warning(f"Failed to clear rule validation data for {input_key}: {str(e)}")

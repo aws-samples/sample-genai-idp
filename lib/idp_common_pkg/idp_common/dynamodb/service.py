@@ -288,6 +288,25 @@ class DocumentDynamoDBService:
             expression_names["#SummaryReportUri"] = "SummaryReportUri"
             expression_values[":SummaryReportUri"] = document.summary_report_uri
 
+        # Add rule validation result if available
+        if document.rule_validation_result:
+            set_expressions.append("#RuleValidationResult = :RuleValidationResult")
+            expression_names["#RuleValidationResult"] = "RuleValidationResult"
+            # Store as JSON string to preserve structure
+            rule_validation_dict = {
+                "request_id": document.rule_validation_result.request_id,
+                "summary": document.rule_validation_result.summary,
+                "section_results": document.rule_validation_result.section_results,
+                "metadata": document.rule_validation_result.metadata,
+                "output_uri": document.rule_validation_result.output_uri,
+                "errors": document.rule_validation_result.errors,
+                "matched_policy_types": document.rule_validation_result.matched_policy_types,
+                "matched_page_ids": document.rule_validation_result.matched_page_ids,
+            }
+            expression_values[":RuleValidationResult"] = json.dumps(
+                rule_validation_dict, default=str
+            )
+
         # Add trace_id if available
         if document.trace_id:
             set_expressions.append("#TraceId = :TraceId")
@@ -362,6 +381,7 @@ class DocumentDynamoDBService:
             evaluation_report_uri=item.get("EvaluationReportUri"),
             summary_report_uri=item.get("SummaryReportUri"),
             trace_id=item.get("TraceId"),
+            config_version=item.get("ConfigVersion"),
         )
 
         # Convert status
@@ -446,6 +466,25 @@ class DocumentDynamoDBService:
         doc.hitl_status = item.get("HITLStatus")
         doc.hitl_sections_pending = item.get("HITLSectionsPending", [])
         doc.hitl_sections_completed = item.get("HITLSectionsCompleted", [])
+
+        # Convert rule validation result if present
+        if item.get("RuleValidationResult"):
+            try:
+                from idp_common.models import RuleValidationResult
+
+                rv_data = item.get("RuleValidationResult")
+                doc.rule_validation_result = RuleValidationResult(
+                    request_id=rv_data.get("request_id"),
+                    summary=rv_data.get("summary"),
+                    section_results=rv_data.get("section_results"),
+                    metadata=rv_data.get("metadata"),
+                    output_uri=rv_data.get("output_uri"),
+                    errors=rv_data.get("errors"),
+                    matched_policy_types=rv_data.get("matched_policy_types"),
+                    matched_page_ids=rv_data.get("matched_page_ids"),
+                )
+            except Exception as e:
+                logger.warning(f"Failed to parse RuleValidationResult: {e}")
 
         return doc
 

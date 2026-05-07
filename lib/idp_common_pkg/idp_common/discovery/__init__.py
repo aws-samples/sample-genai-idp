@@ -9,6 +9,12 @@ multi-document discovery with clustering and agentic analysis.
 """
 
 from idp_common.discovery.classes_discovery import ClassesDiscovery
+from idp_common.discovery.models import (
+    PolicyRuleClass,
+    RuleDiscoveryOutput,
+    RuleProperty,
+)
+from idp_common.discovery.rules_discovery import RulesDiscovery
 
 # MultiDocumentDiscovery and MultiDocDiscoveryResult are imported lazily
 # to avoid pulling in heavy dependencies (scikit-learn, scipy, numpy)
@@ -17,4 +23,8 @@ from idp_common.discovery.classes_discovery import ClassesDiscovery
 
 __all__ = [
     "ClassesDiscovery",
+    "RulesDiscovery",
+    "RuleDiscoveryOutput",
+    "PolicyRuleClass",
+    "RuleProperty",
 ]
