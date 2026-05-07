@@ -655,6 +655,13 @@ def run_discovery(
     output_path = os.path.join(scratch, "discovery", os.path.basename(document_path) + ".schema.json")
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     schema = discovery.discover_and_save(document_path, output_path, ground_truth_path)
+    # Strip GT metadata wrappers if present
+    props = schema.get("properties", {})
+    if "inference_result" in props and len(props) <= 3:
+        schema["properties"] = props["inference_result"].get("properties", {})
+    else:
+        for wrapper_key in ("document_class", "split_document"):
+            props.pop(wrapper_key, None)
     return json.dumps(schema, indent=2)
 
 
@@ -708,6 +715,16 @@ def run_multi_class_discovery(dataset_path: str) -> str:
     config = IDPConfig.from_defaults("pattern-2")
     config.data["classes"] = []
     for s in schemas:
+        # Discovery sometimes includes GT metadata wrappers (document_class,
+        # split_document, inference_result) as top-level properties. Strip them
+        # and promote inference_result.properties if present.
+        props = s.get("properties", {})
+        if "inference_result" in props and len(props) <= 3:
+            ir = props["inference_result"]
+            s["properties"] = ir.get("properties", {})
+        else:
+            for wrapper_key in ("document_class", "split_document"):
+                props.pop(wrapper_key, None)
         config.add_class(s)
     config.save(output_config_path)
     classes = config.get_class_names()
