@@ -743,9 +743,14 @@ def update_optimization_state(
     Call this to report progress not covered by built-in tool status updates
     (e.g., during manual analysis or when making decisions).
 
-    IMPORTANT: Setting status='complete' immediately terminates the optimization loop.
-    No further tool calls will execute after this. Always finish ALL other work first
-    (writing to OPTIMIZATION-LOG.md, copying configs, etc.) BEFORE setting status to complete.
+    IMPORTANT: You CANNOT set status='complete' yourself. The optimization loop
+    manages termination automatically based on iteration count and cost limits.
+    When the system decides to stop, it will set status='finalizing' and give you
+    one final turn to write a summary. Only then should you call status='complete'.
+
+    Do NOT set status='complete' after a single successful evaluation. Your job is
+    to iterate: run full evaluations, analyze results, modify configs, and repeat
+    until the system tells you to stop.
 
     Note: Iteration count is managed automatically (incremented on each full
     evaluation run with n_files=0). You do not need to track iterations.
@@ -761,6 +766,15 @@ def update_optimization_state(
     state = _get_optimization_state()
     if not state:
         return "No optimization state available (AUTOTUNE_SESSION_ID not set)"
+    # Block premature completion — only allowed when system has set status to 'finalizing'
+    if status == "complete":
+        current_status = state.get_status()
+        if current_status != "finalizing":
+            return (
+                "ERROR: Cannot set status='complete' — the optimization loop is still active. "
+                "Continue iterating: run full evaluations (n_files=0), analyze results, "
+                "modify configs, and repeat. The system will tell you when to stop."
+            )
     state.set_status(status, status_detail)
     if best_accuracy is not None and best_config_version is not None:
         current = state.get_state()
