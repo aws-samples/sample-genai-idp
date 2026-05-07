@@ -4535,6 +4535,16 @@ def discover(
     stem: invoice.pdf matches invoice.json. Unmatched documents run without
     ground truth.
 
+    Special case: when exactly one document and one ground truth file are
+    provided, they are paired by position regardless of filename stem. This
+    supports the common case where ground truth files have generic names
+    (e.g., baseline/<doc>/sections/1/result.json).
+
+    If any -g files are provided in batch mode (multiple -d or multiple -g)
+    and cannot be matched to a document by stem, discover exits non-zero
+    with an error rather than silently falling back to no-GT discovery.
+    ([#310](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues/310))
+
     For --output (-o) in batch mode: if path is a directory, writes one
     JSON file per schema; if path is a file, writes all schemas as a
     JSON array.
@@ -4732,24 +4742,68 @@ def discover(
             return
 
         # --- Standard discovery mode (original logic) ---
-        # Build ground truth map: filename stem → gt path
-        gt_map = {}
-        for gt_path in ground_truth:
-            stem = Path(gt_path).stem
-            gt_map[stem] = gt_path
+        # Special case: exactly one document + one ground truth → pair by
+        # position regardless of filename stem. This supports the common case
+        # where GT files have generic names (e.g. baseline/<doc>/sections/1/result.json).
+        # See issue #310.
+        if len(document) == 1 and len(ground_truth) == 1:
+            doc_gt_pairs = [(document[0], ground_truth[0])]
+        else:
+            # Build ground truth map: filename stem → gt path.
+            # Detect duplicate stems up front — silently overwriting them
+            # would hide user errors (e.g. two baseline/.../result.json files).
+            gt_map: dict = {}
+            duplicate_stems: dict = {}
+            for gt_path in ground_truth:
+                stem = Path(gt_path).stem
+                if stem in gt_map:
+                    duplicate_stems.setdefault(stem, [gt_map[stem]]).append(gt_path)
+                else:
+                    gt_map[stem] = gt_path
 
-        # Match ground truth to documents by filename stem
-        doc_gt_pairs = []
-        for doc_path in document:
-            doc_stem = Path(doc_path).stem
-            matched_gt = gt_map.pop(doc_stem, None)
-            doc_gt_pairs.append((doc_path, matched_gt))
+            if duplicate_stems:
+                console.print(
+                    "[red]✗ Error: multiple ground truth files share the same filename stem. "
+                    "Discover cannot determine which document each belongs to.[/red]"
+                )
+                for stem, paths in duplicate_stems.items():
+                    console.print(f"  stem '{stem}':")
+                    for p in paths:
+                        console.print(f"    - {p}")
+                console.print(
+                    "[yellow]Hint: rename ground truth files to uniquely match each document's "
+                    "filename stem, or run discover separately for each document.[/yellow]"
+                )
+                sys.exit(1)
 
-        # Warn about unmatched ground truth files
-        for gt_stem, gt_path in gt_map.items():
-            console.print(
-                f"[yellow]⚠ Ground truth '{gt_path}' did not match any document (stem: {gt_stem})[/yellow]"
-            )
+            # Match ground truth to documents by filename stem
+            doc_gt_pairs = []
+            for doc_path in document:
+                doc_stem = Path(doc_path).stem
+                matched_gt = gt_map.pop(doc_stem, None)
+                doc_gt_pairs.append((doc_path, matched_gt))
+
+            # Unmatched ground truth files are a fatal error when -g was
+            # explicitly provided. Previously this was a yellow warning that
+            # silently fell back to without-GT discovery — which violated the
+            # user's explicit request and produced subtly worse results that
+            # were hard to diagnose. See issue #310.
+            if gt_map:
+                console.print(
+                    "[red]✗ Error: ground truth file(s) could not be matched to "
+                    "any document by filename stem:[/red]"
+                )
+                for gt_stem, gt_path in gt_map.items():
+                    console.print(f"    - {gt_path} (stem: '{gt_stem}')")
+                doc_stems = sorted({Path(p).stem for p in document})
+                console.print(f"  Document stems available: {doc_stems}")
+                console.print(
+                    "[yellow]Hint: for a single document + single ground truth, "
+                    "filenames don't need to match (they will be paired by position). "
+                    "For batch mode, rename each ground truth file to match its "
+                    "corresponding document's stem.[/yellow]"
+                )
+                sys.exit(1)
 
         # Header
         is_batch = len(document) > 1
