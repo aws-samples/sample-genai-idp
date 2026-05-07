@@ -101,17 +101,31 @@ class Discovery:
             tmp_path = tmp.name
 
         args = ["-d", str(doc), "-o", tmp_path]
+        gt_symlink = None
         if ground_truth_path:
             gt = Path(ground_truth_path)
             if not gt.exists():
                 raise FileNotFoundError(f"Ground truth not found: {ground_truth_path}")
-            args += ["-g", str(gt)]
+            # idp-cli matches GT to documents by filename stem. The GT file is
+            # typically "result.json" which won't match. Symlink it with the
+            # document's stem so idp-cli picks it up.
+            gt_symlink = Path(tempfile.gettempdir()) / f"{doc.stem}.json"
+            gt_symlink.unlink(missing_ok=True)
+            gt_symlink.symlink_to(gt.resolve())
+            args += ["-g", str(gt_symlink)]
 
         result = self._run_cli(args)
+        if gt_symlink:
+            gt_symlink.unlink(missing_ok=True)
         if result.returncode != 0:
             Path(tmp_path).unlink(missing_ok=True)
             raise RuntimeError(
                 f"idp-cli discover failed (exit {result.returncode}): {result.stderr or result.stdout}"
+            )
+        if "did not match any document" in (result.stdout or ""):
+            Path(tmp_path).unlink(missing_ok=True)
+            raise RuntimeError(
+                f"idp-cli discover: ground truth was not matched to document. stdout: {result.stdout}"
             )
 
         schema = json.loads(Path(tmp_path).read_text())
