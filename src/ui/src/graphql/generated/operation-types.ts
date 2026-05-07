@@ -112,6 +112,16 @@ export type ChatSessionConnection = {
   nextToken?: Maybe<Scalars['String']['output']>;
 };
 
+export type CircuitBreakerStatus = {
+  enabled: Scalars['Boolean']['output'];
+  failureCount?: Maybe<Scalars['Int']['output']>;
+  lastCheckedAt?: Maybe<Scalars['AWSDateTime']['output']>;
+  lastError?: Maybe<Scalars['String']['output']>;
+  openedAt?: Maybe<Scalars['AWSDateTime']['output']>;
+  recoveryAttempts?: Maybe<Scalars['Int']['output']>;
+  state?: Maybe<Scalars['String']['output']>;
+};
+
 export type ConfidenceThresholdAlert = {
   attributeName?: Maybe<Scalars['String']['output']>;
   confidence?: Maybe<Scalars['Float']['output']>;
@@ -472,10 +482,14 @@ export type Mutation = {
   deleteTestSets: Scalars['Boolean']['output'];
   deleteTests: Scalars['Boolean']['output'];
   deleteUser?: Maybe<Scalars['Boolean']['output']>;
+  pauseCircuitBreaker?: Maybe<CircuitBreakerStatus>;
+  probeCircuitBreaker?: Maybe<CircuitBreakerStatus>;
   processChanges: ProcessChangesResponse;
+  publishCircuitBreakerStatus?: Maybe<CircuitBreakerStatus>;
   releaseReview?: Maybe<Document>;
   reprocessDocument: Scalars['Boolean']['output'];
   restoreDefaultPricing?: Maybe<UpdatePricingResponse>;
+  resumeCircuitBreaker?: Maybe<CircuitBreakerStatus>;
   sendAgentChatMessage?: Maybe<AgentChatMessage>;
   setActiveVersion?: Maybe<UpdateConfigurationResponse>;
   skipAllSectionsReview?: Maybe<Document>;
@@ -619,10 +633,25 @@ export type MutationDeleteUserArgs = {
 };
 
 
+export type MutationPauseCircuitBreakerArgs = {
+  reason: Scalars['String']['input'];
+};
+
+
+export type MutationProbeCircuitBreakerArgs = {
+  reason: Scalars['String']['input'];
+};
+
+
 export type MutationProcessChangesArgs = {
   modifiedPages?: InputMaybe<Array<ModifiedPageInput>>;
   modifiedSections: Array<ModifiedSectionInput>;
   objectKey: Scalars['String']['input'];
+};
+
+
+export type MutationPublishCircuitBreakerStatusArgs = {
+  status: Scalars['AWSJSON']['input'];
 };
 
 
@@ -634,6 +663,11 @@ export type MutationReleaseReviewArgs = {
 export type MutationReprocessDocumentArgs = {
   objectKeys: Array<Scalars['String']['input']>;
   version?: InputMaybe<Scalars['String']['input']>;
+};
+
+
+export type MutationResumeCircuitBreakerArgs = {
+  reason: Scalars['String']['input'];
 };
 
 
@@ -833,6 +867,7 @@ export type Query = {
   getAgentChatMessages?: Maybe<Array<Maybe<AgentChatMessage>>>;
   getAgentJobStatus?: Maybe<AgentJob>;
   getChatMessages?: Maybe<Array<Maybe<AgentChatMessage>>>;
+  getCircuitBreakerStatus?: Maybe<CircuitBreakerStatus>;
   getConfigVersion?: Maybe<ConfigurationResponse>;
   getConfigVersions?: Maybe<ConfigurationVersionsResponse>;
   getConfigurationLibraryFile?: Maybe<ConfigurationLibraryFileResponse>;
@@ -1094,6 +1129,7 @@ export type StepFunctionExecutionStep = {
 export type Subscription = {
   onAgentChatMessageUpdate?: Maybe<AgentChatMessage>;
   onAgentJobComplete?: Maybe<Scalars['Boolean']['output']>;
+  onCircuitBreakerStatusChange?: Maybe<CircuitBreakerStatus>;
   onCreateDocument?: Maybe<CreateDocumentOutput>;
   onDiscoveryJobStatusChange?: Maybe<DiscoveryJob>;
   onUpdateDocument?: Maybe<Document>;
@@ -1465,6 +1501,20 @@ export type DeleteUserMutationVariables = Exact<{
 
 export type DeleteUserMutation = { deleteUser?: boolean | null };
 
+export type PauseCircuitBreakerMutationVariables = Exact<{
+  reason: Scalars['String']['input'];
+}>;
+
+
+export type PauseCircuitBreakerMutation = { pauseCircuitBreaker?: { enabled: boolean, state?: string | null, openedAt?: string | null, lastCheckedAt?: string | null, failureCount?: number | null, recoveryAttempts?: number | null, lastError?: string | null } | null };
+
+export type ProbeCircuitBreakerMutationVariables = Exact<{
+  reason: Scalars['String']['input'];
+}>;
+
+
+export type ProbeCircuitBreakerMutation = { probeCircuitBreaker?: { enabled: boolean, state?: string | null, openedAt?: string | null, lastCheckedAt?: string | null, failureCount?: number | null, recoveryAttempts?: number | null, lastError?: string | null } | null };
+
 export type ProcessChangesMutationVariables = Exact<{
   objectKey: Scalars['String']['input'];
   modifiedSections: Array<ModifiedSectionInput> | ModifiedSectionInput;
@@ -1493,6 +1543,13 @@ export type RestoreDefaultPricingMutationVariables = Exact<{ [key: string]: neve
 
 
 export type RestoreDefaultPricingMutation = { restoreDefaultPricing?: { success: boolean, message?: string | null, error?: { type?: string | null, message?: string | null } | null } | null };
+
+export type ResumeCircuitBreakerMutationVariables = Exact<{
+  reason: Scalars['String']['input'];
+}>;
+
+
+export type ResumeCircuitBreakerMutation = { resumeCircuitBreaker?: { enabled: boolean, state?: string | null, openedAt?: string | null, lastCheckedAt?: string | null, failureCount?: number | null, recoveryAttempts?: number | null, lastError?: string | null } | null };
 
 export type SendAgentChatMessageMutationVariables = Exact<{
   prompt: Scalars['String']['input'];
@@ -1653,6 +1710,11 @@ export type GetChatMessagesQueryVariables = Exact<{
 
 
 export type GetChatMessagesQuery = { getChatMessages?: Array<{ role: string, content: string, timestamp: string, isProcessing?: boolean | null, sessionId?: string | null, messageType?: string | null, toolMetadata?: { toolName?: string | null, toolUseId?: string | null } | null } | null> | null };
+
+export type GetCircuitBreakerStatusQueryVariables = Exact<{ [key: string]: never; }>;
+
+
+export type GetCircuitBreakerStatusQuery = { getCircuitBreakerStatus?: { enabled: boolean, state?: string | null, openedAt?: string | null, lastCheckedAt?: string | null, failureCount?: number | null, recoveryAttempts?: number | null, lastError?: string | null } | null };
 
 export type GetConfigVersionQueryVariables = Exact<{
   versionName: Scalars['String']['input'];
@@ -1876,6 +1938,11 @@ export type OnAgentJobCompleteSubscriptionVariables = Exact<{
 
 
 export type OnAgentJobCompleteSubscription = { onAgentJobComplete?: boolean | null };
+
+export type OnCircuitBreakerStatusChangeSubscriptionVariables = Exact<{ [key: string]: never; }>;
+
+
+export type OnCircuitBreakerStatusChangeSubscription = { onCircuitBreakerStatusChange?: { enabled: boolean, state?: string | null, openedAt?: string | null, lastCheckedAt?: string | null, failureCount?: number | null, recoveryAttempts?: number | null, lastError?: string | null } | null };
 
 export type OnCreateDocumentSubscriptionVariables = Exact<{ [key: string]: never; }>;
 

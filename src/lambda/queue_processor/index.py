@@ -21,12 +21,17 @@ logging.getLogger('idp_common.bedrock.client').setLevel(os.environ.get("BEDROCK_
 # Get LOG_LEVEL from environment variable with INFO as default
 
 sfn = boto3.client('stepfunctions')
+sqs = boto3.client('sqs')
 dynamodb = boto3.resource('dynamodb')
 document_service = create_document_service()
 concurrency_table = dynamodb.Table(os.environ['CONCURRENCY_TABLE'])
 state_machine_arn = os.environ['STATE_MACHINE_ARN']
 MAX_CONCURRENT = int(os.environ.get('MAX_CONCURRENT', '5'))
 COUNTER_ID = 'workflow_counter'
+CIRCUIT_BREAKER_ID = 'circuit_breaker'
+CIRCUIT_BREAKER_ENABLED = os.environ.get('CIRCUIT_BREAKER_ENABLED', 'false').lower() == 'true'
+DOCUMENT_QUEUE_URL = os.environ.get('DOCUMENT_QUEUE_URL', '')
+RECOVERY_TIMEOUT_SECONDS = int(os.environ.get('RECOVERY_TIMEOUT_SECONDS', '300'))
 
 def update_counter(increment: bool = True) -> bool:
     """
@@ -67,6 +72,68 @@ def update_counter(increment: bool = True) -> bool:
             return False
         logger.error(f"Error updating counter: {e}")
         raise
+
+
+def check_circuit_breaker() -> tuple[bool, str]:
+    """
+    Check if the circuit breaker allows new workflows.
+
+    Returns:
+        Tuple of (allowed: bool, state: str)
+        - allowed: True if workflows should proceed, False if blocked
+        - state: Current circuit breaker state (CLOSED, OPEN, HALF_OPEN, DISABLED, ERROR)
+    """
+    if not CIRCUIT_BREAKER_ENABLED:
+        return True, 'DISABLED'
+
+    try:
+        response = concurrency_table.get_item(
+            Key={'counter_id': CIRCUIT_BREAKER_ID},
+            ProjectionExpression='#state',
+            ExpressionAttributeNames={'#state': 'state'}
+        )
+        item = response.get('Item')
+
+        if not item:
+            return True, 'CLOSED'
+
+        state = item.get('state', 'CLOSED')
+
+        if state == 'OPEN':
+            logger.warning("Circuit breaker is OPEN - blocking new workflows")
+            return False, state
+        elif state == 'HALF_OPEN':
+            logger.info("Circuit breaker is HALF_OPEN - allowing probe traffic")
+            return True, state
+
+        return True, state
+
+    except ClientError as e:
+        logger.error(f"Error checking circuit breaker: {e}")
+        return True, 'ERROR'
+
+
+def extend_visibility_for_outage(receipt_handle: str) -> None:
+    """Push SQS visibility to RECOVERY_TIMEOUT_SECONDS so OPEN-state retries
+    don't burn through the queue's maxReceiveCount during a long Bedrock outage.
+
+    Non-fatal: if the call fails, the message still reappears on the default
+    30s visibility timeout and the next invocation handles the retry.
+    """
+    if not DOCUMENT_QUEUE_URL:
+        return
+    try:
+        sqs.change_message_visibility(
+            QueueUrl=DOCUMENT_QUEUE_URL,
+            ReceiptHandle=receipt_handle,
+            VisibilityTimeout=RECOVERY_TIMEOUT_SECONDS,
+        )
+        logger.info(
+            f"Circuit breaker OPEN - pushed visibility to {RECOVERY_TIMEOUT_SECONDS}s"
+        )
+    except ClientError as e:
+        logger.warning(f"Failed to extend visibility for OPEN-state message: {e}")
+
 
 def start_workflow(document: Document) -> Dict[str, Any]:
     """
@@ -170,7 +237,8 @@ def process_message(record: Dict[str, Any]) -> Tuple[bool, str]:
     """
     message = record['body']
     message_id = record['messageId']
-    
+    receipt_handle = record.get('receiptHandle', '')
+
     try:
         # Handle both compressed and uncompressed documents
         working_bucket = os.environ.get('WORKING_BUCKET')
@@ -179,12 +247,22 @@ def process_message(record: Dict[str, Any]) -> Tuple[bool, str]:
         object_key = document.input_key
         logger.info(f"Processing message {message_id} for object {object_key}")
 
-        # Check if document has been aborted before starting workflow
-        # This prevents starting workflows for documents the user has cancelled
+        # Check if document has been aborted before starting workflow.
+        # Must run before CB check so aborted docs can be acked regardless
+        # of outage state.
         current_doc = document_service.get_document(object_key)
         if current_doc and current_doc.status == Status.ABORTED:
             logger.info(f"Document {object_key} was aborted by user, skipping workflow start")
             return True, message_id  # Return success to remove message from queue
+
+        # Check circuit breaker before paying the cost of X-Ray setup and
+        # counter increment.
+        cb_allowed, cb_state = check_circuit_breaker()
+        if not cb_allowed:
+            logger.warning(f"Circuit breaker {cb_state} for {object_key} - message will retry later")
+            if cb_state == 'OPEN' and receipt_handle:
+                extend_visibility_for_outage(receipt_handle)
+            return False, message_id
 
         # X-Ray annotations
         xray_recorder.put_annotation('document_id', {document.id})
