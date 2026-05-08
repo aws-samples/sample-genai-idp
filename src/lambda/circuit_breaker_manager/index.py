@@ -112,6 +112,10 @@ def update_circuit_breaker_state(
     if new_state == STATE_OPEN:
         set_exprs.append("opened_at = :opened")
         expr_values[":opened"] = timestamp
+    elif new_state == STATE_CLOSED:
+        # Clear the outage timestamp so the UI details panel doesn't show a
+        # stale "Opened at" after the breaker has fully recovered.
+        remove_exprs.append("opened_at")
     if last_error:
         set_exprs.append("last_error = :err")
         expr_values[":err"] = last_error
@@ -388,14 +392,14 @@ def _handle_action(event: dict) -> dict:
 
     if action == "manual_open":
         # CLOSED|HALF_OPEN → OPEN. Race-safe via expected_state.
+        # failure_count is deliberately NOT incremented: manual pauses are
+        # operator actions, not Bedrock failures.
         current = get_circuit_breaker_state()
         current_state = current.get("state", STATE_CLOSED)
         if current_state == STATE_OPEN:
             return {"statusCode": 200, "body": get_circuit_breaker_state()}
-        failure_count = current.get("failure_count", 0) + 1
         applied = update_circuit_breaker_state(
             STATE_OPEN,
-            failure_count=failure_count,
             last_error=f"Manual pause by {user}: {reason}",
             expected_state=current_state,
         )

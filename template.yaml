@@ -5452,6 +5452,21 @@ Resources:
       CodeUri: src/lambda/circuit_breaker_manager/
       Timeout: 30
       MemorySize: 256
+      # When AppSync is PRIVATE, the SigV4 mutation to the private GraphQL
+      # endpoint only resolves from inside the AppSync VPC. When the user opted
+      # into VPC-only Lambdas (DeployInVPC=true) but AppSync is still public,
+      # we honour that too so DynamoDB traffic can use a gateway endpoint.
+      VpcConfig: !If
+        - UsePrivateAppSync
+        - SecurityGroupIds:
+            - !Ref LambdaVpcSecurityGroup
+          SubnetIds: !Ref LambdaSubnetIds
+        - !If
+          - DeployInVPC
+          - SecurityGroupIds:
+              - !Ref LambdaSecurityGroupId
+            SubnetIds: !Ref PrivateSubnetIds
+          - !Ref AWS::NoValue
       Environment:
         Variables:
           LOG_LEVEL: !Ref LogLevel

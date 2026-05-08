@@ -70,8 +70,10 @@ class TestNotifyCircuitBreakerSuccess:
         assert kwargs["ExpressionAttributeValues"][":closed"] == "CLOSED"
         assert kwargs["ExpressionAttributeValues"][":expected"] == "HALF_OPEN"
         assert "ConditionExpression" in kwargs
-        # Clear stale last_error on recovery so operators don't see old errors.
+        # Clear stale last_error and opened_at on recovery so operators don't
+        # see old errors or a dangling outage timestamp on CLOSED.
         assert "REMOVE last_error" in kwargs["UpdateExpression"]
+        assert "opened_at" in kwargs["UpdateExpression"]
         index_module.sns.publish.assert_called_once()
         index_module.cloudwatch.put_metric_data.assert_called_once()
 

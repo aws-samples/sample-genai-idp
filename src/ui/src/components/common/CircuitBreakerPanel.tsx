@@ -126,7 +126,7 @@ const CircuitBreakerPanel = ({ visible, status, onDismiss, onPause, onResume, on
   const display = stateDisplay[currentState];
 
   const canPause = currentState === 'CLOSED' || currentState === 'HALF_OPEN';
-  const canResume = true;
+  const canResume = currentState === 'OPEN' || currentState === 'HALF_OPEN';
   const canProbe = currentState === 'OPEN';
 
   const activeConfig = activeAction ? ACTIONS[activeAction] : null;
