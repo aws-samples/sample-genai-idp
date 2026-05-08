@@ -9,6 +9,8 @@ SPDX-License-Identifier: MIT-0
 
 Protects the IDP pipeline from cascading failures when Amazon Bedrock is degraded or unavailable. When Bedrock starts returning errors at a configurable rate, the circuit breaker **opens** and new workflows stop starting. Messages stay in SQS instead of fanning out into Lambda retries that would eventually time out or burn through the Step Functions retry budget. Once Bedrock recovers, the breaker transitions through a **half-open** probe state back to **closed** and normal processing resumes.
 
+https://github.com/user-attachments/assets/86aefe92-d86d-4e38-862d-5e8047a63c80
+
 ## Why it exists
 
 Without the circuit breaker, a Bedrock outage produces this chain:
