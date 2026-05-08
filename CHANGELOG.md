@@ -7,6 +7,8 @@ SPDX-License-Identifier: MIT-0
 
 ### Added
 
+- **Enhanced config validation** — `idp-cli config-validate` now validates Bedrock model IDs against `pricing.yaml` and checks that custom `task_prompts` include required placeholders (`{DOCUMENT_TEXT}`, `{DOCUMENT_IMAGE}`, etc.) for all sections (ocr, classification, extraction, assessment, summarization). Prevents silent pipeline failures where configs pass validation but fail in production. Validation runs automatically on `config-upload` (use `--no-validate` to skip).
+
 - **`idp-cli discover --model-id` flag** — override the Bedrock model used by `idp-cli discover` for a single invocation (e.g. `--model-id us.anthropic.claude-opus-4-6-v1`). Threads from the CLI through the SDK (`client.discovery.*`) and `idp_common.discovery.ClassesDiscovery` down to `bedrock.invoke_model`. Applies to with-ground-truth, without-ground-truth, `--auto-detect`, and `--page-range` modes; backward-compatible (omitting the flag uses the configured model). ([#309](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues/309))
 
 - **Bedrock circuit breaker** — a CFN-parameterized circuit breaker that pauses new workflow starts when Bedrock is unhealthy and auto-recovers once the service comes back, so transient Bedrock outages no longer burn through SQS retries or leave documents half-processed. Off by default for full backward compatibility.
