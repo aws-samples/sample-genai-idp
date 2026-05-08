@@ -23,14 +23,17 @@ make srt-scan      # Run security assessment
 make srt-fix       # Interactive fix mode
 ```
 
-### Integration with Tests
+### Running Tests
 
 ```bash
-# Run all tests including SRT
+# Run all tests (excludes SRT)
 make test
+
+# Run SRT security scan separately
+make srt
 ```
 
-The `make test` target now includes SRT scanning as part of the test suite.
+SRT has a dedicated target and is not part of `make test` to avoid slowing down the development test loop. It runs automatically in CI/CD on merge requests to `develop`.
 
 ## CI/CD Integration
 
