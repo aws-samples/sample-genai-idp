@@ -49,11 +49,12 @@ def main():
     # Use -y flag to skip interactive prompts (e.g., "Open dashboard in browser?")
     # Use -p flag to specify project path
     # Use --no-diagrams and --no-threat-models to reduce memory usage in CI/CD
+    # Use --no-license-update to prevent automatic license header updates
     project_path = str(project_root)
     print(f"Scanning project: {project_path}")
 
     result = run_command(
-        f"./srt assess -y -p {project_path} --no-diagrams --no-threat-models",
+        f"./srt assess -y -p {project_path} --no-diagrams --no-threat-models --no-license-update",
         cwd=srt_dir,
         capture_output=True
     )

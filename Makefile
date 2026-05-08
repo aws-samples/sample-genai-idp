@@ -197,7 +197,7 @@ typecheck-pr: ## Type check only files changed vs TARGET_BRANCH (default: main)
 	$(PYTHON) scripts/sdlc/typecheck_pr_changes.py $(TARGET_BRANCH)
 
 ##@ Testing
-test: ## Run all tests (idp_common, cli, sdk, capacity, circuit breaker, config library, srt)
+test: ## Run all tests (idp_common, cli, sdk, capacity, circuit breaker, config library)
 	$(MAKE) -C lib/idp_common_pkg test PYTHON=$(PYTHON)
 	cd lib/idp_cli_pkg && $(PYTHON) -m pytest -v
 	cd lib/idp_sdk && $(PYTHON) -m pytest -m "not integration" -v
@@ -210,8 +210,6 @@ test: ## Run all tests (idp_common, cli, sdk, capacity, circuit breaker, config 
 	    src/lambda/workflow_tracker/test_notify_circuit_breaker.py
 	@echo "Validating config library files..."
 	$(PYTHON) -m pytest config_library/test_config_library.py -v
-	#@echo "Running SRT security scan..."
-	#$(MAKE) srt
 
 test-cli: ## Run only IDP CLI tests
 	@echo "Running IDP CLI tests..."
