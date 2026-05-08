@@ -37,7 +37,7 @@ from strands.types.media import (
     ImageSource,
 )
 
-from idp_common.bedrock.client import CACHEPOINT_SUPPORTED_MODELS
+from idp_common.bedrock.client import CACHEPOINT_SUPPORTED_MODELS, is_claude_4_7_model
 from idp_common.config.models import IDPConfig
 from idp_common.utils.bedrock_utils import (
     async_exponential_backoff_retry,
@@ -936,21 +936,44 @@ def _build_model_config(
     return model_config
 
 
-def _get_inference_params(temperature: float, top_p: float | None) -> dict[str, float]:
+def _get_inference_params(
+    model_id: str,
+    temperature: float,
+    top_p: float | None,
+) -> dict[str, float]:
     """
     Get inference parameters ensuring temperature and top_p are mutually exclusive.
 
     Some Bedrock models don't allow both temperature and top_p to be specified.
-    This follows the same logic as bedrock/client.py lines 348-364.
+    This follows the same logic as bedrock/client.py.
+
+    Claude 4.7+ models (e.g. ``us.anthropic.claude-opus-4-7``) deprecate the
+    ``temperature``, ``top_p`` and ``top_k`` parameters and reject requests
+    that pass them. For these models this helper returns an empty dict so
+    that no inference parameters are forwarded to the Strands ``BedrockModel``
+    / ConverseStream call. See GitHub issue #304.
 
     Args:
-        temperature: Temperature value from config
-        top_p: Top_p value from config (may be None)
+        model_id: Bedrock model identifier (used to detect Claude 4.7+).
+        temperature: Temperature value from config.
+        top_p: Top_p value from config (may be None).
 
     Returns:
-        Dict with only one of temperature or top_p
+        Dict with only one of temperature or top_p, or an empty dict for
+        Claude 4.7+ models where both are deprecated.
     """
-    params = {}
+    # Claude 4.7+ models don't support temperature/top_p/top_k. Omit them
+    # entirely so ConverseStream doesn't fail with
+    # "`top_p` is deprecated for this model".
+    if is_claude_4_7_model(model_id):
+        logger.info(
+            "Skipping temperature/top_p for Claude 4.7+ model "
+            "(these parameters are deprecated for this model)",
+            extra={"model_id": model_id},
+        )
+        return {}
+
+    params: dict[str, float] = {}
 
     # Only use top_p if it's positive (greater than 0)
     # This allows temperature=0.0 for deterministic output (recommended by Anthropic)
@@ -1515,9 +1538,13 @@ async def structured_output_async(
     # Track token usage
     token_usage = _initialize_token_usage()
 
-    # Get inference params ensuring temperature and top_p are mutually exclusive
+    # Get inference params ensuring temperature and top_p are mutually exclusive.
+    # For Claude 4.7+ models, no inference params are returned because
+    # temperature/top_p/top_k are deprecated (see GitHub issue #304).
     inference_params = _get_inference_params(
-        temperature=config.extraction.temperature, top_p=config.extraction.top_p
+        model_id=model_id,
+        temperature=config.extraction.temperature,
+        top_p=config.extraction.top_p,
     )
 
     # Set the context-local checkpoint callback so tools can invoke it.
