@@ -769,8 +769,6 @@ Implemented and deployed. The agent runs fully decoupled from the frontend — n
 
 ### ⚠️ NEXT SESSION: TOP PRIORITY
 
-**See `autotune/planning-docs/next-steps-2026-05-08.md` for detailed next steps.**
-
 **Next priorities (in order):**
 1. **Discovery schema mismatch fix** — Awaiting IDP service team response. Repro at `autotune/planning-docs/discovery-schema-mismatch/`.
 2. **Test proactive context summarization** — Verify triggers at 50% and log re-read works.
