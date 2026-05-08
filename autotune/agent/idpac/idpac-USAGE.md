@@ -437,7 +437,7 @@ result = client.config_create(
 )
 
 # Validate a config file
-result = client.config_validate('idp-configs/my-config.yaml', pattern='pattern-2')
+result = client.config_validate('idp-configs/my-config.yaml')
 print(f"Valid: {result['valid']}")
 print(result['stdout'])
 
@@ -592,6 +592,8 @@ from idpac import Discovery
 discovery = Discovery(region='us-east-1')
 # With AWS profile:
 discovery = Discovery(region='us-east-1', profile='my-profile')
+# With custom model (defaults to Claude Opus for best schema quality):
+discovery = Discovery(region='us-east-1', model_id='us.anthropic.claude-sonnet-4-6')
 ```
 
 ### Discover Schema

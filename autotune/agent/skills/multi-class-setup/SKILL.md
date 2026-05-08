@@ -34,13 +34,13 @@ if errors:
 ### 1. Generate Schemas for Each Class
 
 ```python
-from idpac import DatasetAnalyzer, StandaloneDiscovery
+from idpac import DatasetAnalyzer, Discovery
 
 analyzer = DatasetAnalyzer('/path/to/dataset')
 samples = analyzer.get_samples_by_class(n=1)
 gt_paths = analyzer.get_ground_truth_by_class(n=1)
 
-discovery = StandaloneDiscovery(region='us-east-1')
+discovery = Discovery(region='us-east-1')
 schemas = discovery.discover_multi_class(samples, gt_paths)
 ```
 

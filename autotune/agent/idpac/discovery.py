@@ -32,7 +32,8 @@ class Discovery:
     Args:
         region: AWS region for Bedrock calls.
         profile: AWS profile name (passed as `idp-cli --profile`).
-        model_id: Deprecated, ignored. Kept for backward compat.
+        model_id: Bedrock model ID to use for discovery (passed as --model-id).
+            Defaults to us.anthropic.claude-opus-4-6-v1 for best schema quality.
         temperature: Deprecated, ignored. Kept for backward compat.
         top_p: Deprecated, ignored. Kept for backward compat.
         max_tokens: Deprecated, ignored. Kept for backward compat.
@@ -43,7 +44,7 @@ class Discovery:
         self,
         region: Optional[str] = None,
         profile: Optional[str] = None,
-        model_id: str = "us.amazon.nova-pro-v1:0",
+        model_id: str = "us.anthropic.claude-opus-4-6-v1",
         temperature: float = 1.0,
         top_p: float = 0.1,
         max_tokens: int = 10000,
@@ -51,14 +52,8 @@ class Discovery:
     ):
         self.region = region
         self.profile = profile
+        self.model_id = model_id
         self.verbose = verbose
-
-        # Warn if caller passes non-default model params (they're ignored now)
-        if model_id != "us.amazon.nova-pro-v1:0" or temperature != 1.0 or top_p != 0.1 or max_tokens != 10000:
-            logger.warning(
-                "model_id/temperature/top_p/max_tokens are ignored — "
-                "idp-cli discover uses system default settings"
-            )
 
     def _run_cli(self, args: list[str]) -> subprocess.CompletedProcess:
         """Run idp-cli discover with common options."""
@@ -68,6 +63,8 @@ class Discovery:
         cmd += ["discover"] + args
         if self.region:
             cmd += ["--region", self.region]
+        if self.model_id:
+            cmd += ["--model-id", self.model_id]
         if self.verbose:
             logger.info(f"Running: {' '.join(cmd)}")
         env = None
@@ -101,22 +98,13 @@ class Discovery:
             tmp_path = tmp.name
 
         args = ["-d", str(doc), "-o", tmp_path]
-        gt_symlink = None
         if ground_truth_path:
             gt = Path(ground_truth_path)
             if not gt.exists():
                 raise FileNotFoundError(f"Ground truth not found: {ground_truth_path}")
-            # idp-cli matches GT to documents by filename stem. The GT file is
-            # typically "result.json" which won't match. Symlink it with the
-            # document's stem so idp-cli picks it up.
-            gt_symlink = Path(tempfile.gettempdir()) / f"{doc.stem}.json"
-            gt_symlink.unlink(missing_ok=True)
-            gt_symlink.symlink_to(gt.resolve())
-            args += ["-g", str(gt_symlink)]
+            args += ["-g", str(gt)]
 
         result = self._run_cli(args)
-        if gt_symlink:
-            gt_symlink.unlink(missing_ok=True)
         if result.returncode != 0:
             Path(tmp_path).unlink(missing_ok=True)
             raise RuntimeError(

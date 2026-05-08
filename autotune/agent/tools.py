@@ -229,28 +229,42 @@ def create_default_config(features: str = "min") -> str:
 
 @tool
 def validate_config(config_path: str) -> str:
-    """Validate a config file for common issues that cause 0% accuracy.
+    """Validate a config file for common issues that cause failures or 0% accuracy.
 
-    Checks for:
-    - Missing x-aws-idp-document-type on classes (most common cause of 0% accuracy —
-      evaluation silently skips classes without this attribute)
-    - Missing $schema declaration
-    - Missing type: object on class schemas
-    - Nullable types (type: ["string", "null"]) which break evaluation matching
-    - Missing data_type annotations on leaf fields
-    - Assessment + granular enabled with array fields (causes timeouts)
+    Runs two levels of validation:
+    1. CLI-level: model ID validity, required prompt placeholders ({DOCUMENT_TEXT},
+       {DOCUMENT_IMAGE}) — catches silent extraction failures.
+    2. Schema-level: missing x-aws-idp-document-type, nullable types, missing
+       data_type annotations, assessment settings.
 
     Args:
         config_path: Path to config YAML file.
 
     Returns:
-        Validation result with errors and warnings.
+        Validation result with errors and warnings from both levels.
     """
+    import subprocess
+
     from idpac import IDPConfig
 
+    # CLI-level validation (model IDs, placeholders)
+    cli_result = subprocess.run(
+        ["idp-cli", "config-validate", "--config-file", config_path],
+        capture_output=True, text=True,
+    )
+    cli_output = (cli_result.stdout or "") + (cli_result.stderr or "")
+
+    # Schema-level validation (evaluation compatibility)
     config = IDPConfig(config_path)
-    result = config.validate()
-    return str(result)
+    schema_result = config.validate()
+
+    parts = []
+    if cli_result.returncode != 0:
+        parts.append(f"CLI validation FAILED:\n{cli_output.strip()}")
+    else:
+        parts.append(f"CLI validation passed:\n{cli_output.strip()}")
+    parts.append(f"\nSchema validation:\n{schema_result}")
+    return "\n".join(parts)
 
 
 @tool
@@ -621,10 +635,6 @@ def analyze_dataset(dataset_path: str) -> str:
 
 
 @tool
-# TODO: After idp-cli adds --model-id flag (expected after May 15 2026),
-# pass a stronger model (e.g. us.anthropic.claude-opus-4-6-v1) to both
-# run_discovery and run_multi_class_discovery. Default Nova Pro fails on
-# complex documents.
 def run_discovery(
     document_path: str,
     ground_truth_path: str,
@@ -632,7 +642,7 @@ def run_discovery(
     """Discover a document class schema from a sample document.
 
     Runs idp-cli discover in local mode (calls Bedrock directly, no stack needed).
-    Saves discovered schema to scratch directory.
+    Uses Claude Opus for best schema quality. Saves discovered schema to scratch directory.
 
     Args:
         document_path: Path to a sample document (PDF or image).

@@ -24,12 +24,12 @@ You must create the best possible configuration using qualitative analysis only.
 
 ### 1. Schema Discovery (without ground truth)
 
-`StandaloneDiscovery` works without ground truth — it examines the document and infers a schema:
+`Discovery` works without ground truth — it examines the document and infers a schema:
 
 ```python
-from idpac import StandaloneDiscovery, IDPConfig
+from idpac import Discovery, IDPConfig
 
-discovery = StandaloneDiscovery(region='us-east-1')
+discovery = Discovery(region='us-east-1')
 
 # Discover schema from document only (no ground_truth_path argument)
 schema = discovery.discover(document_path='samples/invoice.pdf')

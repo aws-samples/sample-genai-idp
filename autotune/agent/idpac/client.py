@@ -628,7 +628,7 @@ class IDPACClient:
 
         Args:
             config_path: Path to config file
-            pattern: Pattern to validate against
+            pattern: Deprecated, ignored. Kept for backward compat.
 
         Returns:
             Dict with valid bool, errors, and warnings
@@ -636,7 +636,6 @@ class IDPACClient:
         args = [
             "config-validate",
             "--config-file", config_path,
-            "--pattern", pattern,
         ]
 
         result = self._run_idp_cli(args, stack_required=False)
