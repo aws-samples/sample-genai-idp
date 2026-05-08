@@ -243,18 +243,35 @@ const FileViewer = ({ objectKey }: FileViewerProps): React.JSX.Element => {
     logger.info('Presigned URL:', presignedUrl);
 
     if (isPdf) {
-      // Special handling for PDFs - use object tag instead of iframe for better PDF support
+      // Render PDFs in an iframe rather than <object> to comply with the hardened
+      // CloudFront Content-Security-Policy (`object-src 'none'`, introduced in v0.5.9).
+      // Modern browsers render PDFs natively inside iframes using their built-in
+      // viewer (Chrome's PDFium, Firefox's pdf.js, Safari's WebKit PDF viewer).
+      //
+      // Intentionally no `sandbox` attribute on this iframe: Chrome's built-in PDF
+      // viewer relies on its own internal scripts and is blocked by Chromium when
+      // loaded inside a sandboxed iframe ("This page has been blocked by Chrome").
+      // The content is an S3 presigned URL to a file in a bucket owned by this stack
+      // and served as `Content-Type: application/pdf` with `Content-Disposition: inline`,
+      // so there is no HTML/JS execution risk from the iframe source itself.
+      //
+      // A visible "Open PDF in a new tab" link is included as a fallback for browsers
+      // that have their built-in PDF viewer disabled.
       return (
         <Box className="document-container" padding={{ top: 's' }}>
-          <object data={presignedUrl} type="application/pdf" width="100%" height="800px" className="h-full w-full">
-            <p>
-              It appears your browser does not support embedded PDFs. You can{' '}
-              <a href={presignedUrl} target="_blank" rel="noopener noreferrer">
-                download the PDF
-              </a>{' '}
-              instead.
-            </p>
-          </object>
+          <iframe
+            src={presignedUrl}
+            title="PDF Viewer"
+            width="100%"
+            height="800px"
+            className="h-full w-full"
+            referrerPolicy="no-referrer"
+          />
+          <Box padding={{ top: 'xs' }}>
+            <a href={presignedUrl} target="_blank" rel="noopener noreferrer">
+              Open PDF in a new tab
+            </a>
+          </Box>
         </Box>
       );
     }

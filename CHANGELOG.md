@@ -42,7 +42,6 @@ SPDX-License-Identifier: MIT-0
 
 - **Replaced DSR with open-source SRT security scanning tool** — Migrated from deprecated internal DSR (Design Security Review) tool to the actively maintained open-source [Sample Security Review Tool (SRT)](https://github.com/aws-samples/sample-security-review-tool). Added automated security scanning in GitLab CI/CD pipeline that runs on merge requests targeting `develop` branch. Pipeline fails if security findings are detected, providing a security gate before production deployments. New Makefile targets: `make srt`, `make srt-setup`, `make srt-scan`, `make srt-fix`. Updated documentation in CLAUDE.md, CONTRIBUTING.md, and scripts/README.md.
 
-- **SRT security scan no longer runs as part of `make test` target** — Use dedicated `make srt` target instead to run security scans. This avoids slowing down the development test loop. SRT still runs automatically in CI/CD on merge requests to `develop`.
 
 ### Fixed
 
@@ -55,7 +54,10 @@ SPDX-License-Identifier: MIT-0
   - **Batch mode** (multiple `-d` or multiple `-g`): unmatched `-g` files are now a fatal error (exit `1`) with a clear message showing unmatched ground truth files and available document stems. Also detects and errors on duplicate ground truth filename stems, which previously overwrote each other silently.
   ([#310](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues/310))
 
-- **Web UI "View Source" failed with "Failed to load document"** — `FileViewer` now passes an `s3://<bucket>/<key>` URI to `getFileContents` (matching every other viewer), removing a fragile dependency on the build-time `VITE_AWS_REGION` env var that, when missing, caused Vite to inline `undefined` into the S3 URL.
+- **Web UI "View Source" failed for PDFs and other docs after the v0.5.9 CSP hardening** — three fixes in `FileViewer`:
+  (1) Passes an `s3://<bucket>/<key>` URI to `getFileContents` (matching every other viewer), removing a fragile dependency on the build-time `VITE_AWS_REGION` env var that, when missing, caused Vite to inline `undefined` into the S3 URL and fail the lookup.
+  (2) Renders PDFs in an `<iframe>` instead of `<object>` so they load under the hardened CloudFront `object-src 'none'` Content-Security-Policy introduced in v0.5.9. Previously the `<object>` element was silently blocked and the page fell through to the "browser does not support embedded PDFs" fallback copy inside the `<object>`.
+  (3) Removed the `sandbox` attribute from the PDF iframe only. Chrome's built-in PDF viewer runs its own internal scripts and is blocked when loaded inside a sandboxed iframe ("This page has been blocked by Chrome"); the iframe source is an S3 presigned URL to a stack-owned bucket served as `application/pdf`, so there is no HTML/JS execution risk. Non-PDF iframe branches retain their existing `sandbox` attributes. Added a visible "Open PDF in a new tab" link as a fallback for browsers with the built-in PDF viewer disabled.
 
   
 ## [0.5.9]
