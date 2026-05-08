@@ -1,0 +1,11 @@
+mutation ProbeCircuitBreaker($reason: String!) {
+  probeCircuitBreaker(reason: $reason) {
+    enabled
+    state
+    openedAt
+    lastCheckedAt
+    failureCount
+    recoveryAttempts
+    lastError
+  }
+}

@@ -1,0 +1,11 @@
+mutation ResumeCircuitBreaker($reason: String!) {
+  resumeCircuitBreaker(reason: $reason) {
+    enabled
+    state
+    openedAt
+    lastCheckedAt
+    failureCount
+    recoveryAttempts
+    lastError
+  }
+}

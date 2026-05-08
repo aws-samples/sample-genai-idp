@@ -31,9 +31,14 @@ dynamodb = boto3.resource('dynamodb')
 cloudwatch = boto3.client('cloudwatch')
 s3 = boto3.client('s3')
 lambda_client = boto3.client('lambda')
+sns = boto3.client('sns')
 document_service = create_document_service()
 concurrency_table: Table = dynamodb.Table(os.environ['CONCURRENCY_TABLE'])
 COUNTER_ID = 'workflow_counter'
+CIRCUIT_BREAKER_ID = 'circuit_breaker'
+CIRCUIT_BREAKER_ENABLED = os.environ.get('CIRCUIT_BREAKER_ENABLED', 'false').lower() == 'true'
+CIRCUIT_BREAKER_MANAGER_ARN = os.environ.get('CIRCUIT_BREAKER_MANAGER_ARN', '')
+ALERTS_TOPIC_ARN = os.environ.get('ALERTS_TOPIC_ARN', '')
 
 
 def update_document_completion(object_key: str, workflow_status: str, output_data: Dict[str, Any]) -> Document:
@@ -259,6 +264,91 @@ def decrement_counter() -> Optional[int]:
         logger.error(f"Unexpected error decrementing counter: {e}", exc_info=True)
         return None
 
+
+def notify_circuit_breaker_success() -> None:
+    """
+    Transition circuit breaker to CLOSED if currently in HALF_OPEN state.
+
+    Called after a successful workflow completion to signal that Bedrock
+    has recovered and normal operation can resume. The DynamoDB update is
+    conditional on the state still being HALF_OPEN so a concurrent alarm
+    firing at the same moment (HALF_OPEN->OPEN) is not clobbered.
+    """
+    if not CIRCUIT_BREAKER_ENABLED:
+        return
+
+    try:
+        response = concurrency_table.get_item(
+            Key={'counter_id': CIRCUIT_BREAKER_ID},
+            ProjectionExpression='#state',
+            ExpressionAttributeNames={'#state': 'state'}
+        )
+        item = response.get('Item')
+
+        if not (item and item.get('state') == 'HALF_OPEN'):
+            return
+
+        timestamp = datetime.now(timezone.utc).isoformat()
+        try:
+            concurrency_table.update_item(
+                Key={'counter_id': CIRCUIT_BREAKER_ID},
+                UpdateExpression='SET #state = :closed, last_checked_at = :ts REMOVE last_error, opened_at',
+                ConditionExpression='#state = :expected',
+                ExpressionAttributeNames={'#state': 'state'},
+                ExpressionAttributeValues={
+                    ':closed': 'CLOSED',
+                    ':expected': 'HALF_OPEN',
+                    ':ts': timestamp
+                }
+            )
+        except ClientError as ce:
+            if ce.response['Error']['Code'] == 'ConditionalCheckFailedException':
+                logger.info(
+                    "Circuit breaker no longer HALF_OPEN - skipping CLOSED transition"
+                )
+                return
+            raise
+
+        logger.info("Circuit breaker transitioned to CLOSED - service recovered")
+
+        if ALERTS_TOPIC_ARN:
+            try:
+                sns.publish(
+                    TopicArn=ALERTS_TOPIC_ARN,
+                    Subject='Circuit Breaker CLOSED: Bedrock Service Recovered',
+                    Message=json.dumps({
+                        'circuit_breaker_state': 'CLOSED',
+                        'reason': 'Successful workflow execution in HALF_OPEN state',
+                        'timestamp': timestamp
+                    }, indent=2)
+                )
+            except Exception as sns_error:
+                logger.warning(f"Failed to publish circuit breaker notification: {sns_error}")
+
+        cloudwatch.put_metric_data(
+            Namespace=METRIC_NAMESPACE,
+            MetricData=[{
+                'MetricName': 'CircuitBreakerClosed',
+                'Value': 1,
+                'Unit': 'Count'
+            }]
+        )
+
+        if CIRCUIT_BREAKER_MANAGER_ARN:
+            try:
+                lambda_client.invoke(
+                    FunctionName=CIRCUIT_BREAKER_MANAGER_ARN,
+                    InvocationType='Event',
+                    Payload=json.dumps({'action': 'broadcast'}).encode('utf-8'),
+                )
+            except Exception as invoke_error:
+                logger.warning(
+                    f"Failed to broadcast circuit breaker CLOSED to AppSync: {invoke_error}"
+                )
+    except Exception as e:
+        logger.warning(f"Error notifying circuit breaker of success: {e}")
+
+
 def handler(event, context):
     logger.info(f"Processing event: {json.dumps(event)}")
     counter_value = None
@@ -295,6 +385,9 @@ def handler(event, context):
             except Exception as metrics_error:
                 logger.error(f"Failed to publish metrics: {metrics_error}", exc_info=True)
                 # Continue processing even if metrics fail
+
+            # Notify circuit breaker of successful workflow (for HALF_OPEN recovery)
+            notify_circuit_breaker_success()
         else:
             logger.info(
                 f"Workflow did not succeed (status: {workflow_status}), "

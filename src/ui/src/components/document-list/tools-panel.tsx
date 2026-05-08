@@ -29,6 +29,11 @@ const ToolsPanel = (): React.JSX.Element => (
               Monitoring
             </a>
           </li>
+          <li>
+            <a href={`${DOCS_BASE_URL}/circuit-breaker/`} target="_blank" rel="noopener noreferrer">
+              Circuit Breaker
+            </a>
+          </li>
         </ul>
       </div>
     }
@@ -43,6 +48,7 @@ const ToolsPanel = (): React.JSX.Element => (
         <li>Claim or release documents for human review</li>
         <li>Export filtered results to Excel for offline analysis</li>
         <li>Drill down into individual documents for detailed inspection</li>
+        <li>Monitor the circuit breaker status and (admins only) pause, resume, or probe document processing</li>
       </ul>
     </div>
   </HelpPanel>

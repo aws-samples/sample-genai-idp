@@ -58,6 +58,9 @@ class LoadTestResult(BaseModel):
 class TestRunResult(BaseModel):
     """Result of a Test Studio evaluation run."""
 
+    # Tell pytest not to collect this class as a test (name starts with "Test").
+    __test__ = False
+
     test_run_id: str = Field(description="Test run identifier")
     test_set_name: str = Field(description="Test set name")
     status: str = Field(
@@ -84,6 +87,9 @@ class TestRunResult(BaseModel):
 
 class TestComparisonResult(BaseModel):
     """Result of comparing multiple test runs."""
+
+    # Tell pytest not to collect this class as a test (name starts with "Test").
+    __test__ = False
 
     metrics: dict = Field(description="Metrics for each test run ID")
     comparison_summary: Optional[dict] = Field(

@@ -207,6 +207,81 @@ class TestDiscoveryOperations:
             file_bytes = call_args[2]  # file_bytes
             assert file_bytes == b"%PDF-1.4 test content"
 
+    def test_discovery_run_passes_model_id_to_local(self, tmp_path):
+        """model_id parameter is threaded through to _run_local (issue #309)."""
+        doc_file = tmp_path / "invoice.pdf"
+        doc_file.write_bytes(b"%PDF-1.4 test content")
+
+        client = IDPClient()  # No stack → local mode
+        with patch.object(
+            client.discovery,
+            "_run_local",
+            return_value=DiscoveryResult(status="SUCCESS"),
+        ) as mock_local:
+            client.discovery.run(
+                str(doc_file),
+                model_id="us.anthropic.claude-opus-4-6-v1",
+            )
+
+        assert mock_local.call_args.kwargs["model_id"] == (
+            "us.anthropic.claude-opus-4-6-v1"
+        )
+
+    def test_discovery_run_passes_model_id_to_stack(self, tmp_path):
+        """model_id parameter is threaded through to _run_with_stack."""
+        doc_file = tmp_path / "invoice.pdf"
+        doc_file.write_bytes(b"%PDF-1.4 test content")
+
+        client = IDPClient(stack_name="test-stack")
+        with patch.object(
+            client.discovery,
+            "_run_with_stack",
+            return_value=DiscoveryResult(status="SUCCESS"),
+        ) as mock_stack:
+            client.discovery.run(
+                str(doc_file),
+                model_id="us.anthropic.claude-opus-4-6-v1",
+            )
+
+        assert mock_stack.call_args.kwargs["model_id"] == (
+            "us.anthropic.claude-opus-4-6-v1"
+        )
+
+    def test_discovery_run_model_id_defaults_to_none(self, tmp_path):
+        """When --model-id not supplied, model_id is None (uses configured default)."""
+        doc_file = tmp_path / "invoice.pdf"
+        doc_file.write_bytes(b"%PDF-1.4 test content")
+
+        client = IDPClient()
+        with patch.object(
+            client.discovery,
+            "_run_local",
+            return_value=DiscoveryResult(status="SUCCESS"),
+        ) as mock_local:
+            client.discovery.run(str(doc_file))
+
+        assert mock_local.call_args.kwargs["model_id"] is None
+
+    def test_auto_detect_sections_passes_model_id(self, tmp_path):
+        """auto_detect_sections threads model_id to the appropriate backend."""
+        doc_file = tmp_path / "packet.pdf"
+        doc_file.write_bytes(b"%PDF-1.4 test content")
+
+        client = IDPClient()  # Local mode
+        with patch.object(
+            client.discovery,
+            "_auto_detect_local",
+            return_value=AutoDetectResult(status="SUCCESS", sections=[]),
+        ) as mock_detect:
+            client.discovery.auto_detect_sections(
+                document_path=str(doc_file),
+                model_id="us.anthropic.claude-opus-4-6-v1",
+            )
+
+        assert mock_detect.call_args.kwargs["model_id"] == (
+            "us.anthropic.claude-opus-4-6-v1"
+        )
+
 
 @pytest.mark.unit
 class TestDiscoveryBatchOperations:

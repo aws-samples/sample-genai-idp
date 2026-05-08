@@ -23,7 +23,7 @@ __pycache__
 .kiro
 notebooks/examples/data
 .idea/
-.dsr/
+.srt/
 *tmp-dev-assets*
 scratch/
 .mcp.json

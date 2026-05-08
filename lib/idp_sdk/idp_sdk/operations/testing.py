@@ -12,6 +12,9 @@ from idp_sdk.models import LoadTestResult, TestComparisonResult, TestRunResult
 class TestingOperation:
     """Load testing and workflow control operations."""
 
+    # Tell pytest not to collect this class as a test (name starts with "Test").
+    __test__ = False
+
     def __init__(self, client):
         self._client = client
         self._processor = None

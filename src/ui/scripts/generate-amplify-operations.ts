@@ -40,7 +40,11 @@ interface OperationInfo {
 function parseGraphQL(text: string, filePath?: string): { operationName: string; operationType: 'query' | 'mutation' | 'subscription' } | null {
   // Strip comment lines (lines starting with #) before parsing
   const strippedText = text.split('\n').filter(line => !line.trimStart().startsWith('#')).join('\n');
-  const matches = [...strippedText.matchAll(/\b(query|mutation|subscription)\s+([A-Za-z_]\w*)/g)];
+  // Anchor to start-of-line (with the /m flag) so we don't false-match on field
+  // selections whose names happen to be `query`, `mutation`, or `subscription`
+  // (e.g. `GetAgentJobStatus` selects a `query` field — before this anchor the
+  // regex reported "file contains 2 operations" and dropped the real one).
+  const matches = [...strippedText.matchAll(/^(query|mutation|subscription)\s+([A-Za-z_]\w*)/gm)];
   if (matches.length > 1) {
     console.warn(`Warning: ${filePath ?? '<unknown>'} contains ${matches.length} operations; only the first will be used`);
   }
