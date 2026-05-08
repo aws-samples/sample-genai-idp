@@ -740,15 +740,43 @@ Implemented and deployed. The agent runs fully decoupled from the frontend — n
 - `ad695ad3` — fix: prevent image/png crash — add image_reader tool, steer agent away from file_read on images
 - `58a8435a` — fix: FileReadSafetyHook forces mode=view, add harness engineering research TODO
 
+### 6.14 Session: May 8 — Max Cost Per Page, Discovery Investigation
+
+**Max allowable cost per page (deployed):**
+- Required input at run launch (UI text field, validated as positive number)
+- Stored in DynamoDB state as `max_cost_per_page_usd`
+- Passed to agent via `AUTOTUNE_MAX_COST_PER_PAGE` env var
+- Included in initial/resume prompts and OPTIMIZATION-LOG.md
+- `get_evaluation_summary` appends ⚠️ warning when cost per page exceeds budget
+- System prompt: CRITICAL non-negotiable constraint (first rule in Critical Rules)
+- Agent may explore over-budget configs but final recommendation MUST be within budget
+
+**DDB field renames (deployed):**
+- `best_accuracy` → `best_accuracy_within_budget`
+- `best_config_version` → `best_config_version_within_budget`
+- Semantics: "best" means "best that's viable for the user's production budget"
+
+**Discovery schema mismatch investigation:**
+- Agent ran `run_multi_class_discovery` with GT — schemas didn't match GT structure
+- Confirmed: GT IS being passed correctly (PR fix `17d4b13d` works — single doc + single GT paired by position)
+- Root cause: discovery prompt in `_prompt_classes_discovery_with_ground_truth` has conflicting instructions ("Do not nest groups" vs "preserve exact GT structure")
+- Model wraps flat GT fields into new objects (e.g., `title`, `facility`, `weekStartDate` → `DocumentInfo` object)
+- Created repro at `autotune/planning-docs/discovery-schema-mismatch/` with input, GT, output, and README
+- Sent to IDP service team for prompt fix
+
+**Commits pushed:**
+- `0161e596` — feat: max allowable cost per page constraint + discovery schema mismatch repro
+
 ### ⚠️ NEXT SESSION: TOP PRIORITY
 
-**See `autotune/planning-docs/next-steps-2026-05-04.md` for detailed Monday next steps.**
+**See `autotune/planning-docs/next-steps-2026-05-08.md` for detailed next steps.**
 
 **Next priorities (in order):**
-1. **Silent evaluation failure investigation** — IDP-side bug where eval runs get stuck at 0 completed files. Create standalone investigation doc for colleague.
-2. **Reward hacking guardrail** — Hard guardrail in `upload_config` + discuss upstream config separation with IDP team.
-3. **Cost observability** — Track token usage and estimated cost per run.
+1. **Discovery schema mismatch fix** — Awaiting IDP service team response. Repro at `autotune/planning-docs/discovery-schema-mismatch/`.
+2. **Test proactive context summarization** — Verify triggers at 50% and log re-read works.
+3. **Silent evaluation failure investigation** — IDP-side bug where eval runs get stuck at 0 completed files.
 4. **Automatic optimization log updates** — Hook-based approach to keep the log current.
+5. **Improve `validate_config`** — Catch configs that break the pipeline.
 
 #### Problem being solved
 AgentCore's internal SSE proxy kills the HTTP response stream after ~60s. Our heartbeat/ping approach can't fix this because the proxy is upstream of our container. The agent keeps running but the frontend loses all visibility. We need the frontend to see the agent's full thought process, optimization state, and optimization log — all without depending on a persistent SSE connection.
