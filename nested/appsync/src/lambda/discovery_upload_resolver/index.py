@@ -104,6 +104,7 @@ def handle_upload_discovery_document(event, context):
         page_ranges = arguments.get('pageRanges') or []
         page_labels = arguments.get('pageLabels') or []
         skip_job_creation = arguments.get('skipJobCreation', False)
+        discovery_type = arguments.get('discoveryType', 'classes')
 
         if not file_name:
             raise ValueError("fileName is required")
@@ -138,7 +139,7 @@ def handle_upload_discovery_document(event, context):
                     create_discovery_job(job_id, object_key, gt_object_key, version, page_range=page_range, class_name_hint=page_label)
             else:
                 job_id = str(uuid.uuid4())
-                create_discovery_job(job_id, object_key, gt_object_key, version)
+                create_discovery_job(job_id, object_key, gt_object_key, version, discovery_type=discovery_type)
         else:
             logger.info("skipJobCreation=True — returning presigned URL only, no jobs created")
 
@@ -177,7 +178,7 @@ def create_s3_signed_post_url(bucket_name, content_type, file_name, file_type, p
     return object_key, presigned_post
 
 
-def create_discovery_job(job_id, document_key, ground_truth_key, version, page_range=None, class_name_hint=None):
+def create_discovery_job(job_id, document_key, ground_truth_key, version, discovery_type='classes', page_range=None, class_name_hint=None):
     """
     Create a new discovery job entry in DynamoDB.
     
@@ -186,6 +187,7 @@ def create_discovery_job(job_id, document_key, ground_truth_key, version, page_r
         document_key (str): S3 key for the document file
         ground_truth_key (str): S3 key for the ground truth file
         version (str): Configuration version to use
+        discovery_type (str): Type of discovery - "classes" or "rules"
         page_range (str, optional): Page range string (e.g., "1-3") for multi-section discovery
     """
     try:
@@ -221,17 +223,25 @@ def create_discovery_job(job_id, document_key, ground_truth_key, version, page_r
 
         if page_range:
             item['pageRange'] = page_range
+
+        # Persist discovery type so the UI can distinguish policy-discovery
+        # jobs (whose results live in policy_classes) from regular class
+        # discovery (whose results live in classes).
+        if discovery_type:
+            item['discoveryType'] = discovery_type
+            if discovery_type == 'rules':
+                item['jobType'] = 'rules'
         
         table.put_item(Item=item)
         logger.info(f"Created discovery job: {job_id}" + (f" (pages {page_range})" if page_range else ""))
         
-        send_discovery_message(job_id, document_key, ground_truth_key, version, page_range=page_range, class_name_hint=class_name_hint)
+        send_discovery_message(job_id, document_key, ground_truth_key, version, discovery_type=discovery_type, page_range=page_range, class_name_hint=class_name_hint)
         
     except Exception as e:
         logger.error(f"Error creating discovery job: {str(e)}")
         # Don't fail the upload if job tracking fails
 
-def send_discovery_message(job_id, document_key, ground_truth_key, version, page_range=None, class_name_hint=None):
+def send_discovery_message(job_id, document_key, ground_truth_key, version, discovery_type='classes', page_range=None, class_name_hint=None):
     """
     Send a message to the discovery processing queue.
     
@@ -240,6 +250,7 @@ def send_discovery_message(job_id, document_key, ground_truth_key, version, page
         document_key (str): S3 key for the document file
         ground_truth_key (str): S3 key for the ground truth file
         version (str): Configuration version to use
+        discovery_type (str): Type of discovery - "classes" or "rules"
         page_range (str, optional): Page range string (e.g., "1-3") for multi-section discovery
     """
     try:
@@ -252,6 +263,7 @@ def send_discovery_message(job_id, document_key, ground_truth_key, version, page
             'jobId': job_id,
             'documentKey': document_key,
             'groundTruthKey': ground_truth_key,
+            'discoveryType': discovery_type,
             'bucket': os.environ.get('DISCOVERY_BUCKET'),
             'version': version,
             'timestamp': datetime.now().isoformat()

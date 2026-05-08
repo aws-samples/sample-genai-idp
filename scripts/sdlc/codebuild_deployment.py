@@ -382,12 +382,12 @@ def test_step5_rule_validation(stack_name):
     print("Step 5: Testing rule validation...")
     config_version = "rule-validation"
     config_path = "config_library/unified/rule-validation/config.yaml"
-    sample_file = "Prior-Auth-12345678.pdf"
+    sample_file = "medicare_respiratory_pa_packet.pdf"
     sample_dir = "samples/rule-validation"
     batch_id = "test-rules"
     verify_string = "global_periods"
     result_location = "rule_validation/sections/section_1_responses.json"
-    content_path = "responses.global_periods.0.rule_type"
+    content_path = "responses.global_periods.0.policy_type"
 
     print(f"Uploading rule validation config from: {config_path}")
     cmd = f"idp-cli config-upload --stack-name {stack_name} --config-file {config_path} --config-version {config_version}"

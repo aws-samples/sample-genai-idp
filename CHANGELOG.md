@@ -7,6 +7,50 @@ SPDX-License-Identifier: MIT-0
 
 ### Added
 
+- **`idp-cli discover --model-id` flag** — override the Bedrock model used by `idp-cli discover` for a single invocation (e.g. `--model-id us.anthropic.claude-opus-4-6-v1`). Threads from the CLI through the SDK (`client.discovery.*`) and `idp_common.discovery.ClassesDiscovery` down to `bedrock.invoke_model`. Applies to with-ground-truth, without-ground-truth, `--auto-detect`, and `--page-range` modes; backward-compatible (omitting the flag uses the configured model). ([#309](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues/309))
+
+- **Bedrock circuit breaker** — a CFN-parameterized circuit breaker that pauses new workflow starts when Bedrock is unhealthy and auto-recovers once the service comes back, so transient Bedrock outages no longer burn through SQS retries or leave documents half-processed. Off by default for full backward compatibility.
+  - New `circuit_breaker_manager` Lambda (`src/lambda/circuit_breaker_manager/`) owns state transitions in the existing `ConcurrencyTable` under `counter_id = "circuit_breaker"`. Three states: `CLOSED` (normal), `OPEN` (block new workflow starts), `HALF_OPEN` (probe traffic allowed).
+  - **Triggers:** (1) CloudWatch Alarm state changes on Bedrock error metrics fan out via SNS → `circuit_breaker_manager`; (2) an EventBridge-scheduled health check promotes `OPEN → HALF_OPEN` once `RECOVERY_TIMEOUT_SECONDS` has elapsed.
+  - **Gate:** `queue_processor.check_circuit_breaker()` runs *before* the concurrency-counter increment — cheap filter first. `OPEN` → message is not deleted, SQS redelivers after visibility timeout. `HALF_OPEN` → probe traffic proceeds. DDB errors fail **open** (do not block traffic) and return state `ERROR`.
+  - **Recovery:** `workflow_tracker.notify_circuit_breaker_success()` transitions `HALF_OPEN → CLOSED` after the first successful workflow completion, conditionally on state still being `HALF_OPEN`.
+  - **Race-safe DDB writes:** all state transitions (`handle_alarm_event`, `handle_health_check`, `notify_circuit_breaker_success`) use `ConditionExpression` on the expected prior state. A concurrent alarm fan-out or a workflow-completion racing against an alarm can no longer clobber each other's state write; the loser's `ConditionalCheckFailedException` is swallowed as a no-op and side effects (SNS publish, CloudWatch metric, custom error-handler invoke) are skipped so no stale notification is emitted.
+  - **Operator hooks:** manual `{"action": "reset"}` and `{"action": "get_state"}` invocations on `circuit_breaker_manager`; optional customer Lambda invoked via `ERROR_HANDLER_ARN` when the breaker opens.
+  - **Metrics & notifications:** `CircuitBreakerOpened` / `CircuitBreakerHalfOpen` / `CircuitBreakerClosed` CloudWatch metrics under the existing `METRIC_NAMESPACE`, and state-change notifications to the existing `AlertsTopic`.
+  - **New CFN parameters** (all default to off, fully backward-compatible): `EnableCircuitBreaker`, `CircuitBreakerRecoveryTimeoutSeconds`, `CircuitBreakerErrorHandlerArn`. New env vars `CIRCUIT_BREAKER_ENABLED` / `CIRCUIT_BREAKER_ID` on `queue_processor` and `workflow_tracker`.
+  - **Unit test coverage:** `src/lambda/circuit_breaker_manager/test_index.py`, `src/lambda/queue_processor/test_check_circuit_breaker.py`, `src/lambda/workflow_tracker/test_notify_circuit_breaker.py` cover alarm ALARM/OK per prior-state branch, health-check recovery elapsed vs. not elapsed, counter preservation on OPEN→HALF_OPEN, manual reset/get_state (including `last_error` removal), disabled / item-missing / OPEN / HALF_OPEN / DDB-error gate paths, OPEN-state SQS visibility extension, HALF_OPEN→CLOSED success path, and the ConditionalCheckFailedException race-loss branch.
+  - **Outage-aware SQS retry backoff:** when the breaker is `OPEN`, `queue_processor` calls `sqs.ChangeMessageVisibility` to push the message invisibility out to `CircuitBreakerRecoveryTimeoutSeconds` (default 300 s). Keeps long Bedrock outages from burning through the source queue's `maxReceiveCount` and landing documents in the DLQ. Failures are non-fatal — messages fall back to the default 30 s visibility timeout.
+  - **Counter preservation on recovery:** `OPEN → HALF_OPEN` transitions (both alarm-cleared and recovery-timeout paths) now preserve `failure_count` instead of resetting it to 0, so operators can see the cumulative failure count across a full outage. Manual reset still zeros both counters and removes `last_error` for a clean-slate restart.
+  - **Docs:** `docs/circuit-breaker.md` and `src/lambda/circuit_breaker_manager/README.md`.
+  - **Web UI visibility & admin controls** — the document list header shows a live status badge (green CLOSED / blue HALF_OPEN / red OPEN with `lastError` tooltip) powered by an AppSync subscription. Clicking the badge opens a details panel (state, `openedAt`, `failureCount`, `recoveryAttempts`, `lastError`). Users in the **Admin** Cognito group additionally see **Pause processing**, **Resume processing**, and **Probe recovery** buttons — each requires a reason that is persisted to DynamoDB and broadcast over the existing `AlertsTopic`. All automatic transitions (alarm fan-out, scheduled health-check probe) also publish to the subscription, so the badge reflects real state within ~1 s across every connected browser. Badge and panel are hidden entirely when `CircuitBreakerEnabled=false`.
+    - New AppSync query/mutations/subscription: `getCircuitBreakerStatus`, `pauseCircuitBreaker`, `resumeCircuitBreaker`, `probeCircuitBreaker`, `onCircuitBreakerStatusChange` (backed by IAM-only `publishCircuitBreakerStatus` fan-out mutation).
+    - New resolver Lambda (`nested/appsync/src/lambda/circuit_breaker_resolver/`) handles reads directly from `ConcurrencyTable` and forwards admin mutations to `circuit_breaker_manager` as new `manual_open` / `manual_close` / `manual_probe` actions (reasons recorded in `last_error`). Admin authorization is enforced at both the AppSync schema layer (`@aws_auth(cognito_groups: ["Admin"])`) and in the resolver.
+    - `HALF_OPEN → CLOSED` recoveries fan out to the UI in real time. `workflow_tracker` async-invokes `circuit_breaker_manager` with a new `broadcast` action after it closes the breaker, so the badge flips from "Circuit: recovering" to "Circuit: closed" without a manual refresh. Previously the DDB write was correct but the UI stayed stuck on recovering because only the manager Lambda published to AppSync.
+    - Badge label distinguishes `Manual pause by <user>` entries in `last_error` ("Circuit: manually paused") from automatic alarm-triggered opens ("Circuit: Bedrock outage"). Badge is also restyled as a Cloudscape `Button` to match the other header actions and moved to the right of **Release Review**.
+
+### Changed
+
+- **Replaced DSR with open-source SRT security scanning tool** — Migrated from deprecated internal DSR (Design Security Review) tool to the actively maintained open-source [Sample Security Review Tool (SRT)](https://github.com/aws-samples/sample-security-review-tool). Added automated security scanning in GitLab CI/CD pipeline that runs on merge requests targeting `develop` branch. Pipeline fails if security findings are detected, providing a security gate before production deployments. New Makefile targets: `make srt`, `make srt-setup`, `make srt-scan`, `make srt-fix`. Updated documentation in CLAUDE.md, CONTRIBUTING.md, and scripts/README.md.
+
+### Fixed
+
+- **`idp-cli discover` silently ignored mismatched ground truth files** — When `-g` ground truth files didn't match any `-d` document by filename stem, the CLI printed a yellow warning but exited `0` and ran discovery without ground truth. This produced subtly worse results that were hard to diagnose (common trigger: IDP test-set ground truth stored as `baseline/<doc>/sections/1/result.json`, whose stem is always `result`). Two behavioral changes:
+  - **Single document + single ground truth** (`-d 1 file, -g 1 file`): now paired by position regardless of filename stem — filenames no longer need to match for this common case.
+  - **Batch mode** (multiple `-d` or multiple `-g`): unmatched `-g` files are now a fatal error (exit `1`) with a clear message showing unmatched ground truth files and available document stems. Also detects and errors on duplicate ground truth filename stems, which previously overwrote each other silently.
+  ([#310](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues/310))
+
+  
+## [0.5.9]
+
+### Added
+
+- **Policy Discovery & Rule Validation Policy Classification**: Upload a regulatory document (e.g., an NCCI Medicare policy manual) and automatically extract structured validation rules from it. A new "Policy Discovery" tab in the Discovery page walks you through the process, and the extracted rules feed directly into the rule validation workflow.
+  - A new policy classification step runs before rule validation, matching each document against your configured `policy_classes` using regex patterns on document names and page content. Only matching policy rules are evaluated, so unrelated rules are skipped automatically.
+  - The configuration key `rule_classes` has been renamed to `policy_classes` for clarity. Existing configs will need to update this key.
+  - The Schema Builder now has dedicated support for editing policy classes with policy-specific labels, and extraction-only settings are hidden when editing policy schemas.
+  - A "Policy Discovery" section has been added to Discovery Configuration in the UI, letting you choose the model, temperature, and prompts used for Policy Discovery.
+  - The legacy `rule-extraction` configuration preset has been removed. Use **Policy Discovery** on the Discovery tab instead — it writes extracted rules directly into the active config's `policy_classes`.
+
 - **Document-level Download button on the Document Details page** — A new **Download** dropdown in the Document Details header lets users pull every output artifact for a document in a single click, packaged as a ZIP. Three scopes are offered:
   - **Download All (ZIP)** — document attributes, metering, summary, evaluation & rule-validation reports, per-section predictions, baselines (when available), per-page text/confidence, and optionally per-page images and/or the source document (checkboxes).
   - **Download Predictions (ZIP)** — all section result JSONs plus a self-describing `manifest.json`.
@@ -32,6 +76,7 @@ SPDX-License-Identifier: MIT-0
     - `DeployInVPC` (bool) — places all IDP Lambdas in customer-supplied private subnets with a customer-supplied security group.
     - `VpcId`, `PrivateSubnetIds`, `ApiGatewayVpcEndpointId`, `LambdaSecurityGroupId`, `ApiStageName` — customer-supplied networking.
     - `DeployBastionHost`, `BastionHostSubnetId`, `BastionHostSecurityGroupId` — optional dev-access bastion.
+    - **CloudFormation console UX** - the 11 new parameters are grouped into two dedicated `AWS::CloudFormation::Interface` sections ("Headless API Deployment (required for GovCloud)" and "Headless API Deployment - Bastion Host (optional, requires VPC Secured Mode)") with friendlier `ParameterLabels` and rewritten `Description` text. Each description now explicitly states when the parameter is required, what the default behavior is (no Jobs API / no Lambda VPC placement / no bastion EC2 unless explicitly enabled), and which companion parameters it depends on. Ensures Quick-Start users who click the README's "Launch Stack" button see clear opt-in sections rather than assuming the bastion host or Jobs API is always deployed.
   - **CFN fail-fast validation (H1)** — new `Rules:` block entries catch misconfiguration at stack create / update time with clear `AssertDescription` errors, instead of failing deep in resource provisioning:
     - `HeadlessRequiresVPC` — `EnableHeadless=true` requires `DeployInVPC=true` + non-empty `VpcId` / `ApiGatewayVpcEndpointId` / `LambdaSecurityGroupId`.
     - `BastionRequiresVPC` — `DeployBastionHost=true` requires `DeployInVPC=true` + non-empty bastion subnet / SG.
@@ -48,6 +93,12 @@ SPDX-License-Identifier: MIT-0
     - New `docs/govcloud-architecture.md`, `docs/govcloud-operations.md`, `docs/vpc-secured-mode.md`.
     - Overhauled `docs/govcloud-deployment.md` with a deployment-variant matrix (Vanilla / Headless API / Headless + VPC / Headless + VPC + Bastion).
   - **End-to-end test script:** `scripts/e2e_test_headless.py <STACK_NAME> <PATH_TO_FILE>` exercises the full flow (OAuth → POST /jobs → presigned upload → status poll → download results).
+
+- **Managed configuration upload rejection** — `idp-cli config upload` now rejects configuration files with `managed: true` to prevent users from accidentally creating stack-managed configurations that would be overwritten on stack updates. All user-uploaded configurations automatically have `managed: false` set, ensuring they persist across stack lifecycle events.
+
+### Fixed
+
+- **Evaluation markdown/report rendering resilience** — two defensive fixes that keep evaluation and test-results pages from crashing when upstream data is non-numeric or empty.
 
 ### Security
 
@@ -104,6 +155,12 @@ Hardening response to security review - Highlights:
   - SQL injection in `test_results_resolver` Athena queries (every
     interpolation is gated by `_validate_sql_input()` with a strict
     allow-list regex).
+
+## Templates
+   - us-west-2: `https://s3.us-west-2.amazonaws.com/aws-ml-blog-us-west-2/artifacts/genai-idp/idp-main_0.5.9.yaml`
+   - us-east-1: `https://s3.us-east-1.amazonaws.com/aws-ml-blog-us-east-1/artifacts/genai-idp/idp-main_0.5.9.yaml`
+   - eu-central-1: `https://s3.eu-central-1.amazonaws.com/aws-ml-blog-eu-central-1/artifacts/genai-idp/idp-main_0.5.9.yaml`
+  
 
 ## [0.5.8]
 

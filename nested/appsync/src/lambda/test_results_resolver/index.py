@@ -1018,11 +1018,12 @@ def _get_evaluation_metrics_from_athena(test_run_id):
     )
 
     # Calculate split accuracies from summed counts
-    total_pages = result.get("total_pages", 0)
-    total_splits = result.get("total_splits", 0)
-    correctly_classified_pages = result.get("correctly_classified_pages", 0)
-    correctly_split_without_order = result.get("correctly_split_without_order", 0)
-    correctly_split_with_order = result.get("correctly_split_with_order", 0)
+    # Athena returns None for SUM() on empty result sets, so default to 0
+    total_pages = result.get("total_pages") if result.get("total_pages") is not None else 0
+    total_splits = result.get("total_splits") if result.get("total_splits") is not None else 0
+    correctly_classified_pages = result.get("correctly_classified_pages") if result.get("correctly_classified_pages") is not None else 0
+    correctly_split_without_order = result.get("correctly_split_without_order") if result.get("correctly_split_without_order") is not None else 0
+    correctly_split_with_order = result.get("correctly_split_with_order") if result.get("correctly_split_with_order") is not None else 0
 
     page_level_accuracy = (
         correctly_classified_pages / total_pages if total_pages > 0 else None
@@ -1086,7 +1087,7 @@ def _get_cost_data_from_athena(test_run_id):
         unit = result["unit"]
         total_value = result["total_value"]
         unit_cost = result["unit_cost"]
-        estimated_cost = result["total_estimated_cost"]
+        estimated_cost = result["total_estimated_cost"] if result["total_estimated_cost"] is not None else 0
 
         if context not in cost_breakdown:
             cost_breakdown[context] = {}

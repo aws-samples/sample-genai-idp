@@ -79,6 +79,7 @@ type Document implements DynamoDbBase @aws_cognito_user_pools @aws_iam {
   EvaluationStatus: String
   SummaryReportUri: String
   RuleValidationResultUri: String
+  RuleValidationResult: AWSJSON
   ExpiresAfter: AWSTimestamp
   HITLStatus: String
   HITLReviewURL: String
@@ -315,6 +316,7 @@ input UpdateDocumentInput {
   EvaluationStatus: String
   SummaryReportUri: String
   RuleValidationResultUri: String
+  RuleValidationResult: AWSJSON
   HITLStatus: String
   HITLReviewURL: String
   HITLTriggered: Boolean
@@ -639,6 +641,20 @@ type MessageContent {
   text: String
 }
 
+# =========================================================================
+# Circuit Breaker Types
+# =========================================================================
+
+type CircuitBreakerStatus @aws_cognito_user_pools @aws_iam {
+  enabled: Boolean!
+  state: String
+  openedAt: AWSDateTime
+  lastCheckedAt: AWSDateTime
+  failureCount: Int
+  recoveryAttempts: Int
+  lastError: String
+}
+
 # =============================================================================
 # RBAC: Role-Based Access Control via @aws_auth(cognito_groups: [...])
 #
@@ -720,6 +736,7 @@ type Mutation {
     pageRanges: [String]
     pageLabels: [String]
     skipJobCreation: Boolean
+    discoveryType: String
   ): DisPresignedUrlResponse!
     @aws_auth(cognito_groups: ["Admin", "Author"])
   autoDetectSections(
@@ -807,6 +824,18 @@ type Mutation {
   updateChatSessionTitle(sessionId: ID!, title: String!): ChatSession
     @aws_cognito_user_pools
     @aws_iam
+
+  # Circuit Breaker admin controls — Admin only.
+  pauseCircuitBreaker(reason: String!): CircuitBreakerStatus
+    @aws_auth(cognito_groups: ["Admin"])
+  resumeCircuitBreaker(reason: String!): CircuitBreakerStatus
+    @aws_auth(cognito_groups: ["Admin"])
+  probeCircuitBreaker(reason: String!): CircuitBreakerStatus
+    @aws_auth(cognito_groups: ["Admin"])
+  # IAM-only fan-out trigger used by circuit_breaker_manager Lambda.
+  # Return value is what subscribers receive; all successful calls to this
+  # mutation broadcast to onCircuitBreakerStatusChange.
+  publishCircuitBreakerStatus(status: AWSJSON!): CircuitBreakerStatus @aws_iam
 }
 
 type DocumentPage @aws_cognito_user_pools @aws_iam {
@@ -923,6 +952,9 @@ type Query @aws_cognito_user_pools @aws_iam {
   getFinetuningJob(jobId: ID!): FinetuningJob @aws_cognito_user_pools
   validateTestSetForFinetuning(testSetId: ID!): TestSetValidationResult @aws_cognito_user_pools
   listAvailableModels: AvailableModelsResult @aws_cognito_user_pools
+
+  # Circuit Breaker status — any authenticated user can read.
+  getCircuitBreakerStatus: CircuitBreakerStatus
 }
 
 type Subscription @aws_cognito_user_pools @aws_iam {
@@ -935,6 +967,8 @@ type Subscription @aws_cognito_user_pools @aws_iam {
     @aws_subscribe(mutations: ["updateDiscoveryJobStatus"])
   onAgentChatMessageUpdate(sessionId: String!): AgentChatMessage
     @aws_subscribe(mutations: ["sendAgentChatMessage"])
+  onCircuitBreakerStatusChange: CircuitBreakerStatus
+    @aws_subscribe(mutations: ["publishCircuitBreakerStatus"])
 }
 
 # =========================================================================

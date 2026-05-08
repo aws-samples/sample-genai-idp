@@ -113,7 +113,6 @@ The configuration preset names are the same — only the internal directory stru
 | realkie-fcc-verified | ✅ Available |
 | ocr-benchmark | ✅ Available |
 | rule-validation | ✅ Available |
-| rule-extraction | ✅ Available |
 | healthcare-multisection-package | ✅ New |
 | fake-w2 | ✅ New — 2,000 synthetic W-2 tax forms with structured ground truth |
 | lending-package-sample-govcloud | ✅ New — GovCloud-compatible model IDs |

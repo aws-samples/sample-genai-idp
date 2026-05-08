@@ -197,7 +197,7 @@ typecheck-pr: ## Type check only files changed vs TARGET_BRANCH (default: main)
 	$(PYTHON) scripts/sdlc/typecheck_pr_changes.py $(TARGET_BRANCH)
 
 ##@ Testing
-test: ## Run all tests (idp_common, cli, sdk, capacity, config library)
+test: ## Run all tests (idp_common, cli, sdk, capacity, config library, srt)
 	$(MAKE) -C lib/idp_common_pkg test PYTHON=$(PYTHON)
 	cd lib/idp_cli_pkg && $(PYTHON) -m pytest -v
 	cd lib/idp_sdk && $(PYTHON) -m pytest -m "not integration" -v
@@ -205,6 +205,8 @@ test: ## Run all tests (idp_common, cli, sdk, capacity, config library)
 	cd src/lambda/calculate_capacity && $(PYTHON) -m pytest -v
 	@echo "Validating config library files..."
 	$(PYTHON) -m pytest config_library/test_config_library.py -v
+	#@echo "Running SRT security scan..."
+	#$(MAKE) srt
 
 test-cli: ## Run only IDP CLI tests
 	@echo "Running IDP CLI tests..."
@@ -379,28 +381,28 @@ docs-deploy: docs-build ## Deploy docs to GitHub Pages (from local build)
 	cd docs-site && npx gh-pages -d dist --dotfiles --repo https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws.git
 	@echo -e "$(GREEN)✅ Docs deployed to GitHub Pages!$(NC)"
 
-##@ Security (DSR)
-dsr: ## Run full DSR workflow (setup → scan → optional fix)
-	@$(MAKE) dsr-setup
-	@$(MAKE) dsr-scan
+##@ Security (SRT)
+srt: ## Run full SRT workflow (setup → scan → optional fix)
+	@$(MAKE) srt-setup
+	@$(MAKE) srt-scan
 	@echo ""
-	@echo "Do you want to run DSR fix? (y/N):"
+	@echo "Do you want to run SRT fix? (y/N):"
 	@read answer && \
 	if [ "$$answer" = "y" ] || [ "$$answer" = "Y" ]; then \
-		$(MAKE) dsr-fix; \
+		$(MAKE) srt-fix; \
 	fi
 
-dsr-setup: ## Set up DSR tool
-	@echo "Setting up DSR tool..."
-	$(PYTHON) scripts/dsr/setup.py
+srt-setup: ## Download and configure SRT tool
+	@echo "Setting up SRT tool..."
+	$(PYTHON) scripts/srt/setup.py
 
-dsr-scan: ## Run DSR security scan
-	@echo "Running DSR security scan..."
-	$(PYTHON) scripts/dsr/run.py
+srt-scan: ## Run SRT security assessment
+	@echo "Running SRT security assessment..."
+	$(PYTHON) scripts/srt/run.py
 
-dsr-fix: ## Run DSR interactive fix
-	@echo "Running DSR interactive fix..."
-	$(PYTHON) scripts/dsr/fix.py
+srt-fix: ## Run SRT interactive fix
+	@echo "Running SRT interactive fix..."
+	$(PYTHON) scripts/srt/fix.py
 
 ##@ Deploy
 # Thin wrappers around `idp-cli publish` / `deploy` / `delete` for the common

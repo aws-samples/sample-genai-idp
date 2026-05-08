@@ -50,9 +50,10 @@ def is_rule_validation_enabled(config_version=None):
         config = get_config(as_model=True, version=config_version)
         if hasattr(config, 'rule_validation') and config.rule_validation:
             enabled = config.rule_validation.enabled
-            if enabled and hasattr(config, 'rule_classes'):
-                if not config.rule_classes or len(config.rule_classes) == 0:
-                    logger.info("Rule validation enabled but no rule_classes configured - skipping")
+            if enabled:
+                policy_classes = getattr(config, 'policy_classes', None) or []
+                if len(policy_classes) == 0:
+                    logger.info("Rule validation enabled but no policy_classes configured - skipping")
                     return False
             logger.info(f"Rule validation enabled: {enabled}")
             return enabled

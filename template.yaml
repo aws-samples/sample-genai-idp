@@ -45,8 +45,6 @@ Mappings:
       ConfigPath: "ocr-benchmark"
     rule-validation:
       ConfigPath: "rule-validation"
-    rule-extraction:
-      ConfigPath: "rule-extraction"
     lending-package-sample-govcloud:
       ConfigPath: "lending-package-sample-govcloud"
 
@@ -198,7 +196,6 @@ Parameters:
       - "realkie-fcc-verified"
       - "ocr-benchmark"
       - "rule-validation"
-      - "rule-extraction"
     Description: >-
       Select the configuration preset. Each configuration contains pre-tuned settings for specific document processing scenarios - see https://github.com/aws-samples/sample-genai-idp/blob/main/config_library/README.md. Note: Custom Configuration Path overrides this when provided.
 
@@ -436,7 +433,7 @@ Parameters:
       (Required when WebUIHosting=ALB or AppSyncVisibility=PRIVATE) VPC ID.
       When using ALB hosting, this is the VPC for the ALB and S3 VPC endpoint.
       When using private AppSync (AppSyncVisibility=PRIVATE), this VPC ID is
-      also used for the Lambda security group — private AppSync requires all
+      also used for the Lambda security group - private AppSync requires all
       Lambda functions to be in the same VPC as the AppSync VPC endpoint, so
       ALB hosting and private AppSync always use the same VPC.
 
@@ -492,7 +489,7 @@ Parameters:
     Description: >-
       (Required when AppSyncVisibility=PRIVATE) Comma-separated private subnet
       IDs for Lambda functions. Should be private subnets with no direct
-      internet route — Lambda traffic reaches AWS services via VPC endpoints.
+      internet route - Lambda traffic reaches AWS services via VPC endpoints.
       Can be the same as ALBSubnetIds for simpler deployments, or different
       private subnets for stricter network isolation. Minimum 2 subnets in
       different Availability Zones recommended.
@@ -557,70 +554,217 @@ Parameters:
     Default: ""
     Description: SageMaker MLflow tracking server ARN
 
+  # Circuit Breaker Configuration
+  CircuitBreakerEnabled:
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: >-
+      Enable circuit breaker for Bedrock service outages. When enabled, the system
+      automatically detects Bedrock failures and blocks new workflows until the
+      service recovers.
+
+  CircuitBreakerFailureThreshold:
+    Type: Number
+    Default: 3
+    MinValue: 1
+    MaxValue: 100
+    Description: >-
+      Combined error count across selected trigger metrics within the evaluation
+      window that opens the circuit breaker. See CircuitBreakerTrigger* params.
+
+  CircuitBreakerTriggerServiceUnavailable:
+    Type: String
+    Default: "true"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: >-
+      Count Bedrock ServiceUnavailable (503) errors toward the circuit breaker
+      failure threshold.
+
+  CircuitBreakerTriggerThrottling:
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: >-
+      Count Bedrock throttling errors (ThrottlingException,
+      TooManyRequestsException, RequestLimitExceeded) toward the circuit breaker
+      failure threshold.
+
+  CircuitBreakerTriggerQuotaLimit:
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: >-
+      Count Bedrock service quota errors (ServiceQuotaExceededException) toward
+      the circuit breaker failure threshold.
+
+  CircuitBreakerEvaluationPeriods:
+    Type: Number
+    Default: 1
+    MinValue: 1
+    MaxValue: 10
+    Description: >-
+      Number of 5-minute periods to evaluate for circuit breaker threshold.
+      For example, 1 period = 5 minutes, 2 periods = 10 minutes.
+
+  CircuitBreakerRecoveryTimeoutSeconds:
+    Type: Number
+    Default: 300
+    MinValue: 60
+    MaxValue: 3600
+    Description: >-
+      Seconds to wait before attempting recovery after the circuit breaker opens.
+      After this timeout, the circuit enters HALF_OPEN state to test if Bedrock
+      has recovered.
+
+  CircuitBreakerErrorHandlerArn:
+    Type: String
+    Default: ""
+    AllowedPattern: "^(|arn:aws[a-z-]*:lambda:[a-z0-9-]+:[0-9]{12}:function:.+)$"
+    Description: >-
+      (Optional) Lambda ARN for custom error handling when circuit breaker opens.
+      This Lambda is invoked asynchronously when the circuit opens, allowing
+      custom alerting or remediation logic.
   # Headless API Configuration
+  # ------------------------------------------------------------------------
+  # Headless API Deployment (required for GovCloud)
+  #
+  # These parameters control the optional "headless" deployment mode, where
+  # the stack deploys a private Jobs REST API (API Gateway + Lambda) instead
+  # of (or in addition to) the web UI. This mode is REQUIRED for GovCloud
+  # regions because the UI-layer services (AppSync, CloudFront, Cognito UI
+  # pool) aren't available there. In Commercial regions the mode is OPTIONAL
+  # and useful for API-only / machine-to-machine integrations.
+  #
+  # All parameters below default to OFF / empty. Leaving them at defaults
+  # keeps the stack as a pure web-UI deployment with no Jobs API, no VPC
+  # placement of Lambdas, and no bastion EC2.
+  #
+  # See docs/govcloud-deployment.md for deployment patterns and
+  # docs/govcloud-batch-api.md for the Jobs API reference.
+  # ------------------------------------------------------------------------
+
   EnableHeadless:
     Type: String
     Default: 'false'
     AllowedValues: ['true', 'false']
     Description: >-
-      Enable headless mode which deploys the Jobs REST API Gateway and supporting Lambda functions.
-      Requires VpcId, PrivateSubnetIds, ApiGatewayVpcEndpointId, and LambdaSecurityGroupId.
+      Set to 'true' to deploy the headless Jobs REST API (Private API Gateway
+      + /jobs endpoints + supporting Lambdas). Default 'false' = no Jobs API
+      is deployed. Required for GovCloud. When 'true', you must also set
+      DeployInVPC=true and populate VpcId, PrivateSubnetIds,
+      ApiGatewayVpcEndpointId, and LambdaSecurityGroupId.
 
-  # VPC Configuration
   DeployInVPC:
     Type: String
     Default: 'false'
     AllowedValues: ['true', 'false']
     Description: >-
-      When enabled, deploys all core document processing Lambda functions into the VPC.
-      Requires VpcId, PrivateSubnetIds, and LambdaSecurityGroupId.
+      Set to 'true' to place all document-processing Lambdas inside the
+      customer-supplied VPC (required for Headless API deployments and for
+      any compliance/exfil-control use cases). Default 'false' = Lambdas run
+      in the default AWS-owned network. When 'true', you must populate
+      VpcId, PrivateSubnetIds, and LambdaSecurityGroupId.
 
-  # Jobs API VPC Configuration
   VpcId:
     Type: String
     Default: ""
-    Description: Optional - Existing VPC ID for Jobs API deployment (leave blank to skip Jobs API deployment)
+    Description: >-
+      Required when DeployInVPC=true. The customer-owned VPC that Lambdas
+      and (if Headless) the Private API Gateway VPC endpoint are attached
+      to. Leave empty for non-VPC deployments.
 
   PrivateSubnetIds:
     Type: CommaDelimitedList
     Default: ""
-    Description: Optional - Comma-separated list of at least 2 private subnet IDs in different AZs (required if VpcId is provided)
-
-  ApiGatewayVpcEndpointId:
-    Type: String
-    Default: ""
-    Description: Optional - Existing VPC Endpoint ID for execute-api service (required if VpcId is provided)
-
-  ApiStageName:
-    Type: String
-    Default: beta
-    Description: API Gateway deployment stage name
+    Description: >-
+      Required when DeployInVPC=true. Comma-separated list of at least 2
+      private subnet IDs in different AZs within VpcId. Lambdas are
+      attached to these subnets. Leave empty for non-VPC deployments.
 
   LambdaSecurityGroupId:
     Type: String
     Default: ""
-    Description: Optional - Existing Security Group ID for VPC-enabled Lambda functions (required if VpcId is provided)
+    Description: >-
+      Required when DeployInVPC=true. Security group attached to all
+      VPC-resident Lambdas. Must allow outbound HTTPS to AWS service
+      endpoints (either via VPC endpoints or a NAT gateway). Leave empty
+      for non-VPC deployments.
+
+  ApiGatewayVpcEndpointId:
+    Type: String
+    Default: ""
+    Description: >-
+      Required when EnableHeadless=true. The com.amazonaws.<region>.execute-api
+      Interface VPC endpoint that the Private API Gateway is bound to. The
+      API's resource policy denies all traffic not sourced from this VPCE.
+      Leave empty if EnableHeadless=false.
+
+  ApiStageName:
+    Type: String
+    Default: 'beta'
+    Description: >-
+      Stage name for the Headless Jobs API Gateway (e.g. 'beta', 'prod').
+      Ignored when EnableHeadless=false.
+
+  # ------------------------------------------------------------------------
+  # Headless API Deployment - Bastion Host (optional, requires VPC Secured Mode)
+  #
+  # The bastion host is an OPTIONAL developer-convenience feature for
+  # reaching the Private API Gateway from outside the VPC during
+  # development. It provisions a small EC2 instance (Amazon Linux 2, t3.small,
+  # IMDSv2-required, encrypted EBS, no inbound SSH) reachable via AWS SSM
+  # Session Manager. Use scripts/bastion.sh to establish a local tunnel
+  # through it for running scripts/e2e_test_headless.py or similar.
+  #
+  # These parameters are ONLY used when DeployBastionHost=true AND
+  # DeployInVPC=true (the bastion shares the customer-supplied VPC).
+  # Nothing is deployed if DeployBastionHost=false (the default).
+  # ------------------------------------------------------------------------
 
   DeployBastionHost:
     Type: String
     Default: 'false'
     AllowedValues: ['true', 'false']
-    Description: Whether to deploy a bastion host to facilitate testing of the Private API Gateway
+    Description: >-
+      Set to 'true' to provision an SSM-reachable bastion EC2 for dev-time
+      access to the Private API Gateway (useful for running e2e tests or
+      calling the API from a local machine). Default 'false' = no EC2 is
+      deployed. Requires DeployInVPC=true and the two Bastion* parameters
+      below. Typically only used in dev accounts.
 
   BastionHostSubnetId:
     Type: String
     Default: ""
-    Description: Public Subnet ID where the bastion host will be deployed, if DeployBastionHost is 'true'
+    Description: >-
+      Required when DeployBastionHost=true. A PUBLIC subnet in VpcId where
+      the bastion EC2 will launch. The subnet needs SSM egress so Session
+      Manager can reach the instance. Leave empty when DeployBastionHost=false.
 
   BastionHostSecurityGroupId:
     Type: String
     Default: ""
-    Description: Security Group ID for the bastion host to use, if DeployBastionHost is 'true'
+    Description: >-
+      Required when DeployBastionHost=true. Security group attached to the
+      bastion EC2. No inbound SSH rule is needed - SSM Session Manager is
+      the only ingress path. Leave empty when DeployBastionHost=false.
 
   BastionHostAmiId:
     Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
     Default: /aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2
-    Description: SSM parameter path to the AMI ID for the bastion host
+    Description: >-
+      SSM Parameter Store path for the AMI to use on the bastion EC2. The
+      default resolves to the latest Amazon Linux 2 AMI and is the right
+      choice for almost all deployments. Only change if you need a custom
+      hardened AMI. Ignored when DeployBastionHost=false.
 
 Rules:
   MLflowTrackingURIRequired:
@@ -718,6 +862,11 @@ Conditions:
   EnableXRayTracingCondition: !Equals [ !Ref EnableXRayTracing, "true" ]
   UsePrivateAppSync: !Equals [ !Ref AppSyncVisibility, "PRIVATE" ]
   HasArtifactsBucketKmsKey: !Not [ !Equals [ !Ref ArtifactsBucketKmsKeyArn, "" ] ]
+  CircuitBreakerEnabledCondition: !Equals [ !Ref CircuitBreakerEnabled, "true" ]
+  HasCircuitBreakerErrorHandler: !Not [ !Equals [ !Ref CircuitBreakerErrorHandlerArn, "" ] ]
+  CircuitBreakerTriggerServiceUnavailableEnabled: !Equals [ !Ref CircuitBreakerTriggerServiceUnavailable, "true" ]
+  CircuitBreakerTriggerThrottlingEnabled: !Equals [ !Ref CircuitBreakerTriggerThrottling, "true" ]
+  CircuitBreakerTriggerQuotaLimitEnabled: !Equals [ !Ref CircuitBreakerTriggerQuotaLimit, "true" ]
 
 Metadata:
   cfn-lint:
@@ -777,6 +926,17 @@ Metadata:
           - EnableMLflow
           - MlflowTrackingURI
       - Label:
+          default: "Circuit Breaker"
+        Parameters:
+          - CircuitBreakerEnabled
+          - CircuitBreakerTriggerServiceUnavailable
+          - CircuitBreakerTriggerThrottling
+          - CircuitBreakerTriggerQuotaLimit
+          - CircuitBreakerFailureThreshold
+          - CircuitBreakerEvaluationPeriods
+          - CircuitBreakerRecoveryTimeoutSeconds
+          - CircuitBreakerErrorHandlerArn
+      - Label:
           default: "External Identity Provider (Federation)"
         Parameters:
           - ExternalIdPType
@@ -811,7 +971,24 @@ Metadata:
           - AppSyncVisibility
           - LambdaSubnetIds
       - Label:
-          default: "Advanced — Artifact Bucket"
+          default: "Headless API Deployment (required for GovCloud)"
+        Parameters:
+          - EnableHeadless
+          - DeployInVPC
+          - VpcId
+          - PrivateSubnetIds
+          - LambdaSecurityGroupId
+          - ApiGatewayVpcEndpointId
+          - ApiStageName
+      - Label:
+          default: "Headless API Deployment - Bastion Host (optional, requires VPC Secured Mode)"
+        Parameters:
+          - DeployBastionHost
+          - BastionHostSubnetId
+          - BastionHostSecurityGroupId
+          - BastionHostAmiId
+      - Label:
+          default: "Advanced - Artifact Bucket"
         Parameters:
           - ArtifactsBucketKmsKeyArn
       - Label:
@@ -895,6 +1072,44 @@ Metadata:
         default: "Lambda Subnet IDs (required when AppSyncVisibility=PRIVATE)"
       ArtifactsBucketKmsKeyArn:
         default: "Artifacts Bucket KMS Key ARN (optional, for pre-created KMS-encrypted bucket)"
+      CircuitBreakerEnabled:
+        default: "Enable Circuit Breaker"
+      CircuitBreakerTriggerServiceUnavailable:
+        default: "Trigger: Bedrock Service Unavailable (503)"
+      CircuitBreakerTriggerThrottling:
+        default: "Trigger: Bedrock Throttling"
+      CircuitBreakerTriggerQuotaLimit:
+        default: "Trigger: Bedrock Quota Limit"
+      CircuitBreakerFailureThreshold:
+        default: "Circuit Breaker Failure Threshold"
+      CircuitBreakerEvaluationPeriods:
+        default: "Circuit Breaker Evaluation Periods (5-min each)"
+      CircuitBreakerRecoveryTimeoutSeconds:
+        default: "Circuit Breaker Recovery Timeout (seconds)"
+      CircuitBreakerErrorHandlerArn:
+        default: "Circuit Breaker Error Handler Lambda ARN (optional)"
+      EnableHeadless:
+        default: "Enable Headless API (Jobs REST API, required for GovCloud)"
+      DeployInVPC:
+        default: "Enable VPC Secured Mode (required when Headless API is enabled)"
+      VpcId:
+        default: "VPC ID (required when VPC Secured Mode is enabled)"
+      PrivateSubnetIds:
+        default: "Private Subnet IDs (required when VPC Secured Mode is enabled)"
+      LambdaSecurityGroupId:
+        default: "Lambda Security Group ID (required when VPC Secured Mode is enabled)"
+      ApiGatewayVpcEndpointId:
+        default: "API Gateway VPC Endpoint ID (required when Headless API is enabled)"
+      ApiStageName:
+        default: "API Gateway Stage Name (Headless API)"
+      DeployBastionHost:
+        default: "Deploy Bastion Host (optional, for dev access to Private API)"
+      BastionHostSubnetId:
+        default: "Bastion Host - Subnet ID (required when Bastion Host is enabled)"
+      BastionHostSecurityGroupId:
+        default: "Bastion Host - Security Group ID (required when Bastion Host is enabled)"
+      BastionHostAmiId:
+        default: "Bastion Host - AMI ID (SSM parameter path, leave default for Amazon Linux 2)"
 
 Resources:
   # Custom resource to enforce max length of StackName - prevent downstream failures
@@ -2078,6 +2293,14 @@ Resources:
           - !Ref LambdaVpcSecurityGroup
           - ""
 
+        # Circuit Breaker wiring — feature-flagged; params empty when disabled
+        ConcurrencyTableName: !Ref ConcurrencyTable
+        CircuitBreakerManagerFunctionArn: !If
+          - CircuitBreakerEnabledCondition
+          - !GetAtt CircuitBreakerManagerFunction.Arn
+          - ""
+        CircuitBreakerEnabled: !Ref CircuitBreakerEnabled
+
   CustomerManagedEncryptionKey:
     DependsOn:
       - IsStacknameLengthOK
@@ -2136,6 +2359,17 @@ Resources:
               - kms:GenerateDataKey*
               - kms:DescribeKey
             Resource: "*"
+          - !If
+            - CircuitBreakerEnabledCondition
+            - Sid: Allow CloudWatch Alarms to use the key for SNS
+              Effect: Allow
+              Principal:
+                Service: !Sub "cloudwatch.${AWS::URLSuffix}"
+              Action:
+                - kms:Decrypt
+                - kms:GenerateDataKey*
+              Resource: "*"
+            - !Ref AWS::NoValue
           - !If
             - IsS3VectorsVectorStore
             - Sid: Allow S3 Vectors indexing service to use the key
@@ -4612,6 +4846,9 @@ Resources:
           MAX_CONCURRENT: !Ref MaxConcurrentWorkflows
           WORKING_BUCKET: !Ref WorkingBucket
           CONFIG_TABLE: !Ref ConfigurationTable
+          CIRCUIT_BREAKER_ENABLED: !If [CircuitBreakerEnabledCondition, "true", "false"]
+          DOCUMENT_QUEUE_URL: !Ref DocumentQueue
+          RECOVERY_TIMEOUT_SECONDS: !Ref CircuitBreakerRecoveryTimeoutSeconds
       Policies:
         - SQSPollerPolicy:
             QueueName: !GetAtt DocumentQueue.QueueName
@@ -4748,6 +4985,9 @@ Resources:
             ]
           SAVE_REPORTING_FUNCTION_NAME: !Ref SaveReportingDataFunctionV2
           WORKING_BUCKET: !Ref WorkingBucket
+          CIRCUIT_BREAKER_ENABLED: !If [CircuitBreakerEnabledCondition, "true", "false"]
+          CIRCUIT_BREAKER_MANAGER_ARN: !If [CircuitBreakerEnabledCondition, !GetAtt CircuitBreakerManagerFunction.Arn, ""]
+          ALERTS_TOPIC_ARN: !If [CircuitBreakerEnabledCondition, !Ref AlertsTopic, ""]
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref TrackingTable
@@ -4777,6 +5017,19 @@ Resources:
                 - kms:GenerateDataKey*
                 - kms:DescribeKey
               Resource: !GetAtt CustomerManagedEncryptionKey.Arn
+        - !If
+          - CircuitBreakerEnabledCondition
+          - SNSPublishMessagePolicy:
+              TopicName: !GetAtt AlertsTopic.TopicName
+          - !Ref AWS::NoValue
+        - !If
+          - CircuitBreakerEnabledCondition
+          - Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource: !GetAtt CircuitBreakerManagerFunction.Arn
+          - !Ref AWS::NoValue
 
   WorkflowTrackerLogGroup:
     Type: AWS::Logs::LogGroup
@@ -5164,6 +5417,178 @@ Resources:
           Value: !GetAtt PATTERNSTACK.Outputs.StateMachineArn
       AlarmActions:
         - !Ref AlertsTopic
+
+  ##########################################################################
+  # Circuit Breaker Resources
+  ##########################################################################
+
+  CircuitBreakerManagerFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Condition: CircuitBreakerEnabledCondition
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${AWS::StackName}-CircuitBreakerManager"
+      KmsKeyId: !GetAtt CustomerManagedEncryptionKey.Arn
+      RetentionInDays: !Ref LogRetentionDays
+
+  CircuitBreakerManagerFunction:
+    Type: AWS::Serverless::Function
+    Condition: CircuitBreakerEnabledCondition
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: "Function does not require VPC access as it only interacts with DynamoDB and SNS"
+          - id: W92
+            reason: "Function does not require reserved concurrency"
+    # checkov:skip=CKV_AWS_116: "DLQ not required - alarm-driven, idempotent state changes"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data"
+    Properties:
+      PermissionsBoundary:
+        !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
+      Handler: index.handler
+      Runtime: python3.12
+      CodeUri: src/lambda/circuit_breaker_manager/
+      Timeout: 30
+      MemorySize: 256
+      Environment:
+        Variables:
+          LOG_LEVEL: !Ref LogLevel
+          CONCURRENCY_TABLE: !Ref ConcurrencyTable
+          ALERTS_TOPIC_ARN: !Ref AlertsTopic
+          RECOVERY_TIMEOUT_SECONDS: !Ref CircuitBreakerRecoveryTimeoutSeconds
+          ERROR_HANDLER_ARN: !Ref CircuitBreakerErrorHandlerArn
+          METRIC_NAMESPACE: !Ref AWS::StackName
+          APPSYNC_API_URL: !GetAtt GraphQLApi.GraphQLUrl
+      LoggingConfig:
+        LogGroup: !Ref CircuitBreakerManagerFunctionLogGroup
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ConcurrencyTable
+        - SNSPublishMessagePolicy:
+            TopicName: !GetAtt AlertsTopic.TopicName
+        - CloudWatchPutMetricPolicy: {}
+        - Statement:
+            - Effect: Allow
+              Action:
+                - appsync:GraphQL
+              Resource:
+                - !Sub "${GraphQLApi.Arn}/types/Mutation/fields/publishCircuitBreakerStatus"
+            - Effect: Allow
+              Action:
+                - kms:Encrypt
+                - kms:Decrypt
+                - kms:ReEncrypt*
+                - kms:GenerateDataKey*
+                - kms:DescribeKey
+              Resource: !GetAtt CustomerManagedEncryptionKey.Arn
+        - !If
+          - HasCircuitBreakerErrorHandler
+          - Statement:
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource: !Ref CircuitBreakerErrorHandlerArn
+          - !Ref AWS::NoValue
+
+  CircuitBreakerTopic:
+    Type: AWS::SNS::Topic
+    Condition: CircuitBreakerEnabledCondition
+    Properties:
+      DisplayName: Circuit Breaker State Changes
+      KmsMasterKeyId: !Ref CustomerManagedEncryptionKey
+
+  BedrockServiceOutageAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: CircuitBreakerEnabledCondition
+    Properties:
+      AlarmName: !Sub "${AWS::StackName}-BedrockServiceOutage"
+      AlarmDescription: !Sub >-
+        Circuit breaker: combined Bedrock error count (ServiceUnavailable=${CircuitBreakerTriggerServiceUnavailable},
+        Throttling=${CircuitBreakerTriggerThrottling}, QuotaLimit=${CircuitBreakerTriggerQuotaLimit})
+        exceeded ${CircuitBreakerFailureThreshold} in ${CircuitBreakerEvaluationPeriods} evaluation period(s).
+      Metrics:
+        - Id: e1
+          Label: CombinedCircuitBreakerErrors
+          ReturnData: true
+          Expression: !Sub
+            - "${SUCoef} * FILL(m1, 0) + ${ThrCoef} * FILL(m2, 0) + ${QLCoef} * FILL(m3, 0)"
+            - SUCoef: !If [CircuitBreakerTriggerServiceUnavailableEnabled, "1", "0"]
+              ThrCoef: !If [CircuitBreakerTriggerThrottlingEnabled, "1", "0"]
+              QLCoef: !If [CircuitBreakerTriggerQuotaLimitEnabled, "1", "0"]
+        - Id: m1
+          ReturnData: false
+          MetricStat:
+            Metric:
+              Namespace: !Ref AWS::StackName
+              MetricName: BedrockServiceUnavailable
+            Period: 300
+            Stat: Sum
+        - Id: m2
+          ReturnData: false
+          MetricStat:
+            Metric:
+              Namespace: !Ref AWS::StackName
+              MetricName: BedrockThrottling
+            Period: 300
+            Stat: Sum
+        - Id: m3
+          ReturnData: false
+          MetricStat:
+            Metric:
+              Namespace: !Ref AWS::StackName
+              MetricName: BedrockQuotaLimit
+            Period: 300
+            Stat: Sum
+      EvaluationPeriods: !Ref CircuitBreakerEvaluationPeriods
+      Threshold: !Ref CircuitBreakerFailureThreshold
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref CircuitBreakerTopic
+      OKActions:
+        - !Ref CircuitBreakerTopic
+
+  CircuitBreakerTopicSubscription:
+    Type: AWS::SNS::Subscription
+    Condition: CircuitBreakerEnabledCondition
+    Properties:
+      TopicArn: !Ref CircuitBreakerTopic
+      Protocol: lambda
+      Endpoint: !GetAtt CircuitBreakerManagerFunction.Arn
+
+  CircuitBreakerManagerInvokePermission:
+    Type: AWS::Lambda::Permission
+    Condition: CircuitBreakerEnabledCondition
+    Properties:
+      FunctionName: !Ref CircuitBreakerManagerFunction
+      Action: lambda:InvokeFunction
+      Principal: !Sub "sns.${AWS::URLSuffix}"
+      SourceArn: !Ref CircuitBreakerTopic
+
+  # Runs every 5 min whenever the breaker is enabled (including CLOSED) so
+  # recovery timeouts always converge. Cost is ~8.6k invocations/month; remove
+  # this rule to disable automated recovery and rely solely on manual reset.
+  CircuitBreakerHealthCheckRule:
+    Type: AWS::Events::Rule
+    Condition: CircuitBreakerEnabledCondition
+    Properties:
+      Description: Periodic health check for circuit breaker recovery
+      ScheduleExpression: rate(5 minutes)
+      State: ENABLED
+      Targets:
+        - Id: CircuitBreakerHealthCheck
+          Arn: !GetAtt CircuitBreakerManagerFunction.Arn
+          Input: '{"source": "scheduled", "action": "health_check"}'
+
+  CircuitBreakerHealthCheckPermission:
+    Type: AWS::Lambda::Permission
+    Condition: CircuitBreakerEnabledCondition
+    Properties:
+      FunctionName: !Ref CircuitBreakerManagerFunction
+      Action: lambda:InvokeFunction
+      Principal: !Sub "events.${AWS::URLSuffix}"
+      SourceArn: !GetAtt CircuitBreakerHealthCheckRule.Arn
 
   # This dasboard is merged with dashboard created by the pattern stack to create an overall dashboard
   MainTemplateSubsetDashboard:

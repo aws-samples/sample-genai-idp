@@ -863,6 +863,22 @@ class BedrockClient:
             if error_code in retryable_errors:
                 self._put_metric("BedrockThrottles", 1)
 
+                # Emit circuit-breaker specific metrics by error category.
+                # BedrockThrottling is a combined generation+embedding signal
+                # that feeds BedrockServiceOutageAlarm (the circuit breaker
+                # trigger). For per-path counts use BedrockThrottles
+                # (generation, above) or BedrockEmbeddingThrottles (embedding).
+                if error_code == "ServiceUnavailableException":
+                    self._put_metric("BedrockServiceUnavailable", 1)
+                elif error_code in (
+                    "ThrottlingException",
+                    "TooManyRequestsException",
+                    "RequestLimitExceeded",
+                ):
+                    self._put_metric("BedrockThrottling", 1)
+                elif error_code == "ServiceQuotaExceededException":
+                    self._put_metric("BedrockQuotaLimit", 1)
+
                 # Check if we've reached max retries
                 if retry_count >= max_retries:
                     logger.error(
@@ -1268,6 +1284,22 @@ class BedrockClient:
 
             if error_code in retryable_errors:
                 self._put_metric("BedrockEmbeddingThrottles", 1)
+
+                # Emit circuit-breaker specific metrics by error category.
+                # BedrockThrottling is a combined generation+embedding signal
+                # that feeds BedrockServiceOutageAlarm (the circuit breaker
+                # trigger). For per-path counts use BedrockEmbeddingThrottles
+                # (embedding, above) or BedrockThrottles (generation).
+                if error_code == "ServiceUnavailableException":
+                    self._put_metric("BedrockServiceUnavailable", 1)
+                elif error_code in (
+                    "ThrottlingException",
+                    "TooManyRequestsException",
+                    "RequestLimitExceeded",
+                ):
+                    self._put_metric("BedrockThrottling", 1)
+                elif error_code == "ServiceQuotaExceededException":
+                    self._put_metric("BedrockQuotaLimit", 1)
 
                 # Check if we've reached max retries
                 if retry_count >= max_retries:

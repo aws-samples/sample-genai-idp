@@ -216,14 +216,26 @@ class DocumentAppSyncService:
         if document.summary_report_uri:
             input_data["SummaryReportUri"] = document.summary_report_uri
 
-        # Add rule validation result URI if available
-        if (
-            document.rule_validation_result
-            and document.rule_validation_result.output_uri
-        ):
-            input_data["RuleValidationResultUri"] = (
-                document.rule_validation_result.output_uri
+        # Add rule validation result if available (store full object as JSON like metering)
+        if document.rule_validation_result:
+            rule_validation_dict = {
+                "request_id": document.rule_validation_result.request_id,
+                "summary": document.rule_validation_result.summary,
+                "section_results": document.rule_validation_result.section_results,
+                "metadata": document.rule_validation_result.metadata,
+                "output_uri": document.rule_validation_result.output_uri,
+                "errors": document.rule_validation_result.errors,
+                "matched_policy_types": document.rule_validation_result.matched_policy_types,
+                "matched_page_ids": document.rule_validation_result.matched_page_ids,
+            }
+            input_data["RuleValidationResult"] = json.dumps(
+                rule_validation_dict, default=str
             )
+            # Also keep the URI for backward compatibility
+            if document.rule_validation_result.output_uri:
+                input_data["RuleValidationResultUri"] = (
+                    document.rule_validation_result.output_uri
+                )
 
         # Add HITL fields if available from hitl_metadata
         if document.hitl_metadata:
@@ -282,14 +294,39 @@ class DocumentAppSyncService:
             config_version=appsync_data.get("ConfigVersion"),
         )
 
-        # Handle rule validation result URI if present
-        rule_validation_uri = appsync_data.get("RuleValidationResultUri")
-        if rule_validation_uri:
-            from idp_common.models import RuleValidationResult
+        # Handle rule validation result if present
+        rule_validation_data = appsync_data.get("RuleValidationResult")
+        if rule_validation_data:
+            try:
+                from idp_common.models import RuleValidationResult
 
-            doc.rule_validation_result = RuleValidationResult(
-                request_id=doc.id or "", output_uri=rule_validation_uri
-            )
+                # AppSync returns dict (from DynamoDB Map), not JSON string
+                if isinstance(rule_validation_data, str):
+                    rv_data = json.loads(rule_validation_data)
+                else:
+                    rv_data = rule_validation_data
+
+                doc.rule_validation_result = RuleValidationResult(
+                    request_id=rv_data.get("request_id"),
+                    summary=rv_data.get("summary"),
+                    section_results=rv_data.get("section_results"),
+                    metadata=rv_data.get("metadata"),
+                    output_uri=rv_data.get("output_uri"),
+                    errors=rv_data.get("errors"),
+                    matched_policy_types=rv_data.get("matched_policy_types"),
+                    matched_page_ids=rv_data.get("matched_page_ids"),
+                )
+            except Exception as e:
+                logger.warning(f"Failed to parse RuleValidationResult: {e}")
+        else:
+            # Fallback to URI-only for backward compatibility
+            rule_validation_uri = appsync_data.get("RuleValidationResultUri")
+            if rule_validation_uri:
+                from idp_common.models import RuleValidationResult
+
+                doc.rule_validation_result = RuleValidationResult(
+                    request_id=doc.id or "", output_uri=rule_validation_uri
+                )
 
         # Set Review Status fields from AppSync response
         hitl_status = appsync_data.get("HITLStatus")
