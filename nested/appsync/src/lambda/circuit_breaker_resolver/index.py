@@ -55,7 +55,7 @@ def _get_caller(event: dict) -> dict:
         "email": email,
         "groups": groups,
         "is_admin": "Admin" in groups,
-        "is_iam": "userArn" in identity and not claims,
+        "is_iam": "userArn" in identity and "accountId" in identity and not claims,
     }
 
 

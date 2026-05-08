@@ -33,20 +33,24 @@ The circuit breaker short-circuits that cycle by refusing to start new workflows
 
 ```
               ┌──────────┐
-              │  CLOSED  │◄─────────── Successful workflow in HALF_OPEN
-              └────┬─────┘              OR alarm returns to OK
+              │  CLOSED  │◄──── Successful workflow in HALF_OPEN
+              └────┬─────┘      (workflow_tracker)
+                   │            OR manual Resume (admin)
                    │
                    │ CloudWatch alarm fires
+                   │ OR manual Pause (admin)
                    ▼
               ┌──────────┐
-              │   OPEN   │ ◄── Alarm fires during HALF_OPEN
-              └────┬─────┘
+              │   OPEN   │◄──── Alarm fires during HALF_OPEN
+              └────┬─────┘      OR manual Pause (admin)
                    │
-                   │ Recovery timeout OR alarm OK
+                   │ Recovery timeout elapsed (scheduled health check)
+                   │ OR alarm returns to OK
+                   │ OR manual Probe (admin)
                    ▼
               ┌───────────┐
-              │ HALF_OPEN │
-              └───────────┘
+              │ HALF_OPEN │──── First new alarm re-opens
+              └───────────┘     (back to OPEN)
 ```
 
 ## Architecture
@@ -170,12 +174,14 @@ When `CircuitBreakerEnabled=false` the badge is hidden entirely.
 Click the badge to open a details panel showing `state`, `openedAt`, `lastCheckedAt`, `failureCount`, `recoveryAttempts`, and `lastError`. Users in the **Admin** Cognito group additionally see three controls:
 
 - **Pause processing** — forces OPEN (available when state is CLOSED or HALF_OPEN). Use before planned Bedrock changes or to quiesce the pipeline.
-- **Resume processing** — forces CLOSED and resets failure/recovery counters. Use to clear a stuck OPEN state.
+- **Resume processing** — forces CLOSED and resets failure/recovery counters. Use to clear a stuck OPEN state. Resume is unconditional: if the underlying Bedrock outage is still active, a subsequent alarm will re-open the breaker within ~5 minutes. Hold until the alarm clears before resuming.
 - **Probe recovery** — forces HALF_OPEN (available when state is OPEN). Use to test recovery before the automatic timeout.
 
 Each control requires a **reason** that is persisted to DynamoDB (`lastError` field for pause; also logged) and broadcast over the existing SNS alerts topic. All transitions — including automatic ones from CloudWatch alarms, the scheduled health check, and the `HALF_OPEN → CLOSED` transition triggered by a successful workflow completion — fan out to every connected browser in real time.
 
 Non-admins can view the panel but do not see the control buttons.
+
+**VPC deployments.** When `AppSyncVisibility=PRIVATE`, both the circuit-breaker manager and the AppSync resolver Lambda are automatically attached to the same VPC/subnets used by the other private-AppSync resolvers — so the manager's SigV4 mutation to the private GraphQL endpoint and the resolver's DynamoDB reads succeed. If you run with `DeployInVPC=true` but `AppSyncVisibility=PUBLIC`, the resolver still reaches DynamoDB over the public endpoint; in accounts whose SCP blocks public DynamoDB without a gateway endpoint, the badge will fail to load. Deploy with `AppSyncVisibility=PRIVATE` in that case.
 
 ## Manual operations
 

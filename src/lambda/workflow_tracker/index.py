@@ -292,7 +292,7 @@ def notify_circuit_breaker_success() -> None:
         try:
             concurrency_table.update_item(
                 Key={'counter_id': CIRCUIT_BREAKER_ID},
-                UpdateExpression='SET #state = :closed, last_checked_at = :ts REMOVE last_error',
+                UpdateExpression='SET #state = :closed, last_checked_at = :ts REMOVE last_error, opened_at',
                 ConditionExpression='#state = :expected',
                 ExpressionAttributeNames={'#state': 'state'},
                 ExpressionAttributeValues={

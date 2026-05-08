@@ -4313,6 +4313,15 @@ Resources:
       Description: AppSync resolver for circuit breaker status + admin controls
       MemorySize: 256
       Timeout: 30
+      # With a PRIVATE AppSync API the resolver Lambda must live in the same
+      # VPC so AppSync can invoke it and its DynamoDB reads traverse a
+      # gateway endpoint rather than the public endpoint.
+      VpcConfig: !If
+        - IsPrivateAppSync
+        - SubnetIds: !Ref LambdaSubnetIds
+          SecurityGroupIds:
+            - !Ref LambdaSecurityGroupId
+        - !Ref AWS::NoValue
       Environment:
         Variables:
           LOG_LEVEL: !Ref LogLevel
