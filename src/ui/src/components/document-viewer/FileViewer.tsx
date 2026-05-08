@@ -145,8 +145,11 @@ const FileViewer = ({ objectKey }: FileViewerProps): React.JSX.Element => {
         throw new Error('Input bucket not configured');
       }
 
-      const region = import.meta.env.VITE_AWS_REGION;
-      const s3Url = `https://${(settings as Record<string, unknown>).InputBucket}.s3.${region}.amazonaws.com/${objectKey}`;
+      // Use s3:// URI scheme (matches what every other file viewer in the app does).
+      // Avoids dependence on the VITE_AWS_REGION build-time env var (which, if missing,
+      // produces an invalid URL like https://<bucket>.s3.undefined.amazonaws.com/<key>),
+      // and sidesteps S3 HTTPS URL encoding issues for keys with special characters.
+      const s3Url = `s3://${(settings as Record<string, unknown>).InputBucket}/${objectKey}`;
 
       // First fetch the content via GraphQL to determine content type
       const result = await fetchFileContents(s3Url);
