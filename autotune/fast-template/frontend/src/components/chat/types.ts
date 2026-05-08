@@ -36,7 +36,7 @@ export interface RunSummary {
   session_id: string
   status: string
   test_set_id?: string
-  best_accuracy?: number | string
+  best_accuracy_within_budget?: number | string
   iteration?: number | string
   started_at?: string
   updated_at?: string

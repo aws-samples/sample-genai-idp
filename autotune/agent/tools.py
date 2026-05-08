@@ -366,8 +366,8 @@ def run_evaluation(test_set_id: str, context: str, config_version: str, n_files:
             iteration = int(current.get("iteration", 0)) + 1
             state.update_metrics(
                 iteration=iteration,
-                best_accuracy=float(current.get("best_accuracy", 0)),
-                best_config_version=current.get("best_config_version", ""),
+                best_accuracy_within_budget=float(current.get("best_accuracy_within_budget", 0)),
+                best_config_version_within_budget=current.get("best_config_version_within_budget", ""),
                 current_config_version=config_version,
                 best_cost_per_page_usd=float(current.get("best_cost_per_page_usd", 0)),
             )
@@ -421,7 +421,20 @@ def get_evaluation_summary(batch_id: str, save_json: bool = False) -> str:
     sys.stdout = buf
     er.print_aggregated_summary()
     sys.stdout = old_stdout
-    return buf.getvalue()
+    summary = buf.getvalue()
+
+    # Warn if cost per page exceeds user's budget
+    max_cpp = os.environ.get("AUTOTUNE_MAX_COST_PER_PAGE")
+    if max_cpp:
+        cost_per_page = data.get("costPerPage", 0)
+        if cost_per_page and float(cost_per_page) > float(max_cpp):
+            summary += (
+                f"\n⚠️  WARNING: This config's cost per page (${float(cost_per_page):.5f}) "
+                f"exceeds the end user's maximum allowable budget of ${float(max_cpp):.5f} per page. "
+                f"This config CANNOT be recommended as the final solution.\n"
+            )
+
+    return summary
 
 
 @tool
@@ -764,8 +777,8 @@ def _get_optimization_state():
 def update_optimization_state(
     status: str,
     status_detail: str = "",
-    best_accuracy: Optional[float] = None,
-    best_config_version: Optional[str] = None,
+    best_accuracy_within_budget: Optional[float] = None,
+    best_config_version_within_budget: Optional[str] = None,
     best_cost_per_page_usd: Optional[float] = None,
     current_config_version: Optional[str] = None,
 ) -> str:
@@ -789,8 +802,8 @@ def update_optimization_state(
     Args:
         status: Current status (e.g. "evaluating", "analyzing", "configuring", "discovering", "complete")
         status_detail: Human-readable detail (e.g. "Analyzing field-level accuracy...")
-        best_accuracy: Best accuracy so far (if changed)
-        best_config_version: Version name of best config (if changed)
+        best_accuracy_within_budget: Best accuracy so far among configs within the user's cost-per-page budget (if changed)
+        best_config_version_within_budget: Version name of best within-budget config (if changed)
         best_cost_per_page_usd: Cost per page in USD of the best config (e.g. 0.09 means $0.09/page)
         current_config_version: Version name of config being tested (if changed)
     """
@@ -807,12 +820,12 @@ def update_optimization_state(
                 "modify configs, and repeat. The system will tell you when to stop."
             )
     state.set_status(status, status_detail)
-    if best_accuracy is not None and best_config_version is not None:
+    if best_accuracy_within_budget is not None and best_config_version_within_budget is not None:
         current = state.get_state()
         state.update_metrics(
             iteration=int(current.get("iteration", 0)),
-            best_accuracy=best_accuracy,
-            best_config_version=best_config_version,
+            best_accuracy_within_budget=best_accuracy_within_budget,
+            best_config_version_within_budget=best_config_version_within_budget,
             current_config_version=current_config_version or "",
             best_cost_per_page_usd=best_cost_per_page_usd or 0.0,
         )

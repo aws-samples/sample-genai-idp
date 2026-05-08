@@ -189,11 +189,11 @@ class OptimizationLoopHook(HookProvider):
             return
 
         # Continue optimization
-        best_accuracy = current.get("best_accuracy", 0)
-        best_version = current.get("best_config_version", "none")
+        best_accuracy = current.get("best_accuracy_within_budget", 0)
+        best_version = current.get("best_config_version_within_budget", "none")
         event.resume = (
             f"Continue optimization. Iteration {iteration}/{self.max_iterations}. "
-            f"Best accuracy so far: {best_accuracy}% (config {best_version}). "
+            f"Best accuracy within budget so far: {best_accuracy}% (config {best_version}). "
             "Read OPTIMIZATION-LOG.md if you need to recall what has been tried. "
             "Proceed with the next optimization iteration."
         )

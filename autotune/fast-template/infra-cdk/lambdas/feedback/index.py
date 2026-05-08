@@ -141,7 +141,7 @@ def get_log() -> Dict[str, Any]:
 @app.get("/runs")
 def list_runs() -> Dict[str, Any]:
     """List all optimization runs, most recent first."""
-    projection = "session_id, #s, status_detail, test_set_id, best_accuracy, iteration, started_at, updated_at, optimization_guidance"
+    projection = "session_id, #s, status_detail, test_set_id, best_accuracy_within_budget, iteration, started_at, updated_at, optimization_guidance"
     try:
         items = []
         kwargs = {

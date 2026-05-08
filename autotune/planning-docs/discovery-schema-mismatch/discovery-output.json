@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "SHIFT_SCHEDULE",
+  "x-aws-idp-document-type": "SHIFT_SCHEDULE",
+  "type": "object",
+  "description": "Staff shift schedule document for a medical center showing weekly employee shift assignments",
+  "properties": {
+    "DocumentInfo": {
+      "type": "object",
+      "description": "General document information",
+      "properties": {
+        "title": {
+          "type": "string",
+          "description": "The title of the schedule document, typically found at the top of the page",
+          "data_type": "string",
+          "field_description": "Extract the main heading/title of the document"
+        },
+        "facility": {
+          "type": "string",
+          "description": "The name of the medical facility",
+          "data_type": "string",
+          "field_description": "Extract the facility or medical center name shown below the title"
+        },
+        "weekStartDate": {
+          "type": "string",
+          "description": "The start date of the schedule week in YYYY-MM-DD format",
+          "data_type": "string",
+          "field_description": "Extract the week start date from the subtitle text (e.g., 'Week of October 10, 2025') and format as YYYY-MM-DD"
+        }
+      }
+    },
+    "employees": {
+      "type": "array",
+      "description": "List of employees and their weekly shift assignments",
+      "items": {
+        "type": "object",
+        "properties": {
+          "employeeName": {
+            "type": "string",
+            "description": "Full name of the employee",
+            "data_type": "string",
+            "field_description": "Extract the employee name from the 'Employee' column"
+          },
+          "employeeId": {
+            "type": "string",
+            "description": "Unique identifier for the employee",
+            "data_type": "string",
+            "field_description": "Extract the employee ID from the 'ID' column"
+          },
+          "department": {
+            "type": "string",
+            "description": "Department the employee belongs to",
+            "data_type": "string",
+            "field_description": "Extract the department name from the 'Department' column"
+          },
+          "shifts": {
+            "type": "array",
+            "description": "Array of 7 shift entries for each day of the week (Fri through Thu)",
+            "items": {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "description": "Type of shift: Morning, Afternoon, Night, Leave, or empty",
+                  "data_type": "string",
+                  "field_description": "Extract the shift type from the cell. If the cell contains a time-based shift (Morning, Afternoon, Night), extract that keyword. If it contains 'Leave' (Leave Personal, Leave Training, Leave Sick Leave, Leave Vacation), set as 'Leave'. If the cell is blank, set as 'empty'."
+                },
+                "hours": {
+                  "type": "string",
+                  "description": "The time range for the shift, null if Leave or empty",
+                  "data_type": "string",
+                  "field_description": "Extract the time range shown below the shift type (e.g., '07:00-15:00' for Morning, '15:00-23:00' for Afternoon, '23:00-07:00' for Night). Set to null if the shift type is Leave or empty."
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

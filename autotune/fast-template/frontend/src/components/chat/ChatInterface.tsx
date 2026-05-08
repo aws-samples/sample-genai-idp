@@ -54,6 +54,7 @@ export default function ChatInterface() {
 
   const [input, setInput] = useState("")
   const [testSetId, setTestSetId] = useState("")
+  const [maxCostPerPage, setMaxCostPerPage] = useState("")
   const [error, setError] = useState<string | null>(null)
   const [client, setClient] = useState<AgentCoreClient | null>(null)
   const [stateApiUrl, setStateApiUrl] = useState<string>("")
@@ -235,7 +236,7 @@ export default function ChatInterface() {
     return () => { active = false; clearInterval(interval) }
   }, [stateApiUrl, currentSessionId, agentState?.status, auth.user?.id_token])
 
-  const invokeAgent = async (sessionId: string, testSet: string, guidance: string, isResume: boolean) => {
+  const invokeAgent = async (sessionId: string, testSet: string, guidance: string, maxCostPerPage: string, isResume: boolean) => {
     if (!client) return
     setError(null)
     setIsLoading(true)
@@ -247,6 +248,7 @@ export default function ChatInterface() {
       const extra: Record<string, string> = {
         test_set_id: testSet,
         optimization_guidance: guidance,
+        max_cost_per_page_usd: maxCostPerPage,
       }
       if (isResume) extra.resume = "true"
 
@@ -276,6 +278,10 @@ export default function ChatInterface() {
       setError("Test Set ID is required to start an optimization run")
       return
     }
+    if (!maxCostPerPage.trim() || isNaN(Number(maxCostPerPage)) || Number(maxCostPerPage) <= 0) {
+      setError("Max cost per page is required and must be a positive number")
+      return
+    }
 
     const sessionId = crypto.randomUUID()
     setCurrentSessionId(sessionId)
@@ -289,7 +295,7 @@ export default function ChatInterface() {
     saveMessages(sessionId, [userMsg])
     setMessagesState([userMsg])
 
-    await invokeAgent(sessionId, testSetId.trim(), userMessage, false)
+    await invokeAgent(sessionId, testSetId.trim(), userMessage, maxCostPerPage.trim(), false)
   }
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -307,6 +313,7 @@ export default function ChatInterface() {
       currentSessionId,
       String(agentState.test_set_id ?? ""),
       String(agentState.optimization_guidance ?? ""),
+      String(agentState.max_cost_per_page_usd ?? ""),
       true
     )
   }
@@ -412,6 +419,13 @@ export default function ChatInterface() {
                   placeholder="Test Set ID (required)"
                   className="w-full px-3 py-2 border rounded-md text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
+                <input
+                  type="text"
+                  value={maxCostPerPage}
+                  onChange={e => setMaxCostPerPage(e.target.value)}
+                  placeholder="Max cost per page in $ (required, e.g. 0.05)"
+                  className="w-full px-3 py-2 border rounded-md text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
                 <ChatInput input={input} setInput={setInput} handleSubmit={handleSubmit} isLoading={isLoading} placeholder="Optimization guidance (optional)" allowEmpty />
               </div>
               <div className="grow" />
@@ -439,8 +453,8 @@ export default function ChatInterface() {
                         </span>
                         {agentState.status_detail && <span>— {String(agentState.status_detail)}</span>}
                         {agentState.iteration != null && <span>· Iteration {String(agentState.iteration)}/{String(agentState.max_iterations ?? "?")}</span>}
-                        {agentState.best_accuracy != null && Number(agentState.best_accuracy) > 0 && (
-                          <span>· Best: {String(agentState.best_accuracy)}%</span>
+                        {agentState.best_accuracy_within_budget != null && Number(agentState.best_accuracy_within_budget) > 0 && (
+                          <span>· Best: {String(agentState.best_accuracy_within_budget)}%</span>
                         )}
                         {(Number(agentState.agent_cost_usd || 0) > 0 || Number(agentState.eval_cost_usd || 0) > 0) && (
                           <span>· Cost: ${(Number(agentState.agent_cost_usd || 0) + Number(agentState.eval_cost_usd || 0)).toFixed(2)} (agent ${Number(agentState.agent_cost_usd || 0).toFixed(2)} + eval ${Number(agentState.eval_cost_usd || 0).toFixed(2)})</span>

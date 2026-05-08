@@ -1,0 +1,507 @@
+{
+  "document_class": {
+    "type": "SHIFT_SCHEDULE"
+  },
+  "split_document": {
+    "page_indices": [
+      0
+    ]
+  },
+  "inference_result": {
+    "title": "Staff Shift Schedule",
+    "facility": "New Francescostead Medical Center",
+    "employees": [
+      {
+        "shifts": [
+          {
+            "type": "empty",
+            "hours": null
+          },
+          {
+            "type": "Afternoon",
+            "hours": "15:00-23:00"
+          },
+          {
+            "type": "empty",
+            "hours": null
+          },
+          {
+            "type": "Morning",
+            "hours": "07:00-15:00"
+          },
+          {
+            "type": "empty",
+            "hours": null
+          },
+          {
+            "type": "Leave",
+            "hours": null
+          },
+          {
+            "type": "Leave",
+            "hours": null
+          }
+        ],
+        "department": "Radiology",
+        "employeeId": "Y1J3D0",
+        "employeeName": "Jeanne Rogahn"
+      },
+      {
+        "shifts": [
+          {
+            "type": "empty",
+            "hours": null
+          },
+          {
+            "type": "Afternoon",
+            "hours": "15:00-23:00"
+          },
+          {
+            "type": "empty",
+            "hours": null
+          },
+          {
+            "type": "empty",
+            "hours": null
+          },
+          {
+            "type": "Afternoon",
+            "hours": "15:00-23:00"
+          },
+          {
+            "type": "empty",
+            "hours": null
+          },
+          {
+            "type": "empty",
+            "hours": null
+          }
+        ],
+        "department": "General Ward",
+        "employeeId": "BM2YOA",
+        "employeeName": "Mr. Ross Rempel-Gorczany"
+      },
+      {
+        "shifts": [
+          {
+            "type": "empty",
+            "hours": null
+          },
+          {
+            "type": "Morning",
+            "hours": "07:00-15:00"
+          },
+          {
+            "type": "empty",
+            "hours": null
+          },
+          {
+            "type": "Leave",
+            "hours": null
+          },
+          {
+            "type": "Night",
+            "hours": "23:00-07:00"
+          },
+          {
+            "type": "empty",
+            "hours": null
+          },
+          {
+            "type": "Morning",
+            "hours": "07:00-15:00"
+          }
+        ],
+        "department": "Emergency",
+        "employeeId": "EXTSHE",
+        "employeeName": "Jacqueline Reichert"
+      },
+      {
+        "shifts": [
+          {
+            "type": "Leave",
+            "hours": null
+          },
+          {
+            "type": "Leave",
+            "hours": null
+          },
+          {
+            "type": "empty",
+            "hours": null
+          },
+          {
+            "type": "empty",
+            "hours": null
+          },
+          {
+            "type": "empty",
+            "hours": null
+          },
+          {
+            "type": "Afternoon",
+            "hours": "15:00-23:00"
+          },
+          {
+            "type": "Night",
+            "hours": "23:00-07:00"
+          }
+        ],
+        "department": "Surgery",
+        "employeeId": "KVPNOB",
+        "employeeName": "Amy Considine"
+      },
+      {
+        "shifts": [
+          {
+            "type": "Afternoon",
+            "hours": "15:00-23:00"
+          },
+          {
+            "type": "Leave",
+            "hours": null
+          },
+          {
+            "type": "Leave",
+            "hours": null
+          },
+          {
+            "type": "Leave",
+            "hours": null
+          },
+          {
+            "type": "Morning",
+            "hours": "07:00-15:00"
+          },
+          {
+            "type": "Leave",
+            "hours": null
+          },
+          {
+            "type": "empty",
+            "hours": null
+          }
+        ],
+        "department": "Cardiology",
+        "employeeId": "KPTLMO",
+        "employeeName": "Ms. Faye Reinger"
+      },
+      {
+        "shifts": [
+          {
+            "type": "Leave",
+            "hours": null
+          },
+          {
+            "type": "empty",
+            "hours": null
+          },
+          {
+            "type": "empty",
+            "hours": null
+          },
+          {
+            "type": "empty",
+            "hours": null
+          },
+          {
+            "type": "empty",
+            "hours": null
+          },
+          {
+            "type": "empty",
+            "hours": null
+          },
+          {
+            "type": "empty",
+            "hours": null
+          }
+        ],
+        "department": "Cardiology",
+        "employeeId": "INKVQO",
+        "employeeName": "Theodore Romaguera"
+      },
+      {
+        "shifts": [
+          {
+            "type": "Morning",
+            "hours": "07:00-15:00"
+          },
+          {
+            "type": "empty",
+            "hours": null
+          },
+          {
+            "type": "Leave",
+            "hours": null
+          },
+          {
+            "type": "Morning",
+            "hours": "07:00-15:00"
+          },
+          {
+            "type": "empty",
+            "hours": null
+          },
+          {
+            "type": "Morning",
+            "hours": "07:00-15:00"
+          },
+          {
+            "type": "empty",
+            "hours": null
+          }
+        ],
+        "department": "Surgery",
+        "employeeId": "WTTYN2",
+        "employeeName": "Julius Veum"
+      },
+      {
+        "shifts": [
+          {
+            "type": "empty",
+            "hours": null
+          },
+          {
+            "type": "empty",
+            "hours": null
+          },
+          {
+            "type": "empty",
+            "hours": null
+          },
+          {
+            "type": "empty",
+            "hours": null
+          },
+          {
+            "type": "empty",
+            "hours": null
+          },
+          {
+            "type": "Afternoon",
+            "hours": "15:00-23:00"
+          },
+          {
+            "type": "empty",
+            "hours": null
+          }
+        ],
+        "department": "Oncology",
+        "employeeId": "JDBX2Y",
+        "employeeName": "Bradford Farrell Sr."
+      },
+      {
+        "shifts": [
+          {
+            "type": "Leave",
+            "hours": null
+          },
+          {
+            "type": "Morning",
+            "hours": "07:00-15:00"
+          },
+          {
+            "type": "Morning",
+            "hours": "07:00-15:00"
+          },
+          {
+            "type": "Leave",
+            "hours": null
+          },
+          {
+            "type": "Leave",
+            "hours": null
+          },
+          {
+            "type": "empty",
+            "hours": null
+          },
+          {
+            "type": "Leave",
+            "hours": null
+          }
+        ],
+        "department": "Emergency",
+        "employeeId": "ADZYK5",
+        "employeeName": "Arnold Beahan-Hickle"
+      },
+      {
+        "shifts": [
+          {
+            "type": "empty",
+            "hours": null
+          },
+          {
+            "type": "Afternoon",
+            "hours": "15:00-23:00"
+          },
+          {
+            "type": "Afternoon",
+            "hours": "15:00-23:00"
+          },
+          {
+            "type": "Afternoon",
+            "hours": "15:00-23:00"
+          },
+          {
+            "type": "empty",
+            "hours": null
+          },
+          {
+            "type": "Afternoon",
+            "hours": "15:00-23:00"
+          },
+          {
+            "type": "Leave",
+            "hours": null
+          }
+        ],
+        "department": "Surgery",
+        "employeeId": "IGSBWA",
+        "employeeName": "Megan Effertz"
+      },
+      {
+        "shifts": [
+          {
+            "type": "Night",
+            "hours": "23:00-07:00"
+          },
+          {
+            "type": "empty",
+            "hours": null
+          },
+          {
+            "type": "Leave",
+            "hours": null
+          },
+          {
+            "type": "Leave",
+            "hours": null
+          },
+          {
+            "type": "Night",
+            "hours": "23:00-07:00"
+          },
+          {
+            "type": "Leave",
+            "hours": null
+          },
+          {
+            "type": "empty",
+            "hours": null
+          }
+        ],
+        "department": "Neurology",
+        "employeeId": "936SCW",
+        "employeeName": "Constance Metz"
+      },
+      {
+        "shifts": [
+          {
+            "type": "empty",
+            "hours": null
+          },
+          {
+            "type": "Night",
+            "hours": "23:00-07:00"
+          },
+          {
+            "type": "empty",
+            "hours": null
+          },
+          {
+            "type": "Night",
+            "hours": "23:00-07:00"
+          },
+          {
+            "type": "empty",
+            "hours": null
+          },
+          {
+            "type": "empty",
+            "hours": null
+          },
+          {
+            "type": "Afternoon",
+            "hours": "15:00-23:00"
+          }
+        ],
+        "department": "Cardiology",
+        "employeeId": "KW8FVM",
+        "employeeName": "Lonnie Kreiger"
+      },
+      {
+        "shifts": [
+          {
+            "type": "Leave",
+            "hours": null
+          },
+          {
+            "type": "empty",
+            "hours": null
+          },
+          {
+            "type": "Afternoon",
+            "hours": "15:00-23:00"
+          },
+          {
+            "type": "empty",
+            "hours": null
+          },
+          {
+            "type": "Morning",
+            "hours": "07:00-15:00"
+          },
+          {
+            "type": "Morning",
+            "hours": "07:00-15:00"
+          },
+          {
+            "type": "empty",
+            "hours": null
+          }
+        ],
+        "department": "Emergency",
+        "employeeId": "K00YDI",
+        "employeeName": "Jermaine Waelchi"
+      },
+      {
+        "shifts": [
+          {
+            "type": "empty",
+            "hours": null
+          },
+          {
+            "type": "empty",
+            "hours": null
+          },
+          {
+            "type": "empty",
+            "hours": null
+          },
+          {
+            "type": "Leave",
+            "hours": null
+          },
+          {
+            "type": "empty",
+            "hours": null
+          },
+          {
+            "type": "empty",
+            "hours": null
+          },
+          {
+            "type": "Leave",
+            "hours": null
+          }
+        ],
+        "department": "Radiology",
+        "employeeId": "SYZXH8",
+        "employeeName": "Dianne Bogan"
+      }
+    ],
+    "weekStartDate": "2025-10-10"
+  }
+}

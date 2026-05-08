@@ -46,8 +46,8 @@ export function ChatSidebar({ runs, currentSessionId, onRunSelect, onNewChat }: 
                 const cfg = STATUS_CONFIG[run.status] ?? { icon: Activity, color: "text-green-600" }
                 const Icon = cfg.icon
                 const shortId = run.session_id.slice(0, 8)
-                const accuracy = run.best_accuracy != null && Number(run.best_accuracy) > 0
-                  ? `${run.best_accuracy}%`
+                const accuracy = run.best_accuracy_within_budget != null && Number(run.best_accuracy_within_budget) > 0
+                  ? `${run.best_accuracy_within_budget}%`
                   : null
                 return (
                   <SidebarMenuItem key={run.session_id}>

@@ -80,6 +80,9 @@ def _build_initial_prompt(test_set_id: str, optimization_guidance: str) -> str:
         "\nRead OPTIMIZATION-LOG.md for the pre-filled run metadata, then run the "
         "test set to establish a baseline. Update the log after each step.",
     ]
+    max_cpp = os.environ.get("AUTOTUNE_MAX_COST_PER_PAGE")
+    if max_cpp:
+        parts.append(f"\nThe end user's maximum allowable cost per page is ${max_cpp}.")
     if optimization_guidance:
         parts.append(f"\nOptimization guidance from the user:\n{optimization_guidance}")
     return "\n".join(parts)
@@ -96,6 +99,9 @@ def _build_resume_prompt(test_set_id: str, optimization_guidance: str) -> str:
         "was already completed — check the log for which iterations, configs, and "
         "evaluations have already been run.",
     ]
+    max_cpp = os.environ.get("AUTOTUNE_MAX_COST_PER_PAGE")
+    if max_cpp:
+        parts.append(f"\nReminder: The end user's maximum allowable cost per page is ${max_cpp}.")
     if optimization_guidance:
         parts.append(f"\nOriginal optimization guidance from the user:\n{optimization_guidance}")
     return "\n".join(parts)
@@ -104,6 +110,7 @@ def _build_resume_prompt(test_set_id: str, optimization_guidance: str) -> str:
 def _create_optimization_log(session_workspace: str, test_set_id: str, optimization_guidance: str) -> None:
     idp_stack = os.environ.get("IDP_STACK_NAME", "unknown")
     region = os.environ.get("AWS_DEFAULT_REGION", os.environ.get("AWS_REGION", "unknown"))
+    max_cpp = os.environ.get("AUTOTUNE_MAX_COST_PER_PAGE", "not set")
     content = f"""# Optimization Log
 
 This file documents the progress of the current optimization run.
@@ -112,6 +119,7 @@ This file documents the progress of the current optimization run.
 IDP stack name and region: {idp_stack} ({region})
 Input test set: {test_set_id}
 Dataset mode: TBD (determine from test set analysis)
+Max allowable cost per page: ${max_cpp}
 Optimization guidance: {optimization_guidance or "None provided"}
 
 ## Optimization Log
@@ -402,16 +410,26 @@ async def invocations(payload, context: RequestContext):
     test_set_id = payload.get("test_set_id", "").strip()
     optimization_guidance = payload.get("optimization_guidance", "").strip()
     is_resume = payload.get("resume", "").strip().lower() == "true"
+    max_cost_per_page_usd = payload.get("max_cost_per_page_usd", "").strip()
 
     if not test_set_id:
         yield {"status": "error", "error": "Missing required field: test_set_id"}
         return
 
+    if not is_resume and not max_cost_per_page_usd:
+        yield {"status": "error", "error": "Missing required field: max_cost_per_page_usd"}
+        return
+
+    # Set env var for tools to read
+    if max_cost_per_page_usd:
+        os.environ["AUTOTUNE_MAX_COST_PER_PAGE"] = max_cost_per_page_usd
+
     if is_resume:
         # Resume: don't re-initialize — just flip status back to active
         state.set_status("resuming", "Resuming after interruption")
     else:
-        state.initialize(test_set_id, optimization_guidance, MAX_ITERATIONS)
+        state.initialize(test_set_id, optimization_guidance, MAX_ITERATIONS,
+                         max_cost_per_page_usd=float(max_cost_per_page_usd))
 
     user_id = extract_user_id_from_context(context)
 

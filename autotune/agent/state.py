@@ -36,6 +36,7 @@ class OptimizationState:
         test_set_id: str,
         optimization_guidance: str = "",
         max_iterations: int = 10,
+        max_cost_per_page_usd: float = 0.0,
     ) -> None:
         """Create the initial state item for a new optimization run."""
         self._table.put_item(
@@ -45,8 +46,9 @@ class OptimizationState:
                 "status_detail": "Starting optimization run",
                 "iteration": 0,
                 "max_iterations": max_iterations,
-                "best_accuracy": 0,
-                "best_config_version": "",
+                "max_cost_per_page_usd": str(round(max_cost_per_page_usd, 5)),
+                "best_accuracy_within_budget": 0,
+                "best_config_version_within_budget": "",
                 "current_config_version": "",
                 "test_set_id": test_set_id,
                 "optimization_guidance": optimization_guidance,
@@ -89,19 +91,19 @@ class OptimizationState:
     def update_metrics(
         self,
         iteration: int,
-        best_accuracy: float,
-        best_config_version: str,
+        best_accuracy_within_budget: float,
+        best_config_version_within_budget: str,
         current_config_version: str = "",
         best_cost_per_page_usd: float = 0.0,
     ) -> None:
         """Update iteration metrics."""
         self._update_expr(
-            "SET iteration = :i, best_accuracy = :a, best_config_version = :b, "
+            "SET iteration = :i, best_accuracy_within_budget = :a, best_config_version_within_budget = :b, "
             "current_config_version = :c, best_cost_per_page_usd = :cpp, updated_at = :t",
             {
                 ":i": iteration,
-                ":a": str(best_accuracy),
-                ":b": best_config_version,
+                ":a": str(best_accuracy_within_budget),
+                ":b": best_config_version_within_budget,
                 ":c": current_config_version,
                 ":cpp": str(round(best_cost_per_page_usd, 5)),
                 ":t": _now(),
