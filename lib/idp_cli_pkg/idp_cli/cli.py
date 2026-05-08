@@ -237,7 +237,7 @@ TEMPLATE_URLS = {
 
 
 @click.group()
-@click.version_option(version="0.5.9")
+@click.version_option(version="0.5.10")
 def cli():
     """
     IDP CLI - Batch document processing for IDP Accelerator
