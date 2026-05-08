@@ -51,6 +51,8 @@ SPDX-License-Identifier: MIT-0
   - **Batch mode** (multiple `-d` or multiple `-g`): unmatched `-g` files are now a fatal error (exit `1`) with a clear message showing unmatched ground truth files and available document stems. Also detects and errors on duplicate ground truth filename stems, which previously overwrote each other silently.
   ([#310](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues/310))
 
+- **Web UI "View Source" failed with "Failed to load document"** — `FileViewer` now passes an `s3://<bucket>/<key>` URI to `getFileContents` (matching every other viewer), removing a fragile dependency on the build-time `VITE_AWS_REGION` env var that, when missing, caused Vite to inline `undefined` into the S3 URL.
+
   
 ## [0.5.9]
 
