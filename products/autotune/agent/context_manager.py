@@ -13,7 +13,7 @@ import os
 import time
 
 from strands.agent.conversation_manager import SummarizingConversationManager
-from strands.hooks import HookProvider, BeforeModelCallEvent
+from strands.hooks import HookProvider, HookRegistry, BeforeModelCallEvent
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +39,9 @@ class ContextCheckHook(HookProvider):
     def __init__(self, threshold_pct: float = 50.0):
         self.threshold_pct = threshold_pct
 
-    @HookProvider.hook(BeforeModelCallEvent)
+    def register_hooks(self, registry: HookRegistry, **kwargs) -> None:
+        registry.add_callback(BeforeModelCallEvent, self._check)
+
     def _check(self, event: BeforeModelCallEvent) -> None:
         agent = event.agent
         # Find last assistant message with usage metadata

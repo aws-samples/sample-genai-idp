@@ -954,14 +954,15 @@ In `products/autotune/fast-template/infra-cdk/lib/backend-stack.ts`:
 
 ---
 
-## Next Session Priorities (2026-05-11 — updated 19:20 UTC)
+## Next Session Priorities (2026-05-11 — updated 23:00 UTC)
 
 **Start here.** Read this section first when resuming work.
 
 ### Current state
-- **Branch:** `develop-private` (feature branch merged and deleted)
-- **Directory:** Code lives at `products/autotune/` (moved from `autotune/` on 2026-05-11)
+- **Branch:** `feature-private/idp-autotune/context-check-hook` (based off `develop-private`, not yet merged)
+- **Directory:** Code lives at `products/autotune/agent/` (consolidated — no more `fast-template/patterns/`)
 - **Deployed stack:** `kaleko-FAST-IDPAT-dev` in us-east-1
+- **Stream bucket:** (query via `aws cloudformation describe-stacks --stack-name kaleko-FAST-IDPAT-dev --region us-east-1 --query "Stacks[0].Outputs[?OutputKey=='StreamBucketName'].OutputValue" --output text`)
 - **App URL:** https://main.d2hvyoqfm7h5q6.amplifyapp.com
 - **IDP stack:** `kaleko-IDPAutoTune-dev` in us-east-1
 - **Test dataset:** `davids-test-dataset` (45 PNG images, 9 classes, 5 samples each)
@@ -986,22 +987,28 @@ source products/autotune/.venv/bin/activate
 python products/autotune/scripts/reset_stack.py kaleko-IDPAutoTune-dev --region us-east-1 [--force]
 ```
 
-### What was done on 2026-05-11
-1. **Max total cost as per-run input** — removed unreliable env var, added UI field, passed in payload
-2. **Cost enforcement before every action** — `CancelCheckHook` fires on `BeforeToolCallEvent` + `BeforeModelCallEvent`, reads cost from DDB
-3. **Graceful finalizing** — when over budget, only `write_optimization_log` tool allowed; agent writes summary then stops
-4. **Moved `autotune/` → `products/autotune/`** — updated Dockerfiles, CDK paths, docs
-5. **Merged into `develop-private`** — feature branch deleted
-6. **Reset script** — `products/autotune/scripts/reset_stack.py` with `--force` and interactive modes
+### What was done on 2026-05-11 (PM session)
+1. **Code consolidation** — moved `basic_agent.py`, Dockerfile, requirements.txt from `fast-template/patterns/strands-single-agent/` into `agent/`. Renamed `basic_agent.py` → `entrypoint.py`. Deleted dead code (`agent.py`, `gateway_tools/`). Merged to `develop-private`.
+2. **`grep_idp_source_code` tool** — bundled IDP source code (`lib/`, `src/lambda/`, `patterns/`, `config_library/`, `docs/`) into container at `/app/idp-source/`. Pure-Python grep tool scoped to that directory. Added `!docs/` and `!template.yaml` exceptions to root `.dockerignore`. Merged to `develop-private`.
+3. **Context summarization moved to `BeforeModelCallEvent` hook** — `ContextCheckHook` fires before every model call (not just between invocations). Emits `context_summarizing` + `context_summarized` stream events. Frontend renders both (blue/yellow banners). Threshold set to 5% for testing.
+4. **Stream bucket output** — added `StreamBucketName` to parent stack CloudFormation outputs.
+5. **UI tweaks** — "Launch Run" button (was "Send").
 
-### Priority 1: Discovery schema mismatch fix
+### ⚠️ Priority 1: Fix context summarization bug (BLOCKING)
+- **Session:** `707e8973`
+- **Error:** `ValidationException: User messages cannot contain tool uses. Please remove the tool uses and try again`
+- **When:** After multiple context summarizations
+- **Root cause (suspected):** `SummarizingConversationManager.reduce_context()` produces a summary that gets inserted as a user message. After multiple summarizations, the conversation structure may have tool_use blocks in user messages (from the summarization output or from how messages are preserved). Bedrock's ConverseStream API rejects this.
+- **Investigation steps:**
+  1. Download `stream.jsonl` for session `707e8973` from the stream bucket to see what happened before the crash
+  2. Look at what `reduce_context` does to the message array — does it preserve `tool_use` blocks in user messages?
+  3. Check `preserve_recent_messages=6` — if recent messages include a tool_use/tool_result pair that gets orphaned or misplaced after summarization
+  4. Possible fix: post-process messages after `reduce_context()` to strip any tool_use blocks from user messages, or increase `preserve_recent_messages` to avoid splitting tool call pairs
+- **Also:** Change threshold back to 50% after fixing this bug
+
+### Priority 2: Discovery schema mismatch fix
 - Awaiting IDP service team response
 - Root cause: discovery prompt has conflicting instructions about nesting
-- Repro was at `products/autotune/planning-docs/discovery-schema-mismatch/` (removed in cleanup — recreate if needed)
-
-### Priority 2: Test proactive context summarization
-- Verify triggers at 50% context window fill
-- Verify agent re-reads OPTIMIZATION-LOG.md after summarization
 
 ### Priority 3: Silent evaluation failure investigation
 - IDP-side bug where eval runs get stuck at 0 completed files
@@ -1012,8 +1019,6 @@ python products/autotune/scripts/reset_stack.py kaleko-IDPAutoTune-dev --region 
 
 ### Priority 5: Pyright exclusion for CI
 - `products/autotune/` code fails the IDP repo's `make typecheck-pr` because it has its own deps (strands, agentcore) not in the IDP venv
-- Need to add `products/autotune` to `pyrightconfig.json` exclude list (or modify the typecheck script to skip it)
-- The `cli.py` and `queue_processor` errors are pre-existing from other merged commits
 
 ---
 
@@ -1121,20 +1126,26 @@ Once everything works with tools connected directly, migrate to the proper Agent
 |------|------|
 | Agent entrypoint (AgentCore) | `products/autotune/agent/entrypoint.py` |
 | Strands tools (25+) | `products/autotune/agent/tools.py` |
+| IDP source grep tool | `products/autotune/agent/grep_tool.py` |
 | Hooks (cost, cancel, loop) | `products/autotune/agent/hooks.py` |
+| Context check hook | `products/autotune/agent/context_manager.py` |
 | DynamoDB state helper | `products/autotune/agent/state.py` |
 | Cost calculation | `products/autotune/agent/pricing.py` |
 | Sandboxed code execution | `products/autotune/agent/code_interpreter_tools.py` |
-| Context summarization | `products/autotune/agent/context_manager.py` |
 | System prompt | `products/autotune/agent/prompt.md` |
 | Domain knowledge skills | `products/autotune/agent/skills/` |
 | IDPAC library (wraps idp-cli) | `products/autotune/agent/idpac/` |
 | Dockerfile | `products/autotune/agent/Dockerfile` |
+| Dockerfile.dockerignore | `products/autotune/agent/Dockerfile.dockerignore` |
 | Agent requirements | `products/autotune/agent/requirements.txt` |
 | CDK infrastructure | `products/autotune/fast-template/infra-cdk/` |
+| CDK backend stack | `products/autotune/fast-template/infra-cdk/lib/backend-stack.ts` |
+| CDK main stack (outputs) | `products/autotune/fast-template/infra-cdk/lib/fast-main-stack.ts` |
 | Frontend (React) | `products/autotune/fast-template/frontend/` |
+| Frontend stream rendering | `products/autotune/fast-template/frontend/src/components/chat/ChatInterface.tsx` |
 | FAST gateway/utils | `products/autotune/fast-template/patterns/utils/` |
 | Reset script | `products/autotune/scripts/reset_stack.py` |
+| Root .dockerignore (has AutoTune exceptions) | `.dockerignore` |
 
 ## Appendix: Skills Inventory
 
