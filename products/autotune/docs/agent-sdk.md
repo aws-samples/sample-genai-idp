@@ -86,4 +86,4 @@ The agent receives a test set ID and optional optimization guidance, then runs i
 - [Strands tools documentation](https://strandsagents.com/docs/user-guide/concepts/tools/)
 - [Claude Code CLI license](https://github.com/anthropics/claude-code/blob/main/LICENSE.md) — proprietary
 - [Cline SDK overview](https://docs.cline.bot/cline-sdk/overview)
-- Full framework evaluation: `autotune/docs/temp-extra-doc.txt`
+- Full framework evaluation: `products/autotune/docs/temp-extra-doc.txt`

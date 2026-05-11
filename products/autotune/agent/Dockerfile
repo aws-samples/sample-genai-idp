@@ -11,7 +11,7 @@ ENV UV_SYSTEM_PYTHON=1 \
     BYPASS_TOOL_CONSENT=true
 
 # Install agent requirements
-COPY autotune/agent/requirements.txt .
+COPY products/autotune/agent/requirements.txt .
 RUN uv pip install --no-cache -r requirements.txt
 
 # Install idp-cli chain: idp_common -> idp_sdk -> idp-cli
@@ -24,17 +24,17 @@ RUN uv pip install --no-cache \
     -e /app/lib/idp_cli_pkg/
 
 # Install idpac package
-COPY autotune/agent/pyproject.toml /app/autotune/agent/pyproject.toml
-COPY autotune/agent/idpac/ /app/autotune/agent/idpac/
-RUN uv pip install --no-cache -e /app/autotune/agent/
+COPY products/autotune/agent/pyproject.toml /app/products/autotune/agent/pyproject.toml
+COPY products/autotune/agent/idpac/ /app/products/autotune/agent/idpac/
+RUN uv pip install --no-cache -e /app/products/autotune/agent/
 
 # Copy agent code, prompt, and skills
-COPY autotune/agent/agent.py /app/autotune/agent/
-COPY autotune/agent/tools.py /app/autotune/agent/
-COPY autotune/agent/prompt.md /app/autotune/agent/
-COPY autotune/agent/skills/ /app/autotune/agent/skills/
+COPY products/autotune/agent/agent.py /app/products/autotune/agent/
+COPY products/autotune/agent/tools.py /app/products/autotune/agent/
+COPY products/autotune/agent/prompt.md /app/products/autotune/agent/
+COPY products/autotune/agent/skills/ /app/products/autotune/agent/skills/
 
-WORKDIR /app/autotune/agent
+WORKDIR /app/products/autotune/agent
 
 # Create workspace dir for agent file operations
 RUN mkdir -p /app/workspace

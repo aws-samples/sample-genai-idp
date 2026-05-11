@@ -1,8 +1,8 @@
 # Reward Hacking Guardrail
 
 **Status:** ✅ Implemented  
-**Branch:** `feature-private/idp-autotune/reward-hacking-guardrail`  
-**Parent:** `feature-private/idp-autotune/initial-port`  
+**Branch:** `feature-private/idp-products/autotune/reward-hacking-guardrail`  
+**Parent:** `feature-private/idp-products/autotune/initial-port`  
 **Date:** 2026-05-05
 
 ## Problem
@@ -83,12 +83,12 @@ Still needed — forces `file_read` to `mode=view` to prevent image/document cra
 
 | File | Change |
 |------|--------|
-| `autotune/agent/tools.py` | Hardened `config_edit`, added 4 new tools, enriched download responses, removed duplicate, added timestamps |
-| `autotune/agent/code_interpreter_tools.py` | New file — sandboxed Python execution via AgentCore CodeInterpreter |
-| `autotune/fast-template/patterns/strands-single-agent/basic_agent.py` | Removed shell/editor/file_write, added execute_python_analysis, set AUTOTUNE_WORKSPACE_DIR |
-| `autotune/fast-template/patterns/strands-single-agent/Dockerfile` | Added COPY for code_interpreter_tools.py |
-| `autotune/fast-template/patterns/strands-single-agent/Dockerfile.dockerignore` | Allowlisted code_interpreter_tools.py |
-| `autotune/agent/prompt.md` | Documented new tool surface, locked fields rule |
+| `products/autotune/agent/tools.py` | Hardened `config_edit`, added 4 new tools, enriched download responses, removed duplicate, added timestamps |
+| `products/autotune/agent/code_interpreter_tools.py` | New file — sandboxed Python execution via AgentCore CodeInterpreter |
+| `products/autotune/fast-template/patterns/strands-single-agent/basic_agent.py` | Removed shell/editor/file_write, added execute_python_analysis, set AUTOTUNE_WORKSPACE_DIR |
+| `products/autotune/fast-template/patterns/strands-single-agent/Dockerfile` | Added COPY for code_interpreter_tools.py |
+| `products/autotune/fast-template/patterns/strands-single-agent/Dockerfile.dockerignore` | Allowlisted code_interpreter_tools.py |
+| `products/autotune/agent/prompt.md` | Documented new tool surface, locked fields rule |
 
 ## Testing
 

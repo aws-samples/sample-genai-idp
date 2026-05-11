@@ -118,7 +118,7 @@ The agent can be stopped at any time via:
 - **API call:** `POST /cancel` with the session ID
 - **CLI:** Direct DynamoDB update to set `status: "cancelled"`
 
-The `CancelCheckHook` reads the DynamoDB status before every tool call. If cancelled, the current tool is blocked and the agent stops. See `autotune/docs/full-autonomy.md` for details.
+The `CancelCheckHook` reads the DynamoDB status before every tool call. If cancelled, the current tool is blocked and the agent stops. See `products/autotune/docs/full-autonomy.md` for details.
 
 ### Layer 5: Iteration and Cost Limits
 
@@ -168,7 +168,7 @@ The agent has `dynamodb:PutItem` and `UpdateItem` scoped to `table/{idp-stack-na
 
 ## IAM Policy Reference
 
-All policies are defined in `autotune/fast-template/infra-cdk/lib/backend-stack.ts` on the `agentRole`.
+All policies are defined in `products/autotune/fast-template/infra-cdk/lib/backend-stack.ts` on the `agentRole`.
 
 | Policy SID | Effect | Scope | Purpose |
 |-----------|--------|-------|---------|

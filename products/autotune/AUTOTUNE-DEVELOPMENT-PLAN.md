@@ -24,19 +24,19 @@ f# IDPAutoTune — Development Plan
 ### 0.1 Branch setup
 - [x] `cd /home/ubuntu/gitlab/genaiic-idp-accelerator`
 - [x] `git checkout develop-private && git pull`
-- [x] `git checkout -b feature-private/idp-autotune/initial-port`
+- [x] `git checkout -b feature-private/idp-products/autotune/initial-port`
 
 ### 0.2 Clone FAST into the IDP repo
 - [x] Clone FAST as a standalone directory within the IDP codebase:
   ```bash
   cd /home/ubuntu/gitlab/genaiic-idp-accelerator
-  git clone https://github.com/awslabs/fullstack-solution-template-for-agentcore.git autotune/fast-template/
+  git clone https://github.com/awslabs/fullstack-solution-template-for-agentcore.git products/autotune/fast-template/
   ```
 - [x] Remove FAST's `.git` directory so it becomes part of the IDP repo:
   ```bash
-  rm -rf autotune/fast-template/.git
+  rm -rf products/autotune/fast-template/.git
   ```
-- [x] Commit as the initial baseline: `git add autotune/ && git commit -m "feat: add FAST template as AutoTune baseline"`
+- [x] Commit as the initial baseline: `git add products/autotune/ && git commit -m "feat: add FAST template as AutoTune baseline"`
 - [ ] Review the FAST directory structure — understand what's provided (CDK infra, frontend scaffold, agent entry point, Dockerfile, etc.)
 
 ### 0.3 Understand the IDP repo layout
@@ -179,7 +179,7 @@ AutoTune and the IDP Accelerator are deployed in the **same AWS account** but as
 
 **Problem:** The AutoTune agent writes state to the filesystem (OPTIMIZATION-LOG.md, config YAML files, evaluation results). By default, AgentCore compute is ephemeral — if the session stops or times out, all local files are lost. The agent needs to resume optimization runs across session boundaries. Chat history must also persist.
 
-**Research:** See [`autotune/planning-docs/session-persistence-research.md`](planning-docs/session-persistence-research.md) for full analysis of 5 options (AgentCore Persistent FS, S3 Workspace Sync, Agent State Dict, S3 Files, Hybrid). Also reviewed Doron Bleiberg's S3 Files + AgentCore reference implementation at `~/gitlab/s3files-on-agentcore/`.
+**Research:** See [`products/autotune/planning-docs/session-persistence-research.md`](planning-docs/session-persistence-research.md) for full analysis of 5 options (AgentCore Persistent FS, S3 Workspace Sync, Agent State Dict, S3 Files, Hybrid). Also reviewed Doron Bleiberg's S3 Files + AgentCore reference implementation at `~/gitlab/s3files-on-agentcore/`.
 
 **Decision: AgentCore Persistent Filesystem (Preview)** — simplest path, no VPC needed, zero custom persistence code.
 
@@ -238,10 +238,10 @@ AutoTune and the IDP Accelerator are deployed in the **same AWS account** but as
 cd autotune && python3 -m venv .venv
 
 # Activate
-source autotune/.venv/bin/activate
+source products/autotune/.venv/bin/activate
 
 # Install idpac package (editable, after Phase 1)
-pip install -e autotune/agent/
+pip install -e products/autotune/agent/
 ```
 
 The `.venv` directory is already gitignored. Python 3.12.3.
@@ -249,12 +249,12 @@ The `.venv` directory is already gitignored. Python 3.12.3.
 ## Phase 1: Migrate `idpac` Package into FAST/AutoTune Directory
 
 ### 1.1 Copy the package
-- [x] Copy `idpac/` into `autotune/agent/idpac/`
+- [x] Copy `idpac/` into `products/autotune/agent/idpac/`
 - [x] Copy `pyproject.toml` (adjusted: dropped `uv` dep, updated metadata)
 - [x] Copy `OPTIMIZATION-LOG-TEMPLATE.md`
 
 ### 1.2 Verify the package works standalone
-- [x] `pip install -e autotune/agent/` — installed editable in venv
+- [x] `pip install -e products/autotune/agent/` — installed editable in venv
 - [x] Smoke test: all 7 classes import successfully
 - [x] `idp-cli --version` → v0.5.7 (installed via `pip install -e lib/idp_common_pkg/ -e lib/idp_sdk/ -e lib/idp_cli_pkg/`)
 
@@ -268,12 +268,12 @@ The `.venv` directory is already gitignored. Python 3.12.3.
 ## Phase 2: Migrate Agent Prompt & Skills
 
 ### 2.1 Migrate the agent prompt
-- [x] Copied `.kiro/agents/idpac-optimizer.md` → `autotune/agent/prompt.md` (161 lines)
+- [x] Copied `.kiro/agents/idpac-optimizer.md` → `products/autotune/agent/prompt.md` (161 lines)
 - [x] Found 5 interactive-mode assumptions, documented as HTML comments at top of file for Phase 6 conversion
 - [x] Straight port — autonomy conversion deferred to Phase 6
 
 ### 2.2 Migrate skills
-- [x] Copied `idpac-skills/` → `autotune/agent/skills/` (28 skill directories + README + .kiro)
+- [x] Copied `idpac-skills/` → `products/autotune/agent/skills/` (28 skill directories + README + .kiro)
 - [x] Removed `.git` only, kept `.kiro` for future reference
 - [x] **Strands Skills plugin research:** Skills already use `SKILL.md` frontmatter format matching the [Agent Skills specification](https://agentskills.io/specification). Strands `AgentSkills` plugin is a drop-in fit:
   ```python
@@ -295,7 +295,7 @@ The `.venv` directory is already gitignored. Python 3.12.3.
 This is the core porting work. Build a Strands-based agent that wraps the `idpac` toolkit as tools, using the existing IDPAC agent prompt. Test everything locally before touching AgentCore.
 
 ### 3.1 Create Strands tool definitions
-- [x] Created `autotune/agent/tools.py` — 19 Strands `@tool` wrappers:
+- [x] Created `products/autotune/agent/tools.py` — 19 Strands `@tool` wrappers:
   - Stack: `deploy_stack`, `upload_test_set`
   - Config: `upload_config`, `download_config`, `list_configs`, `create_default_config`, `validate_config`, `auto_fix_config`, `compare_configs`
   - Evaluation: `run_evaluation`, `get_evaluation_summary`, `compare_evaluations`, `list_evaluations`, `download_evaluation_results`
@@ -307,7 +307,7 @@ This is the core porting work. Build a Strands-based agent that wraps the `idpac
 - [x] Tools connected directly to agent (not behind AgentCore gateway)
 
 ### 3.2 Create the Strands agent
-- [x] Created `autotune/agent/agent.py` (78 lines):
+- [x] Created `products/autotune/agent/agent.py` (78 lines):
   - BedrockModel with Claude Sonnet 4 (configurable via `AUTOTUNE_MODEL_ID`)
   - System prompt loaded from `prompt.md`
   - 19 IDPAC tools + 4 community tools (`file_read`, `file_write`, `editor`, `shell`)
@@ -328,14 +328,14 @@ This is the core porting work. Build a Strands-based agent that wraps the `idpac
 Before deploying to AgentCore, verify everything works inside a container.
 
 ### 4.1 Create Dockerfile
-- [x] Created `autotune/agent/Dockerfile` modeled after FAST Strands agent pattern
+- [x] Created `products/autotune/agent/Dockerfile` modeled after FAST Strands agent pattern
   - Base: `ghcr.io/astral-sh/uv:python3.13-bookworm-slim`
   - Installs: requirements.txt → idp_common → idp_sdk → idp-cli → idpac
   - Copies: agent.py, tools.py, prompt.md, skills/, OPTIMIZATION-LOG-TEMPLATE.md
-  - Container layout mirrors local: `/app/autotune/agent/`, `/app/lib/`
+  - Container layout mirrors local: `/app/products/autotune/agent/`, `/app/lib/`
   - Non-root user `autotune`, `BYPASS_TOOL_CONSENT=true`
-- [x] Created `autotune/agent/requirements.txt` (strands-agents, strands-agents-tools, boto3, ruamel.yaml, pypdfium2)
-- [x] Build: `docker build -t idp-autotune:local -f autotune/agent/Dockerfile .` (from repo root)
+- [x] Created `products/autotune/agent/requirements.txt` (strands-agents, strands-agents-tools, boto3, ruamel.yaml, pypdfium2)
+- [x] Build: `docker build -t idp-autotune:local -f products/autotune/agent/Dockerfile .` (from repo root)
 
 ### 4.2 Test Docker container locally
 - [x] All 7 tests pass inside container:
@@ -349,7 +349,7 @@ Before deploying to AgentCore, verify everything works inside a container.
 - [x] Run command:
   ```bash
   docker run --rm \
-    -v ~/.aws:/home/autotune/.aws:ro \
+    -v ~/.aws:/home/products/autotune/.aws:ro \
     -e AWS_DEFAULT_REGION=us-east-1 \
     -e IDP_STACK_NAME=kaleko-IDPAutoTune-dev \
     idp-autotune:local python agent.py
@@ -370,7 +370,7 @@ Port the AutoTune agent into the FAST template and deploy using its CDK infrastr
 > - **Frontend merge:** Replace the FAST chat frontend with the IDP Accelerator frontend (or add AutoTune as a tab/route in the existing IDP UI). For now, keep the FAST frontend as-is for development.
 
 ### 5.1 Port agent into FAST pattern directory
-- [x] No code duplication — CDK build context set to repo root so Dockerfile COPYs from `autotune/agent/` and `lib/` directly
+- [x] No code duplication — CDK build context set to repo root so Dockerfile COPYs from `products/autotune/agent/` and `lib/` directly
 - [x] Changed `backend-stack.ts` to use `path.resolve(__dirname, "..", "..", "..", "..")` (repo root) as Docker build context
 - [x] Added CDK `exclude` list to prevent asset hasher from scanning the entire repo (CDK hashes the build context for change detection — without excludes it hangs on large repos)
 - [x] Created `Dockerfile.dockerignore` next to the Dockerfile (Docker 19.03+ feature) — allowlists only the paths the build needs (327KB context)
@@ -383,7 +383,7 @@ Port the AutoTune agent into the FAST template and deploy using its CDK infrastr
 **How to deploy:**
 
 ```bash
-cd autotune/fast-template/infra-cdk
+cd products/autotune/fast-template/infra-cdk
 npm install
 
 # IMPORTANT: This EC2 instance has two sets of credentials:
@@ -447,7 +447,7 @@ These values are passed as env vars `IDP_STACK_NAME` and `AUTOTUNE_MODEL_ID` to 
 - [ ] **Create CDK custom resource** — Lambda that calls `UpdateAgentRuntime` API with `filesystemConfigurations: [{ sessionStorage: { mountPath: "/mnt/workspace" } }]` after the runtime is created
 - [ ] **Test persistence** — invoke agent, write files, stop session, resume with same `runtimeSessionId`, verify files are still there
 - [ ] **Test the "wiped on deploy" risk** — do a `cdk deploy`, verify session storage is reset, confirm agent can recover gracefully (re-discover state from IDP stack)
-- [ ] **Fallback readiness** — if preview proves unreliable, implement Option B (S3 Workspace Sync, ~100 lines) per `autotune/planning-docs/session-persistence-research.md`
+- [ ] **Fallback readiness** — if preview proves unreliable, implement Option B (S3 Workspace Sync, ~100 lines) per `products/autotune/planning-docs/session-persistence-research.md`
 
 ---
 
@@ -455,7 +455,7 @@ These values are passed as env vars `IDP_STACK_NAME` and `AUTOTUNE_MODEL_ID` to 
 
 Convert the agent from interactive chat to autonomous operation. The agent receives a `test_set_id` + optional `optimization_guidance`, runs to completion (or cancellation), and produces an optimized config.
 
-**Design reference:** See [`autotune/planning-docs/full-autonomy-research.md`](planning-docs/full-autonomy-research.md) sections 6–7 for full architecture rationale.
+**Design reference:** See [`products/autotune/planning-docs/full-autonomy-research.md`](planning-docs/full-autonomy-research.md) sections 6–7 for full architecture rationale.
 
 **Key architecture decisions:**
 - **Two-layer state:** DynamoDB for control plane (status, phase, cancel signal, metrics — read by hook + frontend), OPTIMIZATION-LOG.md on persistent filesystem for data plane (detailed optimization history — read by agent only)
@@ -472,7 +472,7 @@ Convert the agent from interactive chat to autonomous operation. The agent recei
 - [x] Add DynamoDB read/write permissions to the AgentCore IAM role for this table
 
 ### 6.2 Create state helper module
-- [x] Create `autotune/agent/state.py`:
+- [x] Create `products/autotune/agent/state.py`:
   - `OptimizationState` class — thin wrapper around DynamoDB `get_item` / `update_item`
   - `update_phase(phase, phase_detail)` — updates phase + phase_detail + updated_at
   - `update_metrics(iteration, best_accuracy, best_config_version, current_config_version)` — updates metric fields
@@ -485,7 +485,7 @@ Convert the agent from interactive chat to autonomous operation. The agent recei
   - All methods handle DynamoDB errors gracefully (log + continue — state tracking failure should not crash the optimization)
 
 ### 6.3 Create Strands hooks
-- [x] Create `autotune/agent/hooks.py` with two hooks:
+- [x] Create `products/autotune/agent/hooks.py` with two hooks:
 
 **`CancelCheckHook`** (BeforeToolCallEvent):
   - Before every tool call, read `status` from DynamoDB via `OptimizationState.get_status()`
@@ -510,7 +510,7 @@ Convert the agent from interactive chat to autonomous operation. The agent recei
   - The agent's first invocation kicks off the full workflow; the hook's `resume` drives subsequent iterations
 
 ### 6.5 Adapt prompt for autonomous operation
-- [x] Update `autotune/agent/prompt.md` — replace the 5 interactive assumptions:
+- [x] Update `products/autotune/agent/prompt.md` — replace the 5 interactive assumptions:
   1. "clarify with the user" about workspace → auto-create workspace using session_id
   2. "Work with the user to fill in required fields" → pre-populate OPTIMIZATION-LOG from test_set_id + optimization_guidance + dataset analysis
   3. "continue where the user last left off" → on resume, read OPTIMIZATION-LOG.md + DynamoDB state
@@ -570,7 +570,7 @@ Convert the agent from interactive chat to autonomous operation. The agent recei
 - [x] **Max iterations test** — Deterministic iteration counting (auto-incremented on `run_evaluation(n_files=0)`). At max iterations, agent enters "finalizing" phase with one turn to summarize. `run_evaluation` refuses during finalizing. Agent calls `update_optimization_state(phase="complete")` to trigger hard stop via `CancelCheckHook`. `best_cost_per_page_usd` tracked in DDB alongside `best_accuracy`.
 
 ### 6.8 Deferred items (TODO)
-- [x] **Agent permissions scoping (SECURITY)** — IAM hardened with explicit Deny policy for destructive actions (DeleteStack, DeleteObject, iam:*, etc.), read/write split, s3:DeleteObject removed. See `autotune/docs/agent-security.md`. Remaining:
+- [x] **Agent permissions scoping (SECURITY)** — IAM hardened with explicit Deny policy for destructive actions (DeleteStack, DeleteObject, iam:*, etc.), read/write split, s3:DeleteObject removed. See `products/autotune/docs/agent-security.md`. Remaining:
   - [ ] Scope resource ARNs to specific IDP stack resources (currently `*`)
   - [ ] Restrict network egress via VPC with no internet gateway
   - [ ] Wire AgentCore CodeInterpreter for sandboxed arbitrary code execution
@@ -591,14 +591,14 @@ Convert the agent from interactive chat to autonomous operation. The agent recei
 - [ ] **Automatic optimization log updates via hook/subagent** — The main agent frequently forgets to update OPTIMIZATION-LOG.md despite repeated prompt instructions. Investigate using a Strands hook (e.g. `AfterToolCallEvent`) that triggers a lightweight subagent whose sole job is to append a summary of what just happened to the log. This decouples log maintenance from the main agent's reasoning, ensuring the log stays current without consuming main agent context or relying on it remembering. Consider: cost of extra LLM calls, whether a simple template-based append (no LLM) is sufficient for tool results, and whether the subagent needs the full conversation or just the last tool call/result.
 - [ ] **IDP feature request: hide test execution documents from main document list** — Documents processed during AutoTune evaluation runs currently appear in the IDP UI's main document list, polluting it with hundreds of test documents. Request a filter or flag in IDP so that documents processed via test executions (test studio runs) are excluded from the default document list view.
 - [x] **Small validation runs before full evaluation** — Added `n_files` param to `run_evaluation` (default 1). Agent runs 1-file validation first, inspects results, then scales to all files with `n_files=0`. Prompt step 5 updated accordingly.
-- [ ] **Improve `validate_config` to catch pipeline-breaking configs** — The agent frequently launches evaluation runs with configs that pass `validate_config` but produce garbage results (e.g., LLM responds "I don't see any document or image attached" for all files, indicating OCR output wasn't passed to the extraction model). These are avoidable pipeline failures that waste full test executions. **Action items:** (1) Collect 3-5 example configs that pass validation but break the pipeline — save to `autotune/planning-docs/broken-configs/` with notes on the failure mode. (2) Root-cause each failure in the IDP pipeline code (likely in the extraction Lambda or prompt assembly). (3) Add validation rules to `idp-cli validate-config` (in `lib/idp_common_pkg/`) that catch these patterns before upload. File with IDP service team if the fix is non-trivial.
-- [x] **Prevent reward hacking via config manipulation** — Implemented on branch `feature-private/idp-autotune/reward-hacking-guardrail`. Removed `shell`/`editor`/`file_write`, hardened `config_edit` to reject `x-aws-idp-evaluation-*` changes, added purpose-built replacement tools (`write_optimization_log`, `list_files`, `copy_config`, `wait_seconds`, `execute_python_analysis` via AgentCore CodeInterpreter). See `autotune/docs/reward-hacking-guardrail.md`. Upstream config separation discussion with IDP team still TODO.
-- [x] **Cost observability per optimization run** — Agent token cost (from Strands `accumulated_usage` + `config_library/pricing.yaml`) and eval pipeline cost (from top-level `totalCost` in eval summary, deduplicated by batch_id) tracked separately in DynamoDB. Real-time updates via `CostTrackingHook` (AfterModelCallEvent). Resume-safe (eval cost + seen batches seeded from DDB). Prompt caching enabled (system prompt, tools, messages) for 10x input cost reduction. See `autotune/agent/pricing.py`, `autotune/agent/hooks.py`.
+- [ ] **Improve `validate_config` to catch pipeline-breaking configs** — The agent frequently launches evaluation runs with configs that pass `validate_config` but produce garbage results (e.g., LLM responds "I don't see any document or image attached" for all files, indicating OCR output wasn't passed to the extraction model). These are avoidable pipeline failures that waste full test executions. **Action items:** (1) Collect 3-5 example configs that pass validation but break the pipeline — save to `products/autotune/planning-docs/broken-configs/` with notes on the failure mode. (2) Root-cause each failure in the IDP pipeline code (likely in the extraction Lambda or prompt assembly). (3) Add validation rules to `idp-cli validate-config` (in `lib/idp_common_pkg/`) that catch these patterns before upload. File with IDP service team if the fix is non-trivial.
+- [x] **Prevent reward hacking via config manipulation** — Implemented on branch `feature-private/idp-products/autotune/reward-hacking-guardrail`. Removed `shell`/`editor`/`file_write`, hardened `config_edit` to reject `x-aws-idp-evaluation-*` changes, added purpose-built replacement tools (`write_optimization_log`, `list_files`, `copy_config`, `wait_seconds`, `execute_python_analysis` via AgentCore CodeInterpreter). See `products/autotune/docs/reward-hacking-guardrail.md`. Upstream config separation discussion with IDP team still TODO.
+- [x] **Cost observability per optimization run** — Agent token cost (from Strands `accumulated_usage` + `config_library/pricing.yaml`) and eval pipeline cost (from top-level `totalCost` in eval summary, deduplicated by batch_id) tracked separately in DynamoDB. Real-time updates via `CostTrackingHook` (AfterModelCallEvent). Resume-safe (eval cost + seen batches seeded from DDB). Prompt caching enabled (system prompt, tools, messages) for 10x input cost reduction. See `products/autotune/agent/pricing.py`, `products/autotune/agent/hooks.py`.
 - [ ] **Research harness engineering** — Study emerging best practices for building reliable scaffolding around autonomous agents. Highly relevant to AutoTune's optimization loop, tool design, error recovery, and guardrails. Sources: [Anthropic: Building Effective Managed Agents](https://www.anthropic.com/engineering/managed-agents), [OpenAI: Harness Engineering](https://openai.com/index/harness-engineering/), plus arxiv papers on agent reliability, tool-use scaffolding, and reward hacking prevention. Apply findings to improve hooks, prompt design, loop control, and cost/quality tradeoffs.
 
 ### 6.9 Fire-and-Forget Architecture with S3 Polling (DONE)
 
-Implemented and deployed. The agent runs fully decoupled from the frontend — no SSE connection needed after the initial request. See `autotune/docs/full-autonomy.md` for full architecture.
+Implemented and deployed. The agent runs fully decoupled from the frontend — no SSE connection needed after the initial request. See `products/autotune/docs/full-autonomy.md` for full architecture.
 
 ### 6.10 Session: April 29 PM — What Was Done
 
@@ -627,7 +627,7 @@ Implemented and deployed. The agent runs fully decoupled from the frontend — n
 
 ### 6.11 Session: April 30 — ENOSPC Fix (Two-Filesystem Strategy)
 
-**Root cause:** AgentCore persistent filesystem (`/mnt/workspace`, NFS mount) has a ~50 MB metadata limit separate from the 1 GB data limit. Creating hundreds of small files (evaluation results: 586 files per iteration) exhausts the metadata budget. Additionally, `df -h` always reports 0% used on the NFS mount — usage is invisible. A known AgentCore bug (reported by Walkley He, April 13, `#bedrock-agentcore-runtime-interest`) causes premature ENOSPC even with minimal data written. See `autotune/docs/state-persistence.md` for full investigation.
+**Root cause:** AgentCore persistent filesystem (`/mnt/workspace`, NFS mount) has a ~50 MB metadata limit separate from the 1 GB data limit. Creating hundreds of small files (evaluation results: 586 files per iteration) exhausts the metadata budget. Additionally, `df -h` always reports 0% used on the NFS mount — usage is invisible. A known AgentCore bug (reported by Walkley He, April 13, `#bedrock-agentcore-runtime-interest`) causes premature ENOSPC even with minimal data written. See `products/autotune/docs/state-persistence.md` for full investigation.
 
 **Fix: two-filesystem strategy.**
 - `/mnt/workspace` (1 GB NFS, persistent): ONLY `.sessions/` (Strands history) and `OPTIMIZATION-LOG.md`
@@ -661,7 +661,7 @@ Implemented and deployed. The agent runs fully decoupled from the frontend — n
 - Zero files on `/mnt/workspace` from sessions — only `OPTIMIZATION-LOG.md` remains on NFS
 - Same per-message storage structure, just S3 objects instead of local files
 - Added `s3:GetObject`, `s3:DeleteObject`, `s3:ListBucket` to agent role for stream bucket
-- See `autotune/docs/state-persistence.md` for full lessons learned
+- See `products/autotune/docs/state-persistence.md` for full lessons learned
 
 - [ ] **Session resume after ENOSPC** — Implement "Resume" button in the UI for runs that fail with ENOSPC. Reuse the same `runtimeSessionId` to get a fresh microVM with the same persistent storage (`/mnt/workspace`). The agent reads OPTIMIZATION-LOG.md on resume and continues where it left off. This pairs with the optimization run history feature — session IDs need to be visible in the UI so users can identify and resume failed runs. See also the existing "Resume interrupted runs" TODO in 6.8.
 
@@ -761,7 +761,7 @@ Implemented and deployed. The agent runs fully decoupled from the frontend — n
 - Confirmed: GT IS being passed correctly (PR fix `17d4b13d` works — single doc + single GT paired by position)
 - Root cause: discovery prompt in `_prompt_classes_discovery_with_ground_truth` has conflicting instructions ("Do not nest groups" vs "preserve exact GT structure")
 - Model wraps flat GT fields into new objects (e.g., `title`, `facility`, `weekStartDate` → `DocumentInfo` object)
-- Created repro at `autotune/planning-docs/discovery-schema-mismatch/` with input, GT, output, and README
+- Created repro at `products/autotune/planning-docs/discovery-schema-mismatch/` with input, GT, output, and README
 - Sent to IDP service team for prompt fix
 
 **Commits pushed:**
@@ -770,7 +770,7 @@ Implemented and deployed. The agent runs fully decoupled from the frontend — n
 ### ⚠️ NEXT SESSION: TOP PRIORITY
 
 **Next priorities (in order):**
-1. **Discovery schema mismatch fix** — Awaiting IDP service team response. Repro at `autotune/planning-docs/discovery-schema-mismatch/`.
+1. **Discovery schema mismatch fix** — Awaiting IDP service team response. Repro at `products/autotune/planning-docs/discovery-schema-mismatch/`.
 2. **Test proactive context summarization** — Verify triggers at 50% and log re-read works.
 3. **Silent evaluation failure investigation** — IDP-side bug where eval runs get stuck at 0 completed files.
 4. **Automatic optimization log updates** — Hook-based approach to keep the log current.
@@ -891,7 +891,7 @@ Can be a single Lambda with path-based routing:
 
 #### CDK changes needed
 
-In `autotune/fast-template/infra-cdk/lib/backend-stack.ts`:
+In `products/autotune/fast-template/infra-cdk/lib/backend-stack.ts`:
 - Add two new API Gateway resources: `/stream` (GET) and `/log` (GET)
 - New Lambda function (or extend existing optimization-state Lambda) to handle both endpoints
 - Grant the Lambda `s3:GetObject` on the staging bucket prefix `autotune-streams/*`
@@ -902,12 +902,12 @@ In `autotune/fast-template/infra-cdk/lib/backend-stack.ts`:
 
 | File | Change |
 |------|--------|
-| `autotune/fast-template/patterns/strands-single-agent/basic_agent.py` | Major refactor: fire-and-forget entrypoint, background thread, stream writing, S3 sync, resilient ping |
-| `autotune/agent/state.py` | Move heartbeat into background thread context (minor) |
-| `autotune/fast-template/infra-cdk/lib/backend-stack.ts` | New Lambda, API Gateway routes, IAM permissions |
-| `autotune/fast-template/infra-cdk/lib/lambdas/optimization-state/index.py` | Add `/stream` and `/log` handlers (or new Lambda file) |
-| `autotune/fast-template/frontend/src/components/chat/ChatInterface.tsx` | Remove SSE dependency, add stream + log polling, add log viewer tab |
-| `autotune/fast-template/frontend/src/lib/agentcore-client/` | May need changes to the invoke call to not expect streaming response |
+| `products/autotune/fast-template/patterns/strands-single-agent/basic_agent.py` | Major refactor: fire-and-forget entrypoint, background thread, stream writing, S3 sync, resilient ping |
+| `products/autotune/agent/state.py` | Move heartbeat into background thread context (minor) |
+| `products/autotune/fast-template/infra-cdk/lib/backend-stack.ts` | New Lambda, API Gateway routes, IAM permissions |
+| `products/autotune/fast-template/infra-cdk/lib/lambdas/optimization-state/index.py` | Add `/stream` and `/log` handlers (or new Lambda file) |
+| `products/autotune/fast-template/frontend/src/components/chat/ChatInterface.tsx` | Remove SSE dependency, add stream + log polling, add log viewer tab |
+| `products/autotune/fast-template/frontend/src/lib/agentcore-client/` | May need changes to the invoke call to not expect streaming response |
 
 #### What we can delete/simplify after this
 
@@ -940,11 +940,11 @@ This is the critical path. The SSE streaming approach is broken due to a known A
 5. **Deploy and test** — Run a full optimization loop. Verify: agent survives past 60s, frontend shows live thought process via polling, optimization log updates in real time, cancel still works.
 
 **Key files to read before starting:**
-- `autotune/fast-template/patterns/strands-single-agent/basic_agent.py` — current entrypoint (will be heavily refactored)
-- `autotune/agent/state.py` — DynamoDB state helper (heartbeat method needs to move to background thread)
-- `autotune/fast-template/infra-cdk/lib/backend-stack.ts` — CDK stack (add new Lambda + API routes)
-- `autotune/fast-template/infra-cdk/lib/lambdas/optimization-state/index.py` — existing state Lambda (extend or create sibling)
-- `autotune/fast-template/frontend/src/components/chat/ChatInterface.tsx` — frontend (remove SSE, add polling)
+- `products/autotune/fast-template/patterns/strands-single-agent/basic_agent.py` — current entrypoint (will be heavily refactored)
+- `products/autotune/agent/state.py` — DynamoDB state helper (heartbeat method needs to move to background thread)
+- `products/autotune/fast-template/infra-cdk/lib/backend-stack.ts` — CDK stack (add new Lambda + API routes)
+- `products/autotune/fast-template/infra-cdk/lib/lambdas/optimization-state/index.py` — existing state Lambda (extend or create sibling)
+- `products/autotune/fast-template/frontend/src/components/chat/ChatInterface.tsx` — frontend (remove SSE, add polling)
 - Phase 6.9 in this document for the full architecture diagram and implementation details
 
 ### Priority 2: Run a complete optimization loop
@@ -964,12 +964,12 @@ Once fire-and-forget is working, run a full end-to-end test:
 - **Agent behavior confirmed working:** OTel traces show the agent successfully analyzing datasets, reading evaluation reports, identifying extraction problems (date formats, over-extraction), and attempting config modifications — all happening server-side after the SSE stream died. The agent logic is solid; only the visibility/streaming is broken.
 
 ### Git state
-- Branch: `feature-private/idp-autotune/initial-port`
+- Branch: `feature-private/idp-products/autotune/initial-port`
 - Uncommitted changes from today's heartbeat work (needs commit before starting Phase 6.9)
 - Deploy commands:
   ```bash
   # Backend
-  cd autotune/fast-template/infra-cdk
+  cd products/autotune/fast-template/infra-cdk
   AWS_EC2_METADATA_DISABLED=true \
   CDK_DEFAULT_ACCOUNT=$(aws sts get-caller-identity --query Account --output text) \
   CDK_DEFAULT_REGION=us-east-1 \
@@ -977,13 +977,13 @@ Once fire-and-forget is working, run a full end-to-end test:
 
   # Frontend
   cd /home/ubuntu/gitlab/genaiic-idp-accelerator
-  python autotune/fast-template/scripts/deploy-frontend.py kaleko-FAST-IDPAT-dev --region us-east-1
+  python products/autotune/fast-template/scripts/deploy-frontend.py kaleko-FAST-IDPAT-dev --region us-east-1
   ```
 
 ### Key documentation
-- `autotune/docs/full-autonomy.md` — Architecture decisions and rationale (has a Session Keepalive section that needs updating to reflect fire-and-forget decision)
-- `autotune/docs/agent-security.md` — Security model, IAM policies, threat model, FAQ
-- `autotune/AUTOTUNE-DEVELOPMENT-PLAN.md` — This file
+- `products/autotune/docs/full-autonomy.md` — Architecture decisions and rationale (has a Session Keepalive section that needs updating to reflect fire-and-forget decision)
+- `products/autotune/docs/agent-security.md` — Security model, IAM policies, threat model, FAQ
+- `products/autotune/AUTOTUNE-DEVELOPMENT-PLAN.md` — This file
 
 ---
 
@@ -1089,13 +1089,13 @@ Once everything works with tools connected directly, migrate to the proper Agent
 
 | What | Path (IDPAC repo) | Path (IDP repo, proposed) |
 |------|-------------------|--------------------------|
-| Python package | `idpac/` | `autotune/agent/idpac/` |
-| Agent prompt | `.kiro/agents/idpac-optimizer.md` | `autotune/agent/prompt.md` |
-| Skills | `.kiro/skills/` | `autotune/agent/skills/` |
-| Optimization log template | `OPTIMIZATION-LOG-TEMPLATE.md` | `autotune/agent/OPTIMIZATION-LOG-TEMPLATE.md` |
-| Strands agent | N/A | `autotune/agent/agent.py` |
-| Tool definitions | N/A | `autotune/agent/tools.py` |
-| FAST template | N/A | `autotune/` (cloned from FAST) |
+| Python package | `idpac/` | `products/autotune/agent/idpac/` |
+| Agent prompt | `.kiro/agents/idpac-optimizer.md` | `products/autotune/agent/prompt.md` |
+| Skills | `.kiro/skills/` | `products/autotune/agent/skills/` |
+| Optimization log template | `OPTIMIZATION-LOG-TEMPLATE.md` | `products/autotune/agent/OPTIMIZATION-LOG-TEMPLATE.md` |
+| Strands agent | N/A | `products/autotune/agent/agent.py` |
+| Tool definitions | N/A | `products/autotune/agent/tools.py` |
+| FAST template | N/A | `products/autotune/` (cloned from FAST) |
 
 ## Appendix: Skills Inventory
 

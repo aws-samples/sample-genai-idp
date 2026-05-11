@@ -52,7 +52,7 @@ Fields removed: `phase`, `phase_detail` (replaced by `status`, `status_detail`).
 
 ## Files to Change
 
-### 1. `autotune/agent/state.py`
+### 1. `products/autotune/agent/state.py`
 
 - Remove `STATUS_RUNNING`, `STATUS_CANCELLED`, `STATUS_COMPLETE`, `STATUS_FAILED` constants
 - Add `TERMINAL_STATUSES = frozenset({"complete", "failed", "cancelled"})`
@@ -64,7 +64,7 @@ Fields removed: `phase`, `phase_detail` (replaced by `status`, `status_detail`).
 - `initialize()`: set `status: "initializing"`, `status_detail: "Starting optimization run"` (remove old `phase`/`phase_detail` fields)
 - Remove try/except wrappers — let exceptions propagate
 
-### 2. `autotune/agent/hooks.py`
+### 2. `products/autotune/agent/hooks.py`
 
 - Remove imports: `STATUS_COMPLETE`
 - `CancelCheckHook._check_cancel`:
@@ -77,7 +77,7 @@ Fields removed: `phase`, `phase_detail` (replaced by `status`, `status_detail`).
   - Replace `self.state.update_phase("finalizing", ...)` with `self.state.set_status("finalizing", ...)`
   - Replace `self.state.set_status(STATUS_COMPLETE)` + `self.state.update_phase("complete", ...)` with `self.state.set_status("complete", ...)`
 
-### 3. `autotune/agent/tools.py`
+### 3. `products/autotune/agent/tools.py`
 
 - `_auto_update_state(phase, phase_detail)` → rename to `_auto_update_status(status, detail)`, calls `state.set_status(status, detail)`
 - All callers of `_auto_update_state` → rename to `_auto_update_status` (same args, just rename)
@@ -88,7 +88,7 @@ Fields removed: `phase`, `phase_detail` (replaced by `status`, `status_detail`).
   - The tool docstring: update param names/descriptions
 - `run_evaluation` finalizing guard: replace `current.get("phase") == "finalizing"` with `current.get("status") == "finalizing"`
 
-### 4. `autotune/fast-template/patterns/strands-single-agent/basic_agent.py`
+### 4. `products/autotune/fast-template/patterns/strands-single-agent/basic_agent.py`
 
 - Remove imports: `STATUS_RUNNING`, `STATUS_COMPLETE`, `STATUS_FAILED`
 - Post-run completion: replace `state.get_status() == STATUS_RUNNING` + `state.set_status(STATUS_COMPLETE)` + `state.update_phase(...)` with:
@@ -98,7 +98,7 @@ Fields removed: `phase`, `phase_detail` (replaced by `status`, `status_detail`).
 - Resume logic: replace `state.set_status(STATUS_RUNNING)` + `state.update_phase("resuming", ...)` with:
   - `state.set_status("resuming", "Resuming after interruption")`
 
-### 5. `autotune/fast-template/infra-cdk/lambdas/feedback/index.py`
+### 5. `products/autotune/fast-template/infra-cdk/lambdas/feedback/index.py`
 
 - `/cancel` endpoint: already sets `status = "cancelled"` — just also set `status_detail`:
   ```python
@@ -108,7 +108,7 @@ Fields removed: `phase`, `phase_detail` (replaced by `status`, `status_detail`).
 - `/runs` endpoint: remove `phase` and `phase_detail` from ProjectionExpression, add `status_detail`
 - `/state` endpoint: no change (returns raw item)
 
-### 6. `autotune/fast-template/frontend/src/components/chat/ChatInterface.tsx`
+### 6. `products/autotune/fast-template/frontend/src/components/chat/ChatInterface.tsx`
 
 - Status bar display: remove `agentState.phase` and `agentState.phase_detail` spans
 - Replace with `agentState.status_detail` for the detail text
@@ -128,7 +128,7 @@ Fields removed: `phase`, `phase_detail` (replaced by `status`, `status_detail`).
 - Resume button: show when `status === 'failed' || status === 'cancelled'`
 - Stream/log polling: poll when status is any value (active or terminal for final fetch)
 
-### 7. `autotune/fast-template/frontend/src/components/chat/ChatSidebar.tsx`
+### 7. `products/autotune/fast-template/frontend/src/components/chat/ChatSidebar.tsx`
 
 - `STATUS_CONFIG` map: add entries for active statuses (all map to green/Activity icon), or use a fallback:
   ```tsx

@@ -77,7 +77,7 @@ This pattern uses **FileSessionManager** on AgentCore's persistent filesystem (`
 3. Storage survives compute teardown — AgentCore mounts the same storage when the session resumes
 4. Falls back to `/tmp/workspace` for local Docker testing
 
-See [State Persistence](../../../autotune/docs/state-persistence.md) for full details.
+See [State Persistence](../../../docs/state-persistence.md) for full details.
 
 **AgentCore Memory (LTM)** — previously used for conversation history via `AgentCoreMemorySessionManager`, now disabled. Can be re-added alongside `FileSessionManager` if cross-session semantic fact extraction is needed. See the commented-out code in `backend-stack.ts`.
 

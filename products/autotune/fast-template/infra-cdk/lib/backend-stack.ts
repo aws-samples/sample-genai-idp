@@ -220,16 +220,16 @@ export class BackendStack extends cdk.NestedStack {
     } else {
       // DOCKER DEPLOYMENT: Use container-based deployment
       // Build context is the IDP Accelerator repo root so the Dockerfile can
-      // COPY from autotune/agent/ and lib/ without duplicating code.
+      // COPY from products/autotune/agent/ and lib/ without duplicating code.
       // NOTE: The `exclude` list is for CDK's asset hasher, NOT for Docker.
       // Docker uses Dockerfile.dockerignore (already filters to 327KB).
       // Without these excludes, CDK scans the entire repo to compute a
       // change-detection hash, which hangs on large repos.
       agentRuntimeArtifact = agentcore.AgentRuntimeArtifact.fromAsset(
-        path.resolve(__dirname, "..", "..", "..", ".."), // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
+        path.resolve(__dirname, "..", "..", "..", "..", ".."), // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
         {
           platform: ecr_assets.Platform.LINUX_ARM64,
-          file: `autotune/fast-template/patterns/${pattern}/Dockerfile`,
+          file: `products/autotune/fast-template/patterns/${pattern}/Dockerfile`,
           exclude: [
             ".git",
             "node_modules",
@@ -242,10 +242,10 @@ export class BackendStack extends cdk.NestedStack {
             "src",
             "tests",
             "memory-bank",
-            "autotune/fast-template/frontend",
-            "autotune/fast-template/infra-cdk/cdk.out",
-            "autotune/fast-template/docs",
-            "autotune/fast-template/tests",
+            "products/autotune/fast-template/frontend",
+            "products/autotune/fast-template/infra-cdk/cdk.out",
+            "products/autotune/fast-template/docs",
+            "products/autotune/fast-template/tests",
           ],
         }
       )
@@ -271,7 +271,7 @@ export class BackendStack extends cdk.NestedStack {
     // history (stored in the stream bucket) instead of AgentCoreMemorySessionManager.
     // To re-enable for long-term memory (semantic fact extraction across sessions),
     // uncomment this block and the MEMORY_ID env var below.
-    // See autotune/docs/state-persistence.md for rationale.
+    // See products/autotune/docs/state-persistence.md for rationale.
     //
     // const memory = new cdk.CfnResource(this, "AgentMemory", {
     //   type: "AWS::BedrockAgentCore::Memory",
@@ -706,7 +706,7 @@ export class BackendStack extends cdk.NestedStack {
 
   // Creates a DynamoDB table for AutoTune optimization state (control plane).
   // Read by hooks (cancel check), frontend (progress polling), and agent (state updates).
-  // See autotune/planning-docs/full-autonomy-research.md section 6 for architecture.
+  // See products/autotune/planning-docs/full-autonomy-research.md section 6 for architecture.
   private createOptimizationStateTable(config: AppConfig): void {
     const table = new dynamodb.Table(this, "OptimizationStateTable", {
       tableName: `${config.stack_name_base}-OptimizationState`,

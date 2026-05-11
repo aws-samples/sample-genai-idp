@@ -12,7 +12,7 @@ The current IDPAC agent has **no programmatic autonomy controls**. Everything is
 
 **State management:** OPTIMIZATION-LOG.md is the sole state mechanism. The prompt mandates updating it "IMMEDIATELY after EACH action." This is the agent's memory across sessions — if it stops, a human (or the agent itself) reads the log to resume. No structured JSON, no programmatic checkpoints.
 
-**Interactive assumptions (5 found, documented in `autotune/agent/prompt.md`):**
+**Interactive assumptions (5 found, documented in `products/autotune/agent/prompt.md`):**
 1. "clarify with the user" about workspace naming
 2. "Work with the user to fill in required fields" in the optimization log
 3. "continue where the user last left off" — assumes human tells agent to resume
@@ -480,7 +480,7 @@ On cancel or completion:
 
 ### Prompt Conversion
 
-The current prompt (`autotune/agent/prompt.md`) has 5 interactive assumptions documented as HTML comments at the top. These need to be replaced:
+The current prompt (`products/autotune/agent/prompt.md`) has 5 interactive assumptions documented as HTML comments at the top. These need to be replaced:
 
 1. "clarify with the user" about workspace → auto-create workspace using session_id
 2. "Work with the user to fill in required fields" → pre-populate from `test_set_id` + `optimization_guidance` + auto-discovery

@@ -18,12 +18,12 @@ ENV UV_SYSTEM_PYTHON=1 \
     BYPASS_TOOL_CONSENT=true
 
 # --- FAST framework ---
-COPY autotune/fast-template/pyproject.toml .
-COPY autotune/fast-template/gateway/ gateway/
-COPY autotune/fast-template/tools/ agentcore_tools/
+COPY products/autotune/fast-template/pyproject.toml .
+COPY products/autotune/fast-template/gateway/ gateway/
+COPY products/autotune/fast-template/tools/ agentcore_tools/
 
 # --- Agent requirements (FAST + AutoTune deps) ---
-COPY autotune/fast-template/patterns/strands-single-agent/requirements.txt requirements.txt
+COPY products/autotune/fast-template/patterns/strands-single-agent/requirements.txt requirements.txt
 RUN uv pip install --no-cache -r requirements.txt && \
     uv pip install --no-cache aws-opentelemetry-distro==0.16.0
 
@@ -41,9 +41,9 @@ RUN uv pip install --no-cache \
     -e /app/lib/idp_cli_pkg/
 
 # --- idpac package ---
-COPY autotune/agent/pyproject.toml /app/autotune/agent/pyproject.toml
-COPY autotune/agent/idpac/ /app/autotune/agent/idpac/
-RUN uv pip install --no-cache -e /app/autotune/agent/
+COPY products/autotune/agent/pyproject.toml /app/products/autotune/agent/pyproject.toml
+COPY products/autotune/agent/idpac/ /app/products/autotune/agent/idpac/
+RUN uv pip install --no-cache -e /app/products/autotune/agent/
 
 # --- Pricing data ---
 COPY config_library/pricing.yaml /app/config_library/pricing.yaml
@@ -55,17 +55,17 @@ USER bedrock_agentcore
 EXPOSE 8080
 
 # --- Agent code (no duplication — COPY from source locations) ---
-COPY autotune/fast-template/patterns/strands-single-agent/basic_agent.py .
-COPY autotune/fast-template/patterns/strands-single-agent/tools/ tools/
-COPY autotune/fast-template/patterns/utils/ utils/
-COPY autotune/agent/tools.py idpac_tools.py
-COPY autotune/agent/code_interpreter_tools.py code_interpreter_tools.py
-COPY autotune/agent/pricing.py pricing.py
-COPY autotune/agent/state.py optimization_state.py
-COPY autotune/agent/hooks.py optimization_hooks.py
-COPY autotune/agent/context_manager.py proactive_context_manager.py
-COPY autotune/agent/prompt.md .
-COPY autotune/agent/skills/ skills/
+COPY products/autotune/fast-template/patterns/strands-single-agent/basic_agent.py .
+COPY products/autotune/fast-template/patterns/strands-single-agent/tools/ tools/
+COPY products/autotune/fast-template/patterns/utils/ utils/
+COPY products/autotune/agent/tools.py idpac_tools.py
+COPY products/autotune/agent/code_interpreter_tools.py code_interpreter_tools.py
+COPY products/autotune/agent/pricing.py pricing.py
+COPY products/autotune/agent/state.py optimization_state.py
+COPY products/autotune/agent/hooks.py optimization_hooks.py
+COPY products/autotune/agent/context_manager.py proactive_context_manager.py
+COPY products/autotune/agent/prompt.md .
+COPY products/autotune/agent/skills/ skills/
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
   CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8080/ping', timeout=2)" || exit 1

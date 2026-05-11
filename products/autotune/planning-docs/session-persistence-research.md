@@ -91,7 +91,7 @@ from strands.session import S3SessionManager
 session_manager = S3SessionManager(
     session_id="my-session",
     bucket="my-bucket",
-    prefix="autotune/sessions"
+    prefix="products/autotune/sessions"
 )
 agent = Agent(model=model, tools=tools, session_manager=session_manager)
 ```
@@ -407,5 +407,5 @@ Use Strands `FileSessionManager(storage_dir="/mnt/workspace/.sessions")` for con
 - [S3 Files on ECS](https://docs.aws.amazon.com/AmazonS3/latest/userguide/s3-files-mounting-ecs.html)
 - [S3 Files Limits & Quotas](https://docs.aws.amazon.com/AmazonS3/latest/userguide/s3-files-quotas.html)
 - [Strands SDK S3SessionManager](https://github.com/strands-agents/sdk-python) (v1.37.0)
-- FAST template: `autotune/fast-template/` in this repo
+- FAST template: `products/autotune/fast-template/` in this repo
 - Apex-build-agent: `~/gitlab/proserve-apex/delivery-agent/apex-build-agent/`
