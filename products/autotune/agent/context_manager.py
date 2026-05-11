@@ -3,34 +3,46 @@
 
 """Proactive context management for long-running optimization agent.
 
-Triggers summarization at a configurable threshold (default 50%) and forces
-the agent to re-read the optimization log after context reduction.
+Checks context usage before every model call. When threshold is exceeded,
+summarizes the conversation and re-injects the optimization log.
 """
 
+import json
 import logging
 import os
+import time
 
 from strands.agent.conversation_manager import SummarizingConversationManager
+from strands.hooks import HookProvider, BeforeModelCallEvent
 
 logger = logging.getLogger(__name__)
 
-# TODO: After strands-agents > 1.37.0 (May 7 2026), replace with
-# model.get_config().get("context_window_limit")
-CONTEXT_WINDOW_TOKENS = 1_000_000  # Claude Opus 4-6-v1
+CONTEXT_WINDOW_TOKENS = 1_000_000  # Claude Opus/Sonnet context window
 
 
 class ProactiveContextManager(SummarizingConversationManager):
-    """Triggers summarization proactively at a token threshold, then injects log re-read."""
+    """Conversation manager that never triggers on its own — driven by the hook."""
 
-    def __init__(self, threshold_pct: float = 50.0, **kwargs):
+    def __init__(self, **kwargs):
         kwargs.setdefault("summary_ratio", 0.5)
         kwargs.setdefault("preserve_recent_messages", 6)
         super().__init__(**kwargs)
-        self.threshold_pct = threshold_pct
 
     def apply_management(self, agent, **kwargs):
-        """After each agent cycle, check if we've crossed the threshold."""
-        # Get context size from last assistant message metadata
+        """No-op — context check is done by ContextCheckHook before each model call."""
+        pass
+
+
+class ContextCheckHook(HookProvider):
+    """Check context usage before every model call and summarize if over threshold."""
+
+    def __init__(self, threshold_pct: float = 50.0):
+        self.threshold_pct = threshold_pct
+
+    @HookProvider.hook(BeforeModelCallEvent)
+    def _check(self, event: BeforeModelCallEvent) -> None:
+        agent = event.agent
+        # Find last assistant message with usage metadata
         for msg in reversed(agent.messages):
             if msg.get("role") == "assistant":
                 usage = msg.get("metadata", {}).get("usage", {})
@@ -38,19 +50,20 @@ class ProactiveContextManager(SummarizingConversationManager):
                     context_tokens = usage.get("inputTokens", 0) + usage.get("cacheReadInputTokens", 0)
                     pct = context_tokens / CONTEXT_WINDOW_TOKENS * 100
                     if pct >= self.threshold_pct:
-                        logger.info(
-                            "Context at %.1f%% (threshold %.1f%%) — summarizing and injecting log re-read",
-                            pct, self.threshold_pct,
-                        )
-                        self.reduce_context(agent)
+                        logger.info("Context at %.1f%% — summarizing", pct)
+                        self._emit_stream_event("context_summarizing", pct)
+                        agent.conversation_manager.reduce_context(agent)
                         self._inject_log_reread(agent)
-                    return
+                        self._emit_stream_event("context_summarized", pct)
+                return
 
     def _inject_log_reread(self, agent):
-        """Append a user message instructing the agent to re-read the optimization log."""
-        log_path = os.path.join(os.environ["AUTOTUNE_WORKSPACE_DIR"], "OPTIMIZATION-LOG.md")
-        with open(log_path) as f:
-            log_content = f.read()
+        log_path = os.path.join(os.environ.get("AUTOTUNE_WORKSPACE_DIR", "/tmp"), "OPTIMIZATION-LOG.md")
+        try:
+            with open(log_path) as f:
+                log_content = f.read()
+        except FileNotFoundError:
+            return
         agent.messages.append({
             "role": "user",
             "content": [{"text": (
@@ -59,3 +72,20 @@ class ProactiveContextManager(SummarizingConversationManager):
                 + log_content
             )}],
         })
+
+    def _emit_stream_event(self, event_type: str, pct: float):
+        scratch = os.environ.get("AUTOTUNE_SCRATCH_DIR", "")
+        if not scratch:
+            return
+        stream_path = os.path.join(scratch, "stream.jsonl")
+        event = {
+            "type": event_type,
+            "pct": round(pct, 1),
+            "threshold_pct": self.threshold_pct,
+            "ts": time.strftime("%H:%M:%S", time.gmtime()),
+        }
+        try:
+            with open(stream_path, "a") as f:
+                f.write(json.dumps(event) + "\n")
+        except Exception:
+            pass

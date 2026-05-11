@@ -80,7 +80,7 @@ export function ChatInput({
           ) : (
             <>
               <Send className="h-4 w-4 mr-2" />
-              Send
+              Launch Run
             </>
           )}
         </Button>

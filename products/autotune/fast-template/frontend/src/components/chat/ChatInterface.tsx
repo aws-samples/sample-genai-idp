@@ -36,6 +36,8 @@ type StreamItem =
   | { type: "text"; content: string; ts?: string }
   | { type: "tool_use"; toolUseId: string; name: string; input: string; ts?: string }
   | { type: "tool_result"; toolUseId: string; result: string; ts?: string }
+  | { type: "context_summarizing"; pct: number; threshold_pct: number; ts?: string }
+  | { type: "context_summarized"; pct: number; threshold_pct: number; ts?: string }
 
 function parseStreamLine(line: string): StreamItem | null {
   try {
@@ -43,6 +45,8 @@ function parseStreamLine(line: string): StreamItem | null {
     if (evt.type === "text" && evt.content) return evt
     if (evt.type === "tool_use") return evt
     if (evt.type === "tool_result") return evt
+    if (evt.type === "context_summarizing") return evt
+    if (evt.type === "context_summarized") return evt
     return null
   } catch { return null }
 }
@@ -386,6 +390,22 @@ export default function ChatInterface() {
           <div className="grow">
             <ToolCallDisplay name={item.name} args={item.input} status="complete" result={result} />
           </div>
+        </div>
+      )
+    }
+    if (item.type === "context_summarized") {
+      return (
+        <div key={i} className="my-2 px-3 py-2 bg-yellow-50 border border-yellow-200 rounded text-sm text-yellow-800">
+          {item.ts && <span className="text-xs text-yellow-500 mr-2">[{item.ts}]</span>}
+          ⚡ Context summarized at {item.pct}% usage (threshold: {item.threshold_pct}%) — optimization log re-injected
+        </div>
+      )
+    }
+    if (item.type === "context_summarizing") {
+      return (
+        <div key={i} className="my-2 px-3 py-2 bg-blue-50 border border-blue-200 rounded text-sm text-blue-800">
+          {item.ts && <span className="text-xs text-blue-500 mr-2">[{item.ts}]</span>}
+          🔄 Context at {item.pct}% — summarizing conversation...
         </div>
       )
     }

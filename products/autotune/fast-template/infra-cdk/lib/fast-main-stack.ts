@@ -84,6 +84,12 @@ export class FastMainStack extends cdk.Stack {
       exportName: `${props.config.stack_name_base}-OptimizationStateApiUrl`,
     })
 
+    new cdk.CfnOutput(this, "StreamBucketName", {
+      value: this.backendStack.streamBucket,
+      description: "S3 bucket for AutoTune agent stream data",
+      exportName: `${props.config.stack_name_base}-StreamBucketName`,
+    })
+
     new cdk.CfnOutput(this, "AmplifyConsoleUrl", {
       value: `https://console.aws.amazon.com/amplify/apps/${this.amplifyHostingStack.amplifyApp.appId}`,
       description: "Amplify Console URL for monitoring deployments",
