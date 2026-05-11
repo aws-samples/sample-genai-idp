@@ -5,10 +5,11 @@
 !products/autotune/fast-template/pyproject.toml
 !products/autotune/fast-template/gateway/
 !products/autotune/fast-template/tools/
-!products/autotune/fast-template/patterns/strands-single-agent/
 !products/autotune/fast-template/patterns/utils/
 
 # AutoTune agent
+!products/autotune/agent/entrypoint.py
+!products/autotune/agent/requirements.txt
 !products/autotune/agent/pyproject.toml
 !products/autotune/agent/idpac/
 !products/autotune/agent/tools.py
