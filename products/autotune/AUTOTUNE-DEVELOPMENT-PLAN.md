@@ -1117,15 +1117,24 @@ Once everything works with tools connected directly, migrate to the proper Agent
 
 ## Appendix: Key Files Reference
 
-| What | Path (IDPAC repo) | Path (IDP repo, proposed) |
-|------|-------------------|--------------------------|
-| Python package | `idpac/` | `products/autotune/agent/idpac/` |
-| Agent prompt | `.kiro/agents/idpac-optimizer.md` | `products/autotune/agent/prompt.md` |
-| Skills | `.kiro/skills/` | `products/autotune/agent/skills/` |
-| Optimization log template | `OPTIMIZATION-LOG-TEMPLATE.md` | `products/autotune/agent/OPTIMIZATION-LOG-TEMPLATE.md` |
-| Strands agent | N/A | `products/autotune/agent/agent.py` |
-| Tool definitions | N/A | `products/autotune/agent/tools.py` |
-| FAST template | N/A | `products/autotune/` (cloned from FAST) |
+| What | Path |
+|------|------|
+| Agent entrypoint (AgentCore) | `products/autotune/agent/entrypoint.py` |
+| Strands tools (25+) | `products/autotune/agent/tools.py` |
+| Hooks (cost, cancel, loop) | `products/autotune/agent/hooks.py` |
+| DynamoDB state helper | `products/autotune/agent/state.py` |
+| Cost calculation | `products/autotune/agent/pricing.py` |
+| Sandboxed code execution | `products/autotune/agent/code_interpreter_tools.py` |
+| Context summarization | `products/autotune/agent/context_manager.py` |
+| System prompt | `products/autotune/agent/prompt.md` |
+| Domain knowledge skills | `products/autotune/agent/skills/` |
+| IDPAC library (wraps idp-cli) | `products/autotune/agent/idpac/` |
+| Dockerfile | `products/autotune/agent/Dockerfile` |
+| Agent requirements | `products/autotune/agent/requirements.txt` |
+| CDK infrastructure | `products/autotune/fast-template/infra-cdk/` |
+| Frontend (React) | `products/autotune/fast-template/frontend/` |
+| FAST gateway/utils | `products/autotune/fast-template/patterns/utils/` |
+| Reset script | `products/autotune/scripts/reset_stack.py` |
 
 ## Appendix: Skills Inventory
 

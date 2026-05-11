@@ -229,7 +229,7 @@ export class BackendStack extends cdk.NestedStack {
         path.resolve(__dirname, "..", "..", "..", "..", ".."), // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
         {
           platform: ecr_assets.Platform.LINUX_ARM64,
-          file: `products/autotune/fast-template/patterns/${pattern}/Dockerfile`,
+          file: `products/autotune/agent/Dockerfile`,
           exclude: [
             ".git",
             "node_modules",
