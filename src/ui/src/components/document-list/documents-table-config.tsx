@@ -8,6 +8,7 @@ import type { TableProps } from '@cloudscape-design/components';
 import { TableHeader } from '../common/table';
 import { DOCUMENTS_PATH } from '../../routes/constants';
 import { renderHitlStatus } from '../common/hitl-status-renderer';
+import CircuitBreakerBadge from './CircuitBreakerBadge';
 import { formatConfigVersionLink } from '../test-studio/utils/configVersionUtils';
 import type { ConfigVersion } from '../test-studio/utils/configVersionUtils';
 
@@ -377,6 +378,7 @@ export const DocumentsCommonHeader = ({
               />
             </span>
           )}
+          <CircuitBreakerBadge />
         </SpaceBetween>
       }
       {...props}

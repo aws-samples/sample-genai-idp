@@ -222,6 +222,21 @@ Parameters:
     Default: ""
     Description: Security group ID for Lambda VpcConfig (required when UsePrivateAppSync=true)
 
+  # Circuit Breaker (feature-flagged — may be empty when disabled)
+  ConcurrencyTableName:
+    Type: String
+    Default: ""
+    Description: DynamoDB ConcurrencyTable — circuit breaker state lives here under counter_id=circuit_breaker
+  CircuitBreakerManagerFunctionArn:
+    Type: String
+    Default: ""
+    Description: ARN of the CircuitBreakerManagerFunction from main template (empty if disabled)
+  CircuitBreakerEnabled:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+    Description: Whether the circuit breaker feature is enabled
+
 Metadata:
   cfn-lint:
     config:
@@ -237,6 +252,7 @@ Conditions:
   HasTestExecutionAggregationFunction: !Not [!Equals [!Ref TestExecutionAggregationFunctionArn, ""]]
   IsPrivateAppSync: !Equals [!Ref UsePrivateAppSync, "true"]
   HasMLflowLoggerFunction: !Not [!Equals [!Ref MLflowLoggerFunctionArn, ""]]
+  CircuitBreakerEnabledCondition: !Equals [!Ref CircuitBreakerEnabled, "true"]
 
 Resources:
 
@@ -4262,6 +4278,160 @@ Resources:
           true
         #end
 
+
+  ##########################################################################
+  # Circuit Breaker resolver — status query + admin mutations + fan-out trigger
+  # All circuit breaker resources are feature-flagged via CircuitBreakerEnabledCondition.
+  ##########################################################################
+  CircuitBreakerResolverFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Condition: CircuitBreakerEnabledCondition
+    Properties:
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+      RetentionInDays: !Ref LogRetentionDays
+
+  CircuitBreakerResolverFunction:
+    Type: AWS::Serverless::Function
+    Condition: CircuitBreakerEnabledCondition
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: "VPC attachment is conditional on AppSyncVisibility=PRIVATE (see VpcConfig below). The resolver must live in the same VPC as the private AppSync API so AppSync can invoke it and its DynamoDB reads can traverse a gateway endpoint. On the default/public AppSync path the resolver only talks to DynamoDB and Lambda over AWS-managed networking and VPC access is not required."
+          - id: W92
+            reason: "Function does not require reserved concurrency as it scales based on demand"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for AppSync resolver function"
+    # checkov:skip=CKV_AWS_117: "VPC attachment is conditional on AppSyncVisibility=PRIVATE (see VpcConfig below); default path does not require VPC access"
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data"
+    Properties:
+      PermissionsBoundary:
+        !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
+      Handler: index.handler
+      Runtime: python3.12
+      CodeUri: ./src/lambda/circuit_breaker_resolver
+      Description: AppSync resolver for circuit breaker status + admin controls
+      MemorySize: 256
+      Timeout: 30
+      # With a PRIVATE AppSync API the resolver Lambda must live in the same
+      # VPC so AppSync can invoke it and its DynamoDB reads traverse a
+      # gateway endpoint rather than the public endpoint.
+      VpcConfig: !If
+        - IsPrivateAppSync
+        - SubnetIds: !Ref LambdaSubnetIds
+          SecurityGroupIds:
+            - !Ref LambdaSecurityGroupId
+        - !Ref AWS::NoValue
+      Environment:
+        Variables:
+          LOG_LEVEL: !Ref LogLevel
+          CONCURRENCY_TABLE: !Ref ConcurrencyTableName
+          CIRCUIT_BREAKER_MANAGER_ARN: !Ref CircuitBreakerManagerFunctionArn
+          CIRCUIT_BREAKER_ENABLED: !Ref CircuitBreakerEnabled
+      LoggingConfig:
+        LogGroup: !Ref CircuitBreakerResolverFunctionLogGroup
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref ConcurrencyTableName
+        - Statement:
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !Ref CircuitBreakerManagerFunctionArn
+            - Effect: Allow
+              Action:
+                - kms:Encrypt
+                - kms:Decrypt
+                - kms:ReEncrypt*
+                - kms:GenerateDataKey*
+                - kms:DescribeKey
+              Resource: !Ref CustomerManagedEncryptionKeyArn
+
+  CircuitBreakerDataSource:
+    Type: AWS::AppSync::DataSource
+    Condition: CircuitBreakerEnabledCondition
+    Properties:
+      ApiId: !Ref GraphQLApiId
+      Name: CircuitBreakerDataSource
+      Description: Lambda function for circuit breaker status + admin controls
+      Type: AWS_LAMBDA
+      ServiceRoleArn: !GetAtt CircuitBreakerAppSyncRole.Arn
+      LambdaConfig:
+        LambdaFunctionArn: !GetAtt CircuitBreakerResolverFunction.Arn
+
+  # Dedicated service role so AppSync can invoke the resolver — AppSyncServiceRole
+  # above is built before the function exists (circular ref), so we provision a
+  # per-resolver role that only grants invoke on this one function.
+  CircuitBreakerAppSyncRole:
+    Type: AWS::IAM::Role
+    Condition: CircuitBreakerEnabledCondition
+    Properties:
+      PermissionsBoundary:
+        !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: !Sub "appsync.${AWS::URLSuffix}"
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: InvokeCircuitBreakerResolver
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource: !GetAtt CircuitBreakerResolverFunction.Arn
+
+  GetCircuitBreakerStatusResolver:
+    Type: AWS::AppSync::Resolver
+    Condition: CircuitBreakerEnabledCondition
+    DependsOn: GraphQLSchema
+    Properties:
+      ApiId: !Ref GraphQLApiId
+      DataSourceName: !GetAtt CircuitBreakerDataSource.Name
+      TypeName: Query
+      FieldName: getCircuitBreakerStatus
+
+  PauseCircuitBreakerResolver:
+    Type: AWS::AppSync::Resolver
+    Condition: CircuitBreakerEnabledCondition
+    DependsOn: GraphQLSchema
+    Properties:
+      ApiId: !Ref GraphQLApiId
+      DataSourceName: !GetAtt CircuitBreakerDataSource.Name
+      TypeName: Mutation
+      FieldName: pauseCircuitBreaker
+
+  ResumeCircuitBreakerResolver:
+    Type: AWS::AppSync::Resolver
+    Condition: CircuitBreakerEnabledCondition
+    DependsOn: GraphQLSchema
+    Properties:
+      ApiId: !Ref GraphQLApiId
+      DataSourceName: !GetAtt CircuitBreakerDataSource.Name
+      TypeName: Mutation
+      FieldName: resumeCircuitBreaker
+
+  ProbeCircuitBreakerResolver:
+    Type: AWS::AppSync::Resolver
+    Condition: CircuitBreakerEnabledCondition
+    DependsOn: GraphQLSchema
+    Properties:
+      ApiId: !Ref GraphQLApiId
+      DataSourceName: !GetAtt CircuitBreakerDataSource.Name
+      TypeName: Mutation
+      FieldName: probeCircuitBreaker
+
+  PublishCircuitBreakerStatusResolver:
+    Type: AWS::AppSync::Resolver
+    Condition: CircuitBreakerEnabledCondition
+    DependsOn: GraphQLSchema
+    Properties:
+      ApiId: !Ref GraphQLApiId
+      DataSourceName: !GetAtt CircuitBreakerDataSource.Name
+      TypeName: Mutation
+      FieldName: publishCircuitBreakerStatus
 
 
 Outputs:

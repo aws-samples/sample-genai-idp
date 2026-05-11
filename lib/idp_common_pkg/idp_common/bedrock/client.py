@@ -69,12 +69,17 @@ DEFAULT_MAX_BACKOFF = 300  # 5 minutes
 # Claude 4.7+ model base names that don't support temperature/top_k/top_p parameters.
 # These parameters are deprecated for these models and cause runtime errors.
 # Add new model base names here as needed (e.g., sonnet-4-7, haiku-4-7).
+#
+# NOTE: This set is consulted by BOTH the traditional Bedrock invocation path
+# (this file's BedrockClient.invoke_model) AND the agentic extraction path
+# (idp_common/extraction/agentic_idp.py::_get_inference_params). When adding
+# a new Claude 4.7+ variant here, no other code changes are required.
 _CLAUDE_4_7_BASE_NAMES = {
     "anthropic.claude-opus-4-7",
 }
 
 
-def _is_claude_4_7_model(model_id: str) -> bool:
+def is_claude_4_7_model(model_id: str) -> bool:
     """Check if a model is a Claude 4.7+ variant that doesn't support temperature/top_k/top_p.
 
     Handles region prefixes (us., eu., global.) and :1m suffix automatically.
@@ -95,6 +100,11 @@ def _is_claude_4_7_model(model_id: str) -> bool:
     if base.endswith(":1m"):
         base = base[:-3]
     return base in _CLAUDE_4_7_BASE_NAMES
+
+
+# Backwards-compatible alias for internal callers that still reference the
+# private name. New code should import `is_claude_4_7_model`.
+_is_claude_4_7_model = is_claude_4_7_model
 
 
 # Base model names that support cachePoint (without region prefix)
@@ -863,6 +873,22 @@ class BedrockClient:
             if error_code in retryable_errors:
                 self._put_metric("BedrockThrottles", 1)
 
+                # Emit circuit-breaker specific metrics by error category.
+                # BedrockThrottling is a combined generation+embedding signal
+                # that feeds BedrockServiceOutageAlarm (the circuit breaker
+                # trigger). For per-path counts use BedrockThrottles
+                # (generation, above) or BedrockEmbeddingThrottles (embedding).
+                if error_code == "ServiceUnavailableException":
+                    self._put_metric("BedrockServiceUnavailable", 1)
+                elif error_code in (
+                    "ThrottlingException",
+                    "TooManyRequestsException",
+                    "RequestLimitExceeded",
+                ):
+                    self._put_metric("BedrockThrottling", 1)
+                elif error_code == "ServiceQuotaExceededException":
+                    self._put_metric("BedrockQuotaLimit", 1)
+
                 # Check if we've reached max retries
                 if retry_count >= max_retries:
                     logger.error(
@@ -1268,6 +1294,22 @@ class BedrockClient:
 
             if error_code in retryable_errors:
                 self._put_metric("BedrockEmbeddingThrottles", 1)
+
+                # Emit circuit-breaker specific metrics by error category.
+                # BedrockThrottling is a combined generation+embedding signal
+                # that feeds BedrockServiceOutageAlarm (the circuit breaker
+                # trigger). For per-path counts use BedrockEmbeddingThrottles
+                # (embedding, above) or BedrockThrottles (generation).
+                if error_code == "ServiceUnavailableException":
+                    self._put_metric("BedrockServiceUnavailable", 1)
+                elif error_code in (
+                    "ThrottlingException",
+                    "TooManyRequestsException",
+                    "RequestLimitExceeded",
+                ):
+                    self._put_metric("BedrockThrottling", 1)
+                elif error_code == "ServiceQuotaExceededException":
+                    self._put_metric("BedrockQuotaLimit", 1)
 
                 # Check if we've reached max retries
                 if retry_count >= max_retries:

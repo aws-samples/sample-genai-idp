@@ -5,10 +5,45 @@ SPDX-License-Identifier: MIT-0
 
 ## [Unreleased]
 
+## [0.5.10]
+
+### Added
+
+- **Enhanced config validation** — `idp-cli config-validate` now validates Bedrock model IDs against `pricing.yaml` and checks that custom `task_prompts` include required placeholders (e.g. `{DOCUMENT_TEXT}`, `{DOCUMENT_IMAGE}`) across all pipeline sections. Runs automatically on `config-upload` (use `--no-validate` to skip).
+
+- **`idp-cli discover --model-id` flag** — override the Bedrock model used by `idp-cli discover` for a single invocation (e.g. `--model-id us.anthropic.claude-opus-4-6-v1`). Applies to all discovery modes; backward-compatible. ([#309](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues/309))
+
+- **Bedrock circuit breaker** — a CFN-parameterized circuit breaker that pauses new workflow starts when Bedrock is unhealthy and auto-recovers once the service comes back, so transient Bedrock outages no longer burn through SQS retries or leave documents half-processed. Off by default for full backward compatibility.
+  - New `circuit_breaker_manager` Lambda owns state transitions (`CLOSED` / `OPEN` / `HALF_OPEN`) in the existing `ConcurrencyTable`. Triggered by CloudWatch Alarms on Bedrock error metrics (via SNS) and by an EventBridge-scheduled health check that promotes `OPEN → HALF_OPEN` after `RECOVERY_TIMEOUT_SECONDS`. `workflow_tracker` closes the breaker after the first successful probe.
+  - `queue_processor` gates new work before incrementing the concurrency counter; `OPEN` messages are redelivered by SQS (with `ChangeMessageVisibility` extended to the recovery timeout to avoid DLQ churn), DDB errors fail open.
+  - All state transitions use conditional DDB writes so concurrent alarm/workflow updates cannot clobber each other. `failure_count` is preserved across `OPEN → HALF_OPEN`; manual reset zeros counters and clears `last_error`.
+  - Operator hooks: manual `reset` / `get_state` invocations, optional customer Lambda invoked via `ERROR_HANDLER_ARN`, CloudWatch metrics (`CircuitBreaker{Opened,HalfOpen,Closed}`), and `AlertsTopic` notifications.
+  - New CFN parameters (all default off): `EnableCircuitBreaker`, `CircuitBreakerRecoveryTimeoutSeconds`, `CircuitBreakerErrorHandlerArn`. Unit tests cover alarm/health-check/manual/race-loss branches.
+  - **Web UI visibility & admin controls** — document list header shows a live status badge (green/blue/red with `lastError` tooltip) via an AppSync subscription; clicking opens a details panel. Admin-group users additionally get **Pause / Resume / Probe** buttons (each requires a reason, persisted and broadcast). All automatic transitions publish to the subscription so the badge updates within ~1s. Hidden entirely when `CircuitBreakerEnabled=false`. Backed by new AppSync ops (`getCircuitBreakerStatus`, `pause/resume/probeCircuitBreaker`, `onCircuitBreakerStatusChange`) and a new resolver Lambda that enforces Admin authorization at both the schema and resolver layers.
+  - Docs: `docs/circuit-breaker.md` and `src/lambda/circuit_breaker_manager/README.md`.
+
+
 ### Changed
 
-- **Replaced DSR with open-source SRT security scanning tool** — Migrated from deprecated internal DSR (Design Security Review) tool to the actively maintained open-source [Sample Security Review Tool (SRT)](https://github.com/aws-samples/sample-security-review-tool). Added automated security scanning in GitLab CI/CD pipeline that runs on merge requests targeting `develop` branch. Pipeline fails if security findings are detected, providing a security gate before production deployments. New Makefile targets: `make srt`, `make srt-setup`, `make srt-scan`, `make srt-fix`. Updated documentation in CLAUDE.md, CONTRIBUTING.md, and scripts/README.md.
-  
+- **Replaced DSR with open-source SRT security scanning tool** — Migrated from the deprecated internal DSR tool to the open-source [Sample Security Review Tool (SRT)](https://github.com/aws-samples/sample-security-review-tool). GitLab CI/CD now runs SRT on MRs targeting `develop` and fails the pipeline on findings. New Makefile targets: `make srt`, `make srt-setup`, `make srt-scan`, `make srt-fix`.
+
+
+### Fixed
+
+- **SRT now uses `--no-license-update`** to prevent it from automatically rewriting source file license headers during security scans.
+
+- **Agentic extraction with Claude Opus 4.7 no longer fails with `top_p is deprecated`** — the Claude 4.7+ enablement in v0.5.7 fixed the traditional Bedrock path but missed the Strands-based agentic path (`idp_common/extraction/agentic_idp.py`), which still forwarded `top_p` to ConverseStream. Both paths now share the same `is_claude_4_7_model` detection and omit deprecated inference params. ([#304](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues/304))
+
+- **`idp-cli discover` silently ignored mismatched ground truth files** — previously a filename-stem mismatch between `-d` and `-g` only produced a warning and ran discovery without ground truth. Now: single-doc + single-GT invocations are paired by position (no filename match required); batch-mode mismatches or duplicate GT stems fail with exit `1` and a clear message. ([#310](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues/310))
+
+- **Web UI "View Source" failed for PDFs and other docs after the v0.5.9 CSP hardening** — three fixes in `FileViewer`: (1) pass an `s3://bucket/key` URI to `getFileContents` instead of relying on the build-time `VITE_AWS_REGION` env var; (2) render PDFs in an `<iframe>` instead of `<object>` so they're allowed under the hardened `object-src 'none'` CSP; (3) drop the `sandbox` attribute on the PDF iframe only (Chrome's built-in PDF viewer is blocked when sandboxed; non-PDF iframes keep their sandbox). Added a fallback "Open PDF in a new tab" link.
+
+## Templates
+   - us-west-2: `https://s3.us-west-2.amazonaws.com/aws-ml-blog-us-west-2/artifacts/genai-idp/idp-main_0.5.10.yaml`
+   - us-east-1: `https://s3.us-east-1.amazonaws.com/aws-ml-blog-us-east-1/artifacts/genai-idp/idp-main_0.5.10.yaml`
+   - eu-central-1: `https://s3.eu-central-1.amazonaws.com/aws-ml-blog-eu-central-1/artifacts/genai-idp/idp-main_0.5.10.yaml`
+
+
 ## [0.5.9]
 
 ### Added

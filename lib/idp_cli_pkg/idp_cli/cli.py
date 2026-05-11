@@ -237,7 +237,7 @@ TEMPLATE_URLS = {
 
 
 @click.group()
-@click.version_option(version="0.5.9")
+@click.version_option(version="0.5.10")
 def cli():
     """
     IDP CLI - Batch document processing for IDP Accelerator
@@ -4512,6 +4512,16 @@ def config_sync_bda(
     is_flag=True,
     help="Only detect section boundaries (use with --auto-detect). Prints boundaries without running discovery.",
 )
+@click.option(
+    "--model-id",
+    default=None,
+    help=(
+        "Override the Bedrock model ID used for discovery "
+        "(e.g., 'us.anthropic.claude-opus-4-6-v1'). When omitted, the "
+        "discovery model from the stack config (stack mode) or system "
+        "defaults (local mode) is used."
+    ),
+)
 def discover(
     stack_name: str,
     document: tuple,
@@ -4524,6 +4534,7 @@ def discover(
     page_label: tuple,
     auto_detect: bool,
     detect_only: bool,
+    model_id: Optional[str],
 ):
     """
     Discover document class schema from sample document(s)
@@ -4534,6 +4545,16 @@ def discover(
     Ground truth files (-g) are auto-matched to documents (-d) by filename
     stem: invoice.pdf matches invoice.json. Unmatched documents run without
     ground truth.
+
+    Special case: when exactly one document and one ground truth file are
+    provided, they are paired by position regardless of filename stem. This
+    supports the common case where ground truth files have generic names
+    (e.g., baseline/<doc>/sections/1/result.json).
+
+    If any -g files are provided in batch mode (multiple -d or multiple -g)
+    and cannot be matched to a document by stem, discover exits non-zero
+    with an error rather than silently falling back to no-GT discovery.
+    ([#310](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues/310))
 
     For --output (-o) in batch mode: if path is a directory, writes one
     JSON file per schema; if path is a file, writes all schemas as a
@@ -4564,6 +4585,10 @@ def discover(
 
       # Stack mode (saves to config)
       idp-cli discover --stack-name my-stack -d ./invoice.pdf --config-version v2
+
+      # Override the discovery model (e.g. use Claude Opus instead of the default)
+      idp-cli discover -d ./invoice.pdf -g ./invoice.json \\
+          --model-id us.anthropic.claude-opus-4-6-v1
     """
     import json
     from pathlib import Path
@@ -4586,6 +4611,8 @@ def discover(
             if stack_name:
                 console.print(f"Stack: {stack_name}")
             console.print(f"Document: {doc_path}")
+            if model_id:
+                console.print(f"Model ID override: {model_id}")
             console.print()
 
             if detect_only:
@@ -4594,7 +4621,8 @@ def discover(
                     "[cyan]Detecting section boundaries with AI...[/cyan]"
                 ):
                     detect_result = client.discovery.auto_detect_sections(
-                        document_path=doc_path
+                        document_path=doc_path,
+                        model_id=model_id,
                     )
 
                 if detect_result.status != "SUCCESS":
@@ -4632,6 +4660,7 @@ def discover(
                     document_path=doc_path,
                     config_version=config_version,
                     auto_detect=True,
+                    model_id=model_id,
                 )
 
             # batch_result is DiscoveryBatchResult
@@ -4678,6 +4707,8 @@ def discover(
                 console.print(f"Stack: {stack_name}")
             console.print(f"Document: {doc_path}")
             console.print(f"Page ranges: {len(page_range)}")
+            if model_id:
+                console.print(f"Model ID override: {model_id}")
             console.print()
 
             # Build page_ranges list
@@ -4701,6 +4732,7 @@ def discover(
                     document_path=doc_path,
                     page_ranges=page_ranges_list,
                     config_version=config_version,
+                    model_id=model_id,
                 )
 
             all_schemas = []
@@ -4732,24 +4764,68 @@ def discover(
             return
 
         # --- Standard discovery mode (original logic) ---
-        # Build ground truth map: filename stem → gt path
-        gt_map = {}
-        for gt_path in ground_truth:
-            stem = Path(gt_path).stem
-            gt_map[stem] = gt_path
+        # Special case: exactly one document + one ground truth → pair by
+        # position regardless of filename stem. This supports the common case
+        # where GT files have generic names (e.g. baseline/<doc>/sections/1/result.json).
+        # See issue #310.
+        if len(document) == 1 and len(ground_truth) == 1:
+            doc_gt_pairs = [(document[0], ground_truth[0])]
+        else:
+            # Build ground truth map: filename stem → gt path.
+            # Detect duplicate stems up front — silently overwriting them
+            # would hide user errors (e.g. two baseline/.../result.json files).
+            gt_map: dict = {}
+            duplicate_stems: dict = {}
+            for gt_path in ground_truth:
+                stem = Path(gt_path).stem
+                if stem in gt_map:
+                    duplicate_stems.setdefault(stem, [gt_map[stem]]).append(gt_path)
+                else:
+                    gt_map[stem] = gt_path
 
-        # Match ground truth to documents by filename stem
-        doc_gt_pairs = []
-        for doc_path in document:
-            doc_stem = Path(doc_path).stem
-            matched_gt = gt_map.pop(doc_stem, None)
-            doc_gt_pairs.append((doc_path, matched_gt))
+            if duplicate_stems:
+                console.print(
+                    "[red]✗ Error: multiple ground truth files share the same filename stem. "
+                    "Discover cannot determine which document each belongs to.[/red]"
+                )
+                for stem, paths in duplicate_stems.items():
+                    console.print(f"  stem '{stem}':")
+                    for p in paths:
+                        console.print(f"    - {p}")
+                console.print(
+                    "[yellow]Hint: rename ground truth files to uniquely match each document's "
+                    "filename stem, or run discover separately for each document.[/yellow]"
+                )
+                sys.exit(1)
 
-        # Warn about unmatched ground truth files
-        for gt_stem, gt_path in gt_map.items():
-            console.print(
-                f"[yellow]⚠ Ground truth '{gt_path}' did not match any document (stem: {gt_stem})[/yellow]"
-            )
+            # Match ground truth to documents by filename stem
+            doc_gt_pairs = []
+            for doc_path in document:
+                doc_stem = Path(doc_path).stem
+                matched_gt = gt_map.pop(doc_stem, None)
+                doc_gt_pairs.append((doc_path, matched_gt))
+
+            # Unmatched ground truth files are a fatal error when -g was
+            # explicitly provided. Previously this was a yellow warning that
+            # silently fell back to without-GT discovery — which violated the
+            # user's explicit request and produced subtly worse results that
+            # were hard to diagnose. See issue #310.
+            if gt_map:
+                console.print(
+                    "[red]✗ Error: ground truth file(s) could not be matched to "
+                    "any document by filename stem:[/red]"
+                )
+                for gt_stem, gt_path in gt_map.items():
+                    console.print(f"    - {gt_path} (stem: '{gt_stem}')")
+                doc_stems = sorted({Path(p).stem for p in document})
+                console.print(f"  Document stems available: {doc_stems}")
+                console.print(
+                    "[yellow]Hint: for a single document + single ground truth, "
+                    "filenames don't need to match (they will be paired by position). "
+                    "For batch mode, rename each ground truth file to match its "
+                    "corresponding document's stem.[/yellow]"
+                )
+                sys.exit(1)
 
         # Header
         is_batch = len(document) > 1
@@ -4767,6 +4843,8 @@ def discover(
             console.print(f"Class hint: {class_hint}")
         if config_version:
             console.print(f"Config Version: {config_version}")
+        if model_id:
+            console.print(f"Model ID override: {model_id}")
         console.print()
 
         # Process documents
@@ -4796,6 +4874,7 @@ def discover(
                     ground_truth_path=matched_gt,
                     config_version=config_version,
                     class_name_hint=class_hint,
+                    model_id=model_id,
                 )
 
             if result.status == "SUCCESS":
