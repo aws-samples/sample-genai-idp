@@ -2337,6 +2337,9 @@ Discover document class schemas from sample documents using Amazon Bedrock.
 
 **Ground truth matching:** Ground truth files (`-g`) are auto-matched to documents (`-d`) by filename stem. For example, `invoice.pdf` matches `invoice.json`. Unmatched documents run without ground truth.
 
+- **Single document + single ground truth:** When exactly one `-d` and one `-g` are provided, they are paired by position regardless of filename stem. This supports the common case where ground truth files have generic names (e.g., `baseline/<doc>/sections/1/result.json`).
+- **Batch mode (multiple `-d` or multiple `-g`):** Files are matched by stem. If any `-g` file cannot be matched to a document, `discover` exits non-zero with a clear error. This prevents silently running without-GT discovery when the user explicitly requested ground-truth-guided discovery. See [issue #310](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues/310).
+
 **Output behavior:**
 - Single document: `-o` writes the schema to the specified file
 - Batch + `-o` is a directory (or has no extension): writes one `{class_name}.json` per schema
@@ -2382,6 +2385,10 @@ idp-cli discover -d ./lending_package.pdf --auto-detect --detect-only -o section
 
 # Stack mode (saves to config)
 idp-cli discover --stack-name my-stack -d ./invoice.pdf --config-version v2
+
+# Override the Bedrock model (e.g. use Claude Opus instead of the configured default)
+idp-cli discover -d ./invoice.pdf -g ./invoice.json \
+    --model-id us.anthropic.claude-opus-4-6-v1
 ```
 
 | Option | Description |
@@ -2396,6 +2403,7 @@ idp-cli discover --stack-name my-stack -d ./invoice.pdf --config-version v2
 | `--page-label` | Label for corresponding `--page-range` (e.g., "W2 Form"). Used as class name hint per range. |
 | `--auto-detect` | Auto-detect document section boundaries using AI, then discover each section. |
 | `--detect-only` | Only detect section boundaries (use with `--auto-detect`). Prints boundaries without running discovery. |
+| `--model-id` | Override the Bedrock model ID used for discovery (e.g., `us.anthropic.claude-opus-4-6-v1`). When omitted, the discovery model from the stack config (stack mode) or system defaults (local mode) is used. Applies to with-ground-truth, without-ground-truth, `--auto-detect`, and `--page-range` modes. |
 | `--region` | AWS region |
 
 ---

@@ -1,0 +1,6 @@
+# IDPAutoTune agent container dependencies
+strands-agents==1.37.0
+strands-agents-tools==0.5.1
+boto3>=1.42.0
+ruamel.yaml>=0.18.0
+pypdfium2>=4.0.0

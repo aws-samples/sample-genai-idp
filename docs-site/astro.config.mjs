@@ -141,6 +141,7 @@ export default defineConfig({
             { label: "Reporting Database", slug: "reporting-database" },
             { label: "Capacity Planning", slug: "capacity-planning" },
             { label: "Cost Calculator", slug: "cost-calculator" },
+            { label: "Circuit Breaker", slug: "circuit-breaker" },
           ],
         },
         {
@@ -193,6 +194,14 @@ export default defineConfig({
             { label: "v0.4 → v0.5 Migration", slug: "migration-v04-to-v05" },
           ],
         },
+        // AUTO-SIDEBAR-START
+        {
+          label: "New & Uncategorized",
+          items: [
+            { label: "Setup Development Env Windows", slug: "setup-development-env-windows" },
+          ],
+        },
+        // AUTO-SIDEBAR-END
       ],
     }),
   ],

@@ -93,6 +93,9 @@ class CustomModelDeploymentResult:
 class TestSetValidationResult:
     """Result of validating a test set for fine-tuning."""
 
+    # Tell pytest not to collect this class as a test (name starts with "Test").
+    __test__ = False
+
     is_valid: bool
     document_count: int
     class_count: int

@@ -1,0 +1,36 @@
+# Exclude everything, then allow only what the build needs
+*
+
+# FAST framework
+!products/autotune/fast-template/pyproject.toml
+!products/autotune/fast-template/gateway/
+!products/autotune/fast-template/tools/
+!products/autotune/fast-template/patterns/strands-single-agent/
+!products/autotune/fast-template/patterns/utils/
+
+# AutoTune agent
+!products/autotune/agent/pyproject.toml
+!products/autotune/agent/idpac/
+!products/autotune/agent/tools.py
+!products/autotune/agent/code_interpreter_tools.py
+!products/autotune/agent/pricing.py
+!products/autotune/agent/state.py
+!products/autotune/agent/hooks.py
+!products/autotune/agent/context_manager.py
+!products/autotune/agent/prompt.md
+!products/autotune/agent/skills/
+
+# IDP CLI chain
+!lib/idp_common_pkg/
+!lib/idp_sdk/
+!lib/idp_cli_pkg/
+
+# Pricing data
+!config_library/pricing.yaml
+
+# Standard excludes within allowed dirs
+**/__pycache__/
+**/*.pyc
+**/.venv/
+**/node_modules/
+**/.git/

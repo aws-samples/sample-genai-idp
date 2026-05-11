@@ -554,6 +554,85 @@ Parameters:
     Default: ""
     Description: SageMaker MLflow tracking server ARN
 
+  # Circuit Breaker Configuration
+  CircuitBreakerEnabled:
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: >-
+      Enable circuit breaker for Bedrock service outages. When enabled, the system
+      automatically detects Bedrock failures and blocks new workflows until the
+      service recovers.
+
+  CircuitBreakerFailureThreshold:
+    Type: Number
+    Default: 3
+    MinValue: 1
+    MaxValue: 100
+    Description: >-
+      Combined error count across selected trigger metrics within the evaluation
+      window that opens the circuit breaker. See CircuitBreakerTrigger* params.
+
+  CircuitBreakerTriggerServiceUnavailable:
+    Type: String
+    Default: "true"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: >-
+      Count Bedrock ServiceUnavailable (503) errors toward the circuit breaker
+      failure threshold.
+
+  CircuitBreakerTriggerThrottling:
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: >-
+      Count Bedrock throttling errors (ThrottlingException,
+      TooManyRequestsException, RequestLimitExceeded) toward the circuit breaker
+      failure threshold.
+
+  CircuitBreakerTriggerQuotaLimit:
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: >-
+      Count Bedrock service quota errors (ServiceQuotaExceededException) toward
+      the circuit breaker failure threshold.
+
+  CircuitBreakerEvaluationPeriods:
+    Type: Number
+    Default: 1
+    MinValue: 1
+    MaxValue: 10
+    Description: >-
+      Number of 5-minute periods to evaluate for circuit breaker threshold.
+      For example, 1 period = 5 minutes, 2 periods = 10 minutes.
+
+  CircuitBreakerRecoveryTimeoutSeconds:
+    Type: Number
+    Default: 300
+    MinValue: 60
+    MaxValue: 3600
+    Description: >-
+      Seconds to wait before attempting recovery after the circuit breaker opens.
+      After this timeout, the circuit enters HALF_OPEN state to test if Bedrock
+      has recovered.
+
+  CircuitBreakerErrorHandlerArn:
+    Type: String
+    Default: ""
+    AllowedPattern: "^(|arn:aws[a-z-]*:lambda:[a-z0-9-]+:[0-9]{12}:function:.+)$"
+    Description: >-
+      (Optional) Lambda ARN for custom error handling when circuit breaker opens.
+      This Lambda is invoked asynchronously when the circuit opens, allowing
+      custom alerting or remediation logic.
   # Headless API Configuration
   # ------------------------------------------------------------------------
   # Headless API Deployment (required for GovCloud)
@@ -783,6 +862,11 @@ Conditions:
   EnableXRayTracingCondition: !Equals [ !Ref EnableXRayTracing, "true" ]
   UsePrivateAppSync: !Equals [ !Ref AppSyncVisibility, "PRIVATE" ]
   HasArtifactsBucketKmsKey: !Not [ !Equals [ !Ref ArtifactsBucketKmsKeyArn, "" ] ]
+  CircuitBreakerEnabledCondition: !Equals [ !Ref CircuitBreakerEnabled, "true" ]
+  HasCircuitBreakerErrorHandler: !Not [ !Equals [ !Ref CircuitBreakerErrorHandlerArn, "" ] ]
+  CircuitBreakerTriggerServiceUnavailableEnabled: !Equals [ !Ref CircuitBreakerTriggerServiceUnavailable, "true" ]
+  CircuitBreakerTriggerThrottlingEnabled: !Equals [ !Ref CircuitBreakerTriggerThrottling, "true" ]
+  CircuitBreakerTriggerQuotaLimitEnabled: !Equals [ !Ref CircuitBreakerTriggerQuotaLimit, "true" ]
 
 Metadata:
   cfn-lint:
@@ -841,6 +925,17 @@ Metadata:
         Parameters:
           - EnableMLflow
           - MlflowTrackingURI
+      - Label:
+          default: "Circuit Breaker"
+        Parameters:
+          - CircuitBreakerEnabled
+          - CircuitBreakerTriggerServiceUnavailable
+          - CircuitBreakerTriggerThrottling
+          - CircuitBreakerTriggerQuotaLimit
+          - CircuitBreakerFailureThreshold
+          - CircuitBreakerEvaluationPeriods
+          - CircuitBreakerRecoveryTimeoutSeconds
+          - CircuitBreakerErrorHandlerArn
       - Label:
           default: "External Identity Provider (Federation)"
         Parameters:
@@ -977,6 +1072,22 @@ Metadata:
         default: "Lambda Subnet IDs (required when AppSyncVisibility=PRIVATE)"
       ArtifactsBucketKmsKeyArn:
         default: "Artifacts Bucket KMS Key ARN (optional, for pre-created KMS-encrypted bucket)"
+      CircuitBreakerEnabled:
+        default: "Enable Circuit Breaker"
+      CircuitBreakerTriggerServiceUnavailable:
+        default: "Trigger: Bedrock Service Unavailable (503)"
+      CircuitBreakerTriggerThrottling:
+        default: "Trigger: Bedrock Throttling"
+      CircuitBreakerTriggerQuotaLimit:
+        default: "Trigger: Bedrock Quota Limit"
+      CircuitBreakerFailureThreshold:
+        default: "Circuit Breaker Failure Threshold"
+      CircuitBreakerEvaluationPeriods:
+        default: "Circuit Breaker Evaluation Periods (5-min each)"
+      CircuitBreakerRecoveryTimeoutSeconds:
+        default: "Circuit Breaker Recovery Timeout (seconds)"
+      CircuitBreakerErrorHandlerArn:
+        default: "Circuit Breaker Error Handler Lambda ARN (optional)"
       EnableHeadless:
         default: "Enable Headless API (Jobs REST API, required for GovCloud)"
       DeployInVPC:
@@ -2182,6 +2293,14 @@ Resources:
           - !Ref LambdaVpcSecurityGroup
           - ""
 
+        # Circuit Breaker wiring — feature-flagged; params empty when disabled
+        ConcurrencyTableName: !Ref ConcurrencyTable
+        CircuitBreakerManagerFunctionArn: !If
+          - CircuitBreakerEnabledCondition
+          - !GetAtt CircuitBreakerManagerFunction.Arn
+          - ""
+        CircuitBreakerEnabled: !Ref CircuitBreakerEnabled
+
   CustomerManagedEncryptionKey:
     DependsOn:
       - IsStacknameLengthOK
@@ -2240,6 +2359,17 @@ Resources:
               - kms:GenerateDataKey*
               - kms:DescribeKey
             Resource: "*"
+          - !If
+            - CircuitBreakerEnabledCondition
+            - Sid: Allow CloudWatch Alarms to use the key for SNS
+              Effect: Allow
+              Principal:
+                Service: !Sub "cloudwatch.${AWS::URLSuffix}"
+              Action:
+                - kms:Decrypt
+                - kms:GenerateDataKey*
+              Resource: "*"
+            - !Ref AWS::NoValue
           - !If
             - IsS3VectorsVectorStore
             - Sid: Allow S3 Vectors indexing service to use the key
@@ -4716,6 +4846,9 @@ Resources:
           MAX_CONCURRENT: !Ref MaxConcurrentWorkflows
           WORKING_BUCKET: !Ref WorkingBucket
           CONFIG_TABLE: !Ref ConfigurationTable
+          CIRCUIT_BREAKER_ENABLED: !If [CircuitBreakerEnabledCondition, "true", "false"]
+          DOCUMENT_QUEUE_URL: !Ref DocumentQueue
+          RECOVERY_TIMEOUT_SECONDS: !Ref CircuitBreakerRecoveryTimeoutSeconds
       Policies:
         - SQSPollerPolicy:
             QueueName: !GetAtt DocumentQueue.QueueName
@@ -4852,6 +4985,9 @@ Resources:
             ]
           SAVE_REPORTING_FUNCTION_NAME: !Ref SaveReportingDataFunctionV2
           WORKING_BUCKET: !Ref WorkingBucket
+          CIRCUIT_BREAKER_ENABLED: !If [CircuitBreakerEnabledCondition, "true", "false"]
+          CIRCUIT_BREAKER_MANAGER_ARN: !If [CircuitBreakerEnabledCondition, !GetAtt CircuitBreakerManagerFunction.Arn, ""]
+          ALERTS_TOPIC_ARN: !If [CircuitBreakerEnabledCondition, !Ref AlertsTopic, ""]
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref TrackingTable
@@ -4881,6 +5017,19 @@ Resources:
                 - kms:GenerateDataKey*
                 - kms:DescribeKey
               Resource: !GetAtt CustomerManagedEncryptionKey.Arn
+        - !If
+          - CircuitBreakerEnabledCondition
+          - SNSPublishMessagePolicy:
+              TopicName: !GetAtt AlertsTopic.TopicName
+          - !Ref AWS::NoValue
+        - !If
+          - CircuitBreakerEnabledCondition
+          - Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource: !GetAtt CircuitBreakerManagerFunction.Arn
+          - !Ref AWS::NoValue
 
   WorkflowTrackerLogGroup:
     Type: AWS::Logs::LogGroup
@@ -5268,6 +5417,178 @@ Resources:
           Value: !GetAtt PATTERNSTACK.Outputs.StateMachineArn
       AlarmActions:
         - !Ref AlertsTopic
+
+  ##########################################################################
+  # Circuit Breaker Resources
+  ##########################################################################
+
+  CircuitBreakerManagerFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Condition: CircuitBreakerEnabledCondition
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${AWS::StackName}-CircuitBreakerManager"
+      KmsKeyId: !GetAtt CustomerManagedEncryptionKey.Arn
+      RetentionInDays: !Ref LogRetentionDays
+
+  CircuitBreakerManagerFunction:
+    Type: AWS::Serverless::Function
+    Condition: CircuitBreakerEnabledCondition
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: "Function does not require VPC access as it only interacts with DynamoDB and SNS"
+          - id: W92
+            reason: "Function does not require reserved concurrency"
+    # checkov:skip=CKV_AWS_116: "DLQ not required - alarm-driven, idempotent state changes"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data"
+    Properties:
+      PermissionsBoundary:
+        !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
+      Handler: index.handler
+      Runtime: python3.12
+      CodeUri: src/lambda/circuit_breaker_manager/
+      Timeout: 30
+      MemorySize: 256
+      Environment:
+        Variables:
+          LOG_LEVEL: !Ref LogLevel
+          CONCURRENCY_TABLE: !Ref ConcurrencyTable
+          ALERTS_TOPIC_ARN: !Ref AlertsTopic
+          RECOVERY_TIMEOUT_SECONDS: !Ref CircuitBreakerRecoveryTimeoutSeconds
+          ERROR_HANDLER_ARN: !Ref CircuitBreakerErrorHandlerArn
+          METRIC_NAMESPACE: !Ref AWS::StackName
+          APPSYNC_API_URL: !GetAtt GraphQLApi.GraphQLUrl
+      LoggingConfig:
+        LogGroup: !Ref CircuitBreakerManagerFunctionLogGroup
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ConcurrencyTable
+        - SNSPublishMessagePolicy:
+            TopicName: !GetAtt AlertsTopic.TopicName
+        - CloudWatchPutMetricPolicy: {}
+        - Statement:
+            - Effect: Allow
+              Action:
+                - appsync:GraphQL
+              Resource:
+                - !Sub "${GraphQLApi.Arn}/types/Mutation/fields/publishCircuitBreakerStatus"
+            - Effect: Allow
+              Action:
+                - kms:Encrypt
+                - kms:Decrypt
+                - kms:ReEncrypt*
+                - kms:GenerateDataKey*
+                - kms:DescribeKey
+              Resource: !GetAtt CustomerManagedEncryptionKey.Arn
+        - !If
+          - HasCircuitBreakerErrorHandler
+          - Statement:
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource: !Ref CircuitBreakerErrorHandlerArn
+          - !Ref AWS::NoValue
+
+  CircuitBreakerTopic:
+    Type: AWS::SNS::Topic
+    Condition: CircuitBreakerEnabledCondition
+    Properties:
+      DisplayName: Circuit Breaker State Changes
+      KmsMasterKeyId: !Ref CustomerManagedEncryptionKey
+
+  BedrockServiceOutageAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: CircuitBreakerEnabledCondition
+    Properties:
+      AlarmName: !Sub "${AWS::StackName}-BedrockServiceOutage"
+      AlarmDescription: !Sub >-
+        Circuit breaker: combined Bedrock error count (ServiceUnavailable=${CircuitBreakerTriggerServiceUnavailable},
+        Throttling=${CircuitBreakerTriggerThrottling}, QuotaLimit=${CircuitBreakerTriggerQuotaLimit})
+        exceeded ${CircuitBreakerFailureThreshold} in ${CircuitBreakerEvaluationPeriods} evaluation period(s).
+      Metrics:
+        - Id: e1
+          Label: CombinedCircuitBreakerErrors
+          ReturnData: true
+          Expression: !Sub
+            - "${SUCoef} * FILL(m1, 0) + ${ThrCoef} * FILL(m2, 0) + ${QLCoef} * FILL(m3, 0)"
+            - SUCoef: !If [CircuitBreakerTriggerServiceUnavailableEnabled, "1", "0"]
+              ThrCoef: !If [CircuitBreakerTriggerThrottlingEnabled, "1", "0"]
+              QLCoef: !If [CircuitBreakerTriggerQuotaLimitEnabled, "1", "0"]
+        - Id: m1
+          ReturnData: false
+          MetricStat:
+            Metric:
+              Namespace: !Ref AWS::StackName
+              MetricName: BedrockServiceUnavailable
+            Period: 300
+            Stat: Sum
+        - Id: m2
+          ReturnData: false
+          MetricStat:
+            Metric:
+              Namespace: !Ref AWS::StackName
+              MetricName: BedrockThrottling
+            Period: 300
+            Stat: Sum
+        - Id: m3
+          ReturnData: false
+          MetricStat:
+            Metric:
+              Namespace: !Ref AWS::StackName
+              MetricName: BedrockQuotaLimit
+            Period: 300
+            Stat: Sum
+      EvaluationPeriods: !Ref CircuitBreakerEvaluationPeriods
+      Threshold: !Ref CircuitBreakerFailureThreshold
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref CircuitBreakerTopic
+      OKActions:
+        - !Ref CircuitBreakerTopic
+
+  CircuitBreakerTopicSubscription:
+    Type: AWS::SNS::Subscription
+    Condition: CircuitBreakerEnabledCondition
+    Properties:
+      TopicArn: !Ref CircuitBreakerTopic
+      Protocol: lambda
+      Endpoint: !GetAtt CircuitBreakerManagerFunction.Arn
+
+  CircuitBreakerManagerInvokePermission:
+    Type: AWS::Lambda::Permission
+    Condition: CircuitBreakerEnabledCondition
+    Properties:
+      FunctionName: !Ref CircuitBreakerManagerFunction
+      Action: lambda:InvokeFunction
+      Principal: !Sub "sns.${AWS::URLSuffix}"
+      SourceArn: !Ref CircuitBreakerTopic
+
+  # Runs every 5 min whenever the breaker is enabled (including CLOSED) so
+  # recovery timeouts always converge. Cost is ~8.6k invocations/month; remove
+  # this rule to disable automated recovery and rely solely on manual reset.
+  CircuitBreakerHealthCheckRule:
+    Type: AWS::Events::Rule
+    Condition: CircuitBreakerEnabledCondition
+    Properties:
+      Description: Periodic health check for circuit breaker recovery
+      ScheduleExpression: rate(5 minutes)
+      State: ENABLED
+      Targets:
+        - Id: CircuitBreakerHealthCheck
+          Arn: !GetAtt CircuitBreakerManagerFunction.Arn
+          Input: '{"source": "scheduled", "action": "health_check"}'
+
+  CircuitBreakerHealthCheckPermission:
+    Type: AWS::Lambda::Permission
+    Condition: CircuitBreakerEnabledCondition
+    Properties:
+      FunctionName: !Ref CircuitBreakerManagerFunction
+      Action: lambda:InvokeFunction
+      Principal: !Sub "events.${AWS::URLSuffix}"
+      SourceArn: !GetAtt CircuitBreakerHealthCheckRule.Arn
 
   # This dasboard is merged with dashboard created by the pattern stack to create an overall dashboard
   MainTemplateSubsetDashboard:

@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "idpac"
+version = "0.1.0"
+description = "IDP AutoTune - automated IDP Accelerator configuration optimization"
+license = {text = "LicenseRef-AWS-Proprietary"}
+requires-python = ">=3.9"
+authors = [
+    { name = "AWS Professional Services" },
+]
+dependencies = [
+    "boto3",
+    "ruamel.yaml",
+    "pypdfium2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+]
+
+[tool.setuptools.packages.find]
+include = ["idpac*"]

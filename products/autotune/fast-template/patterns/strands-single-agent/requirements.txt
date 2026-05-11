@@ -1,0 +1,10 @@
+# FAST framework
+strands-agents==1.37.0
+bedrock-agentcore==1.4.7
+mcp==1.26.0
+PyJWT[crypto]==2.12.1
+
+# AutoTune agent
+strands-agents-tools==0.5.1
+ruamel.yaml>=0.18.0
+pypdfium2>=4.0.0

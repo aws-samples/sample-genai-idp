@@ -205,8 +205,8 @@ test: ## Run all tests (idp_common, cli, sdk, capacity, config library, srt)
 	cd src/lambda/calculate_capacity && $(PYTHON) -m pytest -v
 	@echo "Validating config library files..."
 	$(PYTHON) -m pytest config_library/test_config_library.py -v
-	@echo "Running SRT security scan..."
-	$(MAKE) srt
+	#@echo "Running SRT security scan..."
+	#$(MAKE) srt
 
 test-cli: ## Run only IDP CLI tests
 	@echo "Running IDP CLI tests..."

@@ -140,6 +140,7 @@ class ClassesDiscovery:
         input_bucket: str,
         input_prefix: str,
         file_bytes: Optional[bytes] = None,
+        model_id: Optional[str] = None,
     ) -> list:
         """
         Use an LLM to automatically detect document section boundaries in a multi-page PDF.
@@ -151,6 +152,10 @@ class ClassesDiscovery:
             input_bucket: S3 bucket name
             input_prefix: S3 key for the PDF document
             file_bytes: Optional document bytes. If provided, skips S3 read.
+            model_id: Optional Bedrock model ID override. When provided, this
+                replaces the ``auto_split.model_id`` from the discovery config
+                for this call only. Useful for callers (e.g. ``idp-cli``) that
+                want to use a more capable model than the configured default.
 
         Returns:
             list of dicts: [{"start": 1, "end": 3, "type": "W2 Form"}, ...]
@@ -170,7 +175,8 @@ class ClassesDiscovery:
 
             # Use the auto_split config (falls back to defaults from base-discovery.yaml)
             auto_split_config = self.discovery_config.auto_split
-            model_id = auto_split_config.model_id
+            # Caller-supplied override takes precedence over configured model_id
+            model_id = model_id or auto_split_config.model_id
             top_p = auto_split_config.top_p
             max_tokens = auto_split_config.max_tokens
 
@@ -245,6 +251,7 @@ class ClassesDiscovery:
         save_to_config: bool = True,
         page_range: Optional[str] = None,
         class_name_hint: Optional[str] = None,
+        model_id: Optional[str] = None,
     ):
         """
         Create blueprint for document discovery.
@@ -264,6 +271,9 @@ class ClassesDiscovery:
                 entire document is used.
             class_name_hint: Optional hint for the document class name. When provided,
                 the LLM will use this as the $id and x-aws-idp-document-type values.
+            model_id: Optional Bedrock model ID override. When provided, this
+                replaces the ``without_ground_truth.model_id`` from the discovery
+                config for this call only.
 
         Returns:
             dict with status and optionally the discovered schema
@@ -298,7 +308,10 @@ class ClassesDiscovery:
             logger.info(f" document len: {len(file_in_bytes)}")
 
             model_response = self._extract_data_from_document(
-                file_in_bytes, file_extension, class_name_hint=class_name_hint
+                file_in_bytes,
+                file_extension,
+                class_name_hint=class_name_hint,
+                model_id=model_id,
             )
             logger.info(f"Extracted data from document: {model_response}")
 
@@ -332,6 +345,7 @@ class ClassesDiscovery:
         ground_truth_data: Optional[dict] = None,
         save_to_config: bool = True,
         page_range: Optional[str] = None,
+        model_id: Optional[str] = None,
     ):
         """
         Create optimized blueprint using ground truth data.
@@ -347,6 +361,9 @@ class ClassesDiscovery:
             page_range: Optional page range string (e.g., "1-3") to extract
                 specific pages from a PDF before discovery. If None, the
                 entire document is used.
+            model_id: Optional Bedrock model ID override. When provided, this
+                replaces the ``with_ground_truth.model_id`` from the discovery
+                config for this call only.
 
         Returns:
             dict with status and optionally the discovered schema
@@ -382,7 +399,10 @@ class ClassesDiscovery:
                 )
 
             model_response = self._extract_data_from_document_with_ground_truth(
-                file_in_bytes, file_extension, ground_truth_data
+                file_in_bytes,
+                file_extension,
+                ground_truth_data,
+                model_id=model_id,
             )
 
             if model_response is None:
@@ -536,10 +556,12 @@ class ClassesDiscovery:
         file_extension,
         max_retries: int = 3,
         class_name_hint: Optional[str] = None,
+        model_id: Optional[str] = None,
     ):
         """Extract data from document with retry logic for invalid schemas."""
         # Get configuration for without ground truth
-        model_id = self.without_gt_config.model_id
+        # Caller-supplied override takes precedence over configured model_id
+        model_id = model_id or self.without_gt_config.model_id
         system_prompt = (
             self.without_gt_config.system_prompt
             or "You are an expert in processing forms. Extracting data from images and documents"
@@ -660,11 +682,17 @@ class ClassesDiscovery:
         return content
 
     def _extract_data_from_document_with_ground_truth(
-        self, document_content, file_extension, ground_truth_data, max_retries: int = 3
+        self,
+        document_content,
+        file_extension,
+        ground_truth_data,
+        max_retries: int = 3,
+        model_id: Optional[str] = None,
     ):
         """Extract data from document using ground truth as reference with retry logic."""
         # Get configuration for with ground truth
-        model_id = self.with_gt_config.model_id
+        # Caller-supplied override takes precedence over configured model_id
+        model_id = model_id or self.with_gt_config.model_id
         system_prompt = (
             self.with_gt_config.system_prompt
             or "You are an expert in processing forms. Extracting data from images and documents"

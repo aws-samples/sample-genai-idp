@@ -1,0 +1,17 @@
+stack_name_base: kaleko-FAST-IDPAT-dev
+
+# Optional: Set to automatically create an admin user and email credentials
+admin_user_email: kaleko@amazon.com
+
+backend:
+  pattern: strands-single-agent
+  deployment_type: docker
+  network_mode: PUBLIC
+
+# AutoTune agent configuration.
+# The IDP Accelerator stack must be deployed in the same AWS region as this stack.
+autotune:
+  # The IDP Accelerator stack that this agent optimizes configs for.
+  idp_stack_name: kaleko-IDPAutoTune-dev
+  # Bedrock model ID for the optimization agent.
+  model_id: us.anthropic.claude-opus-4-6-v1

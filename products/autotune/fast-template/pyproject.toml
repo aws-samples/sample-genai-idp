@@ -1,0 +1,92 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fullstack-agentcore-solution-template"
+version = "0.4.1"
+description = "Fullstack AgentCore Solution Template - A template for building AgentCore applications"
+readme = "README.md"
+license = { text = "Apache-2.0" }
+requires-python = ">=3.10"
+authors = [
+    { name = "AWS Professional Services", email = "aws-professional-services@amazon.com" },
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+]
+
+# Core dependencies for gateway utilities and scripts
+dependencies = [
+    "boto3>=1.34.0",
+    "requests>=2.31.0",
+    "PyYAML>=6.0.1",
+    "colorama>=0.4.6",
+]
+
+[project.optional-dependencies]
+# Development dependencies
+dev = ["pytest>=7.0.0", "ruff>=0.1.0", "mypy>=1.0.0"]
+
+# Strands agent dependencies (for local development)
+agent-strands = [
+    "strands-agents==1.16.0",
+    "bedrock-agentcore[strands-agents]==1.0.6",
+    "mcp==1.21.0",
+]
+
+# LangGraph agent dependencies (for local development)
+agent-langgraph = [
+    "langgraph==1.0.3",
+    "langchain-aws==1.0.0",
+    "langchain-mcp-adapters==0.1.13",
+    "langgraph-checkpoint-aws==1.0.1",
+    "mcp==1.21.0",
+]
+
+# All dependencies for local development
+all = [
+    "fullstack-agentcore-solution-template[dev,agent-strands,agent-langgraph]",
+]
+
+[project.urls]
+Homepage = "https://github.com/aws-samples/fullstack-agentcore-solution-template"
+Documentation = "https://github.com/aws-samples/fullstack-agentcore-solution-template/tree/main/docs"
+Repository = "https://github.com/aws-samples/fullstack-agentcore-solution-template"
+Issues = "https://github.com/aws-samples/fullstack-agentcore-solution-template/issues"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["gateway*", "scripts*"]
+exclude = ["tests*", "infra-cdk*", "frontend*", "patterns*"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "S", "B", "A", "C4", "T20"]
+ignore = ["S101", "S603", "S607"]                                    # Allow assert, subprocess calls
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S101"]  # Allow assert in tests
+"test-scripts/*.py" = ["E402"]  # Allow imports after sys.path modification
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py", "*_test.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
