@@ -52,7 +52,6 @@ AGENT_DIR = Path(__file__).parent
 # (known issue, reported April 2026). For now, all state lives on /tmp + S3 sync.
 SCRATCH_DIR = "/tmp/autotune-data"
 MAX_ITERATIONS = 10
-MAX_COST_USD = float(os.environ.get("AUTOTUNE_MAX_COST_USD", "500"))
 
 # S3 sync config
 SYNC_INTERVAL = 10  # seconds between background sync cycles (heartbeat + S3)
@@ -129,7 +128,8 @@ Optimization guidance: {optimization_guidance or "None provided"}
 
 
 def _create_agent(user_id: str, session_id: str, state: OptimizationState,
-                  test_set_id: str, optimization_guidance: str, is_resume: bool = False) -> Agent:
+                  test_set_id: str, optimization_guidance: str, is_resume: bool = False,
+                  max_cost_usd: float = 500.0) -> Agent:
     # Prompt caching: system prompt cached via cachePoint, tools via cache_tools,
     # messages via CacheConfig(strategy="auto") which places a cache point at the
     # end of the last user message each turn. This is Claude-specific; for other
@@ -164,8 +164,8 @@ def _create_agent(user_id: str, session_id: str, state: OptimizationState,
     skills_dir = AGENT_DIR / "skills"
     plugins = [AgentSkills(skills=str(skills_dir))] if skills_dir.exists() else []
     tools = IDPAC_TOOLS + [file_read, image_reader, execute_python_analysis]
-    cost_hook = CostTrackingHook(state, max_cost_usd=MAX_COST_USD)
-    hooks = [ServiceUnavailableRetryHook(), CancelCheckHook(state), FileReadSafetyHook(), cost_hook, OptimizationLoopHook(state, max_iterations=MAX_ITERATIONS, max_cost_usd=MAX_COST_USD)]
+    cost_hook = CostTrackingHook(state)
+    hooks = [ServiceUnavailableRetryHook(), CancelCheckHook(state, max_cost_usd=max_cost_usd), FileReadSafetyHook(), cost_hook, OptimizationLoopHook(state, max_iterations=MAX_ITERATIONS, max_cost_usd=max_cost_usd)]
 
     agent = Agent(
         name="idp_autotune",
@@ -229,7 +229,8 @@ def _snapshot_disk_usage(output_path: str) -> None:
 
 
 def _run_agent_thread(user_id: str, session_id: str, state: OptimizationState,
-                      test_set_id: str, optimization_guidance: str, is_resume: bool = False) -> None:
+                      test_set_id: str, optimization_guidance: str, is_resume: bool = False,
+                      max_cost_usd: float = 500.0) -> None:
     """Background thread: runs the agent, writes stream to JSONL, syncs to S3."""
     s3_bucket = os.environ.get("AUTOTUNE_STREAM_BUCKET", "")
     s3_prefix = f"autotune-streams/{session_id}"
@@ -249,7 +250,7 @@ def _run_agent_thread(user_id: str, session_id: str, state: OptimizationState,
             logger.exception("S3 sync failed for %s", s3_key)
 
     async def _run():
-        agent = _create_agent(user_id, session_id, state, test_set_id, optimization_guidance, is_resume)
+        agent = _create_agent(user_id, session_id, state, test_set_id, optimization_guidance, is_resume, max_cost_usd)
         initial_prompt = _build_resume_prompt(test_set_id, optimization_guidance) if is_resume else _build_initial_prompt(test_set_id, optimization_guidance)
 
         # On resume: restore OPTIMIZATION-LOG.md from S3 and seed eval cost
@@ -411,6 +412,7 @@ async def invocations(payload, context: RequestContext):
     optimization_guidance = payload.get("optimization_guidance", "").strip()
     is_resume = payload.get("resume", "").strip().lower() == "true"
     max_cost_per_page_usd = payload.get("max_cost_per_page_usd", "").strip()
+    max_total_cost_usd = payload.get("max_total_cost_usd", "").strip()
 
     if not test_set_id:
         yield {"status": "error", "error": "Missing required field: test_set_id"}
@@ -420,22 +422,29 @@ async def invocations(payload, context: RequestContext):
         yield {"status": "error", "error": "Missing required field: max_cost_per_page_usd"}
         return
 
+    if not is_resume and not max_total_cost_usd:
+        yield {"status": "error", "error": "Missing required field: max_total_cost_usd"}
+        return
+
     # Set env var for tools to read
     if max_cost_per_page_usd:
         os.environ["AUTOTUNE_MAX_COST_PER_PAGE"] = max_cost_per_page_usd
+
+    max_cost_usd = float(max_total_cost_usd) if max_total_cost_usd else 500.0
 
     if is_resume:
         # Resume: don't re-initialize — just flip status back to active
         state.set_status("resuming", "Resuming after interruption")
     else:
         state.initialize(test_set_id, optimization_guidance, MAX_ITERATIONS,
-                         max_cost_per_page_usd=float(max_cost_per_page_usd))
+                         max_cost_per_page_usd=float(max_cost_per_page_usd),
+                         max_total_cost_usd=max_cost_usd)
 
     user_id = extract_user_id_from_context(context)
 
     thread = threading.Thread(
         target=_run_agent_thread,
-        args=(user_id, session_id, state, test_set_id, optimization_guidance, is_resume),
+        args=(user_id, session_id, state, test_set_id, optimization_guidance, is_resume, max_cost_usd),
         daemon=True,
         name=f"autotune-{session_id[:8]}",
     )

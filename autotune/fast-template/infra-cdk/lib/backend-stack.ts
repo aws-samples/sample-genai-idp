@@ -586,8 +586,6 @@ export class BackendStack extends cdk.NestedStack {
       AUTOTUNE_MODEL_ID: config.autotune!.model_id,
       // AutoTune: S3 bucket for agent stream data (stream.jsonl + OPTIMIZATION-LOG.md).
       AUTOTUNE_STREAM_BUCKET: this.streamBucketName,
-      // AutoTune: Maximum cost (USD) per run before triggering stop.
-      AUTOTUNE_MAX_COST_USD: String(config.autotune!.max_cost_usd ?? 500),
       // AgentCore Memory env vars removed (MEMORY_ID, USE_LONG_TERM_MEMORY, LTM_TOP_K,
       // LTM_RELEVANCE_SCORE). Agent uses S3SessionManager instead.
     }

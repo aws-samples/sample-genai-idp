@@ -55,6 +55,7 @@ export default function ChatInterface() {
   const [input, setInput] = useState("")
   const [testSetId, setTestSetId] = useState("")
   const [maxCostPerPage, setMaxCostPerPage] = useState("")
+  const [maxTotalCost, setMaxTotalCost] = useState("")
   const [error, setError] = useState<string | null>(null)
   const [client, setClient] = useState<AgentCoreClient | null>(null)
   const [stateApiUrl, setStateApiUrl] = useState<string>("")
@@ -236,7 +237,7 @@ export default function ChatInterface() {
     return () => { active = false; clearInterval(interval) }
   }, [stateApiUrl, currentSessionId, agentState?.status, auth.user?.id_token])
 
-  const invokeAgent = async (sessionId: string, testSet: string, guidance: string, maxCostPerPage: string, isResume: boolean) => {
+  const invokeAgent = async (sessionId: string, testSet: string, guidance: string, maxCostPerPage: string, maxTotalCost: string, isResume: boolean) => {
     if (!client) return
     setError(null)
     setIsLoading(true)
@@ -249,6 +250,7 @@ export default function ChatInterface() {
         test_set_id: testSet,
         optimization_guidance: guidance,
         max_cost_per_page_usd: maxCostPerPage,
+        max_total_cost_usd: maxTotalCost,
       }
       if (isResume) extra.resume = "true"
 
@@ -282,6 +284,10 @@ export default function ChatInterface() {
       setError("Max cost per page is required and must be a positive number")
       return
     }
+    if (!maxTotalCost.trim() || isNaN(Number(maxTotalCost)) || Number(maxTotalCost) <= 0) {
+      setError("Max total cost is required and must be a positive number")
+      return
+    }
 
     const sessionId = crypto.randomUUID()
     setCurrentSessionId(sessionId)
@@ -295,7 +301,7 @@ export default function ChatInterface() {
     saveMessages(sessionId, [userMsg])
     setMessagesState([userMsg])
 
-    await invokeAgent(sessionId, testSetId.trim(), userMessage, maxCostPerPage.trim(), false)
+    await invokeAgent(sessionId, testSetId.trim(), userMessage, maxCostPerPage.trim(), maxTotalCost.trim(), false)
   }
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -314,6 +320,7 @@ export default function ChatInterface() {
       String(agentState.test_set_id ?? ""),
       String(agentState.optimization_guidance ?? ""),
       String(agentState.max_cost_per_page_usd ?? ""),
+      String(agentState.max_total_cost_usd ?? "500"),
       true
     )
   }
@@ -424,6 +431,13 @@ export default function ChatInterface() {
                   value={maxCostPerPage}
                   onChange={e => setMaxCostPerPage(e.target.value)}
                   placeholder="Max cost per page in $ (required, e.g. 0.05)"
+                  className="w-full px-3 py-2 border rounded-md text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                <input
+                  type="text"
+                  value={maxTotalCost}
+                  onChange={e => setMaxTotalCost(e.target.value)}
+                  placeholder="Max total optimization cost in $ (required, e.g. 2)"
                   className="w-full px-3 py-2 border rounded-md text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
                 <ChatInput input={input} setInput={setInput} handleSubmit={handleSubmit} isLoading={isLoading} placeholder="Optimization guidance (optional)" allowEmpty />

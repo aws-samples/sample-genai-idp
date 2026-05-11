@@ -10,7 +10,7 @@ OptimizationLoopHook: Drives the optimization loop via AfterInvocationEvent.resu
 import logging
 import os
 
-from strands.hooks import AfterInvocationEvent, AfterModelCallEvent, BeforeToolCallEvent
+from strands.hooks import AfterInvocationEvent, AfterModelCallEvent, BeforeModelCallEvent, BeforeToolCallEvent
 from strands.hooks.registry import HookProvider, HookRegistry
 
 try:
@@ -47,19 +47,43 @@ class ServiceUnavailableRetryHook(HookProvider):
 
 
 class CancelCheckHook(HookProvider):
-    """Check DynamoDB before every tool call. Raises OptimizationCancelled if terminal."""
+    """Check DynamoDB before every tool call and model call. Raises OptimizationCancelled if terminal or over budget."""
 
-    def __init__(self, state: OptimizationState):
+    def __init__(self, state: OptimizationState, max_cost_usd: float = 500.0):
         self.state = state
+        self.max_cost_usd = max_cost_usd
 
     def register_hooks(self, registry: HookRegistry, **kwargs) -> None:
         registry.add_callback(BeforeToolCallEvent, self._check)
+        registry.add_callback(BeforeModelCallEvent, self._check_before_model)
 
     def _check(self, event: BeforeToolCallEvent) -> None:
-        if self.state.is_terminal():
-            status = self.state.get_status()
+        self._enforce()
+        # During finalizing, only allow write_optimization_log
+        if self.state.get_status() == "finalizing":
+            tool_name = event.tool_use.get("name", "")
+            if tool_name != "write_optimization_log":
+                event.cancel_tool = (
+                    "COST LIMIT REACHED. You must call write_optimization_log with a final "
+                    "summary of what was accomplished, then stop."
+                )
+
+    def _check_before_model(self, event: BeforeModelCallEvent) -> None:
+        self._enforce()
+
+    def _enforce(self) -> None:
+        status = self.state.get_status()
+        if status in TERMINAL_STATUSES:
             logger.info("Optimization in terminal state (%s) — raising to stop agent", status)
             raise OptimizationCancelled(f"Optimization {status}")
+        if status == "finalizing":
+            # Let model calls and write_optimization_log through
+            return
+        current = self.state.get_state()
+        total_cost = float(current.get("agent_cost_usd", 0)) + float(current.get("eval_cost_usd", 0))
+        if total_cost >= self.max_cost_usd:
+            logger.info("Cost ($%.2f >= $%.2f) exceeded — setting finalizing", total_cost, self.max_cost_usd)
+            self.state.set_status("finalizing", f"Cost limit reached (${total_cost:.2f})")
 
 
 class FileReadSafetyHook(HookProvider):
@@ -83,12 +107,11 @@ class CostTrackingHook(HookProvider):
     # model.get_config().get("context_window_limit")
     CONTEXT_WINDOW_TOKENS = 1_000_000  # Claude Opus 4-6-v1
 
-    def __init__(self, state: OptimizationState, max_cost_usd: float = 500.0):
+    def __init__(self, state: OptimizationState):
         self.state = state
         self.metrics = None  # Set to agent.event_loop_metrics after Agent() construction
         self.agent_messages = None  # Set to agent.messages after Agent() construction
         self.model_id = os.environ.get("AUTOTUNE_MODEL_ID", "")
-        self.max_cost_usd = max_cost_usd
 
     def register_hooks(self, registry: HookRegistry, **kwargs) -> None:
         registry.add_callback(AfterModelCallEvent, self._update_cost)
@@ -112,14 +135,6 @@ class CostTrackingHook(HookProvider):
             eval_seen_batches=get_eval_seen_batches(),
             context_window_pct=context_pct,
         )
-        # Enforce max cost mid-turn: set status to finalizing so OptimizationLoopHook
-        # picks it up at end of invocation and gives the agent one final turn
-        total_cost = agent_cost + eval_cost
-        if total_cost >= self.max_cost_usd and not self.state.is_terminal():
-            current_status = self.state.get_status()
-            if current_status != "finalizing":
-                logger.info("Max cost ($%.2f >= $%.2f) exceeded mid-turn — setting finalizing", total_cost, self.max_cost_usd)
-                self.state.set_status("finalizing", f"Cost limit reached (${total_cost:.2f})")
 
     def _compute_context_pct(self) -> float:
         """Get context window fill % from the most recent assistant message metadata."""

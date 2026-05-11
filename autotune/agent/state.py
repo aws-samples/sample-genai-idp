@@ -37,6 +37,7 @@ class OptimizationState:
         optimization_guidance: str = "",
         max_iterations: int = 10,
         max_cost_per_page_usd: float = 0.0,
+        max_total_cost_usd: float = 500.0,
     ) -> None:
         """Create the initial state item for a new optimization run."""
         self._table.put_item(
@@ -47,6 +48,7 @@ class OptimizationState:
                 "iteration": 0,
                 "max_iterations": max_iterations,
                 "max_cost_per_page_usd": str(round(max_cost_per_page_usd, 5)),
+                "max_total_cost_usd": str(round(max_total_cost_usd, 2)),
                 "best_accuracy_within_budget": 0,
                 "best_config_version_within_budget": "",
                 "current_config_version": "",
