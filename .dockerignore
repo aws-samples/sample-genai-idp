@@ -97,3 +97,7 @@ memory-bank/
 !patterns/*/src/**
 !lib/idp_common_pkg/**
 !src/lambda/**
+
+# AutoTune agent needs these for IDP source code reference
+!docs/
+!template.yaml

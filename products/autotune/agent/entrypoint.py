@@ -34,6 +34,7 @@ from strands_tools import file_read, image_reader
 from utils.auth import extract_user_id_from_context
 
 from code_interpreter_tools import execute_python_analysis
+from grep_tool import grep_idp_source_code
 from idpac_tools import ALL_TOOLS as IDPAC_TOOLS, seed_eval_cost
 from optimization_state import OptimizationState, TERMINAL_STATUSES
 from optimization_hooks import CancelCheckHook, CostTrackingHook, FileReadSafetyHook, OptimizationCancelled, OptimizationLoopHook, ServiceUnavailableRetryHook
@@ -163,7 +164,7 @@ def _create_agent(user_id: str, session_id: str, state: OptimizationState,
 
     skills_dir = AGENT_DIR / "skills"
     plugins = [AgentSkills(skills=str(skills_dir))] if skills_dir.exists() else []
-    tools = IDPAC_TOOLS + [file_read, image_reader, execute_python_analysis]
+    tools = IDPAC_TOOLS + [file_read, image_reader, execute_python_analysis, grep_idp_source_code]
     cost_hook = CostTrackingHook(state)
     hooks = [ServiceUnavailableRetryHook(), CancelCheckHook(state, max_cost_usd=max_cost_usd), FileReadSafetyHook(), cost_hook, OptimizationLoopHook(state, max_iterations=MAX_ITERATIONS, max_cost_usd=max_cost_usd)]
 

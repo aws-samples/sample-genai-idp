@@ -14,12 +14,22 @@
 !products/autotune/agent/idpac/
 !products/autotune/agent/tools.py
 !products/autotune/agent/code_interpreter_tools.py
+!products/autotune/agent/grep_tool.py
 !products/autotune/agent/pricing.py
 !products/autotune/agent/state.py
 !products/autotune/agent/hooks.py
 !products/autotune/agent/context_manager.py
 !products/autotune/agent/prompt.md
 !products/autotune/agent/skills/
+
+# IDP source code (bundled for agent reference)
+!lib/
+!src/lambda/
+!patterns/
+!config_library/
+!docs/
+!template.yaml
+!template.yaml
 
 # IDP CLI chain
 !lib/idp_common_pkg/

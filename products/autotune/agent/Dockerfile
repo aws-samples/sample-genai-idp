@@ -59,12 +59,23 @@ COPY products/autotune/agent/entrypoint.py .
 COPY products/autotune/fast-template/patterns/utils/ utils/
 COPY products/autotune/agent/tools.py idpac_tools.py
 COPY products/autotune/agent/code_interpreter_tools.py code_interpreter_tools.py
+COPY products/autotune/agent/grep_tool.py grep_tool.py
 COPY products/autotune/agent/pricing.py pricing.py
 COPY products/autotune/agent/state.py optimization_state.py
 COPY products/autotune/agent/hooks.py optimization_hooks.py
 COPY products/autotune/agent/context_manager.py proactive_context_manager.py
 COPY products/autotune/agent/prompt.md .
 COPY products/autotune/agent/skills/ skills/
+
+# --- IDP source code (read-only reference for the agent) ---
+# NOTE: template.yaml excluded — CDK's asset bundler strips files matching
+# CloudFormation template naming patterns from the build context.
+COPY lib/ idp-source/lib/
+COPY src/lambda/ idp-source/src/lambda/
+COPY patterns/ idp-source/patterns/
+COPY config_library/ idp-source/config_library/
+COPY docs/ idp-source/docs/
+COPY template.yaml idp-source/idp-cloudformation-template.yaml
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
   CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8080/ping', timeout=2)" || exit 1
