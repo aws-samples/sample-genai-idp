@@ -7,7 +7,7 @@ f# IDPAutoTune — Development Plan
 - AWS credentials: [default] AWS account in ~/.aws/credentials
 - IDPAC source: `/home/ubuntu/gitlab/idp-auto-configurator`
 - IDP Accelerator source: `/home/ubuntu/gitlab/genaiic-idp-accelerator`
-- Target branch: `feature/idp-autotune-initial-port`
+- Target branch: `develop-private`
 - Agent backend: **Strands SDK**
 - Starting template: **FAST** (https://github.com/awslabs/fullstack-solution-template-for-agentcore)
 
@@ -24,7 +24,7 @@ f# IDPAutoTune — Development Plan
 ### 0.1 Branch setup
 - [x] `cd /home/ubuntu/gitlab/genaiic-idp-accelerator`
 - [x] `git checkout develop-private && git pull`
-- [x] `git checkout -b feature-private/idp-products/autotune/initial-port`
+- [x] Development done on `feature-private/idp-autotune/initial-port` (merged into `develop-private` 2026-05-11, branch deleted)
 
 ### 0.2 Clone FAST into the IDP repo
 - [x] Clone FAST as a standalone directory within the IDP codebase:
@@ -594,6 +594,7 @@ Convert the agent from interactive chat to autonomous operation. The agent recei
 - [ ] **Improve `validate_config` to catch pipeline-breaking configs** — The agent frequently launches evaluation runs with configs that pass `validate_config` but produce garbage results (e.g., LLM responds "I don't see any document or image attached" for all files, indicating OCR output wasn't passed to the extraction model). These are avoidable pipeline failures that waste full test executions. **Action items:** (1) Collect 3-5 example configs that pass validation but break the pipeline — save to `products/autotune/planning-docs/broken-configs/` with notes on the failure mode. (2) Root-cause each failure in the IDP pipeline code (likely in the extraction Lambda or prompt assembly). (3) Add validation rules to `idp-cli validate-config` (in `lib/idp_common_pkg/`) that catch these patterns before upload. File with IDP service team if the fix is non-trivial.
 - [x] **Prevent reward hacking via config manipulation** — Implemented on branch `feature-private/idp-products/autotune/reward-hacking-guardrail`. Removed `shell`/`editor`/`file_write`, hardened `config_edit` to reject `x-aws-idp-evaluation-*` changes, added purpose-built replacement tools (`write_optimization_log`, `list_files`, `copy_config`, `wait_seconds`, `execute_python_analysis` via AgentCore CodeInterpreter). See `products/autotune/docs/reward-hacking-guardrail.md`. Upstream config separation discussion with IDP team still TODO.
 - [x] **Cost observability per optimization run** — Agent token cost (from Strands `accumulated_usage` + `config_library/pricing.yaml`) and eval pipeline cost (from top-level `totalCost` in eval summary, deduplicated by batch_id) tracked separately in DynamoDB. Real-time updates via `CostTrackingHook` (AfterModelCallEvent). Resume-safe (eval cost + seen batches seeded from DDB). Prompt caching enabled (system prompt, tools, messages) for 10x input cost reduction. See `products/autotune/agent/pricing.py`, `products/autotune/agent/hooks.py`.
+- [x] **Max total cost enforcement** — `max_total_cost_usd` is a required per-run input (UI field), passed in the invocation payload (not an env var). `CancelCheckHook` checks cost on `BeforeToolCallEvent` + `BeforeModelCallEvent`. When cost exceeds limit: sets status to `finalizing`, cancels all tools except `write_optimization_log` (via `event.cancel_tool`), lets agent write a final summary, then `OptimizationLoopHook` sets `complete`. `CostTrackingHook` is purely for tracking (no enforcement). Removed `AUTOTUNE_MAX_COST_USD` env var entirely — AgentCore runtime env vars don't update reliably on `cdk deploy`.
 - [ ] **Research harness engineering** — Study emerging best practices for building reliable scaffolding around autonomous agents. Highly relevant to AutoTune's optimization loop, tool design, error recovery, and guardrails. Sources: [Anthropic: Building Effective Managed Agents](https://www.anthropic.com/engineering/managed-agents), [OpenAI: Harness Engineering](https://openai.com/index/harness-engineering/), plus arxiv papers on agent reliability, tool-use scaffolding, and reward hacking prevention. Apply findings to improve hooks, prompt design, loop control, and cost/quality tradeoffs.
 
 ### 6.9 Fire-and-Forget Architecture with S3 Polling (DONE)
@@ -767,6 +768,40 @@ Implemented and deployed. The agent runs fully decoupled from the frontend — n
 **Commits pushed:**
 - `0161e596` — feat: max allowable cost per page constraint + discovery schema mismatch repro
 
+### 6.15 Session: May 11 — Max Total Cost Enforcement, Directory Move, Merge
+
+**Max total cost as per-run input (deployed):**
+- Removed `AUTOTUNE_MAX_COST_USD` env var — AgentCore runtime env vars don't update reliably on `cdk deploy`
+- Added `max_total_cost_usd` as required UI input field (validated: positive number)
+- Passed in invocation payload alongside `test_set_id`
+- Stored in DynamoDB state for resume support
+- Removed from CDK config.yaml, backend-stack.ts env vars, config-manager.ts type
+
+**Cost enforcement refactored (deployed):**
+- `CancelCheckHook` now fires on both `BeforeToolCallEvent` AND `BeforeModelCallEvent`
+- Reads current cost from DynamoDB (agent_cost_usd + eval_cost_usd) — catches eval cost that accrues during tool execution
+- When cost >= limit: sets status to `finalizing`
+- During `finalizing`: only `write_optimization_log` tool allowed through; all other tools cancelled with message telling agent to write final summary
+- `OptimizationLoopHook` handles transition from `finalizing` → `complete` at end of invocation
+- `CostTrackingHook` is now purely for tracking (removed enforcement logic)
+- Tested at $2 limit — agent correctly stops, writes summary, completes
+
+**Directory restructure:**
+- Moved `autotune/` → `products/autotune/`
+- Updated all Dockerfiles, Dockerfile.dockerignore, backend-stack.ts (path.resolve + exclude list), all markdown docs
+- CDK synth verified after move
+
+**Reset script (`products/autotune/scripts/reset_stack.py`):**
+- Deletes all test executions (via DeleteTests Lambda) and custom configs (via idp-cli)
+- Interactive confirmation prompts by default, `--force` to skip
+- Tested and working
+
+**Cleanup:**
+- Removed planning-docs/, idp_discovery_extension/, publish-commands.txt from repo
+
+**Merged into `develop-private`:**
+- Feature branch `feature-private/idp-autotune/initial-port` merged and deleted (2026-05-11)
+
 ### ⚠️ NEXT SESSION: TOP PRIORITY
 
 **Next priorities (in order):**
@@ -919,71 +954,66 @@ In `products/autotune/fast-template/infra-cdk/lib/backend-stack.ts`:
 
 ---
 
-## Next Session Priorities (2026-04-29 — updated 13:40 UTC)
+## Next Session Priorities (2026-05-11 — updated 19:20 UTC)
 
 **Start here.** Read this section first when resuming work.
 
-### Priority 1: Implement Fire-and-Forget Architecture (Phase 6.9)
+### Current state
+- **Branch:** `develop-private` (feature branch merged and deleted)
+- **Directory:** Code lives at `products/autotune/` (moved from `autotune/` on 2026-05-11)
+- **Deployed stack:** `kaleko-FAST-IDPAT-dev` in us-east-1
+- **App URL:** https://main.d2hvyoqfm7h5q6.amplifyapp.com
+- **IDP stack:** `kaleko-IDPAutoTune-dev` in us-east-1
+- **Test dataset:** `davids-test-dataset` (45 PNG images, 9 classes, 5 samples each)
 
-This is the critical path. The SSE streaming approach is broken due to a known AgentCore proxy timeout at ~60s (see detailed analysis in Phase 6.7 above). The fix is to decouple the agent from the SSE connection entirely.
+### Deploy commands
+```bash
+# Backend
+cd products/autotune/fast-template/infra-cdk
+AWS_EC2_METADATA_DISABLED=true \
+CDK_DEFAULT_ACCOUNT=$(aws sts get-caller-identity --query Account --output text) \
+CDK_DEFAULT_REGION=us-east-1 \
+npx cdk deploy --require-approval never
 
-**Implementation order:**
+# Frontend
+cd /home/ubuntu/gitlab/genaiic-idp-accelerator
+python products/autotune/fast-template/scripts/deploy-frontend.py kaleko-FAST-IDPAT-dev --region us-east-1
+```
 
-1. **Refactor `basic_agent.py`** — Change the entrypoint from an async generator to fire-and-forget. Agent runs in a background thread. Entrypoint yields one `{"status": "started"}` event and returns. Background thread runs `agent.stream_async()`, writes events to local JSONL file, syncs to S3 periodically, updates DynamoDB heartbeat. Fix `/ping` to check background thread liveness (not generator state).
+### Reset IDP stack (clear test runs + custom configs)
+```bash
+source products/autotune/.venv/bin/activate
+python products/autotune/scripts/reset_stack.py kaleko-IDPAutoTune-dev --region us-east-1 [--force]
+```
 
-2. **Add S3 stream + log syncing** — In the background thread, write each agent event to `/mnt/workspace/{session_id}/stream.jsonl` and sync to `s3://staging-bucket/autotune-streams/{session_id}/stream.jsonl` every 10 events or 10s. Also sync `OPTIMIZATION-LOG.md` to S3 every 30s.
+### What was done on 2026-05-11
+1. **Max total cost as per-run input** — removed unreliable env var, added UI field, passed in payload
+2. **Cost enforcement before every action** — `CancelCheckHook` fires on `BeforeToolCallEvent` + `BeforeModelCallEvent`, reads cost from DDB
+3. **Graceful finalizing** — when over budget, only `write_optimization_log` tool allowed; agent writes summary then stops
+4. **Moved `autotune/` → `products/autotune/`** — updated Dockerfiles, CDK paths, docs
+5. **Merged into `develop-private`** — feature branch deleted
+6. **Reset script** — `products/autotune/scripts/reset_stack.py` with `--force` and interactive modes
 
-3. **Add `GET /stream` and `GET /log` Lambda endpoints** — Single Lambda handling both routes. Reads from S3, returns JSONL lines (with offset pagination) or markdown content. Add to existing API Gateway. Cognito-authenticated.
+### Priority 1: Discovery schema mismatch fix
+- Awaiting IDP service team response
+- Root cause: discovery prompt has conflicting instructions about nesting
+- Repro was at `products/autotune/planning-docs/discovery-schema-mismatch/` (removed in cleanup — recreate if needed)
 
-4. **Update frontend** — Remove SSE streaming dependency. Add polling for `/stream` (3-5s) and `/log` (5-10s). Render agent events from JSONL. Add optimization log viewer tab/panel.
+### Priority 2: Test proactive context summarization
+- Verify triggers at 50% context window fill
+- Verify agent re-reads OPTIMIZATION-LOG.md after summarization
 
-5. **Deploy and test** — Run a full optimization loop. Verify: agent survives past 60s, frontend shows live thought process via polling, optimization log updates in real time, cancel still works.
+### Priority 3: Silent evaluation failure investigation
+- IDP-side bug where eval runs get stuck at 0 completed files
+- Need to add timeout + retry logic in `run_evaluation` tool
 
-**Key files to read before starting:**
-- `products/autotune/fast-template/patterns/strands-single-agent/basic_agent.py` — current entrypoint (will be heavily refactored)
-- `products/autotune/agent/state.py` — DynamoDB state helper (heartbeat method needs to move to background thread)
-- `products/autotune/fast-template/infra-cdk/lib/backend-stack.ts` — CDK stack (add new Lambda + API routes)
-- `products/autotune/fast-template/infra-cdk/lib/lambdas/optimization-state/index.py` — existing state Lambda (extend or create sibling)
-- `products/autotune/fast-template/frontend/src/components/chat/ChatInterface.tsx` — frontend (remove SSE, add polling)
-- Phase 6.9 in this document for the full architecture diagram and implementation details
+### Priority 4: Improve `validate_config`
+- Catch configs that break the pipeline (pass validation but produce garbage)
 
-### Priority 2: Run a complete optimization loop
-Once fire-and-forget is working, run a full end-to-end test:
-1. Start optimization with test set `realkie-fcc-verified`
-2. Watch the agent analyze → create config → upload → evaluate → analyze results → iterate (via polling, not SSE)
-3. Verify DynamoDB state updates (iteration count, best_accuracy, phase changes)
-4. Verify stream.jsonl and OPTIMIZATION-LOG.md appear in S3 and are viewable in frontend
-5. Let it run to max_iterations or convergence
-6. Verify final output: optimized config + summary in OPTIMIZATION-LOG.md
-
-### What's deployed and working (as of 2026-04-29 13:40 UTC)
-- **Backend:** AgentCore runtime with autonomous agent (hooks, state, prompt, 20 tools with auto-state-update). Has the heartbeat/SSE code that doesn't work due to proxy timeout — needs refactoring to fire-and-forget.
-- **Frontend:** Test set ID input, optimization guidance, cancel button, state polling display (works), SSE streaming (broken at ~60s), heartbeat counter (stops at ♥ 2). Needs refactoring to polling-only.
-- **Infrastructure:** DynamoDB state table, optimization state API (`POST /cancel` + `GET /state`), hardened IAM with explicit deny. Needs: `GET /stream` + `GET /log` endpoints.
-- **IDP stack:** `kaleko-IDPAutoTune-dev` in us-east-1 with test set `realkie-fcc-verified` (RealKIE FCC invoices)
-- **Agent behavior confirmed working:** OTel traces show the agent successfully analyzing datasets, reading evaluation reports, identifying extraction problems (date formats, over-extraction), and attempting config modifications — all happening server-side after the SSE stream died. The agent logic is solid; only the visibility/streaming is broken.
-
-### Git state
-- Branch: `feature-private/idp-products/autotune/initial-port`
-- Uncommitted changes from today's heartbeat work (needs commit before starting Phase 6.9)
-- Deploy commands:
-  ```bash
-  # Backend
-  cd products/autotune/fast-template/infra-cdk
-  AWS_EC2_METADATA_DISABLED=true \
-  CDK_DEFAULT_ACCOUNT=$(aws sts get-caller-identity --query Account --output text) \
-  CDK_DEFAULT_REGION=us-east-1 \
-  npx cdk deploy --require-approval never
-
-  # Frontend
-  cd /home/ubuntu/gitlab/genaiic-idp-accelerator
-  python products/autotune/fast-template/scripts/deploy-frontend.py kaleko-FAST-IDPAT-dev --region us-east-1
-  ```
-
-### Key documentation
-- `products/autotune/docs/full-autonomy.md` — Architecture decisions and rationale (has a Session Keepalive section that needs updating to reflect fire-and-forget decision)
-- `products/autotune/docs/agent-security.md` — Security model, IAM policies, threat model, FAQ
-- `products/autotune/AUTOTUNE-DEVELOPMENT-PLAN.md` — This file
+### Priority 5: Pyright exclusion for CI
+- `products/autotune/` code fails the IDP repo's `make typecheck-pr` because it has its own deps (strands, agentcore) not in the IDP venv
+- Need to add `products/autotune` to `pyrightconfig.json` exclude list (or modify the typecheck script to skip it)
+- The `cli.py` and `queue_processor` errors are pre-existing from other merged commits
 
 ---
 
