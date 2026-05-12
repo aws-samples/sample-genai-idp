@@ -528,7 +528,12 @@ Resources:
         - Type: url-rewrite
           UrlRewriteConfig:
             Rewrites:
-              - Regex: "^/$"
+              # The url-rewrite regex matches against path + query string.
+              # Matching only the leading "/" leaves the query string intact,
+              # which is required for OAuth callbacks ("/?code=...&state=...").
+              # "^/$" does not match when a query string is present, causing
+              # S3 to see a bare "GET /" (ListBucket) and return AccessDenied.
+              - Regex: "^/"
                 Replace: "/index.html"
 
   # Rule 2: All other paths - serve static assets (JS, CSS, images, fonts, etc.)

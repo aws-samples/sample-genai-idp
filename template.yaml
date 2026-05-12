@@ -2623,7 +2623,7 @@ Resources:
               - !If
                 - UseCloudFrontHosting
                 - !Sub "https://${CloudFrontDistribution.DomainName}"
-                - !GetAtt ALBHOSTINGSTACK.Outputs.WebUIURL
+                - !GetAtt GetLowercaseAlbUrl.Lowercase
               # For local development only
               - "http://localhost:3000"
             ExposedHeaders:
@@ -2700,7 +2700,7 @@ Resources:
               - !If
                 - UseCloudFrontHosting
                 - !Sub "https://${CloudFrontDistribution.DomainName}"
-                - !GetAtt ALBHOSTINGSTACK.Outputs.WebUIURL
+                - !GetAtt GetLowercaseAlbUrl.Lowercase
               # For local development only
               - "http://localhost:3000"
             ExposedHeaders:
@@ -2819,7 +2819,7 @@ Resources:
               - !If
                 - UseCloudFrontHosting
                 - !Sub "https://${CloudFrontDistribution.DomainName}"
-                - !GetAtt ALBHOSTINGSTACK.Outputs.WebUIURL
+                - !GetAtt GetLowercaseAlbUrl.Lowercase
               # For local development only
               - "http://localhost:3000"
             ExposedHeaders:
@@ -3296,7 +3296,7 @@ Resources:
               - !If
                 - UseCloudFrontHosting
                 - !Sub "https://${CloudFrontDistribution.DomainName}"
-                - !GetAtt ALBHOSTINGSTACK.Outputs.WebUIURL
+                - !GetAtt GetLowercaseAlbUrl.Lowercase
               # For local development only
               - "http://localhost:3000"
             ExposedHeaders:
@@ -3417,7 +3417,7 @@ Resources:
               - !If
                 - UseCloudFrontHosting
                 - !Sub "https://${CloudFrontDistribution.DomainName}"
-                - !GetAtt ALBHOSTINGSTACK.Outputs.WebUIURL
+                - !GetAtt GetLowercaseAlbUrl.Lowercase
               # For local development only
               - "http://localhost:3000"
             ExposedHeaders:
@@ -3486,7 +3486,7 @@ Resources:
               - !If
                 - UseCloudFrontHosting
                 - !Sub "https://${CloudFrontDistribution.DomainName}"
-                - !GetAtt ALBHOSTINGSTACK.Outputs.WebUIURL
+                - !GetAtt GetLowercaseAlbUrl.Lowercase
               # For local development only
               - "http://localhost:3000"
             ExposedHeaders:
@@ -3540,6 +3540,13 @@ Resources:
     Properties:
       ServiceToken: !GetAtt GetDomainLambda.Arn
       InputString: !Ref AWS::StackName
+
+  GetLowercaseAlbUrl:
+    Type: Custom::GetLowercaseAlbUrl
+    Condition: UseALBHosting
+    Properties:
+      ServiceToken: !GetAtt GetDomainLambda.Arn
+      InputString: !GetAtt ALBHOSTINGSTACK.Outputs.WebUIURL
 
   ReportingDatabase:
     Type: AWS::Glue::Database
@@ -3954,7 +3961,7 @@ Resources:
               - !If
                 - UseCloudFrontHosting
                 - !Sub "https://${CloudFrontDistribution.DomainName}"
-                - !GetAtt ALBHOSTINGSTACK.Outputs.WebUIURL
+                - !GetAtt GetLowercaseAlbUrl.Lowercase
               # For local development only
               - "http://localhost:3000"
             ExposedHeaders:
@@ -6869,7 +6876,7 @@ Resources:
         - !If
           - UseCloudFrontHosting
           - !Sub "https://${CloudFrontDistribution.DomainName}/"
-          - !Sub "${ALBHOSTINGSTACK.Outputs.WebUIURL}/"
+          - !Sub "${GetLowercaseAlbUrl.Lowercase}/"
         - !Sub "https://${AWS::Region}.quicksight.aws.amazon.com/sn/oauthcallback"
         - https://us-east-1.quicksight.aws.amazon.com/sn/oauthcallback
         - https://us-west-2.quicksight.aws.amazon.com/sn/oauthcallback
@@ -6880,7 +6887,7 @@ Resources:
         - !If
           - UseCloudFrontHosting
           - !Sub "https://${CloudFrontDistribution.DomainName}/"
-          - !Sub "${ALBHOSTINGSTACK.Outputs.WebUIURL}/"
+          - !Sub "${GetLowercaseAlbUrl.Lowercase}/"
         - !Sub "https://${AWS::Region}.quicksight.aws.amazon.com/sn/oauthcallback"
         - https://us-east-1.quicksight.aws.amazon.com/sn/oauthcallback
         - https://us-west-2.quicksight.aws.amazon.com/sn/oauthcallback
@@ -6948,7 +6955,7 @@ Resources:
             - WebUIURL: !If
                 - UseCloudFrontHosting
                 - !Sub "https://${CloudFrontDistribution.DomainName}/"
-                - !GetAtt ALBHOSTINGSTACK.Outputs.WebUIURL
+                - !GetAtt GetLowercaseAlbUrl.Lowercase
       AutoVerifiedAttributes:
         - email
       EmailConfiguration:
@@ -7013,21 +7020,21 @@ Resources:
         - !If
           - UseCloudFrontHosting
           - !Sub "https://${CloudFrontDistribution.DomainName}"
-          - !GetAtt ALBHOSTINGSTACK.Outputs.WebUIURL
+          - !GetAtt GetLowercaseAlbUrl.Lowercase
         - !If
           - UseCloudFrontHosting
           - !Sub "https://${CloudFrontDistribution.DomainName}/"
-          - !Sub "${ALBHOSTINGSTACK.Outputs.WebUIURL}/"
+          - !Sub "${GetLowercaseAlbUrl.Lowercase}/"
       LogoutURLs: !If
         - HasExternalIdP
         - - !If
             - UseCloudFrontHosting
             - !Sub "https://${CloudFrontDistribution.DomainName}"
-            - !GetAtt ALBHOSTINGSTACK.Outputs.WebUIURL
+            - !GetAtt GetLowercaseAlbUrl.Lowercase
           - !If
             - UseCloudFrontHosting
             - !Sub "https://${CloudFrontDistribution.DomainName}/"
-            - !Sub "${ALBHOSTINGSTACK.Outputs.WebUIURL}/"
+            - !Sub "${GetLowercaseAlbUrl.Lowercase}/"
         - !Ref AWS::NoValue
       AccessTokenValidity: 1
       EnableTokenRevocation: true
@@ -8956,7 +8963,7 @@ Resources:
             Value: !If
               - UseCloudFrontHosting
               - !Sub "https://${CloudFrontDistribution.DomainName}/"
-              - !Sub "${ALBHOSTINGSTACK.Outputs.WebUIURL}/"
+              - !Sub "${GetLowercaseAlbUrl.Lowercase}/"
           - Name: VITE_TEST_SET_BUCKET_NAME
             Value: !Ref TestSetBucket
           - Name: VITE_INPUT_BUCKET_NAME
@@ -10083,7 +10090,7 @@ Outputs:
     Value: !If
       - UseCloudFrontHosting
       - !Sub "https://${CloudFrontDistribution.DomainName}/"
-      - !GetAtt ALBHOSTINGSTACK.Outputs.WebUIURL
+      - !GetAtt GetLowercaseAlbUrl.Lowercase
   S3InstallBucket:
     Description: Install S3 bucket name
     Value: !Ref InputBucket
