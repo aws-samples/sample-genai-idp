@@ -843,6 +843,7 @@ export class BackendStack extends cdk.NestedStack {
     api.root.addResource("stream").addMethod("GET", lambdaIntegration, authOptions)
     api.root.addResource("log").addMethod("GET", lambdaIntegration, authOptions)
     api.root.addResource("report").addMethod("GET", lambdaIntegration, authOptions)
+    api.root.addResource("config").addMethod("GET", lambdaIntegration, authOptions)
     api.root.addResource("runs").addMethod("GET", lambdaIntegration, authOptions)
 
     this.optimizationStateApiUrl = api.url

@@ -159,6 +159,27 @@ def get_report() -> Dict[str, Any]:
         return {"error": str(e)}, 500
 
 
+@app.get("/config")
+def get_config() -> Dict[str, Any]:
+    """Return an archived config YAML from S3."""
+    session_id = app.current_event.get_query_string_value("sessionId", "").strip()
+    version = app.current_event.get_query_string_value("version", "").strip()
+    if not session_id or not version:
+        return {"error": "sessionId and version query parameters are required"}, 400
+
+    s3_key = f"autotune-streams/{session_id}/configs/{version}.yaml"
+    try:
+        resp = s3.get_object(Bucket=STREAM_BUCKET, Key=s3_key)
+        content = resp["Body"].read().decode("utf-8")
+        return {"content": content}
+    except Exception as e:
+        error_code = getattr(e, "response", {}).get("Error", {}).get("Code", "")
+        if error_code == "NoSuchKey":
+            return {"content": None}
+        logger.exception("Failed to get config")
+        return {"error": str(e)}, 500
+
+
 @app.get("/runs")
 def list_runs() -> Dict[str, Any]:
     """List all optimization runs, most recent first."""

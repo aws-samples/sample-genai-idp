@@ -72,6 +72,7 @@ export default function ChatInterface() {
   const streamOffsetRef = useRef(0)  // Optimization log polling state
   const [optimizationLog, setOptimizationLog] = useState("")
   const [finalReport, setFinalReport] = useState<any>(null)
+  const [configModal, setConfigModal] = useState<{ version: string; content: string } | null>(null)
   // Tab: "stream", "log", or "report"
   const [activeTab, setActiveTab] = useState<"stream" | "log" | "report">("stream")
 
@@ -268,6 +269,21 @@ export default function ChatInterface() {
     }
     return () => { active = false; clearInterval(interval) }
   }, [stateApiUrl, currentSessionId, agentState?.status, auth.user?.id_token])
+
+  const fetchConfig = async (version: string) => {
+    if (!stateApiUrl || !currentSessionId) return
+    const idToken = auth.user?.id_token
+    if (!idToken) return
+    try {
+      const resp = await fetch(`${stateApiUrl}config?sessionId=${currentSessionId}&version=${encodeURIComponent(version)}`, {
+        headers: { Authorization: `Bearer ${idToken}` },
+      })
+      if (resp.ok) {
+        const data = await resp.json()
+        if (data.content) setConfigModal({ version, content: data.content })
+      }
+    } catch { /* ignore */ }
+  }
 
   const invokeAgent = async (sessionId: string, testSet: string, guidance: string, maxCostPerPage: string, maxTotalCost: string, isResume: boolean) => {
     if (!client) return
@@ -640,26 +656,30 @@ export default function ChatInterface() {
                           </div>
 
                           {/* Configs table */}
-                          <div className="border rounded-lg overflow-hidden">
+                          <div className="border rounded-lg overflow-hidden bg-gray-50">
                             <h4 className="font-medium text-gray-700 p-3 bg-gray-50 border-b">Configs Tested ({finalReport.configs?.length})</h4>
                             <table className="w-full text-sm">
-                              <thead className="bg-gray-50 border-b">
+                              <thead className="bg-gray-100 border-b">
                                 <tr>
                                   <th className="text-left p-2">Version</th>
                                   <th className="text-left p-2">Accuracy</th>
                                   <th className="text-left p-2">Cost/Page</th>
                                   <th className="text-left p-2">Budget</th>
                                   <th className="text-left p-2">Overview</th>
+                                  <th className="text-left p-2"></th>
                                 </tr>
                               </thead>
                               <tbody>
                                 {finalReport.configs?.map((cfg: any, i: number) => (
-                                  <tr key={i} className={`border-b ${cfg.version === finalReport.result.recommended_config_name ? "bg-green-50" : ""}`}>
+                                  <tr key={i} className={`border-b ${cfg.version === finalReport.result.recommended_config_name ? "bg-green-50" : "bg-white"}`}>
                                     <td className="p-2 font-medium">{cfg.version}</td>
                                     <td className="p-2">{cfg.accuracy}%</td>
                                     <td className="p-2">${cfg.cost_per_page_usd?.toFixed(4)}</td>
                                     <td className="p-2">{cfg.within_budget ? <span className="text-green-600">✓</span> : <span className="text-red-500">✗</span>}</td>
                                     <td className="p-2 text-gray-600">{cfg.overview}</td>
+                                    <td className="p-2">
+                                      <button onClick={() => fetchConfig(cfg.version)} className="text-xs text-blue-600 hover:text-blue-800 underline">View</button>
+                                    </td>
                                   </tr>
                                 ))}
                               </tbody>
@@ -681,6 +701,21 @@ export default function ChatInterface() {
           )}
         </div>
       </SidebarInset>
+
+      {/* Config viewer modal */}
+      {configModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setConfigModal(null)}>
+          <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full mx-4 max-h-[80vh] flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between p-4 border-b">
+              <h3 className="font-semibold text-gray-800">{configModal.version}</h3>
+              <button onClick={() => setConfigModal(null)} className="text-gray-400 hover:text-gray-600 text-xl">✕</button>
+            </div>
+            <div className="overflow-auto p-4 flex-1">
+              <pre className="text-xs text-gray-800 whitespace-pre-wrap font-mono">{configModal.content}</pre>
+            </div>
+          </div>
+        </div>
+      )}
     </SidebarProvider>
   )
 }
