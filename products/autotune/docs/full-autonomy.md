@@ -141,15 +141,17 @@ Runs after each agent invocation completes. Decides whether to continue:
 
 1. **Check terminal** — if status is terminal (`complete`, `failed`, `cancelled`), don't resume.
 2. **Check finalizing** — if `status == "finalizing"`, the agent just finished its summary turn. Force `status=complete` and stop.
-3. **Check max iterations** — if `iteration >= max_iterations`, set `status="finalizing"` and resume with a final prompt telling the agent to write a summary.
-4. **Check max cost** — if `agent_cost_usd + eval_cost_usd >= max_cost_usd`, set `status="finalizing"` and resume with a cost-limit message.
+3. **Check max iterations** — if `iteration >= max_iterations`, set `status="finalizing"` and resume with a final prompt including the full OPTIMIZATION-LOG.md content, telling the agent to call `generate_final_report`.
+4. **Check max cost** — if `agent_cost_usd + eval_cost_usd >= max_cost_usd`, set `status="finalizing"` and resume with a cost-limit message + full log, telling the agent to call `generate_final_report`.
 5. **Otherwise** — resume with a prompt that includes current iteration count, best accuracy so far, and instruction to continue.
 
 **Premature completion guard:** The `update_optimization_state` tool refuses to set `status='complete'` unless the current status is already `'finalizing'`. This prevents the agent from ending the run early after a single good result. Only the `OptimizationLoopHook` can transition to `finalizing` (via max iterations or max cost), and only then can the agent set `complete`.
 
-**Iteration counting:** Iterations are incremented deterministically by `run_evaluation` when called with `n_files=0` (full evaluation run). The agent does not manage iteration counts.
+**Final report guard:** The `generate_final_report` tool checks DynamoDB status and refuses to run unless `status == "finalizing"`. This prevents the agent from prematurely writing a final report mid-optimization when it believes it has converged — only the hooks can authorize finalization.
 
-**Finalizing guardrails:** During finalizing, `run_evaluation` refuses to launch new runs (returns an error). Once the agent calls `update_optimization_state(status='complete')`, status becomes terminal and `CancelCheckHook` kills the agent on the next tool call.
+**Finalizing flow:** During finalizing, `CancelCheckHook` blocks all tools except `generate_final_report`. The agent calls it with structured results (configs tested, recommendation, stopping reason). The tool writes `final-report.json` to S3, archives all configs from the run to S3, and appends a summary to OPTIMIZATION-LOG.md. After the agent's finalizing turn completes, `OptimizationLoopHook` sets `status=complete`.
+
+**Iteration counting:** Iterations are incremented deterministically by `run_evaluation` when called with `n_files=0` (full evaluation run). The agent does not manage iteration counts.
 
 **Why `event.resume` instead of a Python loop:** Strands' `AfterInvocationEvent.resume` is the SDK's built-in mechanism for multi-turn autonomous operation. It handles conversation history, context management, and streaming correctly. A manual loop around `agent()` calls would need to replicate all of that.
 
