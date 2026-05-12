@@ -5,41 +5,45 @@ SPDX-License-Identifier: MIT-0
 
 ## [Unreleased]
 
+## [0.5.10]
+
 ### Added
 
-- **`idp-cli discover --model-id` flag** — override the Bedrock model used by `idp-cli discover` for a single invocation (e.g. `--model-id us.anthropic.claude-opus-4-6-v1`). Threads from the CLI through the SDK (`client.discovery.*`) and `idp_common.discovery.ClassesDiscovery` down to `bedrock.invoke_model`. Applies to with-ground-truth, without-ground-truth, `--auto-detect`, and `--page-range` modes; backward-compatible (omitting the flag uses the configured model). ([#309](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues/309))
+- **Enhanced config validation** — `idp-cli config-validate` now validates Bedrock model IDs against `pricing.yaml` and checks that custom `task_prompts` include required placeholders (e.g. `{DOCUMENT_TEXT}`, `{DOCUMENT_IMAGE}`) across all pipeline sections. Runs automatically on `config-upload` (use `--no-validate` to skip).
+
+- **`idp-cli discover --model-id` flag** — override the Bedrock model used by `idp-cli discover` for a single invocation (e.g. `--model-id us.anthropic.claude-opus-4-6-v1`). Applies to all discovery modes; backward-compatible. ([#309](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues/309))
 
 - **Bedrock circuit breaker** — a CFN-parameterized circuit breaker that pauses new workflow starts when Bedrock is unhealthy and auto-recovers once the service comes back, so transient Bedrock outages no longer burn through SQS retries or leave documents half-processed. Off by default for full backward compatibility.
-  - New `circuit_breaker_manager` Lambda (`src/lambda/circuit_breaker_manager/`) owns state transitions in the existing `ConcurrencyTable` under `counter_id = "circuit_breaker"`. Three states: `CLOSED` (normal), `OPEN` (block new workflow starts), `HALF_OPEN` (probe traffic allowed).
-  - **Triggers:** (1) CloudWatch Alarm state changes on Bedrock error metrics fan out via SNS → `circuit_breaker_manager`; (2) an EventBridge-scheduled health check promotes `OPEN → HALF_OPEN` once `RECOVERY_TIMEOUT_SECONDS` has elapsed.
-  - **Gate:** `queue_processor.check_circuit_breaker()` runs *before* the concurrency-counter increment — cheap filter first. `OPEN` → message is not deleted, SQS redelivers after visibility timeout. `HALF_OPEN` → probe traffic proceeds. DDB errors fail **open** (do not block traffic) and return state `ERROR`.
-  - **Recovery:** `workflow_tracker.notify_circuit_breaker_success()` transitions `HALF_OPEN → CLOSED` after the first successful workflow completion, conditionally on state still being `HALF_OPEN`.
-  - **Race-safe DDB writes:** all state transitions (`handle_alarm_event`, `handle_health_check`, `notify_circuit_breaker_success`) use `ConditionExpression` on the expected prior state. A concurrent alarm fan-out or a workflow-completion racing against an alarm can no longer clobber each other's state write; the loser's `ConditionalCheckFailedException` is swallowed as a no-op and side effects (SNS publish, CloudWatch metric, custom error-handler invoke) are skipped so no stale notification is emitted.
-  - **Operator hooks:** manual `{"action": "reset"}` and `{"action": "get_state"}` invocations on `circuit_breaker_manager`; optional customer Lambda invoked via `ERROR_HANDLER_ARN` when the breaker opens.
-  - **Metrics & notifications:** `CircuitBreakerOpened` / `CircuitBreakerHalfOpen` / `CircuitBreakerClosed` CloudWatch metrics under the existing `METRIC_NAMESPACE`, and state-change notifications to the existing `AlertsTopic`.
-  - **New CFN parameters** (all default to off, fully backward-compatible): `EnableCircuitBreaker`, `CircuitBreakerRecoveryTimeoutSeconds`, `CircuitBreakerErrorHandlerArn`. New env vars `CIRCUIT_BREAKER_ENABLED` / `CIRCUIT_BREAKER_ID` on `queue_processor` and `workflow_tracker`.
-  - **Unit test coverage:** `src/lambda/circuit_breaker_manager/test_index.py`, `src/lambda/queue_processor/test_check_circuit_breaker.py`, `src/lambda/workflow_tracker/test_notify_circuit_breaker.py` cover alarm ALARM/OK per prior-state branch, health-check recovery elapsed vs. not elapsed, counter preservation on OPEN→HALF_OPEN, manual reset/get_state (including `last_error` removal), disabled / item-missing / OPEN / HALF_OPEN / DDB-error gate paths, OPEN-state SQS visibility extension, HALF_OPEN→CLOSED success path, and the ConditionalCheckFailedException race-loss branch.
-  - **Outage-aware SQS retry backoff:** when the breaker is `OPEN`, `queue_processor` calls `sqs.ChangeMessageVisibility` to push the message invisibility out to `CircuitBreakerRecoveryTimeoutSeconds` (default 300 s). Keeps long Bedrock outages from burning through the source queue's `maxReceiveCount` and landing documents in the DLQ. Failures are non-fatal — messages fall back to the default 30 s visibility timeout.
-  - **Counter preservation on recovery:** `OPEN → HALF_OPEN` transitions (both alarm-cleared and recovery-timeout paths) now preserve `failure_count` instead of resetting it to 0, so operators can see the cumulative failure count across a full outage. Manual reset still zeros both counters and removes `last_error` for a clean-slate restart.
-  - **Docs:** `docs/circuit-breaker.md` and `src/lambda/circuit_breaker_manager/README.md`.
-  - **Web UI visibility & admin controls** — the document list header shows a live status badge (green CLOSED / blue HALF_OPEN / red OPEN with `lastError` tooltip) powered by an AppSync subscription. Clicking the badge opens a details panel (state, `openedAt`, `failureCount`, `recoveryAttempts`, `lastError`). Users in the **Admin** Cognito group additionally see **Pause processing**, **Resume processing**, and **Probe recovery** buttons — each requires a reason that is persisted to DynamoDB and broadcast over the existing `AlertsTopic`. All automatic transitions (alarm fan-out, scheduled health-check probe) also publish to the subscription, so the badge reflects real state within ~1 s across every connected browser. Badge and panel are hidden entirely when `CircuitBreakerEnabled=false`.
-    - New AppSync query/mutations/subscription: `getCircuitBreakerStatus`, `pauseCircuitBreaker`, `resumeCircuitBreaker`, `probeCircuitBreaker`, `onCircuitBreakerStatusChange` (backed by IAM-only `publishCircuitBreakerStatus` fan-out mutation).
-    - New resolver Lambda (`nested/appsync/src/lambda/circuit_breaker_resolver/`) handles reads directly from `ConcurrencyTable` and forwards admin mutations to `circuit_breaker_manager` as new `manual_open` / `manual_close` / `manual_probe` actions (reasons recorded in `last_error`). Admin authorization is enforced at both the AppSync schema layer (`@aws_auth(cognito_groups: ["Admin"])`) and in the resolver.
-    - `HALF_OPEN → CLOSED` recoveries fan out to the UI in real time. `workflow_tracker` async-invokes `circuit_breaker_manager` with a new `broadcast` action after it closes the breaker, so the badge flips from "Circuit: recovering" to "Circuit: closed" without a manual refresh. Previously the DDB write was correct but the UI stayed stuck on recovering because only the manager Lambda published to AppSync.
-    - Badge label distinguishes `Manual pause by <user>` entries in `last_error` ("Circuit: manually paused") from automatic alarm-triggered opens ("Circuit: Bedrock outage"). Badge is also restyled as a Cloudscape `Button` to match the other header actions and moved to the right of **Release Review**.
+  - New `circuit_breaker_manager` Lambda owns state transitions (`CLOSED` / `OPEN` / `HALF_OPEN`) in the existing `ConcurrencyTable`. Triggered by CloudWatch Alarms on Bedrock error metrics (via SNS) and by an EventBridge-scheduled health check that promotes `OPEN → HALF_OPEN` after `RECOVERY_TIMEOUT_SECONDS`. `workflow_tracker` closes the breaker after the first successful probe.
+  - `queue_processor` gates new work before incrementing the concurrency counter; `OPEN` messages are redelivered by SQS (with `ChangeMessageVisibility` extended to the recovery timeout to avoid DLQ churn), DDB errors fail open.
+  - All state transitions use conditional DDB writes so concurrent alarm/workflow updates cannot clobber each other. `failure_count` is preserved across `OPEN → HALF_OPEN`; manual reset zeros counters and clears `last_error`.
+  - Operator hooks: manual `reset` / `get_state` invocations, optional customer Lambda invoked via `ERROR_HANDLER_ARN`, CloudWatch metrics (`CircuitBreaker{Opened,HalfOpen,Closed}`), and `AlertsTopic` notifications.
+  - New CFN parameters (all default off): `EnableCircuitBreaker`, `CircuitBreakerRecoveryTimeoutSeconds`, `CircuitBreakerErrorHandlerArn`. Unit tests cover alarm/health-check/manual/race-loss branches.
+  - **Web UI visibility & admin controls** — document list header shows a live status badge (green/blue/red with `lastError` tooltip) via an AppSync subscription; clicking opens a details panel. Admin-group users additionally get **Pause / Resume / Probe** buttons (each requires a reason, persisted and broadcast). All automatic transitions publish to the subscription so the badge updates within ~1s. Hidden entirely when `CircuitBreakerEnabled=false`. Backed by new AppSync ops (`getCircuitBreakerStatus`, `pause/resume/probeCircuitBreaker`, `onCircuitBreakerStatusChange`) and a new resolver Lambda that enforces Admin authorization at both the schema and resolver layers.
+  - Docs: `docs/circuit-breaker.md` and `src/lambda/circuit_breaker_manager/README.md`.
+
 
 ### Changed
 
-- **Replaced DSR with open-source SRT security scanning tool** — Migrated from deprecated internal DSR (Design Security Review) tool to the actively maintained open-source [Sample Security Review Tool (SRT)](https://github.com/aws-samples/sample-security-review-tool). Added automated security scanning in GitLab CI/CD pipeline that runs on merge requests targeting `develop` branch. Pipeline fails if security findings are detected, providing a security gate before production deployments. New Makefile targets: `make srt`, `make srt-setup`, `make srt-scan`, `make srt-fix`. Updated documentation in CLAUDE.md, CONTRIBUTING.md, and scripts/README.md.
+- **Replaced DSR with open-source SRT security scanning tool** — Migrated from the deprecated internal DSR tool to the open-source [Sample Security Review Tool (SRT)](https://github.com/aws-samples/sample-security-review-tool). GitLab CI/CD now runs SRT on MRs targeting `develop` and fails the pipeline on findings. New Makefile targets: `make srt`, `make srt-setup`, `make srt-scan`, `make srt-fix`.
+
 
 ### Fixed
 
-- **`idp-cli discover` silently ignored mismatched ground truth files** — When `-g` ground truth files didn't match any `-d` document by filename stem, the CLI printed a yellow warning but exited `0` and ran discovery without ground truth. This produced subtly worse results that were hard to diagnose (common trigger: IDP test-set ground truth stored as `baseline/<doc>/sections/1/result.json`, whose stem is always `result`). Two behavioral changes:
-  - **Single document + single ground truth** (`-d 1 file, -g 1 file`): now paired by position regardless of filename stem — filenames no longer need to match for this common case.
-  - **Batch mode** (multiple `-d` or multiple `-g`): unmatched `-g` files are now a fatal error (exit `1`) with a clear message showing unmatched ground truth files and available document stems. Also detects and errors on duplicate ground truth filename stems, which previously overwrote each other silently.
-  ([#310](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues/310))
+- **SRT now uses `--no-license-update`** to prevent it from automatically rewriting source file license headers during security scans.
 
-  
+- **Agentic extraction with Claude Opus 4.7 no longer fails with `top_p is deprecated`** — the Claude 4.7+ enablement in v0.5.7 fixed the traditional Bedrock path but missed the Strands-based agentic path (`idp_common/extraction/agentic_idp.py`), which still forwarded `top_p` to ConverseStream. Both paths now share the same `is_claude_4_7_model` detection and omit deprecated inference params. ([#304](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues/304))
+
+- **`idp-cli discover` silently ignored mismatched ground truth files** — previously a filename-stem mismatch between `-d` and `-g` only produced a warning and ran discovery without ground truth. Now: single-doc + single-GT invocations are paired by position (no filename match required); batch-mode mismatches or duplicate GT stems fail with exit `1` and a clear message. ([#310](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues/310))
+
+- **Web UI "View Source" failed for PDFs and other docs after the v0.5.9 CSP hardening** — three fixes in `FileViewer`: (1) pass an `s3://bucket/key` URI to `getFileContents` instead of relying on the build-time `VITE_AWS_REGION` env var; (2) render PDFs in an `<iframe>` instead of `<object>` so they're allowed under the hardened `object-src 'none'` CSP; (3) drop the `sandbox` attribute on the PDF iframe only (Chrome's built-in PDF viewer is blocked when sandboxed; non-PDF iframes keep their sandbox). Added a fallback "Open PDF in a new tab" link.
+
+## Templates
+   - us-west-2: `https://s3.us-west-2.amazonaws.com/aws-ml-blog-us-west-2/artifacts/genai-idp/idp-main_0.5.10.yaml`
+   - us-east-1: `https://s3.us-east-1.amazonaws.com/aws-ml-blog-us-east-1/artifacts/genai-idp/idp-main_0.5.10.yaml`
+   - eu-central-1: `https://s3.eu-central-1.amazonaws.com/aws-ml-blog-eu-central-1/artifacts/genai-idp/idp-main_0.5.10.yaml`
+
+
 ## [0.5.9]
 
 ### Added

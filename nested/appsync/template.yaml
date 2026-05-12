@@ -4297,11 +4297,11 @@ Resources:
       cfn_nag:
         rules_to_suppress:
           - id: W89
-            reason: "Function does not require VPC access as it only interacts with AWS services via APIs"
+            reason: "VPC attachment is conditional on AppSyncVisibility=PRIVATE (see VpcConfig below). The resolver must live in the same VPC as the private AppSync API so AppSync can invoke it and its DynamoDB reads can traverse a gateway endpoint. On the default/public AppSync path the resolver only talks to DynamoDB and Lambda over AWS-managed networking and VPC access is not required."
           - id: W92
             reason: "Function does not require reserved concurrency as it scales based on demand"
     # checkov:skip=CKV_AWS_116: "DLQ not required for AppSync resolver function"
-    # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
+    # checkov:skip=CKV_AWS_117: "VPC attachment is conditional on AppSyncVisibility=PRIVATE (see VpcConfig below); default path does not require VPC access"
     # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
     # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data"
     Properties:
@@ -4313,6 +4313,15 @@ Resources:
       Description: AppSync resolver for circuit breaker status + admin controls
       MemorySize: 256
       Timeout: 30
+      # With a PRIVATE AppSync API the resolver Lambda must live in the same
+      # VPC so AppSync can invoke it and its DynamoDB reads traverse a
+      # gateway endpoint rather than the public endpoint.
+      VpcConfig: !If
+        - IsPrivateAppSync
+        - SubnetIds: !Ref LambdaSubnetIds
+          SecurityGroupIds:
+            - !Ref LambdaSecurityGroupId
+        - !Ref AWS::NoValue
       Environment:
         Variables:
           LOG_LEVEL: !Ref LogLevel

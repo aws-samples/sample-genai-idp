@@ -197,16 +197,19 @@ typecheck-pr: ## Type check only files changed vs TARGET_BRANCH (default: main)
 	$(PYTHON) scripts/sdlc/typecheck_pr_changes.py $(TARGET_BRANCH)
 
 ##@ Testing
-test: ## Run all tests (idp_common, cli, sdk, capacity, config library, srt)
+test: ## Run all tests (idp_common, cli, sdk, capacity, circuit breaker, config library)
 	$(MAKE) -C lib/idp_common_pkg test PYTHON=$(PYTHON)
 	cd lib/idp_cli_pkg && $(PYTHON) -m pytest -v
 	cd lib/idp_sdk && $(PYTHON) -m pytest -m "not integration" -v
 	@echo "Running capacity planning Lambda tests..."
 	cd src/lambda/calculate_capacity && $(PYTHON) -m pytest -v
+	@echo "Running circuit breaker Lambda tests..."
+	$(PYTHON) -m pytest -v \
+	    src/lambda/circuit_breaker_manager \
+	    src/lambda/queue_processor/test_check_circuit_breaker.py \
+	    src/lambda/workflow_tracker/test_notify_circuit_breaker.py
 	@echo "Validating config library files..."
 	$(PYTHON) -m pytest config_library/test_config_library.py -v
-	#@echo "Running SRT security scan..."
-	#$(MAKE) srt
 
 test-cli: ## Run only IDP CLI tests
 	@echo "Running IDP CLI tests..."
@@ -225,6 +228,13 @@ test-capacity-coverage: ## Run capacity planning tests with coverage report
 	@echo "Running capacity planning Lambda tests with coverage..."
 	cd src/lambda/calculate_capacity && $(PYTHON) -m pytest --cov=. --cov-report=term --cov-report=html -v
 	@echo -e "$(GREEN)✅ Coverage report generated at src/lambda/calculate_capacity/htmlcov/index.html$(NC)"
+
+test-circuit-breaker: ## Run only circuit breaker tests
+	@echo "Running circuit breaker Lambda tests..."
+	$(PYTHON) -m pytest -v \
+	    src/lambda/circuit_breaker_manager \
+	    src/lambda/queue_processor/test_check_circuit_breaker.py \
+	    src/lambda/workflow_tracker/test_notify_circuit_breaker.py
 
 ##@ UI Development
 # Usage: make ui-start STACK_NAME=<stack-name>

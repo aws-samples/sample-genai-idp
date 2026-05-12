@@ -201,10 +201,12 @@ class TestHandlerActions:
         index_module.concurrency_table.update_item.assert_called_once()
         kwargs = index_module.concurrency_table.update_item.call_args.kwargs
         assert kwargs["ExpressionAttributeValues"][":state"] == "CLOSED"
-        # Manual reset zeros counters and removes stale last_error.
+        # Manual reset zeros counters and removes stale last_error + opened_at.
         assert kwargs["ExpressionAttributeValues"][":fc"] == 0
         assert kwargs["ExpressionAttributeValues"][":ra"] == 0
-        assert "REMOVE last_error" in kwargs["UpdateExpression"]
+        assert "REMOVE" in kwargs["UpdateExpression"]
+        assert "last_error" in kwargs["UpdateExpression"]
+        assert "opened_at" in kwargs["UpdateExpression"]
         index_module.sns.publish.assert_called_once()
 
 
@@ -213,7 +215,7 @@ class TestManualActions:
 
     def test_manual_open_from_closed(self, index_module):
         index_module.concurrency_table.get_item.return_value = {
-            "Item": {"state": "CLOSED", "failure_count": 0}
+            "Item": {"state": "CLOSED", "failure_count": 3}
         }
         event = {"action": "manual_open", "user": "admin@x", "reason": "quiesce"}
         result = index_module.handler(event, MagicMock())
@@ -221,7 +223,10 @@ class TestManualActions:
         kwargs = index_module.concurrency_table.update_item.call_args.kwargs
         assert kwargs["ExpressionAttributeValues"][":state"] == "OPEN"
         assert kwargs["ExpressionAttributeValues"][":expected"] == "CLOSED"
-        assert kwargs["ExpressionAttributeValues"][":fc"] == 1
+        # Admin pauses are operator actions, not Bedrock failures, so
+        # failure_count must be left alone.
+        assert ":fc" not in kwargs["ExpressionAttributeValues"]
+        assert "failure_count" not in kwargs["UpdateExpression"]
         assert "Manual pause by admin@x: quiesce" in (
             kwargs["ExpressionAttributeValues"][":err"]
         )
@@ -257,7 +262,11 @@ class TestManualActions:
         assert kwargs["ExpressionAttributeValues"][":state"] == "CLOSED"
         assert kwargs["ExpressionAttributeValues"][":fc"] == 0
         assert kwargs["ExpressionAttributeValues"][":ra"] == 0
-        assert "REMOVE last_error" in kwargs["UpdateExpression"]
+        assert "REMOVE" in kwargs["UpdateExpression"]
+        assert "last_error" in kwargs["UpdateExpression"]
+        # opened_at must also be cleared so the UI panel doesn't show a stale
+        # outage timestamp after a manual override.
+        assert "opened_at" in kwargs["UpdateExpression"]
         assert "ConditionExpression" not in kwargs
         index_module.sns.publish.assert_called_once()
 
@@ -285,3 +294,20 @@ class TestManualActions:
     def test_unknown_action_returns_400(self, index_module):
         result = index_module.handler({"action": "bogus"}, MagicMock())
         assert result["statusCode"] == 400
+
+    def test_broadcast_action_publishes_without_mutating_state(self, index_module):
+        """The broadcast action must re-publish current state without writing DDB or SNS."""
+        state_item = {
+            "counter_id": "circuit_breaker",
+            "state": "CLOSED",
+            "failure_count": 0,
+        }
+        index_module.concurrency_table.get_item.return_value = {"Item": state_item}
+        with patch.object(index_module, "publish_to_appsync") as mock_publish:
+            result = index_module.handler({"action": "broadcast"}, MagicMock())
+        assert result["statusCode"] == 200
+        assert result["body"] == state_item
+        mock_publish.assert_called_once_with(state_item)
+        index_module.concurrency_table.update_item.assert_not_called()
+        index_module.sns.publish.assert_not_called()
+        index_module.cloudwatch.put_metric_data.assert_not_called()
