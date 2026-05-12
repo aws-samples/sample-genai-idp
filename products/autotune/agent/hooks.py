@@ -218,7 +218,7 @@ class OptimizationLoopHook(HookProvider):
             event.resume = (
                 f"You have reached the maximum cost limit (${total_cost:.2f} >= ${self.max_cost_usd:.2f}). "
                 "Call generate_final_report with the structured results of this "
-                "optimization run (stopping_reason='max_cost', all configs tested, "
+                "optimization run (stopping_reason='budget_exhausted', all configs tested, "
                 "and your recommendation). Do NOT launch new evaluations.\n\n"
                 "Here is your OPTIMIZATION-LOG.md for reference:\n"
                 f"```\n{log_content}\n```"

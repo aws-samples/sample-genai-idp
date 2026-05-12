@@ -152,19 +152,28 @@ def upload_config(config_path: str, config_version: str, description: str) -> st
     IMPORTANT: Config version names MUST include the test set name as a prefix,
     e.g. 'davids-test-set-v3', 'realkie-fcc-v7'. Short names like 'v3' are rejected.
 
+    NOTE: A session ID suffix is automatically appended to ensure uniqueness across
+    optimization runs. The final uploaded name is returned in the response.
+
     Args:
         config_path: Path to config YAML file.
         config_version: Version name (e.g., 'davids-test-set-v3', 'realkie-fcc-v7').
         description: Description of what changed in this version.
 
     Returns:
-        JSON with status, stdout, stderr.
+        JSON with status, uploaded_version (the actual name used), stdout, stderr.
     """
     if len(config_version) < 5:
         return json.dumps({"error": f"Config version name '{config_version}' is too short. Include the test set name as prefix, e.g. 'davids-test-set-v3'."})
-    _auto_update_status("configuring", f"Uploading config {config_version}")
+
+    # Append session ID suffix for global uniqueness
+    session_id = os.environ["AUTOTUNE_SESSION_ID"]
+    unique_version = f"{config_version}-{session_id[:8]}"
+
+    _auto_update_status("configuring", f"Uploading config {unique_version}")
     client = _get_client()
-    result = client.upload_config(config_path, config_version, description)
+    result = client.upload_config(config_path, unique_version, description)
+    result["uploaded_version"] = unique_version
     return json.dumps(result, indent=2)
 
 
@@ -1311,7 +1320,7 @@ def generate_final_report(
     and appends a summary to OPTIMIZATION-LOG.md.
 
     Args:
-        stopping_reason: Why the run stopped. One of: 'max_iterations', 'max_cost', 'converged'.
+        stopping_reason: Why the run stopped. One of: 'max_iterations', 'budget_exhausted', 'converged'.
         iterations_completed: Number of full evaluation iterations completed.
         recommended_config_name: Config version name with best accuracy within budget.
         recommended_config_accuracy: Accuracy (%) of the recommended config.
