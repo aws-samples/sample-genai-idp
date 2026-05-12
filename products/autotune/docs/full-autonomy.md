@@ -19,7 +19,7 @@ These arrive as fields in the JSON payload alongside the standard `prompt` and `
 
 ## Startup Sequence
 
-When a request arrives with `test_set_id`, the entrypoint (`basic_agent.py`) performs these steps in order:
+When a request arrives with `test_set_id`, the entrypoint (`entrypoint.py`) performs these steps in order:
 
 1. **Set `AUTOTUNE_SESSION_ID` env var** — makes the session ID available to the `update_optimization_state` tool (which lazy-initializes an `OptimizationState` instance from this env var).
 
@@ -114,15 +114,22 @@ State is split between two stores, each serving a different purpose:
 
 ## Hooks
 
-Two Strands hooks drive autonomous operation. Both receive an `OptimizationState` instance via constructor injection.
+Six Strands hooks drive autonomous operation (registered in order in `entrypoint.py`):
 
-### CancelCheckHook (BeforeToolCallEvent)
+1. **ServiceUnavailableRetryHook** (AfterModelCallEvent) — retries on Bedrock `serviceUnavailableException`
+2. **CancelCheckHook** (BeforeToolCallEvent + BeforeModelCallEvent) — cost enforcement + cancel detection
+3. **ContextCheckHook** (BeforeModelCallEvent) — summarizes conversation when context exceeds 50%
+4. **FileReadSafetyHook** (BeforeToolCallEvent) — forces `mode=view`, blocks search/find on directories
+5. **CostTrackingHook** (AfterModelCallEvent) — updates DynamoDB with token cost
+6. **OptimizationLoopHook** (AfterInvocationEvent) — drives iteration, checks stopping criteria
+
+### CancelCheckHook (BeforeToolCallEvent + BeforeModelCallEvent)
 
 Runs before every tool call. Reads `status` from DynamoDB. If `status == "cancelled"`:
 - Raises `OptimizationCancelled` exception, which immediately halts the agent
 - Updates phase to "cancelled" before raising
 
-The exception propagates up through `agent.stream_async()` and is caught by the background thread in `basic_agent.py`, which does a final S3 sync of the stream and log files.
+The exception propagates up through `agent.stream_async()` and is caught by the background thread in `entrypoint.py`, which does a final S3 sync of the stream and log files.
 
 **Why raise instead of `cancel_tool`:** The original implementation used `event.cancel_tool`, which only cancels the individual tool call. The agent interpreted this as "tool failed" and kept retrying indefinitely. Raising an exception is the only reliable way to stop the agent mid-invocation.
 
@@ -327,7 +334,7 @@ The agent uses belt-and-suspenders to prevent AgentCore from killing the session
 
 | Component | File | Description |
 |-----------|------|-------------|
-| Entrypoint | `fast-template/patterns/strands-single-agent/basic_agent.py` | AgentCore entrypoint, startup sequence, agent creation |
+| Entrypoint | `agent/entrypoint.py` | AgentCore entrypoint, startup sequence, agent creation |
 | State helper | `agent/state.py` | `OptimizationState` class — DynamoDB read/write wrapper |
 | Hooks | `agent/hooks.py` | `CancelCheckHook`, `OptimizationLoopHook` |
 | Tools | `agent/tools.py` | 20 IDPAC tools including `update_optimization_state`, with auto state updates |
@@ -339,4 +346,4 @@ The agent uses belt-and-suspenders to prevent AgentCore from killing the session
 | Frontend | `fast-template/frontend/src/components/chat/ChatInterface.tsx` | Polling-based UI with stream/log tabs, cancel button |
 | Deploy script | `fast-template/scripts/deploy-frontend.py` | Generates aws-exports.json with `optimizationStateApiUrl` |
 | Config | `fast-template/infra-cdk/config.yaml` | `autotune` section with `idp_stack_name`, `model_id` |
-| Dockerfile | `fast-template/patterns/strands-single-agent/Dockerfile` | Container build, copies state.py/hooks.py as optimization_state.py/optimization_hooks.py |
+| Dockerfile | `agent/Dockerfile` | Container build, copies state.py/hooks.py as optimization_state.py/optimization_hooks.py |

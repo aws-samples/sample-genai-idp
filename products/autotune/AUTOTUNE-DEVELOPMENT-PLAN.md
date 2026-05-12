@@ -998,13 +998,9 @@ python products/autotune/scripts/reset_stack.py kaleko-IDPAutoTune-dev --region 
 - **Session:** `707e8973`
 - **Error:** `ValidationException: User messages cannot contain tool uses. Please remove the tool uses and try again`
 - **When:** After multiple context summarizations
-- **Root cause (suspected):** `SummarizingConversationManager.reduce_context()` produces a summary that gets inserted as a user message. After multiple summarizations, the conversation structure may have tool_use blocks in user messages (from the summarization output or from how messages are preserved). Bedrock's ConverseStream API rejects this.
-- **Investigation steps:**
-  1. Download `stream.jsonl` for session `707e8973` from the stream bucket to see what happened before the crash
-  2. Look at what `reduce_context` does to the message array — does it preserve `tool_use` blocks in user messages?
-  3. Check `preserve_recent_messages=6` — if recent messages include a tool_use/tool_result pair that gets orphaned or misplaced after summarization
-  4. Possible fix: post-process messages after `reduce_context()` to strip any tool_use blocks from user messages, or increase `preserve_recent_messages` to avoid splitting tool call pairs
-- **Also:** Change threshold back to 50% after fixing this bug
+- **Root cause:** Strands' `SummarizingConversationManager._generate_summary` runs a full agent loop that can produce toolUse blocks, then casts the result to `role=user`. Bedrock rejects user messages with tool_use content.
+- **Fix (deployed):** Replaced Strands summarization with a single `bedrock-runtime converse()` call. No tools, no agent loop — just text in, text out. See `agent/context_manager.py`.
+- **Status:** ✅ FIXED — tested with 5% threshold, multiple summarizations work correctly now. Threshold set back to 50%.
 
 ### Priority 2: Discovery schema mismatch fix
 - Awaiting IDP service team response
@@ -1016,6 +1012,7 @@ python products/autotune/scripts/reset_stack.py kaleko-IDPAutoTune-dev --region 
 
 ### Priority 4: Improve `validate_config`
 - Catch configs that break the pipeline (pass validation but produce garbage)
+- **New finding (2026-05-12):** `extraction.max_tokens: 16000` with `us.amazon.nova-lite-v1:0` (limit 10000) passes validation but fails at runtime with `ValidationException: The maximum tokens you requested exceeds the model limit of 10000`. Reported to IDP service team. Repro at `products/autotune/planning-docs/broken-configs/`.
 
 ### Priority 5: Pyright exclusion for CI
 - `products/autotune/` code fails the IDP repo's `make typecheck-pr` because it has its own deps (strands, agentcore) not in the IDP venv
