@@ -204,7 +204,8 @@ Every GraphQL **mutation** and many **queries** have `@aws_auth(cognito_groups: 
 | `listDiscoveryJobs` | Admin, Author |
 | `getTestRun`, `getTestRuns`, `getTestRunStatus`, `compareTestRuns`, `getTestSets`, `listBucketFiles`, `validateTestFileName` | Admin, Author |
 | `listFinetuningJobs`, `getFinetuningJob`, `validateTestSetForFinetuning`, `listAvailableModels` | All authenticated (UI limited to Admin, Author) |
-| `queryKnowledgeBase`, `chatWithDocument` | All authenticated |
+| `queryKnowledgeBase` | All authenticated |
+| `sendChatDocumentMessage` (mutation), `onChatDocumentMessageUpdate` (subscription) | All authenticated; resolver enforces per-session ownership and processor enforces `allowedConfigVersions` scope on the target document |
 | `listUsers` | All authenticated (non-admin sees only self in resolver) |
 | `getMyProfile` | All authenticated |
 

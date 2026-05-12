@@ -613,6 +613,33 @@ type AgentChatMessage @aws_cognito_user_pools @aws_iam {
   toolMetadata: ToolMetadata
 }
 
+# Chat-with-Document async messages.
+#
+# The feature works via a long-running processor Lambda invoked async, which
+# publishes status updates and token deltas back via this type so the UI can
+# render activity while waiting for large-context models (e.g. Opus 4.7 1M).
+# Mirrors the AgentChatMessage pattern.
+#
+# `method` values:
+#   - "chat"                  — user-initiated request (from UI)
+#   - "assistant_status"      — processor status transition (e.g. LOADING_DOCUMENT,
+#                               CALLING_MODEL). `content` carries a human-readable
+#                               status string; `status` carries the machine-readable
+#                               state.
+#   - "assistant_stream"      — streaming delta; `content` is the incremental text.
+#   - "assistant_final"       — final assistant answer; `content` is the full text.
+#   - "assistant_error"       — terminal error; `content` is the error message.
+type ChatDocumentMessage @aws_cognito_user_pools @aws_iam {
+  sessionId: String!
+  role: String!          # "user" | "assistant"
+  content: String!       # Full text, delta chunk, or status string
+  timestamp: String!
+  method: String         # See docstring above
+  status: String         # Machine-readable: QUEUED | LOADING_DOCUMENT | CALLING_MODEL | STREAMING | COMPLETE | ERROR
+  modelId: String        # The actual model invoked (may differ from UI selection if fallback kicked in)
+  isProcessing: Boolean
+}
+
 type ToolMetadata @aws_cognito_user_pools @aws_iam {
   toolName: String
   toolUseId: String
@@ -825,6 +852,23 @@ type Mutation {
     @aws_cognito_user_pools
     @aws_iam
 
+  # Chat-with-Document async mutation. The UI calls this with method="chat" to
+  # initiate; the processor Lambda calls it via IAM with method="assistant_*"
+  # to publish status/delta/final events. All calls broadcast via
+  # onChatDocumentMessageUpdate.
+  sendChatDocumentMessage(
+    sessionId: String!
+    prompt: String!
+    method: String            # defaults to "chat" when from UI
+    s3Uri: String             # required on first "chat" message; ignored on processor publishes
+    modelId: String           # optional — if empty, processor reads from config.chat.model
+    status: String
+    timestamp: String
+    content: String           # used by processor publishes (delta/final/error/status)
+    role: String
+    isProcessing: Boolean
+  ): ChatDocumentMessage @aws_cognito_user_pools @aws_iam
+
   # Circuit Breaker admin controls — Admin only.
   pauseCircuitBreaker(reason: String!): CircuitBreakerStatus
     @aws_auth(cognito_groups: ["Admin"])
@@ -896,14 +940,12 @@ type Query @aws_cognito_user_pools @aws_iam {
   listChatSessions(limit: Int, nextToken: String): ChatSessionConnection @aws_cognito_user_pools @aws_iam
   getChatMessages(sessionId: ID!): [AgentChatMessage] @aws_cognito_user_pools @aws_iam
 
-  # Knowledge base & document chat queries
+  # Knowledge base query
   queryKnowledgeBase(input: String!, sessionId: String): String
-  chatWithDocument(
-    s3Uri: String!
-    prompt: String!
-    history: AWSJSON!
-    modelId: String!
-  ): String
+
+  # NOTE: The legacy `chatWithDocument` query has been removed. Chat with
+  # Document now uses the async `sendChatDocumentMessage` mutation +
+  # `onChatDocumentMessageUpdate` subscription (see Mutation / Subscription).
 
   # Discovery queries - Admin, Author only
   listDiscoveryJobs: DiscoveryJobList
@@ -967,6 +1009,8 @@ type Subscription @aws_cognito_user_pools @aws_iam {
     @aws_subscribe(mutations: ["updateDiscoveryJobStatus"])
   onAgentChatMessageUpdate(sessionId: String!): AgentChatMessage
     @aws_subscribe(mutations: ["sendAgentChatMessage"])
+  onChatDocumentMessageUpdate(sessionId: String!): ChatDocumentMessage
+    @aws_subscribe(mutations: ["sendChatDocumentMessage"])
   onCircuitBreakerStatusChange: CircuitBreakerStatus
     @aws_subscribe(mutations: ["publishCircuitBreakerStatus"])
 }

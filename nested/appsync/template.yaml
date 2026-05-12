@@ -20,6 +20,10 @@ Parameters:
   AgentChatProcessorFunctionArn:
     Type: String
     Description: ARN of the AgentChatProcessorFunction from main template
+
+  ChatWithDocumentProcessorFunctionArn:
+    Type: String
+    Description: ARN of the ChatWithDocumentProcessorFunction from main template (long-running chat Lambda invoked async by the lightweight mutation resolver)
   
   AgentProcessorFunctionArn:
     Type: String
@@ -337,7 +341,7 @@ Resources:
                   - !GetAtt ProcessChangesResolverFunction.Arn
                   - !GetAtt AgentChatResolverFunction.Arn
                   - !GetAtt ListAvailableAgentsFunction.Arn
-                  - !GetAtt ChatWithDocumentResolverFunction.Arn
+                  - !GetAtt SendChatDocumentMessageResolverFunction.Arn
                   - !GetAtt DiscoveryUploadResolverFunction.Arn
                   - !GetAtt TestRunnerFunction.Arn
                   - !GetAtt TestResultsResolverFunction.Arn
@@ -811,19 +815,24 @@ Resources:
 
 
   ##########################################################################
-  # ChatWithDocumentResolverFunctionLogGroup
+  # SendChatDocumentMessageResolverFunctionLogGroup
+  #
+  # Lightweight AppSync mutation handler that:
+  #   * receives user's chat prompt via `sendChatDocumentMessage` mutation
+  #   * records session ownership in ChatDocumentSessionsTable (RBAC)
+  #   * async-invokes ChatWithDocumentProcessorFunction (passed in from main
+  #     template) to do the long-running work outside the 30s AppSync budget
+  #   * passes processor-originated publishes (status/final/error) through
+  #     for AppSync subscription fan-out to the UI
+  # Replaces the legacy ChatWithDocumentResolverFunction + its Query resolver.
   ##########################################################################
-  ChatWithDocumentResolverFunctionLogGroup:
+  SendChatDocumentMessageResolverFunctionLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
       KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
       RetentionInDays: !Ref LogRetentionDays
 
-
-  ##########################################################################
-  # ChatWithDocumentResolverFunction
-  ##########################################################################
-  ChatWithDocumentResolverFunction:
+  SendChatDocumentMessageResolverFunction:
     Type: AWS::Serverless::Function
     Metadata:
       cfn_nag:
@@ -834,93 +843,34 @@ Resources:
             reason: "Function does not require reserved concurrency as it scales based on demand"
           - id: W12
             reason: "Lambda requires CloudWatch logs permissions"
-          - id: W11
-            reason: "Role requires * resource access for CloudWatch Metrics and Logs"
     # checkov:skip=CKV_AWS_116: "DLQ not required for AppSync resolver function"
     # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
     # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
-    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only configuration values like feature flags and non-sensitive settings"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data"
     Properties:
       PermissionsBoundary:
-        !If [
-          HasPermissionsBoundary,
-          !Ref PermissionsBoundaryArn,
-          !Ref AWS::NoValue,
-        ]
+        !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
       Handler: index.handler
       Runtime: python3.12
-      CodeUri: ./src/lambda/chat_with_document_resolver
-      Description: Lambda function to chat with the document via GraphQL API
-      MemorySize: 512
-      Timeout: 120
-
-      Layers:
-        - !Ref IDPCommonBaseLayerArn
+      CodeUri: ./src/lambda/send_chat_document_message_resolver
+      Description: Lightweight AppSync resolver for Chat-with-Document mutation
+      MemorySize: 256
+      Timeout: 30
       Environment:
         Variables:
           LOG_LEVEL: !Ref LogLevel
-          OUTPUT_BUCKET: !Ref OutputBucketName
-          CONFIGURATION_TABLE_NAME: !Ref ConfigurationTableName
-          TRACKING_TABLE_NAME: !Ref TrackingTableName
-          SETTINGS_PARAMETER: !Ref SettingsParameterName
-          GUARDRAIL_ID_AND_VERSION:
-            !If [
-              HasGuardrail,
-              !Sub "${BedrockGuardrailId}:${BedrockGuardrailVersion}",
-              "",
-            ]
+          CHAT_DOCUMENT_SESSIONS_TABLE: !Ref ChatDocumentSessionsTable
+          CHAT_DOCUMENT_PROCESSOR_FUNCTION_ARN: !Ref ChatWithDocumentProcessorFunctionArn
+          DATA_RETENTION_DAYS: !Ref DataRetentionInDays
       LoggingConfig:
-        LogGroup: !Ref ChatWithDocumentResolverFunctionLogGroup
+        LogGroup: !Ref SendChatDocumentMessageResolverFunctionLogGroup
       Policies:
-        - S3CrudPolicy:
-            BucketName: !Ref OutputBucketName
         - DynamoDBCrudPolicy:
-            TableName: !Ref ConfigurationTableName
-        - DynamoDBCrudPolicy:
-            TableName: !Ref TrackingTableName
+            TableName: !Ref ChatDocumentSessionsTable
         - Statement:
             - Effect: Allow
-              Action:
-                - bedrock:Retrieve
-                - bedrock:RetrieveAndGenerate
-              Resource: !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:knowledge-base/*"
-            - Effect: Allow
-              Action:
-                - "bedrock:InvokeModel"
-                - bedrock:GetInferenceProfile
-              Resource:
-                - !Sub "arn:${AWS::Partition}:bedrock:*::foundation-model/*"
-                - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
-                - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:application-inference-profile/*"
-            - Effect: Allow
-              Action:
-                - aws-marketplace:Subscribe
-                - aws-marketplace:Unsubscribe
-                - aws-marketplace:ViewSubscriptions
-              Resource: "*"
-            - Effect: Allow
-              Action:
-                - cloudwatch:PutMetricData
-              Resource: "*"
-            - Effect: Allow
-              Action:
-                - "bedrock:GetInferenceProfile"
-              Resource:
-                - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
-                - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:application-inference-profile/*"
-            - Effect: Allow
-              Action:
-                - ssm:GetParameter
-              Resource:
-                - !Sub "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${SettingsParameterName}"
-            - !If
-              - HasGuardrail
-              - Effect: Allow
-                Action:
-                  - "bedrock:ApplyGuardrail"
-                Resource:
-                  - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:guardrail/${BedrockGuardrailId}"
-              - !Ref AWS::NoValue
+              Action: lambda:InvokeFunction
+              Resource: !Ref ChatWithDocumentProcessorFunctionArn
             - Effect: Allow
               Action:
                 - kms:Encrypt
@@ -930,33 +880,111 @@ Resources:
                 - kms:DescribeKey
               Resource: !Ref CustomerManagedEncryptionKeyArn
 
+  ##########################################################################
+  # ChatDocumentSessionsTable
+  # Tracks session ownership for Chat-with-Document so one user cannot
+  # subscribe to or continue another user's chat session. Short TTL keeps
+  # storage minimal since the UI discards history on leave anyway.
+  ##########################################################################
+  ChatDocumentSessionsTable:
+    Type: AWS::DynamoDB::Table
+    # cdk-nag AwsSolutions-DDB3: PITR not required — this table only stores
+    # ephemeral session-ownership records (keyed by sessionId, short TTL);
+    # losing the table has no business impact beyond forcing users to start
+    # a new chat session.
+    # checkov:skip=CKV_AWS_119: "CMK encryption enabled via SSESpecification (KMSMasterKeyId) below"
+    # checkov:skip=CKV_AWS_28: "PITR intentionally disabled — ephemeral per-session ownership metadata with short TTL (see justification comment above)"
+    Properties:
+      AttributeDefinitions:
+        - AttributeName: sessionId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: sessionId
+          KeyType: HASH
+      BillingMode: PAY_PER_REQUEST
+      TimeToLiveSpecification:
+        AttributeName: ExpiresAfter
+        Enabled: true
+      SSESpecification:
+        SSEEnabled: true
+        SSEType: KMS
+        KMSMasterKeyId: !Ref CustomerManagedEncryptionKeyArn
 
   ##########################################################################
-  # ChatWithDocumentDataSource
+  # SendChatDocumentMessageDataSource
   ##########################################################################
-  ChatWithDocumentDataSource:
+  SendChatDocumentMessageDataSource:
     Type: AWS::AppSync::DataSource
     Properties:
       ApiId: !Ref GraphQLApiId
-      Name: ChatWithDocument
-      Description: Lambda function to chat with document
+      Name: SendChatDocumentMessageDataSource
+      Description: Lambda function for Chat-with-Document mutation
       Type: AWS_LAMBDA
       ServiceRoleArn: !GetAtt AppSyncServiceRole.Arn
       LambdaConfig:
-        LambdaFunctionArn: !GetAtt ChatWithDocumentResolverFunction.Arn
-
+        LambdaFunctionArn: !GetAtt SendChatDocumentMessageResolverFunction.Arn
 
   ##########################################################################
-  # ChatWithDocumentResolver
+  # SendChatDocumentMessageResolver — forwards UI + processor publishes
   ##########################################################################
-  ChatWithDocumentResolver:
+  SendChatDocumentMessageResolver:
     Type: AWS::AppSync::Resolver
     DependsOn: GraphQLSchema
     Properties:
       ApiId: !Ref GraphQLApiId
-      DataSourceName: !GetAtt ChatWithDocumentDataSource.Name
-      TypeName: Query
-      FieldName: chatWithDocument
+      DataSourceName: !GetAtt SendChatDocumentMessageDataSource.Name
+      TypeName: Mutation
+      FieldName: sendChatDocumentMessage
+      RequestMappingTemplate: |
+        {
+          "version": "2017-02-28",
+          "operation": "Invoke",
+          "payload": {
+            "arguments": $util.toJson($context.arguments),
+            "identity": {
+              "username": $util.toJson($context.identity.username),
+              "sub": $util.toJson($context.identity.sub),
+              "sourceIp": $util.toJson($context.identity.sourceIp),
+              "userArn": $util.toJson($context.identity.userArn),
+              "claims": $util.toJson($context.identity.claims)
+            }
+          }
+        }
+      ResponseMappingTemplate: |
+        #if($ctx.error)
+          $util.error($ctx.error.message, $ctx.error.type)
+        #end
+        $util.toJson($ctx.result)
+
+  ##########################################################################
+  # OnChatDocumentMessageUpdateResolver — subscription fan-out
+  # Mirrors OnAgentChatMessageUpdateResolver — filters by sessionId so one
+  # user cannot eavesdrop on another user's chat session.
+  ##########################################################################
+  OnChatDocumentMessageUpdateResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: GraphQLSchema
+    Properties:
+      ApiId: !Ref GraphQLApiId
+      TypeName: Subscription
+      FieldName: onChatDocumentMessageUpdate
+      DataSourceName: !GetAtt NoneDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version": "2018-05-29",
+          "payload": {}
+        }
+      ResponseMappingTemplate: |
+        #if($context.arguments.sessionId && $context.source.sessionId)
+          #if($context.arguments.sessionId == $context.source.sessionId)
+            $util.toJson($context.source)
+          #else
+            #set($result = $util.appendError("Session ID does not match", "Unauthorized"))
+            $util.toJson(null)
+          #end
+        #else
+          $util.toJson($context.source)
+        #end
 
   ##########################################################################
   # WebUI build and deployment

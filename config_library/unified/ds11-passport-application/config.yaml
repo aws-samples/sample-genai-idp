@@ -24,6 +24,12 @@ use_bda: false
 
 notes: "DS-11 US Passport Application sample - demonstrates excluding static instruction/legal pages from extraction using x-aws-idp-exclude-from-processing."
 
+chat:
+  # Chat-with-Document: inherits defaults from system base-chat.yaml.
+  # Uncomment and set 'model:' here to override the default chat model
+  # for documents processed with this configuration version.
+  enabled: true
+
 classes:
   # ------------------------------------------------------------------
   # Excluded class: static instruction / legal / tax / oath pages

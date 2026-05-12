@@ -481,6 +481,69 @@ class SummarizationConfig(BaseModel):
         return int(v)
 
 
+class ChatConfig(BaseModel):
+    """Chat-with-Document configuration.
+
+    Controls the interactive "Chat with Document" feature available on the
+    Document Detail screen. This is decoupled from summarization so that
+    chat can use a different (typically larger-context) model.
+    """
+
+    enabled: bool = Field(default=True, description="Enable Chat-with-Document")
+    model: str = Field(
+        default="us.anthropic.claude-opus-4-7:1m",
+        description=(
+            "Bedrock model ID used for Chat-with-Document. A large-context "
+            "model is recommended because the entire document text is sent "
+            "in a single prompt. Use 'LambdaHook' to invoke a custom Lambda "
+            "function instead of Bedrock."
+        ),
+    )
+    model_lambda_hook_arn: Optional[str] = Field(
+        default=None,
+        description=(
+            "Lambda function ARN for custom inference (used when model is "
+            "'LambdaHook'). Function name must start with GENAIIDP-."
+        ),
+    )
+    system_prompt: str = Field(
+        default=(
+            "You are an assistant that answers questions about the attached "
+            "document text. If you don't know the answer, say so. Do not "
+            "invent information. Use the prior chat history provided as "
+            "context. Respond in plain text, not JSON."
+        ),
+        description="System prompt for the Chat-with-Document assistant",
+    )
+    temperature: float = Field(default=0.0, ge=0.0, le=1.0)
+    top_p: float = Field(default=0.1, ge=0.0, le=1.0)
+    top_k: float = Field(default=5.0, ge=0.0)
+    max_tokens: int = Field(
+        default=4096,
+        gt=0,
+        description=(
+            "Maximum number of output (response) tokens. Ensure this does "
+            "not exceed the selected model's limit."
+        ),
+    )
+
+    @field_validator("temperature", "top_p", "top_k", mode="before")
+    @classmethod
+    def parse_float(cls, v: Any) -> float:
+        """Parse float from string or number"""
+        if isinstance(v, str):
+            return float(v) if v else 0.0
+        return float(v)
+
+    @field_validator("max_tokens", mode="before")
+    @classmethod
+    def parse_int(cls, v: Any) -> int:
+        """Parse int from string or number"""
+        if isinstance(v, str):
+            return int(v) if v else 0
+        return int(v)
+
+
 class OCRFeature(BaseModel):
     """OCR feature configuration"""
 
@@ -1588,6 +1651,11 @@ class IDPConfig(BaseModel):
             model="us.amazon.nova-premier-v1:0"
         ),
         description="Summarization configuration",
+    )
+    chat: ChatConfig = Field(
+        default_factory=ChatConfig,
+        description="Chat-with-Document configuration (used by the interactive "
+        "document Q&A feature in the Web UI)",
     )
     rule_validation: RuleValidationConfig = Field(
         default_factory=lambda: RuleValidationConfig(

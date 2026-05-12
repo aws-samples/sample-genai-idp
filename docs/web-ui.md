@@ -316,9 +316,30 @@ Every file in the archive is fetched directly from S3 using a short-lived presig
 
 ## Chat with Document
 
-The "Chat with Document" feature is available at the bottom of the Document Detail view. This feature uses the same model that's configured to do the summarization to provide a RAG interface to the document that's the details are displayed for. No other document is taken in to account except the document you're viewing the details of. Note that this feature will only work after the document status is marked as complete.
+The "Chat with Document" feature is available at the bottom of the Document Detail view. It provides an interactive Q&A interface grounded in the text of the single document you are viewing — no other documents are considered. The feature is only available after the document's status is **COMPLETE**.
 
-Your chat history will be saved as you continue your chat but if you leave the document details screen, your chat history is erased. This feature uses prompt caching for the document contents for repeated chat requests for each document.
+### Model selection
+
+Chat has its own dedicated configuration section (**Configuration tab → "Chat-with-Document Configuration"**) — it is **independent from summarization**. This is important because chat sends the entire document text to the model in a single prompt, so a large-context model (such as `us.anthropic.claude-opus-4-7:1m` — the default — or `us.anthropic.claude-sonnet-4-6:1m`) is usually the best choice, even if you've configured a smaller, cheaper model for summarization.
+
+The Chat panel includes a **Model** selector that defaults to the `chat.model` configured in the version of the config that was used to process the document. You can override the model for the current chat session via the dropdown. The list of selectable models comes from the `chat.model` enum in the configuration schema.
+
+If a document is "too large for chat context window" — i.e. Bedrock returns an `Input Tokens Exceeded` error — pick a larger-context model in the Chat panel's Model selector and retry. For documents that are larger than any single-prompt model can fit, use the [Knowledge Base](./knowledge-base.md) feature instead.
+
+### Chat history
+
+Your chat history is preserved while you remain on the Document Detail screen; leaving and returning erases it. Prompt caching is used for the document contents across successive turns on the same document to reduce latency and cost.
+
+### Streaming & live status
+
+Chat-with-Document runs as an asynchronous workflow so it can use long-latency large-context models without hitting an AppSync synchronous-request timeout. When you submit a prompt:
+
+1. A **status pill** appears above the input area and transitions as the backend makes progress: **Queued → Loading document text → Querying {model} → Streaming response**.
+2. As soon as the model starts producing output, the assistant bubble appears with a blinking cursor and **tokens stream in** live (throttled to ~200 ms / 200-char batches server-side so the UI stays responsive under heavy throttling).
+3. When generation completes the status pill clears and the bubble finalizes with a timestamp and the model ID used.
+4. Errors (including RBAC scope denials on documents outside your `allowedConfigVersions`) render inline in the assistant bubble in red so you can see what went wrong without losing the context of the conversation.
+
+The session is scoped to your user — other users cannot subscribe to or continue your chat session even if they know the session ID.
 
 See the feature in action in this video:
 

@@ -208,6 +208,10 @@ test: ## Run all tests (idp_common, cli, sdk, capacity, circuit breaker, config 
 	    src/lambda/circuit_breaker_manager \
 	    src/lambda/queue_processor/test_check_circuit_breaker.py \
 	    src/lambda/workflow_tracker/test_notify_circuit_breaker.py
+	@echo "Running Chat-with-Document Lambda tests..."
+	$(PYTHON) -m pytest -v \
+	    src/lambda/chat_with_document_processor/tests \
+	    nested/appsync/src/lambda/send_chat_document_message_resolver/tests
 	@echo "Validating config library files..."
 	$(PYTHON) -m pytest config_library/test_config_library.py -v
 

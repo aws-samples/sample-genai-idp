@@ -1,0 +1,17 @@
+# idp_common provides: bedrock client, appsync client, config loader.
+# Provided by Lambda Layer 1 (base) — see nested/appsync/template.yaml for the layer
+# reference pattern used by other AppSync-publishing Lambdas.
+requests
+
+# Pin a newer boto3 than the Lambda runtime default (currently ~1.35) so that
+# the ``serviceTier`` parameter is supported by ``bedrock-runtime.converse_stream``.
+# Service-tier support (``priority`` / ``flex``) was added to the Converse *non*-stream
+# API first, then to Converse-Stream in later botocore releases. Without this pin,
+# Bedrock rejects ``serviceTier`` client-side with a boto3 ParamValidationError before
+# the request is ever sent:
+#   Unknown parameter in input: "serviceTier", must be one of: modelId, messages,
+#   system, inferenceConfig, toolConfig, guardrailConfig, additionalModelRequestFields,
+#   promptVariables, additionalModelResponseFieldPaths, requestMetadata, performanceConfig
+# Lambda will use the version pinned here over the runtime default when it's newer.
+boto3>=1.42.0
+botocore>=1.42.0

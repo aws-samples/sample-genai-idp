@@ -1887,6 +1887,93 @@ Resources:
                     format: textarea
                     description: System prompt for the error analysis agent
                     order: 2
+          chat:
+            order: 12
+            type: object
+            collapsible: true
+            defaultExpanded: false
+            sectionLabel: Chat-with-Document Configuration
+            description: >-
+              Controls the interactive "Chat with Document" feature on the
+              Document Detail screen. This uses the model configured here
+              (independent from summarization). The full document text is
+              sent in a single prompt, so a large-context model is
+              recommended.
+            properties:
+              enabled:
+                type: boolean
+                description: Enable or disable the Chat-with-Document feature
+                default: true
+                order: 0
+              model:
+                type: string
+                description: "Bedrock model ID for chat. A large-context model is recommended because the entire document text is sent in one prompt. Select 'LambdaHook' to use a custom Lambda function for inference."
+                enum:
+                  [
+                    "LambdaHook",
+                    "us.amazon.nova-lite-v1:0",
+                    "us.amazon.nova-pro-v1:0",
+                    "us.amazon.nova-premier-v1:0",
+                    "us.amazon.nova-2-lite-v1:0", "us.amazon.nova-2-lite-v1:0:priority", "us.amazon.nova-2-lite-v1:0:flex", "global.amazon.nova-2-lite-v1:0", "global.amazon.nova-2-lite-v1:0:priority", "global.amazon.nova-2-lite-v1:0:flex",
+                    "us.anthropic.claude-haiku-4-5-20251001-v1:0",
+                    "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+                    "us.anthropic.claude-sonnet-4-6",
+                    "us.anthropic.claude-sonnet-4-6:1m",
+                    "us.anthropic.claude-opus-4-5-20251101-v1:0",
+                    "us.anthropic.claude-opus-4-6-v1",
+                    "us.anthropic.claude-opus-4-6-v1:1m",
+                    "us.anthropic.claude-opus-4-7",
+                    "us.anthropic.claude-opus-4-7:1m",
+                    "eu.amazon.nova-lite-v1:0",
+                    "eu.amazon.nova-pro-v1:0",
+                    "eu.amazon.nova-2-lite-v1:0", "eu.amazon.nova-2-lite-v1:0:priority", "eu.amazon.nova-2-lite-v1:0:flex",
+                    "eu.anthropic.claude-haiku-4-5-20251001-v1:0",
+                    "eu.anthropic.claude-sonnet-4-5-20250929-v1:0",
+                    "eu.anthropic.claude-sonnet-4-6",
+                    "eu.anthropic.claude-sonnet-4-6:1m",
+                    "eu.anthropic.claude-opus-4-5-20251101-v1:0",
+                    "eu.anthropic.claude-opus-4-6-v1",
+                    "eu.anthropic.claude-opus-4-6-v1:1m",
+                    "eu.anthropic.claude-opus-4-7",
+                    "eu.anthropic.claude-opus-4-7:1m",
+                    "global.anthropic.claude-haiku-4-5-20251001-v1:0",
+                    "global.anthropic.claude-sonnet-4-5-20250929-v1:0",
+                    "global.anthropic.claude-sonnet-4-6",
+                    "global.anthropic.claude-sonnet-4-6:1m",
+                    "global.anthropic.claude-opus-4-5-20251101-v1:0",
+                    "global.anthropic.claude-opus-4-6-v1",
+                    "global.anthropic.claude-opus-4-6-v1:1m",
+                    "global.anthropic.claude-opus-4-7",
+                    "global.anthropic.claude-opus-4-7:1m"
+                  ]
+                order: 1
+              model_lambda_hook_arn:
+                type: string
+                description: "Lambda function ARN for custom inference (used when model is 'LambdaHook'). Function name must start with GENAIIDP-."
+                default: ""
+                order: 2
+                dependsOn: { field: "model", value: "LambdaHook" }
+              temperature:
+                type: number
+                description: "Sampling temperature. Not used for Claude 4.7 models."
+                order: 3
+              top_k:
+                type: number
+                description: "Sampling Top K. Not used for Claude 4.7 models."
+                order: 4
+              top_p:
+                type: number
+                description: Sampling Top P
+                order: 5
+              max_tokens:
+                type: number
+                description: "Maximum number of output tokens for the chat response. Ensure this does not exceed the selected model's limit."
+                order: 6
+              system_prompt:
+                type: string
+                format: textarea
+                description: System prompt for the Chat-with-Document assistant
+                order: 7
           rule_validation:
             order: 8
             type: object

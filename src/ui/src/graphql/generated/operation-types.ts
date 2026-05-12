@@ -98,6 +98,17 @@ export type CapacityResult = {
   success: Scalars['Boolean']['output'];
 };
 
+export type ChatDocumentMessage = {
+  content: Scalars['String']['output'];
+  isProcessing?: Maybe<Scalars['Boolean']['output']>;
+  method?: Maybe<Scalars['String']['output']>;
+  modelId?: Maybe<Scalars['String']['output']>;
+  role: Scalars['String']['output'];
+  sessionId: Scalars['String']['output'];
+  status?: Maybe<Scalars['String']['output']>;
+  timestamp: Scalars['String']['output'];
+};
+
 export type ChatSession = {
   createdAt: Scalars['AWSDateTime']['output'];
   lastMessage?: Maybe<Scalars['String']['output']>;
@@ -491,6 +502,7 @@ export type Mutation = {
   restoreDefaultPricing?: Maybe<UpdatePricingResponse>;
   resumeCircuitBreaker?: Maybe<CircuitBreakerStatus>;
   sendAgentChatMessage?: Maybe<AgentChatMessage>;
+  sendChatDocumentMessage?: Maybe<ChatDocumentMessage>;
   setActiveVersion?: Maybe<UpdateConfigurationResponse>;
   skipAllSectionsReview?: Maybe<Document>;
   startMultiDocDiscovery?: Maybe<MultiDocDiscoveryJob>;
@@ -680,6 +692,20 @@ export type MutationSendAgentChatMessageArgs = {
 };
 
 
+export type MutationSendChatDocumentMessageArgs = {
+  content?: InputMaybe<Scalars['String']['input']>;
+  isProcessing?: InputMaybe<Scalars['Boolean']['input']>;
+  method?: InputMaybe<Scalars['String']['input']>;
+  modelId?: InputMaybe<Scalars['String']['input']>;
+  prompt: Scalars['String']['input'];
+  role?: InputMaybe<Scalars['String']['input']>;
+  s3Uri?: InputMaybe<Scalars['String']['input']>;
+  sessionId: Scalars['String']['input'];
+  status?: InputMaybe<Scalars['String']['input']>;
+  timestamp?: InputMaybe<Scalars['String']['input']>;
+};
+
+
 export type MutationSetActiveVersionArgs = {
   versionName: Scalars['String']['input'];
 };
@@ -862,7 +888,6 @@ export type ProcessChangesResponse = {
 
 export type Query = {
   calculateCapacity?: Maybe<CapacityResult>;
-  chatWithDocument?: Maybe<Scalars['String']['output']>;
   compareTestRuns?: Maybe<TestRunComparison>;
   getAgentChatMessages?: Maybe<Array<Maybe<AgentChatMessage>>>;
   getAgentJobStatus?: Maybe<AgentJob>;
@@ -904,14 +929,6 @@ export type Query = {
 
 export type QueryCalculateCapacityArgs = {
   input: Scalars['String']['input'];
-};
-
-
-export type QueryChatWithDocumentArgs = {
-  history: Scalars['AWSJSON']['input'];
-  modelId: Scalars['String']['input'];
-  prompt: Scalars['String']['input'];
-  s3Uri: Scalars['String']['input'];
 };
 
 
@@ -1129,6 +1146,7 @@ export type StepFunctionExecutionStep = {
 export type Subscription = {
   onAgentChatMessageUpdate?: Maybe<AgentChatMessage>;
   onAgentJobComplete?: Maybe<Scalars['Boolean']['output']>;
+  onChatDocumentMessageUpdate?: Maybe<ChatDocumentMessage>;
   onCircuitBreakerStatusChange?: Maybe<CircuitBreakerStatus>;
   onCreateDocument?: Maybe<CreateDocumentOutput>;
   onDiscoveryJobStatusChange?: Maybe<DiscoveryJob>;
@@ -1143,6 +1161,11 @@ export type SubscriptionOnAgentChatMessageUpdateArgs = {
 
 export type SubscriptionOnAgentJobCompleteArgs = {
   jobId: Scalars['ID']['input'];
+};
+
+
+export type SubscriptionOnChatDocumentMessageUpdateArgs = {
+  sessionId: Scalars['String']['input'];
 };
 
 
@@ -1562,6 +1585,22 @@ export type SendAgentChatMessageMutationVariables = Exact<{
 
 export type SendAgentChatMessageMutation = { sendAgentChatMessage?: { role: string, content: string, timestamp: string, isProcessing?: boolean | null, sessionId?: string | null, messageType?: string | null, toolMetadata?: { toolName?: string | null, toolUseId?: string | null } | null } | null };
 
+export type SendChatDocumentMessageMutationVariables = Exact<{
+  sessionId: Scalars['String']['input'];
+  prompt: Scalars['String']['input'];
+  method?: InputMaybe<Scalars['String']['input']>;
+  s3Uri?: InputMaybe<Scalars['String']['input']>;
+  modelId?: InputMaybe<Scalars['String']['input']>;
+  status?: InputMaybe<Scalars['String']['input']>;
+  timestamp?: InputMaybe<Scalars['String']['input']>;
+  content?: InputMaybe<Scalars['String']['input']>;
+  role?: InputMaybe<Scalars['String']['input']>;
+  isProcessing?: InputMaybe<Scalars['Boolean']['input']>;
+}>;
+
+
+export type SendChatDocumentMessageMutation = { sendChatDocumentMessage?: { sessionId: string, role: string, content: string, timestamp: string, method?: string | null, status?: string | null, modelId?: string | null, isProcessing?: boolean | null } | null };
+
 export type SetActiveVersionMutationVariables = Exact<{
   versionName: Scalars['String']['input'];
 }>;
@@ -1679,16 +1718,6 @@ export type CalculateCapacityQueryVariables = Exact<{
 
 
 export type CalculateCapacityQuery = { calculateCapacity?: { success: boolean, errorMessage?: string | null, recommendations?: Array<string | null> | null, metrics?: Array<{ label: string, value: string } | null> | null, quotaRequirements?: Array<{ service: string, category: string, currentQuota: string, requiredQuota: string, statusText: string, modelId?: string | null } | null> | null, latencyDistribution?: { p50?: string | null, p75?: string | null, p90?: string | null, p95?: string | null, p99?: string | null, procP50?: string | null, procP75?: string | null, procP90?: string | null, procP95?: string | null, procP99?: string | null, queueP50?: string | null, queueP75?: string | null, queueP90?: string | null, queueP95?: string | null, queueP99?: string | null, baseLatency?: string | null, queueLatency?: string | null, totalLatency?: string | null, exceedsLimit?: boolean | null, maxAllowed?: string | null } | null, calculationDetails?: { quotasUsed?: { bedrock_models?: string | null } | null } | null } | null };
-
-export type ChatWithDocumentQueryVariables = Exact<{
-  s3Uri: Scalars['String']['input'];
-  prompt: Scalars['String']['input'];
-  history: Scalars['AWSJSON']['input'];
-  modelId: Scalars['String']['input'];
-}>;
-
-
-export type ChatWithDocumentQuery = { chatWithDocument?: string | null };
 
 export type CompareTestRunsQueryVariables = Exact<{
   testRunIds: Array<Scalars['String']['input']> | Scalars['String']['input'];
@@ -1938,6 +1967,13 @@ export type OnAgentJobCompleteSubscriptionVariables = Exact<{
 
 
 export type OnAgentJobCompleteSubscription = { onAgentJobComplete?: boolean | null };
+
+export type OnChatDocumentMessageUpdateSubscriptionVariables = Exact<{
+  sessionId: Scalars['String']['input'];
+}>;
+
+
+export type OnChatDocumentMessageUpdateSubscription = { onChatDocumentMessageUpdate?: { sessionId: string, role: string, content: string, timestamp: string, method?: string | null, status?: string | null, modelId?: string | null, isProcessing?: boolean | null } | null };
 
 export type OnCircuitBreakerStatusChangeSubscriptionVariables = Exact<{ [key: string]: never; }>;
 
