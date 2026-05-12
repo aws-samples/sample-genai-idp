@@ -16,11 +16,10 @@ import {
 import { useSchemaDesigner } from '../../hooks/useSchemaDesigner';
 import { useSchemaValidation } from '../../hooks/useSchemaValidation';
 import { useDebounce } from '../../hooks/useDebounce';
-import { TYPE_OPTIONS, X_AWS_IDP_DOCUMENT_TYPE, X_AWS_IDP_POLICY_TYPE } from '../../constants/schemaConstants';
+import { TYPE_OPTIONS, X_AWS_IDP_DOCUMENT_TYPE } from '../../constants/schemaConstants';
 import SchemaCanvas from './SchemaCanvas';
 import SchemaInspector from './SchemaInspector';
 import SchemaPreviewTabs from './SchemaPreviewTabs';
-import StandardClassCatalog from './StandardClassCatalog';
 import { formatTypeBadge, DocumentTypeBadge } from './utils/badgeHelpers';
 
 interface SchemaClass {
@@ -68,7 +67,7 @@ const SchemaBuilder = ({
     setSelectedAttributeId,
     isDirty,
     addClass,
-    addStandardClasses,
+    addStandardClasses: _addStandardClasses,
     updateClass,
     removeClass,
     addAttribute,
@@ -267,14 +266,17 @@ const SchemaBuilder = ({
   const docTypeCount = classes.filter((c) => c[X_AWS_IDP_DOCUMENT_TYPE]).length;
   const _sharedCount = classes.filter((c) => !c[X_AWS_IDP_DOCUMENT_TYPE]).length;
 
-  // Dynamic labels based on schema type
+  // Dynamic labels based on schema type. Underscore-prefixed entries are part
+  // of the full naming set but not yet referenced in this component; kept here
+  // (opted out of the unused-vars lint rule) so the label vocabulary stays
+  // colocated and ready for use.
   const typeLabel = isRuleSchema ? 'policy' : 'document';
-  const typeLabelPlural = isRuleSchema ? 'rules' : 'documents';
+  const _typeLabelPlural = isRuleSchema ? 'rules' : 'documents';
   const TypeLabel = isRuleSchema ? 'Rule' : 'Document';
   const TypesLabel = isRuleSchema ? 'Rules' : 'Documents';
-  const classLabel = isRuleSchema ? 'Policy Class' : 'Class';
+  const _classLabel = isRuleSchema ? 'Policy Class' : 'Class';
   const classesLabel = isRuleSchema ? 'Policy Classes' : 'Classes';
-  const attributeLabel = isRuleSchema ? 'Rule' : 'Attribute';
+  const _attributeLabel = isRuleSchema ? 'Rule' : 'Attribute';
   const attributesLabel = isRuleSchema ? 'Rules' : 'Attributes';
   const sharedLabel = isRuleSchema ? 'Recommendation Options' : 'Shared Classes';
 

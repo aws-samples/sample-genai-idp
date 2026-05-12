@@ -5437,11 +5437,11 @@ Resources:
       cfn_nag:
         rules_to_suppress:
           - id: W89
-            reason: "Function does not require VPC access as it only interacts with DynamoDB and SNS"
+            reason: "VPC attachment is conditional: required when AppSyncVisibility=PRIVATE (SigV4 mutation to the private AppSync endpoint only resolves inside the VPC) or DeployInVPC=true (DynamoDB reached via gateway endpoint). On the default/public path the function only talks to DynamoDB, SNS, CloudWatch, and AppSync over AWS-managed networking and VPC access is not required."
           - id: W92
             reason: "Function does not require reserved concurrency"
     # checkov:skip=CKV_AWS_116: "DLQ not required - alarm-driven, idempotent state changes"
-    # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
+    # checkov:skip=CKV_AWS_117: "VPC attachment is conditional on AppSyncVisibility=PRIVATE or DeployInVPC=true (see VpcConfig below); default path does not require VPC access"
     # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
     # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data"
     Properties:
@@ -5452,6 +5452,21 @@ Resources:
       CodeUri: src/lambda/circuit_breaker_manager/
       Timeout: 30
       MemorySize: 256
+      # When AppSync is PRIVATE, the SigV4 mutation to the private GraphQL
+      # endpoint only resolves from inside the AppSync VPC. When the user opted
+      # into VPC-only Lambdas (DeployInVPC=true) but AppSync is still public,
+      # we honour that too so DynamoDB traffic can use a gateway endpoint.
+      VpcConfig: !If
+        - UsePrivateAppSync
+        - SecurityGroupIds:
+            - !Ref LambdaVpcSecurityGroup
+          SubnetIds: !Ref LambdaSubnetIds
+        - !If
+          - DeployInVPC
+          - SecurityGroupIds:
+              - !Ref LambdaSecurityGroupId
+            SubnetIds: !Ref PrivateSubnetIds
+          - !Ref AWS::NoValue
       Environment:
         Variables:
           LOG_LEVEL: !Ref LogLevel

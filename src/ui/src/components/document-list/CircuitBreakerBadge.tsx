@@ -1,7 +1,7 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 import React, { useState } from 'react';
-import { Button } from '@cloudscape-design/components';
+import { Button, Popover } from '@cloudscape-design/components';
 import type { IconProps } from '@cloudscape-design/components';
 
 import useCircuitBreaker from '../../hooks/use-circuit-breaker';
@@ -36,15 +36,23 @@ const CircuitBreakerBadge = (): React.JSX.Element | null => {
   const display = stateDisplay[status.state];
   if (!display) return null;
 
-  const tooltip = status.state === 'OPEN' && status.lastError ? status.lastError : 'Circuit breaker details';
+  const button = (
+    <Button iconName={display.iconName} variant="normal" onClick={() => setPanelVisible(true)} ariaLabel={display.label}>
+      {display.label}
+    </Button>
+  );
+
+  const showErrorPopover = status.state === 'OPEN' && !!status.lastError;
 
   return (
     <>
-      <span title={tooltip}>
-        <Button iconName={display.iconName} variant="normal" onClick={() => setPanelVisible(true)} ariaLabel={display.label}>
-          {display.label}
-        </Button>
-      </span>
+      {showErrorPopover ? (
+        <Popover dismissButton={false} position="bottom" size="medium" triggerType="custom" content={status.lastError}>
+          {button}
+        </Popover>
+      ) : (
+        button
+      )}
       <CircuitBreakerPanel
         visible={panelVisible}
         status={status}

@@ -2018,7 +2018,19 @@ idp-cli config-create --features "classification,extraction,summarization" --out
 
 ### `config-validate`
 
-Validate a configuration file against system defaults and Pydantic models.
+Validate a configuration file against system defaults and Pydantic models. Catches common configuration errors that cause silent pipeline failures.
+
+**Validation Checks:**
+- **YAML/JSON Syntax** - Ensures file is well-formed
+- **Schema Validation** - Validates against Pydantic models
+- **Model IDs** - Verifies Bedrock model IDs are valid (checked against pricing.yaml)
+- **Placeholder Validation** - Ensures required placeholders are present in custom task_prompts:
+  - `ocr.task_prompt` (bedrock only): Requires `{DOCUMENT_IMAGE}`
+  - `classification.task_prompt`: Requires `{DOCUMENT_TEXT}` OR `{DOCUMENT_IMAGE}`
+  - `extraction.task_prompt`: Requires `{DOCUMENT_TEXT}` OR `{DOCUMENT_IMAGE}`
+  - `assessment.task_prompt`: Requires `{DOCUMENT_IMAGE}`, `{OCR_TEXT_CONFIDENCE}`, `{EXTRACTION_RESULTS}`
+  - `summarization.task_prompt`: Requires `{DOCUMENT_TEXT}`, `{EXTRACTION_RESULTS}`
+- **JSON Schema Fields** - Warns about non-standard fields (e.g., `data_type`)
 
 **Usage:**
 ```bash
@@ -2042,6 +2054,10 @@ idp-cli config-validate --config-file ./config.yaml --show-merged
 # Strict mode (fails if config has unknown or deprecated fields — useful for CI/CD)
 idp-cli config-validate --config-file ./config.yaml --strict
 ```
+
+**Notes:**
+- The `config-upload` command runs validation by default before uploading to protect production stacks.
+- Model ID validation requires `config_library/pricing.yaml`. Ensure `idp-cli` is run from the repository root, or set the `IDP_PROJECT_ROOT` environment variable to the repo root for validation to work correctly.
 
 ---
 
