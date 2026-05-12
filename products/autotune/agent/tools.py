@@ -1296,6 +1296,131 @@ def write_optimization_log(operation: str, content: str = "", old_str: str = "",
 
 
 @tool
+def generate_final_report(
+    stopping_reason: str,
+    iterations_completed: int,
+    recommended_config_name: str,
+    recommended_config_accuracy: float,
+    recommended_config_cost_per_page_usd: float,
+    configs: list[dict],
+) -> str:
+    """Generate the final structured report for the optimization run.
+
+    Call this tool when the optimization is complete (finalizing). It produces a
+    JSON report, uploads all configs from this run to S3 for long-term storage,
+    and appends a summary to OPTIMIZATION-LOG.md.
+
+    Args:
+        stopping_reason: Why the run stopped. One of: 'max_iterations', 'max_cost', 'converged'.
+        iterations_completed: Number of full evaluation iterations completed.
+        recommended_config_name: Config version name with best accuracy within budget.
+        recommended_config_accuracy: Accuracy (%) of the recommended config.
+        recommended_config_cost_per_page_usd: Cost per page of the recommended config.
+        configs: List of config dicts, each with keys:
+            - version (str): Config version name (e.g. 'davids-test-dataset-v3')
+            - accuracy (float): Accuracy % achieved
+            - cost_per_page_usd (float): Cost per page
+            - within_budget (bool): Whether cost is within max_cost_per_page_usd
+            - overview (str): Brief description of the config (models, OCR, key changes)
+
+    Returns:
+        JSON with status, report path, and number of configs archived.
+    """
+    from datetime import datetime, timezone
+
+    import boto3
+
+    session_id = os.environ["AUTOTUNE_SESSION_ID"]
+    s3_bucket = os.environ["AUTOTUNE_STREAM_BUCKET"]
+    s3_prefix = f"autotune-streams/{session_id}"
+
+    # Build report — auto-populate from env/DDB
+    state = _get_optimization_state()
+    current = state.get_state()
+
+    report = {
+        "version": "1.0",
+        "session_id": session_id,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "input": {
+            "test_set_id": current.get("test_set_id", os.environ.get("AUTOTUNE_TEST_SET_ID", "")),
+            "optimization_guidance": current.get("optimization_guidance", ""),
+            "max_iterations": int(current.get("max_iterations", 0)),
+            "max_total_cost_usd": float(current.get("max_total_cost_usd", 0)),
+            "max_cost_per_page_usd": float(current.get("max_cost_per_page_usd", 0)),
+        },
+        "result": {
+            "stopping_reason": stopping_reason,
+            "iterations_completed": iterations_completed,
+            "total_cost_usd": float(current.get("agent_cost_usd", 0)) + float(current.get("eval_cost_usd", 0)),
+            "agent_cost_usd": float(current.get("agent_cost_usd", 0)),
+            "eval_cost_usd": float(current.get("eval_cost_usd", 0)),
+            "recommended_config_name": recommended_config_name,
+            "recommended_config_accuracy": recommended_config_accuracy,
+            "recommended_config_cost_per_page_usd": recommended_config_cost_per_page_usd,
+        },
+        "configs": configs,
+    }
+
+    # Write report to local scratch and S3
+    scratch = os.environ["AUTOTUNE_SCRATCH_DIR"]
+    report_path = os.path.join(scratch, "final-report.json")
+    with open(report_path, "w") as f:
+        json.dump(report, f, indent=2)
+
+    s3 = boto3.client("s3")
+    s3.upload_file(report_path, s3_bucket, f"{s3_prefix}/final-report.json")
+
+    # Download and archive each config from this run to S3
+    client = _get_client()
+    configs_archived = 0
+    for cfg in configs:
+        version = cfg.get("version", "")
+        if not version:
+            continue
+        try:
+            local_path = os.path.join(scratch, "configs", "archived", f"{version}.yaml")
+            os.makedirs(os.path.dirname(local_path), exist_ok=True)
+            client.config_download(local_path, version)
+            s3.upload_file(local_path, s3_bucket, f"{s3_prefix}/configs/{version}.yaml")
+            configs_archived += 1
+        except Exception:
+            pass  # Config may have been deleted or never uploaded successfully
+
+    # Append summary to OPTIMIZATION-LOG.md
+    workspace = os.environ["AUTOTUNE_WORKSPACE_DIR"]
+    log_path = os.path.join(workspace, "OPTIMIZATION-LOG.md")
+    timestamp = datetime.now(timezone.utc).strftime("[%Y-%m-%d %H:%M:%S UTC]")
+    summary_lines = [
+        f"\n\n{timestamp}",
+        "## FINAL REPORT",
+        f"- Stopping reason: {stopping_reason}",
+        f"- Iterations: {iterations_completed}",
+        f"- Total cost: ${report['result']['total_cost_usd']:.2f}",
+        f"- Recommended config: {recommended_config_name} "
+        f"(accuracy: {recommended_config_accuracy}%, "
+        f"cost/page: ${recommended_config_cost_per_page_usd:.4f})",
+        "",
+        "### Configs tested:",
+    ]
+    for cfg in configs:
+        budget_str = "✓" if cfg.get("within_budget") else "✗ OVER BUDGET"
+        summary_lines.append(
+            f"- {cfg.get('version')}: {cfg.get('accuracy')}% accuracy, "
+            f"${cfg.get('cost_per_page_usd', 0):.4f}/page [{budget_str}] — {cfg.get('overview', '')}"
+        )
+    with open(log_path, "a") as f:
+        f.write("\n".join(summary_lines))
+
+    return json.dumps({
+        "status": "ok",
+        "report_path": report_path,
+        "s3_key": f"{s3_prefix}/final-report.json",
+        "configs_archived": configs_archived,
+    })
+
+
+@tool
 def list_files(directory: str = ".", max_depth: int = 2) -> str:
     """List files and directories at a given path.
 
@@ -1418,6 +1543,7 @@ ALL_TOOLS = [
     run_multi_class_discovery,
     update_optimization_state,
     write_optimization_log,
+    generate_final_report,
     list_files,
     copy_config,
     wait_seconds,
