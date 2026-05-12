@@ -71,8 +71,10 @@ export default function ChatInterface() {
   // Use ref for offset so polling closure always sees current value
   const streamOffsetRef = useRef(0)  // Optimization log polling state
   const [optimizationLog, setOptimizationLog] = useState("")
-  // Tab: "stream" or "log"
-  const [activeTab, setActiveTab] = useState<"stream" | "log">("stream")
+  const [finalReport, setFinalReport] = useState<any>(null)
+  const [configModal, setConfigModal] = useState<{ version: string; content: string } | null>(null)
+  // Tab: "stream", "log", or "report"
+  const [activeTab, setActiveTab] = useState<"stream" | "log" | "report">("stream")
 
   const { isLoading, setIsLoading } = useGlobal()
   const auth = useAuth()
@@ -241,6 +243,48 @@ export default function ChatInterface() {
     return () => { active = false; clearInterval(interval) }
   }, [stateApiUrl, currentSessionId, agentState?.status, auth.user?.id_token])
 
+  // Poll final report
+  useEffect(() => {
+    if (!stateApiUrl || !currentSessionId || !agentState?.status) return
+    const idToken = auth.user?.id_token
+    if (!idToken) return
+
+    let active = true
+    const poll = async () => {
+      try {
+        const resp = await fetch(`${stateApiUrl}report?sessionId=${currentSessionId}`, {
+          headers: { Authorization: `Bearer ${idToken}` },
+        })
+        if (resp.ok && active) {
+          const data = await resp.json()
+          if (data.report) setFinalReport(data.report)
+        }
+      } catch { /* ignore */ }
+    }
+    poll()
+    const isTerminal = ["complete", "failed", "cancelled"].includes(String(agentState.status))
+    const interval = setInterval(poll, isTerminal ? 30000 : 10000)
+    if (isTerminal && finalReport) {
+      clearInterval(interval)
+    }
+    return () => { active = false; clearInterval(interval) }
+  }, [stateApiUrl, currentSessionId, agentState?.status, auth.user?.id_token])
+
+  const fetchConfig = async (version: string) => {
+    if (!stateApiUrl || !currentSessionId) return
+    const idToken = auth.user?.id_token
+    if (!idToken) return
+    try {
+      const resp = await fetch(`${stateApiUrl}config?sessionId=${currentSessionId}&version=${encodeURIComponent(version)}`, {
+        headers: { Authorization: `Bearer ${idToken}` },
+      })
+      if (resp.ok) {
+        const data = await resp.json()
+        if (data.content) setConfigModal({ version, content: data.content })
+      }
+    } catch { /* ignore */ }
+  }
+
   const invokeAgent = async (sessionId: string, testSet: string, guidance: string, maxCostPerPage: string, maxTotalCost: string, isResume: boolean) => {
     if (!client) return
     setError(null)
@@ -362,6 +406,7 @@ export default function ChatInterface() {
     streamOffsetRef.current = 0
     setStreamItems([])
     setOptimizationLog("")
+    setFinalReport(null)
   }
 
   const isInitialState = currentSessionId === null
@@ -549,6 +594,16 @@ export default function ChatInterface() {
                   >
                     Optimization Log
                   </button>
+                  <button
+                    onClick={() => setActiveTab("report")}
+                    className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+                      activeTab === "report"
+                        ? "border-blue-500 text-blue-700"
+                        : "border-transparent text-gray-500 hover:text-gray-700"
+                    }`}
+                  >
+                    Final Report {finalReport && "✓"}
+                  </button>
                 </div>
               </div>
 
@@ -564,13 +619,79 @@ export default function ChatInterface() {
                       )}
                       <div ref={streamEndRef} />
                     </div>
-                  ) : (
+                  ) : activeTab === "log" ? (
                     <div className="prose prose-sm max-w-none bg-white p-6 rounded border">
                       {optimizationLog ? (
                         <pre className="whitespace-pre-wrap text-sm text-gray-800">{optimizationLog}</pre>
                       ) : (
                         <p className="text-gray-400 text-center mt-8">
                           {agentState?.status && !["complete", "failed", "cancelled"].includes(String(agentState.status)) ? "Waiting for optimization log..." : "No optimization log available"}
+                        </p>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="max-w-3xl mx-auto">
+                      {finalReport ? (
+                        <div className="space-y-6">
+                          {/* Result summary */}
+                          <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                            <h3 className="text-lg font-semibold text-green-800 mb-2">Recommended Config: {finalReport.result.recommended_config_name}</h3>
+                            <div className="grid grid-cols-3 gap-4 text-sm">
+                              <div><span className="text-gray-500">Accuracy</span><br/><span className="font-medium text-lg">{finalReport.result.recommended_config_accuracy}%</span></div>
+                              <div><span className="text-gray-500">Cost/Page</span><br/><span className="font-medium text-lg">${finalReport.result.recommended_config_cost_per_page_usd?.toFixed(4)}</span></div>
+                              <div><span className="text-gray-500">Stopping Reason</span><br/><span className="font-medium">{finalReport.result.stopping_reason}</span></div>
+                            </div>
+                          </div>
+
+                          {/* Run info */}
+                          <div className="bg-gray-50 border rounded-lg p-4">
+                            <h4 className="font-medium text-gray-700 mb-2">Run Details</h4>
+                            <div className="grid grid-cols-2 gap-2 text-sm">
+                              <div><span className="text-gray-500">Iterations:</span> {finalReport.result.iterations_completed}</div>
+                              <div><span className="text-gray-500">Total Cost:</span> ${finalReport.result.total_cost_usd?.toFixed(2)}</div>
+                              <div><span className="text-gray-500">Agent Cost:</span> ${finalReport.result.agent_cost_usd?.toFixed(2)}</div>
+                              <div><span className="text-gray-500">Eval Cost:</span> ${finalReport.result.eval_cost_usd?.toFixed(2)}</div>
+                              <div><span className="text-gray-500">Test Set:</span> {finalReport.input.test_set_id}</div>
+                              <div><span className="text-gray-500">Max Cost/Page:</span> ${finalReport.input.max_cost_per_page_usd}</div>
+                            </div>
+                          </div>
+
+                          {/* Configs table */}
+                          <div className="border rounded-lg overflow-hidden bg-gray-50">
+                            <h4 className="font-medium text-gray-700 p-3 bg-gray-50 border-b">Configs Tested ({finalReport.configs?.length})</h4>
+                            <table className="w-full text-sm">
+                              <thead className="bg-gray-100 border-b">
+                                <tr>
+                                  <th className="text-left p-2">Version</th>
+                                  <th className="text-left p-2">Accuracy</th>
+                                  <th className="text-left p-2">Cost/Page</th>
+                                  <th className="text-left p-2">Budget</th>
+                                  <th className="text-left p-2">Overview</th>
+                                  <th className="text-left p-2"></th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {finalReport.configs?.map((cfg: any, i: number) => (
+                                  <tr key={i} className={`border-b ${cfg.version === finalReport.result.recommended_config_name ? "bg-green-50" : "bg-white"}`}>
+                                    <td className="p-2 font-medium">{cfg.version}</td>
+                                    <td className="p-2">{cfg.accuracy}%</td>
+                                    <td className="p-2">${cfg.cost_per_page_usd?.toFixed(4)}</td>
+                                    <td className="p-2">{cfg.within_budget ? <span className="text-green-600">✓</span> : <span className="text-red-500">✗</span>}</td>
+                                    <td className="p-2 text-gray-600">{cfg.overview}</td>
+                                    <td className="p-2">
+                                      <button onClick={() => fetchConfig(cfg.version)} className="text-xs text-blue-600 hover:text-blue-800 underline">View</button>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+
+                          <p className="text-xs text-gray-400">Generated: {finalReport.timestamp}</p>
+                        </div>
+                      ) : (
+                        <p className="text-gray-400 text-center mt-8">
+                          {agentState?.status && !["complete", "failed", "cancelled"].includes(String(agentState.status)) ? "Final report will appear when optimization completes..." : "Final report not available"}
                         </p>
                       )}
                     </div>
@@ -581,6 +702,21 @@ export default function ChatInterface() {
           )}
         </div>
       </SidebarInset>
+
+      {/* Config viewer modal */}
+      {configModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setConfigModal(null)}>
+          <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full mx-4 max-h-[80vh] flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between p-4 border-b">
+              <h3 className="font-semibold text-gray-800">{configModal.version}</h3>
+              <button onClick={() => setConfigModal(null)} className="text-gray-400 hover:text-gray-600 text-xl">✕</button>
+            </div>
+            <div className="overflow-auto p-4 flex-1">
+              <pre className="text-xs text-gray-800 whitespace-pre-wrap font-mono">{configModal.content}</pre>
+            </div>
+          </div>
+        </div>
+      )}
     </SidebarProvider>
   )
 }

@@ -59,13 +59,13 @@ class CancelCheckHook(HookProvider):
 
     def _check(self, event: BeforeToolCallEvent) -> None:
         self._enforce()
-        # During finalizing, only allow write_optimization_log
+        # During finalizing, only allow generate_final_report
         if self.state.get_status() == "finalizing":
             tool_name = event.tool_use.get("name", "")
-            if tool_name != "write_optimization_log":
+            if tool_name != "generate_final_report":
                 event.cancel_tool = (
-                    "COST LIMIT REACHED. You must call write_optimization_log with a final "
-                    "summary of what was accomplished, then stop."
+                    "OPTIMIZATION FINALIZING. You must call generate_final_report with the "
+                    "structured results of this optimization run, then stop."
                 )
 
     def _check_before_model(self, event: BeforeModelCallEvent) -> None:
@@ -170,6 +170,12 @@ class OptimizationLoopHook(HookProvider):
         self.max_iterations = max_iterations
         self.max_cost_usd = max_cost_usd
 
+    def _read_optimization_log(self) -> str:
+        workspace = os.environ["AUTOTUNE_WORKSPACE_DIR"]
+        log_path = os.path.join(workspace, "OPTIMIZATION-LOG.md")
+        with open(log_path) as f:
+            return f.read()
+
     def register_hooks(self, registry: HookRegistry, **kwargs) -> None:
         registry.add_callback(AfterInvocationEvent, self._check_and_resume)
 
@@ -188,30 +194,34 @@ class OptimizationLoopHook(HookProvider):
             self.state.set_status("complete", "Optimization finished")
             return
 
-        # Max iterations reached — give agent one final turn to summarize
+        # Max iterations reached — give agent one final turn to produce report
         if iteration >= self.max_iterations:
             logger.info("Max iterations (%d) reached — giving final turn", self.max_iterations)
-            self.state.set_status("finalizing", "Writing final summary")
+            self.state.set_status("finalizing", "Generating final report")
+            log_content = self._read_optimization_log()
             event.resume = (
                 "You have reached the maximum number of iterations. "
-                "Download and review results from your best run, write a final "
-                "summary to OPTIMIZATION-LOG.md, then call "
-                "update_optimization_state(status='complete', status_detail='...'). "
-                "Do NOT launch new evaluations."
+                "Call generate_final_report with the structured results of this "
+                "optimization run (stopping_reason='max_iterations', all configs tested, "
+                "and your recommendation). Do NOT launch new evaluations.\n\n"
+                "Here is your OPTIMIZATION-LOG.md for reference:\n"
+                f"```\n{log_content}\n```"
             )
             return
 
-        # Max cost reached — give agent one final turn to summarize
+        # Max cost reached — give agent one final turn to produce report
         total_cost = float(current.get("agent_cost_usd", 0)) + float(current.get("eval_cost_usd", 0))
         if total_cost >= self.max_cost_usd:
             logger.info("Max cost ($%.2f >= $%.2f) reached — giving final turn", total_cost, self.max_cost_usd)
             self.state.set_status("finalizing", f"Cost limit reached (${total_cost:.2f})")
+            log_content = self._read_optimization_log()
             event.resume = (
                 f"You have reached the maximum cost limit (${total_cost:.2f} >= ${self.max_cost_usd:.2f}). "
-                "Download and review results from your best run, write a final "
-                "summary to OPTIMIZATION-LOG.md, then call "
-                "update_optimization_state(status='complete', status_detail='...'). "
-                "Do NOT launch new evaluations."
+                "Call generate_final_report with the structured results of this "
+                "optimization run (stopping_reason='budget_exhausted', all configs tested, "
+                "and your recommendation). Do NOT launch new evaluations.\n\n"
+                "Here is your OPTIMIZATION-LOG.md for reference:\n"
+                f"```\n{log_content}\n```"
             )
             return
 

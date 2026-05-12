@@ -756,7 +756,7 @@ export class BackendStack extends cdk.NestedStack {
     this.streamBucket = bucket.bucketName
   }
 
-  // Creates a DynamoDB table for storing user feedback.
+  // Creates an API Gateway with Lambda integration for optimization state.
   /**
    * Creates an API Gateway with Lambda integration for optimization state.
    *
@@ -772,7 +772,7 @@ export class BackendStack extends cdk.NestedStack {
       functionName: `${config.stack_name_base}-optimization-state`,
       runtime: lambda.Runtime.PYTHON_3_13,
       architecture: lambda.Architecture.ARM_64,
-      entry: path.join(__dirname, "..", "lambdas", "feedback"), // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
+      entry: path.join(__dirname, "..", "lambdas", "optimization-api"), // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
       handler: "handler",
       environment: {
         TABLE_NAME: this.optimizationStateTableName,
@@ -842,6 +842,8 @@ export class BackendStack extends cdk.NestedStack {
     api.root.addResource("state").addMethod("GET", lambdaIntegration, authOptions)
     api.root.addResource("stream").addMethod("GET", lambdaIntegration, authOptions)
     api.root.addResource("log").addMethod("GET", lambdaIntegration, authOptions)
+    api.root.addResource("report").addMethod("GET", lambdaIntegration, authOptions)
+    api.root.addResource("config").addMethod("GET", lambdaIntegration, authOptions)
     api.root.addResource("runs").addMethod("GET", lambdaIntegration, authOptions)
 
     this.optimizationStateApiUrl = api.url
