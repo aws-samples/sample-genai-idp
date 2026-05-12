@@ -406,6 +406,7 @@ export default function ChatInterface() {
     streamOffsetRef.current = 0
     setStreamItems([])
     setOptimizationLog("")
+    setFinalReport(null)
   }
 
   const isInitialState = currentSessionId === null
