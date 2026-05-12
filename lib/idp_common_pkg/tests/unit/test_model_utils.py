@@ -4,7 +4,7 @@
 """Unit tests for model_utils module."""
 
 import pytest
-from idp_common.bedrock.model_utils import parse_model_id
+from idp_common.bedrock.model_utils import get_model_max_output_tokens, parse_model_id
 
 
 @pytest.mark.unit
@@ -71,3 +71,46 @@ class TestParseModelId:
         base_id, tier = parse_model_id("global.amazon.nova-2-lite-v1:0:priority")
         assert base_id == "global.amazon.nova-2-lite-v1:0"
         assert tier == "priority"
+
+
+@pytest.mark.unit
+class TestGetModelMaxOutputTokens:
+    """Test model max output token detection."""
+
+    def test_claude4_models_return_64k(self):
+        """Test Claude 4 models return 64,000 max tokens."""
+        assert get_model_max_output_tokens("us.anthropic.claude-sonnet-4-20250514-v1:0") == 64_000
+        assert get_model_max_output_tokens("us.anthropic.claude-opus-4-20250514-v1:0") == 64_000
+        assert get_model_max_output_tokens("us.anthropic.claude-haiku-4-5-20251001-v1:0") == 64_000
+        assert get_model_max_output_tokens("eu.anthropic.claude-sonnet-4-6") == 64_000
+        assert get_model_max_output_tokens("global.anthropic.claude-opus-4-7") == 64_000
+
+    def test_claude3_models_return_8k(self):
+        """Test Claude 3 models return 8,192 max tokens."""
+        assert get_model_max_output_tokens("us.anthropic.claude-3-haiku-20240307-v1:0") == 8_192
+        assert get_model_max_output_tokens("us.anthropic.claude-3-5-sonnet-20241022-v2:0") == 8_192
+        assert get_model_max_output_tokens("eu.anthropic.claude-3-5-sonnet-20241022-v2:0") == 8_192
+
+    def test_nova_models_return_10k(self):
+        """Test Amazon Nova models return 10,000 max tokens."""
+        assert get_model_max_output_tokens("us.amazon.nova-lite-v1:0") == 10_000
+        assert get_model_max_output_tokens("us.amazon.nova-pro-v1:0") == 10_000
+        assert get_model_max_output_tokens("us.amazon.nova-premier-v1:0") == 10_000
+        assert get_model_max_output_tokens("us.amazon.nova-micro-v1:0") == 10_000
+
+    def test_nova2_models_return_10k(self):
+        """Test Amazon Nova 2 models return 10,000 max tokens."""
+        assert get_model_max_output_tokens("us.amazon.nova-2-lite-v1:0") == 10_000
+        assert get_model_max_output_tokens("eu.amazon.nova-2-lite-v1:0") == 10_000
+        assert get_model_max_output_tokens("global.amazon.nova-2-lite-v1:0") == 10_000
+
+    def test_unknown_model_returns_default(self):
+        """Test unknown models return default 4,096 tokens."""
+        assert get_model_max_output_tokens("unknown.model.id") == 4_096
+        assert get_model_max_output_tokens("us.meta.llama-3-70b-instruct-v1:0") == 4_096
+
+    def test_case_insensitive(self):
+        """Test model ID matching is case insensitive."""
+        assert get_model_max_output_tokens("US.ANTHROPIC.CLAUDE-SONNET-4-20250514-V1:0") == 64_000
+        assert get_model_max_output_tokens("US.AMAZON.NOVA-LITE-V1:0") == 10_000
+        assert get_model_max_output_tokens("US.ANTHROPIC.CLAUDE-3-HAIKU-20240307-V1:0") == 8_192

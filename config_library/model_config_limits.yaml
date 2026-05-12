@@ -1,0 +1,52 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: MIT-0
+
+# =============================================================================
+# Model Configuration Limits
+# =============================================================================
+# This file contains technical limits and capabilities for Bedrock models.
+# These limits are enforced by the Bedrock API and used for config validation.
+#
+# IMPORTANT: These are API limits from AWS documentation. Verify current limits at:
+# - Bedrock Models: https://docs.aws.amazon.com/bedrock/latest/userguide/models-supported.html
+# - Claude Models: https://docs.anthropic.com/claude/docs/models-overview
+# - Nova Models: https://docs.aws.amazon.com/nova/latest/userguide/what-is-nova.html
+# =============================================================================
+
+# Model limits are matched by pattern (case-insensitive regex)
+# Patterns are evaluated in order - first match wins
+# Each entry has a 'pattern' (regex) and 'max_output_tokens' (integer)
+
+model_limits:
+  # ---------------------------------------------------------------------------
+  # Anthropic Claude 4.x Models
+  # ---------------------------------------------------------------------------
+  - pattern: "claude-(opus|sonnet|haiku)-4"
+    max_output_tokens: 64000
+    description: "Claude 4.x models (Opus, Sonnet, Haiku)"
+    reference: "https://docs.anthropic.com/claude/docs/models-overview#model-comparison"
+
+  # ---------------------------------------------------------------------------
+  # Anthropic Claude 3.x Models
+  # ---------------------------------------------------------------------------
+  - pattern: "claude-3"
+    max_output_tokens: 8192
+    description: "Claude 3.x models (3.5 Sonnet, 3.7 Sonnet, 3 Opus, 3 Haiku)"
+    reference: "https://docs.anthropic.com/claude/docs/models-overview#model-comparison"
+
+  # ---------------------------------------------------------------------------
+  # Amazon Nova Models (all generations)
+  # ---------------------------------------------------------------------------
+  - pattern: "nova-(premier|pro|lite|micro|2)"
+    max_output_tokens: 10000
+    description: "Amazon Nova models (Premier, Pro, Lite, Micro, Nova 2)"
+    reference: "https://docs.aws.amazon.com/nova/latest/userguide/what-is-nova.html"
+
+  # ---------------------------------------------------------------------------
+  # Default Fallback
+  # ---------------------------------------------------------------------------
+  # This should always be last - matches any model not caught above
+  - pattern: ".*"
+    max_output_tokens: 4096
+    description: "Default fallback for unknown models"
+    reference: "Conservative default for models without explicit limits"

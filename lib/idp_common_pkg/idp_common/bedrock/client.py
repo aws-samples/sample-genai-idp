@@ -1367,7 +1367,15 @@ class BedrockClient:
             Extracted text content
         """
         response_obj = response.get("response", response)
-        return response_obj["output"]["message"]["content"][0].get("text", "")
+        content = response_obj["output"]["message"].get("content", [])
+        if not content or len(content) == 0:
+            logger = logging.getLogger(__name__)
+            logger.error(
+                "LLM returned empty content array",
+                extra={"response": response_obj},
+            )
+            return ""
+        return content[0].get("text", "")
 
     def format_prompt(
         self,

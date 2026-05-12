@@ -201,7 +201,16 @@ class SummarizationService:
             metering = response_with_metering["metering"]
 
             # Extract summarization result
-            summary_text = response["output"]["message"]["content"][0].get("text", "")
+            # Defensive: Handle case where LLM returns empty content array
+            content = response["output"]["message"].get("content", [])
+            if not content or len(content) == 0:
+                logger.error(
+                    "LLM returned empty content array in summarization response",
+                    extra={"response": response},
+                )
+                raise ValueError("Summarization failed: LLM returned empty response")
+
+            summary_text = content[0].get("text", "")
 
             # Try to extract JSON from the response
             try:
