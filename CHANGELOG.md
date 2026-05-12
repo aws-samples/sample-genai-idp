@@ -17,16 +17,10 @@ SPDX-License-Identifier: MIT-0
 
 ### Changed
 
-- **Chat-with-Document is decoupled from summarization** — the feature no longer silently reuses `summarization.model`. Admins can pick a different (typically larger-context) model for chat without affecting summarization.
-- **Removed legacy `chatWithDocument` GraphQL query and resolver** — replaced by the async `sendChatDocumentMessage` mutation + `onChatDocumentMessageUpdate` subscription. The Web UI migrates transparently; external direct callers must switch to the new ops.
 
 ### Fixed
 
-- **Chat stuck on "Queued…" — subscription fan-out missing fields.** The mutation's response selection set only included `{sessionId, status, method}`, so AppSync enhanced subscriptions delivered `null` for `content`, `role`, and every other field, leaving the UI frozen even though Bedrock finished successfully. Selection expanded to the full `ChatDocumentMessage` shape.
-- **`:1m` suffix rejected by Bedrock.** `us.anthropic.claude-opus-4-7:1m` was being passed verbatim to `converse_stream`. The processor now strips `:1m` and sets the 1M-context beta flag via `additionalModelRequestFields.anthropic_beta`, matching `idp_common.bedrock.client.BedrockClient`.
-- **`:priority` / `:flex` service-tier suffixes rejected by Bedrock.** Two root causes fixed together: (1) the processor now strips the tier suffix and passes it as Converse's `serviceTier={"type": ...}` parameter; (2) the Lambda now ships with a newer boto3 (≥1.42.0) so Converse-Stream actually recognizes `serviceTier`.
-- **LogGroup KMS key rejected during deploy.** `ChatWithDocumentProcessorLogGroup.KmsKeyId` now uses `!GetAtt …Arn` instead of `!Ref …` — CloudWatch Logs requires the full ARN.
-- **"Input Tokens Exceeded" on chat with large documents** — while not fixed automatically, admins now have a direct lever: switch `chat.model` to a 1M-context variant (e.g. `us.anthropic.claude-opus-4-7:1m` or `us.anthropic.claude-sonnet-4-6:1m`) in the Configuration tab. The chat resolver no longer hard-codes Nova Pro as a fallback.
+
 
 ## [0.5.10]
 
