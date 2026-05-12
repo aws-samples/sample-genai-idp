@@ -1335,6 +1335,11 @@ def generate_final_report(
     Returns:
         JSON with status, report path, and number of configs archived.
     """
+    # Only allowed during finalizing
+    state = _get_optimization_state()
+    if state.get_status() != "finalizing":
+        return json.dumps({"error": "generate_final_report can only be called when the optimization is finalizing. Continue optimizing."})
+
     from datetime import datetime, timezone
 
     import boto3
