@@ -11,7 +11,6 @@
  */
 
 import Box from '@cloudscape-design/components/box';
-import Button from '@cloudscape-design/components/button';
 import Container from '@cloudscape-design/components/container';
 import Header from '@cloudscape-design/components/header';
 import Pagination from '@cloudscape-design/components/pagination';
@@ -121,15 +120,17 @@ export function FailuresTableWidget({
                 cell: (r) => {
                   const parts = r.documentId.split('/');
                   const filename = parts.pop() ?? r.documentId;
-                  const docClass = r.documentClass || '';
                   const configVer = r.configVersion || '';
-                  const subtitle = [docClass, configVer].filter(Boolean).join(' | ');
                   return (
                     <Box>
-                      <Box>{filename}</Box>
-                      {subtitle && (
-                        <Box color="text-body-secondary" fontSize="body-s">
-                          {subtitle}
+                      <Box>
+                        <span style={{ fontWeight: 600, color: '#545b64' }}>
+                          {filename}
+                        </span>
+                      </Box>
+                      {configVer && (
+                        <Box fontSize="body-s">
+                          <span style={{ color: '#687078' }}>{configVer}</span>
                         </Box>
                       )}
                     </Box>
@@ -189,18 +190,36 @@ export function FailuresTableWidget({
                 header: 'Action',
                 cell: (r) => (
                   <SpaceBetween size="xxs" direction="vertical">
-                    <Button
-                      variant="inline-link"
-                      onClick={() => onInvestigate?.(r.documentId)}
+                    <a
+                      href="#"
+                      onClick={(e) => { e.preventDefault(); onInvestigate?.(r.documentId); }}
+                      style={{
+                        fontSize: 13,
+                        fontWeight: 'normal',
+                        color: '#0972d3',
+                        textDecoration: 'none',
+                        cursor: 'pointer',
+                      }}
+                      onMouseEnter={(e) => { (e.target as HTMLElement).style.textDecoration = 'underline'; }}
+                      onMouseLeave={(e) => { (e.target as HTMLElement).style.textDecoration = 'none'; }}
                     >
                       Troubleshoot
-                    </Button>
-                    <Button
-                      variant="inline-link"
-                      onClick={() => onReprocess?.(r.documentId)}
+                    </a>
+                    <a
+                      href="#"
+                      onClick={(e) => { e.preventDefault(); onReprocess?.(r.documentId); }}
+                      style={{
+                        fontSize: 13,
+                        fontWeight: 'normal',
+                        color: '#0972d3',
+                        textDecoration: 'none',
+                        cursor: 'pointer',
+                      }}
+                      onMouseEnter={(e) => { (e.target as HTMLElement).style.textDecoration = 'underline'; }}
+                      onMouseLeave={(e) => { (e.target as HTMLElement).style.textDecoration = 'none'; }}
                     >
                       Reprocess
-                    </Button>
+                    </a>
                   </SpaceBetween>
                 ),
                 minWidth: 120,

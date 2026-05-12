@@ -24,8 +24,15 @@
 
 import React, { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Box, Button, Container, Header, Icon, SpaceBetween, Spinner, TextContent } from '@cloudscape-design/components';
+import { generateClient } from 'aws-amplify/api';
+import { ConsoleLogger } from 'aws-amplify/utils';
 import useSettingsContext from '../../contexts/settings';
 import TroubleshootModal from '../document-panel/TroubleshootModal';
+import ReprocessDocumentModal from '../common/ReprocessDocumentModal';
+import { reprocessDocument } from '../../graphql/generated';
+
+const logger = new ConsoleLogger('MonitoringShell');
+const client = generateClient();
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -264,13 +271,37 @@ export const MonitoringShell: React.FC<MonitoringShellProps> = ({ stackName, cla
     setIsTroubleshootVisible(true);
   }, []);
 
-  // ── Reprocess handler (for Reprocess action in failures table) ────────────
+  // ── Reprocess modal state (for Reprocess action in failures table) ────────
+  const [reprocessDocId, setReprocessDocId] = useState<string | null>(null);
+  const [isReprocessVisible, setIsReprocessVisible] = useState(false);
+  const [isReprocessLoading, setIsReprocessLoading] = useState(false);
+
   const handleReprocess = useCallback((documentId: string) => {
-    // TODO: Integrate with actual reprocessing API (e.g., Step Functions restart)
-    console.log('[MonitoringShell] Reprocess requested for document:', documentId);
-    // For now, show a confirmation in the console. Will be wired to the
-    // reprocessing API once available.
+    setReprocessDocId(documentId);
+    setIsReprocessVisible(true);
   }, []);
+
+  const handleReprocessConfirm = useCallback(
+    async (version?: string) => {
+      if (!reprocessDocId) return;
+      setIsReprocessLoading(true);
+      try {
+        const variables: { objectKeys: string[]; version?: string } = {
+          objectKeys: [reprocessDocId],
+        };
+        if (version) variables.version = version;
+        await client.graphql({ query: reprocessDocument, variables });
+        logger.debug('Reprocess succeeded for', reprocessDocId);
+        setIsReprocessVisible(false);
+        setReprocessDocId(null);
+      } catch (err) {
+        logger.error('Reprocess failed:', err);
+      } finally {
+        setIsReprocessLoading(false);
+      }
+    },
+    [reprocessDocId],
+  );
 
   // IDPMonitorUiUrl is the relative (or absolute) URL to the monitor UI bundle.
   // Written to SSM by deploy.sh when the IDPMonitor stack is deployed.
@@ -379,6 +410,18 @@ export const MonitoringShell: React.FC<MonitoringShellProps> = ({ stackName, cla
         visible={isTroubleshootVisible}
         onDismiss={() => setIsTroubleshootVisible(false)}
         documentItem={troubleshootDocId ? { objectKey: troubleshootDocId } : null}
+      />
+
+      {/* Reprocess Modal — opened by "Reprocess" link in Recent Failures */}
+      <ReprocessDocumentModal
+        visible={isReprocessVisible}
+        onDismiss={() => {
+          setIsReprocessVisible(false);
+          setReprocessDocId(null);
+        }}
+        onConfirm={handleReprocessConfirm}
+        selectedItems={reprocessDocId ? [{ objectKey: reprocessDocId }] : []}
+        isLoading={isReprocessLoading}
       />
     </div>
   );
