@@ -883,7 +883,7 @@ export const DocumentPanel = ({
         } as Record<string, unknown>)}
       />
       <PagesPanel {...({ pages: localItem.pages, documentItem: localItem } as Record<string, unknown>)} />
-      <ChatPanel objectKey={localItem.objectKey} />
+      <ChatPanel objectKey={localItem.objectKey} configVersion={docConfigVersion} />
 
       {/* Step Function Flow Viewer - uses the document's config version, not the active stack config */}
       {localItem?.executionArn && (

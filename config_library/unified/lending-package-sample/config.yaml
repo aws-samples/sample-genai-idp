@@ -7,6 +7,12 @@ use_bda: false
 
 notes: "Lending package sample - processes payslips, driver licenses, bank checks, bank statements, W2s, and insurance applications - . Set use_bda: true for BDA mode."
 
+chat:
+  # Chat-with-Document: inherits defaults from system base-chat.yaml.
+  # Uncomment and set 'model:' here to override the default chat model
+  # for documents processed with this configuration version.
+  enabled: true
+
 classes:
   - $schema: https://json-schema.org/draft/2020-12/schema
     $id: Payslip

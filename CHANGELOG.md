@@ -5,6 +5,29 @@ SPDX-License-Identifier: MIT-0
 
 ## [Unreleased]
 
+### Added
+
+- **Chat-with-Document enhancements** — the Web UI "Chat with Document" feature has been substantially upgraded:
+  - **Async streaming** — responses now stream token-by-token into the chat bubble so large documents and long-context models no longer hit AppSync's 30-second synchronous timeout.
+  - **Markdown rendering in assistant replies** — headings, bullet/numbered lists, fenced code blocks, inline code, tables, block quotes, and links render as formatted HTML instead of raw markdown characters. Renders during streaming and at final.
+  - **Dedicated `chat` configuration section** — independent from `summarization`, with its own `model`, `system_prompt`, `temperature`, `top_k`, `top_p`, and `max_tokens`. Backward compatible: configs without a `chat` section fall back to `summarization.*`.
+  - **UI model selector on the Chat panel** — per-session model override, populated from the config's model enum; default comes from the document's own config version.
+  - **Default chat model is `us.anthropic.claude-opus-4-7:1m`** — 1M-context by default so typical multi-hundred-page packets fit without hitting input-token limits. EU and GovCloud presets use their region-appropriate inference profiles.
+  - **First-class support for Bedrock model-ID suffixes** — `:1m` (1M-context beta), `:priority` and `:flex` (service tiers) all work end-to-end when selected in the Chat panel dropdown.
+
+### Changed
+
+- **Chat-with-Document is decoupled from summarization** — the feature no longer silently reuses `summarization.model`. Admins can pick a different (typically larger-context) model for chat without affecting summarization.
+- **Removed legacy `chatWithDocument` GraphQL query and resolver** — replaced by the async `sendChatDocumentMessage` mutation + `onChatDocumentMessageUpdate` subscription. The Web UI migrates transparently; external direct callers must switch to the new ops.
+
+### Fixed
+
+- **Chat stuck on "Queued…" — subscription fan-out missing fields.** The mutation's response selection set only included `{sessionId, status, method}`, so AppSync enhanced subscriptions delivered `null` for `content`, `role`, and every other field, leaving the UI frozen even though Bedrock finished successfully. Selection expanded to the full `ChatDocumentMessage` shape.
+- **`:1m` suffix rejected by Bedrock.** `us.anthropic.claude-opus-4-7:1m` was being passed verbatim to `converse_stream`. The processor now strips `:1m` and sets the 1M-context beta flag via `additionalModelRequestFields.anthropic_beta`, matching `idp_common.bedrock.client.BedrockClient`.
+- **`:priority` / `:flex` service-tier suffixes rejected by Bedrock.** Two root causes fixed together: (1) the processor now strips the tier suffix and passes it as Converse's `serviceTier={"type": ...}` parameter; (2) the Lambda now ships with a newer boto3 (≥1.42.0) so Converse-Stream actually recognizes `serviceTier`.
+- **LogGroup KMS key rejected during deploy.** `ChatWithDocumentProcessorLogGroup.KmsKeyId` now uses `!GetAtt …Arn` instead of `!Ref …` — CloudWatch Logs requires the full ARN.
+- **"Input Tokens Exceeded" on chat with large documents** — while not fixed automatically, admins now have a direct lever: switch `chat.model` to a 1M-context variant (e.g. `us.anthropic.claude-opus-4-7:1m` or `us.anthropic.claude-sonnet-4-6:1m`) in the Configuration tab. The chat resolver no longer hard-codes Nova Pro as a fallback.
+
 ## [0.5.10]
 
 ### Added
