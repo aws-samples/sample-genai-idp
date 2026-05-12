@@ -363,7 +363,37 @@ def create_dynamic_extraction_tool_and_patch_tool(model_class: type[TargetModel]
 
         # Note: The @tool decorator passes data as a dict, not as a model instance
         # We need to validate it manually using the Pydantic model
-        extraction_model = model_class.model_validate(extraction)  # pyright: ignore[reportAssignmentType]
+
+        # Handle case where LLM returns a single-element array instead of dict
+        # This happens when models mistakenly wrap the extraction in an array
+        extraction_data = extraction
+        if isinstance(extraction_data, list):
+            if len(extraction_data) == 1:
+                logger.warning(
+                    "LLM returned single-element array instead of object, unwrapping",
+                    extra={"original_type": "list", "element_count": 1},
+                )
+                extraction_data = extraction_data[0]
+            elif len(extraction_data) == 0:
+                logger.error(
+                    "LLM returned empty array when single object expected",
+                    extra={"element_count": 0},
+                )
+                return (
+                    "Error: Expected single object but received empty array. "
+                    "Please provide a single object, not an array."
+                )
+            else:  # len > 1
+                logger.error(
+                    "LLM returned multi-element array when single object expected",
+                    extra={"element_count": len(extraction_data)},
+                )
+                return (
+                    f"Error: Expected single object but received array with {len(extraction_data)} elements. "
+                    "Please provide a single object, not an array."
+                )
+
+        extraction_model = model_class.model_validate(extraction_data)  # pyright: ignore[reportAssignmentType]
         extraction_dict = extraction_model.model_dump(mode="json")
         logger.info(
             "extraction_tool called", extra={"models_extraction": extraction_dict}
