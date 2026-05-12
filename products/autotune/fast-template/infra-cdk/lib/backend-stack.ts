@@ -34,6 +34,7 @@ export class BackendStack extends cdk.NestedStack {
   public readonly userPoolDomain: cognito.UserPoolDomain
   public optimizationStateApiUrl: string
   public runtimeArn: string
+  public streamBucket: string
   // public memoryArn: string  // Disabled — see AgentCore Memory comment in createAgentRuntime()
   private agentName: cdk.CfnParameter
   private userPool: cognito.IUserPool
@@ -752,6 +753,7 @@ export class BackendStack extends cdk.NestedStack {
 
     this.streamBucketName = bucket.bucketName
     this.streamBucketArn = bucket.bucketArn
+    this.streamBucket = bucket.bucketName
   }
 
   // Creates a DynamoDB table for storing user feedback.
