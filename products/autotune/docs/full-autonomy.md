@@ -230,7 +230,7 @@ These are wired to env vars `IDP_STACK_NAME`, `AUTOTUNE_MODEL_ID`, and `AUTOTUNE
 
 | Feature | Status | Rationale |
 |---------|--------|-----------|
-| SummarizingConversationManager | Deferred | Monitor context usage first; add when overflow is observed |
+| Context summarization | **Done** | `ContextCheckHook` (BeforeModelCallEvent) — single Bedrock Converse call, no agent/tools. Re-injects OPTIMIZATION-LOG.md after. See `agent/context_manager.py` |
 | Watchdog timeout | Deferred | Rely on AgentCore session timeout (2h idle, 8h max) for v1 |
 | Tool limits (LimitToolCounts) | Deferred | Doesn't exist in strands-agents 1.37.0; max iterations + cancel are sufficient |
 | Programmatic tool retry | Deferred | Rely on model's natural retry behavior for v1 |

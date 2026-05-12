@@ -575,7 +575,7 @@ Convert the agent from interactive chat to autonomous operation. The agent recei
   - [ ] Restrict network egress via VPC with no internet gateway
   - [ ] Wire AgentCore CodeInterpreter for sandboxed arbitrary code execution
   - [ ] Consider Bedrock Guardrails for input/output validation
-- [ ] **SummarizingConversationManager** — add when context overflow is observed in practice. When added, the resume prompt must instruct the agent to re-read OPTIMIZATION-LOG.md to recover summarized-away detail.
+- [x] **Context summarization** — Implemented as `ContextCheckHook` (BeforeModelCallEvent). Uses a single Bedrock Converse call (no agent/tools) to summarize older messages, then re-injects OPTIMIZATION-LOG.md. Avoids the Strands `SummarizingConversationManager` which caused toolUse-in-user-message errors. See `products/autotune/agent/context_manager.py`.
 - [ ] **Watchdog timeout** — add `agent.cancel()` from a watchdog thread if AgentCore session timeout proves insufficient.
 - [ ] **Tool limits hook** — custom `BeforeToolCallEvent` hook counting tool invocations, if runaway usage is observed.
 - [ ] **Doom loop detection** — programmatic oscillation detection in the `OptimizationLoopHook`. For v1, rely on prompt instructions + OPTIMIZATION-LOG history.
