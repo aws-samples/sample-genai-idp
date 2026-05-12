@@ -87,7 +87,7 @@ class CancelCheckHook(HookProvider):
 
 
 class FileReadSafetyHook(HookProvider):
-    """Force file_read to always use mode='view' to prevent document-mode crashes on images."""
+    """Constrain file_read: force mode='view' (prevents image crashes) and block 'find' on '/' (hangs)."""
 
     def register_hooks(self, registry: HookRegistry, **kwargs) -> None:
         registry.add_callback(BeforeToolCallEvent, self._enforce_view_mode)
@@ -95,6 +95,10 @@ class FileReadSafetyHook(HookProvider):
     def _enforce_view_mode(self, event: BeforeToolCallEvent) -> None:
         if event.tool_use.get("name") == "file_read":
             tool_input = event.tool_use.get("input", {})
+            # Block find mode on root — causes full filesystem scan that hangs
+            if tool_input.get("mode") == "find" and tool_input.get("path", "").strip() in ("/", ""):
+                event.cancel_tool = "Cannot use find mode on '/'. Use grep_idp_source_code to search IDP source, or list_files for specific directories."
+                return
             if tool_input.get("mode") != "view":
                 logger.info("FileReadSafetyHook: overriding mode=%s to view", tool_input.get("mode"))
                 tool_input["mode"] = "view"
