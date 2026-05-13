@@ -155,6 +155,8 @@ export function MonitoringPage({ apiUrl, apiKey, onInvestigate, onReprocess }: M
               isLoading={isLoading}
               timeRange={timeRange}
               widgetVisibility={widgetVisibility}
+              apiUrl={apiUrl}
+              apiKey={apiKey}
               onInvestigate={onInvestigate}
               onReprocess={onReprocess}
             />

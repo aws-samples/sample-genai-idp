@@ -42,6 +42,20 @@ pip install boto3 \
     --upgrade \
     --quiet
 
+# Install strands-agents and bedrock-agentcore (required by analytics/error_analyzer agents)
+# These are optional deps of idp_common[agents] but needed for the SummaryWidget AI features
+pip install "strands-agents==1.14.0" \
+    --target "${LAYER_PYTHON_DIR}" \
+    --quiet
+
+pip install "strands-agents-tools==0.2.22" \
+    --target "${LAYER_PYTHON_DIR}" \
+    --quiet
+
+pip install "bedrock-agentcore>=0.1.1" \
+    --target "${LAYER_PYTHON_DIR}" \
+    --quiet
+
 # Clean up unnecessary metadata to reduce layer size
 find "${LAYER_PYTHON_DIR}" -type d -name "*.dist-info" -exec rm -rf {} + 2>/dev/null || true
 find "${LAYER_PYTHON_DIR}" -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true

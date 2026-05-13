@@ -59,6 +59,20 @@ export const GET_MONITORING_STATUS = `
   }
 `;
 
+// ─────────────────────────────────────────────────────────────────────────────
+// QUERY_ANALYTICS_AGENT
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const QUERY_ANALYTICS_AGENT = `
+  mutation QueryAnalyticsAgent($input: AnalyticsAgentInput!) {
+    queryAnalyticsAgent(input: $input) {
+      success
+      result
+      error
+    }
+  }
+`;
+
 // Re-export as named constants for consumers that use Apollo gql tag:
 //
 //   import gql from 'graphql-tag';

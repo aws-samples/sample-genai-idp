@@ -61,6 +61,27 @@ except ImportError as _exc:
         _exc,
     )
 
+# ── Import Analytics Agent from idp_common layer ─────────────────────────────
+try:
+    from idp_common.agents.analytics.agent import create_analytics_agent
+    from idp_common.agents.analytics.config import get_analytics_config
+
+    _ANALYTICS_AGENT_AVAILABLE = True
+    logger.info(
+        "✓ idp_common.agents.analytics imported successfully. "
+        "Analytics agent is available for SummaryWidget."
+    )
+except Exception as _exc:
+    # Catch ALL exceptions — strands/opentelemetry can raise StopIteration,
+    # RuntimeError, etc. during import in Lambda environments
+    _ANALYTICS_AGENT_AVAILABLE = False
+    logger.warning(
+        "✗ idp_common.agents.analytics NOT available: %s (%s) — "
+        "Will fall back to direct Bedrock invocation for SummaryWidget.",
+        type(_exc).__name__,
+        _exc,
+    )
+
 # Log environment configuration at cold start
 logger.info(
     "Lambda cold start — env config: "
@@ -131,6 +152,15 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         )
         return result
 
+    if field_name == "queryAnalyticsAgent":
+        result = _handle_query_analytics_agent(event)
+        logger.info(
+            "<<< queryAnalyticsAgent response: success=%s, hasResult=%s",
+            result.get("success"),
+            result.get("result") is not None,
+        )
+        return result
+
     logger.warning("Unknown field: %s", field_name)
     return {"error": f"Unknown field: {field_name}"}
 
@@ -149,6 +179,133 @@ def _handle_get_status() -> dict[str, Any]:
         "stackName": os.environ.get("AWS_LAMBDA_FUNCTION_NAME", ""),
         "acceleratorStackName": ACCELERATOR_STACK_NAME,
     }
+
+
+def _handle_query_analytics_agent(event: dict[str, Any]) -> dict[str, Any]:
+    """
+    Handle queryAnalyticsAgent mutation.
+
+    Strategy:
+      1. If the full analytics agent (strands-based) is available → use it
+      2. Otherwise → fall back to direct Bedrock Converse API invocation
+
+    Used by the SummaryWidget for:
+      - Auto-generated AI summary of dashboard metrics
+      - Interactive chat queries from users
+    """
+    import time as _time  # noqa: PLC0415
+
+    args = event.get("arguments", {}).get("input", {})
+    query = args.get("query", "").strip()
+
+    if not query:
+        return {"success": False, "result": None, "error": "No query provided"}
+
+    # ── Strategy 1: Full analytics agent (requires strands + Athena config) ──
+    if _ANALYTICS_AGENT_AVAILABLE:
+        try:
+            import boto3  # noqa: PLC0415
+
+            session = boto3.Session()
+            config = get_analytics_config()
+            agent = create_analytics_agent(config=config, session=session)
+
+            start_time = _time.time()
+            logger.info("Analytics agent query (full): [%s]", query[:200])
+            result = agent(query)
+            elapsed = _time.time() - start_time
+
+            logger.info("Analytics agent completed in %.2fs", elapsed)
+
+            return {
+                "success": True,
+                "result": str(result),
+                "error": None,
+            }
+
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "Full analytics agent failed, falling back to Bedrock: %s", exc
+            )
+            # Fall through to Bedrock fallback
+
+    # ── Strategy 2: Direct Bedrock Converse API fallback ─────────────────────
+    logger.info("Using direct Bedrock Converse API for query: [%s]", query[:200])
+    return _invoke_bedrock_converse(query, _time)
+
+
+def _invoke_bedrock_converse(query: str, _time: Any) -> dict[str, Any]:
+    """
+    Invoke Bedrock Converse API directly as a fallback when the full
+    analytics agent (strands) is not available.
+
+    This provides text-based AI responses for summary generation and
+    simple Q&A without needing Athena/SQL capabilities.
+    """
+    import boto3  # noqa: PLC0415
+
+    try:
+        client = boto3.client("bedrock-runtime")
+        model_id = os.environ.get(
+            "BEDROCK_MODEL_ID",
+            "us.anthropic.claude-sonnet-4-6",
+        )
+
+        system_prompt = (
+            "You are an AI assistant for an Intelligent Document Processing (IDP) system. "
+            "You help users understand their document processing metrics, identify issues, "
+            "and provide insights about system health. Respond concisely in plain English. "
+            "Do not use markdown formatting, bullet points, or headers unless specifically asked."
+        )
+
+        start_time = _time.time()
+        response = client.converse(
+            modelId=model_id,
+            system=[{"text": system_prompt}],
+            messages=[{"role": "user", "content": [{"text": query}]}],
+            inferenceConfig={
+                "maxTokens": 1024,
+                "temperature": 0.3,
+            },
+        )
+        elapsed = _time.time() - start_time
+        logger.info("Bedrock Converse completed in %.2fs", elapsed)
+
+        # Extract text from response
+        output = response.get("output", {})
+        message = output.get("message", {})
+        content_blocks = message.get("content", [])
+        result_text = ""
+        for block in content_blocks:
+            if "text" in block:
+                result_text += block["text"]
+
+        if result_text:
+            return {"success": True, "result": result_text, "error": None}
+        else:
+            return {
+                "success": False,
+                "result": None,
+                "error": "No response generated from model",
+            }
+
+    except Exception as exc:  # noqa: BLE001
+        error_str = str(exc).lower()
+        if "throttl" in error_str or "too many" in error_str:
+            message = (
+                "Service temporarily unavailable due to high demand. "
+                "Please retry in a moment."
+            )
+        elif "access" in error_str or "denied" in error_str:
+            message = (
+                "Bedrock model access not configured. "
+                "Ensure the Lambda role has bedrock:InvokeModel permission."
+            )
+        else:
+            message = f"AI query error: {exc}"
+
+        logger.error("Bedrock Converse failed: %s", exc, exc_info=True)
+        return {"success": False, "result": None, "error": message}
 
 
 def _handle_get_dashboard(event: dict[str, Any]) -> dict[str, Any]:

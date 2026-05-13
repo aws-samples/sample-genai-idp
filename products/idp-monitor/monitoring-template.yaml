@@ -68,7 +68,7 @@ Conditions:
 Globals:
   Function:
     Runtime: python3.12
-    Timeout: 60
+    Timeout: 120
     MemorySize: 512
     Environment:
       Variables:
@@ -107,6 +107,7 @@ Resources:
         # IDPMonitor — AppSync GraphQL Schema
         schema {
           query: Query
+          mutation: Mutation
         }
 
         type Query {
@@ -114,11 +115,19 @@ Resources:
           getMonitoringStatus: MonitoringStatusResponse
         }
 
+        type Mutation {
+          queryAnalyticsAgent(input: AnalyticsAgentInput!): AnalyticsAgentResponse
+        }
+
         input MonitoringQueryInput {
           timeRange: String
           startTime: AWSDateTime
           endTime: AWSDateTime
           sections: [String!]
+        }
+
+        input AnalyticsAgentInput {
+          query: String!
         }
 
         type MonitoringDashboardResponse {
@@ -142,6 +151,12 @@ Resources:
           subscriptionStatus: String!
           stackName: String
           acceleratorStackName: String
+        }
+
+        type AnalyticsAgentResponse {
+          success: Boolean!
+          result: String
+          error: String
         }
 
         type SectionError {
@@ -249,6 +264,26 @@ Resources:
           "payload": {
             "info": { "fieldName": "getMonitoringStatus" },
             "arguments": {}
+          }
+        }
+      ResponseMappingTemplate: |
+        $util.toJson($context.result)
+
+  QueryAnalyticsAgentResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: MonitoringGraphQLSchema
+    Properties:
+      ApiId: !GetAtt MonitoringGraphQLApi.ApiId
+      TypeName: Mutation
+      FieldName: queryAnalyticsAgent
+      DataSourceName: !GetAtt MonitoringLambdaDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version": "2018-05-29",
+          "operation": "Invoke",
+          "payload": {
+            "info": { "fieldName": "queryAnalyticsAgent" },
+            "arguments": $util.toJson($context.args)
           }
         }
       ResponseMappingTemplate: |
@@ -373,6 +408,13 @@ Resources:
               - kms:Decrypt
               - kms:DescribeKey
             Resource: !Sub "arn:aws:kms:${AWS::Region}:${AWS::AccountId}:key/*"
+
+          # Bedrock — invoke models for AI Insights (SummaryWidget)
+          - Effect: Allow
+            Action:
+              - bedrock:InvokeModel
+              - bedrock:InvokeModelWithResponseStream
+            Resource: "*"
 
           # AWS Marketplace — entitlement check
           - Effect: Allow
