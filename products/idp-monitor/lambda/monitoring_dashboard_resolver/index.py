@@ -248,7 +248,7 @@ def _invoke_bedrock_converse(query: str, _time: Any) -> dict[str, Any]:
         client = boto3.client("bedrock-runtime")
         model_id = os.environ.get(
             "BEDROCK_MODEL_ID",
-            "us.anthropic.claude-3-7-sonnet-20250219-v1:0",
+            "us.anthropic.claude-sonnet-4-6",
         )
 
         system_prompt = (

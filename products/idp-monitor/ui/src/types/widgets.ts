@@ -34,7 +34,7 @@ export const WIDGET_DEFINITIONS: WidgetDefinition[] = [
   },
   {
     id: 'kpiCards',
-    label: 'Key Metrics',
+    label: 'Status',
     description: 'Total documents, pages, tokens, estimated cost, and success rate',
     defaultVisible: true,
   },

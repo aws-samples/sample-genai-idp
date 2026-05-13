@@ -129,9 +129,10 @@ function buildSummaryPrompt(dashboard: MonitoringDashboardData, timeRange?: stri
   }
 
   return (
-    `Provide a brief 3-6 sentence summary in plain English of the following IDP (Intelligent Document Processing) ` +
-    `monitoring metrics for the last ${range}. Focus on key highlights, any issues or anomalies, and overall system health. ` +
-    `Do not use markdown formatting, bullet points, or headers — just plain paragraph text.\n\n` +
+    `In 1-2 short sentences, give the most important takeaway about this IDP system's health ` +
+    `over the last ${range}. Only mention issues, risks, or anomalies that need attention. ` +
+    `If everything looks good, just say so briefly. Do NOT repeat numbers or stats — ` +
+    `the user already sees those. No markdown, no bullet points, just plain text.\n\n` +
     `Metrics:\n${metricsContext.join('\n')}`
   );
 }
@@ -365,7 +366,7 @@ export function SummaryWidget({
   return (
     <Container
       header={
-        <Header variant="h2" description="AI-powered insights and interactive analytics">
+        <Header variant="h2">
           AI Insights
         </Header>
       }
