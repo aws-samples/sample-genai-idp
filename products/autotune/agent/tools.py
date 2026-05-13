@@ -98,46 +98,46 @@ def _get_deployer():
 # --- Stack Operations ---
 
 
-@tool
-def deploy_stack(stack_name: str, admin_email: str) -> str:
-    """Deploy a new IDP Accelerator stack.
+# @tool
+# def deploy_stack(stack_name: str, admin_email: str) -> str:
+#     """Deploy a new IDP Accelerator stack.
 
-    Args:
-        stack_name: CloudFormation stack name (max 25 chars).
-        admin_email: Admin email for the stack.
+#     Args:
+#         stack_name: CloudFormation stack name (max 25 chars).
+#         admin_email: Admin email for the stack.
 
-    Returns:
-        JSON with stack_name, status, stdout, stderr.
-    """
-    deployer = _get_deployer()
-    result = deployer.deploy_stack(stack_name, admin_email)
-    return json.dumps(result, indent=2)
+#     Returns:
+#         JSON with stack_name, status, stdout, stderr.
+#     """
+#     deployer = _get_deployer()
+#     result = deployer.deploy_stack(stack_name, admin_email)
+#     return json.dumps(result, indent=2)
 
 
-@tool
-def upload_test_set(
-    test_set_name: str,
-    documents_dir: str,
-    baselines_dir: str,
-    file_pattern: str = "*.pdf",
-) -> str:
-    """Upload a test set (documents + ground truth baselines) to the IDP stack.
+# @tool
+# def upload_test_set(
+#     test_set_name: str,
+#     documents_dir: str,
+#     baselines_dir: str,
+#     file_pattern: str = "*.pdf",
+# ) -> str:
+#     """Upload a test set (documents + ground truth baselines) to the IDP stack.
 
-    Args:
-        test_set_name: Name for the test set.
-        documents_dir: Local directory containing test documents.
-        baselines_dir: Local directory containing baseline ground truth files.
-        file_pattern: Glob pattern for document files (default: *.pdf).
+#     Args:
+#         test_set_name: Name for the test set.
+#         documents_dir: Local directory containing test documents.
+#         baselines_dir: Local directory containing baseline ground truth files.
+#         file_pattern: Glob pattern for document files (default: *.pdf).
 
-    Returns:
-        JSON with test_set_name, test_set_id, status, file_count.
-    """
-    client = _get_client()
-    deployer = _get_deployer()
-    result = deployer.upload_test_set(
-        client.stack_name, test_set_name, documents_dir, baselines_dir, file_pattern
-    )
-    return json.dumps(result, indent=2)
+#     Returns:
+#         JSON with test_set_name, test_set_id, status, file_count.
+#     """
+#     client = _get_client()
+#     deployer = _get_deployer()
+#     result = deployer.upload_test_set(
+#         client.stack_name, test_set_name, documents_dir, baselines_dir, file_pattern
+#     )
+#     return json.dumps(result, indent=2)
 
 
 # --- Config Operations ---
@@ -443,6 +443,8 @@ def get_evaluation_summary(batch_id: str, save_json: bool = False) -> str:
                 f"This config CANNOT be recommended as the final solution.\n"
             )
 
+    summary += "\n\nReminder: don't forget that you have _skills_ available to help you. Leverage them whenever possible!"
+
     return summary
 
 
@@ -584,6 +586,7 @@ def download_raw_processing_results(
     result = client.download_results(batch_id, output_dir, file_types)
     result["output_dir"] = output_dir
     result["files"] = _list_dir_files(output_dir)
+    result["reminder"] = "Don't forget that you have _skills_ available to help you. Leverage them whenever possible!"
     return json.dumps(result, indent=2)
 
 

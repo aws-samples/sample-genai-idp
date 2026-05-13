@@ -210,6 +210,15 @@ The tool lazy-initializes an `OptimizationState` instance from the `AUTOTUNE_SES
 
 **Why a tool instead of a Python helper called from the prompt:** Making it a tool means the agent decides when to call it based on its system prompt instructions. The model sees the tool's docstring and knows what fields to update. This is more natural than trying to get the agent to call a specific Python function.
 
+## Skill Usage Nudges
+
+The agent has 28 domain-knowledge skills (prompt engineering, model selection, debugging, etc.) but tends to under-use them. To encourage skill activation without adding to the system prompt length, key tools append a reminder to their output:
+
+- `get_evaluation_summary` — appends "don't forget that you have _skills_ available" to the text summary
+- `download_raw_processing_results` — includes a `reminder` field in the JSON response
+
+This places the nudge at the moment the agent is most likely to benefit from skills (after receiving evaluation results and needing to decide what to change next).
+
 ## Configuration
 
 Runtime configuration lives in `config.yaml` under the `autotune` section:
