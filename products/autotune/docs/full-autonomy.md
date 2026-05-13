@@ -10,12 +10,13 @@ The agent runs on AWS Bedrock AgentCore with persistent filesystem storage. It i
 
 ## Input Contract
 
-The agent receives two inputs via the AgentCore invocation payload:
+The agent receives these inputs via the AgentCore invocation payload:
 
+- **`idp_stack_name`** (required): Name of the IDP Accelerator CloudFormation stack to optimize. Set as `os.environ["IDP_STACK_NAME"]` at the start of each session — all tools read from this env var. This decouples the FAST stack from any specific IDP stack, allowing one FAST deployment to run concurrent sessions against different IDP stacks.
 - **`test_set_id`** (required): ID of a dataset already uploaded and registered in the IDP Accelerator test studio. The agent does not receive raw documents — it uses IDP CLI tools to interact with the stack.
 - **`optimization_guidance`** (optional, default blank): Free-text instructions like "focus on extraction accuracy for address fields" or "cost doesn't matter, maximize accuracy."
 
-These arrive as fields in the JSON payload alongside the standard `prompt` and `runtimeSessionId` fields. If `test_set_id` is missing, the entrypoint returns an error — there is no interactive fallback.
+These arrive as fields in the JSON payload alongside the standard `prompt` and `runtimeSessionId` fields. If `idp_stack_name` or `test_set_id` is missing, the entrypoint returns an error — there is no fallback.
 
 ## Startup Sequence
 
@@ -215,15 +216,17 @@ Runtime configuration lives in `config.yaml` under the `autotune` section:
 
 ```yaml
 autotune:
-  # Name of the IDP Accelerator CloudFormation stack to optimize.
-  # Must be deployed in the same region as this AutoTune stack.
-  idp_stack_name: "IDP"
+  # Glob pattern for IAM policy scoping. Grants the agent access to IDP stack
+  # resources (S3, DynamoDB, Lambda, SQS) matching this pattern.
+  # The actual IDP stack name is provided at invocation time, not deploy time.
+  # NOTE: Cannot be just "*" — YAML interprets a bare * as an alias. Use a prefix like "my-prefix-*".
+  idp_stack_name_pattern: kaleko-*
 
   # Bedrock model ID for the optimization agent.
-  model_id: "us.anthropic.claude-opus-4-6-v1"
+  model_id: us.anthropic.claude-opus-4-6-v1
 ```
 
-These are wired to env vars `IDP_STACK_NAME`, `AUTOTUNE_MODEL_ID`, and `AUTOTUNE_STREAM_BUCKET` in the AgentCore runtime container. Both `idp_stack_name` and `model_id` are required — CDK synth will fail if either is missing.
+`idp_stack_name_pattern` is used solely for IAM scoping — it determines which AWS resources the agent role can access. The actual IDP stack name is provided per-session via the `idp_stack_name` invocation parameter. `model_id` is wired to env var `AUTOTUNE_MODEL_ID` in the AgentCore runtime container. Both fields are required — CDK synth will fail if either is missing.
 
 **Same-region requirement:** The IDP stack must be in the same AWS region as the AutoTune FAST stack. This is a documented requirement, not enforced programmatically. The agent uses IDP CLI tools that read CloudFormation outputs and S3 buckets, which are region-scoped.
 
@@ -347,5 +350,5 @@ The agent uses belt-and-suspenders to prevent AgentCore from killing the session
 | State API Lambda | `fast-template/infra-cdk/lambdas/feedback/index.py` | Cancel, get-state, get-stream, get-log endpoints |
 | Frontend | `fast-template/frontend/src/components/chat/ChatInterface.tsx` | Polling-based UI with stream/log tabs, cancel button |
 | Deploy script | `fast-template/scripts/deploy-frontend.py` | Generates aws-exports.json with `optimizationStateApiUrl` |
-| Config | `fast-template/infra-cdk/config.yaml` | `autotune` section with `idp_stack_name`, `model_id` |
+| Config | `fast-template/infra-cdk/config.yaml` | `autotune` section with `idp_stack_name_pattern` (IAM scoping), `model_id` |
 | Dockerfile | `agent/Dockerfile` | Container build, copies state.py/hooks.py as optimization_state.py/optimization_hooks.py |

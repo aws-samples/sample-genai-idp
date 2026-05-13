@@ -53,11 +53,11 @@ The agent can write to S3 (upload configs and documents), SQS (submit documents 
 - If the agent tries to create an IAM role or policy, the API call returns `AccessDenied`.
 - If a prompt injection in a document tells the agent to "delete all S3 objects", the agent may attempt it, but IAM blocks every delete call.
 
-**TODO: Resource scoping.** ~~The Allow policies currently use `resources: ["*"]`.~~ **DONE.** IDP stack resources are scoped using the stack name from `config.yaml`:
-- S3: `arn:aws:s3:::{stack-name-lowercase}-*`
-- DynamoDB: `arn:aws:dynamodb:{region}:{account}:table/{stack-name}-*`
-- Lambda invoke: `arn:aws:lambda:{region}:{account}:function:*{stack-name}*`
-- SQS: `arn:aws:sqs:{region}:{account}:{stack-name}-*`
+**TODO: Resource scoping.** ~~The Allow policies currently use `resources: ["*"]`.~~ **DONE.** IDP stack resources are scoped using `idp_stack_name_pattern` from `config.yaml` (e.g. `kaleko-*`). This pattern is used solely for IAM policy scoping — the actual IDP stack name is provided at invocation time as a required parameter (`idp_stack_name` in the payload):
+- S3: `arn:aws:s3:::{pattern}`
+- DynamoDB: `arn:aws:dynamodb:{region}:{account}:table/{pattern}`
+- Lambda invoke: `arn:aws:lambda:{region}:{account}:function:*{pattern}`
+- SQS: `arn:aws:sqs:{region}:{account}:{pattern}`
 - Bedrock: scoped to foundation models and inference profiles in the account
 - KMS: scoped to keys in the account/region
 
@@ -164,7 +164,7 @@ The agent has `shell` access, but all AWS API calls are IAM-bounded. For Python 
 IAM Deny always takes precedence over Allow. The `DenyDestructiveActions` policy cannot be overridden by any Allow statement on the same role. The only way to bypass it is to remove the Deny policy itself, which requires a CDK code change and deployment.
 
 **Q: Can the agent write to DynamoDB tables it shouldn't?**
-The agent has `dynamodb:PutItem` and `UpdateItem` scoped to `table/{idp-stack-name}-*`. It cannot write to tables outside the IDP stack. It cannot `DeleteTable` or `DeleteItem` on any table (explicit Deny covers DeleteTable; DynamoDB write policy only includes PutItem/UpdateItem).
+The agent has `dynamodb:PutItem` and `UpdateItem` scoped to `table/{idp_stack_name_pattern}` (from config.yaml, e.g. `kaleko-*`). It cannot write to tables outside that pattern. It cannot `DeleteTable` or `DeleteItem` on any table (explicit Deny covers DeleteTable; DynamoDB write policy only includes PutItem/UpdateItem).
 
 ## IAM Policy Reference
 
@@ -177,13 +177,13 @@ All policies are defined in `products/autotune/fast-template/infra-cdk/lib/backe
 | `OAuth2CredentialProviderAccess` | Allow | OAuth2 resources | AgentCore authentication |
 | `SecretsManagerOAuth2Access` | Allow | Specific secrets | OAuth2 token retrieval |
 | `IDPStackReadAccess` | Allow | `*` (APIs that don't support resource scoping) | CloudFormation, STS, Logs, Step Functions |
-| `IDPStackS3Read` | Allow | `{idp-stack-lowercase}-*` | Read IDP S3 buckets |
-| `IDPStackS3Write` | Allow | `{idp-stack-lowercase}-*/*` | Upload configs, test sets |
-| `IDPStackDynamoDBRead` | Allow | `table/{idp-stack}-*` | Read IDP DynamoDB tables |
-| `IDPStackDynamoDBWrite` | Allow | `table/{idp-stack}-*` | Write config versions |
-| `IDPStackLambdaInvoke` | Allow | `function:*{idp-stack}*` | Invoke IDP processing functions |
+| `IDPStackS3Read` | Allow | `{idp_stack_name_pattern}` | Read IDP S3 buckets |
+| `IDPStackS3Write` | Allow | `{idp_stack_name_pattern}/*` | Upload configs, test sets |
+| `IDPStackDynamoDBRead` | Allow | `table/{idp_stack_name_pattern}` | Read IDP DynamoDB tables |
+| `IDPStackDynamoDBWrite` | Allow | `table/{idp_stack_name_pattern}` | Write config versions |
+| `IDPStackLambdaInvoke` | Allow | `function:*{idp_stack_name_pattern}` | Invoke IDP processing functions |
 | `LambdaList` | Allow | `*` | List functions (API requires `*`) |
-| `IDPStackSQS` | Allow | `{idp-stack}-*` | Submit documents for processing |
+| `IDPStackSQS` | Allow | `{idp_stack_name_pattern}` | Submit documents for processing |
 | `BedrockModelAccess` | Allow | Foundation models + inference profiles | Model invocation |
 | `KMSAccess` | Allow | Keys in account/region | Decrypt IDP encrypted resources |
 | `DenyDestructiveActions` | **Deny** | `*` | Block all destructive operations |

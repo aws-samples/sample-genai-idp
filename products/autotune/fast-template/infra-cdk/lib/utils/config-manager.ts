@@ -27,8 +27,8 @@ export interface VpcConfig {
 }
 
 export interface AutotuneConfig {
-  /** The IDP Accelerator stack that this agent optimizes configs for. Must be in the same region. */
-  idp_stack_name: string
+  /** Glob pattern for IDP stack names. Used only for IAM policy scoping to grant the agent access to IDP stack resources. */
+  idp_stack_name_pattern: string
   /** Bedrock model ID for the optimization agent. */
   model_id: string
 }
@@ -138,7 +138,7 @@ export class ConfigManager {
         },
         autotune: parsedConfig.autotune
           ? {
-              idp_stack_name: parsedConfig.autotune.idp_stack_name,
+              idp_stack_name_pattern: parsedConfig.autotune.idp_stack_name_pattern,
               model_id: parsedConfig.autotune.model_id,
             }
           : undefined,

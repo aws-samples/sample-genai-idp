@@ -72,7 +72,7 @@ def get_access_token(cognito_client_id: str) -> str:
 
 
 def invoke_agent(session_id: str, access_token: str, max_cost_per_page: float,
-                 runtime_arn: str, test_set_id: str) -> None:
+                 runtime_arn: str, test_set_id: str, idp_stack_name: str) -> None:
     """Fire-and-forget invocation of the agent."""
     endpoint = f"https://bedrock-agentcore.{REGION}.amazonaws.com"
     escaped_arn = requests.utils.quote(runtime_arn, safe="")
@@ -82,6 +82,7 @@ def invoke_agent(session_id: str, access_token: str, max_cost_per_page: float,
         "prompt": "Begin optimization",
         "runtimeSessionId": session_id,
         "test_set_id": test_set_id,
+        "idp_stack_name": idp_stack_name,
         "optimization_guidance": OPTIMIZATION_GUIDANCE,
         "max_cost_per_page_usd": str(max_cost_per_page),
         "max_total_cost_usd": MAX_TOTAL_COST_USD,
@@ -185,7 +186,7 @@ def main():
         access_token = get_access_token(cfg["cognito_client_id"])
 
         try:
-            invoke_agent(session_id, access_token, tier, cfg["runtime_arn"], args.test_set_id)
+            invoke_agent(session_id, access_token, tier, cfg["runtime_arn"], args.test_set_id, args.idp_stack_name)
         except Exception as e:
             print(f"  ERROR invoking agent: {e}")
             results.append({"cost_per_page": tier, "session_id": session_id, "status": "invoke_failed", "error": str(e)})

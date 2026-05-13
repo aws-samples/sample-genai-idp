@@ -415,6 +415,13 @@ async def invocations(payload, context: RequestContext):
     max_cost_per_page_usd = payload.get("max_cost_per_page_usd", "").strip()
     max_total_cost_usd = payload.get("max_total_cost_usd", "").strip()
 
+    # IDP stack name is required — set as env var for all tools to read
+    idp_stack_name = payload.get("idp_stack_name", "").strip()
+    if not idp_stack_name:
+        yield {"status": "error", "error": "Missing required field: idp_stack_name"}
+        return
+    os.environ["IDP_STACK_NAME"] = idp_stack_name
+
     if not test_set_id:
         yield {"status": "error", "error": "Missing required field: test_set_id"}
         return
@@ -439,7 +446,8 @@ async def invocations(payload, context: RequestContext):
     else:
         state.initialize(test_set_id, optimization_guidance, MAX_ITERATIONS,
                          max_cost_per_page_usd=float(max_cost_per_page_usd),
-                         max_total_cost_usd=max_cost_usd)
+                         max_total_cost_usd=max_cost_usd,
+                         idp_stack_name=idp_stack_name)
 
     user_id = extract_user_id_from_context(context)
 
