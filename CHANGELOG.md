@@ -5,6 +5,23 @@ SPDX-License-Identifier: MIT-0
 
 ## [Unreleased]
 
+### Added
+
+- **Chat-with-Document enhancements** — the Web UI "Chat with Document" feature has been substantially upgraded:
+  - **Async streaming** — responses now stream token-by-token into the chat bubble so large documents and long-context models no longer hit AppSync's 30-second synchronous timeout.
+  - **Markdown rendering in assistant replies** — headings, bullet/numbered lists, fenced code blocks, inline code, tables, block quotes, and links render as formatted HTML instead of raw markdown characters. Renders during streaming and at final.
+  - **Dedicated `chat` configuration section** — independent from `summarization`, with its own `model`, `system_prompt`, `temperature`, `top_k`, `top_p`, and `max_tokens`. Backward compatible: configs without a `chat` section fall back to `summarization.*`.
+  - **UI model selector on the Chat panel** — per-session model override, populated from the config's model enum; default comes from the document's own config version.
+  - **Default chat model is `us.anthropic.claude-opus-4-7:1m`** — 1M-context by default so typical multi-hundred-page packets fit without hitting input-token limits. EU and GovCloud presets use their region-appropriate inference profiles.
+  - **First-class support for Bedrock model-ID suffixes** — `:1m` (1M-context beta), `:priority` and `:flex` (service tiers) all work end-to-end when selected in the Chat panel dropdown.
+
+### Changed
+
+
+### Fixed
+
+- **LLM array wrapping in extraction and assessment services** — LLMs occasionally return single-element arrays `[{...}]` instead of objects `{...}` when generating JSON responses, causing Pydantic validation errors (`Input should be a valid dictionary [type=dict_type, input_value=[{...}], input_type=list]`). All affected services now automatically detect and unwrap single-element arrays with a warning log, while multi-element arrays are rejected with a clear error message. Applied to standard extraction, agentic extraction, assessment service, and granular assessment service.
+
 ## [0.5.10]
 
 ### Added

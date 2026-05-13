@@ -2205,6 +2205,7 @@ Resources:
         
         # Background worker ARNs
         AgentChatProcessorFunctionArn: !GetAtt AgentChatProcessorFunction.Arn
+        ChatWithDocumentProcessorFunctionArn: !GetAtt ChatWithDocumentProcessorFunction.Arn
         AgentProcessorFunctionArn: !GetAtt AgentProcessorFunction.Arn
         TestExecutionAggregationFunctionArn: !GetAtt PATTERNSTACK.Outputs.TestExecutionAggregationFunctionArn
         
@@ -6169,6 +6170,111 @@ Resources:
       Description: "Credentials for External MCP Agents - JSON array with required fields: mcp_url, cognito_user_pool_id, cognito_client_id, cognito_username, cognito_password. Optional fields: agent_name, agent_description"
       SecretString: "[]"
       KmsKeyId: !Ref CustomerManagedEncryptionKey
+
+  # ChatWithDocumentProcessor — long-running Lambda invoked async by the
+  # send_chat_document_message_resolver. Does the heavy lifting (load doc,
+  # call Bedrock, publish streaming status via AppSync) outside AppSync's
+  # 30-second synchronous budget. Mirrors AgentChatProcessorFunction.
+  ChatWithDocumentProcessorLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      KmsKeyId: !GetAtt CustomerManagedEncryptionKey.Arn
+      RetentionInDays: !Ref LogRetentionDays
+
+  ChatWithDocumentProcessorFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: "Function does not require VPC access as it only interacts with AWS services via APIs"
+          - id: W92
+            reason: "Function does not require reserved concurrency as it scales based on demand"
+          - id: W11
+            reason: "Role requires * for Bedrock marketplace and CloudWatch Metrics"
+    # checkov:skip=CKV_AWS_116: "DLQ not required — invoked async by resolver; failure events logged + published to UI as assistant_error via subscription"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
+    # checkov:skip=CKV_AWS_173: "Environment variables contain only non-sensitive configuration"
+    Properties:
+      PermissionsBoundary:
+        !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
+      CodeUri: src/lambda/chat_with_document_processor/
+      Handler: index.handler
+      Runtime: python3.12
+      MemorySize: 4096
+      Timeout: 900
+      Layers:
+        - !Ref IDPCommonBaseLayer
+      Environment:
+        Variables:
+          LOG_LEVEL: !Ref LogLevel
+          OUTPUT_BUCKET: !Ref OutputBucket
+          CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
+          TRACKING_TABLE_NAME: !Ref TrackingTable
+          USERS_TABLE_NAME: !Ref UsersTable
+          APPSYNC_API_URL: !GetAtt GraphQLApi.GraphQLUrl
+          GUARDRAIL_ID_AND_VERSION:
+            !If [HasGuardrailConfig, !Sub "${BedrockGuardrailId}:${BedrockGuardrailVersion}", ""]
+      LoggingConfig:
+        LogGroup: !Ref ChatWithDocumentProcessorLogGroup
+      Policies:
+        - S3ReadPolicy:
+            BucketName: !Ref OutputBucket
+        - S3WritePolicy:
+            BucketName: !Ref OutputBucket
+        - DynamoDBReadPolicy:
+            TableName: !Ref ConfigurationTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref TrackingTable
+        - Statement:
+            - Effect: Allow
+              Action:
+                - appsync:GraphQL
+              Resource: !Sub "arn:${AWS::Partition}:appsync:${AWS::Region}:${AWS::AccountId}:apis/${GraphQLApi.ApiId}/types/Mutation/*"
+            - Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+                - bedrock:InvokeModelWithResponseStream
+                - bedrock:GetInferenceProfile
+              Resource:
+                - !Sub "arn:${AWS::Partition}:bedrock:*::foundation-model/*"
+                - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
+                - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:application-inference-profile/*"
+            - Effect: Allow
+              Action:
+                - aws-marketplace:Subscribe
+                - aws-marketplace:Unsubscribe
+                - aws-marketplace:ViewSubscriptions
+              Resource: "*"
+            - Effect: Allow
+              Action:
+                - cloudwatch:PutMetricData
+              Resource: "*"
+            - Effect: Allow
+              Action:
+                - kms:Encrypt
+                - kms:Decrypt
+                - kms:ReEncrypt*
+                - kms:GenerateDataKey*
+                - kms:DescribeKey
+              Resource: !GetAtt CustomerManagedEncryptionKey.Arn
+            - !If
+              - HasGuardrailConfig
+              - Effect: Allow
+                Action: bedrock:ApplyGuardrail
+                Resource: !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:guardrail/${BedrockGuardrailId}"
+              - !Ref AWS::NoValue
+            # RBAC scope enforcement — processor queries UsersTable.SubIndex
+            # to fetch the caller's `allowedConfigVersions` and rejects
+            # chats against documents outside that scope.
+            - Effect: Allow
+              Action:
+                - dynamodb:Query
+                - dynamodb:GetItem
+              Resource:
+                - !GetAtt UsersTable.Arn
+                - !Sub "${UsersTable.Arn}/index/*"
 
   # Lambda function for agent chat resolver
   AgentChatProcessorFunction:

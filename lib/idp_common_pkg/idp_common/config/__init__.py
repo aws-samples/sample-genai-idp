@@ -17,6 +17,7 @@ from .models import (
     AssessmentConfig,
     SchemaConfig,
     SummarizationConfig,
+    ChatConfig,
     OCRConfig,
     AgenticConfig,
     ImageConfig,

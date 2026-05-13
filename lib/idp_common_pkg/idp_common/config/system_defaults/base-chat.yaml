@@ -1,0 +1,25 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: MIT-0
+
+# =============================================================================
+# BASE CHAT - Chat-with-Document defaults
+# =============================================================================
+# Controls the interactive "Chat with Document" feature on the Document Detail
+# screen. This is intentionally separate from summarization — chat usually
+# benefits from a large-context model because the entire document text is sent
+# in a single prompt.
+# =============================================================================
+
+chat:
+  enabled: true
+  # Large-context model recommended (entire document sent in a single prompt).
+  # Users can override via the UI model selector on the Chat panel.
+  model: us.anthropic.claude-opus-4-7:1m
+  temperature: "0.0"
+  top_p: "0.1"
+  top_k: "5"
+  max_tokens: "4096"
+  system_prompt: >-
+    You are an assistant that answers questions about the attached document text.
+    If you don't know the answer, say so. Do not invent information.
+    Use the prior chat history provided as context. Respond in plain text, not JSON.

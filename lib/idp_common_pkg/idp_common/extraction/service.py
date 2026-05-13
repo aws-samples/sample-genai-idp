@@ -1659,6 +1659,36 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
 
             try:
                 extracted_fields = json.loads(extract_json_from_text(extracted_text))
+
+                # Handle case where LLM returns a single-element array instead of dict
+                # This happens when models mistakenly wrap the extraction in an array
+                if isinstance(extracted_fields, list):
+                    if len(extracted_fields) == 1:
+                        logger.warning(
+                            "LLM returned single-element array instead of object, unwrapping",
+                            extra={"original_type": "list", "element_count": 1},
+                        )
+                        extracted_fields = extracted_fields[0]
+                    elif len(extracted_fields) == 0:
+                        logger.error(
+                            "LLM returned empty array when single object expected",
+                            extra={"element_count": 0},
+                        )
+                        extracted_fields = {
+                            "error": "Received empty array instead of single object",
+                        }
+                        parsing_succeeded = False
+                    else:  # len > 1
+                        logger.error(
+                            "LLM returned multi-element array when single object expected",
+                            extra={"element_count": len(extracted_fields)},
+                        )
+                        extracted_fields = {
+                            "error": f"Received array with {len(extracted_fields)} elements instead of single object",
+                            "raw_array": extracted_fields,
+                        }
+                        parsing_succeeded = False
+
             except Exception as e:
                 logger.warning(
                     f"Error parsing LLM output - attempting JSON repair: {e}"
@@ -1671,13 +1701,42 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
                 if repaired_data:
                     # Repair succeeded
                     extracted_fields = repaired_data
+
+                    # Handle case where repaired data is also a single-element array
+                    if isinstance(extracted_fields, list):
+                        if len(extracted_fields) == 1:
+                            logger.warning(
+                                "Repaired JSON is single-element array, unwrapping",
+                                extra={"original_type": "list", "element_count": 1},
+                            )
+                            extracted_fields = extracted_fields[0]
+                        elif len(extracted_fields) == 0:
+                            logger.error(
+                                "Repaired JSON is empty array when single object expected",
+                                extra={"element_count": 0},
+                            )
+                            extracted_fields = {
+                                "error": "Repaired empty array instead of single object",
+                            }
+                            parsing_succeeded = False
+                        else:  # len > 1
+                            logger.error(
+                                "Repaired JSON is multi-element array when single object expected",
+                                extra={"element_count": len(extracted_fields)},
+                            )
+                            extracted_fields = {
+                                "error": f"Repaired array with {len(extracted_fields)} elements instead of single object",
+                                "raw_array": extracted_fields,
+                            }
+                            parsing_succeeded = False
+
                     output_repaired = True
                     repair_method = repair_info.get("repair_method")
-                    parsing_succeeded = True
-                    logger.info(
-                        f"JSON repair successful using '{repair_method}': "
-                        f"recovered {repair_info.get('fields_recovered', 0)} fields"
-                    )
+                    if parsing_succeeded:
+                        logger.info(
+                            f"JSON repair successful using '{repair_method}': "
+                            f"recovered {repair_info.get('fields_recovered', 0)} fields"
+                        )
                 else:
                     # Repair failed - store raw output
                     logger.error(

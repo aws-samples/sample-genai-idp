@@ -12,6 +12,10 @@ assessment:
 summarization:
   enabled: false
 
+chat:
+  # docsplit is a section-splitting pipeline, not doc Q&A — disable chat.
+  enabled: false
+
 classes:
   - $schema: https://json-schema.org/draft/2020-12/schema
     $id: letter

@@ -875,6 +875,45 @@ class GranularAssessmentService:
             error_messages = []
             try:
                 assessment_data = json.loads(extract_json_from_text(assessment_text))
+
+                # Handle case where LLM returns a single-element array instead of dict
+                # This happens when models mistakenly wrap the assessment in an array
+                if isinstance(assessment_data, list):
+                    if len(assessment_data) == 1:
+                        logger.warning(
+                            "LLM returned single-element array instead of object, unwrapping",
+                            extra={
+                                "original_type": "list",
+                                "element_count": 1,
+                                "task_id": task.task_id,
+                            },
+                        )
+                        assessment_data = assessment_data[0]
+                    elif len(assessment_data) == 0:
+                        logger.error(
+                            "LLM returned empty array when single object expected",
+                            extra={
+                                "element_count": 0,
+                                "task_id": task.task_id,
+                            },
+                        )
+                        # Fall through to error handling below
+                        raise ValueError(
+                            "Received empty array instead of single object"
+                        )
+                    else:  # len > 1
+                        logger.error(
+                            "LLM returned multi-element array when single object expected",
+                            extra={
+                                "element_count": len(assessment_data),
+                                "task_id": task.task_id,
+                            },
+                        )
+                        # Fall through to error handling below
+                        raise ValueError(
+                            f"Received array with {len(assessment_data)} elements instead of single object"
+                        )
+
             except Exception as e:
                 logger.error(
                     f"Error parsing assessment LLM output for task {task.task_id}: {e}"

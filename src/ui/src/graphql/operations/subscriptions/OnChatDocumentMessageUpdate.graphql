@@ -1,0 +1,12 @@
+subscription OnChatDocumentMessageUpdate($sessionId: String!) {
+  onChatDocumentMessageUpdate(sessionId: $sessionId) {
+    sessionId
+    role
+    content
+    timestamp
+    method
+    status
+    modelId
+    isProcessing
+  }
+}

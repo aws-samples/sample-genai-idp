@@ -7,6 +7,9 @@ assessment:
   enabled: false
 summarization:
   enabled: false
+
+chat:
+  enabled: false
 rule_validation:
   enabled: false
 classes:
