@@ -180,7 +180,14 @@ export function useMonitoringDashboard(
         },
       });
 
-      const gql = raw.getMonitoringDashboard;
+      const gql = raw?.getMonitoringDashboard;
+      if (!gql) {
+        throw new Error(
+          'AppSync returned null for getMonitoringDashboard. ' +
+          'The deployed API schema may not match the expected schema. ' +
+          'Please redeploy the IDPMonitor stack.'
+        );
+      }
       const result: MonitoringDashboardData = {
         subscriptionStatus: gql.subscriptionStatus as MonitoringDashboardData['subscriptionStatus'],
         subscriptionTier: gql.subscriptionTier as MonitoringDashboardData['subscriptionTier'],

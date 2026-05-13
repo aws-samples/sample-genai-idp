@@ -9,6 +9,7 @@
  * section data to each widget.
  *
  * Layout:
+ *   Row 0: SummaryWidget (AI Insights)  (full width)
  *   Row 1: KPICardsWidget               (full width)
  *   Row 2: VolumeChartWidget            (full width)
  *   Row 3: DocTypeChartWidget (1/2)   | ConfigPanelWidget (1/2)
@@ -27,6 +28,7 @@ import { DocTypeChartWidget } from './widgets/DocTypeChartWidget';
 import { FailuresTableWidget } from './widgets/FailuresTableWidget';
 import { KPICardsWidget } from './widgets/KPICardsWidget';
 import { LatencyChartWidget } from './widgets/LatencyChartWidget';
+import { SummaryWidget } from './widgets/SummaryWidget';
 import { ThrottleWidget } from './widgets/ThrottleWidget';
 import { VolumeChartWidget } from './widgets/VolumeChartWidget';
 
@@ -35,6 +37,8 @@ interface MonitoringLayoutProps {
   isLoading: boolean;
   timeRange?: string;
   widgetVisibility: WidgetVisibilityMap;
+  apiUrl?: string;
+  apiKey?: string;
   onInvestigate?: (documentId: string) => void;
   onReprocess?: (documentId: string) => void;
 }
@@ -44,6 +48,8 @@ export function MonitoringLayout({
   isLoading,
   timeRange,
   widgetVisibility,
+  apiUrl,
+  apiKey,
   onInvestigate,
   onReprocess,
 }: MonitoringLayoutProps): JSX.Element {
@@ -62,6 +68,17 @@ export function MonitoringLayout({
 
   return (
     <SpaceBetween size="l">
+      {/* Row 0 — AI Insights (full width, above all other widgets) */}
+      {widgetVisibility.summary && (
+        <SummaryWidget
+          dashboard={dashboard}
+          isLoading={isLoading}
+          timeRange={timeRange}
+          apiUrl={apiUrl}
+          apiKey={apiKey}
+        />
+      )}
+
       {/* Row 1 — KPI Summary bar (full width) */}
       {widgetVisibility.kpiCards && (
         <KPICardsWidget volume={dashboard.volume} cost={dashboard.cost} isLoading={isLoading} />

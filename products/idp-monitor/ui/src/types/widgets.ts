@@ -7,6 +7,7 @@
  */
 
 export type WidgetId =
+  | 'summary'
   | 'kpiCards'
   | 'volumeChart'
   | 'configPanel'
@@ -25,6 +26,12 @@ export interface WidgetDefinition {
 }
 
 export const WIDGET_DEFINITIONS: WidgetDefinition[] = [
+  {
+    id: 'summary',
+    label: 'AI Insights',
+    description: 'AI-generated summary of dashboard metrics and interactive chat for analytics queries',
+    defaultVisible: true,
+  },
   {
     id: 'kpiCards',
     label: 'Key Metrics',

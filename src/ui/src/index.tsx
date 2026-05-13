@@ -48,6 +48,8 @@ import CloudscapeButtonDropdown from '@cloudscape-design/components/button-dropd
 import CloudscapeCheckbox from '@cloudscape-design/components/checkbox';
 import CloudscapeProgressBar from '@cloudscape-design/components/progress-bar';
 import CloudscapePieChart from '@cloudscape-design/components/pie-chart';
+import CloudscapeTabs from '@cloudscape-design/components/tabs';
+import CloudscapeTextarea from '@cloudscape-design/components/textarea';
 import * as CloudscapeCollectionHooks from '@cloudscape-design/collection-hooks';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -81,6 +83,8 @@ import * as CloudscapeCollectionHooks from '@cloudscape-design/collection-hooks'
   CloudscapeCheckbox,
   CloudscapeProgressBar,
   CloudscapePieChart,
+  CloudscapeTabs,
+  CloudscapeTextarea,
   CloudscapeCollectionHooks,
 };
 
