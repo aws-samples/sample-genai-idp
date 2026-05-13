@@ -32,7 +32,7 @@ import boto3
 import requests
 
 # --- Configuration ---
-COST_PER_PAGE_TIERS = [0.01, 0.02, 0.05, 0.10, 0.25, 1.00]
+COST_PER_PAGE_TIERS = [0.02, 0.05, 0.10, 0.25, 1.00]
 MAX_TOTAL_COST_USD = "25.0"
 OPTIMIZATION_GUIDANCE = ""
 REGION = "us-east-1"
@@ -201,20 +201,21 @@ def main():
             "cost_per_page": tier,
             "session_id": session_id,
             "status": status,
-            "best_accuracy": accuracy,
+            "best_accuracy": str(accuracy),
             "total_cost_usd": total_cost,
-            "iterations": final_state.get("iteration", "0"),
-            "best_config": final_state.get("best_config_version_within_budget", "N/A"),
+            "iterations": str(final_state.get("iteration", "0")),
+            "best_config": str(final_state.get("best_config_version_within_budget", "N/A")),
         })
 
         print(f"  DONE: status={status} accuracy={accuracy}% cost=${total_cost:.2f}")
+
+        # Reset stack before next run
+        reset_stack(args.idp_stack_name)
 
         # Save intermediate results
         with open(RESULTS_FILE, "w") as f:
             json.dump(results, f, indent=2)
 
-        # Reset stack before next run
-        reset_stack(args.idp_stack_name)
         print()
 
     # Final summary

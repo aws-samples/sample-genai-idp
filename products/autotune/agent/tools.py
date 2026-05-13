@@ -1320,7 +1320,7 @@ def generate_final_report(
     and appends a summary to OPTIMIZATION-LOG.md.
 
     Args:
-        stopping_reason: Why the run stopped. One of: 'max_iterations', 'budget_exhausted', 'converged'.
+        stopping_reason: Why the run stopped. One of: 'max_iterations', 'budget_exhausted'.
         iterations_completed: Number of full evaluation iterations completed.
         recommended_config_name: Config version name with best accuracy within budget.
         recommended_config_accuracy: Accuracy (%) of the recommended config.
@@ -1335,6 +1335,11 @@ def generate_final_report(
     Returns:
         JSON with status, report path, and number of configs archived.
     """
+    # Validate stopping_reason
+    VALID_STOPPING_REASONS = ["max_iterations", "budget_exhausted"]
+    if stopping_reason not in VALID_STOPPING_REASONS:
+        return json.dumps({"error": f"Invalid stopping_reason '{stopping_reason}'. Must be one of: {VALID_STOPPING_REASONS}"})
+
     # Only allowed during finalizing
     state = _get_optimization_state()
     if state.get_status() != "finalizing":
