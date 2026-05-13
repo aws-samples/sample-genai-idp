@@ -38,6 +38,10 @@ SPDX-License-Identifier: MIT-0
 
 - **Web UI "View Source" failed for PDFs and other docs after the v0.5.9 CSP hardening** — three fixes in `FileViewer`: (1) pass an `s3://bucket/key` URI to `getFileContents` instead of relying on the build-time `VITE_AWS_REGION` env var; (2) render PDFs in an `<iframe>` instead of `<object>` so they're allowed under the hardened `object-src 'none'` CSP; (3) drop the `sandbox` attribute on the PDF iframe only (Chrome's built-in PDF viewer is blocked when sandboxed; non-PDF iframes keep their sandbox). Added a fallback "Open PDF in a new tab" link.
 
+- **Private ALB deployment broken when stack name had uppercase characters** — the ALB DNS name is case-preserving, but browser `Origin` headers, Cognito `redirect_uri` matching, and the ALB url-rewrite regex all expected lowercase, so CORS preflights, OAuth callbacks, and the `/` → `/index.html` rewrite all failed. Fixed by lowercasing the ALB URL in every CFN consumer (new `GetLowercaseAlbUrl` custom resource reusing the existing `GetDomainLambda`), lowercasing the Amplify redirect URL in `aws-exports.js`, and broadening the ALB rewrite regex from `^/$` to `^/` so OAuth query strings don't break the match. CloudFront deployments unaffected. ([#303](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues/303))
+
+
+
 ## Templates
    - us-west-2: `https://s3.us-west-2.amazonaws.com/aws-ml-blog-us-west-2/artifacts/genai-idp/idp-main_0.5.10.yaml`
    - us-east-1: `https://s3.us-east-1.amazonaws.com/aws-ml-blog-us-east-1/artifacts/genai-idp/idp-main_0.5.10.yaml`
