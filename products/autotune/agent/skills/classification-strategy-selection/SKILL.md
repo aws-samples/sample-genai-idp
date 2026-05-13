@@ -19,24 +19,14 @@ The IDP accelerator supports multiple classification strategies and advanced par
 
 ## Diagnosis
 
-```python
-from idpac import IDPACClient, IDPConfig
-from idpac.evaluations import EvaluationResult
+Use `get_evaluation_summary(batch_id)` to get classification metrics. Then check current classification config:
 
-client = IDPACClient('stack-name', region='us-east-1')
-summary = client.get_evaluation_summary('batch-id', 'results/summary.json')
-result = EvaluationResult.from_aggregated_file('results/summary.json')
-
-# Check current classification config
-config = IDPConfig('workspace/current-config.yaml')
-method = config.get('classification.classificationMethod')
-context = config.get('classification.contextPagesCount')
-max_pages = config.get('classification.maxPagesForClassification')
-print(f"Method: {method}, Context pages: {context}, Max pages: {max_pages}")
-
-# Check classification metrics
-result.print_classification_summary()  # multi-class
-result.print_split_summary()           # packet-splitting
+```
+config_edit(config_path, operations=[
+    {"op": "get", "field": "classification.classificationMethod"},
+    {"op": "get", "field": "classification.contextPagesCount"},
+    {"op": "get", "field": "classification.maxPagesForClassification"}
+])
 ```
 
 Use this decision table to identify which fix to apply:
@@ -68,18 +58,17 @@ IDP supports two classification methods. The default is page-level, but holistic
 - Single LLM call for entire document
 - Best for: text-heavy documents where cross-page context matters, documents with weak per-page visual cues, smaller documents (<50 pages)
 
-```python
-from idpac import IDPConfig
-
-config = IDPConfig('workspace/current-config.yaml')
-
-# Switch to holistic method
-config.set('classification.classificationMethod', 'textbasedHolisticClassification')
+```
+config_edit(config_path, operations=[
+    {"op": "set", "field": "classification.classificationMethod", "value": "textbasedHolisticClassification"},
+    {"op": "save"}
+])
 
 # Or switch to page-level (default)
-config.set('classification.classificationMethod', 'multimodalPageLevelClassification')
-
-config.save('workspace/updated-config.yaml')
+config_edit(config_path, operations=[
+    {"op": "set", "field": "classification.classificationMethod", "value": "multimodalPageLevelClassification"},
+    {"op": "save"}
+])
 ```
 
 **Decision guide:**
@@ -106,18 +95,17 @@ Context is wrapped in XML tags:
 
 Both text AND images are included for context pages.
 
-```python
-from idpac import IDPConfig
-
-config = IDPConfig('workspace/current-config.yaml')
-
-# Include 1 page before and after as context (default: 0)
-config.set('classification.contextPagesCount', 1)
+```
+config_edit(config_path, operations=[
+    {"op": "set", "field": "classification.contextPagesCount", "value": 1},
+    {"op": "save"}
+])
 
 # Include 2 pages on each side for more context
-config.set('classification.contextPagesCount', 2)
-
-config.save('workspace/updated-config.yaml')
+config_edit(config_path, operations=[
+    {"op": "set", "field": "classification.contextPagesCount", "value": 2},
+    {"op": "save"}
+])
 ```
 
 **When to use:**
@@ -136,18 +124,17 @@ config.save('workspace/updated-config.yaml')
 
 For large documents where the first few pages are sufficient to determine the document type, limit how many pages are classified to reduce cost.
 
-```python
-from idpac import IDPConfig
-
-config = IDPConfig('workspace/current-config.yaml')
-
-# Only classify first 3 pages (default: 'ALL')
-config.set('classification.maxPagesForClassification', '3')
+```
+config_edit(config_path, operations=[
+    {"op": "set", "field": "classification.maxPagesForClassification", "value": "3"},
+    {"op": "save"}
+])
 
 # Classify all pages (default)
-config.set('classification.maxPagesForClassification', 'ALL')
-
-config.save('workspace/updated-config.yaml')
+config_edit(config_path, operations=[
+    {"op": "set", "field": "classification.maxPagesForClassification", "value": "ALL"},
+    {"op": "save"}
+])
 ```
 
 Valid values: `'ALL'`, `'1'`, `'2'`, `'3'`, `'5'`, `'10'`
@@ -171,38 +158,24 @@ When documents have predictable filenames or distinctive text markers, regex byp
 
 Matches against the document filename/ID. If matched, ALL pages are classified as that class instantly.
 
-```python
-from idpac import IDPConfig
-
-config = IDPConfig('workspace/current-config.yaml')
-
-# Add regex to match filenames containing "invoice" (case-insensitive)
-config.set('classes.0.document_name_regex', '(?i).*(invoice|inv).*')
-
-# Match W-2 tax forms by filename
-config.set('classes.1.document_name_regex', '(?i).*w-?2.*')
-
-config.save('workspace/updated-config.yaml')
+```
+config_edit(config_path, operations=[
+    {"op": "set", "field": "classes.0.document_name_regex", "value": "(?i).*(invoice|inv).*"},
+    {"op": "set", "field": "classes.1.document_name_regex", "value": "(?i).*w-?2.*"},
+    {"op": "save"}
+])
 ```
 
 ### Page Content Regex
 
 Matches against individual page text content during page-level classification. First matching pattern wins for that page.
 
-```python
-from idpac import IDPConfig
-
-config = IDPConfig('workspace/current-config.yaml')
-
-# Match pages containing invoice-specific terms
-config.set('classes.0.document_page_content_regex',
-    '(?i)(invoice\\s+number|bill\\s+to|amount\\s+due)')
-
-# Match pages containing payslip-specific terms
-config.set('classes.1.document_page_content_regex',
-    '(?i)(gross\\s+pay|net\\s+pay|employee\\s+id)')
-
-config.save('workspace/updated-config.yaml')
+```
+config_edit(config_path, operations=[
+    {"op": "set", "field": "classes.0.document_page_content_regex", "value": "(?i)(invoice\\s+number|bill\\s+to|amount\\s+due)"},
+    {"op": "set", "field": "classes.1.document_page_content_regex", "value": "(?i)(gross\\s+pay|net\\s+pay|employee\\s+id)"},
+    {"op": "save"}
+])
 ```
 
 **Regex best practices:**
@@ -233,22 +206,18 @@ Few-shot examples provide concrete reference documents with known classification
 
 Each example needs: a class prompt, a name, an attributes prompt, and an image path.
 
-```python
-from idpac import IDPConfig
-
-config = IDPConfig('workspace/current-config.yaml')
-
-# Add few-shot example to first class
-config.set('classes.0.examples', [
-    {
-        'classPrompt': "This is an example of the class 'Invoice'",
-        'name': 'InvoiceExample1',
-        'attributesPrompt': 'expected attributes are:\n    "invoice_number": "INV-2024-001",\n    "vendor_name": "ACME Corp",\n    "total_amount": "$1,250.00"',
-        'imagePath': 'path/to/example-invoice.jpg'
-    }
+```
+config_edit(config_path, operations=[
+    {"op": "set", "field": "classes.0.examples", "value": [
+        {
+            "classPrompt": "This is an example of the class 'Invoice'",
+            "name": "InvoiceExample1",
+            "attributesPrompt": "expected attributes are:\n    \"invoice_number\": \"INV-2024-001\",\n    \"vendor_name\": \"ACME Corp\",\n    \"total_amount\": \"$1,250.00\"",
+            "imagePath": "path/to/example-invoice.jpg"
+        }
+    ]},
+    {"op": "save"}
 ])
-
-config.save('workspace/updated-config.yaml')
 ```
 
 The `imagePath` field supports:
@@ -261,21 +230,11 @@ The `imagePath` field supports:
 
 The classification task prompt MUST include the `{FEW_SHOT_EXAMPLES}` placeholder for examples to be used:
 
-```python
-config.set('classification.task_prompt', '''Classify this document into exactly one category from:
-{CLASS_NAMES_AND_DESCRIPTIONS}
-
-Here are examples of each document type:
-<few_shot_examples>
-{FEW_SHOT_EXAMPLES}
-</few_shot_examples>
-
-Document text:
-{DOCUMENT_TEXT}
-
-Return your classification in JSON format.''')
-
-config.save('workspace/updated-config.yaml')
+```
+config_edit(config_path, operations=[
+    {"op": "set", "field": "classification.task_prompt", "value": "Classify this document into exactly one category from:\n{CLASS_NAMES_AND_DESCRIPTIONS}\n\nHere are examples of each document type:\n<few_shot_examples>\n{FEW_SHOT_EXAMPLES}\n</few_shot_examples>\n\nDocument text:\n{DOCUMENT_TEXT}\n\nReturn your classification in JSON format."},
+    {"op": "save"}
+])
 ```
 
 **Best practices:**
@@ -302,21 +261,16 @@ config.save('workspace/updated-config.yaml')
 After applying any fix:
 
 1. Upload updated config:
-   ```python
-   client.upload_config('workspace/updated-config.yaml', config_version='<version>', description='Classification strategy change')
+   ```
+   upload_config('workspace/updated-config.yaml', config_version='<version>', description='Classification strategy change')
    ```
 
 2. Run evaluation:
-   ```python
-   result = client.run_evaluation('test-set-id', context='Classification strategy change', config_version='<version>')
+   ```
+   run_evaluation(test_set_id, context='Classification strategy change', config_version='<version>')
    ```
 
-3. Compare classification metrics before/after:
-   ```python
-   new_result = EvaluationResult.from_aggregated_file('results/new-summary.json')
-   new_result.print_classification_summary()  # multi-class
-   new_result.print_split_summary()           # packet-splitting
-   ```
+3. Compare classification metrics before/after using `get_evaluation_summary(batch_id)` on both the old and new batch IDs.
 
 4. Success criteria:
    - Classification accuracy improved (or maintained with lower cost)

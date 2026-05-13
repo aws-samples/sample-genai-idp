@@ -46,50 +46,43 @@ Use `config.validate()` to detect this issue and `config.auto_fix(['fix_nullable
 
 ## Fix 1: Create Grouped Fields with `$defs` and `$ref`
 
-Use `$defs` to define reusable sub-object types, then reference them with `$ref` from the top-level `properties`.
+Use `$defs` to define reusable sub-object types, then reference them with `$ref` from the top-level `properties`. Use `config_edit` to read the current class, then set the `$defs` and update `properties`:
 
-```python
-from idpac import IDPConfig
-
-config = IDPConfig('workspace/current-config.yaml')
-
-# Get the class schema
-cls = config.get('classes.0')
+```
+# First read the current class schema
+config_edit(config_path, operations=[{"op": "get", "field": "classes.0"}])
 
 # Add a $defs section with a group definition
-cls['$defs'] = {
-    'PatientInformationDef': {
-        'type': 'object',
-        'description': 'Information about the patient.',
-        'properties': {
-            'Patient-Name': {
-                'type': 'string',
-                'description': 'Full name of the patient.',
-                'x-aws-idp-evaluation-method': 'FUZZY'
+config_edit(config_path, operations=[
+    {"op": "set", "field": "classes.0.$defs.PatientInformationDef", "value": {
+        "type": "object",
+        "description": "Information about the patient.",
+        "properties": {
+            "Patient-Name": {
+                "type": "string",
+                "description": "Full name of the patient.",
+                "x-aws-idp-evaluation-method": "FUZZY"
             },
-            'Patient-DOB': {
-                'type': 'string',
-                'format': 'date',
-                'description': 'Date of birth of the patient.',
-                'x-aws-idp-evaluation-method': 'EXACT'
+            "Patient-DOB": {
+                "type": "string",
+                "format": "date",
+                "description": "Date of birth of the patient.",
+                "x-aws-idp-evaluation-method": "EXACT"
             },
-            'Patient-ID': {
-                'type': 'string',
-                'description': 'Patient identification number.',
-                'x-aws-idp-evaluation-method': 'EXACT'
+            "Patient-ID": {
+                "type": "string",
+                "description": "Patient identification number.",
+                "x-aws-idp-evaluation-method": "EXACT"
             }
         }
-    }
-}
-
-# Reference the definition from top-level properties
-cls['properties']['PatientInformation'] = {
-    'description': 'Information about the patient.',
-    '$ref': '#/$defs/PatientInformationDef',
-    'x-aws-idp-evaluation-method': 'LLM'
-}
-
-config.save('workspace/updated-config.yaml')
+    }},
+    {"op": "set", "field": "classes.0.properties.PatientInformation", "value": {
+        "description": "Information about the patient.",
+        "$ref": "#/$defs/PatientInformationDef",
+        "x-aws-idp-evaluation-method": "LLM"
+    }},
+    {"op": "save"}
+])
 ```
 
 **Key rules:**
@@ -102,50 +95,40 @@ config.save('workspace/updated-config.yaml')
 
 For repeating records (line items, charges, services), use `type: array` with `items` referencing a `$defs` entry.
 
-```python
-from idpac import IDPConfig
-
-config = IDPConfig('workspace/current-config.yaml')
-cls = config.get('classes.0')
-
-# Define the item schema in $defs
-if '$defs' not in cls:
-    cls['$defs'] = {}
-
-cls['$defs']['ServiceLineItem'] = {
-    'type': 'object',
-    'properties': {
-        'Date-of-Service': {
-            'type': 'string',
-            'format': 'date',
-            'description': 'Date the service was provided.',
-            'x-aws-idp-evaluation-method': 'EXACT'
-        },
-        'Procedure-Code': {
-            'type': 'string',
-            'description': 'CPT or procedure code for the service.',
-            'x-aws-idp-evaluation-method': 'EXACT'
-        },
-        'Charges': {
-            'type': 'string',
-            'description': 'Dollar amount charged for this service.',
-            'x-aws-idp-evaluation-method': 'EXACT'
+```
+config_edit(config_path, operations=[
+    {"op": "set", "field": "classes.0.$defs.ServiceLineItem", "value": {
+        "type": "object",
+        "properties": {
+            "Date-of-Service": {
+                "type": "string",
+                "format": "date",
+                "description": "Date the service was provided.",
+                "x-aws-idp-evaluation-method": "EXACT"
+            },
+            "Procedure-Code": {
+                "type": "string",
+                "description": "CPT or procedure code for the service.",
+                "x-aws-idp-evaluation-method": "EXACT"
+            },
+            "Charges": {
+                "type": "string",
+                "description": "Dollar amount charged for this service.",
+                "x-aws-idp-evaluation-method": "EXACT"
+            }
         }
-    }
-}
-
-# Add the array property
-cls['properties']['ServiceInformation'] = {
-    'description': 'List of services provided to the patient.',
-    'type': 'array',
-    'x-aws-idp-list-item-description': 'Each item represents one service line from the claim form.',
-    'items': {
-        '$ref': '#/$defs/ServiceLineItem'
-    },
-    'x-aws-idp-evaluation-method': 'LLM'
-}
-
-config.save('workspace/updated-config.yaml')
+    }},
+    {"op": "set", "field": "classes.0.properties.ServiceInformation", "value": {
+        "description": "List of services provided to the patient.",
+        "type": "array",
+        "x-aws-idp-list-item-description": "Each item represents one service line from the claim form.",
+        "items": {
+            "$ref": "#/$defs/ServiceLineItem"
+        },
+        "x-aws-idp-evaluation-method": "LLM"
+    }},
+    {"op": "save"}
+])
 ```
 
 **Key rules:**
@@ -196,45 +179,32 @@ When you have a flat schema and ground truth is nested, restructure by:
 4. Replace the flat fields in top-level `properties` with a single `$ref` entry
 5. Add `x-aws-idp-evaluation-method` at both levels
 
-```python
-from idpac import IDPConfig
+Use `config_edit` to read the current class, then restructure. For example, to group patient fields:
 
-config = IDPConfig('workspace/current-config.yaml')
-cls = config.get('classes.0')
-
-# Before: flat
-# properties:
-#   Patient-Name: { type: string, ... }
-#   Patient-DOB: { type: string, ... }
-#   Invoice-Number: { type: string, ... }
-
-# After: grouped
-# 1. Move patient fields into a $defs group
-# 2. Replace with $ref
-# 3. Keep non-grouped fields flat
-
-patient_fields = {}
-for field_name in ['Patient-Name', 'Patient-DOB']:
-    if field_name in cls['properties']:
-        patient_fields[field_name] = cls['properties'].pop(field_name)
-
-if '$defs' not in cls:
-    cls['$defs'] = {}
-
-cls['$defs']['PatientInfoDef'] = {
-    'type': 'object',
-    'description': 'Patient demographic information.',
-    'properties': patient_fields
-}
-
-cls['properties']['PatientInformation'] = {
-    'description': 'Patient demographic information.',
-    '$ref': '#/$defs/PatientInfoDef',
-    'x-aws-idp-evaluation-method': 'LLM'
-}
-
-config.save('workspace/updated-config.yaml')
 ```
+# Read current class to see flat fields
+config_edit(config_path, operations=[{"op": "get", "field": "classes.0.properties"}])
+
+# Create the $defs group and update properties
+config_edit(config_path, operations=[
+    {"op": "set", "field": "classes.0.$defs.PatientInfoDef", "value": {
+        "type": "object",
+        "description": "Patient demographic information.",
+        "properties": {
+            "Patient-Name": {"type": "string", "description": "...", "x-aws-idp-evaluation-method": "FUZZY"},
+            "Patient-DOB": {"type": "string", "format": "date", "description": "...", "x-aws-idp-evaluation-method": "EXACT"}
+        }
+    }},
+    {"op": "set", "field": "classes.0.properties.PatientInformation", "value": {
+        "description": "Patient demographic information.",
+        "$ref": "#/$defs/PatientInfoDef",
+        "x-aws-idp-evaluation-method": "LLM"
+    }},
+    {"op": "save"}
+])
+```
+
+Note: You'll also need to remove the old flat fields (`Patient-Name`, `Patient-DOB`) from the top-level properties. Read the full class, restructure it, and save.
 
 ## Verification
 

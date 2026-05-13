@@ -27,19 +27,11 @@ Past engagements have shown boolean fields consistently require specialized hand
 
 ## Diagnosis
 
-```python
-from idpac import IDPACClient
-from idpac.evaluations import EvaluationResult
+Use `get_evaluation_summary(batch_id)` to identify boolean fields with low accuracy. Then investigate individual documents:
 
-client = IDPACClient('stack-name', region='us-east-1')
-summary = client.get_evaluation_summary('batch-id', 'results/summary.json')
-result = EvaluationResult.from_aggregated_file('results/summary.json')
-result.print_aggregated_summary(top_bottom_n=10)
-
-# Identify boolean fields with low accuracy
-# Then investigate individual documents to see what's going wrong
-client.download_single_document_results('batch-id', 'failing-doc.pdf', 'investigation/')
-client.download_ground_truth('test-set-id', 'failing-doc.pdf', 'investigation/gt.json')
+```
+download_single_document_results(batch_id, 'failing-doc.pdf')
+download_ground_truth(test_set_id, 'failing-doc.pdf')
 ```
 
 For each failing boolean field, categorize the error:
@@ -52,25 +44,12 @@ For each failing boolean field, categorize the error:
 
 This is the single most impactful fix for boolean fields. Every boolean field description should explicitly define when to output each possible value:
 
-```python
-from idpac import IDPConfig
-
-config = IDPConfig('workspace/current-config.yaml')
-
-# BAD: vague description
-config.set('classes.0.properties.Exclusivity.description',
-    'Whether the rights are exclusive.')
-
-# GOOD: explicit three-way distinction
-config.set('classes.0.properties.Exclusivity.description',
-    'Whether the licensee has been granted exclusive rights. '
-    'Return "Yes" if the document explicitly grants exclusive rights. '
-    'Return "No" if the document explicitly states rights are non-exclusive '
-    'or shared. '
-    'Return "N/A" if exclusivity is not discussed or not applicable to '
-    'this document type. '
-    'Do NOT return "No" simply because exclusivity is not mentioned — '
-    'if the topic is not addressed, the correct answer is "N/A".')
+```
+config_edit(config_path, operations=[
+    {"op": "set", "field": "classes.0.properties.Exclusivity.description",
+     "value": "Whether the licensee has been granted exclusive rights. Return \"Yes\" if the document explicitly grants exclusive rights. Return \"No\" if the document explicitly states rights are non-exclusive or shared. Return \"N/A\" if exclusivity is not discussed or not applicable to this document type. Do NOT return \"No\" simply because exclusivity is not mentioned — if the topic is not addressed, the correct answer is \"N/A\"."},
+    {"op": "save"}
+])
 ```
 
 Apply this pattern to every boolean field in the schema.
@@ -79,11 +58,18 @@ Apply this pattern to every boolean field in the schema.
 
 Add cross-cutting guidance that applies to all boolean fields:
 
-```python
-current_prompt = config.get('extraction.task_prompt')
+Read the current prompt with `config_edit(config_path, [{"op": "get", "field": "extraction.task_prompt"}])`, then append boolean guidance:
 
-boolean_guidance = '''
+```
+config_edit(config_path, operations=[
+    {"op": "set", "field": "extraction.task_prompt", "value": "<existing prompt + appended text below>"},
+    {"op": "save"}
+])
+```
 
+Text to append:
+
+```
 BOOLEAN FIELD RULES:
 - Boolean fields must return exactly one of: "Yes", "No", or "N/A".
 - "Yes" = the document explicitly grants or confirms this.
@@ -94,53 +80,46 @@ BOOLEAN FIELD RULES:
   "No" when there is explicit language denying or prohibiting it.
 - When a right must be inferred from broader language (e.g., "all media
   rights" implies simulcast is allowed), return "Yes" and note that it is
-  implied by the broader grant.'''
-
-config.set('extraction.task_prompt', current_prompt + boolean_guidance)
-config.save('workspace/updated-config.yaml')
+  implied by the broader grant.
 ```
 
 ## Fix 3: Handle Implied Values with Explicit Guidance
 
 For fields where the value is often implied rather than stated, add inference rules to the field description:
 
-```python
-# Field that is often implied by broader rights language
-config.set('classes.0.properties.SimulcastAllowed.description',
-    'Whether simultaneous broadcast (simulcast) is permitted. '
-    'Return "Yes" if simulcast is explicitly allowed, OR if the document '
-    'grants "all media rights" or "all distribution rights" without '
-    'excluding simulcast. '
-    'Return "No" only if simulcast is explicitly prohibited or excluded. '
-    'Return "N/A" if the document does not address media distribution '
-    'rights at all.')
-
-# Field that requires checking for absence of restriction
-config.set('classes.0.properties.SublicenseAllowed.description',
-    'Whether the licensee may sublicense the rights to third parties. '
-    'Return "Yes" if sublicensing is explicitly permitted. '
-    'Return "No" if sublicensing is explicitly prohibited or restricted. '
-    'Return "N/A" if sublicensing is not discussed. '
-    'Note: the absence of a sublicensing clause does NOT mean sublicensing '
-    'is allowed — it means the topic is not addressed ("N/A").')
+```
+config_edit(config_path, operations=[
+    {"op": "set", "field": "classes.0.properties.SimulcastAllowed.description",
+     "value": "Whether simultaneous broadcast (simulcast) is permitted. Return \"Yes\" if simulcast is explicitly allowed, OR if the document grants \"all media rights\" or \"all distribution rights\" without excluding simulcast. Return \"No\" only if simulcast is explicitly prohibited or excluded. Return \"N/A\" if the document does not address media distribution rights at all."},
+    {"op": "set", "field": "classes.0.properties.SublicenseAllowed.description",
+     "value": "Whether the licensee may sublicense the rights to third parties. Return \"Yes\" if sublicensing is explicitly permitted. Return \"No\" if sublicensing is explicitly prohibited or restricted. Return \"N/A\" if sublicensing is not discussed. Note: the absence of a sublicensing clause does NOT mean sublicensing is allowed — it means the topic is not addressed (\"N/A\")."},
+    {"op": "save"}
+])
 ```
 
 ## Fix 4: Set Appropriate Evaluation Methods
 
 Boolean fields need evaluation methods that handle normalization:
 
-```python
+```
 # Option A: Use LLM evaluation to handle semantic equivalence
-# ("Yes" matches "True", "Permitted", "Allowed", etc.)
-config.set('classes.0.properties.Exclusivity.x-aws-idp-evaluation-method', 'LLM')
+config_edit(config_path, operations=[
+    {"op": "set", "field": "classes.0.properties.Exclusivity.x-aws-idp-evaluation-method", "value": "LLM"},
+    {"op": "save"}
+])
 
 # Option B: Use EXACT if ground truth is already normalized to Yes/No/N/A
-# and you've constrained the LLM output to match
-config.set('classes.0.properties.Exclusivity.x-aws-idp-evaluation-method', 'EXACT')
+config_edit(config_path, operations=[
+    {"op": "set", "field": "classes.0.properties.Exclusivity.x-aws-idp-evaluation-method", "value": "EXACT"},
+    {"op": "save"}
+])
 
 # Option C: Use FUZZY with a moderate threshold for minor variations
-config.set('classes.0.properties.Exclusivity.x-aws-idp-evaluation-method', 'FUZZY')
-config.set('classes.0.properties.Exclusivity.x-aws-idp-evaluation-threshold', 0.8)
+config_edit(config_path, operations=[
+    {"op": "set", "field": "classes.0.properties.Exclusivity.x-aws-idp-evaluation-method", "value": "FUZZY"},
+    {"op": "set", "field": "classes.0.properties.Exclusivity.x-aws-idp-evaluation-threshold", "value": 0.8},
+    {"op": "save"}
+])
 ```
 
 **Recommendation**: Use `LLM` evaluation for boolean fields during optimization (most forgiving, catches semantic equivalence). Once the extraction is stable and output format is consistent, switch to `EXACT` for faster, cheaper evaluation. See the `evaluation-method-tuning` skill for details on changing evaluation methods.
@@ -149,20 +128,24 @@ config.set('classes.0.properties.Exclusivity.x-aws-idp-evaluation-threshold', 0.
 
 If the ground truth uses a specific format (e.g., always "Yes"/"No"/"N/A"), constrain the LLM output:
 
-```python
-current_prompt = config.get('extraction.task_prompt')
+Read the current prompt and append normalization guidance:
 
-normalization = '''
+```
+config_edit(config_path, operations=[
+    {"op": "set", "field": "extraction.task_prompt", "value": "<existing prompt + appended text below>"},
+    {"op": "save"}
+])
+```
 
+Text to append:
+
+```
 OUTPUT FORMAT FOR BOOLEAN FIELDS:
 - Use exactly "Yes", "No", or "N/A" (with this exact capitalization).
 - Do NOT use: "True"/"False", "Y"/"N", "Allowed"/"Not Allowed",
   "Permitted"/"Not Permitted", or any other variation.
 - Do NOT add qualifiers like "Yes (implied)" or "No (not mentioned)".
-  Return only the single word.'''
-
-config.set('extraction.task_prompt', current_prompt + normalization)
-config.save('workspace/updated-config.yaml')
+  Return only the single word.
 ```
 
 ## Common Boolean Field Patterns

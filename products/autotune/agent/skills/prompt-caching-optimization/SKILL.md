@@ -20,33 +20,19 @@ Prompt caching stores the static portions of prompts and reuses them across requ
 
 ## Diagnosis
 
-```python
-from idpac import IDPACClient, IDPConfig
-from idpac.evaluations import EvaluationResult
+Use `get_evaluation_summary(batch_id)` to check current costs and cost breakdown.
 
-client = IDPACClient('stack-name', region='us-east-1')
-summary = client.get_evaluation_summary('batch-id', 'results/summary.json')
+Then inspect current prompts for caching opportunity:
 
-# Check current costs
-print(f"Total cost: ${summary.get('totalCost')}")
-print(f"Cost breakdown: {summary.get('costBreakdown')}")
-
-# Check current prompts for caching opportunity
-config = IDPConfig('workspace/current-config.yaml')
-extraction_prompt = config.get('extraction.task_prompt')
-classification_prompt = config.get('classification.task_prompt')
-
-# Large prompts benefit most from caching
-print(f"Extraction prompt length: {len(extraction_prompt)} chars")
-print(f"Classification prompt length: {len(classification_prompt)} chars")
-
-# Check if few-shot examples are configured (high-value caching target)
-classes = config.get('classes')
-for i, cls in enumerate(classes):
-    examples = cls.get('x-aws-idp-examples', [])
-    if examples:
-        print(f"Class {cls.get('$id')}: {len(examples)} few-shot examples (high caching value)")
 ```
+config_edit(config_path, operations=[
+    {"op": "get", "field": "extraction.task_prompt"},
+    {"op": "get", "field": "classification.task_prompt"},
+    {"op": "get", "field": "classes"}
+])
+```
+
+Large prompts benefit most from caching. Check if few-shot examples are configured (high-value caching target) — classes with `x-aws-idp-examples` entries have the most to gain from caching.
 
 ## How It Works
 
@@ -68,33 +54,11 @@ Cache read (reuse):  ~0.1× standard (10x savings on every subsequent request)
 
 Place the `<<CACHEPOINT>>` delimiter after all static instructions and before the dynamic document content:
 
-```python
-from idpac import IDPConfig
-
-config = IDPConfig('workspace/current-config.yaml')
-
-# Structure the extraction prompt with cachepoint
-config.set('extraction.task_prompt', '''You are an expert document analyst. Extract the requested fields accurately.
-
-EXTRACTION GUIDELINES:
-- Extract values exactly as they appear in the document unless a specific format is requested.
-- For fields with no matching value, return null.
-- For date fields, convert to YYYY-MM-DD format.
-- For numeric fields, extract only the numeric value without currency symbols.
-
-Extract the following fields:
-{ATTRIBUTE_NAMES_AND_DESCRIPTIONS}
-
-<<CACHEPOINT>>
-
-Here is the document to analyze:
-{DOCUMENT_TEXT}
-
-{DOCUMENT_IMAGE}
-
-Return your response as valid JSON.''')
-
-config.save('workspace/updated-config.yaml')
+```
+config_edit(config_path, operations=[
+    {"op": "set", "field": "extraction.task_prompt", "value": "You are an expert document analyst. Extract the requested fields accurately.\n\nEXTRACTION GUIDELINES:\n- Extract values exactly as they appear in the document unless a specific format is requested.\n- For fields with no matching value, return null.\n- For date fields, convert to YYYY-MM-DD format.\n- For numeric fields, extract only the numeric value without currency symbols.\n\nExtract the following fields:\n{ATTRIBUTE_NAMES_AND_DESCRIPTIONS}\n\n<<CACHEPOINT>>\n\nHere is the document to analyze:\n{DOCUMENT_TEXT}\n\n{DOCUMENT_IMAGE}\n\nReturn your response as valid JSON."},
+    {"op": "save"}
+])
 ```
 
 **Key placement rule**: Static content (instructions, guidelines, attribute descriptions) goes BEFORE `<<CACHEPOINT>>`. Dynamic content (`{DOCUMENT_TEXT}`, `{DOCUMENT_IMAGE}`) goes AFTER.
@@ -103,55 +67,22 @@ Note: `{ATTRIBUTE_NAMES_AND_DESCRIPTIONS}` is static per class (same schema for 
 
 ## Fix 2: Add CachePoint to Classification Prompts
 
-```python
-from idpac import IDPConfig
-
-config = IDPConfig('workspace/current-config.yaml')
-
-config.set('classification.task_prompt', '''Classify this document into exactly one category from:
-{CLASS_NAMES_AND_DESCRIPTIONS}
-
-Return your classification in JSON format with the document type.
-
-<<CACHEPOINT>>
-
-Document to classify:
-{DOCUMENT_TEXT}
-
-{DOCUMENT_IMAGE}''')
-
-config.save('workspace/updated-config.yaml')
+```
+config_edit(config_path, operations=[
+    {"op": "set", "field": "classification.task_prompt", "value": "Classify this document into exactly one category from:\n{CLASS_NAMES_AND_DESCRIPTIONS}\n\nReturn your classification in JSON format with the document type.\n\n<<CACHEPOINT>>\n\nDocument to classify:\n{DOCUMENT_TEXT}\n\n{DOCUMENT_IMAGE}"},
+    {"op": "save"}
+])
 ```
 
 ## Fix 3: Combine CachePoint with Few-Shot Examples
 
 Few-shot examples with images are the highest-value caching target because image tokens are expensive. Place examples before the cachepoint so they are cached across all documents:
 
-```python
-from idpac import IDPConfig
-
-config = IDPConfig('workspace/current-config.yaml')
-
-# Extraction prompt with few-shot examples + cachepoint
-config.set('extraction.task_prompt', '''Extract the following fields from this {DOCUMENT_CLASS} document:
-
-{ATTRIBUTE_NAMES_AND_DESCRIPTIONS}
-
-Here are examples of correct extractions:
-<few_shot_examples>
-{FEW_SHOT_EXAMPLES}
-</few_shot_examples>
-
-<<CACHEPOINT>>
-
-Now extract the attributes from this document:
-{DOCUMENT_TEXT}
-
-{DOCUMENT_IMAGE}
-
-Return your response as valid JSON.''')
-
-config.save('workspace/updated-config.yaml')
+```
+config_edit(config_path, operations=[
+    {"op": "set", "field": "extraction.task_prompt", "value": "Extract the following fields from this {DOCUMENT_CLASS} document:\n\n{ATTRIBUTE_NAMES_AND_DESCRIPTIONS}\n\nHere are examples of correct extractions:\n<few_shot_examples>\n{FEW_SHOT_EXAMPLES}\n</few_shot_examples>\n\n<<CACHEPOINT>>\n\nNow extract the attributes from this document:\n{DOCUMENT_TEXT}\n\n{DOCUMENT_IMAGE}\n\nReturn your response as valid JSON."},
+    {"op": "save"}
+])
 ```
 
 The few-shot examples (including their images) are identical for every document of the same class, so caching them avoids re-sending those expensive image tokens on every request.
@@ -160,10 +91,11 @@ The few-shot examples (including their images) are identical for every document 
 
 System prompts are also cacheable. If your system prompt is long, add a cachepoint:
 
-```python
-config.set('extraction.system_prompt', '''You are an expert document analyst specializing in structured data extraction from business documents. You have deep expertise in identifying and extracting key fields from complex document layouts.
-
-<<CACHEPOINT>>''')
+```
+config_edit(config_path, operations=[
+    {"op": "set", "field": "extraction.system_prompt", "value": "You are an expert document analyst specializing in structured data extraction from business documents. You have deep expertise in identifying and extracting key fields from complex document layouts.\n\n<<CACHEPOINT>>"},
+    {"op": "save"}
+])
 ```
 
 For short system prompts (1-2 sentences), caching provides minimal benefit — focus on task prompts first.
@@ -196,13 +128,6 @@ CachePoint requires a compatible Bedrock model. As of the current IDP accelerato
 1. Run evaluation WITHOUT cachepoint, note `totalCost` and `costBreakdown`
 2. Add `<<CACHEPOINT>>` delimiters to prompts
 3. Upload updated config and re-run evaluation on the same test set
-4. Compare costs:
-   ```python
-   old_summary = client.get_evaluation_summary('old-batch-id', 'results/old.json')
-   new_summary = client.get_evaluation_summary('new-batch-id', 'results/new.json')
-   
-   print(f"Cost before caching: ${old_summary.get('totalCost')}")
-   print(f"Cost after caching:  ${new_summary.get('totalCost')}")
-   ```
+4. Compare costs using `get_evaluation_summary` on both batch IDs and comparing the `totalCost` values.
 5. Verify accuracy is unchanged — cachepoint should not affect extraction or classification quality
 6. Document cost savings in the optimization log

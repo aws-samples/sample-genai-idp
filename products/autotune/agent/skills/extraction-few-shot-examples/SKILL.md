@@ -27,65 +27,34 @@ In past engagements, adding image-integrated few-shot examples was recommended a
 
 ## Diagnosis
 
-```python
-from idpac import IDPACClient, IDPConfig
-from idpac.evaluations import EvaluationResult
+Use `get_evaluation_summary(batch_id)` to identify fields with low accuracy. Then check if few-shot examples are already configured:
 
-client = IDPACClient('stack-name', region='us-east-1')
-summary = client.get_evaluation_summary('batch-id', 'results/summary.json')
-
-result = EvaluationResult.from_aggregated_file('results/summary.json')
-result.print_aggregated_summary(top_bottom_n=5)
-
-# Identify fields with low accuracy that might benefit from examples
-# Then check if few-shot examples are already configured
-config = IDPConfig('workspace/current-config.yaml')
-for i, cls in enumerate(config.get('classes')):
-    examples = cls.get('x-aws-idp-examples', [])
-    print(f"Class '{cls.get('$id')}': {len(examples)} extraction examples")
+```
+config_edit(config_path, operations=[{"op": "get", "field": "classes"}])
 ```
 
-If accuracy is low on specific fields and no few-shot examples are configured, adding examples is likely to help.
+Look for `x-aws-idp-examples` entries on each class. If accuracy is low on specific fields and no few-shot examples are configured, adding examples is likely to help.
 
 ## Fix 1: Add Few-Shot Examples to a Document Class
 
 Each example needs: a name, an attributes prompt showing expected extraction output, and optionally an image path.
 
-```python
-from idpac import IDPConfig
-
-config = IDPConfig('workspace/current-config.yaml')
-
-# Add few-shot examples to the class
-config.set('classes.0.x-aws-idp-examples', [
-    {
-        'name': 'Example1',
-        'attributesPrompt': '''expected attributes are:
-    "invoice_number": "INV-2024-001",
-    "invoice_date": "2024-01-15",
-    "vendor_name": "ACME Corp",
-    "total_amount": "1250.00",
-    "line_items": [
-        {"description": "Widget A", "quantity": "10", "unit_price": "100.00"},
-        {"description": "Widget B", "quantity": "5", "unit_price": "50.00"}
-    ]''',
-        'imagePath': 'path/to/example-invoice1.jpg'
-    },
-    {
-        'name': 'Example2',
-        'attributesPrompt': '''expected attributes are:
-    "invoice_number": "INV-2024-002",
-    "invoice_date": "2024-02-20",
-    "vendor_name": "Global Supplies Inc",
-    "total_amount": "3400.00",
-    "line_items": [
-        {"description": "Service Fee", "quantity": "1", "unit_price": "3400.00"}
-    ]''',
-        'imagePath': 'path/to/example-invoice2.jpg'
-    }
+```
+config_edit(config_path, operations=[
+    {"op": "set", "field": "classes.0.x-aws-idp-examples", "value": [
+        {
+            "name": "Example1",
+            "attributesPrompt": "expected attributes are:\n    \"invoice_number\": \"INV-2024-001\",\n    \"invoice_date\": \"2024-01-15\",\n    \"vendor_name\": \"ACME Corp\",\n    \"total_amount\": \"1250.00\",\n    \"line_items\": [\n        {\"description\": \"Widget A\", \"quantity\": \"10\", \"unit_price\": \"100.00\"},\n        {\"description\": \"Widget B\", \"quantity\": \"5\", \"unit_price\": \"50.00\"}\n    ]",
+            "imagePath": "path/to/example-invoice1.jpg"
+        },
+        {
+            "name": "Example2",
+            "attributesPrompt": "expected attributes are:\n    \"invoice_number\": \"INV-2024-002\",\n    \"invoice_date\": \"2024-02-20\",\n    \"vendor_name\": \"Global Supplies Inc\",\n    \"total_amount\": \"3400.00\",\n    \"line_items\": [\n        {\"description\": \"Service Fee\", \"quantity\": \"1\", \"unit_price\": \"3400.00\"}\n    ]",
+            "imagePath": "path/to/example-invoice2.jpg"
+        }
+    ]},
+    {"op": "save"}
 ])
-
-config.save('workspace/updated-config.yaml')
 ```
 
 ### Example Fields
@@ -103,28 +72,11 @@ config.save('workspace/updated-config.yaml')
 
 The extraction task prompt **must** include the `{FEW_SHOT_EXAMPLES}` placeholder for examples to be injected. Without this placeholder, examples are configured but never used.
 
-```python
-from idpac import IDPConfig
-
-config = IDPConfig('workspace/current-config.yaml')
-
-config.set('extraction.task_prompt', '''Extract the following fields from this {DOCUMENT_CLASS} document:
-
-{ATTRIBUTE_NAMES_AND_DESCRIPTIONS}
-
-Here are examples of correct extractions for this document type:
-<few_shot_examples>
-{FEW_SHOT_EXAMPLES}
-</few_shot_examples>
-
-Now extract the attributes from this document:
-{DOCUMENT_TEXT}
-
-{DOCUMENT_IMAGE}
-
-Return your response as valid JSON.''')
-
-config.save('workspace/updated-config.yaml')
+```
+config_edit(config_path, operations=[
+    {"op": "set", "field": "extraction.task_prompt", "value": "Extract the following fields from this {DOCUMENT_CLASS} document:\n\n{ATTRIBUTE_NAMES_AND_DESCRIPTIONS}\n\nHere are examples of correct extractions for this document type:\n<few_shot_examples>\n{FEW_SHOT_EXAMPLES}\n</few_shot_examples>\n\nNow extract the attributes from this document:\n{DOCUMENT_TEXT}\n\n{DOCUMENT_IMAGE}\n\nReturn your response as valid JSON."},
+    {"op": "save"}
+])
 ```
 
 Examples are class-specific — only examples from the same document class being processed are included in the prompt.
@@ -133,22 +85,16 @@ Examples are class-specific — only examples from the same document class being
 
 When a field is absent from an example document, explicitly show it as null. This teaches the LLM when to return null vs. when to extract a value:
 
-```python
-config.set('classes.0.x-aws-idp-examples', [
-    {
-        'name': 'TaskCardExample1',
-        'attributesPrompt': '''expected attributes are:
-    "work_order_number": "WO-2024-1234",
-    "equipment_id": "EQ-12345",
-    "serial_number": "SN-98765",
-    "equipment_model": "Model X-800",
-    "operating_hours": "45230.5",
-    "cycle_count": "22150",
-    "compliance_date": "2024-03-15",
-    "component_serial_no": null,
-    "component_part_no": null''',
-        'imagePath': 'examples/task-card-1.jpg'
-    }
+```
+config_edit(config_path, operations=[
+    {"op": "set", "field": "classes.0.x-aws-idp-examples", "value": [
+        {
+            "name": "TaskCardExample1",
+            "attributesPrompt": "expected attributes are:\n    \"work_order_number\": \"WO-2024-1234\",\n    \"equipment_id\": \"EQ-12345\",\n    \"serial_number\": \"SN-98765\",\n    \"equipment_model\": \"Model X-800\",\n    \"operating_hours\": \"45230.5\",\n    \"cycle_count\": \"22150\",\n    \"compliance_date\": \"2024-03-15\",\n    \"component_serial_no\": null,\n    \"component_part_no\": null",
+            "imagePath": "examples/task-card-1.jpg"
+        }
+    ]},
+    {"op": "save"}
 ])
 ```
 
@@ -156,34 +102,7 @@ This is especially important for fields that are legitimately absent in some doc
 
 ## Fix 4: Use Multiple Diverse Examples
 
-Include examples that cover different variations within the document class:
-
-```python
-examples = [
-    {
-        'name': 'SimpleInvoice',
-        'attributesPrompt': '''expected attributes are:
-    "invoice_number": "INV-001",
-    "line_items": [
-        {"description": "Consulting", "quantity": "1", "unit_price": "5000.00"}
-    ]''',
-        'imagePath': 'examples/simple-invoice.jpg'
-    },
-    {
-        'name': 'ComplexInvoice',
-        'attributesPrompt': '''expected attributes are:
-    "invoice_number": "2024-INV-0042",
-    "line_items": [
-        {"description": "Part A", "quantity": "100", "unit_price": "12.50"},
-        {"description": "Part B", "quantity": "50", "unit_price": "25.00"},
-        {"description": "Shipping", "quantity": "1", "unit_price": "45.00"}
-    ]''',
-        'imagePath': 'examples/complex-invoice.jpg'
-    }
-]
-
-config.set('classes.0.x-aws-idp-examples', examples)
-```
+Include examples that cover different variations within the document class. Use `config_edit` to set the `classes.0.x-aws-idp-examples` array with multiple entries covering simple and complex cases.
 
 **Best practices for example selection:**
 - Use 1-3 examples per class (more adds token cost with diminishing returns)
@@ -214,27 +133,7 @@ For multi-page documents, use a directory or S3 prefix containing one image per 
 
 ## Fix 6: Text-Only Examples (When Images Aren't Available)
 
-If example images aren't available, you can include sample OCR text in the `attributesPrompt` to still provide context:
-
-```python
-config.set('classes.0.x-aws-idp-examples', [
-    {
-        'name': 'TextOnlyExample',
-        'attributesPrompt': '''For a document containing:
-    "INVOICE #: INV-2024-001
-     Date: January 15, 2024
-     Bill To: ACME Corp
-     Total: $1,250.00"
-
-    expected attributes are:
-    "invoice_number": "INV-2024-001",
-    "invoice_date": "2024-01-15",
-    "vendor_name": null,
-    "customer_name": "ACME Corp",
-    "total_amount": "1250.00"'''
-    }
-])
-```
+If example images aren't available, you can include sample OCR text in the `attributesPrompt` to still provide context. Use `config_edit` to set examples without `imagePath`.
 
 Text-only examples are less effective than multimodal examples but still provide significant accuracy improvements over no examples.
 
@@ -242,23 +141,11 @@ Text-only examples are less effective than multimodal examples but still provide
 
 Few-shot examples with images are expensive in token cost. Combine with the `<<CACHEPOINT>>` delimiter to cache the examples across documents:
 
-```python
-config.set('extraction.task_prompt', '''Extract the following fields from this {DOCUMENT_CLASS} document:
-
-{ATTRIBUTE_NAMES_AND_DESCRIPTIONS}
-
-<few_shot_examples>
-{FEW_SHOT_EXAMPLES}
-</few_shot_examples>
-
-<<CACHEPOINT>>
-
-Now extract from this document:
-{DOCUMENT_TEXT}
-
-{DOCUMENT_IMAGE}
-
-Return valid JSON.''')
+```
+config_edit(config_path, operations=[
+    {"op": "set", "field": "extraction.task_prompt", "value": "Extract the following fields from this {DOCUMENT_CLASS} document:\n\n{ATTRIBUTE_NAMES_AND_DESCRIPTIONS}\n\n<few_shot_examples>\n{FEW_SHOT_EXAMPLES}\n</few_shot_examples>\n\n<<CACHEPOINT>>\n\nNow extract from this document:\n{DOCUMENT_TEXT}\n\n{DOCUMENT_IMAGE}\n\nReturn valid JSON."},
+    {"op": "save"}
+])
 ```
 
 See the `prompt-caching-optimization` skill for details on cachepoint placement and model compatibility.
@@ -275,13 +162,6 @@ See the `prompt-caching-optimization` skill for details on cachepoint placement 
 1. Run evaluation without few-shot examples as baseline
 2. Add examples and the `{FEW_SHOT_EXAMPLES}` placeholder
 3. Upload updated config and re-run evaluation
-4. Compare per-field accuracy, focusing on the fields that were previously low:
-   ```python
-   old_result = EvaluationResult.from_aggregated_file('results/old-summary.json')
-   new_result = EvaluationResult.from_aggregated_file('results/new-summary.json')
-   
-   old_result.print_aggregated_summary(top_bottom_n=5)
-   new_result.print_aggregated_summary(top_bottom_n=5)
-   ```
+4. Compare per-field accuracy, focusing on the fields that were previously low. Use `get_evaluation_summary` on both batch IDs or `compare_evaluations([old_batch_id, new_batch_id])`.
 5. Check that adding examples didn't regress other fields
 6. Monitor cost impact — few-shot examples increase input tokens (mitigate with cachepoint)

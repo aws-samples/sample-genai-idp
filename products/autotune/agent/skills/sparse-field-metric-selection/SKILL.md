@@ -55,37 +55,11 @@ For stakeholders who care about "how often is the output correct," Accuracy is t
 
 ### Step 1: Analyze Field Density
 
-```python
-from idpac import DatasetAnalyzer
-
-analyzer = DatasetAnalyzer('/path/to/dataset')
-density = analyzer.get_field_density()
-
-# Categorize fields by density
-sparse = {k: v for k, v in density.items() if v < 0.1}
-medium = {k: v for k, v in density.items() if 0.1 <= v < 0.5}
-dense = {k: v for k, v in density.items() if v >= 0.5}
-
-print(f"Total fields: {len(density)}")
-print(f"Dense (>50%): {len(dense)}")
-print(f"Medium (10-50%): {len(medium)}")
-print(f"Sparse (<10%): {len(sparse)}")
-
-if len(sparse) > len(density) * 0.3:
-    print("⚠️ >30% of fields are sparse — Accuracy is recommended over F1 as primary metric")
-```
+Use `analyze_dataset(dataset_path)` after downloading the test set. This reports field density information. For more detailed analysis, use `execute_python_analysis` with the downloaded ground truth files.
 
 ### Step 2: Compare Accuracy vs F1 in Evaluation Results
 
-```python
-from idpac.evaluations import EvaluationResult
-
-result = EvaluationResult.from_aggregated_file('results/summary.json')
-result.print_aggregated_summary(top_bottom_n=5)
-
-# Look at the gap between overallAccuracy and overallF1
-# A large gap (>5 points) suggests significant field sparsity impact
-```
+Use `get_evaluation_summary(batch_id)` to see both overallAccuracy and overallF1. Look at the gap between them — a large gap (>5 points) suggests significant field sparsity impact.
 
 ## Recommendation
 

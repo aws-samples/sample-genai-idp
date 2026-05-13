@@ -19,19 +19,11 @@ Reported accuracy is artificially low because the default evaluation method (EXA
 
 ## Diagnosis
 
-```python
-from idpac import IDPACClient
-from idpac.evaluations import EvaluationResult
+Use `get_evaluation_summary(batch_id)` to see per-field accuracy. Then investigate individual documents:
 
-client = IDPACClient('stack-name', region='us-east-1')
-summary = client.get_evaluation_summary('batch-id', 'results/summary.json')
-
-result = EvaluationResult.from_aggregated_file('results/summary.json')
-result.print_aggregated_summary(top_bottom_n=5)
-
-# Investigate individual documents to see what's being marked wrong
-client.download_single_document_results('batch-id', 'failing-doc.pdf', 'investigation/')
-client.download_ground_truth('test-set-id', 'failing-doc.pdf', 'investigation/gt.json')
+```
+download_single_document_results(batch_id, 'failing-doc.pdf')
+download_ground_truth(test_set_id, 'failing-doc.pdf')
 ```
 
 Look at the mismatches: is the extracted value actually wrong, or is it a valid equivalent that strict matching rejects?
@@ -52,53 +44,41 @@ Look at the mismatches: is the extracted value actually wrong, or is it a valid 
 
 ### Step 1: Set Appropriate Methods Per Field
 
-```python
-from idpac import IDPConfig
-
-config = IDPConfig('workspace/current-config.yaml')
-
-# Monetary/numeric fields → NUMERIC_EXACT
-config.set('classes.0.properties.Amount.x-aws-idp-evaluation-method', 'NUMERIC_EXACT')
-config.set('classes.0.properties.TotalArea.x-aws-idp-evaluation-method', 'NUMERIC_EXACT')
-
-# Fields with formatting variations → FUZZY or LEVENSHTEIN
-config.set('classes.0.properties.CompanyName.x-aws-idp-evaluation-method', 'FUZZY')
-
-# Domain fields with equivalent representations → LLM
-config.set('classes.0.properties.Township.x-aws-idp-evaluation-method', 'LLM')
-
-# Strict identifier fields → EXACT (default, but explicit is better)
-config.set('classes.0.properties.InvoiceNumber.x-aws-idp-evaluation-method', 'EXACT')
-
-config.save('workspace/updated-config.yaml')
+```
+config_edit(config_path, operations=[
+    {"op": "set", "field": "classes.0.properties.Amount.x-aws-idp-evaluation-method", "value": "NUMERIC_EXACT"},
+    {"op": "set", "field": "classes.0.properties.TotalArea.x-aws-idp-evaluation-method", "value": "NUMERIC_EXACT"},
+    {"op": "set", "field": "classes.0.properties.CompanyName.x-aws-idp-evaluation-method", "value": "FUZZY"},
+    {"op": "set", "field": "classes.0.properties.Township.x-aws-idp-evaluation-method", "value": "LLM"},
+    {"op": "set", "field": "classes.0.properties.InvoiceNumber.x-aws-idp-evaluation-method", "value": "EXACT"},
+    {"op": "save"}
+])
 ```
 
 ### Step 2: Tune Thresholds for Fuzzy/Similarity Methods
 
 The threshold controls how similar values must be to count as a match (0.0–1.0):
 
-```python
-# Strict: must be very similar (good for IDs with minor OCR errors)
-config.set('classes.0.properties.RecordNumber.x-aws-idp-evaluation-threshold', 0.9)
-
-# Lenient: allow more variation (good for names, descriptions)
-config.set('classes.0.properties.CustomerName.x-aws-idp-evaluation-threshold', 0.7)
+```
+config_edit(config_path, operations=[
+    {"op": "set", "field": "classes.0.properties.RecordNumber.x-aws-idp-evaluation-threshold", "value": 0.9},
+    {"op": "set", "field": "classes.0.properties.CustomerName.x-aws-idp-evaluation-threshold", "value": 0.7},
+    {"op": "save"}
+])
 ```
 
 ### Step 3: Set Field Weights by Business Importance
 
 Not all fields are equally important. Weight critical fields higher:
 
-```python
-# Critical fields: full weight
-config.set('classes.0.properties.InvoiceNumber.x-aws-idp-evaluation-weight', 1.0)
-config.set('classes.0.properties.TotalAmount.x-aws-idp-evaluation-weight', 1.0)
-
-# Important but less critical
-config.set('classes.0.properties.CustomerName.x-aws-idp-evaluation-weight', 0.5)
-
-# Nice-to-have fields
-config.set('classes.0.properties.Notes.x-aws-idp-evaluation-weight', 0.25)
+```
+config_edit(config_path, operations=[
+    {"op": "set", "field": "classes.0.properties.InvoiceNumber.x-aws-idp-evaluation-weight", "value": 1.0},
+    {"op": "set", "field": "classes.0.properties.TotalAmount.x-aws-idp-evaluation-weight", "value": 1.0},
+    {"op": "set", "field": "classes.0.properties.CustomerName.x-aws-idp-evaluation-weight", "value": 0.5},
+    {"op": "set", "field": "classes.0.properties.Notes.x-aws-idp-evaluation-weight", "value": 0.25},
+    {"op": "save"}
+])
 ```
 
 ### Step 4: Tune Array Matching Threshold
@@ -107,9 +87,11 @@ For arrays of structured objects (e.g., line items, land descriptions), the matc
 
 Lowering the threshold (e.g., to 0.7) allows objects to match even if some sub-fields differ, which gives a more realistic accuracy picture when most fields are correct but a few are wrong:
 
-```python
-# For array fields, set threshold on the array property
-config.set('classes.0.properties.line_items.x-aws-idp-evaluation-threshold', 0.7)
+```
+config_edit(config_path, operations=[
+    {"op": "set", "field": "classes.0.properties.line_items.x-aws-idp-evaluation-threshold", "value": 0.7},
+    {"op": "save"}
+])
 ```
 
 ## Decision Guide

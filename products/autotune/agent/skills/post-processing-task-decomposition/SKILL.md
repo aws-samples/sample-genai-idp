@@ -43,45 +43,40 @@ Decomposition is beneficial when there is a significant gap between what appears
 
 ### Step 1: Simplify the Extraction Prompt
 
-Instruct the LLM to extract values exactly as they appear in the document, without transformation:
+Instruct the LLM to extract values exactly as they appear in the document, without transformation. Read the current prompt with `config_edit(config_path, [{"op": "get", "field": "extraction.task_prompt"}])`, then append simplification guidance:
 
-```python
-from idpac import IDPConfig
+```
+config_edit(config_path, operations=[
+    {"op": "set", "field": "extraction.task_prompt", "value": "<existing prompt + appended text below>"},
+    {"op": "save"}
+])
+```
 
-config = IDPConfig('workspace/current-config.yaml')
+Text to append:
 
-current_prompt = config.get('extraction.task_prompt')
-
-simplification = '''
-
+```
 EXTRACTION APPROACH:
 - Extract values exactly as they appear in the document.
 - Do NOT attempt to map, transform, or standardize values.
 - For ID fields, extract the ID as shown in the document (e.g., vehicle number, unit number).
 - For code fields, extract the code exactly as marked/written.
 - If a person appears in multiple roles (e.g., both vehicle owner and driver), create only ONE entry and note the roles.
-- The extracted values will be post-processed to match the target schema format.'''
-
-config.set('extraction.task_prompt', current_prompt + simplification)
+- The extracted values will be post-processed to match the target schema format.
 ```
 
 ### Step 2: Add Placeholder Fields for Post-Processing Signals
 
 Add fields to the schema that help post-processing rules make decisions:
 
-```python
-# Add a signal field so post-processing knows when to duplicate entries
-config.set('classes.0.properties.People.items.properties.is_also_vehicle_owner.description',
-    'Set to true if this person is both the driver AND the vehicle owner. '
-    'Post-processing will create the duplicate owner entry.')
-config.set('classes.0.properties.People.items.properties.is_also_vehicle_owner.type', 'boolean')
-
-# Extract raw document IDs instead of mapped IDs
-config.set('classes.0.properties.People.items.properties.unit_number.description',
-    'The unit/vehicle number as shown in the document. '
-    'Do NOT convert to a person-level Party ID.')
-
-config.save('workspace/simplified-extraction-config.yaml')
+```
+config_edit(config_path, operations=[
+    {"op": "set", "field": "classes.0.properties.People.items.properties.is_also_vehicle_owner.description",
+     "value": "Set to true if this person is both the driver AND the vehicle owner. Post-processing will create the duplicate owner entry."},
+    {"op": "set", "field": "classes.0.properties.People.items.properties.is_also_vehicle_owner.type", "value": "boolean"},
+    {"op": "set", "field": "classes.0.properties.People.items.properties.unit_number.description",
+     "value": "The unit/vehicle number as shown in the document. Do NOT convert to a person-level Party ID."},
+    {"op": "save"}
+])
 ```
 
 ### Step 3: Implement Post-Processing
@@ -130,12 +125,12 @@ def post_process_extraction(extraction_result):
 
 Fields that are populated by post-processing rather than direct extraction may need adjusted evaluation methods:
 
-```python
-# Post-processed ID fields should use NUMERIC_EXACT since format may vary
-config.set('classes.0.properties.People.items.properties.Party_Id.x-aws-idp-evaluation-method', 'NUMERIC_EXACT')
-
-# Signal/placeholder fields should be excluded from evaluation
-config.set('classes.0.properties.People.items.properties.is_also_vehicle_owner.x-aws-idp-evaluation-weight', 0)
+```
+config_edit(config_path, operations=[
+    {"op": "set", "field": "classes.0.properties.People.items.properties.Party_Id.x-aws-idp-evaluation-method", "value": "NUMERIC_EXACT"},
+    {"op": "set", "field": "classes.0.properties.People.items.properties.is_also_vehicle_owner.x-aws-idp-evaluation-weight", "value": 0},
+    {"op": "save"}
+])
 ```
 
 ## Cost-Benefit Analysis

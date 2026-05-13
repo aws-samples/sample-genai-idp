@@ -29,15 +29,7 @@ Past engagements have shown that establishing document-level context first (cont
 
 ### Step 1: Identify the Pattern
 
-```python
-from idpac import IDPACClient
-from idpac.evaluations import EvaluationResult
-
-client = IDPACClient('stack-name', region='us-east-1')
-summary = client.get_evaluation_summary('batch-id', 'results/summary.json')
-result = EvaluationResult.from_aggregated_file('results/summary.json')
-result.print_aggregated_summary(top_bottom_n=5)
-```
+Use `get_evaluation_summary(batch_id)` to see per-field accuracy breakdown.
 
 Look for the signature pattern:
 - Top-level / document-level fields: high accuracy
@@ -46,23 +38,7 @@ Look for the signature pattern:
 
 ### Step 2: Check Entity Counts
 
-```python
-import json
-
-# Compare entity counts between extraction and ground truth
-client.download_single_document_results('batch-id', 'complex-doc.pdf', 'investigation/')
-client.download_ground_truth('test-set-id', 'complex-doc.pdf', 'investigation/gt.json')
-
-with open('investigation/gt.json') as f:
-    gt = json.load(f)
-
-# Count entities in ground truth array field
-gt_entities = gt.get('inference_result', {}).get('Programs', [])
-print(f"Ground truth entity count: {len(gt_entities)}")
-
-# Compare with extraction output
-# If extraction has significantly fewer entities, single-pass is struggling
-```
+Use `download_single_document_results(batch_id, 'complex-doc.pdf')` and `download_ground_truth(test_set_id, 'complex-doc.pdf')` to compare entity counts between extraction and ground truth. Use `execute_python_analysis` with the downloaded files to count entities in the ground truth array fields.
 
 ### Step 3: Check for Cross-Entity Confusion
 
@@ -70,17 +46,18 @@ Examine a few extracted entities and compare field values against the source doc
 
 ## Fix 1: Restructure the Extraction Task Prompt
 
-Guide the LLM to extract in a logical order within the single extraction call. This mimics step-wise extraction within the constraints of one prompt:
+Guide the LLM to extract in a logical order within the single extraction call. Read the current prompt with `config_edit(config_path, [{"op": "get", "field": "extraction.task_prompt"}])`, then append hierarchical guidance:
 
-```python
-from idpac import IDPConfig
+```
+config_edit(config_path, operations=[
+    {"op": "set", "field": "extraction.task_prompt", "value": "<existing prompt + appended text below>"},
+    {"op": "save"}
+])
+```
 
-config = IDPConfig('workspace/current-config.yaml')
+Text to append:
 
-current_prompt = config.get('extraction.task_prompt')
-
-hierarchical_guidance = '''
-
+```
 EXTRACTION APPROACH FOR COMPLEX DOCUMENTS:
 Follow this order when extracting from this document:
 
@@ -100,46 +77,32 @@ Follow this order when extracting from this document:
 
 CRITICAL: When the same item appears with different terms (e.g., different
 territories, date ranges, or rights), create SEPARATE entries for each
-distinct combination. Do not merge them into one entry.'''
-
-config.set('extraction.task_prompt', current_prompt + hierarchical_guidance)
-config.save('workspace/updated-config.yaml')
+distinct combination. Do not merge them into one entry.
 ```
 
 ## Fix 2: Improve Array Field Schema Descriptions
 
-Give the LLM explicit guidance about what constitutes a distinct entity and how to handle variations:
+Give the LLM explicit guidance about what constitutes a distinct entity:
 
-```python
-from idpac import IDPConfig
-
-config = IDPConfig('workspace/current-config.yaml')
-
-# Describe the array field with explicit counting and segmentation guidance
-config.set('classes.0.properties.Programs.description',
-    'List of ALL programs/titles in the document. Each program that has ANY '
-    'unique combination of rights, territories, dates, or terms MUST be a '
-    'separate entry. If the same program title appears with different territorial '
-    'rights or different time periods, create one entry per unique combination. '
-    'Extract ALL entries — do not skip, summarize, or merge.')
-
-# Add x-aws-idp-list-item-description for array items
-config.set('classes.0.properties.Programs.x-aws-idp-list-item-description',
-    'Each item represents one program with a specific set of rights. '
-    'If the same program has different rights for different territories '
-    'or time periods, it appears as multiple items.')
-
-config.save('workspace/updated-config.yaml')
+```
+config_edit(config_path, operations=[
+    {"op": "set", "field": "classes.0.properties.Programs.description",
+     "value": "List of ALL programs/titles in the document. Each program that has ANY unique combination of rights, territories, dates, or terms MUST be a separate entry. If the same program title appears with different territorial rights or different time periods, create one entry per unique combination. Extract ALL entries — do not skip, summarize, or merge."},
+    {"op": "set", "field": "classes.0.properties.Programs.x-aws-idp-list-item-description",
+     "value": "Each item represents one program with a specific set of rights. If the same program has different rights for different territories or time periods, it appears as multiple items."},
+    {"op": "save"}
+])
 ```
 
 ## Fix 3: Use a Stronger Model for Complex Documents
 
 More capable models handle long-context hierarchical extraction better:
 
-```python
-config.set('extraction.model', 'us.anthropic.claude-sonnet-4-5-20250929-v1:0')
-# For the most complex documents:
-config.set('extraction.model', 'us.anthropic.claude-opus-4-5-20251101-v1:0')
+```
+config_edit(config_path, operations=[
+    {"op": "set", "field": "extraction.model", "value": "us.anthropic.claude-sonnet-4-5-20250929-v1:0"},
+    {"op": "save"}
+])
 ```
 
 See the `choosing-a-bedrock-model` skill for cost/quality tradeoffs.
@@ -148,8 +111,11 @@ See the `choosing-a-bedrock-model` skill for cost/quality tradeoffs.
 
 Documents with many entities produce large JSON outputs. Ensure max_tokens is high enough:
 
-```python
-config.set('extraction.max_tokens', 65535)
+```
+config_edit(config_path, operations=[
+    {"op": "set", "field": "extraction.max_tokens", "value": 65535},
+    {"op": "save"}
+])
 ```
 
 See the `token-limit-fix` skill if output is being truncated.
@@ -158,21 +124,10 @@ See the `token-limit-fix` skill if output is being truncated.
 
 If the document type allows it, consider splitting into two document classes — one for document-level fields and one for entity-level fields. This only works in multi-class configurations where both classes can be applied to the same document:
 
-```python
-from idpac import IDPConfig
+- **Class 1**: Document-level metadata only (simpler extraction) — Properties: contract_type, date_executed, date_effective, parties, etc. No array fields.
+- **Class 2**: Entity-level details only — Properties: the array of programs/items with per-entity fields. Task prompt can reference document-level context.
 
-config = IDPConfig('workspace/current-config.yaml')
-
-# Class 1: Document-level metadata only (simpler extraction)
-# Properties: contract_type, date_executed, date_effective, parties, etc.
-# No array fields — just the top-level metadata
-
-# Class 2: Entity-level details only
-# Properties: the array of programs/items with per-entity fields
-# Task prompt can reference document-level context
-
-# This approach requires post-processing to merge the two outputs
-```
+Use `config_edit` to set up both classes with their respective schemas.
 
 **Note**: This approach requires a post-processing Lambda hook to combine the outputs from both classes into a single result. It adds architectural complexity and may not be worth it unless the accuracy gap is significant.
 

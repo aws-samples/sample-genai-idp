@@ -22,19 +22,7 @@ However, schemas often have dozens of fields, and it's not obvious which fields 
 
 ### Step 1: Establish Baseline and Categorize Fields
 
-After the first evaluation run, categorize every field by its accuracy AND its type:
-
-```python
-from idpac import IDPACClient, IDPConfig
-from idpac.evaluations import EvaluationResult
-
-client = IDPACClient('stack-name', region='us-east-1')
-summary = client.get_evaluation_summary('batch-id', 'results/summary.json')
-result = EvaluationResult.from_aggregated_file('results/summary.json')
-result.print_aggregated_summary(top_bottom_n=10)
-
-config = IDPConfig('workspace/current-config.yaml')
-```
+After the first evaluation run, categorize every field by its accuracy AND its type. Use `get_evaluation_summary(batch_id)` to get the aggregated metrics, and `config_edit(config_path, [{"op": "get", "field": "classes"}])` to inspect the schema.
 
 Build a mental model of field performance by category:
 
@@ -60,13 +48,9 @@ Not all fields are equally worth optimizing. Prioritize based on:
 3. **Document coverage**: Fields that appear in many documents (high density) affect more results than sparse fields
 4. **Fixability**: Some issues are addressable via schema changes, others require architecture changes
 
-```python
-# Check field weights to understand impact
-cls = config.get('classes.0')
-for field_name, field_def in cls.get('properties', {}).items():
-    weight = field_def.get('x-aws-idp-evaluation-weight', 1.0)
-    method = field_def.get('x-aws-idp-evaluation-method', 'EXACT')
-    print(f"{field_name}: weight={weight}, method={method}")
+```
+config_edit(config_path, operations=[{"op": "get", "field": "classes.0"}])
+# Then inspect the properties for weights and methods
 ```
 
 ### Step 3: Apply Category-Specific Fixes
@@ -113,22 +97,11 @@ Don't change everything at once. Each iteration should focus on one type of impr
 
 **Iteration pattern:**
 1. Change one category of fields (e.g., all boolean fields, or all date fields)
-2. Save as a new numbered config version
-3. Run evaluation
+2. Save as a new numbered config version using `copy_config` then `config_edit`
+3. Run evaluation with `run_evaluation`
 4. Compare results — did the targeted fields improve? Did anything regress?
 5. Log findings in OPTIMIZATION-LOG.md
 6. Move to the next category
-
-```python
-# Example: Iteration focused on boolean fields
-config = IDPConfig('workspace/config-v2-fixed-schemas.yaml')
-
-# Apply boolean-specific fixes to all boolean fields
-# (see boolean-field-extraction skill for details)
-# ...
-
-config.save('workspace/config-v3-boolean-fixes.yaml')
-```
 
 ### Step 5: Check for Regressions
 
@@ -137,21 +110,7 @@ After each iteration, verify that improving one set of fields didn't degrade oth
 - Schema restructuring changes how the LLM interprets the overall document
 - Model changes have different strengths/weaknesses
 
-```python
-# Compare two evaluation runs
-old_result = EvaluationResult.from_aggregated_file('results/eval-v2.json')
-new_result = EvaluationResult.from_aggregated_file('results/eval-v3.json')
-
-old_result.print_aggregated_summary(top_bottom_n=5)
-new_result.print_aggregated_summary(top_bottom_n=5)
-
-# Also compare configs to see exactly what changed
-IDPConfig.print_comparison(
-    'workspace/config-v2-fixed-schemas.yaml',
-    'workspace/config-v3-boolean-fixes.yaml',
-    name1='v2', name2='v3'
-)
-```
+Use `get_evaluation_summary` on both the old and new batch IDs to compare, or use `compare_evaluations([old_batch_id, new_batch_id])` for a side-by-side comparison. Also use `compare_configs(path1, path2)` to see exactly what changed between config versions.
 
 ### Step 6: Know When to Stop
 

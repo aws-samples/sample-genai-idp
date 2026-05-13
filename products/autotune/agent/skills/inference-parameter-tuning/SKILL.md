@@ -29,41 +29,46 @@ Apply this skill when:
 
 Extraction is a deterministic task — you want the LLM to faithfully copy values from the document, not generate creative responses. Use low temperature and top_p:
 
-```python
-from idpac import IDPConfig
-
-config = IDPConfig('workspace/current-config.yaml')
-
-# Recommended for extraction: low temperature, low top_p
-config.set('extraction.temperature', 0.2)
-config.set('extraction.top_p', 0.6)
-
-config.save('workspace/updated-config.yaml')
+```
+config_edit(config_path, operations=[
+    {"op": "set", "field": "extraction.temperature", "value": 0.2},
+    {"op": "set", "field": "extraction.top_p", "value": 0.6},
+    {"op": "save"}
+])
 ```
 
 For maximum determinism (e.g., when debugging or establishing baselines):
 
-```python
-config.set('extraction.temperature', 0)
-config.set('extraction.top_p', 0)
+```
+config_edit(config_path, operations=[
+    {"op": "set", "field": "extraction.temperature", "value": 0},
+    {"op": "set", "field": "extraction.top_p", "value": 0},
+    {"op": "save"}
+])
 ```
 
 ### For Classification Tasks
 
 Classification is also deterministic — use low settings:
 
-```python
-config.set('classification.temperature', 0)
-config.set('classification.top_p', 0)
+```
+config_edit(config_path, operations=[
+    {"op": "set", "field": "classification.temperature", "value": 0},
+    {"op": "set", "field": "classification.top_p", "value": 0},
+    {"op": "save"}
+])
 ```
 
 ### For OCR (Bedrock backend)
 
 When using Bedrock LLM for OCR, you want faithful text reproduction:
 
-```python
-config.set('ocr.temperature', 0)
-config.set('ocr.top_p', 0)
+```
+config_edit(config_path, operations=[
+    {"op": "set", "field": "ocr.temperature", "value": 0},
+    {"op": "set", "field": "ocr.top_p", "value": 0},
+    {"op": "save"}
+])
 ```
 
 ## Parameter Reference

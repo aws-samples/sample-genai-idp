@@ -34,19 +34,7 @@ Some document fields require complex visual parsing that LLMs struggle with, eve
 
 From evaluation results, find fields with consistently low accuracy. Then examine the source documents to determine if these fields involve visual parsing:
 
-```python
-from idpac import IDPACClient
-from idpac.evaluations import EvaluationResult
-
-client = IDPACClient('stack-name', region='us-east-1')
-summary = client.get_evaluation_summary('batch-id', 'results/summary.json')
-
-result = EvaluationResult.from_aggregated_file('results/summary.json')
-result.print_aggregated_summary(top_bottom_n=10)
-
-# Download a few failing documents and visually inspect them
-client.download_single_document_results('batch-id', 'failing-doc.pdf', 'investigation/')
-```
+Use `get_evaluation_summary(batch_id)` to identify low-accuracy fields, then `download_single_document_results(batch_id, 'failing-doc.pdf')` to inspect the extraction output.
 
 Look at the source document pages where the failing fields appear. If the fields involve checkboxes, diagrams, spatial tables, or handwritten content, they are visual extraction challenges.
 
@@ -60,34 +48,21 @@ Check whether the LLM is extracting *something* for these fields (wrong value) v
 
 For fields in complex visual layouts, add very specific location and parsing instructions to the field description:
 
-```python
-from idpac import IDPConfig
-
-config = IDPConfig('workspace/current-config.yaml')
-
-# BAD: vague description
-config.set('classes.0.properties.TrafficControlType.description',
-    'The type of traffic control at the intersection.')
-
-# GOOD: specific spatial guidance
-config.set('classes.0.properties.TrafficControlType.description',
-    'The traffic control type code from the TRAFFIC CRASH CODING table on page 2. '
-    'This field appears in the LEFT column of the coding table. '
-    'Look for a check mark or X mark to the LEFT of the code value. '
-    'Do NOT confuse with marks on the RIGHT side of the same row, which belong '
-    'to a different field. The code is the number/letter immediately to the '
-    'RIGHT of the check mark.')
+```
+config_edit(config_path, operations=[
+    {"op": "set", "field": "classes.0.properties.TrafficControlType.description",
+     "value": "The traffic control type code from the TRAFFIC CRASH CODING table on page 2. This field appears in the LEFT column of the coding table. Look for a check mark or X mark to the LEFT of the code value. Do NOT confuse with marks on the RIGHT side of the same row, which belong to a different field. The code is the number/letter immediately to the RIGHT of the check mark."},
+    {"op": "save"}
+])
 ```
 
 ### Strategy 2: Add Section Indicators to the Task Prompt
 
-Tell the LLM exactly where on the page to look for visual fields:
+Tell the LLM exactly where on the page to look for visual fields. Read the current task prompt with `config_edit(config_path, [{"op": "get", "field": "extraction.task_prompt"}])`, then append visual guidance and save.
 
-```python
-current_prompt = config.get('extraction.task_prompt')
+Example visual guidance to append:
 
-visual_guidance = '''
-
+```
 VISUAL FIELD EXTRACTION NOTES:
 - For fields in the TRAFFIC CRASH CODING section (typically page 2), pay careful
   attention to which side of the table a check mark appears on. Left-side marks
@@ -95,43 +70,43 @@ VISUAL FIELD EXTRACTION NOTES:
 - For damage diagram fields, describe the marked areas using the vehicle outline
   as reference (front, rear, left side, right side).
 - When a field value is determined by a checkbox or X-mark, extract the label
-  text associated with the MARKED checkbox, not adjacent unmarked ones.'''
-
-config.set('extraction.task_prompt', current_prompt + visual_guidance)
-config.save('workspace/updated-config.yaml')
+  text associated with the MARKED checkbox, not adjacent unmarked ones.
 ```
 
 ### Strategy 3: Improve Image Quality for Visual Fields
 
 Higher resolution images give the LLM better visual input for spatial parsing:
 
-```python
-# Increase DPI for better visual detail
-config.set('extraction.image.dpi', 300)
-
-# Increase image dimensions
-config.set('extraction.image.target_width', 2400)
-config.set('extraction.image.target_height', 1800)
+```
+config_edit(config_path, operations=[
+    {"op": "set", "field": "extraction.image.dpi", "value": 300},
+    {"op": "set", "field": "extraction.image.target_width", "value": 2400},
+    {"op": "set", "field": "extraction.image.target_height", "value": 1800},
+    {"op": "save"}
+])
 ```
 
 ### Strategy 4: Use a Stronger Multimodal Model
 
 More capable models have better spatial reasoning. If visual fields are critical:
 
-```python
-config.set('extraction.model', 'us.anthropic.claude-sonnet-4-5-20250929-v1:0')
-# Or for maximum visual capability:
-config.set('extraction.model', 'us.anthropic.claude-opus-4-5-20251101-v1:0')
+```
+config_edit(config_path, operations=[
+    {"op": "set", "field": "extraction.model", "value": "us.anthropic.claude-sonnet-4-5-20250929-v1:0"},
+    {"op": "save"}
+])
 ```
 
 ### Strategy 5: Exclude and Flag for Human Review
 
 If visual fields remain below acceptable accuracy after trying the above strategies, recommend excluding them from automated evaluation and flagging them for human review:
 
-```python
-# Set weight to 0 so these fields don't drag down overall accuracy
-config.set('classes.0.properties.DamageDiagram.x-aws-idp-evaluation-weight', 0)
-config.set('classes.0.properties.TrafficControlType.x-aws-idp-evaluation-weight', 0)
+```
+config_edit(config_path, operations=[
+    {"op": "set", "field": "classes.0.properties.DamageDiagram.x-aws-idp-evaluation-weight", "value": 0},
+    {"op": "set", "field": "classes.0.properties.TrafficControlType.x-aws-idp-evaluation-weight", "value": 0},
+    {"op": "save"}
+])
 ```
 
 **Always flag this to the human:**

@@ -103,10 +103,9 @@ Models are prefixed by region: `us.`, `eu.`, or `global.`
 
 ## Applying Model Changes
 
-```python
-from idpac import IDPConfig
-
-config = IDPConfig('idp-configs/my-config.yaml')
-config.set('extraction.model', 'us.anthropic.claude-sonnet-4-5-20250929-v1:0')
-config.save('idp-configs/my-config-sonnet.yaml')
+```
+config_edit(config_path, operations=[
+    {"op": "set", "field": "extraction.model", "value": "us.anthropic.claude-sonnet-4-5-20250929-v1:0"},
+    {"op": "save"}
+])
 ```
