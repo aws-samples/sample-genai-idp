@@ -176,8 +176,9 @@ def _handle_get_live_status() -> dict[str, Any]:
 
     Terminal statuses (excluded): COMPLETED, FAILED, ABORTED
     """
-    import boto3  # noqa: PLC0415
     from datetime import timedelta  # noqa: PLC0415
+
+    import boto3  # noqa: PLC0415
 
     timestamp = datetime.now(timezone.utc).isoformat()
 
@@ -214,7 +215,11 @@ def _handle_get_live_status() -> dict[str, Any]:
         # Include everything else: QUEUED, OCR, CLASSIFYING, EXTRACTING, etc.
         for item in response.get("Items", []):
             object_status = item.get("ObjectStatus")
-            if object_status and object_status not in ("COMPLETED", "FAILED", "ABORTED"):
+            if object_status and object_status not in (
+                "COMPLETED",
+                "FAILED",
+                "ABORTED",
+            ):
                 status_counts[object_status] = status_counts.get(object_status, 0) + 1
                 total += 1
 
@@ -231,8 +236,14 @@ def _handle_get_live_status() -> dict[str, Any]:
             )
             for item in response.get("Items", []):
                 object_status = item.get("ObjectStatus")
-                if object_status and object_status not in ("COMPLETED", "FAILED", "ABORTED"):
-                    status_counts[object_status] = status_counts.get(object_status, 0) + 1
+                if object_status and object_status not in (
+                    "COMPLETED",
+                    "FAILED",
+                    "ABORTED",
+                ):
+                    status_counts[object_status] = (
+                        status_counts.get(object_status, 0) + 1
+                    )
                     total += 1
 
         logger.info(
