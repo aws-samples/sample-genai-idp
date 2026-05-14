@@ -2,14 +2,12 @@
 // SPDX-License-Identifier: MIT-0
 
 /**
- * IDPMonitor Widget — AI Insights (Summary + Chat)
+ * IDPMonitor Widget — Summary
  *
  * Full-width widget placed at the top of the monitoring dashboard.
- * Two tabs:
- *   1. Summary — Auto-generated AI summary of current dashboard metrics
- *   2. Chat — Interactive natural language query interface
+ * Displays an auto-generated AI summary of current dashboard metrics.
  *
- * Both tabs use the analytics agent backend (same as search.py in
+ * Uses the analytics agent backend (same as search.py in
  * agentcore_mcp_handler) via the queryAnalyticsAgent AppSync mutation.
  */
 
@@ -20,8 +18,6 @@ import Container from '@cloudscape-design/components/container';
 import Header from '@cloudscape-design/components/header';
 import SpaceBetween from '@cloudscape-design/components/space-between';
 import Spinner from '@cloudscape-design/components/spinner';
-import Tabs from '@cloudscape-design/components/tabs';
-import Textarea from '@cloudscape-design/components/textarea';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { fetchAppSync } from '../../../lib/appsync-client';
@@ -148,17 +144,10 @@ export function SummaryWidget({
   apiUrl,
   apiKey,
 }: SummaryWidgetProps): JSX.Element {
-  // Summary tab state
   const [summaryText, setSummaryText] = useState<string>('');
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [summaryError, setSummaryError] = useState<string | null>(null);
   const summaryGeneratedRef = useRef(false);
-
-  // Chat tab state
-  const [chatInput, setChatInput] = useState('');
-  const [chatResponse, setChatResponse] = useState<string>('');
-  const [chatLoading, setChatLoading] = useState(false);
-  const [chatError, setChatError] = useState<string | null>(null);
 
   // ── Call analytics agent ──────────────────────────────────────────────────
   const callAnalyticsAgent = useCallback(
@@ -219,172 +208,58 @@ export function SummaryWidget({
     }
   }, [isLoading, dashboard.volume, generateSummary]);
 
-  // ── Chat submit handler ───────────────────────────────────────────────────
-  const handleChatSubmit = useCallback(async () => {
-    const query = chatInput.trim();
-    if (!query) return;
-
-    setChatLoading(true);
-    setChatError(null);
-    setChatResponse('');
-
-    const result = await callAnalyticsAgent(query);
-
-    if (result.success) {
-      setChatResponse(result.result ?? '');
-    } else {
-      setChatError(result.error ?? 'Failed to process query');
-    }
-    setChatLoading(false);
-  }, [chatInput, callAnalyticsAgent]);
-
-  // ── Keyboard handler for textarea ─────────────────────────────────────────
-  const handleChatKeyDown = useCallback(
-    (event: React.KeyboardEvent) => {
-      if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
-        event.preventDefault();
-        handleChatSubmit();
-      }
-    },
-    [handleChatSubmit],
-  );
-
-  // ── Summary Tab Content ───────────────────────────────────────────────────
-  const summaryTabContent = (
-    <SpaceBetween size="s">
-      {summaryLoading && (
-        <Box textAlign="center" padding="s">
-          <SpaceBetween size="xs" direction="horizontal" alignItems="center">
-            <Spinner size="normal" />
-            <Box color="text-body-secondary">Generating AI summary…</Box>
-          </SpaceBetween>
-        </Box>
-      )}
-
-      {summaryError && (
-        <Alert type="warning" dismissible onDismiss={() => setSummaryError(null)}>
-          {summaryError}
-        </Alert>
-      )}
-
-      {summaryText && !summaryLoading && (
-        <Box
-          color="text-body-secondary"
-          fontSize="body-m"
-          padding={{ vertical: 'xs' }}
-        >
-          {summaryText}
-        </Box>
-      )}
-
-      {!summaryText && !summaryLoading && !summaryError && (
-        <Box color="text-body-secondary" padding={{ vertical: 'xs' }}>
-          AI summary will be generated when dashboard data is available.
-        </Box>
-      )}
-
-      <Box float="right">
-        <Button
-          variant="link"
-          iconName="refresh"
-          onClick={generateSummary}
-          disabled={summaryLoading || isLoading}
-        >
-          Regenerate
-        </Button>
-      </Box>
-    </SpaceBetween>
-  );
-
-  // ── Chat Tab Content ──────────────────────────────────────────────────────
-  const chatTabContent = (
-    <SpaceBetween size="s">
-      {/* Response area */}
-      {chatLoading && (
-        <Box textAlign="center" padding="s">
-          <SpaceBetween size="xs" direction="horizontal" alignItems="center">
-            <Spinner size="normal" />
-            <Box color="text-body-secondary">Processing your query…</Box>
-          </SpaceBetween>
-        </Box>
-      )}
-
-      {chatError && (
-        <Alert type="error" dismissible onDismiss={() => setChatError(null)}>
-          {chatError}
-        </Alert>
-      )}
-
-      {chatResponse && !chatLoading && (
-        <Box
-          color="text-body-secondary"
-          fontSize="body-m"
-          padding={{ vertical: 'xs', horizontal: 's' }}
-          variant="div"
-        >
-          <div
-            style={{
-              backgroundColor: '#f8f9fa',
-              borderRadius: '8px',
-              padding: '12px 16px',
-              border: '1px solid #e9ecef',
-              maxHeight: '200px',
-              overflowY: 'auto',
-              whiteSpace: 'pre-wrap',
-            }}
-          >
-            {chatResponse}
-          </div>
-        </Box>
-      )}
-
-      {/* Input area */}
-      <div onKeyDown={handleChatKeyDown}>
-        <Textarea
-          value={chatInput}
-          onChange={({ detail }) => setChatInput(detail.value)}
-          placeholder="Ask a question about your IDP metrics… (e.g., 'What are the top failure reasons today?' or 'Show me cost trends')"
-          rows={4}
-          disabled={chatLoading}
-        />
-      </div>
-
-      <Box float="right">
-        <Button
-          variant="primary"
-          onClick={handleChatSubmit}
-          disabled={!chatInput.trim() || chatLoading}
-          loading={chatLoading}
-        >
-          Submit
-        </Button>
-      </Box>
-    </SpaceBetween>
-  );
-
   // ── Render ────────────────────────────────────────────────────────────────
   return (
     <Container
       header={
         <Header variant="h2">
-          AI Insights
+          Summary
         </Header>
       }
     >
-      <Tabs
-        tabs={[
-          {
-            id: 'summary',
-            label: 'Summary',
-            content: summaryTabContent,
-          },
-          {
-            id: 'chat',
-            label: 'Chat',
-            content: chatTabContent,
-          },
-        ]}
-      />
+      <SpaceBetween size="s">
+        {summaryLoading && (
+          <Box textAlign="center" padding="s">
+            <SpaceBetween size="xs" direction="horizontal" alignItems="center">
+              <Spinner size="normal" />
+              <Box color="text-body-secondary">Generating AI summary…</Box>
+            </SpaceBetween>
+          </Box>
+        )}
+
+        {summaryError && (
+          <Alert type="warning" dismissible onDismiss={() => setSummaryError(null)}>
+            {summaryError}
+          </Alert>
+        )}
+
+        {summaryText && !summaryLoading && (
+          <Box
+            color="text-body-secondary"
+            fontSize="body-m"
+            padding={{ vertical: 'xs' }}
+          >
+            {summaryText}
+          </Box>
+        )}
+
+        {!summaryText && !summaryLoading && !summaryError && (
+          <Box color="text-body-secondary" padding={{ vertical: 'xs' }}>
+            AI summary will be generated when dashboard data is available.
+          </Box>
+        )}
+
+        <Box float="right">
+          <Button
+            variant="link"
+            iconName="refresh"
+            onClick={generateSummary}
+            disabled={summaryLoading || isLoading}
+          >
+            Regenerate
+          </Button>
+        </Box>
+      </SpaceBetween>
     </Container>
   );
 }
