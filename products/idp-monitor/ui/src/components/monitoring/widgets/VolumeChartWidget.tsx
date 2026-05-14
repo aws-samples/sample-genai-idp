@@ -11,8 +11,6 @@
 import Box from '@cloudscape-design/components/box';
 import Container from '@cloudscape-design/components/container';
 import Header from '@cloudscape-design/components/header';
-import Icon from '@cloudscape-design/components/icon';
-import Popover from '@cloudscape-design/components/popover';
 import Spinner from '@cloudscape-design/components/spinner';
 import {
   Bar,
@@ -26,12 +24,15 @@ import {
 } from 'recharts';
 
 import type { StatusBreakdown, VolumeTimeSeriesPoint } from '../../../types/monitoring';
+import { AiInfoPopover } from '../AiInfoPopover';
 
 interface VolumeChartWidgetProps {
   timeSeries: VolumeTimeSeriesPoint[] | null | undefined;
   statusBreakdown?: StatusBreakdown | null;
   isLoading: boolean;
   timeRange?: string;
+  apiUrl?: string;
+  apiKey?: string;
 }
 
 // Matching the accelerator color palette (20% transparency)
@@ -132,6 +133,8 @@ export function VolumeChartWidget({
   statusBreakdown,
   isLoading,
   timeRange,
+  apiUrl,
+  apiKey,
 }: VolumeChartWidgetProps): JSX.Element {
   // Calculate pending from statusBreakdown (current snapshot) or per-bucket derivation
   const snapshotPending = (statusBreakdown?.inProgress ?? 0) + (statusBreakdown?.queued ?? 0);
@@ -160,16 +163,14 @@ export function VolumeChartWidget({
     safeData.length > 12 ? Math.ceil(safeData.length / 12) - 1 : 0;
 
   const infoPopover = (
-    <Popover
+    <AiInfoPopover
+      widgetName="Processing Volume"
+      cacheKey="volume-insight"
+      data={{ timeSeries: safeData, totalDocs, totalFailures, totalPending }}
       header="Processing Volume"
-      content="Number of documents processed over time, broken down by completion status (completed, failed, pending)."
-      triggerType="custom"
-      size="medium"
-    >
-      <Box color="text-status-info" display="inline-block" margin={{ left: 'xs' }}>
-        <Icon name="status-info" variant="link" />
-      </Box>
-    </Popover>
+      apiUrl={apiUrl}
+      apiKey={apiKey}
+    />
   );
 
   if (isLoading && !timeSeries) {

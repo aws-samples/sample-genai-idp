@@ -91,6 +91,8 @@ export function MonitoringLayout({
           statusBreakdown={dashboard.volume?.statusBreakdown}
           isLoading={isLoading}
           timeRange={timeRange}
+          apiUrl={apiUrl}
+          apiKey={apiKey}
         />
       )}
 
@@ -112,6 +114,8 @@ export function MonitoringLayout({
               <DocTypeChartWidget
                 distribution={dashboard.distribution}
                 isLoading={isLoading}
+                apiUrl={apiUrl}
+                apiKey={apiKey}
               />
             </div>
           )}
@@ -120,6 +124,8 @@ export function MonitoringLayout({
               <ConfigPanelWidget
                 config={dashboard.config}
                 isLoading={isLoading}
+                apiUrl={apiUrl}
+                apiKey={apiKey}
               />
             </div>
           )}
@@ -141,12 +147,12 @@ export function MonitoringLayout({
         >
           {widgetVisibility.latencyChart && (
             <div style={{ minWidth: 0, display: 'grid' }}>
-              <LatencyChartWidget latency={dashboard.latency} isLoading={isLoading} />
+              <LatencyChartWidget latency={dashboard.latency} isLoading={isLoading} apiUrl={apiUrl} apiKey={apiKey} />
             </div>
           )}
           {widgetVisibility.throttleEvents && (
             <div style={{ minWidth: 0, display: 'grid' }}>
-              <ThrottleWidget throttles={dashboard.throttles} isLoading={isLoading} />
+              <ThrottleWidget throttles={dashboard.throttles} isLoading={isLoading} apiUrl={apiUrl} apiKey={apiKey} />
             </div>
           )}
         </div>
