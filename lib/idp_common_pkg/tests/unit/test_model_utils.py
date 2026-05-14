@@ -78,18 +78,42 @@ class TestGetModelMaxOutputTokens:
     """Test model max output token detection."""
 
     def test_claude4_models_return_64k(self):
-        """Test Claude 4 models return 64,000 max tokens."""
-        assert get_model_max_output_tokens("us.anthropic.claude-sonnet-4-20250514-v1:0") == 64_000
-        assert get_model_max_output_tokens("us.anthropic.claude-opus-4-20250514-v1:0") == 64_000
-        assert get_model_max_output_tokens("us.anthropic.claude-haiku-4-5-20251001-v1:0") == 64_000
+        """Test Claude 4 Sonnet/Haiku and older Opus versions return 64,000 max tokens."""
+        # Sonnet 4.x
+        assert (
+            get_model_max_output_tokens("us.anthropic.claude-sonnet-4-20250514-v1:0")
+            == 64_000
+        )
         assert get_model_max_output_tokens("eu.anthropic.claude-sonnet-4-6") == 64_000
-        assert get_model_max_output_tokens("global.anthropic.claude-opus-4-7") == 64_000
+        # Haiku 4.x
+        assert (
+            get_model_max_output_tokens("us.anthropic.claude-haiku-4-5-20251001-v1:0")
+            == 64_000
+        )
+        # Older Opus versions (4.5, 4.6)
+        assert (
+            get_model_max_output_tokens("us.anthropic.claude-opus-4-5-20250514-v1:0")
+            == 64_000
+        )
+        assert (
+            get_model_max_output_tokens("us.anthropic.claude-opus-4-6-20250514-v1:0")
+            == 64_000
+        )
 
     def test_claude3_models_return_8k(self):
         """Test Claude 3 models return 8,192 max tokens."""
-        assert get_model_max_output_tokens("us.anthropic.claude-3-haiku-20240307-v1:0") == 8_192
-        assert get_model_max_output_tokens("us.anthropic.claude-3-5-sonnet-20241022-v2:0") == 8_192
-        assert get_model_max_output_tokens("eu.anthropic.claude-3-5-sonnet-20241022-v2:0") == 8_192
+        assert (
+            get_model_max_output_tokens("us.anthropic.claude-3-haiku-20240307-v1:0")
+            == 8_192
+        )
+        assert (
+            get_model_max_output_tokens("us.anthropic.claude-3-5-sonnet-20241022-v2:0")
+            == 8_192
+        )
+        assert (
+            get_model_max_output_tokens("eu.anthropic.claude-3-5-sonnet-20241022-v2:0")
+            == 8_192
+        )
 
     def test_nova_models_return_10k(self):
         """Test Amazon Nova models return 10,000 max tokens."""
@@ -111,6 +135,48 @@ class TestGetModelMaxOutputTokens:
 
     def test_case_insensitive(self):
         """Test model ID matching is case insensitive."""
-        assert get_model_max_output_tokens("US.ANTHROPIC.CLAUDE-SONNET-4-20250514-V1:0") == 64_000
+        assert (
+            get_model_max_output_tokens("US.ANTHROPIC.CLAUDE-SONNET-4-20250514-V1:0")
+            == 64_000
+        )
         assert get_model_max_output_tokens("US.AMAZON.NOVA-LITE-V1:0") == 10_000
-        assert get_model_max_output_tokens("US.ANTHROPIC.CLAUDE-3-HAIKU-20240307-V1:0") == 8_192
+        assert (
+            get_model_max_output_tokens("US.ANTHROPIC.CLAUDE-3-HAIKU-20240307-V1:0")
+            == 8_192
+        )
+
+    def test_extended_context_1m_suffix(self):
+        """Test that :1m extended context suffix doesn't change output token limit."""
+        # Claude 4 with :1m suffix should still be 64K output (Sonnet, Haiku)
+        assert (
+            get_model_max_output_tokens("us.anthropic.claude-sonnet-4-20250514-v1:0:1m")
+            == 64_000
+        )
+        # The :1m increases INPUT context window, not output tokens
+
+    def test_opus_4_7_returns_128k(self):
+        """Test Claude Opus 4.7 returns 128,000 max tokens."""
+        assert (
+            get_model_max_output_tokens("us.anthropic.claude-opus-4-7-20250514-v1:0")
+            == 128_000
+        )
+        assert (
+            get_model_max_output_tokens("global.anthropic.claude-opus-4-7")
+            == 128_000
+        )
+        # With :1m suffix
+        assert (
+            get_model_max_output_tokens("us.anthropic.claude-opus-4-7-20250514-v1:0:1m")
+            == 128_000
+        )
+
+    def test_older_opus_versions_return_64k(self):
+        """Test Claude Opus 4.5/4.6 return 64,000 max tokens."""
+        assert (
+            get_model_max_output_tokens("us.anthropic.claude-opus-4-5-20250514-v1:0")
+            == 64_000
+        )
+        assert (
+            get_model_max_output_tokens("us.anthropic.claude-opus-4-6-20250514-v1:0")
+            == 64_000
+        )

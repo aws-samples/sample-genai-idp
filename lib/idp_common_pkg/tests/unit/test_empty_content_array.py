@@ -21,9 +21,7 @@ class TestBedrockClientEmptyContent:
         client = BedrockClient()
         response = {
             "output": {
-                "message": {
-                    "content": [{"text": "This is the classification result"}]
-                }
+                "message": {"content": [{"text": "This is the classification result"}]}
             }
         }
 
@@ -51,9 +49,7 @@ class TestBedrockClientEmptyContent:
         client = BedrockClient()
         response = {
             "response": {
-                "output": {
-                    "message": {"content": [{"text": "nested response text"}]}
-                }
+                "output": {"message": {"content": [{"text": "nested response text"}]}}
             }
         }
 
@@ -123,5 +119,7 @@ class TestEmptyContentArrayDetection:
         # None should be treated as empty
         # Use .get() with default [] like in the code
         content_array = {} if content is None else content
-        result = content_array.get("content", []) if isinstance(content_array, dict) else []
+        result = (
+            content_array.get("content", []) if isinstance(content_array, dict) else []
+        )
         assert not result or len(result) == 0
