@@ -92,7 +92,7 @@ def invoke_agent(session_id: str, access_token: str, max_cost_per_page: float,
             "X-Amzn-Bedrock-AgentCore-Runtime-Session-Id": session_id,
         },
         json=body,
-        timeout=10,
+        timeout=120,
         stream=True,
     )
     if resp.status_code >= 400:

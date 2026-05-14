@@ -1536,8 +1536,6 @@ def wait_seconds(seconds: int) -> str:
 
 
 ALL_TOOLS = [
-    deploy_stack,
-    upload_test_set,
     upload_config,
     download_config,
     list_configs,
