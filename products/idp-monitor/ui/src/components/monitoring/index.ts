@@ -12,6 +12,7 @@ export { MonitoringFilters } from './MonitoringFilters';
 export { MonitoringLayout } from './MonitoringLayout';
 
 // Widgets
+export { SummaryWidget } from './widgets/SummaryWidget';
 export { KPICardsWidget } from './widgets/KPICardsWidget';
 export { VolumeChartWidget } from './widgets/VolumeChartWidget';
 export { DocTypeChartWidget } from './widgets/DocTypeChartWidget';

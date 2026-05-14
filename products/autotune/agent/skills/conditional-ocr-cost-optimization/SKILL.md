@@ -23,39 +23,17 @@ In a past engagement processing documents across 14 document classes, implementi
 
 ### Step 1: Identify Classes That Don't Need Extraction
 
-Review the document classes and determine which ones actually need extraction vs. classification-only:
+Review the document classes and determine which ones actually need extraction vs. classification-only. Use `config_edit` to inspect the classes:
 
-```python
-from idpac import IDPConfig
-from idpac.evaluations import EvaluationResult
-
-config = IDPConfig('workspace/current-config.yaml')
-
-# List all classes and their extraction schemas
-for i, cls in enumerate(config.get('classes')):
-    class_name = cls.get('$id', f'class_{i}')
-    num_fields = len(cls.get('properties', {}))
-    print(f"  {class_name}: {num_fields} extraction fields")
+```
+config_edit(config_path, operations=[{"op": "get", "field": "classes"}])
 ```
 
 Classes with few or no meaningful extraction fields, or classes where extraction results aren't used downstream, are candidates for OCR/extraction bypass.
 
 ### Step 2: Estimate Cost Impact
 
-```python
-from idpac import IDPACClient
-from idpac.evaluations import EvaluationResult
-
-client = IDPACClient('stack-name', region='us-east-1')
-summary = client.get_evaluation_summary('batch-id', 'results/summary.json')
-
-print(f"Total cost: ${summary.get('totalCost')}")
-print(f"Cost breakdown: {summary.get('costBreakdown')}")
-
-# Check per-class document counts to estimate savings
-result = EvaluationResult.from_aggregated_file('results/summary.json')
-result.print_classification_summary()
-```
+Use `get_evaluation_summary(batch_id)` to see cost breakdown and per-class document counts.
 
 Estimate savings by calculating what percentage of documents belong to classes that don't need extraction, and multiplying by the per-document OCR + extraction cost.
 
@@ -136,8 +114,11 @@ While per-class conditional OCR isn't supported, these global options exist:
 
 If NO classes need OCR (all extraction is multimodal image-only), you can disable OCR globally:
 
-```python
-config.set('ocr.backend', 'none')
+```
+config_edit(config_path, operations=[
+    {"op": "set", "field": "ocr.backend", "value": "none"},
+    {"op": "save"}
+])
 ```
 
 **Warning**: This typically causes a 30-50% accuracy drop for extraction. Only use if you've benchmarked and confirmed acceptable accuracy without OCR. See the `ocr-configuration` skill.
@@ -146,9 +127,12 @@ config.set('ocr.backend', 'none')
 
 If cost is a concern, disable optional pipeline features that add LLM calls:
 
-```python
-config.set('assessment.enabled', False)
-config.set('summarization.enabled', False)
+```
+config_edit(config_path, operations=[
+    {"op": "set", "field": "assessment.enabled", "value": false},
+    {"op": "set", "field": "summarization.enabled", "value": false},
+    {"op": "save"}
+])
 ```
 
 These features add per-document LLM costs for confidence scoring and document summarization. Disabling them during optimization reduces cost without affecting extraction accuracy.

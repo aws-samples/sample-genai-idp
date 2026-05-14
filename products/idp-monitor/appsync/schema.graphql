@@ -10,6 +10,7 @@
 
 schema {
   query: Query
+  mutation: Mutation
 }
 
 type Query {
@@ -86,6 +87,27 @@ type SectionError {
   section: String!
   message: String!
   code: String
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Mutations
+# ─────────────────────────────────────────────────────────────────────────────
+
+type Mutation {
+  # Query the analytics agent with natural language.
+  # Used by the SummaryWidget for AI-generated insights and interactive chat.
+  queryAnalyticsAgent(input: AnalyticsAgentInput!): AnalyticsAgentResponse
+}
+
+input AnalyticsAgentInput {
+  # Natural language query (e.g., "Summarize the last 24h metrics" or user chat question)
+  query: String!
+}
+
+type AnalyticsAgentResponse {
+  success: Boolean!
+  result: String
+  error: String
 }
 
 # ─────────────────────────────────────────────────────────────────────────────

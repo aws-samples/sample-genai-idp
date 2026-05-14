@@ -11,7 +11,10 @@ backend:
 # AutoTune agent configuration.
 # The IDP Accelerator stack must be deployed in the same AWS region as this stack.
 autotune:
-  # The IDP Accelerator stack that this agent optimizes configs for.
-  idp_stack_name: kaleko-IDPAutoTune-dev
+  # Glob pattern for IAM policy scoping. Grants the agent access to IDP stack
+  # resources (S3, DynamoDB, Lambda, SQS) matching this pattern.
+  # The actual IDP stack name is provided at invocation time, not deploy time.
+  # NOTE: Cannot be just "*" — YAML interprets a bare * as an alias. Use a prefix like "my-prefix-*".
+  idp_stack_name_pattern: kaleko-*
   # Bedrock model ID for the optimization agent.
   model_id: us.anthropic.claude-opus-4-6-v1

@@ -16,16 +16,7 @@ description: Comprehensive revision skill for improving document packet classifi
 
 ### Step 1: Get Current Metrics
 
-```python
-from idpac import IDPACClient
-from idpac.evaluations import EvaluationResult
-
-client = IDPACClient('stack-name', region='us-east-1')
-summary = client.get_evaluation_summary('batch-id', 'results/summary.json')
-
-result = EvaluationResult.from_aggregated_file('results/summary.json')
-result.print_split_summary()
-```
+Use `get_evaluation_summary(batch_id)` to see split classification metrics including `page_level_accuracy`, `split_accuracy_without_order`, and `split_accuracy_with_order`.
 
 ### Step 2: Identify the Problem Type
 
@@ -37,13 +28,12 @@ result.print_split_summary()
 
 ### Step 3: Examine Failing Documents
 
-```python
+```
 # Download ground truth for a failing packet
-result = client.download_ground_truth_all_sections('test-set-id', 'packet_0001.pdf', './gt/')
-print(f"Downloaded {result['count']} sections")
+download_ground_truth(test_set_id, 'packet_0001.pdf')
 
 # Compare with inference results
-client.download_single_document_results('batch-id', 'packet_0001.pdf', './inference/')
+download_single_document_results(batch_id, 'packet_0001.pdf')
 ```
 
 ---
@@ -214,65 +204,50 @@ The revision agent must apply these skills in the following sequence:
 
 Page-level classification sees ONE page at a time. Descriptions should focus on visual/structural cues visible on a single page:
 
-```python
-from idpac import IDPConfig
-
-config = IDPConfig('workspace/current-config.yaml')
-
-# BAD: describes multi-page document characteristics
-config.set('classes.0.description', 'A multi-page invoice with cover letter')
-
-# GOOD: describes single-page visual cues
-config.set('classes.0.description',
-    'Invoice page - contains line items with prices, quantities, totals. '
-    'Look for: invoice number, vendor/customer info, itemized list, amounts. '
-    'May have "INVOICE" header, company logo, payment terms.')
-
-config.set('classes.1.description',
-    'Letter page - formal correspondence with letterhead, date, salutation, '
-    'body text, signature block. Look for: "Dear...", formal closing like '
-    '"Sincerely", handwritten or typed signature.')
-
-config.save('workspace/updated-config.yaml')
+```
+config_edit(config_path, operations=[
+    {"op": "set", "field": "classes.0.description",
+     "value": "Invoice page - contains line items with prices, quantities, totals. Look for: invoice number, vendor/customer info, itemized list, amounts. May have \"INVOICE\" header, company logo, payment terms."},
+    {"op": "set", "field": "classes.1.description",
+     "value": "Letter page - formal correspondence with letterhead, date, salutation, body text, signature block. Look for: \"Dear...\", formal closing like \"Sincerely\", handwritten or typed signature."},
+    {"op": "save"}
+])
 ```
 
 ### Fix 2: Use Stronger Classification Model
 
-```python
-config.set('classification.model', 'us.anthropic.claude-sonnet-4-5-20250929-v1:0')
-config.save('workspace/updated-config.yaml')
+```
+config_edit(config_path, operations=[
+    {"op": "set", "field": "classification.model", "value": "us.anthropic.claude-sonnet-4-5-20250929-v1:0"},
+    {"op": "save"}
+])
 ```
 
 ### Fix 3: Add More Distinctive Class Descriptions
 
 If two classes are being confused, make their descriptions more distinctive:
 
-```python
+```
 # Find which classes are confused by examining inference results
 # Then update descriptions to highlight differences
-
-config.set('classes.0.description',
-    'Invoice page - MUST have itemized line items with prices. '
-    'Contains: invoice number, quantities, unit prices, totals, tax.')
-
-config.set('classes.1.description', 
-    'Receipt page - simpler than invoice, usually single transaction. '
-    'Contains: store name, date, items purchased, total amount paid.')
+config_edit(config_path, operations=[
+    {"op": "set", "field": "classes.0.description",
+     "value": "Invoice page - MUST have itemized line items with prices. Contains: invoice number, quantities, unit prices, totals, tax."},
+    {"op": "set", "field": "classes.1.description",
+     "value": "Receipt page - simpler than invoice, usually single transaction. Contains: store name, date, items purchased, total amount paid."},
+    {"op": "save"}
+])
 ```
 
 ### Fix 4: Use Per-Page Section Splitting
 
-When LLM-determined boundary detection consistently fails — especially for packets where each page is a separate logical document (single-page forms, certificates, maintenance records) — switch to per-page section splitting. This treats every page as its own section, bypassing boundary detection entirely.
+When LLM-determined boundary detection consistently fails — especially for packets where each page is a separate logical document (single-page forms, certificates, maintenance records) — switch to per-page section splitting.
 
-```python
-from idpac import IDPConfig
-
-config = IDPConfig('workspace/current-config.yaml')
-
-# Switch to per-page splitting
-config.set('classification.sectionSplitting', 'page')
-
-config.save('workspace/updated-config.yaml')
+```
+config_edit(config_path, operations=[
+    {"op": "set", "field": "classification.sectionSplitting", "value": "page"},
+    {"op": "save"}
+])
 ```
 
 **Available section splitting strategies:**
@@ -301,22 +276,16 @@ In a past engagement with complex bundled documents, per-page splitting outperfo
 After applying fixes:
 
 1. Upload updated config:
-   ```python
-   client.upload_config('workspace/updated-config.yaml', config_version='<version>', description='Tuned class descriptions')
+   ```
+   upload_config('workspace/updated-config.yaml', config_version='<version>', description='Tuned class descriptions')
    ```
 
 2. Re-run evaluation:
-   ```python
-   result = client.run_evaluation('test-set-id', context='Tuned class descriptions', config_version='<version>')
-   batch_id = result['batch_id']
+   ```
+   run_evaluation(test_set_id, context='Tuned class descriptions', config_version='<version>')
    ```
 
-3. Compare metrics:
-   ```python
-   new_summary = client.get_evaluation_summary(batch_id, 'results/new_summary.json')
-   new_result = EvaluationResult.from_aggregated_file('results/new_summary.json')
-   new_result.print_split_summary()
-   ```
+3. Compare metrics using `get_evaluation_summary(batch_id)` on the new batch ID. Check split classification metrics.
 
 4. Success criteria:
    - page_level_accuracy > 85%

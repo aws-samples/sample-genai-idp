@@ -24,20 +24,16 @@ You must create the best possible configuration using qualitative analysis only.
 
 ### 1. Schema Discovery (without ground truth)
 
-`Discovery` works without ground truth — it examines the document and infers a schema:
+`run_discovery` works without ground truth — it examines the document and infers a schema:
 
-```python
-from idpac import Discovery, IDPConfig
+```
+run_discovery(document_path='samples/invoice.pdf', ground_truth_path='')
+```
 
-discovery = Discovery(region='us-east-1')
-
-# Discover schema from document only (no ground_truth_path argument)
-schema = discovery.discover(document_path='samples/invoice.pdf')
-
-config = IDPConfig.from_defaults('pattern-2')
-config.set('classes', [schema])
-config = config.auto_fix()
-config.save('workspace/config-v1.yaml')
+Then validate and fix the generated config:
+```
+validate_config(config_path)
+auto_fix_config(config_path)
 ```
 
 For multi-class datasets, discover from one sample per class. If the user has told you the class names, ask them to point you to one representative document per class.
@@ -46,34 +42,25 @@ For multi-class datasets, discover from one sample per class. If the user has to
 
 Use `run_inference()` instead of `run_evaluation()`. This processes documents through the full IDP pipeline without needing a test set:
 
-```python
-from idpac import IDPACClient
-
-client = IDPACClient('my-stack', region='us-east-1')
-client.upload_config('workspace/config-v1.yaml', config_version='v1', description='Initial discovery')
-
-result = client.run_inference(
-    documents_dir='/path/to/documents/',
-    config_version='v1',
-    number_of_files=10  # start with a small subset
-)
-batch_id = result['batch_id']
+```
+upload_config(config_path, config_version='v1', description='Initial discovery')
+run_inference(documents_dir='/path/to/documents/', config_version='v1', number_of_files=10)
 ```
 
 ### 3. Download and Inspect Results
 
 Download extraction output (not evaluation output):
 
-```python
-client.download_results(batch_id, 'workspace/results-v1/', file_types='sections')
+```
+download_raw_processing_results(batch_id, file_types='sections')
 ```
 
 This gives you `sections/1/result.json` per document — the raw extraction output.
 
-You can also download OCR output for comparison:
+You can also download all output for comparison:
 
-```python
-client.download_results(batch_id, 'workspace/results-v1/', file_types='all')
+```
+download_raw_processing_results(batch_id, file_types='all')
 ```
 
 This includes `pages/N/rawText.json` (OCR text) and `pages/N/image.jpg` (page images).

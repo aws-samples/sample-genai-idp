@@ -18,48 +18,38 @@ Documents with many line items (e.g., invoices with 1000+ items) exceed the LLM'
 
 ## Diagnosis
 
-1. Identify 0% accuracy documents:
-```python
-from idpac.evaluations import EvaluationResult
-
-result = EvaluationResult.from_aggregated_file('results/<summary>.json')
-result.print_aggregated_summary(top_bottom_n=5)
-```
+1. Identify 0% accuracy documents using `get_evaluation_summary(batch_id)`.
 
 2. Download and examine extraction output:
-```python
-from idpac import IDPACClient
-
-client = IDPACClient('<stack-name>', region='us-east-1')
-client.download_single_document_results('<batch-id>', '<filename>.pdf', 'investigation/')
+```
+download_single_document_results(batch_id, '<filename>.pdf')
 ```
 
 3. Check if JSON starts correctly but is truncated (incomplete structure)
 
 4. Download ground truth to see expected line item count:
-```python
-client.download_ground_truth('<test-set-id>', '<filename>.pdf', 'investigation/gt.json')
+```
+download_ground_truth(test_set_id, '<filename>.pdf')
 ```
 
 ## Fix
 
-Add line item limit instructions to `extraction.task_prompt`:
+Read the current prompt with `config_edit(config_path, [{"op": "get", "field": "extraction.task_prompt"}])`, then append token limit guidance:
 
-```python
-from idpac import IDPConfig
+```
+config_edit(config_path, operations=[
+    {"op": "set", "field": "extraction.task_prompt", "value": "<existing prompt + appended text below>"},
+    {"op": "save"}
+])
+```
 
-config = IDPConfig('idp-configs/current.yaml')
-current_prompt = config.get('extraction.task_prompt')
+Text to append:
 
-token_fix = '''
-
+```
 IMPORTANT: Some documents contain extremely long lists with thousands of line items. To ensure valid JSON output:
 - Never output more than 500 line items for any single array
 - If a document has more than 500 items, extract the first 500 and add a field "truncated": true
-- Always ensure you output complete, valid JSON with all closing braces and brackets'''
-
-config.set('extraction.task_prompt', current_prompt + token_fix)
-config.save('idp-configs/current-token-fix.yaml')
+- Always ensure you output complete, valid JSON with all closing braces and brackets
 ```
 
 ## Verification

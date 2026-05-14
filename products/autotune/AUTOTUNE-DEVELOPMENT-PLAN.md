@@ -423,11 +423,14 @@ cdk deploy --require-approval never
 
 ```yaml
 autotune:
-  idp_stack_name: kaleko-IDPAutoTune-dev   # IDP stack to optimize (same region)
-  model_id: us.anthropic.claude-sonnet-4-20250514-v1:0
+  # Glob pattern for IAM policy scoping. Grants the agent access to IDP stack
+  # resources matching this pattern. Actual IDP stack name is provided at invocation time.
+  # NOTE: Cannot be just "*" — YAML interprets a bare * as an alias.
+  idp_stack_name_pattern: kaleko-*
+  model_id: us.anthropic.claude-opus-4-6-v1
 ```
 
-These values are passed as env vars `IDP_STACK_NAME` and `AUTOTUNE_MODEL_ID` to the agent runtime. No more hardcoded values in `backend-stack.ts`.
+`idp_stack_name_pattern` is used solely for IAM scoping. The actual IDP stack name is a required invocation parameter (`idp_stack_name` in the payload), set as `os.environ["IDP_STACK_NAME"]` at session start. `model_id` is passed as env var `AUTOTUNE_MODEL_ID` to the agent runtime.
 
 **Removed:** FAST feedback system (FeedbackDialog, feedbackService, feedback Lambda, feedback DynamoDB table). Replaced with optimization state API (`POST /cancel`, `GET /state`) backed by the OptimizationState DynamoDB table.
 

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT-0
 
 /**
- * IDPMonitor Widget — KPI Cards (Key Metrics Bar)
+ * IDPMonitor Widget — KPI Cards (Status Bar)
  *
  * 4-column summary showing Documents, Pages, Tokens, and Cost.
  * Matches the IDP Accelerator reference layout.
@@ -64,7 +64,7 @@ function formatTokens(n: number): string {
 export function KPICardsWidget({ volume, cost, isLoading }: KPICardsWidgetProps): JSX.Element {
   if (isLoading && !volume) {
     return (
-      <Container header={<Header variant="h2">Key Metrics</Header>}>
+      <Container header={<Header variant="h2">Status</Header>}>
         <Box textAlign="center" padding="l">
           <Spinner size="large" />
         </Box>
@@ -74,7 +74,7 @@ export function KPICardsWidget({ volume, cost, isLoading }: KPICardsWidgetProps)
 
   if (!volume) {
     return (
-      <Container header={<Header variant="h2">Key Metrics</Header>}>
+      <Container header={<Header variant="h2">Status</Header>}>
         <Box textAlign="center" color="text-body-secondary" padding="l">
           No data available for the selected time range.
         </Box>
@@ -96,7 +96,7 @@ export function KPICardsWidget({ volume, cost, isLoading }: KPICardsWidgetProps)
     volume.successRate != null && volume.successRate < 90 ? '#d13212' : undefined;
 
   return (
-    <Container header={<Header variant="h2">Key Metrics</Header>}>
+    <Container header={<Header variant="h2">Status</Header>}>
       <ColumnLayout columns={4} variant="text-grid">
         {/* 1 — Documents */}
         <KPICard

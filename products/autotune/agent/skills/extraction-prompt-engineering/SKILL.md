@@ -18,20 +18,11 @@ Extraction accuracy is low for specific fields because the schema field descript
 
 ## Diagnosis
 
-```python
-from idpac import IDPACClient
-from idpac.evaluations import EvaluationResult
+Use `get_evaluation_summary(batch_id)` to see per-field accuracy and identify weak fields. Then investigate individual failing documents:
 
-client = IDPACClient('stack-name', region='us-east-1')
-summary = client.get_evaluation_summary('batch-id', 'results/summary.json')
-
-result = EvaluationResult.from_aggregated_file('results/summary.json')
-result.print_aggregated_summary(top_bottom_n=5)
-
-# Look at per-field accuracy to identify weak fields
-# Then investigate individual failing documents
-client.download_single_document_results('batch-id', 'failing-doc.pdf', 'investigation/')
-client.download_ground_truth('test-set-id', 'failing-doc.pdf', 'investigation/gt.json')
+```
+download_single_document_results(batch_id, 'failing-doc.pdf')
+download_ground_truth(test_set_id, 'failing-doc.pdf')
 ```
 
 Compare the extracted values against ground truth to understand *why* the field is wrong — wrong format? Wrong value selected? Missing entirely?
@@ -57,85 +48,58 @@ From evaluation results, find fields with low accuracy. Prioritize fields that:
 
 ### Step 2: Enrich Field Descriptions
 
-```python
-from idpac import IDPConfig
-
-config = IDPConfig('workspace/current-config.yaml')
-
-# BAD: Vague description
-# "township": { "description": "The township designation", "type": "string" }
-
-# GOOD: Rich description with domain context, format, and examples
-config.set('classes.0.properties.township.description',
-    'The PLSS township designation indicating position north or south of the '
-    'baseline. Townships are 6-mile x 6-mile squares containing 36 sections. '
-    'Format includes the township number followed by directional indicator '
-    '(N for North, S for South of baseline). '
-    'Format as T[-]{digit}[-]{direction}, such as T5S or T-2-E. '
-    'Extract the complete designation including direction.')
+```
+config_edit(config_path, operations=[
+    {"op": "set", "field": "classes.0.properties.township.description",
+     "value": "The PLSS township designation indicating position north or south of the baseline. Townships are 6-mile x 6-mile squares containing 36 sections. Format includes the township number followed by directional indicator (N for North, S for South of baseline). Format as T[-]{digit}[-]{direction}, such as T5S or T-2-E. Extract the complete designation including direction."},
+    {"op": "save"}
+])
 ```
 
 ### Step 3: Distinguish Confusable Fields
 
 When two fields are semantically similar, explicitly contrast them:
 
-```python
-# Dates that could be confused
-config.set('classes.0.properties.RecordDate.description',
-    'Date when the document was officially recorded by the county office. '
-    'Look for keywords: "Recorded", "duly Recorded", "e-Recorded for". '
-    'This is NOT the execution date or filing date. Format: YYYY-MM-DD.')
-
-config.set('classes.0.properties.FileDate.description',
-    'Date when the document was initially submitted/filed, which may precede '
-    'the recording date. Often identical to RecordDate when processed immediately. '
-    'This is NOT the execution or acknowledgement date. Format: YYYY-MM-DD.')
-
-config.set('classes.0.properties.ExecutedDate.description',
-    'Date when the document was signed/executed by the parties. '
-    'This is typically the earliest date and precedes filing and recording. '
-    'Format: YYYY-MM-DD.')
+```
+config_edit(config_path, operations=[
+    {"op": "set", "field": "classes.0.properties.RecordDate.description",
+     "value": "Date when the document was officially recorded by the county office. Look for keywords: \"Recorded\", \"duly Recorded\", \"e-Recorded for\". This is NOT the execution date or filing date. Format: YYYY-MM-DD."},
+    {"op": "set", "field": "classes.0.properties.FileDate.description",
+     "value": "Date when the document was initially submitted/filed, which may precede the recording date. Often identical to RecordDate when processed immediately. This is NOT the execution or acknowledgement date. Format: YYYY-MM-DD."},
+    {"op": "set", "field": "classes.0.properties.ExecutedDate.description",
+     "value": "Date when the document was signed/executed by the parties. This is typically the earliest date and precedes filing and recording. Format: YYYY-MM-DD."},
+    {"op": "save"}
+])
 ```
 
 ### Step 4: Handle Complex Nested/Array Fields
 
 For array fields containing structured objects, describe both the array purpose and each sub-field:
 
-```python
-config.set('classes.0.properties.line_items.description',
-    'List of all line items in order of appearance. '
-    'Extract ALL items — do not skip or summarize.')
-
-# Sub-field descriptions within array items
-config.set('classes.0.properties.line_items.items.properties.quantity.description',
-    'Numeric quantity ordered. Extract only the number, not units. '
-    'Example: "5" from "5 boxes".')
-
-config.set('classes.0.properties.line_items.items.properties.unit_price.description',
-    'Price per single unit before tax/discount. '
-    'Extract as decimal number without currency symbol. '
-    'Example: "12.50" not "$12.50".')
+```
+config_edit(config_path, operations=[
+    {"op": "set", "field": "classes.0.properties.line_items.description",
+     "value": "List of all line items in order of appearance. Extract ALL items — do not skip or summarize."},
+    {"op": "set", "field": "classes.0.properties.line_items.items.properties.quantity.description",
+     "value": "Numeric quantity ordered. Extract only the number, not units. Example: \"5\" from \"5 boxes\"."},
+    {"op": "set", "field": "classes.0.properties.line_items.items.properties.unit_price.description",
+     "value": "Price per single unit before tax/discount. Extract as decimal number without currency symbol. Example: \"12.50\" not \"$12.50\"."},
+    {"op": "save"}
+])
 ```
 
 ### Step 5: Include Valid Values for Enum/Dropdown Fields
 
 When a field has a fixed set of valid values (codes, categories, dropdown options), listing those values in the field description is one of the highest-impact improvements you can make. In past engagements, adding dropdown values to field descriptions was a major factor in achieving ~40% accuracy improvement across iterative prompt refinements.
 
-```python
-# Code field with known valid options
-config.set('classes.0.properties.CrashType.Code.description',
-    'The crash type classification code. Must be one of the following values: '
-    '"A" (Head-On), "B" (Sideswipe-Same Direction), "C" (Rear End), '
-    '"D" (Broadside), "E" (Hit Object), "F" (Overturned), '
-    '"G" (Vehicle/Pedestrian), "H" (Other). '
-    'Extract the code letter only, not the description.')
-
-# Description field paired with a code field
-config.set('classes.0.properties.CrashType.Description.description',
-    'The human-readable description of the crash type. Must be exactly one of: '
-    '"Head-On", "Sideswipe-Same Direction", "Rear End", "Broadside", '
-    '"Hit Object", "Overturned", "Vehicle/Pedestrian", "Other". '
-    'Use the description that corresponds to the code value.')
+```
+config_edit(config_path, operations=[
+    {"op": "set", "field": "classes.0.properties.CrashType.Code.description",
+     "value": "The crash type classification code. Must be one of the following values: \"A\" (Head-On), \"B\" (Sideswipe-Same Direction), \"C\" (Rear End), \"D\" (Broadside), \"E\" (Hit Object), \"F\" (Overturned), \"G\" (Vehicle/Pedestrian), \"H\" (Other). Extract the code letter only, not the description."},
+    {"op": "set", "field": "classes.0.properties.CrashType.Description.description",
+     "value": "The human-readable description of the crash type. Must be exactly one of: \"Head-On\", \"Sideswipe-Same Direction\", \"Rear End\", \"Broadside\", \"Hit Object\", \"Overturned\", \"Vehicle/Pedestrian\", \"Other\". Use the description that corresponds to the code value."},
+    {"op": "save"}
+])
 ```
 
 **Tradeoffs to consider:**
@@ -159,28 +123,29 @@ This is distinct from the general "return null for missing fields" instruction �
 
 **Fix via field description** — explicitly state what the field is NOT and where NOT to look:
 
-```python
+```
 # BAD: Vague — LLM will grab any state it finds
 # "work_state": { "description": "The employee's work state", "type": "string" }
 
 # GOOD: Explicitly disambiguates from nearby similar content
-config.set('classes.0.properties.work_state.description',
-    'The state where the employee performs their work duties. '
-    'This must be explicitly labeled as "work state" or "state of employment" '
-    'in the document. Do NOT extract the state from the employee mailing address, '
-    'employer address, or any other address field. '
-    'If no explicitly labeled work state field exists in the document, return null.')
+config_edit(config_path, operations=[
+    {"op": "set", "field": "classes.0.properties.work_state.description",
+     "value": "The state where the employee performs their work duties. This must be explicitly labeled as \"work state\" or \"state of employment\" in the document. Do NOT extract the state from the employee mailing address, employer address, or any other address field. If no explicitly labeled work state field exists in the document, return null."},
+    {"op": "save"}
+])
 ```
 
 **Fix via task prompt** — add a cross-cutting instruction for all fields:
 
-```python
-current_prompt = config.get('extraction.task_prompt')
+```
+# First read the current prompt:
+config_edit(config_path, operations=[{"op": "get", "field": "extraction.task_prompt"}])
 
-anti_hallucination = '''
-- CRITICAL: Only extract a value for a field if the document contains content that specifically corresponds to that field. Do not infer or fill in a field from nearby similar-looking content. If a field is not explicitly present in the document, return null rather than guessing from related fields.'''
-
-config.set('extraction.task_prompt', current_prompt + anti_hallucination)
+# Then append anti-hallucination guidance:
+config_edit(config_path, operations=[
+    {"op": "set", "field": "extraction.task_prompt", "value": "<current_prompt + the following appended>\n- CRITICAL: Only extract a value for a field if the document contains content that specifically corresponds to that field. Do not infer or fill in a field from nearby similar-looking content. If a field is not explicitly present in the document, return null rather than guessing from related fields."},
+    {"op": "save"}
+])
 ```
 
 **Common patterns to watch for:**
@@ -194,21 +159,27 @@ config.set('extraction.task_prompt', current_prompt + anti_hallucination)
 
 For cross-cutting concerns that apply to all fields, add instructions to the extraction task prompt rather than individual field descriptions:
 
-```python
-current_prompt = config.get('extraction.task_prompt')
+```
+# Read current prompt first:
+config_edit(config_path, operations=[{"op": "get", "field": "extraction.task_prompt"}])
 
-extraction_guidance = '''
+# Then set the updated prompt with appended guidelines:
+config_edit(config_path, operations=[
+    {"op": "set", "field": "extraction.task_prompt", "value": "<existing prompt + appended extraction guidelines>"},
+    {"op": "save"}
+])
+```
 
+Example extraction guidelines to append:
+
+```
 EXTRACTION GUIDELINES:
 - Extract values exactly as they appear in the document unless a specific format is requested in the field description.
 - For fields with no matching value in the document, return null.
 - For date fields, convert to YYYY-MM-DD format regardless of how the date appears in the document.
 - For numeric fields, extract only the numeric value without currency symbols or units.
 - For name fields, preserve the original casing and spelling from the document.
-- When multiple candidate values exist for a field, use the field description to determine which is correct.'''
-
-config.set('extraction.task_prompt', current_prompt + extraction_guidance)
-config.save('workspace/updated-config.yaml')
+- When multiple candidate values exist for a field, use the field description to determine which is correct.
 ```
 
 ## Description Enrichment Template
@@ -245,29 +216,25 @@ Beyond field descriptions, two schema-level annotations significantly improve ex
 
 Every leaf field (string, number, boolean) should have a `data_type` annotation matching its type. This tells the extraction pipeline how to parse and validate the value. Missing `data_type` can cause subtle extraction issues.
 
-```python
-# data_type should mirror the field's type:
-#   type: string   → data_type: string
-#   type: number   → data_type: number
-#   type: integer  → data_type: number
-#   type: boolean  → data_type: boolean
-
+```
 # You can add data_type automatically to all leaf fields:
-config = config.auto_fix(['add_data_type'])
+auto_fix_config(config_path, fixes=["add_data_type"])
 ```
 
 ### `enum` — Use for Categorical Fields
 
 When a field has a known finite set of valid values, add an `enum` constraint directly on the schema property. This is more effective than listing values only in the description because the LLM sees the constraint as a hard requirement, not a suggestion.
 
-```python
-# Add enum constraint + description explaining the values
-cls = config.get_class_by_name('EQUIPMENT_INSPECTION')
-cls['$defs']['checkpointItem']['properties']['status']['enum'] = [
-    'functional', 'needsService', 'defective', 'pass', 'fail', 'na'
-]
-cls['$defs']['checkpointItem']['properties']['status']['description'] = (
-    'Inspection status. Must be one of the enum values.')
+Use `config_edit` to add enum constraints:
+
+```
+config_edit(config_path, operations=[
+    {"op": "set", "field": "classes.0.properties.status.enum",
+     "value": ["functional", "needsService", "defective", "pass", "fail", "na"]},
+    {"op": "set", "field": "classes.0.properties.status.description",
+     "value": "Inspection status. Must be one of the enum values."},
+    {"op": "save"}
+])
 ```
 
 **When to add `enum`:**

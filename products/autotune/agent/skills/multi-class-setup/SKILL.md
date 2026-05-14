@@ -12,63 +12,38 @@ Dataset contains documents of different types that need classification before ex
 ## Symptoms
 
 - Ground truth files have different `document_class.type` values
-- `DatasetAnalyzer.is_multi_class()` returns True
+- `analyze_dataset` reports the dataset as multi-class
 - Single-schema config gives 0% accuracy on documents of other classes
 
 ## Diagnosis
 
-```python
-from idpac import DatasetAnalyzer
-
-analyzer = DatasetAnalyzer('/path/to/dataset')
-print(f"Classes: {analyzer.get_class_names()}")
-print(f"Is multi-class: {analyzer.is_multi_class()}")
-
-errors = analyzer.validate_ground_truth_format()
-if errors:
-    print(f"Ground truth issues: {errors}")
-```
+Use `analyze_dataset(dataset_path)` after downloading the test set with `download_test_set(test_set_id)`. This will report the dataset mode (single-class, multi-class, or packet-splitting), class names, and any ground truth validation errors.
 
 ## Fix
 
 ### 1. Generate Schemas for Each Class
 
-```python
-from idpac import DatasetAnalyzer, Discovery
-
-analyzer = DatasetAnalyzer('/path/to/dataset')
-samples = analyzer.get_samples_by_class(n=1)
-gt_paths = analyzer.get_ground_truth_by_class(n=1)
-
-discovery = Discovery(region='us-east-1')
-schemas = discovery.discover_multi_class(samples, gt_paths)
-```
+Use `run_multi_class_discovery(dataset_path)` to discover schemas for all classes and create a config automatically. This requires the dataset to be downloaded locally first.
 
 ### 2. Create Multi-Class Config
 
-```python
-from idpac import IDPConfig
+The `run_multi_class_discovery` tool creates the config for you. After it runs, validate it:
 
-config = IDPConfig.from_defaults('pattern-2')
-for schema in schemas:
-    config.add_class(schema)
-
-# Validate before saving
-result = config.validate()
-if not result.is_valid:
-    print(result)
-
-config.save('workspace/config-multiclass-v1.yaml')
+```
+validate_config(config_path)
+auto_fix_config(config_path)
 ```
 
 ### 3. Add Class Descriptions
 
 Each class should have a `description` field to help the classifier:
 
-```python
-for i, class_name in enumerate(config.get_class_names()):
-    desc = f"Description of what makes {class_name} documents unique"
-    config.set(f'classes.{i}.description', desc)
+```
+config_edit(config_path, operations=[
+    {"op": "set", "field": "classes.0.description", "value": "Description of what makes this document type unique"},
+    {"op": "set", "field": "classes.1.description", "value": "Description of what makes this document type unique"},
+    {"op": "save"}
+])
 ```
 
 ## Verification

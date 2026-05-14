@@ -27,39 +27,13 @@ Past engagements have found this analysis critical — SMEs reviewing data compl
 
 ### Step 1: Compute Field Density
 
-```python
-from idpac import DatasetAnalyzer
+Use `analyze_dataset(dataset_path)` after downloading the test set with `download_test_set(test_set_id)`. This reports field density information including sparse fields.
 
-analyzer = DatasetAnalyzer('/path/to/dataset')
-density = analyzer.get_field_density()
-
-# Categorize fields by population density
-sparse = {k: v for k, v in density.items() if v < 0.1}
-medium = {k: v for k, v in density.items() if 0.1 <= v < 0.5}
-dense = {k: v for k, v in density.items() if v >= 0.5}
-
-print(f"Total fields: {len(density)}")
-print(f"Dense (>50% populated): {len(dense)}")
-print(f"Medium (10-50%): {len(medium)}")
-print(f"Sparse (<10%): {len(sparse)}")
-
-print("\nSparsest fields:")
-for field, d in list(density.items())[:10]:
-    print(f"  {field}: {d:.1%} populated")
-```
+For more detailed per-field density analysis, use `execute_python_analysis` with the downloaded ground truth files to compute exact population rates per field.
 
 ### Step 2: Analyze Per-Class Density (Multi-Class Datasets)
 
-For multi-class datasets, null rates vary by class. A field that's always populated for Contracts may be always empty for Waivers:
-
-```python
-for class_name in analyzer.get_class_names():
-    class_density = analyzer.get_field_density(doc_class=class_name)
-    empty_fields = [k for k, v in class_density.items() if v == 0.0]
-    print(f"\n{class_name}: {len(empty_fields)} always-empty fields")
-    for f in empty_fields:
-        print(f"  - {f}")
-```
+For multi-class datasets, null rates vary by class. A field that's always populated for Contracts may be always empty for Waivers. Use `execute_python_analysis` with the downloaded ground truth files to compute per-class density.
 
 ### Step 3: Identify Suspicious Patterns
 
@@ -75,21 +49,7 @@ Look for these red flags:
 
 ### Step 4: Spot-Check Suspicious Fields
 
-For fields with unexpected null rates, examine a few documents:
-
-```python
-import json
-
-# Find documents where a supposedly-common field is empty
-field_name = 'ContractType'  # field you expect to be populated
-
-for cache_key, gt in analyzer._ground_truth_cache.items():
-    result = gt.get('inference_result', {})
-    value = result.get(field_name)
-    if value in [None, '', []]:
-        doc_name = cache_key.rsplit('/', 1)[0]
-        print(f"  {doc_name}: {field_name} is empty — investigate this document")
-```
+For fields with unexpected null rates, examine a few documents. Use `download_ground_truth(test_set_id, filename)` to get the ground truth for specific documents, then use `execute_python_analysis` to inspect which fields are empty.
 
 Then download and visually inspect those documents to determine if the field is genuinely absent or if the annotation was missed.
 
@@ -147,17 +107,12 @@ are intentionally empty or missing annotations.
 - **Missing annotations confirmed**: Work with human to fix ground truth before continuing optimization.
 - **Intentionally empty fields confirmed**: Ensure the schema and prompts handle the empty case correctly (return null or "N/A" as appropriate).
 
-```python
-from idpac import IDPConfig
-
-config = IDPConfig('workspace/current-config.yaml')
-
-# Temporarily exclude always-empty fields from evaluation
-# until human confirms they should be populated
-for field in always_empty_fields:
-    config.set(f'classes.0.properties.{field}.x-aws-idp-evaluation-weight', 0)
-
-config.save('workspace/updated-config.yaml')
+```
+config_edit(config_path, operations=[
+    {"op": "set", "field": "classes.0.properties.<field1>.x-aws-idp-evaluation-weight", "value": 0},
+    {"op": "set", "field": "classes.0.properties.<field2>.x-aws-idp-evaluation-weight", "value": 0},
+    {"op": "save"}
+])
 ```
 
 ## Interaction with Other Skills

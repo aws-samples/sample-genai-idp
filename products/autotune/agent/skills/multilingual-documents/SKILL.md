@@ -67,12 +67,8 @@ Look for signs of non-English text:
 
 ### Step 2: Check Current OCR Configuration
 
-```python
-from idpac import IDPConfig
-
-config = IDPConfig('workspace/current-config.yaml')
-backend = config.get('ocr.backend')  # 'textract' or 'bedrock'
-print(f"Current OCR backend: {backend}")
+```
+config_edit(config_path, operations=[{"op": "get", "field": "ocr.backend"}])
 ```
 
 ### Step 3: Evaluate OCR Quality
@@ -87,38 +83,34 @@ If using Textract on unsupported languages, you'll see:
 
 ### Fix 1: Switch to Bedrock OCR
 
-```python
-from idpac import IDPConfig
-
-config = IDPConfig('workspace/current-config.yaml')
-
-# Switch from Textract to Bedrock OCR
-config.set('ocr.backend', 'bedrock')
-config.set('ocr.model_id', 'us.anthropic.claude-sonnet-4-5-20250929-v1:0')
-
-config.save('workspace/updated-config.yaml')
+```
+config_edit(config_path, operations=[
+    {"op": "set", "field": "ocr.backend", "value": "bedrock"},
+    {"op": "set", "field": "ocr.model_id", "value": "us.anthropic.claude-sonnet-4-5-20250929-v1:0"},
+    {"op": "save"}
+])
 ```
 
 ### Fix 2: Use Language-Specific Prompts
 
 Adjust extraction prompts to handle the target language:
 
-```python
-config.set('extraction.task_prompt', 
-    'Extract the following fields from this document. '
-    'The document is in Mandarin Chinese. '
-    'Return field values in their original language.'
-)
+```
+config_edit(config_path, operations=[
+    {"op": "set", "field": "extraction.task_prompt",
+     "value": "Extract the following fields from this document. The document is in Mandarin Chinese. Return field values in their original language."},
+    {"op": "save"}
+])
 ```
 
 Or request translation in the prompt:
 
-```python
-config.set('extraction.task_prompt', 
-    'Extract the following fields from this document. '
-    'The document may be in Mandarin Chinese. '
-    'Translate all extracted values to English.'
-)
+```
+config_edit(config_path, operations=[
+    {"op": "set", "field": "extraction.task_prompt",
+     "value": "Extract the following fields from this document. The document may be in Mandarin Chinese. Translate all extracted values to English."},
+    {"op": "save"}
+])
 ```
 
 ## Decision Tree

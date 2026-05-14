@@ -38,6 +38,7 @@ class OptimizationState:
         max_iterations: int = 10,
         max_cost_per_page_usd: float = 0.0,
         max_total_cost_usd: float = 500.0,
+        idp_stack_name: str = "",
     ) -> None:
         """Create the initial state item for a new optimization run."""
         self._table.put_item(
@@ -53,6 +54,7 @@ class OptimizationState:
                 "best_config_version_within_budget": "",
                 "current_config_version": "",
                 "test_set_id": test_set_id,
+                "idp_stack_name": idp_stack_name,
                 "optimization_guidance": optimization_guidance,
                 "started_at": _now(),
                 "updated_at": _now(),

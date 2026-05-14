@@ -62,26 +62,11 @@ For fields that span multiple pages or sections (e.g., narrative text), the grou
 
 Look for fields where accuracy is systematically low across many documents, not just a few:
 
-```python
-from idpac import IDPACClient
-from idpac.evaluations import EvaluationResult
-
-client = IDPACClient('stack-name', region='us-east-1')
-summary = client.get_evaluation_summary('batch-id', 'results/summary.json')
-
-result = EvaluationResult.from_aggregated_file('results/summary.json')
-result.print_aggregated_summary(top_bottom_n=5)
-```
-
-Fields with consistently low accuracy across many documents (not just outliers) are candidates for ground truth issues.
+Use `get_evaluation_summary(batch_id)` to get the aggregated metrics, then look at per-field accuracy. Fields with consistently low accuracy across many documents (not just outliers) are candidates for ground truth issues.
 
 ### Step 2: Compare Extraction vs Ground Truth for Failing Documents
 
-```python
-# Pick a few failing documents and download both extraction and GT
-client.download_single_document_results('batch-id', 'failing-doc.pdf', 'investigation/')
-client.download_ground_truth('test-set-id', 'failing-doc.pdf', 'investigation/gt.json')
-```
+Use `download_single_document_results(batch_id, 'failing-doc.pdf')` and `download_ground_truth(test_set_id, 'failing-doc.pdf')` to get both the extraction output and ground truth for failing documents.
 
 For each mismatched field, ask:
 1. Does the LLM output match what's visible in the source document?
@@ -94,12 +79,13 @@ Check multiple failing documents for the same field. If the pattern is consisten
 
 ### Step 4: Check for Near-Empty Entries in Array Fields
 
-For array fields (people, vehicles, line items), compare the count of entries in GT vs extraction. If GT consistently has more entries than the LLM extracts, check whether the extra GT entries are near-empty placeholders:
+For array fields (people, vehicles, line items), compare the count of entries in GT vs extraction. If GT consistently has more entries than the LLM extracts, use `execute_python_analysis` to check whether the extra GT entries are near-empty placeholders:
 
 ```python
+# Pass the ground truth file via the `files` parameter, then analyze:
 import json
 
-with open('investigation/gt.json') as f:
+with open('gt/result.json') as f:
     gt = json.load(f)
 
 # Check for near-empty entries in an array field
@@ -130,33 +116,27 @@ When you identify a ground truth quality issue, report it clearly:
 
 ### Action 2: Adjust Evaluation Methods (with human approval)
 
-For enriched values or format inconsistencies, changing the evaluation method may be more appropriate than excluding the field:
+For enriched values or format inconsistencies, changing the evaluation method may be more appropriate than excluding the field. Use `config_edit` to modify the config:
 
-```python
-from idpac import IDPConfig
-
-config = IDPConfig('workspace/current-config.yaml')
-
-# GT has "VOLKSWAGEN", doc shows "VOLK" — use LLM comparison
-config.set('classes.0.properties.VehicleMake.x-aws-idp-evaluation-method', 'LLM')
-
-# GT uses different abbreviation style — use FUZZY with lenient threshold
-config.set('classes.0.properties.Address.x-aws-idp-evaluation-method', 'FUZZY')
-config.set('classes.0.properties.Address.x-aws-idp-evaluation-threshold', 0.7)
-
-config.save('workspace/updated-config.yaml')
+```
+config_edit(config_path, operations=[
+    {"op": "set", "field": "classes.0.properties.VehicleMake.x-aws-idp-evaluation-method", "value": "LLM"},
+    {"op": "set", "field": "classes.0.properties.Address.x-aws-idp-evaluation-method", "value": "FUZZY"},
+    {"op": "set", "field": "classes.0.properties.Address.x-aws-idp-evaluation-threshold", "value": 0.7},
+    {"op": "save"}
+])
 ```
 
 ### Action 3: Exclude Systematically Broken Fields (with human approval)
 
 For fields where the ground truth is fundamentally wrong (system metadata, enriched values with no document source), recommend excluding them from evaluation by setting weight to 0:
 
-```python
-# Fields that can't be extracted from the document
-config.set('classes.0.properties.systemReportId.x-aws-idp-evaluation-weight', 0)
-
-# Fields with systematic GT enrichment that can't be matched
-config.set('classes.0.properties.VehicleModel.x-aws-idp-evaluation-weight', 0)
+```
+config_edit(config_path, operations=[
+    {"op": "set", "field": "classes.0.properties.systemReportId.x-aws-idp-evaluation-weight", "value": 0},
+    {"op": "set", "field": "classes.0.properties.VehicleModel.x-aws-idp-evaluation-weight", "value": 0},
+    {"op": "save"}
+])
 ```
 
 ### Action 4: Document GT Issues in Optimization Log

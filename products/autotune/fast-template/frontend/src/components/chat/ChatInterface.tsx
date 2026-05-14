@@ -58,6 +58,7 @@ export default function ChatInterface() {
 
   const [input, setInput] = useState("")
   const [testSetId, setTestSetId] = useState("")
+  const [idpStackName, setIdpStackName] = useState("")
   const [maxCostPerPage, setMaxCostPerPage] = useState("")
   const [maxTotalCost, setMaxTotalCost] = useState("")
   const [error, setError] = useState<string | null>(null)
@@ -296,6 +297,7 @@ export default function ChatInterface() {
 
       const extra: Record<string, string> = {
         test_set_id: testSet,
+        idp_stack_name: idpStackName,
         optimization_guidance: guidance,
         max_cost_per_page_usd: maxCostPerPage,
         max_total_cost_usd: maxTotalCost,
@@ -326,6 +328,10 @@ export default function ChatInterface() {
   const sendMessage = async (userMessage: string) => {
     if (!testSetId.trim()) {
       setError("Test Set ID is required to start an optimization run")
+      return
+    }
+    if (!idpStackName.trim()) {
+      setError("IDP Stack Name is required")
       return
     }
     if (!maxCostPerPage.trim() || isNaN(Number(maxCostPerPage)) || Number(maxCostPerPage) <= 0) {
@@ -489,6 +495,13 @@ export default function ChatInterface() {
                   value={testSetId}
                   onChange={e => setTestSetId(e.target.value)}
                   placeholder="Test Set ID (required)"
+                  className="w-full px-3 py-2 border rounded-md text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                <input
+                  type="text"
+                  value={idpStackName}
+                  onChange={e => setIdpStackName(e.target.value)}
+                  placeholder="IDP Stack Name (required, e.g. kaleko-idp-exp-1)"
                   className="w-full px-3 py-2 border rounded-md text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
                 <input

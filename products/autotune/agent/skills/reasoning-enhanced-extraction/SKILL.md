@@ -21,36 +21,29 @@ Adding a reasoning component — requiring the LLM to think step-by-step and pro
 
 ## Diagnosis
 
-```python
-from idpac import IDPACClient
-from idpac.evaluations import EvaluationResult
+Use `get_evaluation_summary(batch_id)` to identify fields with low accuracy. Then download and compare:
 
-client = IDPACClient('stack-name', region='us-east-1')
-summary = client.get_evaluation_summary('batch-id', 'results/summary.json')
-
-result = EvaluationResult.from_aggregated_file('results/summary.json')
-result.print_aggregated_summary(top_bottom_n=5)
-
-# Download a failing document and compare extraction vs ground truth
-client.download_single_document_results('batch-id', 'failing-doc.pdf', 'investigation/')
-client.download_ground_truth('test-set-id', 'failing-doc.pdf', 'investigation/gt.json')
+```
+download_single_document_results(batch_id, 'failing-doc.pdf')
+download_ground_truth(test_set_id, 'failing-doc.pdf')
 ```
 
 If the extracted value is a real value from the document (not hallucinated) but it's the *wrong* value from the document, reasoning can help the LLM make better selections.
 
 ## Fix 1: Add Reasoning to Extraction Task Prompt
 
-Add step-by-step reasoning instructions to the extraction task prompt. This tells the LLM to evaluate candidates before committing to a value.
+Add step-by-step reasoning instructions to the extraction task prompt. Read the current prompt with `config_edit(config_path, [{"op": "get", "field": "extraction.task_prompt"}])`, then append:
 
-```python
-from idpac import IDPConfig
+```
+config_edit(config_path, operations=[
+    {"op": "set", "field": "extraction.task_prompt", "value": "<existing prompt + appended text below>"},
+    {"op": "save"}
+])
+```
 
-config = IDPConfig('workspace/current-config.yaml')
+Text to append:
 
-current_prompt = config.get('extraction.task_prompt')
-
-reasoning_instructions = '''
-
+```
 EXTRACTION REASONING PROCESS:
 For each field, follow this process before selecting a value:
 1. Identify ALL candidate values in the document that could match this field
@@ -58,87 +51,41 @@ For each field, follow this process before selecting a value:
 3. Select the candidate with the strongest match
 4. If no candidate clearly matches, return null rather than guessing
 
-Think step by step first, then provide your final answer.'''
-
-config.set('extraction.task_prompt', current_prompt + reasoning_instructions)
-config.save('workspace/updated-config.yaml')
+Think step by step first, then provide your final answer.
 ```
 
 ## Fix 2: Add Reasoning for Checkbox/Selection Fields
 
-For documents with checkboxes, radio buttons, or selection fields, reasoning is especially valuable because the LLM must interpret visual marks and associate them with the correct option.
+For documents with checkboxes, radio buttons, or selection fields, reasoning is especially valuable. Read the current prompt and append checkbox reasoning guidance:
 
-```python
-from idpac import IDPConfig
+```
+config_edit(config_path, operations=[
+    {"op": "set", "field": "extraction.task_prompt", "value": "<existing prompt + appended text below>"},
+    {"op": "save"}
+])
+```
 
-config = IDPConfig('workspace/current-config.yaml')
+Text to append:
 
-current_prompt = config.get('extraction.task_prompt')
-
-checkbox_reasoning = '''
-
+```
 CHECKBOX AND SELECTION FIELD REASONING:
 For fields determined by checkboxes, radio buttons, or selection marks:
 1. Examine each option's checkbox area for visible marks (✓, ✗, x, filled circles, handwritten marks)
 2. For ambiguous or overlapping marks, determine which option contains the majority of the mark
 3. Consider the mark selected if it is primarily inside the checkbox or over the option text
 4. Think from a human perspective — anticipate natural tendencies when marking checkboxes
-5. Provide your reasoning for which option was selected before outputting the value'''
-
-config.set('extraction.task_prompt', current_prompt + checkbox_reasoning)
-config.save('workspace/updated-config.yaml')
+5. Provide your reasoning for which option was selected before outputting the value
 ```
 
 ## Fix 3: Add Reasoning to Classification
 
-For classification, reasoning helps the LLM systematically evaluate document evidence before choosing a class. Add `<reasoning-guidelines>` and require a `classification_reason` field in the output.
+For classification, reasoning helps the LLM systematically evaluate document evidence before choosing a class:
 
-```python
-from idpac import IDPConfig
-
-config = IDPConfig('workspace/current-config.yaml')
-
-config.set('classification.task_prompt', '''<reasoning-guidelines>
-When determining the document type:
-- First identify the document's primary purpose and function
-- Note specific visual elements (letterhead, forms, tables, signatures)
-- Identify key textual indicators (terminology, phrases, structure)
-- Consider the document's intended audience and use case
-- Provide specific evidence from both visual and textual analysis
-</reasoning-guidelines>
-
-<document-types>
-{CLASS_NAMES_AND_DESCRIPTIONS}
-</document-types>
-
-<output-format>
-Return your classification as valid JSON following this exact structure:
-{
-  "classification_reason": "Detailed reasoning including specific visual and textual evidence that led to this classification",
-  "class": "exact_document_type_from_list"
-}
-</output-format>
-
-<<CACHEPOINT>>
-
-<document-ocr-data>
-{DOCUMENT_TEXT}
-</document-ocr-data>
-
-<document-image>
-{DOCUMENT_IMAGE}
-</document-image>
-
-<final-instructions>
-Analyze the document above by:
-1. Examining both visual and textual features
-2. Following the <reasoning-guidelines> to build your classification rationale
-3. Selecting ONLY from document types in <document-types>
-4. Providing clear reasoning with specific evidence BEFORE the classification
-5. Outputting in the exact JSON format specified in <output-format>
-</final-instructions>''')
-
-config.save('workspace/updated-config.yaml')
+```
+config_edit(config_path, operations=[
+    {"op": "set", "field": "classification.task_prompt", "value": "<reasoning-guidelines>\nWhen determining the document type:\n- First identify the document's primary purpose and function\n- Note specific visual elements (letterhead, forms, tables, signatures)\n- Identify key textual indicators (terminology, phrases, structure)\n- Consider the document's intended audience and use case\n- Provide specific evidence from both visual and textual analysis\n</reasoning-guidelines>\n\n<document-types>\n{CLASS_NAMES_AND_DESCRIPTIONS}\n</document-types>\n\n<output-format>\nReturn your classification as valid JSON following this exact structure:\n{\n  \"classification_reason\": \"Detailed reasoning including specific visual and textual evidence that led to this classification\",\n  \"class\": \"exact_document_type_from_list\"\n}\n</output-format>\n\n<<CACHEPOINT>>\n\n<document-ocr-data>\n{DOCUMENT_TEXT}\n</document-ocr-data>\n\n<document-image>\n{DOCUMENT_IMAGE}\n</document-image>\n\n<final-instructions>\nAnalyze the document above by:\n1. Examining both visual and textual features\n2. Following the <reasoning-guidelines> to build your classification rationale\n3. Selecting ONLY from document types in <document-types>\n4. Providing clear reasoning with specific evidence BEFORE the classification\n5. Outputting in the exact JSON format specified in <output-format>\n</final-instructions>"},
+    {"op": "save"}
+])
 ```
 
 The `classification_reason` field forces the LLM to articulate its evidence before committing to a class, which reduces impulsive misclassification.

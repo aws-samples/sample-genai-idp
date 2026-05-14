@@ -59,30 +59,24 @@ These are independent systems. Assessment doesn't need ground truth — it works
 
 ### Step 1: Enable Assessment
 
-```python
-from idpac import IDPConfig
-
-config = IDPConfig('workspace/current-config.yaml')
-
-# Enable assessment
-config.set('assessment.enabled', True)
-
-# Enable granular assessment for per-field confidence scores
-config.set('assessment.granular.enabled', True)
-
-# Enable HITL routing
-config.set('assessment.hitl_enabled', True)
-
-config.save('workspace/updated-config.yaml')
+```
+config_edit(config_path, operations=[
+    {"op": "set", "field": "assessment.enabled", "value": true},
+    {"op": "set", "field": "assessment.granular.enabled", "value": true},
+    {"op": "set", "field": "assessment.hitl_enabled", "value": true},
+    {"op": "save"}
+])
 ```
 
 ### Step 2: Set the Global Default Confidence Threshold
 
 The `default_confidence_threshold` applies to all fields that don't have a per-field override. Fields with confidence scores below this threshold generate alerts.
 
-```python
-# Default threshold (0.8 = 80% confidence)
-config.set('assessment.default_confidence_threshold', 0.8)
+```
+config_edit(config_path, operations=[
+    {"op": "set", "field": "assessment.default_confidence_threshold", "value": 0.8},
+    {"op": "save"}
+])
 ```
 
 **Choosing the default**: Start with 0.8. This is a reasonable balance — fields the LLM is less than 80% confident about get flagged for review. You'll tune per-field thresholds for critical fields in Step 4.
@@ -91,13 +85,13 @@ config.set('assessment.default_confidence_threshold', 0.8)
 
 The assessment LLM evaluates extraction quality. It doesn't need to be the same model used for extraction.
 
-```python
-# Use a capable model for assessment
-config.set('assessment.model', 'us.anthropic.claude-3-5-haiku-20241022-v1:0')
-
-# Assessment should be deterministic
-config.set('assessment.temperature', 0.0)
-config.set('assessment.top_p', 0.1)
+```
+config_edit(config_path, operations=[
+    {"op": "set", "field": "assessment.model", "value": "us.anthropic.claude-3-5-haiku-20241022-v1:0"},
+    {"op": "set", "field": "assessment.temperature", "value": 0.0},
+    {"op": "set", "field": "assessment.top_p", "value": 0.1},
+    {"op": "save"}
+])
 ```
 
 A smaller/cheaper model often works well for assessment since it's comparing extracted values against visible document content, not performing the extraction itself.
@@ -106,21 +100,12 @@ A smaller/cheaper model often works well for assessment since it's comparing ext
 
 Critical fields can have stricter thresholds than the global default. Set `x-aws-idp-confidence-threshold` on individual schema properties:
 
-```python
-from idpac import IDPConfig
-
-config = IDPConfig('workspace/current-config.yaml')
-
-# Critical field — require high confidence (strict threshold)
-config.set('classes.0.properties.social_security_number.x-aws-idp-confidence-threshold', 0.6)
-
-# Important field — moderate threshold
-config.set('classes.0.properties.employee_name.x-aws-idp-confidence-threshold', 0.85)
-
-# Low-criticality field — use global default (no override needed)
-# config.set('classes.0.properties.comments.x-aws-idp-confidence-threshold', ...)
-
-config.save('workspace/updated-config.yaml')
+```
+config_edit(config_path, operations=[
+    {"op": "set", "field": "classes.0.properties.social_security_number.x-aws-idp-confidence-threshold", "value": 0.6},
+    {"op": "set", "field": "classes.0.properties.employee_name.x-aws-idp-confidence-threshold", "value": 0.85},
+    {"op": "save"}
+])
 ```
 
 **Understanding the threshold value**: The threshold is the minimum confidence score required for auto-acceptance. A *lower* threshold means more documents are auto-accepted (higher recall, lower precision). A *higher* threshold means fewer documents are auto-accepted (lower recall, higher precision).
@@ -135,18 +120,14 @@ config.save('workspace/updated-config.yaml')
 
 Granular assessment processes fields individually rather than the entire extraction at once. This gives more accurate per-field confidence scores but takes longer.
 
-```python
-# Granular assessment settings
-config.set('assessment.granular.enabled', True)
-
-# Batch sizes control how many fields are assessed per LLM call
-config.set('assessment.granular.simple_batch_size', 3)  # Simple fields per batch
-config.set('assessment.granular.list_batch_size', 1)     # Array items per batch
-
-# Parallelism
-config.set('assessment.granular.max_workers', 20)
-
-config.save('workspace/updated-config.yaml')
+```
+config_edit(config_path, operations=[
+    {"op": "set", "field": "assessment.granular.enabled", "value": true},
+    {"op": "set", "field": "assessment.granular.simple_batch_size", "value": 3},
+    {"op": "set", "field": "assessment.granular.list_batch_size", "value": 1},
+    {"op": "set", "field": "assessment.granular.max_workers", "value": 20},
+    {"op": "save"}
+])
 ```
 
 **WARNING**: Granular assessment with `list_batch_size=1` on documents with large arrays (100+ items) can cause Lambda timeouts. For documents with many array items, either:
@@ -194,25 +175,25 @@ Start from the business requirement and find the threshold that meets it:
 
 Categorize fields by criticality and set thresholds accordingly:
 
-```python
-from idpac import IDPConfig
-
-config = IDPConfig('workspace/current-config.yaml')
-
+```
 # Tier 1: Critical fields — strict thresholds
-critical_fields = ['social_security_number', 'date_of_birth', 'plan_number']
-for field in critical_fields:
-    config.set(f'classes.0.properties.{field}.x-aws-idp-confidence-threshold', 0.85)
+config_edit(config_path, operations=[
+    {"op": "set", "field": "classes.0.properties.social_security_number.x-aws-idp-confidence-threshold", "value": 0.85},
+    {"op": "set", "field": "classes.0.properties.date_of_birth.x-aws-idp-confidence-threshold", "value": 0.85},
+    {"op": "set", "field": "classes.0.properties.plan_number.x-aws-idp-confidence-threshold", "value": 0.85},
+    {"op": "save"}
+])
 
 # Tier 2: Important fields — moderate thresholds
-important_fields = ['employee_name', 'employer_name', 'work_state']
-for field in important_fields:
-    config.set(f'classes.0.properties.{field}.x-aws-idp-confidence-threshold', 0.75)
+config_edit(config_path, operations=[
+    {"op": "set", "field": "classes.0.properties.employee_name.x-aws-idp-confidence-threshold", "value": 0.75},
+    {"op": "set", "field": "classes.0.properties.employer_name.x-aws-idp-confidence-threshold", "value": 0.75},
+    {"op": "set", "field": "classes.0.properties.work_state.x-aws-idp-confidence-threshold", "value": 0.75},
+    {"op": "save"}
+])
 
 # Tier 3: Low-criticality fields — use global default (0.8) or lenient
 # No per-field override needed — falls back to default_confidence_threshold
-
-config.save('workspace/updated-config.yaml')
 ```
 
 ### Approach 3: Complexity-Driven
@@ -253,20 +234,19 @@ To minimize cost:
 ## Verification
 
 1. Enable assessment on the optimized config:
-   ```python
-   config.set('assessment.enabled', True)
-   config.set('assessment.granular.enabled', True)
-   config.set('assessment.hitl_enabled', True)
-   config.save('workspace/config-with-assessment.yaml')
+   ```
+   config_edit(config_path, operations=[
+       {"op": "set", "field": "assessment.enabled", "value": true},
+       {"op": "set", "field": "assessment.granular.enabled", "value": true},
+       {"op": "set", "field": "assessment.hitl_enabled", "value": true},
+       {"op": "save", "output_path": "workspace/config-with-assessment.yaml"}
+   ])
    ```
 
 2. Upload and run evaluation:
-   ```python
-   client.upload_config('workspace/config-with-assessment.yaml',
-                        config_version='vN-assessment',
-                        description='Enabled assessment with confidence thresholds')
-   result = client.run_evaluation('test-set-id', context='Assessment tuning',
-                                  config_version='vN-assessment')
+   ```
+   upload_config('workspace/config-with-assessment.yaml', config_version='vN-assessment', description='Enabled assessment with confidence thresholds')
+   run_evaluation(test_set_id, context='Assessment tuning', config_version='vN-assessment')
    ```
 
 3. Verify extraction accuracy is unchanged (assessment should not affect extraction results)

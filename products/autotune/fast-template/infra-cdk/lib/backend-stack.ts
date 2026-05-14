@@ -389,8 +389,9 @@ export class BackendStack extends cdk.NestedStack {
     //   DynamoDB tables: {stack-name}-{Table}-{random}
     //   Lambda functions: contain the stack name
     //   SQS queues: {stack-name}-{Queue}-{random}
-    const idpStackName = config.autotune!.idp_stack_name
-    const idpStackNameLower = idpStackName.toLowerCase()
+    // idp_stack_name_pattern is used solely for IAM scoping (e.g. "kaleko-*")
+    const idpPattern = config.autotune!.idp_stack_name_pattern
+    const idpPatternLower = idpPattern.toLowerCase()
 
     agentRole.addToPolicy(
       new iam.PolicyStatement({
@@ -428,8 +429,8 @@ export class BackendStack extends cdk.NestedStack {
         effect: iam.Effect.ALLOW,
         actions: ["s3:GetObject", "s3:ListBucket", "s3:HeadObject", "s3:GetBucketLocation"],
         resources: [
-          `arn:aws:s3:::${idpStackNameLower}-*`,
-          `arn:aws:s3:::${idpStackNameLower}-*/*`,
+          `arn:aws:s3:::${idpPatternLower}`,
+          `arn:aws:s3:::${idpPatternLower}/*`,
         ],
       })
     )
@@ -440,7 +441,7 @@ export class BackendStack extends cdk.NestedStack {
         sid: "IDPStackS3Write",
         effect: iam.Effect.ALLOW,
         actions: ["s3:PutObject"],
-        resources: [`arn:aws:s3:::${idpStackNameLower}-*/*`],
+        resources: [`arn:aws:s3:::${idpPatternLower}/*`],
       })
     )
 
@@ -451,8 +452,8 @@ export class BackendStack extends cdk.NestedStack {
         effect: iam.Effect.ALLOW,
         actions: ["dynamodb:GetItem", "dynamodb:Query", "dynamodb:Scan", "dynamodb:DescribeTable"],
         resources: [
-          `arn:aws:dynamodb:${this.region}:${this.account}:table/${idpStackName}-*`,
-          `arn:aws:dynamodb:${this.region}:${this.account}:table/${idpStackName}-*/index/*`,
+          `arn:aws:dynamodb:${this.region}:${this.account}:table/${idpPattern}`,
+          `arn:aws:dynamodb:${this.region}:${this.account}:table/${idpPattern}/index/*`,
         ],
       })
     )
@@ -463,7 +464,7 @@ export class BackendStack extends cdk.NestedStack {
         sid: "IDPStackDynamoDBWrite",
         effect: iam.Effect.ALLOW,
         actions: ["dynamodb:PutItem", "dynamodb:UpdateItem"],
-        resources: [`arn:aws:dynamodb:${this.region}:${this.account}:table/${idpStackName}-*`],
+        resources: [`arn:aws:dynamodb:${this.region}:${this.account}:table/${idpPattern}`],
       })
     )
 
@@ -473,7 +474,7 @@ export class BackendStack extends cdk.NestedStack {
         sid: "IDPStackLambdaInvoke",
         effect: iam.Effect.ALLOW,
         actions: ["lambda:InvokeFunction", "lambda:GetFunction"],
-        resources: [`arn:aws:lambda:${this.region}:${this.account}:function:*${idpStackName}*`],
+        resources: [`arn:aws:lambda:${this.region}:${this.account}:function:*${idpPattern}`],
       })
     )
 
@@ -493,7 +494,7 @@ export class BackendStack extends cdk.NestedStack {
         sid: "IDPStackSQS",
         effect: iam.Effect.ALLOW,
         actions: ["sqs:SendMessage", "sqs:GetQueueUrl", "sqs:GetQueueAttributes"],
-        resources: [`arn:aws:sqs:${this.region}:${this.account}:${idpStackName}-*`],
+        resources: [`arn:aws:sqs:${this.region}:${this.account}:${idpPattern}`],
       })
     )
 
@@ -577,8 +578,6 @@ export class BackendStack extends cdk.NestedStack {
       AWS_DEFAULT_REGION: stack.region,
       STACK_NAME: config.stack_name_base,
       GATEWAY_CREDENTIAL_PROVIDER_NAME: `${config.stack_name_base}-runtime-gateway-auth`, // Used by @requires_access_token decorator to look up the correct provider
-      // AutoTune: The IDP Accelerator stack that this agent optimizes.
-      IDP_STACK_NAME: config.autotune!.idp_stack_name,
       // AutoTune: DynamoDB table for optimization state (control plane).
       AUTOTUNE_STATE_TABLE: this.optimizationStateTableName,
       // AutoTune: Bedrock model ID for the optimization agent.

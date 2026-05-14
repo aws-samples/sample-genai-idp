@@ -40,35 +40,44 @@ For most production use cases, keep OCR enabled (hybrid approach).
 
 ## Checking Current Config
 
-```python
-from idpac import IDPConfig
-config = IDPConfig('workspace/config.yaml')
-print(f"Backend: {config.get('ocr.backend')}")
-print(f"Features: {config.get('ocr.features')}")
+```
+config_edit(config_path, operations=[
+    {"op": "get", "field": "ocr.backend"},
+    {"op": "get", "field": "ocr.features"}
+])
 ```
 
 ## Backend Selection
 
 ### Textract (Default)
 For: English, Spanish, German, French, Italian, Portuguese.
-```python
-config.set('ocr.backend', 'textract')
-config.set('ocr.features', [{'name': 'LAYOUT'}])
+```
+config_edit(config_path, operations=[
+    {"op": "set", "field": "ocr.backend", "value": "textract"},
+    {"op": "set", "field": "ocr.features", "value": [{"name": "LAYOUT"}]},
+    {"op": "save"}
+])
 ```
 
 ### Bedrock LLM OCR
 Required for: Chinese, Japanese, Korean, Arabic, Hebrew, Hindi, Thai, Vietnamese, Russian.
-```python
-config.set('ocr.backend', 'bedrock')
-config.set('ocr.model_id', 'us.amazon.nova-2-lite-v1:0')
-config.set('ocr.system_prompt', 'You are an expert OCR system. Extract all text accurately, preserving layout.')
-config.set('ocr.task_prompt', 'Extract all text from this document image. Preserve layout, paragraphs, and tables.')
+```
+config_edit(config_path, operations=[
+    {"op": "set", "field": "ocr.backend", "value": "bedrock"},
+    {"op": "set", "field": "ocr.model_id", "value": "us.amazon.nova-2-lite-v1:0"},
+    {"op": "set", "field": "ocr.system_prompt", "value": "You are an expert OCR system. Extract all text accurately, preserving layout."},
+    {"op": "set", "field": "ocr.task_prompt", "value": "Extract all text from this document image. Preserve layout, paragraphs, and tables."},
+    {"op": "save"}
+])
 ```
 
 ### None (Skip OCR)
 For multimodal extraction where LLM reads images directly.
-```python
-config.set('ocr.backend', 'none')
+```
+config_edit(config_path, operations=[
+    {"op": "set", "field": "ocr.backend", "value": "none"},
+    {"op": "save"}
+])
 ```
 
 ## Textract Features
@@ -80,17 +89,23 @@ config.set('ocr.backend', 'none')
 | `FORMS` | Extracts key-value pairs |
 | `SIGNATURES` | Detects signatures |
 
-```python
-config.set('ocr.features', [{'name': 'LAYOUT'}, {'name': 'TABLES'}])
+```
+config_edit(config_path, operations=[
+    {"op": "set", "field": "ocr.features", "value": [{"name": "LAYOUT"}, {"name": "TABLES"}]},
+    {"op": "save"}
+])
 ```
 
 ## Image Settings
 
-```python
-config.set('ocr.image.dpi', 150)  # PDF conversion DPI
-config.set('ocr.image.target_width', 1200)  # Resize limit
-config.set('ocr.image.target_height', 900)
-config.set('ocr.image.preprocessing', True)  # For low-quality scans
+```
+config_edit(config_path, operations=[
+    {"op": "set", "field": "ocr.image.dpi", "value": 150},
+    {"op": "set", "field": "ocr.image.target_width", "value": 1200},
+    {"op": "set", "field": "ocr.image.target_height", "value": 900},
+    {"op": "set", "field": "ocr.image.preprocessing", "value": true},
+    {"op": "save"}
+])
 ```
 
 ## Decision Tree
@@ -140,18 +155,18 @@ What field types matter most?
     └─ Start with Layout+Tables, benchmark, then adjust
 ```
 
-```python
+```
 # Recommended default: Layout+Tables
-config.set('ocr.features', [{'name': 'LAYOUT'}, {'name': 'TABLES'}])
+config_edit(config_path, operations=[{"op": "set", "field": "ocr.features", "value": [{"name": "LAYOUT"}, {"name": "TABLES"}]}, {"op": "save"}])
 
 # Cost-optimized: Layout only (~11% fewer tokens)
-config.set('ocr.features', [{'name': 'LAYOUT'}])
+config_edit(config_path, operations=[{"op": "set", "field": "ocr.features", "value": [{"name": "LAYOUT"}]}, {"op": "save"}])
 
 # Maximum features (rarely needed)
-config.set('ocr.features', [{'name': 'LAYOUT'}, {'name': 'TABLES'}, {'name': 'FORMS'}])
+config_edit(config_path, operations=[{"op": "set", "field": "ocr.features", "value": [{"name": "LAYOUT"}, {"name": "TABLES"}, {"name": "FORMS"}]}, {"op": "save"}])
 
 # Detect text only (lowest cost, often sufficient for simple documents)
-config.set('ocr.features', [])
+config_edit(config_path, operations=[{"op": "set", "field": "ocr.features", "value": []}, {"op": "save"}])
 ```
 
 Always benchmark different feature combinations on your specific dataset before finalizing. The optimal configuration depends on which field categories are most important to business requirements.
@@ -162,16 +177,14 @@ Always benchmark different feature combinations on your specific dataset before 
 
 For documents with poor scan quality, small text, or historical/degraded documents, tune image settings to give the LLM better visual input:
 
-```python
-# Increase DPI for better text resolution (default is typically 150)
-config.set('ocr.image.dpi', 300)
-
-# Increase image dimensions for documents with fine detail
-config.set('ocr.image.target_width', 2400)
-config.set('ocr.image.target_height', 1800)
-
-# Enable preprocessing for low-quality scans
-config.set('ocr.image.preprocessing', True)
+```
+config_edit(config_path, operations=[
+    {"op": "set", "field": "ocr.image.dpi", "value": 300},
+    {"op": "set", "field": "ocr.image.target_width", "value": 2400},
+    {"op": "set", "field": "ocr.image.target_height", "value": 1800},
+    {"op": "set", "field": "ocr.image.preprocessing", "value": true},
+    {"op": "save"}
+])
 ```
 
 These same settings apply per-task (`extraction.image.*`, `classification.image.*`) if you need different image quality for different pipeline stages.
@@ -185,9 +198,12 @@ For very long documents (20+ pages), be aware of:
 - **max_tokens**: Ensure `extraction.max_tokens` is large enough for the expected output size. Long documents with many fields/line items need higher limits.
 - **OCR text length**: Long documents produce large OCR text blocks. The combined OCR text + images may approach model context limits.
 
-```python
+```
 # For long documents, ensure sufficient output tokens
-config.set('extraction.max_tokens', 65535)
+config_edit(config_path, operations=[
+    {"op": "set", "field": "extraction.max_tokens", "value": 65535},
+    {"op": "save"}
+])
 ```
 
 ## Troubleshooting
