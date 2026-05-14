@@ -51,6 +51,9 @@ import CloudscapePieChart from '@cloudscape-design/components/pie-chart';
 import CloudscapeTabs from '@cloudscape-design/components/tabs';
 import CloudscapeTextarea from '@cloudscape-design/components/textarea';
 import CloudscapeCollectionPreferences from '@cloudscape-design/components/collection-preferences';
+import CloudscapeDatePicker from '@cloudscape-design/components/date-picker';
+import CloudscapeFormField from '@cloudscape-design/components/form-field';
+import CloudscapeTimeInput from '@cloudscape-design/components/time-input';
 import * as CloudscapeCollectionHooks from '@cloudscape-design/collection-hooks';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -87,6 +90,9 @@ import * as CloudscapeCollectionHooks from '@cloudscape-design/collection-hooks'
   CloudscapeTabs,
   CloudscapeTextarea,
   CloudscapeCollectionPreferences,
+  CloudscapeDatePicker,
+  CloudscapeFormField,
+  CloudscapeTimeInput,
   CloudscapeCollectionHooks,
 };
 
