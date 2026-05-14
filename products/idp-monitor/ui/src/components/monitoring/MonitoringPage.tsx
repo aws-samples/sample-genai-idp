@@ -29,6 +29,8 @@ import {
   loadWidgetVisibility,
 } from '../../types/widgets';
 import type { WidgetVisibilityMap } from '../../types/widgets';
+import { DateRangeModal } from './DateRangeModal';
+import type { DateRange } from './DateRangeModal';
 import { MonitoringActivationPage } from './MonitoringActivationPage';
 import { MonitoringFilters } from './MonitoringFilters';
 import { MonitoringLayout } from './MonitoringLayout';
@@ -46,7 +48,9 @@ export interface MonitoringPageProps {
 }
 
 export function MonitoringPage({ apiUrl, apiKey, onInvestigate, onReprocess }: MonitoringPageProps = {}): JSX.Element {
-  const [timeRange, setTimeRange] = useState<TimeRangePreset>('24h');
+  const [timeRange, setTimeRange] = useState<TimeRangePreset>('2h');
+  const [customDateRange, setCustomDateRange] = useState<DateRange | null>(null);
+  const [isDateRangeModalVisible, setIsDateRangeModalVisible] = useState(false);
   const [widgetVisibility, setWidgetVisibility] = useState<WidgetVisibilityMap>(
     () => loadWidgetVisibility(DEFAULT_WIDGET_VISIBILITY),
   );
@@ -61,11 +65,33 @@ export function MonitoringPage({ apiUrl, apiKey, onInvestigate, onReprocess }: M
     loading: dashboardLoading,
     error: dashboardError,
     refetch,
-  } = useMonitoringDashboard({ timeRange, apiUrl, apiKey });
+  } = useMonitoringDashboard({
+    timeRange,
+    startTime: timeRange === 'custom' && customDateRange ? customDateRange.startDateTime : undefined,
+    endTime: timeRange === 'custom' && customDateRange ? customDateRange.endDateTime : undefined,
+    apiUrl,
+    apiKey,
+  });
 
   const handleWidgetVisibilityConfirm = useCallback((visibility: WidgetVisibilityMap) => {
     setWidgetVisibility(visibility);
     setCustomizeOpen(false);
+  }, []);
+
+  // Handle time range change from the filter dropdown
+  const handleTimeRangeChange = useCallback((range: TimeRangePreset) => {
+    setTimeRange(range);
+    // Clear custom date range when switching to a preset
+    if (range !== 'custom') {
+      setCustomDateRange(null);
+    }
+  }, []);
+
+  // Handle custom date range applied from modal
+  const handleDateRangeApply = useCallback((range: DateRange) => {
+    setCustomDateRange(range);
+    setTimeRange('custom');
+    setIsDateRangeModalVisible(false);
   }, []);
 
   // ── Loading state ──────────────────────────────────────────────────────────
@@ -110,9 +136,11 @@ export function MonitoringPage({ apiUrl, apiKey, onInvestigate, onReprocess }: M
             actions={
               <MonitoringFilters
                 timeRange={timeRange}
-                onTimeRangeChange={setTimeRange}
+                onTimeRangeChange={handleTimeRangeChange}
                 onRefresh={refetch}
                 onCustomize={() => setCustomizeOpen(true)}
+                onCustomDateRange={() => setIsDateRangeModalVisible(true)}
+                customDateRange={customDateRange}
                 isLoading={isLoading}
               />
             }
@@ -176,6 +204,13 @@ export function MonitoringPage({ apiUrl, apiKey, onInvestigate, onReprocess }: M
         currentVisibility={widgetVisibility}
         onConfirm={handleWidgetVisibilityConfirm}
         onDismiss={() => setCustomizeOpen(false)}
+      />
+
+      {/* Custom Date Range Modal */}
+      <DateRangeModal
+        visible={isDateRangeModalVisible}
+        onDismiss={() => setIsDateRangeModalVisible(false)}
+        onApply={handleDateRangeApply}
       />
     </>
   );
