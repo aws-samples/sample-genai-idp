@@ -84,42 +84,53 @@ const CustomTooltip = ({
 const PieLegend = ({
   items,
 }: {
-  items: { label: string; color: string; count: number; percentage: string }[];
+  items: { label: string; color: string; count: number }[];
 }) => (
   <div
     style={{
       display: 'flex',
-      justifyContent: 'center',
-      gap: 16,
-      paddingTop: 16,
-      fontSize: 13,
       flexWrap: 'wrap',
+      justifyContent: 'center',
+      gap: '8px 16px',
+      paddingTop: 8,
+      fontSize: 12,
     }}
   >
-    {items.map(({ label, color, count, percentage }) => (
-      <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-        <span
-          style={{
-            width: 12,
-            height: 12,
-            background: color,
-            display: 'inline-block',
-            borderRadius: '50%',
-          }}
-        />
-        <span style={{ color: '#16191f', fontWeight: 500 }}>{label}</span>
-        <span style={{ color: '#555' }}>
-          {count.toLocaleString()} ({percentage}%)
-        </span>
-      </div>
-    ))}
+    {items.map(({ label, color, count }) => {
+      const isOthers = label.startsWith('others (');
+      let displayText: string;
+      if (isOthers) {
+        // Extract the count from "others (15 versions)" -> "15 versions"
+        const match = label.match(/others \((.+)\)/);
+        const versionInfo = match ? match[1] : '';
+        displayText = `others (${versionInfo}): ${count.toLocaleString()}`;
+      } else {
+        displayText = `${label} (${count.toLocaleString()})`;
+      }
+      return (
+        <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+          <span
+            style={{
+              width: 10,
+              height: 10,
+              background: color,
+              display: 'inline-block',
+              borderRadius: 2,
+            }}
+          />
+          <span style={{ color: '#16191f' }}>
+            {displayText}
+          </span>
+        </div>
+      );
+    })}
   </div>
 );
 
 const infoPopover = (
   <Popover
-    header="Config Version Distribution"
-    content="Shows how many documents were processed by each configuration version."
+    header="Config Versions"
+    content="Distribution of processed documents by config version."
     triggerType="custom"
     size="medium"
   >
@@ -141,7 +152,7 @@ export function ConfigPanelWidget({ config, isLoading }: ConfigPanelWidgetProps)
 
   if (isLoading && !config) {
     return (
-      <Container header={<Header variant="h2" info={infoPopover}>Config Version Distribution</Header>}>
+      <Container header={<Header variant="h2" info={infoPopover}>Config Versions</Header>}>
         <Box textAlign="center" padding="l">
           <Spinner size="large" />
         </Box>
@@ -152,7 +163,7 @@ export function ConfigPanelWidget({ config, isLoading }: ConfigPanelWidgetProps)
   if (sorted.length === 0) {
     return (
       <Container
-        header={<Header variant="h2" description={subtitle} info={infoPopover}>Config Version Distribution</Header>}
+        header={<Header variant="h2" description={subtitle} info={infoPopover}>Config Versions</Header>}
       >
         <Box color="text-body-secondary" textAlign="center" padding="l">
           No config version data available for this time range.
@@ -162,7 +173,6 @@ export function ConfigPanelWidget({ config, isLoading }: ConfigPanelWidgetProps)
   }
 
   const usePieChart = displayLimit <= 5;
-  const topNForPie = 6;
 
   const limitOptions = [
     { label: 'Top 5', value: '5' },
@@ -175,8 +185,8 @@ export function ConfigPanelWidget({ config, isLoading }: ConfigPanelWidgetProps)
 
   // ── Pie mode ────────────────────────────────────────────────────────────────
   if (usePieChart) {
-    const topN = sorted.slice(0, topNForPie);
-    const remaining = sorted.slice(topNForPie);
+    const topN = sorted.slice(0, displayLimit);
+    const remaining = sorted.slice(displayLimit);
 
     const pieData: { name: string; value: number; percent: number; count: number }[] = topN.map((v) => ({
       name: v.version,
@@ -187,8 +197,9 @@ export function ConfigPanelWidget({ config, isLoading }: ConfigPanelWidgetProps)
 
     if (remaining.length > 0) {
       const othersCount = remaining.reduce((s, v) => s + v.documentCount, 0);
+      const versionLabel = remaining.length === 1 ? 'version' : 'versions';
       pieData.push({
-        name: `Others (${remaining.length} versions)`,
+        name: `others (${remaining.length} ${versionLabel})`,
         value: othersCount,
         count: othersCount,
         percent: total > 0 ? othersCount / total : 0,
@@ -196,12 +207,11 @@ export function ConfigPanelWidget({ config, isLoading }: ConfigPanelWidgetProps)
     }
 
     const legendItems = pieData.map((item, idx) => {
-      const isOthers = item.name.startsWith('Others (');
+      const isOthers = item.name.startsWith('others (');
       return {
         label: item.name,
         color: isOthers ? OTHERS_COLOR : PALETTE[idx % PALETTE.length],
         count: item.count,
-        percentage: (item.percent * 100).toFixed(1),
       };
     });
 
@@ -223,7 +233,7 @@ export function ConfigPanelWidget({ config, isLoading }: ConfigPanelWidgetProps)
               />
             }
           >
-            Config Version Distribution
+            Config Versions
           </Header>
         }
       >
@@ -239,7 +249,7 @@ export function ConfigPanelWidget({ config, isLoading }: ConfigPanelWidgetProps)
               dataKey="value"
             >
               {pieData.map((entry, idx) => {
-                const isOthers = entry.name.startsWith('Others (');
+                const isOthers = entry.name.startsWith('others (');
                 return (
                   <Cell
                     key={entry.name}
@@ -269,8 +279,9 @@ export function ConfigPanelWidget({ config, isLoading }: ConfigPanelWidgetProps)
   if (remaining.length > 0) {
     const othersCount = remaining.reduce((s, v) => s + v.documentCount, 0);
     const othersPct = total > 0 ? (othersCount / total) * 100 : 0;
+    const versionLabel = remaining.length === 1 ? 'version' : 'versions';
     barData.push({
-      name: `Others (${remaining.length} versions)`,
+      name: `others (${remaining.length} ${versionLabel})`,
       count: othersCount,
       pct: othersPct,
     });
@@ -296,7 +307,7 @@ export function ConfigPanelWidget({ config, isLoading }: ConfigPanelWidgetProps)
             />
           }
         >
-          Config Version Distribution
+          Config Versions
         </Header>
       }
     >
@@ -308,7 +319,7 @@ export function ConfigPanelWidget({ config, isLoading }: ConfigPanelWidgetProps)
           <BarChart
             layout="vertical"
             data={barData}
-            margin={{ top: 4, right: 60, left: 8, bottom: 0 }}
+            margin={{ top: 4, right: 60, left: 8, bottom: 20 }}
             barCategoryGap="25%"
           >
             <CartesianGrid
@@ -325,6 +336,7 @@ export function ConfigPanelWidget({ config, isLoading }: ConfigPanelWidgetProps)
               tickFormatter={(v) =>
                 v >= 1000 ? `${(v / 1000).toFixed(0)}K` : v.toString()
               }
+              label={{ value: 'Document Count', position: 'bottom', offset: 0, style: { fontSize: 11, fill: '#555' } }}
             />
             <YAxis
               type="category"
@@ -333,6 +345,7 @@ export function ConfigPanelWidget({ config, isLoading }: ConfigPanelWidgetProps)
               axisLine={false}
               tickLine={false}
               width={140}
+              label={{ value: 'Config Version', angle: -90, position: 'insideLeft', style: { fontSize: 11, fill: '#555' } }}
             />
             <Tooltip content={<CustomTooltip />} cursor={{ fill: 'rgba(0,0,0,0.04)' }} />
             <Bar dataKey="count" radius={[0, 3, 3, 0]}>
@@ -343,7 +356,7 @@ export function ConfigPanelWidget({ config, isLoading }: ConfigPanelWidgetProps)
                 formatter={(v: unknown) => Number(v).toLocaleString()}
               />
               {barData.map((entry, i) => {
-                const isOthers = entry.name.startsWith('Others (');
+                const isOthers = entry.name.startsWith('others (');
                 return (
                   <Cell
                     key={entry.name}

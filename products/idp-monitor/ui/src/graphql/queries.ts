@@ -59,6 +59,20 @@ export const GET_MONITORING_STATUS = `
   }
 `;
 
+// ─────────────────────────────────────────────────────────────────────────────
+// GET_LIVE_PROCESSING_STATUS
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const GET_LIVE_PROCESSING_STATUS = `
+  query GetLiveProcessingStatus {
+    getLiveProcessingStatus {
+      statusCounts
+      total
+      timestamp
+    }
+  }
+`;
+
 // Re-export as named constants for consumers that use Apollo gql tag:
 //
 //   import gql from 'graphql-tag';

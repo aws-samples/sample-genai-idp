@@ -157,6 +157,8 @@ export function MonitoringPage({ apiUrl, apiKey, onInvestigate, onReprocess }: M
               widgetVisibility={widgetVisibility}
               onInvestigate={onInvestigate}
               onReprocess={onReprocess}
+              apiUrl={apiUrl}
+              apiKey={apiKey}
             />
           )}
 

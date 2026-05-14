@@ -10,8 +10,9 @@
  *
  * Layout:
  *   Row 1: KPICardsWidget               (full width)
+ *   Row 1.5: LiveStatusWidget           (full width, auto-refresh from DynamoDB tracking table)
  *   Row 2: VolumeChartWidget            (full width)
- *   Row 3: DocTypeChartWidget (1/2)   | ConfigPanelWidget (1/2)
+ *   Row 3: DistributionWidget           (full width, tabbed: Document Types | Config Versions)
  *   Row 4: LatencyChartWidget (1/2)   | ThrottleWidget (1/2)
  *   Row 5: FailuresTableWidget          (full width)
  *   Empty state when all widgets hidden
@@ -22,11 +23,11 @@ import SpaceBetween from '@cloudscape-design/components/space-between';
 
 import type { MonitoringDashboardData } from '../../types/monitoring';
 import type { WidgetVisibilityMap } from '../../types/widgets';
-import { ConfigPanelWidget } from './widgets/ConfigPanelWidget';
-import { DocTypeChartWidget } from './widgets/DocTypeChartWidget';
+import { DistributionWidget } from './widgets/DistributionWidget';
 import { FailuresTableWidget } from './widgets/FailuresTableWidget';
 import { KPICardsWidget } from './widgets/KPICardsWidget';
 import { LatencyChartWidget } from './widgets/LatencyChartWidget';
+import { LiveStatusWidget } from './widgets/LiveStatusWidget';
 import { ThrottleWidget } from './widgets/ThrottleWidget';
 import { VolumeChartWidget } from './widgets/VolumeChartWidget';
 
@@ -37,6 +38,8 @@ interface MonitoringLayoutProps {
   widgetVisibility: WidgetVisibilityMap;
   onInvestigate?: (documentId: string) => void;
   onReprocess?: (documentId: string) => void;
+  apiUrl?: string;
+  apiKey?: string;
 }
 
 export function MonitoringLayout({
@@ -46,6 +49,8 @@ export function MonitoringLayout({
   widgetVisibility,
   onInvestigate,
   onReprocess,
+  apiUrl,
+  apiKey,
 }: MonitoringLayoutProps): JSX.Element {
   const allHidden = Object.values(widgetVisibility).every((v) => !v);
 
@@ -67,6 +72,9 @@ export function MonitoringLayout({
         <KPICardsWidget volume={dashboard.volume} cost={dashboard.cost} isLoading={isLoading} />
       )}
 
+      {/* Row 1.5 — Live Processing Status (full width, auto-refresh) */}
+      <LiveStatusWidget apiUrl={apiUrl} apiKey={apiKey} />
+
       {/* Row 2 — Volume chart (full width) */}
       {widgetVisibility.volumeChart && (
         <VolumeChartWidget
@@ -77,36 +85,13 @@ export function MonitoringLayout({
         />
       )}
 
-      {/* Row 3 — Doc type distribution (1/2) | Active Config (1/2) */}
+      {/* Row 3 — Distribution (Tabbed: Document Types & Config Versions) */}
       {(widgetVisibility.docTypes || widgetVisibility.configPanel) && (
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns:
-              widgetVisibility.docTypes && widgetVisibility.configPanel
-                ? '1fr 1fr'
-                : '1fr',
-            gap: '20px',
-            alignItems: 'stretch',
-          }}
-        >
-          {widgetVisibility.docTypes && (
-            <div style={{ minWidth: 0, display: 'grid' }}>
-              <DocTypeChartWidget
-                distribution={dashboard.distribution}
-                isLoading={isLoading}
-              />
-            </div>
-          )}
-          {widgetVisibility.configPanel && (
-            <div style={{ minWidth: 0, display: 'grid' }}>
-              <ConfigPanelWidget
-                config={dashboard.config}
-                isLoading={isLoading}
-              />
-            </div>
-          )}
-        </div>
+        <DistributionWidget
+          distribution={dashboard.distribution}
+          config={dashboard.config}
+          isLoading={isLoading}
+        />
       )}
 
       {/* Row 4 — Processing Speed (1/2) | Service Performance (1/2) */}

@@ -20,6 +20,10 @@ type Query {
   # Lightweight subscription status check — used by the UI to determine
   # whether to show the dashboard or the "Activate IDPMonitor" page.
   getMonitoringStatus: MonitoringStatusResponse
+
+  # Live processing status — fetches current non-terminal document counts from DynamoDB.
+  # Auto-refreshed by UI every 2 seconds. NOT time-filtered — always shows current pipeline state.
+  getLiveProcessingStatus: LiveProcessingStatusResponse
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -70,6 +74,12 @@ type MonitoringStatusResponse {
   subscriptionStatus: String!   # "active" | "inactive" | "unknown"
   stackName: String
   acceleratorStackName: String
+}
+
+type LiveProcessingStatusResponse {
+  statusCounts: AWSJSON!  # Map of status name to count: { "QUEUED": 5, "OCR": 2, ... }
+  total: Int!
+  timestamp: AWSDateTime!
 }
 
 type SectionError {

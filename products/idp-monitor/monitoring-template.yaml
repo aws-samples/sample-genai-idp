@@ -112,6 +112,7 @@ Resources:
         type Query {
           getMonitoringDashboard(input: MonitoringQueryInput!): MonitoringDashboardResponse
           getMonitoringStatus: MonitoringStatusResponse
+          getLiveProcessingStatus: LiveProcessingStatusResponse
         }
 
         input MonitoringQueryInput {
@@ -142,6 +143,12 @@ Resources:
           subscriptionStatus: String!
           stackName: String
           acceleratorStackName: String
+        }
+
+        type LiveProcessingStatusResponse {
+          statusCounts: AWSJSON!
+          total: Int!
+          timestamp: AWSDateTime!
         }
 
         type SectionError {
@@ -248,6 +255,26 @@ Resources:
           "operation": "Invoke",
           "payload": {
             "info": { "fieldName": "getMonitoringStatus" },
+            "arguments": {}
+          }
+        }
+      ResponseMappingTemplate: |
+        $util.toJson($context.result)
+
+  GetLiveProcessingStatusResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: MonitoringGraphQLSchema
+    Properties:
+      ApiId: !GetAtt MonitoringGraphQLApi.ApiId
+      TypeName: Query
+      FieldName: getLiveProcessingStatus
+      DataSourceName: !GetAtt MonitoringLambdaDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version": "2018-05-29",
+          "operation": "Invoke",
+          "payload": {
+            "info": { "fieldName": "getLiveProcessingStatus" },
             "arguments": {}
           }
         }

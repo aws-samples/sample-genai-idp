@@ -116,6 +116,13 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         )
         return result
 
+    if field_name == "getLiveProcessingStatus":
+        result = _handle_get_live_status()
+        logger.info(
+            "<<< getLiveProcessingStatus response: %s", json.dumps(result, default=str)
+        )
+        return result
+
     if field_name == "getMonitoringDashboard":
         result = _handle_get_dashboard(event)
         # Log a summary (not the full payload which can be large)
@@ -149,6 +156,107 @@ def _handle_get_status() -> dict[str, Any]:
         "stackName": os.environ.get("AWS_LAMBDA_FUNCTION_NAME", ""),
         "acceleratorStackName": ACCELERATOR_STACK_NAME,
     }
+
+
+def _handle_get_live_status() -> dict[str, Any]:
+    """
+    Fetch live processing status from DynamoDB tracking table.
+
+    Returns current counts of non-terminal document statuses by stage.
+    Time-filtered to last 6 hours to capture recent processing activity.
+
+    Uses TypeDateIndex GSI (ItemType + InitialEventTime) to efficiently
+    query recent documents, then filters by non-terminal status.
+
+    Non-terminal statuses (documents still in pipeline):
+    - QUEUED: waiting to start
+    - PENDING_UPLOAD, IN_PROGRESS, RUNNING, OCR, CLASSIFYING, EXTRACTING, ASSESSING,
+      POSTPROCESSING, HITL_IN_PROGRESS, SUMMARIZING, RULE_VALIDATION*, EVALUATING:
+      actively processing
+
+    Terminal statuses (excluded): COMPLETED, FAILED, ABORTED
+    """
+    import boto3  # noqa: PLC0415
+    from datetime import timedelta  # noqa: PLC0415
+
+    timestamp = datetime.now(timezone.utc).isoformat()
+
+    if not TRACKING_TABLE_NAME:
+        logger.warning("TRACKING_TABLE_NAME not set - returning zero counts")
+        return {
+            "statusCounts": {},
+            "total": 0,
+            "timestamp": timestamp,
+        }
+
+    try:
+        dynamodb = boto3.resource("dynamodb")
+        table = dynamodb.Table(TRACKING_TABLE_NAME)
+
+        # Query last 6 hours using TypeDateIndex GSI
+        six_hours_ago = (datetime.now(timezone.utc) - timedelta(hours=6)).isoformat()
+
+        status_counts: dict[str, int] = {}
+        total = 0
+
+        # Query TypeDateIndex GSI for document items in last 6 hours
+        response = table.query(
+            IndexName="TypeDateIndex",
+            KeyConditionExpression="ItemType = :type AND InitialEventTime > :time",
+            ExpressionAttributeValues={
+                ":type": "document",
+                ":time": six_hours_ago,
+            },
+        )
+
+        # Filter and count by ObjectStatus
+        # Exclude terminal statuses: COMPLETED, FAILED, ABORTED
+        # Include everything else: QUEUED, OCR, CLASSIFYING, EXTRACTING, etc.
+        for item in response.get("Items", []):
+            object_status = item.get("ObjectStatus")
+            if object_status and object_status not in ("COMPLETED", "FAILED", "ABORTED"):
+                status_counts[object_status] = status_counts.get(object_status, 0) + 1
+                total += 1
+
+        # Handle pagination if needed
+        while "LastEvaluatedKey" in response:
+            response = table.query(
+                IndexName="TypeDateIndex",
+                KeyConditionExpression="ItemType = :type AND InitialEventTime > :time",
+                ExpressionAttributeValues={
+                    ":type": "document",
+                    ":time": six_hours_ago,
+                },
+                ExclusiveStartKey=response["LastEvaluatedKey"],
+            )
+            for item in response.get("Items", []):
+                object_status = item.get("ObjectStatus")
+                if object_status and object_status not in ("COMPLETED", "FAILED", "ABORTED"):
+                    status_counts[object_status] = status_counts.get(object_status, 0) + 1
+                    total += 1
+
+        logger.info(
+            "Live status (last 6h): %d total documents across %d statuses: %s",
+            total,
+            len(status_counts),
+            status_counts,
+        )
+
+        return {
+            "statusCounts": status_counts,
+            "total": total,
+            "timestamp": timestamp,
+        }
+
+    except Exception as exc:
+        logger.error(
+            "Failed to fetch live status from DynamoDB: %s", exc, exc_info=True
+        )
+        return {
+            "statusCounts": {},
+            "total": 0,
+            "timestamp": timestamp,
+        }
 
 
 def _handle_get_dashboard(event: dict[str, Any]) -> dict[str, Any]:

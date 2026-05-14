@@ -42,6 +42,7 @@ import CloudscapeSpaceBetween from '@cloudscape-design/components/space-between'
 import CloudscapeSpinner from '@cloudscape-design/components/spinner';
 import CloudscapeStatusIndicator from '@cloudscape-design/components/status-indicator';
 import CloudscapeTable from '@cloudscape-design/components/table';
+import CloudscapeTabs from '@cloudscape-design/components/tabs';
 import CloudscapeTextFilter from '@cloudscape-design/components/text-filter';
 import CloudscapeModal from '@cloudscape-design/components/modal';
 import CloudscapeButtonDropdown from '@cloudscape-design/components/button-dropdown';
@@ -75,6 +76,7 @@ import * as CloudscapeCollectionHooks from '@cloudscape-design/collection-hooks'
   CloudscapeSpinner,
   CloudscapeStatusIndicator,
   CloudscapeTable,
+  CloudscapeTabs,
   CloudscapeTextFilter,
   CloudscapeModal,
   CloudscapeButtonDropdown,
