@@ -161,8 +161,7 @@ class TestGetModelMaxOutputTokens:
             == 128_000
         )
         assert (
-            get_model_max_output_tokens("global.anthropic.claude-opus-4-7")
-            == 128_000
+            get_model_max_output_tokens("global.anthropic.claude-opus-4-7") == 128_000
         )
         # With :1m suffix
         assert (
