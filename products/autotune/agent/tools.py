@@ -1243,16 +1243,7 @@ def execute_python_analysis(code: str) -> str:
         finally:
             client.stop()
     except ImportError:
-        # Fallback: run in-process with restricted builtins (local dev only)
-        import io
-        import contextlib
-        stdout = io.StringIO()
-        try:
-            with contextlib.redirect_stdout(stdout):
-                exec(code, {"__builtins__": __builtins__})  # noqa: S102
-            return json.dumps({"output": stdout.getvalue()})
-        except Exception as e:
-            return json.dumps({"error": str(e), "partial_output": stdout.getvalue()})
+        return json.dumps({"error": "Code interpreter unavailable: bedrock_agentcore package not installed. Install it or run in the AgentCore runtime environment."})
 
 
 @tool

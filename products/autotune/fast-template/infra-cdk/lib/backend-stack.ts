@@ -10,6 +10,7 @@ import * as logs from "aws-cdk-lib/aws-logs"
 import * as s3 from "aws-cdk-lib/aws-s3"
 import * as agentcore from "@aws-cdk/aws-bedrock-agentcore-alpha"
 import * as bedrockagentcore from "aws-cdk-lib/aws-bedrockagentcore"
+import * as wafv2 from "aws-cdk-lib/aws-wafv2"
 import { PythonFunction } from "@aws-cdk/aws-lambda-python-alpha"
 import * as lambda from "aws-cdk-lib/aws-lambda"
 import * as ecr_assets from "aws-cdk-lib/aws-ecr-assets"
@@ -149,6 +150,7 @@ export class BackendStack extends cdk.NestedStack {
         runtime: lambda.Runtime.PYTHON_3_12,
         handler: "index.handler",
         code: lambda.Code.fromAsset(path.join(__dirname, "..", "lambdas", "zip-packager")), // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
+        tracing: lambda.Tracing.ACTIVE,
         timeout: cdk.Duration.minutes(10),
         memorySize: 1024,
         ephemeralStorageSize: cdk.Size.gibibytes(2),
@@ -715,6 +717,7 @@ export class BackendStack extends cdk.NestedStack {
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
       removalPolicy: cdk.RemovalPolicy.DESTROY,
       encryption: dynamodb.TableEncryption.AWS_MANAGED,
+      pointInTimeRecovery: true,
     })
 
     // Store table name in SSM for frontend/external access
@@ -737,11 +740,21 @@ export class BackendStack extends cdk.NestedStack {
   // Creates an S3 bucket for agent stream data (stream.jsonl + OPTIMIZATION-LOG.md).
   // The agent runtime writes to this bucket; the Lambda reads from it for /stream and /log endpoints.
   private createStreamBucket(config: AppConfig): void {
+    const streamAccessLogsBucket = new s3.Bucket(this, "StreamBucketAccessLogs", {
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+      autoDeleteObjects: true,
+      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
+      encryption: s3.BucketEncryption.S3_MANAGED,
+      lifecycleRules: [{ expiration: cdk.Duration.days(90) }],
+    })
+
     const bucket = new s3.Bucket(this, "StreamBucket", {
       removalPolicy: cdk.RemovalPolicy.DESTROY,
       autoDeleteObjects: true,
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
       encryption: s3.BucketEncryption.S3_MANAGED,
+      serverAccessLogsBucket: streamAccessLogsBucket,
+      serverAccessLogsPrefix: "stream-bucket-access-logs/",
       lifecycleRules: [{ expiration: cdk.Duration.days(30), prefix: "autotune-streams/" }],
     })
 
@@ -778,6 +791,7 @@ export class BackendStack extends cdk.NestedStack {
         STREAM_BUCKET: this.streamBucketName,
         CORS_ALLOWED_ORIGINS: `${frontendUrl},http://localhost:3000`,
       },
+      tracing: lambda.Tracing.ACTIVE,
       timeout: cdk.Duration.seconds(10),
       layers: [
         lambda.LayerVersion.fromLayerVersionArn(
@@ -811,6 +825,12 @@ export class BackendStack extends cdk.NestedStack {
       })
     )
 
+    const apiLogGroup = new logs.LogGroup(this, "ApiGatewayAccessLogs", {
+      logGroupName: `/aws/apigateway/${config.stack_name_base}-api`,
+      retention: logs.RetentionDays.ONE_MONTH,
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+    })
+
     const api = new apigateway.RestApi(this, "OptimizationStateApi", {
       restApiName: `${config.stack_name_base}-api`,
       description: "AutoTune optimization state and control API",
@@ -823,7 +843,19 @@ export class BackendStack extends cdk.NestedStack {
         stageName: "prod",
         throttlingRateLimit: 100,
         throttlingBurstLimit: 200,
+        accessLogDestination: new apigateway.LogGroupLogDestination(apiLogGroup),
+        accessLogFormat: apigateway.AccessLogFormat.jsonWithStandardFields(),
+        loggingLevel: apigateway.MethodLoggingLevel.INFO,
+        tracingEnabled: true,
       },
+    })
+
+    // Request validator for API methods
+    const requestValidator = new apigateway.RequestValidator(this, "ApiRequestValidator", {
+      restApi: api,
+      requestValidatorName: "validate-request",
+      validateRequestBody: true,
+      validateRequestParameters: true,
     })
 
     const authorizer = new apigateway.CognitoUserPoolsAuthorizer(this, "ApiAuthorizer", {
@@ -835,6 +867,7 @@ export class BackendStack extends cdk.NestedStack {
     const authOptions = {
       authorizer,
       authorizationType: apigateway.AuthorizationType.COGNITO,
+      requestValidator,
     }
 
     api.root.addResource("cancel").addMethod("POST", lambdaIntegration, authOptions)
@@ -846,6 +879,56 @@ export class BackendStack extends cdk.NestedStack {
     api.root.addResource("runs").addMethod("GET", lambdaIntegration, authOptions)
 
     this.optimizationStateApiUrl = api.url
+
+    // WAF WebACL for API Gateway protection
+    const webAcl = new wafv2.CfnWebACL(this, "ApiWafWebAcl", {
+      defaultAction: { allow: {} },
+      scope: "REGIONAL",
+      visibilityConfig: {
+        cloudWatchMetricsEnabled: true,
+        metricName: `${config.stack_name_base}-api-waf`,
+        sampledRequestsEnabled: true,
+      },
+      rules: [
+        {
+          name: "AWSManagedRulesCommonRuleSet",
+          priority: 1,
+          overrideAction: { none: {} },
+          statement: {
+            managedRuleGroupStatement: {
+              vendorName: "AWS",
+              name: "AWSManagedRulesCommonRuleSet",
+            },
+          },
+          visibilityConfig: {
+            cloudWatchMetricsEnabled: true,
+            metricName: "AWSManagedRulesCommonRuleSet",
+            sampledRequestsEnabled: true,
+          },
+        },
+        {
+          name: "AWSManagedRulesKnownBadInputsRuleSet",
+          priority: 2,
+          overrideAction: { none: {} },
+          statement: {
+            managedRuleGroupStatement: {
+              vendorName: "AWS",
+              name: "AWSManagedRulesKnownBadInputsRuleSet",
+            },
+          },
+          visibilityConfig: {
+            cloudWatchMetricsEnabled: true,
+            metricName: "AWSManagedRulesKnownBadInputsRuleSet",
+            sampledRequestsEnabled: true,
+          },
+        },
+      ],
+    })
+
+    new wafv2.CfnWebACLAssociation(this, "ApiWafAssociation", {
+      resourceArn: api.deploymentStage.stageArn,
+      webAclArn: webAcl.attrArn,
+    })
 
     new ssm.StringParameter(this, "OptimizationStateApiUrlParam", {
       parameterName: `/${config.stack_name_base}/optimization-state-api-url`,
@@ -860,6 +943,7 @@ export class BackendStack extends cdk.NestedStack {
       runtime: lambda.Runtime.PYTHON_3_13,
       handler: "sample_tool_lambda.handler",
       code: lambda.Code.fromAsset(path.join(__dirname, "../../gateway/tools/sample_tool")), // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
+      tracing: lambda.Tracing.ACTIVE,
       timeout: cdk.Duration.seconds(30),
       logGroup: new logs.LogGroup(this, "SampleToolLambdaLogGroup", {
         logGroupName: `/aws/lambda/${config.stack_name_base}-sample-tool`,
@@ -937,6 +1021,7 @@ export class BackendStack extends cdk.NestedStack {
       runtime: lambda.Runtime.PYTHON_3_13,
       handler: "index.handler",
       code: lambda.Code.fromAsset(path.join(__dirname, "..", "lambdas", "oauth2-provider")), // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
+      tracing: lambda.Tracing.ACTIVE,
       timeout: cdk.Duration.minutes(5),
       logGroup: new logs.LogGroup(this, "OAuth2ProviderLambdaLogGroup", {
         logGroupName: `/aws/lambda/${config.stack_name_base}-oauth2-provider`,
