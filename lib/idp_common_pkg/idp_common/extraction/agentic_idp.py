@@ -28,8 +28,6 @@ from PIL import Image
 from pydantic import BaseModel, Field
 from strands import Agent, tool
 from strands.agent.conversation_manager import SummarizingConversationManager
-
-from idp_common.bedrock.model_utils import get_model_max_output_tokens
 from strands.models import BedrockModel
 from strands.types.agent import AgentInput
 from strands.types.content import CachePoint, ContentBlock, Message
@@ -894,7 +892,21 @@ def _build_model_config(
     )
 
     # Determine model-specific maximum token limits
-    model_max = get_model_max_output_tokens(model_id)
+    model_max = 4_096  # Default fallback
+    model_id_lower = model_id.lower()
+
+    # Check Claude 4 patterns first (more specific)
+    if re.search(r"claude-(opus|sonnet|haiku)-4", model_id_lower):
+        model_max = 64_000
+    # Check Nova models
+    elif any(
+        nova in model_id_lower
+        for nova in ["nova-premier", "nova-pro", "nova-lite", "nova-micro"]
+    ):
+        model_max = 10_000
+    # Check Claude 3 models
+    elif "claude-3" in model_id_lower:
+        model_max = 8_192
 
     # Use config value if provided, but cap at model's maximum
     if max_tokens is not None:
