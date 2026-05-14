@@ -23,6 +23,7 @@ import { useCallback, useState } from 'react';
 
 import { useMonitoringDashboard } from '../../hooks/useMonitoringDashboard';
 import { useMonitoringStatus } from '../../hooks/useMonitoringStatus';
+import { analyticsCache } from '../../services/analyticsCacheService';
 import type { TimeRangePreset } from '../../types/monitoring';
 import {
   DEFAULT_WIDGET_VISIBILITY,
@@ -81,6 +82,7 @@ export function MonitoringPage({ apiUrl, apiKey, onInvestigate, onReprocess }: M
   // Handle time range change from the filter dropdown
   const handleTimeRangeChange = useCallback((range: TimeRangePreset) => {
     setTimeRange(range);
+    analyticsCache.clearAll();
     // Clear custom date range when switching to a preset
     if (range !== 'custom') {
       setCustomDateRange(null);
@@ -91,6 +93,7 @@ export function MonitoringPage({ apiUrl, apiKey, onInvestigate, onReprocess }: M
   const handleDateRangeApply = useCallback((range: DateRange) => {
     setCustomDateRange(range);
     setTimeRange('custom');
+    analyticsCache.clearAll();
     setIsDateRangeModalVisible(false);
   }, []);
 
