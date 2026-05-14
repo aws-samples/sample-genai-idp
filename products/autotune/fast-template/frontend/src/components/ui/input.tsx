@@ -1,3 +1,6 @@
+// Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+// SPDX-License-Identifier: LicenseRef-AWS-Proprietary
+
 import * as React from "react"
 
 import { cn } from "@/lib/utils"

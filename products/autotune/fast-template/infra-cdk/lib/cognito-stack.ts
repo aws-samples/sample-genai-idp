@@ -1,3 +1,6 @@
+// Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+// SPDX-License-Identifier: LicenseRef-AWS-Proprietary
+
 import * as cdk from "aws-cdk-lib"
 import * as cognito from "aws-cdk-lib/aws-cognito"
 import { Construct } from "constructs"

@@ -1,3 +1,6 @@
+// Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+// SPDX-License-Identifier: LicenseRef-AWS-Proprietary
+
 import { Button } from "@/components/ui/button"
 import { Plus } from "lucide-react"
 import { useAuth } from "@/hooks/useAuth"

@@ -1,3 +1,13 @@
-Copyright Amazon.com, Inc. or its affiliates. This material (“AWS Asset”) is AWS Content under the AWS Enterprise Agreement or AWS Customer Agreement (as applicable) and is provided under the AWS Intellectual Property License.
- 
-THIS AWS ASSET IS PROVIDED TO YOU “AS IS.” AWS AND ITS AFFILIATES AND LICENSORS MAKE NO REPRESENTATIONS OR WARRANTIES OF ANY KIND, WHETHER EXPRESS, IMPLIED, STATUTORY, OR OTHERWISE REGARDING AWS ASSETS, INCLUDING ANY WARRANTY THAT THE AWS ASSETS WILL BE UNINTERRUPTED, ERROR FREE, OR FREE OF HARMFUL COMPONENTS, OR THAT ANY CONTENT, INCLUDING YOUR CONTENT, WILL BE SECURE OR NOT OTHERWISE LOST OR DAMAGED. EXCEPT TO THE EXTENT PROHIBITED BY LAW, AWS AND ITS AFFILIATES AND LICENSORS DISCLAIM ALL WARRANTIES, INCLUDING ANY IMPLIED WARRANTIES OF MERCHANTABILITY, SATISFACTORY QUALITY, FITNESS FOR A PARTICULAR PURPOSE, NON-INFRINGEMENT, OR QUIET ENJOYMENT, AND ANY WARRANTIES ARISING OUT OF ANY COURSE OF DEALING OR USAGE OF TRADE.
+Copyright Amazon.com and its affiliates; all rights reserved. This software, including any machine learning models, and model artifacts, is AWS Content under https://aws.amazon.com/agreement/ and may not be distributed without permission.
+
+In addition to the permissions in https://aws.amazon.com/legal/aws-ip-license-terms/, the AWS Licensor grants you these additional permissions:
+
+Internal reproduction and use in source and binary forms, with or without modification, are permitted provided that the following conditions are met:
+
+1. Internal reproductions of source code must retain the above copyright notice, this list of conditions, and the following disclaimer.
+2. Internal reproductions in binary form must reproduce the above copyright notice, this list of conditions, and the following disclaimer by printing upon startup of the binary.
+3. External distribution, in source or binary form, with or without modification, is not permitted under the terms of this license.
+
+Disclaimer
+
+THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALING IN THE SOFTWARE.

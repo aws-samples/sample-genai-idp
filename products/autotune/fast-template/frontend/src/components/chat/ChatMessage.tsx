@@ -1,3 +1,6 @@
+// Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+// SPDX-License-Identifier: LicenseRef-AWS-Proprietary
+
 import { Message } from "./types"
 import { getToolRenderer } from "@/hooks/useToolRenderer"
 import { MarkdownRenderer } from "./MarkdownRenderer"

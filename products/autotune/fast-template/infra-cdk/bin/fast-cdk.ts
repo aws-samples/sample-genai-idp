@@ -1,3 +1,6 @@
+// Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+// SPDX-License-Identifier: LicenseRef-AWS-Proprietary
+
 #!/usr/bin/env node
 import * as cdk from "aws-cdk-lib"
 import { FastMainStack } from "../lib/fast-main-stack"

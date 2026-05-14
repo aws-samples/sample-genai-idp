@@ -1,3 +1,6 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: LicenseRef-AWS-Proprietary
+
 #!/usr/bin/env python3
 """Parallel batch optimization experiment across cost-per-page tiers.
 

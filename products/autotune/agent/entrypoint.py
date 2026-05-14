@@ -1,3 +1,6 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: LicenseRef-AWS-Proprietary
+
 """IDPAutoTune agent — automated IDP Accelerator config optimization.
 
 Runs as a Strands agent on AgentCore via the FAST BedrockAgentCoreApp entrypoint.
