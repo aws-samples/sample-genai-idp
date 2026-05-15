@@ -144,8 +144,8 @@ export function DocTypeChartWidget({
 
   // ── Donut mode (legend below chart) ─────────────────────────────────────────
   if (useDonutChart) {
-    const topN = sorted.slice(0, 6);
-    const remaining = sorted.slice(6);
+    const topN = sorted.slice(0, displayLimit);
+    const remaining = sorted.slice(displayLimit);
 
     const pieData: { name: string; value: number; count: number; percent: number }[] = topN.map((c) => ({
       name: c.className,
@@ -156,8 +156,9 @@ export function DocTypeChartWidget({
 
     if (remaining.length > 0) {
       const othersCount = remaining.reduce((s, c) => s + c.count, 0);
+      const typeLabel = remaining.length === 1 ? 'type' : 'types';
       pieData.push({
-        name: `Others (${remaining.length})`,
+        name: `others (${remaining.length} ${typeLabel})`,
         value: othersCount,
         count: othersCount,
         percent: total > 0 ? othersCount / total : 0,
@@ -203,7 +204,7 @@ export function DocTypeChartWidget({
                 labelLine={false}
               >
                 {pieData.map((entry, idx) => {
-                  const isOthers = entry.name.startsWith('Others (');
+                  const isOthers = entry.name.startsWith('others (');
                   return (
                     <Cell
                       key={entry.name}
@@ -227,7 +228,16 @@ export function DocTypeChartWidget({
             }}
           >
             {pieData.map((entry, idx) => {
-              const isOthers = entry.name.startsWith('Others (');
+              const isOthers = entry.name.startsWith('others (');
+              let displayText: string;
+              if (isOthers) {
+                // Extract the content from "others (15 types)" -> "15 types"
+                const match = entry.name.match(/others \((.+)\)/);
+                const typeInfo = match ? match[1] : '';
+                displayText = `others (${typeInfo}): ${entry.count.toLocaleString()}`;
+              } else {
+                displayText = `${entry.name} (${entry.count.toLocaleString()})`;
+              }
               return (
                 <div key={entry.name} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
                   <span
@@ -239,8 +249,8 @@ export function DocTypeChartWidget({
                       borderRadius: 2,
                     }}
                   />
-                  <span style={{ color: '#16191f' }}>
-                    {entry.name} ({entry.count.toLocaleString()})
+                  <span style={{ color: '#16191f', textTransform: 'lowercase' }}>
+                    {displayText}
                   </span>
                 </div>
               );
@@ -264,8 +274,9 @@ export function DocTypeChartWidget({
   if (remaining.length > 0) {
     const othersCount = remaining.reduce((s, c) => s + c.count, 0);
     const othersPct = remaining.reduce((s, c) => s + c.percentage, 0);
+    const typeLabel = remaining.length === 1 ? 'type' : 'types';
     barData.push({
-      name: `Others (${remaining.length} types)`,
+      name: `others (${remaining.length} ${typeLabel})`,
       count: othersCount,
       pct: othersPct,
     });
@@ -279,6 +290,7 @@ export function DocTypeChartWidget({
         <Header
           variant="h2"
           description={subtitle}
+          info={infoPopover}
           actions={
             <Select
               selectedOption={selectedOption}
@@ -302,7 +314,7 @@ export function DocTypeChartWidget({
           <BarChart
             layout="vertical"
             data={barData}
-            margin={{ top: 4, right: 60, left: 8, bottom: 0 }}
+            margin={{ top: 4, right: 60, left: 8, bottom: 20 }}
             barCategoryGap="25%"
           >
             <CartesianGrid
@@ -319,6 +331,7 @@ export function DocTypeChartWidget({
               tickFormatter={(v) =>
                 v >= 1000 ? `${(v / 1000).toFixed(0)}K` : v.toString()
               }
+              label={{ value: 'Document Count', position: 'bottom', offset: 0, style: { fontSize: 11, fill: '#555' } }}
             />
             <YAxis
               type="category"
@@ -327,6 +340,7 @@ export function DocTypeChartWidget({
               axisLine={false}
               tickLine={false}
               width={140}
+              label={{ value: 'Document Type', angle: -90, position: 'insideLeft', style: { fontSize: 11, fill: '#555' } }}
             />
             <Tooltip content={<CustomTooltip />} cursor={{ fill: 'rgba(0,0,0,0.04)' }} />
             <Bar dataKey="count" radius={[0, 3, 3, 0]}>
@@ -337,7 +351,7 @@ export function DocTypeChartWidget({
                 formatter={(v: unknown) => Number(v).toLocaleString()}
               />
               {barData.map((entry, i) => {
-                const isOthers = entry.name.startsWith('Others (');
+                const isOthers = entry.name.startsWith('others (');
                 return (
                   <Cell
                     key={entry.name}

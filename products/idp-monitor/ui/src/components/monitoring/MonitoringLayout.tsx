@@ -9,12 +9,14 @@
  * section data to each widget.
  *
  * Layout:
- *   Row 0: SummaryWidget (AI Insights)  (full width)
- *   Row 1: KPICardsWidget               (full width)
- *   Row 2: VolumeChartWidget            (full width)
- *   Row 3: DocTypeChartWidget (1/2)   | ConfigPanelWidget (1/2)
- *   Row 4: LatencyChartWidget (1/2)   | ThrottleWidget (1/2)
- *   Row 5: FailuresTableWidget          (full width)
+ *   Row 0: SummaryWidget (AI Insights)            (full width)
+ *   Row 1: KPICardsWidget                         (full width)
+ *   Row 2: ProcessingStatusWidget                 (full width, tabbed: Processing | Processed Documents)
+ *          - Processing tab: Live non-terminal statuses (auto-refresh)
+ *          - Processed Documents tab: Terminal statuses over time (completed/failed)
+ *   Row 3: DistributionWidget                     (full width, tabbed: Document Types | Config Versions)
+ *   Row 4: LatencyChartWidget (1/2) | ThrottleWidget (1/2)
+ *   Row 5: FailuresTableWidget                    (full width)
  *   Empty state when all widgets hidden
  */
 
@@ -23,14 +25,13 @@ import SpaceBetween from '@cloudscape-design/components/space-between';
 
 import type { MonitoringDashboardData } from '../../types/monitoring';
 import type { WidgetVisibilityMap } from '../../types/widgets';
-import { ConfigPanelWidget } from './widgets/ConfigPanelWidget';
-import { DocTypeChartWidget } from './widgets/DocTypeChartWidget';
+import { DistributionWidget } from './widgets/DistributionWidget';
 import { FailuresTableWidget } from './widgets/FailuresTableWidget';
 import { KPICardsWidget } from './widgets/KPICardsWidget';
 import { LatencyChartWidget } from './widgets/LatencyChartWidget';
+import { ProcessingStatusWidget } from './widgets/ProcessingStatusWidget';
 import { SummaryWidget } from './widgets/SummaryWidget';
 import { ThrottleWidget } from './widgets/ThrottleWidget';
-import { VolumeChartWidget } from './widgets/VolumeChartWidget';
 
 interface MonitoringLayoutProps {
   dashboard: MonitoringDashboardData;
@@ -84,9 +85,9 @@ export function MonitoringLayout({
         <KPICardsWidget volume={dashboard.volume} cost={dashboard.cost} isLoading={isLoading} />
       )}
 
-      {/* Row 2 — Volume chart (full width) */}
+      {/* Row 2 — Processing Status (Tabbed: Processing | Processed Documents) */}
       {widgetVisibility.volumeChart && (
-        <VolumeChartWidget
+        <ProcessingStatusWidget
           timeSeries={dashboard.volume?.timeSeries}
           statusBreakdown={dashboard.volume?.statusBreakdown}
           isLoading={isLoading}
@@ -96,40 +97,15 @@ export function MonitoringLayout({
         />
       )}
 
-      {/* Row 3 — Doc type distribution (1/2) | Active Config (1/2) */}
+      {/* Row 3 — Distribution (Tabbed: Document Types & Config Versions) */}
       {(widgetVisibility.docTypes || widgetVisibility.configPanel) && (
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns:
-              widgetVisibility.docTypes && widgetVisibility.configPanel
-                ? '1fr 1fr'
-                : '1fr',
-            gap: '20px',
-            alignItems: 'stretch',
-          }}
-        >
-          {widgetVisibility.docTypes && (
-            <div style={{ minWidth: 0, display: 'grid' }}>
-              <DocTypeChartWidget
-                distribution={dashboard.distribution}
-                isLoading={isLoading}
-                apiUrl={apiUrl}
-                apiKey={apiKey}
-              />
-            </div>
-          )}
-          {widgetVisibility.configPanel && (
-            <div style={{ minWidth: 0, display: 'grid' }}>
-              <ConfigPanelWidget
-                config={dashboard.config}
-                isLoading={isLoading}
-                apiUrl={apiUrl}
-                apiKey={apiKey}
-              />
-            </div>
-          )}
-        </div>
+        <DistributionWidget
+          distribution={dashboard.distribution}
+          config={dashboard.config}
+          isLoading={isLoading}
+          apiUrl={apiUrl}
+          apiKey={apiKey}
+        />
       )}
 
       {/* Row 4 — Processing Speed (1/2) | Service Performance (1/2) */}
