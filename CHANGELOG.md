@@ -5,6 +5,8 @@ SPDX-License-Identifier: MIT-0
 
 ## [Unreleased]
 
+## [0.5.11]
+
 ### Added
 
 - **"Update available" indicator in Web UI Deployment Info** — the Deployment Info section of the side nav now shows a small `Update` badge next to the deployed `Version: …` line whenever a newer published template is available on the public artifacts bucket. Hovering the badge opens a popover showing the deployed and latest versions; for **Admin** users, the popover includes a one-click "Update stack in CloudFormation →" link that deep-links to the AWS console with the new template URL pre-filled (review parameters before applying). **Zero-touch by default**: `idp-cli publish` auto-substitutes the new `PublicArtifactsBucket` / `PublicArtifactsPrefix` CloudFormation parameter defaults to point at the bucket and prefix it's publishing to, so customers deploying the published template get the indicator out of the box. Headless / private-network deployments can override `PublicArtifactsBucket=""` to disable the check. The check itself runs in a small Lambda resolver (`getLatestPublishedVersion`) that lists the public bucket via unsigned S3 reads and caches results for 10 minutes. The headless template transformer (`HeadlessTemplateTransformer`) strips the resolver, parameters, and Settings entries so headless / GovCloud builds remain UI-free with zero dangling references.
@@ -23,6 +25,12 @@ SPDX-License-Identifier: MIT-0
 ### Fixed
 
 - **LLM array wrapping in extraction and assessment services** — LLMs occasionally return single-element arrays `[{...}]` instead of objects `{...}` when generating JSON responses, causing Pydantic validation errors (`Input should be a valid dictionary [type=dict_type, input_value=[{...}], input_type=list]`). All affected services now automatically detect and unwrap single-element arrays with a warning log, while multi-element arrays are rejected with a clear error message. Applied to standard extraction, agentic extraction, assessment service, and granular assessment service.
+
+## Templates
+   - us-west-2: `https://s3.us-west-2.amazonaws.com/aws-ml-blog-us-west-2/artifacts/genai-idp/idp-main_0.5.11.yaml`
+   - us-east-1: `https://s3.us-east-1.amazonaws.com/aws-ml-blog-us-east-1/artifacts/genai-idp/idp-main_0.5.11.yaml`
+   - eu-central-1: `https://s3.eu-central-1.amazonaws.com/aws-ml-blog-eu-central-1/artifacts/genai-idp/idp-main_0.5.11.yaml`
+
 
 ## [0.5.10]
 
