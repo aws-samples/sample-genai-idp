@@ -9,13 +9,14 @@
  * section data to each widget.
  *
  * Layout:
- *   Row 0: SummaryWidget (AI Insights)  (full width)
- *   Row 1: KPICardsWidget               (full width)
- *   Row 1.5: LiveStatusWidget           (full width, auto-refresh from DynamoDB tracking table)
- *   Row 2: VolumeChartWidget            (full width)
- *   Row 3: DistributionWidget           (full width, tabbed: Document Types | Config Versions)
- *   Row 4: LatencyChartWidget (1/2)   | ThrottleWidget (1/2)
- *   Row 5: FailuresTableWidget          (full width)
+ *   Row 0: SummaryWidget (AI Insights)            (full width)
+ *   Row 1: KPICardsWidget                         (full width)
+ *   Row 2: ProcessingStatusWidget                 (full width, tabbed: Processing | Processed Documents)
+ *          - Processing tab: Live non-terminal statuses (auto-refresh)
+ *          - Processed Documents tab: Terminal statuses over time (completed/failed)
+ *   Row 3: DistributionWidget                     (full width, tabbed: Document Types | Config Versions)
+ *   Row 4: LatencyChartWidget (1/2) | ThrottleWidget (1/2)
+ *   Row 5: FailuresTableWidget                    (full width)
  *   Empty state when all widgets hidden
  */
 
@@ -28,10 +29,9 @@ import { DistributionWidget } from './widgets/DistributionWidget';
 import { FailuresTableWidget } from './widgets/FailuresTableWidget';
 import { KPICardsWidget } from './widgets/KPICardsWidget';
 import { LatencyChartWidget } from './widgets/LatencyChartWidget';
-import { LiveStatusWidget } from './widgets/LiveStatusWidget';
+import { ProcessingStatusWidget } from './widgets/ProcessingStatusWidget';
 import { SummaryWidget } from './widgets/SummaryWidget';
 import { ThrottleWidget } from './widgets/ThrottleWidget';
-import { VolumeChartWidget } from './widgets/VolumeChartWidget';
 
 interface MonitoringLayoutProps {
   dashboard: MonitoringDashboardData;
@@ -85,16 +85,15 @@ export function MonitoringLayout({
         <KPICardsWidget volume={dashboard.volume} cost={dashboard.cost} isLoading={isLoading} />
       )}
 
-      {/* Row 1.5 — Live Processing Status (full width, auto-refresh) */}
-      <LiveStatusWidget apiUrl={apiUrl} apiKey={apiKey} />
-
-      {/* Row 2 — Volume chart (full width) */}
+      {/* Row 2 — Processing Status (Tabbed: Processing | Processed Documents) */}
       {widgetVisibility.volumeChart && (
-        <VolumeChartWidget
+        <ProcessingStatusWidget
           timeSeries={dashboard.volume?.timeSeries}
           statusBreakdown={dashboard.volume?.statusBreakdown}
           isLoading={isLoading}
           timeRange={timeRange}
+          apiUrl={apiUrl}
+          apiKey={apiKey}
         />
       )}
 
@@ -104,6 +103,8 @@ export function MonitoringLayout({
           distribution={dashboard.distribution}
           config={dashboard.config}
           isLoading={isLoading}
+          apiUrl={apiUrl}
+          apiKey={apiKey}
         />
       )}
 
@@ -122,12 +123,12 @@ export function MonitoringLayout({
         >
           {widgetVisibility.latencyChart && (
             <div style={{ minWidth: 0, display: 'grid' }}>
-              <LatencyChartWidget latency={dashboard.latency} isLoading={isLoading} />
+              <LatencyChartWidget latency={dashboard.latency} isLoading={isLoading} apiUrl={apiUrl} apiKey={apiKey} />
             </div>
           )}
           {widgetVisibility.throttleEvents && (
             <div style={{ minWidth: 0, display: 'grid' }}>
-              <ThrottleWidget throttles={dashboard.throttles} isLoading={isLoading} />
+              <ThrottleWidget throttles={dashboard.throttles} isLoading={isLoading} apiUrl={apiUrl} apiKey={apiKey} />
             </div>
           )}
         </div>

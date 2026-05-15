@@ -200,5 +200,5 @@ export interface SectionError {
 // Hook / Component Props helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
-export type TimeRangePreset = '1h' | '6h' | '24h' | '7d' | '30d' | 'custom';
+export type TimeRangePreset = '1h' | '2h' | '4h' | '6h' | '8h' | '24h' | '1d' | '2d' | '7d' | '14d' | '30d' | 'custom';
 export type DashboardSection = 'volume' | 'cost' | 'latency' | 'failures' | 'throttles' | 'distribution' | 'config';

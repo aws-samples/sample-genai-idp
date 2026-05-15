@@ -12,16 +12,17 @@ import Badge from '@cloudscape-design/components/badge';
 import Box from '@cloudscape-design/components/box';
 import Container from '@cloudscape-design/components/container';
 import Header from '@cloudscape-design/components/header';
-import Icon from '@cloudscape-design/components/icon';
-import Popover from '@cloudscape-design/components/popover';
 import Spinner from '@cloudscape-design/components/spinner';
 import Table from '@cloudscape-design/components/table';
 
 import type { ThrottleMetric, ThrottleMetrics } from '../../../types/monitoring';
+import { AiInfoPopover } from '../AiInfoPopover';
 
 interface ThrottleWidgetProps {
   throttles: ThrottleMetrics | null | undefined;
   isLoading: boolean;
+  apiUrl?: string;
+  apiKey?: string;
 }
 
 type SeverityLevel = 'ok' | 'warning' | 'critical';
@@ -54,26 +55,26 @@ const BADGE_LABEL: Record<SeverityLevel, string> = {
   critical: 'Critical',
 };
 
-const infoPopover = (
-  <Popover
-    header="Service Performance"
-    content="Monitors throttling and rate-limiting events across AWS services used by the IDP pipeline. Normal means no throttle events detected in the selected time range."
-    triggerType="custom"
-    size="medium"
-  >
-    <Box color="text-status-info" display="inline-block" margin={{ left: 'xs' }}>
-      <Icon name="status-info" variant="link" />
-    </Box>
-  </Popover>
-);
-
 export function ThrottleWidget({
   throttles,
   isLoading,
+  apiUrl,
+  apiKey,
 }: ThrottleWidgetProps): JSX.Element {
+  const aiInfoPopover = (
+    <AiInfoPopover
+      widgetName="Service Performance"
+      cacheKey="throttle-insight"
+      data={throttles}
+      header="Service Performance"
+      apiUrl={apiUrl}
+      apiKey={apiKey}
+    />
+  );
+
   if (isLoading && !throttles) {
     return (
-      <Container header={<Header variant="h2" info={infoPopover}>Service Performance</Header>}>
+      <Container header={<Header variant="h2" info={aiInfoPopover}>Service Performance</Header>}>
         <Box textAlign="center" padding="l">
           <Spinner size="large" />
         </Box>
@@ -83,7 +84,7 @@ export function ThrottleWidget({
 
   if (!throttles) {
     return (
-      <Container header={<Header variant="h2" info={infoPopover}>Service Performance</Header>}>
+      <Container header={<Header variant="h2" info={aiInfoPopover}>Service Performance</Header>}>
         <Box textAlign="center" color="text-body-secondary" padding="l">
           No service performance data available.
         </Box>
@@ -104,7 +105,7 @@ export function ThrottleWidget({
       header={
         <Header
           variant="h2"
-          info={infoPopover}
+          info={aiInfoPopover}
           description="Issues related to throttling or quota limits"
         >
           Service Performance

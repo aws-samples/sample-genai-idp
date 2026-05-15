@@ -11,8 +11,6 @@
 import Box from '@cloudscape-design/components/box';
 import Container from '@cloudscape-design/components/container';
 import Header from '@cloudscape-design/components/header';
-import Icon from '@cloudscape-design/components/icon';
-import Popover from '@cloudscape-design/components/popover';
 import Select from '@cloudscape-design/components/select';
 import Spinner from '@cloudscape-design/components/spinner';
 import {
@@ -31,10 +29,13 @@ import {
 import { useState } from 'react';
 
 import type { DocumentTypeDistribution } from '../../../types/monitoring';
+import { AiInfoPopover } from '../AiInfoPopover';
 
 interface DocTypeChartWidgetProps {
   distribution: DocumentTypeDistribution | null | undefined;
   isLoading: boolean;
+  apiUrl?: string;
+  apiKey?: string;
 }
 
 const PALETTE = [
@@ -83,6 +84,8 @@ const CustomTooltip = ({
 export function DocTypeChartWidget({
   distribution,
   isLoading,
+  apiUrl,
+  apiKey,
 }: DocTypeChartWidgetProps): JSX.Element {
   const [displayLimit, setDisplayLimit] = useState<number>(5);
 
@@ -95,16 +98,14 @@ export function DocTypeChartWidget({
     : undefined;
 
   const infoPopover = (
-    <Popover
+    <AiInfoPopover
+      widgetName="Document Types"
+      cacheKey="doctype-insight"
+      data={distribution}
       header="Document Types"
-      content="Distribution of processed documents by classification type (e.g., invoices, contracts, receipts)."
-      triggerType="custom"
-      size="medium"
-    >
-      <Box color="text-status-info" display="inline-block" margin={{ left: 'xs' }}>
-        <Icon name="status-info" variant="link" />
-      </Box>
-    </Popover>
+      apiUrl={apiUrl}
+      apiKey={apiKey}
+    />
   );
 
   if (isLoading && !distribution) {

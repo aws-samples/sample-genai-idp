@@ -18,12 +18,16 @@ interface DistributionWidgetProps {
   distribution: DocumentTypeDistribution | null | undefined;
   config: ConfigContext | null | undefined;
   isLoading: boolean;
+  apiUrl?: string;
+  apiKey?: string;
 }
 
 export function DistributionWidget({
   distribution,
   config,
   isLoading,
+  apiUrl,
+  apiKey,
 }: DistributionWidgetProps): JSX.Element {
   const [activeTabId, setActiveTabId] = useState('docTypes');
 
@@ -35,12 +39,12 @@ export function DistributionWidget({
         {
           id: 'docTypes',
           label: 'By Document Type',
-          content: <DocTypeChartWidget distribution={distribution} isLoading={isLoading} />,
+          content: <DocTypeChartWidget distribution={distribution} isLoading={isLoading} apiUrl={apiUrl} apiKey={apiKey} />,
         },
         {
           id: 'configVersions',
           label: 'By Config Version',
-          content: <ConfigPanelWidget config={config} isLoading={isLoading} />,
+          content: <ConfigPanelWidget config={config} isLoading={isLoading} apiUrl={apiUrl} apiKey={apiKey} />,
         },
       ]}
     />

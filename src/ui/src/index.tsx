@@ -50,6 +50,10 @@ import CloudscapeCheckbox from '@cloudscape-design/components/checkbox';
 import CloudscapeProgressBar from '@cloudscape-design/components/progress-bar';
 import CloudscapePieChart from '@cloudscape-design/components/pie-chart';
 import CloudscapeTextarea from '@cloudscape-design/components/textarea';
+import CloudscapeCollectionPreferences from '@cloudscape-design/components/collection-preferences';
+import CloudscapeDatePicker from '@cloudscape-design/components/date-picker';
+import CloudscapeFormField from '@cloudscape-design/components/form-field';
+import CloudscapeTimeInput from '@cloudscape-design/components/time-input';
 import * as CloudscapeCollectionHooks from '@cloudscape-design/collection-hooks';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -85,6 +89,10 @@ import * as CloudscapeCollectionHooks from '@cloudscape-design/collection-hooks'
   CloudscapeProgressBar,
   CloudscapePieChart,
   CloudscapeTextarea,
+  CloudscapeCollectionPreferences,
+  CloudscapeDatePicker,
+  CloudscapeFormField,
+  CloudscapeTimeInput,
   CloudscapeCollectionHooks,
 };
 

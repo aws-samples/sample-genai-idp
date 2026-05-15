@@ -130,7 +130,7 @@ export function useMonitoringDashboard(
   options: UseMonitoringDashboardOptions = {}
 ): UseMonitoringDashboardResult {
   const {
-    timeRange = '24h',
+    timeRange = '2h',
     startTime,
     endTime,
     refreshIntervalMs = 0,

@@ -11,8 +11,6 @@
 import Box from '@cloudscape-design/components/box';
 import Container from '@cloudscape-design/components/container';
 import Header from '@cloudscape-design/components/header';
-import Icon from '@cloudscape-design/components/icon';
-import Popover from '@cloudscape-design/components/popover';
 import Select from '@cloudscape-design/components/select';
 import Spinner from '@cloudscape-design/components/spinner';
 import {
@@ -31,10 +29,13 @@ import {
 import { useState } from 'react';
 
 import type { ConfigContext } from '../../../types/monitoring';
+import { AiInfoPopover } from '../AiInfoPopover';
 
 interface ConfigPanelWidgetProps {
   config: ConfigContext | null | undefined;
   isLoading: boolean;
+  apiUrl?: string;
+  apiKey?: string;
 }
 
 const PALETTE = [
@@ -127,20 +128,7 @@ const PieLegend = ({
   </div>
 );
 
-const infoPopover = (
-  <Popover
-    header="Config Versions"
-    content="Distribution of processed documents by config version."
-    triggerType="custom"
-    size="medium"
-  >
-    <Box color="text-status-info" display="inline-block" margin={{ left: 'xs' }}>
-      <Icon name="status-info" variant="link" />
-    </Box>
-  </Popover>
-);
-
-export function ConfigPanelWidget({ config, isLoading }: ConfigPanelWidgetProps): JSX.Element {
+export function ConfigPanelWidget({ config, isLoading, apiUrl, apiKey }: ConfigPanelWidgetProps): JSX.Element {
   const [displayLimit, setDisplayLimit] = useState<number>(5);
 
   const sorted = [...(config?.versionDistribution ?? [])].sort(
@@ -149,6 +137,17 @@ export function ConfigPanelWidget({ config, isLoading }: ConfigPanelWidgetProps)
 
   const total = sorted.reduce((s, v) => s + v.documentCount, 0);
   const subtitle = total > 0 ? `${total.toLocaleString()} total documents` : undefined;
+
+  const infoPopover = (
+    <AiInfoPopover
+      widgetName="Config Version Distribution"
+      cacheKey="config-insight"
+      data={config}
+      header="Config Version Distribution"
+      apiUrl={apiUrl}
+      apiKey={apiKey}
+    />
+  );
 
   if (isLoading && !config) {
     return (

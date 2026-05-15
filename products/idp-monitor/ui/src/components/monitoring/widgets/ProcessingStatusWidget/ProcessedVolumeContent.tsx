@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: MIT-0
 
 /**
- * IDPMonitor Widget — Volume Over Time Chart
+ * Processed Documents Volume Content (Tab Content)
  *
  * Stacked bar chart showing completed vs. failed document counts over time.
- * Matches the IDP Accelerator reference visual style.
+ * Shows ONLY terminal statuses (completed/failed) - no pending/in-progress.
  */
 
 import Box from '@cloudscape-design/components/box';
@@ -23,10 +23,10 @@ import {
   YAxis,
 } from 'recharts';
 
-import type { StatusBreakdown, VolumeTimeSeriesPoint } from '../../../types/monitoring';
-import { AiInfoPopover } from '../AiInfoPopover';
+import type { StatusBreakdown, VolumeTimeSeriesPoint } from '../../../../types/monitoring';
+import { AiInfoPopover } from '../../AiInfoPopover';
 
-interface VolumeChartWidgetProps {
+interface ProcessedVolumeContentProps {
   timeSeries: VolumeTimeSeriesPoint[] | null | undefined;
   statusBreakdown?: StatusBreakdown | null;
   isLoading: boolean;
@@ -35,11 +35,10 @@ interface VolumeChartWidgetProps {
   apiKey?: string;
 }
 
-// Matching the accelerator color palette (20% transparency)
+// Terminal status colors only
 const COLORS = {
   completed: 'rgba(103,177,115,0.8)',
   failed: 'rgba(242,139,139,0.8)',
-  pending: 'rgba(176,184,193,0.8)',
 };
 
 const CustomTooltip = ({
@@ -97,7 +96,6 @@ const CustomLegend = () => (
   >
     {[
       { label: 'Completed', color: COLORS.completed },
-      { label: 'Pending', color: COLORS.pending },
       { label: 'Failed', color: COLORS.failed },
     ].map(({ label, color }) => (
       <div
@@ -128,46 +126,33 @@ function formatTimestamp(ts: string, timeRange?: string): string {
   return d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
 }
 
-export function VolumeChartWidget({
+export function ProcessedVolumeContent({
   timeSeries,
-  statusBreakdown,
   isLoading,
   timeRange,
   apiUrl,
   apiKey,
-}: VolumeChartWidgetProps): JSX.Element {
-  // Calculate pending from statusBreakdown (current snapshot) or per-bucket derivation
-  const snapshotPending = (statusBreakdown?.inProgress ?? 0) + (statusBreakdown?.queued ?? 0);
-
-  const safeData = (timeSeries ?? []).map((p, idx, arr) => {
-    // Per-bucket pending from total - completed - failed
-    let bucketPending = Math.max(0, (p.total ?? 0) - p.completed - p.failed);
-
-    // If no per-bucket pending detected but we have snapshot pending,
-    // assign all pending to the most recent bucket so it's visible in the chart
-    if (bucketPending === 0 && snapshotPending > 0 && idx === arr.length - 1) {
-      bucketPending = snapshotPending;
-    }
-
-    return {
-      ...p,
-      pending: bucketPending,
-      label: formatTimestamp(p.timestamp, timeRange),
-    };
-  });
+}: ProcessedVolumeContentProps): JSX.Element {
+  // Filter to terminal statuses only (no pending)
+  const safeData = (timeSeries ?? []).map((p) => ({
+    ...p,
+    label: formatTimestamp(p.timestamp, timeRange),
+    // Only completed and failed - remove pending from chart
+  }));
 
   const totalDocs = safeData.reduce((s, d) => s + d.completed + d.failed, 0);
   const totalFailures = safeData.reduce((s, d) => s + d.failed, 0);
-  const totalPending = snapshotPending || safeData.reduce((s, d) => s + d.pending, 0);
+  const totalCompleted = totalDocs - totalFailures;
+
   const tickInterval =
     safeData.length > 12 ? Math.ceil(safeData.length / 12) - 1 : 0;
 
   const infoPopover = (
     <AiInfoPopover
-      widgetName="Processing Volume"
-      cacheKey="volume-insight"
-      data={{ timeSeries: safeData, totalDocs, totalFailures, totalPending }}
-      header="Processing Volume"
+      widgetName="Processed Documents"
+      cacheKey="processed-volume-insight"
+      data={{ timeSeries: safeData, totalDocs, totalFailures, totalCompleted }}
+      header="Processed Documents"
       apiUrl={apiUrl}
       apiKey={apiKey}
     />
@@ -175,7 +160,7 @@ export function VolumeChartWidget({
 
   if (isLoading && !timeSeries) {
     return (
-      <Container header={<Header variant="h2" info={infoPopover}>Processing Volume</Header>}>
+      <Container header={<Header variant="h2" info={infoPopover}>Processed Documents</Header>}>
         <Box textAlign="center" padding="l">
           <Spinner size="large" />
         </Box>
@@ -184,28 +169,24 @@ export function VolumeChartWidget({
   }
 
   if (safeData.length === 0) {
-    const emptyPendingStr = totalPending > 0 ? ` · ${totalPending.toLocaleString()} pending` : '';
     return (
       <Container
         header={
           <Header
             variant="h2"
             info={infoPopover}
-            description={`0 completed${emptyPendingStr} · 0 failed`}
+            description="0 completed · 0 failed"
           >
-            Processing Volume
+            Processed Documents
           </Header>
         }
       >
         <Box color="text-body-secondary" textAlign="center" padding="l">
-          No volume data available for this time range.
+          No processed documents for this time range.
         </Box>
       </Container>
     );
   }
-
-  const totalCompleted = totalDocs - totalFailures;
-  const pendingStr = totalPending > 0 ? ` · ${totalPending.toLocaleString()} pending` : '';
 
   return (
     <Container
@@ -213,9 +194,9 @@ export function VolumeChartWidget({
         <Header
           variant="h2"
           info={infoPopover}
-          description={`${totalCompleted.toLocaleString()} completed${pendingStr} · ${totalFailures.toLocaleString()} failed`}
+          description={`${totalCompleted.toLocaleString()} completed · ${totalFailures.toLocaleString()} failed`}
         >
-          Processing Volume
+          Processed Documents
         </Header>
       }
     >
@@ -243,6 +224,7 @@ export function VolumeChartWidget({
               axisLine={false}
               tickLine={false}
               width={48}
+              allowDecimals={false}
               tickFormatter={(v) =>
                 v >= 1000 ? `${(v / 1000).toFixed(0)}K` : v
               }
@@ -254,12 +236,6 @@ export function VolumeChartWidget({
               name="completed"
               stackId="a"
               fill={COLORS.completed}
-            />
-            <Bar
-              dataKey="pending"
-              name="pending"
-              stackId="a"
-              fill={COLORS.pending}
             />
             <Bar
               dataKey="failed"
