@@ -187,8 +187,10 @@ def get_model_max_output_tokens(model_id: str) -> int:
             )
             return max_tokens
 
-    # Should never reach here if YAML has ".*" catch-all pattern
-    raise RuntimeError(
-        f"No model limit pattern matched {model_id}. "
-        f"Ensure model_config_limits.yaml has a catch-all '.*' pattern as the last entry."
+    # No pattern matched - unknown/unsupported model
+    raise ValueError(
+        f"Unsupported model ID: {model_id}. "
+        f"No max_tokens limit defined in model_config_limits.yaml. "
+        f"Supported model families: Claude 4.x, Claude 3.x, Amazon Nova. "
+        f"To add this model, run scripts/discover_model_limits.py to test its actual limits."
     )

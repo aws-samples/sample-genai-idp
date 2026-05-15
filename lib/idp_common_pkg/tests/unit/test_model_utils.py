@@ -128,10 +128,13 @@ class TestGetModelMaxOutputTokens:
         assert get_model_max_output_tokens("eu.amazon.nova-2-lite-v1:0") == 10_000
         assert get_model_max_output_tokens("global.amazon.nova-2-lite-v1:0") == 10_000
 
-    def test_unknown_model_returns_default(self):
-        """Test unknown models return default 4,096 tokens."""
-        assert get_model_max_output_tokens("unknown.model.id") == 4_096
-        assert get_model_max_output_tokens("us.meta.llama-3-70b-instruct-v1:0") == 4_096
+    def test_unknown_model_raises_error(self):
+        """Test unknown models raise ValueError instead of returning default."""
+        with pytest.raises(ValueError, match="Unsupported model ID"):
+            get_model_max_output_tokens("unknown.model.id")
+
+        with pytest.raises(ValueError, match="Unsupported model ID"):
+            get_model_max_output_tokens("us.meta.llama-3-70b-instruct-v1:0")
 
     def test_case_insensitive(self):
         """Test model ID matching is case insensitive."""

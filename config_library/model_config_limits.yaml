@@ -53,10 +53,10 @@ model_limits:
     reference: "https://docs.aws.amazon.com/nova/latest/userguide/what-is-nova.html"
 
   # ---------------------------------------------------------------------------
-  # Default Fallback
+  # Unknown Models
   # ---------------------------------------------------------------------------
-  # This should always be last - matches any model not caught above
-  - pattern: ".*"
-    max_output_tokens: 4096
-    description: "Default fallback for unknown models"
-    reference: "Conservative default for models without explicit limits"
+  # Models not matched above will not have max_tokens validation applied.
+  # This allows use of new/unknown models without artificial limits.
+  # Validation will log a warning and skip the check for unknown model IDs.
+  #
+  # To add a new model family, add a pattern entry above with its known limit.
