@@ -253,12 +253,14 @@ def _run_agent_thread(user_id: str, session_id: str, state: OptimizationState,
         except Exception:
             logger.exception("S3 sync failed for %s", s3_key)
 
+    _is_resume = is_resume
+
     async def _run():
-        agent = _create_agent(user_id, session_id, state, test_set_id, optimization_guidance, is_resume, max_cost_usd)
-        initial_prompt = _build_resume_prompt(test_set_id, optimization_guidance) if is_resume else _build_initial_prompt(test_set_id, optimization_guidance)
+        agent = _create_agent(user_id, session_id, state, test_set_id, optimization_guidance, _is_resume, max_cost_usd)
+        initial_prompt = _build_resume_prompt(test_set_id, optimization_guidance) if _is_resume else _build_initial_prompt(test_set_id, optimization_guidance)
 
         # On resume: restore OPTIMIZATION-LOG.md from S3 and seed eval cost
-        if is_resume:
+        if _is_resume:
             prev_state = state.get_state()
             seed_eval_cost(float(prev_state.get("eval_cost_usd", 0)), prev_state.get("eval_seen_batches", ""))
             if s3 and s3_bucket:
@@ -377,16 +379,30 @@ def _run_agent_thread(user_id: str, session_id: str, state: OptimizationState,
         if os.path.exists(log_path):
             _sync_file(log_path, f"{s3_prefix}/OPTIMIZATION-LOG.md")
 
+    max_retries = 2
     try:
-        asyncio.run(_run())
-        if not state.is_terminal():
-            state.set_status("complete", "Optimization finished")
-    except OptimizationCancelled:
-        logger.info("Agent stopped — optimization in terminal state")
-    except Exception as e:
-        logger.exception("Agent run failed")
-        if not state.is_terminal():
-            state.set_status("failed", str(e)[:500])
+        for attempt in range(max_retries + 1):
+            try:
+                asyncio.run(_run())
+                if not state.is_terminal():
+                    state.set_status("complete", "Optimization finished")
+                break
+            except OptimizationCancelled:
+                logger.info("Agent stopped — optimization in terminal state")
+                break
+            except RecursionError:
+                if attempt < max_retries:
+                    logger.warning("RecursionError (attempt %d) — resuming session", attempt + 1)
+                    _is_resume = True
+                else:
+                    logger.exception("RecursionError persisted after %d retries", max_retries)
+                    if not state.is_terminal():
+                        state.set_status("failed", "RecursionError after retries")
+            except Exception as e:
+                logger.exception("Agent run failed")
+                if not state.is_terminal():
+                    state.set_status("failed", str(e)[:500])
+                break
     finally:
         # Final sync of whatever we have
         if s3 and s3_bucket:
