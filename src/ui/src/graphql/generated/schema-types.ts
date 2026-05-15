@@ -437,6 +437,13 @@ export type LatencyDistribution = {
   totalLatency?: Maybe<Scalars['String']['output']>;
 };
 
+export type LatestPublishedVersion = {
+  checkEnabled: Scalars['Boolean']['output'];
+  errorMessage?: Maybe<Scalars['String']['output']>;
+  latestVersion?: Maybe<Scalars['String']['output']>;
+  templateUrl?: Maybe<Scalars['String']['output']>;
+};
+
 export type MessageContent = {
   text?: Maybe<Scalars['String']['output']>;
 };
@@ -900,6 +907,7 @@ export type Query = {
   getDocumentCount?: Maybe<DocumentCount>;
   getFileContents?: Maybe<FileContentsResponse>;
   getFinetuningJob?: Maybe<FinetuningJob>;
+  getLatestPublishedVersion?: Maybe<LatestPublishedVersion>;
   getMyProfile?: Maybe<User>;
   getPricing?: Maybe<PricingResponse>;
   getStepFunctionExecution?: Maybe<StepFunctionExecutionResponse>;

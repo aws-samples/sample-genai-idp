@@ -1513,6 +1513,21 @@ STDERR:
                     "<PUBLIC_SAMPLE_UDOP_MODEL>": self.public_sample_udop_model,
                     "<ARTIFACT_BUCKET_TOKEN>": self.bucket,
                     "<ARTIFACT_PREFIX_TOKEN>": self.prefix_and_version,
+                    # Public template version-check defaults — substituted into
+                    # template.yaml so the deployed stack's CloudFormation
+                    # parameters default to the bucket/prefix the operator is
+                    # publishing TO. This makes the Web UI "Update available"
+                    # indicator work out of the box for whoever publishes (e.g.
+                    # the public release publishes to aws-ml-blog-<region> with
+                    # prefix `artifacts/genai-idp` and gets the indicator for
+                    # free; private builders get a default that points at their
+                    # own bucket/prefix).
+                    #
+                    # `prefix` is the version-stripped prefix (e.g.
+                    # `artifacts/genai-idp`), so the resolver lists sibling
+                    # versioned templates published by future `publish` runs.
+                    "<PUBLIC_ARTIFACTS_BUCKET_TOKEN>": self.bucket,
+                    "<PUBLIC_ARTIFACTS_PREFIX_TOKEN>": self.prefix,
                     "<WEBUI_ZIPFILE_TOKEN>": webui_zipfile,
                     "<UNIFIED_SOURCE_ZIPFILE_TOKEN>": unified_source_zipfile,
                     # Unified image version extracted from source zipfile hash

@@ -71,6 +71,18 @@ class HeadlessTemplateTransformer:
             "CalculateCapacityResolver",
             "CalculateCapacityResolverFunction",
             "CalculateCapacityResolverFunctionLogGroup",
+            # Public-template version-check resolver — UI-only feature, must
+            # be stripped because its DataSource references the AppSync
+            # GraphQLApi (removed below) and HITLAppSyncServiceRole (removed
+            # in self.hitl_resources). Same shape/rationale as the
+            # CalculateCapacityResolver entries above — these resources live
+            # in the main template (next to GraphQLApi) rather than in the
+            # nested/appsync stack to avoid the cross-stack circular
+            # dependency on `!GetAtt GraphQLApi.ApiId`.
+            "VersionCheckResolverFunction",
+            "VersionCheckResolverFunctionLogGroup",
+            "VersionCheckResolverDataSource",
+            "GetLatestPublishedVersionResolver",
             # Fine-tuning AppSync resources — depend on GraphQLApi
             "FinetuningJobsDataSource",
             "CreateFinetuningJobResolver",
@@ -229,6 +241,11 @@ class HeadlessTemplateTransformer:
             "ExternalIdPReviewerGroupName",
             "ExternalIdPViewerGroupName",
             "ExternalIdPAutoLogin",
+            # Public-template version-check (UI-only feature — resolver
+            # removed above in self.appsync_resources). Drop the params so
+            # the headless template doesn't expose unused UI configuration.
+            "PublicArtifactsBucket",
+            "PublicArtifactsPrefix",
         }
 
         # ---- Outputs to remove ----
@@ -876,7 +893,13 @@ class HeadlessTemplateTransformer:
             logger.debug("Removed AllowedSignUpEmailDomains from UpdateSettingsValues")
 
         # Remove Discovery-related settings (resources removed in headless)
-        for key in ["DiscoveryBucket"]:
+        # plus the public-template version-check settings (UI-only feature
+        # whose resolver and parameters are removed in headless mode).
+        for key in [
+            "DiscoveryBucket",
+            "PublicArtifactsBucket",
+            "PublicArtifactsPrefix",
+        ]:
             if key in settings_kvp:
                 del settings_kvp[key]
                 logger.debug(f"Removed {key} from UpdateSettingsValues")

@@ -542,6 +542,48 @@ Parameters:
     AllowedPattern: "^(|arn:aws[a-z-]*:kms:[a-z0-9-]+:[0-9]{12}:key/.+)$"
     ConstraintDescription: Must be empty or a valid KMS key ARN
 
+  # ------------------------------------------------------------------------
+  # Public template version-check (used to surface an "Update available"
+  # indicator in the Web UI's Deployment Info nav section).
+  #
+  # When PublicArtifactsBucket is set, the UI calls a Lambda resolver that
+  # lists the bucket prefix for versioned templates of the form
+  # `<prefix>/idp-main_<version>.yaml`, picks the highest semver, and
+  # compares it with the deployed Version. If newer, an "Update" badge is
+  # rendered next to the deployed version (the Update Stack deep-link is
+  # only active for Admin users).
+  #
+  # Default values point at the public IDP release bucket so out-of-the-box
+  # deployments get the indicator. Set PublicArtifactsBucket to "" to
+  # disable the check entirely (recommended for headless / private network
+  # deployments that can't reach the public bucket).
+  # ------------------------------------------------------------------------
+  PublicArtifactsBucket:
+    Type: String
+    # `idp-cli publish` substitutes the publishing bucket here so that
+    # operators publishing to e.g. aws-ml-blog-us-west-2 get zero-touch
+    # version-check working out of the box. Falls back to empty string
+    # (= check disabled) for headless / private-network builds.
+    Default: "<PUBLIC_ARTIFACTS_BUCKET_TOKEN>"
+    Description: >-
+      (Optional) S3 bucket holding the public IDP CloudFormation templates
+      used for the "update available" check shown in the Web UI Deployment
+      Info section. Leave empty to disable the check (default for headless
+      / private-network deployments). For the public release, point this at
+      the regional aws-ml-blog bucket — e.g. aws-ml-blog-us-west-2.
+
+  PublicArtifactsPrefix:
+    Type: String
+    # `idp-cli publish` substitutes the publishing prefix (without version
+    # suffix) so the version-check resolver can list sibling versioned
+    # templates published under the same prefix. Falls back to the public
+    # release default when not substituted.
+    Default: "<PUBLIC_ARTIFACTS_PREFIX_TOKEN>"
+    Description: >-
+      S3 key prefix under PublicArtifactsBucket where the versioned
+      idp-main_<version>.yaml templates live. Only used when
+      PublicArtifactsBucket is set.
+
   # MLflow Integration
   EnableMLflow:
     Type: String
@@ -840,6 +882,13 @@ Conditions:
     !Not [ !Equals [ !Ref DocumentSectionsCrawlerFrequency, "Manual" ] ]
   HasPermissionsBoundary: !Not [ !Equals [ !Ref PermissionsBoundaryArn, "" ] ]
   HasCustomConfigPath: !Not [ !Equals [ !Ref CustomConfigPath, "" ] ]
+  # The version-check resolver only needs IAM grants when an artifacts
+  # bucket is actually configured. When `PublicArtifactsBucket` is empty
+  # the resolver short-circuits before any S3 call, so we omit the policy
+  # entirely (avoids creating an IAM policy with a wildcard ARN).
+  HasPublicArtifactsBucket:
+    !Not [ !Equals [ !Ref PublicArtifactsBucket, "" ] ]
+
   IsS3VectorsVectorStore: !Equals [ !Ref KnowledgeBaseVectorStore, "S3_VECTORS" ]
   CreateAgentCoreLambda: !Equals [ !Ref EnableMCP, "true" ]
   CreateExternalAppClient: !Equals [ !Ref EnableMCP, "true" ]
@@ -4626,6 +4675,10 @@ Resources:
           - !GetAtt DOCUMENTKB.Outputs.KnowledgeBaseID
           - ""
         AllowedSignUpEmailDomains: !Ref AllowedSignUpEmailDomain
+        # Public template version-check (used by Web UI Deployment Info "Update available" indicator).
+        # When PublicArtifactsBucket is empty the UI hides the indicator entirely.
+        PublicArtifactsBucket: !Ref PublicArtifactsBucket
+        PublicArtifactsPrefix: !Ref PublicArtifactsPrefix
     UpdateReplacePolicy: Delete
     DeletionPolicy: Delete
 
@@ -6739,6 +6792,112 @@ Resources:
       DataSourceName: !GetAtt CalculateCapacityDataSource.Name
       TypeName: Query
       FieldName: calculateCapacity
+
+  ##########################################################################
+  # Public Template Version-Check Resolver
+  #
+  # Powers the "Update available" indicator in the Web UI's Deployment Info
+  # nav section. Lists the public artifacts S3 prefix for versioned templates
+  # of the form <prefix>/idp-main_<version>.yaml and returns the highest
+  # semver. The check is disabled by default (PublicArtifactsBucket=""); the
+  # public release sets it to the regional aws-ml-blog bucket.
+  #
+  # The resolver tries unsigned/anonymous S3 reads first (botocore UNSIGNED)
+  # so it works against truly public buckets without any IAM grant. If the
+  # unsigned call fails (e.g. the bucket has BlockPublicAcls / requires
+  # SigV4), it falls back to signed requests using this Lambda's execution
+  # role — that's why we attach `s3:ListBucket` and `s3:GetObject` on the
+  # configured PublicArtifactsBucket (conditional on
+  # HasPublicArtifactsBucket so headless / empty-bucket builds don't get a
+  # dangling policy).
+  ##########################################################################
+
+
+  VersionCheckResolverFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${AWS::StackName}-VersionCheckResolver"
+      KmsKeyId: !GetAtt CustomerManagedEncryptionKey.Arn
+      RetentionInDays: !Ref LogRetentionDays
+
+  VersionCheckResolverFunction:
+    DependsOn:
+      - IsStacknameLengthOK
+    Type: AWS::Serverless::Function
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: "Function does not require VPC access — only reads from public S3 bucket via unsigned requests"
+          - id: W92
+            reason: "Function does not require reserved concurrency"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for synchronous AppSync resolver"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
+    # checkov:skip=CKV_AWS_173: "Environment variables contain non-sensitive configuration values (bucket name, prefix, log level)"
+    Properties:
+      PermissionsBoundary:
+        !If [
+          HasPermissionsBoundary,
+          !Ref PermissionsBoundaryArn,
+          !Ref AWS::NoValue,
+        ]
+      Handler: index.lambda_handler
+      Runtime: python3.12
+      Timeout: 30
+      MemorySize: 256
+      CodeUri: src/lambda/version_check_resolver
+      LoggingConfig:
+        LogGroup: !Ref VersionCheckResolverFunctionLogGroup
+      Environment:
+        Variables:
+          LOG_LEVEL: !Ref LogLevel
+          PUBLIC_ARTIFACTS_BUCKET: !Ref PublicArtifactsBucket
+          PUBLIC_ARTIFACTS_PREFIX: !Ref PublicArtifactsPrefix
+          PUBLIC_ARTIFACTS_REGION: !Ref AWS::Region
+          # Cache TTL (seconds) for the in-process result cache.
+          VERSION_CHECK_CACHE_TTL: "600"
+      # Grant signed-S3 access to the configured artifacts bucket as a
+      # fallback for when unsigned/anonymous reads aren't allowed (e.g.
+      # private buckets like `idp-cli publish` creates with all public
+      # access blocked). Only attached when PublicArtifactsBucket is
+      # non-empty so headless / disabled builds get no policy.
+      Policies:
+        - !If
+          - HasPublicArtifactsBucket
+          - Statement:
+              - Effect: Allow
+                Action:
+                  - s3:ListBucket
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:s3:::${PublicArtifactsBucket}"
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:s3:::${PublicArtifactsBucket}/${PublicArtifactsPrefix}/*"
+          - !Ref AWS::NoValue
+
+  VersionCheckResolverDataSource:
+
+    Type: AWS::AppSync::DataSource
+    Properties:
+      ApiId: !GetAtt GraphQLApi.ApiId
+      Name: VersionCheckResolverDataSource
+      Description: Lambda function for the public template version-check
+      Type: AWS_LAMBDA
+      ServiceRoleArn: !GetAtt HITLAppSyncServiceRole.Arn
+      LambdaConfig:
+        LambdaFunctionArn: !GetAtt VersionCheckResolverFunction.Arn
+
+  GetLatestPublishedVersionResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: APPSYNCSTACK
+    Properties:
+      ApiId: !GetAtt GraphQLApi.ApiId
+      DataSourceName: !GetAtt VersionCheckResolverDataSource.Name
+      TypeName: Query
+      FieldName: getLatestPublishedVersion
 
   AgentProcessorLogGroup:
     Type: AWS::Logs::LogGroup
@@ -9388,6 +9547,13 @@ Resources:
                   - !GetAtt CompleteSectionReviewFunction.Arn
                   - !GetAtt CalculateCapacityResolverFunction.Arn
                   - !GetAtt FinetuningJobsResolverFunction.Arn
+                  # Public-template version-check resolver. Same shape as
+                  # CalculateCapacityResolverFunction above — the role is
+                  # shared with the AppSync data sources defined in the main
+                  # template (next to GraphQLApi), so we have to grant invoke
+                  # here. Without this, the AppSync data source returns
+                  # `Lambda:IllegalArgument` 403.
+                  - !GetAtt VersionCheckResolverFunction.Arn
 
   UserManagementDataSource:
     Type: AWS::AppSync::DataSource

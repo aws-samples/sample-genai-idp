@@ -1,0 +1,5 @@
+# boto3 + botocore are provided by the Lambda runtime; no extra deps needed.
+# `packaging` is optionally used for semver-aware sorting and is bundled with
+# the Lambda Python 3.12 runtime via setuptools, but we list it here in case
+# the runtime drops it in the future.
+packaging>=23.0
