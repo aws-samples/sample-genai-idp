@@ -1,3 +1,6 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: LicenseRef-AWS-Proprietary
+
 #!/usr/bin/env python3
 """Dev-only script to reset an IDP stack: delete all test executions and non-managed configs."""
 

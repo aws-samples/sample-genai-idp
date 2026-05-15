@@ -1,3 +1,6 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: LicenseRef-AWS-Proprietary
+
 #!/usr/bin/env python3
 """Parallel batch optimization experiment across cost-per-page tiers.
 
@@ -92,7 +95,7 @@ def invoke_agent(session_id: str, access_token: str, max_cost_per_page: float,
             "X-Amzn-Bedrock-AgentCore-Runtime-Session-Id": session_id,
         },
         json=body,
-        timeout=10,
+        timeout=120,
         stream=True,
     )
     if resp.status_code >= 400:

@@ -1,3 +1,6 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: LicenseRef-AWS-Proprietary
+
 #!/usr/bin/env python3
 """
 Test script for AgentCore Memory

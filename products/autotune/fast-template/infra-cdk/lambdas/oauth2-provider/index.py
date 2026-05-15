@@ -1,3 +1,6 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: LicenseRef-AWS-Proprietary
+
 """
 Custom Resource Lambda for managing OAuth2 Credential Provider lifecycle.
 

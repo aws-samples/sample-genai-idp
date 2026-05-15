@@ -1,4 +1,4 @@
-stack_name_base: kaleko-FAST-IDPAT-dev
+stack_name_base: kaleko-autotune-exp-harness
 
 # Optional: Set to automatically create an admin user and email credentials
 admin_user_email: kaleko@amazon.com

@@ -1,3 +1,6 @@
+// Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+// SPDX-License-Identifier: LicenseRef-AWS-Proprietary
+
 import { WebStorageStateStore } from "oidc-client-ts"
 
 // Configuration type matching the cognitoAuthConfig structure

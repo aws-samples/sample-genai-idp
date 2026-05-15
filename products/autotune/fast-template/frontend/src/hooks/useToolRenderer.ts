@@ -1,3 +1,6 @@
+// Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+// SPDX-License-Identifier: LicenseRef-AWS-Proprietary
+
 import type { ReactNode } from "react"
 import type { ToolCallStatus } from "@/components/chat/types"
 

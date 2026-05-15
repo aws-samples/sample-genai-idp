@@ -1,3 +1,6 @@
+// Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+// SPDX-License-Identifier: LicenseRef-AWS-Proprietary
+
 import { RefObject } from "react"
 import { Message } from "./types"
 import { ChatMessage } from "./ChatMessage"

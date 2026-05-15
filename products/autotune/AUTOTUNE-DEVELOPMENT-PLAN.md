@@ -1154,3 +1154,7 @@ Run `ls -la /home/ubuntu/gitlab/idp-auto-configurator/.kiro/skills/` and review 
 | Skill | MLP Priority | Notes |
 |-------|-------------|-------|
 | (fill in after reviewing) | Critical / Important / Nice-to-have | |
+
+## TODO
+
+- [ ] Remove AgentCore Gateway from CDK backend stack — it is deployed but unused by the autotune agent (tools are provided directly in the Runtime). Removing it eliminates the CfnGateway, CfnGatewayTarget, sample tool Lambda, Gateway IAM role, and OAuth2 credential provider, reducing attack surface and deployment time.
