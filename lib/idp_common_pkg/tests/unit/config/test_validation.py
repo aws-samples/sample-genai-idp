@@ -11,6 +11,7 @@ from unittest.mock import patch
 import yaml
 from idp_common.config.merge_utils import (
     _load_valid_bedrock_models,
+    _validate_max_tokens,
     _validate_model_ids,
     _validate_schema_fields,
     _validate_task_prompt_placeholders,
@@ -468,3 +469,177 @@ class TestValidateSchemaFields:
         assert result["valid"] is True
         assert len(result["warnings"]) == 1
         assert "data_type" in result["warnings"][0]
+
+
+class TestValidateMaxTokens:
+    """Test _validate_max_tokens function."""
+
+    def test_valid_max_tokens_pass(self):
+        """Test that valid max_tokens pass validation."""
+        config = {
+            "extraction": {
+                "model": "us.amazon.nova-lite-v1:0",
+                "max_tokens": 5000,  # Within limit (10,000)
+            }
+        }
+
+        result = {"valid": True, "errors": [], "warnings": []}
+        _validate_max_tokens(config, result)
+
+        assert result["valid"] is True
+        assert len(result["errors"]) == 0
+
+    def test_exceeds_nova_limit(self):
+        """Test that max_tokens exceeding Nova limit fails."""
+        config = {
+            "extraction": {
+                "model": "us.amazon.nova-lite-v1:0",
+                "max_tokens": 16000,  # Exceeds limit (10,000)
+            }
+        }
+
+        result = {"valid": True, "errors": [], "warnings": []}
+        _validate_max_tokens(config, result)
+
+        assert result["valid"] is False
+        assert len(result["errors"]) == 1
+        assert "extraction.max_tokens" in result["errors"][0]
+        assert "16000" in result["errors"][0]
+        assert "10,000" in result["errors"][0]
+
+    def test_exceeds_claude3_limit(self):
+        """Test that max_tokens exceeding Claude 3 limit fails."""
+        config = {
+            "classification": {
+                "model": "us.anthropic.claude-3-haiku-20240307-v1:0",
+                "max_tokens": 10000,  # Exceeds limit (8,192)
+            }
+        }
+
+        result = {"valid": True, "errors": [], "warnings": []}
+        _validate_max_tokens(config, result)
+
+        assert result["valid"] is False
+        assert len(result["errors"]) == 1
+        assert "classification.max_tokens" in result["errors"][0]
+        assert "10000" in result["errors"][0]
+        assert "8,192" in result["errors"][0]
+
+    def test_claude4_allows_64k(self):
+        """Test that Claude 4 models allow 64,000 tokens."""
+        config = {
+            "extraction": {
+                "model": "us.anthropic.claude-sonnet-4-20250514-v1:0",
+                "max_tokens": 64000,  # At limit (64,000)
+            }
+        }
+
+        result = {"valid": True, "errors": [], "warnings": []}
+        _validate_max_tokens(config, result)
+
+        assert result["valid"] is True
+        assert len(result["errors"]) == 0
+
+    def test_claude4_exceeds_limit(self):
+        """Test that exceeding Claude 4 limit fails."""
+        config = {
+            "extraction": {
+                "model": "us.anthropic.claude-sonnet-4-20250514-v1:0",
+                "max_tokens": 70000,  # Exceeds limit (64,000)
+            }
+        }
+
+        result = {"valid": True, "errors": [], "warnings": []}
+        _validate_max_tokens(config, result)
+
+        assert result["valid"] is False
+        assert len(result["errors"]) == 1
+        assert "extraction.max_tokens" in result["errors"][0]
+        assert "70000" in result["errors"][0]
+        assert "64,000" in result["errors"][0]
+
+    def test_validates_all_sections(self):
+        """Test validates max_tokens in all sections."""
+        config = {
+            "classification": {
+                "model": "us.amazon.nova-lite-v1:0",
+                "max_tokens": 11000,  # Exceeds 10,000
+            },
+            "extraction": {
+                "model": "us.amazon.nova-lite-v1:0",
+                "max_tokens": 12000,  # Exceeds 10,000
+            },
+            "assessment": {
+                "enabled": True,
+                "model": "us.amazon.nova-lite-v1:0",
+                "max_tokens": 13000,  # Exceeds 10,000
+            },
+            "summarization": {
+                "enabled": True,
+                "model": "us.amazon.nova-lite-v1:0",
+                "max_tokens": 14000,  # Exceeds 10,000
+            },
+        }
+
+        result = {"valid": True, "errors": [], "warnings": []}
+        _validate_max_tokens(config, result)
+
+        assert result["valid"] is False
+        assert len(result["errors"]) == 4
+
+    def test_skips_disabled_sections(self):
+        """Test skips validation for disabled sections."""
+        config = {
+            "assessment": {
+                "enabled": False,
+                "model": "us.amazon.nova-lite-v1:0",
+                "max_tokens": 50000,  # Would fail if enabled
+            },
+            "summarization": {
+                "enabled": False,
+                "model": "us.amazon.nova-lite-v1:0",
+                "max_tokens": 50000,  # Would fail if enabled
+            },
+        }
+
+        result = {"valid": True, "errors": [], "warnings": []}
+        _validate_max_tokens(config, result)
+
+        assert result["valid"] is True
+        assert len(result["errors"]) == 0
+
+    def test_skips_missing_model_or_tokens(self):
+        """Test skips validation when model or max_tokens is missing."""
+        config = {
+            "extraction": {
+                "model": "us.amazon.nova-lite-v1:0",
+                # max_tokens missing
+            },
+            "classification": {
+                # model missing
+                "max_tokens": 5000,
+            },
+        }
+
+        result = {"valid": True, "errors": [], "warnings": []}
+        _validate_max_tokens(config, result)
+
+        # Should skip validation silently
+        assert result["valid"] is True
+        assert len(result["errors"]) == 0
+
+    def test_nova2_models_have_10k_limit(self):
+        """Test that Nova 2 models have 10,000 token limit."""
+        config = {
+            "extraction": {
+                "model": "us.amazon.nova-2-lite-v1:0",
+                "max_tokens": 11000,  # Exceeds limit (10,000)
+            }
+        }
+
+        result = {"valid": True, "errors": [], "warnings": []}
+        _validate_max_tokens(config, result)
+
+        assert result["valid"] is False
+        assert len(result["errors"]) == 1
+        assert "10,000" in result["errors"][0]

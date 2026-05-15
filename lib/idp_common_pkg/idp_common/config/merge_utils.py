@@ -19,6 +19,8 @@ from typing import Any, Dict, List, Optional, Union
 
 import yaml
 
+from idp_common.bedrock.model_utils import get_model_max_output_tokens
+
 # Use importlib.resources for Python 3.9+
 if sys.version_info >= (3, 9):
     from importlib.resources import (
@@ -609,6 +611,7 @@ def validate_config(
 
     # Enhanced validation checks
     _validate_model_ids(merged, result)
+    _validate_max_tokens(merged, result)
     _validate_task_prompt_placeholders(merged, result)
     _validate_schema_fields(config.get("classes", []), result)
 
@@ -1013,3 +1016,54 @@ def _check_schema_properties(
                     idp_extensions,
                     non_standard_fields,
                 )
+
+
+def _validate_max_tokens(merged_config: Dict[str, Any], result: Dict[str, Any]) -> None:
+    """
+    Validate max_tokens against model-specific limits.
+
+    Checks that max_tokens in each service config does not exceed the
+    maximum output tokens supported by the configured model.
+
+    This prevents runtime failures when the Bedrock API rejects requests
+    with max_tokens values that exceed model limits.
+    """
+    # Services that have both model and max_tokens configurations
+    sections_with_tokens = {
+        "classification": {"model_field": "model", "max_tokens_field": "max_tokens"},
+        "extraction": {"model_field": "model", "max_tokens_field": "max_tokens"},
+        "assessment": {"model_field": "model", "max_tokens_field": "max_tokens"},
+        "summarization": {"model_field": "model", "max_tokens_field": "max_tokens"},
+    }
+
+    for section_name, config in sections_with_tokens.items():
+        section = merged_config.get(section_name, {})
+
+        # Skip disabled sections
+        if section_name in ["assessment", "summarization"]:
+            if not section.get("enabled", True):
+                continue
+
+        model_id = section.get(config["model_field"])
+        max_tokens = section.get(config["max_tokens_field"])
+
+        # Skip if either value is missing
+        if not model_id or not max_tokens:
+            continue
+
+        # Get model's max output tokens limit
+        try:
+            model_limit = get_model_max_output_tokens(model_id)
+
+            if max_tokens > model_limit:
+                result["valid"] = False
+                result["errors"].append(
+                    f"{section_name}.max_tokens ({max_tokens}) exceeds model limit ({model_limit:,}) "
+                    f"for {model_id}. "
+                    f"Reduce max_tokens to {model_limit:,} or less, or choose a different model. "
+                    f"Model limits: Claude 4.x=64,000, Nova=10,000, Claude 3.x=8,192"
+                )
+        except Exception as e:
+            logger.warning(
+                "Could not validate max_tokens for %s: %s", section_name, str(e)
+            )

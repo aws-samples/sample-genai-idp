@@ -1348,9 +1348,18 @@ class ClassificationService:
             metering = response_with_metering["metering"]
 
             # Extract classification result
-            classification_text = response["output"]["message"]["content"][0].get(
-                "text", ""
-            )
+            # Defensive: Handle case where LLM returns empty content array
+            content_array = response["output"]["message"].get("content", [])
+            if not content_array or len(content_array) == 0:
+                logger.error(
+                    "LLM returned empty content array in classification response",
+                    extra={"page_id": page_id, "response": response},
+                )
+                raise ValueError(
+                    f"Classification failed for page {page_id}: LLM returned empty response"
+                )
+
+            classification_text = content_array[0].get("text", "")
 
             # Try to extract structured data (JSON or YAML) from the response
             try:
@@ -2625,9 +2634,18 @@ class ClassificationService:
             metering = response_with_metering["metering"]
 
             # Extract classification result
-            classification_text = response["output"]["message"]["content"][0].get(
-                "text", ""
-            )
+            # Defensive: Handle case where LLM returns empty content array
+            content_array = response["output"]["message"].get("content", [])
+            if not content_array or len(content_array) == 0:
+                logger.error(
+                    "LLM returned empty content array in holistic classification response",
+                    extra={"response": response},
+                )
+                raise ValueError(
+                    "Holistic classification failed: LLM returned empty response"
+                )
+
+            classification_text = content_array[0].get("text", "")
 
             # Try to extract JSON from the response
             try:
