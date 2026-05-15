@@ -1,0 +1,101 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aws-solutions-library-samples.github.io/idp/feature-manifest.schema.json",
+  "title": "IDP Feature Manifest",
+  "description": "feature.yaml — the declaration every installable IDP feature ships with.",
+  "type": "object",
+  "required": ["featureId", "displayName", "version", "template", "ui"],
+  "additionalProperties": false,
+  "properties": {
+    "featureId": {
+      "type": "string",
+      "pattern": "^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$",
+      "description": "Unique slug for the feature (DNS-safe). Used as S3 prefix and session-tag value."
+    },
+    "displayName": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120,
+      "description": "Human-readable name shown in the UI nav and feature page."
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+(-[0-9A-Za-z.-]+)?(\\+[0-9A-Za-z.-]+)?$",
+      "description": "SemVer 2.0 version of this build."
+    },
+    "description": {
+      "type": "string",
+      "maxLength": 1000
+    },
+    "iconUrl": {
+      "type": "string",
+      "format": "uri"
+    },
+    "template": {
+      "type": "object",
+      "required": ["path"],
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Path to the feature's CloudFormation template, relative to the project root."
+        },
+        "requiresMainStackName": {
+          "type": "boolean",
+          "default": true,
+          "description": "If true, the template must declare a MainStackName parameter."
+        }
+      }
+    },
+    "ui": {
+      "type": "object",
+      "required": ["bundlePath"],
+      "additionalProperties": false,
+      "properties": {
+        "bundlePath": {
+          "type": "string",
+          "description": "Path (relative to project root) to the built UMD bundle (ui-bundle.js)."
+        },
+        "buildCommand": {
+          "type": "string",
+          "description": "Command run from project root to (re)build the bundle. Optional — if omitted, the bundle is expected to already exist."
+        }
+      }
+    },
+    "marketplace": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "productCode": {
+          "type": "string",
+          "description": "AWS Marketplace product code. When set, the main-stack FeatureProductCodeMap must include this entry for entitlements to resolve."
+        },
+        "listingUrl": {
+          "type": "string",
+          "format": "uri",
+          "description": "Public Marketplace listing URL shown in the NONE/EXPIRED UI states."
+        }
+      }
+    },
+    "defaultParameters": {
+      "type": "object",
+      "description": "CloudFormation parameters pre-filled on the Launch Stack URL. Values must be scalar.",
+      "additionalProperties": {
+        "type": ["string", "number", "integer", "boolean"]
+      }
+    },
+    "capabilities": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "reads-documents",
+          "writes-documents",
+          "custom-api",
+          "client-only"
+        ]
+      },
+      "description": "Capabilities the feature declares. Displayed on the FeaturePage as chips."
+    }
+  }
+}

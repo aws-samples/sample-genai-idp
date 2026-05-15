@@ -836,6 +836,50 @@ type Mutation {
   # Return value is what subscribers receive; all successful calls to this
   # mutation broadcast to onCircuitBreakerStatusChange.
   publishCircuitBreakerStatus(status: AWSJSON!): CircuitBreakerStatus @aws_iam
+
+  # === Feature Platform (optional) — mutations ===========================
+  # Only wired up server-side when EnableFeaturePlatform=true. See the
+  # matching note near type Query. Inlined here (rather than a separate
+  # `extend type Mutation` block) because AppSync silently rejects schemas
+  # that mix top-level + extend definitions in one SDL file and falls back
+  # to the previously-deployed schema.
+  #
+  # Return types on the user-facing fields below are intentionally NULLABLE
+  # (no trailing `!`). When EnableFeaturePlatform=false the resolvers are
+  # not deployed; with non-nullable returns AppSync responds with the
+  # confusing error "Cannot return null for non-nullable type ... within
+  # parent 'Mutation' (/subscribeFeature)". Making the return nullable lets
+  # the UI hooks (which already guard against null payloads) fail
+  # gracefully instead of surfacing a GraphQL error to the admin.
+  # The `registerFeature`/`unregisterFeature` mutations stay non-nullable
+  # because they're @aws_iam and only invoked by feature stacks, which by
+  # definition only exist when the feature platform is enabled.
+  # -----------------------------------------------------------------------
+  """Called by a feature stack's RegisterFeature custom resource once the stack has deployed."""
+  registerFeature(input: RegisterFeatureInput!): InstalledFeature! @aws_iam
+
+  """Called by a feature stack's RegisterFeature custom resource on stack delete."""
+  unregisterFeature(featureId: String!): Boolean! @aws_iam
+
+  """Admin-only: initiate a subscription for a feature. Returns a
+  `FeatureEntitlement` whose `marketplaceUrl` is the AWS Marketplace (or
+  simulator) URL the UI must redirect the admin to in order to accept
+  pricing, EULA, and the AWS Customer Agreement. The entitlement `state`
+  remains NONE until the admin completes the Marketplace flow; the UI
+  should re-query `checkFeatureEntitlement` when the admin returns from
+  the Marketplace tab. Optional `returnUrl` is threaded through so the
+  Marketplace page can deep-link the admin back to the feature page.
+  Returns null when EnableFeaturePlatform=false (no resolver attached)."""
+  subscribeFeature(featureId: String!, returnUrl: String): FeatureEntitlement
+    @aws_auth(cognito_groups: ["Admin"])
+
+  """Admin-only: cancel a subscription for a feature by marking the simulator
+  entitlement EXPIRED. With the real Marketplace, the UI should redirect the
+  user to the AWS Marketplace Subscription Management portal instead of
+  calling this. Returns the updated FeatureEntitlement, or null when
+  EnableFeaturePlatform=false (no resolver attached)."""
+  unsubscribeFeature(featureId: String!): FeatureEntitlement
+    @aws_auth(cognito_groups: ["Admin"])
 }
 
 type DocumentPage @aws_cognito_user_pools @aws_iam {
@@ -955,6 +999,37 @@ type Query @aws_cognito_user_pools @aws_iam {
 
   # Circuit Breaker status — any authenticated user can read.
   getCircuitBreakerStatus: CircuitBreakerStatus
+
+  # === Feature Platform (optional) — queries =============================
+  # These fields are only wired up server-side when EnableFeaturePlatform=true
+  # (resolvers live in the prototype/feature-platform/main-stack-extensions
+  # nested stack). When the feature platform is off they are unresolved and
+  # return null. The UI hides them behind the EnableFeaturePlatform flag.
+  #
+  # Return types are intentionally NULLABLE (no trailing `!`) so that with
+  # EnableFeaturePlatform=false (no resolver attached) AppSync returns
+  # `data: { ...: null }` instead of the confusing "Cannot return null for
+  # non-nullable type ..." error. The UI hooks (`useCatalogFeatures`,
+  # `useInstalledFeatures`, `useFeatureEntitlement`, `useFeatureLaunchUrl`)
+  # all coerce null → empty list / sensible default.
+  # -----------------------------------------------------------------------
+  """List all features currently installed in this IDP stack.
+  Returns null when EnableFeaturePlatform=false (no resolver attached)."""
+  listInstalledFeatures: [InstalledFeature!] @aws_cognito_user_pools
+
+  """List all features published to the seller bucket (the catalog), whether
+  installed or not. The UI takes the union of this + listInstalledFeatures to
+  show a "Subscribe" CTA for catalog-only features.
+  Returns null when EnableFeaturePlatform=false (no resolver attached)."""
+  listCatalogFeatures: [CatalogFeature!] @aws_cognito_user_pools
+
+  """Check the subscription/entitlement state for a single feature for the caller.
+  Returns null when EnableFeaturePlatform=false (no resolver attached)."""
+  checkFeatureEntitlement(featureId: String!): FeatureEntitlement @aws_cognito_user_pools
+
+  """Admin-only: get a CloudFormation Console quick-create URL for installing or updating a feature.
+  Returns null when EnableFeaturePlatform=false (no resolver attached)."""
+  getFeatureLaunchUrl(featureId: String!, version: String): FeatureLaunchUrl @aws_cognito_user_pools
 }
 
 type Subscription @aws_cognito_user_pools @aws_iam {
@@ -1059,6 +1134,110 @@ type AvailableModelsResult @aws_cognito_user_pools @aws_iam {
   baseModels: [BaseModelInfo!]!
   customModels: [CustomModelInfo!]!
 }
+
+# =============================================================================
+# === Feature Platform (optional) — BEGIN ====================================
+# Added by prototype/feature-platform/main-stack-extensions/
+# Guarded in CFN by the `EnableFeaturePlatform` parameter / `IsFeaturePlatformEnabled`
+# condition. The block below can be lifted out cleanly by removing everything
+# between BEGIN/END markers if the feature platform is ever removed.
+# =============================================================================
+
+"""A feature installed in this IDP stack via AWS Marketplace (or the simulator).
+
+Authorized for BOTH Cognito user pool callers (the web UI reading
+`listInstalledFeatures`) AND IAM callers (the ui-deployer Lambda in each
+feature stack, which invokes the `registerFeature` mutation with SigV4
+signing and then reads the returned `InstalledFeature` fields). Without
+`@aws_iam`, the feature stack's `RegisterFeatureResource` custom resource
+fails at CREATE time with:
+
+    AppSync errors: Not Authorized to access featureId on type InstalledFeature
+
+because AppSync's default auth mode (Cognito) denies field reads to the
+IAM-signed caller even though the mutation itself is tagged `@aws_iam`.
+"""
+type InstalledFeature @aws_iam @aws_cognito_user_pools {
+  featureId: String!
+  displayName: String!
+  installedVersion: String!
+  latestVersion: String
+  updateAvailable: Boolean!
+  stackName: String!
+  stackRegion: String!
+  stackId: String
+  uiBundlePath: String!
+  featureApiEndpoint: String
+  iconUrl: String
+  installedAt: AWSDateTime!
+  installedBy: String
+}
+
+"""A feature published to the seller bucket (available in the catalog), whether
+or not it is installed in this IDP stack. Drives the "Subscribe" CTA in the UI
+for features that haven't been installed yet."""
+type CatalogFeature @aws_cognito_user_pools {
+  featureId: String!
+  displayName: String!
+  latestVersion: String!
+  iconUrl: String
+}
+
+"""Subscription / entitlement state for a feature."""
+type FeatureEntitlement {
+  featureId: String!
+  state: FeatureEntitlementState!
+  expiresAt: AWSDateTime
+  customerIdentifier: String
+  productCode: String
+  source: String!      # "marketplace" | "simulator" | "none"
+  # Populated by subscribeFeature — the AWS Marketplace (or simulator) URL the
+  # UI must redirect the admin to in order to accept terms and complete the
+  # subscription. Null on all other resolvers.
+  marketplaceUrl: String
+}
+
+enum FeatureEntitlementState {
+  NONE
+  ACTIVE
+  EXPIRED
+}
+
+"""CloudFormation Console quick-create URL + metadata for installing/updating a feature."""
+type FeatureLaunchUrl {
+  featureId: String!
+  version: String!
+  launchUrl: String!          # https://console.aws.amazon.com/cloudformation/home?region=X#/stacks/quickcreate?...
+  templateUrl: String!        # S3 https URL (or simulator URL) of the feature template
+  stackName: String!          # Suggested stackName (e.g. idp-feature-docs-by-status)
+  parameters: AWSJSON!        # Prefilled parameter values (JSON-encoded map)
+}
+
+"""Input passed by the feature stack's RegisterFeature custom resource."""
+input RegisterFeatureInput {
+  featureId: String!
+  displayName: String!
+  installedVersion: String!
+  stackName: String!
+  stackId: String!
+  stackRegion: String!
+  uiBundlePath: String!
+  featureApiEndpoint: String
+  iconUrl: String
+  installedBy: String
+}
+
+# NOTE: The feature-platform Query/Mutation fields are inlined into the main
+# `type Query` / `type Mutation` declarations earlier in this file (search for
+# "Feature Platform (optional) — queries" and "Feature Platform (optional) —
+# mutations"). `extend type` blocks on the same schema file cause AppSync to
+# reject the schema silently and fall back to the previously-deployed version,
+# which is why listCatalogFeatures / subscribeFeature used to return
+# "Field 'X' in type 'Query/Mutation' is undefined" even though the fields
+# appeared in this file.
+# =============================================================================
+# === Feature Platform (optional) — END ======================================
+# =============================================================================
 
 schema {
   query: Query

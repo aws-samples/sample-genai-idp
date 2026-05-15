@@ -6,6 +6,9 @@ import type { SideNavigationProps } from '@cloudscape-design/components';
 import { Badge, Popover, SideNavigation } from '@cloudscape-design/components';
 import useSettingsContext from '../../contexts/settings';
 import useUserRole from '../../hooks/use-user-role';
+import useInstalledFeatures from '../../hooks/use-installed-features';
+import useCatalogFeatures from '../../hooks/use-catalog-features';
+import { buildFeaturesNavSection } from './feature-platform-nav-items';
 
 import {
   DOCUMENTS_PATH,
@@ -20,6 +23,7 @@ import {
   AGENT_CHAT_PATH,
   CAPACITY_PLANNING_PATH,
   CUSTOM_MODELS_PATH,
+  FEATURES_PATH_PREFIX,
   MONITORING_PATH,
 } from '../../routes/constants';
 
@@ -205,17 +209,34 @@ const Navigation = ({
   let activeHref = `#${DEFAULT_PATH}`;
   const { settings } = useSettingsContext();
   const { isAdmin, isAuthor, isReviewerOnly, isViewerOnly } = useUserRole();
+  const { features: installedFeatures } = useInstalledFeatures();
+  const { features: catalogFeatures } = useCatalogFeatures();
+
+  // Dynamic "Subscription Features" section driven by InstalledFeatures +
+  // CatalogFeatures. Always visible (shows "No features installed" placeholder
+  // when both lists are empty) per the feature platform plan. Catalog-only
+  // entries (published to the seller bucket but not yet installed) render
+  // with a "Subscribe" badge so admins can reach the FeaturePage Subscribe CTA.
+  const featuresSection = useMemo(() => buildFeaturesNavSection(installedFeatures, catalogFeatures), [installedFeatures, catalogFeatures]);
 
   // Select navigation items based on user role (highest privilege wins)
   const baseItems = useMemo(() => {
     if (items) return items;
-    if (isAdmin) return adminNavItems;
-    if (isAuthor) return authorNavItems;
-    if (isViewerOnly) return viewerNavItems;
-    if (isReviewerOnly) return reviewerNavItems;
-    // Default: if user has Viewer + Reviewer, show viewer nav (union)
-    return viewerNavItems;
-  }, [items, isAdmin, isAuthor, isViewerOnly, isReviewerOnly]);
+    let roleItems: Array<Record<string, unknown>>;
+    if (isAdmin) roleItems = adminNavItems;
+    else if (isAuthor) roleItems = authorNavItems;
+    else if (isViewerOnly) roleItems = viewerNavItems;
+    else if (isReviewerOnly) roleItems = reviewerNavItems;
+    else roleItems = viewerNavItems; // Default: if user has Viewer + Reviewer, show viewer nav (union)
+
+    // Insert the dynamic Subscription Features section just before Resources
+    // (or at the end if Resources isn't present, e.g. reviewer nav).
+    const resourcesIdx = roleItems.findIndex(
+      (i) => (i as { type?: string }).type === 'section' && (i as { text?: string }).text === 'Resources',
+    );
+    if (resourcesIdx < 0) return [...roleItems, featuresSection as unknown as Record<string, unknown>];
+    return [...roleItems.slice(0, resourcesIdx), featuresSection as unknown as Record<string, unknown>, ...roleItems.slice(resourcesIdx)];
+  }, [items, isAdmin, isAuthor, isViewerOnly, isReviewerOnly, featuresSection]);
 
   // Filter out navigation items based on deployment context:
   // - Capacity Planning: hidden if pattern is not Pattern-2 or Unified
@@ -245,9 +266,10 @@ const Navigation = ({
 
     // Transform navigation items: hide unsupported items, grey out region-restricted items
     return baseItems
-      .map((item) => {
+      .map((rawItem) => {
+        const item = rawItem as { type?: string; text?: string; items?: unknown[] };
         if (item.type === 'section' && item.text === 'Configuration') {
-          const section = item as SideNavigationProps.Section;
+          const section = item as unknown as SideNavigationProps.Section;
           return {
             ...item,
             items: section.items
@@ -307,8 +329,13 @@ const Navigation = ({
     activeHref = `#${DOCUMENTS_PATH}`;
   } else if (path === AGENT_CHAT_PATH) {
     activeHref = `#${AGENT_CHAT_PATH}`;
+<<<<<<< HEAD
+  } else if (path.startsWith(FEATURES_PATH_PREFIX)) {
+    activeHref = `#${path}`;
+=======
   } else if (path.startsWith(MONITORING_PATH)) {
     activeHref = `#${MONITORING_PATH}`;
+>>>>>>> develop-private
   }
 
   // Create navigation items with deployment info

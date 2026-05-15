@@ -1,0 +1,15 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: MIT-0
+#
+# docker compose up
+# → simulator on http://localhost:9999 with SQLite persistence in ./data/
+services:
+  mp-simulator:
+    build: .
+    image: idp/mp-simulator:local
+    container_name: idp-mp-simulator
+    ports:
+      - "9999:9999"
+    volumes:
+      - ./data:/data
+    restart: unless-stopped
