@@ -65,8 +65,13 @@ samconfig.toml
 ..bfg-report
 .git-rewrite
 
-# Cline memory bank (session-specific, not project source)
-memory-bank/
+# Cline memory bank — structural context files (projectbrief,
+# productContext, systemPatterns, techContext, progress) are tracked so
+# they're available to the whole team on clone. Only activeContext.md
+# is session-specific and ignored (it documents per-session in-flight
+# work that shouldn't be committed).
+memory-bank/activeContext.md
+
 
 # generated code
 /src/ui/public/extensions/idp-monitor-ui.js

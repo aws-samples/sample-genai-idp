@@ -766,6 +766,95 @@ Parameters:
       choice for almost all deployments. Only change if you need a custom
       hardened AMI. Ignored when DeployBastionHost=false.
 
+  # =========================================================================
+  # === Feature Platform (optional) — BEGIN ================================
+  # Everything between BEGIN/END markers may be lifted cleanly when the feature
+  # platform is removed. All resources gate on `EnableFeaturePlatform=false`
+  # (the default) so existing deployments see no behavior change.
+  # See subscription-features/feature-platform/ and docs/feature-platform.md.
+  # =========================================================================
+
+  EnableFeaturePlatform:
+    Type: String
+    Default: 'true'
+    AllowedValues: ['true', 'false']
+    Description: >-
+      Set to 'true' to enable the Subscription Features platform. All other
+      FeaturePlatform* parameters are OPTIONAL and have sensible defaults —
+      leaving them blank auto-deploys the marketplace-simulator EC2 and
+      synthesizes product/customer identifiers so the Subscribe button in
+      the nav just works out-of-the-box. Off by default (no extra resources).
+
+  FeaturePlatformSellerBucket:
+    Type: String
+    Default: ''
+    Description: >-
+      (Optional) S3 bucket publishers push feature bundles to. Leave blank
+      to auto-create one populated with the bundled sample feature. Set to
+      a pre-existing bucket to share a catalog across stacks.
+
+  FeaturePlatformSellerBucketRegion:
+    Type: String
+    Default: 'us-east-1'
+    Description: (Optional) Region of the seller bucket. Only used when FeaturePlatformSellerBucket is set.
+
+  FeaturePlatformSimulatorEndpoint:
+    Type: String
+    Default: ''
+    Description: >-
+      (Optional) Endpoint URL of an existing marketplace-simulator (e.g.
+      https://simulator.example.com) or real AWS Marketplace API. Leave
+      blank to auto-deploy a new simulator EC2 as a nested stack.
+
+  FeaturePlatformSimulatorVpcId:
+    Type: String
+    Default: ''
+    Description: >-
+      (Optional) VPC ID (vpc-...) to place the auto-deployed simulator EC2 in.
+      Leave blank to auto-create a minimal single-subnet VPC (10.200.0.0/24)
+      dedicated to the simulator — removes any need to pre-stage VPC/subnet
+      IDs. Only used when FeaturePlatformSimulatorEndpoint is also blank.
+
+  FeaturePlatformSimulatorSubnetId:
+    Type: String
+    Default: ''
+    Description: >-
+      (Optional) Public subnet ID (subnet-...) with an Internet Gateway route,
+      inside FeaturePlatformSimulatorVpcId. Ignored when
+      FeaturePlatformSimulatorVpcId is blank — the auto-created VPC provides
+      its own public subnet. Only used when FeaturePlatformSimulatorEndpoint
+      is also blank.
+
+  FeaturePlatformSimulatorAllowedCidr:
+    Type: String
+    Default: ''
+    Description: >-
+      (Optional) CIDR block allowed to reach the simulator's HTTPS port.
+      Leave blank to default to 0.0.0.0/0 (dev-only — restrict in shared
+      environments). Ignored when not auto-deploying the simulator.
+
+  FeaturePlatformDefaultCustomerIdentifier:
+    Type: String
+    Default: ''
+    Description: >-
+      (Optional) Marketplace customer identifier used when the incoming
+      request has no X-Amzn-Marketplace-Customer-Identifier header. Leave
+      blank to use the per-stack default 'cust-idp-default' in simulator
+      mode. Required only for real-Marketplace production use.
+
+  FeaturePlatformProductCodeMap:
+    Type: String
+    Default: '{}'
+    Description: >-
+      (Optional) JSON map {featureId -> Marketplace productCode}. Leave as
+      the default '{}' to auto-synthesize 'prod-<featureId>-sim' product
+      codes in simulator mode. Required only for real-Marketplace
+      production use, e.g. {"docs-by-status":"prod-docs-by-status"}.
+
+  # =========================================================================
+  # === Feature Platform (optional) — END ==================================
+  # =========================================================================
+
 Rules:
   MLflowTrackingURIRequired:
     RuleCondition: !Equals [ !Ref EnableMLflow, "true" ]
@@ -798,10 +887,20 @@ Rules:
       # invalid subnet IDs are caught later by the Lambda CreateFunction
       # call with a clear error rather than a mid-deploy rollback.
 
+  # When EnableFeaturePlatform=true with no FeaturePlatformSimulatorEndpoint the
+  # stack auto-deploys a marketplace-simulator EC2. That EC2 needs a VPC +
+  # public subnet (for Let's Encrypt HTTPS cert provisioning via *.nip.io).
+  # NOTE: The previous FeaturePlatformSimulatorRequiresVPC rule has been
+  # removed — the simulator nested stack now auto-creates a minimal
+  # single-subnet VPC (10.200.0.0/24) when FeaturePlatformSimulatorVpcId /
+  # FeaturePlatformSimulatorSubnetId are left blank, so no pre-staged VPC is
+  # required. See subscription-features/marketplace-simulator/template.yaml.
+
   # Bastion host is a developer-convenience layered on top of VPC-secured mode.
   # It shares the customer-supplied VPC, so DeployInVPC must be true as well.
   BastionRequiresVPC:
     RuleCondition: !Equals [ !Ref DeployBastionHost, "true" ]
+
     Assertions:
       - Assert: !Equals [ !Ref DeployInVPC, "true" ]
         AssertDescription: "DeployBastionHost=true requires DeployInVPC=true"
@@ -867,6 +966,31 @@ Conditions:
   CircuitBreakerTriggerServiceUnavailableEnabled: !Equals [ !Ref CircuitBreakerTriggerServiceUnavailable, "true" ]
   CircuitBreakerTriggerThrottlingEnabled: !Equals [ !Ref CircuitBreakerTriggerThrottling, "true" ]
   CircuitBreakerTriggerQuotaLimitEnabled: !Equals [ !Ref CircuitBreakerTriggerQuotaLimit, "true" ]
+
+  # Feature Platform
+  IsFeaturePlatformEnabled: !Equals [ !Ref EnableFeaturePlatform, 'true' ]
+  # Deploy the marketplace-simulator EC2 when the feature platform is enabled
+  # AND the user hasn't supplied their own FeaturePlatformSimulatorEndpoint.
+  # Lets admins get the end-to-end UX (Subscribe → Install → Register) with
+  # zero extra setup. Defaults to off when EnableFeaturePlatform=false.
+  DeployFeaturePlatformSimulator:
+    !And
+      - !Condition IsFeaturePlatformEnabled
+      - !Equals [ !Ref FeaturePlatformSimulatorEndpoint, '' ]
+  # Used by the nested simulator stack to pass through an explicit CIDR only
+  # when the admin supplied one. When blank, the nested template's default
+  # (0.0.0.0/0) is used — adequate for dev but dangerous for shared accounts.
+  FeaturePlatformSimulatorHasAllowedCidr:
+    !Not [ !Equals [ !Ref FeaturePlatformSimulatorAllowedCidr, '' ] ]
+  # Create the SellerBucket (and pre-populate it with the bundled docs-by-status
+  # sample feature) when the feature platform is enabled AND the admin has not
+  # supplied their own seller bucket. Gives new stacks a working feature to
+  # Subscribe/Install immediately without running `idp-feature-cli publish`.
+  CreateFeaturePlatformSellerBucket:
+    !And
+      - !Condition IsFeaturePlatformEnabled
+      - !Equals [ !Ref FeaturePlatformSellerBucket, '' ]
+
 
 Metadata:
   cfn-lint:
@@ -992,6 +1116,18 @@ Metadata:
         Parameters:
           - ArtifactsBucketKmsKeyArn
       - Label:
+          default: "Subscription Features Platform (optional)"
+        Parameters:
+          - EnableFeaturePlatform
+          - FeaturePlatformSellerBucket
+          - FeaturePlatformSellerBucketRegion
+          - FeaturePlatformSimulatorEndpoint
+          - FeaturePlatformSimulatorVpcId
+          - FeaturePlatformSimulatorSubnetId
+          - FeaturePlatformSimulatorAllowedCidr
+          - FeaturePlatformDefaultCustomerIdentifier
+          - FeaturePlatformProductCodeMap
+      - Label:
           default: "General Configuration"
         Parameters:
           - MaxConcurrentWorkflows
@@ -1002,6 +1138,25 @@ Metadata:
           - LogRetentionDays
 
     ParameterLabels:
+      # --- Subscription Features Platform ---
+      EnableFeaturePlatform:
+        default: "Enable Subscription Features Platform"
+      FeaturePlatformSellerBucket:
+        default: "Seller Bucket (optional — auto-created if blank)"
+      FeaturePlatformSellerBucketRegion:
+        default: "Seller Bucket Region (only used if Seller Bucket is set)"
+      FeaturePlatformSimulatorEndpoint:
+        default: "Simulator Endpoint (optional — auto-deployed if blank)"
+      FeaturePlatformSimulatorVpcId:
+        default: "Simulator VPC ID (optional — default VPC used if blank)"
+      FeaturePlatformSimulatorSubnetId:
+        default: "Simulator Public Subnet ID (optional — auto-selected if blank)"
+      FeaturePlatformSimulatorAllowedCidr:
+        default: "Simulator Allowed CIDR (optional — defaults to 0.0.0.0/0 dev-only)"
+      FeaturePlatformDefaultCustomerIdentifier:
+        default: "Marketplace Customer Identifier (optional — synthesized in simulator mode)"
+      FeaturePlatformProductCodeMap:
+        default: "Marketplace Product Code Map JSON (optional — synthesized in simulator mode)"
       AdminEmail:
         default: "Admin Email Address"
       AllowedSignUpEmailDomain:
@@ -1615,6 +1770,16 @@ Resources:
             BucketName: "<ARTIFACT_BUCKET_TOKEN>"
         - S3WritePolicy:
             BucketName: !Ref ConfigurationBucket
+        # When the feature platform auto-creates its own seller bucket, the
+        # same ConfigurationCopyFunction also copies the bundled sample-feature
+        # artifacts from the artifact bucket into that seller bucket. The
+        # bucket name isn't known at template-render time (CFN generates it),
+        # so attach this policy only in that path.
+        - !If
+          - CreateFeaturePlatformSellerBucket
+          - S3WritePolicy:
+              BucketName: !Ref FeaturePlatformSellerBucketResource
+          - !Ref AWS::NoValue
         - Statement:
             - Effect: Allow
               Action:
@@ -1637,6 +1802,7 @@ Resources:
               - !Ref AWS::NoValue
 
   ConfigurationCopyFunctionLogGroup:
+
     Type: AWS::Logs::LogGroup
     Properties:
       RetentionInDays: !Ref LogRetentionDays
@@ -2293,13 +2459,171 @@ Resources:
           - !Ref LambdaVpcSecurityGroup
           - ""
 
-        # Circuit Breaker wiring — feature-flagged; params empty when disabled
-        ConcurrencyTableName: !Ref ConcurrencyTable
-        CircuitBreakerManagerFunctionArn: !If
-          - CircuitBreakerEnabledCondition
-          - !GetAtt CircuitBreakerManagerFunction.Arn
-          - ""
-        CircuitBreakerEnabled: !Ref CircuitBreakerEnabled
+  ##########################################################################
+  # === Feature Platform (optional) — BEGIN ===============================
+  # Deployed only when EnableFeaturePlatform=true. Adds an InstalledFeatures
+  # DDB table + 4 AppSync Lambdas for listing/registering/installing features
+  # and checking Marketplace entitlements. Feature stacks (subscribed via
+  # Marketplace or the simulator) can then register themselves with this
+  # host and have their UI bundles rendered inside the main IDP web UI.
+  #
+  # See subscription-features/feature-platform/main-stack-extensions/apply-to-main-stack.md
+  ##########################################################################
+
+  # Auto-deployed marketplace-simulator EC2 — only when the feature platform
+  # is enabled AND the admin did not supply their own simulator endpoint.
+  # Runs Caddy + the simulator Docker container on a t4g.nano with HTTPS
+  # via *.nip.io Let's Encrypt. Dev-only; tear down with the main stack.
+  FeaturePlatformSimulatorStack:
+    Type: AWS::CloudFormation::Stack
+    Condition: DeployFeaturePlatformSimulator
+    Properties:
+      TemplateURL: ./subscription-features/marketplace-simulator/.aws-sam/packaged.yaml
+      Parameters:
+        VpcId: !Ref FeaturePlatformSimulatorVpcId
+        SubnetId: !Ref FeaturePlatformSimulatorSubnetId
+        # Use the explicit CIDR when the admin supplied one; otherwise fall
+        # back to the simulator template's default (0.0.0.0/0 — dev-only).
+        AllowedCidr: !If
+          - FeaturePlatformSimulatorHasAllowedCidr
+          - !Ref FeaturePlatformSimulatorAllowedCidr
+          - '0.0.0.0/0'
+        # Source tarball + content hash uploaded by publish.py on every
+        # deploy. Lets the simulator EC2 download the current source on
+        # first boot (no git clone needed) and lets the simulator's
+        # SimulatorRefreshResource custom resource rebuild the container
+        # in-place on every subsequent stack update when the SourceHash
+        # changes — so `idp-cli deploy` automatically propagates simulator
+        # code changes without SSH/docker compose by hand.
+        SourceS3Bucket: <ARTIFACT_BUCKET_TOKEN>
+        SourceS3Key: <ARTIFACT_PREFIX_TOKEN>/marketplace-simulator-source.tar.gz
+        SourceHash: <MARKETPLACE_SIMULATOR_SOURCE_HASH_TOKEN>
+
+  # Auto-created seller bucket — only when the feature platform is enabled AND
+  # the admin did not supply their own FeaturePlatformSellerBucket. The bucket
+  # holds feature artifacts (template.yaml, ui-bundle.js, manifest.json,
+  # latest.json) under features/<featureId>/... and is pre-populated with the
+  # bundled `docs-by-status` sample feature by PublishSampleFeatureCustomResource
+  # (see below). `DeletionPolicy: Delete` means the bucket is removed with the
+  # stack — acceptable because artifacts are published by the publish step and
+  # can be re-published trivially. If you pre-publish features via
+  # `idp-feature-cli` to a long-lived bucket, supply it as
+  # FeaturePlatformSellerBucket instead.
+  FeaturePlatformSellerBucketResource:
+    Type: AWS::S3::Bucket
+    Condition: CreateFeaturePlatformSellerBucket
+    UpdateReplacePolicy: Delete
+    DeletionPolicy: Delete
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: Enabled
+      LoggingConfiguration:
+        DestinationBucketName: !Ref LoggingBucket
+        LogFilePrefix: feature-platform-seller-bucket-logs/
+
+  FeaturePlatformSellerBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Condition: CreateFeaturePlatformSellerBucket
+    Properties:
+      Bucket: !Ref FeaturePlatformSellerBucketResource
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: EnforceSSLOnly
+            Effect: Deny
+            Principal: "*"
+            Action: "s3:*"
+            Resource:
+              - !Sub "${FeaturePlatformSellerBucketResource.Arn}/*"
+              - !Sub "${FeaturePlatformSellerBucketResource.Arn}"
+            Condition:
+              Bool:
+                "aws:SecureTransport": false
+
+  # Pre-publish the bundled sample-feature(s) into the auto-created seller
+  # bucket at deploy time. `publish.py` uploads the sample artifacts to
+  # s3://<artifact-bucket>/<prefix>/<version>/sample-features/features/<id>/...;
+  # this custom resource copies each listed object into
+  # s3://<seller-bucket>/features/<id>/... so the existing listCatalogFeatures /
+  # getFeatureLaunchUrl / listInstalledFeatures Lambdas (which look under
+  # `features/`) see the feature as if a developer had run `idp-feature-cli
+  # publish`.
+  #
+  # Re-uses the existing ConfigurationCopyFunction (pure S3 copy logic — it
+  # doesn't care what the files are). The SAMPLE_FEATURES_HASH_TOKEN ensures
+  # the resource re-runs whenever the sample-feature source changes.
+  PublishSampleFeatureCustomResource:
+    Type: Custom::SampleFeaturePublish
+    Condition: CreateFeaturePlatformSellerBucket
+    Properties:
+      ServiceToken: !GetAtt ConfigurationCopyFunction.Arn
+      SourceBucket: "<ARTIFACT_BUCKET_TOKEN>"
+      SourcePrefix: "<ARTIFACT_PREFIX_TOKEN>/sample-features"
+      TargetBucket: !Ref FeaturePlatformSellerBucketResource
+      TargetPrefix: ""
+      SampleFeaturesHash: "<SAMPLE_FEATURES_HASH_TOKEN>"
+      FileList: <SAMPLE_FEATURES_LIST_TOKEN>
+
+  FeaturePlatformStack:
+    Type: AWS::CloudFormation::Stack
+    Condition: IsFeaturePlatformEnabled
+    DependsOn:
+      - APPSYNCSTACK  # Attach resolvers only after main schema is finalised
+    Properties:
+      TemplateURL: ./subscription-features/feature-platform/main-stack-extensions/.aws-sam/packaged.yaml
+      Parameters:
+        MainStackName: !Ref AWS::StackName
+        GraphQLApiId: !GetAtt GraphQLApi.ApiId
+        GraphQLApiArn: !GetAtt GraphQLApi.Arn
+        AppSyncApiUrl: !GetAtt GraphQLApi.GraphQLUrl
+        UserPoolId: !Ref UserPool
+        # Feature stacks with HTTP APIs use these two as the JWT audience
+        # (Cognito Client id) and as the document-state table name for
+        # scoped `dynamodb:Scan`/`Query` — e.g. `docs-by-status` counts
+        # documents per status by scanning the main stack's TrackingTable.
+        UserPoolClientId: !Ref UserPoolClient
+        TrackingTableName: !Ref TrackingTable
+        # Exposed to feature stacks so they can grant `kms:Decrypt` on the
+        # key that encrypts TrackingTable. Without it, a feature Lambda
+        # querying the table gets `AccessDeniedException: KMS key access
+        # denied` — the "Failed to fetch" seen in the docs-by-status feature.
+        CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
+        WebUIBucketName: !Ref WebUIBucket
+        WebUIBucketArn: !GetAtt WebUIBucket.Arn
+
+        # When the admin did not supply FeaturePlatformSellerBucket, use the
+        # auto-created bucket pre-populated with the bundled sample feature(s).
+        SellerBucketName: !If
+          - CreateFeaturePlatformSellerBucket
+          - !Ref FeaturePlatformSellerBucketResource
+          - !Ref FeaturePlatformSellerBucket
+        SellerBucketRegion: !If
+          - CreateFeaturePlatformSellerBucket
+          - !Ref AWS::Region
+          - !Ref FeaturePlatformSellerBucketRegion
+        # When the simulator is auto-deployed, point the entitlement Lambda
+        # at its nip.io endpoint. Otherwise honour the admin's explicit
+        # FeaturePlatformSimulatorEndpoint (which may be a real Marketplace
+        # URL or their own self-hosted simulator).
+        SimulatorEntitlementEndpoint: !If
+          - DeployFeaturePlatformSimulator
+          - !GetAtt FeaturePlatformSimulatorStack.Outputs.SimulatorEndpoint
+          - !Ref FeaturePlatformSimulatorEndpoint
+        DefaultCustomerIdentifier: !Ref FeaturePlatformDefaultCustomerIdentifier
+        FeatureProductCodeMap: !Ref FeaturePlatformProductCodeMap
+        AdminGroupName: 'Admin'
+        LogLevel: !Ref LogLevel
+  # === Feature Platform (optional) — END =================================
+
 
   CustomerManagedEncryptionKey:
     DependsOn:
@@ -8677,7 +9001,14 @@ Resources:
             #     (tracked as Talos finding #12 phase 2).
             #   - img-src: retains `https:` to allow user-supplied
             #     document thumbnails from any S3 / CloudFront origin.
-            ContentSecurityPolicy: "script-src 'self' 'unsafe-inline' 'unsafe-eval' https:; object-src 'none'; base-uri 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline' https:; connect-src 'self' https://*.amazonaws.com https://*.amazoncognito.com https://cognito-idp.*.amazonaws.com https://cognito-identity.*.amazonaws.com https://*.appsync-api.*.amazonaws.com https://*.execute-api.*.amazonaws.com https://*.s3.*.amazonaws.com https://*.s3-accelerate.amazonaws.com wss://*.amazonaws.com wss://*.appsync-realtime-api.*.amazonaws.com wss://*.execute-api.*.amazonaws.com ws://localhost:*;"
+            #   - connect-src includes `https://cdn.jsdelivr.net` because
+            #     the Monaco editor loader (`@monaco-editor/loader`) issues
+            #     XHR fetches for its AMD modules and source maps from
+            #     `cdn.jsdelivr.net/npm/monaco-editor/...` at runtime.
+            #     Without it the browser blocks the `.map` fetch and
+            #     spams the console with CSP violations. The loader
+            #     `<script>` tag itself is permitted by `script-src https:`.
+            ContentSecurityPolicy: "script-src 'self' 'unsafe-inline' 'unsafe-eval' https:; object-src 'none'; base-uri 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline' https:; connect-src 'self' https://*.amazonaws.com https://*.amazoncognito.com https://cognito-idp.*.amazonaws.com https://cognito-identity.*.amazonaws.com https://*.appsync-api.*.amazonaws.com https://*.execute-api.*.amazonaws.com https://*.s3.*.amazonaws.com https://*.s3-accelerate.amazonaws.com https://cdn.jsdelivr.net wss://*.amazonaws.com wss://*.appsync-realtime-api.*.amazonaws.com wss://*.execute-api.*.amazonaws.com ws://localhost:*;"
 
           StrictTransportSecurity:
             Override: true

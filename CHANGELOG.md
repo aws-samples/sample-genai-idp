@@ -5,7 +5,47 @@ SPDX-License-Identifier: MIT-0
 
 ## [Unreleased]
 
+### Added
+
+- **Subscription Features platform (opt-in)** — turns the main IDP stack into a host for *installable subscription features* delivered through AWS Marketplace (or a bundled local Marketplace simulator). Off by default (`EnableFeaturePlatform=false`); existing deployments are fully backward-compatible. The platform's purpose is to be a **template + scaffolding for adding new subscription features**, not just to ship the bundled `docs-by-status` demo.
+
+  **What ships in the box**
+
+  - **`subscription-features/feature-platform/feature-template/`** — a full working feature scaffold (manifest, SAM template, React UMD bundle build, Cognito-authorised HTTP API, registration custom-resource, pytest stubs). New features are bootstrapped from this template with one CLI command (see SDK below).
+  - **`subscription-features/feature-platform/sample-feature/` (`docs-by-status`)** — a real, running reference implementation built from the template. Demonstrates every contract a third-party feature can use: a feature-owned HTTP API that reads the host stack's `TrackingTable`, a Cloudscape-based React UI, the registration handshake, and the seller-bucket→WebUIBucket asset pipeline.
+  - **`subscription-features/feature-platform/main-stack-extensions/`** — the host-side nested stack: `InstalledFeatures` DDB table, AppSync Lambdas backing the GraphQL surface (`listCatalogFeatures`, `listInstalledFeatures`, `checkFeatureEntitlement`, `getFeatureLaunchUrl`, `subscribeFeature`/`unsubscribeFeature`, `registerFeature`/`unregisterFeature`), and the bucket-policy fragment that lets feature stacks write under `WebUIBucket/features/<id>/*`.
+  - **`subscription-features/marketplace-simulator/`** — an EC2-hosted, Marketplace-compatible REST API + buyer console (`/marketplace/*`) used in dev / demo. Auto-deployed when `FeaturePlatformSimulatorEndpoint` is blank; production deployments point the same env var at real AWS Marketplace endpoints with no UI changes.
+  - **`lib/idp_feature_sdk/` + `idp-feature-cli`** — the SDK and CLI that feature authors use: `idp-feature-cli init <dir>` scaffolds from `feature-template/`, `idp-feature-cli build` validates the bundle, `idp-feature-cli publish` uploads version-pinned artifacts to a seller bucket and bumps `latest.json`. Authors never touch the host code.
+
+  **Plug-in contract for new features (the stable surface)**
+
+  - **`feature.yaml` is the single source of truth** for `featureId` / `displayName` / `version`. The Vite build injects them into `entry.tsx` as compile-time constants (`__FEATURE_ID__` / `__FEATURE_DISPLAY_NAME__` / `__FEATURE_VERSION__`); the publisher bakes the version into the published `template.yaml` (replacing a `<FEATURE_VERSION_TOKEN>` placeholder). Bumping a version is a one-line edit in `feature.yaml`.
+  - **`window.IdpFeatures.register(featureId, { Component, version, displayName })`** — top-level call in the feature's UMD bundle entry point. The host's `FeatureLoader` reads it back after the `<script>` load event.
+  - **`FeatureContext` prop** — the host renders the registered Component with `{ featureId, installedVersion, featureApiEndpoint, getAuthToken, mainStackName, subscriptionActive }`. React, ReactDOM, react-router-dom, aws-amplify, and Cloudscape are externalised via `window.*` globals so feature bundles stay small and share the host's library instances.
+  - **Host re-exports for `Fn::ImportValue`** — `${MainStackName}-UserPoolId`, `-UserPoolClientId`, `-WebUIBucketName`, `-AppSyncApiUrl`, `-AppSyncApiArn`, `-TrackingTableName`, `-CustomerManagedEncryptionKeyArn`. These are the only main-stack handles features should depend on.
+  - **Versioned S3 layout** — `s3://<seller-bucket>/features/<id>/v<version>/{template.yaml, ui-bundle.js, manifest.json, sha256.txt}` plus `features/<id>/latest.json`.
+  - **Catalog → Subscribe → Install → Update lifecycle** — `listCatalogFeatures` populates the nav from `latest.json`; admins click **Subscribe** which redirects to the Marketplace (or simulator) buyer flow; `listInstalledFeatures` flags `updateAvailable` when `latestVersion != installedVersion`; clicking **Update** opens a CFN Console "Update stack" URL targeting the existing stack's ARN with the new version-pinned `templateURL` (no `param_*` overrides — the new version is a real template-content change CFN must apply, which sidesteps the update-wizard's documented `param_*` ignoring).
+
+  **Authoring a new feature**
+
+  ```bash
+  pip install -e lib/idp_feature_sdk
+  idp-feature-cli init ./my-feature --feature-id my-feature --display-name "My Feature"
+  cd my-feature
+  # ... implement App.tsx + handler.py + adjust template.yaml as needed ...
+  idp-feature-cli build .
+  idp-feature-cli publish . --seller-bucket <bucket> --region <region>
+  ```
+
+  After publish, the feature shows up in the IDP nav of every main stack pointed at that seller bucket, with no main-stack rebuild. Bumping `feature.yaml -> version` and re-publishing triggers an "Update available" badge for already-installed instances; clicking **Update** updates the existing feature stack in place.
+
+  **Documentation** — start at [`subscription-features/feature-platform/docs/README.md`](subscription-features/feature-platform/docs/README.md). Three deep-dive author docs cover [creating a feature](subscription-features/feature-platform/docs/CREATING-A-FEATURE.md), the [host contract](subscription-features/feature-platform/docs/HOST-CONTRACT.md), and a [file-by-file walkthrough of the bundled sample](subscription-features/feature-platform/docs/SAMPLE-FEATURE-WALKTHROUGH.md). Operator-facing setup, cost, and tear-down notes are in [`docs/feature-platform.md`](docs/feature-platform.md).
+
+  **Tests** — 217+ automated tests cover the platform: 65 main-stack Lambda pytest cases, 13 e2e test-harness cases, 28 SDK cases, 45 simulator cases, and 80 vitest UI cases. Run them with `python -m pytest subscription-features/feature-platform/main-stack-extensions/tests/` etc. — see the docs README for the full matrix.
+
 ## [0.5.10]
+
+
 
 ### Added
 

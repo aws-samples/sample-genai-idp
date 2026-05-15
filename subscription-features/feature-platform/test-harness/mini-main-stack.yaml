@@ -1,0 +1,173 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  Mini main stack — minimal set of resources the feature-platform Phase A
+  nested stack needs in order to deploy and run in a real AWS account (for
+  live integration testing). Does NOT include the full IDP accelerator; think
+  of it as the "feature platform in isolation" harness.
+
+Parameters:
+  FeaturePlatformTemplateUrl:
+    Type: String
+    Description: HTTPS URL to the Phase A nested stack template (feature-platform.yaml),
+      e.g. after uploading it to your deployments S3 bucket.
+
+  SellerBucketName:
+    Type: String
+    Default: ''
+
+Resources:
+
+  # -------------------------------------------------------------------------
+  # Minimal Cognito — no app clients, no federation, just enough for JWTs.
+  # -------------------------------------------------------------------------
+  UserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: !Sub '${AWS::StackName}-UserPool'
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 12
+
+  UserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      UserPoolId: !Ref UserPool
+      ClientName: !Sub '${AWS::StackName}-client'
+
+  AdminGroup:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      UserPoolId: !Ref UserPool
+      GroupName: Admin
+
+  # -------------------------------------------------------------------------
+  # Minimal AppSync — API + schema stub. Does NOT declare the feature
+  # platform types; those are added inline by the Phase A nested stack's
+  # resolvers (CFN accepts resolvers attached to extend-only schemas).
+  # -------------------------------------------------------------------------
+  GraphQLApi:
+    Type: AWS::AppSync::GraphQLApi
+    Properties:
+      Name: !Sub '${AWS::StackName}-api'
+      AuthenticationType: AMAZON_COGNITO_USER_POOLS
+      UserPoolConfig:
+        UserPoolId: !Ref UserPool
+        AwsRegion: !Ref AWS::Region
+        DefaultAction: ALLOW
+      AdditionalAuthenticationProviders:
+        - AuthenticationType: AWS_IAM
+
+  GraphQLSchema:
+    Type: AWS::AppSync::GraphQLSchema
+    Properties:
+      ApiId: !GetAtt GraphQLApi.ApiId
+      # Paste the feature-platform schema fragment inline for this harness.
+      # In the real main stack, this schema includes the full IDP types.
+      Definition: |
+        type InstalledFeature {
+          featureId: String!
+          displayName: String!
+          installedVersion: String!
+          latestVersion: String
+          updateAvailable: Boolean!
+          stackName: String!
+          stackRegion: String!
+          stackId: String
+          uiBundlePath: String!
+          featureApiEndpoint: String
+          iconUrl: String
+          installedAt: AWSDateTime!
+          installedBy: String
+        }
+        type FeatureEntitlement {
+          featureId: String!
+          state: FeatureEntitlementState!
+          expiresAt: AWSDateTime
+          customerIdentifier: String
+          productCode: String
+          source: String!
+        }
+        enum FeatureEntitlementState { NONE ACTIVE EXPIRED }
+        type FeatureLaunchUrl {
+          featureId: String!
+          version: String!
+          launchUrl: String!
+          templateUrl: String!
+          stackName: String!
+          parameters: AWSJSON!
+        }
+        input RegisterFeatureInput {
+          featureId: String!
+          displayName: String!
+          installedVersion: String!
+          stackName: String!
+          stackId: String!
+          stackRegion: String!
+          uiBundlePath: String!
+          featureApiEndpoint: String
+          iconUrl: String
+          installedBy: String
+        }
+        type Query {
+          listInstalledFeatures: [InstalledFeature!]! @aws_cognito_user_pools
+          checkFeatureEntitlement(featureId: String!): FeatureEntitlement! @aws_cognito_user_pools
+          getFeatureLaunchUrl(featureId: String!, version: String): FeatureLaunchUrl! @aws_cognito_user_pools
+        }
+        type Mutation {
+          registerFeature(input: RegisterFeatureInput!): InstalledFeature! @aws_iam
+          unregisterFeature(featureId: String!): Boolean! @aws_iam
+        }
+        schema { query: Query mutation: Mutation }
+
+  # -------------------------------------------------------------------------
+  # Minimal "WebUIBucket" stand-in — just an S3 bucket with CloudFront
+  # disabled; the feature-stack's ui-deployer writes its bundle under
+  # features/<id>/*. A real main stack fronts this with CloudFront + OAI.
+  # -------------------------------------------------------------------------
+  WebUIBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Delete
+    Properties:
+      BucketName: !Sub '${AWS::StackName}-webui-${AWS::AccountId}'
+      OwnershipControls:
+        Rules: [ { ObjectOwnership: BucketOwnerEnforced } ]
+
+  # -------------------------------------------------------------------------
+  # Phase A nested stack
+  # -------------------------------------------------------------------------
+  FeaturePlatform:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Ref FeaturePlatformTemplateUrl
+      Parameters:
+        MainStackName: !Ref AWS::StackName
+        GraphQLApiId: !GetAtt GraphQLApi.ApiId
+        GraphQLApiArn: !GetAtt GraphQLApi.Arn
+        AppSyncApiUrl: !GetAtt GraphQLApi.GraphQLUrl
+        UserPoolId: !Ref UserPool
+        WebUIBucketName: !Ref WebUIBucket
+        WebUIBucketArn: !GetAtt WebUIBucket.Arn
+        SellerBucketName: !Ref SellerBucketName
+        SellerBucketRegion: !Ref AWS::Region
+        # FeatureProductCodeMap, simulator endpoint, etc. omitted — set later
+        # by override if you want to exercise entitlement flows.
+
+Outputs:
+
+  # Re-export main-stack values so feature stacks can Fn::ImportValue them.
+  UserPoolId:
+    Value: !Ref UserPool
+    Export: { Name: !Sub '${AWS::StackName}-UserPoolId' }
+  UserPoolClientId:
+    Value: !Ref UserPoolClient
+    Export: { Name: !Sub '${AWS::StackName}-UserPoolClientId' }
+  AppSyncApiUrl:
+    Value: !GetAtt GraphQLApi.GraphQLUrl
+    Export: { Name: !Sub '${AWS::StackName}-AppSyncApiUrl' }
+  AppSyncApiArn:
+    Value: !GetAtt GraphQLApi.Arn
+    Export: { Name: !Sub '${AWS::StackName}-AppSyncApiArn' }
+  WebUIBucketName:
+    Value: !Ref WebUIBucket
+    Export: { Name: !Sub '${AWS::StackName}-WebUIBucketName' }

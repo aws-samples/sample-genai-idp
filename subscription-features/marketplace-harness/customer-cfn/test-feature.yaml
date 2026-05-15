@@ -1,0 +1,236 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  GenAI IDP Accelerator — Test Feature (Quick Launch template).
+  Deployed into the BUYER's AWS account via AWS Marketplace SaaS Quick Launch
+  after subscription. Provisions a shim Lambda + API Gateway that calls back
+  to the seller-hosted entitlement/metering API. No premium business logic
+  runs in this stack; it exists only to prove plumbing end-to-end.
+
+Parameters:
+  SellerApiEndpoint:
+    Type: String
+    Description: >
+      URL of the seller's /validate + /meter API, e.g.
+      https://xxx.execute-api.us-east-1.amazonaws.com/prod
+    AllowedPattern: "^https://.*"
+  SellerApiKeySecretValue:
+    Type: String
+    NoEcho: true
+    Description: >
+      Shared API key for authenticating to the seller API. Populated by
+      AWS Marketplace Quick Launch from the Secrets Manager value the seller
+      configured during listing creation.
+  CustomerIdentifier:
+    Type: String
+    Description: >
+      CustomerIdentifier returned by ResolveCustomer during registration,
+      supplied to Quick Launch so the deployed resources know who they are.
+
+Resources:
+  SellerApiSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub "idp-test-feature/${AWS::StackName}/seller-api"
+      Description: Seller API endpoint + key used by TestFeatureFn
+      SecretString: !Sub |
+        {
+          "sellerApiEndpoint": "${SellerApiEndpoint}",
+          "sellerApiKey": "${SellerApiKeySecretValue}",
+          "customerIdentifier": "${CustomerIdentifier}"
+        }
+
+  TestFeatureFnRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: read-seller-secret
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: !Ref SellerApiSecret
+
+  TestFeatureFn:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "${AWS::StackName}-test-feature"
+      Runtime: python3.12
+      Handler: index.lambda_handler
+      Timeout: 30
+      MemorySize: 256
+      Role: !GetAtt TestFeatureFnRole.Arn
+      Environment:
+        Variables:
+          SECRET_ARN: !Ref SellerApiSecret
+          CACHE_TTL_SECONDS: "300"
+      Code:
+        ZipFile: |
+          """Stub 'Test Feature' — the shim deployed into the buyer's account.
+
+          On every invocation:
+            1. Reads the seller API endpoint + key + customer id from Secrets Manager
+            2. POSTs /validate to check entitlement (with a 5-min cache)
+            3. If entitled, does fake 'premium work' (stamps the doc name)
+            4. POSTs /meter to record the usage
+
+          Fails closed when /validate returns entitled=false.
+          """
+          import json
+          import os
+          import time
+          import urllib.request
+          import urllib.error
+          import boto3
+
+          _sm = boto3.client("secretsmanager")
+          _secret_cache = {"data": None, "fetchedAt": 0}
+          _validate_cache = {"data": None, "fetchedAt": 0}
+          _TTL = int(os.environ.get("CACHE_TTL_SECONDS", "300"))
+
+          def _secret():
+              now = time.time()
+              if _secret_cache["data"] and now - _secret_cache["fetchedAt"] < 600:
+                  return _secret_cache["data"]
+              resp = _sm.get_secret_value(SecretId=os.environ["SECRET_ARN"])
+              data = json.loads(resp["SecretString"])
+              _secret_cache.update(data=data, fetchedAt=now)
+              return data
+
+          def _post(url, body, api_key):
+              req = urllib.request.Request(
+                  url,
+                  data=json.dumps(body).encode("utf-8"),
+                  headers={"Content-Type": "application/json", "x-api-key": api_key},
+                  method="POST",
+              )
+              with urllib.request.urlopen(req, timeout=10) as r:
+                  return json.loads(r.read())
+
+          def _validate(secret):
+              now = time.time()
+              if _validate_cache["data"] and now - _validate_cache["fetchedAt"] < _TTL:
+                  return _validate_cache["data"]
+              result = _post(
+                  secret["sellerApiEndpoint"].rstrip("/") + "/validate",
+                  {"customerIdentifier": secret["customerIdentifier"]},
+                  secret["sellerApiKey"],
+              )
+              _validate_cache.update(data=result, fetchedAt=now)
+              return result
+
+          def _meter(secret, resource_id):
+              return _post(
+                  secret["sellerApiEndpoint"].rstrip("/") + "/meter",
+                  {
+                      "customerIdentifier": secret["customerIdentifier"],
+                      "quantity": 1,
+                      "resourceId": resource_id,
+                  },
+                  secret["sellerApiKey"],
+              )
+
+          def lambda_handler(event, context):
+              secret = _secret()
+              body = event.get("body") or "{}"
+              if isinstance(body, str):
+                  try:
+                      body = json.loads(body)
+                  except Exception:
+                      body = {}
+              resource_id = body.get("documentId") or context.aws_request_id
+
+              try:
+                  v = _validate(secret)
+              except urllib.error.HTTPError as e:
+                  # Fail open within cache window already handled by _validate's cache;
+                  # if no cache, fail closed.
+                  return {"statusCode": 503, "body": json.dumps({"error": "validate-unreachable", "detail": str(e)})}
+
+              if not v.get("entitled") or v.get("blockedByCapacity"):
+                  return {
+                      "statusCode": 402,
+                      "body": json.dumps({
+                          "error": "not-entitled",
+                          "detail": v,
+                      }),
+                  }
+
+              # "Premium" stub work
+              work_output = {
+                  "documentId": resource_id,
+                  "stamp": "processed-by-test-feature",
+                  "timestamp": int(time.time()),
+              }
+
+              try:
+                  m = _meter(secret, resource_id)
+              except Exception as e:
+                  # Don't fail the customer call just because metering failed;
+                  # a real implementation would enqueue for retry.
+                  m = {"accepted": False, "error": str(e)}
+
+              return {
+                  "statusCode": 200,
+                  "headers": {"Content-Type": "application/json"},
+                  "body": json.dumps({"work": work_output, "validate": v, "meter": m}),
+              }
+
+  TestFeatureApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: !Sub "${AWS::StackName}-test-feature-api"
+      ProtocolType: HTTP
+
+  TestFeatureApiIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref TestFeatureApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt TestFeatureFn.Arn
+      PayloadFormatVersion: "2.0"
+
+  TestFeatureApiRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref TestFeatureApi
+      RouteKey: "POST /invoke"
+      Target: !Sub "integrations/${TestFeatureApiIntegration}"
+
+  TestFeatureApiStage:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      ApiId: !Ref TestFeatureApi
+      StageName: prod
+      AutoDeploy: true
+
+  TestFeatureApiPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt TestFeatureFn.Arn
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${TestFeatureApi}/*/*/invoke"
+
+Outputs:
+  TestFeatureFunctionArn:
+    Description: Invoke this Lambda directly (or via the API) to exercise the feature
+    Value: !GetAtt TestFeatureFn.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-TestFeatureFunctionArn"
+  TestFeatureApiUrl:
+    Description: Public URL for POST /invoke
+    Value: !Sub "https://${TestFeatureApi}.execute-api.${AWS::Region}.amazonaws.com/prod/invoke"
+    Export:
+      Name: !Sub "${AWS::StackName}-TestFeatureApiUrl"
+  SellerSecretArn:
+    Value: !Ref SellerApiSecret

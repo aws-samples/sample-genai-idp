@@ -1,0 +1,368 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  AWS Marketplace Subscription Harness — seller-side backend (us-east-1 only).
+  Registration URL, lifecycle SQS, entitlement/metering API, BatchMeterUsage roll-up.
+  PROTOTYPE — not production.
+
+Parameters:
+  ProductCode:
+    Type: String
+    Description: AWS Marketplace ProductCode (legacy identifier)
+    Default: placeholder-product-code
+  LicenseArn:
+    Type: String
+    Description: AWS Marketplace LicenseArn (post-2026 identifier)
+    Default: "arn:aws:license-manager::placeholder:license/placeholder"
+  Use2026ApiShape:
+    Type: String
+    Description: Use CustomerAWSAccountId/LicenseArn path rather than legacy
+    Default: "true"
+    AllowedValues: ["true", "false"]
+  ApiKeySecretName:
+    Type: String
+    Description: Name of Secrets Manager secret holding the seller API key
+    Default: mp-harness/seller-api-key
+
+Globals:
+  Function:
+    Runtime: python3.12
+    Timeout: 30
+    MemorySize: 256
+    Tracing: Active
+    Environment:
+      Variables:
+        LOG_LEVEL: INFO
+        PRODUCT_CODE: !Ref ProductCode
+        LICENSE_ARN: !Ref LicenseArn
+        USE_2026_API: !Ref Use2026ApiShape
+        CUSTOMERS_TABLE: !Ref CustomersTable
+        ENTITLEMENTS_TABLE: !Ref EntitlementsTable
+        USAGE_LEDGER_TABLE: !Ref UsageLedgerTable
+
+Resources:
+  # ─────────────────────────────────── DynamoDB ────────────────────────────────
+  CustomersTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: customerIdentifier
+          AttributeType: S
+      KeySchema:
+        - AttributeName: customerIdentifier
+          KeyType: HASH
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+
+  EntitlementsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: customerIdentifier
+          AttributeType: S
+        - AttributeName: dimension
+          AttributeType: S
+      KeySchema:
+        - AttributeName: customerIdentifier
+          KeyType: HASH
+        - AttributeName: dimension
+          KeyType: RANGE
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+      SSESpecification:
+        SSEEnabled: true
+
+  UsageLedgerTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: customerIdentifier
+          AttributeType: S
+        - AttributeName: eventId
+          AttributeType: S
+        - AttributeName: billingPeriod
+          AttributeType: S
+      KeySchema:
+        - AttributeName: customerIdentifier
+          KeyType: HASH
+        - AttributeName: eventId
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: billingPeriod-customerIdentifier-index
+          KeySchema:
+            - AttributeName: billingPeriod
+              KeyType: HASH
+            - AttributeName: customerIdentifier
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+
+  # ─────────────────────────────────── SNS / SQS ───────────────────────────────
+  # NOTE: In production, the aws-mp-* SNS topics are created by AWS Marketplace
+  # onboarding and the ARNs are passed back to us. For the prototype we create
+  # placeholder topics in our own account so the mock harness can publish to them.
+  SubscriptionNotificationTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: aws-mp-subscription-notification-harness
+      KmsMasterKeyId: alias/aws/sns
+
+  EntitlementNotificationTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: aws-mp-entitlement-notification-harness
+      KmsMasterKeyId: alias/aws/sns
+
+  LifecycleDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: mp-harness-lifecycle-dlq
+      KmsMasterKeyId: alias/aws/sqs
+      MessageRetentionPeriod: 1209600
+
+  LifecycleQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: mp-harness-lifecycle
+      KmsMasterKeyId: alias/aws/sqs
+      VisibilityTimeout: 180
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt LifecycleDLQ.Arn
+        maxReceiveCount: 5
+
+  LifecycleQueuePolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues:
+        - !Ref LifecycleQueue
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowSnsSubscribeTopics
+            Effect: Allow
+            Principal:
+              Service: sns.amazonaws.com
+            Action: sqs:SendMessage
+            Resource: !GetAtt LifecycleQueue.Arn
+            Condition:
+              ArnEquals:
+                aws:SourceArn:
+                  - !Ref SubscriptionNotificationTopic
+                  - !Ref EntitlementNotificationTopic
+
+  SubscriptionTopicSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      Protocol: sqs
+      TopicArn: !Ref SubscriptionNotificationTopic
+      Endpoint: !GetAtt LifecycleQueue.Arn
+      RawMessageDelivery: false
+
+  EntitlementTopicSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      Protocol: sqs
+      TopicArn: !Ref EntitlementNotificationTopic
+      Endpoint: !GetAtt LifecycleQueue.Arn
+      RawMessageDelivery: false
+
+  # ─────────────────────────────── Registration URL ────────────────────────────
+  RegistrationFn:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: mp-harness-registration
+      CodeUri: src/registration/
+      Handler: handler.lambda_handler
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - aws-marketplace:ResolveCustomer
+              Resource: "*"
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CustomersTable
+      Events:
+        RegisterApi:
+          Type: Api
+          Properties:
+            RestApiId: !Ref PublicApi
+            Path: /register
+            Method: POST
+
+  PublicApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: prod
+      EndpointConfiguration:
+        Type: REGIONAL
+      TracingEnabled: true
+      MethodSettings:
+        - ResourcePath: "/*"
+          HttpMethod: "*"
+          LoggingLevel: INFO
+          MetricsEnabled: true
+
+  # ─────────────────────────────── Lifecycle Lambda ────────────────────────────
+  LifecycleFn:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: mp-harness-lifecycle
+      CodeUri: src/lifecycle/
+      Handler: handler.lambda_handler
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - aws-marketplace:GetEntitlements
+              Resource: "*"
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CustomersTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref EntitlementsTable
+        - SQSPollerPolicy:
+            QueueName: !GetAtt LifecycleQueue.QueueName
+      Events:
+        FromQueue:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt LifecycleQueue.Arn
+            BatchSize: 10
+
+  # ─────────────────────────── Entitlement / Metering API ──────────────────────
+  SellerApiKeySecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Ref ApiKeySecretName
+      Description: Shared API key for buyer-side TestFeatureFn -> seller API
+      GenerateSecretString:
+        SecretStringTemplate: '{"name":"mp-harness-prototype"}'
+        GenerateStringKey: "apiKey"
+        PasswordLength: 48
+        ExcludePunctuation: true
+
+  EntitlementApiFn:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: mp-harness-entitlement-api
+      CodeUri: src/entitlement-api/
+      Handler: handler.lambda_handler
+      Environment:
+        Variables:
+          API_KEY_SECRET_ARN: !Ref SellerApiKeySecret
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - aws-marketplace:GetEntitlements
+              Resource: "*"
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CustomersTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref EntitlementsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref UsageLedgerTable
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Ref SellerApiKeySecret
+      Events:
+        Validate:
+          Type: Api
+          Properties:
+            RestApiId: !Ref PublicApi
+            Path: /validate
+            Method: POST
+        Meter:
+          Type: Api
+          Properties:
+            RestApiId: !Ref PublicApi
+            Path: /meter
+            Method: POST
+
+  # ─────────────────────────── BatchMeterUsage Rollup ──────────────────────────
+  MeteringRollupFn:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: mp-harness-metering-rollup
+      CodeUri: src/metering-rollup/
+      Handler: handler.lambda_handler
+      Timeout: 300
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - aws-marketplace:BatchMeterUsage
+              Resource: "*"
+        - DynamoDBCrudPolicy:
+            TableName: !Ref UsageLedgerTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CustomersTable
+      Events:
+        Hourly:
+          Type: Schedule
+          Properties:
+            Schedule: rate(1 hour)
+
+  # ─────────────────────────────── CloudWatch Alarms ───────────────────────────
+  LifecycleDlqAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: mp-harness-lifecycle-dlq-depth
+      AlarmDescription: Lifecycle SNS messages ended up in DLQ — investigate
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt LifecycleDLQ.QueueName
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+
+  RollupErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: mp-harness-rollup-errors
+      AlarmDescription: BatchMeterUsage roll-up Lambda erroring — check metering lag
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref MeteringRollupFn
+      Statistic: Sum
+      Period: 3600
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+
+Outputs:
+  RegistrationUrl:
+    Description: Fulfillment URL to give to AWS Marketplace onboarding
+    Value: !Sub "https://${PublicApi}.execute-api.${AWS::Region}.amazonaws.com/prod/register"
+  ValidateUrl:
+    Value: !Sub "https://${PublicApi}.execute-api.${AWS::Region}.amazonaws.com/prod/validate"
+  MeterUrl:
+    Value: !Sub "https://${PublicApi}.execute-api.${AWS::Region}.amazonaws.com/prod/meter"
+  SubscriptionTopicArn:
+    Value: !Ref SubscriptionNotificationTopic
+  EntitlementTopicArn:
+    Value: !Ref EntitlementNotificationTopic
+  CustomersTableName:
+    Value: !Ref CustomersTable
+  UsageLedgerTableName:
+    Value: !Ref UsageLedgerTable
+  SellerApiKeySecretArn:
+    Value: !Ref SellerApiKeySecret

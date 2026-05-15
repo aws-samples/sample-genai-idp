@@ -95,6 +95,17 @@ class IDPPublisher:
                 if os.path.isdir(pattern_path):
                     checksum_paths.append(f"{pattern_path}/.checksum")
 
+        # Add subscription-features/* checksum files (feature-platform, marketplace-simulator).
+        # These components are condition-gated on EnableFeaturePlatform=true but we
+        # still need to clean their checksums on a forced full rebuild.
+        for prototype_component in (
+            "subscription-features/feature-platform/main-stack-extensions",
+            "subscription-features/feature-platform/sample-feature",
+            "subscription-features/marketplace-simulator",
+        ):
+            if os.path.isdir(prototype_component):
+                checksum_paths.append(f"{prototype_component}/.checksum")
+
         deleted_count = 0
         for checksum_path in checksum_paths:
             if os.path.exists(checksum_path):
@@ -1366,6 +1377,397 @@ STDERR:
 
         return zipfile_name
 
+    def build_and_upload_simulator_source(self):
+        """Build + upload the marketplace-simulator source tarball.
+
+        The simulator EC2 downloads this tarball on first boot (see
+        ``subscription-features/marketplace-simulator/template.yaml`` — UserData), and the
+        nested stack's ``SimulatorRefreshResource`` Lambda tells the running
+        EC2 to re-download + ``docker compose up -d --build`` in place on
+        every stack update where the returned hash changes.
+
+        Net effect: changes to simulator source code propagate to the running
+        EC2 on the next ``idp-cli deploy`` — no git push, no SSH, no manual
+        docker compose.
+
+        Returns:
+            tuple (source_hash, source_key) where
+              - source_hash: 16-char hex of the simulator source checksum.
+                Injected into the main template as
+                ``<MARKETPLACE_SIMULATOR_SOURCE_HASH_TOKEN>`` so CFN re-invokes
+                the refresh Lambda on content change.
+              - source_key: S3 key of the uploaded tarball, relative to
+                ``self.bucket``. Injected into the simulator nested stack
+                via the ``SourceS3Key`` parameter.
+            Both return empty strings when the simulator directory is absent
+            (e.g. someone stripped subscription-features/ out of the build).
+        """
+        sim_dir = Path("subscription-features/marketplace-simulator")
+        if not sim_dir.is_dir():
+            self.log_verbose(
+                "No subscription-features/marketplace-simulator — skipping simulator "
+                "source upload (feature platform simulator nested stack will "
+                "either fall back to git clone or use a user-supplied endpoint)."
+            )
+            return "", ""
+
+        self.log_phase("Building Marketplace Simulator source", "🧩")
+
+        # Content hash of everything that ends up in the tarball. The refresh
+        # Lambda skips refreshes when the hash is unchanged on Update, so the
+        # hash needs to stabilise when nothing meaningful changes.
+        deps = [
+            str(sim_dir / "Dockerfile"),
+            str(sim_dir / "docker-compose.yml"),
+            str(sim_dir / "pyproject.toml"),
+            str(sim_dir / "mp_simulator"),
+            str(sim_dir / "refresh_lambda"),
+            str(sim_dir / "client"),
+        ]
+        current_checksum = hashlib.sha256(
+            "".join(
+                self.get_file_checksum(d)
+                if os.path.isfile(d)
+                else self.get_source_files_checksum(d)
+                for d in deps
+                if os.path.exists(d)
+            ).encode()
+        ).hexdigest()
+        source_hash = current_checksum[:16]
+
+        # Build the tarball once per hash, in .aws-sam/ so normal gitignore
+        # rules apply. Re-uploading is cheap, so we always push on every
+        # build — publish.py isn't called on hot paths.
+        out_dir = Path(".aws-sam")
+        out_dir.mkdir(exist_ok=True)
+        tarball_name = "marketplace-simulator-source.tar.gz"
+        tarball_path = out_dir / tarball_name
+
+        # Recreate the tarball every time we run — small (~200KB) and cheap.
+        import tarfile
+
+        self.log_task(f"Packaging simulator source → {tarball_path}")
+        with tarfile.open(tarball_path, "w:gz") as tar:
+            # Add each file/dir preserving the layout expected by the UserData
+            # script — the tarball root becomes
+            # /srv/idp/subscription-features/marketplace-simulator/.
+            for item in sim_dir.iterdir():
+                # Skip build artefacts and gitignore droppings.
+                if item.name in (
+                    ".aws-sam",
+                    "__pycache__",
+                    ".checksum",
+                    "node_modules",
+                    ".pytest_cache",
+                    "tests",
+                ):
+                    continue
+                tar.add(item, arcname=item.name, recursive=True)
+
+        s3_key = f"{self.prefix_and_version}/marketplace-simulator-source.tar.gz"
+        self.upload_to_s3_with_timer(
+            str(tarball_path),
+            s3_key,
+            "marketplace-simulator source tarball",
+        )
+        self.log_success(
+            f"Uploaded simulator source (hash={source_hash}) to s3://{self.bucket}/{s3_key}"
+        )
+        return source_hash, s3_key
+
+    def build_and_upload_sample_features(self):
+        """Build and upload bundled sample feature(s) to the artifact bucket.
+
+        Produces artifacts under
+            s3://<artifact-bucket>/<prefix>/<version>/sample-features/features/<id>/...
+
+        At deploy time, when EnableFeaturePlatform=true, the main stack's
+        PublishSampleFeature custom resource copies these objects into the
+        auto-created FeaturePlatformSellerBucket (layout: features/<id>/...)
+        so the feature appears in the catalog with zero manual
+        `idp-feature-cli publish` step.
+
+        Returns:
+            tuple (sample_features_hash, file_list) where
+              - sample_features_hash: 16-char hex of the combined source
+                checksum; injected into the main template as
+                <SAMPLE_FEATURES_HASH_TOKEN> so the custom resource re-runs on
+                content change.
+              - file_list: list of relative paths (relative to the
+                `sample-features/` artifact prefix) that were uploaded. Injected
+                as <SAMPLE_FEATURES_LIST_TOKEN> JSON so the custom resource
+                knows exactly what to copy.
+            Both return empty ("" / []) when the sample-feature directory is
+            absent (e.g. the user has trimmed subscription-features/ out of the repo).
+        """
+        sample_feature_dir = Path(
+            "subscription-features/feature-platform/sample-feature"
+        )
+        if not sample_feature_dir.is_dir():
+            self.log_verbose(
+                "No subscription-features/feature-platform/sample-feature — skipping "
+                "sample-feature publish (feature-platform seller-bucket will "
+                "start empty)."
+            )
+            return "", []
+
+        self.log_phase("Building Sample Features", "🧩")
+
+        # Lazy import — idp_feature_sdk is shipped in lib/idp_feature_sdk/ but
+        # some CI envs may strip subscription-features/ before this runs.
+        try:
+            from idp_feature_sdk.manifest import load_manifest
+            from idp_feature_sdk.publisher import FeaturePublisher
+        except ImportError as exc:
+            self.log_warning(
+                f"idp_feature_sdk not installed; skipping sample feature publish ({exc})"
+            )
+            return "", []
+
+        # Source checksum covers every file the built artifacts depend on. A
+        # change here triggers an npm rebuild AND re-upload to S3.
+        deps = [
+            str(sample_feature_dir / "feature.yaml"),
+            str(sample_feature_dir / "template.yaml"),
+            str(sample_feature_dir / "feature-api"),
+            str(sample_feature_dir / "feature-ui" / "src"),
+            str(sample_feature_dir / "feature-ui" / "package.json"),
+            str(sample_feature_dir / "feature-ui" / "vite.config.ts"),
+            str(sample_feature_dir / "feature-ui" / "tsconfig.json"),
+            str(sample_feature_dir / "feature-ui" / "index.html"),
+            str(sample_feature_dir / "ui-deployer"),
+        ]
+        # `_PUBLISH_FORMAT_VERSION` is mixed into the hash so that changes
+        # to *this file's* publishing logic (e.g. the
+        # `<FEATURE_VERSION_TOKEN>` substitution in
+        # `_upload_sample_feature_artifacts`) invalidate the cached hash
+        # even when no source file under sample_feature_dir changed.
+        # Without this, the SAMPLE_FEATURES_HASH stamped into the main
+        # template stays the same after a publish-logic-only fix, so
+        # `PublishSampleFeatureCustomResource` decides "nothing to do" on
+        # the next main-stack deploy and the seller bucket keeps the
+        # old (broken) artifacts. **Bump this string whenever you change
+        # the format/contents of what gets uploaded by
+        # `_upload_sample_feature_artifacts`.**
+        _PUBLISH_FORMAT_VERSION = "v2-feature-version-token-baked"
+        current_checksum = hashlib.sha256(
+            (
+                _PUBLISH_FORMAT_VERSION
+                + "".join(
+                    self.get_file_checksum(d)
+                    if os.path.isfile(d)
+                    else self.get_source_files_checksum(d)
+                    for d in deps
+                )
+            ).encode()
+        ).hexdigest()
+
+        bundle_path = sample_feature_dir / "feature-ui" / "dist" / "ui-bundle.js"
+        checksum_file = sample_feature_dir / ".checksum"
+
+        cached = False
+        if checksum_file.is_file() and bundle_path.is_file():
+            try:
+                if (
+                    checksum_file.read_text(encoding="utf-8").strip()
+                    == current_checksum
+                ):
+                    cached = True
+            except OSError:
+                cached = False
+
+        if cached:
+            self.log_cached("Sample feature source unchanged — using cached UI bundle")
+            manifest = load_manifest(sample_feature_dir)
+        else:
+            publisher = FeaturePublisher(sample_feature_dir, console=self.console)
+            try:
+                manifest = publisher.validate()
+                publisher.build(manifest)
+            except Exception as exc:  # noqa: BLE001 — surface any build failure
+                self.log_error(f"Sample feature build failed: {exc}")
+                sys.exit(1)
+            try:
+                checksum_file.write_text(current_checksum, encoding="utf-8")
+            except OSError as exc:
+                self.log_warning(f"Could not write {checksum_file}: {exc}")
+
+        # Run `sam build` + `sam package` on the sample-feature's SAM template
+        # so its local `CodeUri: feature-api/` / `CodeUri: ui-deployer/` paths
+        # are rewritten to `s3://<artifact-bucket>/...` references. Without
+        # this, the packaged template that ends up in the seller bucket still
+        # has local paths, and the CloudFormation quick-create URL fails with
+        # `'CodeUri' is not a valid S3 Uri of the form 's3://bucket/key'`.
+        # `build_and_package_template` writes `<dir>/.aws-sam/packaged.yaml`.
+        self.log_task("Packaging sample-feature SAM template (sam build + sam package)")
+        self.build_and_package_template(str(sample_feature_dir), force_rebuild=True)
+        packaged_template_path = sample_feature_dir / ".aws-sam" / "packaged.yaml"
+        if not packaged_template_path.is_file():
+            self.log_error(
+                f"Expected packaged template at {packaged_template_path} "
+                f"but it was not produced by sam package"
+            )
+            sys.exit(1)
+
+        file_list = self._upload_sample_feature_artifacts(
+            sample_feature_dir,
+            manifest,
+            bundle_path,
+            packaged_template_path=packaged_template_path,
+        )
+        return current_checksum[:16], file_list
+
+    def _upload_sample_feature_artifacts(
+        self,
+        sample_feature_dir,
+        manifest,
+        bundle_path,
+        packaged_template_path=None,
+    ):
+        """Upload a built sample feature's artifacts to the artifact bucket.
+
+        Layout under `<prefix>/<version>/sample-features/`:
+            features/<featureId>/latest.json
+            features/<featureId>/v<version>/template.yaml
+            features/<featureId>/v<version>/ui-bundle.js
+            features/<featureId>/v<version>/manifest.json
+
+        This mirrors the layout that PublishSampleFeature copies into the
+        SellerBucket at deploy time (under its own `features/<featureId>/...`
+        root), so the main-stack Lambdas (`listCatalogFeatures`,
+        `getFeatureLaunchUrl`, `listInstalledFeatures`) see the feature exactly
+        as if a developer had run `idp-feature-cli publish`.
+
+        Args:
+            packaged_template_path: Optional path to a template produced by
+                `sam package` (with local `CodeUri:` paths already rewritten
+                to `s3://...`). When provided, this is uploaded instead of
+                `manifest.template.path`. Required for features whose
+                template.yaml uses `AWS::Serverless::Function` with local
+                `CodeUri`, which otherwise fails at `CREATE_IN_PROGRESS` with
+                `'CodeUri' is not a valid S3 Uri of the form 's3://bucket/key'`.
+
+        Returns:
+            list of paths (relative to the `sample-features/` artifact prefix)
+            that were uploaded.
+        """
+
+        artifact_root = f"{self.prefix_and_version}/sample-features"
+        feature_id = manifest.featureId
+        version = manifest.version
+        uploaded: list = []
+
+        def _put(body: bytes, rel_key: str, content_type: str) -> None:
+            s3_key = f"{artifact_root}/{rel_key}"
+            self.s3_client.put_object(
+                Bucket=self.bucket,
+                Key=s3_key,
+                Body=body,
+                ContentType=content_type,
+            )
+            uploaded.append(rel_key)
+
+        def _upload(local_path: Path, rel_key: str, content_type: str) -> None:
+            s3_key = f"{artifact_root}/{rel_key}"
+            self.s3_client.upload_file(
+                str(local_path),
+                self.bucket,
+                s3_key,
+                ExtraArgs={"ContentType": content_type},
+            )
+            uploaded.append(rel_key)
+
+        # template.yaml — prefer the sam-packaged version (with CodeUri paths
+        # rewritten to s3://...) when available; fall back to the raw template.
+        #
+        # Bake `<FEATURE_VERSION_TOKEN>` -> manifest.version into the
+        # template before upload. This mirrors what idp-feature-cli publish
+        # does for third-party features (see
+        # lib/idp_feature_sdk/idp_feature_sdk/publisher.py). Without the
+        # substitution, the published template.yaml contains the literal
+        # string `<FEATURE_VERSION_TOKEN>` — when CFN later deploys the
+        # feature stack, the `UiDeployerFunction.Environment.FEATURE_VERSION`
+        # ends up as that literal, the ui-deployer Lambda then tries to
+        # CopyObject from `s3://<seller-bucket>/features/<id>/v<FEATURE_VERSION_TOKEN>/ui-bundle.js`,
+        # which doesn't exist, surfacing as `NoSuchKey: The specified key
+        # does not exist` in the RegisterFeatureResource UPDATE_FAILED event.
+        # Why bake instead of using a CFN parameter? CloudFormation Console's
+        # update-stack wizard ignores `param_*` URL overrides — clicking
+        # "Update" in the IDP UI would otherwise stay on the old version
+        # because the existing parameter value would be retained.
+        template_source = (
+            packaged_template_path
+            if packaged_template_path is not None
+            else sample_feature_dir / manifest.template.path
+        )
+        template_text = Path(template_source).read_text(encoding="utf-8")
+        baked_text = template_text.replace("<FEATURE_VERSION_TOKEN>", version)
+        # If the template doesn't have the placeholder, log but proceed —
+        # third-party features bundled by future versions of the platform
+        # may use a different mechanism. The publish CLI's published
+        # version is the source of truth for whether the upgrade flow
+        # works for that feature.
+        if (
+            baked_text == template_text
+            and "<FEATURE_VERSION_TOKEN>" not in template_text
+        ):
+            # No placeholder present at all (older template format) — proceed.
+            pass
+        _put(
+            baked_text.encode("utf-8"),
+            f"features/{feature_id}/v{version}/template.yaml",
+            "application/x-yaml",
+        )
+
+        # ui-bundle.js
+        _upload(
+            bundle_path,
+            f"features/{feature_id}/v{version}/ui-bundle.js",
+            "application/javascript",
+        )
+
+        # manifest.json (public form — matches FeaturePublisher._public_manifest)
+        manifest_data = {
+            "featureId": feature_id,
+            "displayName": manifest.displayName,
+            "version": version,
+            "description": manifest.description,
+            "iconUrl": manifest.iconUrl,
+            "capabilities": list(manifest.capabilities),
+            "defaultParameters": dict(manifest.defaultParameters),
+            "marketplace": {
+                "productCode": manifest.marketplace.productCode,
+                "listingUrl": manifest.marketplace.listingUrl,
+            },
+        }
+        _put(
+            json.dumps(manifest_data, indent=2, sort_keys=True).encode("utf-8"),
+            f"features/{feature_id}/v{version}/manifest.json",
+            "application/json",
+        )
+
+        # latest.json (pinned to this version — main-stack Lambdas read this to
+        # decide which version to install and whether updates are available)
+        latest_data = {
+            "featureId": feature_id,
+            "version": version,
+            "displayName": manifest.displayName,
+            "publishedAt": datetime.now(timezone.utc)
+            .isoformat()
+            .replace("+00:00", "Z"),
+        }
+        _put(
+            json.dumps(latest_data, indent=2, sort_keys=True).encode("utf-8"),
+            f"features/{feature_id}/latest.json",
+            "application/json",
+        )
+
+        self.log_success(
+            f"Uploaded {len(uploaded)} sample-feature artifacts to "
+            f"s3://{self.bucket}/{artifact_root}/ ({feature_id} v{version})"
+        )
+        return sorted(uploaded)
+
     def _upload_template_to_s3(self, template_path, s3_key, description):
         """Helper method to upload template to S3 with error handling"""
         self.console.print(f"[cyan]Uploading {description} to S3: {s3_key}[/cyan]")
@@ -1404,6 +1806,9 @@ STDERR:
         webui_zipfile,
         unified_source_zipfile,
         components_needing_rebuild,
+        sample_features_hash="",
+        sample_features_list=None,
+        simulator_source_hash="",
     ):
         """Build and package main template with smart detection"""
         try:
@@ -1566,6 +1971,19 @@ STDERR:
                     "<MULTI_DOC_DISCOVERY_BUILD_HASH_TOKEN>": self.get_directory_checksum(
                         "src/lambda/multi_doc_discovery"
                     )[:16],
+                    # Feature Platform sample-feature artifacts (optional).
+                    # Empty when EnableFeaturePlatform=false — the corresponding
+                    # custom resource in the main template is condition-gated
+                    # on IsFeaturePlatformEnabled, so unused tokens are fine.
+                    "<SAMPLE_FEATURES_HASH_TOKEN>": sample_features_hash,
+                    "<SAMPLE_FEATURES_LIST_TOKEN>": json.dumps(
+                        sample_features_list or []
+                    ),
+                    # Marketplace simulator source hash — bumped on every
+                    # publish when simulator source code changes. Drives the
+                    # SimulatorRefreshResource custom resource in the nested
+                    # simulator stack to re-run docker compose on the EC2.
+                    "<MARKETPLACE_SIMULATOR_SOURCE_HASH_TOKEN>": simulator_source_hash,
                 }
 
                 # Debug: show layer ARNs being used
@@ -1853,7 +2271,34 @@ STDERR:
 
     def get_component_dependencies(self):
         """Map each component to its dependencies for smart rebuild detection"""
-        main_deps = ["./src", "template.yaml", "./config_library", LIB_DEPENDENCY]
+        # NOTE: subscription-features/feature-platform/sample-feature is listed here (not
+        # under a separate "sample-feature" component) because its only
+        # consumer is the main template — its SHA is stamped into the main
+        # template as <SAMPLE_FEATURES_HASH_TOKEN>, which the main stack's
+        # PublishSampleFeatureCustomResource reads. If we skip the main
+        # rebuild when only the sample-feature changed, the main template
+        # ends up with a stale hash and the custom resource won't re-run on
+        # deploy, so the seller bucket keeps the old template. Treating the
+        # sample-feature dir as a main dependency makes smart_rebuild_detection
+        # force a main-template rebuild whenever any sample-feature file
+        # changes.
+        main_deps = [
+            "./src",
+            "template.yaml",
+            "./config_library",
+            "./subscription-features/feature-platform/sample-feature",
+            # marketplace-simulator source is listed here (not only under the
+            # separate "subscription-features/marketplace-simulator" component) because the
+            # simulator's source hash is stamped into the main template as
+            # <MARKETPLACE_SIMULATOR_SOURCE_HASH_TOKEN>, which drives the
+            # nested simulator stack's SimulatorRefreshResource custom
+            # resource. Without this, editing simulator code would update the
+            # uploaded tarball in S3 but NOT bump the hash parameter in the
+            # main template — CFN would see identical params and skip the
+            # in-place refresh, leaving the running EC2 on stale code.
+            "./subscription-features/marketplace-simulator",
+            LIB_DEPENDENCY,
+        ]
 
         dependencies = {
             # Main template components
@@ -1876,6 +2321,24 @@ STDERR:
                 "nested/multi-doc-discovery/docker_build_lambda",
                 "nested/multi-doc-discovery/template.yaml",
                 "src/lambda/multi_doc_discovery",
+            ],
+            # Feature Platform (optional, condition-gated on EnableFeaturePlatform=true).
+            # The main-stack-extensions nested stack deploys the InstalledFeatures DDB table,
+            # 4 AppSync Lambdas, and the marketplace-simulator EC2 (when no user-supplied
+            # endpoint is provided). See subscription-features/feature-platform/.
+            "subscription-features/feature-platform/main-stack-extensions": [
+                "subscription-features/feature-platform/main-stack-extensions/lambdas",
+                "subscription-features/feature-platform/main-stack-extensions/template.yaml",
+                "subscription-features/feature-platform/main-stack-extensions/appsync",
+            ],
+            # Marketplace simulator EC2 nested stack. Condition-gated on
+            # EnableFeaturePlatform=true AND no user-supplied simulator endpoint (see
+            # template.yaml SimulatorStack resource). Template has no Lambda functions
+            # (EC2 + SG + EIP + IAM role only) so `sam build`/`sam package` is a no-op
+            # re: artifact upload — but it produces the packaged.yaml the main stack
+            # references. See subscription-features/marketplace-simulator/.
+            "subscription-features/marketplace-simulator": [
+                "subscription-features/marketplace-simulator/template.yaml",
             ],
             # Unified pattern (combines BDA + Pipeline)
             "patterns/unified": [
@@ -2918,11 +3381,16 @@ STDERR:
                 "\n[bold yellow]🚀 Building Nested Stacks and Patterns Concurrently[/bold yellow]"
             )
 
-            # Submit both category builds concurrently
+            # Submit three category builds concurrently (nested, patterns,
+            # subscription-features). The third category covers the optional
+            # Feature Platform: feature-platform/main-stack-extensions and
+            # marketplace-simulator are both condition-gated on
+            # EnableFeaturePlatform=true but built unconditionally so the
+            # packaged templates exist if the operator opts in.
             with concurrent.futures.ThreadPoolExecutor(
-                max_workers=2
+                max_workers=3
             ) as category_executor:
-                # Submit builds for both categories
+                # Submit builds for all categories
                 nested_future = category_executor.submit(
                     self.build_components_with_smart_detection,
                     components_needing_rebuild,
@@ -2935,8 +3403,14 @@ STDERR:
                     "patterns",
                     self.max_workers,
                 )
+                subscription_features_future = category_executor.submit(
+                    self.build_components_with_smart_detection,
+                    components_needing_rebuild,
+                    "subscription-features",
+                    self.max_workers,
+                )
 
-                # Wait for both categories to complete and collect results
+                # Wait for all categories to complete and collect results
                 nested_start = time.time()
                 nested_success = nested_future.result()
                 nested_time = time.time() - nested_start
@@ -2944,6 +3418,10 @@ STDERR:
                 patterns_start = time.time()
                 patterns_success = patterns_future.result()
                 patterns_time = time.time() - patterns_start
+
+                subscription_features_start = time.time()
+                subscription_features_success = subscription_features_future.result()
+                subscription_features_time = time.time() - subscription_features_start
 
             # Check if any category failed
             if not nested_success:
@@ -2968,15 +3446,34 @@ STDERR:
                     )
                 sys.exit(1)
 
+            if not subscription_features_success:
+                self.print_error_summary()
+                self.console.print(
+                    "[red]❌ Error: Failed to build one or more "
+                    "subscription-features stacks[/red]"
+                )
+                if not self.verbose:
+                    self.console.print(
+                        "[dim]Use --verbose flag for detailed error information[/dim]"
+                    )
+                sys.exit(1)
+
             total_build_time = time.time() - concurrent_build_start
-            timing_breakdown["Concurrent builds (nested + patterns)"] = total_build_time
+            timing_breakdown[
+                "Concurrent builds (nested + patterns + subscription-features)"
+            ] = total_build_time
             self.console.print(
                 f"\n[bold green]✅ Concurrent build completed in {total_build_time:.2f}s[/bold green]"
             )
             self.console.print(f"   [dim]• Nested: {nested_time:.2f}s[/dim]")
             self.console.print(f"   [dim]• Patterns: {patterns_time:.2f}s[/dim]")
             self.console.print(
-                f"   [dim]• Wall-clock time saved by concurrency: {max(nested_time, patterns_time) - total_build_time:.2f}s[/dim]"
+                f"   [dim]• Subscription-features: "
+                f"{subscription_features_time:.2f}s[/dim]"
+            )
+            self.console.print(
+                f"   [dim]• Wall-clock time saved by concurrency: "
+                f"{max(nested_time, patterns_time, subscription_features_time) - total_build_time:.2f}s[/dim]"
             )
 
             if components_needing_rebuild:
@@ -3021,12 +3518,42 @@ STDERR:
                 time.time() - step_start
             )
 
+            # Build + upload Feature Platform sample feature(s).
+            # Tokens are injected into the main template so the stack's
+            # PublishSampleFeature custom resource can copy artifacts from the
+            # artifact bucket into the auto-created SellerBucket at deploy time.
+            # Safe no-op when subscription-features/feature-platform/sample-feature is absent.
+            step_start = time.time()
+            sample_features_hash, sample_features_list = (
+                self.build_and_upload_sample_features()
+            )
+            timing_breakdown["Build & upload sample features"] = (
+                time.time() - step_start
+            )
+
+            # Build + upload the marketplace-simulator source tarball. The
+            # nested simulator stack passes SourceS3Key + SourceHash through
+            # to its UserData (first boot) and SimulatorRefreshResource custom
+            # resource (subsequent updates), so code changes propagate to the
+            # running EC2 container on every `idp-cli deploy`.
+            # Safe no-op when subscription-features/marketplace-simulator is absent.
+            step_start = time.time()
+            simulator_source_hash, _simulator_source_key = (
+                self.build_and_upload_simulator_source()
+            )
+            timing_breakdown["Build & upload simulator source"] = (
+                time.time() - step_start
+            )
+
             # Build main template
             step_start = time.time()
             self.build_main_template(
                 webui_zipfile,
                 unified_source_zipfile,
                 components_needing_rebuild,
+                sample_features_hash=sample_features_hash,
+                sample_features_list=sample_features_list,
+                simulator_source_hash=simulator_source_hash,
             )
             timing_breakdown["Build & upload main template"] = time.time() - step_start
 

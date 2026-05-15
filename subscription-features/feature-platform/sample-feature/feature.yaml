@@ -1,0 +1,17 @@
+featureId: docs-by-status
+displayName: DemoFeature - Docs By Status
+version: 1.0.2
+description: |
+  Pie chart showing how many documents are in each status (NEW, QUEUED,
+  RUNNING, COMPLETED, FAILED). Useful for operational visibility at a glance.
+template:
+  path: template.yaml
+  requiresMainStackName: true
+ui:
+  bundlePath: feature-ui/dist/ui-bundle.js
+  buildCommand: "cd feature-ui && npm ci && npm run build"
+defaultParameters:
+  LogLevel: INFO
+capabilities:
+  - reads-documents
+  - custom-api

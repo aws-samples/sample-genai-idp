@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+*.egg-info/
+build/
+dist/
+.ipynb_checkpoints/
+.ruff_cache/

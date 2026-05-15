@@ -1,0 +1,481 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  AWS Marketplace Simulator — EC2 deployment.
+  Runs the simulator in a Docker container on a t4g.nano with Caddy fronting
+  HTTPS (auto-TLS via *.nip.io). Single-instance; SQLite persists on EBS.
+  Intended for DEV use only — do not use in production.
+
+  The simulator source code is pulled from an S3 tarball (populated by
+  publish.py on every `idp-cli deploy`) so that stack updates automatically
+  refresh the simulator container in-place — no manual SSH or docker
+  compose needed. A Lambda-backed custom resource runs SSM SendCommand
+  against the running EC2 whenever the source hash changes.
+
+Parameters:
+
+  VpcId:
+    Type: String
+    Default: ''
+    Description: (Optional) VPC to place the simulator in. Leave blank to
+      auto-create a minimal single-subnet VPC (10.200.0.0/24) dedicated to
+      the simulator — removes the need to pre-stage VPC/subnet IDs in shared
+      accounts. Supply a VPC id (`vpc-…`) to use an existing VPC instead.
+
+  SubnetId:
+    Type: String
+    Default: ''
+    Description: (Optional) Public subnet (with an Internet Gateway route)
+      within `VpcId`. Ignored when `VpcId` is blank — the auto-created VPC
+      provides its own public subnet. Supply a subnet id (`subnet-…`) with
+      a route to an IGW when using an existing VPC.
+
+  AllowedCidr:
+    Type: String
+    Default: '0.0.0.0/0'
+    Description: CIDR allowed to reach the simulator's HTTPS port. Tighten this
+      to your VPC CIDR in real deployments. Default 0.0.0.0/0 is dev-only.
+
+  InstanceType:
+    Type: String
+    Default: t4g.nano
+    AllowedValues: [t4g.nano, t4g.micro, t4g.small]
+
+  AmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64
+    Description: Amazon Linux 2023 arm64 AMI.
+
+  # --------------------------------------------------------------------------
+  # Source-of-truth for the simulator Docker image: an S3 tarball of the
+  # `subscription-features/marketplace-simulator/` source directory, uploaded by
+  # publish.py / idp-cli deploy. UserData downloads + extracts this on first
+  # boot, and the SimulatorRefreshResource custom resource re-downloads
+  # + rebuilds on every subsequent stack update.
+  #
+  # Legacy: if SourceS3Bucket is blank, UserData falls back to a git clone
+  # of SimulatorGitUrl@SimulatorGitRef (behaviour prior to this feature).
+  # --------------------------------------------------------------------------
+
+  SourceS3Bucket:
+    Type: String
+    Default: ''
+    Description: (Optional) S3 bucket holding the simulator source tarball
+      uploaded by publish.py. Leave blank to fall back to git clone.
+
+  SourceS3Key:
+    Type: String
+    Default: ''
+    Description: (Optional) S3 key (e.g. genai-idp/x.y.z/marketplace-simulator-source.tar.gz)
+      holding the simulator source tarball. Leave blank to fall back to git clone.
+
+  SourceHash:
+    Type: String
+    Default: ''
+    Description: (Optional) Content hash of the simulator source. Bumped on
+      every `idp-cli deploy`. Changing this triggers an in-place refresh of
+      the running EC2's simulator container via SSM SendCommand — no SSH or
+      stack re-creation required. Empty disables the refresh mechanism.
+
+  SimulatorImageRepo:
+    Type: String
+    Default: ''
+    Description: (Optional) Docker image URI to pull (e.g. ECR). If blank, the
+      instance downloads source from S3 (or git clones) and builds locally.
+
+  SimulatorGitUrl:
+    Type: String
+    Default: https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws.git
+    Description: Git repo to clone (fallback only — used when both
+      SourceS3Bucket and SimulatorImageRepo are blank).
+
+  SimulatorGitRef:
+    Type: String
+    Default: main
+
+Conditions:
+  # When VpcId is blank, provision a minimal single-AZ public VPC dedicated to
+  # the simulator. Chosen CIDR 10.200.0.0/24 is unlikely to collide with any
+  # existing customer VPC. When VpcId is supplied, the user must also supply
+  # SubnetId and the conditional VPC resources are skipped entirely.
+  CreateMinimalVpc: !Equals [!Ref VpcId, '']
+
+  # Auto-refresh is wired up only when the parent stack has uploaded a source
+  # tarball to S3. Without it the refresh Lambda would have nothing to pull.
+  HasS3Source: !Not [!Equals [!Ref SourceS3Bucket, '']]
+
+Resources:
+
+  # =========================================================================
+  # Minimal VPC (created only when the admin did not pre-supply VpcId).
+  # 10.200.0.0/24 → one /24 subnet in the first AZ, one IGW, one public route.
+  # Single AZ is sufficient because the simulator is a single-instance dev
+  # helper with no HA requirement.
+  # =========================================================================
+
+  MinimalVpc:
+    Type: AWS::EC2::VPC
+    Condition: CreateMinimalVpc
+    Properties:
+      CidrBlock: 10.200.0.0/24
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-mp-sim-vpc'
+
+  MinimalInternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Condition: CreateMinimalVpc
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-mp-sim-igw'
+
+  MinimalIgwAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Condition: CreateMinimalVpc
+    Properties:
+      VpcId: !Ref MinimalVpc
+      InternetGatewayId: !Ref MinimalInternetGateway
+
+  MinimalPublicSubnet:
+    Type: AWS::EC2::Subnet
+    Condition: CreateMinimalVpc
+    Properties:
+      VpcId: !Ref MinimalVpc
+      CidrBlock: 10.200.0.0/28
+      AvailabilityZone: !Select [0, !GetAZs '']
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-mp-sim-subnet'
+
+  MinimalRouteTable:
+    Type: AWS::EC2::RouteTable
+    Condition: CreateMinimalVpc
+    Properties:
+      VpcId: !Ref MinimalVpc
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-mp-sim-rtb'
+
+  MinimalDefaultRoute:
+    Type: AWS::EC2::Route
+    Condition: CreateMinimalVpc
+    DependsOn: MinimalIgwAttachment
+    Properties:
+      RouteTableId: !Ref MinimalRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref MinimalInternetGateway
+
+  MinimalSubnetRouteAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Condition: CreateMinimalVpc
+    Properties:
+      SubnetId: !Ref MinimalPublicSubnet
+      RouteTableId: !Ref MinimalRouteTable
+
+  # =========================================================================
+  # Simulator SG + EC2 — use either the auto-created minimal VPC/subnet or
+  # the admin-supplied ones, determined by the CreateMinimalVpc condition.
+  # =========================================================================
+
+  SimulatorSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Simulator HTTPS ingress + SSM egress
+      VpcId: !If [CreateMinimalVpc, !Ref MinimalVpc, !Ref VpcId]
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: !Ref AllowedCidr
+          Description: Simulator HTTPS
+      SecurityGroupEgress:
+        - IpProtocol: '-1'
+          CidrIp: 0.0.0.0/0
+
+  SimulatorRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ec2.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore'
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/CloudWatchAgentServerPolicy'
+      Policies:
+        # Read access to the simulator source tarball in S3 so both the
+        # first-boot UserData and the in-place refresh script can
+        # `aws s3 cp` the tarball.
+        - !If
+          - HasS3Source
+          - PolicyName: SimulatorSourceRead
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - s3:GetObject
+                    - s3:GetObjectVersion
+                  Resource: !Sub 'arn:${AWS::Partition}:s3:::${SourceS3Bucket}/*'
+                - Effect: Allow
+                  Action: s3:ListBucket
+                  Resource: !Sub 'arn:${AWS::Partition}:s3:::${SourceS3Bucket}'
+          - !Ref AWS::NoValue
+
+  SimulatorInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles: [!Ref SimulatorRole]
+
+  SimulatorInstance:
+    Type: AWS::EC2::Instance
+    Metadata:
+      Comment: Simulator EC2 — Docker + Caddy + auto-TLS on *.nip.io.
+    Properties:
+      InstanceType: !Ref InstanceType
+      ImageId: !Ref AmiId
+      SubnetId: !If [CreateMinimalVpc, !Ref MinimalPublicSubnet, !Ref SubnetId]
+      SecurityGroupIds: [!Ref SimulatorSecurityGroup]
+      IamInstanceProfile: !Ref SimulatorInstanceProfile
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            VolumeSize: 20
+            VolumeType: gp3
+            DeleteOnTermination: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-mp-simulator'
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          # Log everything to /var/log/mp-simulator-userdata.log for easier debugging.
+          # NOTE: we deliberately do NOT use `set -e` here. Transient dnf cache
+          # errors on first boot used to abort the whole bootstrap and leave the
+          # instance listening on nothing (Caddy never started). Instead each
+          # step is retried inline and failures are logged but non-fatal.
+          set -uxo pipefail
+          exec > >(tee -a /var/log/mp-simulator-userdata.log) 2>&1
+
+          # ----- Helpers ---------------------------------------------------------
+          retry() {
+            # retry <n> <sleep-sec> -- <cmd...>
+            local n=$1 s=$2
+            shift 2
+            [ "$1" = "--" ] && shift
+            local i=1
+            while true; do
+              "$@" && return 0
+              if [ "$i" -ge "$n" ]; then
+                echo "retry: giving up on: $*" >&2
+                return 1
+              fi
+              echo "retry $i/$n failed, sleeping $s... : $*" >&2
+              sleep "$s"
+              i=$((i + 1))
+              # Clear dnf's partial-download cache between attempts — this is
+              # the specific failure mode we've seen.
+              dnf clean all >/dev/null 2>&1 || true
+            done
+          }
+
+          # ----- Install Docker + git -------------------------------------------
+          retry 5 15 -- dnf install -y docker git
+          systemctl enable --now docker
+
+          # ----- Install Docker Compose v2 plugin --------------------------------
+          mkdir -p /usr/libexec/docker/cli-plugins
+          retry 5 10 -- curl -fSL \
+            https://github.com/docker/compose/releases/latest/download/docker-compose-linux-aarch64 \
+            -o /usr/libexec/docker/cli-plugins/docker-compose
+          chmod +x /usr/libexec/docker/cli-plugins/docker-compose
+
+          # ----- Install Docker Buildx plugin -----------------------------------
+          # Required by `docker compose build` on AL2023. The bundled buildx is
+          # too old for compose >= 2.30 (compose demands buildx >= 0.17.0).
+          retry 5 10 -- curl -fSL \
+            https://github.com/docker/buildx/releases/download/v0.25.0/buildx-v0.25.0.linux-arm64 \
+            -o /usr/libexec/docker/cli-plugins/docker-buildx
+          chmod +x /usr/libexec/docker/cli-plugins/docker-buildx
+
+          # ----- Download the simulator source ---------------------------------
+          # Preferred: an S3 tarball uploaded by publish.py on every
+          # `idp-cli deploy`. This makes stack-update refreshes trivial — the
+          # same S3 key gets re-uploaded and the SimulatorRefreshResource
+          # custom resource re-runs `docker compose up -d --build` in place.
+          #
+          # Fallback (legacy): git clone the IDP repo. Still works; useful
+          # for standalone simulator deployments that aren't driven by
+          # publish.py. In that mode, the in-place refresh feature is off.
+          mkdir -p /srv
+          cd /srv
+          if [ -z "${SimulatorImageRepo}" ]; then
+            if [ -n "${SourceS3Bucket}" ] && [ -n "${SourceS3Key}" ]; then
+              echo "Downloading simulator source from s3://${SourceS3Bucket}/${SourceS3Key}"
+              mkdir -p idp/prototype
+              retry 5 10 -- aws s3 cp \
+                "s3://${SourceS3Bucket}/${SourceS3Key}" \
+                /tmp/mp-sim-source.tar.gz
+              rm -rf idp/subscription-features/marketplace-simulator
+              mkdir -p idp/subscription-features/marketplace-simulator
+              tar xzf /tmp/mp-sim-source.tar.gz \
+                -C idp/subscription-features/marketplace-simulator
+              rm -f /tmp/mp-sim-source.tar.gz
+            else
+              echo "No SourceS3Bucket configured; falling back to git clone."
+              retry 5 10 -- git clone --depth 1 \
+                --branch ${SimulatorGitRef} ${SimulatorGitUrl} idp
+            fi
+            cd idp/subscription-features/marketplace-simulator
+          fi
+
+          # ----- Build nip.io hostname from this EC2's public IPv4 --------------
+          TOKEN=$(curl -sX PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 60")
+          PUBIP=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/public-ipv4)
+          HOSTNAME="$(echo $PUBIP | tr . -).nip.io"
+
+          # ----- Emit docker-compose with simulator + Caddy sidecar -------------
+          cat > /srv/compose.yaml <<EOF
+          services:
+            mp-simulator:
+              build: /srv/idp/subscription-features/marketplace-simulator
+              image: idp/mp-simulator:local
+              restart: unless-stopped
+              volumes: ["mp-data:/data"]
+
+            caddy:
+              image: caddy:2
+              restart: unless-stopped
+              ports:
+                - "443:443"
+              depends_on: [mp-simulator]
+              volumes:
+                - caddy_data:/data
+                - caddy_config:/config
+              command: |
+                caddy reverse-proxy --from $HOSTNAME:443 --to mp-simulator:9999
+
+          volumes:
+            mp-data:
+            caddy_data:
+            caddy_config:
+          EOF
+
+          cd /srv
+          # Build + bring up the stack, retrying on transient Docker Hub pulls.
+          retry 3 15 -- docker compose -f compose.yaml up -d --build
+
+          # Print the endpoint for debugging
+          echo "Simulator endpoint: https://$HOSTNAME" > /var/log/mp-simulator-endpoint.txt
+
+  # Elastic IP so the endpoint hostname survives restarts (nip.io uses the IP).
+  SimulatorEip:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+      InstanceId: !Ref SimulatorInstance
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-mp-sim-eip'
+
+  # =========================================================================
+  # Auto-refresh — pushes new simulator source into the running EC2 on every
+  # stack update.  Implemented as a Lambda-backed custom resource whose
+  # SourceHash property is bumped on each `idp-cli deploy`, which forces
+  # CloudFormation to invoke the Lambda, which in turn uses SSM SendCommand
+  # to tell the EC2 to download the new tarball and `docker compose up -d
+  # --build` in place. No SSH, no stack re-creation, no human action.
+  # =========================================================================
+
+  SimulatorRefreshFunctionRole:
+    Type: AWS::IAM::Role
+    Condition: HasS3Source
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'
+      Policies:
+        - PolicyName: SsmSendCommandToSimulatorInstance
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ssm:SendCommand
+                Resource:
+                  # AWS-RunShellScript document
+                  - !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}::document/AWS-RunShellScript'
+                  # The specific EC2 instance we need to command
+                  - !Sub 'arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/${SimulatorInstance}'
+              - Effect: Allow
+                Action:
+                  - ssm:GetCommandInvocation
+                  - ssm:ListCommandInvocations
+                Resource: '*'
+
+  SimulatorRefreshFunction:
+    Type: AWS::Serverless::Function
+    Condition: HasS3Source
+    Properties:
+      CodeUri: ./refresh_lambda/
+      Handler: index.handler
+      Runtime: python3.12
+      Architectures: [arm64]
+      Timeout: 300
+      MemorySize: 256
+      Role: !GetAtt SimulatorRefreshFunctionRole.Arn
+
+  # The actual refresh trigger. Every stack update where SourceHash changes
+  # causes CloudFormation to invoke SimulatorRefreshFunction, which issues
+  # an SSM RunShellScript command to the EC2. Waits up to WaitSeconds for
+  # the command to succeed so stack updates fail fast on misconfiguration.
+  SimulatorRefreshResource:
+    Type: Custom::SimulatorRefresh
+    Condition: HasS3Source
+    DependsOn: [SimulatorInstance, SimulatorEip]
+    Properties:
+      ServiceToken: !GetAtt SimulatorRefreshFunction.Arn
+      InstanceId: !Ref SimulatorInstance
+      SourceS3Uri: !Sub 's3://${SourceS3Bucket}/${SourceS3Key}'
+      SourceHash: !Ref SourceHash
+      WaitSeconds: 240
+
+Outputs:
+  InstanceId:
+    Description: EC2 instance id running the simulator.
+    Value: !Ref SimulatorInstance
+
+  PublicIp:
+    Description: Elastic IPv4 of the simulator.
+    Value: !Ref SimulatorEip
+
+  SimulatorEndpoint:
+    Description: HTTPS endpoint to use as FeaturePlatformSimulatorEndpoint.
+    Value: !Sub
+      - 'https://${HostnameWithDashes}.nip.io'
+      - HostnameWithDashes: !Join
+          - '-'
+          - !Split ['.', !Ref SimulatorEip]
+
+  SecurityGroupId:
+    Description: SG id — add its CIDR to Lambda VPC egress rules if needed.
+    Value: !Ref SimulatorSecurityGroup
+
+  VpcId:
+    Description: VPC the simulator is deployed into (auto-created or supplied).
+    Value: !If [CreateMinimalVpc, !Ref MinimalVpc, !Ref VpcId]
+
+  SubnetId:
+    Description: Subnet the simulator is deployed into (auto-created or supplied).
+    Value: !If [CreateMinimalVpc, !Ref MinimalPublicSubnet, !Ref SubnetId]

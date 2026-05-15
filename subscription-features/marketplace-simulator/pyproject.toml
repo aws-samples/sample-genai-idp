@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mp-simulator"
+version = "0.1.0"
+description = "AWS Marketplace simulator for local/CI testing of subscription-based SaaS flows (SDK-compatible data plane)"
+requires-python = ">=3.10"
+dependencies = [
+  "boto3>=1.34.0",
+  "requests>=2.31",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8",
+  "ruff>=0.5",
+  "jupyter",
+]
+
+[project.scripts]
+mp-simulator = "mp_simulator.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["mp_simulator*", "client*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
