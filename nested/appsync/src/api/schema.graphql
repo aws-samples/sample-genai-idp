@@ -54,6 +54,18 @@ type QuotasUsed @aws_cognito_user_pools {
   bedrock_models: AWSJSON
 }
 
+# Result of the public-artifacts version check used to render the
+# "Update available" indicator in the Deployment Info nav section.
+# When `checkEnabled` is false the UI hides the indicator entirely
+# (this is the default for headless and private-network deployments
+# that don't configure a PublicArtifactsBucket).
+type LatestPublishedVersion @aws_cognito_user_pools {
+  checkEnabled: Boolean!
+  latestVersion: String
+  templateUrl: String
+  errorMessage: String
+}
+
 interface DynamoDbBase {
   PK: ID!
   SK: ID!
@@ -929,6 +941,11 @@ type Query @aws_cognito_user_pools @aws_iam {
     @aws_auth(cognito_groups: ["Admin", "Author", "Viewer"])
   calculateCapacity(input: String!): CapacityResult
     @aws_auth(cognito_groups: ["Admin", "Author", "Viewer"])
+
+  # Deployment / version metadata queries — open to all authenticated users
+  # (the version number itself isn't sensitive; the UI gates the
+  # "Update Stack" link to Admin only).
+  getLatestPublishedVersion: LatestPublishedVersion
 
   # Agent Chat & Code Explorer queries
   # Note: These need both Cognito and IAM auth (for return type resolution).

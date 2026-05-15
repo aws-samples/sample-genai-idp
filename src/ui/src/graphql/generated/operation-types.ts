@@ -437,6 +437,13 @@ export type LatencyDistribution = {
   totalLatency?: Maybe<Scalars['String']['output']>;
 };
 
+export type LatestPublishedVersion = {
+  checkEnabled: Scalars['Boolean']['output'];
+  errorMessage?: Maybe<Scalars['String']['output']>;
+  latestVersion?: Maybe<Scalars['String']['output']>;
+  templateUrl?: Maybe<Scalars['String']['output']>;
+};
+
 export type MessageContent = {
   text?: Maybe<Scalars['String']['output']>;
 };
@@ -900,6 +907,7 @@ export type Query = {
   getDocumentCount?: Maybe<DocumentCount>;
   getFileContents?: Maybe<FileContentsResponse>;
   getFinetuningJob?: Maybe<FinetuningJob>;
+  getLatestPublishedVersion?: Maybe<LatestPublishedVersion>;
   getMyProfile?: Maybe<User>;
   getPricing?: Maybe<PricingResponse>;
   getStepFunctionExecution?: Maybe<StepFunctionExecutionResponse>;
@@ -1794,6 +1802,11 @@ export type GetFinetuningJobQueryVariables = Exact<{
 
 
 export type GetFinetuningJobQuery = { getFinetuningJob?: { jobId: string, jobName: string, status: FinetuningJobStatus, baseModelId: string, customModelName?: string | null, customModelArn?: string | null, testSetId: string, testSetName?: string | null, createdAt: string, updatedAt?: string | null, completedAt?: string | null, errorMessage?: string | null, trainingMetrics?: string | null, hyperparameters?: string | null, trainingDataConfig?: string | null, validationDataConfig?: string | null, outputDataConfig?: string | null, deploymentId?: string | null, deploymentStatus?: string | null, deploymentEndpoint?: string | null, provisionedModelArn?: string | null } | null };
+
+export type GetLatestPublishedVersionQueryVariables = Exact<{ [key: string]: never; }>;
+
+
+export type GetLatestPublishedVersionQuery = { getLatestPublishedVersion?: { checkEnabled: boolean, latestVersion?: string | null, templateUrl?: string | null, errorMessage?: string | null } | null };
 
 export type GetMyProfileQueryVariables = Exact<{ [key: string]: never; }>;
 
