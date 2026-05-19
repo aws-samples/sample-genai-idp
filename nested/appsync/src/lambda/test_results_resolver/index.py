@@ -247,6 +247,44 @@ def _format_datetime(dt_str):
     return dt_str + "Z" if not dt_str.endswith("Z") else dt_str
 
 
+def _count_completed_documents(table, test_run_id, files):
+    """
+    Count how many documents completed evaluation successfully.
+
+    Args:
+        table: DynamoDB table resource
+        test_run_id: Test run identifier
+        files: List of file names in the test run
+
+    Returns:
+        int: Number of documents with EvaluationStatus='COMPLETED'
+    """
+    completed_count = 0
+
+    for file_name in files:
+        object_key = f"{test_run_id}/{file_name}"
+        try:
+            response = table.get_item(
+                Key={'PK': f"doc#{object_key}", 'SK': 'none'}
+            )
+
+            if 'Item' not in response:
+                logger.warning(f"Document {object_key} not found in tracking table")
+                continue
+
+            item = response['Item']
+            eval_status = item.get('EvaluationStatus', '').upper()
+
+            if eval_status == 'COMPLETED':
+                completed_count += 1
+
+        except Exception as e:
+            logger.warning(f"Failed to check status for {object_key}: {str(e)}")
+            continue
+
+    return completed_count
+
+
 def get_test_results(test_run_id):
     """Get detailed test results for a specific test run"""
     table = dynamodb.Table(os.environ["TRACKING_TABLE"])  # type: ignore[attr-defined]  # type: ignore[attr-defined]
@@ -296,6 +334,27 @@ def get_test_results(test_run_id):
             )
             # Force recalculation by falling through to aggregation logic
         else:
+            # For ABORTED status, count completed files on first call and persist to DB
+            completed_files_count = metadata.get("CompletedFiles", 0)
+            if current_status == "ABORTED" and completed_files_count == 0:
+                files = metadata.get("Files", [])
+                if files:
+                    completed_files_count = _count_completed_documents(table, test_run_id, files)
+                    logger.info(f"Counted {completed_files_count} completed documents for aborted test run {test_run_id}")
+
+                    # Persist the count to database
+                    try:
+                        table.update_item(
+                            Key={"PK": f"testrun#{test_run_id}", "SK": "metadata"},
+                            UpdateExpression="SET CompletedFiles = :completed_files",
+                            ExpressionAttributeValues={
+                                ":completed_files": completed_files_count
+                            }
+                        )
+                        logger.info(f"Updated CompletedFiles to {completed_files_count} for test run {test_run_id}")
+                    except Exception as e:
+                        logger.warning(f"Failed to update CompletedFiles for {test_run_id}: {str(e)}")
+
             # Use cached metrics but get dynamic fields from current metadata
             return {
                 "testRunId": test_run_id,
@@ -303,7 +362,7 @@ def get_test_results(test_run_id):
                 "testSetName": metadata.get("TestSetName"),
                 "status": current_status,
                 "filesCount": metadata.get("FilesCount", 0),
-                "completedFiles": metadata.get("CompletedFiles", 0),
+                "completedFiles": completed_files_count,
                 "failedFiles": metadata.get("FailedFiles", 0),
                 "overallAccuracy": cached_metrics.get("overallAccuracy"),
                 "weightedOverallScores": cached_metrics.get(
@@ -499,6 +558,20 @@ def get_test_run_status(test_run_id):
         files = item.get("Files", [])
         files_count = item.get("FilesCount", 0)
         logger.info(f"Test run {test_run_id}: Found {files_count} files")
+
+        # If test run was manually aborted, return ABORTED status without recalculation
+        stored_status = item.get("Status", "RUNNING")
+        if stored_status == "ABORTED":
+            logger.info(f"Test run {test_run_id} is ABORTED, returning stored status")
+            return {
+                "testRunId": test_run_id,
+                "status": "ABORTED",
+                "progress": 100,
+                "completedFiles": item.get("CompletedFiles", 0),
+                "filesCount": files_count,
+                "evaluatingFiles": 0,
+                "failedFiles": item.get("FailedFiles", 0),
+            }
 
         # Always check actual document status from tracking table
         completed_files = 0

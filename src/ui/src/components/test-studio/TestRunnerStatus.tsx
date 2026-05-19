@@ -26,7 +26,12 @@ interface TestRunnerStatusProps {
 
 const MAX_POLL_AGE_MS = 2 * 60 * 60 * 1000; // 2 hours
 
-const TestRunnerStatus = ({ testRunId = null, createdAt = null, onComplete = null, onAbort = null }: TestRunnerStatusProps): React.JSX.Element => {
+const TestRunnerStatus = ({
+  testRunId = null,
+  createdAt = null,
+  onComplete = null,
+  onAbort = null,
+}: TestRunnerStatusProps): React.JSX.Element => {
   const [testRunStatus, setTestRunStatus] = useState<TestRunStatusData | null>(null);
 
   useEffect(() => {

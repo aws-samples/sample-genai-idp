@@ -215,7 +215,7 @@ const TestResultsList = ({
       const activeRunsWithProgress = activeTestRuns.map((run) => ({
         testRunId: run.testRunId,
         testSetName: run.testSetName,
-        status: 'Running',
+        status: 'RUNNING',
         isActive: true,
         progress: Math.min(90, Math.floor(((Date.now() - run.startTime.getTime()) / 1000 / 60) * 10)), // Simulate progress
         filesCount: run.filesCount || 0,
