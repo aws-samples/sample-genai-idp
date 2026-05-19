@@ -5,8 +5,9 @@ import { Table, Button, SpaceBetween, ButtonDropdown, Pagination, Box, TextFilte
 import type { IconProps } from '@cloudscape-design/components';
 import { useCollection } from '@cloudscape-design/collection-hooks';
 import { generateClient } from 'aws-amplify/api';
-import { getTestRuns, deleteTests } from '../../graphql/generated';
+import { getTestRuns, deleteTests, abortTestRuns } from '../../graphql/generated';
 import DeleteTestModal from './DeleteTestModal';
+import AbortTestModal from './AbortTestModal';
 import DateRangeModal from '../common/DateRangeModal';
 import { paginationLabels } from '../common/labels';
 import TestRunnerStatus from './TestRunnerStatus';
@@ -124,9 +125,11 @@ const TestResultsList = ({
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [isDeleteModalVisible, setIsDeleteModalVisible] = useState(false);
+  const [isAbortModalVisible, setIsAbortModalVisible] = useState(false);
   const [isDateRangeModalVisible, setIsDateRangeModalVisible] = useState(false);
   const [customDateRange, setCustomDateRange] = useState<DateRange | null>(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
+  const [abortLoading, setAbortLoading] = useState(false);
   const [pageSize, setPageSize] = useState(10);
 
   // Load saved time period from localStorage on mount
@@ -173,9 +176,20 @@ const TestResultsList = ({
   const getContextCell = (item: TestRunItem) => <TextCell text={item.context || 'N/A'} />;
 
   const getStatusCell = (item: TestRunItem) => {
-    const terminalStatuses = ['COMPLETE', 'PARTIAL_COMPLETE', 'FAILED'];
+    const terminalStatuses = ['COMPLETE', 'PARTIAL_COMPLETE', 'FAILED', 'ABORTED'];
+
     if (!terminalStatuses.includes(item.status || '')) {
-      return <TestRunnerStatus testRunId={item.testRunId} createdAt={item.createdAt} onComplete={() => onTestComplete(item.testRunId)} />;
+      return (
+        <TestRunnerStatus
+          testRunId={item.testRunId}
+          createdAt={item.createdAt}
+          onComplete={() => onTestComplete(item.testRunId)}
+          onAbort={() => {
+            setSelectedItems([item]);
+            setIsAbortModalVisible(true);
+          }}
+        />
+      );
     }
     return item.status;
   };
@@ -303,6 +317,49 @@ const TestResultsList = ({
       return false;
     } finally {
       setDeleteLoading(false);
+    }
+  };
+
+  const confirmAbort = async () => {
+    try {
+      setAbortLoading(true);
+      const testRunIds = selectedItems.map((item) => item.testRunId);
+      console.log('Attempting to abort test runs:', testRunIds);
+
+      const result = (await client.graphql({
+        query: abortTestRuns,
+        variables: { testRunIds },
+      })) as GqlResult;
+      console.log('Abort result:', result);
+
+      const abortResult = result.data.abortTestRuns;
+      if (abortResult.success) {
+        const { abortedCount, failedCount } = abortResult;
+        let message = `Successfully aborted ${abortedCount} test run${abortedCount > 1 ? 's' : ''}`;
+        if (failedCount > 0) {
+          message += `, ${failedCount} failed`;
+        }
+        setSuccessMessage(message);
+        setSelectedItems([]);
+        setIsAbortModalVisible(false);
+        fetchTestRuns(); // Refresh the list
+
+        // Clear success message after 5 seconds
+        setTimeout(() => setSuccessMessage(null), 5000);
+      } else {
+        setSuccessMessage(`Abort failed: ${abortResult.message}`);
+        setTimeout(() => setSuccessMessage(null), 5000);
+      }
+
+      return abortResult;
+    } catch (err) {
+      console.error('Error aborting test runs:', err);
+      console.error('Error details:', (err as { errors?: unknown }).errors);
+      setSuccessMessage('Error aborting test runs');
+      setTimeout(() => setSuccessMessage(null), 5000);
+      return null;
+    } finally {
+      setAbortLoading(false);
     }
   };
 
@@ -469,6 +526,14 @@ const TestResultsList = ({
         selectedItems={selectedItems}
         itemType="test run"
         loading={deleteLoading}
+      />
+
+      <AbortTestModal
+        visible={isAbortModalVisible}
+        onDismiss={() => setIsAbortModalVisible(false)}
+        onConfirm={confirmAbort}
+        selectedItems={selectedItems}
+        loading={abortLoading}
       />
 
       <DateRangeModal

@@ -1525,6 +1525,13 @@ export type DeleteTestsMutationVariables = Exact<{
 
 export type DeleteTestsMutation = { deleteTests: boolean };
 
+export type AbortTestRunsMutationVariables = Exact<{
+  testRunIds: Array<Scalars['String']['input']> | Scalars['String']['input'];
+}>;
+
+
+export type AbortTestRunsMutation = { abortTestRuns: { success: boolean, message: string, abortedCount: number, failedCount: number, errors?: Array<string> | null } };
+
 export type DeleteUserMutationVariables = Exact<{
   userId: Scalars['ID']['input'];
 }>;

@@ -261,7 +261,7 @@ def get_test_results(test_run_id):
     current_status = metadata.get("Status")
 
     # Update status if not completed
-    if current_status not in ["COMPLETE", "PARTIAL_COMPLETE"]:
+    if current_status not in ["COMPLETE", "PARTIAL_COMPLETE", "ABORTED"]:
         status_result = get_test_run_status(test_run_id)
         if status_result:
             current_status = status_result["status"]
@@ -273,7 +273,7 @@ def get_test_results(test_run_id):
                 metadata = response["Item"]
 
     # Raise error if status is still not complete
-    if current_status not in ["COMPLETE", "PARTIAL_COMPLETE"]:
+    if current_status not in ["COMPLETE", "PARTIAL_COMPLETE", "ABORTED"]:
         raise ValueError(
             f"Test run {test_run_id} is not complete. Current status: {current_status}"
         )
@@ -325,9 +325,15 @@ def get_test_results(test_run_id):
                 "config": _get_test_run_config(test_run_id),
             }
     else:
-        raise ValueError(
-            f"Test run {test_run_id} processing completed, evaluating results"
-        )
+        # Provide more specific message for ABORTED status
+        if current_status == "ABORTED":
+            raise ValueError(
+                f"Test run {test_run_id} aborted, evaluating results for completed documents"
+            )
+        else:
+            raise ValueError(
+                f"Test run {test_run_id} processing completed, evaluating results"
+            )
 
 
 def _query_test_runs_from_gsi(table, start_iso, end_iso):
@@ -412,6 +418,7 @@ def _build_test_run_list(items):
 
     for item in items:
         display_status = item.get("Status")
+        # Show EVALUATING for completed tests without metrics, but keep ABORTED as-is
         if display_status in ["COMPLETE", "PARTIAL_COMPLETE"] and not item.get(
             "testRunResult"
         ):
@@ -544,9 +551,6 @@ def get_test_run_status(test_run_id):
                 elif doc_status == "FAILED":
                     processing_failed_files += 1
                     logger.info(f"File {file_key}: counted as failed")
-                elif doc_status == "ABORTED":
-                    processing_failed_files += 1
-                    logger.info(f"File {file_key}: counted as failed (aborted)")
                 elif doc_status == "QUEUED":
                     queued_files += 1
                     logger.info(f"File {file_key}: counted as queued")

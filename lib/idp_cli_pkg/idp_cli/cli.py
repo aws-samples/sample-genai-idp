@@ -5765,6 +5765,126 @@ def test_compare(
         sys.exit(1)
 
 
+@cli.command(name="abort-test-run")
+@click.option("--stack-name", required=True, help="CloudFormation stack name")
+@click.option(
+    "--test-run-ids",
+    required=True,
+    help="Comma-separated list of test run IDs to abort",
+)
+@click.option("--region", default=None, help="AWS region")
+@click.option(
+    "--force",
+    "-y",
+    is_flag=True,
+    help="Skip confirmation prompt",
+)
+def abort_test_run(
+    stack_name: str,
+    test_run_ids: str,
+    region: Optional[str],
+    force: bool,
+):
+    """Abort one or more Test Studio runs.
+
+    Stops all running document workflows and updates test run status to ABORTED.
+    Only test runs with status QUEUED or RUNNING can be aborted. Completed
+    documents within a test run are preserved.
+
+    \b
+    Examples:
+      # Abort a single test run
+      idp-cli abort-test-run --stack-name my-stack \\
+        --test-run-ids "fake-w2-20260409-123456"
+
+      # Abort multiple test runs
+      idp-cli abort-test-run --stack-name my-stack \\
+        --test-run-ids "run1,run2,run3"
+
+      # Skip confirmation
+      idp-cli abort-test-run --stack-name my-stack \\
+        --test-run-ids "run1" --force
+    """
+    if not region:
+        region = os.environ.get("AWS_REGION", "us-east-1")
+
+    try:
+        # Parse test run IDs
+        test_run_id_list = [tid.strip() for tid in test_run_ids.split(",")]
+
+        if not test_run_id_list:
+            console.print("[red]✗ No test run IDs provided[/red]")
+            sys.exit(1)
+
+        # Show warning and confirm
+        if not force:
+            console.print()
+            console.print("[bold yellow]⚠️  WARNING: Abort Test Runs[/bold yellow]")
+            console.print("━" * 60)
+            console.print(f"Stack: [cyan]{stack_name}[/cyan]")
+            console.print(f"Region: {region}")
+            console.print(f"Test Runs: {len(test_run_id_list)}")
+            for test_run_id in test_run_id_list:
+                console.print(f"  • {test_run_id}")
+            console.print()
+            console.print(
+                "[yellow]This will stop all running document workflows and mark test runs as ABORTED.[/yellow]"
+            )
+            console.print("[yellow]Completed documents will be preserved.[/yellow]")
+            console.print()
+
+            if not click.confirm("Do you want to proceed?"):
+                console.print("[yellow]Aborted by user[/yellow]")
+                sys.exit(0)
+
+        # Use SDK to abort test runs
+        from idp_sdk import IDPClient
+
+        client = IDPClient(stack_name=stack_name, region=region)
+
+        console.print(f"[blue]Aborting {len(test_run_id_list)} test run(s)...[/blue]\n")
+
+        result = client.testing.abort_test_run(test_run_ids=test_run_id_list)
+
+        # Display results
+        if result.get("success"):
+            aborted_count = result.get("abortedCount", 0)
+            failed_count = result.get("failedCount", 0)
+
+            console.print(f"[green]✓ {result.get('message')}[/green]")
+
+            if aborted_count > 0:
+                console.print(
+                    f"[green]  Successfully aborted: {aborted_count} test run(s)[/green]"
+                )
+
+            if failed_count > 0:
+                console.print(
+                    f"[yellow]  Failed to abort: {failed_count} test run(s)[/yellow]"
+                )
+
+                errors = result.get("errors", [])
+                if errors:
+                    console.print("\n[bold red]Errors:[/bold red]")
+                    for error in errors:
+                        console.print(f"  • {error}")
+        else:
+            console.print(f"[red]✗ Failed: {result.get('message')}[/red]")
+
+            errors = result.get("errors", [])
+            if errors:
+                console.print("\n[bold red]Errors:[/bold red]")
+                for error in errors:
+                    console.print(f"  • {error}")
+
+            sys.exit(1)
+
+    except Exception as e:
+        logger.error(f"Error aborting test runs: {e}", exc_info=True)
+        console.print(f"[red]✗ Error: {e}[/red]")
+        sys.exit(1)
+
+
 def main():
     """Main entry point for the CLI"""
     # Pre-flight check: verify core dependencies are importable
