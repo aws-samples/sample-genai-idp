@@ -3,9 +3,13 @@
 """
 Unit tests for abort_test_runs resolver Lambda function
 """
+
 from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
+
 import pytest
+
+
 @pytest.fixture
 def mock_env(monkeypatch):
     """Mock environment variables"""
@@ -15,6 +19,8 @@ def mock_env(monkeypatch):
         "TEST_RESULT_CACHE_UPDATE_QUEUE_URL",
         "https://sqs.us-east-1.amazonaws.com/123456789012/test-queue",
     )
+
+
 @pytest.fixture
 def mock_dynamodb():
     """Mock DynamoDB resource"""
@@ -22,6 +28,8 @@ def mock_dynamodb():
         mock_table = MagicMock()
         mock.return_value.Table.return_value = mock_table
         yield mock_table
+
+
 @pytest.fixture
 def mock_lambda_client():
     """Mock Lambda client"""
@@ -29,6 +37,8 @@ def mock_lambda_client():
         mock_client = MagicMock()
         mock.return_value = mock_client
         yield mock_client
+
+
 @pytest.mark.unit
 def test_abort_single_test_run_success(mock_env, mock_dynamodb, mock_lambda_client):
     """Test successful abort of a single test run"""
@@ -36,6 +46,7 @@ def test_abort_single_test_run_success(mock_env, mock_dynamodb, mock_lambda_clie
     import importlib.util
     import os
     import sys
+
     spec = importlib.util.spec_from_file_location(
         "index",
         os.path.join(
@@ -61,12 +72,15 @@ def test_abort_single_test_run_success(mock_env, mock_dynamodb, mock_lambda_clie
     assert result["abortedCount"] == 1
     assert result["failedCount"] == 0
     assert mock_dynamodb.update_item.called
+
+
 @pytest.mark.unit
 def test_abort_test_run_not_found(mock_env, mock_dynamodb):
     """Test abort when test run does not exist"""
     import importlib.util
     import os
     import sys
+
     spec = importlib.util.spec_from_file_location(
         "index",
         os.path.join(
@@ -84,12 +98,15 @@ def test_abort_test_run_not_found(mock_env, mock_dynamodb):
     assert result["failedCount"] == 1
     assert result["abortedCount"] == 0
     assert "Test run not found" in result["errors"][0]
+
+
 @pytest.mark.unit
 def test_abort_cannot_abort_completed(mock_env, mock_dynamodb):
     """Test that completed test runs cannot be aborted"""
     import importlib.util
     import os
     import sys
+
     spec = importlib.util.spec_from_file_location(
         "index",
         os.path.join(
@@ -109,12 +126,15 @@ def test_abort_cannot_abort_completed(mock_env, mock_dynamodb):
     assert result["failedCount"] == 1
     assert result["abortedCount"] == 0
     assert "Cannot abort test run with status COMPLETE" in result["errors"][0]
+
+
 @pytest.mark.unit
 def test_abort_queued_test_run(mock_env, mock_dynamodb, mock_lambda_client):
     """Test that QUEUED test runs can be aborted"""
     import importlib.util
     import os
     import sys
+
     spec = importlib.util.spec_from_file_location(
         "index",
         os.path.join(
@@ -133,12 +153,15 @@ def test_abort_queued_test_run(mock_env, mock_dynamodb, mock_lambda_client):
         result = index.lambda_handler(event, None)
     assert result["success"] is True
     assert result["abortedCount"] == 1
+
+
 @pytest.mark.unit
 def test_wait_for_documents_all_complete():
     """Test waiting for documents when all reach terminal state quickly"""
     import importlib.util
     import os
     import sys
+
     spec = importlib.util.spec_from_file_location(
         "index",
         os.path.join(
@@ -160,12 +183,15 @@ def test_wait_for_documents_all_complete():
             mock_table, test_run_id, object_keys, max_wait_time=10
         )
     assert mock_table.get_item.call_count >= 2
+
+
 @pytest.mark.unit
 def test_wait_for_documents_mixed_statuses():
     """Test waiting for documents with mixed terminal states"""
     import importlib.util
     import os
     import sys
+
     spec = importlib.util.spec_from_file_location(
         "index",
         os.path.join(
@@ -177,12 +203,14 @@ def test_wait_for_documents_mixed_statuses():
     sys.modules["index"] = index
     spec.loader.exec_module(index)
     mock_table = MagicMock()
+
     def mock_get_item(Key):
         object_key = Key["PK"].replace("doc#", "")
         if "file1" in object_key:
             return {"Item": {"Status": "COMPLETED", "EvaluationStatus": "COMPLETED"}}
         else:
             return {"Item": {"Status": "ABORTED", "EvaluationStatus": None}}
+
     mock_table.get_item.side_effect = mock_get_item
     test_run_id = "test-run-123"
     object_keys = ["test-run-123/file1.pdf", "test-run-123/file2.pdf"]
@@ -191,6 +219,8 @@ def test_wait_for_documents_mixed_statuses():
             mock_table, test_run_id, object_keys, max_wait_time=10
         )
     assert mock_table.get_item.call_count >= 2
+
+
 @pytest.mark.unit
 def test_abort_updates_completed_at_timestamp(
     mock_env, mock_dynamodb, mock_lambda_client
@@ -199,6 +229,7 @@ def test_abort_updates_completed_at_timestamp(
     import importlib.util
     import os
     import sys
+
     spec = importlib.util.spec_from_file_location(
         "index",
         os.path.join(
@@ -225,6 +256,8 @@ def test_abort_updates_completed_at_timestamp(
     timestamp = datetime.fromisoformat(completed_at.replace("Z", "+00:00"))
     now = datetime.now(timezone.utc)
     assert (now - timestamp).total_seconds() < 60
+
+
 @pytest.mark.unit
 def test_abort_multiple_test_runs_mixed_results(
     mock_env, mock_dynamodb, mock_lambda_client
@@ -233,6 +266,7 @@ def test_abort_multiple_test_runs_mixed_results(
     import importlib.util
     import os
     import sys
+
     spec = importlib.util.spec_from_file_location(
         "index",
         os.path.join(
@@ -243,6 +277,7 @@ def test_abort_multiple_test_runs_mixed_results(
     index = importlib.util.module_from_spec(spec)
     sys.modules["index"] = index
     spec.loader.exec_module(index)
+
     def mock_get_item(Key):
         test_run_id = Key["PK"].replace("testrun#", "")
         if test_run_id == "test-run-1":
@@ -254,6 +289,7 @@ def test_abort_multiple_test_runs_mixed_results(
                 "Item": {"Status": "COMPLETE", "Files": ["file2.pdf"], "FilesCount": 1}
             }
         return {}
+
     mock_dynamodb.get_item.side_effect = mock_get_item
     event = {"arguments": {"testRunIds": ["test-run-1", "test-run-2", "test-run-3"]}}
     with patch.object(index, "_wait_for_documents_terminal_state"):
