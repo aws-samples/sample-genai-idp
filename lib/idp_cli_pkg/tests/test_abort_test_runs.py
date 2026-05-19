@@ -28,7 +28,7 @@ class TestAbortTestRuns:
     @pytest.fixture
     def mock_lambda_client(self):
         """Mock boto3 Lambda client"""
-        with patch("idp_sdk._core.test_studio_processor.boto3.client") as mock:
+        with patch("idp_sdk._core.test_studio_processor.boto3.client"):
             mock_client = Mock()
             yield mock_client
 
@@ -138,7 +138,8 @@ class TestAbortTestRuns:
             processor = TestStudioProcessor("test-stack", "us-east-1")
 
             with pytest.raises(
-                IDPResourceNotFoundError, match="AbortTestRunsResolverFunction not found"
+                IDPResourceNotFoundError,
+                match="AbortTestRunsResolverFunction not found",
             ):
                 processor.abort_test_runs(["test-run-123"])
 
@@ -213,7 +214,6 @@ class TestAbortTestRunsCLI:
     def test_cli_abort_success(self, mock_idp_client, mock_console):
         """Test CLI abort command with successful result"""
         from click.testing import CliRunner
-
         from idp_cli.cli import abort_test_run
 
         runner = CliRunner()
@@ -234,7 +234,6 @@ class TestAbortTestRunsCLI:
     def test_cli_abort_multiple_ids(self, mock_idp_client, mock_console):
         """Test CLI abort with multiple test run IDs"""
         from click.testing import CliRunner
-
         from idp_cli.cli import abort_test_run
 
         runner = CliRunner()
@@ -256,7 +255,6 @@ class TestAbortTestRunsCLI:
     def test_cli_abort_with_failures(self, mock_idp_client, mock_console):
         """Test CLI abort with partial failures"""
         from click.testing import CliRunner
-
         from idp_cli.cli import abort_test_run
 
         mock_idp_client.return_value.testing.abort_test_run.return_value = {
@@ -284,7 +282,6 @@ class TestAbortTestRunsCLI:
     def test_cli_abort_complete_failure(self, mock_idp_client, mock_console):
         """Test CLI abort with complete failure"""
         from click.testing import CliRunner
-
         from idp_cli.cli import abort_test_run
 
         mock_idp_client.return_value.testing.abort_test_run.return_value = {
@@ -312,7 +309,6 @@ class TestAbortTestRunsCLI:
     def test_cli_abort_confirmation_declined(self, mock_console):
         """Test CLI abort when user declines confirmation"""
         from click.testing import CliRunner
-
         from idp_cli.cli import abort_test_run
 
         runner = CliRunner()
@@ -332,7 +328,6 @@ class TestAbortTestRunsCLI:
     def test_cli_abort_empty_test_run_ids(self, mock_console):
         """Test CLI abort with empty test run IDs"""
         from click.testing import CliRunner
-
         from idp_cli.cli import abort_test_run
 
         runner = CliRunner()

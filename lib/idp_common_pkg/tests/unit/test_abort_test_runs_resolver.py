@@ -5,9 +5,8 @@
 Unit tests for abort_test_runs resolver Lambda function
 """
 
-import json
 from datetime import datetime, timezone
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -16,9 +15,7 @@ import pytest
 def mock_env(monkeypatch):
     """Mock environment variables"""
     monkeypatch.setenv("TRACKING_TABLE_NAME", "test-tracking-table")
-    monkeypatch.setenv(
-        "ABORT_WORKFLOW_FUNCTION_NAME", "test-abort-workflow-function"
-    )
+    monkeypatch.setenv("ABORT_WORKFLOW_FUNCTION_NAME", "test-abort-workflow-function")
     monkeypatch.setenv(
         "TEST_RESULT_CACHE_UPDATE_QUEUE_URL",
         "https://sqs.us-east-1.amazonaws.com/123456789012/test-queue",
@@ -47,8 +44,8 @@ def mock_lambda_client():
 def test_abort_single_test_run_success(mock_env, mock_dynamodb, mock_lambda_client):
     """Test successful abort of a single test run"""
     # Import after environment setup
-    import sys
     import importlib.util
+    import sys
 
     spec = importlib.util.spec_from_file_location(
         "index",
@@ -82,8 +79,8 @@ def test_abort_single_test_run_success(mock_env, mock_dynamodb, mock_lambda_clie
 @pytest.mark.unit
 def test_abort_test_run_not_found(mock_env, mock_dynamodb):
     """Test abort when test run does not exist"""
-    import sys
     import importlib.util
+    import sys
 
     spec = importlib.util.spec_from_file_location(
         "index",
@@ -108,8 +105,8 @@ def test_abort_test_run_not_found(mock_env, mock_dynamodb):
 @pytest.mark.unit
 def test_abort_cannot_abort_completed(mock_env, mock_dynamodb):
     """Test that completed test runs cannot be aborted"""
-    import sys
     import importlib.util
+    import sys
 
     spec = importlib.util.spec_from_file_location(
         "index",
@@ -136,8 +133,8 @@ def test_abort_cannot_abort_completed(mock_env, mock_dynamodb):
 @pytest.mark.unit
 def test_abort_queued_test_run(mock_env, mock_dynamodb, mock_lambda_client):
     """Test that QUEUED test runs can be aborted"""
-    import sys
     import importlib.util
+    import sys
 
     spec = importlib.util.spec_from_file_location(
         "index",
@@ -163,8 +160,8 @@ def test_abort_queued_test_run(mock_env, mock_dynamodb, mock_lambda_client):
 @pytest.mark.unit
 def test_wait_for_documents_all_complete():
     """Test waiting for documents when all reach terminal state quickly"""
-    import sys
     import importlib.util
+    import sys
 
     spec = importlib.util.spec_from_file_location(
         "index",
@@ -193,8 +190,8 @@ def test_wait_for_documents_all_complete():
 @pytest.mark.unit
 def test_wait_for_documents_mixed_statuses():
     """Test waiting for documents with mixed terminal states"""
-    import sys
     import importlib.util
+    import sys
 
     spec = importlib.util.spec_from_file_location(
         "index",
@@ -231,8 +228,8 @@ def test_abort_updates_completed_at_timestamp(
     mock_env, mock_dynamodb, mock_lambda_client
 ):
     """Test that abort sets CompletedAt timestamp"""
-    import sys
     import importlib.util
+    import sys
 
     spec = importlib.util.spec_from_file_location(
         "index",
@@ -270,8 +267,8 @@ def test_abort_multiple_test_runs_mixed_results(
     mock_env, mock_dynamodb, mock_lambda_client
 ):
     """Test aborting multiple test runs with mixed results"""
-    import sys
     import importlib.util
+    import sys
 
     spec = importlib.util.spec_from_file_location(
         "index",
@@ -295,9 +292,7 @@ def test_abort_multiple_test_runs_mixed_results(
 
     mock_dynamodb.get_item.side_effect = mock_get_item
 
-    event = {
-        "arguments": {"testRunIds": ["test-run-1", "test-run-2", "test-run-3"]}
-    }
+    event = {"arguments": {"testRunIds": ["test-run-1", "test-run-2", "test-run-3"]}}
 
     with patch.object(index, "_wait_for_documents_terminal_state"):
         result = index.lambda_handler(event, None)

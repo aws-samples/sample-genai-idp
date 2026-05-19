@@ -13,8 +13,8 @@ import pytest
 @pytest.mark.unit
 def test_count_completed_documents_all_completed():
     """Test counting when all documents completed evaluation"""
-    import sys
     import importlib.util
+    import sys
 
     spec = importlib.util.spec_from_file_location(
         "index",
@@ -41,8 +41,8 @@ def test_count_completed_documents_all_completed():
 @pytest.mark.unit
 def test_count_completed_documents_partial():
     """Test counting when only some documents completed evaluation"""
-    import sys
     import importlib.util
+    import sys
 
     spec = importlib.util.spec_from_file_location(
         "index",
@@ -77,8 +77,8 @@ def test_count_completed_documents_partial():
 @pytest.mark.unit
 def test_count_completed_documents_none_completed():
     """Test counting when no documents completed evaluation"""
-    import sys
     import importlib.util
+    import sys
 
     spec = importlib.util.spec_from_file_location(
         "index",
@@ -104,8 +104,8 @@ def test_count_completed_documents_none_completed():
 @pytest.mark.unit
 def test_count_completed_documents_missing_evaluation_status():
     """Test counting when EvaluationStatus field is missing"""
-    import sys
     import importlib.util
+    import sys
 
     spec = importlib.util.spec_from_file_location(
         "index",
@@ -134,8 +134,8 @@ def test_count_completed_documents_missing_evaluation_status():
 @pytest.mark.unit
 def test_count_completed_documents_document_not_found():
     """Test counting when document not found in tracking table"""
-    import sys
     import importlib.util
+    import sys
 
     spec = importlib.util.spec_from_file_location(
         "index",
@@ -159,8 +159,8 @@ def test_count_completed_documents_document_not_found():
 @pytest.mark.unit
 def test_count_completed_documents_handles_exceptions():
     """Test counting gracefully handles exceptions"""
-    import sys
     import importlib.util
+    import sys
 
     spec = importlib.util.spec_from_file_location(
         "index",
@@ -195,8 +195,8 @@ def test_count_completed_documents_handles_exceptions():
 @pytest.mark.unit
 def test_count_completed_documents_uses_correct_sk():
     """Test that counting uses SK='none' not SK='status'"""
-    import sys
     import importlib.util
+    import sys
 
     spec = importlib.util.spec_from_file_location(
         "index",
@@ -226,8 +226,8 @@ def test_count_completed_documents_uses_correct_sk():
 @pytest.mark.unit
 def test_count_completed_documents_case_insensitive():
     """Test that evaluation status comparison is case-insensitive"""
-    import sys
     import importlib.util
+    import sys
 
     spec = importlib.util.spec_from_file_location(
         "index",

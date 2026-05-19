@@ -4,6 +4,18 @@
 import type { GeneratedQuery, GeneratedMutation, GeneratedSubscription } from '@aws-amplify/api-graphql';
 import type { AbortTestRunsMutation, AbortTestRunsMutationVariables, AbortWorkflowMutation, AbortWorkflowMutationVariables, AddDocumentsToTestSetFromUploadMutation, AddDocumentsToTestSetFromUploadMutationVariables, AddDocumentsToTestSetMutation, AddDocumentsToTestSetMutationVariables, AddTestSetFromUploadMutation, AddTestSetFromUploadMutationVariables, AddTestSetMutation, AddTestSetMutationVariables, AutoDetectSectionsMutation, AutoDetectSectionsMutationVariables, CalculateCapacityQuery, CalculateCapacityQueryVariables, ClaimReviewMutation, ClaimReviewMutationVariables, CompareTestRunsQuery, CompareTestRunsQueryVariables, CompleteSectionReviewMutation, CompleteSectionReviewMutationVariables, CopyToBaselineMutation, CopyToBaselineMutationVariables, CreateFinetuningJobMutation, CreateFinetuningJobMutationVariables, CreateUserMutation, CreateUserMutationVariables, DeleteAgentJobMutation, DeleteAgentJobMutationVariables, DeleteChatSessionMutation, DeleteChatSessionMutationVariables, DeleteConfigVersionMutation, DeleteConfigVersionMutationVariables, DeleteDiscoveryJobMutation, DeleteDiscoveryJobMutationVariables, DeleteDocumentMutation, DeleteDocumentMutationVariables, DeleteFinetuningJobMutation, DeleteFinetuningJobMutationVariables, DeleteTestSetsMutation, DeleteTestSetsMutationVariables, DeleteTestsMutation, DeleteTestsMutationVariables, DeleteUserMutation, DeleteUserMutationVariables, GetAgentJobStatusQuery, GetAgentJobStatusQueryVariables, GetChatMessagesQuery, GetChatMessagesQueryVariables, GetCircuitBreakerStatusQuery, GetCircuitBreakerStatusQueryVariables, GetConfigVersionQuery, GetConfigVersionQueryVariables, GetConfigVersionsQuery, GetConfigVersionsQueryVariables, GetConfigurationLibraryFileQuery, GetConfigurationLibraryFileQueryVariables, GetDocumentCountQuery, GetDocumentCountQueryVariables, GetDocumentQuery, GetDocumentQueryVariables, GetFileContentsQuery, GetFileContentsQueryVariables, GetFinetuningJobQuery, GetFinetuningJobQueryVariables, GetLatestPublishedVersionQuery, GetLatestPublishedVersionQueryVariables, GetMyProfileQuery, GetMyProfileQueryVariables, GetPricingQuery, GetPricingQueryVariables, GetStepFunctionExecutionQuery, GetStepFunctionExecutionQueryVariables, GetTestRunQuery, GetTestRunQueryVariables, GetTestRunStatusQuery, GetTestRunStatusQueryVariables, GetTestRunsQuery, GetTestRunsQueryVariables, GetTestSetsQuery, GetTestSetsQueryVariables, ListAgentJobsQuery, ListAgentJobsQueryVariables, ListAvailableAgentsQuery, ListAvailableAgentsQueryVariables, ListBucketFilesQuery, ListBucketFilesQueryVariables, ListChatSessionsQuery, ListChatSessionsQueryVariables, ListConfigurationLibraryQuery, ListConfigurationLibraryQueryVariables, ListDiscoveryJobsQuery, ListDiscoveryJobsQueryVariables, ListDocumentsByDateRangeQuery, ListDocumentsByDateRangeQueryVariables, ListDocumentsDateHourQuery, ListDocumentsDateHourQueryVariables, ListDocumentsDateShardQuery, ListDocumentsDateShardQueryVariables, ListDocumentsQuery, ListDocumentsQueryVariables, ListFinetuningJobsQuery, ListFinetuningJobsQueryVariables, ListUsersQuery, ListUsersQueryVariables, OnAgentChatMessageUpdateSubscription, OnAgentChatMessageUpdateSubscriptionVariables, OnAgentJobCompleteSubscription, OnAgentJobCompleteSubscriptionVariables, OnChatDocumentMessageUpdateSubscription, OnChatDocumentMessageUpdateSubscriptionVariables, OnCircuitBreakerStatusChangeSubscription, OnCircuitBreakerStatusChangeSubscriptionVariables, OnCreateDocumentSubscription, OnCreateDocumentSubscriptionVariables, OnDiscoveryJobStatusChangeSubscription, OnDiscoveryJobStatusChangeSubscriptionVariables, OnUpdateDocumentSubscription, OnUpdateDocumentSubscriptionVariables, PauseCircuitBreakerMutation, PauseCircuitBreakerMutationVariables, ProbeCircuitBreakerMutation, ProbeCircuitBreakerMutationVariables, ProcessChangesMutation, ProcessChangesMutationVariables, QueryKnowledgeBaseQuery, QueryKnowledgeBaseQueryVariables, ReleaseReviewMutation, ReleaseReviewMutationVariables, ReprocessDocumentMutation, ReprocessDocumentMutationVariables, RestoreDefaultPricingMutation, RestoreDefaultPricingMutationVariables, ResumeCircuitBreakerMutation, ResumeCircuitBreakerMutationVariables, SendAgentChatMessageMutation, SendAgentChatMessageMutationVariables, SendChatDocumentMessageMutation, SendChatDocumentMessageMutationVariables, SetActiveVersionMutation, SetActiveVersionMutationVariables, SkipAllSectionsReviewMutation, SkipAllSectionsReviewMutationVariables, StartMultiDocDiscoveryMutation, StartMultiDocDiscoveryMutationVariables, StartTestRunMutation, StartTestRunMutationVariables, SubmitAgentQueryQuery, SubmitAgentQueryQueryVariables, SyncBdaIdpMutation, SyncBdaIdpMutationVariables, UpdateChatSessionTitleMutation, UpdateChatSessionTitleMutationVariables, UpdateConfigurationMutation, UpdateConfigurationMutationVariables, UpdatePricingMutation, UpdatePricingMutationVariables, UpdateUserMutation, UpdateUserMutationVariables, UploadDiscoveryDocumentMutation, UploadDiscoveryDocumentMutationVariables, UploadDocumentMutation, UploadDocumentMutationVariables, UploadMultiDocDiscoveryZipMutation, UploadMultiDocDiscoveryZipMutationVariables, ValidateTestFileNameQuery, ValidateTestFileNameQueryVariables } from './operation-types';
 
+export const abortTestRuns = /* GraphQL */ `
+  mutation AbortTestRuns($testRunIds: [String!]!) {
+    abortTestRuns(testRunIds: $testRunIds) {
+      success
+      message
+      abortedCount
+      failedCount
+      errors
+    }
+  }
+` as GeneratedMutation<AbortTestRunsMutationVariables, AbortTestRunsMutation>;
+
 export const abortWorkflow = /* GraphQL */ `
   mutation AbortWorkflow($objectKeys: [String!]!) {
     abortWorkflow(objectKeys: $objectKeys) {
@@ -249,18 +261,6 @@ export const deleteTests = /* GraphQL */ `
     deleteTests(testRunIds: $testRunIds)
   }
 ` as GeneratedMutation<DeleteTestsMutationVariables, DeleteTestsMutation>;
-
-export const abortTestRuns = /* GraphQL */ `
-  mutation AbortTestRuns($testRunIds: [String!]!) {
-    abortTestRuns(testRunIds: $testRunIds) {
-      success
-      message
-      abortedCount
-      failedCount
-      errors
-    }
-  }
-` as GeneratedMutation<AbortTestRunsMutationVariables, AbortTestRunsMutation>;
 
 export const deleteTestSets = /* GraphQL */ `
   mutation DeleteTestSets($testSetIds: [String!]!) {
