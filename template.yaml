@@ -486,8 +486,8 @@ Parameters:
     Default: ""
     Description: >
       Optional. Regional DNS name of the BYO S3 Interface VPC Endpoint, with
-      the AWS-assigned random suffix and the leading "*." stripped — for
-      example: "vpce-0123456789abcdef0-abcdef12.s3.us-east-1.vpce.amazonaws.com".
+      the AWS-assigned random suffix and the leading "*." stripped (format:
+      "vpce-<id>-<suffix>.s3.<region>.vpce.<url-suffix>").
       Required when S3VpcEndpointIdOverride is set. Get from
       "aws ec2 describe-vpc-endpoints --vpc-endpoint-ids <id> --query
       'VpcEndpoints[0].DnsEntries[0].DnsName'" then strip the leading "*.".
