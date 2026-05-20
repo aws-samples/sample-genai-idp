@@ -5,6 +5,7 @@
 Tests for abort_test_runs functionality in CLI and SDK
 """
 
+import io
 import json
 from unittest.mock import Mock, patch
 
@@ -28,17 +29,17 @@ class TestAbortTestRuns:
     @pytest.fixture
     def mock_lambda_client(self):
         """Mock boto3 Lambda client"""
-        with patch("idp_sdk._core.test_studio_processor.boto3.client"):
+        with patch("idp_sdk._core.test_studio_processor.boto3.client") as mock:
             mock_client = Mock()
+            mock.return_value = mock_client
             yield mock_client
 
     def test_abort_single_test_run_success(self, mock_stack_info, mock_lambda_client):
         """Test successful abort of a single test run"""
         from idp_sdk._core.test_studio_processor import TestStudioProcessor
 
-        # Mock Lambda response
-        mock_response = Mock()
-        mock_response.__getitem__.return_value.read.return_value = json.dumps(
+        # Mock Lambda response - use BytesIO for proper .read() behavior
+        payload_data = json.dumps(
             {
                 "success": True,
                 "message": "Aborted 1 test run(s)",
@@ -47,7 +48,7 @@ class TestAbortTestRuns:
                 "errors": None,
             }
         ).encode()
-        mock_lambda_client.return_value.invoke.return_value = mock_response
+        mock_lambda_client.invoke.return_value = {"Payload": io.BytesIO(payload_data)}
 
         processor = TestStudioProcessor("test-stack", "us-east-1")
         result = processor.abort_test_runs(["test-run-123"])
@@ -57,8 +58,8 @@ class TestAbortTestRuns:
         assert result["failedCount"] == 0
 
         # Verify Lambda was invoked with correct payload
-        mock_lambda_client.return_value.invoke.assert_called_once()
-        call_args = mock_lambda_client.return_value.invoke.call_args
+        mock_lambda_client.invoke.assert_called_once()
+        call_args = mock_lambda_client.invoke.call_args
         payload = json.loads(call_args[1]["Payload"])
         assert payload["arguments"]["testRunIds"] == ["test-run-123"]
 
@@ -66,8 +67,7 @@ class TestAbortTestRuns:
         """Test aborting multiple test runs"""
         from idp_sdk._core.test_studio_processor import TestStudioProcessor
 
-        mock_response = Mock()
-        mock_response.__getitem__.return_value.read.return_value = json.dumps(
+        payload_data = json.dumps(
             {
                 "success": True,
                 "message": "Aborted 3 test run(s)",
@@ -76,7 +76,7 @@ class TestAbortTestRuns:
                 "errors": None,
             }
         ).encode()
-        mock_lambda_client.return_value.invoke.return_value = mock_response
+        mock_lambda_client.invoke.return_value = {"Payload": io.BytesIO(payload_data)}
 
         processor = TestStudioProcessor("test-stack", "us-east-1")
         result = processor.abort_test_runs(["run1", "run2", "run3"])
@@ -88,8 +88,7 @@ class TestAbortTestRuns:
         """Test abort with some test runs failing"""
         from idp_sdk._core.test_studio_processor import TestStudioProcessor
 
-        mock_response = Mock()
-        mock_response.__getitem__.return_value.read.return_value = json.dumps(
+        payload_data = json.dumps(
             {
                 "success": True,
                 "message": "Aborted 2 test run(s), 1 failed",
@@ -98,7 +97,7 @@ class TestAbortTestRuns:
                 "errors": ["run3: Cannot abort test run with status COMPLETE"],
             }
         ).encode()
-        mock_lambda_client.return_value.invoke.return_value = mock_response
+        mock_lambda_client.invoke.return_value = {"Payload": io.BytesIO(payload_data)}
 
         processor = TestStudioProcessor("test-stack", "us-east-1")
         result = processor.abort_test_runs(["run1", "run2", "run3"])
@@ -114,11 +113,8 @@ class TestAbortTestRuns:
         from idp_sdk._core.test_studio_processor import TestStudioProcessor
         from idp_sdk.exceptions import IDPProcessingError
 
-        mock_response = Mock()
-        mock_response.__getitem__.return_value.read.return_value = json.dumps(
-            {"errorMessage": "Internal server error"}
-        ).encode()
-        mock_lambda_client.return_value.invoke.return_value = mock_response
+        payload_data = json.dumps({"errorMessage": "Internal server error"}).encode()
+        mock_lambda_client.invoke.return_value = {"Payload": io.BytesIO(payload_data)}
 
         processor = TestStudioProcessor("test-stack", "us-east-1")
 
@@ -190,142 +186,150 @@ class TestAbortTestRuns:
 class TestAbortTestRunsCLI:
     """Tests for CLI abort-test-run command"""
 
-    @pytest.fixture
-    def mock_idp_client(self):
-        """Mock IDPClient"""
-        with patch("idp_cli.cli.IDPClient") as mock:
-            mock_instance = Mock()
-            mock_instance.testing.abort_test_run.return_value = {
+    def test_cli_abort_success(self):
+        """Test CLI abort command with successful result"""
+        from click.testing import CliRunner
+        from idp_cli.cli import abort_test_run
+
+        with patch("idp_sdk.IDPClient") as mock_client_class:
+            mock_client = Mock()
+            mock_client.testing.abort_test_run.return_value = {
                 "success": True,
                 "message": "Aborted 1 test run(s)",
                 "abortedCount": 1,
                 "failedCount": 0,
                 "errors": None,
             }
-            mock.return_value = mock_instance
-            yield mock
+            mock_client_class.return_value = mock_client
 
-    @pytest.fixture
-    def mock_console(self):
-        """Mock Rich console"""
-        with patch("idp_cli.cli.console") as mock:
-            yield mock
+            runner = CliRunner()
+            result = runner.invoke(
+                abort_test_run,
+                [
+                    "--stack-name",
+                    "test-stack",
+                    "--test-run-ids",
+                    "test-run-123",
+                    "--force",
+                ],
+            )
 
-    def test_cli_abort_success(self, mock_idp_client, mock_console):
-        """Test CLI abort command with successful result"""
-        from click.testing import CliRunner
-        from idp_cli.cli import abort_test_run
+            assert result.exit_code == 0
+            mock_client.testing.abort_test_run.assert_called_once()
 
-        runner = CliRunner()
-        result = runner.invoke(
-            abort_test_run,
-            [
-                "--stack-name",
-                "test-stack",
-                "--test-run-ids",
-                "test-run-123",
-                "--force",
-            ],
-        )
-
-        assert result.exit_code == 0
-        mock_idp_client.return_value.testing.abort_test_run.assert_called_once()
-
-    def test_cli_abort_multiple_ids(self, mock_idp_client, mock_console):
+    def test_cli_abort_multiple_ids(self):
         """Test CLI abort with multiple test run IDs"""
         from click.testing import CliRunner
         from idp_cli.cli import abort_test_run
 
-        runner = CliRunner()
-        result = runner.invoke(
-            abort_test_run,
-            [
-                "--stack-name",
-                "test-stack",
-                "--test-run-ids",
-                "run1,run2,run3",
-                "--force",
-            ],
-        )
+        with patch("idp_sdk.IDPClient") as mock_client_class:
+            mock_client = Mock()
+            mock_client.testing.abort_test_run.return_value = {
+                "success": True,
+                "message": "Aborted 3 test run(s)",
+                "abortedCount": 3,
+                "failedCount": 0,
+                "errors": None,
+            }
+            mock_client_class.return_value = mock_client
 
-        assert result.exit_code == 0
-        call_args = mock_idp_client.return_value.testing.abort_test_run.call_args
-        assert call_args[1]["test_run_ids"] == ["run1", "run2", "run3"]
+            runner = CliRunner()
+            result = runner.invoke(
+                abort_test_run,
+                [
+                    "--stack-name",
+                    "test-stack",
+                    "--test-run-ids",
+                    "run1,run2,run3",
+                    "--force",
+                ],
+            )
 
-    def test_cli_abort_with_failures(self, mock_idp_client, mock_console):
+            assert result.exit_code == 0
+            call_args = mock_client.testing.abort_test_run.call_args
+            assert call_args[1]["test_run_ids"] == ["run1", "run2", "run3"]
+
+    def test_cli_abort_with_failures(self):
         """Test CLI abort with partial failures"""
         from click.testing import CliRunner
         from idp_cli.cli import abort_test_run
 
-        mock_idp_client.return_value.testing.abort_test_run.return_value = {
-            "success": True,
-            "message": "Aborted 1 test run(s), 1 failed",
-            "abortedCount": 1,
-            "failedCount": 1,
-            "errors": ["run2: Test run not found"],
-        }
+        with patch("idp_sdk.IDPClient") as mock_client_class:
+            mock_client = Mock()
+            mock_client.testing.abort_test_run.return_value = {
+                "success": True,
+                "message": "Aborted 1 test run(s), 1 failed",
+                "abortedCount": 1,
+                "failedCount": 1,
+                "errors": ["run2: Test run not found"],
+            }
+            mock_client_class.return_value = mock_client
 
-        runner = CliRunner()
-        result = runner.invoke(
-            abort_test_run,
-            [
-                "--stack-name",
-                "test-stack",
-                "--test-run-ids",
-                "run1,run2",
-                "--force",
-            ],
-        )
+            runner = CliRunner()
+            result = runner.invoke(
+                abort_test_run,
+                [
+                    "--stack-name",
+                    "test-stack",
+                    "--test-run-ids",
+                    "run1,run2",
+                    "--force",
+                ],
+            )
 
-        assert result.exit_code == 0
+            assert result.exit_code == 0
 
-    def test_cli_abort_complete_failure(self, mock_idp_client, mock_console):
+    def test_cli_abort_complete_failure(self):
         """Test CLI abort with complete failure"""
         from click.testing import CliRunner
         from idp_cli.cli import abort_test_run
 
-        mock_idp_client.return_value.testing.abort_test_run.return_value = {
-            "success": False,
-            "message": "Failed to abort test runs",
-            "abortedCount": 0,
-            "failedCount": 1,
-            "errors": ["Internal error"],
-        }
+        with patch("idp_sdk.IDPClient") as mock_client_class:
+            mock_client = Mock()
+            mock_client.testing.abort_test_run.return_value = {
+                "success": False,
+                "message": "Failed to abort test runs",
+                "abortedCount": 0,
+                "failedCount": 1,
+                "errors": ["Internal error"],
+            }
+            mock_client_class.return_value = mock_client
 
-        runner = CliRunner()
-        result = runner.invoke(
-            abort_test_run,
-            [
-                "--stack-name",
-                "test-stack",
-                "--test-run-ids",
-                "test-run-123",
-                "--force",
-            ],
-        )
+            runner = CliRunner()
+            result = runner.invoke(
+                abort_test_run,
+                [
+                    "--stack-name",
+                    "test-stack",
+                    "--test-run-ids",
+                    "test-run-123",
+                    "--force",
+                ],
+            )
 
-        assert result.exit_code == 1
+            assert result.exit_code == 1
 
-    def test_cli_abort_confirmation_declined(self, mock_console):
+    def test_cli_abort_confirmation_declined(self):
         """Test CLI abort when user declines confirmation"""
         from click.testing import CliRunner
         from idp_cli.cli import abort_test_run
 
-        runner = CliRunner()
-        result = runner.invoke(
-            abort_test_run,
-            [
-                "--stack-name",
-                "test-stack",
-                "--test-run-ids",
-                "test-run-123",
-            ],
-            input="n\n",  # Decline confirmation
-        )
+        with patch("idp_sdk.IDPClient"):
+            runner = CliRunner()
+            result = runner.invoke(
+                abort_test_run,
+                [
+                    "--stack-name",
+                    "test-stack",
+                    "--test-run-ids",
+                    "test-run-123",
+                ],
+                input="n\n",  # Decline confirmation
+            )
 
-        assert result.exit_code == 0
+            assert result.exit_code == 0
 
-    def test_cli_abort_empty_test_run_ids(self, mock_console):
+    def test_cli_abort_empty_test_run_ids(self):
         """Test CLI abort with empty test run IDs"""
         from click.testing import CliRunner
         from idp_cli.cli import abort_test_run

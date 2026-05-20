@@ -30,9 +30,6 @@ with patch("boto3.resource") as mock_resource, patch("boto3.client") as mock_cli
 
 
 @pytest.mark.unit
-@patch("index.s3")
-@patch("index.lambda_client")
-@patch("index.dynamodb")
 @patch.dict(
     os.environ,
     {
@@ -41,15 +38,15 @@ with patch("boto3.resource") as mock_resource, patch("boto3.client") as mock_cli
         "BASELINE_BUCKET": "test-baseline-bucket",
     },
 )
-def test_lambda_handler_success(mock_dynamodb, mock_lambda_client, mock_s3):
+def test_lambda_handler_success():
     """Test successful deletion of test runs."""
-    # Setup
+    # Setup - configure the already-mocked clients
     mock_table = Mock()
-    mock_dynamodb.Table.return_value = mock_table
+    index.dynamodb.Table.return_value = mock_table
 
     # Mock S3 paginator for baseline file deletion
     mock_paginator = Mock()
-    mock_s3.get_paginator.return_value = mock_paginator
+    index.s3.get_paginator.return_value = mock_paginator
     mock_paginator.paginate.return_value = [
         {"Contents": [{"Key": "test1/baseline1.json"}]},
         {"Contents": [{"Key": "test2/baseline2.json"}]},
@@ -73,17 +70,14 @@ def test_lambda_handler_success(mock_dynamodb, mock_lambda_client, mock_s3):
     assert mock_table.delete_item.call_count == 2
 
     # Verify lambda invocation with all document keys
-    mock_lambda_client.invoke.assert_called_once()
-    call_args = mock_lambda_client.invoke.call_args
+    index.lambda_client.invoke.assert_called_once()
+    call_args = index.lambda_client.invoke.call_args
     payload = json.loads(call_args[1]["Payload"])
     expected_keys = ["test1/file1.pdf", "test1/file2.pdf", "test2/file3.pdf"]
     assert payload["arguments"]["objectKeys"] == expected_keys
 
 
 @pytest.mark.unit
-@patch("index.s3")
-@patch("index.lambda_client")
-@patch("index.dynamodb")
 @patch.dict(
     os.environ,
     {
@@ -92,16 +86,19 @@ def test_lambda_handler_success(mock_dynamodb, mock_lambda_client, mock_s3):
         "BASELINE_BUCKET": "test-baseline-bucket",
     },
 )
-def test_lambda_handler_test_run_not_found(mock_dynamodb, mock_lambda_client, mock_s3):
+def test_lambda_handler_test_run_not_found():
     """Test handling when test run is not found."""
     mock_table = Mock()
-    mock_dynamodb.Table.return_value = mock_table
+    index.dynamodb.Table.return_value = mock_table
     mock_table.get_item.return_value = {}  # No Item key
 
     # Mock S3 paginator
     mock_paginator = Mock()
-    mock_s3.get_paginator.return_value = mock_paginator
+    index.s3.get_paginator.return_value = mock_paginator
     mock_paginator.paginate.return_value = []
+
+    # Reset mock for this test
+    index.lambda_client.reset_mock()
 
     event = {"arguments": {"testRunIds": ["nonexistent"]}}
     context = Mock()
@@ -110,13 +107,10 @@ def test_lambda_handler_test_run_not_found(mock_dynamodb, mock_lambda_client, mo
 
     assert result is False
     mock_table.delete_item.assert_not_called()
-    mock_lambda_client.invoke.assert_not_called()
+    index.lambda_client.invoke.assert_not_called()
 
 
 @pytest.mark.unit
-@patch("index.s3")
-@patch("index.lambda_client")
-@patch("index.dynamodb")
 @patch.dict(
     os.environ,
     {
@@ -125,16 +119,19 @@ def test_lambda_handler_test_run_not_found(mock_dynamodb, mock_lambda_client, mo
         "BASELINE_BUCKET": "test-baseline-bucket",
     },
 )
-def test_lambda_handler_no_files(mock_dynamodb, mock_lambda_client, mock_s3):
+def test_lambda_handler_no_files():
     """Test handling when test run has no files."""
     mock_table = Mock()
-    mock_dynamodb.Table.return_value = mock_table
+    index.dynamodb.Table.return_value = mock_table
     mock_table.get_item.return_value = {"Item": {}}  # No Files key
 
     # Mock S3 paginator
     mock_paginator = Mock()
-    mock_s3.get_paginator.return_value = mock_paginator
+    index.s3.get_paginator.return_value = mock_paginator
     mock_paginator.paginate.return_value = []
+
+    # Reset mock for this test
+    index.lambda_client.reset_mock()
 
     event = {"arguments": {"testRunIds": ["test1"]}}
     context = Mock()
@@ -143,13 +140,10 @@ def test_lambda_handler_no_files(mock_dynamodb, mock_lambda_client, mock_s3):
 
     assert result is True
     mock_table.delete_item.assert_called_once()
-    mock_lambda_client.invoke.assert_not_called()
+    index.lambda_client.invoke.assert_not_called()
 
 
 @pytest.mark.unit
-@patch("index.s3")
-@patch("index.lambda_client")
-@patch("index.dynamodb")
 @patch.dict(
     os.environ,
     {
@@ -158,18 +152,21 @@ def test_lambda_handler_no_files(mock_dynamodb, mock_lambda_client, mock_s3):
         "BASELINE_BUCKET": "test-baseline-bucket",
     },
 )
-def test_lambda_handler_client_error(mock_dynamodb, mock_lambda_client, mock_s3):
+def test_lambda_handler_client_error():
     """Test handling of DynamoDB client errors."""
     mock_table = Mock()
-    mock_dynamodb.Table.return_value = mock_table
+    index.dynamodb.Table.return_value = mock_table
     mock_table.get_item.side_effect = ClientError(
         {"Error": {"Code": "ResourceNotFoundException"}}, "GetItem"
     )
 
     # Mock S3 paginator
     mock_paginator = Mock()
-    mock_s3.get_paginator.return_value = mock_paginator
+    index.s3.get_paginator.return_value = mock_paginator
     mock_paginator.paginate.return_value = []
+
+    # Reset mock for this test
+    index.lambda_client.reset_mock()
 
     event = {"arguments": {"testRunIds": ["test1"]}}
     context = Mock()
@@ -177,17 +174,14 @@ def test_lambda_handler_client_error(mock_dynamodb, mock_lambda_client, mock_s3)
     result = index.lambda_handler(event, context)
 
     assert result is False
-    mock_lambda_client.invoke.assert_not_called()
+    index.lambda_client.invoke.assert_not_called()
 
 
 @pytest.mark.unit
-@patch("index.s3")
-@patch("index.lambda_client")
-@patch("index.dynamodb")
-def test_lambda_handler_missing_env_vars(mock_dynamodb, mock_lambda_client, mock_s3):
+def test_lambda_handler_missing_env_vars():
     """Test handling of missing environment variables."""
     mock_table = Mock()
-    mock_dynamodb.Table.return_value = mock_table
+    index.dynamodb.Table.return_value = mock_table
     mock_table.get_item.return_value = {}  # Test run not found
 
     event = {"arguments": {"testRunIds": ["test1"]}}
