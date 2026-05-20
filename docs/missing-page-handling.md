@@ -150,3 +150,8 @@ When `representation: null_with_metadata` is set, an additional `missing_fields`
 ## Backwards compatibility
 
 The feature is fully additive. With `extraction.missing_field_handling.enabled: false` (the default) or with no `x-aws-idp-page-types` declared on the class, behavior is byte-for-byte identical to earlier releases.
+
+## See also
+
+- [`notebooks/usecase-specific-examples/multi-page-bank-statement/step3_extraction_with_missing_pages.ipynb`](../notebooks/usecase-specific-examples/multi-page-bank-statement/step3_extraction_with_missing_pages.ipynb) — runnable end-to-end demo. Loads the bank-statement sample's `step2_classification.ipynb` output, augments the schema with `x-aws-idp-page-types` extensions, and runs extraction twice (full document vs. transactions page omitted) to make the BLANK vs MISSING distinction visible in the resulting JSON.
+- [`config_library/unified/bank-statement-sample/config.yaml`](../config_library/unified/bank-statement-sample/config.yaml) — annotated commented-out stanza you can uncomment in a deployed stack.
