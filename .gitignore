@@ -64,3 +64,7 @@ samconfig.toml
 
 # Cline memory bank (session-specific, not project source)
 memory-bank/
+
+# Claude agent workspace artefacts (plans/specs/transcripts)
+.claude/superpowers/plans/
+.claude/superpowers/specs/

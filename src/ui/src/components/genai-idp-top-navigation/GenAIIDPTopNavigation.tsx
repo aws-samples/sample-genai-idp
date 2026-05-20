@@ -7,6 +7,7 @@ import { ConsoleLogger } from 'aws-amplify/utils';
 
 import useAppContext from '../../contexts/app';
 import useUserRole from '../../hooks/use-user-role';
+import useUserDisplayName from '../../hooks/use-user-display-name';
 
 const logger = new ConsoleLogger('TopNavigation');
 
@@ -60,7 +61,8 @@ const SignOutModal = ({ visible, setVisible }: SignOutModalProps): React.JSX.Ele
 const GenAIIDPTopNavigation = (): React.JSX.Element => {
   const { user } = useAppContext();
   const { isAdmin, isAuthor, isReviewer, isViewer, loading: roleLoading } = useUserRole();
-  const userId = user?.username || 'user';
+  const { displayName } = useUserDisplayName();
+  const userId = displayName || user?.username || 'user';
   const [isSignOutModalVisible, setIsSignOutModalVisiblesetVisible] = useState(false);
 
   // Determine role display
