@@ -16,12 +16,16 @@ from idp_common.utils.log_sanitizer import sanitize_event_for_logging
 logger = logging.getLogger()
 logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 
-# Configure S3 client with S3v4 signature
+# Configure S3 client with S3v4 signature.
+# When S3_ENDPOINT_URL is set (private VPC mode), switch to virtual-host
+# addressing so SigV4 host signing matches the VPC endpoint DNS.
+_s3_endpoint_url = os.environ.get("S3_ENDPOINT_URL") or None
+_s3_addressing = "virtual" if _s3_endpoint_url else "path"
 s3_config = Config(
-    signature_version='s3v4',
-    s3={'addressing_style': 'path'}
+    signature_version="s3v4",
+    s3={"addressing_style": _s3_addressing},
 )
-s3_client = boto3.client('s3', config=s3_config)
+s3_client = boto3.client("s3", endpoint_url=_s3_endpoint_url, config=s3_config)
 sqs_client = boto3.client('sqs')
 dynamodb = boto3.resource('dynamodb')
 

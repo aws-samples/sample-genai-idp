@@ -241,6 +241,16 @@ Parameters:
     AllowedValues: ["true", "false"]
     Description: Whether the circuit breaker feature is enabled
 
+  S3EndpointUrl:
+    Type: String
+    Default: ""
+    Description: >
+      VPC-aware S3 endpoint URL injected by parent stack when private mode is
+      active (e.g. https://bucket.<vpce-id>.s3.<region>.vpce.amazonaws.com).
+      When set, presigner Lambdas use this endpoint with virtual-host
+      addressing so browser uploads target the VPC interface endpoint.
+      Empty in public mode.
+
 Metadata:
   cfn-lint:
     config:
@@ -249,6 +259,7 @@ Metadata:
         - W1031  # ARN pattern matching when Fn::Sub resolves to empty string (UsersTableArn default)
 
 Conditions:
+  HasS3EndpointUrl: !Not [!Equals [!Ref S3EndpointUrl, ""]]
   HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
   HasGuardrail: !Equals [!Ref HasGuardrailConfig, "true"]
   ShouldCreateEvaluationBaselineBucket: !Equals [!Ref ShouldCreateEvaluationBaselineBucket, "true"]
@@ -1776,6 +1787,7 @@ Resources:
           DISCOVERY_QUEUE_URL: !Ref DiscoveryQueueUrl
           CONFIGURATION_TABLE_NAME: !Ref ConfigurationTableName
           MULTI_DOC_DISCOVERY_STATE_MACHINE_ARN: !Ref MultiDocDiscoveryStateMachineArn
+          S3_ENDPOINT_URL: !If [HasS3EndpointUrl, !Ref S3EndpointUrl, !Ref AWS::NoValue]
       LoggingConfig:
         LogGroup: !Ref DiscoveryUploadResolverFunctionLogGroup
       Policies:
@@ -3410,6 +3422,7 @@ Resources:
             - ShouldCreateEvaluationBaselineBucket
             - !Ref EvaluationBaselineBucketName
             - !Ref EvaluationBaselineBucketName
+          S3_ENDPOINT_URL: !If [HasS3EndpointUrl, !Ref S3EndpointUrl, !Ref AWS::NoValue]
       LoggingConfig:
         LogGroup: !Ref TestSetResolverFunctionLogGroup
       Policies:
@@ -3602,6 +3615,7 @@ Resources:
         Variables:
           LOG_LEVEL: !Ref LogLevel
           INPUT_BUCKET: !Ref InputBucketName
+          S3_ENDPOINT_URL: !If [HasS3EndpointUrl, !Ref S3EndpointUrl, !Ref AWS::NoValue]
       LoggingConfig:
         LogGroup: !Ref UploadResolverFunctionLogGroup
       Policies:

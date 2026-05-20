@@ -31,12 +31,16 @@ def validate_description(description):
         return False
     return len(description) <= 200
 
-# Configure S3 client with S3v4 signature
+# Configure S3 client with S3v4 signature.
+# When S3_ENDPOINT_URL is set (private VPC mode), use virtual-host addressing
+# so the SigV4 host header matches the VPC endpoint DNS.
+_s3_endpoint_url = os.environ.get("S3_ENDPOINT_URL") or None
+_s3_addressing = "virtual" if _s3_endpoint_url else "path"
 s3_config = Config(
-    signature_version='s3v4',
-    s3={'addressing_style': 'path'}
+    signature_version="s3v4",
+    s3={"addressing_style": _s3_addressing},
 )
-s3_client = boto3.client('s3', config=s3_config)
+s3_client = boto3.client("s3", endpoint_url=_s3_endpoint_url, config=s3_config)
 db_client = DynamoDBClient(table_name=os.environ['TRACKING_TABLE'])
 
 def handler(event, context):
