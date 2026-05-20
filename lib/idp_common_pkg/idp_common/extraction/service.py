@@ -25,6 +25,10 @@ from idp_common.config.schema_constants import (
     X_AWS_IDP_DOCUMENT_TYPE,
     X_AWS_IDP_EXTRACTION_MODEL,
 )
+from idp_common.extraction.page_type_resolver import (
+    PageTypePresence,
+    resolve_page_types,
+)
 from idp_common.models import Document
 from idp_common.utils.few_shot_example_builder import (
     build_few_shot_extraction_examples_content,
@@ -53,6 +57,8 @@ logger = logging.getLogger(__name__)
 class SectionInfo(BaseModel):
     """Metadata about a document section being processed."""
 
+    model_config = {"arbitrary_types_allowed": True}
+
     class_label: str
     sorted_page_ids: list[str]
     page_indices: list[int]
@@ -61,6 +67,7 @@ class SectionInfo(BaseModel):
     output_uri: str
     start_page: int
     end_page: int
+    page_type_presence: PageTypePresence | None = None
 
 
 class ExtractionConfig(BaseModel):
@@ -632,44 +639,67 @@ class ExtractionService:
             end_page=end_page,
         )
 
-    def _load_document_text(
+    def _load_page_texts(
         self, document: Document, sorted_page_ids: list[str]
-    ) -> str:
-        """
-        Load and concatenate text from all pages.
+    ) -> dict[str, str]:
+        """Load OCR text for each page in the section, preserving page IDs.
 
-        Args:
-            document: Document containing pages
-            sorted_page_ids: Sorted list of page IDs
-
-        Returns:
-            Concatenated document text
+        Pages missing from ``document.pages`` are recorded as errors and
+        omitted from the result.
         """
         t0 = time.time()
-        document_texts = []
-
+        page_id_to_text: dict[str, str] = {}
         for page_id in sorted_page_ids:
             if page_id not in document.pages:
                 error_msg = f"Page {page_id} not found in document"
                 logger.error(error_msg)
                 document.errors.append(error_msg)
                 continue
-
             page = document.pages[page_id]
             text_path = page.parsed_text_uri
-            page_text = s3.get_text_content(text_path)
-            document_texts.append(page_text)
+            page_id_to_text[page_id] = s3.get_text_content(text_path)
+        logger.info(f"Time taken to read text content: {time.time() - t0:.2f} seconds")
+        return page_id_to_text
 
-        # Join with page markers so batch agents can extract their page range
-        page_separator_parts = []
-        for idx, text in enumerate(document_texts):
+    def _format_document_text(
+        self,
+        sorted_page_ids: list[str],
+        page_id_to_text: dict[str, str],
+        page_type_presence: PageTypePresence | None = None,
+    ) -> str:
+        """Concatenate per-page text with sequential page markers.
+
+        When ``page_type_presence`` resolves a page type for a page, the
+        marker is annotated as ``--- PAGE N [PageType] ---`` so the LLM
+        gets a soft hint about the page's role.
+        """
+        page_id_to_type: dict[str, str] = (
+            page_type_presence.page_id_to_page_type if page_type_presence else {}
+        )
+        parts: list[str] = []
+        for idx, page_id in enumerate(
+            pid for pid in sorted_page_ids if pid in page_id_to_text
+        ):
             page_num = idx + 1
-            page_separator_parts.append(f"--- PAGE {page_num} ---\n{text}")
-        document_text = "\n".join(page_separator_parts)
-        t1 = time.time()
-        logger.info(f"Time taken to read text content: {t1 - t0:.2f} seconds")
+            page_type = page_id_to_type.get(page_id)
+            marker = (
+                f"--- PAGE {page_num} [{page_type}] ---"
+                if page_type
+                else f"--- PAGE {page_num} ---"
+            )
+            parts.append(f"{marker}\n{page_id_to_text[page_id]}")
+        return "\n".join(parts)
 
-        return document_text
+    def _load_document_text(
+        self, document: Document, sorted_page_ids: list[str]
+    ) -> str:
+        """Backwards-compatible loader that returns the concatenated text only.
+
+        Prefer :meth:`_load_page_texts` + :meth:`_format_document_text` when
+        per-page text is also needed (e.g., for page-type resolution).
+        """
+        page_id_to_text = self._load_page_texts(document, sorted_page_ids)
+        return self._format_document_text(sorted_page_ids, page_id_to_text)
 
     def _load_confidence_data(
         self, document: Document, sorted_page_ids: list[str]
@@ -1956,9 +1986,26 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
         try:
             t0 = time.time()
 
-            # Load document content
-            document_text = self._load_document_text(
+            # Load per-page text first so the page-type resolver and the
+            # prompt-formatter can both consume it without re-reading S3.
+            page_id_to_text = self._load_page_texts(
                 document, section_info.sorted_page_ids
+            )
+            class_schema_for_resolver = self._get_class_schema(section_info.class_label)
+            section_info.page_type_presence = resolve_page_types(
+                class_schema_for_resolver, page_id_to_text
+            )
+            if section_info.page_type_presence.declared:
+                logger.info(
+                    "Page-type resolution for section %s: present=%s missing=%s",
+                    section.section_id,
+                    sorted(section_info.page_type_presence.present_page_types),
+                    sorted(section_info.page_type_presence.missing_page_types),
+                )
+            document_text = self._format_document_text(
+                section_info.sorted_page_ids,
+                page_id_to_text,
+                section_info.page_type_presence,
             )
             page_images = self._load_document_images(
                 document, section_info.sorted_page_ids
