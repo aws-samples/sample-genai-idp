@@ -30,13 +30,30 @@ with patch("boto3.resource") as mock_resource, patch("boto3.client") as mock_cli
 
 
 @pytest.mark.unit
+@patch("index.s3")
 @patch("index.lambda_client")
 @patch("index.dynamodb")
-def test_lambda_handler_success(mock_dynamodb, mock_lambda_client):
+@patch.dict(
+    os.environ,
+    {
+        "TRACKING_TABLE_NAME": "test-table",
+        "DELETE_DOCUMENT_FUNCTION_NAME": "delete-func",
+        "BASELINE_BUCKET": "test-baseline-bucket",
+    },
+)
+def test_lambda_handler_success(mock_dynamodb, mock_lambda_client, mock_s3):
     """Test successful deletion of test runs."""
     # Setup
     mock_table = Mock()
     mock_dynamodb.Table.return_value = mock_table
+
+    # Mock S3 paginator for baseline file deletion
+    mock_paginator = Mock()
+    mock_s3.get_paginator.return_value = mock_paginator
+    mock_paginator.paginate.return_value = [
+        {"Contents": [{"Key": "test1/baseline1.json"}]},
+        {"Contents": [{"Key": "test2/baseline2.json"}]},
+    ]
 
     # Mock get_item responses
     mock_table.get_item.side_effect = [
@@ -46,10 +63,6 @@ def test_lambda_handler_success(mock_dynamodb, mock_lambda_client):
 
     event = {"arguments": {"testRunIds": ["test1", "test2"]}}
     context = Mock()
-    context.get.side_effect = lambda key: {
-        "TRACKING_TABLE_NAME": "test-table",
-        "DELETE_DOCUMENT_FUNCTION_NAME": "delete-func",
-    }[key]
 
     # Execute
     result = index.lambda_handler(event, context)
@@ -68,20 +81,30 @@ def test_lambda_handler_success(mock_dynamodb, mock_lambda_client):
 
 
 @pytest.mark.unit
+@patch("index.s3")
 @patch("index.lambda_client")
 @patch("index.dynamodb")
-def test_lambda_handler_test_run_not_found(mock_dynamodb, mock_lambda_client):
+@patch.dict(
+    os.environ,
+    {
+        "TRACKING_TABLE_NAME": "test-table",
+        "DELETE_DOCUMENT_FUNCTION_NAME": "delete-func",
+        "BASELINE_BUCKET": "test-baseline-bucket",
+    },
+)
+def test_lambda_handler_test_run_not_found(mock_dynamodb, mock_lambda_client, mock_s3):
     """Test handling when test run is not found."""
     mock_table = Mock()
     mock_dynamodb.Table.return_value = mock_table
     mock_table.get_item.return_value = {}  # No Item key
 
+    # Mock S3 paginator
+    mock_paginator = Mock()
+    mock_s3.get_paginator.return_value = mock_paginator
+    mock_paginator.paginate.return_value = []
+
     event = {"arguments": {"testRunIds": ["nonexistent"]}}
     context = Mock()
-    context.get.side_effect = lambda key: {
-        "TRACKING_TABLE_NAME": "test-table",
-        "DELETE_DOCUMENT_FUNCTION_NAME": "delete-func",
-    }[key]
 
     result = index.lambda_handler(event, context)
 
@@ -91,20 +114,30 @@ def test_lambda_handler_test_run_not_found(mock_dynamodb, mock_lambda_client):
 
 
 @pytest.mark.unit
+@patch("index.s3")
 @patch("index.lambda_client")
 @patch("index.dynamodb")
-def test_lambda_handler_no_files(mock_dynamodb, mock_lambda_client):
+@patch.dict(
+    os.environ,
+    {
+        "TRACKING_TABLE_NAME": "test-table",
+        "DELETE_DOCUMENT_FUNCTION_NAME": "delete-func",
+        "BASELINE_BUCKET": "test-baseline-bucket",
+    },
+)
+def test_lambda_handler_no_files(mock_dynamodb, mock_lambda_client, mock_s3):
     """Test handling when test run has no files."""
     mock_table = Mock()
     mock_dynamodb.Table.return_value = mock_table
     mock_table.get_item.return_value = {"Item": {}}  # No Files key
 
+    # Mock S3 paginator
+    mock_paginator = Mock()
+    mock_s3.get_paginator.return_value = mock_paginator
+    mock_paginator.paginate.return_value = []
+
     event = {"arguments": {"testRunIds": ["test1"]}}
     context = Mock()
-    context.get.side_effect = lambda key: {
-        "TRACKING_TABLE_NAME": "test-table",
-        "DELETE_DOCUMENT_FUNCTION_NAME": "delete-func",
-    }[key]
 
     result = index.lambda_handler(event, context)
 
@@ -114,9 +147,18 @@ def test_lambda_handler_no_files(mock_dynamodb, mock_lambda_client):
 
 
 @pytest.mark.unit
+@patch("index.s3")
 @patch("index.lambda_client")
 @patch("index.dynamodb")
-def test_lambda_handler_client_error(mock_dynamodb, mock_lambda_client):
+@patch.dict(
+    os.environ,
+    {
+        "TRACKING_TABLE_NAME": "test-table",
+        "DELETE_DOCUMENT_FUNCTION_NAME": "delete-func",
+        "BASELINE_BUCKET": "test-baseline-bucket",
+    },
+)
+def test_lambda_handler_client_error(mock_dynamodb, mock_lambda_client, mock_s3):
     """Test handling of DynamoDB client errors."""
     mock_table = Mock()
     mock_dynamodb.Table.return_value = mock_table
@@ -124,12 +166,13 @@ def test_lambda_handler_client_error(mock_dynamodb, mock_lambda_client):
         {"Error": {"Code": "ResourceNotFoundException"}}, "GetItem"
     )
 
+    # Mock S3 paginator
+    mock_paginator = Mock()
+    mock_s3.get_paginator.return_value = mock_paginator
+    mock_paginator.paginate.return_value = []
+
     event = {"arguments": {"testRunIds": ["test1"]}}
     context = Mock()
-    context.get.side_effect = lambda key: {
-        "TRACKING_TABLE_NAME": "test-table",
-        "DELETE_DOCUMENT_FUNCTION_NAME": "delete-func",
-    }[key]
 
     result = index.lambda_handler(event, context)
 
@@ -138,13 +181,18 @@ def test_lambda_handler_client_error(mock_dynamodb, mock_lambda_client):
 
 
 @pytest.mark.unit
+@patch("index.s3")
+@patch("index.lambda_client")
 @patch("index.dynamodb")
-def test_lambda_handler_missing_env_vars(mock_dynamodb):
+def test_lambda_handler_missing_env_vars(mock_dynamodb, mock_lambda_client, mock_s3):
     """Test handling of missing environment variables."""
+    mock_table = Mock()
+    mock_dynamodb.Table.return_value = mock_table
+    mock_table.get_item.return_value = {}  # Test run not found
+
     event = {"arguments": {"testRunIds": ["test1"]}}
     context = Mock()
-    context.get.return_value = None
 
-    # The actual error occurs when trying to create DynamoDB table with None name
+    # Without environment variables, the Lambda handles gracefully
     result = index.lambda_handler(event, context)
     assert result is False
