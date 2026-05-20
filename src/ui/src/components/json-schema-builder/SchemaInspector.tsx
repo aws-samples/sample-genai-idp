@@ -1,5 +1,17 @@
 import React, { useState, useEffect } from 'react';
-import { Box, SpaceBetween, Header, FormField, Input, Select, Textarea, Checkbox, Button, Alert } from '@cloudscape-design/components';
+import {
+  Alert,
+  Box,
+  Button,
+  Checkbox,
+  FormField,
+  Header,
+  Input,
+  Multiselect,
+  Select,
+  SpaceBetween,
+  Textarea,
+} from '@cloudscape-design/components';
 import StringConstraints from './constraints/StringConstraints';
 import NumberConstraints from './constraints/NumberConstraints';
 import ArrayConstraints from './constraints/ArrayConstraints';
@@ -7,6 +19,7 @@ import ObjectConstraints from './constraints/ObjectConstraints';
 import MetadataFields from './constraints/MetadataFields';
 import ValueConstraints from './constraints/ValueConstraints';
 import ExamplesEditor from './constraints/ExamplesEditor';
+import PageTypesEditor, { PageTypeEntry } from './constraints/PageTypesEditor';
 import {
   TYPE_OPTIONS,
   EVALUATION_METHOD_OPTIONS,
@@ -27,6 +40,8 @@ import {
   X_AWS_IDP_EXTRACTION_MODEL,
   X_AWS_IDP_EXCLUDE_FROM_PROCESSING,
   X_AWS_IDP_EXCLUSION_REASON,
+  X_AWS_IDP_PAGE_TYPES,
+  X_AWS_IDP_SOURCE_PAGE_TYPES,
 } from '../../constants/schemaConstants';
 
 interface SchemaAttribute {
@@ -190,6 +205,13 @@ const SchemaInspector = ({
                 <ExamplesEditor
                   examples={(selectedClass[X_AWS_IDP_EXAMPLES] as Example[]) || []}
                   onChange={(examples) => onUpdateClass({ [X_AWS_IDP_EXAMPLES]: examples })}
+                />
+              )}
+
+              {!isRuleSchema && (
+                <PageTypesEditor
+                  pageTypes={(selectedClass[X_AWS_IDP_PAGE_TYPES] as PageTypeEntry[]) || []}
+                  onChange={(pageTypes) => onUpdateClass({ [X_AWS_IDP_PAGE_TYPES]: pageTypes.length > 0 ? pageTypes : undefined })}
                 />
               )}
 
@@ -598,6 +620,44 @@ const SchemaInspector = ({
         {!isRuleSchema && <NumberConstraints attribute={selectedAttribute} onUpdate={onUpdate} />}
 
         {!isRuleSchema && <ValueConstraints attribute={selectedAttribute} onUpdate={onUpdate} />}
+
+        {!isRuleSchema &&
+          (() => {
+            const declaredPageTypes = (selectedClass?.[X_AWS_IDP_PAGE_TYPES] as PageTypeEntry[] | undefined) || [];
+            if (declaredPageTypes.length === 0) {
+              return null;
+            }
+            const selectedSourcePages = (selectedAttribute[X_AWS_IDP_SOURCE_PAGE_TYPES] as string[] | undefined) || [];
+            const options = declaredPageTypes
+              .filter((pt) => pt.name)
+              .map((pt) => ({
+                label: pt.name,
+                value: pt.name,
+                description: pt.description || undefined,
+              }));
+            return (
+              <>
+                <Header {...({ variant: 'h4' } as Record<string, unknown>)}>Missing-Page Handling</Header>
+                <FormField
+                  label="Source Page Types (Optional)"
+                  description="Page sub-types this property is sourced from. If none of the selected page types are present in a section, the property is treated as MISSING per extraction.missing_field_handling config (instead of being silently empty/BLANK)."
+                >
+                  <Multiselect
+                    selectedOptions={options.filter((opt) => selectedSourcePages.includes(opt.value))}
+                    onChange={({ detail }) => {
+                      const values = detail.selectedOptions.map((opt) => opt.value).filter((v): v is string => Boolean(v));
+                      onUpdate({
+                        [X_AWS_IDP_SOURCE_PAGE_TYPES]: values.length > 0 ? values : undefined,
+                      });
+                    }}
+                    options={options}
+                    placeholder="Select page types where this field appears"
+                    empty="No page types declared on the parent class"
+                  />
+                </FormField>
+              </>
+            );
+          })()}
 
         {!isRuleSchema && (
           <>

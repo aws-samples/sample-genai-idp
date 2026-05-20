@@ -46,6 +46,17 @@ X_AWS_IDP_EXCLUSION_REASON = "x-aws-idp-exclusion-reason"
 # Per-class model override for extraction (overrides extraction.model)
 X_AWS_IDP_EXTRACTION_MODEL = "x-aws-idp-extraction-model"
 
+# Declares the named page sub-types a class can include. Each entry has a
+# `name`, optional `description`, and a regex (`x-aws-idp-document-page-content-regex`)
+# used to detect the page type from per-page OCR text.
+X_AWS_IDP_PAGE_TYPES = "x-aws-idp-page-types"
+
+# On a property: declares which page sub-types contain the property's source
+# data. If none of the listed page types are present in the section, the
+# property is considered MISSING (vs. blank when the page is present but the
+# field is empty).
+X_AWS_IDP_SOURCE_PAGE_TYPES = "x-aws-idp-source-page-types"
+
 # ============================================================================
 # AWS IDP Policy/Rule Type Extensions
 # ============================================================================
