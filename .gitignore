@@ -31,6 +31,8 @@ scratch/
 # Node.js / npm
 node_modules/
 package-lock.json
+# Allow the docs-site lock file (needed by GitHub Pages workflow for `npm ci` and dep caching)
+!docs-site/package-lock.json
 
 # Jupyter
 .ipynb_checkpoints/
