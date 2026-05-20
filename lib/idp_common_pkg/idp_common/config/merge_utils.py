@@ -919,6 +919,8 @@ def _validate_schema_fields(
         "x-aws-idp-evaluation-weight",
         "x-aws-idp-document-type",
         "x-aws-idp-list-item-description",
+        "x-aws-idp-page-types",
+        "x-aws-idp-source-page-types",
     }
 
     non_standard_fields = {}

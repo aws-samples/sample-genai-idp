@@ -183,6 +183,46 @@ class AgenticConfig(BaseModel):
     )
 
 
+class MissingFieldHandlingConfig(BaseModel):
+    """Controls how extraction treats fields whose source pages are absent.
+
+    See ``x-aws-idp-page-types`` and ``x-aws-idp-source-page-types`` schema
+    extensions for the page-type → property mapping that drives this.
+    """
+
+    enabled: bool = Field(
+        default=False,
+        description=(
+            "Enable BLANK vs MISSING field handling. When enabled, properties "
+            "whose declared source page-types are absent from the section are "
+            "marked as MISSING per the configured representation. Default off "
+            "to preserve existing behavior."
+        ),
+    )
+    representation: str = Field(
+        default="omit",
+        description=(
+            "How to represent missing fields in extraction output. 'omit' drops "
+            "the key entirely; 'null_with_metadata' keeps the key as null and "
+            "lists it under a sibling 'missing_fields' array."
+        ),
+    )
+
+    @field_validator("representation", mode="before")
+    @classmethod
+    def validate_representation(cls, v: Any) -> str:
+        """Reject unknown representations early so misconfiguration fails fast."""
+        if v is None:
+            return "omit"
+        v_str = str(v)
+        if v_str not in ("omit", "null_with_metadata"):
+            raise ValueError(
+                "missing_field_handling.representation must be 'omit' or "
+                f"'null_with_metadata', got {v_str!r}"
+            )
+        return v_str
+
+
 class ExtractionConfig(BaseModel):
     """Document extraction configuration"""
 
@@ -212,6 +252,15 @@ class ExtractionConfig(BaseModel):
     )
     image: ImageConfig = Field(default_factory=ImageConfig)
     agentic: AgenticConfig = Field(default_factory=AgenticConfig)
+    missing_field_handling: MissingFieldHandlingConfig = Field(
+        default_factory=MissingFieldHandlingConfig,
+        description=(
+            "Configuration for distinguishing BLANK fields (page present, "
+            "field empty) from MISSING fields (page absent). Requires class "
+            "schemas to declare 'x-aws-idp-page-types' and properties to "
+            "declare 'x-aws-idp-source-page-types'."
+        ),
+    )
     custom_prompt_lambda_arn: Optional[str] = Field(
         default=None, description="ARN of custom prompt Lambda"
     )

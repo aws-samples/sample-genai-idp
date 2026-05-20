@@ -24,6 +24,7 @@ from idp_common.config.schema_constants import (
     SCHEMA_PROPERTIES,
     X_AWS_IDP_DOCUMENT_TYPE,
     X_AWS_IDP_EXTRACTION_MODEL,
+    X_AWS_IDP_SOURCE_PAGE_TYPES,
 )
 from idp_common.extraction.page_type_resolver import (
     PageTypePresence,
@@ -1791,6 +1792,66 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
             ocr_analysis=ocr_analysis,
         )
 
+    def _apply_missing_field_handling(
+        self,
+        extracted_fields: dict[str, Any],
+        class_schema: dict[str, Any],
+        section_info: SectionInfo,
+    ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+        """Mark or remove fields whose source pages were not present.
+
+        Returns the (possibly mutated) extracted_fields and a report listing
+        the fields treated as MISSING. When the feature is disabled, the
+        config doesn't declare page-types, or no top-level property has
+        ``x-aws-idp-source-page-types``, the input is returned unchanged
+        with an empty report.
+        """
+        cfg = self.config.extraction.missing_field_handling
+        presence = section_info.page_type_presence
+        if not cfg.enabled or presence is None or not presence.declared:
+            return extracted_fields, []
+
+        properties = class_schema.get(SCHEMA_PROPERTIES) or {}
+        if not properties:
+            return extracted_fields, []
+
+        present = presence.present_page_types
+        report: list[dict[str, Any]] = []
+        # Operate on a copy so we don't mutate the agent's result in place.
+        fields_out = dict(extracted_fields)
+
+        for prop_name, prop_schema in properties.items():
+            if not isinstance(prop_schema, dict):
+                continue
+            declared_pages = prop_schema.get(X_AWS_IDP_SOURCE_PAGE_TYPES)
+            if not declared_pages:
+                continue
+            if not isinstance(declared_pages, list):
+                logger.warning(
+                    "Property %s declares %s as %s; expected list — ignoring",
+                    prop_name,
+                    X_AWS_IDP_SOURCE_PAGE_TYPES,
+                    type(declared_pages).__name__,
+                )
+                continue
+            if any(p in present for p in declared_pages):
+                # At least one source page-type is present → field is BLANK
+                # if empty, not MISSING. Leave it alone.
+                continue
+            report.append(
+                {
+                    "field": prop_name,
+                    "reason": "page types not present",
+                    "expected_page_types": list(declared_pages),
+                }
+            )
+            if cfg.representation == "omit":
+                fields_out.pop(prop_name, None)
+            else:  # null_with_metadata
+                fields_out[prop_name] = None
+
+        return fields_out, report
+
     def _save_results(
         self,
         document: Document,
@@ -1887,18 +1948,38 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
             metadata["output_repaired"] = True
             metadata["repair_method"] = result.repair_method
 
+        # Apply BLANK vs MISSING field handling (no-op unless configured + declared).
+        fields_for_output, missing_fields_report = self._apply_missing_field_handling(
+            result.extracted_fields,
+            self._class_schema,
+            section_info,
+        )
+
         # Generate user-friendly processing report
         processing_report = self._generate_processing_report(metadata)
         logger.info(f"Processing Report:\n{processing_report}")
 
         # Write to S3 with processing report
-        output = {
+        output: dict[str, Any] = {
             "document_class": {"type": section_info.class_label},
             "split_document": {"page_indices": section_info.page_indices},
-            "inference_result": result.extracted_fields,
+            "inference_result": fields_for_output,
             "metadata": metadata,
             "processing_report": processing_report,
         }
+        # Surface page-type resolution and the missing-field report when the
+        # feature is in use, so downstream consumers can act on the signal.
+        presence = section_info.page_type_presence
+        if presence is not None and presence.declared:
+            output["page_type_resolution"] = presence.to_output_dict()
+        if missing_fields_report:
+            output["missing_fields_report"] = missing_fields_report
+            if self.config.extraction.missing_field_handling.representation == (
+                "null_with_metadata"
+            ):
+                output["missing_fields"] = [
+                    entry["field"] for entry in missing_fields_report
+                ]
         s3.write_content(
             output,
             section_info.output_bucket,
