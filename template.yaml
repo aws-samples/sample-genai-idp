@@ -7362,7 +7362,7 @@ Resources:
       Schema:
         - Name: email
           AttributeDataType: String
-          Mutable: true
+          Mutable: false
           Required: true
         - Name: idp_groups
           AttributeDataType: String
