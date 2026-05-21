@@ -72,6 +72,7 @@ This folder contains detailed documentation on various aspects of the GenAI Inte
 - [Reporting Database](./reporting-database.md) - Analytics database for evaluation metrics and metering data
 - [Capacity Planning](./capacity-planning.md) - Performance optimization and resource scaling guidance
 - [Circuit Breaker](./circuit-breaker.md) - Automatic protection from cascading failures during Bedrock outages
+- [Cross-Account Bedrock](./cross-account-bedrock.md) - Route all Bedrock invocations through a centralized hub account via STS AssumeRole
 - [Cost Calculator](./cost-calculator.md) - Framework for estimating solution costs
 
 ## Planning & Security

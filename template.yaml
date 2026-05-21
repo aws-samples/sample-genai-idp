@@ -331,6 +331,36 @@ Parameters:
     Description: >
       If you provided a Bedrock Guardrail Id above, provide the corresponding Guardrail version here (e.g. DRAFT|1|2|...).
 
+  # Optional Cross-Account Bedrock (Hub Account) Configuration
+  BedrockHubRoleArn:
+    Type: String
+    Default: ""
+    AllowedPattern: "^$|^arn:(aws|aws-cn|aws-us-gov|aws-iso|aws-iso-b):iam::[0-9]{12}:role/[\\w+=,.@\\-/]+$"
+    ConstraintDescription: "Must be empty or a valid IAM role ARN. The ARN must NOT contain spaces — pass ExternalId via the separate BedrockHubRoleExternalId parameter."
+    Description: >
+      (Optional) ARN of an IAM role in a centralized "hub" account that this stack
+      should assume for all Amazon Bedrock data-plane and control-plane API calls.
+      When set, all Bedrock invocations (data-plane and control-plane) are routed
+      through sts:AssumeRole to this role using refreshable credentials. Leave empty
+      to call Bedrock from the local account (default behavior).
+
+  BedrockHubRoleExternalId:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: >
+      (Optional) ExternalId to include in sts:AssumeRole calls for the Bedrock hub role.
+      Required only when the hub-account role's trust policy enforces an ExternalId.
+
+  BedrockHubRoleSessionName:
+    Type: String
+    Default: ""
+    AllowedPattern: "^[\\w+=,.@-]{0,64}$"
+    Description: >
+      (Optional) Session name for sts:AssumeRole calls (max 64 chars; characters
+      allowed: A-Z a-z 0-9 + = , . @ - _). Defaults to the calling Lambda function name
+      for CloudTrail attribution in the hub account.
+
   # General Configuration
   MaxConcurrentWorkflows:
     Type: Number
@@ -902,6 +932,13 @@ Conditions:
       !Not [ !Equals [ !Ref BedrockGuardrailVersion, "" ] ],
     ]
 
+  HasBedrockHubRole:
+    !Not [ !Equals [ !Ref BedrockHubRoleArn, "" ] ]
+  HasBedrockHubRoleExternalId:
+    !Not [ !Equals [ !Ref BedrockHubRoleExternalId, "" ] ]
+  HasBedrockHubRoleSessionName:
+    !Not [ !Equals [ !Ref BedrockHubRoleSessionName, "" ] ]
+
   # HITL and Private Workforce conditions
   # General rules
   ShouldAllowSignUpEmailDomain:
@@ -1017,6 +1054,12 @@ Metadata:
         Parameters:
           - BedrockGuardrailId
           - BedrockGuardrailVersion
+      - Label:
+          default: "Cross-Account Bedrock (Hub Account)"
+        Parameters:
+          - BedrockHubRoleArn
+          - BedrockHubRoleExternalId
+          - BedrockHubRoleSessionName
       - Label:
           default: "Security Configuration"
         Parameters:
@@ -1134,6 +1177,12 @@ Metadata:
         default: "Bedrock Guardrail Id"
       BedrockGuardrailVersion:
         default: "Bedrock Guardrail Version"
+      BedrockHubRoleArn:
+        default: "Bedrock Hub-Account Role ARN"
+      BedrockHubRoleExternalId:
+        default: "Bedrock Hub-Account Role External Id"
+      BedrockHubRoleSessionName:
+        default: "Bedrock Hub-Account Role Session Name"
       PermissionsBoundaryArn:
         default: "Permissions Boundary ARN"
       MaxConcurrentWorkflows:
@@ -1879,6 +1928,12 @@ Resources:
           CLOUDWATCH_LOG_GROUP_PREFIX: !Sub "/aws/lambda/${AWS::StackName}"
           SETTINGS_PARAMETER_NAME: !Ref SettingsParameter
           MCP_SERVER_BUCKET: !Ref MCPContentBucket
+          BEDROCK_ASSUME_ROLE_ARN:
+            !If [HasBedrockHubRole, !Ref BedrockHubRoleArn, !Ref AWS::NoValue]
+          BEDROCK_ASSUME_ROLE_EXTERNAL_ID:
+            !If [HasBedrockHubRoleExternalId, !Ref BedrockHubRoleExternalId, !Ref AWS::NoValue]
+          BEDROCK_ASSUME_ROLE_SESSION_NAME:
+            !If [HasBedrockHubRoleSessionName, !Ref BedrockHubRoleSessionName, !Ref AWS::NoValue]
       LoggingConfig:
         LogGroup: !Ref AgentCoreMCPHandlerLogGroup
       Policies:
@@ -1976,6 +2031,13 @@ Resources:
                   - "bedrock:ApplyGuardrail"
                 Resource:
                   - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:guardrail/${BedrockGuardrailId}"
+              - !Ref AWS::NoValue
+            # Optional cross-account Bedrock invocation via hub-account role.
+            - !If
+              - HasBedrockHubRole
+              - Effect: Allow
+                Action: sts:AssumeRole
+                Resource: !Ref BedrockHubRoleArn
               - !Ref AWS::NoValue
             - Effect: Allow
               Action:
@@ -2264,6 +2326,9 @@ Resources:
         ExecutionTimeThresholdMs: !Ref ExecutionTimeThresholdMs
         BedrockGuardrailId: !Ref BedrockGuardrailId
         BedrockGuardrailVersion: !Ref BedrockGuardrailVersion
+        BedrockHubRoleArn: !Ref BedrockHubRoleArn
+        BedrockHubRoleExternalId: !Ref BedrockHubRoleExternalId
+        BedrockHubRoleSessionName: !Ref BedrockHubRoleSessionName
         UpdateConfigurationFunctionArn: !GetAtt UpdateConfigurationFunction.Arn
         ConfigurationTable: !Ref ConfigurationTable
         AppSyncApiUrl: !GetAtt GraphQLApi.GraphQLUrl
@@ -6374,6 +6439,12 @@ Resources:
           APPSYNC_API_URL: !GetAtt GraphQLApi.GraphQLUrl
           GUARDRAIL_ID_AND_VERSION:
             !If [HasGuardrailConfig, !Sub "${BedrockGuardrailId}:${BedrockGuardrailVersion}", ""]
+          BEDROCK_ASSUME_ROLE_ARN:
+            !If [HasBedrockHubRole, !Ref BedrockHubRoleArn, !Ref AWS::NoValue]
+          BEDROCK_ASSUME_ROLE_EXTERNAL_ID:
+            !If [HasBedrockHubRoleExternalId, !Ref BedrockHubRoleExternalId, !Ref AWS::NoValue]
+          BEDROCK_ASSUME_ROLE_SESSION_NAME:
+            !If [HasBedrockHubRoleSessionName, !Ref BedrockHubRoleSessionName, !Ref AWS::NoValue]
       LoggingConfig:
         LogGroup: !Ref ChatWithDocumentProcessorLogGroup
       Policies:
@@ -6422,6 +6493,13 @@ Resources:
               - Effect: Allow
                 Action: bedrock:ApplyGuardrail
                 Resource: !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:guardrail/${BedrockGuardrailId}"
+              - !Ref AWS::NoValue
+            # Optional cross-account Bedrock invocation via hub-account role.
+            - !If
+              - HasBedrockHubRole
+              - Effect: Allow
+                Action: sts:AssumeRole
+                Resource: !Ref BedrockHubRoleArn
               - !Ref AWS::NoValue
             # RBAC scope enforcement — processor queries UsersTable.SubIndex
             # to fetch the caller's `allowedConfigVersions` and rejects
@@ -6512,6 +6590,12 @@ Resources:
             ]
           CLOUDWATCH_LOG_GROUP_PREFIX: !Sub "/aws/lambda/${AWS::StackName}"
           SETTINGS_PARAMETER_NAME: !Ref SettingsParameter
+          BEDROCK_ASSUME_ROLE_ARN:
+            !If [HasBedrockHubRole, !Ref BedrockHubRoleArn, !Ref AWS::NoValue]
+          BEDROCK_ASSUME_ROLE_EXTERNAL_ID:
+            !If [HasBedrockHubRoleExternalId, !Ref BedrockHubRoleExternalId, !Ref AWS::NoValue]
+          BEDROCK_ASSUME_ROLE_SESSION_NAME:
+            !If [HasBedrockHubRoleSessionName, !Ref BedrockHubRoleSessionName, !Ref AWS::NoValue]
       LoggingConfig:
         LogGroup: !Ref AgentChatProcessorLogGroup
       Policies:
@@ -6576,6 +6660,13 @@ Resources:
                   - "bedrock:ApplyGuardrail"
                 Resource:
                   - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:guardrail/${BedrockGuardrailId}"
+              - !Ref AWS::NoValue
+            # Optional cross-account Bedrock invocation via hub-account role.
+            - !If
+              - HasBedrockHubRole
+              - Effect: Allow
+                Action: sts:AssumeRole
+                Resource: !Ref BedrockHubRoleArn
               - !Ref AWS::NoValue
             - Effect: Allow
               Action:
@@ -7082,6 +7173,12 @@ Resources:
             ]
           CLOUDWATCH_LOG_GROUP_PREFIX: !Sub "/aws/lambda/${AWS::StackName}"
           SETTINGS_PARAMETER_NAME: !Ref SettingsParameter
+          BEDROCK_ASSUME_ROLE_ARN:
+            !If [HasBedrockHubRole, !Ref BedrockHubRoleArn, !Ref AWS::NoValue]
+          BEDROCK_ASSUME_ROLE_EXTERNAL_ID:
+            !If [HasBedrockHubRoleExternalId, !Ref BedrockHubRoleExternalId, !Ref AWS::NoValue]
+          BEDROCK_ASSUME_ROLE_SESSION_NAME:
+            !If [HasBedrockHubRoleSessionName, !Ref BedrockHubRoleSessionName, !Ref AWS::NoValue]
       LoggingConfig:
         LogGroup: !Ref AgentProcessorLogGroup
       Policies:
@@ -7136,6 +7233,13 @@ Resources:
                   - "bedrock:ApplyGuardrail"
                 Resource:
                   - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:guardrail/${BedrockGuardrailId}"
+              - !Ref AWS::NoValue
+            # Optional cross-account Bedrock invocation via hub-account role.
+            - !If
+              - HasBedrockHubRole
+              - Effect: Allow
+                Action: sts:AssumeRole
+                Resource: !Ref BedrockHubRoleArn
               - !Ref AWS::NoValue
             - Effect: Allow
               Action:
@@ -8876,6 +8980,9 @@ Resources:
         SourceZipfile: "<ARTIFACT_PREFIX_TOKEN>/multi-doc-discovery-source.zip"
         AppSyncApiUrl: !GetAtt GraphQLApi.GraphQLUrl
         AppSyncApiArn: !GetAtt GraphQLApi.Arn
+        BedrockHubRoleArn: !Ref BedrockHubRoleArn
+        BedrockHubRoleExternalId: !Ref BedrockHubRoleExternalId
+        BedrockHubRoleSessionName: !Ref BedrockHubRoleSessionName
 
   # --- Step Functions State Machine ---
 
