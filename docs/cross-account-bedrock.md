@@ -43,6 +43,9 @@ The following Bedrock call paths route through the hub role when configured:
 - ✅ **Pipeline mode (Pattern 2)**: classification, extraction (traditional + agentic), assessment, summarization, evaluation, OCR (Bedrock OCR backend), discovery (classes, rules, multi-doc), embeddings, CachePoint inference-profile resolution.
 - ✅ **Strands agentic extraction** in `idp_common/extraction/agentic_idp.py` (uses the same factory via `BedrockModel(boto_session=...)`).
 - ✅ **Multi-doc discovery** nested stack (Embed, Cluster, Analyze, Save Lambdas).
+- ✅ **Chat with Document** — the streaming chat-with-document processor (`src/lambda/chat_with_document_processor`).
+- ✅ **Agent Companion** — the agent chat processor (`src/lambda/agent_chat_processor`) and agent processor (`src/lambda/agent_processor`). These build sub-agent boto3 sessions for connection isolation; the shared `create_strands_bedrock_model()` helper detects `BEDROCK_ASSUME_ROLE_ARN` and overrides those sessions for Bedrock calls only — workload-account AWS calls (DynamoDB, S3, Athena, Glue, AppSync) continue to use local credentials.
+- ⏸️ **Bedrock Knowledge Bases** (`query_knowledgebase_resolver`): not yet covered. The KB resolver uses the `bedrock-agent-runtime` service which has a different identity surface; cross-account KB warrants a separate design.
 - ⏸️ **BDA (formerly Pattern 1)**: out of scope for v1. Cross-account BDA has its own model (project ARNs, BDA service roles) and warrants a separate design. If your deployment uses BDA mode (`use_bda: true`), the BDA runtime calls remain in the calling account.
 - ⏸️ **Model fine-tuning utilities** (`idp_common/model_finetuning/`): out of scope for v1.
 
@@ -125,6 +128,66 @@ If you set `BedrockGuardrailId` in the workload account but enable the hub role,
 If you also use `UsePrivateAppSync=true` or otherwise deploy IDP into a VPC, ensure the VPC has an **STS interface VPC endpoint** in addition to the existing Bedrock and AppSync endpoints. Without it, `sts:AssumeRole` calls from the Lambda cannot reach the AWS STS regional service.
 
 See [Deployment in a Private Network](./deployment-private-network.md) for the full list of required VPC endpoints.
+
+## How to verify
+
+After deploying with `BedrockHubRoleArn` set, run through the following checklist to confirm cross-account routing is in effect end-to-end.
+
+### 1. Backwards-compatibility test (most important)
+
+Deploy with `BedrockHubRoleArn=""` (or omit it). All existing flows should behave exactly as before. If extraction, classification, summarization, evaluation, discovery, chat-with-document, and agent companion all work, the additive change is confirmed safe.
+
+### 2. CloudTrail in the hub account — AssumeRole calls
+
+Each invocation should produce an `AssumeRole` event in the hub account:
+
+```bash
+aws cloudtrail lookup-events \
+  --lookup-attributes AttributeKey=EventName,AttributeValue=AssumeRole \
+  --max-results 20 --profile hub
+```
+
+The `RoleSessionName` should be the workload Lambda's function name (e.g. `mystack-ExtractionFunction-...`), enabling per-Lambda audit attribution.
+
+### 3. CloudTrail in the hub account — Bedrock data-plane calls
+
+The actual Bedrock invocations should show up under the assumed role's session principal:
+
+```bash
+aws cloudtrail lookup-events \
+  --lookup-attributes AttributeKey=EventName,AttributeValue=Converse \
+  --max-results 20 --profile hub | \
+  jq '.Events[].CloudTrailEvent | fromjson | .userIdentity.sessionContext.sessionIssuer.userName'
+```
+
+### 4. Negative test: workload account has no Bedrock permissions
+
+Strip the local `bedrock:InvokeModel` from the workload account (or apply a permissions boundary that blocks Bedrock). With `BedrockHubRoleArn` set, processing should still succeed via the assumed role — proving the traffic actually transits the hub.
+
+### 5. Warm-Lambda credential refresh
+
+The implementation uses `DeferredRefreshableCredentials` so STS credentials auto-refresh before the 1-hour expiry. Two ways to verify:
+
+- Trigger one of the processing Lambdas, wait > 60 minutes, trigger again. A successful call after the wait proves the refresher worked.
+- Look at the hub-account CloudTrail for **multiple** `AssumeRole` events from a single Lambda invocation lifetime (each refresh triggers a new `AssumeRole`).
+
+### 6. Coverage matrix — exercise each surface
+
+| Surface | How to exercise it |
+|---------|---------------------|
+| Pipeline (extraction, classification, summarization, evaluation, OCR, assessment) | Upload a sample document via the IDP UI; confirm in hub CloudTrail. |
+| Discovery | Run a discovery job from the UI; confirm `Embed`, `Analyze`, `Save` Lambdas show up. |
+| Chat with Document | Open a processed document and use the "Chat with Document" feature; confirm the `chat-with-document-processor` Lambda's `RoleSessionName` in CloudTrail. |
+| Agent Companion / Agent Chat | Open the agent chat panel and ask an analytics question; confirm the `agent-chat-processor` and any sub-agents (orchestrator, analytics, code-intelligence, error-analyzer) show up. |
+| Strands agentic extraction | Set `extraction.agentic.enabled: true` in the configuration and run extraction on a document with large tables. |
+
+### 7. Failure-mode probes
+
+Force-fail each likely misconfiguration to verify error messages are useful:
+
+- **Bad ARN**: deploy with a non-existent role ARN — Lambdas should fail with a clear `AccessDenied` on `sts:AssumeRole`.
+- **Missing ExternalId**: enable an `ExternalId` requirement in the trust policy, but unset `BedrockHubRoleExternalId` in the stack. Confirm the failure points at `ExternalId`.
+- **Application inference profile in wrong account**: set the IDP `model` field to an application inference profile ARN that lives in the **workload** account while the hub role is enabled. Confirm the failure clearly indicates the resource is not accessible from the assumed role.
 
 ## Operational considerations
 
