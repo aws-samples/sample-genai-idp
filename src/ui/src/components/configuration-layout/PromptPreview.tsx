@@ -127,6 +127,101 @@ function formatClassNamesAndDescriptions(classes: ClassSchema[]): string {
 }
 
 /**
+ * Soft cap on the number of schema attribute names emitted per class.
+ * Must mirror ``ClassificationService.MAX_ATTRIBUTES_PER_CLASS`` in the
+ * Python backend.
+ */
+const MAX_ATTRIBUTES_PER_CLASS = 50;
+
+/**
+ * Recursively walk a JSON Schema ``properties`` object and yield a flat
+ * list of dotted-path attribute names.
+ *
+ * Mirrors ``ClassificationService._get_attribute_names_for_class`` in the
+ * Python backend:
+ *   - Flat scalars surface by their property name.
+ *   - Nested ``object`` properties are flattened to dotted paths
+ *     (e.g. ``borrower.address.zip``).
+ *   - Arrays of objects are unwrapped — item-properties are surfaced as
+ *     ``parent.child`` (no ``[]`` indexing).
+ *   - Scalar arrays surface by their parent name only.
+ */
+function getAttributeNamesForClass(cls: ClassSchema): string[] {
+  const properties = cls.properties;
+  if (!properties || typeof properties !== 'object') return [];
+
+  const names: string[] = [];
+  const seen = new Set<string>();
+
+  const walk = (props: Record<string, PropertySchema>, parentPath = ''): void => {
+    for (const [propName, propSchema] of Object.entries(props)) {
+      if (!propSchema || typeof propSchema !== 'object') continue;
+      const fullPath = parentPath ? `${parentPath}.${propName}` : propName;
+      const propType = (propSchema as { type?: string }).type;
+
+      if (propType === 'object') {
+        const nested = (propSchema as { properties?: Record<string, PropertySchema> }).properties;
+        if (nested && typeof nested === 'object' && Object.keys(nested).length > 0) {
+          walk(nested, fullPath);
+        } else if (!seen.has(fullPath)) {
+          seen.add(fullPath);
+          names.push(fullPath);
+        }
+      } else if (propType === 'array') {
+        const items = (propSchema as { items?: PropertySchema }).items;
+        if (items && typeof items === 'object' && (items as { type?: string }).type === 'object') {
+          const nested = (items as { properties?: Record<string, PropertySchema> }).properties;
+          if (nested && typeof nested === 'object' && Object.keys(nested).length > 0) {
+            walk(nested, fullPath);
+            continue;
+          }
+        }
+        if (!seen.has(fullPath)) {
+          seen.add(fullPath);
+          names.push(fullPath);
+        }
+      } else {
+        if (!seen.has(fullPath)) {
+          seen.add(fullPath);
+          names.push(fullPath);
+        }
+      }
+    }
+  };
+
+  walk(properties);
+  return names;
+}
+
+/**
+ * Format the optional ``{CLASS_AND_ATTRIBUTE_NAMES_AND_DESCRIPTIONS}``
+ * placeholder as an XML-tagged listing for page-level classification
+ * prompts. Mirrors
+ * ``ClassificationService._format_classes_and_attributes_list()`` in the
+ * Python backend, including the soft cap and ``...(+N more)`` truncation
+ * marker for classes with > MAX_ATTRIBUTES_PER_CLASS schema attributes.
+ */
+function formatClassAndAttributeNamesAndDescriptions(classes: ClassSchema[]): string {
+  return classes
+    .map((cls) => {
+      const className = getClassId(cls);
+      const description = cls.description || '';
+      const attrNames = getAttributeNamesForClass(cls);
+      let attrsText: string;
+      if (attrNames.length === 0) {
+        attrsText = '(no schema)';
+      } else if (attrNames.length > MAX_ATTRIBUTES_PER_CLASS) {
+        const overflow = attrNames.length - MAX_ATTRIBUTES_PER_CLASS;
+        attrsText = `${attrNames.slice(0, MAX_ATTRIBUTES_PER_CLASS).join(', ')}, ...(+${overflow} more)`;
+      } else {
+        attrsText = attrNames.join(', ');
+      }
+      return `<class name="${className}">\n  <description>${description}</description>\n  <attributes>${attrsText}</attributes>\n</class>`;
+    })
+    .join('\n');
+}
+
+/**
  * Format a class schema as cleaned JSON for extraction/assessment prompts.
  * Mirrors the Python _format_schema_for_prompt() logic in extraction/service.py.
  */
@@ -395,6 +490,10 @@ const PromptPreview = ({ formValues }: PromptPreviewProps): React.JSX.Element =>
     switch (selectedStep) {
       case 'classification':
         subs.CLASS_NAMES_AND_DESCRIPTIONS = formatClassNamesAndDescriptions(classes);
+        // Optional opt-in placeholder. Only materialized into the rendered
+        // prompt if the template references it; substitutions for
+        // unreferenced keys are no-ops.
+        subs.CLASS_AND_ATTRIBUTE_NAMES_AND_DESCRIPTIONS = formatClassAndAttributeNamesAndDescriptions(classes);
         break;
 
       case 'extraction':
@@ -606,6 +705,25 @@ const PromptPreview = ({ formValues }: PromptPreviewProps): React.JSX.Element =>
             </Box>
             <div className="prompt-preview-content" style={{ height: '200px', fontSize: '12px' }}>
               {formatClassNamesAndDescriptions(classes)}
+            </div>
+
+            <Box variant="h4">{'{CLASS_AND_ATTRIBUTE_NAMES_AND_DESCRIPTIONS}'} → Class List with Schema Attribute Names (opt-in)</Box>
+            <Box variant="small" color="text-body-secondary">
+              <strong>Optional placeholder.</strong> Expands to each class&apos;s name, description, <em>and</em> the names of its schema
+              attributes (extraction fields). Useful for disambiguating classes with similar names but different extraction schemas. Only
+              materialized into the prompt when the template references it — token cost stays unchanged for users who don&apos;t use it.
+              Per-class attribute counts are soft-capped at 50 with a <code>...(+N more)</code> truncation marker. See{' '}
+              <a
+                href="https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues/262"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                issue #262
+              </a>{' '}
+              for context.
+            </Box>
+            <div className="prompt-preview-content" style={{ height: '200px', fontSize: '12px' }}>
+              {formatClassAndAttributeNamesAndDescriptions(classes)}
             </div>
           </SpaceBetween>
         </Container>
