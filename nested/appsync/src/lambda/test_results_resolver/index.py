@@ -251,6 +251,8 @@ def _count_completed_documents(table, test_run_id, files):
     """
     Count how many documents completed evaluation successfully.
 
+    Uses batch_get_item for efficiency instead of sequential get_item calls.
+
     Args:
         table: DynamoDB table resource
         test_run_id: Test run identifier
@@ -259,28 +261,44 @@ def _count_completed_documents(table, test_run_id, files):
     Returns:
         int: Number of documents with EvaluationStatus='COMPLETED'
     """
-    completed_count = 0
+    if not files:
+        return 0
 
-    for file_name in files:
-        object_key = f"{test_run_id}/{file_name}"
+    completed_count = 0
+    table_name = table.table_name
+    dynamodb_client = boto3.client('dynamodb')
+
+    # Build object keys
+    object_keys = [f"{test_run_id}/{file_name}" for file_name in files]
+
+    # DynamoDB batch_get_item supports up to 100 keys per batch
+    batch_size = 100
+    for i in range(0, len(object_keys), batch_size):
+        batch = object_keys[i:i + batch_size]
+        keys = [{'PK': {'S': f"doc#{key}"}, 'SK': {'S': 'none'}} for key in batch]
+
         try:
-            response = table.get_item(
-                Key={'PK': f"doc#{object_key}", 'SK': 'none'}
+            response = dynamodb_client.batch_get_item(
+                RequestItems={
+                    table_name: {
+                        'Keys': keys
+                    }
+                }
             )
 
-            if 'Item' not in response:
-                logger.warning(f"Document {object_key} not found in tracking table")
-                continue
+            # Count completed evaluations
+            for item in response.get('Responses', {}).get(table_name, []):
+                eval_status = item.get('EvaluationStatus', {}).get('S', '').upper()
+                if eval_status == 'COMPLETED':
+                    completed_count += 1
 
-            item = response['Item']
-            eval_status = item.get('EvaluationStatus', '').upper()
-
-            if eval_status == 'COMPLETED':
-                completed_count += 1
+            # Handle unprocessed keys (throttling, etc.)
+            unprocessed = response.get('UnprocessedKeys', {}).get(table_name, {})
+            if unprocessed:
+                logger.warning(f"Batch get had {len(unprocessed.get('Keys', []))} unprocessed keys")
 
         except Exception as e:
-            logger.warning(f"Failed to check status for {object_key}: {str(e)}")
-            continue
+            logger.error(f"Batch get failed for batch starting at index {i}: {str(e)}")
 
     return completed_count
 
@@ -336,22 +354,26 @@ def get_test_results(test_run_id):
         else:
             # For ABORTED status, count completed files on first call and persist to DB
             completed_files_count = metadata.get("CompletedFiles", 0)
-            if current_status == "ABORTED" and completed_files_count == 0:
+            completed_files_counted = metadata.get("CompletedFilesCounted", False)
+
+            # Only re-count if we haven't counted before (tracked by CompletedFilesCounted flag)
+            if current_status == "ABORTED" and not completed_files_counted:
                 files = metadata.get("Files", [])
                 if files:
                     completed_files_count = _count_completed_documents(table, test_run_id, files)
                     logger.info(f"Counted {completed_files_count} completed documents for aborted test run {test_run_id}")
 
-                    # Persist the count to database
+                    # Persist the count and flag to database
                     try:
                         table.update_item(
                             Key={"PK": f"testrun#{test_run_id}", "SK": "metadata"},
-                            UpdateExpression="SET CompletedFiles = :completed_files",
+                            UpdateExpression="SET CompletedFiles = :completed_files, CompletedFilesCounted = :counted",
                             ExpressionAttributeValues={
-                                ":completed_files": completed_files_count
+                                ":completed_files": completed_files_count,
+                                ":counted": True
                             }
                         )
-                        logger.info(f"Updated CompletedFiles to {completed_files_count} for test run {test_run_id}")
+                        logger.info(f"Updated CompletedFiles to {completed_files_count} and set CompletedFilesCounted=True for test run {test_run_id}")
                     except Exception as e:
                         logger.warning(f"Failed to update CompletedFiles for {test_run_id}: {str(e)}")
 
@@ -624,6 +646,10 @@ def get_test_run_status(test_run_id):
                 elif doc_status == "FAILED":
                     processing_failed_files += 1
                     logger.info(f"File {file_key}: counted as failed")
+                elif doc_status == "ABORTED":
+                    # Count aborted documents as processing failures
+                    processing_failed_files += 1
+                    logger.info(f"File {file_key}: counted as failed (aborted)")
                 elif doc_status == "QUEUED":
                     queued_files += 1
                     logger.info(f"File {file_key}: counted as queued")

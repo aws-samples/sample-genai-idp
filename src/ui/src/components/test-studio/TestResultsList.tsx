@@ -124,6 +124,7 @@ const TestResultsList = ({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isDeleteModalVisible, setIsDeleteModalVisible] = useState(false);
   const [isAbortModalVisible, setIsAbortModalVisible] = useState(false);
   const [isDateRangeModalVisible, setIsDateRangeModalVisible] = useState(false);
@@ -200,14 +201,10 @@ const TestResultsList = ({
       const variables = customDateRange
         ? { startDateTime: customDateRange.startDateTime, endDateTime: customDateRange.endDateTime }
         : { timePeriodHours };
-      console.log('Fetching test runs with variables:', variables);
       const result = (await client.graphql({
         query: getTestRuns,
         variables,
       })) as GqlResult;
-      console.log('Raw GraphQL result:', result);
-      console.log('getTestRuns data:', result.data.getTestRuns);
-      console.log('Number of test runs returned:', result.data.getTestRuns?.length || 0);
 
       const completedRuns = result.data.getTestRuns || [];
 
@@ -236,11 +233,11 @@ const TestResultsList = ({
     } catch (err) {
       console.error('Error fetching test runs:', err);
       const typedErr = err as { errors?: Array<{ message: string }> };
-      const errorMessage =
+      const fetchErrorMsg =
         typedErr.errors?.length && typedErr.errors.length > 0
           ? typedErr.errors.map((e: { message: string }) => e.message).join('; ')
           : 'Failed to load test runs';
-      setError(errorMessage);
+      setError(fetchErrorMsg);
     } finally {
       setLoading(false);
     }
@@ -293,13 +290,11 @@ const TestResultsList = ({
     try {
       setDeleteLoading(true);
       const testRunIds = selectedItems.map((item) => item.testRunId);
-      console.log('Attempting to delete test runs:', testRunIds);
 
       const result = (await client.graphql({
         query: deleteTests,
         variables: { testRunIds },
       })) as GqlResult;
-      console.log('Delete result:', result);
 
       const count = selectedItems.length;
       setSuccessMessage(`Successfully deleted ${count} test run${count > 1 ? 's' : ''}`);
@@ -324,13 +319,11 @@ const TestResultsList = ({
     try {
       setAbortLoading(true);
       const testRunIds = selectedItems.map((item) => item.testRunId);
-      console.log('Attempting to abort test runs:', testRunIds);
 
       const result = (await client.graphql({
         query: abortTestRuns,
         variables: { testRunIds },
       })) as GqlResult;
-      console.log('Abort result:', result);
 
       const abortResult = result.data.abortTestRuns;
       if (abortResult.success) {
@@ -347,16 +340,14 @@ const TestResultsList = ({
         // Clear success message after 5 seconds
         setTimeout(() => setSuccessMessage(null), 5000);
       } else {
-        setSuccessMessage(`Abort failed: ${abortResult.message}`);
-        setTimeout(() => setSuccessMessage(null), 5000);
+        setErrorMessage(`Abort failed: ${abortResult.message}`);
+        setTimeout(() => setErrorMessage(null), 5000);
       }
 
       return abortResult;
     } catch (err) {
-      console.error('Error aborting test runs:', err);
-      console.error('Error details:', (err as { errors?: unknown }).errors);
-      setSuccessMessage('Error aborting test runs');
-      setTimeout(() => setSuccessMessage(null), 5000);
+      setErrorMessage('Error aborting test runs');
+      setTimeout(() => setErrorMessage(null), 5000);
       return null;
     } finally {
       setAbortLoading(false);
@@ -376,6 +367,18 @@ const TestResultsList = ({
               content: successMessage,
               dismissible: true,
               onDismiss: () => setSuccessMessage(null),
+            },
+          ]}
+        />
+      )}
+      {errorMessage && (
+        <Flashbar
+          items={[
+            {
+              type: 'error',
+              content: errorMessage,
+              dismissible: true,
+              onDismiss: () => setErrorMessage(null),
             },
           ]}
         />

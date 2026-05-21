@@ -44,6 +44,17 @@ def lambda_handler(event, context):
     """
     try:
         test_run_ids = event['arguments']['testRunIds']
+
+        # Validate non-empty input
+        if not test_run_ids or len(test_run_ids) == 0:
+            return {
+                "success": False,
+                "message": "No test runs provided to abort",
+                "abortedCount": 0,
+                "failedCount": 0,
+                "errors": ["Empty testRunIds list"]
+            }
+
         logger.info(f"Aborting test runs: {test_run_ids}")
 
         tracking_table_name = os.environ.get('TRACKING_TABLE_NAME')
@@ -86,7 +97,7 @@ def lambda_handler(event, context):
                 )
 
         # Prepare response
-        success = aborted_count > 0 or failed_count == 0
+        success = aborted_count > 0
         message = f"Aborted {aborted_count} test run(s)"
         if failed_count > 0:
             message += f", {failed_count} failed"
@@ -103,11 +114,13 @@ def lambda_handler(event, context):
 
     except Exception as e:
         logger.error(f"Error in abort test runs handler: {str(e)}", exc_info=True)
+        # Extract test_run_ids if available from event
+        test_run_ids = event.get('arguments', {}).get('testRunIds', []) if 'event' in locals() else []
         return {
             "success": False,
             "message": f"Error: {str(e)}",
             "abortedCount": 0,
-            "failedCount": len(test_run_ids) if 'test_run_ids' in locals() else 0,
+            "failedCount": len(test_run_ids),
             "errors": [str(e)]
         }
 
@@ -150,24 +163,34 @@ def abort_single_test_run(test_run_id, tracking_table, abort_workflow_function_n
                 object_key = f"{test_run_id}/{file_name}"
                 object_keys.append(object_key)
 
-        # Abort all documents in the test run (async invocation)
+        # Abort all documents in the test run (async invocation in batches)
         # Note: abort_workflow_resolver handles completed/failed gracefully
         if object_keys:
             logger.info(
                 f"Aborting {len(object_keys)} documents for test run {test_run_id}"
             )
-            try:
-                lambda_client.invoke(
-                    FunctionName=abort_workflow_function_name,
-                    InvocationType='Event',  # Async
-                    Payload=json.dumps({
-                        'arguments': {'objectKeys': object_keys}
-                    })
-                )
-                logger.info(f"Invoked abort workflow for {len(object_keys)} documents")
-            except Exception as e:
-                logger.error(f"Failed to invoke abort workflow: {str(e)}")
-                # Continue anyway to wait for documents
+
+            # Process in batches of 100 to avoid Lambda timeout
+            # All batches run in parallel (InvocationType='Event')
+            batch_size = 100
+            batch_count = 0
+            for i in range(0, len(object_keys), batch_size):
+                batch = object_keys[i:i + batch_size]
+                try:
+                    lambda_client.invoke(
+                        FunctionName=abort_workflow_function_name,
+                        InvocationType='Event',  # Async - runs in parallel
+                        Payload=json.dumps({
+                            'arguments': {'objectKeys': batch}
+                        })
+                    )
+                    batch_count += 1
+                    logger.info(f"Invoked abort workflow batch {batch_count} with {len(batch)} documents")
+                except Exception as e:
+                    logger.error(f"Failed to invoke abort workflow batch {batch_count}: {str(e)}")
+                    # Continue with next batch
+
+            logger.info(f"Invoked {batch_count} abort workflow batches for total of {len(object_keys)} documents")
 
         # Wait for documents to reach terminal state (max 25 seconds to stay within AppSync timeout)
         logger.info(f"Waiting for documents to reach terminal state for test run {test_run_id}")
@@ -184,22 +207,31 @@ def abort_single_test_run(test_run_id, tracking_table, abort_workflow_function_n
                 logger.info(
                     f"Queued cache update for aborted test run: {test_run_id}"
                 )
+
+                # Wait briefly to give the metrics calculation Lambda time to start processing
+                # before we mark the test run as ABORTED
+                time.sleep(2)
+                logger.info("Waited 2 seconds for metrics calculation to start")
         except Exception as e:
             logger.warning(
                 f"Failed to queue cache update for {test_run_id}: {e}"
             )
 
         # Update test run status to ABORTED after documents have settled and metrics queued
+        # Use conditional update to prevent overwriting if test run already completed/evaluating
         try:
             # Format timestamp for AppSync AWSDateTime scalar (ISO 8601 with Z suffix)
             completed_at = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.%fZ')
             tracking_table.update_item(
                 Key={'PK': f"testrun#{test_run_id}", 'SK': "metadata"},
                 UpdateExpression="SET #status = :status, CompletedAt = :completed_at",
+                ConditionExpression="#status IN (:queued, :running)",
                 ExpressionAttributeNames={'#status': 'Status'},
                 ExpressionAttributeValues={
                     ':status': 'ABORTED',
-                    ':completed_at': completed_at
+                    ':completed_at': completed_at,
+                    ':queued': 'QUEUED',
+                    ':running': 'RUNNING'
                 }
             )
             logger.info(f"Updated test run {test_run_id} status to ABORTED")
@@ -220,14 +252,65 @@ def abort_single_test_run(test_run_id, tracking_table, abort_workflow_function_n
         return {"success": False, "error": str(e)}
 
 
+def _batch_get_document_items(tracking_table, object_keys):
+    """
+    Batch get document items from DynamoDB.
+
+    Args:
+        tracking_table: DynamoDB table resource
+        object_keys: List of document object keys (S3 paths)
+
+    Returns:
+        Dict mapping object_key to item dict
+    """
+    if not object_keys:
+        return {}
+
+    table_name = tracking_table.table_name
+    items_by_key = {}
+
+    # DynamoDB batch_get_item supports up to 100 keys per batch
+    batch_size = 100
+    for i in range(0, len(object_keys), batch_size):
+        batch = object_keys[i:i + batch_size]
+        keys = [{'PK': f"doc#{key}", 'SK': 'none'} for key in batch]
+
+        try:
+            response = dynamodb.batch_get_item(
+                RequestItems={
+                    table_name: {
+                        'Keys': keys
+                    }
+                }
+            )
+
+            # Map responses back to object keys
+            for item in response.get('Responses', {}).get(table_name, []):
+                # Extract object_key from PK (format: "doc#object_key")
+                pk = item.get('PK', '')
+                if pk.startswith('doc#'):
+                    obj_key = pk[4:]  # Remove "doc#" prefix
+                    items_by_key[obj_key] = item
+
+            # Handle unprocessed keys (throttling, etc.)
+            unprocessed = response.get('UnprocessedKeys', {}).get(table_name, {})
+            if unprocessed:
+                logger.warning(f"Batch get had {len(unprocessed.get('Keys', []))} unprocessed keys")
+
+        except Exception as e:
+            logger.error(f"Batch get failed for batch starting at index {i}: {str(e)}")
+
+    return items_by_key
+
+
 def _wait_for_documents_terminal_state(tracking_table, test_run_id, object_keys, max_wait_time=25):
     """
     Wait for all documents in the test run to reach a terminal state.
 
     Terminal states for documents:
+    - COMPLETED with EvaluationStatus='COMPLETED' (finished evaluation)
     - ABORTED (stopped by abort workflow)
     - FAILED (processing failed)
-    - COMPLETED with EvaluationStatus='COMPLETED' (finished evaluation)
 
     Args:
         tracking_table: DynamoDB table resource
@@ -238,34 +321,45 @@ def _wait_for_documents_terminal_state(tracking_table, test_run_id, object_keys,
     poll_interval = 2  # Check every 2 seconds
     start_time = time.time()
 
-    terminal_statuses = {'ABORTED', 'FAILED'}
+    # Terminal statuses: documents that won't change further
+    terminal_statuses = {'COMPLETED', 'ABORTED', 'FAILED'}
+
+    # Initialize counters
+    pending_count = 0
+    terminal_count = 0
 
     while time.time() - start_time < max_wait_time:
         pending_count = 0
-        completed_eval_count = 0
-        aborted_count = 0
+        terminal_count = 0
+
+        # Use batch_get_item for efficiency (100 keys per batch vs 100 sequential GETs)
+        items_by_key = _batch_get_document_items(tracking_table, object_keys)
 
         for object_key in object_keys:
             try:
-                # Query document status
-                response = tracking_table.get_item(
-                    Key={'PK': f"doc#{object_key}", 'SK': 'status'}
-                )
-
-                if 'Item' not in response:
+                item = items_by_key.get(object_key)
+                if not item:
                     logger.warning(f"Document {object_key} not found in tracking table")
+                    pending_count += 1
                     continue
 
-                item = response['Item']
-                doc_status = item.get('Status', '').upper()
+                doc_status = item.get('ObjectStatus', '').upper()
                 eval_status = item.get('EvaluationStatus', '').upper()
 
                 # Check if document reached terminal state
-                if doc_status in terminal_statuses:
-                    aborted_count += 1
-                elif eval_status == 'COMPLETED':
-                    completed_eval_count += 1
+                # Terminal = processing done AND (evaluation done OR no evaluation needed)
+                if doc_status == 'COMPLETED':
+                    # Document processing finished, check if evaluation is also done
+                    if eval_status in ('COMPLETED', 'FAILED', 'NO_BASELINE'):
+                        terminal_count += 1
+                    else:
+                        # Still evaluating (or evaluation not started yet)
+                        pending_count += 1
+                elif doc_status in terminal_statuses:
+                    # ABORTED or FAILED - no evaluation happens, already terminal
+                    terminal_count += 1
                 else:
+                    # Still processing (QUEUED, RUNNING, OCR, EXTRACTING, etc.)
                     pending_count += 1
 
             except Exception as e:
@@ -273,15 +367,14 @@ def _wait_for_documents_terminal_state(tracking_table, test_run_id, object_keys,
                 pending_count += 1
 
         logger.info(
-            f"Document status check: {completed_eval_count} evaluated, "
-            f"{aborted_count} aborted, {pending_count} pending"
+            f"Document status check: {terminal_count} terminal, {pending_count} pending"
         )
 
         # All documents reached terminal state
         if pending_count == 0:
             logger.info(
                 f"All documents reached terminal state for test run {test_run_id} "
-                f"({completed_eval_count} completed evaluation, {aborted_count} aborted)"
+                f"({terminal_count} terminal)"
             )
             return
 
@@ -292,5 +385,5 @@ def _wait_for_documents_terminal_state(tracking_table, test_run_id, object_keys,
     logger.warning(
         f"Timeout waiting for documents to reach terminal state for test run {test_run_id}. "
         f"Proceeding with metrics calculation anyway. "
-        f"Final status: {completed_eval_count} evaluated, {aborted_count} aborted, {pending_count} pending"
+        f"Final status: {terminal_count} terminal, {pending_count} pending"
     )

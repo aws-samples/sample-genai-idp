@@ -173,16 +173,27 @@ def test_wait_for_documents_all_complete():
     sys.modules["index"] = index
     spec.loader.exec_module(index)
     mock_table = MagicMock()
-    mock_table.get_item.return_value = {
-        "Item": {"Status": "COMPLETED", "EvaluationStatus": "COMPLETED"}
+    mock_table.table_name = "test-tracking-table"
+
+    # Mock the module-level dynamodb.batch_get_item
+    mock_dynamodb = MagicMock()
+    mock_dynamodb.batch_get_item.return_value = {
+        "Responses": {
+            "test-tracking-table": [
+                {"PK": "doc#test-run-123/file1.pdf", "ObjectStatus": "COMPLETED", "EvaluationStatus": "COMPLETED"},
+                {"PK": "doc#test-run-123/file2.pdf", "ObjectStatus": "COMPLETED", "EvaluationStatus": "COMPLETED"}
+            ]
+        }
     }
+
     test_run_id = "test-run-123"
     object_keys = ["test-run-123/file1.pdf", "test-run-123/file2.pdf"]
-    with patch("time.sleep"):
-        index._wait_for_documents_terminal_state(
-            mock_table, test_run_id, object_keys, max_wait_time=10
-        )
-    assert mock_table.get_item.call_count >= 2
+    with patch.object(index, "dynamodb", mock_dynamodb):
+        with patch("time.sleep"):
+            index._wait_for_documents_terminal_state(
+                mock_table, test_run_id, object_keys, max_wait_time=10
+            )
+    assert mock_dynamodb.batch_get_item.call_count >= 1
 
 
 @pytest.mark.unit
@@ -203,22 +214,27 @@ def test_wait_for_documents_mixed_statuses():
     sys.modules["index"] = index
     spec.loader.exec_module(index)
     mock_table = MagicMock()
+    mock_table.table_name = "test-tracking-table"
 
-    def mock_get_item(Key):
-        object_key = Key["PK"].replace("doc#", "")
-        if "file1" in object_key:
-            return {"Item": {"Status": "COMPLETED", "EvaluationStatus": "COMPLETED"}}
-        else:
-            return {"Item": {"Status": "ABORTED", "EvaluationStatus": None}}
+    # Mock the module-level dynamodb.batch_get_item with mixed statuses
+    mock_dynamodb = MagicMock()
+    mock_dynamodb.batch_get_item.return_value = {
+        "Responses": {
+            "test-tracking-table": [
+                {"PK": "doc#test-run-123/file1.pdf", "ObjectStatus": "COMPLETED", "EvaluationStatus": "COMPLETED"},
+                {"PK": "doc#test-run-123/file2.pdf", "ObjectStatus": "ABORTED"}
+            ]
+        }
+    }
 
-    mock_table.get_item.side_effect = mock_get_item
     test_run_id = "test-run-123"
     object_keys = ["test-run-123/file1.pdf", "test-run-123/file2.pdf"]
-    with patch("time.sleep"):
-        index._wait_for_documents_terminal_state(
-            mock_table, test_run_id, object_keys, max_wait_time=10
-        )
-    assert mock_table.get_item.call_count >= 2
+    with patch.object(index, "dynamodb", mock_dynamodb):
+        with patch("time.sleep"):
+            index._wait_for_documents_terminal_state(
+                mock_table, test_run_id, object_keys, max_wait_time=10
+            )
+    assert mock_dynamodb.batch_get_item.call_count >= 1
 
 
 @pytest.mark.unit
