@@ -11,11 +11,7 @@ import pytest
 
 def _mock_batch_get_response(table_name, items):
     """Helper to create batch_get_item response"""
-    return {
-        "Responses": {
-            table_name: items
-        }
-    }
+    return {"Responses": {table_name: items}}
 
 
 @pytest.mark.unit
@@ -38,11 +34,26 @@ def test_count_completed_documents_all_completed():
     mock_table = MagicMock()
     mock_table.table_name = "test-table"
 
-    mock_response = _mock_batch_get_response("test-table", [
-        {"PK": {"S": "doc#test-run-123/file1.pdf"}, "SK": {"S": "none"}, "EvaluationStatus": {"S": "COMPLETED"}},
-        {"PK": {"S": "doc#test-run-123/file2.pdf"}, "SK": {"S": "none"}, "EvaluationStatus": {"S": "COMPLETED"}},
-        {"PK": {"S": "doc#test-run-123/file3.pdf"}, "SK": {"S": "none"}, "EvaluationStatus": {"S": "COMPLETED"}}
-    ])
+    mock_response = _mock_batch_get_response(
+        "test-table",
+        [
+            {
+                "PK": {"S": "doc#test-run-123/file1.pdf"},
+                "SK": {"S": "none"},
+                "EvaluationStatus": {"S": "COMPLETED"},
+            },
+            {
+                "PK": {"S": "doc#test-run-123/file2.pdf"},
+                "SK": {"S": "none"},
+                "EvaluationStatus": {"S": "COMPLETED"},
+            },
+            {
+                "PK": {"S": "doc#test-run-123/file3.pdf"},
+                "SK": {"S": "none"},
+                "EvaluationStatus": {"S": "COMPLETED"},
+            },
+        ],
+    )
 
     mock_dynamodb_client = MagicMock()
     mock_dynamodb_client.batch_get_item.return_value = mock_response
@@ -75,11 +86,25 @@ def test_count_completed_documents_partial():
     mock_table = MagicMock()
     mock_table.table_name = "test-table"
 
-    mock_response = _mock_batch_get_response("test-table", [
-        {"PK": {"S": "doc#test-run-123/file1.pdf"}, "SK": {"S": "none"}, "EvaluationStatus": {"S": "COMPLETED"}},
-        {"PK": {"S": "doc#test-run-123/file2.pdf"}, "SK": {"S": "none"}, "EvaluationStatus": {"S": "COMPLETED"}},
-        {"PK": {"S": "doc#test-run-123/file3.pdf"}, "SK": {"S": "none"}}  # No EvaluationStatus
-    ])
+    mock_response = _mock_batch_get_response(
+        "test-table",
+        [
+            {
+                "PK": {"S": "doc#test-run-123/file1.pdf"},
+                "SK": {"S": "none"},
+                "EvaluationStatus": {"S": "COMPLETED"},
+            },
+            {
+                "PK": {"S": "doc#test-run-123/file2.pdf"},
+                "SK": {"S": "none"},
+                "EvaluationStatus": {"S": "COMPLETED"},
+            },
+            {
+                "PK": {"S": "doc#test-run-123/file3.pdf"},
+                "SK": {"S": "none"},
+            },  # No EvaluationStatus
+        ],
+    )
 
     mock_dynamodb_client = MagicMock()
     mock_dynamodb_client.batch_get_item.return_value = mock_response
@@ -111,10 +136,13 @@ def test_count_completed_documents_none_completed():
     mock_table = MagicMock()
     mock_table.table_name = "test-table"
 
-    mock_response = _mock_batch_get_response("test-table", [
-        {"PK": {"S": "doc#test-run-123/file1.pdf"}, "SK": {"S": "none"}},
-        {"PK": {"S": "doc#test-run-123/file2.pdf"}, "SK": {"S": "none"}}
-    ])
+    mock_response = _mock_batch_get_response(
+        "test-table",
+        [
+            {"PK": {"S": "doc#test-run-123/file1.pdf"}, "SK": {"S": "none"}},
+            {"PK": {"S": "doc#test-run-123/file2.pdf"}, "SK": {"S": "none"}},
+        ],
+    )
 
     mock_dynamodb_client = MagicMock()
     mock_dynamodb_client.batch_get_item.return_value = mock_response
@@ -146,9 +174,16 @@ def test_count_completed_documents_missing_evaluation_status():
     mock_table = MagicMock()
     mock_table.table_name = "test-table"
 
-    mock_response = _mock_batch_get_response("test-table", [
-        {"PK": {"S": "doc#test-run-123/file1.pdf"}, "SK": {"S": "none"}, "ObjectStatus": {"S": "COMPLETED"}}
-    ])
+    mock_response = _mock_batch_get_response(
+        "test-table",
+        [
+            {
+                "PK": {"S": "doc#test-run-123/file1.pdf"},
+                "SK": {"S": "none"},
+                "ObjectStatus": {"S": "COMPLETED"},
+            }
+        ],
+    )
 
     mock_dynamodb_client = MagicMock()
     mock_dynamodb_client.batch_get_item.return_value = mock_response
@@ -243,9 +278,16 @@ def test_count_completed_documents_uses_correct_sk():
     mock_table = MagicMock()
     mock_table.table_name = "test-table"
 
-    mock_response = _mock_batch_get_response("test-table", [
-        {"PK": {"S": "doc#test-run-123/file1.pdf"}, "SK": {"S": "none"}, "EvaluationStatus": {"S": "COMPLETED"}}
-    ])
+    mock_response = _mock_batch_get_response(
+        "test-table",
+        [
+            {
+                "PK": {"S": "doc#test-run-123/file1.pdf"},
+                "SK": {"S": "none"},
+                "EvaluationStatus": {"S": "COMPLETED"},
+            }
+        ],
+    )
 
     mock_dynamodb_client = MagicMock()
     mock_dynamodb_client.batch_get_item.return_value = mock_response
@@ -282,10 +324,21 @@ def test_count_completed_documents_case_insensitive():
     mock_table = MagicMock()
     mock_table.table_name = "test-table"
 
-    mock_response = _mock_batch_get_response("test-table", [
-        {"PK": {"S": "doc#test-run-123/file1.pdf"}, "SK": {"S": "none"}, "EvaluationStatus": {"S": "completed"}},  # lowercase
-        {"PK": {"S": "doc#test-run-123/file2.pdf"}, "SK": {"S": "none"}, "EvaluationStatus": {"S": "COMPLETED"}}   # uppercase
-    ])
+    mock_response = _mock_batch_get_response(
+        "test-table",
+        [
+            {
+                "PK": {"S": "doc#test-run-123/file1.pdf"},
+                "SK": {"S": "none"},
+                "EvaluationStatus": {"S": "completed"},
+            },  # lowercase
+            {
+                "PK": {"S": "doc#test-run-123/file2.pdf"},
+                "SK": {"S": "none"},
+                "EvaluationStatus": {"S": "COMPLETED"},
+            },  # uppercase
+        ],
+    )
 
     mock_dynamodb_client = MagicMock()
     mock_dynamodb_client.batch_get_item.return_value = mock_response

@@ -180,8 +180,16 @@ def test_wait_for_documents_all_complete():
     mock_dynamodb.batch_get_item.return_value = {
         "Responses": {
             "test-tracking-table": [
-                {"PK": "doc#test-run-123/file1.pdf", "ObjectStatus": "COMPLETED", "EvaluationStatus": "COMPLETED"},
-                {"PK": "doc#test-run-123/file2.pdf", "ObjectStatus": "COMPLETED", "EvaluationStatus": "COMPLETED"}
+                {
+                    "PK": "doc#test-run-123/file1.pdf",
+                    "ObjectStatus": "COMPLETED",
+                    "EvaluationStatus": "COMPLETED",
+                },
+                {
+                    "PK": "doc#test-run-123/file2.pdf",
+                    "ObjectStatus": "COMPLETED",
+                    "EvaluationStatus": "COMPLETED",
+                },
             ]
         }
     }
@@ -221,8 +229,12 @@ def test_wait_for_documents_mixed_statuses():
     mock_dynamodb.batch_get_item.return_value = {
         "Responses": {
             "test-tracking-table": [
-                {"PK": "doc#test-run-123/file1.pdf", "ObjectStatus": "COMPLETED", "EvaluationStatus": "COMPLETED"},
-                {"PK": "doc#test-run-123/file2.pdf", "ObjectStatus": "ABORTED"}
+                {
+                    "PK": "doc#test-run-123/file1.pdf",
+                    "ObjectStatus": "COMPLETED",
+                    "EvaluationStatus": "COMPLETED",
+                },
+                {"PK": "doc#test-run-123/file2.pdf", "ObjectStatus": "ABORTED"},
             ]
         }
     }
