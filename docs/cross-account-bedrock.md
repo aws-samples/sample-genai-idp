@@ -139,15 +139,27 @@ Deploy with `BedrockHubRoleArn=""` (or omit it). All existing flows should behav
 
 ### 2. CloudTrail in the hub account — AssumeRole calls
 
-Each invocation should produce an `AssumeRole` event in the hub account:
+Each Lambda invocation should produce an `AssumeRole` event in the hub account. Note that `lookup-events` returns the top-level `Username` as `null` for cross-account `AssumeRole` events — the source account and session name live inside the embedded `CloudTrailEvent` JSON. Decode it with a small Python snippet:
 
 ```bash
 aws cloudtrail lookup-events \
   --lookup-attributes AttributeKey=EventName,AttributeValue=AssumeRole \
-  --max-results 20 --profile hub
+  --max-results 20 \
+  --region <region-where-stack-is-deployed> \
+  --output json --profile hub | python3 -c "
+import json, sys
+for e in json.load(sys.stdin)['Events']:
+    ct = json.loads(e['CloudTrailEvent'])
+    req = ct.get('requestParameters') or {}
+    role_arn = req.get('roleArn', '')
+    if 'IDPBedrockHubRole' not in role_arn:  # adjust to your role name
+        continue
+    src_acct = ct.get('userIdentity', {}).get('accountId', '?')
+    print(f\"{e['EventTime']}  src={src_acct}  session={req.get('roleSessionName','?')}\")
+"
 ```
 
-The `RoleSessionName` should be the workload Lambda's function name (e.g. `mystack-ExtractionFunction-...`), enabling per-Lambda audit attribution.
+You should see one event per Lambda invocation, with `RoleSessionName` matching the Lambda function name (e.g. `mystack-ExtractionFunction-abc123`). This proves per-Lambda CloudTrail attribution is working.
 
 ### 3. CloudTrail in the hub account — Bedrock data-plane calls
 
@@ -173,13 +185,14 @@ The implementation uses `DeferredRefreshableCredentials` so STS credentials auto
 
 ### 6. Coverage matrix — exercise each surface
 
-| Surface | How to exercise it |
-|---------|---------------------|
-| Pipeline (extraction, classification, summarization, evaluation, OCR, assessment) | Upload a sample document via the IDP UI; confirm in hub CloudTrail. |
-| Discovery | Run a discovery job from the UI; confirm `Embed`, `Analyze`, `Save` Lambdas show up. |
-| Chat with Document | Open a processed document and use the "Chat with Document" feature; confirm the `chat-with-document-processor` Lambda's `RoleSessionName` in CloudTrail. |
-| Agent Companion / Agent Chat | Open the agent chat panel and ask an analytics question; confirm the `agent-chat-processor` and any sub-agents (orchestrator, analytics, code-intelligence, error-analyzer) show up. |
-| Strands agentic extraction | Set `extraction.agentic.enabled: true` in the configuration and run extraction on a document with large tables. |
+| Surface | How to exercise it | Expected `RoleSessionName` (CloudTrail) |
+|---------|---------------------|------------------------------------------|
+| Pipeline (extraction, classification, summarization, evaluation, OCR, assessment) | Upload a sample document via the IDP UI. | `*-ClassificationFunction-*`, `*-ExtractionFunction-*`, `*-AssessmentFunction-*`, `*-SummarizationFunction-*`, etc. |
+| Discovery | Run a discovery job from the UI. | `*-MultiDocDiscoveryEmbedFunction-*`, `*-AnalyzeFunction-*`, `*-SaveFunction-*` |
+| Chat with Document | Open a processed document and use the "Chat with Document" feature. | `*-ChatWithDocumentProcessor-*` |
+| Agent Companion / Agent Chat | Open the agent chat panel and ask an analytics question. | `*-AgentChatProcessor-*` (sub-agents reuse the same session, so they appear under the same `RoleSessionName`). |
+| Agent processor | Trigger an agent invocation from the UI. | `*-AgentProcessor-*` |
+| Strands agentic extraction | Set `extraction.agentic.enabled: true` in the configuration and run extraction on a document with large tables. | `*-ExtractionFunction-*` |
 
 ### 7. Failure-mode probes
 
@@ -199,12 +212,13 @@ Force-fail each likely misconfiguration to verify error messages are useful:
 
 | Symptom | Likely cause |
 |---------|--------------|
-| `AccessDenied` on `sts:AssumeRole` | Hub-account trust policy missing the workload account/role; missing `ExternalId`; permissions boundary blocking AssumeRole. |
+| `AccessDenied` on `sts:AssumeRole` from the Lambda execution role itself (error message references `User: arn:aws:sts::<workload-acct>:assumed-role/...` is not authorized) | The Lambda execution role is missing the `sts:AssumeRole` IAM stmt. Most common root cause: the `BedrockHubRoleArn` parameter was deployed with the role ARN and the ExternalId concatenated into a single string (e.g. `arn:...:role/Foo ExternalId: xyz`). The IAM stmt is then synthesized with a corrupt Resource. **Fix**: redeploy the stack passing `BedrockHubRoleArn` and `BedrockHubRoleExternalId` as **separate** parameters. Verify with `aws iam get-role-policy ... --query 'PolicyDocument.Statement[?Action==\`sts:AssumeRole\`]'`. |
+| `AccessDenied` on `sts:AssumeRole` blamed on the trust policy (error message references the resource role ARN, not the caller) | Hub-account trust policy missing the workload account/role; missing `ExternalId`; permissions boundary in the workload account blocking AssumeRole. |
 | `AccessDenied` on `bedrock:InvokeModel` after AssumeRole succeeds | Hub-account role missing model access (e.g., not allow-listed for the requested foundation model). |
 | `AccessDenied` on `bedrock:GetInferenceProfile` | The inference profile is in the workload account, not the hub account. Move it, or use a system-defined cross-region profile. |
 | `AccessDenied` on `bedrock:ApplyGuardrail` | The Guardrail is in the workload account. Move it to the hub account or unset `BedrockGuardrailId`. |
 | Errors after ~1 hour of warm Lambda activity | Should not happen — credentials auto-refresh. If it does, file a bug; the factory may have been bypassed. |
-| `EndpointConnectionError` on `sts.us-east-1.amazonaws.com` from a VPC Lambda | Missing STS interface VPC endpoint. |
+| `EndpointConnectionError` on `sts.<region>.amazonaws.com` from a VPC Lambda | Missing STS interface VPC endpoint. |
 
 ## Implementation notes
 

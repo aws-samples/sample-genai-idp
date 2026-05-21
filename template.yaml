@@ -335,7 +335,8 @@ Parameters:
   BedrockHubRoleArn:
     Type: String
     Default: ""
-    AllowedPattern: "^$|^arn:(aws|aws-cn|aws-us-gov|aws-iso|aws-iso-b):iam::[0-9]{12}:role/.+$"
+    AllowedPattern: "^$|^arn:(aws|aws-cn|aws-us-gov|aws-iso|aws-iso-b):iam::[0-9]{12}:role/[\\w+=,.@\\-/]+$"
+    ConstraintDescription: "Must be empty or a valid IAM role ARN. The ARN must NOT contain spaces — pass ExternalId via the separate BedrockHubRoleExternalId parameter."
     Description: >
       (Optional) ARN of an IAM role in a centralized "hub" account that this stack
       should assume for all Amazon Bedrock data-plane and control-plane API calls.
