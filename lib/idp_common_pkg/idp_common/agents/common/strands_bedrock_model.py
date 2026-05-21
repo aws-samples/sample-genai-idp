@@ -75,6 +75,33 @@ def create_strands_bedrock_model(
     if "boto_client_config" not in kwargs:
         kwargs["boto_client_config"] = boto_config
 
+    # Route Bedrock through the cross-account session factory when
+    # BEDROCK_ASSUME_ROLE_ARN is set. The Strands BedrockModel's
+    # boto_session is used **only** for Bedrock invocations, so it is safe
+    # to override any explicitly-passed session here — non-Bedrock AWS
+    # calls in the same Lambda continue to use the calling-account
+    # credentials.
+    #
+    # When BEDROCK_ASSUME_ROLE_ARN is unset, get_bedrock_session() returns
+    # a vanilla session, preserving prior behavior.
+    if os.environ.get("BEDROCK_ASSUME_ROLE_ARN", "").strip():
+        try:
+            from idp_common.bedrock.session import get_bedrock_session
+
+            boto_session = get_bedrock_session()
+        except Exception as e:
+            logger.warning(
+                "Failed to build Bedrock hub-account session, falling back to default (%s)",
+                e,
+            )
+    elif boto_session is None:
+        try:
+            from idp_common.bedrock.session import get_bedrock_session
+
+            boto_session = get_bedrock_session()
+        except Exception as e:
+            logger.debug("Falling back to default Bedrock session (%s)", e)
+
     # Get guardrail configuration from environment if available
     guardrail_env = os.environ.get("GUARDRAIL_ID_AND_VERSION", "")
     if guardrail_env:

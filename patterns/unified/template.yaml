@@ -81,6 +81,28 @@ Parameters:
     Default: ""
     Description: "If you provided a Bedrock Guardrail Id above, provide the corresponding Guardrail version here"
 
+  BedrockHubRoleArn:
+    Type: String
+    Default: ""
+    AllowedPattern: "^$|^arn:(aws|aws-cn|aws-us-gov|aws-iso|aws-iso-b):iam::[0-9]{12}:role/[\\w+=,.@\\-/]+$"
+    ConstraintDescription: "Must be empty or a valid IAM role ARN. The ARN must NOT contain spaces — pass ExternalId via the separate BedrockHubRoleExternalId parameter."
+    Description: >
+      (Optional) ARN of an IAM role in a centralized hub account to assume for all
+      Bedrock invocations. When set, processing Lambdas use sts:AssumeRole and route
+      Bedrock data-plane and control-plane traffic through this role.
+
+  BedrockHubRoleExternalId:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: "(Optional) ExternalId for sts:AssumeRole into the Bedrock hub-account role."
+
+  BedrockHubRoleSessionName:
+    Type: String
+    Default: ""
+    AllowedPattern: "^[\\w+=,.@-]{0,64}$"
+    Description: "(Optional) Session name for sts:AssumeRole into the Bedrock hub-account role."
+
   AppSyncApiUrl:
     Type: String
     Default: ""
@@ -213,6 +235,12 @@ Conditions:
       !Not [!Equals [!Ref BedrockGuardrailId, ""]],
       !Not [!Equals [!Ref BedrockGuardrailVersion, ""]],
     ]
+  HasBedrockHubRole:
+    !Not [!Equals [!Ref BedrockHubRoleArn, ""]]
+  HasBedrockHubRoleExternalId:
+    !Not [!Equals [!Ref BedrockHubRoleExternalId, ""]]
+  HasBedrockHubRoleSessionName:
+    !Not [!Equals [!Ref BedrockHubRoleSessionName, ""]]
   HasCustomClassificationModelARN:
     !Not [!Equals [!Ref CustomClassificationModelARN, ""]]
   HasCustomExtractionModelARN:
@@ -2930,6 +2958,12 @@ Resources:
           TRACKING_TABLE: !Ref TrackingTable
           DOCUMENT_TRACKING_MODE: !If [HasAppSyncApi, "appsync", "dynamodb"]
           WORKING_BUCKET: !Ref WorkingBucket
+          BEDROCK_ASSUME_ROLE_ARN:
+            !If [HasBedrockHubRole, !Ref BedrockHubRoleArn, !Ref AWS::NoValue]
+          BEDROCK_ASSUME_ROLE_EXTERNAL_ID:
+            !If [HasBedrockHubRoleExternalId, !Ref BedrockHubRoleExternalId, !Ref AWS::NoValue]
+          BEDROCK_ASSUME_ROLE_SESSION_NAME:
+            !If [HasBedrockHubRoleSessionName, !Ref BedrockHubRoleSessionName, !Ref AWS::NoValue]
       LoggingConfig:
         LogGroup: !Ref OCRFunctionLogGroup
       Policies:
@@ -2981,6 +3015,17 @@ Resources:
                 - aws-marketplace:Unsubscribe
                 - aws-marketplace:ViewSubscriptions
               Resource: "*"
+            # Optional cross-account Bedrock invocation via hub-account role.
+            # When BedrockHubRoleArn is set, the function assumes this role for
+            # all Bedrock data-plane and control-plane calls. The local Bedrock
+            # statements above are left in place so same-account invocations
+            # continue to work when the parameter is unset.
+            - !If
+              - HasBedrockHubRole
+              - Effect: Allow
+                Action: sts:AssumeRole
+                Resource: !Ref BedrockHubRoleArn
+              - !Ref AWS::NoValue
             # Lambda invoke permission for LambdaHook custom inference
             - Effect: Allow
               Action: lambda:InvokeFunction
@@ -3064,6 +3109,12 @@ Resources:
           WORKING_BUCKET: !Ref WorkingBucket
           # Guardrails break classification
           # GUARDRAIL_ID_AND_VERSION: !If [HasGuardrailConfig, !Sub "${BedrockGuardrailId}:${BedrockGuardrailVersion}", ""]
+          BEDROCK_ASSUME_ROLE_ARN:
+            !If [HasBedrockHubRole, !Ref BedrockHubRoleArn, !Ref AWS::NoValue]
+          BEDROCK_ASSUME_ROLE_EXTERNAL_ID:
+            !If [HasBedrockHubRoleExternalId, !Ref BedrockHubRoleExternalId, !Ref AWS::NoValue]
+          BEDROCK_ASSUME_ROLE_SESSION_NAME:
+            !If [HasBedrockHubRoleSessionName, !Ref BedrockHubRoleSessionName, !Ref AWS::NoValue]
       LoggingConfig:
         LogGroup: !Ref ClassificationFunctionLogGroup
       Policies:
@@ -3125,6 +3176,17 @@ Resources:
                 - aws-marketplace:Unsubscribe
                 - aws-marketplace:ViewSubscriptions
               Resource: "*"
+            # Optional cross-account Bedrock invocation via hub-account role.
+            # When BedrockHubRoleArn is set, the function assumes this role for
+            # all Bedrock data-plane and control-plane calls. The local Bedrock
+            # statements above are left in place so same-account invocations
+            # continue to work when the parameter is unset.
+            - !If
+              - HasBedrockHubRole
+              - Effect: Allow
+                Action: sts:AssumeRole
+                Resource: !Ref BedrockHubRoleArn
+              - !Ref AWS::NoValue
             # Lambda invoke permission for LambdaHook custom inference
             - Effect: Allow
               Action: lambda:InvokeFunction
@@ -3210,6 +3272,12 @@ Resources:
           TRACKING_TABLE: !Ref TrackingTable
           DOCUMENT_TRACKING_MODE: !If [HasAppSyncApi, "appsync", "dynamodb"]
           WORKING_BUCKET: !Ref WorkingBucket
+          BEDROCK_ASSUME_ROLE_ARN:
+            !If [HasBedrockHubRole, !Ref BedrockHubRoleArn, !Ref AWS::NoValue]
+          BEDROCK_ASSUME_ROLE_EXTERNAL_ID:
+            !If [HasBedrockHubRoleExternalId, !Ref BedrockHubRoleExternalId, !Ref AWS::NoValue]
+          BEDROCK_ASSUME_ROLE_SESSION_NAME:
+            !If [HasBedrockHubRoleSessionName, !Ref BedrockHubRoleSessionName, !Ref AWS::NoValue]
       LoggingConfig:
         LogGroup: !Ref ExtractionFunctionLogGroup
       Policies:
@@ -3263,6 +3331,17 @@ Resources:
                   - HasCustomExtractionModelARN
                   - !Ref CustomExtractionModelARN
                   - !Ref AWS::NoValue
+            # Optional cross-account Bedrock invocation via hub-account role.
+            # When BedrockHubRoleArn is set, the function assumes this role for
+            # all Bedrock data-plane and control-plane calls. The local Bedrock
+            # statements above are left in place so same-account invocations
+            # continue to work when the parameter is unset.
+            - !If
+              - HasBedrockHubRole
+              - Effect: Allow
+                Action: sts:AssumeRole
+                Resource: !Ref BedrockHubRoleArn
+              - !Ref AWS::NoValue
             - Effect: Allow
               Action:
                 - aws-marketplace:Subscribe
@@ -3345,6 +3424,12 @@ Resources:
           TRACKING_TABLE: !Ref TrackingTable
           DOCUMENT_TRACKING_MODE: !If [HasAppSyncApi, "appsync", "dynamodb"]
           WORKING_BUCKET: !Ref WorkingBucket
+          BEDROCK_ASSUME_ROLE_ARN:
+            !If [HasBedrockHubRole, !Ref BedrockHubRoleArn, !Ref AWS::NoValue]
+          BEDROCK_ASSUME_ROLE_EXTERNAL_ID:
+            !If [HasBedrockHubRoleExternalId, !Ref BedrockHubRoleExternalId, !Ref AWS::NoValue]
+          BEDROCK_ASSUME_ROLE_SESSION_NAME:
+            !If [HasBedrockHubRoleSessionName, !Ref BedrockHubRoleSessionName, !Ref AWS::NoValue]
       LoggingConfig:
         LogGroup: !Ref AssessmentFunctionLogGroup
       Policies:
@@ -3400,6 +3485,17 @@ Resources:
                 - aws-marketplace:Unsubscribe
                 - aws-marketplace:ViewSubscriptions
               Resource: "*"
+            # Optional cross-account Bedrock invocation via hub-account role.
+            # When BedrockHubRoleArn is set, the function assumes this role for
+            # all Bedrock data-plane and control-plane calls. The local Bedrock
+            # statements above are left in place so same-account invocations
+            # continue to work when the parameter is unset.
+            - !If
+              - HasBedrockHubRole
+              - Effect: Allow
+                Action: sts:AssumeRole
+                Resource: !Ref BedrockHubRoleArn
+              - !Ref AWS::NoValue
             # Lambda invoke permission for LambdaHook custom inference
             - Effect: Allow
               Action: lambda:InvokeFunction
@@ -3580,6 +3676,12 @@ Resources:
           TRACKING_TABLE: !Ref TrackingTable
           DOCUMENT_TRACKING_MODE: !If [HasAppSyncApi, "appsync", "dynamodb"]
           WORKING_BUCKET: !Ref WorkingBucket
+          BEDROCK_ASSUME_ROLE_ARN:
+            !If [HasBedrockHubRole, !Ref BedrockHubRoleArn, !Ref AWS::NoValue]
+          BEDROCK_ASSUME_ROLE_EXTERNAL_ID:
+            !If [HasBedrockHubRoleExternalId, !Ref BedrockHubRoleExternalId, !Ref AWS::NoValue]
+          BEDROCK_ASSUME_ROLE_SESSION_NAME:
+            !If [HasBedrockHubRoleSessionName, !Ref BedrockHubRoleSessionName, !Ref AWS::NoValue]
       LoggingConfig:
         LogGroup: !Ref SummarizationFunctionLogGroup
       Policies:
@@ -3633,6 +3735,17 @@ Resources:
                 - aws-marketplace:Unsubscribe
                 - aws-marketplace:ViewSubscriptions
               Resource: "*"
+            # Optional cross-account Bedrock invocation via hub-account role.
+            # When BedrockHubRoleArn is set, the function assumes this role for
+            # all Bedrock data-plane and control-plane calls. The local Bedrock
+            # statements above are left in place so same-account invocations
+            # continue to work when the parameter is unset.
+            - !If
+              - HasBedrockHubRole
+              - Effect: Allow
+                Action: sts:AssumeRole
+                Resource: !Ref BedrockHubRoleArn
+              - !Ref AWS::NoValue
             # Lambda invoke permission for LambdaHook custom inference
             - Effect: Allow
               Action: lambda:InvokeFunction
@@ -3714,6 +3827,12 @@ Resources:
           WORKING_BUCKET: !Ref WorkingBucket
           DOCUMENT_TRACKING_MODE: !If [HasAppSyncApi, "appsync", "dynamodb"]
           TRACKING_TABLE: !Ref TrackingTable
+          BEDROCK_ASSUME_ROLE_ARN:
+            !If [HasBedrockHubRole, !Ref BedrockHubRoleArn, !Ref AWS::NoValue]
+          BEDROCK_ASSUME_ROLE_EXTERNAL_ID:
+            !If [HasBedrockHubRoleExternalId, !Ref BedrockHubRoleExternalId, !Ref AWS::NoValue]
+          BEDROCK_ASSUME_ROLE_SESSION_NAME:
+            !If [HasBedrockHubRoleSessionName, !Ref BedrockHubRoleSessionName, !Ref AWS::NoValue]
       LoggingConfig:
         LogGroup: !Ref EvaluationFunctionLogGroup
       Policies:
@@ -3761,6 +3880,13 @@ Resources:
                 - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:application-inference-profile/*"
                 # Custom model deployments created via fine-tuning feature
                 - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:custom-model-deployment/*"
+            # Optional cross-account Bedrock invocation via hub-account role.
+            - !If
+              - HasBedrockHubRole
+              - Effect: Allow
+                Action: sts:AssumeRole
+                Resource: !Ref BedrockHubRoleArn
+              - !Ref AWS::NoValue
             # Lambda invoke permission for SaveReportingFunction (in main template)
             - Effect: Allow
               Action:
@@ -3993,6 +4119,12 @@ Resources:
           TRACKING_TABLE: !Ref TrackingTable
           DOCUMENT_TRACKING_MODE: !If [HasAppSyncApi, "appsync", "dynamodb"]
           WORKING_BUCKET: !Ref WorkingBucket
+          BEDROCK_ASSUME_ROLE_ARN:
+            !If [HasBedrockHubRole, !Ref BedrockHubRoleArn, !Ref AWS::NoValue]
+          BEDROCK_ASSUME_ROLE_EXTERNAL_ID:
+            !If [HasBedrockHubRoleExternalId, !Ref BedrockHubRoleExternalId, !Ref AWS::NoValue]
+          BEDROCK_ASSUME_ROLE_SESSION_NAME:
+            !If [HasBedrockHubRoleSessionName, !Ref BedrockHubRoleSessionName, !Ref AWS::NoValue]
       LoggingConfig:
         LogGroup: !Ref RuleValidationFunctionLogGroup
       Policies:
@@ -4040,6 +4172,13 @@ Resources:
                 - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:application-inference-profile/*"
                 # Custom model deployments created via fine-tuning feature
                 - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:custom-model-deployment/*"
+            # Optional cross-account Bedrock invocation via hub-account role.
+            - !If
+              - HasBedrockHubRole
+              - Effect: Allow
+                Action: sts:AssumeRole
+                Resource: !Ref BedrockHubRoleArn
+              - !Ref AWS::NoValue
             - !If
               - HasGuardrailConfig
               - Effect: Allow
@@ -4120,6 +4259,12 @@ Resources:
           WORKING_BUCKET: !Ref WorkingBucket
           REPORTING_BUCKET: !Ref ReportingBucket
           SAVE_REPORTING_FUNCTION_NAME: !Ref SaveReportingFunctionName
+          BEDROCK_ASSUME_ROLE_ARN:
+            !If [HasBedrockHubRole, !Ref BedrockHubRoleArn, !Ref AWS::NoValue]
+          BEDROCK_ASSUME_ROLE_EXTERNAL_ID:
+            !If [HasBedrockHubRoleExternalId, !Ref BedrockHubRoleExternalId, !Ref AWS::NoValue]
+          BEDROCK_ASSUME_ROLE_SESSION_NAME:
+            !If [HasBedrockHubRoleSessionName, !Ref BedrockHubRoleSessionName, !Ref AWS::NoValue]
       LoggingConfig:
         LogGroup: !Ref RuleValidationOrchestrationFunctionLogGroup
       Policies:
@@ -4164,6 +4309,13 @@ Resources:
                 - !Sub "arn:${AWS::Partition}:bedrock:*::foundation-model/*"
                 - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
                 - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:application-inference-profile/*"
+            # Optional cross-account Bedrock invocation via hub-account role.
+            - !If
+              - HasBedrockHubRole
+              - Effect: Allow
+                Action: sts:AssumeRole
+                Resource: !Ref BedrockHubRoleArn
+              - !Ref AWS::NoValue
             - Effect: Allow
               Action:
                 - aws-marketplace:Subscribe
