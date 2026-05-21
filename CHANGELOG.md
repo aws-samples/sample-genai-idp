@@ -28,6 +28,10 @@ SPDX-License-Identifier: MIT-0
 
 - **`scripts/generate_self_signed_cert.sh` now uses a short fixed CommonName (`idp-self-signed`) and places the full ALB hostname in `subjectAltName`** — internal ALB DNS names frequently exceed the X.509 64-character `commonName` limit (RFC 5280 `ub-common-name`), causing openssl to abort with `ASN1_mbstring_ncopy:string too long`. Modern browsers ignore CN entirely and only validate against `subjectAltName`, so this is RFC-correct and removes the silent failure mode.
 
+### Fixed
+
+- **Agentic extraction now supports `:1m` model IDs (1M context window)** ([#312](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues/312)) — agentic extraction with a `:1m` model id (e.g. `us.anthropic.claude-opus-4-7:1m`) failed at ConverseStream with `ValidationException: The provided model identifier is invalid` because the agentic path forwarded the raw id straight to Strands' `BedrockModel`. The traditional `bedrock/client.py::invoke_model` path already strips `:1m` and forwards the `anthropic_beta: ["context-1m-2025-08-07"]` header via `additionalModelRequestFields`; `_build_model_config` in `extraction/agentic_idp.py` now mirrors that behavior via Strands' `additional_request_fields`, so all `:1m` variants (us / eu / global, opus-4-6-v1, opus-4-7, sonnet-4-6) work for agentic extraction.
+
 ## [0.5.11]
 
 ### Added

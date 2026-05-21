@@ -891,6 +891,15 @@ def _build_model_config(
         read_timeout=read_timeout,
     )
 
+    # Handle ':1m' suffix for 1M context window models (Claude 4.x beta).
+    # Bedrock rejects ':1m' as a model identifier; strip it and pass the
+    # anthropic_beta header via additional_request_fields, mirroring
+    # bedrock/client.py::invoke_model. See GitHub issue #312.
+    additional_request_fields: dict[str, Any] | None = None
+    if model_id.endswith(":1m"):
+        model_id = model_id[:-3]
+        additional_request_fields = {"anthropic_beta": ["context-1m-2025-08-07"]}
+
     # Determine model-specific maximum token limits
     model_max = 4_096  # Default fallback
     model_id_lower = model_id.lower()
@@ -930,6 +939,12 @@ def _build_model_config(
     model_config = dict(
         model_id=model_id, boto_client_config=boto_config, max_tokens=max_output_tokens
     )
+
+    # Forward anthropic_beta header for 1M context models via Strands'
+    # additional_request_fields, which maps to ConverseStream's
+    # additionalModelRequestFields.
+    if additional_request_fields is not None:
+        model_config["additional_request_fields"] = additional_request_fields
 
     logger.info(
         "Setting max_tokens for model",
