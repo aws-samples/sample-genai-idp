@@ -927,9 +927,25 @@ def _build_model_config(
         max_output_tokens = model_max
 
     # Build base model config
+    # Honor BEDROCK_ASSUME_ROLE_ARN by sourcing the boto session from the
+    # shared factory. Falls back to default credentials when unset.
+    try:
+        from idp_common.bedrock.session import get_bedrock_session
+
+        bedrock_session = get_bedrock_session()
+    except Exception as e:
+        logger.debug(
+            "Falling back to default Bedrock session for agentic extraction (%s)", e
+        )
+        bedrock_session = None
+
     model_config = dict(
-        model_id=model_id, boto_client_config=boto_config, max_tokens=max_output_tokens
+        model_id=model_id,
+        boto_client_config=boto_config,
+        max_tokens=max_output_tokens,
     )
+    if bedrock_session is not None:
+        model_config["boto_session"] = bedrock_session
 
     logger.info(
         "Setting max_tokens for model",

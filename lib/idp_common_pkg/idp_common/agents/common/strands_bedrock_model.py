@@ -75,6 +75,16 @@ def create_strands_bedrock_model(
     if "boto_client_config" not in kwargs:
         kwargs["boto_client_config"] = boto_config
 
+    # Default boto session to the Bedrock session factory so cross-account
+    # AssumeRole (BEDROCK_ASSUME_ROLE_ARN) is honored for Strands models too.
+    if boto_session is None:
+        try:
+            from idp_common.bedrock.session import get_bedrock_session
+
+            boto_session = get_bedrock_session()
+        except Exception as e:
+            logger.debug("Falling back to default Bedrock session (%s)", e)
+
     # Get guardrail configuration from environment if available
     guardrail_env = os.environ.get("GUARDRAIL_ID_AND_VERSION", "")
     if guardrail_env:

@@ -323,6 +323,8 @@ Pass `--dry-run` to preview without changes.
 
 > **Mode B note**: if you bring your own VPCEs for some/all services, set the corresponding `Create*Endpoint=false` flags in the `vpc-endpoints.yaml` parameters. The script auto-detects existing ones.
 
+> **Cross-account Bedrock note**: if you use the [Cross-Account Bedrock](./cross-account-bedrock.md) feature (`BedrockHubRoleArn` set), the **STS interface VPC endpoint is mandatory** — Lambdas need it for `sts:AssumeRole` against the hub-account role. The endpoint is already in `scripts/vpc-endpoints.yaml`; just verify it deployed.
+
 ---
 
 ## S3 VPC Endpoint policy — security model

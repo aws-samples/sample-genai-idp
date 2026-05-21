@@ -27,6 +27,7 @@ from botocore.exceptions import (
 from urllib3.exceptions import ReadTimeoutError as Urllib3ReadTimeoutError
 
 from .model_utils import parse_model_id
+from .session import get_bedrock_session
 
 # Sentinel value for LambdaHook model selection
 LAMBDA_HOOK_MODEL_ID = "LambdaHook"
@@ -217,7 +218,7 @@ class BedrockClient:
             read_timeout=300,  # allow plenty of time for large extraction or assessment inferences
         )
         if self._client is None:
-            self._client = boto3.client(
+            self._client = get_bedrock_session(self.region).client(
                 "bedrock-runtime", region_name=self.region, config=config
             )
         return self._client
@@ -225,6 +226,8 @@ class BedrockClient:
     @property
     def lambda_client(self):
         """Lazy-loaded Lambda client for LambdaHook invocations."""
+        # Lambda invocations stay in the calling account, so this client
+        # uses default credentials regardless of BEDROCK_ASSUME_ROLE_ARN.
         if self._lambda_client is None:
             self._lambda_client = boto3.client(
                 "lambda", region_name=self.region
@@ -235,7 +238,7 @@ class BedrockClient:
     def bedrock_control_client(self):
         """Lazy-loaded Bedrock control plane client for GetInferenceProfile etc."""
         if self._bedrock_control_client is None:
-            self._bedrock_control_client = boto3.client(
+            self._bedrock_control_client = get_bedrock_session(self.region).client(
                 "bedrock", region_name=self.region
             )
         return self._bedrock_control_client

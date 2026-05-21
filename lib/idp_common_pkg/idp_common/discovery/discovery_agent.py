@@ -361,8 +361,13 @@ class DiscoveryAgent:
             "system_prompt": system_prompt,
         }
 
-        # Use the model ID directly - Strands handles Bedrock routing
-        agent_kwargs["model"] = self.analysis_model_id
+        # Build a BedrockModel via the shared factory so the boto session
+        # honors BEDROCK_ASSUME_ROLE_ARN (cross-account hub) when configured.
+        from idp_common.agents.common.strands_bedrock_model import (
+            create_strands_bedrock_model,
+        )
+
+        agent_kwargs["model"] = create_strands_bedrock_model(self.analysis_model_id)
 
         return Agent(**agent_kwargs)
 
