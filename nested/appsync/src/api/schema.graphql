@@ -810,6 +810,8 @@ type Mutation {
     @aws_auth(cognito_groups: ["Admin", "Author"])
   deleteTests(testRunIds: [String!]!): Boolean!
     @aws_auth(cognito_groups: ["Admin", "Author"])
+  abortTestRuns(testRunIds: [String!]!): AbortWorkflowResponse!
+    @aws_auth(cognito_groups: ["Admin", "Author"])
   addTestSet(name: String!, description: String, filePattern: String!, bucketType: String!, fileCount: Int!, modifiedAfter: String): TestSet
     @aws_auth(cognito_groups: ["Admin", "Author"])
   addTestSetFromUpload(input: TestSetUploadInput!): TestSetUploadResponse
