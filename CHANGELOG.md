@@ -5,6 +5,8 @@ SPDX-License-Identifier: MIT-0
 
 ## [Unreleased]
 
+## [0.5.12]
+
 ### Added
 
 - **Test Studio: Abort running test runs** — Test runs with status `QUEUED` or `RUNNING` can now be aborted from both the Web UI and CLI. The abort operation stops all pending document processing workflows, preserves results from already-completed documents, and updates the test run status to `ABORTED`. Metrics are automatically calculated for completed documents. The Web UI displays an "Abort" button next to running tests, and the CLI provides an `idp-cli abort-test-run` command with confirmation prompts. Aborted test runs show accurate completion counts (e.g., "48/50 files processed") and allow viewing partial results including evaluation metrics and cost breakdowns for successfully processed documents.
@@ -37,6 +39,12 @@ SPDX-License-Identifier: MIT-0
 - **Bedrock Knowledge Base nested stack no longer left in `DELETE_FAILED` on update/delete** ([#315](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues/315)) — two reliability fixes in `nested/bedrockkb/template.yaml`:
   - **Reliable `AWS::Bedrock::DataSource` deletion during sync** — the Delete handler now stops in-progress ingestion jobs and polls until terminal status (12-min deadline) before signalling SUCCESS, so CFN can delete the data source cleanly. Always reports SUCCESS on Delete (logs warnings) so a stuck job never blocks stack delete. IAM gains `Stop/Get/ListIngestionJobs`, timeout is 15 min, and ingestion functions `DependsOn` their schedulers to avoid races.
   - **Helper IAM roles now `DeletionPolicy: Retain`** — `DataSourceSchedulerRole` and `StartIngestionJobFunctionRole` are ephemeral helpers; marking them `Retain` decouples nested-stack delete from the deploying principal's `iam:DeleteRole` permission. Defensive fix for session policies that deny `iam:DeleteRole`. Retained roles are inert and can be deleted manually after the stack is gone.
+
+## Templates
+   - us-west-2: `https://s3.us-west-2.amazonaws.com/aws-ml-blog-us-west-2/artifacts/genai-idp/idp-main_0.5.12.yaml`
+   - us-east-1: `https://s3.us-east-1.amazonaws.com/aws-ml-blog-us-east-1/artifacts/genai-idp/idp-main_0.5.12.yaml`
+   - eu-central-1: `https://s3.eu-central-1.amazonaws.com/aws-ml-blog-eu-central-1/artifacts/genai-idp/idp-main_0.5.12.yaml`
+  
 
 ## [0.5.11]
 
