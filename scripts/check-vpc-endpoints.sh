@@ -130,8 +130,9 @@ echo "   Subnets: $SUBNET_IDS" >&2
 
 # ──────────────────────────────────────────────────────────
 # Interface endpoint services
-#   14 required by the IDP application:
+#   15 required by the IDP application:
 #     appsync-api, appsync, sqs, states, kms, logs,
+#     monitoring (CloudWatch — DashboardMerger custom resource),
 #     bedrock-runtime, ssm (Lambda→SSM Parameter Store),
 #     secretsmanager, lambda, events, athena,
 #     textract (OCR pattern — ocr/service.py calls Textract),
@@ -146,6 +147,7 @@ declare -A ENDPOINTS=(
   [CreateStatesEndpoint]="states"
   [CreateKmsEndpoint]="kms"
   [CreateLogsEndpoint]="logs"
+  [CreateMonitoringEndpoint]="monitoring"
   [CreateBedrockRuntimeEndpoint]="bedrock-runtime"
   [CreateSsmEndpoint]="ssm"
   [CreateSsmMessagesEndpoint]="ssmmessages"
@@ -219,3 +221,53 @@ aws cloudformation deploy \\
   --parameter-overrides \\
     $(printf "%b" "$PARAM_OVERRIDES")
 EOF
+
+# ──────────────────────────────────────────────────────────
+# Check Lambda SG egress rules
+# ──────────────────────────────────────────────────────────
+echo "" >&2
+echo "🔍 Checking Lambda SG ($LAMBDA_SG) egress rules..." >&2
+
+EGRESS_RULES=$(aws ec2 describe-security-groups $AWS_FLAGS \
+  --group-ids "$LAMBDA_SG" \
+  --query 'SecurityGroups[0].IpPermissionsEgress' \
+  --output json 2>/dev/null || echo "[]")
+
+# Check if there's a broad egress rule (0.0.0.0/0 or ::/0)
+HAS_BROAD_EGRESS=$(echo "$EGRESS_RULES" | python3 -c "
+import json, sys
+rules = json.load(sys.stdin)
+for r in rules:
+    for cidr in r.get('IpRanges', []):
+        if cidr.get('CidrIp') == '0.0.0.0/0':
+            print('true'); sys.exit(0)
+    if r.get('IpProtocol') == '-1':
+        print('true'); sys.exit(0)
+print('false')
+" 2>/dev/null || echo "false")
+
+if [[ "$HAS_BROAD_EGRESS" == "true" ]]; then
+  echo "   ✅ Lambda SG has broad egress — VPC endpoints and Gateway endpoints reachable" >&2
+else
+  echo "   ⚠️  Lambda SG has RESTRICTED egress (no 0.0.0.0/0 rule)" >&2
+  echo "" >&2
+  echo "   The vpc-endpoints.yaml stack will add egress to the VPC endpoints SG." >&2
+  echo "   However, you ALSO need egress to S3 and DynamoDB Gateway endpoint prefix lists." >&2
+  echo "   After deploying the endpoints stack, run:" >&2
+  echo "" >&2
+  # Get prefix list IDs for S3 and DynamoDB
+  S3_PL=$(aws ec2 describe-prefix-lists $AWS_FLAGS \
+    --filters "Name=prefix-list-name,Values=com.amazonaws.${REGION}.s3" \
+    --query 'PrefixLists[0].PrefixListId' --output text 2>/dev/null || echo "pl-UNKNOWN")
+  DYNAMO_PL=$(aws ec2 describe-prefix-lists $AWS_FLAGS \
+    --filters "Name=prefix-list-name,Values=com.amazonaws.${REGION}.dynamodb" \
+    --query 'PrefixLists[0].PrefixListId' --output text 2>/dev/null || echo "pl-UNKNOWN")
+  echo "   aws ec2 authorize-security-group-egress --group-id $LAMBDA_SG \\" >&2
+  echo "     --ip-permissions IpProtocol=tcp,FromPort=443,ToPort=443,PrefixListIds=[{PrefixListId=$S3_PL,Description=\"S3 Gateway\"}] \\" >&2
+  echo "     --region $REGION" >&2
+  echo "" >&2
+  echo "   aws ec2 authorize-security-group-egress --group-id $LAMBDA_SG \\" >&2
+  echo "     --ip-permissions IpProtocol=tcp,FromPort=443,ToPort=443,PrefixListIds=[{PrefixListId=$DYNAMO_PL,Description=\"DynamoDB Gateway\"}] \\" >&2
+  echo "     --region $REGION" >&2
+  echo "" >&2
+fi

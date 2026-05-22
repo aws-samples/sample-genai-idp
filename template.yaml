@@ -331,6 +331,36 @@ Parameters:
     Description: >
       If you provided a Bedrock Guardrail Id above, provide the corresponding Guardrail version here (e.g. DRAFT|1|2|...).
 
+  # Optional Cross-Account Bedrock (Hub Account) Configuration
+  BedrockHubRoleArn:
+    Type: String
+    Default: ""
+    AllowedPattern: "^$|^arn:(aws|aws-cn|aws-us-gov|aws-iso|aws-iso-b):iam::[0-9]{12}:role/[\\w+=,.@\\-/]+$"
+    ConstraintDescription: "Must be empty or a valid IAM role ARN. The ARN must NOT contain spaces — pass ExternalId via the separate BedrockHubRoleExternalId parameter."
+    Description: >
+      (Optional) ARN of an IAM role in a centralized "hub" account that this stack
+      should assume for all Amazon Bedrock data-plane and control-plane API calls.
+      When set, all Bedrock invocations (data-plane and control-plane) are routed
+      through sts:AssumeRole to this role using refreshable credentials. Leave empty
+      to call Bedrock from the local account (default behavior).
+
+  BedrockHubRoleExternalId:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: >
+      (Optional) ExternalId to include in sts:AssumeRole calls for the Bedrock hub role.
+      Required only when the hub-account role's trust policy enforces an ExternalId.
+
+  BedrockHubRoleSessionName:
+    Type: String
+    Default: ""
+    AllowedPattern: "^[\\w+=,.@-]{0,64}$"
+    Description: >
+      (Optional) Session name for sts:AssumeRole calls (max 64 chars; characters
+      allowed: A-Z a-z 0-9 + = , . @ - _). Defaults to the calling Lambda function name
+      for CloudTrail attribution in the hub account.
+
   # General Configuration
   MaxConcurrentWorkflows:
     Type: Number
@@ -469,6 +499,28 @@ Parameters:
       (ALB hosting only) Comma-separated CIDR ranges allowed to access the ALB.
       Leave empty to automatically use the VPC CIDR range (recommended for
       internal ALBs). Specify explicit CIDRs to override.
+
+  S3VpcEndpointIdOverride:
+    Type: String
+    Default: ""
+    Description: >
+      Optional. Existing S3 Interface VPC Endpoint ID (vpce-...) from a central
+      network account. When provided, presigned S3 URLs for browser uploads use
+      this endpoint instead of the one auto-provisioned in the ALB stack.
+      Leave empty in standard private-mode (ALB) deployments to use the
+      stack-provisioned endpoint. When this is set you MUST also set
+      S3VpcEndpointDnsNameOverride.
+
+  S3VpcEndpointDnsNameOverride:
+    Type: String
+    Default: ""
+    Description: >
+      Optional. Regional DNS name of the BYO S3 Interface VPC Endpoint, with
+      the AWS-assigned random suffix and the leading "*." stripped (format:
+      "vpce-<id>-<suffix>.s3.<region>.vpce.<url-suffix>").
+      Required when S3VpcEndpointIdOverride is set. Get from
+      "aws ec2 describe-vpc-endpoints --vpc-endpoint-ids <id> --query
+      'VpcEndpoints[0].DnsEntries[0].DnsName'" then strip the leading "*.".
 
   AppSyncVisibility:
     Type: String
@@ -852,6 +904,22 @@ Rules:
       - Assert: !Not [ !Equals [ !Ref BastionHostSecurityGroupId, "" ] ]
         AssertDescription: "BastionHostSecurityGroupId is required when DeployBastionHost=true"
 
+  # BYO S3 VPC endpoint: id and DNS name must be supplied together. The DNS
+  # name carries the AWS-assigned random suffix (e.g. vpce-XXX-abcdef12.s3...)
+  # which cannot be derived from the id alone, so without it presigned URLs
+  # would target a non-existent host and browser uploads would NXDOMAIN.
+  S3VpcEndpointOverridePairing:
+    RuleCondition: !Not [ !Equals [ !Ref S3VpcEndpointIdOverride, "" ] ]
+    Assertions:
+      - Assert: !Not [ !Equals [ !Ref S3VpcEndpointDnsNameOverride, "" ] ]
+        AssertDescription: "S3VpcEndpointDnsNameOverride is required when S3VpcEndpointIdOverride is set."
+
+  S3VpcEndpointDnsNameRequiresId:
+    RuleCondition: !Not [ !Equals [ !Ref S3VpcEndpointDnsNameOverride, "" ] ]
+    Assertions:
+      - Assert: !Not [ !Equals [ !Ref S3VpcEndpointIdOverride, "" ] ]
+        AssertDescription: "S3VpcEndpointIdOverride is required when S3VpcEndpointDnsNameOverride is set."
+
 Conditions:
   # Headless/VPC/Bastion feature conditions
   DeployInVPC: !Equals [!Ref DeployInVPC, 'true']
@@ -863,6 +931,13 @@ Conditions:
       !Not [ !Equals [ !Ref BedrockGuardrailId, "" ] ],
       !Not [ !Equals [ !Ref BedrockGuardrailVersion, "" ] ],
     ]
+
+  HasBedrockHubRole:
+    !Not [ !Equals [ !Ref BedrockHubRoleArn, "" ] ]
+  HasBedrockHubRoleExternalId:
+    !Not [ !Equals [ !Ref BedrockHubRoleExternalId, "" ] ]
+  HasBedrockHubRoleSessionName:
+    !Not [ !Equals [ !Ref BedrockHubRoleSessionName, "" ] ]
 
   # HITL and Private Workforce conditions
   # General rules
@@ -908,6 +983,25 @@ Conditions:
       - !Condition HasExternalIdPGroupMapping
   UseCloudFrontHosting: !Equals [ !Ref WebUIHosting, "CloudFront" ]
   UseALBHosting: !Equals [ !Ref WebUIHosting, "ALB" ]
+  HasS3VpcEndpointOverride: !Not [!Equals [!Ref S3VpcEndpointIdOverride, ""]]
+  # True when this stack should inject S3_ENDPOINT_URL on Lambdas + presigner
+  # resolvers. Two paths trigger it:
+  #   1. WebUIHosting=ALB — the ALB nested stack always provisions an S3
+  #      Interface VPCE (ALB virtual-host rewrite to bucket-vhost requires it).
+  #   2. S3VpcEndpointIdOverride is set — customer is providing their own VPCE
+  #      (typical central-network-account topology) regardless of ALB usage.
+  # Note: ALB hosting can technically be selected with DeployInVPC=false; in
+  # that case the VPCE still exists but Lambdas run outside the VPC, so the
+  # endpoint URL injection is a no-op for resolver paths but still drives the
+  # browser presigner output. This is intentional.
+  HasS3VpcEndpoint: !Or [!Condition UseALBHosting, !Condition HasS3VpcEndpointOverride]
+  # True when VPC-resident Lambdas should use S3_ENDPOINT_URL for direct S3
+  # calls (not presigned URL generation). Requires BOTH:
+  #   - An S3 VPCE exists (HasS3VpcEndpoint)
+  #   - Lambdas are deployed in the VPC (DeployInVPC=true)
+  # Without DeployInVPC, Lambdas run on the public Lambda network and cannot
+  # reach the VPCE hostname — setting endpoint_url would cause timeouts.
+  HasS3VpcEndpointAndVpc: !And [!Condition HasS3VpcEndpoint, !Condition DeployInVPC]
   EnableXRayTracingCondition: !Equals [ !Ref EnableXRayTracing, "true" ]
   UsePrivateAppSync: !Equals [ !Ref AppSyncVisibility, "PRIVATE" ]
   HasArtifactsBucketKmsKey: !Not [ !Equals [ !Ref ArtifactsBucketKmsKeyArn, "" ] ]
@@ -960,6 +1054,12 @@ Metadata:
         Parameters:
           - BedrockGuardrailId
           - BedrockGuardrailVersion
+      - Label:
+          default: "Cross-Account Bedrock (Hub Account)"
+        Parameters:
+          - BedrockHubRoleArn
+          - BedrockHubRoleExternalId
+          - BedrockHubRoleSessionName
       - Label:
           default: "Security Configuration"
         Parameters:
@@ -1077,6 +1177,12 @@ Metadata:
         default: "Bedrock Guardrail Id"
       BedrockGuardrailVersion:
         default: "Bedrock Guardrail Version"
+      BedrockHubRoleArn:
+        default: "Bedrock Hub-Account Role ARN"
+      BedrockHubRoleExternalId:
+        default: "Bedrock Hub-Account Role External Id"
+      BedrockHubRoleSessionName:
+        default: "Bedrock Hub-Account Role Session Name"
       PermissionsBoundaryArn:
         default: "Permissions Boundary ARN"
       MaxConcurrentWorkflows:
@@ -1351,6 +1457,15 @@ Resources:
           OUTPUT_BUCKET_NAME: !Ref OutputBucket
           STAGING_BUCKET_NAME: !Ref StagingBucket
           DATA_RETENTION_IN_DAYS: !Ref DataRetentionInDays
+          S3_ENDPOINT_URL: !If
+            - HasS3VpcEndpoint
+            - !Sub
+              - "https://bucket.${VpceDnsName}"
+              - VpceDnsName: !If
+                  - HasS3VpcEndpointOverride
+                  - !Ref S3VpcEndpointDnsNameOverride
+                  - !GetAtt ALBHOSTINGSTACK.Outputs.S3VPCEndpointDnsName
+            - !Ref AWS::NoValue
       LoggingConfig:
         LogGroup: !Ref ApiHandlerLogGroup
       Events:
@@ -1583,7 +1698,9 @@ Resources:
             SubnetIds: !Ref PrivateSubnetIds
           - !Ref AWS::NoValue
       InlineCode: |
+        import os
         import boto3
+        from botocore.config import Config
         import cfnresponse
         import json
         import logging
@@ -1593,16 +1710,24 @@ Resources:
 
         def handler(event, context):
             logger.info(json.dumps(event))
-        
+
             try:
                 source_bucket = event['ResourceProperties']['SourceBucket']
                 source_prefix = event['ResourceProperties']['SourcePrefix']
                 target_bucket = event['ResourceProperties']['TargetBucket']
                 target_prefix = event['ResourceProperties'].get('TargetPrefix', '')
-        
+
                 file_list = event['ResourceProperties'].get('FileList', [])
-        
-                s3_client = boto3.client('s3')
+
+                # Private-mode S3 client — virtual-host addressing ensures the
+                # SigV4 host header matches the VPC interface endpoint DNS.
+                s3_endpoint_url = os.environ.get('S3_ENDPOINT_URL') or None
+                s3_addressing = 'virtual' if s3_endpoint_url else 'path'
+                s3_client = boto3.client(
+                    's3',
+                    endpoint_url=s3_endpoint_url,
+                    config=Config(signature_version='s3v4', s3={'addressing_style': s3_addressing}),
+                )
         
                 if event['RequestType'] == 'Create' or event['RequestType'] == 'Update':
                     # Copy files explicitly from the provided list
@@ -1656,6 +1781,15 @@ Resources:
       Environment:
         Variables:
           LOG_LEVEL: INFO
+          S3_ENDPOINT_URL: !If
+            - HasS3VpcEndpointAndVpc
+            - !Sub
+              - "https://bucket.${VpceDnsName}"
+              - VpceDnsName: !If
+                  - HasS3VpcEndpointOverride
+                  - !Ref S3VpcEndpointDnsNameOverride
+                  - !GetAtt ALBHOSTINGSTACK.Outputs.S3VPCEndpointDnsName
+            - !Ref AWS::NoValue
       LoggingConfig:
         LogGroup:
           Ref: ConfigurationCopyFunctionLogGroup
@@ -1794,6 +1928,12 @@ Resources:
           CLOUDWATCH_LOG_GROUP_PREFIX: !Sub "/aws/lambda/${AWS::StackName}"
           SETTINGS_PARAMETER_NAME: !Ref SettingsParameter
           MCP_SERVER_BUCKET: !Ref MCPContentBucket
+          BEDROCK_ASSUME_ROLE_ARN:
+            !If [HasBedrockHubRole, !Ref BedrockHubRoleArn, !Ref AWS::NoValue]
+          BEDROCK_ASSUME_ROLE_EXTERNAL_ID:
+            !If [HasBedrockHubRoleExternalId, !Ref BedrockHubRoleExternalId, !Ref AWS::NoValue]
+          BEDROCK_ASSUME_ROLE_SESSION_NAME:
+            !If [HasBedrockHubRoleSessionName, !Ref BedrockHubRoleSessionName, !Ref AWS::NoValue]
       LoggingConfig:
         LogGroup: !Ref AgentCoreMCPHandlerLogGroup
       Policies:
@@ -1891,6 +2031,13 @@ Resources:
                   - "bedrock:ApplyGuardrail"
                 Resource:
                   - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:guardrail/${BedrockGuardrailId}"
+              - !Ref AWS::NoValue
+            # Optional cross-account Bedrock invocation via hub-account role.
+            - !If
+              - HasBedrockHubRole
+              - Effect: Allow
+                Action: sts:AssumeRole
+                Resource: !Ref BedrockHubRoleArn
               - !Ref AWS::NoValue
             - Effect: Allow
               Action:
@@ -2179,6 +2326,9 @@ Resources:
         ExecutionTimeThresholdMs: !Ref ExecutionTimeThresholdMs
         BedrockGuardrailId: !Ref BedrockGuardrailId
         BedrockGuardrailVersion: !Ref BedrockGuardrailVersion
+        BedrockHubRoleArn: !Ref BedrockHubRoleArn
+        BedrockHubRoleExternalId: !Ref BedrockHubRoleExternalId
+        BedrockHubRoleSessionName: !Ref BedrockHubRoleSessionName
         UpdateConfigurationFunctionArn: !GetAtt UpdateConfigurationFunction.Arn
         ConfigurationTable: !Ref ConfigurationTable
         AppSyncApiUrl: !GetAtt GraphQLApi.GraphQLUrl
@@ -2331,6 +2481,17 @@ Resources:
         # User management (for config-version scoping)
         UsersTableName: !Ref UsersTable
         UsersTableArn: !GetAtt UsersTable.Arn
+
+        # S3 VPC endpoint URL (private mode) — passed to presigner resolver Lambdas
+        S3EndpointUrl: !If
+          - HasS3VpcEndpoint
+          - !Sub
+            - "https://bucket.${VpceDnsName}"
+            - VpceDnsName: !If
+                - HasS3VpcEndpointOverride
+                - !Ref S3VpcEndpointDnsNameOverride
+                - !GetAtt ALBHOSTINGSTACK.Outputs.S3VPCEndpointDnsName
+          - ""
 
         # Private AppSync VPC config (req #2) — passed to nested/appsync resolver Lambdas
         UsePrivateAppSync: !If [UsePrivateAppSync, "true", "false"]
@@ -3068,6 +3229,15 @@ Resources:
           LOG_LEVEL: !Ref LogLevel
           TESTSET_BUCKET: !Ref TestSetBucket
           TRACKING_TABLE: !Ref TrackingTable
+          S3_ENDPOINT_URL: !If
+            - HasS3VpcEndpointAndVpc
+            - !Sub
+              - "https://bucket.${VpceDnsName}"
+              - VpceDnsName: !If
+                  - HasS3VpcEndpointOverride
+                  - !Ref S3VpcEndpointDnsNameOverride
+                  - !GetAtt ALBHOSTINGSTACK.Outputs.S3VPCEndpointDnsName
+            - !Ref AWS::NoValue
       Policies:
         - S3CrudPolicy:
             BucketName: !Ref TestSetBucket
@@ -6269,6 +6439,12 @@ Resources:
           APPSYNC_API_URL: !GetAtt GraphQLApi.GraphQLUrl
           GUARDRAIL_ID_AND_VERSION:
             !If [HasGuardrailConfig, !Sub "${BedrockGuardrailId}:${BedrockGuardrailVersion}", ""]
+          BEDROCK_ASSUME_ROLE_ARN:
+            !If [HasBedrockHubRole, !Ref BedrockHubRoleArn, !Ref AWS::NoValue]
+          BEDROCK_ASSUME_ROLE_EXTERNAL_ID:
+            !If [HasBedrockHubRoleExternalId, !Ref BedrockHubRoleExternalId, !Ref AWS::NoValue]
+          BEDROCK_ASSUME_ROLE_SESSION_NAME:
+            !If [HasBedrockHubRoleSessionName, !Ref BedrockHubRoleSessionName, !Ref AWS::NoValue]
       LoggingConfig:
         LogGroup: !Ref ChatWithDocumentProcessorLogGroup
       Policies:
@@ -6317,6 +6493,13 @@ Resources:
               - Effect: Allow
                 Action: bedrock:ApplyGuardrail
                 Resource: !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:guardrail/${BedrockGuardrailId}"
+              - !Ref AWS::NoValue
+            # Optional cross-account Bedrock invocation via hub-account role.
+            - !If
+              - HasBedrockHubRole
+              - Effect: Allow
+                Action: sts:AssumeRole
+                Resource: !Ref BedrockHubRoleArn
               - !Ref AWS::NoValue
             # RBAC scope enforcement — processor queries UsersTable.SubIndex
             # to fetch the caller's `allowedConfigVersions` and rejects
@@ -6407,6 +6590,12 @@ Resources:
             ]
           CLOUDWATCH_LOG_GROUP_PREFIX: !Sub "/aws/lambda/${AWS::StackName}"
           SETTINGS_PARAMETER_NAME: !Ref SettingsParameter
+          BEDROCK_ASSUME_ROLE_ARN:
+            !If [HasBedrockHubRole, !Ref BedrockHubRoleArn, !Ref AWS::NoValue]
+          BEDROCK_ASSUME_ROLE_EXTERNAL_ID:
+            !If [HasBedrockHubRoleExternalId, !Ref BedrockHubRoleExternalId, !Ref AWS::NoValue]
+          BEDROCK_ASSUME_ROLE_SESSION_NAME:
+            !If [HasBedrockHubRoleSessionName, !Ref BedrockHubRoleSessionName, !Ref AWS::NoValue]
       LoggingConfig:
         LogGroup: !Ref AgentChatProcessorLogGroup
       Policies:
@@ -6471,6 +6660,13 @@ Resources:
                   - "bedrock:ApplyGuardrail"
                 Resource:
                   - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:guardrail/${BedrockGuardrailId}"
+              - !Ref AWS::NoValue
+            # Optional cross-account Bedrock invocation via hub-account role.
+            - !If
+              - HasBedrockHubRole
+              - Effect: Allow
+                Action: sts:AssumeRole
+                Resource: !Ref BedrockHubRoleArn
               - !Ref AWS::NoValue
             - Effect: Allow
               Action:
@@ -6977,6 +7173,12 @@ Resources:
             ]
           CLOUDWATCH_LOG_GROUP_PREFIX: !Sub "/aws/lambda/${AWS::StackName}"
           SETTINGS_PARAMETER_NAME: !Ref SettingsParameter
+          BEDROCK_ASSUME_ROLE_ARN:
+            !If [HasBedrockHubRole, !Ref BedrockHubRoleArn, !Ref AWS::NoValue]
+          BEDROCK_ASSUME_ROLE_EXTERNAL_ID:
+            !If [HasBedrockHubRoleExternalId, !Ref BedrockHubRoleExternalId, !Ref AWS::NoValue]
+          BEDROCK_ASSUME_ROLE_SESSION_NAME:
+            !If [HasBedrockHubRoleSessionName, !Ref BedrockHubRoleSessionName, !Ref AWS::NoValue]
       LoggingConfig:
         LogGroup: !Ref AgentProcessorLogGroup
       Policies:
@@ -7031,6 +7233,13 @@ Resources:
                   - "bedrock:ApplyGuardrail"
                 Resource:
                   - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:guardrail/${BedrockGuardrailId}"
+              - !Ref AWS::NoValue
+            # Optional cross-account Bedrock invocation via hub-account role.
+            - !If
+              - HasBedrockHubRole
+              - Effect: Allow
+                Action: sts:AssumeRole
+                Resource: !Ref BedrockHubRoleArn
               - !Ref AWS::NoValue
             - Effect: Allow
               Action:
@@ -7313,6 +7522,8 @@ Resources:
         - email
         - email_verified
         - preferred_username
+        - given_name
+        - family_name
         - !If
           - HasExternalIdP
           - custom:idp_groups
@@ -7428,6 +7639,14 @@ Resources:
           - IsExternalIdPSAML
           - "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress"
           - "email"
+        given_name: !If
+          - IsExternalIdPSAML
+          - "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/givenname"
+          - "given_name"
+        family_name: !If
+          - IsExternalIdPSAML
+          - "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/surname"
+          - "family_name"
         custom:idp_groups: !If
           - HasExternalIdPGroupMapping
           - !Ref ExternalIdPGroupAttributeName
@@ -8761,6 +8980,9 @@ Resources:
         SourceZipfile: "<ARTIFACT_PREFIX_TOKEN>/multi-doc-discovery-source.zip"
         AppSyncApiUrl: !GetAtt GraphQLApi.GraphQLUrl
         AppSyncApiArn: !GetAtt GraphQLApi.Arn
+        BedrockHubRoleArn: !Ref BedrockHubRoleArn
+        BedrockHubRoleExternalId: !Ref BedrockHubRoleExternalId
+        BedrockHubRoleSessionName: !Ref BedrockHubRoleSessionName
 
   # --- Step Functions State Machine ---
 
@@ -9048,6 +9270,13 @@ Resources:
         StackName: !Ref AWS::StackName
         PermissionsBoundaryArn: !Ref PermissionsBoundaryArn
         LoggingBucketName: !Ref LoggingBucket
+        # In private mode the same S3 VPCE is used by app Lambdas; pass the
+        # Lambda SG so the ALB stack opens 443 from it on the endpoint SG.
+        # Empty when DeployInVPC=false — the nested stack treats empty as no-op.
+        LambdaSecurityGroupId: !If
+          - DeployInVPC
+          - !Ref LambdaSecurityGroupId
+          - ""
 
   UICodeBuildServiceRole:
     Type: AWS::IAM::Role

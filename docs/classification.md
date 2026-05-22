@@ -777,6 +777,111 @@ For documents with multiple pages, the system provides comprehensive image suppo
 - **Info Logging**: System logs image counts for monitoring and debugging purposes
 - **Automatic Pagination**: Images are processed in page order for all pages
 
+## Optional `{CLASS_AND_ATTRIBUTE_NAMES_AND_DESCRIPTIONS}` Placeholder
+
+Pattern 2 classification prompts support an **optional** placeholder that
+expands to each class's name, description, **and the names of the schema
+attributes (extraction fields)** declared for that class. This gives the
+classifier richer disambiguation signal — particularly useful when two
+document types have similar names or descriptions but very different
+extraction schemas (e.g. `appraisal_report` vs `inspection_report`).
+
+The placeholder is fully **opt-in**:
+
+- The default classification prompts in `config_library/` continue to use
+  only `{CLASS_NAMES_AND_DESCRIPTIONS}`. **Token usage and cost are
+  unchanged** for users who don't reference the new placeholder.
+- Power users with schema-rich domains (lending, healthcare, insurance)
+  can drop `{CLASS_AND_ATTRIBUTE_NAMES_AND_DESCRIPTIONS}` into a custom
+  `task_prompt` to give the model the extra signal.
+
+### Rendered output (page-level classification)
+
+In the page-level (`multimodalPageLevelClassification`) path, the
+placeholder renders as one XML block per class:
+
+```xml
+<class name="appraisal_report">
+  <description>Real estate valuation report</description>
+  <attributes>property_address, appraised_value, effective_date, appraiser_name, comparable_sales.address, comparable_sales.sale_price</attributes>
+</class>
+<class name="inspection_report">
+  <description>Property condition inspection report</description>
+  <attributes>property_address, inspection_date, inspector_name, findings</attributes>
+</class>
+```
+
+### Rendered output (holistic packet classification)
+
+In the holistic (`textbasedHolisticClassification`) path the same
+placeholder renders as a markdown table — matching the format of the
+existing `{CLASS_NAMES_AND_DESCRIPTIONS}` table:
+
+```markdown
+| type | description | attributes |
+| --- | --- | --- |
+| appraisal_report | Real estate valuation report | property_address, appraised_value, effective_date, ... |
+| inspection_report | Property condition inspection report | property_address, inspection_date, inspector_name, findings |
+```
+
+### Example: Custom prompt using the new placeholder
+
+```yaml
+classification:
+  task_prompt: |
+    Classify the following document page into one of these document types.
+
+    Use the schema attribute names listed for each class as a strong
+    disambiguation signal — if the page text mentions field names that
+    match a class's attributes, prefer that class.
+
+    {CLASS_AND_ATTRIBUTE_NAMES_AND_DESCRIPTIONS}
+
+    Document text:
+    <document-text>
+    {DOCUMENT_TEXT}
+    </document-text>
+
+    Respond with JSON: {"class": "...", "document_boundary": "start|continue"}
+```
+
+### Schema-walking rules
+
+- Flat scalar properties surface by their property name
+  (e.g. `appraised_value`).
+- Nested `object` properties are flattened to dotted paths
+  (e.g. `borrower.address.zip`).
+- Arrays of objects are unwrapped — each item-property is rendered as
+  `parent.child` (no `[]` indexing).
+- Arrays of scalars (or arrays without item properties) surface by their
+  parent name only.
+- Classes that have no JSON Schema render
+  `<attributes>(no schema)</attributes>` so the absence is obvious for
+  debugging.
+
+### Soft cap and token-cost guardrails
+
+To prevent pathologically large schemas from bloating the classification
+prompt, the rendered attribute list per class is **soft-capped at 50
+field names** (`ClassificationService.MAX_ATTRIBUTES_PER_CLASS`). When a
+class exceeds the cap, the rendered list is truncated and a
+`...(+N more)` suffix is appended; a `WARNING` log line is emitted for
+visibility.
+
+If you have a class with hundreds of attributes, prefer:
+
+1. Writing a richer class `description` that captures distinguishing
+   characteristics, **or**
+2. Adding [few-shot classification examples](#setting-up-few-shot-examples-in-pattern-2)
+   for that class.
+
+### Mixing with the legacy placeholder
+
+You can use both placeholders in the same prompt — they're independent.
+For example you could keep the compact `{CLASS_NAMES_AND_DESCRIPTIONS}`
+list for an overview block and add `{CLASS_AND_ATTRIBUTE_NAMES_AND_DESCRIPTIONS}`
+in a "for ambiguous cases, consult the schema fields" sub-section.
+
 ## Setting Up Few Shot Examples in Pattern 2
 
 Pattern 2's multimodal page-level classification supports few-shot example prompting, which can significantly improve classification accuracy by providing concrete document examples. This feature is available when you select the 'few_shot_example_with_multimodal_page_classification' configuration.

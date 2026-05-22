@@ -142,6 +142,7 @@ export default defineConfig({
             { label: "Capacity Planning", slug: "capacity-planning" },
             { label: "Cost Calculator", slug: "cost-calculator" },
             { label: "Circuit Breaker", slug: "circuit-breaker" },
+            { label: "Cross-Account Bedrock", slug: "cross-account-bedrock" },
           ],
         },
         {

@@ -368,7 +368,7 @@ All datasets share these deployment characteristics:
 
 ### GraphQL Schema
 - **Location**: `src/api/schema.graphql`
-- **Operations**: `getTestSets`, `addTestSet`, `addTestSetFromUpload`, `addDocumentsToTestSet`, `addDocumentsToTestSetFromUpload`, `deleteTestSets`, `getTestRuns`, `startTestRun`, `compareTestRuns`
+- **Operations**: `getTestSets`, `addTestSet`, `addTestSetFromUpload`, `addDocumentsToTestSet`, `addDocumentsToTestSetFromUpload`, `deleteTestSets`, `getTestRuns`, `startTestRun`, `abortTestRuns`, `compareTestRuns`
 
 ### Frontend Components
 
@@ -384,7 +384,7 @@ All datasets share these deployment characteristics:
 #### TestExecutions
 - **Location**: `src/ui/src/components/test-studio/TestExecutions.jsx`
 - **Purpose**: Unified interface combining TestRunner and TestResultsList
-- **Features**: Test execution, results viewing, comparison, export, delete operations
+- **Features**: Test execution, results viewing, comparison, export, abort, delete operations
 
 ## Component Structure
 
@@ -478,13 +478,32 @@ For full details on configuration versioning, see [configuration-versions.md](co
 ### Test States
 - **QUEUED**: File copying jobs queued in SQS
 - **RUNNING**: Files being copied and processed
-- **COMPLETED**: Test finished successfully
+- **EVALUATING**: Documents processed, evaluation in progress
+- **COMPLETED**: Test finished successfully with all documents evaluated
+- **PARTIAL_COMPLETE**: Test finished with some documents failed
 - **FAILED**: Errors during processing
+- **ABORTED**: Test run manually stopped before completion
+
+### Aborting Test Runs
+Test runs with status **QUEUED** or **RUNNING** can be aborted:
+1. Click the "Abort" button next to the running test
+2. The system will:
+   - Stop all pending document processing workflows
+   - Preserve results from already-completed documents
+   - Update test run status to **ABORTED**
+   - Calculate metrics for completed documents
+3. View partial results including:
+   - Accurate count of completed vs. total files (e.g., "48/50 files processed")
+   - Evaluation metrics for completed documents
+   - Cost breakdown for processed documents
+
+**Note**: Test runs with status **EVALUATING**, **COMPLETED**, **PARTIAL_COMPLETE**, or **FAILED** cannot be aborted.
 
 ### Results Management
 - Filter and paginate test runs
 - Multi-select for comparison
 - Navigate to detailed results view
+- Abort running test runs
 - Delete and export functionality
 
 ## Key Features

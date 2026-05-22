@@ -935,6 +935,12 @@ Resources:
   # Start sync jobs for datasources
   StartIngestionJobFunctionRole:
     Type: AWS::IAM::Role
+    # Retain on delete: this role is only assumed by StartIngestionJobFunction
+    # (also being deleted with the stack), so orphaning it is harmless. Retaining
+    # decouples nested-stack delete from the deployer's iam:DeleteRole permission
+    # — see GitHub issue #315 for the failure mode this avoids.
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
@@ -952,7 +958,12 @@ Resources:
             Statement:
               - Effect: Allow
                 Action:
+                  # Start, plus the stop/list/get verbs the Delete handler
+                  # uses to drain in-progress jobs before DeleteDataSource.
                   - "bedrock:StartIngestionJob"
+                  - "bedrock:StopIngestionJob"
+                  - "bedrock:GetIngestionJob"
+                  - "bedrock:ListIngestionJobs"
                 Resource:
                   - !Sub "arn:${AWS::Partition}:bedrock:*:${AWS::AccountId}:knowledge-base/${KnowledgeBase.Value}"
           PolicyName: BedrockPolicy
@@ -976,7 +987,10 @@ Resources:
       Handler: handler.lambda_handler
       Role: !GetAtt "StartIngestionJobFunctionRole.Arn"
       Runtime: python3.12
-      Timeout: 600
+      # 15 min: covers up to ~12 min polling for in-progress ingestion jobs
+      # to reach a terminal state on Delete, plus headroom for cold start
+      # and cfnresponse.
+      Timeout: 900
       MemorySize: 128
       Code: ./src/start_ingestion_job_custom_resource
       Environment:
@@ -986,6 +1000,12 @@ Resources:
   StartWebIngestionJob:
     Type: AWS::CloudFormation::CustomResource
     Condition: IsWebDataSource
+    # DependsOn is the delete-order lever: CFN deletes in reverse, so this
+    # ensures the EventBridge schedule is gone before the Delete handler
+    # tries to drain in-progress jobs (otherwise the schedule could fire a
+    # new job mid-drain).
+    DependsOn:
+      - WebDataSourceScheduler
     Properties:
       ServiceToken: !GetAtt StartIngestionJobFunction.Arn
       knowledgeBaseId: !GetAtt KnowledgeBase.Value
@@ -994,6 +1014,8 @@ Resources:
   StartS3IngestionJob:
     Type: AWS::CloudFormation::CustomResource
     Condition: IsS3DataSource
+    DependsOn:
+      - S3DataSourceScheduler
     Properties:
       ServiceToken: !GetAtt StartIngestionJobFunction.Arn
       knowledgeBaseId: !GetAtt KnowledgeBase.Value
@@ -1044,6 +1066,12 @@ Resources:
 
   DataSourceSchedulerRole:
     Type: AWS::IAM::Role
+    # Retain on delete: this role is only assumed by EventBridge Scheduler;
+    # once the Schedule resources are gone (CFN deletes them before this),
+    # nothing trusts it. Retaining decouples nested-stack delete from the
+    # deployer's iam:DeleteRole permission — see GitHub issue #315.
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       AssumeRolePolicyDocument:
         Version: "2012-10-17"

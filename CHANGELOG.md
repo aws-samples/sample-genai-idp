@@ -5,6 +5,47 @@ SPDX-License-Identifier: MIT-0
 
 ## [Unreleased]
 
+## [0.5.12]
+
+### Added
+
+- **Test Studio: Abort running test runs** — Test runs with status `QUEUED` or `RUNNING` can now be aborted from both the Web UI and CLI. The abort operation stops all pending document processing workflows, preserves results from already-completed documents, and updates the test run status to `ABORTED`. Metrics are automatically calculated for completed documents. The Web UI displays an "Abort" button next to running tests, and the CLI provides an `idp-cli abort-test-run` command with confirmation prompts. Aborted test runs show accurate completion counts (e.g., "48/50 files processed") and allow viewing partial results including evaluation metrics and cost breakdowns for successfully processed documents.
+
+- **Optional `{CLASS_AND_ATTRIBUTE_NAMES_AND_DESCRIPTIONS}` placeholder for classification prompts** ([#262](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues/262)) — Pattern 2 classification `task_prompt` templates can opt in to a new placeholder that expands, per document type, to the class name, description, **and** schema attribute names. Renders as XML for `multimodalPageLevelClassification` and as a markdown table for `textbasedHolisticClassification`. Cost-neutral by default — only materialized when the template references it, with per-class attribute counts capped (default 50) to keep prompt cost predictable. Useful for schema-rich domains where similarly-named classes have very different extraction schemas. The Web UI Prompt Preview tab renders the substituted attributes for inspection. See [`docs/classification.md`](docs/classification.md#optional-class_and_attribute_names_and_descriptions-placeholder).
+
+- **Cross-account Bedrock invocation via STS AssumeRole** ([#305](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues/305)) — IDP processing Lambdas can now route all Bedrock traffic through a centralized "hub" AWS account. Set the new optional `BedrockHubRoleArn` parameter (with optional external-id / session-name) and the stack conditionally adds `sts:AssumeRole` to each Lambda's execution role. STS credentials auto-refresh via `DeferredRefreshableCredentials` so warm Lambdas survive past the 1-hour STS session. Covers the entire pipeline plus discovery, embeddings, Chat with Document, and Agent Companion (incl. Strands sub-agents). Fully additive — leaving the parameter empty preserves prior same-account behavior. **Out of scope:** BDA runtime, Bedrock Knowledge Bases, and `model_finetuning/`. See [`docs/cross-account-bedrock.md`](docs/cross-account-bedrock.md).
+
+- **Distinguish MISSING pages from BLANK fields in extraction output** ([#317](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues/317)) — for sparsely-populated multi-section forms where pages may be legitimately omitted, extraction can now distinguish fields whose source page was *present but empty* (BLANK) from those whose source page was *not submitted* (MISSING). Two new optional schema extensions, `x-aws-idp-page-types` and `x-aws-idp-source-page-types`, declare named page sub-types and which page types each property sources from. A regex-based resolver detects present page types, annotates the LLM prompt with `--- PAGE N [PageType] ---` markers, and (when enabled) post-processes the JSON to drop/null fields whose source pages are absent. Output gains optional `page_type_resolution` and `missing_fields_report`. Fully additive; the Document Schema editor adds form widgets for both extensions. See [`docs/missing-page-handling.md`](docs/missing-page-handling.md) and the [demo notebook](notebooks/usecase-specific-examples/multi-page-bank-statement/step3_extraction_with_missing_pages.ipynb).
+
+- **Private (VPC-only) deployment — browser uploads route through the S3 Interface VPC Endpoint** — when `WebUIHosting=ALB`, the ALB nested stack provisions an S3 Interface VPC Endpoint and exposes its regional DNS name as a new `S3VPCEndpointDnsName` output. Web UI presigner Lambdas, `ApiHandlerFunction`, and config/dataset custom resources receive an `S3_ENDPOINT_URL` env var and use virtual-host addressing so SigV4 matches the VPCE DNS. Browser uploads and Lambda S3 traffic stay on the AWS backbone with zero public-internet egress.
+
+- **Bring-Your-Own S3 VPC endpoint** — two new top-level parameters (`S3VpcEndpointIdOverride`, `S3VpcEndpointDnsNameOverride`) let customers with a central network account reuse an existing endpoint instead of having the IDP stack provision one. Both must be set together; CloudFormation `Rules` enforce the pairing.
+
+- **`monitoring` (CloudWatch) Interface VPC Endpoint** — `scripts/vpc-endpoints.yaml` now provisions a CloudWatch Interface VPC Endpoint, gated by the new `CreateMonitoringEndpoint` parameter (default `true`). Required for the `DashboardMerger` custom resource to succeed in private mode. `scripts/check-vpc-endpoints.sh` updated to detect and skip pre-existing endpoints.
+
+- **`LambdaSecurityGroupId` parameter on the ALB nested stack** — when supplied, the ALB S3 VPC Endpoint security group allows inbound 443 from the app Lambda SG so VPC-resident Lambdas can reach S3 through the same endpoint as ALB. Fixes a 5-minute hang in `ConfigurationCopyFunction` caused by SG mismatch.
+
+
+### Changed
+
+- **ALB nested stack S3 VPC endpoint policy scoped to same-account operations** — the endpoint policy allows a finite set of S3 actions on `arn:${AWS::Partition}:s3:::*` conditioned on `aws:PrincipalAccount` / `aws:ResourceAccount` matching the deployment account. Wildcard resource is necessary to avoid cyclic dependencies on parent-stack buckets; authorization is additionally enforced at the network (SG) and IAM (role + bucket policy) layers. See `docs/deployment-private-network.md`.
+
+- **`scripts/generate_self_signed_cert.sh` uses a short fixed CommonName (`idp-self-signed`) with the full ALB hostname in `subjectAltName`** — internal ALB DNS names often exceed the X.509 64-char CN limit, causing openssl to abort. Modern browsers validate only against SAN, so this is RFC-correct and removes the silent failure.
+
+### Fixed
+
+- **Agentic extraction now supports `:1m` model IDs (1M context window)** ([#312](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues/312)) — agentic extraction with `:1m` model ids (e.g. `us.anthropic.claude-opus-4-7:1m`) previously failed at ConverseStream with `ValidationException` because the agentic path forwarded the raw id to Strands' `BedrockModel`. `_build_model_config` now strips `:1m` and forwards the `anthropic_beta` header via Strands' `additional_request_fields`, matching the traditional Bedrock path. All `:1m` variants now work.
+
+- **Bedrock Knowledge Base nested stack no longer left in `DELETE_FAILED` on update/delete** ([#315](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues/315)) — two reliability fixes in `nested/bedrockkb/template.yaml`:
+  - **Reliable `AWS::Bedrock::DataSource` deletion during sync** — the Delete handler now stops in-progress ingestion jobs and polls until terminal status (12-min deadline) before signalling SUCCESS, so CFN can delete the data source cleanly. Always reports SUCCESS on Delete (logs warnings) so a stuck job never blocks stack delete. IAM gains `Stop/Get/ListIngestionJobs`, timeout is 15 min, and ingestion functions `DependsOn` their schedulers to avoid races.
+  - **Helper IAM roles now `DeletionPolicy: Retain`** — `DataSourceSchedulerRole` and `StartIngestionJobFunctionRole` are ephemeral helpers; marking them `Retain` decouples nested-stack delete from the deploying principal's `iam:DeleteRole` permission. Defensive fix for session policies that deny `iam:DeleteRole`. Retained roles are inert and can be deleted manually after the stack is gone.
+
+## Templates
+   - us-west-2: `https://s3.us-west-2.amazonaws.com/aws-ml-blog-us-west-2/artifacts/genai-idp/idp-main_0.5.12.yaml`
+   - us-east-1: `https://s3.us-east-1.amazonaws.com/aws-ml-blog-us-east-1/artifacts/genai-idp/idp-main_0.5.12.yaml`
+   - eu-central-1: `https://s3.eu-central-1.amazonaws.com/aws-ml-blog-eu-central-1/artifacts/genai-idp/idp-main_0.5.12.yaml`
+  
+
 ## [0.5.11]
 
 ### Added
@@ -19,10 +60,14 @@ SPDX-License-Identifier: MIT-0
   - **Default chat model is `us.anthropic.claude-opus-4-7:1m`** — 1M-context by default so typical multi-hundred-page packets fit without hitting input-token limits. EU and GovCloud presets use their region-appropriate inference profiles.
   - **First-class support for Bedrock model-ID suffixes** — `:1m` (1M-context beta), `:priority` and `:flex` (service tiers) all work end-to-end when selected in the Chat panel dropdown.
 
+
 ### Changed
 
-
 ### Fixed
+
+- **Config validation now checks max_tokens against model limits** — `idp-cli config-validate` now verifies that `max_tokens` is within the model's maximum output token limit, catching invalid configurations like `extraction.max_tokens: 16000` with `us.amazon.nova-lite-v1:0` (max 10,000 tokens) before deployment. New `_validate_max_tokens()` function checks all services (extraction, classification, assessment, summarization) against model-specific limits loaded from `config_library/model_config_limits.yaml`: Claude 4.x (64,000), Claude 3.x (8,192), Amazon Nova (10,000), default (4,096). Added `get_model_max_output_tokens()` utility to `bedrock/model_utils.py` for use by CLI validation only (Lambda functions continue to use hardcoded limits for runtime defense-in-depth).
+
+- **Empty content array handling across all LLM services** — LLMs occasionally return empty content arrays (`content: []`) instead of the expected text response, causing `IndexError: list index out of range` when accessing `content[0]`. All affected services now check for empty arrays before accessing elements and raise descriptive errors with task context. Applied to classification (page-level and holistic), summarization, bedrock client helper, and model finetuning inference. Added 11 unit tests in `test_empty_content_array.py` covering all edge cases (empty, single-element, multi-element arrays).
 
 - **LLM array wrapping in extraction and assessment services** — LLMs occasionally return single-element arrays `[{...}]` instead of objects `{...}` when generating JSON responses, causing Pydantic validation errors (`Input should be a valid dictionary [type=dict_type, input_value=[{...}], input_type=list]`). All affected services now automatically detect and unwrap single-element arrays with a warning log, while multi-element arrays are rejected with a clear error message. Applied to standard extraction, agentic extraction, assessment service, and granular assessment service.
 

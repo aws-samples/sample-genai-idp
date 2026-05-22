@@ -47,7 +47,23 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         
         result = aggregate_test_run_with_stickler(test_run_id, tracking_table_name)
 
-        logger.info(f"Aggregation completed for test run: {test_run_id}, document_count={result.get('document_count', 0)}, overall_accuracy={result.get('overall_accuracy')}")
+        # Calculate average weighted score from document-level scores
+        weighted_scores = result.get('weighted_overall_scores', {})
+        avg_weighted_score = None
+        if weighted_scores:
+            scores = [score for score in weighted_scores.values() if score is not None]
+            if scores:
+                avg_weighted_score = sum(scores) / len(scores)
+
+        # Format avg_weighted_score
+        avg_weighted_score_str = f"{avg_weighted_score:.4f}" if avg_weighted_score is not None else "N/A"
+
+        logger.info(
+            f"Aggregation completed for test run: {test_run_id}, "
+            f"document_count={result.get('document_count', 0)}, "
+            f"overall_accuracy={result.get('overall_accuracy')}, "
+            f"avg_weighted_score={avg_weighted_score_str}"
+        )
 
         return {
             'statusCode': 200,

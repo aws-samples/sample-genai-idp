@@ -40,6 +40,11 @@ from idp_common.classification.models import (
 )
 from idp_common.config.models import IDPConfig
 from idp_common.config.schema_constants import (
+    SCHEMA_ITEMS,
+    SCHEMA_PROPERTIES,
+    SCHEMA_TYPE,
+    TYPE_ARRAY,
+    TYPE_OBJECT,
     X_AWS_IDP_CLASSIFICATION,
     X_AWS_IDP_DOCUMENT_NAME_REGEX,
     X_AWS_IDP_DOCUMENT_TYPE,
@@ -74,6 +79,14 @@ class ClassificationService:
     # Classification method options
     MULTIMODAL_PAGE_LEVEL = "multimodalPageLevelClassification"
     TEXTBASED_HOLISTIC = "textbasedHolisticClassification"
+
+    # Soft cap on the number of schema attribute names emitted per class
+    # when rendering the optional {CLASS_AND_ATTRIBUTE_NAMES_AND_DESCRIPTIONS}
+    # placeholder. Prevents pathologically large schemas from bloating the
+    # classification prompt. If a class exceeds the cap, the rendered list
+    # is truncated and a "...(+N more)" suffix is appended, and a warning
+    # is logged.
+    MAX_ATTRIBUTES_PER_CLASS = 50
 
     def __init__(
         self,
@@ -806,6 +819,180 @@ class ClassificationService:
             ]
         )
 
+    def _get_attribute_names_for_class(self, class_name: str) -> List[str]:
+        """
+        Extract a flat list of dotted-path attribute names from a class's
+        JSON Schema ``properties``.
+
+        Walks nested ``object`` properties (joining names with ``.``) and
+        unwraps ``array`` ``items`` of object type so list-element fields
+        are surfaced (without explicit ``[]`` indexing) in the same flat
+        listing. Non-object/non-array properties contribute their own name.
+
+        Args:
+            class_name: The ``x-aws-idp-document-type`` of the class to look up.
+
+        Returns:
+            Ordered list of unique dotted-path attribute names. Returns an
+            empty list if the class is not found or has no ``properties``.
+        """
+        # Locate the matching schema (case-sensitive on type name)
+        target_schema: Optional[Dict[str, Any]] = None
+        for schema in self.config.classes:
+            if schema.get(X_AWS_IDP_DOCUMENT_TYPE) == class_name:
+                target_schema = schema
+                break
+
+        if not target_schema:
+            return []
+
+        properties = target_schema.get(SCHEMA_PROPERTIES) or {}
+        if not isinstance(properties, dict):
+            return []
+
+        names: List[str] = []
+        seen: Set[str] = set()
+
+        def _walk(props: Dict[str, Any], parent_path: str = "") -> None:
+            if not isinstance(props, dict):
+                return
+            for prop_name, prop_schema in props.items():
+                if not isinstance(prop_schema, dict):
+                    continue
+                full_path = f"{parent_path}.{prop_name}" if parent_path else prop_name
+                prop_type = prop_schema.get(SCHEMA_TYPE)
+
+                if prop_type == TYPE_OBJECT:
+                    nested = prop_schema.get(SCHEMA_PROPERTIES) or {}
+                    if isinstance(nested, dict) and nested:
+                        _walk(nested, full_path)
+                    else:
+                        # Object with no declared properties — emit the
+                        # parent name itself so the model still sees it.
+                        if full_path not in seen:
+                            seen.add(full_path)
+                            names.append(full_path)
+                elif prop_type == TYPE_ARRAY:
+                    items_schema = prop_schema.get(SCHEMA_ITEMS) or {}
+                    if (
+                        isinstance(items_schema, dict)
+                        and items_schema.get(SCHEMA_TYPE) == TYPE_OBJECT
+                    ):
+                        nested = items_schema.get(SCHEMA_PROPERTIES) or {}
+                        if isinstance(nested, dict) and nested:
+                            _walk(nested, full_path)
+                            continue
+                    # Scalar array (or array with no item properties) —
+                    # emit the parent name itself.
+                    if full_path not in seen:
+                        seen.add(full_path)
+                        names.append(full_path)
+                else:
+                    if full_path not in seen:
+                        seen.add(full_path)
+                        names.append(full_path)
+
+        _walk(properties)
+        return names
+
+    def _format_classes_and_attributes_list(self) -> str:
+        """
+        Format document classes WITH their schema attribute names as an
+        XML-tagged listing for inclusion in custom classification prompts
+        via the optional ``{CLASS_AND_ATTRIBUTE_NAMES_AND_DESCRIPTIONS}``
+        placeholder.
+
+        The output is one ``<class>`` block per document type, containing
+        ``<description>`` and (when the class has a JSON Schema) an
+        ``<attributes>`` element with a comma-separated list of flat
+        dotted-path attribute names. Classes with no schema render
+        ``<attributes>(no schema)</attributes>`` to make absence obvious
+        for debugging.
+
+        Attribute counts per class are soft-capped at
+        ``MAX_ATTRIBUTES_PER_CLASS`` to prevent pathologically large
+        schemas from bloating the prompt. When truncation occurs, a
+        ``...(+N more)`` suffix is appended and a warning is logged.
+
+        Returns:
+            Multi-line XML-tagged string suitable for direct prompt
+            substitution.
+        """
+        blocks: List[str] = []
+        for doc_type in self.document_types:
+            attr_names = self._get_attribute_names_for_class(doc_type.type_name)
+            if attr_names:
+                if len(attr_names) > self.MAX_ATTRIBUTES_PER_CLASS:
+                    overflow = len(attr_names) - self.MAX_ATTRIBUTES_PER_CLASS
+                    logger.warning(
+                        "Class '%s' has %d schema attributes; truncating to "
+                        "%d for {CLASS_AND_ATTRIBUTE_NAMES_AND_DESCRIPTIONS} "
+                        "rendering (overflow=%d).",
+                        doc_type.type_name,
+                        len(attr_names),
+                        self.MAX_ATTRIBUTES_PER_CLASS,
+                        overflow,
+                    )
+                    rendered_names = attr_names[: self.MAX_ATTRIBUTES_PER_CLASS]
+                    attrs_text = ", ".join(rendered_names) + f", ...(+{overflow} more)"
+                else:
+                    attrs_text = ", ".join(attr_names)
+            else:
+                attrs_text = "(no schema)"
+
+            blocks.append(
+                f'<class name="{doc_type.type_name}">\n'
+                f"  <description>{doc_type.description}</description>\n"
+                f"  <attributes>{attrs_text}</attributes>\n"
+                f"</class>"
+            )
+
+        return "\n".join(blocks)
+
+    def _format_classes_and_attributes_table(self) -> str:
+        """
+        Format document classes WITH their schema attribute names as a
+        markdown table (``type | description | attributes``) for use by
+        the holistic classification path when the optional
+        ``{CLASS_AND_ATTRIBUTE_NAMES_AND_DESCRIPTIONS}`` placeholder is
+        present in a custom prompt.
+
+        Same soft cap and truncation behavior as
+        :meth:`_format_classes_and_attributes_list`.
+
+        Returns:
+            Markdown table string.
+        """
+        header = "| type | description | attributes |\n| --- | --- | --- |\n"
+        rows: List[str] = []
+        for doc_type in self.document_types:
+            attr_names = self._get_attribute_names_for_class(doc_type.type_name)
+            if attr_names:
+                if len(attr_names) > self.MAX_ATTRIBUTES_PER_CLASS:
+                    overflow = len(attr_names) - self.MAX_ATTRIBUTES_PER_CLASS
+                    logger.warning(
+                        "Class '%s' has %d schema attributes; truncating to "
+                        "%d for {CLASS_AND_ATTRIBUTE_NAMES_AND_DESCRIPTIONS} "
+                        "rendering (overflow=%d).",
+                        doc_type.type_name,
+                        len(attr_names),
+                        self.MAX_ATTRIBUTES_PER_CLASS,
+                        overflow,
+                    )
+                    rendered_names = attr_names[: self.MAX_ATTRIBUTES_PER_CLASS]
+                    attrs_text = ", ".join(rendered_names) + f", ...(+{overflow} more)"
+                else:
+                    attrs_text = ", ".join(attr_names)
+            else:
+                attrs_text = "(no schema)"
+
+            # Escape pipes inside cell values to avoid breaking the table.
+            description = (doc_type.description or "").replace("|", "\\|")
+            attrs_text = attrs_text.replace("|", "\\|")
+            rows.append(f"| {doc_type.type_name} | {description} | {attrs_text} |")
+
+        return header + "\n".join(rows)
+
     def _get_classification_config(self) -> Dict[str, Any]:
         """
         Get and validate the classification configuration.
@@ -862,6 +1049,44 @@ class ClassificationService:
         from idp_common.bedrock import format_prompt
 
         return format_prompt(prompt_template, substitutions, required_placeholders)
+
+    def _build_classification_substitutions(
+        self,
+        document_text: str,
+        class_names_and_descriptions: str,
+    ) -> Dict[str, str]:
+        """
+        Build the standard placeholder substitution dict for classification
+        prompts.
+
+        Always includes ``DOCUMENT_TEXT`` and ``CLASS_NAMES_AND_DESCRIPTIONS``.
+        Lazily includes the optional
+        ``CLASS_AND_ATTRIBUTE_NAMES_AND_DESCRIPTIONS`` substitution — keys
+        not referenced by the template incur no extra cost (the underlying
+        :func:`format_prompt` only substitutes referenced placeholders).
+        Computing the attribute listing is cheap (in-memory schema walk),
+        but we still skip it when the active prompt template does not
+        reference it, to keep logs/metrics clean.
+
+        Args:
+            document_text: Resolved document/page text to substitute.
+            class_names_and_descriptions: The pre-formatted class listing
+                (either flat list or markdown table, depending on caller).
+
+        Returns:
+            Dictionary of placeholder name -> value.
+        """
+        return {
+            "DOCUMENT_TEXT": document_text,
+            "CLASS_NAMES_AND_DESCRIPTIONS": class_names_and_descriptions,
+            # Opt-in placeholder: included unconditionally in the
+            # substitutions dict because format_prompt only substitutes
+            # placeholders that actually appear in the template, so this
+            # is cost-neutral for users who don't reference it.
+            "CLASS_AND_ATTRIBUTE_NAMES_AND_DESCRIPTIONS": (
+                self._format_classes_and_attributes_list()
+            ),
+        }
 
     def _build_content_with_or_without_image_placeholder(
         self,
@@ -936,22 +1161,20 @@ class ClassificationService:
                     image_content,
                 )
 
+            substitutions = self._build_classification_substitutions(
+                document_text, class_names_and_descriptions
+            )
+
             # Process the parts before and after the image placeholder
             before_image = self._prepare_prompt_from_template(
                 parts[0],
-                {
-                    "DOCUMENT_TEXT": document_text,
-                    "CLASS_NAMES_AND_DESCRIPTIONS": class_names_and_descriptions,
-                },
+                substitutions,
                 required_placeholders=[],
             )
 
             after_image = self._prepare_prompt_from_template(
                 parts[1],
-                {
-                    "DOCUMENT_TEXT": document_text,
-                    "CLASS_NAMES_AND_DESCRIPTIONS": class_names_and_descriptions,
-                },
+                substitutions,
                 required_placeholders=[],
             )
 
@@ -1004,10 +1227,9 @@ class ClassificationService:
         # Prepare the full prompt
         task_prompt = self._prepare_prompt_from_template(
             prompt_template,
-            {
-                "DOCUMENT_TEXT": document_text,
-                "CLASS_NAMES_AND_DESCRIPTIONS": class_names_and_descriptions,
-            },
+            self._build_classification_substitutions(
+                document_text, class_names_and_descriptions
+            ),
             required_placeholders=[],
         )
 
@@ -1267,10 +1489,9 @@ class ClassificationService:
             # Build content array - start with text prompt
             task_prompt = self._prepare_prompt_from_template(
                 config["task_prompt"],
-                {
-                    "DOCUMENT_TEXT": document_text,
-                    "CLASS_NAMES_AND_DESCRIPTIONS": self._format_classes_list(),
-                },
+                self._build_classification_substitutions(
+                    document_text, self._format_classes_list()
+                ),
                 required_placeholders=[],
             )
 
@@ -1348,9 +1569,18 @@ class ClassificationService:
             metering = response_with_metering["metering"]
 
             # Extract classification result
-            classification_text = response["output"]["message"]["content"][0].get(
-                "text", ""
-            )
+            # Defensive: Handle case where LLM returns empty content array
+            content_array = response["output"]["message"].get("content", [])
+            if not content_array or len(content_array) == 0:
+                logger.error(
+                    "LLM returned empty content array in classification response",
+                    extra={"page_id": page_id, "response": response},
+                )
+                raise ValueError(
+                    f"Classification failed for page {page_id}: LLM returned empty response"
+                )
+
+            classification_text = content_array[0].get("text", "")
 
             # Try to extract structured data (JSON or YAML) from the response
             try:
@@ -2599,12 +2829,17 @@ class ClassificationService:
             # Prepare document classes and descriptions as a table
             classes_table = self._format_classes_and_descriptions()
 
-            # Prepare prompt using common function
+            # Prepare prompt using common function. The holistic path uses
+            # the markdown-table variant of the optional schema-attribute
+            # placeholder so it matches the surrounding class table format.
             prepared_prompt = self._prepare_prompt_from_template(
                 config["task_prompt"],
                 {
                     "DOCUMENT_TEXT": doc_text,
                     "CLASS_NAMES_AND_DESCRIPTIONS": classes_table,
+                    "CLASS_AND_ATTRIBUTE_NAMES_AND_DESCRIPTIONS": (
+                        self._format_classes_and_attributes_table()
+                    ),
                 },
                 required_placeholders=[],
             )
@@ -2625,9 +2860,18 @@ class ClassificationService:
             metering = response_with_metering["metering"]
 
             # Extract classification result
-            classification_text = response["output"]["message"]["content"][0].get(
-                "text", ""
-            )
+            # Defensive: Handle case where LLM returns empty content array
+            content_array = response["output"]["message"].get("content", [])
+            if not content_array or len(content_array) == 0:
+                logger.error(
+                    "LLM returned empty content array in holistic classification response",
+                    extra={"response": response},
+                )
+                raise ValueError(
+                    "Holistic classification failed: LLM returned empty response"
+                )
+
+            classification_text = content_array[0].get("text", "")
 
             # Try to extract JSON from the response
             try:

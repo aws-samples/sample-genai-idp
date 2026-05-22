@@ -34,7 +34,6 @@ from datetime import datetime
 
 import boto3
 from botocore.exceptions import ClientError
-
 from idp_common.appsync.client import AppSyncClient, AppSyncError
 from idp_common.bedrock.client import is_claude_4_7_model
 from idp_common.bedrock.model_utils import parse_model_id
@@ -117,9 +116,14 @@ def _get_appsync_client() -> AppSyncClient:
 def _get_bedrock_runtime():
     global _bedrock_runtime
     if _bedrock_runtime is None:
-        _bedrock_runtime = boto3.client(
+        # Honor BEDROCK_ASSUME_ROLE_ARN for cross-account hub-account routing.
+        # See lib/idp_common_pkg/idp_common/bedrock/session.py.
+        from idp_common.bedrock.session import get_bedrock_session
+
+        region = os.environ.get("AWS_REGION")
+        _bedrock_runtime = get_bedrock_session(region).client(
             "bedrock-runtime",
-            region_name=os.environ.get("AWS_REGION"),
+            region_name=region,
         )
     return _bedrock_runtime
 
@@ -264,9 +268,7 @@ def _resolve_chat_settings(config_version: str | None):
     summ_cfg = (config or {}).get("summarization") or {}
 
     model_id = (
-        chat_cfg.get("model")
-        or summ_cfg.get("model")
-        or _default_model_for_region()
+        chat_cfg.get("model") or summ_cfg.get("model") or _default_model_for_region()
     )
     system_prompt = (
         chat_cfg.get("system_prompt")
@@ -448,10 +450,9 @@ def _invoke_bedrock_stream_and_publish(
                 # before the final event.
                 _flush_if_needed(force=True)
             elif "internalServerException" in event or "throttlingException" in event:
-                err_msg = (
-                    event.get("internalServerException", event.get("throttlingException", {}))
-                    .get("message", "Bedrock stream error")
-                )
+                err_msg = event.get(
+                    "internalServerException", event.get("throttlingException", {})
+                ).get("message", "Bedrock stream error")
                 raise RuntimeError(f"Bedrock stream error: {err_msg}")
             # Other event types (messageStart, metadata, etc.) are ignored.
     finally:
@@ -539,8 +540,7 @@ def handler(event, _context):  # noqa: ANN001
                 method="assistant_error",
                 status="ERROR",
                 content=(
-                    "You do not have access to this document's configuration "
-                    "version."
+                    "You do not have access to this document's configuration version."
                 ),
                 is_processing=False,
             )

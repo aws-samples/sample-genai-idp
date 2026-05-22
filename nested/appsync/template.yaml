@@ -241,6 +241,16 @@ Parameters:
     AllowedValues: ["true", "false"]
     Description: Whether the circuit breaker feature is enabled
 
+  S3EndpointUrl:
+    Type: String
+    Default: ""
+    Description: >
+      VPC-aware S3 endpoint URL injected by parent stack when private mode is
+      active (e.g. https://bucket.<vpce-id>.s3.<region>.vpce.amazonaws.com).
+      When set, presigner Lambdas use this endpoint with virtual-host
+      addressing so browser uploads target the VPC interface endpoint.
+      Empty in public mode.
+
 Metadata:
   cfn-lint:
     config:
@@ -249,6 +259,7 @@ Metadata:
         - W1031  # ARN pattern matching when Fn::Sub resolves to empty string (UsersTableArn default)
 
 Conditions:
+  HasS3EndpointUrl: !Not [!Equals [!Ref S3EndpointUrl, ""]]
   HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
   HasGuardrail: !Equals [!Ref HasGuardrailConfig, "true"]
   ShouldCreateEvaluationBaselineBucket: !Equals [!Ref ShouldCreateEvaluationBaselineBucket, "true"]
@@ -335,6 +346,7 @@ Resources:
                   - !GetAtt CreateDocumentResolverFunction.Arn
                   - !GetAtt DeleteDocumentResolverFunction.Arn
                   - !GetAtt DeleteTestsResolverFunction.Arn
+                  - !GetAtt AbortTestRunsResolverFunction.Arn
                   - !GetAtt QueryKnowledgeBaseResolverFunction.Arn
                   - !GetAtt ReprocessDocumentResolverFunction.Arn
                   - !GetAtt AbortWorkflowResolverFunction.Arn
@@ -1726,6 +1738,99 @@ Resources:
 
 
   ##########################################################################
+  # AbortTestRunsResolverFunctionLogGroup
+  ##########################################################################
+  AbortTestRunsResolverFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+      RetentionInDays: !Ref LogRetentionDays
+
+
+  ##########################################################################
+  # AbortTestRunsResolverFunction
+  ##########################################################################
+  AbortTestRunsResolverFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: "Function does not require VPC access as it only interacts with AWS services via APIs"
+          - id: W92
+            reason: "Function does not require reserved concurrency as it scales based on demand"
+          - id: W12
+            reason: "Lambda requires CloudWatch logs permissions"
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for synchronous AppSync resolver"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_173: "Environment variables contain non-sensitive configuration values"
+    Properties:
+      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
+      Handler: index.lambda_handler
+      Runtime: python3.12
+      CodeUri: ./src/lambda/abort_test_runs
+      Description: Lambda function to abort test runs via GraphQL API
+      MemorySize: 512
+      Timeout: 60
+      Environment:
+        Variables:
+          LOG_LEVEL: !Ref LogLevel
+          TRACKING_TABLE_NAME: !Ref TrackingTableName
+          ABORT_WORKFLOW_FUNCTION_NAME: !Ref AbortWorkflowResolverFunction
+          TEST_RESULT_CACHE_UPDATE_QUEUE_URL: !Ref TestResultCacheUpdateQueueUrl
+      LoggingConfig:
+        LogGroup: !Ref AbortTestRunsResolverFunctionLogGroup
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref TrackingTableName
+        - Statement:
+            - Effect: Allow
+              Action:
+                - lambda:InvokeFunction
+              Resource: !GetAtt AbortWorkflowResolverFunction.Arn
+        - SQSSendMessagePolicy:
+            QueueName: !Ref TestResultCacheUpdateQueueName
+        - Statement:
+            - Effect: Allow
+              Action:
+                - kms:Encrypt
+                - kms:Decrypt
+                - kms:ReEncrypt*
+                - kms:GenerateDataKey*
+                - kms:DescribeKey
+              Resource: !Ref CustomerManagedEncryptionKeyArn
+
+
+  ##########################################################################
+  # AbortTestRunsDataSource
+  ##########################################################################
+  AbortTestRunsDataSource:
+    Type: AWS::AppSync::DataSource
+    Properties:
+      ApiId: !Ref GraphQLApiId
+      Name: AbortTestRunsDataSource
+      Description: Lambda function for aborting test runs
+      Type: AWS_LAMBDA
+      ServiceRoleArn: !GetAtt AppSyncServiceRole.Arn
+      LambdaConfig:
+        LambdaFunctionArn: !GetAtt AbortTestRunsResolverFunction.Arn
+
+
+  ##########################################################################
+  # AbortTestRunsResolver
+  ##########################################################################
+  AbortTestRunsResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: GraphQLSchema
+    Properties:
+      ApiId: !Ref GraphQLApiId
+      DataSourceName: !GetAtt AbortTestRunsDataSource.Name
+      TypeName: Mutation
+      FieldName: abortTestRuns
+
+
+  ##########################################################################
   # DiscoveryUploadResolverFunctionLogGroup
   ##########################################################################
   DiscoveryUploadResolverFunctionLogGroup:
@@ -1776,6 +1881,7 @@ Resources:
           DISCOVERY_QUEUE_URL: !Ref DiscoveryQueueUrl
           CONFIGURATION_TABLE_NAME: !Ref ConfigurationTableName
           MULTI_DOC_DISCOVERY_STATE_MACHINE_ARN: !Ref MultiDocDiscoveryStateMachineArn
+          S3_ENDPOINT_URL: !If [HasS3EndpointUrl, !Ref S3EndpointUrl, !Ref AWS::NoValue]
       LoggingConfig:
         LogGroup: !Ref DiscoveryUploadResolverFunctionLogGroup
       Policies:
@@ -3410,6 +3516,7 @@ Resources:
             - ShouldCreateEvaluationBaselineBucket
             - !Ref EvaluationBaselineBucketName
             - !Ref EvaluationBaselineBucketName
+          S3_ENDPOINT_URL: !If [HasS3EndpointUrl, !Ref S3EndpointUrl, !Ref AWS::NoValue]
       LoggingConfig:
         LogGroup: !Ref TestSetResolverFunctionLogGroup
       Policies:
@@ -3602,6 +3709,7 @@ Resources:
         Variables:
           LOG_LEVEL: !Ref LogLevel
           INPUT_BUCKET: !Ref InputBucketName
+          S3_ENDPOINT_URL: !If [HasS3EndpointUrl, !Ref S3EndpointUrl, !Ref AWS::NoValue]
       LoggingConfig:
         LogGroup: !Ref UploadResolverFunctionLogGroup
       Policies:
@@ -4470,3 +4578,7 @@ Outputs:
   TestResultsResolverFunctionArn:
     Description: ARN of the Test Results Resolver Lambda function
     Value: !GetAtt TestResultsResolverFunction.Arn
+
+  AbortTestRunsResolverFunctionArn:
+    Description: ARN of the Abort Test Runs Lambda function
+    Value: !GetAtt AbortTestRunsResolverFunction.Arn

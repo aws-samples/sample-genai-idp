@@ -15,12 +15,16 @@ logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 logging.getLogger('idp_common.bedrock.client').setLevel(os.environ.get("BEDROCK_LOG_LEVEL", "INFO"))
 # Get LOG_LEVEL from environment variable with INFO as default
 
-# Configure S3 client with S3v4 signature
+# Configure S3 client with S3v4 signature.
+# When S3_ENDPOINT_URL is set (private VPC mode), use virtual-host addressing
+# so the SigV4 host header matches the VPC interface endpoint DNS.
+_s3_endpoint_url = os.environ.get("S3_ENDPOINT_URL") or None
+_s3_addressing = "virtual" if _s3_endpoint_url else "path"
 s3_config = Config(
-    signature_version='s3v4',
-    s3={'addressing_style': 'path'}
+    signature_version="s3v4",
+    s3={"addressing_style": _s3_addressing},
 )
-s3_client = boto3.client('s3', config=s3_config)
+s3_client = boto3.client("s3", endpoint_url=_s3_endpoint_url, config=s3_config)
 
 # --- inline log sanitizer ---------------------------------------------------
 # Minimal inline redactor. Kept here rather than importing from idp_common to
