@@ -46,6 +46,8 @@ import {
   X_AWS_IDP_EXCLUSION_REASON,
   X_AWS_IDP_PAGE_TYPES,
   X_AWS_IDP_SOURCE_PAGE_TYPES,
+  X_AWS_IDP_VALIDATION_ENGINE,
+  VALIDATION_ENGINE_OPTIONS,
 } from '../../constants/schemaConstants';
 
 interface SchemaAttribute {
@@ -416,6 +418,20 @@ const SchemaInspector = ({
     setAttributeLabel(selectedAttributeName || '');
   }, [selectedAttributeName]);
 
+  // When loading an existing schema with an invalid validation engine value,
+  // overwrite it with "llm" (Requirement 8.6)
+  useEffect(() => {
+    if (isRuleSchema && selectedAttribute) {
+      const currentValue = selectedAttribute[X_AWS_IDP_VALIDATION_ENGINE] as string | undefined;
+      if (currentValue !== undefined && currentValue !== null) {
+        const isValid = VALIDATION_ENGINE_OPTIONS.some((opt) => opt.value === currentValue);
+        if (!isValid) {
+          onUpdate({ [X_AWS_IDP_VALIDATION_ENGINE]: 'llm' });
+        }
+      }
+    }
+  }, [isRuleSchema, selectedAttribute, onUpdate]);
+
   const handleRenameSubmit = (): void => {
     const trimmed = attributeLabel.trim();
     if (!trimmed || trimmed === selectedAttributeName) {
@@ -613,6 +629,27 @@ const SchemaInspector = ({
               onChange={({ detail }) => onUpdate({ description: detail.value || undefined })}
               rows={3}
               placeholder="e.g., Validates that the patient consent form is properly signed"
+            />
+          </FormField>
+        )}
+
+        {isRuleSchema && (
+          <FormField label="Validation Engine" description="Choose the engine for validating this rule">
+            <Select
+              selectedOption={(() => {
+                const currentValue = selectedAttribute[X_AWS_IDP_VALIDATION_ENGINE] as string | undefined;
+                // If value exists and is valid, use it
+                const validOption = VALIDATION_ENGINE_OPTIONS.find((opt) => opt.value === currentValue);
+                if (validOption) {
+                  return validOption;
+                }
+                // Default display: "Semantic (LLM)" when field is absent or invalid
+                return VALIDATION_ENGINE_OPTIONS[0];
+              })()}
+              onChange={({ detail }) => {
+                onUpdate({ [X_AWS_IDP_VALIDATION_ENGINE]: detail.selectedOption.value });
+              }}
+              options={VALIDATION_ENGINE_OPTIONS}
             />
           </FormField>
         )}

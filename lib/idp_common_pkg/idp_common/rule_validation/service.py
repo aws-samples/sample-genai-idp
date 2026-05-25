@@ -21,8 +21,11 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 from idp_common import bedrock, s3, utils
 from idp_common.config.models import IDPConfig
 from idp_common.config.schema_constants import (
+    VALIDATION_ENGINE_LLM,
+    VALIDATION_ENGINE_Z3,
     X_AWS_IDP_POLICY_TYPE,
     X_AWS_IDP_RULE_TYPE,
+    X_AWS_IDP_VALIDATION_ENGINE,
 )
 from idp_common.models import Document, RuleValidationResult, Status
 from idp_common.rule_validation.models import FactExtractionResponse
@@ -114,12 +117,46 @@ class RuleValidationService:
         self.token_size = self.config.rule_validation.token_size
         self.overlap_percentage = self.config.rule_validation.overlap_percentage
 
+        # Z3 engine adapter — eagerly initialize if config has Z3 settings,
+        # otherwise lazily instantiate on first Z3 rule encounter.
+        self._z3_adapter = None
+        if (
+            self.config.rule_validation.z3_rule_translator is not None
+            and self.config.rule_validation.z3_value_extraction is not None
+        ):
+            from idp_common.rule_validation.z3_engine import Z3EngineAdapter
+
+            self._z3_adapter = Z3EngineAdapter(
+                config=self.config, region=self.region
+            )
+            logger.info("Z3EngineAdapter eagerly initialized from config")
+
     @property
     def semaphore(self):
         """Lazy initialization of semaphore in current event loop."""
         if self._semaphore is None:
             self._semaphore = asyncio.Semaphore(self.semaphore_limit)
         return self._semaphore
+
+    @property
+    def z3_adapter(self):
+        """Lazily instantiate Z3EngineAdapter on first Z3 rule encounter.
+
+        If the adapter was already eagerly initialized in __init__ (because
+        config had z3 settings), returns the existing instance. Otherwise,
+        creates a new adapter with the current config and region.
+
+        Returns:
+            Z3EngineAdapter instance ready for rule validation.
+        """
+        if self._z3_adapter is None:
+            from idp_common.rule_validation.z3_engine import Z3EngineAdapter
+
+            self._z3_adapter = Z3EngineAdapter(
+                config=self.config, region=self.region
+            )
+            logger.info("Z3EngineAdapter lazily initialized on first Z3 rule encounter")
+        return self._z3_adapter
 
     def _get_policy_types(self, config: Dict[str, Any]) -> List[str]:
         """
@@ -167,6 +204,47 @@ class RuleValidationService:
                 )
                 return questions
         logger.warning(f"No questions found for policy_type '{policy_type}'")
+        return []
+
+    def _get_rule_metadata(
+        self, config: Dict[str, Any], policy_type: str
+    ) -> List[Dict[str, str]]:
+        """
+        Extract rule metadata (description + engine field) for a specific policy type.
+
+        Each entry contains:
+          - "description": the rule question text
+          - "engine": the validation engine ("llm" or "z3"), defaults to "llm"
+
+        Args:
+            config: Configuration dictionary
+            policy_type: Policy type to get metadata for
+
+        Returns:
+            List of dicts with "description" and "engine" keys
+        """
+        policy_classes = config.get("policy_classes", [])
+        for policy_class in policy_classes:
+            if policy_class.get("x-aws-idp-policy-type") == policy_type:
+                rule_properties = policy_class.get("rule_properties", {})
+                metadata = []
+                for prop in rule_properties.values():
+                    description = prop.get("description")
+                    if description:
+                        engine = prop.get(
+                            X_AWS_IDP_VALIDATION_ENGINE, VALIDATION_ENGINE_LLM
+                        )
+                        metadata.append({
+                            "description": description,
+                            "engine": engine,
+                        })
+                logger.debug(
+                    f"Extracted {len(metadata)} rule metadata entries for "
+                    f"policy_type '{policy_type}': "
+                    f"{[(m['description'][:40], m['engine']) for m in metadata]}"
+                )
+                return metadata
+        logger.warning(f"No rule metadata found for policy_type '{policy_type}'")
         return []
 
     def _chunk_text_with_overlap(
@@ -627,6 +705,137 @@ class RuleValidationService:
                     "reasoning": f"Error during processing: {str(e)}",
                 }
 
+    async def _process_z3_rule(
+        self,
+        rule_description: str,
+        policy_type: str,
+        extraction_results: Dict[str, Any],
+        document_text: str,
+        config: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """
+        Process a single rule using the Z3 engine.
+
+        Wraps Z3EngineAdapter.validate_rule in an executor since Z3 is synchronous.
+        Uses the same semaphore pool as LLM rules for concurrency control.
+
+        Args:
+            rule_description: The rule question/description to evaluate
+            policy_type: Type of policy
+            extraction_results: Structured extraction results from prior pipeline stages
+            document_text: Raw document text for fallback extraction
+            config: Configuration for the validation
+
+        Returns:
+            Validated response dictionary matching LLM response shape
+        """
+        async with self.semaphore:
+            try:
+                import uuid
+
+                task_id = str(uuid.uuid4())[:8]
+                logger.debug(
+                    f"DEBUG:Z3_START task_id={task_id} policy_type='{policy_type}' "
+                    f"rule='{rule_description[:60]}...'"
+                )
+
+                start_time = time.time()
+
+                loop = asyncio.get_event_loop()
+
+                # Run the synchronous Z3 validation in a thread pool executor
+                result = await loop.run_in_executor(
+                    None,
+                    self.z3_adapter.validate_rule,
+                    rule_description,
+                    policy_type,
+                    extraction_results or {},
+                    document_text,
+                    None,  # output_bucket
+                    None,  # cache_prefix
+                )
+
+                duration = time.time() - start_time
+                logger.debug(
+                    f"DEBUG:Z3_COMPLETE task_id={task_id} policy_type='{policy_type}' "
+                    f"rule='{rule_description[:60]}...' duration={duration:.2f}s "
+                    f"recommendation={result.get('recommendation')}"
+                )
+
+                return result
+
+            except Exception as e:
+                logger.error(
+                    f"Error processing Z3 rule '{rule_description[:80]}': {str(e)}"
+                )
+                return {
+                    "rule_type": policy_type,
+                    "rule": rule_description,
+                    "recommendation": "Information Not Found",
+                    "reasoning": f"Z3 engine error: {str(e)}",
+                    "supporting_pages": [],
+                }
+
+    async def _process_z3_rule_with_fallback(
+        self,
+        rule_description: str,
+        policy_type: str,
+        extraction_results: Dict[str, Any],
+        document_text: str,
+        config: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """
+        Process a rule via Z3 with automatic LLM fallback on error.
+
+        When the Z3 engine returns "Information Not Found" (indicating a
+        translation, extraction, or solver error), logs a warning and
+        re-processes the rule via the LLM engine as a fallback.
+
+        If the LLM engine also fails, returns the LLM error result.
+
+        Args:
+            rule_description: The rule question/description to evaluate
+            policy_type: Type of policy
+            extraction_results: Structured extraction results from prior pipeline stages
+            document_text: Raw document text for fallback extraction
+            config: Configuration for the validation
+
+        Returns:
+            Validated response dictionary — either Z3 result on success,
+            or LLM result on Z3 failure (fallback).
+        """
+        # First, attempt Z3 validation
+        z3_result = await self._process_z3_rule(
+            rule_description=rule_description,
+            policy_type=policy_type,
+            extraction_results=extraction_results,
+            document_text=document_text,
+            config=config,
+        )
+
+        # Check if Z3 returned an error (recommendation == "Information Not Found")
+        if z3_result.get("recommendation") == "Information Not Found":
+            logger.warning(
+                f"Z3 engine failed for rule '{rule_description[:80]}' in "
+                f"policy_type '{policy_type}': {z3_result.get('reasoning', 'unknown error')}. "
+                f"Falling back to LLM engine."
+            )
+
+            # Fall back to LLM engine
+            llm_result = await self._process_rule_question(
+                rule=rule_description,
+                user_history=document_text,
+                policy_type=policy_type,
+                config=config,
+                extraction_results=extraction_results,
+            )
+
+            # Return LLM result regardless of success or failure
+            return llm_result
+
+        # Z3 succeeded — return its result
+        return z3_result
+
     async def _process_policy_type(
         self,
         policy_type: str,
@@ -637,9 +846,17 @@ class RuleValidationService:
         """
         Process all rule questions for a specific policy type.
 
+        Routes each rule to the appropriate engine based on its
+        x-aws-idp-validation-engine field:
+          - "z3" → Z3EngineAdapter (deterministic SMT-LIB solving) with LLM fallback
+          - "llm" or absent → LLM engine (semantic reasoning)
+
+        All rules share the same semaphore pool for concurrency control.
+        Partial failures don't block other rules — all results are aggregated.
+
         Args:
             policy_type: The policy type to process
-            user_history: The user history text
+            user_history: The user history text (document content)
             config: Configuration for the validation
             extraction_results: Optional extraction results to include in the prompt
 
@@ -649,26 +866,41 @@ class RuleValidationService:
         start_time = time.time()
 
         try:
-            # Get rule questions from policy_classes
-            rule_questions = self._get_rule_questions(config, policy_type)
-            if not rule_questions:
+            # Get rule metadata (description + engine) from policy_classes
+            rule_metadata = self._get_rule_metadata(config, policy_type)
+            if not rule_metadata:
                 raise ValueError(
                     f"No rule questions found for policy type: {policy_type}"
                 )
 
-            # Process all questions concurrently
+            # Process all rules concurrently, dispatching to the correct engine
             tasks = []
-            for rule in rule_questions:
-                task = self._process_rule_question(
-                    rule=rule,
-                    user_history=user_history,
-                    policy_type=policy_type,
-                    config=config,
-                    extraction_results=extraction_results,
-                )
+            for rule_meta in rule_metadata:
+                rule_description = rule_meta["description"]
+                engine = rule_meta["engine"]
+
+                if engine == VALIDATION_ENGINE_Z3:
+                    # Dispatch to Z3 engine with automatic LLM fallback on error
+                    task = self._process_z3_rule_with_fallback(
+                        rule_description=rule_description,
+                        policy_type=policy_type,
+                        extraction_results=extraction_results,
+                        document_text=user_history,
+                        config=config,
+                    )
+                else:
+                    # Default to LLM engine (engine == "llm" or absent)
+                    task = self._process_rule_question(
+                        rule=rule_description,
+                        user_history=user_history,
+                        policy_type=policy_type,
+                        config=config,
+                        extraction_results=extraction_results,
+                    )
                 tasks.append(task)
 
-            # Wait for all tasks to complete
+            # Wait for all tasks to complete — partial failures don't block
+            # other rules since each task handles its own errors internally
             responses = await asyncio.gather(*tasks)
 
             # Track timing

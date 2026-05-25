@@ -196,6 +196,18 @@ export const X_AWS_IDP_PAGE_TYPES = 'x-aws-idp-page-types';
 export const X_AWS_IDP_SOURCE_PAGE_TYPES = 'x-aws-idp-source-page-types';
 
 // ============================================================================
+// AWS IDP Validation Engine Extensions (Per-Rule Engine Selection)
+// ============================================================================
+/** Per-rule validation engine selector (values: "llm" or "z3") */
+export const X_AWS_IDP_VALIDATION_ENGINE = 'x-aws-idp-validation-engine';
+
+// UI-friendly validation engine options for dropdowns
+export const VALIDATION_ENGINE_OPTIONS = [
+  { label: 'Semantic (LLM)', value: 'llm' },
+  { label: 'Symbolic (Z3)', value: 'z3' },
+];
+
+// ============================================================================
 // AWS IDP List-Specific Extensions
 // ============================================================================
 /** Description for list items */
