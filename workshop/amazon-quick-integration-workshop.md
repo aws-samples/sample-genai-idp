@@ -1,3 +1,9 @@
+---
+title: "IDP Accelerator + Amazon Quick Integration Workshop"
+---
+
+<!-- SPDX-License-Identifier: MIT-0 -->
+
 # IDP Accelerator + Amazon Quick Integration Workshop
 
 > **Workshop Guide** — Build an end-to-end intelligent document processing workflow using the [GenAI IDP Accelerator](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws) and Amazon Quick.
@@ -6,11 +12,12 @@
 
 In this workshop, you will:
 1. Deploy the GenAI IDP Accelerator stack via CloudFormation
-2. Configure an MCP (Model Context Protocol) integration in Amazon Quick to connect to the IDP backend
-3. Build an Amazon Quick workflow that processes a loan document package through the IDP pipeline
-4. Extract structured data from the processed document
-5. Generate a formatted Excel spreadsheet with the results
-6. Upload the output back to S3
+2. Upload the sample loan document to S3
+3. Configure an MCP (Model Context Protocol) integration in Amazon Quick to connect to the IDP backend
+4. Build an Amazon Quick workflow that processes a loan document package through the IDP pipeline
+5. Extract structured data from the processed document
+6. Generate a formatted Excel spreadsheet with the results
+7. Upload the output to S3 and download the results spreadsheet
 
 ### Architecture
 
@@ -87,7 +94,31 @@ You will receive an email with a temporary password to access the IDP Web UI:
 
 > **Important**: Note the following values from the CloudFormation **Outputs** tab — you'll need them for the MCP integration setup:
 > - `MCPServerEndpoint` — The AgentCore Gateway URL
-> - `MCPClientID` — The OAuth client ID for external app authentication
+> - `MCPConnectorClientId` — The OAuth client ID for service-to-service (M2M) authentication
+> - `MCPConnectorClientSecret` — The OAuth client secret for service-to-service (M2M) authentication
+> - `MCPTokenURL` — The Cognito OAuth token endpoint URL
+
+---
+
+### Step 1.5: Upload the Sample Document to S3
+
+Before running the workflow you need the sample loan package in an S3 bucket that the IDP stack can read.
+
+1. Locate the sample file in the cloned repository:
+   ```
+   samples/lending_package.pdf
+   ```
+2. Upload it to an S3 bucket in the **same AWS region** as your IDP stack:
+   ```bash
+   aws s3 cp samples/lending_package.pdf \
+       s3://<your-input-bucket>/inputs/lending_package.pdf \
+       --region <stack-region>
+   ```
+3. Note the bucket name and key — you'll enter them as runtime config values when you run the workflow:
+   - **`loan_package_bucket`** — the bucket name (e.g. `my-idp-input-bucket`)
+   - **`loan_package_key`** — the object key (e.g. `inputs/lending_package.pdf`)
+
+> **Tip:** You can also drag-and-drop the file using the [IDP Web UI](https://docs.aws.amazon.com/solutions/latest/accelerated-intelligent-document-processing/web-ui.html) upload feature if you prefer a console-based approach.
 
 ---
 
@@ -110,8 +141,13 @@ Configure the following fields:
 | **Connection Purpose** | Automated workflows |
 | **Authentication Type** | Service-to-service OAuth |
 | **Base URL** | *(Your `MCPServerEndpoint` from CloudFormation Outputs)* |
-| **Client ID** | *(Your `MCPClientID` from CloudFormation Outputs)* |
+| **Client ID** | *(Your `MCPConnectorClientId` from CloudFormation Outputs)* |
+| **Client Secret** | *(Your `MCPConnectorClientSecret` from CloudFormation Outputs)* |
+| **Token URL** | *(Your `MCPTokenURL` from CloudFormation Outputs)* |
 | **VPC Connection** | Public network |
+
+> **Why `MCPConnectorClientId` and not `MCPClientId`?**
+> The stack creates two separate Cognito clients. `MCPClientId` uses the `authorization_code` flow (interactive user login) and is for QuickSight/external apps. `MCPConnectorClientId` uses the `client_credentials` flow (machine-to-machine OAuth — no user login required), which is required for automated service-to-service workflows. See [MCP Server docs](../docs/mcp-server.md) for full details.
 
 > **Example Base URL format:**
 > ```
@@ -264,14 +300,14 @@ This is the core step — a custom agent that submits the document to the IDP pi
 
 | Field | Value |
 |-------|-------|
-| **Instruction** | `"Process the provided document using IDP MCP (Intelligent Document Processing). Document location: {document}. Submit the document to IDP MCP for processing, then continuously monitor the processing status by polling the IDP MCP status endpoint until the document processing is complete. Once complete, retrieve and return the final processing result including the completion status and any extracted data or metadata from the document."` |
+| **Instruction** | `"Process the provided document using IDP MCP (Intelligent Document Processing). Document location: {document}. Submit the document to IDP MCP for processing using IDPTools__process, then continuously monitor the processing status by polling IDPTools__get_results until the batch status shows completion. Once complete, retrieve and return the final processing result including the completion status and any extracted data or metadata from the document."` |
 | **Mode** | Pro |
 | **Structured Output** | `status`, `extracted_data`, `metadata` |
 | **Agent Response Variable** | `processing_result` |
 
 **Available Actions (MCP tools):**
 - `IDPTools__process`
-- `IDPTools__status`
+- `IDPTools__get_results`
 
 ![Custom Agent Setup](images/image_018.png)
 ![Agent Actions](images/image_019.png)
@@ -446,6 +482,26 @@ Build an Excel workbook with two sheets: **Metadata** and **Extracted Data**.
 
 ![Final Log](images/image_052.png)
 
+#### Step 5.5 — Download Result Spreadsheet
+
+After the S3 upload succeeds, give the user a direct download link to the output file.
+
+- **Q action connector id**: `s3-action-connector`
+- **Action**: Get presigned URL (or use the Amazon Quick file download action)
+- **Bucket**: `runtime_config("output_bucket")`
+- **Key**: `runtime_config("output_bucket_key")`
+- **Output Variable**: `download_url`
+
+Then surface the result to the user:
+
+```
+Message: f"✅ Processing complete! Download your results spreadsheet here: {download_url}"
+```
+
+> **Alternative:** If your Amazon Quick environment has a built-in **File Download** step, use it directly with `spreadsheet` as the source — it will handle S3 retrieval and present the file to the user without needing a separate presigned URL action.
+
+![Download Result](images/image_053.png)
+
 ---
 
 ## Runtime Configuration
@@ -494,7 +550,7 @@ When executing this workflow, provide the following runtime configuration values
 | Issue | Resolution |
 |-------|-----------|
 | Stack deployment fails | Verify you have [Bedrock model access](https://docs.aws.amazon.com/bedrock/latest/userguide/model-access.html) enabled for required models |
-| MCP connection fails | Verify the `MCPServerEndpoint` and `MCPClientID` from CloudFormation Outputs match your integration config |
+| MCP connection fails | Verify the `MCPServerEndpoint`, `MCPConnectorClientId`, `MCPConnectorClientSecret`, and `MCPTokenURL` from CloudFormation Outputs match your integration config |
 | Agent times out during processing | Large documents may take several minutes — increase the agent timeout or ensure the polling logic has adequate retries |
 | No extracted data returned | Verify the input document is in a [supported format](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/blob/main/docs/configuration.md) and that classification/extraction configs are properly set up |
 | S3 upload permission denied | Ensure the Amazon Quick S3 connector has write access to the output bucket |
