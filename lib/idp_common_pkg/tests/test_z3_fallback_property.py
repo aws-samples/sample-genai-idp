@@ -180,6 +180,7 @@ class TestZ3ToLLMFallbackOnError:
                 "recommendation": "Information Not Found",
                 "reasoning": error_reasoning,
                 "supporting_pages": [],
+                "_z3_error": True,
             }
 
             async def mock_process_z3_rule(
@@ -279,6 +280,7 @@ class TestZ3ToLLMFallbackOnError:
                     "recommendation": "Information Not Found",
                     "reasoning": matching_rule["error_reasoning"],
                     "supporting_pages": [],
+                    "_z3_error": True,
                 }
 
             async def mock_process_rule_question(
@@ -464,6 +466,7 @@ class TestZ3ToLLMFallbackOnError:
                     "recommendation": "Information Not Found",
                     "reasoning": error_reasoning,
                     "supporting_pages": [],
+                    "_z3_error": True,
                 }
 
             service._process_z3_rule = mock_process_z3_rule

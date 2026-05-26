@@ -551,9 +551,15 @@ class Z3Validator:
         if token.startswith('"') and token.endswith('"'):
             return z3.StringVal(token[1:-1])
         
-        # If none of the above, treat as a string literal without quotes
-        # (some SMT-LIB dialects allow unquoted strings)
-        return z3.StringVal(token)
+        # Unknown unquoted token — likely a typo in a parameter name from LLM output.
+        # Raise instead of silently coercing to StringVal, which would mask errors.
+        from .exceptions import ValidationError
+        raise ValidationError(
+            message=f"Unknown atom '{token}' in SMT-LIB constraint. "
+                    f"Expected a declared parameter name, numeric literal, or quoted string. "
+                    f"This may indicate an LLM translation error.",
+            component="z3_validator",
+        )
     
     def _apply_smt_operator(self, op: str, args: List[Any]) -> Any:
         """

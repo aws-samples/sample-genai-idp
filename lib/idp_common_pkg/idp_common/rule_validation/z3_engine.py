@@ -29,16 +29,6 @@ from idp_common.config.models import (
     Z3ValueExtractionConfig,
 )
 
-from .z3.validation_system import ValidationSystem
-from .z3.config_loader import TranslatorConfig, ValueExtractionConfig
-from .z3.models import RuleJSON, ValidationResult
-from .z3.exceptions import (
-    TranslationError,
-    ExtractionError,
-    ValidationError,
-    ValidationSystemError,
-)
-
 logger = logging.getLogger(__name__)
 
 _OUTCOME_TO_RECOMMENDATION = {
@@ -48,8 +38,10 @@ _OUTCOME_TO_RECOMMENDATION = {
 }
 
 
-def _build_translator_config(idp_z3_cfg: Z3RuleTranslatorConfig) -> TranslatorConfig:
+def _build_translator_config(idp_z3_cfg: "Z3RuleTranslatorConfig"):
     """Convert IDP Z3RuleTranslatorConfig → internal TranslatorConfig dataclass."""
+    from .z3.config_loader import TranslatorConfig
+
     return TranslatorConfig(
         model_id=idp_z3_cfg.model,
         temperature=idp_z3_cfg.temperature,
@@ -60,8 +52,10 @@ def _build_translator_config(idp_z3_cfg: Z3RuleTranslatorConfig) -> TranslatorCo
     )
 
 
-def _build_extraction_config(idp_z3_cfg: Z3ValueExtractionConfig) -> ValueExtractionConfig:
+def _build_extraction_config(idp_z3_cfg: "Z3ValueExtractionConfig"):
     """Convert IDP Z3ValueExtractionConfig → internal ValueExtractionConfig dataclass."""
+    from .z3.config_loader import ValueExtractionConfig
+
     return ValueExtractionConfig(
         model_id=idp_z3_cfg.model,
         temperature=idp_z3_cfg.temperature,
@@ -117,6 +111,8 @@ class Z3EngineAdapter:
             # Read z3_timeout_ms from Pydantic config
             z3_timeout_ms = rv.z3_timeout_ms
 
+        from .z3.validation_system import ValidationSystem
+
         # Fallback logic: Both must be set together, or both fall back to YAML defaults.
         # If only one is provided and the other is None, fall back to defaults for both.
         if translator_cfg and extraction_cfg:
@@ -133,7 +129,7 @@ class Z3EngineAdapter:
                 region=region,
             )
 
-        self._rule_cache: Dict[str, RuleJSON] = {}
+        self._rule_cache: Dict[str, "RuleJSON"] = {}
 
     # ------------------------------------------------------------------
     # Public API
@@ -188,7 +184,9 @@ class Z3EngineAdapter:
 
             return self._to_llm_response(result, rule_type, rule_description)
 
-        except (TranslationError, ExtractionError, ValidationError, ValidationSystemError) as e:
+        except Exception as e:
+            # Catch all Z3-related exceptions (TranslationError, ExtractionError,
+            # ValidationError, ValidationSystemError) and any unexpected errors.
             logger.error(f"Z3 validation failed for rule '{rule_description[:80]}': {e}")
             return {
                 "rule_type": rule_type,
@@ -196,6 +194,7 @@ class Z3EngineAdapter:
                 "recommendation": "Information Not Found",
                 "reasoning": f"Z3 validation error: {e}",
                 "supporting_pages": [],
+                "_z3_error": True,
             }
 
     # ------------------------------------------------------------------
@@ -204,7 +203,7 @@ class Z3EngineAdapter:
 
     def _extract_values(
         self,
-        rule_json: RuleJSON,
+        rule_json: "RuleJSON",
         extraction_results: Dict[str, Any],
         document_text: str,
     ) -> Dict[str, Any]:
@@ -252,8 +251,9 @@ class Z3EngineAdapter:
         data_example: Any,
         output_bucket: Optional[str] = None,
         cache_prefix: Optional[str] = None,
-    ) -> RuleJSON:
+    ):
         """Load cached RuleJSON or translate from natural language."""
+        from .z3.models import RuleJSON
 
         # Check memory cache first
         if rule_description in self._rule_cache:
@@ -290,6 +290,8 @@ class Z3EngineAdapter:
 
     def _load_from_s3(self, bucket, prefix, rule_description):
         """Attempt to load a cached RuleJSON from S3."""
+        from .z3.models import RuleJSON
+
         key = self._s3_key(prefix, rule_description)
         try:
             data = s3.get_json_content(f"s3://{bucket}/{key}")
@@ -319,7 +321,7 @@ class Z3EngineAdapter:
         return f"{prefix}/z3_rules/{rule_hash}.json"
 
     @staticmethod
-    def _to_llm_response(result: ValidationResult, rule_type: str, rule_description: str) -> Dict[str, Any]:
+    def _to_llm_response(result: "ValidationResult", rule_type: str, rule_description: str) -> Dict[str, Any]:
         """Convert Z3 ValidationResult to the dict shape expected by the orchestrator."""
         recommendation = _OUTCOME_TO_RECOMMENDATION.get(
             result.outcome, "Information Not Found"

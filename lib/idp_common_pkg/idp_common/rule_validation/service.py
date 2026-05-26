@@ -15,6 +15,7 @@ import logging
 import os
 import re
 import time
+import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple, Union
 
@@ -120,6 +121,7 @@ class RuleValidationService:
         # Z3 engine adapter — eagerly initialize if config has Z3 settings,
         # otherwise lazily instantiate on first Z3 rule encounter.
         self._z3_adapter = None
+        self._z3_adapter_lock = asyncio.Lock()
         if (
             self.config.rule_validation.z3_rule_translator is not None
             and self.config.rule_validation.z3_value_extraction is not None
@@ -156,6 +158,22 @@ class RuleValidationService:
                 config=self.config, region=self.region
             )
             logger.info("Z3EngineAdapter lazily initialized on first Z3 rule encounter")
+        return self._z3_adapter
+
+    async def _get_z3_adapter(self):
+        """Get or lazily create the Z3EngineAdapter (coroutine-safe).
+
+        Uses an asyncio.Lock to prevent concurrent initialization.
+        """
+        if self._z3_adapter is None:
+            async with self._z3_adapter_lock:
+                # Double-check after acquiring lock
+                if self._z3_adapter is None:
+                    from idp_common.rule_validation.z3_engine import Z3EngineAdapter
+                    self._z3_adapter = Z3EngineAdapter(
+                        config=self.config, region=self.region
+                    )
+                    logger.info("Z3EngineAdapter lazily initialized on first Z3 rule encounter")
         return self._z3_adapter
 
     def _get_policy_types(self, config: Dict[str, Any]) -> List[str]:
@@ -319,18 +337,18 @@ class RuleValidationService:
             List of text chunks with page-aware overlap
         """
         logger.debug(
-            f"DEBUG:PAGE_CHUNK_START text_length={len(text)} max_chunk_size={max_chunk_size} token_size={token_size} overlap_percentage={overlap_percentage}"
+            f"Page chunk start text_length={len(text)} max_chunk_size={max_chunk_size} token_size={token_size} overlap_percentage={overlap_percentage}"
         )
 
         if not text.strip():
-            logger.debug("DEBUG:PAGE_CHUNK_EMPTY_TEXT")
+            logger.debug("Page chunk empty text")
             return []
 
         # Early return if entire text fits in one chunk
         estimated_tokens = len(text) // token_size
         if estimated_tokens <= max_chunk_size:
             logger.debug(
-                f"DEBUG:PAGE_CHUNK_SINGLE_CHUNK estimated_tokens={estimated_tokens}"
+                f"Page chunk single chunk estimated_tokens={estimated_tokens}"
             )
             return [text]
 
@@ -354,12 +372,12 @@ class RuleValidationService:
                     pages.append((page_number, page_content))
 
         logger.debug(
-            f"DEBUG:PAGE_CHUNK_PARSED_PAGES pages_count={len(pages)} page_numbers={[p[0] for p in pages]}"
+            f"Page chunk parsed pages pages_count={len(pages)} page_numbers={[p[0] for p in pages]}"
         )
 
         if not pages:
             # Fallback to character-based chunking if no pages found
-            logger.debug("DEBUG:PAGE_CHUNK_NO_PAGES_FALLBACK")
+            logger.debug("Page chunk no pages fallback")
             return self._chunk_text_with_overlap(
                 text, max_chunk_size, token_size, overlap_percentage
             )
@@ -387,21 +405,21 @@ class RuleValidationService:
         ) -> List[Tuple[str, str]]:
             """Get overlap pages based on dynamic strategy."""
             if not prev_pages:
-                logger.debug("DEBUG:PAGE_CHUNK_OVERLAP_NO_PREV_PAGES")
+                logger.debug("Page chunk overlap no prev pages")
                 return []
 
             page_numbers = [p[0] for p in prev_pages]
             total_prev_content_length = sum(len(p[1]) for p in prev_pages)
 
             logger.debug(
-                f"DEBUG:PAGE_CHUNK_OVERLAP_INPUT prev_pages_count={len(prev_pages)} page_numbers={page_numbers} total_content_length={total_prev_content_length}"
+                f"Page chunk overlap input prev_pages_count={len(prev_pages)} page_numbers={page_numbers} total_content_length={total_prev_content_length}"
             )
 
             if len(prev_pages) > 1:
                 # Multiple pages: use complete last page as overlap
                 last_page_num, last_page_content = prev_pages[-1]
                 logger.debug(
-                    f"DEBUG:PAGE_CHUNK_OVERLAP_MULTI_PAGE prev_pages_count={len(prev_pages)} page_numbers={page_numbers} using_complete_last_page={last_page_num} last_page_length={len(last_page_content)}"
+                    f"Page chunk overlap multi-page prev_pages_count={len(prev_pages)} page_numbers={page_numbers} using_complete_last_page={last_page_num} last_page_length={len(last_page_content)}"
                 )
                 return [prev_pages[-1]]
             else:
@@ -410,7 +428,7 @@ class RuleValidationService:
                 overlap_size = len(page_content) * overlap_percentage // 100  # True 10%
                 overlap_content = page_content[-overlap_size:]
                 logger.debug(
-                    f"DEBUG:PAGE_CHUNK_OVERLAP_SINGLE_PAGE page={page_num} original_length={len(page_content)} overlap_percentage={overlap_percentage} overlap_size={overlap_size} overlap_length={len(overlap_content)}"
+                    f"Page chunk overlap single-page page={page_num} original_length={len(page_content)} overlap_percentage={overlap_percentage} overlap_size={overlap_size} overlap_length={len(overlap_content)}"
                 )
                 return [(page_num, overlap_content)]
 
@@ -421,7 +439,7 @@ class RuleValidationService:
             page_tokens = get_page_tokens(page_content)
 
             logger.debug(
-                f"DEBUG:PAGE_CHUNK_PROCESSING chunk_idx={chunk_index} page={page_num} page_tokens={page_tokens} current_chunk_tokens={current_chunk_tokens}"
+                f"Page chunk processing chunk_idx={chunk_index} page={page_num} page_tokens={page_tokens} current_chunk_tokens={current_chunk_tokens}"
             )
 
             # Check if we can add this page to current chunk
@@ -430,7 +448,7 @@ class RuleValidationService:
                 current_chunk_pages.append((page_num, page_content))
                 current_chunk_tokens += page_tokens
                 logger.debug(
-                    f"DEBUG:PAGE_CHUNK_ADDED_PAGE chunk_idx={chunk_index} page={page_num} new_total_tokens={current_chunk_tokens}"
+                    f"Page chunk added page chunk_idx={chunk_index} page={page_num} new_total_tokens={current_chunk_tokens}"
                 )
                 i += 1
             else:
@@ -443,7 +461,7 @@ class RuleValidationService:
                     chunks.append(chunk_text)
 
                     logger.debug(
-                        f"DEBUG:PAGE_CHUNK_FINALIZED chunk_idx={chunk_index} pages={[p[0] for p in final_chunk_pages]} overlap_pages_count={len(overlap_pages)} chunk_length={len(chunk_text)}"
+                        f"Page chunk finalized chunk_idx={chunk_index} pages={[p[0] for p in final_chunk_pages]} overlap_pages_count={len(overlap_pages)} chunk_length={len(chunk_text)}"
                     )
 
                     # Update previous chunk pages for next iteration - use final chunk pages including overlap
@@ -460,7 +478,7 @@ class RuleValidationService:
                     chunks.append(chunk_text)
 
                     logger.debug(
-                        f"DEBUG:PAGE_CHUNK_OVERSIZED chunk_idx={chunk_index} page={page_num} page_tokens={page_tokens} overlap_pages_count={len(overlap_pages)} chunk_length={len(chunk_text)}"
+                        f"Page chunk oversized chunk_idx={chunk_index} page={page_num} page_tokens={page_tokens} overlap_pages_count={len(overlap_pages)} chunk_length={len(chunk_text)}"
                     )
 
                     # Update previous chunk pages
@@ -476,11 +494,11 @@ class RuleValidationService:
             chunks.append(chunk_text)
 
             logger.debug(
-                f"DEBUG:PAGE_CHUNK_FINAL chunk_idx={chunk_index} pages={[p[0] for p in final_chunk_pages]} overlap_pages_count={len(overlap_pages)} chunk_length={len(chunk_text)}"
+                f"Page chunk final chunk_idx={chunk_index} pages={[p[0] for p in final_chunk_pages]} overlap_pages_count={len(overlap_pages)} chunk_length={len(chunk_text)}"
             )
 
         logger.debug(
-            f"DEBUG:PAGE_CHUNK_COMPLETE total_chunks={len(chunks)} chunk_lengths={[len(c) for c in chunks]}"
+            f"Page chunk complete total_chunks={len(chunks)} chunk_lengths={[len(c) for c in chunks]}"
         )
 
         return chunks
@@ -523,7 +541,7 @@ class RuleValidationService:
         Since the common bedrock client is synchronous, we run it in an executor
         to maintain async compatibility.
         """
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
 
         # Run the synchronous bedrock.invoke_model in an executor
         response = await loop.run_in_executor(
@@ -566,13 +584,11 @@ class RuleValidationService:
         async with self.semaphore:
             try:
                 # Generate unique task ID for tracking
-                import uuid
-
                 task_id = str(uuid.uuid4())[:8]
 
                 # Log start of processing with context
                 logger.debug(
-                    f"DEBUG:ASYNC_START task_id={task_id} policy_type='{policy_type}' rule='{rule[:60]}...' thread_id={asyncio.current_task()}"
+                    f"LLM start task_id={task_id} policy_type='{policy_type}' rule='{rule[:60]}...' thread_id={asyncio.current_task()}"
                 )
 
                 start_time = time.time()
@@ -611,7 +627,7 @@ class RuleValidationService:
 
                 # Log before LLM invocation
                 logger.debug(
-                    f"DEBUG:LLM_INVOKE_START task_id={task_id} policy_type='{policy_type}' rule='{rule[:60]}...' model='{model_id}'"
+                    f"LLM invoke task_id={task_id} policy_type='{policy_type}' rule='{rule[:60]}...' model='{model_id}'"
                 )
 
                 # Invoke the model
@@ -628,14 +644,14 @@ class RuleValidationService:
 
                 call_duration = time.time() - start_time
                 logger.debug(
-                    f"DEBUG:LLM_RESPONSE task_id={task_id} policy_type='{policy_type}' rule='{rule[:60]}...' duration={call_duration:.2f}s response_keys={list(response.keys()) if response else 'None'}"
+                    f"LLM response task_id={task_id} policy_type='{policy_type}' rule='{rule[:60]}...' duration={call_duration:.2f}s response_keys={list(response.keys()) if response else 'None'}"
                 )
 
                 # Extract and parse response
                 response_text = bedrock.extract_text_from_response(response)
 
                 logger.debug(
-                    f"DEBUG:PARSED_RESPONSE task_id={task_id} policy_type='{policy_type}' rule='{rule[:60]}...' response_length={len(response_text)} response_text={response_text[:200]}..."
+                    f"LLM parsed task_id={task_id} policy_type='{policy_type}' rule='{rule[:60]}...' response_length={len(response_text)} response_text={response_text[:200]}..."
                 )
 
                 # Parse JSON response
@@ -673,11 +689,11 @@ class RuleValidationService:
 
                 # Add comprehensive logging for debugging
                 logger.debug(
-                    f"DEBUG: Raw response keys: {list(response.keys()) if response else 'None'}"
+                    f"Raw response keys: {list(response.keys()) if response else 'None'}"
                 )
-                logger.debug(f"DEBUG: Metering data from response: {metering}")
+                logger.debug(f"Metering data: {metering}")
                 logger.debug(
-                    f"DEBUG: Current token_metrics before merge: {self.token_metrics}"
+                    f"Token metrics before merge: {self.token_metrics}"
                 )
 
                 # Merge metering data using the same utility as extraction service with synchronization
@@ -687,10 +703,10 @@ class RuleValidationService:
                         self.token_metrics, metering or {}
                     )
                     logger.debug(
-                        f"DEBUG: Token metrics after merge: {self.token_metrics}"
+                        f"Token metrics after merge: {self.token_metrics}"
                     )
                     logger.debug(
-                        f"DEBUG: Metrics changed: {old_metrics != self.token_metrics}"
+                        f"Metrics changed: {old_metrics != self.token_metrics}"
                     )
 
                 return validated_response.dict()
@@ -731,22 +747,18 @@ class RuleValidationService:
         """
         async with self.semaphore:
             try:
-                import uuid
-
                 task_id = str(uuid.uuid4())[:8]
                 logger.debug(
-                    f"DEBUG:Z3_START task_id={task_id} policy_type='{policy_type}' "
+                    f"Z3 start task_id={task_id} policy_type='{policy_type}' "
                     f"rule='{rule_description[:60]}...'"
                 )
 
                 start_time = time.time()
 
-                loop = asyncio.get_event_loop()
-
-                # Run the synchronous Z3 validation in a thread pool executor
-                result = await loop.run_in_executor(
-                    None,
-                    self.z3_adapter.validate_rule,
+                # Run the synchronous Z3 validation in a thread pool
+                adapter = await self._get_z3_adapter()
+                result = await asyncio.to_thread(
+                    adapter.validate_rule,
                     rule_description,
                     policy_type,
                     extraction_results or {},
@@ -757,7 +769,7 @@ class RuleValidationService:
 
                 duration = time.time() - start_time
                 logger.debug(
-                    f"DEBUG:Z3_COMPLETE task_id={task_id} policy_type='{policy_type}' "
+                    f"Z3 complete task_id={task_id} policy_type='{policy_type}' "
                     f"rule='{rule_description[:60]}...' duration={duration:.2f}s "
                     f"recommendation={result.get('recommendation')}"
                 )
@@ -774,6 +786,7 @@ class RuleValidationService:
                     "recommendation": "Information Not Found",
                     "reasoning": f"Z3 engine error: {str(e)}",
                     "supporting_pages": [],
+                    "_z3_error": True,
                 }
 
     async def _process_z3_rule_with_fallback(
@@ -813,8 +826,8 @@ class RuleValidationService:
             config=config,
         )
 
-        # Check if Z3 returned an error (recommendation == "Information Not Found")
-        if z3_result.get("recommendation") == "Information Not Found":
+        # Check if Z3 returned an error
+        if z3_result.get("_z3_error"):
             logger.warning(
                 f"Z3 engine failed for rule '{rule_description[:80]}' in "
                 f"policy_type '{policy_type}': {z3_result.get('reasoning', 'unknown error')}. "
@@ -964,12 +977,10 @@ class RuleValidationService:
         Returns:
             Document with updated rule_validation_result
         """
-        import uuid
-
         doc_validation_id = str(uuid.uuid4())[:8]
 
         logger.debug(
-            f"DEBUG:ASYNC_DOC_START doc_validation_id={doc_validation_id} document_id={document.id if document else 'None'} task_id={asyncio.current_task()} sections={len(document.sections) if document and document.sections else 0}"
+            f"Document validation start doc_id={doc_validation_id} document_id={document.id if document else 'None'} task_id={asyncio.current_task()} sections={len(document.sections) if document and document.sections else 0}"
         )
 
         self.timing_metrics["start_time"] = datetime.now()

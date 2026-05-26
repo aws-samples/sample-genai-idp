@@ -148,6 +148,10 @@ SPDX-License-Identifier: MIT-0
    - eu-central-1: `https://s3.eu-central-1.amazonaws.com/aws-ml-blog-eu-central-1/artifacts/genai-idp/idp-main_0.6.3.yaml`
   
 
+### Added
+
+- **Z3 Dual-Engine Rule Validation** — Rules can now be individually routed to either the LLM (semantic) or Z3 (formal/deterministic) validation engine via the `x-aws-idp-validation-engine` field on each rule property in `policy_classes`. The Z3 engine translates natural-language rules to SMT-LIB constraints, extracts parameter values (path-based or LLM-assisted), and validates with the Z3 theorem prover. Z3 failures automatically fall back to the LLM engine. A new "Validation Engine" dropdown in the Schema Builder UI lets users select the engine per rule. Requires `z3-solver` (optional dependency, loaded lazily only when Z3 rules are encountered). See [`docs/rule-validation-z3.md`](docs/rule-validation-z3.md) and the [demo notebook](notebooks/examples/dual-engine-rule-validation.ipynb).
+
 ## [0.6.2]
 
 ### Added

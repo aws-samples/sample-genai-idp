@@ -103,8 +103,12 @@ evaluation = [
   "ruamel-yaml>=0.17.0,<0.19.0; python_version>='3.10'",  # Pure Python YAML, no C extensions
 ]
 
-# Rule validation module dependencies
-rule_validation = [
+# Rule validation module dependencies (core — no z3-solver, keeps Lambda size small)
+rule_validation = []
+
+# Z3 engine optional dependency (adds ~50MB native lib — use only when Z3 rules are needed)
+# For Lambda: only include this extra if your config uses x-aws-idp-validation-engine: z3
+rule_validation_z3 = [
   "z3-solver>=4.12.0",
 ]
 
