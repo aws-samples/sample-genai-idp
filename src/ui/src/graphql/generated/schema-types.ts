@@ -1202,6 +1202,7 @@ export type TestRun = {
   averageConfidence?: Maybe<Scalars['Float']['output']>;
   completedAt?: Maybe<Scalars['AWSDateTime']['output']>;
   completedFiles?: Maybe<Scalars['Int']['output']>;
+  confidenceMetrics?: Maybe<Scalars['AWSJSON']['output']>;
   config?: Maybe<Scalars['AWSJSON']['output']>;
   configVersion?: Maybe<Scalars['String']['output']>;
   confusionMatrix?: Maybe<Scalars['AWSJSON']['output']>;

@@ -567,6 +567,7 @@ export const getTestRun = /* GraphQL */ `
       overallAccuracy
       weightedOverallScores
       averageConfidence
+      confidenceMetrics
       accuracyBreakdown
       confusionMatrix
       fieldMetrics

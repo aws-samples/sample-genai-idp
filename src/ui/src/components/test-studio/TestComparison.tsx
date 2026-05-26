@@ -25,6 +25,7 @@ import {
   parseWeightedOverallScores,
   parseConfigSettingValues,
   calculateAvgCostPerPage,
+  parseConfidenceMetrics,
 } from '../../graphql/awsjson-parsers';
 import type { CostBreakdown } from '../../graphql/awsjson-types';
 
@@ -330,6 +331,52 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
         ),
       ],
       [
+        'Confidence AUROC',
+        ...Object.values(completeTestRuns).map((run) => {
+          if (run.confidenceMetrics) {
+            const parsed = parseConfidenceMetrics(run.confidenceMetrics);
+            const auroc = parsed?.overall?.auroc?.value;
+            return auroc !== null && auroc !== undefined ? Number(auroc).toFixed(3) : 'N/A';
+          }
+          return 'N/A';
+        }),
+      ],
+      [
+        'Confidence ECE',
+        ...Object.values(completeTestRuns).map((run) => {
+          if (run.confidenceMetrics) {
+            const parsed = parseConfidenceMetrics(run.confidenceMetrics);
+            const ece = parsed?.overall?.ece?.value;
+            return ece !== null && ece !== undefined ? Number(ece).toFixed(3) : 'N/A';
+          }
+          return 'N/A';
+        }),
+      ],
+      [
+        'Confidence Brier',
+        ...Object.values(completeTestRuns).map((run) => {
+          if (run.confidenceMetrics) {
+            const parsed = parseConfidenceMetrics(run.confidenceMetrics);
+            const brier = parsed?.overall?.brier?.value;
+            return brier !== null && brier !== undefined ? Number(brier).toFixed(3) : 'N/A';
+          }
+          return 'N/A';
+        }),
+      ],
+      [
+        'Confidence Coverage',
+        ...Object.values(completeTestRuns).map((run) => {
+          if (run.confidenceMetrics) {
+            const parsed = parseConfidenceMetrics(run.confidenceMetrics);
+            const coverage = parsed?.coverage;
+            if (coverage && coverage.ratio !== null && coverage.ratio !== undefined) {
+              return `${(coverage.ratio * 100).toFixed(1)}% (${coverage.fields_with_confidence}/${coverage.fields_total})`;
+            }
+          }
+          return 'N/A';
+        }),
+      ],
+      [
         'Average Weighted Overall Score',
         ...Object.values(completeTestRuns).map((run) => {
           if (run.weightedOverallScores) {
@@ -542,19 +589,48 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
     const fieldMetricsRows: string[][] = [];
     const testSetNames = new Set(Object.values(completeTestRuns).map((r) => r.testSetName));
     const hasFieldMetrics = Object.values(completeTestRuns).some((r) => r.fieldMetrics);
+
+    // Parse confidence metrics for CSV export (outside if block for later reference)
+    const confidenceDataMapCsv: Record<string, ReturnType<typeof parseConfidenceMetrics>> = {};
+    let hasConfidenceDataCsv = false;
+
     if (testSetNames.size === 1 && hasFieldMetrics) {
+      Object.entries(completeTestRuns).forEach(([testRunId, testRun]) => {
+        if (testRun.confidenceMetrics) {
+          const parsed = parseConfidenceMetrics(testRun.confidenceMetrics);
+          if (parsed) {
+            confidenceDataMapCsv[testRunId] = parsed;
+          }
+        }
+      });
+
+      hasConfidenceDataCsv = Object.values(confidenceDataMapCsv).some((data) => data && data.fields && Object.keys(data.fields).length > 0);
+
       const allFields = new Set<string>();
       Object.values(completeTestRuns).forEach((r) => {
         if (r.fieldMetrics) Object.keys(r.fieldMetrics as Record<string, unknown>).forEach((f) => allFields.add(f));
       });
-      fieldMetricsRows.push(['Field Name', ...Object.keys(completeTestRuns)]);
+
+      // Create header row - merge confidence metrics into same column
+      const headerRow = ['Field Name'];
+      Object.keys(completeTestRuns).forEach((testRunId) => {
+        if (hasConfidenceDataCsv) {
+          headerRow.push(`${testRunId} (Acc/Prec/Rec/AUROC/ECE/Brier)`);
+        } else {
+          headerRow.push(`${testRunId} (Acc/Prec/Rec)`);
+        }
+      });
+      fieldMetricsRows.push(headerRow);
+
       Array.from(allFields)
         .sort()
         .forEach((fieldName) => {
           const row = [fieldName];
-          Object.entries(completeTestRuns).forEach(([, testRun]) => {
+          Object.entries(completeTestRuns).forEach(([testRunId, testRun]) => {
             const fm = testRun.fieldMetrics as Record<string, Record<string, number>> | undefined;
             const m = fm?.[fieldName];
+            let cellValue = '';
+
             if (m) {
               const tp = m.tp ?? 0,
                 fp = m.fp ?? 0,
@@ -564,10 +640,26 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
               const acc = total > 0 ? ((tp + tn) / total).toFixed(3) : 'N/A';
               const prec = tp + fp > 0 ? (tp / (tp + fp)).toFixed(3) : 'N/A';
               const rec = tp + fn > 0 ? (tp / (tp + fn)).toFixed(3) : 'N/A';
-              row.push(`${acc} / ${prec} / ${rec}`);
+              cellValue = `${acc} / ${prec} / ${rec}`;
             } else {
-              row.push('N/A');
+              cellValue = 'N/A / N/A / N/A';
             }
+
+            // Merge confidence metrics into same column if available
+            if (hasConfidenceDataCsv) {
+              const confData = confidenceDataMapCsv[testRunId];
+              const fieldConf = confData?.fields?.[fieldName];
+
+              const auroc =
+                fieldConf?.auroc?.value !== undefined && fieldConf.auroc.value !== null ? fieldConf.auroc.value.toFixed(3) : 'N/A';
+              const ece = fieldConf?.ece?.value !== undefined && fieldConf.ece.value !== null ? fieldConf.ece.value.toFixed(3) : 'N/A';
+              const brier =
+                fieldConf?.brier?.value !== undefined && fieldConf.brier.value !== null ? fieldConf.brier.value.toFixed(3) : 'N/A';
+
+              cellValue = `${cellValue} / ${auroc} / ${ece} / ${brier}`;
+            }
+
+            row.push(cellValue);
           });
           fieldMetricsRows.push(row);
         });
@@ -585,7 +677,17 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
       ['=== AVERAGE ACCURACY BREAKDOWN ==='],
       ...accuracyRows,
       [''],
-      ...(fieldMetricsRows.length > 0 ? [['=== FIELD LEVEL METRICS (Accuracy / Precision / Recall) ==='], ...fieldMetricsRows, ['']] : []),
+      ...(fieldMetricsRows.length > 0
+        ? [
+            [
+              hasConfidenceDataCsv
+                ? '=== FIELD LEVEL METRICS (Accuracy / Precision / Recall / AUROC / ECE / Brier) ==='
+                : '=== FIELD LEVEL METRICS (Accuracy / Precision / Recall) ===',
+            ],
+            ...fieldMetricsRows,
+            [''],
+          ]
+        : []),
       ['=== COST BREAKDOWN ==='],
       ...costRows,
       [''],
@@ -680,6 +782,34 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
       ),
       fieldMetrics: Object.fromEntries(
         Object.entries(completeTestRuns).map(([testRunId, testRun]) => [testRunId, testRun.fieldMetrics || {}]),
+      ),
+      confidenceMetrics: Object.fromEntries(
+        Object.entries(completeTestRuns).map(([testRunId, testRun]) => {
+          if (!testRun.confidenceMetrics) return [testRunId, null];
+
+          const parsed = parseConfidenceMetrics(testRun.confidenceMetrics);
+          if (!parsed) return [testRunId, null];
+
+          // Filter out index-based keys (e.g., LineItems[0].Rate) and keep only pattern-based aggregations (e.g., LineItems.Rate)
+          const filteredFields: Record<string, unknown> = {};
+          if (parsed.fields) {
+            Object.entries(parsed.fields).forEach(([key, value]) => {
+              // Only include fields without array indices [0], [1], etc.
+              if (!/\[\d+\]/.test(key)) {
+                filteredFields[key] = value;
+              }
+            });
+          }
+
+          return [
+            testRunId,
+            {
+              overall: parsed.overall,
+              coverage: parsed.coverage,
+              fields: filteredFields,
+            },
+          ];
+        }),
       ),
     };
 
@@ -1287,6 +1417,79 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
                                 }));
                               })()
                             : []),
+                          // Confidence metrics (overall)
+                          ...(() => {
+                            const confidenceMetricKeys = [
+                              { key: 'auroc', label: 'AUROC' },
+                              { key: 'ece', label: 'ECE' },
+                              { key: 'brier', label: 'Brier Score' },
+                            ];
+
+                            const metrics = confidenceMetricKeys
+                              .map(({ key, label }) => {
+                                const row: Record<string, unknown> = {
+                                  metric: (
+                                    <>
+                                      <span style={{ color: '#687078' }}>Confidence:</span> {label}
+                                    </>
+                                  ),
+                                };
+
+                                let hasAnyValue = false;
+                                Object.entries(completeTestRuns).forEach(([testRunId, testRun]) => {
+                                  if (testRun.confidenceMetrics) {
+                                    const parsed = parseConfidenceMetrics(testRun.confidenceMetrics);
+                                    const overallMetric =
+                                      parsed?.overall && (parsed.overall as Record<string, { value?: number | null }>)[key];
+                                    const value = overallMetric?.value;
+                                    if (value !== null && value !== undefined) {
+                                      row[testRunId] = Number(value).toFixed(3);
+                                      hasAnyValue = true;
+                                    } else {
+                                      row[testRunId] = 'N/A';
+                                    }
+                                  } else {
+                                    row[testRunId] = 'N/A';
+                                  }
+                                });
+
+                                // Only include this metric if at least one test run has a value
+                                return hasAnyValue ? row : null;
+                              })
+                              .filter((row) => row !== null);
+
+                            // Add Coverage Ratio
+                            const coverageRow: Record<string, unknown> = {
+                              metric: (
+                                <>
+                                  <span style={{ color: '#687078' }}>Confidence:</span> Coverage Ratio
+                                </>
+                              ),
+                            };
+
+                            let hasCoverage = false;
+                            Object.entries(completeTestRuns).forEach(([testRunId, testRun]) => {
+                              if (testRun.confidenceMetrics) {
+                                const parsed = parseConfidenceMetrics(testRun.confidenceMetrics);
+                                const coverage = parsed?.coverage;
+                                if (coverage && coverage.ratio !== null && coverage.ratio !== undefined) {
+                                  coverageRow[testRunId] =
+                                    `${(coverage.ratio * 100).toFixed(1)}% (${coverage.fields_with_confidence}/${coverage.fields_total})`;
+                                  hasCoverage = true;
+                                } else {
+                                  coverageRow[testRunId] = 'N/A';
+                                }
+                              } else {
+                                coverageRow[testRunId] = 'N/A';
+                              }
+                            });
+
+                            if (hasCoverage) {
+                              metrics.push(coverageRow);
+                            }
+
+                            return metrics;
+                          })(),
                         ]}
                         columnDefinitions={[
                           {
@@ -1319,6 +1522,22 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
 
             if (!isSameTestSet || !hasFieldData) return null;
 
+            // Parse confidence metrics for each test run
+            const confidenceDataMap: Record<string, ReturnType<typeof parseConfidenceMetrics>> = {};
+            Object.entries(completeTestRuns).forEach(([testRunId, testRun]) => {
+              if (testRun.confidenceMetrics) {
+                const parsed = parseConfidenceMetrics(testRun.confidenceMetrics);
+                if (parsed) {
+                  confidenceDataMap[testRunId] = parsed;
+                }
+              }
+            });
+
+            // Check if any test run has confidence data
+            const hasConfidenceData = Object.values(confidenceDataMap).some(
+              (data) => data && data.fields && Object.keys(data.fields).length > 0,
+            );
+
             // Collect all unique field names
             const allFieldNames = new Set<string>();
             Object.values(completeTestRuns).forEach((testRun) => {
@@ -1348,15 +1567,34 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
                 Object.entries(completeTestRuns).forEach(([testRunId, testRun]) => {
                   const fm = testRun.fieldMetrics as Record<string, Record<string, number>> | undefined;
                   const m = computeMetric(fm?.[fieldName]);
-                  row[testRunId] = `${m.accuracy} / ${m.precision} / ${m.recall}`;
+
+                  // Get confidence metrics for this field
+                  const confData = confidenceDataMap[testRunId];
+                  const fieldConf = confData?.fields?.[fieldName];
+
+                  const auroc =
+                    fieldConf?.auroc?.value !== undefined && fieldConf.auroc.value !== null ? fieldConf.auroc.value.toFixed(3) : 'N/A';
+                  const ece = fieldConf?.ece?.value !== undefined && fieldConf.ece.value !== null ? fieldConf.ece.value.toFixed(3) : 'N/A';
+                  const brier =
+                    fieldConf?.brier?.value !== undefined && fieldConf.brier.value !== null ? fieldConf.brier.value.toFixed(3) : 'N/A';
+
+                  // Combine accuracy and confidence metrics in one column
+                  row[testRunId] = hasConfidenceData
+                    ? `${m.accuracy} / ${m.precision} / ${m.recall} / ${auroc} / ${ece} / ${brier}`
+                    : `${m.accuracy} / ${m.precision} / ${m.recall}`;
+                  row[`${testRunId}_confidence`] = hasConfidenceData ? `${auroc} / ${ece} / ${brier}` : 'N/A';
                 });
                 return row;
               });
 
+            const headerDescription = hasConfidenceData
+              ? 'Values shown as: Accuracy / Precision / Recall / AUROC / ECE / Brier. Color grading based on accuracy.'
+              : 'Values shown as: Accuracy / Precision / Recall. Color grading based on accuracy.';
+
             return (
               <Container
                 header={
-                  <Header variant="h3" description="Values shown as: Accuracy / Precision / Recall. Color grading based on accuracy.">
+                  <Header variant="h3" description={headerDescription}>
                     Field Level Metrics Comparison
                   </Header>
                 }
@@ -1372,12 +1610,12 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
                         id: 'fieldName',
                         header: 'Field Name',
                         cell: (item: Record<string, unknown>) => String(item.fieldName),
-                        width: 400,
+                        width: 300,
                       },
                       ...Object.keys(completeTestRuns).map((testRunId) => ({
                         id: testRunId,
                         header: createTestRunHeader(testRunId, true),
-                        width: 200,
+                        width: hasConfidenceData ? 350 : 200,
                         cell: (item: Record<string, unknown>) => {
                           const val = String(item[testRunId] ?? 'N/A');
                           const allVals = Object.keys(completeTestRuns).map((id) => {
@@ -1387,7 +1625,7 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
                           const acc = val.split('/')[0]?.trim();
                           const style = getScoreColorGrade(acc, allVals);
                           return (
-                            <span style={{ ...style, WebkitPrintColorAdjust: 'exact', colorAdjust: 'exact', fontSize: '0.9em' }}>
+                            <span style={{ ...style, WebkitPrintColorAdjust: 'exact', colorAdjust: 'exact', fontSize: '0.85em' }}>
                               {val}
                             </span>
                           );
