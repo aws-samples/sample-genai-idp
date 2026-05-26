@@ -40,6 +40,7 @@ import {
   parseSplitClassificationMetrics,
   parseFieldMetrics,
   parseConfusionMatrix,
+  parseConfidenceMetrics,
   parseWeightedOverallScores,
   parseTestRunConfig,
 } from '../../graphql/awsjson-parsers';
@@ -65,6 +66,7 @@ interface ComprehensiveBreakdownProps {
   splitClassificationMetrics: Record<string, unknown> | null;
   fieldMetrics: Record<string, unknown> | null;
   averageWeightedScore: number | null;
+  confidenceMetrics: unknown;
 }
 
 const ComprehensiveBreakdown = ({
@@ -73,6 +75,7 @@ const ComprehensiveBreakdown = ({
   splitClassificationMetrics,
   fieldMetrics,
   averageWeightedScore,
+  confidenceMetrics,
 }: ComprehensiveBreakdownProps): React.JSX.Element => {
   if (!costBreakdown && !accuracyBreakdown && !splitClassificationMetrics && !fieldMetrics) {
     return <Box>No breakdown data available</Box>;
@@ -160,6 +163,60 @@ const ComprehensiveBreakdown = ({
                           value: value !== null && value !== undefined ? value.toFixed(3) : '0.000',
                         }))
                       : []),
+                    // Confidence calibration metrics (Stickler v0.4.0+)
+                    ...(() => {
+                      const confMetrics = parseConfidenceMetrics(confidenceMetrics);
+                      if (!confMetrics) return [];
+
+                      const items = [];
+                      const { overall, coverage } = confMetrics;
+
+                      if (overall) {
+                        if (overall.auroc?.value !== null && overall.auroc?.value !== undefined) {
+                          items.push({
+                            metric: (
+                              <>
+                                <span style={{ color: '#687078' }}>Confidence:</span> AUROC
+                              </>
+                            ),
+                            value: overall.auroc.value.toFixed(3),
+                          });
+                        }
+                        if (overall.ece?.value !== null && overall.ece?.value !== undefined) {
+                          items.push({
+                            metric: (
+                              <>
+                                <span style={{ color: '#687078' }}>Confidence:</span> ECE (Calibration Error)
+                              </>
+                            ),
+                            value: overall.ece.value.toFixed(3),
+                          });
+                        }
+                        if (overall.brier?.value !== null && overall.brier?.value !== undefined) {
+                          items.push({
+                            metric: (
+                              <>
+                                <span style={{ color: '#687078' }}>Confidence:</span> Brier Score
+                              </>
+                            ),
+                            value: overall.brier.value.toFixed(3),
+                          });
+                        }
+                      }
+
+                      if (coverage) {
+                        items.push({
+                          metric: (
+                            <>
+                              <span style={{ color: '#687078' }}>Confidence:</span> Coverage Ratio
+                            </>
+                          ),
+                          value: `${(coverage.ratio * 100).toFixed(1)}% (${coverage.fields_with_confidence}/${coverage.fields_total})`,
+                        });
+                      }
+
+                      return items;
+                    })(),
                     // Remaining split classification metrics
                     ...(splitClassificationMetrics
                       ? Object.entries(splitClassificationMetrics)
@@ -207,18 +264,24 @@ const ComprehensiveBreakdown = ({
 
           const [expandedFields, setExpandedFields] = React.useState<Set<string>>(initialExpanded);
           const [fieldMetricsPageSize, setFieldMetricsPageSize] = React.useState(10);
+          // Parse confidence metrics to enrich field-level data
+          // Backend now aggregates confidence metrics to match field_metrics structure
+          const parsedConfidenceMetrics = parseConfidenceMetrics(confidenceMetrics);
+          const hasConfidenceData = parsedConfidenceMetrics?.fields && Object.keys(parsedConfidenceMetrics.fields).length > 0;
+
           const [fieldMetricsVisibleColumns, setFieldMetricsVisibleColumns] = React.useState([
             'fieldName',
             'accuracy',
             'precision',
             'recall',
+            ...(hasConfidenceData ? ['auroc', 'ece', 'brier'] : []),
             'tp',
             'fp',
             'tn',
             'fn',
           ]);
 
-          // Build hierarchical structure
+          // Build hierarchical structure with confidence data
           const allItems = Object.entries(fieldMetrics).map(([fieldName, metrics]) => {
             const m = metrics as { tp?: number; fp?: number; tn?: number; fn?: number };
             const tp = m.tp ?? 0;
@@ -226,6 +289,14 @@ const ComprehensiveBreakdown = ({
             const tn = m.tn ?? 0;
             const fn = m.fn ?? 0;
             const total = tp + fp + tn + fn;
+
+            // Extract field-level confidence metrics (if available)
+            // Backend aggregates confidence to match field_metrics keys (pattern-based)
+            const fieldConfidence = parsedConfidenceMetrics?.fields?.[fieldName];
+            const auroc = fieldConfidence?.auroc?.value;
+            const ece = fieldConfidence?.ece?.value;
+            const brier = fieldConfidence?.brier?.value;
+
             return {
               fieldName,
               tp,
@@ -235,6 +306,9 @@ const ComprehensiveBreakdown = ({
               accuracy: total > 0 ? ((tp + tn) / total).toFixed(3) : 'N/A',
               precision: tp + fp > 0 ? (tp / (tp + fp)).toFixed(3) : 'N/A',
               recall: tp + fn > 0 ? (tp / (tp + fn)).toFixed(3) : 'N/A',
+              auroc: auroc !== null && auroc !== undefined ? auroc.toFixed(3) : 'N/A',
+              ece: ece !== null && ece !== undefined ? ece.toFixed(3) : 'N/A',
+              brier: brier !== null && brier !== undefined ? brier.toFixed(3) : 'N/A',
               depth: (fieldName.match(/\./g) || []).length,
             };
           });
@@ -342,6 +416,28 @@ const ComprehensiveBreakdown = ({
               sortingField: 'precision',
             },
             { id: 'recall', header: 'Recall', cell: (item: (typeof displayItems)[0]) => item.recall, sortingField: 'recall' },
+            ...(hasConfidenceData
+              ? [
+                  {
+                    id: 'auroc',
+                    header: 'AUROC',
+                    cell: (item: (typeof displayItems)[0]) => item.auroc,
+                    sortingField: 'auroc',
+                  },
+                  {
+                    id: 'ece',
+                    header: 'ECE',
+                    cell: (item: (typeof displayItems)[0]) => item.ece,
+                    sortingField: 'ece',
+                  },
+                  {
+                    id: 'brier',
+                    header: 'Brier',
+                    cell: (item: (typeof displayItems)[0]) => item.brier,
+                    sortingField: 'brier',
+                  },
+                ]
+              : []),
             { id: 'tp', header: 'TP', cell: (item: (typeof displayItems)[0]) => item.tp, sortingField: 'tp' },
             { id: 'fp', header: 'FP', cell: (item: (typeof displayItems)[0]) => item.fp, sortingField: 'fp' },
             { id: 'tn', header: 'TN', cell: (item: (typeof displayItems)[0]) => item.tn, sortingField: 'tn' },
@@ -413,6 +509,13 @@ const ComprehensiveBreakdown = ({
                                 { id: 'accuracy', label: 'Accuracy' },
                                 { id: 'precision', label: 'Precision' },
                                 { id: 'recall', label: 'Recall' },
+                                ...(hasConfidenceData
+                                  ? [
+                                      { id: 'auroc', label: 'AUROC (Confidence)' },
+                                      { id: 'ece', label: 'ECE (Calibration)' },
+                                      { id: 'brier', label: 'Brier Score' },
+                                    ]
+                                  : []),
                                 { id: 'tp', label: 'TP' },
                                 { id: 'fp', label: 'FP' },
                                 { id: 'tn', label: 'TN' },
@@ -1317,6 +1420,7 @@ const TestResults = ({ testRunId, setSelectedTestRunId }: TestResultsProps): Rea
             splitClassificationMetrics={splitClassificationMetrics}
             fieldMetrics={fieldMetrics}
             averageWeightedScore={averageWeightedScore}
+            confidenceMetrics={results.confidenceMetrics}
           />
         )}
       </SpaceBetween>

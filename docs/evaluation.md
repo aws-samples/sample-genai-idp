@@ -13,9 +13,15 @@ The GenAIIDP solution includes a built-in evaluation framework to assess the acc
 - Generate detailed evaluation reports using configurable methods and thresholds
 - Track and improve processing accuracy over time
 
-## Enhanced Reporting (sticker-eval v0.1.4+)
+## Enhanced Reporting (stickler-eval v0.4.0+)
 
-**NEW in v0.4.9+**: The evaluation module now includes enhanced reporting with fine-grain field comparison details. See [evaluation-enhanced-reporting.md](./evaluation-enhanced-reporting.md) for:
+**NEW in v0.5.12+**: Upgraded to Stickler v0.4.0 with confidence calibration metrics:
+
+- **📊 Confidence Calibration Metrics** - ECE (Expected Calibration Error), Brier score, and AUROC analyze how well-calibrated confidence predictions are
+- **📈 Per-Field Confidence Analysis** - Identify which fields have poorly calibrated confidence scores
+- **🎯 Coverage Tracking** - Visibility into fields with vs without confidence data
+
+**Enhanced Reporting (v0.4.9+)**: Fine-grain field comparison details. See [evaluation-enhanced-reporting.md](./evaluation-enhanced-reporting.md) for:
 
 - 📊 **Nested field comparison details** - See individual field matches within complex objects and arrays
 - 🔍 **Interactive report controls** - Filter to show only unmatched rows for focused debugging
@@ -138,6 +144,56 @@ flowchart TD
 ```
 
 The `SticklerConfigMapper` translates IDP's evaluation extensions (`x-aws-idp-evaluation-*`) to Stickler's format (`x-aws-stickler-*`), maintaining independence from any specific evaluation backend.
+
+### Confidence Score Storage (Stickler v0.4.0+)
+
+The evaluation service stores confidence scores from extraction results alongside comparison data for downstream calibration analysis:
+
+**How Confidence Scores Are Stored:**
+
+1. **Flattening**: Confidence scores are flattened from nested extraction results, unwrapping structural wrapper keys (e.g., `Item_N`, `Record_N`) using pattern-agnostic detection (≥2 confidence fields indicates a wrapper)
+
+2. **Patching field_path**: Stickler's `compare_with()` returns `field_comparisons` with `expected_key`/`actual_key` but `field_path=None`. The evaluation service patches each comparison with `field_path = expected_key` to enable confidence matching in downstream analysis.
+
+3. **Storage Format**: Both flattened confidences and patched field_comparisons are stored in `stickler_comparison_result`:
+
+```json
+{
+  "stickler_comparison_result": {
+    "confidences": {
+      "Agency": 0.99,
+      "LineItems[0].LineItemRate": 1.0,
+      "LineItems[1].LineItemRate": 0.95,
+      ...
+    },
+    "field_comparisons": [
+      {
+        "expected_key": "Agency",
+        "actual_key": "Agency",
+        "field_path": "Agency",
+        "matched": true,
+        ...
+      },
+      {
+        "expected_key": "LineItems[0].LineItemRate",
+        "actual_key": "LineItems[0].LineItemRate", 
+        "field_path": "LineItems[0].LineItemRate",
+        "matched": true,
+        ...
+      }
+    ],
+    ...
+  }
+}
+```
+
+**Storage Location**: `s3://<EvaluationBucket>/evaluations/<document_id>/results.json`
+
+**Implementation**: `lib/idp_common_pkg/idp_common/evaluation/service.py`
+- `_convert_to_rich_values()` method: Converts extraction results to Rich Value format with confidence
+- Field comparisons patching: Ensures `field_path` is populated for Stickler's ConfidenceCalculator
+
+**Purpose**: Enables downstream confidence calibration analysis (AUROC, ECE, Brier score) by providing both confidence values and correctness labels (matched/unmatched) in a format compatible with Stickler v0.4.0's `ConfidenceMetricsCalculator`.
 
 ## How It Works
 
