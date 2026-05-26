@@ -78,6 +78,32 @@ export interface ConfusionMatrix {
   [key: string]: unknown;
 }
 
+/** Parsed confidence metrics from TestRun.confidenceMetrics AWSJSON field (Stickler v0.4.0+) */
+export interface ConfidenceMetrics {
+  overall?: {
+    auroc?: { value: number | null };
+    ece?: { value: number | null; bins?: Array<unknown> };
+    brier?: { value: number | null };
+    [key: string]: unknown;
+  };
+  fields?: {
+    [fieldName: string]: {
+      auroc?: { value: number | null };
+      ece?: { value: number | null; bins?: Array<unknown> };
+      brier?: { value: number | null };
+      [key: string]: unknown;
+    };
+  };
+  coverage?: {
+    fields_with_confidence: number;
+    fields_total: number;
+    ratio: number;
+  };
+  field_count?: number;
+  total_pairs?: number;
+  [key: string]: unknown;
+}
+
 /** Parsed comparison metrics from TestRunComparison.metrics AWSJSON field */
 export interface ComparisonMetrics {
   [key: string]: unknown;

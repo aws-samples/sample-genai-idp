@@ -1,1 +1,1 @@
-stickler-eval==0.1.5
+../../lib/idp_common_pkg[evaluation]

@@ -186,3 +186,39 @@ class TestingOperation:
 
         except Exception as e:
             raise IDPProcessingError(f"Failed to compare test runs: {e}") from e
+
+    def abort_test_run(
+        self,
+        test_run_ids: List[str],
+        stack_name: Optional[str] = None,
+        **kwargs,
+    ) -> dict:
+        """Abort one or more Test Studio runs.
+
+        Stops all running document workflows and updates test run status to ABORTED.
+        Only test runs with status QUEUED or RUNNING can be aborted.
+
+        Args:
+            test_run_ids: List of test run identifiers to abort
+            stack_name: Optional stack name override
+            **kwargs: Additional parameters
+
+        Returns:
+            Dict with:
+                - success: Whether any test runs were aborted
+                - message: Human-readable summary
+                - aborted_count: Number of test runs successfully aborted
+                - failed_count: Number of test runs that failed to abort
+                - errors: List of error messages (if any)
+
+        Raises:
+            IDPProcessingError: If abort operation fails
+        """
+        processor = self._get_processor(stack_name)
+
+        try:
+            result = processor.abort_test_runs(test_run_ids=test_run_ids)
+            return result
+
+        except Exception as e:
+            raise IDPProcessingError(f"Failed to abort test runs: {e}") from e

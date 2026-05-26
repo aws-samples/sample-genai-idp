@@ -479,6 +479,7 @@ export type MultiDocDiscoveryJob = {
 };
 
 export type Mutation = {
+  abortTestRuns: AbortWorkflowResponse;
   abortWorkflow: AbortWorkflowResponse;
   addDocumentsToTestSet?: Maybe<TestSet>;
   addDocumentsToTestSetFromUpload?: Maybe<TestSetUploadResponse>;
@@ -529,6 +530,11 @@ export type Mutation = {
   uploadDiscoveryDocument: DisPresignedUrlResponse;
   uploadDocument: PresignedUrlResponse;
   uploadMultiDocDiscoveryZip?: Maybe<TestSetUploadResponse>;
+};
+
+
+export type MutationAbortTestRunsArgs = {
+  testRunIds: Array<Scalars['String']['input']>;
 };
 
 
@@ -1196,6 +1202,7 @@ export type TestRun = {
   averageConfidence?: Maybe<Scalars['Float']['output']>;
   completedAt?: Maybe<Scalars['AWSDateTime']['output']>;
   completedFiles?: Maybe<Scalars['Int']['output']>;
+  confidenceMetrics?: Maybe<Scalars['AWSJSON']['output']>;
   config?: Maybe<Scalars['AWSJSON']['output']>;
   configVersion?: Maybe<Scalars['String']['output']>;
   confusionMatrix?: Maybe<Scalars['AWSJSON']['output']>;
@@ -1376,6 +1383,13 @@ export type ValidationError = {
   message?: Maybe<Scalars['String']['output']>;
   type?: Maybe<Scalars['String']['output']>;
 };
+
+export type AbortTestRunsMutationVariables = Exact<{
+  testRunIds: Array<Scalars['String']['input']> | Scalars['String']['input'];
+}>;
+
+
+export type AbortTestRunsMutation = { abortTestRuns: { success: boolean, message?: string | null, abortedCount?: number | null, failedCount?: number | null, errors?: Array<string | null> | null } };
 
 export type AbortWorkflowMutationVariables = Exact<{
   objectKeys: Array<Scalars['String']['input']> | Scalars['String']['input'];
@@ -1830,7 +1844,7 @@ export type GetTestRunQueryVariables = Exact<{
 }>;
 
 
-export type GetTestRunQuery = { getTestRun?: { testRunId: string, testSetId?: string | null, testSetName?: string | null, status: string, filesCount: number, completedFiles?: number | null, failedFiles?: number | null, overallAccuracy?: number | null, weightedOverallScores?: string | null, averageConfidence?: number | null, accuracyBreakdown?: string | null, confusionMatrix?: string | null, fieldMetrics?: string | null, splitClassificationMetrics?: string | null, totalCost?: number | null, costBreakdown?: string | null, createdAt?: string | null, completedAt?: string | null, context?: string | null, configVersion?: string | null, config?: string | null } | null };
+export type GetTestRunQuery = { getTestRun?: { testRunId: string, testSetId?: string | null, testSetName?: string | null, status: string, filesCount: number, completedFiles?: number | null, failedFiles?: number | null, overallAccuracy?: number | null, weightedOverallScores?: string | null, averageConfidence?: number | null, confidenceMetrics?: string | null, accuracyBreakdown?: string | null, confusionMatrix?: string | null, fieldMetrics?: string | null, splitClassificationMetrics?: string | null, totalCost?: number | null, costBreakdown?: string | null, createdAt?: string | null, completedAt?: string | null, context?: string | null, configVersion?: string | null, config?: string | null } | null };
 
 export type GetTestRunStatusQueryVariables = Exact<{
   testRunId: Scalars['String']['input'];

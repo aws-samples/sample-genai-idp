@@ -2500,9 +2500,10 @@ STDERR:
         )
 
         # Map each layer name to its zip file
+        # NOTE: Keep in sync with layers_config in build_all_lambda_layers()
         expected_layers = [
             "base",
-            "evaluation",
+            # "evaluation" is disabled - not referenced by any Lambda, adds 50MB+ to build
             "reporting",
             "agents",
             "multi_document_discovery",
@@ -2599,10 +2600,11 @@ STDERR:
             )
             return True  # Need rebuild
 
-        # We have at least some layer zips, check we have all 4
+        # We have at least some layer zips, check we have all expected layers
+        # NOTE: Keep in sync with layers_config in build_all_lambda_layers()
         expected_layers = [
             "base",
-            "evaluation",
+            # "evaluation" is disabled - not referenced by any Lambda, adds 50MB+ to build
             "reporting",
             "agents",
             "multi_document_discovery",
@@ -2634,9 +2636,11 @@ STDERR:
                 "docs_service",
                 "image",
             ],
-            "evaluation": [
-                "evaluation"
-            ],  # Separate layer for stickler (includes numpy)
+            # "evaluation" layer is disabled:
+            # - Not referenced by any Lambda in template.yaml or nested stacks
+            # - Adds 50MB+ to layer size (stickler + scikit-learn + numpy)
+            # - Lambdas needing evaluation install idp_common[evaluation] directly in function package
+            # "evaluation": ["evaluation"],
             "reporting": ["reporting"],
             "agents": ["agents"],
             "multi_document_discovery": ["multi_document_discovery"],

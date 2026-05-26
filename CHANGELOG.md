@@ -5,7 +5,13 @@ SPDX-License-Identifier: MIT-0
 
 ## [Unreleased]
 
+## [0.5.12]
+
 ### Added
+
+- **Stickler v0.4.0 upgrade with confidence calibration metrics** — upgraded evaluation engine from Stickler v0.1.4/v0.1.5 to v0.4.0, adding ECE (Expected Calibration Error), Brier score, and AUROC metrics for confidence analysis. New `ConfidenceMetricsCalculator` in `idp_common.evaluation.confidence_integration` computes calibration metrics at overall and per-field levels. Test aggregation results now include `confidence_metrics` field with comprehensive calibration data. Confidence aggregation logic moved from frontend to backend (test execution aggregation function) for cleaner architecture. Evaluation service patches `field_comparisons` with `field_path` for ConfidenceCalculator compatibility and uses structural detection to unwrap wrapper keys (Item_N, Record_N) from extraction results. Fully backward compatible.
+
+- **Test Studio: Abort running test runs** — Test runs with status `QUEUED` or `RUNNING` can now be aborted from both the Web UI and CLI. The abort operation stops all pending document processing workflows, preserves results from already-completed documents, and updates the test run status to `ABORTED`. Metrics are automatically calculated for completed documents. The Web UI displays an "Abort" button next to running tests, and the CLI provides an `idp-cli abort-test-run` command with confirmation prompts. Aborted test runs show accurate completion counts (e.g., "48/50 files processed") and allow viewing partial results including evaluation metrics and cost breakdowns for successfully processed documents.
 
 - **Optional `{CLASS_AND_ATTRIBUTE_NAMES_AND_DESCRIPTIONS}` placeholder for classification prompts** ([#262](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues/262)) — Pattern 2 classification `task_prompt` templates can opt in to a new placeholder that expands, per document type, to the class name, description, **and** schema attribute names. Renders as XML for `multimodalPageLevelClassification` and as a markdown table for `textbasedHolisticClassification`. Cost-neutral by default — only materialized when the template references it, with per-class attribute counts capped (default 50) to keep prompt cost predictable. Useful for schema-rich domains where similarly-named classes have very different extraction schemas. The Web UI Prompt Preview tab renders the substituted attributes for inspection. See [`docs/classification.md`](docs/classification.md#optional-class_and_attribute_names_and_descriptions-placeholder).
 
@@ -35,6 +41,12 @@ SPDX-License-Identifier: MIT-0
 - **Bedrock Knowledge Base nested stack no longer left in `DELETE_FAILED` on update/delete** ([#315](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues/315)) — two reliability fixes in `nested/bedrockkb/template.yaml`:
   - **Reliable `AWS::Bedrock::DataSource` deletion during sync** — the Delete handler now stops in-progress ingestion jobs and polls until terminal status (12-min deadline) before signalling SUCCESS, so CFN can delete the data source cleanly. Always reports SUCCESS on Delete (logs warnings) so a stuck job never blocks stack delete. IAM gains `Stop/Get/ListIngestionJobs`, timeout is 15 min, and ingestion functions `DependsOn` their schedulers to avoid races.
   - **Helper IAM roles now `DeletionPolicy: Retain`** — `DataSourceSchedulerRole` and `StartIngestionJobFunctionRole` are ephemeral helpers; marking them `Retain` decouples nested-stack delete from the deploying principal's `iam:DeleteRole` permission. Defensive fix for session policies that deny `iam:DeleteRole`. Retained roles are inert and can be deleted manually after the stack is gone.
+
+## Templates
+   - us-west-2: `https://s3.us-west-2.amazonaws.com/aws-ml-blog-us-west-2/artifacts/genai-idp/idp-main_0.5.12.yaml`
+   - us-east-1: `https://s3.us-east-1.amazonaws.com/aws-ml-blog-us-east-1/artifacts/genai-idp/idp-main_0.5.12.yaml`
+   - eu-central-1: `https://s3.eu-central-1.amazonaws.com/aws-ml-blog-eu-central-1/artifacts/genai-idp/idp-main_0.5.12.yaml`
+  
 
 ## [0.5.11]
 

@@ -479,6 +479,7 @@ export type MultiDocDiscoveryJob = {
 };
 
 export type Mutation = {
+  abortTestRuns: AbortWorkflowResponse;
   abortWorkflow: AbortWorkflowResponse;
   addDocumentsToTestSet?: Maybe<TestSet>;
   addDocumentsToTestSetFromUpload?: Maybe<TestSetUploadResponse>;
@@ -529,6 +530,11 @@ export type Mutation = {
   uploadDiscoveryDocument: DisPresignedUrlResponse;
   uploadDocument: PresignedUrlResponse;
   uploadMultiDocDiscoveryZip?: Maybe<TestSetUploadResponse>;
+};
+
+
+export type MutationAbortTestRunsArgs = {
+  testRunIds: Array<Scalars['String']['input']>;
 };
 
 
@@ -1196,6 +1202,7 @@ export type TestRun = {
   averageConfidence?: Maybe<Scalars['Float']['output']>;
   completedAt?: Maybe<Scalars['AWSDateTime']['output']>;
   completedFiles?: Maybe<Scalars['Int']['output']>;
+  confidenceMetrics?: Maybe<Scalars['AWSJSON']['output']>;
   config?: Maybe<Scalars['AWSJSON']['output']>;
   configVersion?: Maybe<Scalars['String']['output']>;
   confusionMatrix?: Maybe<Scalars['AWSJSON']['output']>;

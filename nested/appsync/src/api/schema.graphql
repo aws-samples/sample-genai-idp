@@ -537,6 +537,7 @@ type TestRun @aws_cognito_user_pools @aws_iam {
   overallAccuracy: Float
   weightedOverallScores: AWSJSON
   averageConfidence: Float
+  confidenceMetrics: AWSJSON
   accuracyBreakdown: AWSJSON
   confusionMatrix: AWSJSON
   fieldMetrics: AWSJSON
@@ -809,6 +810,8 @@ type Mutation {
   startTestRun(input: TestRunInput!): TestRun
     @aws_auth(cognito_groups: ["Admin", "Author"])
   deleteTests(testRunIds: [String!]!): Boolean!
+    @aws_auth(cognito_groups: ["Admin", "Author"])
+  abortTestRuns(testRunIds: [String!]!): AbortWorkflowResponse!
     @aws_auth(cognito_groups: ["Admin", "Author"])
   addTestSet(name: String!, description: String, filePattern: String!, bucketType: String!, fileCount: Int!, modifiedAfter: String): TestSet
     @aws_auth(cognito_groups: ["Admin", "Author"])

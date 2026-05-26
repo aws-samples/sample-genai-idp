@@ -149,13 +149,14 @@ def handle_cache_update_request(event, context):
             # Calculate metrics
             aggregated_metrics = _aggregate_test_run_metrics(test_run_id)
 
-            # Cache the metrics
+            # Cache the metrics (including new confidence_metrics from Stickler v0.4.0+)
             metrics_to_cache = {
                 "overallAccuracy": aggregated_metrics.get("overall_accuracy"),
                 "weightedOverallScores": aggregated_metrics.get(
                     "weighted_overall_scores", {}
                 ),
                 "averageConfidence": aggregated_metrics.get("average_confidence"),
+                "confidenceMetrics": aggregated_metrics.get("confidence_metrics"),
                 "accuracyBreakdown": aggregated_metrics.get("accuracy_breakdown", {}),
                 "confusionMatrix": aggregated_metrics.get("confusion_matrix", {}),
                 "fieldMetrics": aggregated_metrics.get("field_metrics", {}),
@@ -247,6 +248,62 @@ def _format_datetime(dt_str):
     return dt_str + "Z" if not dt_str.endswith("Z") else dt_str
 
 
+def _count_completed_documents(table, test_run_id, files):
+    """
+    Count how many documents completed evaluation successfully.
+
+    Uses batch_get_item for efficiency instead of sequential get_item calls.
+
+    Args:
+        table: DynamoDB table resource
+        test_run_id: Test run identifier
+        files: List of file names in the test run
+
+    Returns:
+        int: Number of documents with EvaluationStatus='COMPLETED'
+    """
+    if not files:
+        return 0
+
+    completed_count = 0
+    table_name = table.table_name
+    dynamodb_client = boto3.client('dynamodb')
+
+    # Build object keys
+    object_keys = [f"{test_run_id}/{file_name}" for file_name in files]
+
+    # DynamoDB batch_get_item supports up to 100 keys per batch
+    batch_size = 100
+    for i in range(0, len(object_keys), batch_size):
+        batch = object_keys[i:i + batch_size]
+        keys = [{'PK': {'S': f"doc#{key}"}, 'SK': {'S': 'none'}} for key in batch]
+
+        try:
+            response = dynamodb_client.batch_get_item(
+                RequestItems={
+                    table_name: {
+                        'Keys': keys
+                    }
+                }
+            )
+
+            # Count completed evaluations
+            for item in response.get('Responses', {}).get(table_name, []):
+                eval_status = item.get('EvaluationStatus', {}).get('S', '').upper()
+                if eval_status == 'COMPLETED':
+                    completed_count += 1
+
+            # Handle unprocessed keys (throttling, etc.)
+            unprocessed = response.get('UnprocessedKeys', {}).get(table_name, {})
+            if unprocessed:
+                logger.warning(f"Batch get had {len(unprocessed.get('Keys', []))} unprocessed keys")
+
+        except Exception as e:
+            logger.error(f"Batch get failed for batch starting at index {i}: {str(e)}")
+
+    return completed_count
+
+
 def get_test_results(test_run_id):
     """Get detailed test results for a specific test run"""
     table = dynamodb.Table(os.environ["TRACKING_TABLE"])  # type: ignore[attr-defined]  # type: ignore[attr-defined]
@@ -261,7 +318,7 @@ def get_test_results(test_run_id):
     current_status = metadata.get("Status")
 
     # Update status if not completed
-    if current_status not in ["COMPLETE", "PARTIAL_COMPLETE"]:
+    if current_status not in ["COMPLETE", "PARTIAL_COMPLETE", "ABORTED"]:
         status_result = get_test_run_status(test_run_id)
         if status_result:
             current_status = status_result["status"]
@@ -273,7 +330,7 @@ def get_test_results(test_run_id):
                 metadata = response["Item"]
 
     # Raise error if status is still not complete
-    if current_status not in ["COMPLETE", "PARTIAL_COMPLETE"]:
+    if current_status not in ["COMPLETE", "PARTIAL_COMPLETE", "ABORTED"]:
         raise ValueError(
             f"Test run {test_run_id} is not complete. Current status: {current_status}"
         )
@@ -296,6 +353,31 @@ def get_test_results(test_run_id):
             )
             # Force recalculation by falling through to aggregation logic
         else:
+            # For ABORTED status, count completed files on first call and persist to DB
+            completed_files_count = metadata.get("CompletedFiles", 0)
+            completed_files_counted = metadata.get("CompletedFilesCounted", False)
+
+            # Only re-count if we haven't counted before (tracked by CompletedFilesCounted flag)
+            if current_status == "ABORTED" and not completed_files_counted:
+                files = metadata.get("Files", [])
+                if files:
+                    completed_files_count = _count_completed_documents(table, test_run_id, files)
+                    logger.info(f"Counted {completed_files_count} completed documents for aborted test run {test_run_id}")
+
+                    # Persist the count and flag to database
+                    try:
+                        table.update_item(
+                            Key={"PK": f"testrun#{test_run_id}", "SK": "metadata"},
+                            UpdateExpression="SET CompletedFiles = :completed_files, CompletedFilesCounted = :counted",
+                            ExpressionAttributeValues={
+                                ":completed_files": completed_files_count,
+                                ":counted": True
+                            }
+                        )
+                        logger.info(f"Updated CompletedFiles to {completed_files_count} and set CompletedFilesCounted=True for test run {test_run_id}")
+                    except Exception as e:
+                        logger.warning(f"Failed to update CompletedFiles for {test_run_id}: {str(e)}")
+
             # Use cached metrics but get dynamic fields from current metadata
             return {
                 "testRunId": test_run_id,
@@ -303,13 +385,14 @@ def get_test_results(test_run_id):
                 "testSetName": metadata.get("TestSetName"),
                 "status": current_status,
                 "filesCount": metadata.get("FilesCount", 0),
-                "completedFiles": metadata.get("CompletedFiles", 0),
+                "completedFiles": completed_files_count,
                 "failedFiles": metadata.get("FailedFiles", 0),
                 "overallAccuracy": cached_metrics.get("overallAccuracy"),
                 "weightedOverallScores": cached_metrics.get(
                     "weightedOverallScores", {}
                 ),
                 "averageConfidence": cached_metrics.get("averageConfidence"),
+                "confidenceMetrics": cached_metrics.get("confidenceMetrics"),
                 "accuracyBreakdown": cached_metrics.get("accuracyBreakdown", {}),
                 "confusionMatrix": cached_metrics.get("confusionMatrix", {}),
                 "fieldMetrics": cached_metrics.get("fieldMetrics", {}),
@@ -325,9 +408,15 @@ def get_test_results(test_run_id):
                 "config": _get_test_run_config(test_run_id),
             }
     else:
-        raise ValueError(
-            f"Test run {test_run_id} processing completed, evaluating results"
-        )
+        # Provide more specific message for ABORTED status
+        if current_status == "ABORTED":
+            raise ValueError(
+                f"Test run {test_run_id} aborted, evaluating results for completed documents"
+            )
+        else:
+            raise ValueError(
+                f"Test run {test_run_id} processing completed, evaluating results"
+            )
 
 
 def _query_test_runs_from_gsi(table, start_iso, end_iso):
@@ -412,6 +501,7 @@ def _build_test_run_list(items):
 
     for item in items:
         display_status = item.get("Status")
+        # Show EVALUATING for completed tests without metrics, but keep ABORTED as-is
         if display_status in ["COMPLETE", "PARTIAL_COMPLETE"] and not item.get(
             "testRunResult"
         ):
@@ -493,6 +583,20 @@ def get_test_run_status(test_run_id):
         files_count = item.get("FilesCount", 0)
         logger.info(f"Test run {test_run_id}: Found {files_count} files")
 
+        # If test run was manually aborted, return ABORTED status without recalculation
+        stored_status = item.get("Status", "RUNNING")
+        if stored_status == "ABORTED":
+            logger.info(f"Test run {test_run_id} is ABORTED, returning stored status")
+            return {
+                "testRunId": test_run_id,
+                "status": "ABORTED",
+                "progress": 100,
+                "completedFiles": item.get("CompletedFiles", 0),
+                "filesCount": files_count,
+                "evaluatingFiles": 0,
+                "failedFiles": item.get("FailedFiles", 0),
+            }
+
         # Always check actual document status from tracking table
         completed_files = 0
         processing_failed_files = 0  # Only count processing failures found during scan
@@ -545,6 +649,7 @@ def get_test_run_status(test_run_id):
                     processing_failed_files += 1
                     logger.info(f"File {file_key}: counted as failed")
                 elif doc_status == "ABORTED":
+                    # Count aborted documents as processing failures
                     processing_failed_files += 1
                     logger.info(f"File {file_key}: counted as failed (aborted)")
                 elif doc_status == "QUEUED":
@@ -721,20 +826,37 @@ def _aggregate_test_run_metrics(test_run_id):
                         f"Using Stickler aggregation for test run {test_run_id}"
                     )
 
-                    # Get split metrics and confidence from Athena
+                    # Get split metrics from Athena
                     athena_metrics = _get_evaluation_metrics_from_athena(test_run_id)
                     cost_data = _get_cost_data_from_athena(test_run_id)
 
-                    # Merge Stickler metrics with Athena split metrics and confidence
+                    # Prefer Stickler confidence over Athena (Stickler v0.4.0+ has better calibration)
+                    stickler_avg_confidence = stickler_metrics.get("average_confidence")
+                    athena_avg_confidence = athena_metrics.get("average_confidence")
+
+                    # Use Stickler confidence if available, fallback to Athena
+                    avg_confidence = (
+                        stickler_avg_confidence
+                        if stickler_avg_confidence is not None
+                        else athena_avg_confidence
+                    )
+
+                    # Merge Stickler metrics with Athena split metrics
                     merged_metrics = {
                         **stickler_metrics,
-                        "average_confidence": athena_metrics.get("average_confidence"),
+                        "average_confidence": avg_confidence,
                         "split_classification_metrics": athena_metrics.get(
                             "split_classification_metrics", {}
                         ),
                         "total_cost": cost_data.get("total_cost", 0),
                         "cost_breakdown": cost_data.get("cost_breakdown", {}),
                     }
+
+                    logger.info(
+                        f"Confidence source for {test_run_id}: "
+                        f"{'Stickler' if stickler_avg_confidence is not None else 'Athena'} "
+                        f"(value: {avg_confidence})"
+                    )
                     _invoke_mlflow_logger(
                         test_run_id, merged_metrics, config=test_run_config
                     )

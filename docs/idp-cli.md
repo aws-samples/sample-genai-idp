@@ -52,6 +52,7 @@ https://github.com/user-attachments/assets/3d448a74-ba5b-4a4a-96ad-ec03ac0b4d7d
   - [config-activate](#config-activate)
   - [config-delete](#config-delete)
   - [test-result](#test-result)
+  - [abort-test-run](#abort-test-run)
   - [test-compare](#test-compare)
   - [chat](#chat)
 - [Complete Evaluation Workflow](#complete-evaluation-workflow)
@@ -2295,6 +2296,58 @@ idp-cli test-result \
 - Triggers lazy evaluation if metrics not yet calculated (first call after test run completes)
 - Polls Lambda every 10 seconds when `--wait` is used
 - Returns complete test run data including field-level metrics and cost breakdown
+
+---
+
+### `abort-test-run`
+
+Abort one or more running Test Studio test runs. Stops all document processing workflows and preserves results from completed documents.
+
+**Usage:**
+```bash
+idp-cli abort-test-run [OPTIONS]
+```
+
+**Options:**
+- `--stack-name` (required): CloudFormation stack name
+- `--test-run-ids` (required): Comma-separated list of test run IDs to abort
+- `--force` / `-y`: Skip confirmation prompt
+- `--region`: AWS region (optional)
+
+**Examples:**
+```bash
+# Abort a single test run
+idp-cli abort-test-run \
+  --stack-name my-stack \
+  --test-run-ids "fake-w2-20260409-123456"
+
+# Abort multiple test runs
+idp-cli abort-test-run \
+  --stack-name my-stack \
+  --test-run-ids "run1,run2,run3"
+
+# Skip confirmation prompt
+idp-cli abort-test-run \
+  --stack-name my-stack \
+  --test-run-ids "fake-w2-20260409-123456" \
+  --force
+```
+
+**Output:**
+- Success/failure count for each test run
+- Error details for failed aborts (e.g., test run not found, already completed)
+- Confirmation prompt unless `--force` is used
+
+**Behavior:**
+- Only test runs with status **QUEUED** or **RUNNING** can be aborted
+- Completed documents are preserved with their evaluation results
+- Test run status is updated to **ABORTED**
+- Metrics are calculated for any completed documents
+- Document workflows are stopped via Step Functions execution abort
+
+**Limitations:**
+- Cannot abort test runs with status **EVALUATING**, **COMPLETED**, **PARTIAL_COMPLETE**, or **FAILED**
+- The abort operation waits up to 25 seconds for documents to reach terminal state
 
 ---
 
