@@ -2,7 +2,8 @@
 title: "IDP Accelerator + Amazon Quick Integration Workshop"
 ---
 
-<!-- SPDX-License-Identifier: MIT-0 -->
+Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+SPDX-License-Identifier: MIT-0
 
 # IDP Accelerator + Amazon Quick Integration Workshop
 
@@ -118,7 +119,7 @@ Before running the workflow you need the sample loan package in an S3 bucket tha
    - **`loan_package_bucket`** — the bucket name (e.g. `my-idp-input-bucket`)
    - **`loan_package_key`** — the object key (e.g. `inputs/lending_package.pdf`)
 
-> **Tip:** You can also drag-and-drop the file using the [IDP Web UI](https://docs.aws.amazon.com/solutions/latest/accelerated-intelligent-document-processing/web-ui.html) upload feature if you prefer a console-based approach.
+> **Tip:** You can also drag-and-drop the file using the [IDP Web UI](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/blob/main/docs/web-ui.md) upload feature if you prefer a console-based approach.
 
 ---
 
@@ -482,25 +483,14 @@ Build an Excel workbook with two sheets: **Metadata** and **Extracted Data**.
 
 ![Final Log](images/image_052.png)
 
-#### Step 5.5 — Download Result Spreadsheet
+#### Step 5.5 — Download the Result Spreadsheet from S3
 
-After the S3 upload succeeds, give the user a direct download link to the output file.
+Once the workflow completes, download the output spreadsheet directly from the S3 console:
 
-- **Q action connector id**: `s3-action-connector`
-- **Action**: Get presigned URL (or use the Amazon Quick file download action)
-- **Bucket**: `runtime_config("output_bucket")`
-- **Key**: `runtime_config("output_bucket_key")`
-- **Output Variable**: `download_url`
-
-Then surface the result to the user:
-
-```
-Message: f"✅ Processing complete! Download your results spreadsheet here: {download_url}"
-```
-
-> **Alternative:** If your Amazon Quick environment has a built-in **File Download** step, use it directly with `spreadsheet` as the source — it will handle S3 retrieval and present the file to the user without needing a separate presigned URL action.
-
-![Download Result](images/image_053.png)
+1. Open the [Amazon S3 console](https://s3.console.aws.amazon.com/s3/home)
+2. Navigate to your output bucket (the `output_bucket` value from your runtime configuration)
+3. Locate the uploaded `.xlsx` file at the key path you configured
+4. Click the file name, then click **Download**
 
 ---
 
