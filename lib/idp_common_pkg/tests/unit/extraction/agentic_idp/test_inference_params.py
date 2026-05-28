@@ -61,6 +61,13 @@ pytestmark = [
         "eu.anthropic.claude-opus-4-7:1m",
         "global.anthropic.claude-opus-4-7",
         "global.anthropic.claude-opus-4-7:1m",
+        "anthropic.claude-opus-4-8",
+        "us.anthropic.claude-opus-4-8",
+        "us.anthropic.claude-opus-4-8:1m",
+        "eu.anthropic.claude-opus-4-8",
+        "eu.anthropic.claude-opus-4-8:1m",
+        "global.anthropic.claude-opus-4-8",
+        "global.anthropic.claude-opus-4-8:1m",
     ],
 )
 def test_claude_4_7_models_return_no_inference_params(model_id: str) -> None:
