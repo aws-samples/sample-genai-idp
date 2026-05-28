@@ -3935,6 +3935,7 @@ Resources:
         Variables:
           LOG_LEVEL: !Ref LogLevel
           TRACKING_TABLE: !Ref TrackingTable
+          OUTPUT_BUCKET: !Ref OutputBucket
       LoggingConfig:
         LogGroup: !Ref TestExecutionAggregationFunctionLogGroup
       Policies:

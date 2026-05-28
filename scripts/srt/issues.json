@@ -10,7 +10,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b324_hashlib.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-04-27T18:09:25.683Z",
-    "assessmentCount": 10,
+    "assessmentCount": 12,
     "suppressionReason": "This is a false-positive"
   },
   {
@@ -24,7 +24,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b324_hashlib.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-04-27T18:09:25.683Z",
-    "assessmentCount": 10,
+    "assessmentCount": 12,
     "suppressionReason": "This is a false-positive"
   },
   {
@@ -38,7 +38,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b105_hardcoded_password_string.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-04-27T18:09:25.683Z",
-    "assessmentCount": 10,
+    "assessmentCount": 12,
     "suppressedAt": "2026-04-30T20:06:58.884360Z",
     "suppressionReason": "This is a false-positive"
   },
@@ -53,7 +53,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b105_hardcoded_password_string.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-04-27T18:09:25.683Z",
-    "assessmentCount": 10,
+    "assessmentCount": 12,
     "suppressedAt": "2026-04-30T20:06:58.884366Z",
     "suppressionReason": "This is a false-positive"
   },
@@ -68,7 +68,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b105_hardcoded_password_string.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-04-27T18:09:25.683Z",
-    "assessmentCount": 10,
+    "assessmentCount": 12,
     "suppressedAt": "2026-04-30T20:06:58.884372Z",
     "suppressionReason": "This is a false-positive"
   },
@@ -83,7 +83,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b105_hardcoded_password_string.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-04-27T18:09:25.683Z",
-    "assessmentCount": 10,
+    "assessmentCount": 12,
     "suppressedAt": "2026-04-30T20:06:58.884378Z",
     "suppressionReason": "This is a false-positive"
   },
@@ -98,7 +98,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b105_hardcoded_password_string.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-04-27T18:09:25.683Z",
-    "assessmentCount": 10,
+    "assessmentCount": 12,
     "suppressedAt": "2026-04-30T20:06:58.884383Z",
     "suppressionReason": "This is a false-positive"
   },
@@ -113,7 +113,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b105_hardcoded_password_string.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-04-27T18:09:25.683Z",
-    "assessmentCount": 10,
+    "assessmentCount": 12,
     "suppressedAt": "2026-04-30T20:06:58.884389Z",
     "suppressionReason": "This is a false-positive"
   },
@@ -128,7 +128,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b105_hardcoded_password_string.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-04-27T18:09:25.683Z",
-    "assessmentCount": 10,
+    "assessmentCount": 12,
     "suppressedAt": "2026-04-30T20:06:58.884395Z",
     "suppressionReason": "This is a false-positive"
   },
@@ -143,7 +143,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b105_hardcoded_password_string.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-04-27T18:09:25.683Z",
-    "assessmentCount": 10,
+    "assessmentCount": 12,
     "suppressedAt": "2026-04-30T20:06:58.884400Z",
     "suppressionReason": "This is a false-positive"
   },
@@ -158,7 +158,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b324_hashlib.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-04-27T18:09:25.683Z",
-    "assessmentCount": 10,
+    "assessmentCount": 12,
     "suppressedAt": "2026-04-30T20:06:58.884406Z",
     "suppressionReason": "This is a false-positive"
   },
@@ -173,7 +173,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b106_hardcoded_password_funcarg.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-04-27T18:09:25.683Z",
-    "assessmentCount": 10,
+    "assessmentCount": 12,
     "suppressedAt": "2026-04-30T20:06:58.884416Z",
     "suppressionReason": "This is a false-positive"
   },
@@ -188,7 +188,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b324_hashlib.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-04-27T18:09:25.683Z",
-    "assessmentCount": 10,
+    "assessmentCount": 12,
     "suppressedAt": "2026-04-30T20:06:58.884422Z",
     "suppressionReason": "This is a false-positive"
   },
@@ -203,7 +203,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b105_hardcoded_password_string.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-04-27T18:09:25.683Z",
-    "assessmentCount": 10,
+    "assessmentCount": 12,
     "suppressedAt": "2026-04-30T20:06:58.884435Z",
     "suppressionReason": "This is a false-positive"
   },
@@ -218,7 +218,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b105_hardcoded_password_string.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-04-27T18:09:25.683Z",
-    "assessmentCount": 10,
+    "assessmentCount": 12,
     "suppressedAt": "2026-04-30T20:06:58.884450Z",
     "suppressionReason": "This is a false-positive"
   },
@@ -233,7 +233,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b105_hardcoded_password_string.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-04-27T18:09:25.683Z",
-    "assessmentCount": 10,
+    "assessmentCount": 12,
     "suppressedAt": "2026-04-30T20:06:58.884456Z",
     "suppressionReason": "This is a false-positive"
   },
@@ -248,7 +248,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b105_hardcoded_password_string.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-04-27T18:09:25.683Z",
-    "assessmentCount": 10,
+    "assessmentCount": 12,
     "suppressedAt": "2026-04-30T20:06:58.884462Z",
     "suppressionReason": "This is a false-positive"
   },
@@ -263,7 +263,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b105_hardcoded_password_string.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-04-27T18:09:25.683Z",
-    "assessmentCount": 10,
+    "assessmentCount": 12,
     "suppressedAt": "2026-04-30T20:06:58.884468Z",
     "suppressionReason": "This is a false-positive"
   },
@@ -278,7 +278,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b324_hashlib.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-04-27T18:09:25.683Z",
-    "assessmentCount": 10,
+    "assessmentCount": 12,
     "suppressedAt": "2026-04-30T20:06:58.884489Z",
     "suppressionReason": "This is a false-positive"
   },
@@ -293,7 +293,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b105_hardcoded_password_string.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-04-27T18:09:25.683Z",
-    "assessmentCount": 10,
+    "assessmentCount": 12,
     "suppressedAt": "2026-04-30T20:06:58.884495Z",
     "suppressionReason": "This is a false-positive"
   },
@@ -308,7 +308,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b324_hashlib.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-04-27T18:09:25.683Z",
-    "assessmentCount": 10,
+    "assessmentCount": 12,
     "suppressedAt": "2026-04-30T20:06:58.884564Z",
     "suppressionReason": "This is a false-positive"
   },
@@ -323,7 +323,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b105_hardcoded_password_string.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-04-27T18:09:25.683Z",
-    "assessmentCount": 10,
+    "assessmentCount": 12,
     "suppressedAt": "2026-04-30T20:06:58.884570Z",
     "suppressionReason": "This is a false-positive"
   },
@@ -338,7 +338,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b105_hardcoded_password_string.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-04-27T18:09:25.683Z",
-    "assessmentCount": 10,
+    "assessmentCount": 12,
     "suppressedAt": "2026-04-30T20:06:58.884618Z",
     "suppressionReason": "This is a false-positive"
   },
@@ -353,7 +353,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b105_hardcoded_password_string.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-04-27T18:09:25.683Z",
-    "assessmentCount": 10,
+    "assessmentCount": 12,
     "suppressedAt": "2026-04-30T20:06:58.884624Z",
     "suppressionReason": "This is a false-positive"
   },
@@ -368,7 +368,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b105_hardcoded_password_string.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-04-27T18:09:25.683Z",
-    "assessmentCount": 10,
+    "assessmentCount": 12,
     "suppressedAt": "2026-04-30T20:06:58.884631Z",
     "suppressionReason": "This is a false-positive"
   },
@@ -411,7 +411,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b105_hardcoded_password_string.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-04-27T18:09:25.686Z",
-    "assessmentCount": 10,
+    "assessmentCount": 12,
     "suppressionReason": "This is a false-positive"
   },
   {
@@ -425,7 +425,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b105_hardcoded_password_string.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-04-27T18:09:25.686Z",
-    "assessmentCount": 10,
+    "assessmentCount": 12,
     "suppressionReason": "This is a false-positive"
   },
   {
@@ -439,7 +439,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b105_hardcoded_password_string.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-04-27T18:09:25.686Z",
-    "assessmentCount": 10,
+    "assessmentCount": 12,
     "suppressionReason": "This is a false-positive"
   },
   {
@@ -453,7 +453,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b105_hardcoded_password_string.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-04-27T18:09:25.688Z",
-    "assessmentCount": 10,
+    "assessmentCount": 12,
     "suppressionReason": "This is a false-positive"
   },
   {
@@ -467,7 +467,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b105_hardcoded_password_string.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-04-27T18:09:25.850Z",
-    "assessmentCount": 10,
+    "assessmentCount": 12,
     "suppressionReason": "This is a false-positive"
   },
   {
@@ -481,7 +481,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b105_hardcoded_password_string.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-04-27T18:09:25.850Z",
-    "assessmentCount": 10,
+    "assessmentCount": 12,
     "suppressionReason": "This is a false-positive"
   },
   {
@@ -495,7 +495,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b105_hardcoded_password_string.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-04-27T18:09:25.876Z",
-    "assessmentCount": 10,
+    "assessmentCount": 12,
     "suppressionReason": "This is a false-positive"
   },
   {
@@ -510,7 +510,7 @@
     "status": "suppressed",
     "isCustomResource": false,
     "firstDetectedAt": "2026-04-27T18:09:25.895Z",
-    "assessmentCount": 10,
+    "assessmentCount": 12,
     "suppressionReason": "This is not required/permitted by the customer"
   },
   {
@@ -525,7 +525,7 @@
     "status": "suppressed",
     "isCustomResource": false,
     "firstDetectedAt": "2026-04-27T18:09:25.901Z",
-    "assessmentCount": 10,
+    "assessmentCount": 12,
     "suppressedAt": "2026-04-30T20:06:58.896829Z",
     "suppressionReason": "This is a false-positive"
   },
@@ -541,7 +541,7 @@
     "status": "suppressed",
     "isCustomResource": false,
     "firstDetectedAt": "2026-04-27T18:09:25.901Z",
-    "assessmentCount": 10,
+    "assessmentCount": 12,
     "suppressedAt": "2026-04-30T20:06:58.896833Z",
     "suppressionReason": "This is a false-positive"
   },
@@ -554,10 +554,10 @@
     "fix": "Create a unique IAM execution role for this Lambda function instead of sharing role GetAtt:StartIngestionJobFunctionRole with . Lambda functions should have a 1:1 relationship with IAM execution roles.",
     "priority": "HIGH",
     "check_id": "LAMBDA-012",
-    "status": "reopened",
+    "status": "suppressed",
     "isCustomResource": false,
     "firstDetectedAt": "2026-04-27T18:09:25.901Z",
-    "assessmentCount": 5,
+    "assessmentCount": 6,
     "suppressedAt": "2026-04-30T20:06:58.896838Z",
     "suppressionReason": "This is a false-positive"
   },
@@ -592,7 +592,7 @@
     "status": "suppressed",
     "isCustomResource": false,
     "firstDetectedAt": "2026-04-27T18:09:25.911Z",
-    "assessmentCount": 10,
+    "assessmentCount": 12,
     "suppressedAt": "2026-04-30T20:06:58.897087Z",
     "suppressionReason": "This is a false-positive"
   },
@@ -608,7 +608,7 @@
     "status": "suppressed",
     "isCustomResource": false,
     "firstDetectedAt": "2026-04-27T18:09:25.911Z",
-    "assessmentCount": 10,
+    "assessmentCount": 12,
     "suppressionReason": "This is not required/permitted by the customer"
   },
   {
@@ -623,7 +623,7 @@
     "status": "suppressed",
     "isCustomResource": false,
     "firstDetectedAt": "2026-04-27T18:09:25.912Z",
-    "assessmentCount": 10,
+    "assessmentCount": 12,
     "suppressionReason": "This is not required/permitted by the customer"
   },
   {
@@ -638,7 +638,7 @@
     "status": "suppressed",
     "isCustomResource": false,
     "firstDetectedAt": "2026-04-27T18:09:25.913Z",
-    "assessmentCount": 10,
+    "assessmentCount": 12,
     "suppressionReason": "This is not required/permitted by the customer"
   },
   {
@@ -653,7 +653,7 @@
     "status": "suppressed",
     "isCustomResource": false,
     "firstDetectedAt": "2026-04-27T18:09:25.913Z",
-    "assessmentCount": 10,
+    "assessmentCount": 12,
     "suppressionReason": "This is not required/permitted by the customer"
   },
   {
@@ -668,7 +668,7 @@
     "status": "suppressed",
     "isCustomResource": false,
     "firstDetectedAt": "2026-04-27T18:09:25.913Z",
-    "assessmentCount": 10,
+    "assessmentCount": 12,
     "suppressionReason": "This is not required/permitted by the customer"
   },
   {
@@ -683,7 +683,7 @@
     "status": "suppressed",
     "isCustomResource": false,
     "firstDetectedAt": "2026-04-27T18:09:25.913Z",
-    "assessmentCount": 10,
+    "assessmentCount": 12,
     "suppressionReason": "This is not required/permitted by the customer"
   },
   {
@@ -698,7 +698,7 @@
     "status": "suppressed",
     "isCustomResource": false,
     "firstDetectedAt": "2026-04-27T18:09:25.914Z",
-    "assessmentCount": 10,
+    "assessmentCount": 12,
     "suppressionReason": "This is not required/permitted by the customer"
   },
   {
@@ -713,7 +713,7 @@
     "status": "suppressed",
     "isCustomResource": false,
     "firstDetectedAt": "2026-04-27T18:09:25.914Z",
-    "assessmentCount": 10,
+    "assessmentCount": 12,
     "suppressionReason": "This is not required/permitted by the customer"
   },
   {
@@ -728,7 +728,7 @@
     "status": "suppressed",
     "isCustomResource": false,
     "firstDetectedAt": "2026-04-27T18:09:25.914Z",
-    "assessmentCount": 10,
+    "assessmentCount": 12,
     "suppressionReason": "This is not required/permitted by the customer"
   },
   {
@@ -743,7 +743,7 @@
     "status": "suppressed",
     "isCustomResource": false,
     "firstDetectedAt": "2026-04-27T18:09:25.915Z",
-    "assessmentCount": 10,
+    "assessmentCount": 12,
     "suppressionReason": "This is not required/permitted by the customer"
   },
   {
@@ -758,7 +758,7 @@
     "status": "suppressed",
     "isCustomResource": false,
     "firstDetectedAt": "2026-04-27T18:09:25.915Z",
-    "assessmentCount": 10,
+    "assessmentCount": 12,
     "suppressionReason": "This is not required/permitted by the customer"
   },
   {
@@ -773,7 +773,7 @@
     "status": "suppressed",
     "isCustomResource": false,
     "firstDetectedAt": "2026-04-27T18:09:25.915Z",
-    "assessmentCount": 10,
+    "assessmentCount": 12,
     "suppressionReason": "This is not required/permitted by the customer"
   },
   {
@@ -788,7 +788,7 @@
     "status": "suppressed",
     "isCustomResource": false,
     "firstDetectedAt": "2026-04-27T18:09:25.915Z",
-    "assessmentCount": 10,
+    "assessmentCount": 12,
     "suppressionReason": "This is not required/permitted by the customer"
   },
   {
@@ -803,7 +803,7 @@
     "status": "suppressed",
     "isCustomResource": false,
     "firstDetectedAt": "2026-04-27T18:09:25.915Z",
-    "assessmentCount": 10,
+    "assessmentCount": 12,
     "suppressionReason": "This is not required/permitted by the customer"
   },
   {
@@ -818,7 +818,7 @@
     "status": "suppressed",
     "isCustomResource": false,
     "firstDetectedAt": "2026-04-27T18:09:25.915Z",
-    "assessmentCount": 10,
+    "assessmentCount": 12,
     "suppressionReason": "This is not required/permitted by the customer"
   },
   {
@@ -833,7 +833,7 @@
     "status": "suppressed",
     "isCustomResource": false,
     "firstDetectedAt": "2026-04-27T18:09:25.916Z",
-    "assessmentCount": 10,
+    "assessmentCount": 12,
     "suppressionReason": "This is not required/permitted by the customer"
   },
   {
@@ -848,7 +848,7 @@
     "status": "suppressed",
     "isCustomResource": false,
     "firstDetectedAt": "2026-04-27T18:09:25.916Z",
-    "assessmentCount": 10,
+    "assessmentCount": 12,
     "suppressionReason": "This is not required/permitted by the customer"
   },
   {
@@ -863,7 +863,7 @@
     "status": "suppressed",
     "isCustomResource": false,
     "firstDetectedAt": "2026-04-27T18:09:25.916Z",
-    "assessmentCount": 10,
+    "assessmentCount": 12,
     "suppressionReason": "This is not required/permitted by the customer"
   },
   {
@@ -878,7 +878,7 @@
     "status": "suppressed",
     "isCustomResource": false,
     "firstDetectedAt": "2026-04-27T18:09:25.916Z",
-    "assessmentCount": 10,
+    "assessmentCount": 12,
     "suppressionReason": "This is not required/permitted by the customer"
   },
   {
@@ -893,7 +893,7 @@
     "status": "suppressed",
     "isCustomResource": false,
     "firstDetectedAt": "2026-04-27T18:09:25.916Z",
-    "assessmentCount": 10,
+    "assessmentCount": 12,
     "suppressionReason": "This is not required/permitted by the customer"
   },
   {
@@ -908,7 +908,7 @@
     "status": "suppressed",
     "isCustomResource": false,
     "firstDetectedAt": "2026-04-27T18:09:25.916Z",
-    "assessmentCount": 10,
+    "assessmentCount": 12,
     "suppressionReason": "This is not required/permitted by the customer"
   },
   {
@@ -923,7 +923,7 @@
     "status": "suppressed",
     "isCustomResource": false,
     "firstDetectedAt": "2026-04-27T18:09:25.916Z",
-    "assessmentCount": 10,
+    "assessmentCount": 12,
     "suppressionReason": "This is not required/permitted by the customer"
   },
   {
@@ -938,7 +938,7 @@
     "status": "suppressed",
     "isCustomResource": false,
     "firstDetectedAt": "2026-04-27T18:09:25.917Z",
-    "assessmentCount": 10,
+    "assessmentCount": 12,
     "suppressedAt": "2026-04-30T20:06:58.897146Z",
     "suppressionReason": "This is a false-positive"
   },
@@ -954,7 +954,7 @@
     "status": "suppressed",
     "isCustomResource": false,
     "firstDetectedAt": "2026-04-27T18:09:25.917Z",
-    "assessmentCount": 10,
+    "assessmentCount": 12,
     "suppressedAt": "2026-04-30T20:06:58.897150Z",
     "suppressionReason": "This is a false-positive"
   },
@@ -970,7 +970,7 @@
     "status": "suppressed",
     "isCustomResource": false,
     "firstDetectedAt": "2026-04-27T18:09:25.917Z",
-    "assessmentCount": 10,
+    "assessmentCount": 12,
     "suppressedAt": "2026-04-30T20:06:58.897155Z",
     "suppressionReason": "This is a false-positive"
   },
@@ -986,7 +986,7 @@
     "status": "suppressed",
     "isCustomResource": false,
     "firstDetectedAt": "2026-04-27T18:09:25.917Z",
-    "assessmentCount": 10,
+    "assessmentCount": 12,
     "suppressedAt": "2026-04-30T20:06:58.897161Z",
     "suppressionReason": "This is a false-positive"
   },
@@ -1002,7 +1002,7 @@
     "status": "suppressed",
     "isCustomResource": false,
     "firstDetectedAt": "2026-04-27T18:09:25.918Z",
-    "assessmentCount": 10,
+    "assessmentCount": 12,
     "suppressedAt": "2026-04-30T20:06:58.897170Z",
     "suppressionReason": "This is a false-positive"
   },
@@ -1018,7 +1018,7 @@
     "status": "suppressed",
     "isCustomResource": false,
     "firstDetectedAt": "2026-04-27T18:09:25.918Z",
-    "assessmentCount": 10,
+    "assessmentCount": 12,
     "suppressedAt": "2026-04-30T20:06:58.897174Z",
     "suppressionReason": "This is a false-positive"
   },
@@ -1034,7 +1034,7 @@
     "status": "suppressed",
     "isCustomResource": false,
     "firstDetectedAt": "2026-04-27T18:09:25.918Z",
-    "assessmentCount": 10,
+    "assessmentCount": 12,
     "suppressedAt": "2026-04-30T20:06:58.897181Z",
     "suppressionReason": "This is a false-positive"
   },
@@ -1050,7 +1050,7 @@
     "status": "suppressed",
     "isCustomResource": false,
     "firstDetectedAt": "2026-04-27T18:09:25.918Z",
-    "assessmentCount": 10,
+    "assessmentCount": 12,
     "suppressedAt": "2026-04-30T20:06:58.897185Z",
     "suppressionReason": "This is a false-positive"
   },
@@ -1066,7 +1066,7 @@
     "status": "suppressed",
     "isCustomResource": false,
     "firstDetectedAt": "2026-04-27T18:09:25.918Z",
-    "assessmentCount": 10,
+    "assessmentCount": 12,
     "suppressedAt": "2026-04-30T20:06:58.897190Z",
     "suppressionReason": "This is a false-positive"
   },
@@ -1082,7 +1082,7 @@
     "status": "suppressed",
     "isCustomResource": false,
     "firstDetectedAt": "2026-04-27T18:09:25.918Z",
-    "assessmentCount": 10,
+    "assessmentCount": 12,
     "suppressedAt": "2026-04-30T20:06:58.897194Z",
     "suppressionReason": "This is a false-positive"
   },
@@ -1098,7 +1098,7 @@
     "status": "suppressed",
     "isCustomResource": false,
     "firstDetectedAt": "2026-04-27T18:09:25.918Z",
-    "assessmentCount": 10,
+    "assessmentCount": 12,
     "suppressedAt": "2026-04-30T20:06:58.897200Z",
     "suppressionReason": "This is a false-positive"
   },
@@ -1114,7 +1114,7 @@
     "status": "suppressed",
     "isCustomResource": false,
     "firstDetectedAt": "2026-04-27T18:09:25.918Z",
-    "assessmentCount": 10,
+    "assessmentCount": 12,
     "suppressedAt": "2026-04-30T20:06:58.897205Z",
     "suppressionReason": "This is a false-positive"
   },
@@ -1130,7 +1130,7 @@
     "status": "suppressed",
     "isCustomResource": false,
     "firstDetectedAt": "2026-04-27T18:09:25.919Z",
-    "assessmentCount": 10,
+    "assessmentCount": 12,
     "suppressedAt": "2026-04-30T20:06:58.897209Z",
     "suppressionReason": "This is a false-positive"
   },
@@ -1146,7 +1146,7 @@
     "status": "suppressed",
     "isCustomResource": false,
     "firstDetectedAt": "2026-04-27T18:09:25.920Z",
-    "assessmentCount": 10,
+    "assessmentCount": 12,
     "suppressionReason": "This is not required/permitted by the customer"
   },
   {
@@ -1161,7 +1161,7 @@
     "status": "suppressed",
     "isCustomResource": false,
     "firstDetectedAt": "2026-04-27T18:09:25.920Z",
-    "assessmentCount": 10,
+    "assessmentCount": 12,
     "suppressionReason": "This is not required/permitted by the customer"
   },
   {
@@ -1173,10 +1173,11 @@
     "fix": "Create a unique IAM execution role for this Lambda function instead of sharing role GetAtt:StartIngestionJobFunctionRole with . Lambda functions should have a 1:1 relationship with IAM execution roles.",
     "priority": "HIGH",
     "check_id": "LAMBDA-012",
-    "status": "reopened",
+    "status": "resolved",
     "isCustomResource": false,
     "firstDetectedAt": "2026-04-27T18:09:25.920Z",
-    "assessmentCount": 9
+    "assessmentCount": 10,
+    "resolvedAt": "2026-05-27T22:59:50.961Z"
   },
   {
     "source": "security-matrix",
@@ -1190,7 +1191,7 @@
     "status": "suppressed",
     "isCustomResource": false,
     "firstDetectedAt": "2026-04-27T18:09:25.923Z",
-    "assessmentCount": 10,
+    "assessmentCount": 12,
     "suppressedAt": "2026-04-30T20:06:58.897320Z",
     "suppressionReason": "This is a false-positive"
   },
@@ -1206,7 +1207,7 @@
     "status": "suppressed",
     "isCustomResource": false,
     "firstDetectedAt": "2026-04-27T18:09:25.923Z",
-    "assessmentCount": 10,
+    "assessmentCount": 12,
     "suppressedAt": "2026-04-30T20:06:58.897325Z",
     "suppressionReason": "This is a false-positive"
   },
@@ -1222,7 +1223,7 @@
     "status": "suppressed",
     "isCustomResource": false,
     "firstDetectedAt": "2026-04-27T18:09:25.923Z",
-    "assessmentCount": 10,
+    "assessmentCount": 12,
     "suppressionReason": "This is not required/permitted by the customer"
   },
   {
@@ -1237,7 +1238,7 @@
     "status": "suppressed",
     "isCustomResource": false,
     "firstDetectedAt": "2026-04-27T18:09:25.923Z",
-    "assessmentCount": 10,
+    "assessmentCount": 12,
     "suppressionReason": "This is not required/permitted by the customer"
   },
   {
@@ -1252,7 +1253,7 @@
     "status": "suppressed",
     "isCustomResource": false,
     "firstDetectedAt": "2026-04-27T18:09:25.923Z",
-    "assessmentCount": 10,
+    "assessmentCount": 12,
     "suppressionReason": "This is not required/permitted by the customer"
   },
   {
@@ -1267,7 +1268,7 @@
     "status": "suppressed",
     "isCustomResource": false,
     "firstDetectedAt": "2026-04-27T18:09:25.924Z",
-    "assessmentCount": 10,
+    "assessmentCount": 12,
     "suppressionReason": "This is not required/permitted by the customer"
   },
   {
@@ -1279,11 +1280,11 @@
     "fix": "Create a unique IAM execution role for this Lambda function instead of sharing role GetAtt:RegisterTargetsRole with . Lambda functions should have a 1:1 relationship with IAM execution roles.",
     "priority": "HIGH",
     "check_id": "LAMBDA-012",
-    "status": "resolved",
+    "status": "suppressed",
     "isCustomResource": false,
     "firstDetectedAt": "2026-04-27T18:09:25.924Z",
-    "assessmentCount": 2,
-    "resolvedAt": "2026-04-30T21:02:02.757Z"
+    "assessmentCount": 4,
+    "suppressionReason": "This is a false-positive"
   },
   {
     "source": "security-matrix",
@@ -1297,7 +1298,7 @@
     "status": "suppressed",
     "isCustomResource": false,
     "firstDetectedAt": "2026-04-27T18:09:25.924Z",
-    "assessmentCount": 10,
+    "assessmentCount": 12,
     "suppressionReason": "This is not required/permitted by the customer"
   },
   {
@@ -1312,7 +1313,7 @@
     "status": "suppressed",
     "isCustomResource": false,
     "firstDetectedAt": "2026-04-27T18:09:25.927Z",
-    "assessmentCount": 10,
+    "assessmentCount": 12,
     "suppressedAt": "2026-04-30T20:06:58.897375Z",
     "suppressionReason": "This is a false-positive"
   },
@@ -1328,7 +1329,7 @@
     "status": "suppressed",
     "isCustomResource": false,
     "firstDetectedAt": "2026-04-27T18:09:25.927Z",
-    "assessmentCount": 10,
+    "assessmentCount": 12,
     "suppressedAt": "2026-04-30T20:06:58.897381Z",
     "suppressionReason": "This is a false-positive"
   },
@@ -1344,7 +1345,7 @@
     "status": "suppressed",
     "isCustomResource": false,
     "firstDetectedAt": "2026-04-27T18:09:25.927Z",
-    "assessmentCount": 10,
+    "assessmentCount": 12,
     "suppressedAt": "2026-04-30T20:06:58.897390Z",
     "suppressionReason": "This is a false-positive"
   },
@@ -1360,7 +1361,7 @@
     "status": "suppressed",
     "isCustomResource": false,
     "firstDetectedAt": "2026-04-27T18:09:25.927Z",
-    "assessmentCount": 10,
+    "assessmentCount": 12,
     "suppressedAt": "2026-04-30T20:06:58.897394Z",
     "suppressionReason": "This is a false-positive"
   },
@@ -1376,7 +1377,7 @@
     "status": "suppressed",
     "isCustomResource": false,
     "firstDetectedAt": "2026-04-27T18:09:25.927Z",
-    "assessmentCount": 10,
+    "assessmentCount": 12,
     "suppressedAt": "2026-04-30T20:06:58.897400Z",
     "suppressionReason": "This is a false-positive"
   },
@@ -1389,13 +1390,12 @@
     "fix": "Create a unique IAM execution role for this Lambda function instead of sharing role GetAtt:StartIngestionJobFunctionRole with . Lambda functions should have a 1:1 relationship with IAM execution roles.",
     "priority": "HIGH",
     "check_id": "LAMBDA-012",
-    "status": "resolved",
+    "status": "suppressed",
     "isCustomResource": false,
     "firstDetectedAt": "2026-04-27T18:21:30.802Z",
-    "assessmentCount": 6,
+    "assessmentCount": 8,
     "suppressedAt": "2026-04-30T20:06:58.897512Z",
-    "suppressionReason": "This is a false-positive",
-    "resolvedAt": "2026-05-02T20:11:38.433Z"
+    "suppressionReason": "This is a false-positive"
   },
   {
     "source": "security-matrix",
@@ -1406,12 +1406,13 @@
     "fix": "Create a unique IAM execution role for this Lambda function instead of sharing role GetAtt:RegisterTargetsRole with . Lambda functions should have a 1:1 relationship with IAM execution roles.",
     "priority": "HIGH",
     "check_id": "LAMBDA-012",
-    "status": "reopened",
+    "status": "resolved",
     "isCustomResource": false,
     "firstDetectedAt": "2026-04-27T18:21:30.808Z",
     "assessmentCount": 8,
     "suppressedAt": "2026-04-30T20:06:58.897512Z",
-    "suppressionReason": "This is a false-positive"
+    "suppressionReason": "This is a false-positive",
+    "resolvedAt": "2026-05-27T21:15:37.473Z"
   },
   {
     "source": "Bandit",
@@ -1424,7 +1425,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b105_hardcoded_password_string.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-04-30T20:15:11.167Z",
-    "assessmentCount": 6,
+    "assessmentCount": 8,
     "suppressionReason": "This is a false-positive"
   },
   {
@@ -1438,7 +1439,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b105_hardcoded_password_string.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-04-30T20:15:11.168Z",
-    "assessmentCount": 12,
+    "assessmentCount": 16,
     "suppressionReason": "This is a false-positive"
   },
   {
@@ -1452,7 +1453,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b105_hardcoded_password_string.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-04-30T20:15:11.169Z",
-    "assessmentCount": 6,
+    "assessmentCount": 8,
     "suppressionReason": "This is a false-positive"
   },
   {
@@ -1466,7 +1467,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b105_hardcoded_password_string.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-04-30T20:15:11.170Z",
-    "assessmentCount": 6,
+    "assessmentCount": 8,
     "suppressionReason": "This is a false-positive"
   },
   {
@@ -1480,7 +1481,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b105_hardcoded_password_string.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-04-30T20:15:11.170Z",
-    "assessmentCount": 6,
+    "assessmentCount": 8,
     "suppressionReason": "This is a false-positive"
   },
   {
@@ -1494,7 +1495,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b105_hardcoded_password_string.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-04-30T20:15:11.172Z",
-    "assessmentCount": 6,
+    "assessmentCount": 8,
     "suppressionReason": "This is a false-positive"
   },
   {
@@ -1508,7 +1509,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b105_hardcoded_password_string.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-04-30T20:15:11.278Z",
-    "assessmentCount": 6,
+    "assessmentCount": 8,
     "suppressionReason": "This is a false-positive"
   },
   {
@@ -1541,7 +1542,7 @@
     "status": "suppressed",
     "isCustomResource": false,
     "firstDetectedAt": "2026-04-30T20:15:11.352Z",
-    "assessmentCount": 6,
+    "assessmentCount": 8,
     "suppressionReason": "This is not required/permitted by the customer"
   },
   {
@@ -1556,7 +1557,7 @@
     "status": "suppressed",
     "isCustomResource": false,
     "firstDetectedAt": "2026-04-30T20:15:11.353Z",
-    "assessmentCount": 6,
+    "assessmentCount": 8,
     "suppressionReason": "This is not required/permitted by the customer"
   },
   {
@@ -1571,7 +1572,7 @@
     "status": "suppressed",
     "isCustomResource": false,
     "firstDetectedAt": "2026-04-30T20:15:11.353Z",
-    "assessmentCount": 6,
+    "assessmentCount": 8,
     "suppressionReason": "This is not required/permitted by the customer"
   },
   {
@@ -1585,7 +1586,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b105_hardcoded_password_string.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-02T20:11:37.618Z",
-    "assessmentCount": 2,
+    "assessmentCount": 4,
     "suppressionReason": "This is a false-positive"
   },
   {
@@ -1599,7 +1600,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b105_hardcoded_password_string.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-02T20:11:37.618Z",
-    "assessmentCount": 2,
+    "assessmentCount": 4,
     "suppressionReason": "This is a false-positive"
   },
   {
@@ -1613,7 +1614,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b105_hardcoded_password_string.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-02T20:11:37.618Z",
-    "assessmentCount": 2,
+    "assessmentCount": 4,
     "suppressionReason": "This is a false-positive"
   },
   {
@@ -1627,7 +1628,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b105_hardcoded_password_string.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-02T20:11:37.618Z",
-    "assessmentCount": 2,
+    "assessmentCount": 4,
     "suppressionReason": "This is a false-positive"
   },
   {
@@ -1642,7 +1643,7 @@
     "status": "suppressed",
     "isCustomResource": false,
     "firstDetectedAt": "2026-05-12T19:10:27.151Z",
-    "assessmentCount": 1,
+    "assessmentCount": 3,
     "suppressionReason": "This is a false-positive"
   },
   {
@@ -1657,7 +1658,7 @@
     "status": "suppressed",
     "isCustomResource": false,
     "firstDetectedAt": "2026-05-12T19:10:27.152Z",
-    "assessmentCount": 1,
+    "assessmentCount": 3,
     "suppressionReason": "This is a false-positive"
   },
   {
@@ -1672,7 +1673,7 @@
     "status": "suppressed",
     "isCustomResource": false,
     "firstDetectedAt": "2026-05-12T19:10:27.152Z",
-    "assessmentCount": 1,
+    "assessmentCount": 3,
     "suppressionReason": "This is a false-positive"
   },
   {
@@ -1687,7 +1688,7 @@
     "status": "suppressed",
     "isCustomResource": false,
     "firstDetectedAt": "2026-05-12T19:10:27.154Z",
-    "assessmentCount": 1,
+    "assessmentCount": 3,
     "suppressionReason": "This is not required/permitted by the customer"
   },
   {
@@ -1702,7 +1703,7 @@
     "status": "suppressed",
     "isCustomResource": false,
     "firstDetectedAt": "2026-05-12T19:10:27.154Z",
-    "assessmentCount": 1,
+    "assessmentCount": 3,
     "suppressionReason": "This is a false-positive"
   }
 ]

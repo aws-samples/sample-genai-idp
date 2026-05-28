@@ -1182,16 +1182,33 @@ def _get_cost_data_from_athena(test_run_id):
     _validate_sql_input(test_run_id, "test_run_id")
     _validate_sql_input(database, "database")
 
+    # Extract date from test_run_id (format: name-YYYYMMDD-HHMMSS)
+    # Convert to date partition format: YYYY-MM-DD
+    # NOTE: Test runs spanning midnight UTC may have documents in next day's partition.
+    # We query both run_date and run_date+1 to catch cross-midnight documents.
+    date_match = re.search(r'-(\d{4})(\d{2})(\d{2})-', test_run_id)
+    date_filter = ""
+    if date_match:
+        from datetime import datetime, timedelta
+        year, month, day = date_match.groups()
+        run_date = datetime(int(year), int(month), int(day))
+        next_date = run_date + timedelta(days=1)
+        date_str = run_date.strftime('%Y-%m-%d')
+        next_date_str = next_date.strftime('%Y-%m-%d')
+        date_filter = f"AND date IN ('{date_str}', '{next_date_str}')"
+        logger.info(f"Using date filter for cost query: date IN ('{date_str}', '{next_date_str}')")
+
     query = f"""
-    SELECT 
+    SELECT
         context,
         service_api,
         unit,
         SUM(CAST(value AS DOUBLE)) as total_value,
         AVG(CAST(unit_cost AS DOUBLE)) as unit_cost,
         SUM(CAST(estimated_cost AS DOUBLE)) as total_estimated_cost
-    FROM "{database}"."metering" 
+    FROM "{database}"."metering"
     WHERE document_id LIKE '{test_run_id}/%'
+    {date_filter}
     GROUP BY context, service_api, unit
     """  # nosec B608 - validated by _validate_sql_input()
 

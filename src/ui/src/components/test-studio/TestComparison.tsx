@@ -364,6 +364,27 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
         }),
       ],
       [
+        'ECARB@30',
+        ...Object.values(completeTestRuns).map((run) => {
+          if (run.confidenceMetrics) {
+            const parsed = parseConfidenceMetrics(run.confidenceMetrics);
+            const ecab = (
+              parsed?.overall?.error_capture_at_budget as { budgets?: Record<string, { pct_errors_caught?: number; gain?: number }> }
+            )?.budgets?.['0.30'];
+            if (
+              ecab &&
+              ecab.pct_errors_caught !== null &&
+              ecab.pct_errors_caught !== undefined &&
+              ecab.gain !== null &&
+              ecab.gain !== undefined
+            ) {
+              return `${(ecab.pct_errors_caught * 100).toFixed(0)}% (${ecab.gain.toFixed(1)}x)`;
+            }
+          }
+          return 'N/A';
+        }),
+      ],
+      [
         'Confidence Coverage',
         ...Object.values(completeTestRuns).map((run) => {
           if (run.confidenceMetrics) {
@@ -681,7 +702,7 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
         ? [
             [
               hasConfidenceDataCsv
-                ? '=== FIELD LEVEL METRICS (Accuracy / Precision / Recall / AUROC / ECE / Brier) ==='
+                ? '=== FIELD LEVEL METRICS (Accuracy / Precision / Recall / AUROC / ECE / Brier / ECARB@30) ==='
                 : '=== FIELD LEVEL METRICS (Accuracy / Precision / Recall) ===',
             ],
             ...fieldMetricsRows,
@@ -759,6 +780,62 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
                     return minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
                   })()
                 : 'N/A',
+            // Add overall confidence metrics to performance section
+            confidenceAuroc: (() => {
+              if (testRun.confidenceMetrics) {
+                const parsed = parseConfidenceMetrics(testRun.confidenceMetrics);
+                return parsed?.overall?.auroc?.value ?? null;
+              }
+              return null;
+            })(),
+            confidenceEce: (() => {
+              if (testRun.confidenceMetrics) {
+                const parsed = parseConfidenceMetrics(testRun.confidenceMetrics);
+                return parsed?.overall?.ece?.value ?? null;
+              }
+              return null;
+            })(),
+            confidenceBrier: (() => {
+              if (testRun.confidenceMetrics) {
+                const parsed = parseConfidenceMetrics(testRun.confidenceMetrics);
+                return parsed?.overall?.brier?.value ?? null;
+              }
+              return null;
+            })(),
+            ecarb30: (() => {
+              if (testRun.confidenceMetrics) {
+                const parsed = parseConfidenceMetrics(testRun.confidenceMetrics);
+                const ecab = (
+                  parsed?.overall?.error_capture_at_budget as { budgets?: Record<string, { pct_errors_caught?: number; gain?: number }> }
+                )?.budgets?.['0.30'];
+                if (
+                  ecab?.pct_errors_caught !== null &&
+                  ecab?.pct_errors_caught !== undefined &&
+                  ecab?.gain !== null &&
+                  ecab?.gain !== undefined
+                ) {
+                  return {
+                    pct_errors_caught: ecab.pct_errors_caught,
+                    gain: ecab.gain,
+                    display: `${(ecab.pct_errors_caught * 100).toFixed(0)}% (${ecab.gain.toFixed(2)}x)`,
+                  };
+                }
+              }
+              return null;
+            })(),
+            confidenceCoverage: (() => {
+              if (testRun.confidenceMetrics) {
+                const parsed = parseConfidenceMetrics(testRun.confidenceMetrics);
+                if (parsed?.coverage) {
+                  return {
+                    ratio: parsed.coverage.ratio,
+                    fields_with_confidence: parsed.coverage.fields_with_confidence,
+                    fields_total: parsed.coverage.fields_total,
+                  };
+                }
+              }
+              return null;
+            })(),
           },
         ]),
       ),
@@ -781,34 +858,30 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
         Object.entries(completeTestRuns).map(([testRunId, testRun]) => [testRunId, testRun.costBreakdown || {}]),
       ),
       fieldMetrics: Object.fromEntries(
-        Object.entries(completeTestRuns).map(([testRunId, testRun]) => [testRunId, testRun.fieldMetrics || {}]),
-      ),
-      confidenceMetrics: Object.fromEntries(
         Object.entries(completeTestRuns).map(([testRunId, testRun]) => {
-          if (!testRun.confidenceMetrics) return [testRunId, null];
+          const fieldMetrics = (testRun.fieldMetrics || {}) as Record<string, unknown>;
 
-          const parsed = parseConfidenceMetrics(testRun.confidenceMetrics);
-          if (!parsed) return [testRunId, null];
+          // Merge confidence metrics into field metrics
+          if (testRun.confidenceMetrics) {
+            const parsed = parseConfidenceMetrics(testRun.confidenceMetrics);
+            if (parsed?.fields) {
+              const enrichedFields: Record<string, unknown> = {};
 
-          // Filter out index-based keys (e.g., LineItems[0].Rate) and keep only pattern-based aggregations (e.g., LineItems.Rate)
-          const filteredFields: Record<string, unknown> = {};
-          if (parsed.fields) {
-            Object.entries(parsed.fields).forEach(([key, value]) => {
-              // Only include fields without array indices [0], [1], etc.
-              if (!/\[\d+\]/.test(key)) {
-                filteredFields[key] = value;
-              }
-            });
+              Object.entries(fieldMetrics).forEach(([fieldName, metrics]) => {
+                enrichedFields[fieldName] = {
+                  ...(metrics as Record<string, unknown>),
+                  // Add confidence metrics if available for this field
+                  ...(parsed.fields?.[fieldName] && {
+                    confidence: parsed.fields[fieldName],
+                  }),
+                };
+              });
+
+              return [testRunId, enrichedFields];
+            }
           }
 
-          return [
-            testRunId,
-            {
-              overall: parsed.overall,
-              coverage: parsed.coverage,
-              fields: filteredFields,
-            },
-          ];
+          return [testRunId, fieldMetrics];
         }),
       ),
     };
@@ -1423,6 +1496,7 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
                               { key: 'auroc', label: 'AUROC' },
                               { key: 'ece', label: 'ECE' },
                               { key: 'brier', label: 'Brier Score' },
+                              { key: 'ecarb_30', label: 'ECARB@30' },
                             ];
 
                             const metrics = confidenceMetricKeys
@@ -1439,14 +1513,37 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
                                 Object.entries(completeTestRuns).forEach(([testRunId, testRun]) => {
                                   if (testRun.confidenceMetrics) {
                                     const parsed = parseConfidenceMetrics(testRun.confidenceMetrics);
-                                    const overallMetric =
-                                      parsed?.overall && (parsed.overall as Record<string, { value?: number | null }>)[key];
-                                    const value = overallMetric?.value;
-                                    if (value !== null && value !== undefined) {
-                                      row[testRunId] = Number(value).toFixed(3);
-                                      hasAnyValue = true;
+
+                                    if (key === 'ecarb_30') {
+                                      // Handle ECARB@30 with nested budgets structure
+                                      const ecab = (
+                                        parsed?.overall?.error_capture_at_budget as {
+                                          budgets?: Record<string, { pct_errors_caught?: number; gain?: number }>;
+                                        }
+                                      )?.budgets?.['0.30'];
+                                      if (
+                                        ecab &&
+                                        ecab.pct_errors_caught !== null &&
+                                        ecab.pct_errors_caught !== undefined &&
+                                        ecab.gain !== null &&
+                                        ecab.gain !== undefined
+                                      ) {
+                                        row[testRunId] = `${(ecab.pct_errors_caught * 100).toFixed(0)}% (${ecab.gain.toFixed(2)}x)`;
+                                        hasAnyValue = true;
+                                      } else {
+                                        row[testRunId] = 'N/A';
+                                      }
                                     } else {
-                                      row[testRunId] = 'N/A';
+                                      // Handle standard metrics with .value
+                                      const overallMetric =
+                                        parsed?.overall && (parsed.overall as Record<string, { value?: number | null }>)[key];
+                                      const value = overallMetric?.value;
+                                      if (value !== null && value !== undefined) {
+                                        row[testRunId] = Number(value).toFixed(3);
+                                        hasAnyValue = true;
+                                      } else {
+                                        row[testRunId] = 'N/A';
+                                      }
                                     }
                                   } else {
                                     row[testRunId] = 'N/A';
@@ -1578,17 +1675,30 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
                   const brier =
                     fieldConf?.brier?.value !== undefined && fieldConf.brier.value !== null ? fieldConf.brier.value.toFixed(3) : 'N/A';
 
+                  // Extract ECARB@30
+                  const ecabData = (
+                    fieldConf?.error_capture_at_budget as { budgets?: Record<string, { pct_errors_caught?: number; gain?: number }> }
+                  )?.budgets?.['0.30'];
+                  const ecab30 =
+                    ecabData &&
+                    ecabData.pct_errors_caught !== null &&
+                    ecabData.pct_errors_caught !== undefined &&
+                    ecabData.gain !== null &&
+                    ecabData.gain !== undefined
+                      ? `${(ecabData.pct_errors_caught * 100).toFixed(0)}% (${ecabData.gain.toFixed(1)}x)`
+                      : 'N/A';
+
                   // Combine accuracy and confidence metrics in one column
                   row[testRunId] = hasConfidenceData
-                    ? `${m.accuracy} / ${m.precision} / ${m.recall} / ${auroc} / ${ece} / ${brier}`
+                    ? `${m.accuracy} / ${m.precision} / ${m.recall} / ${auroc} / ${ece} / ${brier} / ${ecab30}`
                     : `${m.accuracy} / ${m.precision} / ${m.recall}`;
-                  row[`${testRunId}_confidence`] = hasConfidenceData ? `${auroc} / ${ece} / ${brier}` : 'N/A';
+                  row[`${testRunId}_confidence`] = hasConfidenceData ? `${auroc} / ${ece} / ${brier} / ${ecab30}` : 'N/A';
                 });
                 return row;
               });
 
             const headerDescription = hasConfidenceData
-              ? 'Values shown as: Accuracy / Precision / Recall / AUROC / ECE / Brier. Color grading based on accuracy.'
+              ? 'Values shown as: Accuracy / Precision / Recall / AUROC / ECE / Brier / ECARB@30. Color grading based on accuracy.'
               : 'Values shown as: Accuracy / Precision / Recall. Color grading based on accuracy.';
 
             return (

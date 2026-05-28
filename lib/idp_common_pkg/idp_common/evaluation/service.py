@@ -1607,12 +1607,25 @@ class EvaluationService:
 
             # Compare using Stickler with field_comparisons and confusion_matrix enabled
             # Confidence automatically extracted to 'prediction_confidences' when rich values used
+            # Import confidence metrics for calibration
+            from stickler.structured_object_evaluator.models.confidence import (
+                AUROCMetric,
+                BrierScoreMetric,
+                ECEMetric,
+            )
+
             stickler_result = expected_instance.compare_with(
                 actual_instance,
                 document_field_comparisons=True,  # Enable detailed field-by-field comparison
                 document_non_matches=True,  # Enable non-match documentation
                 include_confusion_matrix=True,  # Enable confusion matrix for bulk aggregation
                 add_derived_metrics=True,  # Enable per-field precision/recall/F1
+                add_confidence_metrics=True,  # Enable prediction_raw for calibration metrics
+                confidence_metrics=[  # Compute AUROC, ECE, and Brier for confidence calibration
+                    AUROCMetric(),
+                    ECEMetric(),
+                    BrierScoreMetric(),
+                ],
             )
 
             logger.debug(
