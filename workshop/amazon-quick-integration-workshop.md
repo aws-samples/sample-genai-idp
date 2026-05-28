@@ -119,7 +119,7 @@ Before running the workflow you need the sample loan package in an S3 bucket tha
    - **`loan_package_bucket`** — the bucket name (e.g. `my-idp-input-bucket`)
    - **`loan_package_key`** — the object key (e.g. `inputs/lending_package.pdf`)
 
-> **Tip:** You can also drag-and-drop the file using the [IDP Web UI](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/blob/main/docs/web-ui.md) upload feature if you prefer a console-based approach.
+> **Tip:** You can also drag-and-drop the file using the [IDP Web UI](https://aws-solutions-library-samples.github.io/accelerated-intelligent-document-processing-on-aws/web-ui/) upload feature if you prefer a console-based approach.
 
 ---
 
@@ -515,7 +515,7 @@ When executing this workflow, provide the following runtime configuration values
 - 🏗️ [Architecture Guide](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/blob/main/docs/architecture.md) — Detailed component architecture and data flow
 - 🔌 [MCP Server Documentation](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/blob/main/docs/mcp-server.md) — MCP integration details and available tools
 - 📋 [Configuration Guide](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/blob/main/docs/configuration.md) — Customizing document classification and extraction
-- 🖥️ [Web UI Guide](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/blob/main/docs/web-ui.md) — Using the IDP web interface
+- 🖥️ [Web UI Guide](https://aws-solutions-library-samples.github.io/accelerated-intelligent-document-processing-on-aws/web-ui/) — Using the IDP web interface
 
 ### Repository
 
