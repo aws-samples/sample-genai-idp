@@ -20,6 +20,7 @@ import TestStudioHeader from './TestStudioHeader';
 import useLocalStorage from '../common/local-storage';
 import useConfigurationVersions from '../../hooks/use-configuration-versions';
 import { formatConfigVersionLink, formatConfigVersionText, type ConfigVersion as UtilsConfigVersion } from './utils/configVersionUtils';
+import MetricInfo from './utils/MetricInfo';
 import {
   parseComparisonMetrics,
   parseWeightedOverallScores,
@@ -317,13 +318,19 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
         }),
       ],
       [
-        'Average Accuracy',
+        <>
+          Average Accuracy
+          <MetricInfo metric="Avg Accuracy" />
+        </>,
         ...Object.values(completeTestRuns).map((run) =>
           run.overallAccuracy !== null && run.overallAccuracy !== undefined ? Number(run.overallAccuracy).toFixed(3) : 'N/A',
         ),
       ],
       [
-        'Average Confidence',
+        <>
+          Average Confidence
+          <MetricInfo metric="Avg Confidence" />
+        </>,
         ...Object.values(completeTestRuns).map((run) =>
           run.averageConfidence !== null && run.averageConfidence !== undefined
             ? `${(Number(run.averageConfidence) * 100).toFixed(1)}%`
@@ -331,7 +338,10 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
         ),
       ],
       [
-        'Confidence AUROC',
+        <>
+          Confidence AUROC
+          <MetricInfo metric="AUROC" />
+        </>,
         ...Object.values(completeTestRuns).map((run) => {
           if (run.confidenceMetrics) {
             const parsed = parseConfidenceMetrics(run.confidenceMetrics);
@@ -342,7 +352,10 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
         }),
       ],
       [
-        'Confidence ECE',
+        <>
+          Confidence ECE
+          <MetricInfo metric="ECE" />
+        </>,
         ...Object.values(completeTestRuns).map((run) => {
           if (run.confidenceMetrics) {
             const parsed = parseConfidenceMetrics(run.confidenceMetrics);
@@ -353,7 +366,10 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
         }),
       ],
       [
-        'Confidence Brier',
+        <>
+          Confidence Brier
+          <MetricInfo metric="Brier" />
+        </>,
         ...Object.values(completeTestRuns).map((run) => {
           if (run.confidenceMetrics) {
             const parsed = parseConfidenceMetrics(run.confidenceMetrics);
@@ -364,7 +380,10 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
         }),
       ],
       [
-        'ECARB@30',
+        <>
+          ECARB@30
+          <MetricInfo metric="ECARB@30" />
+        </>,
         ...Object.values(completeTestRuns).map((run) => {
           if (run.confidenceMetrics) {
             const parsed = parseConfidenceMetrics(run.confidenceMetrics);
@@ -398,7 +417,10 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
         }),
       ],
       [
-        'Average Weighted Overall Score',
+        <>
+          Average Weighted Overall Score
+          <MetricInfo metric="Avg Weighted Score" />
+        </>,
         ...Object.values(completeTestRuns).map((run) => {
           if (run.weightedOverallScores) {
             const scores = parseWeightedOverallScores(run.weightedOverallScores as string);
@@ -1045,7 +1067,12 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
                   ),
                 },
                 {
-                  metric: 'Average Accuracy',
+                  metric: (
+                    <>
+                      Average Accuracy
+                      <MetricInfo metric="Avg Accuracy" />
+                    </>
+                  ),
                   ...Object.fromEntries(
                     Object.entries(completeTestRuns).map(([testRunId, testRun]) => [
                       testRunId,
@@ -1056,7 +1083,12 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
                   ),
                 },
                 {
-                  metric: 'Average Weighted Overall Score',
+                  metric: (
+                    <>
+                      Average Weighted Overall Score
+                      <MetricInfo metric="Avg Weighted Score" />
+                    </>
+                  ),
                   ...Object.fromEntries(
                     Object.entries(completeTestRuns).map(([testRunId, testRun]) => {
                       if (testRun.weightedOverallScores) {
@@ -1072,7 +1104,12 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
                   ),
                 },
                 {
-                  metric: 'Average Confidence',
+                  metric: (
+                    <>
+                      Average Confidence
+                      <MetricInfo metric="Avg Confidence" />
+                    </>
+                  ),
                   ...Object.fromEntries(
                     Object.entries(completeTestRuns).map(([testRunId, testRun]) => [
                       testRunId,
@@ -1099,7 +1136,7 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
                 },
               ]}
               columnDefinitions={[
-                { id: 'metric', header: 'Metric', cell: (item: Record<string, unknown>) => item.metric as React.ReactNode, width: 250 },
+                { id: 'metric', header: 'Metric', cell: (item: Record<string, unknown>) => item.metric as React.ReactNode, width: 260 },
                 ...Object.keys(completeTestRuns).map((testRunId) => ({
                   id: testRunId,
                   header: createTestRunHeader(testRunId, true),
@@ -1335,6 +1372,7 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
                 metric: (
                   <>
                     <span style={{ color: '#687078' }}>Extraction:</span> Weighted Overall Score
+                    <MetricInfo metric="Avg Weighted Score" />
                   </>
                 ),
                 ...Object.fromEntries(
@@ -1358,6 +1396,7 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
                   metric: (
                     <>
                       <span style={{ color: '#687078' }}>Classification:</span> Page Level Accuracy
+                      <MetricInfo metric="Page Level Accuracy" />
                     </>
                   ),
                   ...Object.fromEntries(
@@ -1374,6 +1413,7 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
                   metric: (
                     <>
                       <span style={{ color: '#687078' }}>Classification:</span> Split Accuracy With Order
+                      <MetricInfo metric="Split Accuracy With Order" />
                     </>
                   ),
                   ...Object.fromEntries(
@@ -1399,7 +1439,7 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
                         id: 'metric',
                         header: 'Metric',
                         cell: (item: Record<string, unknown>) => item.metric as React.ReactNode,
-                        width: 400,
+                        width: 410,
                       },
                       ...Object.keys(completeTestRuns).map((testRunId) => ({
                         id: testRunId,
@@ -1431,24 +1471,51 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
                                   }
                                 });
 
-                                return Array.from(allAccuracyMetrics).map((metricKey) => ({
-                                  metric: (
-                                    <>
-                                      <span style={{ color: '#687078' }}>Extraction:</span>{' '}
-                                      {String(metricKey)
-                                        .replace(/_/g, ' ')
-                                        .replace(/\b\w/g, (l) => l.toUpperCase())}
-                                    </>
-                                  ),
-                                  ...Object.fromEntries(
-                                    Object.entries(completeTestRuns).map(([testRunId, testRun]) => {
-                                      const accuracyBreakdown = (testRun.accuracyBreakdown || {}) as Record<string, number>;
-                                      const value = accuracyBreakdown[metricKey as string];
-                                      const displayValue = value !== null && value !== undefined ? Number(value).toFixed(3) : '0.000';
-                                      return [testRunId, displayValue];
-                                    }),
-                                  ),
-                                }));
+                                return Array.from(allAccuracyMetrics).map((metricKey) => {
+                                  const displayName = String(metricKey)
+                                    .replace(/_/g, ' ')
+                                    .replace(/\b\w/g, (l) => l.toUpperCase());
+                                  // Map backend keys to MetricInfo keys
+                                  const metricMap: Record<
+                                    string,
+                                    | 'Accuracy'
+                                    | 'Precision'
+                                    | 'Recall'
+                                    | 'F1'
+                                    | 'False Alarm Rate'
+                                    | 'False Discovery Rate'
+                                    | 'Avg Accuracy'
+                                    | 'Avg Confidence'
+                                  > = {
+                                    average_accuracy: 'Avg Accuracy',
+                                    avg_confidence: 'Avg Confidence',
+                                    accuracy: 'Accuracy',
+                                    precision: 'Precision',
+                                    recall: 'Recall',
+                                    f1: 'F1',
+                                    f1_score: 'F1',
+                                    false_alarm_rate: 'False Alarm Rate',
+                                    false_discovery_rate: 'False Discovery Rate',
+                                  };
+                                  const mappedMetric = metricMap[String(metricKey)];
+
+                                  return {
+                                    metric: (
+                                      <>
+                                        <span style={{ color: '#687078' }}>Extraction:</span> {displayName}
+                                        {mappedMetric && <MetricInfo metric={mappedMetric} />}
+                                      </>
+                                    ),
+                                    ...Object.fromEntries(
+                                      Object.entries(completeTestRuns).map(([testRunId, testRun]) => {
+                                        const accuracyBreakdown = (testRun.accuracyBreakdown || {}) as Record<string, number>;
+                                        const value = accuracyBreakdown[metricKey as string];
+                                        const displayValue = value !== null && value !== undefined ? Number(value).toFixed(3) : '0.000';
+                                        return [testRunId, displayValue];
+                                      }),
+                                    ),
+                                  };
+                                });
                               })()
                             : []),
                           // Remaining split classification metrics (excluding main ones)
@@ -1465,46 +1532,69 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
                                   }
                                 });
 
-                                return Array.from(allSplitMetrics).map((metricKey) => ({
-                                  metric: (
-                                    <>
-                                      <span style={{ color: '#687078' }}>Classification:</span>{' '}
-                                      {String(metricKey)
-                                        .replace(/_/g, ' ')
-                                        .replace(/\b\w/g, (l) => l.toUpperCase())}
-                                    </>
-                                  ),
-                                  ...Object.fromEntries(
-                                    Object.entries(completeTestRuns).map(([testRunId, testRun]) => {
-                                      const splitMetrics = testRun.splitClassificationMetrics || {};
-                                      const value = (splitMetrics as Record<string, unknown>)[metricKey as string];
-                                      const displayValue =
-                                        typeof value === 'number' && String(metricKey).includes('accuracy')
-                                          ? value.toFixed(3)
-                                          : value !== null && value !== undefined
-                                            ? value.toString()
-                                            : '0';
-                                      return [testRunId, displayValue];
-                                    }),
-                                  ),
-                                }));
+                                return Array.from(allSplitMetrics).map((metricKey) => {
+                                  const displayName = String(metricKey)
+                                    .replace(/_/g, ' ')
+                                    .replace(/\b\w/g, (l) => l.toUpperCase());
+                                  // Map backend keys to MetricInfo keys
+                                  const metricMap: Record<
+                                    string,
+                                    | 'Correctly Split With Order'
+                                    | 'Split Accuracy Without Order'
+                                    | 'Correctly Split Without Order'
+                                    | 'Correctly Classified Pages'
+                                    | 'Total Pages'
+                                    | 'Total Splits'
+                                  > = {
+                                    correctly_split_with_order: 'Correctly Split With Order',
+                                    split_accuracy_without_order: 'Split Accuracy Without Order',
+                                    correctly_split_without_order: 'Correctly Split Without Order',
+                                    correctly_classified_pages: 'Correctly Classified Pages',
+                                    total_pages: 'Total Pages',
+                                    total_splits: 'Total Splits',
+                                  };
+                                  const mappedMetric = metricMap[String(metricKey)];
+
+                                  return {
+                                    metric: (
+                                      <>
+                                        <span style={{ color: '#687078' }}>Classification:</span> {displayName}
+                                        {mappedMetric && <MetricInfo metric={mappedMetric} />}
+                                      </>
+                                    ),
+                                    ...Object.fromEntries(
+                                      Object.entries(completeTestRuns).map(([testRunId, testRun]) => {
+                                        const splitMetrics = testRun.splitClassificationMetrics || {};
+                                        const value = (splitMetrics as Record<string, unknown>)[metricKey as string];
+                                        const displayValue =
+                                          typeof value === 'number' && String(metricKey).includes('accuracy')
+                                            ? value.toFixed(3)
+                                            : value !== null && value !== undefined
+                                              ? value.toString()
+                                              : '0';
+                                        return [testRunId, displayValue];
+                                      }),
+                                    ),
+                                  };
+                                });
                               })()
                             : []),
                           // Confidence metrics (overall)
                           ...(() => {
                             const confidenceMetricKeys = [
-                              { key: 'auroc', label: 'AUROC' },
-                              { key: 'ece', label: 'ECE' },
-                              { key: 'brier', label: 'Brier Score' },
-                              { key: 'ecarb_30', label: 'ECARB@30' },
+                              { key: 'auroc', label: 'AUROC', metricName: 'AUROC' as const },
+                              { key: 'ece', label: 'ECE', metricName: 'ECE' as const },
+                              { key: 'brier', label: 'Brier Score', metricName: 'Brier' as const },
+                              { key: 'ecarb_30', label: 'ECARB@30', metricName: 'ECARB@30' as const },
                             ];
 
                             const metrics = confidenceMetricKeys
-                              .map(({ key, label }) => {
+                              .map(({ key, label, metricName }) => {
                                 const row: Record<string, unknown> = {
                                   metric: (
                                     <>
                                       <span style={{ color: '#687078' }}>Confidence:</span> {label}
+                                      <MetricInfo metric={metricName} />
                                     </>
                                   ),
                                 };
@@ -1560,6 +1650,7 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
                               metric: (
                                 <>
                                   <span style={{ color: '#687078' }}>Confidence:</span> Coverage Ratio
+                                  <MetricInfo metric="Coverage Ratio" />
                                 </>
                               ),
                             };
@@ -1593,7 +1684,7 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
                             id: 'metric',
                             header: 'Metric',
                             cell: (item: Record<string, unknown>) => item.metric as React.ReactNode,
-                            width: 400,
+                            width: 410,
                           },
                           ...Object.keys(completeTestRuns).map((testRunId) => ({
                             id: testRunId,

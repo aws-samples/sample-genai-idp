@@ -588,6 +588,7 @@ Test results include detailed per-field extraction performance metrics displayed
 - **Paginated**: 10 fields per page for easy navigation
 - **Resizable Columns**: Adjust column widths as needed
 - **Backward Compatible**: Confidence columns only shown for test runs with Stickler v0.4.0+ data
+- **Interactive Help**: Info icons next to metric names provide explanatory tooltips with links to documentation (Wikipedia for standard metrics, Stickler docs for ECARB@30). Available for all accuracy metrics, confidence metrics, confusion matrix components, error rates, and split classification metrics
 
 **How It Works:**
 - Backend stores confusion matrix values (TP, FP, TN, FN) from Stickler aggregation
