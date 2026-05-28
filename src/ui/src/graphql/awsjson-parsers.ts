@@ -11,6 +11,7 @@ import type {
   SplitClassificationMetrics,
   FieldMetrics,
   ConfusionMatrix,
+  ConfidenceMetrics,
   ComparisonMetrics,
   ConfigSettingValues,
   ConfigurationData,
@@ -92,6 +93,10 @@ export function parseFieldMetrics(json: unknown): FieldMetrics {
 
 export function parseConfusionMatrix(json: unknown): ConfusionMatrix {
   return safeParse<ConfusionMatrix>(json, {});
+}
+
+export function parseConfidenceMetrics(json: unknown): ConfidenceMetrics | null {
+  return safeParse<ConfidenceMetrics | null>(json, null);
 }
 
 export function parseComparisonMetrics(json: unknown): ComparisonMetrics {

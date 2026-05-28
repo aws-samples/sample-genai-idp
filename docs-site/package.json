@@ -2,6 +2,9 @@
   "name": "genaiidp-docs",
   "type": "module",
   "version": "0.0.1",
+  "engines": {
+    "node": ">=22.12.0"
+  },
   "scripts": {
     "dev": "astro dev",
     "start": "astro dev",
@@ -10,8 +13,8 @@
     "astro": "astro"
   },
   "dependencies": {
-    "@astrojs/starlight": "^0.34.1",
-    "astro": "^5.7.10",
+    "@astrojs/starlight": "^0.39.2",
+    "astro": "^6.3.7",
     "sharp": "^0.33.3",
     "zod": "^3.25.76"
   }
