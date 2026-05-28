@@ -573,10 +573,11 @@ Test results include detailed per-field extraction performance metrics displayed
 5. **AUROC** (when available): Area Under ROC Curve - how well confidence discriminates correct from incorrect (1.0 = perfect)
 6. **ECE** (when available): Expected Calibration Error - measures calibration quality (0.0 = perfect)
 7. **Brier** (when available): Brier Score - mean squared error between confidence and outcome (0.0 = perfect, 0.25 = random)
-8. **TP** (True Positives): Correctly extracted values
-9. **FP** (False Positives): Incorrectly extracted values
-10. **TN** (True Negatives): Correctly identified as absent
-11. **FN** (False Negatives): Missed extractions
+8. **ECARB@30** (when available): Error Capture at Budget 30% - practical metric showing % of errors caught when reviewing lowest-confidence 30% of data, with gain multiplier vs random (e.g., "89% (3.0x)")
+9. **TP** (True Positives): Correctly extracted values
+10. **FP** (False Positives): Incorrectly extracted values
+11. **TN** (True Negatives): Correctly identified as absent
+12. **FN** (False Negatives): Missed extractions
 
 **Features:**
 - **Hierarchical Display**: Nested fields with expand/collapse controls
@@ -616,12 +617,14 @@ When a model extracts a field with 90% confidence, ideally 90% of such predictio
 | **AUROC** | Discrimination: Can confidence separate correct from incorrect predictions? | 1.0 | 0.5 = random guessing, 1.0 = perfect discrimination |
 | **ECE** | Calibration: How far off is confidence from actual accuracy? | 0.0 | 0.0 = perfectly calibrated, >0.1 = poorly calibrated |
 | **Brier** | Overall quality: Mean squared error between confidence and correctness | 0.0 | 0.0 = perfect, 0.25 = random guessing, 1.0 = worst |
+| **ECARB@30** | **The business metric**: Errors caught when reviewing 30% of data (sorted by confidence) | 100% (high gain) | Shows practical value - e.g., "89% (3.0x)" = reviewing lowest-confidence 30% catches 89% of errors, 3x better than random sampling |
 
 **Example Scenarios:**
 
 - **Good AUROC (0.95), Low ECE (0.03)**: Model confidences are well-calibrated and discriminate errors effectively
 - **Good AUROC (0.92), High ECE (0.18)**: Model can distinguish errors but is systematically overconfident or underconfident
 - **Poor AUROC (0.62), Any ECE**: Confidence scores don't correlate with correctness — unreliable even if calibrated
+- **ECARB@30 = 89% (3.0x)**: **The business metric** - If you can only manually review 30% of extracted data, sorting by confidence (lowest first) lets you catch 89% of errors with 3x better efficiency than random sampling. This answers the practical question: "How much value does confidence-guided review provide?"
 
 **How Calibration Metrics Are Computed:**
 
@@ -632,13 +635,15 @@ When a model extracts a field with 90% confidence, ideally 90% of such predictio
 
 2. **Test Aggregation**: When viewing test results, the aggregation function:
    - Loads all `stickler_comparison_result` records for the test run
-   - Computes calibration metrics using Stickler's `ConfidenceMetricsCalculator`
+   - Computes calibration metrics (AUROC, ECE, Brier) using Stickler's `ConfidenceMetricsCalculator`
+   - Computes ECAB (Error Capture at Budget) metrics using `BulkStructuredModelEvaluator` with `ErrorCaptureAtBudgetMetric`
    - Aggregates path-based keys (e.g., `LineItems[0].Rate`) to pattern-based keys (`LineItems.Rate`)
-   - Computes parent field aggregations (e.g., `LineItems` from `LineItems.*` children)
+   - Merges ECAB metrics into the confidence metrics structure
    - Returns `confidence_metrics` field with overall and per-field calibration data
 
 3. **UI Display**: The test results table:
-   - Displays AUROC, ECE, Brier columns alongside accuracy metrics
+   - Displays AUROC, ECE, Brier, and ECARB@30 columns alongside accuracy metrics
+   - ECARB@30 shows as "XX% (Y.Yx)" format (e.g., "89% (3.0x)")
    - Shows metrics for both leaf fields (e.g., `LineItems.Rate`) and parent fields (e.g., `LineItems`)
    - Dynamically hides columns when no confidence data is available
    - Shows "N/A" for fields lacking confidence data

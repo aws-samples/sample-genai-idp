@@ -202,6 +202,21 @@ const ComprehensiveBreakdown = ({
                             value: overall.brier.value.toFixed(3),
                           });
                         }
+                        // ECARB@30
+                        const ecarbData = overall.error_capture_at_budget as {
+                          budgets?: Record<string, { pct_errors_caught?: number; gain?: number }>;
+                        };
+                        const ecarb30 = ecarbData?.budgets?.['0.30'];
+                        if (ecarb30?.pct_errors_caught !== null && ecarb30?.pct_errors_caught !== undefined) {
+                          items.push({
+                            metric: (
+                              <>
+                                <span style={{ color: '#687078' }}>Confidence:</span> ECARB@30
+                              </>
+                            ),
+                            value: `${(ecarb30.pct_errors_caught * 100).toFixed(0)}% (${ecarb30.gain?.toFixed(2)}x)`,
+                          });
+                        }
                       }
 
                       if (coverage) {
@@ -274,7 +289,7 @@ const ComprehensiveBreakdown = ({
             'accuracy',
             'precision',
             'recall',
-            ...(hasConfidenceData ? ['auroc', 'ece', 'brier'] : []),
+            ...(hasConfidenceData ? ['auroc', 'ecab30', 'ece', 'brier'] : []),
             'tp',
             'fp',
             'tn',
@@ -297,6 +312,17 @@ const ComprehensiveBreakdown = ({
             const ece = fieldConfidence?.ece?.value;
             const brier = fieldConfidence?.brier?.value;
 
+            // Extract ECARB@30 (Error Capture at Review Budget 30%)
+            const ecab = (
+              fieldConfidence?.error_capture_at_budget as { budgets?: Record<string, { pct_errors_caught?: number; gain?: number }> }
+            )?.budgets?.['0.30'];
+            const ecabPct = ecab?.pct_errors_caught;
+            const ecabGain = ecab?.gain;
+            const ecabDisplay =
+              ecabPct !== null && ecabPct !== undefined && ecabGain !== null && ecabGain !== undefined
+                ? `${(ecabPct * 100).toFixed(0)}% (${ecabGain.toFixed(1)}x)`
+                : 'N/A';
+
             return {
               fieldName,
               tp,
@@ -309,6 +335,7 @@ const ComprehensiveBreakdown = ({
               auroc: auroc !== null && auroc !== undefined ? auroc.toFixed(3) : 'N/A',
               ece: ece !== null && ece !== undefined ? ece.toFixed(3) : 'N/A',
               brier: brier !== null && brier !== undefined ? brier.toFixed(3) : 'N/A',
+              ecab30: ecabDisplay,
               depth: (fieldName.match(/\./g) || []).length,
             };
           });
@@ -436,6 +463,12 @@ const ComprehensiveBreakdown = ({
                     cell: (item: (typeof displayItems)[0]) => item.brier,
                     sortingField: 'brier',
                   },
+                  {
+                    id: 'ecab30',
+                    header: 'ECARB@30',
+                    cell: (item: (typeof displayItems)[0]) => item.ecab30,
+                    sortingField: 'ecab30',
+                  },
                 ]
               : []),
             { id: 'tp', header: 'TP', cell: (item: (typeof displayItems)[0]) => item.tp, sortingField: 'tp' },
@@ -512,6 +545,7 @@ const ComprehensiveBreakdown = ({
                                 ...(hasConfidenceData
                                   ? [
                                       { id: 'auroc', label: 'AUROC (Confidence)' },
+                                      { id: 'ecab30', label: 'ECARB@30 (Review Budget)' },
                                       { id: 'ece', label: 'ECE (Calibration)' },
                                       { id: 'brier', label: 'Brier Score' },
                                     ]

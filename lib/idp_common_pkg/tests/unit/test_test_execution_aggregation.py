@@ -39,7 +39,12 @@ def import_test_module():
 def mock_env():
     """Mock environment variables."""
     with patch.dict(
-        os.environ, {"TRACKING_TABLE": "test-tracking-table", "LOG_LEVEL": "INFO"}
+        os.environ,
+        {
+            "TRACKING_TABLE": "test-tracking-table",
+            "LOG_LEVEL": "INFO",
+            "OUTPUT_BUCKET": "test-output-bucket",
+        },
     ):
         yield
 
@@ -590,3 +595,76 @@ class TestAggregation:
         print(f"     - Sample count: {line_items_rate['sample_count']}")
         print(f"     - Mean confidence: {actual_mean:.3f}")
         print("\n✅ Pattern aggregation successfully enhanced confidence metrics")
+
+        # Now test ECARB computation on the same comparison results
+        print("\n=== TESTING ECARB COMPUTATION ===")
+        try:
+            from stickler.structured_object_evaluator.bulk_structured_model_evaluator import (
+                BulkStructuredModelEvaluator,
+            )
+            from stickler.structured_object_evaluator.models.confidence import (
+                ErrorCaptureAtBudgetMetric,
+            )
+
+            # Create evaluator with ECARB metric
+            ecarb_evaluator = BulkStructuredModelEvaluator(
+                confidence_metrics=[
+                    ErrorCaptureAtBudgetMetric(budgets=[0.10, 0.30, 0.50]),
+                ]
+            )
+
+            # Feed the same comparison results
+            for comp_result in comparison_results:
+                ecarb_evaluator.update_from_comparison_result(comp_result)
+
+            # Compute ECARB metrics
+            ecarb_result = ecarb_evaluator.compute()
+
+            if ecarb_result.confidence_metrics is not None:
+                ecarb_metrics = ecarb_result.confidence_metrics
+                print("   ✅ ECARB metrics computed successfully")
+
+                # Check overall ECARB
+                if (
+                    "overall" in ecarb_metrics
+                    and "error_capture_at_budget" in ecarb_metrics["overall"]
+                ):
+                    ecarb_overall = ecarb_metrics["overall"]["error_capture_at_budget"]
+                    if "budgets" in ecarb_overall and "0.3" in ecarb_overall["budgets"]:
+                        ecarb_30 = ecarb_overall["budgets"]["0.3"]
+                        print("   ECARB@30 (overall):")
+                        print(
+                            f"     - Errors caught: {ecarb_30.get('pct_errors_caught', 0) * 100:.0f}%"
+                        )
+                        print(f"     - Gain vs random: {ecarb_30.get('gain', 0):.2f}x")
+
+                        assert "pct_errors_caught" in ecarb_30, (
+                            "Should have pct_errors_caught"
+                        )
+                        assert "gain" in ecarb_30, "Should have gain"
+                        assert 0 <= ecarb_30["pct_errors_caught"] <= 1, (
+                            "pct_errors_caught should be in [0,1]"
+                        )
+                        assert ecarb_30["gain"] >= 0, "gain should be non-negative"
+                    else:
+                        print("   ⚠️  ECARB@30 not found in budgets")
+                else:
+                    print("   ⚠️  error_capture_at_budget not in overall metrics")
+
+                # Check field-level ECARB
+                if "fields" in ecarb_metrics and len(ecarb_metrics["fields"]) > 0:
+                    print(
+                        f"   Field-level ECARB: {len(ecarb_metrics['fields'])} fields"
+                    )
+
+                print("\n✅ ECARB validation complete")
+            else:
+                # ECARB should compute successfully with valid comparison results
+                # If this fails, it indicates a breaking change in Stickler
+                pytest.fail(
+                    f"ECARB metrics returned None - this should not happen with valid data. "
+                    f"Document count: {ecarb_result.document_count}"
+                )
+        except Exception as e:
+            # ECARB computation should not raise exceptions with valid data
+            pytest.fail(f"ECARB computation raised exception: {e}")

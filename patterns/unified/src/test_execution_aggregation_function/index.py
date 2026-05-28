@@ -12,6 +12,7 @@ import json
 import logging
 import os
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict, List, Optional
 
 import boto3
@@ -104,6 +105,10 @@ def aggregate_test_run_with_stickler(
     try:
         from stickler.structured_object_evaluator.bulk_structured_model_evaluator import (
             aggregate_from_comparisons,
+            BulkStructuredModelEvaluator,
+        )
+        from stickler.structured_object_evaluator.models.confidence import (
+            ErrorCaptureAtBudgetMetric,
         )
 
         process_eval = aggregate_from_comparisons(comparison_results)
@@ -112,9 +117,42 @@ def aggregate_test_run_with_stickler(
             f"Stickler aggregation complete: document_count={process_eval.document_count}, comparison_results={len(comparison_results)}, weighted_scores={len(doc_weighted_scores)}"
         )
 
+        # Compute ECARB (Error Capture at Review Budget) metrics using BulkStructuredModelEvaluator
+        # This is "the business metric" - answers: if you review X% of data (sorted by
+        # confidence), how many errors do you catch vs random sampling?
+        ecab_metrics = None
+        try:
+            evaluator = BulkStructuredModelEvaluator(
+                confidence_metrics=[
+                    ErrorCaptureAtBudgetMetric(budgets=[0.30]),
+                ]
+            )
+
+            # Feed comparison results using JSONL round-trip pattern
+            for comp_result in comparison_results:
+                evaluator.update_from_comparison_result(comp_result)
+
+            ecab_result = evaluator.compute()
+            ecab_metrics = ecab_result.confidence_metrics
+
+            if ecab_metrics and "overall" in ecab_metrics:
+                ecab_30 = (
+                    ecab_metrics.get("overall", {})
+                    .get("error_capture_at_budget", {})
+                    .get("budgets", {})
+                    .get("0.30", {})
+                )
+                if ecab_30:
+                    logger.info(
+                        f"ECARB@30: catch {ecab_30.get('pct_errors_caught', 0)*100:.0f}% "
+                        f"of errors with {ecab_30.get('gain', 0):.1f}x gain vs random"
+                    )
+        except Exception as e:
+            logger.warning(f"Failed to compute ECAB metrics: {e}", exc_info=True)
+
         # Transform to IDP format (split metrics will be added by caller from Athena)
         return _transform_stickler_metrics(
-            process_eval, doc_weighted_scores, comparison_results
+            process_eval, doc_weighted_scores, comparison_results, ecab_metrics
         )
 
     except Exception as e:
@@ -138,6 +176,11 @@ def _load_comparison_results(
         Tuple of (comparison_results, doc_weighted_scores)
     """
     table = dynamodb.Table(tracking_table_name)
+    output_bucket = os.environ.get("OUTPUT_BUCKET")
+
+    if not output_bucket:
+        logger.error("OUTPUT_BUCKET environment variable not set")
+        return [], {}
 
     # Scan for all documents matching the test run prefix
     comparison_results = []
@@ -162,58 +205,77 @@ def _load_comparison_results(
 
     logger.info(f"Found {len(items)} documents for test run {test_run_id}")
 
+    # Filter for completed documents
+    docs_to_load = []
     for item in items:
-        doc_id = item.get("ObjectKey")
-        if not doc_id:
+        doc_key = item.get("ObjectKey")
+        if not doc_key:
             continue
 
-        # Check if evaluation was completed
         eval_status = item.get("EvaluationStatus")
         if eval_status != "COMPLETED":
-            logger.debug(f"Skipping document {doc_id} with status {eval_status}")
+            logger.debug(f"Skipping document {doc_key} with status {eval_status}")
             continue
 
-        # Construct evaluation results URI from report URI
-        eval_report_uri = item.get("EvaluationReportUri")
-        if not eval_report_uri:
-            logger.warning(f"No EvaluationReportUri for document {doc_id}")
-            continue
+        docs_to_load.append(doc_key)
 
-        # Replace report.md with results.json
-        eval_results_uri = eval_report_uri.replace("/report.md", "/results.json")
+    logger.info(f"Loading {len(docs_to_load)} completed documents in parallel")
 
-        # Load evaluation results from S3
+    # Load S3 results in parallel using ThreadPoolExecutor
+    # Use max 20 workers to balance parallelism with Lambda memory/network limits
+    max_workers = min(20, len(docs_to_load)) if docs_to_load else 1
+
+    def load_document_results(doc_key):
+        """Load and parse a single document's evaluation results.
+
+        NOTE: Uses hardcoded /evaluation/results.json path. This must stay in sync
+        with EvaluationService path format (service.py:2077). If evaluation layout
+        changes, update this path accordingly.
+        """
+        eval_results_uri = f"s3://{output_bucket}/{doc_key}/evaluation/results.json"
         try:
             eval_data = _load_s3_json(eval_results_uri)
-
-            # Extract stickler_comparison_result from section_results
             section_results = eval_data.get("section_results", [])
-            logger.debug(f"Document {doc_id}: Found {len(section_results)} sections")
 
+            # Extract comparison results from sections
+            doc_comparisons = []
             for section in section_results:
                 stickler_result = section.get("stickler_comparison_result")
                 if stickler_result:
-                    comparison_results.append(stickler_result)
-                    logger.debug(
-                        f"Document {doc_id}: Extracted stickler result from section"
-                    )
+                    doc_comparisons.append(stickler_result)
 
-            # Store weighted score for this document (at top level)
+            # Extract weighted score
+            weighted_score = None
             if section_results:
                 weighted_score = eval_data.get("overall_metrics", {}).get(
                     "weighted_overall_score"
                 )
-                if weighted_score is not None:
-                    doc_weighted_scores[doc_id] = weighted_score
-                    logger.debug(
-                        f"Document {doc_id}: Stored weighted score {weighted_score}"
-                    )
 
+            return {
+                "doc_key": doc_key,
+                "comparisons": doc_comparisons,
+                "weighted_score": weighted_score,
+                "success": True
+            }
         except Exception as e:
             logger.warning(
                 f"Failed to load evaluation results from {eval_results_uri}: {e}"
             )
-            continue
+            return {"doc_key": doc_key, "success": False}
+
+    # Execute parallel S3 loads
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {
+            executor.submit(load_document_results, doc_key): doc_key
+            for doc_key in docs_to_load
+        }
+
+        for future in as_completed(futures):
+            result = future.result()
+            if result["success"]:
+                comparison_results.extend(result["comparisons"])
+                if result["weighted_score"] is not None:
+                    doc_weighted_scores[result["doc_key"]] = result["weighted_score"]
 
     logger.info(
         f"Loaded {len(comparison_results)} comparison results for test run {test_run_id}"
@@ -242,6 +304,7 @@ def _transform_stickler_metrics(
     process_eval,
     doc_weighted_scores: Dict[str, float],
     comparison_results: List[Dict[str, Any]],
+    ecab_metrics: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Transform Stickler ProcessEvaluation to IDP metrics format.
@@ -250,6 +313,7 @@ def _transform_stickler_metrics(
         process_eval: ProcessEvaluation from Stickler
         doc_weighted_scores: Per-document weighted scores
         comparison_results: List of comparison results for confidence calculation
+        ecab_metrics: ECARB confidence metrics from BulkStructuredModelEvaluator (optional)
 
     Returns:
         Dictionary matching existing IDP metrics format (without split metrics)
@@ -272,6 +336,25 @@ def _transform_stickler_metrics(
         confidence_metrics = _enhance_confidence_metrics_with_patterns(
             confidence_metrics, comparison_results, process_eval.field_metrics
         )
+
+        # Merge ECARB (Error Capture at Review Budget) metrics from separate evaluation
+        # ECARB requires custom confidence_metrics in BulkStructuredModelEvaluator
+        if ecab_metrics and confidence_metrics:
+            # Merge ECAB into overall metrics
+            if "overall" in ecab_metrics and "error_capture_at_budget" in ecab_metrics["overall"]:
+                if "overall" not in confidence_metrics:
+                    confidence_metrics["overall"] = {}
+                confidence_metrics["overall"]["error_capture_at_budget"] = ecab_metrics["overall"]["error_capture_at_budget"]
+
+            # Merge ECAB into per-field metrics
+            if "fields" in ecab_metrics:
+                if "fields" not in confidence_metrics:
+                    confidence_metrics["fields"] = {}
+                for field_name, field_ecab in ecab_metrics["fields"].items():
+                    if "error_capture_at_budget" in field_ecab:
+                        if field_name not in confidence_metrics["fields"]:
+                            confidence_metrics["fields"][field_name] = {}
+                        confidence_metrics["fields"][field_name]["error_capture_at_budget"] = field_ecab["error_capture_at_budget"]
 
         if confidence_metrics and confidence_metrics.get("fields"):
             # Extract average confidence for backward compatibility
