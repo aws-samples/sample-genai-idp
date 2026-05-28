@@ -7,14 +7,17 @@ SPDX-License-Identifier: MIT-0
 
 ### Added
 - **ECARB@30 confidence metric** — Test Studio now displays Error Capture at Review Budget (30%) showing percentage of errors caught when reviewing lowest-confidence 30% of data. Format: "46% (1.52x)". New column in field metrics table (gear-icon configurable) and in Additional Metrics section.
+- **Claude Opus 4.8 Model Support** — Added `anthropic.claude-opus-4-8` (and `:1m` context variant) across all `us`, `eu`, and `global` inference profiles. Includes unified template enums, UI model dropdowns, cachepoint support, EU region mappings, pricing entries, and documentation updates. Model is recognized as a Claude 4.7+ variant — the same temperature/top_p/top_k handling and 128K extended-output limit apply.
 
 ### Changed
 - **10-15x faster test aggregation** — Large test runs (2000+ docs) now use parallel S3 loading (ThreadPoolExecutor, 20 workers)
 - **Cost queries use date-partition filtering** — Athena metering queries now filter by date partition for correctness and performance
+- **Default Chat-with-Document model promoted to `us.anthropic.claude-opus-4-8:1m`** — chat defaults now point at the newer Opus generation. EU deployments map automatically to `eu.anthropic.claude-opus-4-8:1m` via `UpdateConfiguration`. Existing custom configs are unaffected.
 
 ### Fixed
 - Fixed empty cost breakdown for large tests by adding date-partition filter to Athena query
 - Fixed ECARB budget key format (0.3 → 0.30) to match Stickler output
+- **Agentic extraction now respects 128K output limit for Claude Opus 4.7+** — `_build_model_config` previously matched these models against the generic `claude-(opus|sonnet|haiku)-4` regex and silently capped them at 64K, contradicting the 128K declared in `model_config_limits.yaml`. A dedicated branch now returns 128K for opus-4-7 and opus-4-8.
 
 ## [0.5.12]
 

@@ -68,7 +68,7 @@ class TestResolverUIPath:
                         "sessionId": "s-1",
                         "prompt": "hi",
                         "s3Uri": "uploads/x.pdf",
-                        "modelId": "us.anthropic.claude-opus-4-7:1m",
+                        "modelId": "us.anthropic.claude-opus-4-8:1m",
                         "method": "chat",
                     }
                 ),

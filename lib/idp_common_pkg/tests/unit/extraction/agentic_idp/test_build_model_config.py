@@ -53,6 +53,12 @@ pytestmark = [
             "global.anthropic.claude-opus-4-7:1m",
             "global.anthropic.claude-opus-4-7",
         ),
+        ("us.anthropic.claude-opus-4-8:1m", "us.anthropic.claude-opus-4-8"),
+        ("eu.anthropic.claude-opus-4-8:1m", "eu.anthropic.claude-opus-4-8"),
+        (
+            "global.anthropic.claude-opus-4-8:1m",
+            "global.anthropic.claude-opus-4-8",
+        ),
         ("us.anthropic.claude-opus-4-6-v1:1m", "us.anthropic.claude-opus-4-6-v1"),
         ("us.anthropic.claude-sonnet-4-6:1m", "us.anthropic.claude-sonnet-4-6"),
     ],
@@ -105,7 +111,7 @@ def test_1m_caching_still_detected() -> None:
 
 
 def test_1m_does_not_inflate_max_tokens_for_claude4() -> None:
-    """`:1m` Claude 4 model still gets the Claude 4 64k token limit."""
+    """`:1m` Claude Opus 4.7+ model gets the 128K extended-output limit."""
     config = _build_model_config(
         "us.anthropic.claude-opus-4-7:1m",
         max_tokens=None,
@@ -113,4 +119,4 @@ def test_1m_does_not_inflate_max_tokens_for_claude4() -> None:
         connect_timeout=10.0,
         read_timeout=300.0,
     )
-    assert config["max_tokens"] == 64_000
+    assert config["max_tokens"] == 128_000

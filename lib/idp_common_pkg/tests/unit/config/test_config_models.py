@@ -196,7 +196,7 @@ class TestChatConfig:
 
         assert cfg.enabled is True
         # Default should be a large-context Opus model (see decision in CHANGELOG).
-        assert cfg.model == "us.anthropic.claude-opus-4-7:1m"
+        assert cfg.model == "us.anthropic.claude-opus-4-8:1m"
         assert cfg.temperature == 0.0
         assert cfg.max_tokens == 4096
         assert cfg.system_prompt  # non-empty

@@ -45,6 +45,9 @@ DEFAULT_MODELS_TO_TEST = [
     # Claude 4.x models - Opus 4.7 (128K output)
     "us.anthropic.claude-opus-4-7-20250514-v1:0",
     "us.anthropic.claude-opus-4-7-20250514-v1:0:1m",
+    # Claude 4.x models - Opus 4.8 (128K output)
+    "us.anthropic.claude-opus-4-8-20251201-v1:0",
+    "us.anthropic.claude-opus-4-8-20251201-v1:0:1m",
     # Claude 4.x models - other versions (64K output)
     "us.anthropic.claude-opus-4-20250514-v1:0",
     "us.anthropic.claude-sonnet-4-20250514-v1:0",
@@ -170,7 +173,10 @@ def generate_yaml_config(
         models = limits_map[limit]
 
         # Try to identify model family
-        if any("opus-4-7" in m for m in models):
+        if any("opus-4-8" in m for m in models):
+            pattern = "claude-opus-4-8"
+            description = "Claude Opus 4.8 with extended 128K output"
+        elif any("opus-4-7" in m for m in models):
             pattern = "claude-opus-4-7"
             description = "Claude Opus 4.7 with extended 128K output"
         elif any("claude-4" in m or "opus-4" in m or "sonnet-4" in m or "haiku-4" in m for m in models):

@@ -356,6 +356,8 @@ Resources:
                   - "us.anthropic.claude-opus-4-6-v1:1m"
                   - "us.anthropic.claude-opus-4-7"
                   - "us.anthropic.claude-opus-4-7:1m"
+                  - "us.anthropic.claude-opus-4-8"
+                  - "us.anthropic.claude-opus-4-8:1m"
                   - "eu.amazon.nova-lite-v1:0"
                   - "eu.amazon.nova-pro-v1:0"
                   - "eu.amazon.nova-2-lite-v1:0"
@@ -370,6 +372,8 @@ Resources:
                   - "eu.anthropic.claude-opus-4-6-v1:1m"
                   - "eu.anthropic.claude-opus-4-7"
                   - "eu.anthropic.claude-opus-4-7:1m"
+                  - "eu.anthropic.claude-opus-4-8"
+                  - "eu.anthropic.claude-opus-4-8:1m"
                   - "qwen.qwen3-vl-235b-a22b"
                   - "us.meta.llama4-maverick-17b-instruct-v1:0"
                   - "us.meta.llama4-scout-17b-instruct-v1:0"
@@ -384,6 +388,8 @@ Resources:
                   - "global.anthropic.claude-opus-4-6-v1:1m"
                   - "global.anthropic.claude-opus-4-7"
                   - "global.anthropic.claude-opus-4-7:1m"
+                  - "global.anthropic.claude-opus-4-8"
+                  - "global.anthropic.claude-opus-4-8:1m"
                 order: 2
                 dependsOn: { field: "backend", value: "bedrock" }
               model_lambda_hook_arn:
@@ -467,6 +473,8 @@ Resources:
                     - "us.anthropic.claude-opus-4-6-v1:1m"
                     - "us.anthropic.claude-opus-4-7"
                     - "us.anthropic.claude-opus-4-7:1m"
+                    - "us.anthropic.claude-opus-4-8"
+                    - "us.anthropic.claude-opus-4-8:1m"
                     - "eu.amazon.nova-lite-v1:0"
                     - "eu.amazon.nova-pro-v1:0"
                     - "eu.amazon.nova-2-lite-v1:0"
@@ -479,6 +487,8 @@ Resources:
                     - "eu.anthropic.claude-opus-4-6-v1:1m"
                     - "eu.anthropic.claude-opus-4-7"
                     - "eu.anthropic.claude-opus-4-7:1m"
+                    - "eu.anthropic.claude-opus-4-8"
+                    - "eu.anthropic.claude-opus-4-8:1m"
                     - "global.amazon.nova-2-lite-v1:0"
                     - "global.anthropic.claude-haiku-4-5-20251001-v1:0"
                     - "global.anthropic.claude-sonnet-4-5-20250929-v1:0"
@@ -489,6 +499,8 @@ Resources:
                     - "global.anthropic.claude-opus-4-6-v1:1m"
                     - "global.anthropic.claude-opus-4-7"
                     - "global.anthropic.claude-opus-4-7:1m"
+                    - "global.anthropic.claude-opus-4-8"
+                    - "global.anthropic.claude-opus-4-8:1m"
                 examples:
                   type: array
                   description: Class few-shot examples
@@ -754,6 +766,8 @@ Resources:
                   - "us.anthropic.claude-opus-4-6-v1:1m"
                   - "us.anthropic.claude-opus-4-7"
                   - "us.anthropic.claude-opus-4-7:1m"
+                  - "us.anthropic.claude-opus-4-8"
+                  - "us.anthropic.claude-opus-4-8:1m"
                   - "eu.amazon.nova-lite-v1:0"
                   - "eu.amazon.nova-pro-v1:0"
                   - "eu.amazon.nova-2-lite-v1:0"
@@ -768,6 +782,8 @@ Resources:
                   - "eu.anthropic.claude-opus-4-6-v1:1m"
                   - "eu.anthropic.claude-opus-4-7"
                   - "eu.anthropic.claude-opus-4-7:1m"
+                  - "eu.anthropic.claude-opus-4-8"
+                  - "eu.anthropic.claude-opus-4-8:1m"
                   - "qwen.qwen3-vl-235b-a22b"
                   - "us.meta.llama4-maverick-17b-instruct-v1:0"
                   - "us.meta.llama4-scout-17b-instruct-v1:0"
@@ -783,6 +799,8 @@ Resources:
                   - "global.anthropic.claude-opus-4-6-v1:1m"
                   - "global.anthropic.claude-opus-4-7"
                   - "global.anthropic.claude-opus-4-7:1m"
+                  - "global.anthropic.claude-opus-4-8"
+                  - "global.anthropic.claude-opus-4-8:1m"
                 order: 1
               model_lambda_hook_arn:
                 type: string
@@ -822,12 +840,12 @@ Resources:
                 type: number
                 minimum: 0
                 maximum: 1
-                description: "Sampling temperature: Controls randomness in model output (0.0 = deterministic, higher = more random). Used when top_p is 0. Set temperature=0.0 for consistent, deterministic outputs. Not used for Claude 4.7 models."
+                description: "Sampling temperature: Controls randomness in model output (0.0 = deterministic, higher = more random). Used when top_p is 0. Set temperature=0.0 for consistent, deterministic outputs. Not used for Claude 4.7+ models."
                 order: 4
               top_k:
                 type: integer
                 minimum: 1
-                description: "Sampling Top K. Not used for Claude 4.7 models."
+                description: "Sampling Top K. Not used for Claude 4.7+ models."
                 order: 5
               top_p:
                 type: number
@@ -952,6 +970,8 @@ Resources:
                   - "us.anthropic.claude-opus-4-6-v1:1m"
                   - "us.anthropic.claude-opus-4-7"
                   - "us.anthropic.claude-opus-4-7:1m"
+                  - "us.anthropic.claude-opus-4-8"
+                  - "us.anthropic.claude-opus-4-8:1m"
                   - "eu.amazon.nova-lite-v1:0"
                   - "eu.amazon.nova-pro-v1:0"
                   - "eu.amazon.nova-2-lite-v1:0"
@@ -966,6 +986,8 @@ Resources:
                   - "eu.anthropic.claude-opus-4-6-v1:1m"
                   - "eu.anthropic.claude-opus-4-7"
                   - "eu.anthropic.claude-opus-4-7:1m"
+                  - "eu.anthropic.claude-opus-4-8"
+                  - "eu.anthropic.claude-opus-4-8:1m"
                   - "qwen.qwen3-vl-235b-a22b"
                   - "us.meta.llama4-maverick-17b-instruct-v1:0"
                   - "us.meta.llama4-scout-17b-instruct-v1:0"
@@ -981,6 +1003,8 @@ Resources:
                   - "global.anthropic.claude-opus-4-6-v1:1m"
                   - "global.anthropic.claude-opus-4-7"
                   - "global.anthropic.claude-opus-4-7:1m"
+                  - "global.anthropic.claude-opus-4-8"
+                  - "global.anthropic.claude-opus-4-8:1m"
                 order: 1
               model_lambda_hook_arn:
                 type: string
@@ -992,12 +1016,12 @@ Resources:
                 type: number
                 minimum: 0
                 maximum: 1
-                description: "Sampling temperature: Controls randomness in model output (0.0 = deterministic, higher = more random). Used when top_p is 0. Set temperature=0.0 for consistent, deterministic outputs. Not used for Claude 4.7 models."
+                description: "Sampling temperature: Controls randomness in model output (0.0 = deterministic, higher = more random). Used when top_p is 0. Set temperature=0.0 for consistent, deterministic outputs. Not used for Claude 4.7+ models."
                 order: 3
               top_k:
                 type: integer
                 minimum: 1
-                description: "Sampling Top K. Not used for Claude 4.7 models."
+                description: "Sampling Top K. Not used for Claude 4.7+ models."
                 order: 4
               top_p:
                 type: number
@@ -1125,6 +1149,8 @@ Resources:
                     "us.anthropic.claude-opus-4-6-v1:1m",
                     "us.anthropic.claude-opus-4-7",
                     "us.anthropic.claude-opus-4-7:1m",
+                    "us.anthropic.claude-opus-4-8",
+                    "us.anthropic.claude-opus-4-8:1m",
                     "eu.amazon.nova-lite-v1:0",
                     "eu.amazon.nova-pro-v1:0",
                     "eu.amazon.nova-2-lite-v1:0", "eu.amazon.nova-2-lite-v1:0:priority", "eu.amazon.nova-2-lite-v1:0:flex",
@@ -1137,6 +1163,8 @@ Resources:
                     "eu.anthropic.claude-opus-4-6-v1:1m",
                     "eu.anthropic.claude-opus-4-7",
                     "eu.anthropic.claude-opus-4-7:1m",
+                    "eu.anthropic.claude-opus-4-8",
+                    "eu.anthropic.claude-opus-4-8:1m",
                     "qwen.qwen3-vl-235b-a22b",
                     "us.meta.llama4-maverick-17b-instruct-v1:0",
                     "us.meta.llama4-scout-17b-instruct-v1:0",
@@ -1151,7 +1179,9 @@ Resources:
                     "global.anthropic.claude-opus-4-6-v1",
                     "global.anthropic.claude-opus-4-6-v1:1m",
                     "global.anthropic.claude-opus-4-7",
-                    "global.anthropic.claude-opus-4-7:1m"
+                    "global.anthropic.claude-opus-4-7:1m",
+                    "global.anthropic.claude-opus-4-8",
+                    "global.anthropic.claude-opus-4-8:1m"
                   ]
                 order: 5
               model_lambda_hook_arn:
@@ -1163,12 +1193,12 @@ Resources:
               temperature:
                 type: number
                 dependsOn: { field: "use_bda", value: false }
-                description: "Sampling temperature: Controls randomness in model output (0.0 = deterministic, higher = more random). Used when top_p is 0. Set temperature=0.0 for consistent, deterministic outputs. Not used for Claude 4.7 models."
+                description: "Sampling temperature: Controls randomness in model output (0.0 = deterministic, higher = more random). Used when top_p is 0. Set temperature=0.0 for consistent, deterministic outputs. Not used for Claude 4.7+ models."
                 order: 7
               top_k:
                 type: number
                 dependsOn: { field: "use_bda", value: false }
-                description: "Sampling Top K. Not used for Claude 4.7 models."
+                description: "Sampling Top K. Not used for Claude 4.7+ models."
                 order: 8
               top_p:
                 type: number
@@ -1223,6 +1253,8 @@ Resources:
                     "us.anthropic.claude-opus-4-6-v1:1m",
                     "us.anthropic.claude-opus-4-7",
                     "us.anthropic.claude-opus-4-7:1m",
+                    "us.anthropic.claude-opus-4-8",
+                    "us.anthropic.claude-opus-4-8:1m",
                     "eu.amazon.nova-lite-v1:0",
                     "eu.amazon.nova-pro-v1:0",
                     "eu.amazon.nova-2-lite-v1:0", "eu.amazon.nova-2-lite-v1:0:priority", "eu.amazon.nova-2-lite-v1:0:flex",
@@ -1235,6 +1267,8 @@ Resources:
                     "eu.anthropic.claude-opus-4-6-v1:1m",
                     "eu.anthropic.claude-opus-4-7",
                     "eu.anthropic.claude-opus-4-7:1m",
+                    "eu.anthropic.claude-opus-4-8",
+                    "eu.anthropic.claude-opus-4-8:1m",
                     "qwen.qwen3-vl-235b-a22b",
                     "us.meta.llama4-maverick-17b-instruct-v1:0",
                     "us.meta.llama4-scout-17b-instruct-v1:0",
@@ -1249,7 +1283,9 @@ Resources:
                     "global.anthropic.claude-opus-4-6-v1",
                     "global.anthropic.claude-opus-4-6-v1:1m",
                     "global.anthropic.claude-opus-4-7",
-                    "global.anthropic.claude-opus-4-7:1m"
+                    "global.anthropic.claude-opus-4-7:1m",
+                    "global.anthropic.claude-opus-4-8",
+                    "global.anthropic.claude-opus-4-8:1m"
                   ]
                 order: 1
               model_lambda_hook_arn:
@@ -1260,11 +1296,11 @@ Resources:
                 dependsOn: { field: "model", value: "LambdaHook" }
               temperature:
                 type: number
-                description: "Sampling temperature. Not used for Claude 4.7 models."
+                description: "Sampling temperature. Not used for Claude 4.7+ models."
                 order: 3
               top_k:
                 type: number
-                description: "Sampling Top K. Not used for Claude 4.7 models."
+                description: "Sampling Top K. Not used for Claude 4.7+ models."
                 order: 4
               top_p:
                 type: number
@@ -1317,6 +1353,8 @@ Resources:
                         "us.anthropic.claude-opus-4-6-v1:1m",
                         "us.anthropic.claude-opus-4-7",
                         "us.anthropic.claude-opus-4-7:1m",
+                        "us.anthropic.claude-opus-4-8",
+                        "us.anthropic.claude-opus-4-8:1m",
                         "eu.amazon.nova-lite-v1:0",
                         "eu.amazon.nova-pro-v1:0",
                         "eu.amazon.nova-2-lite-v1:0", "eu.amazon.nova-2-lite-v1:0:priority", "eu.amazon.nova-2-lite-v1:0:flex",
@@ -1329,6 +1367,8 @@ Resources:
                         "eu.anthropic.claude-opus-4-6-v1:1m",
                         "eu.anthropic.claude-opus-4-7",
                         "eu.anthropic.claude-opus-4-7:1m",
+                        "eu.anthropic.claude-opus-4-8",
+                        "eu.anthropic.claude-opus-4-8:1m",
                         "qwen.qwen3-vl-235b-a22b",
                         "us.meta.llama4-maverick-17b-instruct-v1:0",
                         "us.meta.llama4-scout-17b-instruct-v1:0",
@@ -1343,17 +1383,19 @@ Resources:
                         "global.anthropic.claude-opus-4-6-v1",
                         "global.anthropic.claude-opus-4-6-v1:1m",
                         "global.anthropic.claude-opus-4-7",
-                        "global.anthropic.claude-opus-4-7:1m"
+                        "global.anthropic.claude-opus-4-7:1m",
+                        "global.anthropic.claude-opus-4-8",
+                        "global.anthropic.claude-opus-4-8:1m"
                       ]
                     order: 1
                   temperature:
                     type: number
-                    description: "Sampling temperature: Controls randomness in model output (0.0 = deterministic, higher = more random). Used when top_p is 0. Set temperature=0.0 for consistent, deterministic outputs. Not used for Claude 4.7 models."
+                    description: "Sampling temperature: Controls randomness in model output (0.0 = deterministic, higher = more random). Used when top_p is 0. Set temperature=0.0 for consistent, deterministic outputs. Not used for Claude 4.7+ models."
                     default: 0.0
                     order: 2
                   top_k:
                     type: number
-                    description: "Sampling Top K. Not used for Claude 4.7 models."
+                    description: "Sampling Top K. Not used for Claude 4.7+ models."
                     default: 250
                     order: 3
                   top_p:
@@ -1406,6 +1448,8 @@ Resources:
                         "us.anthropic.claude-opus-4-6-v1:1m",
                         "us.anthropic.claude-opus-4-7",
                         "us.anthropic.claude-opus-4-7:1m",
+                        "us.anthropic.claude-opus-4-8",
+                        "us.anthropic.claude-opus-4-8:1m",
                         "eu.amazon.nova-lite-v1:0",
                         "eu.amazon.nova-pro-v1:0",
                         "eu.amazon.nova-2-lite-v1:0", "eu.amazon.nova-2-lite-v1:0:priority", "eu.amazon.nova-2-lite-v1:0:flex",
@@ -1418,6 +1462,8 @@ Resources:
                         "eu.anthropic.claude-opus-4-6-v1:1m",
                         "eu.anthropic.claude-opus-4-7",
                         "eu.anthropic.claude-opus-4-7:1m",
+                        "eu.anthropic.claude-opus-4-8",
+                        "eu.anthropic.claude-opus-4-8:1m",
                         "qwen.qwen3-vl-235b-a22b",
                         "us.meta.llama4-maverick-17b-instruct-v1:0",
                         "us.meta.llama4-scout-17b-instruct-v1:0",
@@ -1432,13 +1478,15 @@ Resources:
                         "global.anthropic.claude-opus-4-6-v1",
                         "global.anthropic.claude-opus-4-6-v1:1m",
                         "global.anthropic.claude-opus-4-7",
-                        "global.anthropic.claude-opus-4-7:1m"
+                        "global.anthropic.claude-opus-4-7:1m",
+                        "global.anthropic.claude-opus-4-8",
+                        "global.anthropic.claude-opus-4-8:1m"
                       ]
                     default: "us.amazon.nova-pro-v1:0"
                     order: 0
                   temperature:
                     type: number
-                    description: "Sampling temperature: Controls randomness in model output (0.0 = deterministic, higher = more random). Used when top_p is 0. Set temperature=0.0 for consistent, deterministic outputs. Not used for Claude 4.7 models."
+                    description: "Sampling temperature: Controls randomness in model output (0.0 = deterministic, higher = more random). Used when top_p is 0. Set temperature=0.0 for consistent, deterministic outputs. Not used for Claude 4.7+ models."
                     minimum: 0.0
                     maximum: 1.0
                     default: 1.0
@@ -1493,6 +1541,8 @@ Resources:
                         "us.anthropic.claude-opus-4-6-v1:1m",
                         "us.anthropic.claude-opus-4-7",
                         "us.anthropic.claude-opus-4-7:1m",
+                        "us.anthropic.claude-opus-4-8",
+                        "us.anthropic.claude-opus-4-8:1m",
                         "eu.amazon.nova-lite-v1:0",
                         "eu.amazon.nova-pro-v1:0",
                         "eu.amazon.nova-2-lite-v1:0", "eu.amazon.nova-2-lite-v1:0:priority", "eu.amazon.nova-2-lite-v1:0:flex",
@@ -1505,6 +1555,8 @@ Resources:
                         "eu.anthropic.claude-opus-4-6-v1:1m",
                         "eu.anthropic.claude-opus-4-7",
                         "eu.anthropic.claude-opus-4-7:1m",
+                        "eu.anthropic.claude-opus-4-8",
+                        "eu.anthropic.claude-opus-4-8:1m",
                         "qwen.qwen3-vl-235b-a22b",
                         "us.meta.llama4-maverick-17b-instruct-v1:0",
                         "us.meta.llama4-scout-17b-instruct-v1:0",
@@ -1519,13 +1571,15 @@ Resources:
                         "global.anthropic.claude-opus-4-6-v1",
                         "global.anthropic.claude-opus-4-6-v1:1m",
                         "global.anthropic.claude-opus-4-7",
-                        "global.anthropic.claude-opus-4-7:1m"
+                        "global.anthropic.claude-opus-4-7:1m",
+                        "global.anthropic.claude-opus-4-8",
+                        "global.anthropic.claude-opus-4-8:1m"
                       ]
                     default: "us.amazon.nova-pro-v1:0"
                     order: 0
                   temperature:
                     type: number
-                    description: "Sampling temperature: Controls randomness in model output (0.0 = deterministic, higher = more random). Used when top_p is 0. Set temperature=0.0 for consistent, deterministic outputs. Not used for Claude 4.7 models."
+                    description: "Sampling temperature: Controls randomness in model output (0.0 = deterministic, higher = more random). Used when top_p is 0. Set temperature=0.0 for consistent, deterministic outputs. Not used for Claude 4.7+ models."
                     minimum: 0.0
                     maximum: 1.0
                     default: 1.0
@@ -1580,6 +1634,8 @@ Resources:
                         "us.anthropic.claude-opus-4-6-v1:1m",
                         "us.anthropic.claude-opus-4-7",
                         "us.anthropic.claude-opus-4-7:1m",
+                        "us.anthropic.claude-opus-4-8",
+                        "us.anthropic.claude-opus-4-8:1m",
                         "eu.amazon.nova-lite-v1:0",
                         "eu.amazon.nova-pro-v1:0",
                         "eu.amazon.nova-2-lite-v1:0", "eu.amazon.nova-2-lite-v1:0:priority", "eu.amazon.nova-2-lite-v1:0:flex",
@@ -1592,6 +1648,8 @@ Resources:
                         "eu.anthropic.claude-opus-4-6-v1:1m",
                         "eu.anthropic.claude-opus-4-7",
                         "eu.anthropic.claude-opus-4-7:1m",
+                        "eu.anthropic.claude-opus-4-8",
+                        "eu.anthropic.claude-opus-4-8:1m",
                         "qwen.qwen3-vl-235b-a22b",
                         "us.meta.llama4-maverick-17b-instruct-v1:0",
                         "us.meta.llama4-scout-17b-instruct-v1:0",
@@ -1606,7 +1664,9 @@ Resources:
                         "global.anthropic.claude-opus-4-6-v1",
                         "global.anthropic.claude-opus-4-6-v1:1m",
                         "global.anthropic.claude-opus-4-7",
-                        "global.anthropic.claude-opus-4-7:1m"
+                        "global.anthropic.claude-opus-4-7:1m",
+                        "global.anthropic.claude-opus-4-8",
+                        "global.anthropic.claude-opus-4-8:1m"
                       ]
                     default: "us.amazon.nova-pro-v1:0"
                     order: 0
@@ -1682,6 +1742,8 @@ Resources:
                       - "us.anthropic.claude-opus-4-6-v1:1m"
                       - "us.anthropic.claude-opus-4-7"
                       - "us.anthropic.claude-opus-4-7:1m"
+                      - "us.anthropic.claude-opus-4-8"
+                      - "us.anthropic.claude-opus-4-8:1m"
                     order: 1
                   temperature:
                     type: number
@@ -1748,18 +1810,24 @@ Resources:
                         "us.anthropic.claude-opus-4-6-v1:1m",
                         "us.anthropic.claude-opus-4-7",
                         "us.anthropic.claude-opus-4-7:1m",
+                        "us.anthropic.claude-opus-4-8",
+                        "us.anthropic.claude-opus-4-8:1m",
                         "eu.anthropic.claude-sonnet-4-6",
                         "eu.anthropic.claude-sonnet-4-6:1m",
                         "eu.anthropic.claude-opus-4-6-v1",
                         "eu.anthropic.claude-opus-4-6-v1:1m",
                         "eu.anthropic.claude-opus-4-7",
                         "eu.anthropic.claude-opus-4-7:1m",
+                        "eu.anthropic.claude-opus-4-8",
+                        "eu.anthropic.claude-opus-4-8:1m",
                         "global.anthropic.claude-sonnet-4-6",
                         "global.anthropic.claude-sonnet-4-6:1m",
                         "global.anthropic.claude-opus-4-6-v1",
                         "global.anthropic.claude-opus-4-6-v1:1m",
                         "global.anthropic.claude-opus-4-7",
-                        "global.anthropic.claude-opus-4-7:1m"
+                        "global.anthropic.claude-opus-4-7:1m",
+                        "global.anthropic.claude-opus-4-8",
+                        "global.anthropic.claude-opus-4-8:1m"
                       ]
                     default: "global.anthropic.claude-sonnet-4-6"
                     order: 0
@@ -1836,6 +1904,8 @@ Resources:
                       - "us.anthropic.claude-opus-4-6-v1:1m"
                       - "us.anthropic.claude-opus-4-7"
                       - "us.anthropic.claude-opus-4-7:1m"
+                      - "us.anthropic.claude-opus-4-8"
+                      - "us.anthropic.claude-opus-4-8:1m"
                       - "global.anthropic.claude-haiku-4-5-20251001-v1:0"
                       - "global.anthropic.claude-sonnet-4-5-20250929-v1:0"
                       - "global.anthropic.claude-sonnet-4-6"
@@ -1845,6 +1915,8 @@ Resources:
                       - "global.anthropic.claude-opus-4-6-v1:1m"
                       - "global.anthropic.claude-opus-4-7"
                       - "global.anthropic.claude-opus-4-7:1m"
+                      - "global.anthropic.claude-opus-4-8"
+                      - "global.anthropic.claude-opus-4-8:1m"
                       - "eu.amazon.nova-lite-v1:0"
                       - "eu.amazon.nova-pro-v1:0"
                       - "eu.amazon.nova-2-lite-v1:0"
@@ -1859,6 +1931,8 @@ Resources:
                       - "eu.anthropic.claude-opus-4-6-v1:1m"
                       - "eu.anthropic.claude-opus-4-7"
                       - "eu.anthropic.claude-opus-4-7:1m"
+                      - "eu.anthropic.claude-opus-4-8"
+                      - "eu.anthropic.claude-opus-4-8:1m"
                       - "qwen.qwen3-vl-235b-a22b"
                       - "us.meta.llama4-maverick-17b-instruct-v1:0"
                       - "us.meta.llama4-scout-17b-instruct-v1:0"
@@ -1885,6 +1959,8 @@ Resources:
                       - "us.anthropic.claude-opus-4-6-v1:1m"
                       - "us.anthropic.claude-opus-4-7"
                       - "us.anthropic.claude-opus-4-7:1m"
+                      - "us.anthropic.claude-opus-4-8"
+                      - "us.anthropic.claude-opus-4-8:1m"
                       - "global.amazon.nova-pro-v1:0"
                       - "global.anthropic.claude-sonnet-4-5-20250929-v1:0"
                       - "global.anthropic.claude-sonnet-4-6"
@@ -1894,6 +1970,8 @@ Resources:
                       - "global.anthropic.claude-opus-4-6-v1:1m"
                       - "global.anthropic.claude-opus-4-7"
                       - "global.anthropic.claude-opus-4-7:1m"
+                      - "global.anthropic.claude-opus-4-8"
+                      - "global.anthropic.claude-opus-4-8:1m"
                       - "eu.amazon.nova-pro-v1:0"
                       - "eu.anthropic.claude-sonnet-4-5-20250929-v1:0"
                       - "eu.anthropic.claude-sonnet-4-6"
@@ -1903,6 +1981,8 @@ Resources:
                       - "eu.anthropic.claude-opus-4-6-v1:1m"
                       - "eu.anthropic.claude-opus-4-7"
                       - "eu.anthropic.claude-opus-4-7:1m"
+                      - "eu.anthropic.claude-opus-4-8"
+                      - "eu.anthropic.claude-opus-4-8:1m"
                     default: "us.anthropic.claude-sonnet-4-6"
                     order: 0
                   lookback_hours:
@@ -1952,6 +2032,8 @@ Resources:
                     "us.anthropic.claude-opus-4-6-v1:1m",
                     "us.anthropic.claude-opus-4-7",
                     "us.anthropic.claude-opus-4-7:1m",
+                    "us.anthropic.claude-opus-4-8",
+                    "us.anthropic.claude-opus-4-8:1m",
                     "eu.amazon.nova-lite-v1:0",
                     "eu.amazon.nova-pro-v1:0",
                     "eu.amazon.nova-2-lite-v1:0", "eu.amazon.nova-2-lite-v1:0:priority", "eu.amazon.nova-2-lite-v1:0:flex",
@@ -1964,6 +2046,8 @@ Resources:
                     "eu.anthropic.claude-opus-4-6-v1:1m",
                     "eu.anthropic.claude-opus-4-7",
                     "eu.anthropic.claude-opus-4-7:1m",
+                    "eu.anthropic.claude-opus-4-8",
+                    "eu.anthropic.claude-opus-4-8:1m",
                     "global.anthropic.claude-haiku-4-5-20251001-v1:0",
                     "global.anthropic.claude-sonnet-4-5-20250929-v1:0",
                     "global.anthropic.claude-sonnet-4-6",
@@ -1972,7 +2056,9 @@ Resources:
                     "global.anthropic.claude-opus-4-6-v1",
                     "global.anthropic.claude-opus-4-6-v1:1m",
                     "global.anthropic.claude-opus-4-7",
-                    "global.anthropic.claude-opus-4-7:1m"
+                    "global.anthropic.claude-opus-4-7:1m",
+                    "global.anthropic.claude-opus-4-8",
+                    "global.anthropic.claude-opus-4-8:1m"
                   ]
                 order: 1
               model_lambda_hook_arn:
@@ -1983,11 +2069,11 @@ Resources:
                 dependsOn: { field: "model", value: "LambdaHook" }
               temperature:
                 type: number
-                description: "Sampling temperature. Not used for Claude 4.7 models."
+                description: "Sampling temperature. Not used for Claude 4.7+ models."
                 order: 3
               top_k:
                 type: number
-                description: "Sampling Top K. Not used for Claude 4.7 models."
+                description: "Sampling Top K. Not used for Claude 4.7+ models."
                 order: 4
               top_p:
                 type: number
@@ -2065,6 +2151,8 @@ Resources:
                         "us.anthropic.claude-opus-4-6-v1:1m",
                         "us.anthropic.claude-opus-4-7",
                         "us.anthropic.claude-opus-4-7:1m",
+                        "us.anthropic.claude-opus-4-8",
+                        "us.anthropic.claude-opus-4-8:1m",
                         "eu.amazon.nova-lite-v1:0",
                         "eu.amazon.nova-pro-v1:0",
                         "eu.amazon.nova-2-lite-v1:0", "eu.amazon.nova-2-lite-v1:0:priority", "eu.amazon.nova-2-lite-v1:0:flex",
@@ -2077,6 +2165,8 @@ Resources:
                         "eu.anthropic.claude-opus-4-6-v1:1m",
                         "eu.anthropic.claude-opus-4-7",
                         "eu.anthropic.claude-opus-4-7:1m",
+                        "eu.anthropic.claude-opus-4-8",
+                        "eu.anthropic.claude-opus-4-8:1m",
                         "qwen.qwen3-vl-235b-a22b",
                         "us.meta.llama4-maverick-17b-instruct-v1:0",
                         "us.meta.llama4-scout-17b-instruct-v1:0",
@@ -2091,7 +2181,9 @@ Resources:
                         "global.anthropic.claude-opus-4-6-v1",
                         "global.anthropic.claude-opus-4-6-v1:1m",
                         "global.anthropic.claude-opus-4-7",
-                        "global.anthropic.claude-opus-4-7:1m"
+                        "global.anthropic.claude-opus-4-7:1m",
+                        "global.anthropic.claude-opus-4-8",
+                        "global.anthropic.claude-opus-4-8:1m"
                       ]
                     default: "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
                     order: 0
@@ -2099,13 +2191,13 @@ Resources:
                     type: number
                     minimum: 0
                     maximum: 1
-                    description: "Sampling temperature: Controls randomness in model output (0.0 = deterministic, higher = more random). Not used for Claude 4.7 models."
+                    description: "Sampling temperature: Controls randomness in model output (0.0 = deterministic, higher = more random). Not used for Claude 4.7+ models."
                     default: 0.0
                     order: 1
                   top_k:
                     type: integer
                     minimum: 1
-                    description: "Sampling Top K. Not used for Claude 4.7 models."
+                    description: "Sampling Top K. Not used for Claude 4.7+ models."
                     default: 20
                     order: 2
                   top_p:
@@ -2153,6 +2245,8 @@ Resources:
                         "us.anthropic.claude-opus-4-6-v1:1m",
                         "us.anthropic.claude-opus-4-7",
                         "us.anthropic.claude-opus-4-7:1m",
+                        "us.anthropic.claude-opus-4-8",
+                        "us.anthropic.claude-opus-4-8:1m",
                         "eu.amazon.nova-lite-v1:0",
                         "eu.amazon.nova-pro-v1:0",
                         "eu.amazon.nova-2-lite-v1:0", "eu.amazon.nova-2-lite-v1:0:priority", "eu.amazon.nova-2-lite-v1:0:flex",
@@ -2165,6 +2259,8 @@ Resources:
                         "eu.anthropic.claude-opus-4-6-v1:1m",
                         "eu.anthropic.claude-opus-4-7",
                         "eu.anthropic.claude-opus-4-7:1m",
+                        "eu.anthropic.claude-opus-4-8",
+                        "eu.anthropic.claude-opus-4-8:1m",
                         "qwen.qwen3-vl-235b-a22b",
                         "us.meta.llama4-maverick-17b-instruct-v1:0",
                         "us.meta.llama4-scout-17b-instruct-v1:0",
@@ -2179,7 +2275,9 @@ Resources:
                         "global.anthropic.claude-opus-4-6-v1",
                         "global.anthropic.claude-opus-4-6-v1:1m",
                         "global.anthropic.claude-opus-4-7",
-                        "global.anthropic.claude-opus-4-7:1m"
+                        "global.anthropic.claude-opus-4-7:1m",
+                        "global.anthropic.claude-opus-4-8",
+                        "global.anthropic.claude-opus-4-8:1m"
                       ]
                     default: "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
                     order: 0
@@ -2187,13 +2285,13 @@ Resources:
                     type: number
                     minimum: 0
                     maximum: 1
-                    description: "Sampling temperature: Controls randomness in model output (0.0 = deterministic, higher = more random). Not used for Claude 4.7 models."
+                    description: "Sampling temperature: Controls randomness in model output (0.0 = deterministic, higher = more random). Not used for Claude 4.7+ models."
                     default: 0.0
                     order: 1
                   top_k:
                     type: integer
                     minimum: 1
-                    description: "Sampling Top K. Not used for Claude 4.7 models."
+                    description: "Sampling Top K. Not used for Claude 4.7+ models."
                     default: 20
                     order: 2
                   top_p:

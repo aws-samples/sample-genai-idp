@@ -288,6 +288,8 @@ To use Bedrock OCR:
    - `us.anthropic.claude-opus-4-6-v1:1m`
    - `us.anthropic.claude-opus-4-7`
    - `us.anthropic.claude-opus-4-7:1m`
+   - `us.anthropic.claude-opus-4-8`
+   - `us.anthropic.claude-opus-4-8:1m`
    - `eu.amazon.nova-lite-v1:0`
    - `eu.amazon.nova-pro-v1:0`
    - `eu.amazon.nova-2-lite-v1:0`
@@ -304,6 +306,8 @@ To use Bedrock OCR:
    - `eu.anthropic.claude-opus-4-6-v1:1m`
    - `eu.anthropic.claude-opus-4-7`
    - `eu.anthropic.claude-opus-4-7:1m`
+   - `eu.anthropic.claude-opus-4-8`
+   - `eu.anthropic.claude-opus-4-8:1m`
    - `qwen.qwen3-vl-235b-a22b`
    - `global.amazon.nova-2-lite-v1:0`
    - `global.anthropic.claude-haiku-4-5-20251001-v1:0`
@@ -315,6 +319,8 @@ To use Bedrock OCR:
    - `global.anthropic.claude-opus-4-6-v1:1m`
    - `global.anthropic.claude-opus-4-7`
    - `global.anthropic.claude-opus-4-7:1m`
+   - `global.anthropic.claude-opus-4-8`
+   - `global.anthropic.claude-opus-4-8:1m`
 
 3. **Configure prompts**: Customize system and task prompts for your specific use case
 4. **Deploy**: The configuration can be updated through the Web UI without stack redeployment

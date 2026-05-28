@@ -135,8 +135,8 @@ def _now_iso() -> str:
 def _default_model_for_region() -> str:
     region = os.environ.get("AWS_REGION", "us-east-1")
     if region.startswith("eu-"):
-        return "eu.anthropic.claude-opus-4-7:1m"
-    return "us.anthropic.claude-opus-4-7:1m"
+        return "eu.anthropic.claude-opus-4-8:1m"
+    return "us.anthropic.claude-opus-4-8:1m"
 
 
 def _publish(
@@ -480,7 +480,7 @@ def handler(event, _context):  # noqa: ANN001
           "turnId":    "...",
           "prompt":    "...",
           "s3Uri":     "uploads/doc.pdf",
-          "modelId":   "us.anthropic.claude-opus-4-7:1m" | "",
+          "modelId":   "us.anthropic.claude-opus-4-8:1m" | "",
           "callerSub": "<cognito sub>"
         }
     """

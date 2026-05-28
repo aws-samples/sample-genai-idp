@@ -172,6 +172,18 @@ class TestGetModelMaxOutputTokens:
             == 128_000
         )
 
+    def test_opus_4_8_returns_128k(self):
+        """Test Claude Opus 4.8 returns 128,000 max tokens."""
+        assert (
+            get_model_max_output_tokens("us.anthropic.claude-opus-4-8-20251201-v1:0")
+            == 128_000
+        )
+        assert (
+            get_model_max_output_tokens("global.anthropic.claude-opus-4-8") == 128_000
+        )
+        # With :1m suffix
+        assert get_model_max_output_tokens("us.anthropic.claude-opus-4-8:1m") == 128_000
+
     def test_older_opus_versions_return_64k(self):
         """Test Claude Opus 4.5/4.6 return 64,000 max tokens."""
         assert (
