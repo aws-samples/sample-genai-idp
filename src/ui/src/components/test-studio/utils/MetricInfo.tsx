@@ -181,50 +181,51 @@ const MetricInfo: React.FC<MetricInfoProps> = ({ metric }) => {
   }
 
   const handleClick = (e: React.MouseEvent) => {
+    // Stop propagation to prevent table sorting, but don't preventDefault so Popover can open
     e.stopPropagation();
-    e.preventDefault();
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' || e.key === ' ') {
+      // Stop propagation to prevent table sorting and prevent default Space scroll behavior
       e.stopPropagation();
       e.preventDefault();
     }
   };
 
   return (
-    <Popover
-      dismissButton={false}
-      position="top"
-      size="small"
-      triggerType="custom"
-      content={
-        <Box variant="p">
-          {config.description}
-          {config.docsUrl && (
-            <>
-              {' '}
-              <Link href={config.docsUrl} external>
-                Learn more
-              </Link>
-            </>
-          )}
-        </Box>
-      }
+    <span
+      onClick={handleClick}
+      onKeyDown={handleKeyDown}
+      style={{ display: 'inline-block' }}
+      role="button"
+      tabIndex={0}
+      aria-label={`Information about ${metric} metric`}
     >
-      <span
-        onClick={handleClick}
-        onKeyDown={handleKeyDown}
-        style={{ cursor: 'pointer' }}
-        role="button"
-        tabIndex={0}
-        aria-label={`Information about ${metric} metric`}
+      <Popover
+        dismissButton={false}
+        position="top"
+        size="small"
+        triggerType="custom"
+        content={
+          <Box variant="p">
+            {config.description}
+            {config.docsUrl && (
+              <>
+                {' '}
+                <Link href={config.docsUrl} external>
+                  Learn more
+                </Link>
+              </>
+            )}
+          </Box>
+        }
       >
         <Box display="inline" margin={{ left: 'xs' }}>
           <Icon name="status-info" size="small" variant="subtle" />
         </Box>
-      </span>
-    </Popover>
+      </Popover>
+    </span>
   );
 };
 
