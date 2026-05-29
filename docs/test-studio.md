@@ -607,6 +607,8 @@ Test results include detailed per-field extraction performance metrics displayed
 
 #### Confidence Calibration Metrics (Stickler v0.4.0+)
 
+https://github.com/user-attachments/assets/1d17ea33-f098-4d9e-a461-1113b9dc3ce9
+
 The evaluation engine uses **Stickler v0.4.0** to compute confidence calibration metrics alongside traditional accuracy metrics. These metrics assess how well the model's confidence scores reflect actual correctness.
 
 **What Are Confidence Calibration Metrics?**
