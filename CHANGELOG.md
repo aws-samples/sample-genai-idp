@@ -20,6 +20,8 @@ SPDX-License-Identifier: MIT-0
 
 - **Agentic extraction now respects 128K output limit for Claude Opus 4.7+** — `_build_model_config` previously matched these models against the generic `claude-(opus|sonnet|haiku)-4` regex and silently capped them at 64K, contradicting the 128K declared in `model_config_limits.yaml`. A dedicated branch now returns 128K for opus-4-7 and opus-4-8.
 
+- **`idp-cli deploy --headless` no longer leaves dangling references in the headless template** — the headless transformer now strips `HasPublicArtifactsBucket` (orphaned after `VersionCheckResolverFunction` was removed) and removes `ChatWithDocumentProcessorFunction` (only invoked by removed AppSync resolvers, with dangling `UsersTable` / `GraphQLApi` refs). `CircuitBreakerManagerFunction` is now also converted to DynamoDB tracking mode so its AppSync status-publish hook is stripped. Additionally, `--headless` (template transform) no longer auto-sets the `EnableHeadless` CFN parameter — that parameter opts into the Private API Gateway and requires VPC infrastructure, which is an orthogonal concern. Users who want the Jobs API must pass `--parameters EnableHeadless=true,VpcId=...` explicitly.
+
 ## Templates
    - us-west-2: `https://s3.us-west-2.amazonaws.com/aws-ml-blog-us-west-2/artifacts/genai-idp/idp-main_0.5.13.yaml`
    - us-east-1: `https://s3.us-east-1.amazonaws.com/aws-ml-blog-us-east-1/artifacts/genai-idp/idp-main_0.5.13.yaml`
