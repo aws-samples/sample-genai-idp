@@ -904,8 +904,12 @@ def _build_model_config(
     model_max = 4_096  # Default fallback
     model_id_lower = model_id.lower()
 
-    # Check Claude 4 patterns first (more specific)
-    if re.search(r"claude-(opus|sonnet|haiku)-4", model_id_lower):
+    # Check Claude Opus 4.7+ first (extended 128K output, more specific than
+    # the generic claude-4 pattern below).
+    if re.search(r"claude-opus-4-(7|8)", model_id_lower):
+        model_max = 128_000
+    # Check Claude 4 patterns (64K output)
+    elif re.search(r"claude-(opus|sonnet|haiku)-4", model_id_lower):
         model_max = 64_000
     # Check Nova models
     elif any(

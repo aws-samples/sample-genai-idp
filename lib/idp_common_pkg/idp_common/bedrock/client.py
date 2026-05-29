@@ -67,9 +67,11 @@ DEFAULT_INITIAL_BACKOFF = 2  # seconds
 DEFAULT_MAX_BACKOFF = 300  # 5 minutes
 
 
-# Claude 4.7+ model base names that don't support temperature/top_k/top_p parameters.
-# These parameters are deprecated for these models and cause runtime errors.
-# Add new model base names here as needed (e.g., sonnet-4-7, haiku-4-7).
+# Claude 4.7 and later model base names that don't support
+# temperature/top_k/top_p parameters. These parameters are deprecated for these
+# models and cause runtime errors. The set covers Claude 4.7, 4.8, and any
+# future generations with the same behavior — add new base names here as
+# needed (e.g., sonnet-4-7, haiku-4-7, opus-4-9).
 #
 # NOTE: This set is consulted by BOTH the traditional Bedrock invocation path
 # (this file's BedrockClient.invoke_model) AND the agentic extraction path
@@ -77,6 +79,7 @@ DEFAULT_MAX_BACKOFF = 300  # 5 minutes
 # a new Claude 4.7+ variant here, no other code changes are required.
 _CLAUDE_4_7_BASE_NAMES = {
     "anthropic.claude-opus-4-7",
+    "anthropic.claude-opus-4-8",
 }
 
 
@@ -122,6 +125,8 @@ CACHEPOINT_SUPPORTED_MODELS = [
     "us.anthropic.claude-opus-4-6-v1:1m",
     "us.anthropic.claude-opus-4-7",
     "us.anthropic.claude-opus-4-7:1m",
+    "us.anthropic.claude-opus-4-8",
+    "us.anthropic.claude-opus-4-8:1m",
     "us.anthropic.claude-opus-4-1-20250805-v1:0",
     "us.anthropic.claude-opus-4-20250514-v1:0",
     "us.anthropic.claude-sonnet-4-20250514-v1:0",
@@ -144,6 +149,8 @@ CACHEPOINT_SUPPORTED_MODELS = [
     "eu.anthropic.claude-opus-4-6-v1:1m",
     "eu.anthropic.claude-opus-4-7",
     "eu.anthropic.claude-opus-4-7:1m",
+    "eu.anthropic.claude-opus-4-8",
+    "eu.anthropic.claude-opus-4-8:1m",
     "eu.amazon.nova-lite-v1:0",
     "eu.amazon.nova-pro-v1:0",
     "eu.amazon.nova-2-lite-v1:0",
@@ -161,6 +168,8 @@ CACHEPOINT_SUPPORTED_MODELS = [
     "global.anthropic.claude-opus-4-6-v1:1m",
     "global.anthropic.claude-opus-4-7",
     "global.anthropic.claude-opus-4-7:1m",
+    "global.anthropic.claude-opus-4-8",
+    "global.anthropic.claude-opus-4-8:1m",
 ]
 
 # Build set of base model names (without region/tier prefixes) for inference profile resolution.

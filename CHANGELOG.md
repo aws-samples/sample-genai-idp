@@ -6,22 +6,29 @@ SPDX-License-Identifier: MIT-0
 ## [Unreleased]
 
 ### Added
-- **ECARB@30 confidence metric** — Test Studio now displays Error Capture at Review Budget (30%) showing percentage of errors caught when reviewing lowest-confidence 30% of data. Format: "46% (1.52x)". New column in field metrics table (gear-icon configurable) and in Additional Metrics section.
 - **Metric info tooltips** — All Test Studio metrics now include info icons with explanatory tooltips. Covers accuracy metrics (Precision, Recall, F1, Accuracy), confidence calibration metrics (AUROC, ECE, Brier, ECARB@30, Coverage Ratio), confusion matrix components (TP, FP, TN, FN), error rates (False Alarm Rate, False Discovery Rate), aggregate metrics (Avg Confidence, Avg Accuracy, Avg Weighted Score), and split classification metrics (Page Level Accuracy, Split Accuracy With/Without Order, Total Pages/Splits). Tooltips link to Wikipedia or Stickler documentation. Available in both TestResults and TestComparison views. Clicking info icons does not trigger table sorting.
 
+- **Claude Opus 4.8 Model Support** — Added `anthropic.claude-opus-4-8` (and `:1m` context variant) across all `us`, `eu`, and `global` inference profiles. Includes unified template enums, UI model dropdowns, cachepoint support, EU region mappings, pricing entries, and documentation updates. Model is recognized as a Claude 4.7+ variant — the same temperature/top_p/top_k handling and 128K extended-output limit apply.
+
+- **Amazon Quick + IDP MCP Integration Workshop** — step-by-step guide (`workshop/amazon-quick-integration-workshop.md`) that walks through deploying the IDP stack, configuring MCP connectivity in Amazon Quick, and building an end-to-end loan document processing workflow with structured data extraction and Excel output. Covers CloudFormation deployment, OAuth service-to-service auth setup, action configuration, and a multi-phase Amazon Quick workflow.
+  
+- **Stickler v0.4.0 upgrade with confidence calibration metrics** — upgraded evaluation engine from Stickler v0.1.4/v0.1.5 to v0.4.0, adding ECE (Expected Calibration Error), Brier score, ECARB@30, and AUROC metrics for confidence analysis. New `ConfidenceMetricsCalculator` in `idp_common.evaluation.confidence_integration` computes calibration metrics at overall and per-field levels. Test aggregation results now include `confidence_metrics` field with comprehensive calibration data. Confidence aggregation logic moved from frontend to backend (test execution aggregation function) for cleaner architecture. Evaluation service patches `field_comparisons` with `field_path` for ConfidenceCalculator compatibility and uses structural detection to unwrap wrapper keys (Item_N, Record_N) from extraction results. Fully backward compatible. Test Studio now displays Error Capture at Review Budget (30%) showing percentage of errors caught when reviewing lowest-confidence 30% of data. Format: "46% (1.52x)". New column in field metrics table (gear-icon configurable) and in Additional Metrics section.
+
 ### Changed
-- **10-15x faster test aggregation** — Large test runs (2000+ docs) now use parallel S3 loading (ThreadPoolExecutor, 20 workers)
-- **Cost queries use date-partition filtering** — Athena metering queries now filter by date partition for correctness and performance
+- **Default Chat-with-Document model promoted to `us.anthropic.claude-opus-4-8:1m`** — chat defaults now point at the newer Opus generation. EU deployments map automatically to `eu.anthropic.claude-opus-4-8:1m` via `UpdateConfiguration`. Existing custom configs are unaffected.
 
 ### Fixed
-- Fixed empty cost breakdown for large tests by adding date-partition filter to Athena query
-- Fixed ECARB budget key format (0.3 → 0.30) to match Stickler output
+
+- **Agentic extraction now respects 128K output limit for Claude Opus 4.7+** — `_build_model_config` previously matched these models against the generic `claude-(opus|sonnet|haiku)-4` regex and silently capped them at 64K, contradicting the 128K declared in `model_config_limits.yaml`. A dedicated branch now returns 128K for opus-4-7 and opus-4-8.
+
+## Templates
+   - us-west-2: `https://s3.us-west-2.amazonaws.com/aws-ml-blog-us-west-2/artifacts/genai-idp/idp-main_0.5.13.yaml`
+   - us-east-1: `https://s3.us-east-1.amazonaws.com/aws-ml-blog-us-east-1/artifacts/genai-idp/idp-main_0.5.13.yaml`
+   - eu-central-1: `https://s3.eu-central-1.amazonaws.com/aws-ml-blog-eu-central-1/artifacts/genai-idp/idp-main_0.5.13.yaml`
 
 ## [0.5.12]
 
 ### Added
-
-- **Stickler v0.4.0 upgrade with confidence calibration metrics** — upgraded evaluation engine from Stickler v0.1.4/v0.1.5 to v0.4.0, adding ECE (Expected Calibration Error), Brier score, and AUROC metrics for confidence analysis. New `ConfidenceMetricsCalculator` in `idp_common.evaluation.confidence_integration` computes calibration metrics at overall and per-field levels. Test aggregation results now include `confidence_metrics` field with comprehensive calibration data. Confidence aggregation logic moved from frontend to backend (test execution aggregation function) for cleaner architecture. Evaluation service patches `field_comparisons` with `field_path` for ConfidenceCalculator compatibility and uses structural detection to unwrap wrapper keys (Item_N, Record_N) from extraction results. Fully backward compatible.
 
 - **Test Studio: Abort running test runs** — Test runs with status `QUEUED` or `RUNNING` can now be aborted from both the Web UI and CLI. The abort operation stops all pending document processing workflows, preserves results from already-completed documents, and updates the test run status to `ABORTED`. Metrics are automatically calculated for completed documents. The Web UI displays an "Abort" button next to running tests, and the CLI provides an `idp-cli abort-test-run` command with confirmation prompts. Aborted test runs show accurate completion counts (e.g., "48/50 files processed") and allow viewing partial results including evaluation metrics and cost breakdowns for successfully processed documents.
 
