@@ -6,6 +6,7 @@ SPDX-License-Identifier: MIT-0
 ## [Unreleased]
 
 ### Added
+- **Metric info tooltips** — All Test Studio metrics now include info icons with explanatory tooltips. Covers accuracy metrics (Precision, Recall, F1, Accuracy), confidence calibration metrics (AUROC, ECE, Brier, ECARB@30, Coverage Ratio), confusion matrix components (TP, FP, TN, FN), error rates (False Alarm Rate, False Discovery Rate), aggregate metrics (Avg Confidence, Avg Accuracy, Avg Weighted Score), and split classification metrics (Page Level Accuracy, Split Accuracy With/Without Order, Total Pages/Splits). Tooltips link to Wikipedia or Stickler documentation. Available in both TestResults and TestComparison views. Clicking info icons does not trigger table sorting.
 
 - **Claude Opus 4.8 Model Support** — Added `anthropic.claude-opus-4-8` (and `:1m` context variant) across all `us`, `eu`, and `global` inference profiles. Includes unified template enums, UI model dropdowns, cachepoint support, EU region mappings, pricing entries, and documentation updates. Model is recognized as a Claude 4.7+ variant — the same temperature/top_p/top_k handling and 128K extended-output limit apply.
 

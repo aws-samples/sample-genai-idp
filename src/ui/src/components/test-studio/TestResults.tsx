@@ -33,6 +33,7 @@ import useConfigurationVersions from '../../hooks/use-configuration-versions';
 import TestStudioHeader from './TestStudioHeader';
 import useAppContext from '../../contexts/app';
 import { formatConfigVersionLink } from './utils/configVersionUtils';
+import MetricInfo, { ACCURACY_METRIC_MAP, SPLIT_METRIC_MAP } from './utils/MetricInfo';
 import {
   parseCostBreakdown,
   calculateAvgCostPerPage,
@@ -99,6 +100,7 @@ const ComprehensiveBreakdown = ({
                     metric: (
                       <>
                         <span style={{ color: '#687078' }}>Extraction:</span> Weighted Overall Score
+                        <MetricInfo metric="Avg Weighted Score" />
                       </>
                     ),
                     value: averageWeightedScore.toFixed(3),
@@ -112,6 +114,7 @@ const ComprehensiveBreakdown = ({
                       metric: (
                         <>
                           <span style={{ color: '#687078' }}>Classification:</span> Page Level Accuracy
+                          <MetricInfo metric="Page Level Accuracy" />
                         </>
                       ),
                       value:
@@ -126,6 +129,7 @@ const ComprehensiveBreakdown = ({
                       metric: (
                         <>
                           <span style={{ color: '#687078' }}>Classification:</span> Split Accuracy With Order
+                          <MetricInfo metric="Split Accuracy With Order" />
                         </>
                       ),
                       value:
@@ -139,7 +143,7 @@ const ComprehensiveBreakdown = ({
                 return mainItems;
               })()}
               columnDefinitions={[
-                { id: 'metric', header: 'Metric', cell: (item) => item.metric, width: 400 },
+                { id: 'metric', header: 'Metric', cell: (item) => item.metric, width: 410 },
                 { id: 'value', header: 'Value', cell: (item) => item.value, width: 200 },
               ]}
               variant="embedded"
@@ -153,15 +157,39 @@ const ComprehensiveBreakdown = ({
                   items={[
                     // All accuracy breakdown metrics
                     ...(accuracyBreakdown
-                      ? Object.entries(accuracyBreakdown).map(([key, value]) => ({
-                          metric: (
-                            <>
-                              <span style={{ color: '#687078' }}>Extraction:</span>{' '}
-                              {key.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase())}
-                            </>
-                          ),
-                          value: value !== null && value !== undefined ? value.toFixed(3) : '0.000',
-                        }))
+                      ? Object.entries(accuracyBreakdown).map(([key, value]) => {
+                          const displayName = key.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase());
+                          // Map backend keys to MetricInfo keys
+                          const extendedMetricMap: Record<
+                            string,
+                            | 'Accuracy'
+                            | 'Precision'
+                            | 'Recall'
+                            | 'F1'
+                            | 'False Alarm Rate'
+                            | 'False Discovery Rate'
+                            | 'Avg Accuracy'
+                            | 'Avg Confidence'
+                          > = {
+                            average_accuracy: 'Avg Accuracy',
+                            avg_confidence: 'Avg Confidence',
+                            f1_score: 'F1',
+                            false_alarm_rate: 'False Alarm Rate',
+                            false_discovery_rate: 'False Discovery Rate',
+                            ...ACCURACY_METRIC_MAP,
+                          };
+                          const metricKey = extendedMetricMap[key];
+
+                          return {
+                            metric: (
+                              <>
+                                <span style={{ color: '#687078' }}>Extraction:</span> {displayName}
+                                {metricKey && <MetricInfo metric={metricKey} />}
+                              </>
+                            ),
+                            value: value !== null && value !== undefined ? value.toFixed(3) : '0.000',
+                          };
+                        })
                       : []),
                     // Confidence calibration metrics (Stickler v0.4.0+)
                     ...(() => {
@@ -177,6 +205,7 @@ const ComprehensiveBreakdown = ({
                             metric: (
                               <>
                                 <span style={{ color: '#687078' }}>Confidence:</span> AUROC
+                                <MetricInfo metric="AUROC" />
                               </>
                             ),
                             value: overall.auroc.value.toFixed(3),
@@ -187,6 +216,7 @@ const ComprehensiveBreakdown = ({
                             metric: (
                               <>
                                 <span style={{ color: '#687078' }}>Confidence:</span> ECE (Calibration Error)
+                                <MetricInfo metric="ECE" />
                               </>
                             ),
                             value: overall.ece.value.toFixed(3),
@@ -197,6 +227,7 @@ const ComprehensiveBreakdown = ({
                             metric: (
                               <>
                                 <span style={{ color: '#687078' }}>Confidence:</span> Brier Score
+                                <MetricInfo metric="Brier" />
                               </>
                             ),
                             value: overall.brier.value.toFixed(3),
@@ -212,6 +243,7 @@ const ComprehensiveBreakdown = ({
                             metric: (
                               <>
                                 <span style={{ color: '#687078' }}>Confidence:</span> ECARB@30
+                                <MetricInfo metric="ECARB@30" />
                               </>
                             ),
                             value: `${(ecarb30.pct_errors_caught * 100).toFixed(0)}% (${ecarb30.gain?.toFixed(2)}x)`,
@@ -224,6 +256,7 @@ const ComprehensiveBreakdown = ({
                           metric: (
                             <>
                               <span style={{ color: '#687078' }}>Confidence:</span> Coverage Ratio
+                              <MetricInfo metric="Coverage Ratio" />
                             </>
                           ),
                           value: `${(coverage.ratio * 100).toFixed(1)}% (${coverage.fields_with_confidence}/${coverage.fields_total})`,
@@ -236,24 +269,30 @@ const ComprehensiveBreakdown = ({
                     ...(splitClassificationMetrics
                       ? Object.entries(splitClassificationMetrics)
                           .filter(([key]) => key !== 'page_level_accuracy' && key !== 'split_accuracy_with_order')
-                          .map(([key, value]) => ({
-                            metric: (
-                              <>
-                                <span style={{ color: '#687078' }}>Classification:</span>{' '}
-                                {key.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase())}
-                              </>
-                            ),
-                            value:
-                              typeof value === 'number' && key.includes('accuracy')
-                                ? value.toFixed(3)
-                                : value !== null && value !== undefined
-                                  ? value.toString()
-                                  : '0',
-                          }))
+                          .map(([key, value]) => {
+                            const displayName = key.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase());
+                            // Map backend keys to MetricInfo keys
+                            const mappedMetric = SPLIT_METRIC_MAP[key];
+
+                            return {
+                              metric: (
+                                <>
+                                  <span style={{ color: '#687078' }}>Classification:</span> {displayName}
+                                  {mappedMetric && <MetricInfo metric={mappedMetric} />}
+                                </>
+                              ),
+                              value:
+                                typeof value === 'number' && key.includes('accuracy')
+                                  ? value.toFixed(3)
+                                  : value !== null && value !== undefined
+                                    ? value.toString()
+                                    : '0',
+                            };
+                          })
                       : []),
                   ]}
                   columnDefinitions={[
-                    { id: 'metric', header: 'Metric', cell: (item) => item.metric, width: 400 },
+                    { id: 'metric', header: 'Metric', cell: (item) => item.metric, width: 410 },
                     { id: 'value', header: 'Value', cell: (item) => item.value, width: 200 },
                   ]}
                   variant="embedded"
@@ -435,46 +474,133 @@ const ComprehensiveBreakdown = ({
               },
               sortingField: 'fieldName',
             },
-            { id: 'accuracy', header: 'Accuracy', cell: (item: (typeof displayItems)[0]) => item.accuracy, sortingField: 'accuracy' },
+            {
+              id: 'accuracy',
+              header: (
+                <>
+                  Accuracy
+                  <MetricInfo metric="Accuracy" />
+                </>
+              ),
+              cell: (item: (typeof displayItems)[0]) => item.accuracy,
+              sortingField: 'accuracy',
+            },
             {
               id: 'precision',
-              header: 'Precision',
+              header: (
+                <>
+                  Precision
+                  <MetricInfo metric="Precision" />
+                </>
+              ),
               cell: (item: (typeof displayItems)[0]) => item.precision,
               sortingField: 'precision',
             },
-            { id: 'recall', header: 'Recall', cell: (item: (typeof displayItems)[0]) => item.recall, sortingField: 'recall' },
+            {
+              id: 'recall',
+              header: (
+                <>
+                  Recall
+                  <MetricInfo metric="Recall" />
+                </>
+              ),
+              cell: (item: (typeof displayItems)[0]) => item.recall,
+              sortingField: 'recall',
+            },
             ...(hasConfidenceData
               ? [
                   {
                     id: 'auroc',
-                    header: 'AUROC',
+                    header: (
+                      <>
+                        AUROC
+                        <MetricInfo metric="AUROC" />
+                      </>
+                    ),
                     cell: (item: (typeof displayItems)[0]) => item.auroc,
                     sortingField: 'auroc',
+                    minWidth: 145,
                   },
                   {
                     id: 'ece',
-                    header: 'ECE',
+                    header: (
+                      <>
+                        ECE
+                        <MetricInfo metric="ECE" />
+                      </>
+                    ),
                     cell: (item: (typeof displayItems)[0]) => item.ece,
                     sortingField: 'ece',
                   },
                   {
                     id: 'brier',
-                    header: 'Brier',
+                    header: (
+                      <>
+                        Brier
+                        <MetricInfo metric="Brier" />
+                      </>
+                    ),
                     cell: (item: (typeof displayItems)[0]) => item.brier,
                     sortingField: 'brier',
                   },
                   {
                     id: 'ecab30',
-                    header: 'ECARB@30',
+                    header: (
+                      <>
+                        ECARB@30
+                        <MetricInfo metric="ECARB@30" />
+                      </>
+                    ),
                     cell: (item: (typeof displayItems)[0]) => item.ecab30,
                     sortingField: 'ecab30',
+                    minWidth: 160,
                   },
                 ]
               : []),
-            { id: 'tp', header: 'TP', cell: (item: (typeof displayItems)[0]) => item.tp, sortingField: 'tp' },
-            { id: 'fp', header: 'FP', cell: (item: (typeof displayItems)[0]) => item.fp, sortingField: 'fp' },
-            { id: 'tn', header: 'TN', cell: (item: (typeof displayItems)[0]) => item.tn, sortingField: 'tn' },
-            { id: 'fn', header: 'FN', cell: (item: (typeof displayItems)[0]) => item.fn, sortingField: 'fn' },
+            {
+              id: 'tp',
+              header: (
+                <>
+                  TP
+                  <MetricInfo metric="TP" />
+                </>
+              ),
+              cell: (item: (typeof displayItems)[0]) => item.tp,
+              sortingField: 'tp',
+            },
+            {
+              id: 'fp',
+              header: (
+                <>
+                  FP
+                  <MetricInfo metric="FP" />
+                </>
+              ),
+              cell: (item: (typeof displayItems)[0]) => item.fp,
+              sortingField: 'fp',
+            },
+            {
+              id: 'tn',
+              header: (
+                <>
+                  TN
+                  <MetricInfo metric="TN" />
+                </>
+              ),
+              cell: (item: (typeof displayItems)[0]) => item.tn,
+              sortingField: 'tn',
+            },
+            {
+              id: 'fn',
+              header: (
+                <>
+                  FN
+                  <MetricInfo metric="FN" />
+                </>
+              ),
+              cell: (item: (typeof displayItems)[0]) => item.fn,
+              sortingField: 'fn',
+            },
           ];
 
           return (
@@ -1158,7 +1284,10 @@ const TestResults = ({ testRunId, setSelectedTestRunId }: TestResultsProps): Rea
             <Box fontSize="heading-l">{avgCostPerPage !== null ? `$${avgCostPerPage.toFixed(4)}` : 'N/A'}</Box>
           </Box>
           <Box>
-            <Box variant="awsui-key-label">Avg Confidence</Box>
+            <Box variant="awsui-key-label">
+              Avg Confidence
+              <MetricInfo metric="Avg Confidence" />
+            </Box>
             <Box fontSize="heading-l">
               {results.averageConfidence !== null && results.averageConfidence !== undefined
                 ? `${((results.averageConfidence as number) * 100).toFixed(1)}%`
@@ -1166,7 +1295,10 @@ const TestResults = ({ testRunId, setSelectedTestRunId }: TestResultsProps): Rea
             </Box>
           </Box>
           <Box>
-            <Box variant="awsui-key-label">Avg Accuracy</Box>
+            <Box variant="awsui-key-label">
+              Avg Accuracy
+              <MetricInfo metric="Avg Accuracy" />
+            </Box>
             <Box fontSize="heading-l">
               {results.overallAccuracy !== null && results.overallAccuracy !== undefined
                 ? (results.overallAccuracy as number).toFixed(3)
@@ -1174,7 +1306,10 @@ const TestResults = ({ testRunId, setSelectedTestRunId }: TestResultsProps): Rea
             </Box>
           </Box>
           <Box>
-            <Box variant="awsui-key-label">Avg Weighted Score</Box>
+            <Box variant="awsui-key-label">
+              Avg Weighted Score
+              <MetricInfo metric="Avg Weighted Score" />
+            </Box>
             <Box fontSize="heading-l">{averageWeightedScore !== null ? averageWeightedScore.toFixed(3) : 'N/A'}</Box>
           </Box>
           <Box>
