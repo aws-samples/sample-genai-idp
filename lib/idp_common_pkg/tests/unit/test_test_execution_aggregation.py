@@ -701,7 +701,13 @@ class TestAggregation:
         # In production, this comes from Stickler's bulk aggregator when schema is provided
         field_metrics = {
             "Agency": {"cm_accuracy": 1.0, "tp": 10, "fp": 0, "fn": 0, "tn": 0},
-            "LineItems.Rate": {"cm_accuracy": 0.80, "tp": 16, "fp": 0, "fn": 4, "tn": 0},
+            "LineItems.Rate": {
+                "cm_accuracy": 0.80,
+                "tp": 16,
+                "fp": 0,
+                "fn": 4,
+                "tn": 0,
+            },
         }
 
         # Enhance with pattern aggregation
@@ -733,7 +739,28 @@ class TestAggregation:
         )
 
         # Validate mean confidence (sum of all 20 line item confidences / 20)
-        expected_mean = (0.95 + 0.92 + 0.88 + 0.94 + 0.91 + 0.97 + 0.89 + 0.65 + 0.93 + 0.90 + 0.72 + 0.96 + 0.88 + 0.94 + 0.68 + 0.91 + 0.87 + 0.92 + 0.58 + 0.95) / 20
+        expected_mean = (
+            0.95
+            + 0.92
+            + 0.88
+            + 0.94
+            + 0.91
+            + 0.97
+            + 0.89
+            + 0.65
+            + 0.93
+            + 0.90
+            + 0.72
+            + 0.96
+            + 0.88
+            + 0.94
+            + 0.68
+            + 0.91
+            + 0.87
+            + 0.92
+            + 0.58
+            + 0.95
+        ) / 20
         actual_mean = line_items_rate["mean_confidence"]
         assert abs(actual_mean - expected_mean) < 0.01, (
             f"Mean confidence should be ~{expected_mean}, got {actual_mean}"
