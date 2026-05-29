@@ -5,8 +5,9 @@ SPDX-License-Identifier: MIT-0
 
 ## [Unreleased]
 
+## [0.5.13]
+
 ### Added
-- **Metric info tooltips** — All Test Studio metrics now include info icons with explanatory tooltips. Covers accuracy metrics (Precision, Recall, F1, Accuracy), confidence calibration metrics (AUROC, ECE, Brier, ECARB@30, Coverage Ratio), confusion matrix components (TP, FP, TN, FN), error rates (False Alarm Rate, False Discovery Rate), aggregate metrics (Avg Confidence, Avg Accuracy, Avg Weighted Score), and split classification metrics (Page Level Accuracy, Split Accuracy With/Without Order, Total Pages/Splits). Tooltips link to Wikipedia or Stickler documentation. Available in both TestResults and TestComparison views. Clicking info icons does not trigger table sorting.
 
 - **Claude Opus 4.8 Model Support** — Added `anthropic.claude-opus-4-8` (and `:1m` context variant) across all `us`, `eu`, and `global` inference profiles. Includes unified template enums, UI model dropdowns, cachepoint support, EU region mappings, pricing entries, and documentation updates. Model is recognized as a Claude 4.7+ variant — the same temperature/top_p/top_k handling and 128K extended-output limit apply.
 
@@ -14,7 +15,10 @@ SPDX-License-Identifier: MIT-0
   
 - **Stickler v0.4.0 upgrade with confidence calibration metrics** — upgraded evaluation engine from Stickler v0.1.4/v0.1.5 to v0.4.0, adding ECE (Expected Calibration Error), Brier score, ECARB@30, and AUROC metrics for confidence analysis. New `ConfidenceMetricsCalculator` in `idp_common.evaluation.confidence_integration` computes calibration metrics at overall and per-field levels. Test aggregation results now include `confidence_metrics` field with comprehensive calibration data. Confidence aggregation logic moved from frontend to backend (test execution aggregation function) for cleaner architecture. Evaluation service patches `field_comparisons` with `field_path` for ConfidenceCalculator compatibility and uses structural detection to unwrap wrapper keys (Item_N, Record_N) from extraction results. Fully backward compatible. Test Studio now displays Error Capture at Review Budget (30%) showing percentage of errors caught when reviewing lowest-confidence 30% of data. Format: "46% (1.52x)". New column in field metrics table (gear-icon configurable) and in Additional Metrics section.
 
+- **Metric info tooltips** — All Test Studio metrics now include info icons with explanatory tooltips. Covers accuracy metrics (Precision, Recall, F1, Accuracy), confidence calibration metrics (AUROC, ECE, Brier, ECARB@30, Coverage Ratio), confusion matrix components (TP, FP, TN, FN), error rates (False Alarm Rate, False Discovery Rate), aggregate metrics (Avg Confidence, Avg Accuracy, Avg Weighted Score), and split classification metrics (Page Level Accuracy, Split Accuracy With/Without Order, Total Pages/Splits). Tooltips link to Wikipedia or Stickler documentation. Available in both TestResults and TestComparison views. Clicking info icons does not trigger table sorting.
+  
 ### Changed
+
 - **Default Chat-with-Document model promoted to `us.anthropic.claude-opus-4-8:1m`** — chat defaults now point at the newer Opus generation. EU deployments map automatically to `eu.anthropic.claude-opus-4-8:1m` via `UpdateConfiguration`. Existing custom configs are unaffected.
 
 ### Fixed
