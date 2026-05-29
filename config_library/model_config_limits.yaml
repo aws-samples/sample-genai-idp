@@ -27,6 +27,14 @@ model_limits:
     reference: "https://docs.anthropic.com/claude/docs/models-overview#model-comparison"
 
   # ---------------------------------------------------------------------------
+  # Anthropic Claude Opus 4.8 (extended output)
+  # ---------------------------------------------------------------------------
+  - pattern: "claude-opus-4-8"
+    max_output_tokens: 128000
+    description: "Claude Opus 4.8 with 128K max output tokens"
+    reference: "https://docs.anthropic.com/claude/docs/models-overview#model-comparison"
+
+  # ---------------------------------------------------------------------------
   # Anthropic Claude 4.x Models (Sonnet, Haiku, older Opus versions)
   # ---------------------------------------------------------------------------
   # Note: The :1m suffix (extended context) increases INPUT to 1M tokens.

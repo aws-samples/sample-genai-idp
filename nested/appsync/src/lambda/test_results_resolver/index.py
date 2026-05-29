@@ -149,13 +149,14 @@ def handle_cache_update_request(event, context):
             # Calculate metrics
             aggregated_metrics = _aggregate_test_run_metrics(test_run_id)
 
-            # Cache the metrics
+            # Cache the metrics (including new confidence_metrics from Stickler v0.4.0+)
             metrics_to_cache = {
                 "overallAccuracy": aggregated_metrics.get("overall_accuracy"),
                 "weightedOverallScores": aggregated_metrics.get(
                     "weighted_overall_scores", {}
                 ),
                 "averageConfidence": aggregated_metrics.get("average_confidence"),
+                "confidenceMetrics": aggregated_metrics.get("confidence_metrics"),
                 "accuracyBreakdown": aggregated_metrics.get("accuracy_breakdown", {}),
                 "confusionMatrix": aggregated_metrics.get("confusion_matrix", {}),
                 "fieldMetrics": aggregated_metrics.get("field_metrics", {}),
@@ -391,6 +392,7 @@ def get_test_results(test_run_id):
                     "weightedOverallScores", {}
                 ),
                 "averageConfidence": cached_metrics.get("averageConfidence"),
+                "confidenceMetrics": cached_metrics.get("confidenceMetrics"),
                 "accuracyBreakdown": cached_metrics.get("accuracyBreakdown", {}),
                 "confusionMatrix": cached_metrics.get("confusionMatrix", {}),
                 "fieldMetrics": cached_metrics.get("fieldMetrics", {}),
@@ -824,20 +826,37 @@ def _aggregate_test_run_metrics(test_run_id):
                         f"Using Stickler aggregation for test run {test_run_id}"
                     )
 
-                    # Get split metrics and confidence from Athena
+                    # Get split metrics from Athena
                     athena_metrics = _get_evaluation_metrics_from_athena(test_run_id)
                     cost_data = _get_cost_data_from_athena(test_run_id)
 
-                    # Merge Stickler metrics with Athena split metrics and confidence
+                    # Prefer Stickler confidence over Athena (Stickler v0.4.0+ has better calibration)
+                    stickler_avg_confidence = stickler_metrics.get("average_confidence")
+                    athena_avg_confidence = athena_metrics.get("average_confidence")
+
+                    # Use Stickler confidence if available, fallback to Athena
+                    avg_confidence = (
+                        stickler_avg_confidence
+                        if stickler_avg_confidence is not None
+                        else athena_avg_confidence
+                    )
+
+                    # Merge Stickler metrics with Athena split metrics
                     merged_metrics = {
                         **stickler_metrics,
-                        "average_confidence": athena_metrics.get("average_confidence"),
+                        "average_confidence": avg_confidence,
                         "split_classification_metrics": athena_metrics.get(
                             "split_classification_metrics", {}
                         ),
                         "total_cost": cost_data.get("total_cost", 0),
                         "cost_breakdown": cost_data.get("cost_breakdown", {}),
                     }
+
+                    logger.info(
+                        f"Confidence source for {test_run_id}: "
+                        f"{'Stickler' if stickler_avg_confidence is not None else 'Athena'} "
+                        f"(value: {avg_confidence})"
+                    )
                     _invoke_mlflow_logger(
                         test_run_id, merged_metrics, config=test_run_config
                     )
@@ -1163,16 +1182,33 @@ def _get_cost_data_from_athena(test_run_id):
     _validate_sql_input(test_run_id, "test_run_id")
     _validate_sql_input(database, "database")
 
+    # Extract date from test_run_id (format: name-YYYYMMDD-HHMMSS)
+    # Convert to date partition format: YYYY-MM-DD
+    # NOTE: Test runs spanning midnight UTC may have documents in next day's partition.
+    # We query both run_date and run_date+1 to catch cross-midnight documents.
+    date_match = re.search(r'-(\d{4})(\d{2})(\d{2})-', test_run_id)
+    date_filter = ""
+    if date_match:
+        from datetime import datetime, timedelta
+        year, month, day = date_match.groups()
+        run_date = datetime(int(year), int(month), int(day))
+        next_date = run_date + timedelta(days=1)
+        date_str = run_date.strftime('%Y-%m-%d')
+        next_date_str = next_date.strftime('%Y-%m-%d')
+        date_filter = f"AND date IN ('{date_str}', '{next_date_str}')"
+        logger.info(f"Using date filter for cost query: date IN ('{date_str}', '{next_date_str}')")
+
     query = f"""
-    SELECT 
+    SELECT
         context,
         service_api,
         unit,
         SUM(CAST(value AS DOUBLE)) as total_value,
         AVG(CAST(unit_cost AS DOUBLE)) as unit_cost,
         SUM(CAST(estimated_cost AS DOUBLE)) as total_estimated_cost
-    FROM "{database}"."metering" 
+    FROM "{database}"."metering"
     WHERE document_id LIKE '{test_run_id}/%'
+    {date_filter}
     GROUP BY context, service_api, unit
     """  # nosec B608 - validated by _validate_sql_input()
 

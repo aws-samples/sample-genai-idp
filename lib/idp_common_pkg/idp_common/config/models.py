@@ -540,7 +540,7 @@ class ChatConfig(BaseModel):
 
     enabled: bool = Field(default=True, description="Enable Chat-with-Document")
     model: str = Field(
-        default="us.anthropic.claude-opus-4-7:1m",
+        default="us.anthropic.claude-opus-4-8:1m",
         description=(
             "Bedrock model ID used for Chat-with-Document. A large-context "
             "model is recommended because the entire document text is sent "

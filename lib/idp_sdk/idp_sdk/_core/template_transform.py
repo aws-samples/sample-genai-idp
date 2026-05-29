@@ -212,6 +212,12 @@ class HeadlessTemplateTransformer:
             "StepFunctionSubscriptionPublisherLogGroup",
             "StepFunctionSubscriptionRule",
             "StepFunctionSubscriptionPublisherPermission",
+            # Invoked async only by an AppSync resolver in the (removed)
+            # APPSYNCSTACK; with no resolver caller, the function and its
+            # log group are dead weight in headless mode and their dangling
+            # refs to UsersTable/GraphQLApi block stack updates.
+            "ChatWithDocumentProcessorFunction",
+            "ChatWithDocumentProcessorLogGroup",
         }
 
         # ---- Parameters to remove ----
@@ -291,6 +297,8 @@ class HeadlessTemplateTransformer:
             "HasExternalIdPGroupMapping",
             "ShouldMapExternalIdPGroups",
             "CreateExternalAppClient",
+            # Used only by the removed VersionCheckResolverFunction (AppSync UI feature)
+            "HasPublicArtifactsBucket",
         }
 
         # ---- Rules to remove ----
@@ -650,6 +658,11 @@ class HeadlessTemplateTransformer:
             "AgentChatProcessorFunction",
             "AgentProcessorFunction",
             "DiscoveryProcessorFunction",
+            # Publishes circuit-breaker status to AppSync mutations for the
+            # UI; the function still has work to do (state management,
+            # alarm processing) in headless mode, so we keep it but strip
+            # the APPSYNC_API_URL env var and appsync:GraphQL policy.
+            "CircuitBreakerManagerFunction",
         ]
         for func_name in functions_to_convert:
             if func_name in resources:

@@ -14,7 +14,7 @@ chat:
   enabled: true
   # Large-context model recommended (entire document sent in a single prompt).
   # Users can override via the UI model selector on the Chat panel.
-  model: us.anthropic.claude-opus-4-7:1m
+  model: us.anthropic.claude-opus-4-8:1m
   temperature: "0.0"
   top_p: "0.1"
   top_k: "5"

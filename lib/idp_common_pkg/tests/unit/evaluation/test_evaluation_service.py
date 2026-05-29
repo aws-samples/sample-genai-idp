@@ -703,3 +703,154 @@ class TestEvaluationService:
         # Check result
         assert len(result.errors) > 0
         assert "Processing error" in result.errors[0]
+
+    def test_flatten_confidence_scores_with_item_wrappers(self, service):
+        """Test that _flatten_confidence_scores correctly unwraps Item_N wrappers in array elements."""
+        # Simulate the structure seen in RealKIE-FCC-Verified extraction results
+        # where some LineItems have direct fields and others are wrapped in Item_N keys
+        confidence_scores = {
+            "Agency": {"confidence": 0.99, "geometry": []},
+            "LineItems": [
+                {
+                    "LineItemRate": {"confidence": 1.0, "geometry": []},
+                    "LineItemDays": {"confidence": 0.8, "geometry": []},
+                },
+                {
+                    "LineItemRate": {"confidence": 1.0, "geometry": []},
+                    "LineItemDays": {"confidence": 0.95, "geometry": []},
+                },
+                {
+                    "Item_6": {
+                        "LineItemRate": {"confidence": 1.0, "geometry": []},
+                        "LineItemDays": {"confidence": 0.95, "geometry": []},
+                        "LineItemStartDate": {"confidence": 1.0, "geometry": []},
+                    },
+                    "confidence_threshold": 0.9,
+                },
+                {
+                    "Item_7": {
+                        "LineItemRate": {"confidence": 0.95, "geometry": []},
+                        "LineItemDays": {"confidence": 0.9, "geometry": []},
+                    },
+                    "confidence_threshold": 0.9,
+                },
+            ],
+        }
+
+        # Test Rich Value conversion with wrapper keys
+        inference_result = {
+            "Agency": "BUYING TIME, LLC",
+            "LineItems": [
+                {"LineItemRate": 600.0, "LineItemDays": "MTWT---"},
+                {"LineItemRate": 500.0, "LineItemDays": "MTWT---"},
+                {
+                    "LineItemRate": 450.0,
+                    "LineItemDays": "MTWT---",
+                    "LineItemStartDate": "10/09/12",
+                },
+                {"LineItemRate": 400.0, "LineItemDays": "MTWT---"},
+            ],
+        }
+
+        rich_values = service._convert_to_rich_values(
+            inference_result, confidence_scores
+        )
+
+        # Verify Agency field has rich value with confidence
+        assert rich_values["Agency"] == {
+            "_value": "BUYING TIME, LLC",
+            "_confidence": 0.99,
+        }
+
+        # Verify LineItems array items have rich values with confidence
+        assert rich_values["LineItems"][0]["LineItemRate"] == {
+            "_value": 600.0,
+            "_confidence": 1.0,
+        }
+        assert rich_values["LineItems"][0]["LineItemDays"] == {
+            "_value": "MTWT---",
+            "_confidence": 0.8,
+        }
+        assert rich_values["LineItems"][2]["LineItemStartDate"] == {
+            "_value": "10/09/12",
+            "_confidence": 1.0,
+        }
+
+    def test_convert_to_rich_values_with_various_wrapper_patterns(self, service):
+        """Test that _convert_to_rich_values handles nested structures."""
+        # Test nested confidence structures
+        confidence_scores = {
+            "Records": [
+                {
+                    "RecordID": {"confidence": 0.99, "geometry": []},
+                    "RecordDate": {"confidence": 1.0, "geometry": []},
+                },
+                {
+                    "RecordID": {"confidence": 0.95, "geometry": []},
+                    "RecordDate": {"confidence": 0.98, "geometry": []},
+                    "RecordAmount": {"confidence": 0.97, "geometry": []},
+                },
+                {
+                    "RecordID": {"confidence": 0.92, "geometry": []},
+                    "RecordDate": {"confidence": 0.94, "geometry": []},
+                },
+            ]
+        }
+
+        inference_result = {
+            "Records": [
+                {"RecordID": "R001", "RecordDate": "2024-01-01"},
+                {"RecordID": "R002", "RecordDate": "2024-01-02", "RecordAmount": 100.0},
+                {"RecordID": "R003", "RecordDate": "2024-01-03"},
+            ]
+        }
+
+        rich_values = service._convert_to_rich_values(
+            inference_result, confidence_scores
+        )
+
+        # Verify array items have rich values with confidence
+        assert rich_values["Records"][0]["RecordID"] == {
+            "_value": "R001",
+            "_confidence": 0.99,
+        }
+        assert rich_values["Records"][1]["RecordAmount"] == {
+            "_value": 100.0,
+            "_confidence": 0.97,
+        }
+        assert rich_values["Records"][2]["RecordDate"] == {
+            "_value": "2024-01-03",
+            "_confidence": 0.94,
+        }
+
+    def test_convert_to_rich_values_preserves_legitimate_nesting(self, service):
+        """Test that nested objects are correctly converted to rich values."""
+        confidence_scores = {
+            "Invoice": [
+                {
+                    "InvoiceDetails": {
+                        "InvoiceID": {"confidence": 0.99, "geometry": []},
+                    },
+                }
+            ]
+        }
+
+        inference_result = {
+            "Invoice": [
+                {
+                    "InvoiceDetails": {
+                        "InvoiceID": "INV001",
+                    }
+                }
+            ]
+        }
+
+        rich_values = service._convert_to_rich_values(
+            inference_result, confidence_scores
+        )
+
+        # InvoiceDetails nesting should be preserved in rich value structure
+        assert rich_values["Invoice"][0]["InvoiceDetails"]["InvoiceID"] == {
+            "_value": "INV001",
+            "_confidence": 0.99,
+        }

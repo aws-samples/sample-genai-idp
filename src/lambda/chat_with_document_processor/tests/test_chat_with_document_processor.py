@@ -100,7 +100,7 @@ class TestProcessorHappyPath:
             patch.object(
                 index, "_resolve_chat_settings",
                 return_value={
-                    "model_id": "us.anthropic.claude-opus-4-7:1m",
+                    "model_id": "us.anthropic.claude-opus-4-8:1m",
                     "system_prompt": "sys",
                     "temperature": 0.0,
                     "max_tokens": 128,
@@ -300,14 +300,14 @@ class TestProcessorModelIdSuffixes:
 
     @pytest.mark.unit
     def test_1m_suffix_stripped_and_anthropic_beta_passed(self):
-        kwargs = self._invoke_with_model("us.anthropic.claude-opus-4-7:1m")
+        kwargs = self._invoke_with_model("us.anthropic.claude-opus-4-8:1m")
         # Suffix stripped from modelId
-        assert kwargs["modelId"] == "us.anthropic.claude-opus-4-7"
+        assert kwargs["modelId"] == "us.anthropic.claude-opus-4-8"
         # Beta flag sent via additionalModelRequestFields
         assert kwargs.get("additionalModelRequestFields") == {
             "anthropic_beta": ["context-1m-2025-08-07"]
         }
-        # Claude 4.7 → temperature omitted
+        # Claude 4.7+ → temperature omitted
         assert "temperature" not in kwargs["inferenceConfig"]
         # No service tier for :1m alone
         assert "serviceTier" not in kwargs

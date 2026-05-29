@@ -237,7 +237,7 @@ TEMPLATE_URLS = {
 
 
 @click.group()
-@click.version_option(version="0.5.12")
+@click.version_option(version="0.5.13")
 def cli():
     """
     IDP CLI - Batch document processing for IDP Accelerator
@@ -627,10 +627,13 @@ def deploy(
                 value = match.group(2).strip().rstrip(",")
                 additional_params[key] = value
 
-        # When --headless is used, auto-set EnableHeadless=true stack parameter so
-        # users don't need to pass it twice. Explicit --parameters values win.
-        if headless and "EnableHeadless" not in additional_params:
-            additional_params["EnableHeadless"] = "true"
+        # Note: --headless (the CLI flag) controls TEMPLATE TRANSFORMATION
+        # — strip UI / AppSync / Cognito / WAF / Agents / HITL / KB from the
+        # template. The CFN parameter `EnableHeadless=true` is a separate
+        # opt-in for the Private API Gateway (/jobs REST API), which by
+        # design requires a VPC + ApiGatewayVpcEndpointId. Users who want
+        # the Jobs API must pass `--parameters EnableHeadless=true,...VPC params`
+        # explicitly.
 
         # Deploy stack via SDK (build_parameters is called internally by client.stack.deploy)
         # Debug: show custom config path hint before deploy

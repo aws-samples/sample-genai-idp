@@ -48,7 +48,11 @@ sys.modules["idp_common.config"] = _cfg_mod
 # Stub idp_common.bedrock.client.is_claude_4_7_model — used by the processor
 # to decide whether to skip temperature/top_p for Claude 4.7+.
 _bedrock_mod = MagicMock()
-_bedrock_mod.is_claude_4_7_model = lambda model_id: "claude-opus-4-7" in model_id or "claude-4-7" in model_id
+_bedrock_mod.is_claude_4_7_model = lambda model_id: (
+    "claude-opus-4-7" in model_id
+    or "claude-opus-4-8" in model_id
+    or "claude-4-7" in model_id
+)
 sys.modules.setdefault("idp_common.bedrock", MagicMock())
 sys.modules["idp_common.bedrock.client"] = _bedrock_mod
 

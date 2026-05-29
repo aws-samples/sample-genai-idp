@@ -563,32 +563,107 @@ Test Studio uses Stickler's `BulkStructuredModelEvaluator` for accurate metric a
 
 ### Field-Level Metrics
 
-Test results include detailed per-field extraction performance metrics displayed in an interactive table:
+Test results include detailed per-field extraction performance metrics displayed in an interactive table with optional confidence calibration columns (Stickler v0.4.0+):
 
 **Displayed Columns:**
-1. **Field Name**: The name of the extracted field
+1. **Field Name**: The name of the extracted field (hierarchical with expand/collapse)
 2. **Accuracy**: `(TP + TN) / (TP + FP + TN + FN)` - Overall correctness
 3. **Precision**: `TP / (TP + FP)` - Accuracy of positive predictions
 4. **Recall**: `TP / (TP + FN)` - Coverage of actual positives
-5. **TP** (True Positives): Correctly extracted values
-6. **FP** (False Positives): Incorrectly extracted values
-7. **TN** (True Negatives): Correctly identified as absent
-8. **FN** (False Negatives): Missed extractions
+5. **AUROC** (when available): Area Under ROC Curve - how well confidence discriminates correct from incorrect (1.0 = perfect)
+6. **ECE** (when available): Expected Calibration Error - measures calibration quality (0.0 = perfect)
+7. **Brier** (when available): Brier Score - mean squared error between confidence and outcome (0.0 = perfect, 0.25 = random)
+8. **ECARB@30** (when available): Error Capture at Budget 30% - practical metric showing % of errors caught when reviewing lowest-confidence 30% of data, with gain multiplier vs random (e.g., "89% (3.0x)")
+9. **TP** (True Positives): Correctly extracted values
+10. **FP** (False Positives): Incorrectly extracted values
+11. **TN** (True Negatives): Correctly identified as absent
+12. **FN** (False Negatives): Missed extractions
 
 **Features:**
+- **Hierarchical Display**: Nested fields with expand/collapse controls
 - **Searchable**: Filter fields by name to quickly find specific metrics
-- **Sortable**: Click any column header to sort by that metric
+- **Sortable**: Click any column header to sort by that metric (including confidence columns)
+- **Column Preferences**: Show/hide columns via preferences menu (confidence columns auto-added when data available)
 - **Expandable Section**: Collapsed by default to keep results view clean
 - **Paginated**: 10 fields per page for easy navigation
 - **Resizable Columns**: Adjust column widths as needed
+- **Backward Compatible**: Confidence columns only shown for test runs with Stickler v0.4.0+ data
+- **Interactive Help**: Info icons next to metric names provide explanatory tooltips with links to documentation (Wikipedia for standard metrics, Stickler docs for ECARB@30). Available for all accuracy metrics, confidence metrics, confusion matrix components, error rates, and split classification metrics
 
 **How It Works:**
 - Backend stores confusion matrix values (TP, FP, TN, FN) from Stickler aggregation
-- UI calculates Accuracy, Precision, and Recall on-the-fly from these values
+- Backend computes confidence calibration metrics (AUROC, ECE, Brier) using Stickler v0.4.0+ ConfidenceCalculator
+- UI calculates Accuracy, Precision, and Recall on-the-fly from confusion matrix values
+- Confidence columns dynamically appear only when `confidenceMetrics` data is present
 - Metrics displayed with 3 decimal precision (e.g., 0.850)
 
 **Use Cases:**
-- Identify which fields have low extraction accuracy
-- Compare field-level performance across test runs
-- Prioritize prompt engineering efforts on problematic fields
-- Track improvement in specific fields after configuration changes
+- **Extraction Quality**: Identify which fields have low extraction accuracy
+- **Confidence Calibration**: Discover poorly calibrated confidence predictions (high ECE = overconfident or underconfident)
+- **Confidence Discrimination**: Check if confidence separates correct from incorrect predictions (low AUROC = poor discrimination)
+- **Comparison**: Compare field-level performance across test runs
+- **Prioritization**: Prioritize prompt engineering efforts on problematic fields or fields with poor confidence calibration
+- **Tracking**: Track improvement in specific fields after configuration changes
+
+#### Confidence Calibration Metrics (Stickler v0.4.0+)
+
+https://github.com/user-attachments/assets/1d17ea33-f098-4d9e-a461-1113b9dc3ce9
+
+The evaluation engine uses **Stickler v0.4.0** to compute confidence calibration metrics alongside traditional accuracy metrics. These metrics assess how well the model's confidence scores reflect actual correctness.
+
+**What Are Confidence Calibration Metrics?**
+
+When a model extracts a field with 90% confidence, ideally 90% of such predictions should be correct. Calibration metrics measure how closely confidence aligns with accuracy:
+
+| Metric | What It Measures | Perfect Score | Interpretation |
+|--------|------------------|---------------|----------------|
+| **AUROC** | Discrimination: Can confidence separate correct from incorrect predictions? | 1.0 | 0.5 = random guessing, 1.0 = perfect discrimination |
+| **ECE** | Calibration: How far off is confidence from actual accuracy? | 0.0 | 0.0 = perfectly calibrated, >0.1 = poorly calibrated |
+| **Brier** | Overall quality: Mean squared error between confidence and correctness | 0.0 | 0.0 = perfect, 0.25 = random guessing, 1.0 = worst |
+| **ECARB@30** | **The business metric**: Errors caught when reviewing 30% of data (sorted by confidence) | 100% (high gain) | Shows practical value - e.g., "89% (3.0x)" = reviewing lowest-confidence 30% catches 89% of errors, 3x better than random sampling |
+
+**Example Scenarios:**
+
+- **Good AUROC (0.95), Low ECE (0.03)**: Model confidences are well-calibrated and discriminate errors effectively
+- **Good AUROC (0.92), High ECE (0.18)**: Model can distinguish errors but is systematically overconfident or underconfident
+- **Poor AUROC (0.62), Any ECE**: Confidence scores don't correlate with correctness — unreliable even if calibrated
+- **ECARB@30 = 89% (3.0x)**: **The business metric** - If you can only manually review 30% of extracted data, sorting by confidence (lowest first) lets you catch 89% of errors with 3x better efficiency than random sampling. This answers the practical question: "How much value does confidence-guided review provide?"
+
+**How Calibration Metrics Are Computed:**
+
+1. **Document Evaluation**: For each document, the evaluation service:
+   - Flattens confidence scores from extraction results (unwraps wrapper keys like `Item_N`, `Record_N`)
+   - Patches Stickler's comparison results with `field_path` for matching
+   - Stores `stickler_comparison_result` with confidences in `results.json`
+
+2. **Test Aggregation**: When viewing test results, the aggregation function:
+   - Loads all `stickler_comparison_result` records for the test run
+   - Computes calibration metrics (AUROC, ECE, Brier) using Stickler's `ConfidenceMetricsCalculator`
+   - Computes ECAB (Error Capture at Budget) metrics using `BulkStructuredModelEvaluator` with `ErrorCaptureAtBudgetMetric`
+   - Aggregates path-based keys (e.g., `LineItems[0].Rate`) to pattern-based keys (`LineItems.Rate`)
+   - Merges ECAB metrics into the confidence metrics structure
+   - Returns `confidence_metrics` field with overall and per-field calibration data
+
+3. **UI Display**: The test results table:
+   - Displays AUROC, ECE, Brier, and ECARB@30 columns alongside accuracy metrics
+   - ECARB@30 shows as "XX% (Y.Yx)" format (e.g., "89% (3.0x)")
+   - Shows metrics for both leaf fields (e.g., `LineItems.Rate`) and parent fields (e.g., `LineItems`)
+   - Dynamically hides columns when no confidence data is available
+   - Shows "N/A" for fields lacking confidence data
+
+**Known Limitations:**
+
+- **Overall Brier Score**: Stickler v0.4.0's bulk aggregator returns `null` for overall Brier score (implementation pending). However, **field-level Brier scores are computed** via scikit-learn in the test aggregation function and are available in the field metrics table.
+- **Coverage**: Confidence metrics only available for fields where extraction service provided confidence scores
+- **Backward Compatibility**: Test runs executed before Stickler v0.4.0 upgrade will not have confidence calibration data
+
+**Architecture:**
+
+- **Evaluation Service**: `lib/idp_common_pkg/idp_common/evaluation/service.py`
+  - Flattens confidence scores and patches field_comparisons
+- **Confidence Integration**: `lib/idp_common_pkg/idp_common/evaluation/confidence_integration.py`
+  - Wrapper for Stickler's ConfidenceMetricsCalculator
+- **Test Aggregation**: `patterns/unified/src/test_execution_aggregation_function/index.py`
+  - Computes and aggregates calibration metrics across test run
+- **UI Display**: `src/ui/src/components/test-studio/TestResults.tsx`
+  - Renders confidence columns in field metrics table
