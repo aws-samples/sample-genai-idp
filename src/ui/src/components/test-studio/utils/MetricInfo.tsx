@@ -2,6 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 import React from 'react';
 import { Popover, Icon, Link, Box } from '@cloudscape-design/components';
+import { ConsoleLogger } from 'aws-amplify/utils';
+
+const logger = new ConsoleLogger('MetricInfo');
 
 interface MetricConfig {
   description: string;
@@ -37,6 +40,25 @@ interface MetricInfoProps {
     | 'Page Level Accuracy'
     | 'Split Accuracy With Order';
 }
+
+// Backend key to MetricInfo key mappings (exported for use in TestResults and TestComparison)
+export const ACCURACY_METRIC_MAP: Record<string, MetricInfoProps['metric']> = {
+  accuracy: 'Accuracy',
+  precision: 'Precision',
+  recall: 'Recall',
+  f1: 'F1',
+};
+
+export const SPLIT_METRIC_MAP: Record<string, MetricInfoProps['metric']> = {
+  page_level_accuracy: 'Page Level Accuracy',
+  split_accuracy_with_order: 'Split Accuracy With Order',
+  correctly_split_with_order: 'Correctly Split With Order',
+  split_accuracy_without_order: 'Split Accuracy Without Order',
+  correctly_split_without_order: 'Correctly Split Without Order',
+  correctly_classified_pages: 'Correctly Classified Pages',
+  total_pages: 'Total Pages',
+  total_splits: 'Total Splits',
+};
 
 // Centralized metric definitions
 const METRIC_CONFIGS: Record<string, MetricConfig> = {
@@ -154,7 +176,7 @@ const MetricInfo: React.FC<MetricInfoProps> = ({ metric }) => {
   const config = METRIC_CONFIGS[metric];
 
   if (!config) {
-    console.warn(`No configuration found for metric: ${metric}`);
+    logger.warn(`No configuration found for metric: ${metric}`);
     return null;
   }
 
@@ -171,38 +193,38 @@ const MetricInfo: React.FC<MetricInfoProps> = ({ metric }) => {
   };
 
   return (
-    <span
-      onClick={handleClick}
-      onMouseDown={handleClick}
-      onKeyDown={handleKeyDown}
-      role="button"
-      tabIndex={0}
-      aria-label={`Information about ${metric} metric`}
+    <Popover
+      dismissButton={false}
+      position="top"
+      size="small"
+      triggerType="custom"
+      content={
+        <Box variant="p">
+          {config.description}
+          {config.docsUrl && (
+            <>
+              {' '}
+              <Link href={config.docsUrl} external>
+                Learn more
+              </Link>
+            </>
+          )}
+        </Box>
+      }
     >
-      <Popover
-        dismissButton={false}
-        position="top"
-        size="small"
-        triggerType="custom"
-        content={
-          <Box variant="p">
-            {config.description}
-            {config.docsUrl && (
-              <>
-                {' '}
-                <Link href={config.docsUrl} external>
-                  Learn more
-                </Link>
-              </>
-            )}
-          </Box>
-        }
+      <span
+        onClick={handleClick}
+        onKeyDown={handleKeyDown}
+        style={{ cursor: 'pointer' }}
+        role="button"
+        tabIndex={0}
+        aria-label={`Information about ${metric} metric`}
       >
         <Box display="inline" margin={{ left: 'xs' }}>
           <Icon name="status-info" size="small" variant="subtle" />
         </Box>
-      </Popover>
-    </span>
+      </span>
+    </Popover>
   );
 };
 

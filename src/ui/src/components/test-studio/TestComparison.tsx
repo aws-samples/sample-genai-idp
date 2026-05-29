@@ -20,7 +20,7 @@ import TestStudioHeader from './TestStudioHeader';
 import useLocalStorage from '../common/local-storage';
 import useConfigurationVersions from '../../hooks/use-configuration-versions';
 import { formatConfigVersionLink, formatConfigVersionText, type ConfigVersion as UtilsConfigVersion } from './utils/configVersionUtils';
-import MetricInfo from './utils/MetricInfo';
+import MetricInfo, { ACCURACY_METRIC_MAP, SPLIT_METRIC_MAP } from './utils/MetricInfo';
 import {
   parseComparisonMetrics,
   parseWeightedOverallScores,
@@ -708,6 +708,30 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
         });
     }
 
+    // Helper function to extract text from JSX or string for CSV
+    const extractTextForCsv = (field: unknown): string => {
+      if (React.isValidElement(field)) {
+        // Extract text content from JSX fragments
+        const extractText = (node: React.ReactNode): string => {
+          if (typeof node === 'string' || typeof node === 'number') {
+            return String(node);
+          }
+          if (React.isValidElement(node)) {
+            const props = node.props as { children?: React.ReactNode };
+            if (props.children) {
+              return extractText(props.children);
+            }
+          }
+          if (Array.isArray(node)) {
+            return node.map(extractText).join('');
+          }
+          return '';
+        };
+        return extractText(field);
+      }
+      return String(field);
+    };
+
     // Combine all data
     const csvData = [
       headers,
@@ -738,7 +762,9 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
       ...usageRows,
     ];
 
-    const csvContent = csvData.map((row) => row.map((field: unknown) => `"${String(field).replace(/"/g, '""')}"`).join(',')).join('\n'); // nosemgrep: javascript.lang.security.audit.incomplete-sanitization.incomplete-sanitization - Standard RFC 4180 CSV double-quote escaping
+    const csvContent = csvData
+      .map((row) => row.map((field: unknown) => `"${extractTextForCsv(field).replace(/"/g, '""')}"`).join(','))
+      .join('\n'); // nosemgrep: javascript.lang.security.audit.incomplete-sanitization.incomplete-sanitization - Standard RFC 4180 CSV double-quote escaping
 
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement('a');
@@ -1023,6 +1049,7 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
                 },
                 {
                   metric: 'Config Version',
+                  metricKey: 'Config Version',
                   ...Object.fromEntries(
                     Object.entries(completeTestRuns).map(([testRunId, testRun]) => [
                       testRunId,
@@ -1050,6 +1077,7 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
                 },
                 {
                   metric: 'Total Cost',
+                  metricKey: 'Total Cost',
                   ...Object.fromEntries(
                     Object.entries(completeTestRuns).map(([testRunId, testRun]) => [
                       testRunId,
@@ -1089,6 +1117,7 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
                       <MetricInfo metric="Avg Weighted Score" />
                     </>
                   ),
+                  metricKey: 'Average Weighted Overall Score',
                   ...Object.fromEntries(
                     Object.entries(completeTestRuns).map(([testRunId, testRun]) => {
                       if (testRun.weightedOverallScores) {
@@ -1144,17 +1173,17 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
                     const value = item[testRunId];
                     let style = {};
 
-                    if (item.metric === 'Total Cost') {
+                    if (item.metricKey === 'Total Cost') {
                       const allCosts = Object.keys(completeTestRuns).map((id) => item[id]);
                       style = getCostColorGrade(value, allCosts);
-                    } else if (item.metric === 'Average Weighted Overall Score') {
+                    } else if (item.metricKey === 'Average Weighted Overall Score') {
                       const allScores = Object.keys(completeTestRuns).map((id) => item[id]);
                       style = getScoreColorGrade(value, allScores);
                     }
 
                     return (
                       <span style={{ ...style, WebkitPrintColorAdjust: 'exact', colorAdjust: 'exact' }}>
-                        {item.metric === 'Config Version' ? (value as React.ReactNode) : String(value)}
+                        {item.metricKey === 'Config Version' ? (value as React.ReactNode) : String(value)}
                       </span>
                     );
                   },
@@ -1476,7 +1505,7 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
                                     .replace(/_/g, ' ')
                                     .replace(/\b\w/g, (l) => l.toUpperCase());
                                   // Map backend keys to MetricInfo keys
-                                  const metricMap: Record<
+                                  const extendedMetricMap: Record<
                                     string,
                                     | 'Accuracy'
                                     | 'Precision'
@@ -1489,15 +1518,12 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
                                   > = {
                                     average_accuracy: 'Avg Accuracy',
                                     avg_confidence: 'Avg Confidence',
-                                    accuracy: 'Accuracy',
-                                    precision: 'Precision',
-                                    recall: 'Recall',
-                                    f1: 'F1',
                                     f1_score: 'F1',
                                     false_alarm_rate: 'False Alarm Rate',
                                     false_discovery_rate: 'False Discovery Rate',
+                                    ...ACCURACY_METRIC_MAP,
                                   };
-                                  const mappedMetric = metricMap[String(metricKey)];
+                                  const mappedMetric = extendedMetricMap[String(metricKey)];
 
                                   return {
                                     metric: (
@@ -1537,23 +1563,7 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
                                     .replace(/_/g, ' ')
                                     .replace(/\b\w/g, (l) => l.toUpperCase());
                                   // Map backend keys to MetricInfo keys
-                                  const metricMap: Record<
-                                    string,
-                                    | 'Correctly Split With Order'
-                                    | 'Split Accuracy Without Order'
-                                    | 'Correctly Split Without Order'
-                                    | 'Correctly Classified Pages'
-                                    | 'Total Pages'
-                                    | 'Total Splits'
-                                  > = {
-                                    correctly_split_with_order: 'Correctly Split With Order',
-                                    split_accuracy_without_order: 'Split Accuracy Without Order',
-                                    correctly_split_without_order: 'Correctly Split Without Order',
-                                    correctly_classified_pages: 'Correctly Classified Pages',
-                                    total_pages: 'Total Pages',
-                                    total_splits: 'Total Splits',
-                                  };
-                                  const mappedMetric = metricMap[String(metricKey)];
+                                  const mappedMetric = SPLIT_METRIC_MAP[String(metricKey)];
 
                                   return {
                                     metric: (

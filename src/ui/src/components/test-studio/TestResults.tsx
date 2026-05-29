@@ -33,7 +33,7 @@ import useConfigurationVersions from '../../hooks/use-configuration-versions';
 import TestStudioHeader from './TestStudioHeader';
 import useAppContext from '../../contexts/app';
 import { formatConfigVersionLink } from './utils/configVersionUtils';
-import MetricInfo from './utils/MetricInfo';
+import MetricInfo, { ACCURACY_METRIC_MAP, SPLIT_METRIC_MAP } from './utils/MetricInfo';
 import {
   parseCostBreakdown,
   calculateAvgCostPerPage,
@@ -160,7 +160,7 @@ const ComprehensiveBreakdown = ({
                       ? Object.entries(accuracyBreakdown).map(([key, value]) => {
                           const displayName = key.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase());
                           // Map backend keys to MetricInfo keys
-                          const metricMap: Record<
+                          const extendedMetricMap: Record<
                             string,
                             | 'Accuracy'
                             | 'Precision'
@@ -173,15 +173,12 @@ const ComprehensiveBreakdown = ({
                           > = {
                             average_accuracy: 'Avg Accuracy',
                             avg_confidence: 'Avg Confidence',
-                            accuracy: 'Accuracy',
-                            precision: 'Precision',
-                            recall: 'Recall',
-                            f1: 'F1',
                             f1_score: 'F1',
                             false_alarm_rate: 'False Alarm Rate',
                             false_discovery_rate: 'False Discovery Rate',
+                            ...ACCURACY_METRIC_MAP,
                           };
-                          const metricKey = metricMap[key];
+                          const metricKey = extendedMetricMap[key];
 
                           return {
                             metric: (
@@ -275,23 +272,7 @@ const ComprehensiveBreakdown = ({
                           .map(([key, value]) => {
                             const displayName = key.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase());
                             // Map backend keys to MetricInfo keys
-                            const metricMap: Record<
-                              string,
-                              | 'Correctly Split With Order'
-                              | 'Split Accuracy Without Order'
-                              | 'Correctly Split Without Order'
-                              | 'Correctly Classified Pages'
-                              | 'Total Pages'
-                              | 'Total Splits'
-                            > = {
-                              correctly_split_with_order: 'Correctly Split With Order',
-                              split_accuracy_without_order: 'Split Accuracy Without Order',
-                              correctly_split_without_order: 'Correctly Split Without Order',
-                              correctly_classified_pages: 'Correctly Classified Pages',
-                              total_pages: 'Total Pages',
-                              total_splits: 'Total Splits',
-                            };
-                            const mappedMetric = metricMap[key];
+                            const mappedMetric = SPLIT_METRIC_MAP[key];
 
                             return {
                               metric: (
