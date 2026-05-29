@@ -473,6 +473,7 @@ const ComprehensiveBreakdown = ({
                 );
               },
               sortingField: 'fieldName',
+              minWidth: 200,
             },
             {
               id: 'accuracy',
@@ -484,6 +485,7 @@ const ComprehensiveBreakdown = ({
               ),
               cell: (item: (typeof displayItems)[0]) => item.accuracy,
               sortingField: 'accuracy',
+              minWidth: 150,
             },
             {
               id: 'precision',
@@ -495,6 +497,7 @@ const ComprehensiveBreakdown = ({
               ),
               cell: (item: (typeof displayItems)[0]) => item.precision,
               sortingField: 'precision',
+              minWidth: 150,
             },
             {
               id: 'recall',
@@ -506,6 +509,7 @@ const ComprehensiveBreakdown = ({
               ),
               cell: (item: (typeof displayItems)[0]) => item.recall,
               sortingField: 'recall',
+              minWidth: 140,
             },
             ...(hasConfidenceData
               ? [
