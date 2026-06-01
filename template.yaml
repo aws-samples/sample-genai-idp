@@ -8977,6 +8977,7 @@ Resources:
         LogRetentionDays: !Ref LogRetentionDays
         BuildHash: <MULTI_DOC_DISCOVERY_BUILD_HASH_TOKEN>
         ArtifactBucket: "<ARTIFACT_BUCKET_TOKEN>"
+        ArtifactsBucketKmsKeyArn: !Ref ArtifactsBucketKmsKeyArn
         SourceZipfile: "<ARTIFACT_PREFIX_TOKEN>/multi-doc-discovery-source.zip"
         AppSyncApiUrl: !GetAtt GraphQLApi.GraphQLUrl
         AppSyncApiArn: !GetAtt GraphQLApi.Arn

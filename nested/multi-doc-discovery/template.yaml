@@ -79,12 +79,19 @@ Parameters:
     Type: String
     Default: ""
     Description: "(Optional) Session name for sts:AssumeRole into the Bedrock hub-account role."
+  ArtifactsBucketKmsKeyArn:
+    Type: String
+    Description: >
+      Optional KMS key ARN for the artifacts S3 bucket (if KMS-encrypted). When provided,
+      the CodeBuildRole receives kms:Decrypt permission so it can download source zips.
+    Default: ""
 
 Conditions:
   HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
   HasBedrockHubRole: !Not [!Equals [!Ref BedrockHubRoleArn, ""]]
   HasBedrockHubRoleExternalId: !Not [!Equals [!Ref BedrockHubRoleExternalId, ""]]
   HasBedrockHubRoleSessionName: !Not [!Equals [!Ref BedrockHubRoleSessionName, ""]]
+  HasArtifactsBucketKmsKey: !Not [!Equals [!Ref ArtifactsBucketKmsKeyArn, ""]]
 
 Resources:
   ##########################################################################
@@ -183,6 +190,17 @@ Resources:
                   - kms:GenerateDataKey*
                   - kms:DescribeKey
                 Resource: !Ref CustomerManagedEncryptionKeyArn
+              # Grant kms:Decrypt on the artifacts bucket KMS key when provided
+              # This allows CodeBuild to download source zips from a KMS-encrypted artifact bucket
+              - !If
+                - HasArtifactsBucketKmsKey
+                - Effect: Allow
+                  Action:
+                    - kms:Decrypt
+                    - kms:GenerateDataKey*
+                    - kms:DescribeKey
+                  Resource: !Ref ArtifactsBucketKmsKeyArn
+                - !Ref AWS::NoValue
 
   DockerBuildProject:
     Type: AWS::CodeBuild::Project
@@ -371,12 +389,6 @@ Resources:
           DISCOVERY_BUCKET: !Ref DiscoveryBucketName
           CONFIGURATION_TABLE_NAME: !Ref ConfigurationTableName
           APPSYNC_API_URL: !Ref AppSyncApiUrl
-          BEDROCK_ASSUME_ROLE_ARN:
-            !If [HasBedrockHubRole, !Ref BedrockHubRoleArn, !Ref AWS::NoValue]
-          BEDROCK_ASSUME_ROLE_EXTERNAL_ID:
-            !If [HasBedrockHubRoleExternalId, !Ref BedrockHubRoleExternalId, !Ref AWS::NoValue]
-          BEDROCK_ASSUME_ROLE_SESSION_NAME:
-            !If [HasBedrockHubRoleSessionName, !Ref BedrockHubRoleSessionName, !Ref AWS::NoValue]
       LoggingConfig:
         LogGroup: !Ref MultiDocDiscoveryEmbedFunctionLogGroup
       Policies:
@@ -398,13 +410,6 @@ Resources:
                 - !Sub "arn:${AWS::Partition}:bedrock:*::foundation-model/*"
                 - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
                 - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:application-inference-profile/*"
-            # Optional cross-account Bedrock invocation via hub-account role.
-            - !If
-              - HasBedrockHubRole
-              - Effect: Allow
-                Action: sts:AssumeRole
-                Resource: !Ref BedrockHubRoleArn
-              - !Ref AWS::NoValue
             - Effect: Allow
               Action: [cloudwatch:PutMetricData]
               Resource: "*"
@@ -447,12 +452,6 @@ Resources:
           LOG_LEVEL: !Ref LogLevel
           DISCOVERY_BUCKET: !Ref DiscoveryBucketName
           APPSYNC_API_URL: !Ref AppSyncApiUrl
-          BEDROCK_ASSUME_ROLE_ARN:
-            !If [HasBedrockHubRole, !Ref BedrockHubRoleArn, !Ref AWS::NoValue]
-          BEDROCK_ASSUME_ROLE_EXTERNAL_ID:
-            !If [HasBedrockHubRoleExternalId, !Ref BedrockHubRoleExternalId, !Ref AWS::NoValue]
-          BEDROCK_ASSUME_ROLE_SESSION_NAME:
-            !If [HasBedrockHubRoleSessionName, !Ref BedrockHubRoleSessionName, !Ref AWS::NoValue]
       LoggingConfig:
         LogGroup: !Ref MultiDocDiscoveryClusterFunctionLogGroup
       Policies:
@@ -462,13 +461,6 @@ Resources:
             - Effect: Allow
               Action: [kms:Encrypt, kms:Decrypt, kms:ReEncrypt*, kms:GenerateDataKey*, kms:DescribeKey]
               Resource: !Ref CustomerManagedEncryptionKeyArn
-            # Optional cross-account Bedrock invocation via hub-account role.
-            - !If
-              - HasBedrockHubRole
-              - Effect: Allow
-                Action: sts:AssumeRole
-                Resource: !Ref BedrockHubRoleArn
-              - !Ref AWS::NoValue
             - Effect: Allow
               Action: [appsync:GraphQL]
               Resource: !Sub "${AppSyncApiArn}/*"
@@ -508,12 +500,6 @@ Resources:
           LOG_LEVEL: !Ref LogLevel
           DISCOVERY_BUCKET: !Ref DiscoveryBucketName
           CONFIGURATION_TABLE_NAME: !Ref ConfigurationTableName
-          BEDROCK_ASSUME_ROLE_ARN:
-            !If [HasBedrockHubRole, !Ref BedrockHubRoleArn, !Ref AWS::NoValue]
-          BEDROCK_ASSUME_ROLE_EXTERNAL_ID:
-            !If [HasBedrockHubRoleExternalId, !Ref BedrockHubRoleExternalId, !Ref AWS::NoValue]
-          BEDROCK_ASSUME_ROLE_SESSION_NAME:
-            !If [HasBedrockHubRoleSessionName, !Ref BedrockHubRoleSessionName, !Ref AWS::NoValue]
       LoggingConfig:
         LogGroup: !Ref MultiDocDiscoveryAnalyzeFunctionLogGroup
       Policies:
@@ -535,13 +521,6 @@ Resources:
                 - !Sub "arn:${AWS::Partition}:bedrock:*::foundation-model/*"
                 - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
                 - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:application-inference-profile/*"
-            # Optional cross-account Bedrock invocation via hub-account role.
-            - !If
-              - HasBedrockHubRole
-              - Effect: Allow
-                Action: sts:AssumeRole
-                Resource: !Ref BedrockHubRoleArn
-              - !Ref AWS::NoValue
             - Effect: Allow
               Action: [cloudwatch:PutMetricData]
               Resource: "*"
@@ -582,12 +561,6 @@ Resources:
           DISCOVERY_BUCKET: !Ref DiscoveryBucketName
           CONFIGURATION_TABLE_NAME: !Ref ConfigurationTableName
           APPSYNC_API_URL: !Ref AppSyncApiUrl
-          BEDROCK_ASSUME_ROLE_ARN:
-            !If [HasBedrockHubRole, !Ref BedrockHubRoleArn, !Ref AWS::NoValue]
-          BEDROCK_ASSUME_ROLE_EXTERNAL_ID:
-            !If [HasBedrockHubRoleExternalId, !Ref BedrockHubRoleExternalId, !Ref AWS::NoValue]
-          BEDROCK_ASSUME_ROLE_SESSION_NAME:
-            !If [HasBedrockHubRoleSessionName, !Ref BedrockHubRoleSessionName, !Ref AWS::NoValue]
       LoggingConfig:
         LogGroup: !Ref MultiDocDiscoverySaveFunctionLogGroup
       Policies:
@@ -605,13 +578,6 @@ Resources:
                 - !Sub "arn:${AWS::Partition}:bedrock:*::foundation-model/*"
                 - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
                 - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:application-inference-profile/*"
-            # Optional cross-account Bedrock invocation via hub-account role.
-            - !If
-              - HasBedrockHubRole
-              - Effect: Allow
-                Action: sts:AssumeRole
-                Resource: !Ref BedrockHubRoleArn
-              - !Ref AWS::NoValue
             - Effect: Allow
               Action: [cloudwatch:PutMetricData]
               Resource: "*"
