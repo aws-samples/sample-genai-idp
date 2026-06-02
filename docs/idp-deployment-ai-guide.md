@@ -158,6 +158,30 @@ In all paths:
 - Collect all remaining answers as you go and pre-fill them into commands before
   presenting each step.
 
+## Confirmation before deploy
+
+After collecting all parameters and BEFORE presenting the deploy command, show the
+user a summary table of all collected values and the exact `--parameters` string that
+will be used. Ask them to confirm or correct anything before proceeding.
+
+Example:
+"Here's a summary of your deployment configuration:
+
+| Parameter | Value |
+|-----------|-------|
+| Stack name | IDP-PRIVATE |
+| Region | us-east-1 |
+| VPC ID | vpc-0e0d... |
+| ALB Subnets | subnet-aaa,subnet-bbb |
+| ... | ... |
+
+**Parameters string:**
+`WebUIHosting=ALB,ALBVpcId=vpc-0e0d...,ALBSubnetIds=subnet-aaa,subnet-bbb,...`
+
+Does everything look correct? Reply **yes** to proceed or tell me what to change."
+
+Only proceed with the deploy command after the user confirms.
+
 ---END---
 ```
 
@@ -290,6 +314,25 @@ idp-cli deploy \
 | `BUCKET_BASENAME` | Ask after VPC is resolved — see Step P0 note below |
 | `ADMIN_EMAIL` | "What admin email address should receive the temporary login password?" |
 | `CERT_ARN` | "Do you have an existing ACM certificate ARN, or do you need a self-signed cert for testing?" |
+| `S3_UPLOAD_MODE` | See S3 upload mode question below |
+
+**S3 upload mode question (ask after VPC/subnets are resolved):**
+
+"How should browser document uploads reach S3?
+
+- **global** (default, recommended) — presigned URLs use `s3.amazonaws.com`. The
+  browser uploads via NAT Gateway or internet. Works without any special DNS
+  configuration on your corporate network.
+- **vpce** — presigned URLs use the S3 VPC Interface Endpoint hostname
+  (`*.vpce-xxx.s3.<region>.vpce.amazonaws.com`). Only choose this if your
+  network has **no NAT/internet path** AND your corporate DNS can resolve VPCE
+  hostnames from the browser's network.
+
+Reply **global** or **vpce**."
+
+If the user replies **vpce**, set `S3PresignedUrlViaVpcEndpoint=true` in the
+`--parameters` string. If **global** (or the user is unsure), omit it (defaults
+to `false`).
 
 > **Ask about S3 bucket AFTER resolving the VPC**, not before. The `alb-test-vpc.yaml`
 > test VPC template outputs a `ArtifactBucketKeyArn` — a KMS key that is already
@@ -378,6 +421,8 @@ idp-cli deploy \
 
 If the artifact bucket is **KMS-encrypted**, append `,ArtifactsBucketKmsKeyArn=<KMS_KEY_ARN>`
 to the end of the `--parameters` string (before the closing `"`), keeping it all on one line.
+
+If the user chose **vpce** for S3 uploads, also append `,S3PresignedUrlViaVpcEndpoint=true`.
 
 **Success indicator:** `Stack <STACK_NAME> is CREATE_COMPLETE`
 
@@ -535,6 +580,7 @@ parameters.
 | `"PrivateLink access is disabled for the user pool that has ManagedLogin configured"` | A `cognito-idp` VPC endpoint exists but the User Pool has a domain (Hosted UI / Managed Login) | Delete the `cognito-idp` VPC endpoint — Cognito must route through NAT. `deploy-vpc-endpoints.py` no longer creates Cognito endpoints by default |
 | `Target Group Unhealthy` | VPC endpoint ENIs stale or SG misconfigured | Check endpoint SG allows HTTPS 443 from ALB; run `deploy-vpc-endpoints.py` |
 | `Output 'LambdaVpcSecurityGroupId' not found` | Stack was not deployed with `AppSyncVisibility=PRIVATE` | Redeploy stack with `AppSyncVisibility=PRIVATE` |
+| **S3 upload timeout (`NS_Net_Timeout POST` to `*.vpce.amazonaws.com`)** | Browser can't reach S3 VPCE (corporate network lacks DNS/routing) | Set `S3PresignedUrlViaVpcEndpoint=false` (default) so uploads use global S3 via NAT instead of VPCE |
 | **Parameter value ends with `\` (e.g. `subnet-abc\`)** | Backslash line-continuation used inside `--parameters` string | Reformat `--parameters` value as a **single unbroken line** — no `\` inside the quotes |
 
 ---
@@ -550,6 +596,7 @@ parameters.
 | `ALBVpcId` | — | VPC ID |
 | `ALBSubnetIds` | — | comma-separated subnet IDs (≥2 AZs) |
 | `ALBCertificateArn` | — | ACM cert ARN |
+| `S3PresignedUrlViaVpcEndpoint` | — | `false` (default, uploads via NAT) or `true` (uploads via S3 VPCE) |
 | `EnableMCP` | `true` (default) | `false` (requires public endpoint) |
 | `DocumentKnowledgeBase` | `OPENSEARCH_SERVERLESS` or `S3_VECTORS` | `DISABLED` |
 | `ArtifactsBucketKmsKeyArn` | optional | optional (required if bucket is KMS-encrypted) |
