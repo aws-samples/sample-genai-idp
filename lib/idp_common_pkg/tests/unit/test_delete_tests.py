@@ -58,7 +58,10 @@ def test_lambda_handler_success():
         {"Item": {"Files": ["file3.pdf"]}},
     ]
 
-    event = {"identity": {"claims": {"cognito:groups": ["Admin"]}}, "arguments": {"testRunIds": ["test1", "test2"]}}
+    event = {
+        "identity": {"claims": {"cognito:groups": ["Admin"]}},
+        "arguments": {"testRunIds": ["test1", "test2"]},
+    }
     context = Mock()
 
     # Execute
@@ -100,7 +103,10 @@ def test_lambda_handler_test_run_not_found():
     # Reset mock for this test
     index.lambda_client.reset_mock()
 
-    event = {"identity": {"claims": {"cognito:groups": ["Admin"]}}, "arguments": {"testRunIds": ["nonexistent"]}}
+    event = {
+        "identity": {"claims": {"cognito:groups": ["Admin"]}},
+        "arguments": {"testRunIds": ["nonexistent"]},
+    }
     context = Mock()
 
     result = index.lambda_handler(event, context)
@@ -133,7 +139,10 @@ def test_lambda_handler_no_files():
     # Reset mock for this test
     index.lambda_client.reset_mock()
 
-    event = {"identity": {"claims": {"cognito:groups": ["Admin"]}}, "arguments": {"testRunIds": ["test1"]}}
+    event = {
+        "identity": {"claims": {"cognito:groups": ["Admin"]}},
+        "arguments": {"testRunIds": ["test1"]},
+    }
     context = Mock()
 
     result = index.lambda_handler(event, context)
@@ -168,7 +177,10 @@ def test_lambda_handler_client_error():
     # Reset mock for this test
     index.lambda_client.reset_mock()
 
-    event = {"identity": {"claims": {"cognito:groups": ["Admin"]}}, "arguments": {"testRunIds": ["test1"]}}
+    event = {
+        "identity": {"claims": {"cognito:groups": ["Admin"]}},
+        "arguments": {"testRunIds": ["test1"]},
+    }
     context = Mock()
 
     result = index.lambda_handler(event, context)
@@ -184,7 +196,10 @@ def test_lambda_handler_missing_env_vars():
     index.dynamodb.Table.return_value = mock_table
     mock_table.get_item.return_value = {}  # Test run not found
 
-    event = {"identity": {"claims": {"cognito:groups": ["Admin"]}}, "arguments": {"testRunIds": ["test1"]}}
+    event = {
+        "identity": {"claims": {"cognito:groups": ["Admin"]}},
+        "arguments": {"testRunIds": ["test1"]},
+    }
     context = Mock()
 
     # Without environment variables, the Lambda handles gracefully

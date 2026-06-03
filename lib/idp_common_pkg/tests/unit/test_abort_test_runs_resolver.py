@@ -65,7 +65,10 @@ def test_abort_single_test_run_success(mock_env, mock_dynamodb, mock_lambda_clie
             "FilesCount": 2,
         }
     }
-    event = {"identity": {"claims": {"cognito:groups": ["Admin"]}}, "arguments": {"testRunIds": ["test-run-1"]}}
+    event = {
+        "identity": {"claims": {"cognito:groups": ["Admin"]}},
+        "arguments": {"testRunIds": ["test-run-1"]},
+    }
     with patch.object(index, "_wait_for_documents_terminal_state"):
         result = index.lambda_handler(event, None)
     assert result["success"] is True
@@ -93,7 +96,10 @@ def test_abort_test_run_not_found(mock_env, mock_dynamodb):
     spec.loader.exec_module(index)
     # Mock test run not found
     mock_dynamodb.get_item.return_value = {}
-    event = {"identity": {"claims": {"cognito:groups": ["Admin"]}}, "arguments": {"testRunIds": ["non-existent-test-run"]}}
+    event = {
+        "identity": {"claims": {"cognito:groups": ["Admin"]}},
+        "arguments": {"testRunIds": ["non-existent-test-run"]},
+    }
     result = index.lambda_handler(event, None)
     assert result["failedCount"] == 1
     assert result["abortedCount"] == 0
@@ -121,7 +127,10 @@ def test_abort_cannot_abort_completed(mock_env, mock_dynamodb):
     mock_dynamodb.get_item.return_value = {
         "Item": {"Status": "COMPLETE", "Files": ["file1.pdf"], "FilesCount": 1}
     }
-    event = {"identity": {"claims": {"cognito:groups": ["Admin"]}}, "arguments": {"testRunIds": ["completed-test-run"]}}
+    event = {
+        "identity": {"claims": {"cognito:groups": ["Admin"]}},
+        "arguments": {"testRunIds": ["completed-test-run"]},
+    }
     result = index.lambda_handler(event, None)
     assert result["failedCount"] == 1
     assert result["abortedCount"] == 0
@@ -148,7 +157,10 @@ def test_abort_queued_test_run(mock_env, mock_dynamodb, mock_lambda_client):
     mock_dynamodb.get_item.return_value = {
         "Item": {"Status": "QUEUED", "Files": ["file1.pdf"], "FilesCount": 1}
     }
-    event = {"identity": {"claims": {"cognito:groups": ["Admin"]}}, "arguments": {"testRunIds": ["queued-test-run"]}}
+    event = {
+        "identity": {"claims": {"cognito:groups": ["Admin"]}},
+        "arguments": {"testRunIds": ["queued-test-run"]},
+    }
     with patch.object(index, "_wait_for_documents_terminal_state"):
         result = index.lambda_handler(event, None)
     assert result["success"] is True
@@ -271,7 +283,10 @@ def test_abort_updates_completed_at_timestamp(
     mock_dynamodb.get_item.return_value = {
         "Item": {"Status": "RUNNING", "Files": ["file1.pdf"], "FilesCount": 1}
     }
-    event = {"identity": {"claims": {"cognito:groups": ["Admin"]}}, "arguments": {"testRunIds": ["test-run-123"]}}
+    event = {
+        "identity": {"claims": {"cognito:groups": ["Admin"]}},
+        "arguments": {"testRunIds": ["test-run-123"]},
+    }
     with patch.object(index, "_wait_for_documents_terminal_state"):
         index.lambda_handler(event, None)
     # Verify CompletedAt was set
@@ -319,7 +334,10 @@ def test_abort_multiple_test_runs_mixed_results(
         return {}
 
     mock_dynamodb.get_item.side_effect = mock_get_item
-    event = {"identity": {"claims": {"cognito:groups": ["Admin"]}}, "arguments": {"testRunIds": ["test-run-1", "test-run-2", "test-run-3"]}}
+    event = {
+        "identity": {"claims": {"cognito:groups": ["Admin"]}},
+        "arguments": {"testRunIds": ["test-run-1", "test-run-2", "test-run-3"]},
+    }
     with patch.object(index, "_wait_for_documents_terminal_state"):
         result = index.lambda_handler(event, None)
     assert result["abortedCount"] == 1  # test-run-1 succeeds

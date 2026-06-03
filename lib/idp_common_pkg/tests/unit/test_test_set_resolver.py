@@ -32,7 +32,9 @@ with patch.dict(
 
 # Test Studio test-set operations are Admin+Author; supply an authorized
 # Cognito identity on handler events so the defense-in-depth group gate passes.
-_ADMIN_IDENTITY = {"claims": {"cognito:groups": ["Admin"], "email": "admin@example.com"}}
+_ADMIN_IDENTITY = {
+    "claims": {"cognito:groups": ["Admin"], "email": "admin@example.com"}
+}
 
 
 @pytest.mark.unit
