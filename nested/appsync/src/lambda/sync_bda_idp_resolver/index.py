@@ -107,11 +107,29 @@ def handler(event: Dict[str, Any], context) -> Dict[str, Any]:
         explicit_bda_arn = arguments.get('bdaProjectArn')  # Optional: user-provided ARN
         save_arn = arguments.get('saveArn', True)  # Whether to save the ARN to version tracking
 
+        # Defense-in-depth RBAC: syncBdaIdp is an Admin+Author operation. The
+        # schema enforces this via @aws_cognito_user_pools(cognito_groups), but
+        # we also gate it server-side so a Viewer can never reach it even if the
+        # schema directive is missing/misconfigured.
+        caller = _get_caller_info(event)
+        if not ({"Admin", "Author"}.intersection(caller["groups"])):
+            logger.warning(
+                "Forbidden: caller %s (groups=%s) attempted syncBdaIdp",
+                caller["email"],
+                caller["groups"],
+            )
+            return {
+                "success": False,
+                "error": {
+                    "type": "Unauthorized",
+                    "message": "syncBdaIdp requires Admin or Author group",
+                },
+            }
+
         # RBAC: scope-enforce for non-admins. An Author with restricted
         # `allowedConfigVersions` must not be able to invoke syncBdaIdp
         # against a version (and its linked BDA project) outside their
         # scope. Admins are unrestricted.
-        caller = _get_caller_info(event)
         if not caller["is_admin"]:
             allowed_versions = _get_user_allowed_config_versions(caller["email"])
             if allowed_versions and versionName not in allowed_versions:

@@ -28,10 +28,29 @@ def handler(event, context):
     
     # Add comprehensive error handling
     try:
+        # Defense-in-depth RBAC: processChanges is an Admin+Reviewer operation.
+        # The schema enforces this via @aws_cognito_user_pools(cognito_groups),
+        # but we also gate it server-side so a Viewer/Author can never reach it
+        # even if the schema directive is missing/misconfigured.
+        caller_groups = (
+            event.get('identity', {}).get('claims', {}).get('cognito:groups') or []
+        )
+        if isinstance(caller_groups, str):
+            caller_groups = [caller_groups]
+        if not ({'Admin', 'Reviewer'}.intersection(caller_groups)):
+            logger.warning(
+                f"Forbidden: caller (groups={caller_groups}) attempted processChanges"
+            )
+            return {
+                'success': False,
+                'message': 'Unauthorized: processChanges requires Admin or Reviewer group',
+                'processingJobId': None,
+            }
+
         # Extract arguments from the GraphQL event
         args = event.get('arguments', {})
         logger.info(f"Arguments received: {json.dumps(args)}")
-        
+
         object_key = args.get('objectKey')
         modified_sections = args.get('modifiedSections', [])
         modified_pages = args.get('modifiedPages', [])

@@ -66,6 +66,24 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Any:
     
     arguments = event.get("arguments", {})
 
+    # Defense-in-depth RBAC: createFinetuningJob / deleteFinetuningJob are
+    # Admin+Author operations. The schema enforces this via
+    # @aws_cognito_user_pools(cognito_groups), but we also gate it server-side so
+    # a Viewer can never reach it even if the schema directive is missing or
+    # misconfigured. (updateFinetuningJobStatus is @aws_iam / backend-only and
+    # carries no Cognito identity, so it is intentionally not gated here.)
+    if field_name in ("createFinetuningJob", "deleteFinetuningJob"):
+        groups = (event.get("identity") or {}).get("claims", {}).get("cognito:groups") or []
+        if isinstance(groups, str):
+            groups = [groups]
+        if not ({"Admin", "Author"}.intersection(groups)):
+            logger.warning(
+                f"Forbidden: caller (groups={groups}) attempted {field_name}"
+            )
+            raise PermissionError(
+                f"Unauthorized: {field_name} requires Admin or Author group"
+            )
+
     try:
         if field_name == "listFinetuningJobs":
             return list_finetuning_jobs(arguments)

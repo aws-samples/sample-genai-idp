@@ -43,10 +43,32 @@ s3_config = Config(
 s3_client = boto3.client("s3", endpoint_url=_s3_endpoint_url, config=s3_config)
 db_client = DynamoDBClient(table_name=os.environ['TRACKING_TABLE'])
 
+def _caller_in_groups(event, allowed):
+    """Defense-in-depth RBAC check against the caller's Cognito groups.
+
+    The schema restricts these fields via @aws_cognito_user_pools(cognito_groups),
+    but we also enforce the group server-side so the operation is never reachable
+    by an unauthorized caller even if the schema directive is missing or
+    misconfigured (e.g. the prior @aws_auth directive, which AppSync silently
+    ignores on a multi-auth API).
+    """
+    groups = (event.get("identity") or {}).get("claims", {}).get("cognito:groups") or []
+    if isinstance(groups, str):
+        groups = [groups]
+    return bool(set(allowed).intersection(groups))
+
+
 def handler(event, context):
     field_name = event['info']['fieldName']
     logger.info(f"Test set resolver invoked with field_name: {field_name}")
-    
+
+    # Defense-in-depth: all Test Studio test-set operations are Admin+Author.
+    if not _caller_in_groups(event, ("Admin", "Author")):
+        logger.warning(
+            f"Forbidden: caller attempted '{field_name}' without Admin/Author group"
+        )
+        raise Exception(f"Unauthorized: '{field_name}' requires Admin or Author group")
+
     if field_name == 'addTestSet':
         return add_test_set(event['arguments'])
     elif field_name == 'addTestSetFromUpload':
