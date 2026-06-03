@@ -31,6 +31,21 @@ sqs_client = boto3.client('sqs')
 ABORTABLE_STATUSES = {'QUEUED', 'RUNNING'}
 
 
+def _caller_in_groups(event, allowed):
+    """Defense-in-depth RBAC check against the caller's Cognito groups.
+
+    The schema restricts this field via @aws_cognito_user_pools(cognito_groups),
+    but we also enforce the group server-side so the operation is never reachable
+    by an unauthorized caller even if the schema directive is missing or
+    misconfigured (e.g. the prior @aws_auth directive, which AppSync silently
+    ignores on a multi-auth API).
+    """
+    groups = (event.get("identity") or {}).get("claims", {}).get("cognito:groups") or []
+    if isinstance(groups, str):
+        groups = [groups]
+    return bool(set(allowed).intersection(groups))
+
+
 def lambda_handler(event, context):
     """
     Abort test runs by stopping document processing and updating status.
@@ -43,6 +58,16 @@ def lambda_handler(event, context):
         Dict with abort results including counts and errors
     """
     try:
+        # Defense-in-depth: abortTestRuns is an Admin+Author operation.
+        if not _caller_in_groups(event, ("Admin", "Author")):
+            return {
+                "success": False,
+                "message": "Unauthorized: abortTestRuns requires Admin or Author group",
+                "abortedCount": 0,
+                "failedCount": 0,
+                "errors": ["Unauthorized: abortTestRuns requires Admin or Author group"],
+            }
+
         test_run_ids = event['arguments']['testRunIds']
 
         # Validate non-empty input

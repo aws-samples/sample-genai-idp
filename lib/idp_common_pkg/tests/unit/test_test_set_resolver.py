@@ -30,26 +30,49 @@ with patch.dict(
         spec.loader.exec_module(test_set_index)
 
 
+# Test Studio test-set operations are Admin+Author; supply an authorized
+# Cognito identity on handler events so the defense-in-depth group gate passes.
+_ADMIN_IDENTITY = {"claims": {"cognito:groups": ["Admin"], "email": "admin@example.com"}}
+
+
 @pytest.mark.unit
 class TestTestSetResolver:
     def test_handler_field_routing(self):
         """Test that handler routes to correct functions"""
         with patch.object(test_set_index, "add_test_set") as mock_add:
             mock_add.return_value = {"id": "test"}
-            event = {"info": {"fieldName": "addTestSet"}, "arguments": {}}
+            event = {
+                "info": {"fieldName": "addTestSet"},
+                "arguments": {},
+                "identity": _ADMIN_IDENTITY,
+            }
             test_set_index.handler(event, {})
             mock_add.assert_called_once()
 
         with patch.object(test_set_index, "get_test_sets") as mock_get:
             mock_get.return_value = []
-            event = {"info": {"fieldName": "getTestSets"}}
+            event = {"info": {"fieldName": "getTestSets"}, "identity": _ADMIN_IDENTITY}
             test_set_index.handler(event, {})
             mock_get.assert_called_once()
 
     def test_handler_unknown_field(self):
         """Test handler with unknown field"""
-        event = {"info": {"fieldName": "unknown"}, "arguments": {}}
+        event = {
+            "info": {"fieldName": "unknown"},
+            "arguments": {},
+            "identity": _ADMIN_IDENTITY,
+        }
         with pytest.raises(Exception, match="Unknown field: unknown"):
+            test_set_index.handler(event, {})
+
+    def test_handler_rejects_viewer(self):
+        """Defense-in-depth: a Viewer must not reach any test-set operation."""
+        event = {
+            "info": {"fieldName": "addTestSet"},
+            "arguments": {},
+            "identity": {"claims": {"cognito:groups": ["Viewer"]}},
+        }
+        with pytest.raises(Exception, match="requires Admin or Author group"):
             test_set_index.handler(event, {})
 
     @patch("uuid.uuid4")
