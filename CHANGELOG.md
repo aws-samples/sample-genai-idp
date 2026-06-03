@@ -5,6 +5,10 @@ SPDX-License-Identifier: MIT-0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Updated the AppSync APIs** (1) all field-level `@aws_auth(cognito_groups:[…])` directives in `schema.graphql` replaced with `@aws_cognito_user_pools(cognito_groups:[…])`, which AppSync evaluates on multi-auth APIs; (2) server-side Cognito group checks added to every privileged resolver Lambda. 
+
 ## [0.5.13]
 
 ### Added
