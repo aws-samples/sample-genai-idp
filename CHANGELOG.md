@@ -5,9 +5,15 @@ SPDX-License-Identifier: MIT-0
 
 ## [Unreleased]
 
+### Added
+
+- **Test Studio: Edit test set metadata** — Test sets can now be edited to update description (max 500 characters) and document classification type. Edit functionality available via new "Edit" button when a single test set is selected. Classification type metadata options: Unspecified, Single Class, Multi Class, Packet Splitting. Includes new `UpdateTestSetInput` GraphQL input type, `updateTestSet` mutation with `UpdateTestSetResolver` AppSync resolver, Lambda handler routing, and frontend Edit Test Set modal with form validation.
+
 ### Fixed
 
-- **Updated the AppSync APIs** (1) all field-level `@aws_auth(cognito_groups:[…])` directives in `schema.graphql` replaced with `@aws_cognito_user_pools(cognito_groups:[…])`, which AppSync evaluates on multi-auth APIs; (2) server-side Cognito group checks added to every privileged resolver Lambda. 
+- **Evaluation now handles null field descriptions** — Configs with `description: null` no longer cause evaluation failures. The evaluation service now automatically converts null descriptions to empty strings before JSON Schema validation (Stickler requirement). This fix ensures extraction results can be evaluated even when field descriptions are missing or null in config schemas. No functional impact on evaluation logic.
+
+- **Updated the AppSync APIs** (1) all field-level `@aws_auth(cognito_groups:[…])` directives in `schema.graphql` replaced with `@aws_cognito_user_pools(cognito_groups:[…])`, which AppSync evaluates on multi-auth APIs; (2) server-side Cognito group checks added to every privileged resolver Lambda.
 
 - **Navigation cleanup** — removed the "Resources" dropdown (Blog, Code) from the top-right user menu and added a "Blog" link to the top of the Resources section in the left navigation panel.
 

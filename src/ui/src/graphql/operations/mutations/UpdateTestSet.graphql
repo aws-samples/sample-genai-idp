@@ -1,5 +1,5 @@
-query GetTestSets {
-  getTestSets {
+mutation UpdateTestSet($input: UpdateTestSetInput!) {
+  updateTestSet(input: $input) {
     id
     name
     description

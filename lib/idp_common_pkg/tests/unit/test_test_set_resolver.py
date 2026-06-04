@@ -57,6 +57,16 @@ class TestTestSetResolver:
             test_set_index.handler(event, {})
             mock_get.assert_called_once()
 
+        with patch.object(test_set_index, "update_test_set") as mock_update:
+            mock_update.return_value = {"id": "test"}
+            event = {
+                "info": {"fieldName": "updateTestSet"},
+                "arguments": {},
+                "identity": _ADMIN_IDENTITY,
+            }
+            test_set_index.handler(event, {})
+            mock_update.assert_called_once()
+
     def test_handler_unknown_field(self):
         """Test handler with unknown field"""
         event = {
@@ -176,3 +186,334 @@ class TestTestSetResolver:
                 "test-bucket", "*.pdf", modified_after=None
             )
             assert result == ["file1.pdf", "file2.pdf"]
+
+    @patch.dict(
+        os.environ,
+        {"TRACKING_TABLE": "test-table", "TEST_SET_BUCKET": "test-set-bucket"},
+    )
+    def test_update_test_set_description_only(self):
+        """Test updating test set description only"""
+        with patch.object(test_set_index.db_client, "get_item") as mock_get:
+            mock_get.return_value = {
+                "PK": "testset#test-id",
+                "SK": "metadata",
+                "id": "test-id",
+                "name": "test-set",
+                "description": "old description",
+                "filePattern": "*.pdf",
+                "fileCount": 5,
+                "createdAt": "2025-10-17T16:00:00Z",
+                "documentClassType": "SINGLE_CLASS",
+            }
+
+            with patch.object(test_set_index, "boto3") as mock_boto3:
+                mock_table = MagicMock()
+                mock_table.update_item.return_value = {
+                    "Attributes": {
+                        "id": "test-id",
+                        "name": "test-set",
+                        "description": "new description",
+                        "filePattern": "*.pdf",
+                        "fileCount": 5,
+                        "createdAt": "2025-10-17T16:00:00Z",
+                        "documentClassType": "SINGLE_CLASS",
+                    }
+                }
+                mock_boto3.resource.return_value.Table.return_value = mock_table
+
+                args = {"input": {"id": "test-id", "description": "new description"}}
+                result = test_set_index.update_test_set(args)
+
+                # Verify update was called with correct expression
+                mock_table.update_item.assert_called_once()
+                call_args = mock_table.update_item.call_args
+                assert "SET #desc = :desc" in call_args[1]["UpdateExpression"]
+                assert (
+                    call_args[1]["ExpressionAttributeValues"][":desc"]
+                    == "new description"
+                )
+                assert (
+                    call_args[1]["ExpressionAttributeNames"]["#desc"] == "description"
+                )
+
+                # Verify result
+                assert result["id"] == "test-id"
+                assert result["description"] == "new description"
+                assert result["documentClassType"] == "SINGLE_CLASS"
+
+    @patch.dict(
+        os.environ,
+        {"TRACKING_TABLE": "test-table", "TEST_SET_BUCKET": "test-set-bucket"},
+    )
+    def test_update_test_set_document_class_type_only(self):
+        """Test updating test set documentClassType only"""
+        with patch.object(test_set_index.db_client, "get_item") as mock_get:
+            mock_get.return_value = {
+                "PK": "testset#test-id",
+                "SK": "metadata",
+                "id": "test-id",
+                "name": "test-set",
+                "description": "test description",
+                "filePattern": "*.pdf",
+                "fileCount": 5,
+                "createdAt": "2025-10-17T16:00:00Z",
+            }
+
+            with patch.object(test_set_index, "boto3") as mock_boto3:
+                mock_table = MagicMock()
+                mock_table.update_item.return_value = {
+                    "Attributes": {
+                        "id": "test-id",
+                        "name": "test-set",
+                        "description": "test description",
+                        "filePattern": "*.pdf",
+                        "fileCount": 5,
+                        "createdAt": "2025-10-17T16:00:00Z",
+                        "documentClassType": "MULTI_CLASS",
+                    }
+                }
+                mock_boto3.resource.return_value.Table.return_value = mock_table
+
+                args = {"input": {"id": "test-id", "documentClassType": "MULTI_CLASS"}}
+                result = test_set_index.update_test_set(args)
+
+                # Verify update was called with correct expression
+                mock_table.update_item.assert_called_once()
+                call_args = mock_table.update_item.call_args
+                assert (
+                    "SET documentClassType = :docType"
+                    in call_args[1]["UpdateExpression"]
+                )
+                assert (
+                    call_args[1]["ExpressionAttributeValues"][":docType"]
+                    == "MULTI_CLASS"
+                )
+
+                # Verify result
+                assert result["id"] == "test-id"
+                assert result["documentClassType"] == "MULTI_CLASS"
+
+    @patch.dict(
+        os.environ,
+        {"TRACKING_TABLE": "test-table", "TEST_SET_BUCKET": "test-set-bucket"},
+    )
+    def test_update_test_set_remove_document_class_type(self):
+        """Test removing documentClassType by setting to None"""
+        with patch.object(test_set_index.db_client, "get_item") as mock_get:
+            mock_get.return_value = {
+                "PK": "testset#test-id",
+                "SK": "metadata",
+                "id": "test-id",
+                "name": "test-set",
+                "description": "test description",
+                "filePattern": "*.pdf",
+                "fileCount": 5,
+                "createdAt": "2025-10-17T16:00:00Z",
+                "documentClassType": "SINGLE_CLASS",
+            }
+
+            with patch.object(test_set_index, "boto3") as mock_boto3:
+                mock_table = MagicMock()
+                mock_table.update_item.return_value = {
+                    "Attributes": {
+                        "id": "test-id",
+                        "name": "test-set",
+                        "description": "test description",
+                        "filePattern": "*.pdf",
+                        "fileCount": 5,
+                        "createdAt": "2025-10-17T16:00:00Z",
+                    }
+                }
+                mock_boto3.resource.return_value.Table.return_value = mock_table
+
+                args = {"input": {"id": "test-id", "documentClassType": None}}
+                result = test_set_index.update_test_set(args)
+
+                # Verify update was called with REMOVE expression
+                mock_table.update_item.assert_called_once()
+                call_args = mock_table.update_item.call_args
+                assert "REMOVE documentClassType" in call_args[1]["UpdateExpression"]
+                # Should not have :docType in expression values when removing
+                assert ":docType" not in call_args[1].get(
+                    "ExpressionAttributeValues", {}
+                )
+
+                # Verify result has documentClassType as None (removed from DynamoDB)
+                assert result["id"] == "test-id"
+                assert result["documentClassType"] is None
+
+    @patch.dict(
+        os.environ,
+        {"TRACKING_TABLE": "test-table", "TEST_SET_BUCKET": "test-set-bucket"},
+    )
+    def test_update_test_set_both_fields(self):
+        """Test updating both description and documentClassType"""
+        with patch.object(test_set_index.db_client, "get_item") as mock_get:
+            mock_get.return_value = {
+                "PK": "testset#test-id",
+                "SK": "metadata",
+                "id": "test-id",
+                "name": "test-set",
+                "description": "old description",
+                "filePattern": "*.pdf",
+                "fileCount": 5,
+                "createdAt": "2025-10-17T16:00:00Z",
+                "documentClassType": "SINGLE_CLASS",
+            }
+
+            with patch.object(test_set_index, "boto3") as mock_boto3:
+                mock_table = MagicMock()
+                mock_table.update_item.return_value = {
+                    "Attributes": {
+                        "id": "test-id",
+                        "name": "test-set",
+                        "description": "new description",
+                        "filePattern": "*.pdf",
+                        "fileCount": 5,
+                        "createdAt": "2025-10-17T16:00:00Z",
+                        "documentClassType": "PACKET_SPLITTING",
+                    }
+                }
+                mock_boto3.resource.return_value.Table.return_value = mock_table
+
+                args = {
+                    "input": {
+                        "id": "test-id",
+                        "description": "new description",
+                        "documentClassType": "PACKET_SPLITTING",
+                    }
+                }
+                result = test_set_index.update_test_set(args)
+
+                # Verify update was called with both fields in SET clause
+                mock_table.update_item.assert_called_once()
+                call_args = mock_table.update_item.call_args
+                update_expr = call_args[1]["UpdateExpression"]
+                assert "SET" in update_expr
+                assert "#desc = :desc" in update_expr
+                assert "documentClassType = :docType" in update_expr
+                assert (
+                    call_args[1]["ExpressionAttributeValues"][":desc"]
+                    == "new description"
+                )
+                assert (
+                    call_args[1]["ExpressionAttributeValues"][":docType"]
+                    == "PACKET_SPLITTING"
+                )
+
+                # Verify result
+                assert result["id"] == "test-id"
+                assert result["description"] == "new description"
+                assert result["documentClassType"] == "PACKET_SPLITTING"
+
+    @patch.dict(
+        os.environ,
+        {"TRACKING_TABLE": "test-table", "TEST_SET_BUCKET": "test-set-bucket"},
+    )
+    def test_update_test_set_description_and_remove_document_class_type(self):
+        """Test updating description while removing documentClassType"""
+        with patch.object(test_set_index.db_client, "get_item") as mock_get:
+            mock_get.return_value = {
+                "PK": "testset#test-id",
+                "SK": "metadata",
+                "id": "test-id",
+                "name": "test-set",
+                "description": "old description",
+                "filePattern": "*.pdf",
+                "fileCount": 5,
+                "createdAt": "2025-10-17T16:00:00Z",
+                "documentClassType": "SINGLE_CLASS",
+            }
+
+            with patch.object(test_set_index, "boto3") as mock_boto3:
+                mock_table = MagicMock()
+                mock_table.update_item.return_value = {
+                    "Attributes": {
+                        "id": "test-id",
+                        "name": "test-set",
+                        "description": "new description",
+                        "filePattern": "*.pdf",
+                        "fileCount": 5,
+                        "createdAt": "2025-10-17T16:00:00Z",
+                    }
+                }
+                mock_boto3.resource.return_value.Table.return_value = mock_table
+
+                args = {
+                    "input": {
+                        "id": "test-id",
+                        "description": "new description",
+                        "documentClassType": None,
+                    }
+                }
+                result = test_set_index.update_test_set(args)
+
+                # Verify update was called with SET and REMOVE
+                mock_table.update_item.assert_called_once()
+                call_args = mock_table.update_item.call_args
+                update_expr = call_args[1]["UpdateExpression"]
+                assert "SET #desc = :desc" in update_expr
+                assert "REMOVE documentClassType" in update_expr
+                assert (
+                    call_args[1]["ExpressionAttributeValues"][":desc"]
+                    == "new description"
+                )
+
+                # Verify result has documentClassType as None (removed from DynamoDB)
+                assert result["id"] == "test-id"
+                assert result["description"] == "new description"
+                assert result["documentClassType"] is None
+
+    @patch.dict(
+        os.environ,
+        {"TRACKING_TABLE": "test-table", "TEST_SET_BUCKET": "test-set-bucket"},
+    )
+    def test_update_test_set_no_changes(self):
+        """Test update_test_set with no actual changes"""
+        with patch.object(test_set_index.db_client, "get_item") as mock_get:
+            mock_get.return_value = {
+                "PK": "testset#test-id",
+                "SK": "metadata",
+                "id": "test-id",
+                "name": "test-set",
+                "description": "test description",
+                "filePattern": "*.pdf",
+                "fileCount": 5,
+                "createdAt": "2025-10-17T16:00:00Z",
+            }
+
+            with patch.object(test_set_index.db_client, "update_item") as mock_update:
+                args = {"input": {"id": "test-id"}}
+                result = test_set_index.update_test_set(args)
+
+                # Should not call update_item when there are no changes
+                mock_update.assert_not_called()
+
+                # Should return the current item
+                assert result["id"] == "test-id"
+                assert result["description"] == "test description"
+
+    @patch.dict(
+        os.environ,
+        {"TRACKING_TABLE": "test-table", "TEST_SET_BUCKET": "test-set-bucket"},
+    )
+    def test_update_test_set_invalid_description(self):
+        """Test update_test_set with invalid description length"""
+        args = {"input": {"id": "test-id", "description": "x" * 501}}
+
+        with pytest.raises(Exception, match="Description cannot exceed 500 characters"):
+            test_set_index.update_test_set(args)
+
+    @patch.dict(
+        os.environ,
+        {"TRACKING_TABLE": "test-table", "TEST_SET_BUCKET": "test-set-bucket"},
+    )
+    def test_update_test_set_nonexistent_id(self):
+        """Test update_test_set with non-existent test set ID"""
+        with patch.object(test_set_index.db_client, "get_item") as mock_get:
+            mock_get.return_value = None
+
+            args = {"input": {"id": "nonexistent-id", "description": "new description"}}
+
+            with pytest.raises(Exception, match="Test set 'nonexistent-id' not found"):
+                test_set_index.update_test_set(args)

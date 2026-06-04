@@ -566,6 +566,12 @@ type TestSetValidationResponse @aws_cognito_user_pools @aws_iam {
   testSetId: String
 }
 
+enum DocumentClassType {
+  SINGLE_CLASS
+  MULTI_CLASS
+  PACKET_SPLITTING
+}
+
 type TestSet @aws_cognito_user_pools @aws_iam {
   id: String!
   name: String!
@@ -576,18 +582,26 @@ type TestSet @aws_cognito_user_pools @aws_iam {
   createdAt: AWSDateTime!
   error: String
   lastAddResult: String
+  documentClassType: DocumentClassType
 }
 
 input TestSetUploadInput {
   fileName: String!
   fileSize: Int!
   description: String
+  documentClassType: DocumentClassType
 }
 
 input TestSetDocumentsUploadInput {
   testSetId: String!
   fileName: String!
   fileSize: Int!
+}
+
+input UpdateTestSetInput {
+  id: String!
+  description: String
+  documentClassType: DocumentClassType
 }
 
 input FileUploadInfo {
@@ -821,13 +835,15 @@ type Mutation {
     @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])
   abortTestRuns(testRunIds: [String!]!): AbortWorkflowResponse!
     @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])
-  addTestSet(name: String!, description: String, filePattern: String!, bucketType: String!, fileCount: Int!, modifiedAfter: String): TestSet
+  addTestSet(name: String!, description: String, filePattern: String!, bucketType: String!, fileCount: Int!, modifiedAfter: String, documentClassType: DocumentClassType): TestSet
     @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])
   addTestSetFromUpload(input: TestSetUploadInput!): TestSetUploadResponse
     @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])
   addDocumentsToTestSet(testSetId: String!, filePattern: String!, bucketType: String!, fileCount: Int!, modifiedAfter: String): TestSet
     @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])
   addDocumentsToTestSetFromUpload(input: TestSetDocumentsUploadInput!): TestSetUploadResponse
+    @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])
+  updateTestSet(input: UpdateTestSetInput!): TestSet
     @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])
   deleteTestSets(testSetIds: [String!]!): Boolean!
     @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])

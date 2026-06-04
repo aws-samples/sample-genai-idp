@@ -30,7 +30,9 @@ import {
   getTestSets,
   listBucketFiles,
   validateTestFileName,
+  updateTestSet,
 } from '../../graphql/generated';
+import type { DocumentClassType } from '../../graphql/generated/schema-types';
 import { getErrorMessage } from '../../utils/errorUtils';
 
 const client = generateClient();
@@ -53,6 +55,13 @@ const TIME_FILTER_OPTIONS: SelectProps.Option[] = [
   { label: 'Custom date/time', value: 'custom' },
 ];
 
+const DOCUMENT_CLASS_TYPE_OPTIONS: SelectProps.Option[] = [
+  { label: 'Unspecified', value: '' },
+  { label: 'Single Class', value: 'SINGLE_CLASS' },
+  { label: 'Multi Class', value: 'MULTI_CLASS' },
+  { label: 'Packet Splitting', value: 'PACKET_SPLITTING' },
+];
+
 interface TestSetItem {
   id: string;
   name: string;
@@ -63,6 +72,7 @@ interface TestSetItem {
   createdAt: string;
   error?: string | null;
   lastAddResult?: string | null;
+  documentClassType?: string | null;
 }
 
 const TestSets = (): React.JSX.Element => {
@@ -91,12 +101,16 @@ const TestSets = (): React.JSX.Element => {
   });
   const [showAddDocsPatternModal, setShowAddDocsPatternModal] = useState(false);
   const [showAddDocsUploadModal, setShowAddDocsUploadModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editDescription, setEditDescription] = useState('');
+  const [editDocumentClassType, setEditDocumentClassType] = useState(DOCUMENT_CLASS_TYPE_OPTIONS[0]);
   const [selectedTimeFilter, setSelectedTimeFilter] = useState(TIME_FILTER_OPTIONS[0]);
   const [customDate, setCustomDate] = useState('');
   const [customTime, setCustomTime] = useState('00:00:00');
   const [addDocsZipFile, setAddDocsZipFile] = useState<File | null>(null);
   const fileInputRef = React.useRef<HTMLInputElement | null>(null);
   const addDocsFileInputRef = React.useRef<HTMLInputElement | null>(null);
+  const [selectedDocumentClassType, setSelectedDocumentClassType] = useState(DOCUMENT_CLASS_TYPE_OPTIONS[0]);
 
   const loadTestSets = async () => {
     try {
@@ -216,7 +230,7 @@ const TestSets = (): React.JSX.Element => {
   };
 
   const validateDescription = (desc: string): boolean => {
-    return desc.length <= 200;
+    return desc.length <= 500;
   };
 
   const handleAddTestSet = async () => {
@@ -233,7 +247,7 @@ const TestSets = (): React.JSX.Element => {
 
     // Validate description
     if (newTestSetDescription && !validateDescription(newTestSetDescription.trim())) {
-      setError('Description cannot exceed 200 characters');
+      setError('Description cannot exceed 500 characters');
       return;
     }
 
@@ -267,16 +281,31 @@ const TestSets = (): React.JSX.Element => {
 
     setLoading(true);
     try {
+      const variables: {
+        name: string;
+        description: string;
+        filePattern: string;
+        bucketType: string;
+        fileCount: number;
+        modifiedAfter: string | undefined;
+        documentClassType?: DocumentClassType;
+      } = {
+        name: newTestSetName.trim(),
+        description: newTestSetDescription.trim(),
+        filePattern: filePattern.trim(),
+        bucketType: selectedBucket.value ?? '',
+        fileCount,
+        modifiedAfter: getModifiedAfterTimestamp(),
+      };
+
+      // Add documentClassType if specified (not "Unspecified")
+      if (selectedDocumentClassType.value) {
+        variables.documentClassType = selectedDocumentClassType.value as DocumentClassType;
+      }
+
       const result = await client.graphql({
         query: addTestSet,
-        variables: {
-          name: newTestSetName.trim(),
-          description: newTestSetDescription.trim(),
-          filePattern: filePattern.trim(),
-          bucketType: selectedBucket.value ?? '',
-          fileCount,
-          modifiedAfter: getModifiedAfterTimestamp(),
-        },
+        variables,
       });
 
       console.log('GraphQL result:', result);
@@ -302,6 +331,7 @@ const TestSets = (): React.JSX.Element => {
         setFilePattern('');
         setSelectedBucket(BUCKET_OPTIONS[0]);
         setSelectedTimeFilter(TIME_FILTER_OPTIONS[0]);
+        setSelectedDocumentClassType(DOCUMENT_CLASS_TYPE_OPTIONS[0]);
         setCustomDate('');
         setCustomTime('00:00:00');
         setFileCount(0);
@@ -334,7 +364,7 @@ const TestSets = (): React.JSX.Element => {
 
     // Validate description
     if (newTestSetDescription && !validateDescription(newTestSetDescription.trim())) {
-      setError('Description cannot exceed 200 characters');
+      setError('Description cannot exceed 500 characters');
       return;
     }
 
@@ -372,15 +402,25 @@ const TestSets = (): React.JSX.Element => {
 
     setLoading(true);
     try {
+      const input: {
+        fileName: string;
+        fileSize: number;
+        description: string;
+        documentClassType?: DocumentClassType;
+      } = {
+        fileName: zipFile.name,
+        fileSize: zipFile.size,
+        description: newTestSetDescription.trim(),
+      };
+
+      // Add documentClassType if specified (not "Unspecified")
+      if (selectedDocumentClassType.value) {
+        input.documentClassType = selectedDocumentClassType.value as DocumentClassType;
+      }
+
       const result = await client.graphql({
         query: addTestSetFromUpload,
-        variables: {
-          input: {
-            fileName: zipFile.name,
-            fileSize: zipFile.size,
-            description: newTestSetDescription.trim(),
-          },
-        },
+        variables: { input },
       });
 
       const response = result.data.addTestSetFromUpload;
@@ -435,6 +475,7 @@ const TestSets = (): React.JSX.Element => {
       setShowAddUploadModal(false);
       setNewTestSetName('');
       setNewTestSetDescription('');
+      setSelectedDocumentClassType(DOCUMENT_CLASS_TYPE_OPTIONS[0]);
       setZipFile(null);
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
@@ -462,6 +503,63 @@ const TestSets = (): React.JSX.Element => {
       setError(`Failed to refresh test sets: ${errorMessage}`);
     } finally {
       setRefreshing(false);
+    }
+  };
+
+  const handleEditTestSet = async () => {
+    const selected = selectedItems[0];
+    if (!selected) {
+      setError('No test set selected');
+      return;
+    }
+
+    // Validate description
+    if (editDescription && !validateDescription(editDescription.trim())) {
+      setError('Description cannot exceed 500 characters');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const input: {
+        id: string;
+        description?: string;
+        documentClassType?: DocumentClassType | null;
+      } = {
+        id: selected.id,
+        description: editDescription.trim(),
+      };
+
+      // Add documentClassType if specified (not "Unspecified")
+      if (editDocumentClassType.value) {
+        input.documentClassType = editDocumentClassType.value as DocumentClassType;
+      } else {
+        input.documentClassType = null;
+      }
+
+      const result = await client.graphql({
+        query: updateTestSet,
+        variables: { input },
+      });
+
+      const updatedTestSet = result.data.updateTestSet;
+
+      if (updatedTestSet) {
+        // Update the test set in the list
+        setTestSets((prev) => prev.map((ts) => (ts.id === updatedTestSet.id ? updatedTestSet : ts)));
+        setSuccessMessage(`Successfully updated test set "${updatedTestSet.name}"`);
+        setError('');
+        setShowEditModal(false);
+        setSelectedItems([updatedTestSet]);
+      } else {
+        setError('Failed to update test set - no data returned');
+      }
+    } catch (err) {
+      console.error('Error updating test set:', err);
+      const errorMessage = getErrorMessage(err);
+      setError(`Failed to update test set: ${errorMessage}`);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -651,6 +749,21 @@ const TestSets = (): React.JSX.Element => {
       cell: (item: TestSetItem) => item.fileCount,
     },
     {
+      id: 'documentClassType',
+      header: 'Classification Type',
+      cell: (item: TestSetItem) => {
+        if (!item.documentClassType) {
+          return '-';
+        }
+        const badges: Record<string, React.JSX.Element> = {
+          SINGLE_CLASS: <Badge color="blue">Single Class</Badge>,
+          MULTI_CLASS: <Badge color="green">Multi Class</Badge>,
+          PACKET_SPLITTING: <Badge>Packet Splitting</Badge>,
+        };
+        return badges[item.documentClassType] || item.documentClassType;
+      },
+    },
+    {
       id: 'status',
       header: 'Status',
       cell: (item: TestSetItem) => {
@@ -706,6 +819,22 @@ const TestSets = (): React.JSX.Element => {
             <SpaceBetween direction="horizontal" size="xs">
               <Button iconName="refresh" loading={refreshing} onClick={handleRefresh}>
                 Refresh
+              </Button>
+              <Button
+                iconName="edit"
+                disabled={selectedItems.length !== 1 || loading}
+                onClick={() => {
+                  const selected = selectedItems[0];
+                  if (selected) {
+                    setEditDescription(selected.description || '');
+                    const classTypeOption =
+                      DOCUMENT_CLASS_TYPE_OPTIONS.find((opt) => opt.value === selected.documentClassType) || DOCUMENT_CLASS_TYPE_OPTIONS[0];
+                    setEditDocumentClassType(classTypeOption);
+                    setShowEditModal(true);
+                  }
+                }}
+              >
+                Edit
               </Button>
               <Button iconName="remove" disabled={selectedItems.length === 0 || loading} onClick={() => setShowDeleteModal(true)} />
               <ButtonDropdown
@@ -810,6 +939,7 @@ const TestSets = (): React.JSX.Element => {
           setWarningMessage('');
           setSelectedBucket(BUCKET_OPTIONS[0]);
           setSelectedTimeFilter(TIME_FILTER_OPTIONS[0]);
+          setSelectedDocumentClassType(DOCUMENT_CLASS_TYPE_OPTIONS[0]);
           setCustomDate('');
           setCustomTime('00:00:00');
           setNewTestSetDescription('');
@@ -826,6 +956,7 @@ const TestSets = (): React.JSX.Element => {
                   setWarningMessage('');
                   setSelectedBucket(BUCKET_OPTIONS[0]);
                   setSelectedTimeFilter(TIME_FILTER_OPTIONS[0]);
+                  setSelectedDocumentClassType(DOCUMENT_CLASS_TYPE_OPTIONS[0]);
                   setCustomDate('');
                   setCustomTime('00:00:00');
                   setNewTestSetDescription('');
@@ -868,7 +999,7 @@ const TestSets = (): React.JSX.Element => {
             label="Description"
             description="Optional description for this test set"
             errorText={
-              newTestSetDescription && !validateDescription(newTestSetDescription) ? 'Description cannot exceed 200 characters' : ''
+              newTestSetDescription && !validateDescription(newTestSetDescription) ? 'Description cannot exceed 500 characters' : ''
             }
           >
             <Input
@@ -876,6 +1007,14 @@ const TestSets = (): React.JSX.Element => {
               onChange={({ detail }) => setNewTestSetDescription(detail.value)}
               placeholder="Test set description"
               invalid={!!newTestSetDescription && !validateDescription(newTestSetDescription)}
+            />
+          </FormField>
+
+          <FormField label="Document Classification Type" description="Optional: Specify the type of documents in this test set">
+            <Select
+              selectedOption={selectedDocumentClassType}
+              onChange={({ detail }) => setSelectedDocumentClassType(detail.selectedOption)}
+              options={DOCUMENT_CLASS_TYPE_OPTIONS}
             />
           </FormField>
 
@@ -1035,6 +1174,7 @@ const TestSets = (): React.JSX.Element => {
           setZipFile(null);
           setNewTestSetName('');
           setNewTestSetDescription('');
+          setSelectedDocumentClassType(DOCUMENT_CLASS_TYPE_OPTIONS[0]);
           if (fileInputRef.current) {
             fileInputRef.current.value = '';
           }
@@ -1053,6 +1193,7 @@ const TestSets = (): React.JSX.Element => {
                   setZipFile(null);
                   setNewTestSetName('');
                   setNewTestSetDescription('');
+                  setSelectedDocumentClassType(DOCUMENT_CLASS_TYPE_OPTIONS[0]);
                   if (fileInputRef.current) {
                     fileInputRef.current.value = '';
                   }
@@ -1075,7 +1216,7 @@ const TestSets = (): React.JSX.Element => {
             label="Description"
             description="Optional description for this test set"
             errorText={
-              newTestSetDescription && !validateDescription(newTestSetDescription) ? 'Description cannot exceed 200 characters' : ''
+              newTestSetDescription && !validateDescription(newTestSetDescription) ? 'Description cannot exceed 500 characters' : ''
             }
           >
             <Input
@@ -1083,6 +1224,14 @@ const TestSets = (): React.JSX.Element => {
               onChange={({ detail }) => setNewTestSetDescription(detail.value)}
               placeholder="Test set description"
               invalid={!!newTestSetDescription && !validateDescription(newTestSetDescription)}
+            />
+          </FormField>
+
+          <FormField label="Document Classification Type" description="Optional: Specify the type of documents in this test set">
+            <Select
+              selectedOption={selectedDocumentClassType}
+              onChange={({ detail }) => setSelectedDocumentClassType(detail.selectedOption)}
+              options={DOCUMENT_CLASS_TYPE_OPTIONS}
             />
           </FormField>
 
@@ -1450,6 +1599,62 @@ const TestSets = (): React.JSX.Element => {
             <Box textAlign="center">No matching files found</Box>
           )}
         </Box>
+      </Modal>
+
+      <Modal
+        visible={showEditModal}
+        onDismiss={() => {
+          setShowEditModal(false);
+          setError('');
+        }}
+        header="Edit Test Set"
+        footer={
+          <Box float="right">
+            <SpaceBetween direction="horizontal" size="xs">
+              <Button
+                variant="link"
+                onClick={() => {
+                  setShowEditModal(false);
+                  setError('');
+                }}
+              >
+                Cancel
+              </Button>
+              <Button variant="primary" loading={loading} onClick={handleEditTestSet}>
+                Save
+              </Button>
+            </SpaceBetween>
+          </Box>
+        }
+      >
+        <SpaceBetween size="m">
+          {error && <Alert type="error">{error}</Alert>}
+
+          <FormField label="Test Set Name">
+            <Input value={selectedItems[0]?.name || ''} disabled />
+          </FormField>
+
+          <FormField
+            label="Description"
+            description="Optional description for this test set"
+            errorText={editDescription && !validateDescription(editDescription) ? 'Description cannot exceed 500 characters' : ''}
+          >
+            <Input
+              value={editDescription}
+              onChange={({ detail }) => setEditDescription(detail.value)}
+              placeholder="Test set description"
+              invalid={!!editDescription && !validateDescription(editDescription)}
+            />
+          </FormField>
+
+          <FormField label="Document Classification Type" description="Specify the type of documents in this test set">
+            <Select
+              selectedOption={editDocumentClassType}
+              onChange={({ detail }) => setEditDocumentClassType(detail.selectedOption)}
+              options={DOCUMENT_CLASS_TYPE_OPTIONS}
+            />
+          </FormField>
+        </SpaceBetween>
       </Modal>
 
       <Modal

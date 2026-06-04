@@ -327,6 +327,11 @@ export type Document = DynamoDbBase & {
   WorkflowStatus?: Maybe<Scalars['String']['output']>;
 };
 
+export type DocumentClassType =
+  | 'MULTI_CLASS'
+  | 'PACKET_SPLITTING'
+  | 'SINGLE_CLASS';
+
 export type DocumentCount = {
   count: Scalars['Int']['output'];
 };
@@ -526,6 +531,7 @@ export type Mutation = {
   updateDocumentStatus?: Maybe<Document>;
   updateFinetuningJobStatus?: Maybe<FinetuningJob>;
   updatePricing?: Maybe<UpdatePricingResponse>;
+  updateTestSet?: Maybe<TestSet>;
   updateUser?: Maybe<User>;
   uploadDiscoveryDocument: DisPresignedUrlResponse;
   uploadDocument: PresignedUrlResponse;
@@ -560,6 +566,7 @@ export type MutationAddDocumentsToTestSetFromUploadArgs = {
 export type MutationAddTestSetArgs = {
   bucketType: Scalars['String']['input'];
   description?: InputMaybe<Scalars['String']['input']>;
+  documentClassType?: InputMaybe<DocumentClassType>;
   fileCount: Scalars['Int']['input'];
   filePattern: Scalars['String']['input'];
   modifiedAfter?: InputMaybe<Scalars['String']['input']>;
@@ -819,6 +826,11 @@ export type MutationUpdateFinetuningJobStatusArgs = {
 
 export type MutationUpdatePricingArgs = {
   pricingConfig: Scalars['AWSJSON']['input'];
+};
+
+
+export type MutationUpdateTestSetArgs = {
+  input: UpdateTestSetInput;
 };
 
 
@@ -1247,6 +1259,7 @@ export type TestRunStatus = {
 export type TestSet = {
   createdAt: Scalars['AWSDateTime']['output'];
   description?: Maybe<Scalars['String']['output']>;
+  documentClassType?: Maybe<DocumentClassType>;
   error?: Maybe<Scalars['String']['output']>;
   fileCount?: Maybe<Scalars['Int']['output']>;
   filePattern?: Maybe<Scalars['String']['output']>;
@@ -1264,6 +1277,7 @@ export type TestSetDocumentsUploadInput = {
 
 export type TestSetUploadInput = {
   description?: InputMaybe<Scalars['String']['input']>;
+  documentClassType?: InputMaybe<DocumentClassType>;
   fileName: Scalars['String']['input'];
   fileSize: Scalars['Int']['input'];
 };
@@ -1365,6 +1379,12 @@ export type UpdatePricingResponse = {
   success: Scalars['Boolean']['output'];
 };
 
+export type UpdateTestSetInput = {
+  description?: InputMaybe<Scalars['String']['input']>;
+  documentClassType?: InputMaybe<DocumentClassType>;
+  id: Scalars['String']['input'];
+};
+
 export type User = {
   allowedConfigVersions?: Maybe<Array<Maybe<Scalars['String']['output']>>>;
   createdAt?: Maybe<Scalars['AWSDateTime']['output']>;
@@ -1423,10 +1443,11 @@ export type AddTestSetMutationVariables = Exact<{
   bucketType: Scalars['String']['input'];
   fileCount: Scalars['Int']['input'];
   modifiedAfter?: InputMaybe<Scalars['String']['input']>;
+  documentClassType?: InputMaybe<DocumentClassType>;
 }>;
 
 
-export type AddTestSetMutation = { addTestSet?: { id: string, name: string, description?: string | null, filePattern?: string | null, fileCount?: number | null, createdAt: string } | null };
+export type AddTestSetMutation = { addTestSet?: { id: string, name: string, description?: string | null, filePattern?: string | null, fileCount?: number | null, createdAt: string, documentClassType?: DocumentClassType | null } | null };
 
 export type AddTestSetFromUploadMutationVariables = Exact<{
   input: TestSetUploadInput;
@@ -1690,6 +1711,13 @@ export type UpdatePricingMutationVariables = Exact<{
 
 export type UpdatePricingMutation = { updatePricing?: { success: boolean, message?: string | null, error?: { type?: string | null, message?: string | null } | null } | null };
 
+export type UpdateTestSetMutationVariables = Exact<{
+  input: UpdateTestSetInput;
+}>;
+
+
+export type UpdateTestSetMutation = { updateTestSet?: { id: string, name: string, description?: string | null, filePattern?: string | null, fileCount?: number | null, status?: string | null, createdAt: string, error?: string | null, lastAddResult?: string | null, documentClassType?: DocumentClassType | null } | null };
+
 export type UpdateUserMutationVariables = Exact<{
   userId: Scalars['ID']['input'];
   allowedConfigVersions?: InputMaybe<Array<InputMaybe<Scalars['String']['input']>> | InputMaybe<Scalars['String']['input']>>;
@@ -1865,7 +1893,7 @@ export type GetTestRunsQuery = { getTestRuns?: Array<{ testRunId: string, testSe
 export type GetTestSetsQueryVariables = Exact<{ [key: string]: never; }>;
 
 
-export type GetTestSetsQuery = { getTestSets?: Array<{ id: string, name: string, description?: string | null, filePattern?: string | null, fileCount?: number | null, status?: string | null, createdAt: string, error?: string | null, lastAddResult?: string | null } | null> | null };
+export type GetTestSetsQuery = { getTestSets?: Array<{ id: string, name: string, description?: string | null, filePattern?: string | null, fileCount?: number | null, status?: string | null, createdAt: string, error?: string | null, lastAddResult?: string | null, documentClassType?: DocumentClassType | null } | null> | null };
 
 export type ListAgentJobsQueryVariables = Exact<{
   limit?: InputMaybe<Scalars['Int']['input']>;
