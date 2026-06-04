@@ -57,6 +57,12 @@ export const adminNavItems = [
     items: [
       {
         type: 'link',
+        text: 'Blog',
+        href: 'https://www.amazon.com/genai-idp-accelerator',
+        external: true,
+      },
+      {
+        type: 'link',
         text: 'Documentation',
         href: 'https://aws-solutions-library-samples.github.io/accelerated-intelligent-document-processing-on-aws/',
         external: true,
@@ -106,6 +112,12 @@ export const authorNavItems = [
     items: [
       {
         type: 'link',
+        text: 'Blog',
+        href: 'https://www.amazon.com/genai-idp-accelerator',
+        external: true,
+      },
+      {
+        type: 'link',
         text: 'Documentation',
         href: 'https://aws-solutions-library-samples.github.io/accelerated-intelligent-document-processing-on-aws/',
         external: true,
@@ -142,6 +154,12 @@ export const viewerNavItems = [
     type: 'section',
     text: 'Resources',
     items: [
+      {
+        type: 'link',
+        text: 'Blog',
+        href: 'https://www.amazon.com/genai-idp-accelerator',
+        external: true,
+      },
       {
         type: 'link',
         text: 'Documentation',

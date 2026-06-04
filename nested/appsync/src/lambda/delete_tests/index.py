@@ -18,11 +18,32 @@ lambda_client = boto3.client('lambda')
 s3 = boto3.client('s3')
 
 
+def _caller_in_groups(event, allowed):
+    """Defense-in-depth RBAC check against the caller's Cognito groups.
+
+    The schema restricts this field via @aws_cognito_user_pools(cognito_groups),
+    but we also enforce the group server-side so the operation is never reachable
+    by an unauthorized caller even if the schema directive is missing or
+    misconfigured (e.g. the prior @aws_auth directive, which AppSync silently
+    ignores on a multi-auth API).
+    """
+    groups = (event.get("identity") or {}).get("claims", {}).get("cognito:groups") or []
+    if isinstance(groups, str):
+        groups = [groups]
+    return bool(set(allowed).intersection(groups))
+
+
 def lambda_handler(event, context):
     """
     Delete test runs by removing tracking metadata and calling document delete for all documents.
     """
     try:
+        # Defense-in-depth: deleteTests is an Admin+Author operation.
+        if not _caller_in_groups(event, ("Admin", "Author")):
+            raise PermissionError(
+                "Unauthorized: deleteTests requires Admin or Author group"
+            )
+
         test_run_ids = event['arguments']['testRunIds']
         logger.info(f"Deleting test runs: {test_run_ids}")
         
