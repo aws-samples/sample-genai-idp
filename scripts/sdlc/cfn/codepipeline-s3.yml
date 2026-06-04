@@ -30,9 +30,25 @@ Parameters:
     Description: 'ARN of customer-managed KMS key for encrypting CodePipeline artifacts'
     Default: ''
 
+  VpcId:
+    Type: String
+    Description: '(Optional) VPC ID for CodeBuild to run in private network'
+    Default: ''
+
+  PrivateSubnetIds:
+    Type: CommaDelimitedList
+    Description: '(Optional) Private subnet IDs for CodeBuild VPC config'
+    Default: ''
+
+  CodeBuildSecurityGroupId:
+    Type: String
+    Description: '(Optional) Security group for CodeBuild VPC config'
+    Default: ''
+
 Conditions:
   CreateKMSKey: !Equals [!Ref KMSKeyArn, '']
   CreateCodeBuildRole: !Equals [!Ref CodeBuildRoleArn, '']
+  DeployInVPC: !Not [!Equals [!Ref VpcId, '']]
 
 Resources:
   PipelineKMSKey:
@@ -282,6 +298,30 @@ Resources:
                 Condition:
                   StringEquals:
                     cloudwatch:namespace: GENAIDP
+        - !If
+          - DeployInVPC
+          - PolicyName: VPCNetworkAccess
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - ec2:CreateNetworkInterface
+                    - ec2:DescribeNetworkInterfaces
+                    - ec2:DeleteNetworkInterface
+                    - ec2:DescribeSubnets
+                    - ec2:DescribeSecurityGroups
+                    - ec2:DescribeVpcs
+                    - ec2:DescribeDhcpOptions
+                  Resource: '*'
+                - Effect: Allow
+                  Action:
+                    - ec2:CreateNetworkInterfacePermission
+                  Resource: !Sub 'arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:network-interface/*'
+                  Condition:
+                    StringEquals:
+                      ec2:AuthorizedService: codebuild.amazonaws.com
+          - !Ref AWS::NoValue
 
   ArtifactBucket:
     Type: 'AWS::S3::Bucket'
@@ -358,6 +398,14 @@ Resources:
       Name: app-sdlc
       ServiceRole: !If [CreateCodeBuildRole, !GetAtt CodeBuildRole.Arn, !Ref CodeBuildRoleArn]
       TimeoutInMinutes: 120
+      VpcConfig:
+        !If
+          - DeployInVPC
+          - VpcId: !Ref VpcId
+            Subnets: !Ref PrivateSubnetIds
+            SecurityGroupIds:
+              - !Ref CodeBuildSecurityGroupId
+          - !Ref AWS::NoValue
       Artifacts:
         Type: CODEPIPELINE
       Environment:
