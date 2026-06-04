@@ -1,6 +1,6 @@
 # Dependency Mirroring for Air-Gapped Builds
 
-Generate a complete list of all Python and Node.js dependencies so they can be mirrored into JFrog Artifactory (or similar) for air-gapped, pre-scanned builds.
+Generate a complete list of all Python and Node.js dependencies so they can be mirrored into an artifact repository for air-gapped, pre-scanned builds.
 
 ## Quick Start
 
@@ -44,19 +44,20 @@ The GitHub Actions workflow (`.github/workflows/generate-dep-manifest.yml`) runs
 
 Download manifests from the workflow run's **Artifacts** section (retained 90 days).
 
-## JFrog Artifactory Setup
+## Artifact Repository Setup
+
+The manifests are designed to work with any artifact repository manager (JFrog Artifactory, AWS CodeArtifact, Sonatype Nexus, Azure Artifacts, etc.). Below are examples using a generic remote/virtual repository pattern.
 
 ### Python (PyPI)
 
-1. Create a **Remote Repository** in Artifactory:
+1. Create a **remote repository** that proxies PyPI:
    - Package Type: PyPI
-   - URL: `https://pypi.org`
+   - Upstream URL: `https://pypi.org`
    - (Optional) Set inclusion patterns from the manifest
 
 2. Bulk-cache all packages:
    ```bash
-   # Using the JFrog CLI
-   pip install --index-url https://your-artifactory/api/pypi/pypi-remote/simple \
+   pip install --index-url https://your-repo-manager/api/pypi/pypi-remote/simple \
        -r dist/manifests/python-packages.txt --no-deps --target /tmp/cache
    ```
 
@@ -64,48 +65,39 @@ Download manifests from the workflow run's **Artifacts** section (retained 90 da
    ```ini
    # ~/.pip/pip.conf
    [global]
-   index-url = https://your-artifactory/api/pypi/pypi-virtual/simple
-   trusted-host = your-artifactory
+   index-url = https://your-repo-manager/api/pypi/pypi-virtual/simple
+   trusted-host = your-repo-manager
    ```
 
 ### Node (npm)
 
-1. Create a **Remote Repository** in Artifactory:
+1. Create a **remote repository** that proxies npmjs:
    - Package Type: npm
-   - URL: `https://registry.npmjs.org`
+   - Upstream URL: `https://registry.npmjs.org`
 
 2. Bulk-cache packages:
    ```bash
-   # Install each package to trigger caching in the remote repo
    while IFS= read -r pkg; do
-       npm pack "$pkg" --registry=https://your-artifactory/api/npm/npm-remote/ 2>/dev/null
+       npm pack "$pkg" --registry=https://your-repo-manager/api/npm/npm-remote/ 2>/dev/null
    done < dist/manifests/node-packages.txt
    ```
 
 3. Configure npm for air-gapped builds:
    ```ini
    # .npmrc
-   registry=https://your-artifactory/api/npm/npm-virtual/
+   registry=https://your-repo-manager/api/npm/npm-virtual/
    ```
 
 ### Known Exceptions
 
-- `xlsx` in `src/ui/` uses a tarball URL (`https://cdn.sheetjs.com/...`), not the npm registry. Upload this manually to your Artifactory generic repo.
+- `xlsx` in `src/ui/` uses a tarball URL (`https://cdn.sheetjs.com/...`), not the npm registry. Upload this manually to your repository's generic/raw storage.
 
 ## How It Works
 
 The script (`scripts/generate-dep-manifest.sh`):
 
-1. **Python**: Collects all dependency specs from `lib/*/pyproject.toml` (including optional groups) and all `requirements.txt` files. Filters out internal packages and path references. Feeds them to `uv pip compile` for a single coherent resolution.
+1. **Python**: Parses existing `uv.lock` files for already-resolved packages, then scans `lib/*/pyproject.toml` and all `requirements.txt` files for any additional packages not covered by the lockfiles. Internal packages and path references are filtered out.
 
-2. **Node**: Parses the already-committed `package-lock.json` files with `jq` to extract every resolved package and version. No install step needed.
+2. **Node**: Parses the committed `package-lock.json` files with `jq` to extract every resolved package and version. No install step needed.
 
-## Why Not Committed Lockfiles?
-
-A previous approach generated 47K+ lines of lockfiles committed to the repo. Problems:
-- Unreviewable diffs on every dependency change
-- Drifts out of sync unless manually regenerated
-- Duplicates what `uv.lock` and `package-lock.json` already provide
-- Not directly consumable by JFrog without further parsing
-
-This approach generates the same information on-demand (~5 seconds) and produces JFrog-ready flat manifests.
+Generated manifests are never committed — they live under `dist/` (gitignored) and are always regenerated fresh from the current dependency state.
