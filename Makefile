@@ -403,7 +403,7 @@ dsr-fix: ## Run DSR interactive fix
 	$(PYTHON) scripts/dsr/fix.py
 
 ##@ Dependencies
-dep-manifest: ## Generate dependency manifests for Artifactory mirroring (Python + Node)
+dep-manifest: ## Generate dependency manifests for artifact repository mirroring (Python + Node)
 	@bash scripts/generate-dep-manifest.sh
 
 ##@ Deploy

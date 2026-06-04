@@ -16,6 +16,7 @@ import sys
 import tomllib
 import re
 from pathlib import Path
+from packaging.version import Version
 
 repo_root = Path(sys.argv[1])
 output_file = Path(sys.argv[2])
@@ -56,8 +57,7 @@ for lockfile in sorted(repo_root.rglob("uv.lock")):
             if version == "0.0.0" or is_internal(name):
                 continue
             key = normalize(name)
-            # Keep the highest version if seen in multiple lockfiles
-            if key not in resolved or version > resolved[key].split("==")[1]:
+            if key not in resolved or Version(version) > Version(resolved[key].split("==")[1]):
                 resolved[key] = f"{name}=={version}"
 
 # 2. Collect additional packages from pyproject.toml and requirements.txt
@@ -117,6 +117,12 @@ with open(output_file, "w") as f:
         for pkg in sorted(additional, key=str.lower):
             f.write(pkg + "\n")
 
+if additional:
+    print(
+        f"  WARNING: {len(additional)} packages not in any lockfile: {', '.join(sorted(additional))}",
+        file=sys.stderr,
+    )
+
 total = len(resolved) + len(additional)
 print(f"  {len(resolved)} packages from lockfiles, {len(additional)} additional")
 print(f"  -> {output_file} ({total} total)")
@@ -138,6 +144,8 @@ NODE_LOCKFILES=(
                 | select(.key != "")
                 | (.key | split("node_modules/") | last) + "@" + .value.version
             ' "$lockfile"
+        else
+            echo "  [skipped] $lockfile (not found)" >&2
         fi
     done
 } | sort -u > "$OUTPUT_DIR/node-packages.txt"

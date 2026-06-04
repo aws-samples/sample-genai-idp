@@ -5,6 +5,15 @@ name: Generate Dependency Manifests
 
 on:
   workflow_dispatch: {}
+  pull_request:
+    paths:
+      - "lib/*/pyproject.toml"
+      - "src/lambda/*/requirements.txt"
+      - "patterns/**/requirements.txt"
+      - "nested/**/requirements.txt"
+      - "src/ui/package-lock.json"
+      - "docs-site/package-lock.json"
+      - "scripts/generate-dep-manifest.sh"
   push:
     branches: [main]
     paths:
@@ -32,15 +41,11 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.3.1
 
-      - name: Install jq
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq jq
-
       - name: Generate manifests
         run: make dep-manifest
 
       - name: Upload manifests
+        if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: dependency-manifests
