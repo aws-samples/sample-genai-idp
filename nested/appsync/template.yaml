@@ -3625,6 +3625,19 @@ Resources:
 
 
   ##########################################################################
+  # UpdateTestSetResolver
+  ##########################################################################
+  UpdateTestSetResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: GraphQLSchema
+    Properties:
+      ApiId: !Ref GraphQLApiId
+      DataSourceName: !GetAtt TestSetDataSource.Name
+      TypeName: Mutation
+      FieldName: updateTestSet
+
+
+  ##########################################################################
   # GetTestSetsResolver
   ##########################################################################
   GetTestSetsResolver:

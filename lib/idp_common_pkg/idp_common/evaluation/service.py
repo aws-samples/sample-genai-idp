@@ -501,6 +501,11 @@ class EvaluationService:
 
             logger.debug(f"Converting schema properties for {document_class}")
 
+            # Clean null descriptions before passing to Stickler's JSON Schema validator
+            # Null descriptions cause validation errors but have no functional impact
+            # (empty string vs null makes no difference for evaluation)
+            schema = self._clean_null_descriptions(schema)
+
             converter = JsonSchemaFieldConverter(schema)
             field_definitions = converter.convert_properties_to_fields(
                 schema.get("properties", {}), schema.get("required", [])
@@ -1223,6 +1228,43 @@ class EvaluationService:
             metrics=metrics,
             stickler_comparison_result=stickler_result,  # Store raw result for bulk aggregation
         )
+
+    def _clean_null_descriptions(self, schema: dict[str, Any]) -> dict[str, Any]:
+        """
+        Recursively replace null descriptions with empty strings in JSON Schema.
+
+        Null descriptions cause Stickler's JSON Schema validator to fail, but have no
+        functional impact on evaluation (empty string vs null makes no difference).
+        This allows schemas with missing descriptions to pass validation.
+
+        Args:
+            schema: JSON Schema dictionary to clean
+
+        Returns:
+            Cleaned schema with null descriptions replaced by empty strings
+        """
+        if "properties" in schema:
+            for prop_name, prop_def in schema["properties"].items():
+                if isinstance(prop_def, dict):
+                    # Replace null description with empty string
+                    if prop_def.get("description") is None:
+                        prop_def["description"] = ""
+
+                    # Recurse into nested object properties
+                    if "properties" in prop_def:
+                        self._clean_null_descriptions(prop_def)
+
+                    # Recurse into array item schemas
+                    if "items" in prop_def and isinstance(prop_def["items"], dict):
+                        self._clean_null_descriptions(prop_def["items"])
+
+        # Also clean $defs if present
+        if "$defs" in schema:
+            for def_name, def_schema in schema["$defs"].items():
+                if isinstance(def_schema, dict):
+                    self._clean_null_descriptions(def_schema)
+
+        return schema
 
     def _remove_none_values(self, data: Any) -> Any:
         """

@@ -5,6 +5,14 @@ SPDX-License-Identifier: MIT-0
 
 ## [Unreleased]
 
+### Added
+
+- **Test Studio: Edit test set metadata** — Test sets can now be edited to update description (max 500 characters) and document classification type. Edit functionality available via new "Edit" button when a single test set is selected. Classification type metadata options: Unspecified, Single Class, Multi Class, Packet Splitting. Includes new `UpdateTestSetInput` GraphQL input type, `updateTestSet` mutation with `UpdateTestSetResolver` AppSync resolver, Lambda handler routing, and frontend Edit Test Set modal with form validation.
+
+### Fixed
+
+- **Evaluation now handles null field descriptions** — Configs with `description: null` no longer cause evaluation failures. The evaluation service now automatically converts null descriptions to empty strings before JSON Schema validation (Stickler requirement). This fix ensures extraction results can be evaluated even when field descriptions are missing or null in config schemas. No functional impact on evaluation logic.
+
 ## [0.5.13]
 
 ### Added
