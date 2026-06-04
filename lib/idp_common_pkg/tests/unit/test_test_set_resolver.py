@@ -59,7 +59,11 @@ class TestTestSetResolver:
 
         with patch.object(test_set_index, "update_test_set") as mock_update:
             mock_update.return_value = {"id": "test"}
-            event = {"info": {"fieldName": "updateTestSet"}, "arguments": {}}
+            event = {
+                "info": {"fieldName": "updateTestSet"},
+                "arguments": {},
+                "identity": _ADMIN_IDENTITY,
+            }
             test_set_index.handler(event, {})
             mock_update.assert_called_once()
 
