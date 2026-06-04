@@ -402,6 +402,10 @@ dsr-fix: ## Run DSR interactive fix
 	@echo "Running DSR interactive fix..."
 	$(PYTHON) scripts/dsr/fix.py
 
+##@ Dependencies
+dep-manifest: ## Generate dependency manifests for Artifactory mirroring (Python + Node)
+	@bash scripts/generate-dep-manifest.sh
+
 ##@ Deploy
 # Thin wrappers around `idp-cli publish` / `deploy` / `delete` for the common
 # 80% case. Uncommon flags can still be passed via EXTRA_ARGS="--foo --bar".
