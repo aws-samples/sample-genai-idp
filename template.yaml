@@ -2377,6 +2377,10 @@ Resources:
           - !Ref LambdaVpcSecurityGroup
           - ""
 
+        # VPC config for CodeBuild (Docker image builds)
+        VpcId: !If [DeployInVPC, !Ref VpcId, ""]
+        PrivateSubnetIds: !If [DeployInVPC, !Join [",", !Ref PrivateSubnetIds], ""]
+
         # MLflow Integration
         EnableMLflow: !Ref EnableMLflow
         MlflowTrackingURI: !Ref MlflowTrackingURI
