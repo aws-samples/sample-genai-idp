@@ -2375,7 +2375,10 @@ Resources:
         LambdaSecurityGroupId: !If
           - DeployInVPC
           - !Ref LambdaSecurityGroupId
-          - ""
+          - !If
+            - UsePrivateAppSync
+            - !Ref LambdaVpcSecurityGroup
+            - ""
 
         # VPC config for CodeBuild (Docker image builds)
         VpcId: !If [DeployInVPC, !Ref VpcId, ""]

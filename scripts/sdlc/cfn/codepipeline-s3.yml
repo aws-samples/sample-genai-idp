@@ -320,7 +320,7 @@ Resources:
                   Resource: !Sub 'arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:network-interface/*'
                   Condition:
                     StringEquals:
-                      ec2:AuthorizedService: codebuild.amazonaws.com
+                      ec2:AuthorizedService: !Sub "codebuild.${AWS::URLSuffix}"
           - !Ref AWS::NoValue
 
   ArtifactBucket:

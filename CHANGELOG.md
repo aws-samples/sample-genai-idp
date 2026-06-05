@@ -5,6 +5,10 @@ SPDX-License-Identifier: MIT-0
 
 ## [Unreleased]
 
+### Added
+
+- **CodeBuild VPC support** — All CodeBuild projects (WebUI build, unified Docker build, multi-doc-discovery Docker build, SDLC pipeline) now run inside the customer's VPC when `DeployInVPC=true`. Build traffic routes through the VPC, reaching public registries via NAT gateway or internal artifact repositories in air-gapped environments. This is a prerequisite for fully private deployments where builds must pull dependencies from internal registries. No changes when `DeployInVPC=false` (the default).
+
 ## [0.5.13]
 
 ### Added
