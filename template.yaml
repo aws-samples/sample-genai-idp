@@ -892,6 +892,16 @@ Rules:
       # invalid subnet IDs are caught later by the Lambda CreateFunction
       # call with a clear error rather than a mid-deploy rollback.
 
+  # DeployInVPC=true places Lambdas and CodeBuild in the VPC. Without the
+  # required VPC params, creation fails deep in nested stacks with opaque errors.
+  DeployInVPCRequiresParams:
+    RuleCondition: !Equals [ !Ref DeployInVPC, "true" ]
+    Assertions:
+      - Assert: !Not [ !Equals [ !Ref VpcId, "" ] ]
+        AssertDescription: "VpcId is required when DeployInVPC=true"
+      - Assert: !Not [ !Equals [ !Ref LambdaSecurityGroupId, "" ] ]
+        AssertDescription: "LambdaSecurityGroupId is required when DeployInVPC=true"
+
   # Bastion host is a developer-convenience layered on top of VPC-secured mode.
   # It shares the customer-supplied VPC, so DeployInVPC must be true as well.
   BastionRequiresVPC:
