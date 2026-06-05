@@ -15,6 +15,8 @@ SPDX-License-Identifier: MIT-0
 
 ### Fixed
 
+- **Schema Builder: Standard Class catalog restored in "Add Class" modal** — The Document Schema *Add Class* modal again presents the two-card chooser (📝 Custom Class / 📦 Standard Class) for non-policy schemas, letting users import pre-built classes from the [Standard Class Catalog](docs/classification.md#standard-document-classes) (Invoice, Receipt, US driver's license, etc.). The chooser/standard-mode UI was inadvertently dropped from `SchemaBuilder.tsx` during the policy-discovery rewrite (commit `d701e6b88`); the underlying `StandardClassCatalog` component, `addStandardClasses` hook action, and `standard-classes.json` data file were all still present and needed only to be re-wired into the modal. Policy Schema "Add Policy Class" still skips the chooser and goes straight to the custom form (unchanged behavior).
+
 - **Evaluation now handles null field descriptions** — Configs with `description: null` no longer cause evaluation failures. The evaluation service now automatically converts null descriptions to empty strings before JSON Schema validation (Stickler requirement). This fix ensures extraction results can be evaluated even when field descriptions are missing or null in config schemas. No functional impact on evaluation logic.
 
 - **Updated the AppSync APIs** (1) all field-level `@aws_auth(cognito_groups:[…])` directives in `schema.graphql` replaced with `@aws_cognito_user_pools(cognito_groups:[…])`, which AppSync evaluates on multi-auth APIs; (2) server-side Cognito group checks added to every privileged resolver Lambda.
