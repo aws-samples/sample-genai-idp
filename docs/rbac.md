@@ -170,7 +170,9 @@ mutation UpdateUser($userId: ID!, $allowedConfigVersions: [String]) {
 
 ### Layer 1: AppSync Schema Auth Directives (Server-Side)
 
-Every GraphQL **mutation** and many **queries** have `@aws_auth(cognito_groups: [...])` directives that enforce access at the AppSync level. If a user's Cognito group is not in the allowed list, AppSync returns an **Unauthorized** error before any resolver code runs.
+Every GraphQL **mutation** and many **queries** have `@aws_cognito_user_pools(cognito_groups: [...])` directives that enforce access at the AppSync level. If a user's Cognito group is not in the allowed list, AppSync returns an **Unauthorized** error before any resolver code runs.
+
+> **⚠️ Do NOT use `@aws_auth(cognito_groups: [...])` on this API.** The API has an additional authorization provider (`AWS_IAM`) configured, and on a multi-auth API AppSync **silently ignores** `@aws_auth` — every field decorated with it becomes reachable by *any* authenticated user regardless of group (a Viewer→Admin privilege escalation). Use `@aws_cognito_user_pools(cognito_groups: [...])`, which AppSync *does* evaluate on multi-auth APIs. As defense-in-depth, the required group is **also** enforced server-side in each privileged resolver Lambda (see Layer 2), so an operation is never reachable by an unauthorized caller even if a schema directive regresses.
 
 **Key mutations and their allowed roles:**
 
@@ -189,7 +191,7 @@ Every GraphQL **mutation** and many **queries** have `@aws_auth(cognito_groups: 
 | `sendAgentChatMessage`, `deleteChatSession`, `updateChatSessionTitle`, `deleteAgentJob` | All authenticated users (see note below) |
 | `updateAgentChatMessage` | All authenticated users (also IAM for backend) |
 
-> **AppSync Limitation**: Agent Chat mutations and queries require both `@aws_cognito_user_pools` and `@aws_iam` (for backend Lambda calls and return type resolution). AppSync does not support `@aws_auth(cognito_groups: [...])` combined with `@aws_iam` on the same field — it causes "Not Authorized" errors for all users. Therefore, Agent Chat mutations (`sendAgentChatMessage`, `deleteChatSession`, etc.) and queries (`listAvailableAgents`, `listChatSessions`, `getChatMessages`) use `@aws_cognito_user_pools @aws_iam` instead. Reviewer exclusion from Agent Chat is enforced via **UI navigation** (Agent Chat page is hidden for Reviewer) and **session scoping** (each user only sees their own sessions).
+> **AppSync Limitation**: Agent Chat mutations and queries require both `@aws_cognito_user_pools` and `@aws_iam` (for backend Lambda calls and return type resolution). AppSync does not support a `@aws_cognito_user_pools(cognito_groups: [...])` group restriction combined with `@aws_iam` on the same field — it causes "Not Authorized" errors for all users. Therefore, Agent Chat mutations (`sendAgentChatMessage`, `deleteChatSession`, etc.) and queries (`listAvailableAgents`, `listChatSessions`, `getChatMessages`) use unrestricted `@aws_cognito_user_pools @aws_iam` instead. Reviewer exclusion from Agent Chat is enforced via **UI navigation** (Agent Chat page is hidden for Reviewer) and **session scoping** (each user only sees their own sessions).
 
 **Key queries and their allowed roles:**
 
@@ -211,9 +213,19 @@ Every GraphQL **mutation** and many **queries** have `@aws_auth(cognito_groups: 
 
 **Note**: The `updateConfiguration` mutation is schema-level restricted to Admin+Author, but the resolver additionally enforces that `saveAsVersion` and `saveAsDefault` operations within that mutation are **Admin-only**.
 
-### Layer 2: Server-Side Resolver Filtering
+### Layer 2: Server-Side Resolver Group Checks & Filtering
 
-Lambda resolvers apply additional filtering based on the caller's identity:
+**Defense-in-depth group enforcement:** In addition to the Layer 1 schema
+directives, each privileged resolver Lambda re-checks the caller's
+`cognito:groups` claim at its entrypoint and rejects the request if the caller
+is not in an allowed group. This ensures a privileged operation is never
+reachable by an unauthorized caller even if a schema directive is missing or
+misconfigured (for example, a regression back to the silently-ignored
+`@aws_auth` directive). The required groups mirror the Layer 1 tables above
+(Admin, Admin+Author, or Admin+Reviewer per operation).
+
+**Identity-based filtering:** Lambda resolvers also apply finer-grained
+filtering based on the caller's identity:
 
 **Document Filtering:**
 - **Admin**: See all documents
@@ -269,12 +281,12 @@ Admins can create users with any of the four roles via the User Management page.
 └────────────┬────────────────────┘
              │ GraphQL
 ┌────────────▼────────────────────┐
-│  AppSync API                    │  Layer 1: @aws_auth directives (DENY if wrong group)
+│  AppSync API                    │  Layer 1: @aws_cognito_user_pools(cognito_groups) directives (DENY if wrong group)
 │  Schema Directives              │
 └────────────┬────────────────────┘
              │
 ┌────────────▼────────────────────┐
-│  Lambda Resolvers               │  Layer 2: Server-side filtering
+│  Lambda Resolvers               │  Layer 2: Server-side group checks (defense-in-depth) + filtering
 │  • listDocuments: ConfigVersion │  ← Filters by allowedConfigVersions from UsersTable
 │  • getConfigVersions: scope     │  ← Filters version list
 │  • getConfigVersion: scope      │  ← Rejects out-of-scope access
@@ -293,7 +305,7 @@ Admins can create users with any of the four roles via the User Management page.
 
 To add a new role:
 1. Add a `AWS::Cognito::UserPoolGroup` in `template.yaml`
-2. Add the group name to relevant `@aws_auth` directives in `schema.graphql`
+2. Add the group name to relevant `@aws_cognito_user_pools(cognito_groups: [...])` directives in `schema.graphql` (do **not** use `@aws_auth` — see Layer 1 warning), and update the corresponding server-side group check in the resolver Lambda
 3. Update the `VALID_PERSONAS` dict in `src/lambda/user_management/index.py`
 4. Add role detection in `src/ui/src/hooks/use-user-role.ts`
 5. Add navigation items in `src/ui/src/components/genaiidp-layout/navigation.tsx`

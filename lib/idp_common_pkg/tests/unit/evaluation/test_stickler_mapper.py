@@ -72,6 +72,56 @@ class TestIsUnevaluableObject:
 
 
 @pytest.mark.unit
+class TestIsUnevaluableArray:
+    """Tests for _is_unevaluable_array helper method."""
+
+    def test_array_without_items(self):
+        """Array with no 'items' (genson empty-list output) is unevaluable."""
+        assert SticklerConfigMapper._is_unevaluable_array({"type": "array"}) is True
+
+    def test_array_with_freeform_object_items(self):
+        """Array whose items are free-form objects is unevaluable."""
+        schema = {
+            "type": "array",
+            "items": {"type": "object", "additionalProperties": True},
+        }
+        assert SticklerConfigMapper._is_unevaluable_array(schema) is True
+
+    def test_array_with_typeless_items(self):
+        """Array whose items have neither 'type' nor '$ref' is unevaluable."""
+        schema = {"type": "array", "items": {"description": "no type"}}
+        assert SticklerConfigMapper._is_unevaluable_array(schema) is True
+
+    def test_array_of_primitives_is_evaluable(self):
+        """Array of typed primitives is evaluable."""
+        schema = {"type": "array", "items": {"type": "string"}}
+        assert SticklerConfigMapper._is_unevaluable_array(schema) is False
+
+    def test_array_of_structured_objects_is_evaluable(self):
+        """Array of objects with properties is evaluable."""
+        schema = {
+            "type": "array",
+            "items": {"type": "object", "properties": {"Name": {"type": "string"}}},
+        }
+        assert SticklerConfigMapper._is_unevaluable_array(schema) is False
+
+    def test_array_with_ref_items_is_evaluable(self):
+        """Array whose items are a $ref is evaluable (resolved later)."""
+        schema = {"type": "array", "items": {"$ref": "#/$defs/Thing"}}
+        assert SticklerConfigMapper._is_unevaluable_array(schema) is False
+
+    def test_non_array_type(self):
+        """Non-array schemas are not unevaluable arrays."""
+        assert SticklerConfigMapper._is_unevaluable_array({"type": "string"}) is False
+        assert SticklerConfigMapper._is_unevaluable_array({"type": "object"}) is False
+
+    def test_non_dict_input(self):
+        """Non-dict input returns False."""
+        assert SticklerConfigMapper._is_unevaluable_array(None) is False
+        assert SticklerConfigMapper._is_unevaluable_array([]) is False
+
+
+@pytest.mark.unit
 class TestRemoveEmptyObjectProperties:
     """Tests for _remove_empty_object_properties method."""
 
@@ -167,6 +217,47 @@ class TestRemoveEmptyObjectProperties:
         removed = SticklerConfigMapper._remove_empty_object_properties(schema)
         assert "EmptyArray" not in schema["properties"]
         assert len(removed) == 1
+
+    def test_removes_array_without_items(self):
+        """Arrays with no 'items' schema (genson empty-list output) are removed."""
+        schema = {
+            "type": "object",
+            "properties": {
+                "Name": {"type": "string"},
+                # genson emits a bare {"type": "array"} for an empty list []
+                "OtherAssets": {"type": "array"},
+            },
+        }
+        removed = SticklerConfigMapper._remove_empty_object_properties(schema)
+        assert "OtherAssets" not in schema["properties"]
+        assert "Name" in schema["properties"]
+        assert len(removed) == 1
+
+    def test_removes_object_emptied_by_empty_array_children(self):
+        """Parent object becomes empty after its empty-array children are removed.
+
+        Mirrors the URLA 'RealEstate' case: an object whose only properties are
+        empty arrays (no 'items') must itself be removed, not left empty (which
+        Stickler cannot evaluate).
+        """
+        schema = {
+            "type": "object",
+            "properties": {
+                "Name": {"type": "string"},
+                "RealEstate": {
+                    "type": "object",
+                    "properties": {
+                        "PropertyOwned": {"type": "array"},
+                        "AdditionalProperty": {"type": "array"},
+                    },
+                },
+            },
+        }
+        removed = SticklerConfigMapper._remove_empty_object_properties(schema)
+        assert "RealEstate" not in schema["properties"]
+        assert "Name" in schema["properties"]
+        # The parent and both empty-array children are reported as removed
+        assert any(p.endswith("RealEstate") for p in removed)
 
     def test_nested_freeform_object_in_parent_object(self):
         """Free-form objects nested inside a parent object are removed."""

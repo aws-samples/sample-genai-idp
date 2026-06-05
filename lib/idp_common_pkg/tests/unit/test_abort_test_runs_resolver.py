@@ -65,7 +65,10 @@ def test_abort_single_test_run_success(mock_env, mock_dynamodb, mock_lambda_clie
             "FilesCount": 2,
         }
     }
-    event = {"arguments": {"testRunIds": ["test-run-1"]}}
+    event = {
+        "identity": {"claims": {"cognito:groups": ["Admin"]}},
+        "arguments": {"testRunIds": ["test-run-1"]},
+    }
     with patch.object(index, "_wait_for_documents_terminal_state"):
         result = index.lambda_handler(event, None)
     assert result["success"] is True
@@ -93,7 +96,10 @@ def test_abort_test_run_not_found(mock_env, mock_dynamodb):
     spec.loader.exec_module(index)
     # Mock test run not found
     mock_dynamodb.get_item.return_value = {}
-    event = {"arguments": {"testRunIds": ["non-existent-test-run"]}}
+    event = {
+        "identity": {"claims": {"cognito:groups": ["Admin"]}},
+        "arguments": {"testRunIds": ["non-existent-test-run"]},
+    }
     result = index.lambda_handler(event, None)
     assert result["failedCount"] == 1
     assert result["abortedCount"] == 0
@@ -121,7 +127,10 @@ def test_abort_cannot_abort_completed(mock_env, mock_dynamodb):
     mock_dynamodb.get_item.return_value = {
         "Item": {"Status": "COMPLETE", "Files": ["file1.pdf"], "FilesCount": 1}
     }
-    event = {"arguments": {"testRunIds": ["completed-test-run"]}}
+    event = {
+        "identity": {"claims": {"cognito:groups": ["Admin"]}},
+        "arguments": {"testRunIds": ["completed-test-run"]},
+    }
     result = index.lambda_handler(event, None)
     assert result["failedCount"] == 1
     assert result["abortedCount"] == 0
@@ -148,7 +157,10 @@ def test_abort_queued_test_run(mock_env, mock_dynamodb, mock_lambda_client):
     mock_dynamodb.get_item.return_value = {
         "Item": {"Status": "QUEUED", "Files": ["file1.pdf"], "FilesCount": 1}
     }
-    event = {"arguments": {"testRunIds": ["queued-test-run"]}}
+    event = {
+        "identity": {"claims": {"cognito:groups": ["Admin"]}},
+        "arguments": {"testRunIds": ["queued-test-run"]},
+    }
     with patch.object(index, "_wait_for_documents_terminal_state"):
         result = index.lambda_handler(event, None)
     assert result["success"] is True
@@ -271,7 +283,10 @@ def test_abort_updates_completed_at_timestamp(
     mock_dynamodb.get_item.return_value = {
         "Item": {"Status": "RUNNING", "Files": ["file1.pdf"], "FilesCount": 1}
     }
-    event = {"arguments": {"testRunIds": ["test-run-123"]}}
+    event = {
+        "identity": {"claims": {"cognito:groups": ["Admin"]}},
+        "arguments": {"testRunIds": ["test-run-123"]},
+    }
     with patch.object(index, "_wait_for_documents_terminal_state"):
         index.lambda_handler(event, None)
     # Verify CompletedAt was set
@@ -319,8 +334,39 @@ def test_abort_multiple_test_runs_mixed_results(
         return {}
 
     mock_dynamodb.get_item.side_effect = mock_get_item
-    event = {"arguments": {"testRunIds": ["test-run-1", "test-run-2", "test-run-3"]}}
+    event = {
+        "identity": {"claims": {"cognito:groups": ["Admin"]}},
+        "arguments": {"testRunIds": ["test-run-1", "test-run-2", "test-run-3"]},
+    }
     with patch.object(index, "_wait_for_documents_terminal_state"):
         result = index.lambda_handler(event, None)
     assert result["abortedCount"] == 1  # test-run-1 succeeds
     assert result["failedCount"] == 2  # test-run-2 (complete), test-run-3 (not found)
+
+
+@pytest.mark.unit
+def test_abort_rejects_viewer(mock_env, mock_dynamodb):
+    """Defense-in-depth: a Viewer must not be able to abort test runs."""
+    import importlib.util
+    import os
+    import sys
+
+    spec = importlib.util.spec_from_file_location(
+        "index",
+        os.path.join(
+            os.path.dirname(__file__),
+            "../../../../nested/appsync/src/lambda/abort_test_runs/index.py",
+        ),
+    )
+    index = importlib.util.module_from_spec(spec)
+    sys.modules["index"] = index
+    spec.loader.exec_module(index)
+
+    event = {
+        "identity": {"claims": {"cognito:groups": ["Viewer"]}},
+        "arguments": {"testRunIds": ["test-run-1"]},
+    }
+    result = index.lambda_handler(event, None)
+    assert result["success"] is False
+    assert "Admin or Author" in result["message"]
+    assert not mock_dynamodb.update_item.called

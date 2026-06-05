@@ -1,0 +1,80 @@
+Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+SPDX-License-Identifier: MIT-0
+
+# Configuration Module
+
+`idp_common.config` manages the IDP configuration: loading it from the DynamoDB
+Configuration Table, merging user-provided overrides with system defaults,
+validating it against typed Pydantic models, and exposing it to services either
+as a plain dict or as a typed `IDPConfig` model.
+
+For the user-facing configuration guide (Web UI editing, custom config paths,
+inheritance), see [docs/configuration.md](../../../../docs/configuration.md).
+
+## Public API
+
+```python
+from idp_common.config import (
+    get_config,            # Load merged config (dict or IDPConfig model)
+    ConfigurationReader,   # Read configuration records from DynamoDB
+    ConfigurationManager,  # Lower-level CRUD on the Configuration Table
+)
+from idp_common.config.models import IDPConfig
+from idp_common.config.merge_utils import merge_config_with_defaults, validate_config
+```
+
+### Loading configuration
+
+```python
+from idp_common.config import get_config
+
+# As a plain dict (default)
+config = get_config(as_model=False)
+
+# As a typed Pydantic model (validated; attribute access)
+idp_config = get_config(as_model=True)
+model_id = idp_config.extraction.model
+```
+
+### Validating configuration
+
+`validate_config()` powers `idp-cli config-validate`. It merges with system
+defaults, runs Pydantic validation, and applies enhanced checks (valid model
+IDs, max-token limits, required prompt placeholders, schema-field warnings, and
+model/feature-compatibility guards such as rejecting OpenAI Responses models for
+agentic extraction or discovery).
+
+```python
+from idp_common.config.merge_utils import validate_config
+
+result = validate_config(user_config, pattern="pattern-2")
+if not result["valid"]:
+    for err in result["errors"]:
+        print("ERROR:", err)
+```
+
+## Files
+
+| File | Purpose |
+|------|---------|
+| `models.py` | Typed `IDPConfig` Pydantic models (per-service config: OCR, classification, extraction, assessment, summarization, evaluation, chat, discovery, …). The source of truth for config field defaults and validation. |
+| `merge_utils.py` | Merge user config with system defaults, diff/strip helpers, and `validate_config()` with its enhanced validators. |
+| `configuration_manager.py` | `ConfigurationManager` — CRUD against the DynamoDB Configuration Table (Default + Custom records), compression, versioning. |
+| `migration.py` | Migration of legacy configuration formats to the current JSON-Schema-based format. |
+| `constants.py` | Configuration constants. |
+| `schema_constants.py` | JSON Schema extension keys (e.g. `x-aws-idp-document-type`, `x-aws-idp-extraction-model`). |
+| `system_defaults/` | Packaged default configuration YAML used as the merge base. |
+
+## Configuration records
+
+Configuration is stored in DynamoDB with two record types:
+- **Default** — built-in pattern configurations (from `config_library/` at deploy time).
+- **Custom** — user-provided overrides, merged over the defaults.
+
+## Adding or changing a model
+
+Model defaults and inference fields live in `models.py`, and model/feature
+compatibility is enforced in `merge_utils.py`. Adding a selectable Bedrock model
+touches many other files too (template enums, pricing, UI, the bedrock client,
+docs) — follow the checklist in
+[.claude/skills/documentation.md](../../../../.claude/skills/documentation.md).

@@ -40,10 +40,32 @@ def _sanitize_for_log(obj):
         return [_sanitize_for_log(v) for v in obj]
     return obj
 
+
+def _caller_in_groups(event, allowed):
+    """Defense-in-depth RBAC check against the caller's Cognito groups.
+
+    The schema restricts this field via @aws_cognito_user_pools(cognito_groups),
+    but we also enforce the group server-side so the operation is never reachable
+    by an unauthorized caller even if the schema directive is missing or
+    misconfigured (e.g. the prior @aws_auth directive, which AppSync silently
+    ignores on a multi-auth API).
+    """
+    groups = (event.get("identity") or {}).get("claims", {}).get("cognito:groups") or []
+    if isinstance(groups, str):
+        groups = [groups]
+    return bool(set(allowed).intersection(groups))
+
+
 def handler(event, context):
     logger.info(f"Test runner invoked with event: {json.dumps(_sanitize_for_log(event))}")
-    
+
     try:
+        # Defense-in-depth: startTestRun is an Admin+Author operation.
+        if not _caller_in_groups(event, ("Admin", "Author")):
+            raise Exception(
+                "Unauthorized: startTestRun requires Admin or Author group"
+            )
+
         input_data = event['arguments']['input']
         test_set_id = input_data['testSetId']
         test_context = input_data.get('context', '')

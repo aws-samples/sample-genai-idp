@@ -327,6 +327,11 @@ export type Document = DynamoDbBase & {
   WorkflowStatus?: Maybe<Scalars['String']['output']>;
 };
 
+export type DocumentClassType =
+  | 'MULTI_CLASS'
+  | 'PACKET_SPLITTING'
+  | 'SINGLE_CLASS';
+
 export type DocumentCount = {
   count: Scalars['Int']['output'];
 };
@@ -526,6 +531,7 @@ export type Mutation = {
   updateDocumentStatus?: Maybe<Document>;
   updateFinetuningJobStatus?: Maybe<FinetuningJob>;
   updatePricing?: Maybe<UpdatePricingResponse>;
+  updateTestSet?: Maybe<TestSet>;
   updateUser?: Maybe<User>;
   uploadDiscoveryDocument: DisPresignedUrlResponse;
   uploadDocument: PresignedUrlResponse;
@@ -560,6 +566,7 @@ export type MutationAddDocumentsToTestSetFromUploadArgs = {
 export type MutationAddTestSetArgs = {
   bucketType: Scalars['String']['input'];
   description?: InputMaybe<Scalars['String']['input']>;
+  documentClassType?: InputMaybe<DocumentClassType>;
   fileCount: Scalars['Int']['input'];
   filePattern: Scalars['String']['input'];
   modifiedAfter?: InputMaybe<Scalars['String']['input']>;
@@ -819,6 +826,11 @@ export type MutationUpdateFinetuningJobStatusArgs = {
 
 export type MutationUpdatePricingArgs = {
   pricingConfig: Scalars['AWSJSON']['input'];
+};
+
+
+export type MutationUpdateTestSetArgs = {
+  input: UpdateTestSetInput;
 };
 
 
@@ -1247,6 +1259,7 @@ export type TestRunStatus = {
 export type TestSet = {
   createdAt: Scalars['AWSDateTime']['output'];
   description?: Maybe<Scalars['String']['output']>;
+  documentClassType?: Maybe<DocumentClassType>;
   error?: Maybe<Scalars['String']['output']>;
   fileCount?: Maybe<Scalars['Int']['output']>;
   filePattern?: Maybe<Scalars['String']['output']>;
@@ -1264,6 +1277,7 @@ export type TestSetDocumentsUploadInput = {
 
 export type TestSetUploadInput = {
   description?: InputMaybe<Scalars['String']['input']>;
+  documentClassType?: InputMaybe<DocumentClassType>;
   fileName: Scalars['String']['input'];
   fileSize: Scalars['Int']['input'];
 };
@@ -1363,6 +1377,12 @@ export type UpdatePricingResponse = {
   error?: Maybe<ConfigurationError>;
   message?: Maybe<Scalars['String']['output']>;
   success: Scalars['Boolean']['output'];
+};
+
+export type UpdateTestSetInput = {
+  description?: InputMaybe<Scalars['String']['input']>;
+  documentClassType?: InputMaybe<DocumentClassType>;
+  id: Scalars['String']['input'];
 };
 
 export type User = {

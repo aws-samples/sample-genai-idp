@@ -51,6 +51,21 @@ def _sanitize_for_log(obj):
         return [_sanitize_for_log(v) for v in obj]
     return obj
 
+
+def _caller_in_groups(event, allowed):
+    """Defense-in-depth RBAC check against the caller's Cognito groups.
+
+    The schema restricts this field via @aws_cognito_user_pools(cognito_groups),
+    but we also enforce the group server-side so the operation is never reachable
+    by an unauthorized caller even if the schema directive is missing or
+    misconfigured (e.g. the prior @aws_auth directive, which AppSync silently
+    ignores on a multi-auth API).
+    """
+    groups = (event.get("identity") or {}).get("claims", {}).get("cognito:groups") or []
+    if isinstance(groups, str):
+        groups = [groups]
+    return bool(set(allowed).intersection(groups))
+
 def handler(event, context):
     """
     Generates a presigned POST URL for S3 uploads through an AppSync resolver.
@@ -63,8 +78,14 @@ def handler(event, context):
         dict: A dictionary containing the presigned URL data and object key
     """
     logger.info(f"Received event: {json.dumps(_sanitize_for_log(event))}")
-    
+
     try:
+        # Defense-in-depth: uploadDocument is an Admin+Author operation.
+        if not _caller_in_groups(event, ("Admin", "Author")):
+            raise PermissionError(
+                "Unauthorized: uploadDocument requires Admin or Author group"
+            )
+
         # Extract variables from the event
         arguments = event.get('arguments', {})
         file_name = arguments.get('fileName')
