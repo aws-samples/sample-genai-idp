@@ -259,6 +259,13 @@ class EvaluationService:
         # with null values in baseline data, which Stickler doesn't support
         self._normalize_null_types(schema)
 
+        # Strip 'required' arrays - genson marks every observed key as required, but
+        # for evaluation a field that wasn't extracted (None, then removed by
+        # _remove_none_values) is a scored miss, not a hard validation failure. Making
+        # all fields optional matches the semantics of explicit IDP configs (which omit
+        # 'required') and avoids "Field required [type=missing]" errors.
+        self._strip_required(schema)
+
         # Add evaluation method extensions recursively
         self._add_evaluation_extensions_recursive(schema)
 
@@ -272,6 +279,37 @@ class EvaluationService:
         )
 
         return schema
+
+    def _strip_required(self, schema: Dict[str, Any]) -> None:
+        """
+        Recursively remove all 'required' arrays from an auto-generated schema.
+
+        genson marks every key it observes as required. For evaluation, a field
+        present in the baseline but absent from a prediction (or vice versa) should
+        score as a miss, not raise a hard "Field required" validation error. Explicit
+        IDP configs omit 'required' entirely (all fields optional); this aligns the
+        auto-generated schema with that convention.
+
+        Args:
+            schema: Schema object to modify in-place
+        """
+        if not isinstance(schema, dict):
+            return
+
+        schema.pop("required", None)
+
+        if "properties" in schema:
+            for prop_schema in schema["properties"].values():
+                self._strip_required(prop_schema)
+
+        if "items" in schema:
+            items = schema["items"]
+            if isinstance(items, dict):
+                self._strip_required(items)
+
+        if "$defs" in schema:
+            for def_schema in schema["$defs"].values():
+                self._strip_required(def_schema)
 
     def _normalize_null_types(self, schema: Dict[str, Any]) -> None:
         """
@@ -404,6 +442,79 @@ class EvaluationService:
             properties = schema.get(SCHEMA_PROPERTIES, {})
             for prop_schema in properties.values():
                 self._add_evaluation_extensions_recursive(prop_schema)
+
+    def _make_model_fields_nullable(
+        self, model_class: Type["StructuredModel"], _seen: Optional[set] = None
+    ) -> None:
+        """
+        Recursively widen every field annotation to Optional[...] so None values pass.
+
+        Stickler's JsonSchemaFieldConverter creates optional fields (default=None) but
+        keeps the original non-nullable annotation (e.g. `str`). When the confidence
+        path round-trips data through ``from_json`` -> ``model_dump`` (see
+        stickler ConfigurationHelper), missing fields are materialized as None and then
+        re-validated, raising "Input should be a valid string [input_value=None]".
+        Widening each annotation to ``Optional[...]`` makes None acceptable on every
+        code path. Nested StructuredModels and List[StructuredModel] are processed too.
+
+        Upstream Stickler bug: https://github.com/awslabs/stickler/issues/149
+        This workaround can be removed once that is fixed.
+
+        Args:
+            model_class: The Pydantic StructuredModel subclass to modify in-place
+            _seen: Internal cycle-guard tracking already-processed model classes
+        """
+        import inspect
+
+        from stickler.structured_object_evaluator.models.structured_model import (
+            StructuredModel,
+        )
+
+        if _seen is None:
+            _seen = set()
+        if model_class in _seen:
+            return
+        _seen.add(model_class)
+
+        changed = False
+        for field_name, field_info in model_class.model_fields.items():
+            if field_name == "extra_fields":
+                continue
+
+            annotation = field_info.annotation
+
+            # Determine the inner (non-None) type for recursion
+            inner = annotation
+            origin = getattr(annotation, "__origin__", None)
+            if origin is Union:
+                inner = next(
+                    (
+                        a
+                        for a in getattr(annotation, "__args__", ())
+                        if a is not type(None)
+                    ),
+                    annotation,
+                )
+
+            inner_origin = getattr(inner, "__origin__", None)
+            if inspect.isclass(inner) and issubclass(inner, StructuredModel):
+                self._make_model_fields_nullable(inner, _seen)
+            elif inner_origin is list:
+                list_args = getattr(inner, "__args__", ())
+                if (
+                    list_args
+                    and inspect.isclass(list_args[0])
+                    and issubclass(list_args[0], StructuredModel)
+                ):
+                    self._make_model_fields_nullable(list_args[0], _seen)
+
+            # Widen to Optional if not already a Union containing None
+            if origin is not Union:
+                field_info.annotation = Optional[annotation]
+                changed = True
+
+        if changed:
+            model_class.model_rebuild(force=True)
 
     def _get_stickler_model(
         self, document_class: str, expected_data: Optional[Dict[str, Any]] = None
@@ -607,6 +718,18 @@ class EvaluationService:
         model_class = create_model(  # type: ignore  # pyright: reportArgumentType=false
             model_name, **field_definitions, __base__=self._StructuredModel
         )
+
+        # Make all fields nullable so that None values (missing/unextracted fields)
+        # pass validation. Stickler's JsonSchemaFieldConverter builds optional fields
+        # with a None default but leaves the annotation non-nullable (e.g. `str`
+        # rather than `Optional[str]`). Plain ModelClass(**data) tolerates this because
+        # Pydantic only applies the default and never validates it, but the confidence
+        # path (from_json -> model_dump round-trip) explicitly materializes None for
+        # missing fields and then re-validates, which raises
+        # "Input should be a valid string [input_value=None]". Widening every field to
+        # Optional makes both paths accept None. See _make_model_fields_nullable and
+        # upstream bug https://github.com/awslabs/stickler/issues/149.
+        self._make_model_fields_nullable(model_class)
 
         # Cache for reuse
         self._model_cache[cache_key] = model_class
@@ -1532,6 +1655,125 @@ class EvaluationService:
             )
             return value
 
+    def _drop_field_at_path(
+        self, data: Dict[str, Any], path: Tuple[Any, ...]
+    ) -> Dict[str, Any]:
+        """
+        Return a deep copy of ``data`` with the value at ``path`` removed.
+
+        Pydantic error locations are tuples of dict keys and list indices, e.g.
+        ``("PersonalInformation", "ContactInformation", "WorkPhone")`` or
+        ``("Liabilities", 0, "UnpaidBalance")``. Navigates that path and deletes
+        the leaf. Missing/incompatible path segments are ignored (the leaf may
+        not exist on one side).
+
+        Args:
+            data: Source data (not mutated)
+            path: Pydantic error location tuple
+
+        Returns:
+            Deep copy of ``data`` with the offending leaf removed
+        """
+        import copy
+
+        result = copy.deepcopy(data)
+        cursor: Any = result
+        for segment in path[:-1]:
+            if isinstance(cursor, dict) and segment in cursor:
+                cursor = cursor[segment]
+            elif (
+                isinstance(cursor, list)
+                and isinstance(segment, int)
+                and 0 <= segment < len(cursor)
+            ):
+                cursor = cursor[segment]
+            else:
+                return result  # Path doesn't exist on this side - nothing to drop
+
+        leaf = path[-1]
+        if isinstance(cursor, dict):
+            cursor.pop(leaf, None)
+        elif (
+            isinstance(cursor, list)
+            and isinstance(leaf, int)
+            and 0 <= leaf < len(cursor)
+        ):
+            del cursor[leaf]
+        return result
+
+    def _build_instances_tolerant(
+        self,
+        model_class: Type["StructuredModel"],
+        coerced_expected: Dict[str, Any],
+        coerced_actual: Dict[str, Any],
+        confidence_scores: Optional[Dict[str, Any]],
+        max_drops: int = 50,
+    ) -> Tuple[Any, Any, List[Tuple[Any, ...]]]:
+        """
+        Instantiate expected/actual models, dropping individual fields that fail.
+
+        A single field that fails Pydantic validation would otherwise raise and
+        abort the entire section (zeroing every attribute). Instead, on a
+        ValidationError we extract the offending field path(s), drop them from
+        BOTH expected and actual (so the comparison stays symmetric and fair),
+        and retry. This bounds the blast radius to just the unparseable fields.
+
+        Args:
+            model_class: The Stickler StructuredModel subclass
+            coerced_expected: Cleaned/coerced baseline data
+            coerced_actual: Cleaned/coerced prediction data
+            confidence_scores: Optional confidence data for the rich-value path
+            max_drops: Safety cap on retry iterations
+
+        Returns:
+            Tuple of (expected_instance, actual_instance, skipped_field_paths)
+
+        Raises:
+            Exception: Re-raises if the error is not a per-field ValidationError
+                or if it cannot be resolved by dropping fields.
+        """
+        from pydantic import ValidationError
+
+        skipped: List[Tuple[Any, ...]] = []
+
+        def build():
+            expected_instance = model_class(**coerced_expected)
+            if confidence_scores:
+                actual_rich = self._convert_to_rich_values(
+                    coerced_actual, confidence_scores
+                )
+                actual_instance = model_class.from_json(
+                    actual_rich, process_rich_values=True
+                )
+            else:
+                actual_instance = model_class(**coerced_actual)
+            return expected_instance, actual_instance
+
+        for _ in range(max_drops):
+            try:
+                expected_instance, actual_instance = build()
+                return expected_instance, actual_instance, skipped
+            except ValidationError as ve:
+                # Collect the offending field paths from this validation pass
+                error_paths = {err["loc"] for err in ve.errors() if err.get("loc")}
+                if not error_paths:
+                    raise  # Nothing actionable to drop
+                progressed = False
+                for path in error_paths:
+                    if path in skipped:
+                        continue
+                    coerced_expected = self._drop_field_at_path(coerced_expected, path)
+                    coerced_actual = self._drop_field_at_path(coerced_actual, path)
+                    skipped.append(path)
+                    progressed = True
+                if not progressed:
+                    # Same fields failing again - avoid infinite loop
+                    raise
+
+        # Exceeded max_drops - one final attempt; let any error propagate
+        expected_instance, actual_instance = build()
+        return expected_instance, actual_instance, skipped
+
     def evaluate_section(
         self,
         section: Section,
@@ -1630,22 +1872,26 @@ class EvaluationService:
             coerced_expected = self._remove_none_values(coerced_expected)
             coerced_actual = self._remove_none_values(coerced_actual)
 
-            # Create model instances using Rich Value Pattern for confidence integration
-            # Expected (baseline) has no confidence - use plain values
-            expected_instance = ModelClass(**coerced_expected)
+            # Create model instances using Rich Value Pattern for confidence integration.
+            # Tolerant build: if a single field still fails Pydantic validation (e.g. an
+            # unexpected type the coercion didn't catch), drop just that field from BOTH
+            # sides and retry, rather than failing the entire section. This limits the
+            # blast radius so the rest of the fields still score.
+            (
+                expected_instance,
+                actual_instance,
+                skipped_field_paths,
+            ) = self._build_instances_tolerant(
+                ModelClass, coerced_expected, coerced_actual, confidence_scores
+            )
 
-            # Actual (prediction) includes confidence - convert to rich values
-            if confidence_scores:
-                actual_rich = self._convert_to_rich_values(
-                    coerced_actual, confidence_scores
+            if skipped_field_paths:
+                logger.warning(
+                    f"Section {section.section_id}: {len(skipped_field_paths)} field(s) "
+                    f"could not be validated and were skipped (the rest were still "
+                    f"evaluated): "
+                    f"{', '.join('.'.join(p) for p in sorted(skipped_field_paths))}"
                 )
-                # Use from_json with process_rich_values=True to extract confidence
-                # This automatically extracts confidence to prediction_confidences in compare_with result
-                actual_instance = ModelClass.from_json(
-                    actual_rich, process_rich_values=True
-                )
-            else:
-                actual_instance = ModelClass(**coerced_actual)
 
             # Compare using Stickler with field_comparisons and confusion_matrix enabled
             # Confidence automatically extracted to 'prediction_confidences' when rich values used
@@ -1701,6 +1947,29 @@ class EvaluationService:
                 stickler_result,
                 confidence_scores or {},
             )
+
+            # Surface any fields that were skipped due to per-field validation
+            # errors so reduced coverage is visible in the report (not silently
+            # dropped). These are informational and excluded from scoring.
+            for path in skipped_field_paths:
+                field_label = ".".join(str(p) for p in path)
+                section_result.attributes.append(
+                    AttributeEvaluationResult(
+                        name=f"__SKIPPED__{field_label}",
+                        expected=None,
+                        actual=None,
+                        matched=False,
+                        score=0.0,
+                        reason=(
+                            f"Field '{field_label}' could not be validated against "
+                            f"the schema and was excluded from scoring. The remaining "
+                            f"fields in this section were evaluated normally."
+                        ),
+                        evaluation_method="N/A",
+                    )
+                )
+            if skipped_field_paths:
+                section_result.metrics["skipped_field_count"] = len(skipped_field_paths)
 
             return section_result
 

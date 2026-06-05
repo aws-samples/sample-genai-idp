@@ -53,7 +53,9 @@ class TestDynamicSchemaGeneration:
         assert props["amount"]["type"] == "number"
         assert props["amount"]["x-aws-idp-evaluation-method"] == "NUMERIC_EXACT"
 
-        assert props["quantity"]["type"] == "integer"
+        # Integers are normalized to "number" so int baselines match float
+        # predictions without type-mismatch errors (_normalize_integer_to_number)
+        assert props["quantity"]["type"] == "number"
         assert props["quantity"]["x-aws-idp-evaluation-method"] == "NUMERIC_EXACT"
 
         assert props["is_paid"]["type"] == "boolean"
@@ -136,10 +138,30 @@ class TestDynamicSchemaGeneration:
 
         schema = evaluation_service._infer_schema_from_data(data, "Document")
 
-        # genson correctly infers None as "null" type (proper JSON Schema)
+        # genson infers None as "null", which Stickler can't evaluate, so
+        # _normalize_null_types converts it to "string" (comparable as empty value)
         props = schema["properties"]
-        assert props["optional_field"]["type"] == "null"
+        assert props["optional_field"]["type"] == "string"
         assert props["required_field"]["type"] == "string"
+
+    def test_infer_schema_strips_required(self, evaluation_service):
+        """Auto-generated schemas must not carry genson's 'required' arrays.
+
+        genson marks every observed key as required; for evaluation a missing
+        field is a scored miss, not a hard validation failure. _strip_required
+        removes them at every nesting level so the schema matches explicit configs.
+        """
+        data = {
+            "name": "John",
+            "address": {"street": "123 Main", "city": "Seattle"},
+            "items": [{"sku": "A1", "qty": 2}],
+        }
+
+        schema = evaluation_service._infer_schema_from_data(data, "Document")
+
+        assert "required" not in schema
+        assert "required" not in schema["properties"]["address"]
+        assert "required" not in schema["properties"]["items"]["items"]
 
     @patch("idp_common.evaluation.service.s3.get_json_content")
     def test_auto_generation_with_missing_config(
