@@ -441,9 +441,11 @@ that domain:
 | `.claude/skills/testing-qa.md` | Writing tests, pytest patterns, moto, conftest setup |
 | `.claude/skills/documentation.md` | Documentation standards, two doc tiers, CHANGELOG, docs-site, and the "adding a Bedrock model" checklist |
 
-> **Note:** Skill files are mirrored in `.cline/skills/` for the Cline assistant
-> (same content, different filenames). When editing a skill, update its
-> counterpart too.
+> **Note:** `.claude/skills/` is canonical. The Cline assistant's
+> `.cline/skills/` files are **symlinks** to these (different filenames), so
+> editing a `.claude` skill updates both — do not create separate `.cline`
+> copies. See the "Two skill systems, one source of truth" section in
+> `.claude/skills/documentation.md` for the filename map and portability caveat.
 
 ### Documentation lives in two tiers
 

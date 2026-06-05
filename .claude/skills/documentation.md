@@ -159,11 +159,28 @@ through this list (skip items that genuinely don't apply, and note why):
 - [ ] Unit tests for routing / params; config-validate guards for unsupported
       combinations (e.g. `tests/unit/config/test_validation.py`).
 
-## Skill files are duplicated across two systems — keep them in sync
+## Two skill systems, one source of truth (symlinks)
 
-This guidance exists in BOTH `.claude/skills/documentation.md` (Claude Code) and
-`.cline/skills/docs.md` (Cline), and the other skills are likewise mirrored
-(`backend-lambda.md`↔`backend.md`, `extraction-pipeline.md`↔`extraction.md`,
-etc.). They are currently identical copies. **When you edit one skill file,
-apply the same change to its counterpart** so the two assistants stay
-consistent.
+This repo serves two assistants: **Claude Code** (`.claude/skills/`) and
+**Cline** (`.cline/skills/`). `.claude/skills/` holds the **canonical** files;
+each `.cline/skills/*.md` is a **symlink** to its `.claude` counterpart (the two
+use different filenames, e.g. `.cline/skills/docs.md` →
+`.claude/skills/documentation.md`). So editing a `.claude` skill automatically
+updates Cline too — **do not** create a separate `.cline` copy.
+
+Filename map (`.cline` → `.claude`): `backend.md`→`backend-lambda.md`,
+`docs.md`→`documentation.md`, `extraction.md`→`extraction-pipeline.md`,
+`frontend.md`→`frontend-ui.md`, `infra.md`→`infrastructure.md`,
+`review.md`→`code-review.md`, `testing.md`→`testing-qa.md`,
+`pr-review.md`→`pr-review.md`.
+
+When **adding** a new skill: create it in `.claude/skills/`, then add a symlink
+from the desired `.cline/skills/` name to it
+(`ln -s ../../.claude/skills/<name>.md .cline/skills/<name>.md`).
+
+> **Portability caveat:** Git stores these as symlinks (mode 120000). On clones
+> with `core.symlinks=false` (notably some Windows setups) they materialize as
+> plain text files containing the target path. If an assistant reports a skill
+> file that just contains a path like `../../.claude/skills/...`, run
+> `git config core.symlinks true` and re-checkout, or copy the canonical file's
+> contents.
