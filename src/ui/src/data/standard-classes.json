@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "generatedAt": "2026-03-09T21:26:11.522362+00:00",
+  "generatedAt": "2026-06-05T21:53:16.744854+00:00",
   "region": "us-east-1",
   "description": "Standard document class definitions derived from AWS BDA standard blueprints. Regenerate with: make classes-from-bda",
   "classes": [
