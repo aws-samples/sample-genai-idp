@@ -118,10 +118,16 @@ cross-account hub role, that role must also grant these `bedrock-mantle` actions
 ## Pricing
 
 Pricing for `bedrock/openai.gpt-5.4` and `bedrock/openai.gpt-5.5` is defined in
-`config_library/pricing.yaml` (input / output / cached-read token units).
-**Verify current per-token rates** against the
-[Amazon Bedrock pricing page](https://aws.amazon.com/bedrock/pricing/) before
-relying on cost reports.
+`config_library/pricing.yaml` and matches OpenAI first-party rates on Bedrock
+(per 1M tokens):
+
+| Model | Input | Cached input | Output |
+|---|---|---|---|
+| GPT-5.4 | $2.75 | $0.275 | $16.50 |
+| GPT-5.5 | $5.50 | $0.55 | $33.00 |
+
+Confirm against the [Amazon Bedrock pricing page](https://aws.amazon.com/bedrock/pricing/)
+if rates change.
 
 ## Choosing a model
 
