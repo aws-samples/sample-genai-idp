@@ -256,6 +256,44 @@ class SticklerConfigMapper:
         return False
 
     @classmethod
+    def _is_unevaluable_array(cls, schema: Dict[str, Any]) -> bool:
+        """
+        Check if an array schema cannot be evaluated by Stickler.
+
+        Stickler's JsonSchemaFieldConverter needs an 'items' schema with a usable
+        'type' to build a typed list. genson emits a bare ``{"type": "array"}``
+        (no 'items') for empty lists in the baseline data, and an array whose
+        items are an unevaluable object cannot be evaluated either. Both crash the
+        converter with "Unsupported JSON Schema type: None".
+
+        Args:
+            schema: JSON Schema dict to check
+
+        Returns:
+            True if the array schema cannot be evaluated by Stickler
+        """
+        if not isinstance(schema, dict):
+            return False
+        if schema.get(SCHEMA_TYPE) != TYPE_ARRAY:
+            return False
+
+        items_schema = schema.get(SCHEMA_ITEMS)
+
+        # Case 1: No 'items' schema at all (e.g. genson output for an empty list)
+        if not isinstance(items_schema, dict):
+            return True
+
+        # Case 2: Items resolve to an unevaluable object (free-form / no properties)
+        if cls._is_unevaluable_object(items_schema):
+            return True
+
+        # Case 3: Items have no usable 'type' and no $ref to resolve
+        if items_schema.get(SCHEMA_TYPE) is None and "$ref" not in items_schema:
+            return True
+
+        return False
+
+    @classmethod
     def _remove_empty_object_properties(
         cls, schema: Dict[str, Any], field_path: str = ""
     ) -> List[str]:
@@ -308,29 +346,49 @@ class SticklerConfigMapper:
                             f"{' (has additionalProperties but no defined properties)' if has_additional else ''}"
                         )
                     elif prop_properties is not None:
-                        # Recurse into non-empty objects
+                        # Recurse into non-empty objects FIRST, then re-check: removing
+                        # unevaluable children (e.g. empty arrays) can leave the parent
+                        # with no properties, which Stickler also cannot evaluate.
                         removed.extend(
                             cls._remove_empty_object_properties(prop_schema, prop_path)
                         )
+                        if cls._is_unevaluable_object(prop_schema):
+                            props_to_remove.append(prop_name)
+                            removed.append(prop_path)
+                            logger.info(
+                                f"Removing object property '{prop_path}' - "
+                                f"became empty after removing unevaluable children"
+                            )
 
-                # Check arrays - remove if items are unevaluable objects
-                elif prop_type == TYPE_ARRAY and SCHEMA_ITEMS in prop_schema:
-                    items_schema = prop_schema[SCHEMA_ITEMS]
-                    if cls._is_unevaluable_object(items_schema):
-                        # Array of free-form objects - can't be evaluated
+                # Check arrays - remove if items are missing or unevaluable
+                elif prop_type == TYPE_ARRAY:
+                    if cls._is_unevaluable_array(prop_schema):
+                        # Array with no usable 'items' schema (e.g. empty list in
+                        # baseline) or free-form object items - can't be evaluated
                         props_to_remove.append(prop_name)
                         removed.append(prop_path)
                         logger.info(
                             f"Removing array property '{prop_path}' - "
-                            f"array items are free-form objects without defined properties, "
+                            f"array has no evaluable 'items' schema "
+                            f"(missing items or free-form objects), "
                             f"which Stickler cannot evaluate"
                         )
                     else:
+                        # Recurse into object items FIRST, then re-check: the items
+                        # object can become empty after its children are removed.
+                        items_schema = prop_schema[SCHEMA_ITEMS]
                         removed.extend(
                             cls._remove_empty_object_properties(
                                 items_schema, f"{prop_path}[]"
                             )
                         )
+                        if cls._is_unevaluable_array(prop_schema):
+                            props_to_remove.append(prop_name)
+                            removed.append(prop_path)
+                            logger.info(
+                                f"Removing array property '{prop_path}' - "
+                                f"items became unevaluable after removing children"
+                            )
 
             # Remove unevaluable properties
             for prop_name in props_to_remove:
