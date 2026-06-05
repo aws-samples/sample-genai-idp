@@ -567,6 +567,14 @@ The Discovery module supports comprehensive configuration through the deployment
 - `us.anthropic.claude-3-5-sonnet-20241022-v2:0` - High accuracy
 - `us.anthropic.claude-3-7-sonnet-20250219-v1:0` - Latest capabilities
 
+> **⚠️ OpenAI GPT-5.x is NOT supported for Discovery.** Discovery ingests whole
+> PDFs as Bedrock `document` content blocks, which the OpenAI Responses API
+> (`bedrock-mantle`) cannot accept (text + image only). `openai.gpt-5.4` /
+> `openai.gpt-5.5` are intentionally absent from the discovery model picklists;
+> selecting one via a hand-edited config is rejected by `idp-cli config-validate`
+> and raises at runtime. Use a Claude or Nova model for Discovery. See
+> [OpenAI GPT-5.x Models](openai-models.md).
+
 **Model Parameters:**
 ```yaml
 discovery:

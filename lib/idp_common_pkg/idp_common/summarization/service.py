@@ -93,6 +93,7 @@ class SummarizationService:
             "top_k": self.config.summarization.top_k,
             "top_p": self.config.summarization.top_p,
             "max_tokens": self.config.summarization.max_tokens,
+            "reasoning_effort": self.config.summarization.reasoning_effort,
         }
 
         # Validate system prompt
@@ -134,6 +135,7 @@ class SummarizationService:
             max_tokens=config["max_tokens"],
             context="Summarization",
             model_lambda_hook_arn=self.config.summarization.model_lambda_hook_arn,
+            reasoning_effort=config.get("reasoning_effort"),
         )
 
     def _create_error_summary(self, error_message: str) -> DocumentSummary:

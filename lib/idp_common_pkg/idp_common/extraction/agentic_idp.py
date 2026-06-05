@@ -38,6 +38,7 @@ from strands.types.media import (
 )
 
 from idp_common.bedrock.client import CACHEPOINT_SUPPORTED_MODELS, is_claude_4_7_model
+from idp_common.bedrock.openai_responses import is_openai_responses_model
 from idp_common.config.models import IDPConfig
 from idp_common.utils.bedrock_utils import (
     async_exponential_backoff_retry,
@@ -881,6 +882,16 @@ def _build_model_config(
         Automatically uses BedrockModel for regional models (us.*, eu.*) and
         AnthropicModel with AnthropicBedrock for cross-region models (global.anthropic.*).
     """
+    # OpenAI GPT-5.x models are served via the bedrock-mantle Responses API and
+    # are not callable through the Converse-based Strands path. Callers should
+    # have routed these to standard extraction (see ExtractionService); fail
+    # loudly if one reaches here so the misconfiguration is obvious.
+    if is_openai_responses_model(model_id):
+        raise ValueError(
+            f"OpenAI Responses-API models ({model_id}) do not support agentic/"
+            "Strands extraction. Use standard extraction (agentic.enabled=false)."
+        )
+
     # Configure retry behavior and timeouts using boto3 Config
     boto_config = Config(
         retries={
@@ -1295,6 +1306,24 @@ async def _run_batch_agent(
     )
 
 
+def _accumulate_metering(
+    merged_metering: dict[str, Any], metering: dict[str, Any]
+) -> None:
+    """Accumulate per-model token-metering counts into ``merged_metering``.
+
+    Token values from Bedrock responses may be ``None`` (e.g. when a model does
+    not report a particular counter). Both the accumulated value and the
+    incoming value are coerced to ``0`` so the addition never raises a
+    TypeError on a ``None`` operand (see issue #337).
+    """
+    for mk, mv in metering.items():
+        if mk not in merged_metering:
+            merged_metering[mk] = dict(mv)
+        else:
+            for tk, tv in mv.items():
+                merged_metering[mk][tk] = (merged_metering[mk].get(tk) or 0) + (tv or 0)
+
+
 async def concurrent_structured_output_async(
     model_id: str,
     data_format: type[TargetModel],
@@ -1386,12 +1415,7 @@ async def concurrent_structured_output_async(
             elif value is not None:
                 merged_dict[key] = value
         # Accumulate metering
-        for mk, mv in result_response.get("metering", {}).items():
-            if mk not in merged_metering:
-                merged_metering[mk] = dict(mv)
-            else:
-                for tk, tv in mv.items():
-                    merged_metering[mk][tk] = merged_metering[mk].get(tk, 0) + (tv or 0)
+        _accumulate_metering(merged_metering, result_response.get("metering", {}))
 
     merged_result = data_format(**merged_dict)
     # Count merged items for logging

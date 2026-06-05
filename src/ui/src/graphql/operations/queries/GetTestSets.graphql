@@ -9,5 +9,6 @@ query GetTestSets {
     createdAt
     error
     lastAddResult
+    documentClassType
   }
 }

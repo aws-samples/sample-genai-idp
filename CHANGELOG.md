@@ -9,6 +9,35 @@ SPDX-License-Identifier: MIT-0
 
 - **CodeBuild VPC support** — All CodeBuild projects (WebUI build, unified Docker build, multi-doc-discovery Docker build, SDLC pipeline) now run inside the customer's VPC when `DeployInVPC=true`. Build traffic routes through the VPC, reaching public registries via NAT gateway or internal artifact repositories in air-gapped environments. This is a prerequisite for fully private deployments where builds must pull dependencies from internal registries. No changes when `DeployInVPC=false` (the default).
 
+## [0.5.14]
+
+### Added
+
+- **Dependency manifest generation for artifact-repository mirroring** — New `make dep-manifest` target (and `scripts/generate-dep-manifest.sh`) generates a complete, pinned list of all Python and Node.js dependencies for enterprises mirroring packages into an artifact repository (JFrog Artifactory, AWS CodeArtifact, Sonatype Nexus, etc.) for air-gapped, pre-scanned builds. Parses existing `uv.lock` and `package-lock.json` files (no re-resolution) plus any extra `requirements.txt`/`pyproject.toml` packages, writing pip-compatible (`name==version`) and npm-compatible (`name@version`) manifests to the gitignored `dist/manifests/`. A GitHub Actions workflow (`generate-dep-manifest.yml`) regenerates manifests on dependency-file changes (dry-run on PRs, 90-day artifact upload on `main`/manual dispatch). See the new [Dependency Mirroring](docs/dependency-mirroring.md) guide.
+
+- **OpenAI GPT-5.4 / GPT-5.5 model support** — Added `openai.gpt-5.4` and `openai.gpt-5.5` everywhere Claude models are selectable (OCR, classification, extraction, assessment, summarization, evaluation, and Chat-with-Document). Unlike all other supported models, these are served via the **`bedrock-mantle` endpoint (OpenAI Responses API)** rather than the Converse API, so a new SigV4-signed HTTP backend was added in `idp_common/bedrock/openai_responses.py`. `BedrockClient.invoke_model` transparently routes `openai.gpt-5.*` IDs to it and returns the identical `{"response", "metering"}` contract, so no downstream service code changed. The Chat-with-Document processor routes GPT-5.x through a streaming Responses call (SSE), publishing incremental token deltas to the UI with the same throttling as the Converse path. Notes: these are reasoning models (temperature/top_p/top_k omitted) tuned via a new OpenAI-only `reasoning_effort` config field (`minimal`/`low`/`medium`/`high`, default `medium`) surfaced per service in the unified template and config models; **no prompt caching** (`<<CACHEPOINT>>` stripped); **incompatible with agentic/Strands extraction** — that combination is now a hard error in `idp-cli config-validate` and raises at runtime; **not supported for Discovery** (which ingests whole-PDF document blocks the Responses API can't accept) — rejected by config-validate and guarded at runtime; **standard service tier only**. Availability is **US regions only** — GPT-5.5 in `us-east-2`; GPT-5.4 in `us-east-2`, `us-west-2`, `us-gov-west-1` (no EU/global), so the models are hidden in EU-region deployments. Lambda roles gained `bedrock-mantle:CreateInference` (+ `Get*`/`List*`) IAM permissions. New env vars: `BEDROCK_MANTLE_REGION` (pin the mantle region), `BEDROCK_MANTLE_SIGNING_NAME`, `BEDROCK_MANTLE_REASONING_EFFORT`. Includes pricing and `model_config_limits` (128K max output) entries. See the new [OpenAI GPT-5.x Models](docs/openai-models.md) guide for the full support matrix and caveats.
+
+- **Test Studio: Edit test set metadata** — Test sets can now be edited to update description (max 500 characters) and document classification type. Edit functionality available via new "Edit" button when a single test set is selected. Classification type metadata options: Unspecified, Single Class, Multi Class, Packet Splitting. Includes new `UpdateTestSetInput` GraphQL input type, `updateTestSet` mutation with `UpdateTestSetResolver` AppSync resolver, Lambda handler routing, and frontend Edit Test Set modal with form validation.
+
+### Fixed
+
+- **Agentic extraction no longer crashes merging token metering with `None` values** ([#337](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues/337)) — `concurrent_structured_output_async` (used when a large document is split into concurrent extraction batches) raised `TypeError: unsupported operand type(s) for +: 'NoneType' and 'int'` when a Bedrock response reported a token counter as `None`. The existing `(tv or 0)` guard only covered the incoming value; the accumulated value (seeded verbatim from the first batch via `dict(mv)`) could itself be `None`, and `dict.get(tk, 0)` returns that stored `None` rather than the default for a present-but-`None` key. The metering merge is now factored into `_accumulate_metering`, which coerces `None` on both sides of the addition. This previously crashed otherwise-successful extractions in the post-processing step, marking the document FAILED.
+
+- **Evaluation no longer fails on `None`/empty optional fields, empty arrays, or a single bad field** — Three related evaluation robustness fixes: (1) Optional fields with `None`/missing values (common in real schemas like URLA) no longer fail the confidence/assessment path with a misleading "Schema configuration error" — model fields are now widened to `Optional[...]` to work around upstream [stickler#149](https://github.com/awslabs/stickler/issues/149). (2) Auto-generated schemas with empty arrays (e.g. `[]` → bare `{"type": "array"}`) and objects that become empty after their unevaluable children are removed are now pruned instead of crashing the converter; genson's spurious `required` arrays are also stripped so a missing field scores as a miss rather than a hard error. (3) A single field that still fails validation is now dropped from scoring (and reported as a `__SKIPPED__` row with a coverage note) instead of zeroing out the entire section — limiting the blast radius so the remaining fields still evaluate.
+
+- **Schema Builder: Standard Class catalog restored in "Add Class" modal** — The Document Schema *Add Class* modal again presents the two-card chooser (📝 Custom Class / 📦 Standard Class) for non-policy schemas, letting users import pre-built classes from the [Standard Class Catalog](docs/classification.md#standard-document-classes) (Invoice, Receipt, US driver's license, etc.). The chooser/standard-mode UI was inadvertently dropped from `SchemaBuilder.tsx` during the policy-discovery rewrite (commit `d701e6b88`); the underlying `StandardClassCatalog` component, `addStandardClasses` hook action, and `standard-classes.json` data file were all still present and needed only to be re-wired into the modal. Policy Schema "Add Policy Class" still skips the chooser and goes straight to the custom form (unchanged behavior).
+
+- **Evaluation now handles null field descriptions** — Configs with `description: null` no longer cause evaluation failures. The evaluation service now automatically converts null descriptions to empty strings before JSON Schema validation (Stickler requirement). This fix ensures extraction results can be evaluated even when field descriptions are missing or null in config schemas. No functional impact on evaluation logic.
+
+- **Updated the AppSync APIs** (1) all field-level `@aws_auth(cognito_groups:[…])` directives in `schema.graphql` replaced with `@aws_cognito_user_pools(cognito_groups:[…])`, which AppSync evaluates on multi-auth APIs; (2) server-side Cognito group checks added to every privileged resolver Lambda.
+
+- **Navigation cleanup** — removed the "Resources" dropdown (Blog, Code) from the top-right user menu and added a "Blog" link to the top of the Resources section in the left navigation panel.
+
+## Templates
+   - us-west-2: `https://s3.us-west-2.amazonaws.com/aws-ml-blog-us-west-2/artifacts/genai-idp/idp-main_0.5.14.yaml`
+   - us-east-1: `https://s3.us-east-1.amazonaws.com/aws-ml-blog-us-east-1/artifacts/genai-idp/idp-main_0.5.14.yaml`
+   - eu-central-1: `https://s3.eu-central-1.amazonaws.com/aws-ml-blog-eu-central-1/artifacts/genai-idp/idp-main_0.5.14.yaml`
+
 ## [0.5.13]
 
 ### Added
@@ -149,7 +178,6 @@ SPDX-License-Identifier: MIT-0
    - us-west-2: `https://s3.us-west-2.amazonaws.com/aws-ml-blog-us-west-2/artifacts/genai-idp/idp-main_0.5.10.yaml`
    - us-east-1: `https://s3.us-east-1.amazonaws.com/aws-ml-blog-us-east-1/artifacts/genai-idp/idp-main_0.5.10.yaml`
    - eu-central-1: `https://s3.eu-central-1.amazonaws.com/aws-ml-blog-eu-central-1/artifacts/genai-idp/idp-main_0.5.10.yaml`
-
 
 ## [0.5.9]
 

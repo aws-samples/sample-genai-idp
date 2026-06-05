@@ -436,6 +436,10 @@ Resources:
             - Effect: Allow
               Action: [kms:Encrypt, kms:Decrypt, kms:ReEncrypt*, kms:GenerateDataKey*, kms:DescribeKey]
               Resource: !Ref CustomerManagedEncryptionKeyArn
+            # OpenAI GPT-5.x models use the bedrock-mantle endpoint / IAM namespace.
+            - Effect: Allow
+              Action: [bedrock-mantle:CreateInference, bedrock-mantle:GetProject, bedrock-mantle:ListProjects, bedrock-mantle:ListTagsForResources]
+              Resource: "*"
             - Effect: Allow
               Action: [bedrock:InvokeModel]
               Resource:
@@ -573,6 +577,10 @@ Resources:
             - Effect: Allow
               Action: [kms:Encrypt, kms:Decrypt, kms:ReEncrypt*, kms:GenerateDataKey*, kms:DescribeKey]
               Resource: !Ref CustomerManagedEncryptionKeyArn
+            # OpenAI GPT-5.x models use the bedrock-mantle endpoint / IAM namespace.
+            - Effect: Allow
+              Action: [bedrock-mantle:CreateInference, bedrock-mantle:GetProject, bedrock-mantle:ListProjects, bedrock-mantle:ListTagsForResources]
+              Resource: "*"
             - Effect: Allow
               Action: [bedrock:InvokeModel, bedrock:InvokeModelWithResponseStream, bedrock:GetInferenceProfile]
               Resource:
@@ -643,6 +651,10 @@ Resources:
             - Effect: Allow
               Action: [kms:Encrypt, kms:Decrypt, kms:ReEncrypt*, kms:GenerateDataKey*, kms:DescribeKey]
               Resource: !Ref CustomerManagedEncryptionKeyArn
+            # OpenAI GPT-5.x models use the bedrock-mantle endpoint / IAM namespace.
+            - Effect: Allow
+              Action: [bedrock-mantle:CreateInference, bedrock-mantle:GetProject, bedrock-mantle:ListProjects, bedrock-mantle:ListTagsForResources]
+              Resource: "*"
             - Effect: Allow
               Action: [bedrock:InvokeModel, bedrock:InvokeModelWithResponseStream, bedrock:GetInferenceProfile]
               Resource:

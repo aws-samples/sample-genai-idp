@@ -160,6 +160,87 @@ logging.getLogger('idp_common.bedrock.client').setLevel(logging.DEBUG)
 ### Example CachePoint Processing
 See notebook [Bedrock Client Prompt Cache Testing Notebook](../../../../notebooks/bedrock_client_cachepoint_test.ipynb)
 
+## OpenAI GPT-5.x Models (bedrock-mantle Responses API)
+
+OpenAI's frontier models — **GPT-5.4** (`openai.gpt-5.4`) and **GPT-5.5**
+(`openai.gpt-5.5`) — are **not** served on the Converse API like every other
+model. They are available only on the **`bedrock-mantle` endpoint via the OpenAI
+Responses API**. The client hides this difference: when a model ID starts with
+`openai.gpt-5`, `invoke_model` transparently routes the request to a
+SigV4-signed HTTP call against `bedrock-mantle` (implemented in
+[`openai_responses.py`](openai_responses.py)) and returns the **same
+`{"response", "metering"}` structure** every caller already expects — so no
+caller code changes.
+
+```python
+from idp_common.bedrock import invoke_model
+
+# Routed automatically to the bedrock-mantle Responses API.
+response = invoke_model(
+    model_id="openai.gpt-5.4",
+    system_prompt="You are a helpful assistant.",
+    content=[{"text": "Summarize this document."}],
+    max_tokens=4000,
+    reasoning_effort="medium",   # OpenAI-only: minimal | low | medium | high
+)
+text = response["response"]["output"]["message"]["content"][0]["text"]
+```
+
+### Behavior and limitations
+
+- **Inference params**: these are reasoning models — `temperature`, `top_p`, and
+  `top_k` are ignored. Control output via `reasoning_effort`
+  (`minimal`/`low`/`medium`/`high`, default `medium`). The default can be set
+  globally with the `BEDROCK_MANTLE_REASONING_EFFORT` env var.
+- **Input modalities**: text and images only. Converse `document` blocks (e.g.
+  whole-PDF input) are **not** supported and are dropped — callers needing PDF
+  ingestion (Discovery) must use a Claude/Nova model.
+- **Prompt caching**: not supported; `<<CACHEPOINT>>` markers are stripped.
+- **Service tiers**: standard only (no `:priority`/`:flex`).
+- **Regions**: US only — GPT-5.5 in `us-east-2`; GPT-5.4 in `us-east-2`,
+  `us-west-2`, `us-gov-west-1`. No EU/global. When the configured region lacks
+  the model, the request is routed to a known-available region (override with
+  `BEDROCK_MANTLE_REGION`).
+- **Agentic extraction / Discovery**: not supported (the Strands path and
+  Discovery's PDF document blocks are incompatible); these are rejected by
+  `idp-cli config-validate` and guarded at runtime.
+
+### Streaming
+
+For interactive use (e.g. Chat-with-Document), `stream_responses_api` yields
+incremental text deltas, then a final `{"metering": ..., "text": ...}` dict:
+
+```python
+from idp_common.bedrock import stream_responses_api
+from idp_common.bedrock.client import default_client
+
+for item in stream_responses_api(
+    client=default_client,
+    model_id="openai.gpt-5.4",
+    system_prompt="Answer concisely.",
+    content=[{"text": "What is the total due?"}],
+    max_tokens=2000,
+    context="ChatWithDocument",
+    reasoning_effort="low",
+):
+    if isinstance(item, str):
+        print(item, end="")        # incremental token delta
+    else:
+        metering = item["metering"]  # final usage record
+```
+
+### Detecting these models
+
+```python
+from idp_common.bedrock import is_openai_responses_model
+
+is_openai_responses_model("openai.gpt-5.4")          # True
+is_openai_responses_model("us.anthropic.claude-...")  # False
+```
+
+For the full support matrix and IAM/env-var details, see the
+[OpenAI GPT-5.x Models](../../../../docs/openai-models.md) guide.
+
 ## Helper Methods
 
 The BedrockClient provides useful utilities for common tasks:
@@ -279,6 +360,13 @@ Different Bedrock models implement these parameters with varying defaults, namin
   - Parameters use camelCase: `temperature`, `topP`, `topK`
   - Implementation: `topK` is placed in `additionalModelRequestFields.inferenceConfig`
 
+- **OpenAI GPT-5.x models** (`openai.gpt-5.*`):
+  - Reasoning models — `temperature`/`top_p`/`top_k` are **not used** (ignored)
+  - Controlled instead via `reasoning_effort` (`minimal`/`low`/`medium`/`high`)
+  - Served on the `bedrock-mantle` Responses API, not Converse — see the
+    [OpenAI GPT-5.x Models](#openai-gpt-5x-models-bedrock-mantle-responses-api)
+    section above
+
 **Common implementation details**:
 - Temperature is always included in the main `inferenceConfig`
 - top_p is added to `inferenceConfig` as "topP"
@@ -321,7 +409,7 @@ The BedrockClient automatically handles common failure scenarios:
 When creating a BedrockClient instance, you can customize:
 
 - `region`: AWS region for Bedrock (default: AWS_REGION env var or us-west-2)
-- `max_retries`: Maximum retry attempts for throttled requests (default: 8)
+- `max_retries`: Maximum retry attempts for throttled requests (default: 7)
 - `initial_backoff`: Starting backoff time in seconds (default: 2)
 - `max_backoff`: Maximum backoff time in seconds (default: 300)
 - `metrics_enabled`: Whether to publish CloudWatch metrics (default: True)

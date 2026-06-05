@@ -232,6 +232,13 @@ All Policy Discovery settings live under the `discovery.rules` section of the Co
 
 **Supported Models:** The same Bedrock model catalog as the Discovery module. Recommended: `us.anthropic.claude-sonnet-4-6` for quality (or `global.anthropic.claude-sonnet-4-6` if your deployment uses global inference profiles); any Claude or Nova model may be substituted.
 
+> **⚠️ OpenAI GPT-5.x is NOT supported for Policy/Rule Discovery.** Rule
+> discovery sends whole-PDF `document` blocks (and agentic rule discovery uses
+> the Converse-based Strands path), neither of which the OpenAI Responses API
+> supports. `openai.gpt-5.4` / `openai.gpt-5.5` are rejected by
+> `idp-cli config-validate` and guarded at runtime. See
+> [OpenAI GPT-5.x Models](openai-models.md).
+
 **Parameter Guidelines:**
 - **Temperature: `0.0`** — deterministic rule extraction; re-running on the same document should give the same rules
 - **Top P: `0.0` / Top K: `5`** — strict decoding, minimizes off-rule hallucination

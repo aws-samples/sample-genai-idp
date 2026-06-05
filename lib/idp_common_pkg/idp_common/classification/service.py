@@ -1010,6 +1010,7 @@ class ClassificationService:
             "top_k": self.config.classification.top_k,
             "top_p": self.config.classification.top_p,
             "max_tokens": self.config.classification.max_tokens,
+            "reasoning_effort": self.config.classification.reasoning_effort,
         }
 
         # Validate system prompt
@@ -1856,6 +1857,7 @@ class ClassificationService:
             max_tokens=config["max_tokens"],
             context="Classification",
             model_lambda_hook_arn=self.config.classification.model_lambda_hook_arn,
+            reasoning_effort=config.get("reasoning_effort"),
         )
 
     def _create_unclassified_result(

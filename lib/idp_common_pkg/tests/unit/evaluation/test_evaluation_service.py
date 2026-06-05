@@ -854,3 +854,54 @@ class TestEvaluationService:
             "_value": "INV001",
             "_confidence": 0.99,
         }
+
+    def test_clean_null_descriptions(self, service):
+        """Test that null descriptions are replaced with empty strings."""
+        schema = {
+            "$id": "Invoice",
+            "type": "object",
+            "properties": {
+                "Agency": {"type": "string", "description": None},
+                "ValidDescription": {
+                    "type": "string",
+                    "description": "A valid description",
+                },
+                "LineItems": {
+                    "type": "array",
+                    "description": None,
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "Description": {"type": "string", "description": None}
+                        },
+                    },
+                },
+            },
+            "$defs": {
+                "SomeGroup": {
+                    "type": "object",
+                    "properties": {"Field1": {"type": "string", "description": None}},
+                }
+            },
+        }
+
+        cleaned = service._clean_null_descriptions(schema)
+
+        # Null descriptions should be replaced with empty strings
+        assert cleaned["properties"]["Agency"]["description"] == ""
+        assert cleaned["properties"]["LineItems"]["description"] == ""
+        assert (
+            cleaned["properties"]["LineItems"]["items"]["properties"]["Description"][
+                "description"
+            ]
+            == ""
+        )
+        assert (
+            cleaned["$defs"]["SomeGroup"]["properties"]["Field1"]["description"] == ""
+        )
+
+        # Valid descriptions should be unchanged
+        assert (
+            cleaned["properties"]["ValidDescription"]["description"]
+            == "A valid description"
+        )

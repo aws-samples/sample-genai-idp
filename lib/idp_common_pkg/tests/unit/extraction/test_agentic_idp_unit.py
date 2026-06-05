@@ -18,6 +18,7 @@ try:
     from idp_common.extraction.agentic_idp import (
         SYSTEM_PROMPT,
         TABLE_PARSING_PROMPT_ADDENDUM,
+        _accumulate_metering,
         _active_checkpoint_callback_var,
         _active_confidence_data_var,
         _build_model_config,
@@ -256,6 +257,17 @@ class TestBuildModelConfig:
         )
         assert config["max_tokens"] == 8_192
 
+    def test_openai_responses_model_rejected(self):
+        """OpenAI GPT-5.x models cannot use the agentic/Strands path."""
+        with pytest.raises(ValueError, match="do not support agentic"):
+            _build_model_config(
+                "openai.gpt-5.4",
+                max_tokens=None,
+                max_retries=3,
+                connect_timeout=10.0,
+                read_timeout=300.0,
+            )
+
     def test_max_tokens_respected_when_under_limit(self):
         config = _build_model_config(
             "us.anthropic.claude-sonnet-4-20250514-v1:0",
@@ -436,3 +448,42 @@ class TestDetectImageFormat:
             buf = io.BytesIO()
             img.save(buf, format="BMP")
             detect_image_format(buf.getvalue())
+
+
+# ──────────────────────────────────────────────────────────────
+# Metering merge (issue #337): guard against None token values
+# ──────────────────────────────────────────────────────────────
+
+
+class TestAccumulateMetering:
+    def test_sums_integer_values(self):
+        merged: dict[str, Any] = {}
+        _accumulate_metering(merged, {"model": {"inputTokens": 3, "outputTokens": 2}})
+        _accumulate_metering(merged, {"model": {"inputTokens": 5, "outputTokens": 1}})
+        assert merged == {"model": {"inputTokens": 8, "outputTokens": 3}}
+
+    def test_none_in_seeded_batch_does_not_raise(self):
+        # Issue #337: the first batch seeds merged_metering verbatim, so a
+        # stored None must not crash the addition of a later batch's value.
+        merged: dict[str, Any] = {}
+        _accumulate_metering(merged, {"model": {"inputTokens": None}})
+        _accumulate_metering(merged, {"model": {"inputTokens": 5}})
+        assert merged == {"model": {"inputTokens": 5}}
+
+    def test_none_in_incoming_batch_does_not_raise(self):
+        merged: dict[str, Any] = {}
+        _accumulate_metering(merged, {"model": {"inputTokens": 5}})
+        _accumulate_metering(merged, {"model": {"inputTokens": None}})
+        assert merged == {"model": {"inputTokens": 5}}
+
+    def test_none_on_both_sides(self):
+        merged: dict[str, Any] = {}
+        _accumulate_metering(merged, {"model": {"inputTokens": None}})
+        _accumulate_metering(merged, {"model": {"inputTokens": None}})
+        assert merged == {"model": {"inputTokens": 0}}
+
+    def test_new_token_key_in_later_batch(self):
+        merged: dict[str, Any] = {}
+        _accumulate_metering(merged, {"model": {"inputTokens": 4}})
+        _accumulate_metering(merged, {"model": {"outputTokens": 2}})
+        assert merged == {"model": {"inputTokens": 4, "outputTokens": 2}}

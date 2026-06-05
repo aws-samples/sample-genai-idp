@@ -32,6 +32,21 @@ dynamodb = boto3.resource('dynamodb')
 sfn_client = boto3.client('stepfunctions')
 
 
+def _caller_in_groups(event, allowed):
+    """Defense-in-depth RBAC check against the caller's Cognito groups.
+
+    The schema restricts these fields via @aws_cognito_user_pools(cognito_groups),
+    but we also enforce the group server-side so the operation is never reachable
+    by an unauthorized caller even if the schema directive is missing or
+    misconfigured (e.g. the prior @aws_auth directive, which AppSync silently
+    ignores on a multi-auth API).
+    """
+    groups = (event.get("identity") or {}).get("claims", {}).get("cognito:groups") or []
+    if isinstance(groups, str):
+        groups = [groups]
+    return bool(set(allowed).intersection(groups))
+
+
 def handler(event, context):
     """
     Handles discovery-related GraphQL mutations:
@@ -44,6 +59,16 @@ def handler(event, context):
 
     # Route based on which GraphQL field is being resolved
     field_name = event.get('info', {}).get('fieldName', 'uploadDiscoveryDocument')
+
+    # Defense-in-depth: all discovery mutations are Admin+Author operations.
+    if not _caller_in_groups(event, ("Admin", "Author")):
+        logger.warning(
+            f"Forbidden: caller attempted '{field_name}' without Admin/Author group"
+        )
+        raise PermissionError(
+            f"Unauthorized: '{field_name}' requires Admin or Author group"
+        )
+
     if field_name == 'autoDetectSections':
         return handle_auto_detect_sections(event, context)
     elif field_name == 'startMultiDocDiscovery':

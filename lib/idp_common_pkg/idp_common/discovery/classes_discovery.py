@@ -11,12 +11,30 @@ import jsonschema
 from jsonschema import Draft202012Validator
 
 from idp_common import bedrock, image
+from idp_common.bedrock.openai_responses import is_openai_responses_model
 from idp_common.config import ConfigurationReader
 from idp_common.config.configuration_manager import ConfigurationManager
 from idp_common.config.models import IDPConfig
 from idp_common.utils.s3util import S3Util
 
 logger = logging.getLogger(__name__)
+
+
+def _reject_openai_responses_model(model_id: Optional[str]) -> None:
+    """Reject OpenAI GPT-5.x models for discovery.
+
+    Discovery ingests whole PDFs via Converse ``document`` content blocks, which
+    the OpenAI Responses API (bedrock-mantle) does not support — it accepts only
+    text and image input. Routing a GPT-5.x model here would silently drop the
+    document and hallucinate, so fail loudly instead. (These models are also not
+    offered in the discovery model picklists.)
+    """
+    if is_openai_responses_model(model_id):
+        raise ValueError(
+            f"OpenAI Responses model '{model_id}' is not supported for discovery. "
+            "Discovery sends whole-PDF document blocks, which the bedrock-mantle "
+            "Responses API cannot accept. Choose an Anthropic or Nova model."
+        )
 
 
 class ClassesDiscovery:
@@ -177,6 +195,7 @@ class ClassesDiscovery:
             auto_split_config = self.discovery_config.auto_split
             # Caller-supplied override takes precedence over configured model_id
             model_id = model_id or auto_split_config.model_id
+            _reject_openai_responses_model(model_id)
             top_p = auto_split_config.top_p
             max_tokens = auto_split_config.max_tokens
 
@@ -562,6 +581,7 @@ class ClassesDiscovery:
         # Get configuration for without ground truth
         # Caller-supplied override takes precedence over configured model_id
         model_id = model_id or self.without_gt_config.model_id
+        _reject_openai_responses_model(model_id)
         system_prompt = (
             self.without_gt_config.system_prompt
             or "You are an expert in processing forms. Extracting data from images and documents"
@@ -693,6 +713,7 @@ class ClassesDiscovery:
         # Get configuration for with ground truth
         # Caller-supplied override takes precedence over configured model_id
         model_id = model_id or self.with_gt_config.model_id
+        _reject_openai_responses_model(model_id)
         system_prompt = (
             self.with_gt_config.system_prompt
             or "You are an expert in processing forms. Extracting data from images and documents"

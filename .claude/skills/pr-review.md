@@ -13,8 +13,8 @@ typically with a prompt like:
 > Safe to merge?
 
 This skill is for reviewing **someone else's** PR/MR at a URL. It is distinct
-from `.claude/skills/code-review.md`, which is the pre-commit self-review
-checklist applied to my own changes before returning them to the user.
+from the code-review skill (the pre-commit self-review checklist applied to my
+own changes before returning them to the user).
 
 ## Ground Rules
 
@@ -44,9 +44,16 @@ gh pr diff <NN> --repo <owner>/<repo>
 gh pr checks <NN> --repo <owner>/<repo>
 ```
 
-If a GitHub MCP server is configured, `pull_request_read` methods
-(`get`, `get_diff`, `get_files`, `get_status`, `get_reviews`,
-`get_comments`, `get_review_comments`) are equivalent.
+If a GitHub MCP server is configured (e.g. for Cline), use its
+`pull_request_read` methods instead of the shell — they are equivalent:
+- `method=get` → title, body, author, base/head refs, mergeable state
+- `method=get_status` → CI / checks status on the head commit
+- `method=get_files` → changed files (paginate if > 100)
+- `method=get_diff` → unified diff
+- `method=get_reviews` → existing reviews
+- `method=get_comments` and `method=get_review_comments` → discussion
+- `get_file_contents` on specific paths at `ref=refs/pull/<NN>/head` to read
+  full files when the diff lacks enough context
 
 ### GitLab MR (`gitlab.aws.dev/<group>/<project>/-/merge_requests/<NN>`)
 
@@ -88,8 +95,8 @@ the head ref so surrounding context is captured.
 ## Step 2 — Evaluate the six review questions
 
 Work through each question. Reuse project coding-standards knowledge from the
-other skill files (`backend-lambda.md`, `frontend-ui.md`, `infrastructure.md`,
-`documentation.md`, `testing-qa.md`, `code-review.md`).
+other skill files in this directory (backend, frontend, infrastructure,
+documentation, testing, code-review).
 
 ### 1. Is this a good PR?
 - Scope is focused (single feature / fix / refactor; not a grab-bag)

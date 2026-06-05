@@ -414,6 +414,21 @@ def handler(event, context):
     else:
         logger.info("Executing normal GraphQL mutation handler")
         try:
+            # Defense-in-depth: copyToBaseline is an Admin+Author operation.
+            # (Only applied to the AppSync path; the async self-invocation above
+            # has no Cognito identity and is reached only from this Lambda.)
+            groups = (event.get("identity") or {}).get("claims", {}).get("cognito:groups") or []
+            if isinstance(groups, str):
+                groups = [groups]
+            if not ({"Admin", "Author"}.intersection(groups)):
+                logger.warning(
+                    f"Forbidden: caller (groups={groups}) attempted copyToBaseline"
+                )
+                return {
+                    "success": False,
+                    "message": "Unauthorized: copyToBaseline requires Admin or Author group",
+                }
+
             # Extract parameters from the GraphQL event
             object_key = event['arguments']['objectKey']
             logger.info(f"GraphQL mutation parameters: object_key={object_key}")
