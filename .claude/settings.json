@@ -1,7 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(python -m pytest tests/unit/extraction/test_agentic_idp_unit.py -v)"
-    ]
-  }
-}
