@@ -5,6 +5,8 @@ SPDX-License-Identifier: MIT-0
 
 ## [Unreleased]
 
+## [0.5.14]
+
 ### Added
 
 - **Dependency manifest generation for artifact-repository mirroring** — New `make dep-manifest` target (and `scripts/generate-dep-manifest.sh`) generates a complete, pinned list of all Python and Node.js dependencies for enterprises mirroring packages into an artifact repository (JFrog Artifactory, AWS CodeArtifact, Sonatype Nexus, etc.) for air-gapped, pre-scanned builds. Parses existing `uv.lock` and `package-lock.json` files (no re-resolution) plus any extra `requirements.txt`/`pyproject.toml` packages, writing pip-compatible (`name==version`) and npm-compatible (`name@version`) manifests to the gitignored `dist/manifests/`. A GitHub Actions workflow (`generate-dep-manifest.yml`) regenerates manifests on dependency-file changes (dry-run on PRs, 90-day artifact upload on `main`/manual dispatch). See the new [Dependency Mirroring](docs/dependency-mirroring.md) guide.
@@ -27,6 +29,11 @@ SPDX-License-Identifier: MIT-0
 
 - **Navigation cleanup** — removed the "Resources" dropdown (Blog, Code) from the top-right user menu and added a "Blog" link to the top of the Resources section in the left navigation panel.
 
+## Templates
+   - us-west-2: `https://s3.us-west-2.amazonaws.com/aws-ml-blog-us-west-2/artifacts/genai-idp/idp-main_0.5.14.yaml`
+   - us-east-1: `https://s3.us-east-1.amazonaws.com/aws-ml-blog-us-east-1/artifacts/genai-idp/idp-main_0.5.14.yaml`
+   - eu-central-1: `https://s3.eu-central-1.amazonaws.com/aws-ml-blog-eu-central-1/artifacts/genai-idp/idp-main_0.5.14.yaml`
+   - 
 ## [0.5.13]
 
 ### Added
