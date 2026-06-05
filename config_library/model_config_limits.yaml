@@ -53,6 +53,17 @@ model_limits:
     reference: "https://docs.anthropic.com/claude/docs/models-overview#model-comparison"
 
   # ---------------------------------------------------------------------------
+  # OpenAI GPT-5.x (bedrock-mantle Responses API)
+  # ---------------------------------------------------------------------------
+  # GPT-5.4 / GPT-5.5 are served via the bedrock-mantle endpoint (OpenAI
+  # Responses API), 272K context window. Used to cap max_output_tokens for the
+  # 'max_output_tokens' request field.
+  - pattern: "openai\\.gpt-5"
+    max_output_tokens: 128000
+    description: "OpenAI GPT-5.4 / GPT-5.5 via Bedrock Mantle Responses API"
+    reference: "https://docs.aws.amazon.com/bedrock/latest/userguide/model-cards-openai.html"
+
+  # ---------------------------------------------------------------------------
   # Amazon Nova Models (all generations)
   # ---------------------------------------------------------------------------
   - pattern: "nova-(premier|pro|lite|micro|2)"

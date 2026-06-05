@@ -245,6 +245,13 @@ class ExtractionConfig(BaseModel):
     temperature: float = Field(default=0.0, ge=0.0, le=1.0)
     top_p: float = Field(default=0.1, ge=0.0, le=1.0)
     top_k: float = Field(default=5.0, ge=0.0)
+    reasoning_effort: str = Field(
+        default="medium",
+        description=(
+            "Reasoning effort for OpenAI Responses models (GPT-5.x) only: "
+            "minimal, low, medium, or high. Ignored by other model families."
+        ),
+    )
     max_tokens: int = Field(
         default=10000,
         gt=0,
@@ -310,6 +317,13 @@ class ClassificationConfig(BaseModel):
     temperature: float = Field(default=0.0, ge=0.0, le=1.0)
     top_p: float = Field(default=0.1, ge=0.0, le=1.0)
     top_k: float = Field(default=5.0, ge=0.0)
+    reasoning_effort: str = Field(
+        default="medium",
+        description=(
+            "Reasoning effort for OpenAI Responses models (GPT-5.x) only: "
+            "minimal, low, medium, or high. Ignored by other model families."
+        ),
+    )
     max_tokens: int = Field(
         default=4096,
         gt=0,
@@ -448,6 +462,13 @@ class AssessmentConfig(BaseModel):
     temperature: float = Field(default=0.0, ge=0.0, le=1.0)
     top_p: float = Field(default=0.1, ge=0.0, le=1.0)
     top_k: float = Field(default=5.0, ge=0.0)
+    reasoning_effort: str = Field(
+        default="medium",
+        description=(
+            "Reasoning effort for OpenAI Responses models (GPT-5.x) only: "
+            "minimal, low, medium, or high. Ignored by other model families."
+        ),
+    )
     max_tokens: int = Field(
         default=10000,
         gt=0,
@@ -507,6 +528,13 @@ class SummarizationConfig(BaseModel):
     temperature: float = Field(default=0.0, ge=0.0, le=1.0)
     top_p: float = Field(default=0.1, ge=0.0, le=1.0)
     top_k: float = Field(default=5.0, ge=0.0)
+    reasoning_effort: str = Field(
+        default="medium",
+        description=(
+            "Reasoning effort for OpenAI Responses models (GPT-5.x) only: "
+            "minimal, low, medium, or high. Ignored by other model families."
+        ),
+    )
     max_tokens: int = Field(
         default=4096,
         gt=0,
@@ -575,6 +603,13 @@ class ChatConfig(BaseModel):
             "not exceed the selected model's limit."
         ),
     )
+    reasoning_effort: str = Field(
+        default="medium",
+        description=(
+            "Reasoning effort for OpenAI Responses models (GPT-5.x) only: "
+            "minimal, low, medium, or high. Ignored by other model families."
+        ),
+    )
 
     @field_validator("temperature", "top_p", "top_k", mode="before")
     @classmethod
@@ -618,6 +653,13 @@ class OCRConfig(BaseModel):
     )
     task_prompt: Optional[str] = Field(
         default=None, description="Task prompt for Bedrock OCR"
+    )
+    reasoning_effort: str = Field(
+        default="medium",
+        description=(
+            "Reasoning effort for OpenAI Responses models (GPT-5.x) only: "
+            "minimal, low, medium, or high. Ignored by other model families."
+        ),
     )
     features: List[OCRFeature] = Field(
         default_factory=list, description="Textract features to enable"
@@ -1318,6 +1360,13 @@ class EvaluationLLMMethodConfig(BaseModel):
         description="Maximum number of output tokens. Ensure this does not exceed the selected model's limit. See model documentation for details.",
     )
     top_k: float = Field(default=5.0, ge=0.0)
+    reasoning_effort: str = Field(
+        default="medium",
+        description=(
+            "Reasoning effort for OpenAI Responses models (GPT-5.x) only: "
+            "minimal, low, medium, or high. Ignored by other model families."
+        ),
+    )
     task_prompt: str = Field(
         default="""
         I need to evaluate attribute extraction for a document of class: {DOCUMENT_CLASS}.

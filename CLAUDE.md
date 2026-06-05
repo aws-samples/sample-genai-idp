@@ -439,7 +439,24 @@ that domain:
 | `.claude/skills/code-review.md` | Pre-commit self-review checklist for your own changes |
 | `.claude/skills/pr-review.md` | Reviewing an external GitHub PR or GitLab MR at a URL (e.g. `review <url>`) |
 | `.claude/skills/testing-qa.md` | Writing tests, pytest patterns, moto, conftest setup |
-| `.claude/skills/documentation.md` | Documentation standards, frontmatter, CHANGELOG, docs-site |
+| `.claude/skills/documentation.md` | Documentation standards, two doc tiers, CHANGELOG, docs-site, and the "adding a Bedrock model" checklist |
+
+> **Note:** Skill files are mirrored in `.cline/skills/` for the Cline assistant
+> (same content, different filenames). When editing a skill, update its
+> counterpart too.
+
+### Documentation lives in two tiers
+
+When changing `idp_common` or adding/changing models, update **both** tiers:
+1. **User/feature docs** — `docs/*.md` (published to the Starlight site).
+2. **Developer/module docs** — `lib/idp_common_pkg/**/README.md` (one per
+   subpackage; the canonical home for library/client behavior).
+
+Adding a selectable Bedrock model touches many files (template enums,
+`config_library/pricing.yaml`, `model_config_limits.yaml`, config models,
+`update_configuration`, UI dropdown, the bedrock client, IAM, **both doc
+tiers**, and `CHANGELOG.md`). Follow the checklist in
+`.claude/skills/documentation.md` so none are missed.
 
 ### Reviewing External PRs / MRs
 

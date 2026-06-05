@@ -634,6 +634,7 @@ def compare_llm(
         model = config.get("model", "us.anthropic.claude-3-sonnet-20240229-v1:0")
         temperature = config.get("temperature", 0.0)
         top_k = config.get("top_k", 5)
+        reasoning_effort = config.get("reasoning_effort")
 
         # Get system and task prompts from config or use defaults
         system_prompt = config.get(
@@ -717,6 +718,7 @@ Respond ONLY with the JSON and nothing else.  Here's the exact format:
             content=content,
             temperature=temperature,
             top_k=top_k,
+            reasoning_effort=reasoning_effort,
         )
 
         # Extract and parse response

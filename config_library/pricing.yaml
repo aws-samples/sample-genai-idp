@@ -328,6 +328,34 @@ pricing:
         price: "12.5E-6"
 
   # ---------------------------------------------------------------------------
+  # Amazon Bedrock Models - OpenAI GPT-5.x (bedrock-mantle Responses API)
+  # ---------------------------------------------------------------------------
+  # Pricing matches OpenAI first-party rates on Bedrock. VERIFY current prices
+  # at https://aws.amazon.com/bedrock/pricing/ before production use.
+  # cacheWriteInputTokens kept at 0 — Responses prefix caching has no write cost.
+  - name: bedrock/openai.gpt-5.4
+    units:
+      - name: inputTokens
+        price: "1.25E-6"
+      - name: outputTokens
+        price: "1.0E-5"
+      - name: cacheReadInputTokens
+        price: "1.25E-7"
+      - name: cacheWriteInputTokens
+        price: "0.0"
+
+  - name: bedrock/openai.gpt-5.5
+    units:
+      - name: inputTokens
+        price: "1.75E-6"
+      - name: outputTokens
+        price: "1.4E-5"
+      - name: cacheReadInputTokens
+        price: "1.75E-7"
+      - name: cacheWriteInputTokens
+        price: "0.0"
+
+  # ---------------------------------------------------------------------------
   # Amazon Bedrock Models - Amazon Nova (EU)
   # ---------------------------------------------------------------------------
   - name: bedrock/eu.amazon.nova-lite-v1:0

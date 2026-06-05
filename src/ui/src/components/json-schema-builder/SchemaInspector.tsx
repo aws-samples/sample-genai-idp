@@ -306,6 +306,9 @@ const SchemaInspector = ({
                         { label: 'us.anthropic.claude-opus-4-7:1m', value: 'us.anthropic.claude-opus-4-7:1m' },
                         { label: 'us.anthropic.claude-opus-4-8', value: 'us.anthropic.claude-opus-4-8' },
                         { label: 'us.anthropic.claude-opus-4-8:1m', value: 'us.anthropic.claude-opus-4-8:1m' },
+                        // OpenAI GPT-5.x (bedrock-mantle Responses API) - US regions only
+                        { label: 'openai.gpt-5.4', value: 'openai.gpt-5.4' },
+                        { label: 'openai.gpt-5.5', value: 'openai.gpt-5.5' },
                         { label: 'eu.amazon.nova-lite-v1:0', value: 'eu.amazon.nova-lite-v1:0' },
                         { label: 'eu.amazon.nova-pro-v1:0', value: 'eu.amazon.nova-pro-v1:0' },
                         { label: 'eu.amazon.nova-2-lite-v1:0', value: 'eu.amazon.nova-2-lite-v1:0' },

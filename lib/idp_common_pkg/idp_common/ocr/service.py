@@ -869,6 +869,9 @@ class OcrService:
                 top_p=0.1,
                 top_k=5,
                 max_tokens=4096,
+                reasoning_effort=getattr(self.config.ocr, "reasoning_effort", None)
+                if hasattr(self, "config")
+                else None,
                 context="OCR",
                 model_lambda_hook_arn=getattr(
                     self.config.ocr, "model_lambda_hook_arn", None
@@ -1071,6 +1074,9 @@ class OcrService:
                 top_p=0.1,
                 top_k=5,
                 max_tokens=4096,
+                reasoning_effort=getattr(self.config.ocr, "reasoning_effort", None)
+                if hasattr(self, "config")
+                else None,
                 context="OCR",
                 model_lambda_hook_arn=getattr(
                     self.config.ocr, "model_lambda_hook_arn", None
@@ -1507,6 +1513,9 @@ class OcrService:
             top_p=0.1,
             top_k=5,
             max_tokens=4096,
+            reasoning_effort=getattr(self.config.ocr, "reasoning_effort", None)
+            if hasattr(self, "config")
+            else None,
             context="OCR",
             model_lambda_hook_arn=getattr(
                 self.config.ocr, "model_lambda_hook_arn", None
@@ -1908,6 +1917,9 @@ class OcrService:
                     top_p=0.1,
                     top_k=5,
                     max_tokens=4096,
+                    reasoning_effort=getattr(self.config.ocr, "reasoning_effort", None)
+                    if hasattr(self, "config")
+                    else None,
                     context="OCR",
                 )
                 return bedrock.extract_text_from_response(response_with_metering)

@@ -17,7 +17,7 @@ import time
 from typing import Any
 
 from idp_common import bedrock, image, metrics, s3, utils
-from idp_common.bedrock import format_prompt
+from idp_common.bedrock import format_prompt, is_openai_responses_model
 from idp_common.config.models import IDPConfig
 from idp_common.config.schema_constants import (
     ID_FIELD,
@@ -1424,6 +1424,7 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
         temperature = self.config.extraction.temperature
         top_k = self.config.extraction.top_k
         top_p = self.config.extraction.top_p
+        reasoning_effort = self.config.extraction.reasoning_effort
         max_tokens = (
             self.config.extraction.max_tokens
             if self.config.extraction.max_tokens
@@ -1442,7 +1443,21 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
         schema_analysis: dict[str, Any] | None = None
         ocr_analysis: dict[str, Any] | None = None
 
-        if self.config.extraction.agentic.enabled:
+        # OpenAI GPT-5.x models are served via the bedrock-mantle Responses API
+        # and are incompatible with agentic (Strands) extraction, which relies on
+        # the Converse API. This combination is rejected at config-validate time;
+        # fail loudly here too rather than silently changing the extraction mode,
+        # so a config that bypassed validation surfaces the error immediately.
+        use_agentic = self.config.extraction.agentic.enabled
+        if use_agentic and is_openai_responses_model(model_id):
+            raise ValueError(
+                f"OpenAI Responses model '{model_id}' is not compatible with agentic "
+                "extraction (extraction.agentic.enabled=true). Set agentic.enabled=false "
+                "or choose a non-OpenAI model. (This is also enforced by "
+                "'idp-cli config-validate'.)"
+            )
+
+        if use_agentic:
             if not AGENTIC_AVAILABLE:
                 raise ImportError(
                     "Agentic extraction requires Python 3.12+ and strands-agents dependencies. "
@@ -1674,6 +1689,7 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
                 max_tokens=max_tokens,
                 context="Extraction",
                 model_lambda_hook_arn=self.config.extraction.model_lambda_hook_arn,
+                reasoning_effort=reasoning_effort,
             )
 
             extracted_text = bedrock.extract_text_from_response(

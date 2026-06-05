@@ -358,6 +358,8 @@ Resources:
                   - "us.anthropic.claude-opus-4-7:1m"
                   - "us.anthropic.claude-opus-4-8"
                   - "us.anthropic.claude-opus-4-8:1m"
+                  - "openai.gpt-5.4"
+                  - "openai.gpt-5.5"
                   - "eu.amazon.nova-lite-v1:0"
                   - "eu.amazon.nova-pro-v1:0"
                   - "eu.amazon.nova-2-lite-v1:0"
@@ -410,6 +412,12 @@ Resources:
                 default: "Extract all text from this document image. Preserve the layout, including paragraphs, tables, and formatting."
                 order: 5
                 dependsOn: { field: "backend", value: "bedrock" }
+              reasoning_effort:
+                type: string
+                enum: ["minimal", "low", "medium", "high"]
+                default: "medium"
+                description: "Reasoning effort for OpenAI GPT-5.x (Responses API) models ONLY: controls how much the model reasons before answering. Ignored by Anthropic/Nova/other models. Default: medium."
+                order: 5.5
               features:
                 type: array
                 listLabel: "Textract Features"
@@ -456,7 +464,7 @@ Resources:
                   order: 2.6
                 extraction_model:
                   type: string
-                  description: "Optional per-class extraction model override. When set, this model is used for extraction instead of the global extraction.model. Useful for classes that benefit from a different model."
+                  description: "Optional per-class extraction model override. When set, this model is used for extraction instead of the global extraction.model. Useful for classes that benefit from a different model. NOTE: OpenAI GPT-5.x models (openai.gpt-5.*) are NOT compatible with agentic extraction (extraction.agentic.enabled=true); that combination is rejected by config validation."
                   order: 2.7
                   enum:
                     - ""
@@ -475,6 +483,8 @@ Resources:
                     - "us.anthropic.claude-opus-4-7:1m"
                     - "us.anthropic.claude-opus-4-8"
                     - "us.anthropic.claude-opus-4-8:1m"
+                    - "openai.gpt-5.4"
+                    - "openai.gpt-5.5"
                     - "eu.amazon.nova-lite-v1:0"
                     - "eu.amazon.nova-pro-v1:0"
                     - "eu.amazon.nova-2-lite-v1:0"
@@ -768,6 +778,8 @@ Resources:
                   - "us.anthropic.claude-opus-4-7:1m"
                   - "us.anthropic.claude-opus-4-8"
                   - "us.anthropic.claude-opus-4-8:1m"
+                  - "openai.gpt-5.4"
+                  - "openai.gpt-5.5"
                   - "eu.amazon.nova-lite-v1:0"
                   - "eu.amazon.nova-pro-v1:0"
                   - "eu.amazon.nova-2-lite-v1:0"
@@ -840,21 +852,27 @@ Resources:
                 type: number
                 minimum: 0
                 maximum: 1
-                description: "Sampling temperature: Controls randomness in model output (0.0 = deterministic, higher = more random). Used when top_p is 0. Set temperature=0.0 for consistent, deterministic outputs. Not used for Claude 4.7+ models."
+                description: "Sampling temperature: Controls randomness in model output (0.0 = deterministic, higher = more random). Used when top_p is 0. Set temperature=0.0 for consistent, deterministic outputs. Not used for Claude 4.7+ or OpenAI GPT-5.x models."
                 order: 4
               top_k:
                 type: integer
                 minimum: 1
-                description: "Sampling Top K. Not used for Claude 4.7+ models."
+                description: "Sampling Top K. Not used for Claude 4.7+ or OpenAI GPT-5.x models."
                 order: 5
               top_p:
                 type: number
-                description: "Sampling Top P: Nucleus sampling threshold (0.0-1.0). When set to a positive value (> 0), overrides temperature parameter. Set to 0 to use temperature instead."
+                description: "Sampling Top P: Nucleus sampling threshold (0.0-1.0). When set to a positive value (> 0), overrides temperature parameter. Set to 0 to use temperature instead. Not used for Claude 4.7+ or OpenAI GPT-5.x models."
                 order: 6
               max_tokens:
                 type: number
                 description: "Maximum number of output tokens. Ensure this does not exceed the selected model's limit. See model documentation for details."
                 order: 7
+              reasoning_effort:
+                type: string
+                enum: ["minimal", "low", "medium", "high"]
+                default: "medium"
+                description: "Reasoning effort for OpenAI GPT-5.x (Responses API) models ONLY: controls how much the model reasons before answering. Ignored by Anthropic/Nova/other models. Default: medium."
+                order: 7.5
               system_prompt:
                 type: string
                 description: System prompt
@@ -945,7 +963,7 @@ Resources:
                     order: 1
               model:
                 type: string
-                description: "Model identifier. Select 'LambdaHook' to use a custom Lambda function for inference."
+                description: "Model identifier. Select 'LambdaHook' to use a custom Lambda function for inference. NOTE: OpenAI GPT-5.x models (openai.gpt-5.*) run via the bedrock-mantle Responses API and are NOT compatible with agentic extraction (agentic.enabled=true); that combination is rejected by config validation."
                 enum:
                   - "LambdaHook"
                   - !If
@@ -972,6 +990,8 @@ Resources:
                   - "us.anthropic.claude-opus-4-7:1m"
                   - "us.anthropic.claude-opus-4-8"
                   - "us.anthropic.claude-opus-4-8:1m"
+                  - "openai.gpt-5.4"
+                  - "openai.gpt-5.5"
                   - "eu.amazon.nova-lite-v1:0"
                   - "eu.amazon.nova-pro-v1:0"
                   - "eu.amazon.nova-2-lite-v1:0"
@@ -1016,21 +1036,27 @@ Resources:
                 type: number
                 minimum: 0
                 maximum: 1
-                description: "Sampling temperature: Controls randomness in model output (0.0 = deterministic, higher = more random). Used when top_p is 0. Set temperature=0.0 for consistent, deterministic outputs. Not used for Claude 4.7+ models."
+                description: "Sampling temperature: Controls randomness in model output (0.0 = deterministic, higher = more random). Used when top_p is 0. Set temperature=0.0 for consistent, deterministic outputs. Not used for Claude 4.7+ or OpenAI GPT-5.x models."
                 order: 3
               top_k:
                 type: integer
                 minimum: 1
-                description: "Sampling Top K. Not used for Claude 4.7+ models."
+                description: "Sampling Top K. Not used for Claude 4.7+ or OpenAI GPT-5.x models."
                 order: 4
               top_p:
                 type: number
-                description: "Sampling Top P: Nucleus sampling threshold (0.0-1.0). When set to a positive value (> 0), overrides temperature parameter. Set to 0 to use temperature instead."
+                description: "Sampling Top P: Nucleus sampling threshold (0.0-1.0). When set to a positive value (> 0), overrides temperature parameter. Set to 0 to use temperature instead. Not used for Claude 4.7+ or OpenAI GPT-5.x models."
                 order: 5
               max_tokens:
                 type: number
                 description: "Maximum number of output tokens. Ensure this does not exceed the selected model's limit. See model documentation for details."
                 order: 6
+              reasoning_effort:
+                type: string
+                enum: ["minimal", "low", "medium", "high"]
+                default: "medium"
+                description: "Reasoning effort for OpenAI GPT-5.x (Responses API) models ONLY: controls how much the model reasons before answering. Ignored by Anthropic/Nova/other models. Default: medium."
+                order: 6.5
               system_prompt:
                 type: string
                 description: System prompt
@@ -1151,6 +1177,8 @@ Resources:
                     "us.anthropic.claude-opus-4-7:1m",
                     "us.anthropic.claude-opus-4-8",
                     "us.anthropic.claude-opus-4-8:1m",
+                    "openai.gpt-5.4",
+                    "openai.gpt-5.5",
                     "eu.amazon.nova-lite-v1:0",
                     "eu.amazon.nova-pro-v1:0",
                     "eu.amazon.nova-2-lite-v1:0", "eu.amazon.nova-2-lite-v1:0:priority", "eu.amazon.nova-2-lite-v1:0:flex",
@@ -1193,23 +1221,30 @@ Resources:
               temperature:
                 type: number
                 dependsOn: { field: "use_bda", value: false }
-                description: "Sampling temperature: Controls randomness in model output (0.0 = deterministic, higher = more random). Used when top_p is 0. Set temperature=0.0 for consistent, deterministic outputs. Not used for Claude 4.7+ models."
+                description: "Sampling temperature: Controls randomness in model output (0.0 = deterministic, higher = more random). Used when top_p is 0. Set temperature=0.0 for consistent, deterministic outputs. Not used for Claude 4.7+ or OpenAI GPT-5.x models."
                 order: 7
               top_k:
                 type: number
                 dependsOn: { field: "use_bda", value: false }
-                description: "Sampling Top K. Not used for Claude 4.7+ models."
+                description: "Sampling Top K. Not used for Claude 4.7+ or OpenAI GPT-5.x models."
                 order: 8
               top_p:
                 type: number
                 dependsOn: { field: "use_bda", value: false }
-                description: "Sampling Top P: Nucleus sampling threshold (0.0-1.0). When set to a positive value (> 0), overrides temperature parameter. Set to 0 to use temperature instead."
+                description: "Sampling Top P: Nucleus sampling threshold (0.0-1.0). When set to a positive value (> 0), overrides temperature parameter. Set to 0 to use temperature instead. Not used for Claude 4.7+ or OpenAI GPT-5.x models."
                 order: 9
               max_tokens:
                 type: number
                 dependsOn: { field: "use_bda", value: false }
                 description: "Maximum number of output tokens. Ensure this does not exceed the selected model's limit. See model documentation for details."
                 order: 10
+              reasoning_effort:
+                type: string
+                enum: ["minimal", "low", "medium", "high"]
+                default: "medium"
+                description: "Reasoning effort for OpenAI GPT-5.x (Responses API) models ONLY: controls how much the model reasons before answering. Ignored by Anthropic/Nova/other models. Default: medium."
+                dependsOn: { field: "use_bda", value: false }
+                order: 10.5
               system_prompt:
                 type: string
                 dependsOn: { field: "use_bda", value: false }
@@ -1255,6 +1290,8 @@ Resources:
                     "us.anthropic.claude-opus-4-7:1m",
                     "us.anthropic.claude-opus-4-8",
                     "us.anthropic.claude-opus-4-8:1m",
+                    "openai.gpt-5.4",
+                    "openai.gpt-5.5",
                     "eu.amazon.nova-lite-v1:0",
                     "eu.amazon.nova-pro-v1:0",
                     "eu.amazon.nova-2-lite-v1:0", "eu.amazon.nova-2-lite-v1:0:priority", "eu.amazon.nova-2-lite-v1:0:flex",
@@ -1296,20 +1333,26 @@ Resources:
                 dependsOn: { field: "model", value: "LambdaHook" }
               temperature:
                 type: number
-                description: "Sampling temperature. Not used for Claude 4.7+ models."
+                description: "Sampling temperature. Not used for Claude 4.7+ or OpenAI GPT-5.x models."
                 order: 3
               top_k:
                 type: number
-                description: "Sampling Top K. Not used for Claude 4.7+ models."
+                description: "Sampling Top K. Not used for Claude 4.7+ or OpenAI GPT-5.x models."
                 order: 4
               top_p:
                 type: number
-                description: Sampling Top P
+                description: "Sampling Top P. Not used for Claude 4.7+ or OpenAI GPT-5.x models."
                 order: 5
               max_tokens:
                 type: number
                 description: "Maximum number of output tokens. Ensure this does not exceed the selected model's limit. See model documentation for details."
                 order: 6
+              reasoning_effort:
+                type: string
+                enum: ["minimal", "low", "medium", "high"]
+                default: "medium"
+                description: "Reasoning effort for OpenAI GPT-5.x (Responses API) models ONLY: controls how much the model reasons before answering. Ignored by Anthropic/Nova/other models. Default: medium."
+                order: 6.5
               system_prompt:
                 type: string
                 format: textarea
@@ -1355,6 +1398,8 @@ Resources:
                         "us.anthropic.claude-opus-4-7:1m",
                         "us.anthropic.claude-opus-4-8",
                         "us.anthropic.claude-opus-4-8:1m",
+                        "openai.gpt-5.4",
+                        "openai.gpt-5.5",
                         "eu.amazon.nova-lite-v1:0",
                         "eu.amazon.nova-pro-v1:0",
                         "eu.amazon.nova-2-lite-v1:0", "eu.amazon.nova-2-lite-v1:0:priority", "eu.amazon.nova-2-lite-v1:0:flex",
@@ -1390,22 +1435,28 @@ Resources:
                     order: 1
                   temperature:
                     type: number
-                    description: "Sampling temperature: Controls randomness in model output (0.0 = deterministic, higher = more random). Used when top_p is 0. Set temperature=0.0 for consistent, deterministic outputs. Not used for Claude 4.7+ models."
+                    description: "Sampling temperature: Controls randomness in model output (0.0 = deterministic, higher = more random). Used when top_p is 0. Set temperature=0.0 for consistent, deterministic outputs. Not used for Claude 4.7+ or OpenAI GPT-5.x models."
                     default: 0.0
                     order: 2
                   top_k:
                     type: number
-                    description: "Sampling Top K. Not used for Claude 4.7+ models."
+                    description: "Sampling Top K. Not used for Claude 4.7+ or OpenAI GPT-5.x models."
                     default: 250
                     order: 3
                   top_p:
                     type: number
-                    description: "Sampling Top P: Nucleus sampling threshold (0.0-1.0). When set to a positive value (> 0), overrides temperature parameter. Set to 0 to use temperature instead."
+                    description: "Sampling Top P: Nucleus sampling threshold (0.0-1.0). When set to a positive value (> 0), overrides temperature parameter. Set to 0 to use temperature instead. Not used for Claude 4.7+ or OpenAI GPT-5.x models."
                     order: 4
                   max_tokens:
                     type: number
                     description: "Maximum number of output tokens. Ensure this does not exceed the selected model's limit. See model documentation for details."
                     order: 5
+                  reasoning_effort:
+                    type: string
+                    enum: ["minimal", "low", "medium", "high"]
+                    default: "medium"
+                    description: "Reasoning effort for OpenAI GPT-5.x (Responses API) models ONLY: controls how much the model reasons before answering. Ignored by Anthropic/Nova/other models. Default: medium."
+                    order: 5.5
                   system_prompt:
                     type: string
                     format: textarea
@@ -1493,7 +1544,7 @@ Resources:
                     order: 1
                   top_p:
                     type: number
-                    description: "Sampling Top P: Nucleus sampling threshold (0.0-1.0). When set to a positive value (> 0), overrides temperature parameter. Set to 0 to use temperature instead."
+                    description: "Sampling Top P: Nucleus sampling threshold (0.0-1.0). When set to a positive value (> 0), overrides temperature parameter. Set to 0 to use temperature instead. Not used for Claude 4.7+ models."
                     minimum: 0.0
                     maximum: 1.0
                     default: 0.1
@@ -1586,7 +1637,7 @@ Resources:
                     order: 1
                   top_p:
                     type: number
-                    description: "Sampling Top P: Nucleus sampling threshold (0.0-1.0). When set to a positive value (> 0), overrides temperature parameter. Set to 0 to use temperature instead."
+                    description: "Sampling Top P: Nucleus sampling threshold (0.0-1.0). When set to a positive value (> 0), overrides temperature parameter. Set to 0 to use temperature instead. Not used for Claude 4.7+ models."
                     minimum: 0.0
                     maximum: 1.0
                     default: 0.1
@@ -2034,6 +2085,8 @@ Resources:
                     "us.anthropic.claude-opus-4-7:1m",
                     "us.anthropic.claude-opus-4-8",
                     "us.anthropic.claude-opus-4-8:1m",
+                    "openai.gpt-5.4",
+                    "openai.gpt-5.5",
                     "eu.amazon.nova-lite-v1:0",
                     "eu.amazon.nova-pro-v1:0",
                     "eu.amazon.nova-2-lite-v1:0", "eu.amazon.nova-2-lite-v1:0:priority", "eu.amazon.nova-2-lite-v1:0:flex",
@@ -2069,20 +2122,26 @@ Resources:
                 dependsOn: { field: "model", value: "LambdaHook" }
               temperature:
                 type: number
-                description: "Sampling temperature. Not used for Claude 4.7+ models."
+                description: "Sampling temperature. Not used for Claude 4.7+ or OpenAI GPT-5.x models."
                 order: 3
               top_k:
                 type: number
-                description: "Sampling Top K. Not used for Claude 4.7+ models."
+                description: "Sampling Top K. Not used for Claude 4.7+ or OpenAI GPT-5.x models."
                 order: 4
               top_p:
                 type: number
-                description: Sampling Top P
+                description: "Sampling Top P. Not used for Claude 4.7+ or OpenAI GPT-5.x models."
                 order: 5
               max_tokens:
                 type: number
                 description: "Maximum number of output tokens for the chat response. Ensure this does not exceed the selected model's limit."
                 order: 6
+              reasoning_effort:
+                type: string
+                enum: ["minimal", "low", "medium", "high"]
+                default: "medium"
+                description: "Reasoning effort for OpenAI GPT-5.x (Responses API) models ONLY: controls how much the model reasons before answering. Ignored by Anthropic/Nova/other models. Default: medium."
+                order: 6.5
               system_prompt:
                 type: string
                 format: textarea
@@ -3096,6 +3155,15 @@ Resources:
                 - textract:AnalyzeDocument
               Resource: "*"
             # Bedrock permissions for OCR
+            # OpenAI GPT-5.x models are served via the bedrock-mantle endpoint
+            # (OpenAI Responses API) and use a separate IAM action namespace.
+            - Effect: Allow
+              Action:
+                - bedrock-mantle:CreateInference
+                - bedrock-mantle:GetProject
+                - bedrock-mantle:ListProjects
+                - bedrock-mantle:ListTagsForResources
+              Resource: "*"
             - Effect: Allow
               Action:
                 - bedrock:InvokeModel
@@ -3253,6 +3321,15 @@ Resources:
                 Resource:
                   - !Sub "${AppSyncApiArn}/types/Mutation/*"
               - !Ref AWS::NoValue
+            # OpenAI GPT-5.x models are served via the bedrock-mantle endpoint
+            # (OpenAI Responses API) and use a separate IAM action namespace.
+            - Effect: Allow
+              Action:
+                - bedrock-mantle:CreateInference
+                - bedrock-mantle:GetProject
+                - bedrock-mantle:ListProjects
+                - bedrock-mantle:ListTagsForResources
+              Resource: "*"
             - Effect: Allow
               Action:
                 - bedrock:InvokeModel
@@ -3414,6 +3491,15 @@ Resources:
                 Resource:
                   - !Sub "${AppSyncApiArn}/types/Mutation/*"
               - !Ref AWS::NoValue
+            # OpenAI GPT-5.x models are served via the bedrock-mantle endpoint
+            # (OpenAI Responses API) and use a separate IAM action namespace.
+            - Effect: Allow
+              Action:
+                - bedrock-mantle:CreateInference
+                - bedrock-mantle:GetProject
+                - bedrock-mantle:ListProjects
+                - bedrock-mantle:ListTagsForResources
+              Resource: "*"
             - Effect: Allow
               Action:
                 - bedrock:InvokeModel
@@ -3566,6 +3652,15 @@ Resources:
                 Resource:
                   - !Sub "${AppSyncApiArn}/types/Mutation/*"
               - !Ref AWS::NoValue
+            # OpenAI GPT-5.x models are served via the bedrock-mantle endpoint
+            # (OpenAI Responses API) and use a separate IAM action namespace.
+            - Effect: Allow
+              Action:
+                - bedrock-mantle:CreateInference
+                - bedrock-mantle:GetProject
+                - bedrock-mantle:ListProjects
+                - bedrock-mantle:ListTagsForResources
+              Resource: "*"
             - Effect: Allow
               Action:
                 - bedrock:InvokeModel
@@ -3816,6 +3911,15 @@ Resources:
                 Resource:
                   - !Sub "${AppSyncApiArn}/types/Mutation/*"
               - !Ref AWS::NoValue
+            # OpenAI GPT-5.x models are served via the bedrock-mantle endpoint
+            # (OpenAI Responses API) and use a separate IAM action namespace.
+            - Effect: Allow
+              Action:
+                - bedrock-mantle:CreateInference
+                - bedrock-mantle:GetProject
+                - bedrock-mantle:ListProjects
+                - bedrock-mantle:ListTagsForResources
+              Resource: "*"
             - Effect: Allow
               Action:
                 - bedrock:InvokeModel
@@ -3967,6 +4071,15 @@ Resources:
                 Resource:
                   - !Sub "${AppSyncApiArn}/types/Mutation/*"
               - !Ref AWS::NoValue
+            # OpenAI GPT-5.x models are served via the bedrock-mantle endpoint
+            # (OpenAI Responses API) and use a separate IAM action namespace.
+            - Effect: Allow
+              Action:
+                - bedrock-mantle:CreateInference
+                - bedrock-mantle:GetProject
+                - bedrock-mantle:ListProjects
+                - bedrock-mantle:ListTagsForResources
+              Resource: "*"
             - Effect: Allow
               Action:
                 - bedrock:InvokeModel
@@ -4260,6 +4373,15 @@ Resources:
                 Resource:
                   - !Sub "${AppSyncApiArn}/types/Mutation/*"
               - !Ref AWS::NoValue
+            # OpenAI GPT-5.x models are served via the bedrock-mantle endpoint
+            # (OpenAI Responses API) and use a separate IAM action namespace.
+            - Effect: Allow
+              Action:
+                - bedrock-mantle:CreateInference
+                - bedrock-mantle:GetProject
+                - bedrock-mantle:ListProjects
+                - bedrock-mantle:ListTagsForResources
+              Resource: "*"
             - Effect: Allow
               Action:
                 - bedrock:InvokeModel
@@ -4399,6 +4521,15 @@ Resources:
                 Resource:
                   - !Sub "${AppSyncApiArn}/types/Mutation/*"
               - !Ref AWS::NoValue
+            # OpenAI GPT-5.x models are served via the bedrock-mantle endpoint
+            # (OpenAI Responses API) and use a separate IAM action namespace.
+            - Effect: Allow
+              Action:
+                - bedrock-mantle:CreateInference
+                - bedrock-mantle:GetProject
+                - bedrock-mantle:ListProjects
+                - bedrock-mantle:ListTagsForResources
+              Resource: "*"
             - Effect: Allow
               Action:
                 - bedrock:InvokeModel
