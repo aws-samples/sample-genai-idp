@@ -2373,8 +2373,8 @@ Resources:
           - !Join [",", !Ref LambdaSubnetIds]
           - ""
         LambdaSecurityGroupId: !If
-          - UsePrivateAppSync
-          - !Ref LambdaVpcSecurityGroup
+          - DeployInVPC
+          - !Ref LambdaSecurityGroupId
           - ""
 
         # VPC config for CodeBuild (Docker image builds)
