@@ -7,10 +7,24 @@ PYTHON_VERSION="3.12"
 
 mkdir -p "$OUTPUT_DIR"
 
+# Pick a Python runner that has the `packaging` library available.
+# Prefer `uv run` (installs `packaging` on the fly into an ephemeral env),
+# which is what CI provisions; fall back to a system python3 that already
+# has `packaging` importable.
+if command -v uv >/dev/null 2>&1; then
+    PY_RUN=(uv run --python "$PYTHON_VERSION" --with packaging python3)
+elif python3 -c "import packaging" >/dev/null 2>&1; then
+    PY_RUN=(python3)
+else
+    echo "ERROR: need either 'uv' (recommended) or a python3 with the 'packaging' library installed." >&2
+    echo "       Install uv (https://docs.astral.sh/uv/) or run: pip install packaging" >&2
+    exit 1
+fi
+
 # ===== PYTHON MANIFEST =====
 echo "Generating Python dependency manifest..."
 
-python3 - "$REPO_ROOT" "$OUTPUT_DIR/python-packages.txt" << 'PYTHON_SCRIPT'
+"${PY_RUN[@]}" - "$REPO_ROOT" "$OUTPUT_DIR/python-packages.txt" << 'PYTHON_SCRIPT'
 """Collect all Python dependencies from lockfiles and requirements, deduplicate by name."""
 import sys
 import tomllib

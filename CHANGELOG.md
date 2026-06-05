@@ -5,6 +5,10 @@ SPDX-License-Identifier: MIT-0
 
 ## [Unreleased]
 
+### Added
+
+- **Dependency manifest generation for artifact-repository mirroring** — New `make dep-manifest` target (and `scripts/generate-dep-manifest.sh`) generates a complete, pinned list of all Python and Node.js dependencies for enterprises mirroring packages into an artifact repository (JFrog Artifactory, AWS CodeArtifact, Sonatype Nexus, etc.) for air-gapped, pre-scanned builds. Parses existing `uv.lock` and `package-lock.json` files (no re-resolution) plus any extra `requirements.txt`/`pyproject.toml` packages, writing pip-compatible (`name==version`) and npm-compatible (`name@version`) manifests to the gitignored `dist/manifests/`. A GitHub Actions workflow (`generate-dep-manifest.yml`) regenerates manifests on dependency-file changes (dry-run on PRs, 90-day artifact upload on `main`/manual dispatch). See the new [Dependency Mirroring](docs/dependency-mirroring.md) guide.
+
 ## [0.5.9]
 
 ### Added

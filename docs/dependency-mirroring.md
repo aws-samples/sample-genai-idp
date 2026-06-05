@@ -1,3 +1,10 @@
+---
+title: "Dependency Mirroring for Air-Gapped Builds"
+---
+
+Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+SPDX-License-Identifier: MIT-0
+
 # Dependency Mirroring for Air-Gapped Builds
 
 Generate a complete list of all Python and Node.js dependencies so they can be mirrored into an artifact repository for air-gapped, pre-scanned builds.
