@@ -64,7 +64,7 @@ make lint-cicd
 ### Testing
 
 ```bash
-# Run all tests (idp_common_pkg + idp_cli)
+# Run all tests (idp_common_pkg + idp_cli + srt security scan)
 make test
 
 # Run tests in idp_common_pkg only
@@ -83,6 +83,26 @@ cd idp_cli && python -m pytest -v
 pytest -m "unit"
 pytest -m "integration"
 ```
+
+### Security Scanning
+
+The project includes automated security scanning with the [Sample Security Review Tool (SRT)](https://github.com/aws-samples/sample-security-review-tool):
+
+```bash
+# Run full SRT workflow (setup → scan → optional fix)
+make srt
+
+# Or run individual steps:
+make srt-setup     # Download and configure SRT
+make srt-scan      # Run security assessment
+make srt-fix       # Interactive fix mode
+```
+
+**CI/CD Integration:**
+- SRT automatically runs on merge requests targeting `develop` branch (GitLab CI `security_review` stage)
+- Does not run on feature branch pushes to avoid blocking development
+- Pipeline fails if high-priority security findings are detected
+- Provides security gate before code is merged to `develop`
 
 ### IDP CLI Commands
 
@@ -403,3 +423,57 @@ Check:
 - Node.js version >= 22.12.0
 - Run `npm ci` in `src/ui/` to install dependencies
 - Check `src/ui/.checksum` if builds are being skipped unexpectedly
+
+## Skill Files
+
+Domain-specific coding conventions, checklists, and workflows live in
+`.claude/skills/`. Consult the relevant skill file whenever a task touches
+that domain:
+
+| Skill File | When to Use |
+|------------|-------------|
+| `.claude/skills/backend-lambda.md` | Writing Lambda handlers or `idp_common` Python code |
+| `.claude/skills/frontend-ui.md` | React / TypeScript / Cloudscape UI changes |
+| `.claude/skills/infrastructure.md` | CloudFormation / SAM templates, nested stacks, GovCloud |
+| `.claude/skills/extraction-pipeline.md` | Document processing pipeline, configuration, agentic extraction |
+| `.claude/skills/code-review.md` | Pre-commit self-review checklist for your own changes |
+| `.claude/skills/pr-review.md` | Reviewing an external GitHub PR or GitLab MR at a URL (e.g. `review <url>`) |
+| `.claude/skills/testing-qa.md` | Writing tests, pytest patterns, moto, conftest setup |
+| `.claude/skills/documentation.md` | Documentation standards, two doc tiers, CHANGELOG, docs-site, and the "adding a Bedrock model" checklist |
+
+> **Note:** `.claude/skills/` is canonical. The Cline assistant's
+> `.cline/skills/` files are **symlinks** to these (different filenames), so
+> editing a `.claude` skill updates both — do not create separate `.cline`
+> copies. See the "Two skill systems, one source of truth" section in
+> `.claude/skills/documentation.md` for the filename map and portability caveat.
+
+### Documentation lives in two tiers
+
+When changing `idp_common` or adding/changing models, update **both** tiers:
+1. **User/feature docs** — `docs/*.md` (published to the Starlight site).
+2. **Developer/module docs** — `lib/idp_common_pkg/**/README.md` (one per
+   subpackage; the canonical home for library/client behavior).
+
+Adding a selectable Bedrock model touches many files (template enums,
+`config_library/pricing.yaml`, `model_config_limits.yaml`, config models,
+`update_configuration`, UI dropdown, the bedrock client, IAM, **both doc
+tiers**, and `CHANGELOG.md`). Follow the checklist in
+`.claude/skills/documentation.md` so none are missed.
+
+### Reviewing External PRs / MRs
+
+When the user asks `review <MR/PR URL>` (or similar), load
+`.claude/skills/pr-review.md` and produce a structured review answering:
+
+1. Is this a good PR?
+2. Safe? No regressions?
+3. Good UX?
+4. No security issues?
+5. Well documented?
+6. Safe to merge?
+
+The expected target branch for this repo is `develop` — flag any PR/MR that
+targets a different branch as the first finding. The review is read-only: do
+not push, merge, approve, or post comments on the PR/MR unless the user
+explicitly asks.
+

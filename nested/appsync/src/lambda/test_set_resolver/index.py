@@ -24,25 +24,51 @@ def validate_test_set_name(name):
 
 
 def validate_description(description):
-    """Validate description: max 200 chars only"""
+    """Validate description: max 500 chars only"""
     if description is None or description == "":
         return True  # Optional field
     if not isinstance(description, str):
         return False
-    return len(description) <= 200
+    return len(description) <= 500
 
-# Configure S3 client with S3v4 signature
+# Configure S3 client with S3v4 signature.
+# When S3_ENDPOINT_URL is set (private VPC mode), use virtual-host addressing
+# so the SigV4 host header matches the VPC endpoint DNS.
+_s3_endpoint_url = os.environ.get("S3_ENDPOINT_URL") or None
+_s3_addressing = "virtual" if _s3_endpoint_url else "path"
 s3_config = Config(
-    signature_version='s3v4',
-    s3={'addressing_style': 'path'}
+    signature_version="s3v4",
+    s3={"addressing_style": _s3_addressing},
 )
-s3_client = boto3.client('s3', config=s3_config)
+s3_client = boto3.client("s3", endpoint_url=_s3_endpoint_url, config=s3_config)
 db_client = DynamoDBClient(table_name=os.environ['TRACKING_TABLE'])
+
+def _caller_in_groups(event, allowed):
+    """Defense-in-depth RBAC check against the caller's Cognito groups.
+
+    The schema restricts these fields via @aws_cognito_user_pools(cognito_groups),
+    but we also enforce the group server-side so the operation is never reachable
+    by an unauthorized caller even if the schema directive is missing or
+    misconfigured (e.g. the prior @aws_auth directive, which AppSync silently
+    ignores on a multi-auth API).
+    """
+    groups = (event.get("identity") or {}).get("claims", {}).get("cognito:groups") or []
+    if isinstance(groups, str):
+        groups = [groups]
+    return bool(set(allowed).intersection(groups))
+
 
 def handler(event, context):
     field_name = event['info']['fieldName']
     logger.info(f"Test set resolver invoked with field_name: {field_name}")
-    
+
+    # Defense-in-depth: all Test Studio test-set operations are Admin+Author.
+    if not _caller_in_groups(event, ("Admin", "Author")):
+        logger.warning(
+            f"Forbidden: caller attempted '{field_name}' without Admin/Author group"
+        )
+        raise Exception(f"Unauthorized: '{field_name}' requires Admin or Author group")
+
     if field_name == 'addTestSet':
         return add_test_set(event['arguments'])
     elif field_name == 'addTestSetFromUpload':
@@ -51,6 +77,8 @@ def handler(event, context):
         return add_documents_to_test_set(event['arguments'])
     elif field_name == 'addDocumentsToTestSetFromUpload':
         return add_documents_to_test_set_from_upload(event['arguments'])
+    elif field_name == 'updateTestSet':
+        return update_test_set(event['arguments'])
     elif field_name == 'deleteTestSets':
         return delete_test_sets(event['arguments'])
     elif field_name == 'getTestSets':
@@ -64,30 +92,31 @@ def handler(event, context):
 
 def add_test_set_from_upload(args):
     logger.info(f"Adding test set from zip upload: {args}")
-    
+
     input_data = args['input']
     zip_filename = input_data['fileName']
     description = input_data.get('description', '')  # Optional field
-    
+    document_class_type = input_data.get('documentClassType')  # Optional field
+
     # Validate zip file extension
     if not zip_filename.lower().endswith('.zip'):
         raise Exception("File must be a zip file")
-    
+
     # Extract test set name from filename (remove .zip extension)
     test_set_name = zip_filename.replace('.zip', '').replace('.ZIP', '')
-    
+
     # Validate test set name
     if not validate_test_set_name(test_set_name):
         raise Exception("Test set name can only contain letters, numbers, spaces, hyphens, and underscores (max 50 characters)")
-    
+
     # Validate description
     if description and not validate_description(description):
-        raise Exception("Description cannot exceed 200 characters")
-    
+        raise Exception("Description cannot exceed 500 characters")
+
     test_set_id = f"{test_set_name.replace(' ', '-').lower()}"
-    
+
     test_set_bucket = os.environ['TEST_SET_BUCKET']
-    
+
     # Upload with .zip extension in the test set folder
     key = f"{test_set_id}/{zip_filename}"
 
@@ -104,12 +133,12 @@ def add_test_set_from_upload(args):
         ],
         ExpiresIn=900  # 15 minutes
     )
-    
+
     logger.info(f"Generated presigned POST for zip file {key}")
-    
+
     # Add test set entry to tracking table
     now = datetime.utcnow().isoformat() + 'Z'
-    
+
     item = {
         'PK': f'testset#{test_set_id}',
         'SK': 'metadata',
@@ -122,13 +151,18 @@ def add_test_set_from_upload(args):
         'status': 'QUEUED',
         'createdAt': now
     }
+
+    # Add documentClassType if provided
+    if document_class_type:
+        item['documentClassType'] = document_class_type
+
     # Don't set fileCount for uploads - will be added after zip processing
-    
+
     db_client.put_item(item)
     logger.info(f"Created test set {test_set_id} in tracking table with QUEUED status")
-    
+
     logger.info(f"Test set {test_set_id} ready for zip upload - will be processed automatically on upload")
-    
+
     return {
         'testSetId': test_set_id,
         'presignedUrl': json.dumps(presigned_post),
@@ -137,25 +171,26 @@ def add_test_set_from_upload(args):
 
 def add_test_set(args):
     logger.info(f"Adding test set: {args}")
-    
+
     test_set_name = args['name']
     description = args.get('description', '')  # Optional field
     file_count = args['fileCount']
-    
+    document_class_type = args.get('documentClassType')  # Optional field
+
     # Validate test set name
     if not validate_test_set_name(test_set_name):
         raise Exception("Test set name can only contain letters, numbers, spaces, hyphens, and underscores (max 50 characters)")
-    
+
     # Validate description
     if description and not validate_description(description):
-        raise Exception("Description cannot exceed 200 characters")
-    
+        raise Exception("Description cannot exceed 500 characters")
+
     # Generate test set ID with name format, replace spaces with dashes
     test_set_id = f"{test_set_name.replace(' ', '-').lower()}"
-    
+
     # Create initial test set record
     now = datetime.utcnow().isoformat() + 'Z'
-    
+
     item = {
         'PK': f'testset#{test_set_id}',
         'SK': 'metadata',
@@ -169,15 +204,19 @@ def add_test_set(args):
         'status': 'QUEUED',
         'createdAt': now
     }
-    
+
+    # Add documentClassType if provided
+    if document_class_type:
+        item['documentClassType'] = document_class_type
+
     db_client.put_item(item)
     logger.info(f"Created test set {test_set_id} in tracking table")
-    
+
     # Send file copying job to SQS queue
     import boto3
     sqs = boto3.client('sqs')
     queue_url = os.environ['TEST_SET_COPY_QUEUE_URL']
-    
+
     message_body = {
         'testSetId': test_set_id,
         'filePattern': args['filePattern'],
@@ -194,7 +233,7 @@ def add_test_set(args):
 
     logger.info(f"Queued test set creation job for {test_set_id} with pattern '{args['filePattern']}'")
 
-    return {
+    result = {
         'id': test_set_id,
         'name': test_set_name,
         'description': description,
@@ -203,6 +242,12 @@ def add_test_set(args):
         'status': 'QUEUED',
         'createdAt': now
     }
+
+    # Add documentClassType to response if provided
+    if document_class_type:
+        result['documentClassType'] = document_class_type
+
+    return result
 
 def add_documents_to_test_set(args):
     logger.info(f"Adding documents to existing test set: {args}")
@@ -327,9 +372,105 @@ def add_documents_to_test_set_from_upload(args):
     }
 
 
+def update_test_set(args):
+    logger.info(f"Updating test set: {args}")
+
+    input_data = args['input']
+    test_set_id = input_data['id']
+    description = input_data.get('description')
+    document_class_type = input_data.get('documentClassType')
+
+    # Validate description if provided
+    if description is not None and not validate_description(description):
+        raise Exception("Description cannot exceed 500 characters")
+
+    # Look up existing test set
+    item = db_client.get_item({
+        'PK': f'testset#{test_set_id}',
+        'SK': 'metadata'
+    })
+
+    if not item:
+        raise Exception(f"Test set '{test_set_id}' not found")
+
+    # Build update expression dynamically
+    update_parts = []
+    expression_values = {}
+    expression_names = {}
+
+    if description is not None:
+        update_parts.append('#desc = :desc')
+        expression_values[':desc'] = description
+        expression_names['#desc'] = 'description'
+
+    # Check if we need to remove documentClassType
+    remove_expression = False
+    if 'documentClassType' in input_data and document_class_type is None:
+        # Explicitly remove documentClassType if set to None
+        remove_expression = True
+    elif document_class_type is not None:
+        # Set documentClassType to the new value
+        update_parts.append('documentClassType = :docType')
+        expression_values[':docType'] = document_class_type
+
+    if not update_parts and not remove_expression:
+        # No updates requested, just return current item
+        return {
+            'id': item['id'],
+            'name': item['name'],
+            'description': item.get('description', ''),
+            'filePattern': item.get('filePattern', ''),
+            'fileCount': item.get('fileCount'),
+            'status': item.get('status'),
+            'createdAt': item['createdAt'],
+            'documentClassType': item.get('documentClassType')
+        }
+
+    # Perform the update
+    tracking_table = os.environ['TRACKING_TABLE']
+    table = boto3.resource('dynamodb').Table(tracking_table)
+
+    # Build update expression
+    update_expression = ""
+    if update_parts:
+        update_expression = f"SET {', '.join(update_parts)}"
+    if remove_expression:
+        if update_expression:
+            update_expression += " REMOVE documentClassType"
+        else:
+            update_expression = "REMOVE documentClassType"
+
+    update_kwargs = {
+        'Key': {'PK': f'testset#{test_set_id}', 'SK': 'metadata'},
+        'UpdateExpression': update_expression,
+        'ReturnValues': 'ALL_NEW'
+    }
+
+    if expression_names:
+        update_kwargs['ExpressionAttributeNames'] = expression_names
+    if expression_values:
+        update_kwargs['ExpressionAttributeValues'] = expression_values
+
+    response = table.update_item(**update_kwargs)
+    updated_item = response['Attributes']
+
+    logger.info(f"Updated test set {test_set_id}")
+
+    return {
+        'id': updated_item['id'],
+        'name': updated_item['name'],
+        'description': updated_item.get('description', ''),
+        'filePattern': updated_item.get('filePattern', ''),
+        'fileCount': updated_item.get('fileCount'),
+        'status': updated_item.get('status'),
+        'createdAt': updated_item['createdAt'],
+        'documentClassType': updated_item.get('documentClassType')
+    }
+
+
 def delete_test_sets(args):
     logger.info(f"Deleting test sets: {args['testSetIds']}")
-    
+
     test_set_ids = args['testSetIds']
     test_set_bucket = os.environ['TEST_SET_BUCKET']
     
@@ -433,7 +574,8 @@ def get_test_sets():
             'status': item.get('status'),
             'createdAt': item['createdAt'],
             'error': item.get('error'),  # Include error message for failed test sets
-            'lastAddResult': item.get('lastAddResult')
+            'lastAddResult': item.get('lastAddResult'),
+            'documentClassType': item.get('documentClassType')
         })
     
     # Scan TestSetBucket for direct uploads
@@ -492,7 +634,8 @@ def get_test_sets():
                         'filePattern': '',
                         'fileCount': validation_result['input_count'],
                         'status': status,
-                        'createdAt': created_at
+                        'createdAt': created_at,
+                        'documentClassType': None
                     })
                     
                     logger.info(f"Registered direct upload test set {prefix} with status {status}")

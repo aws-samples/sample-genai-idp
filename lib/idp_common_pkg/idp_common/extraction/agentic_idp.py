@@ -37,7 +37,8 @@ from strands.types.media import (
     ImageSource,
 )
 
-from idp_common.bedrock.client import CACHEPOINT_SUPPORTED_MODELS
+from idp_common.bedrock.client import CACHEPOINT_SUPPORTED_MODELS, is_claude_4_7_model
+from idp_common.bedrock.openai_responses import is_openai_responses_model
 from idp_common.config.models import IDPConfig
 from idp_common.utils.bedrock_utils import (
     async_exponential_backoff_retry,
@@ -363,7 +364,37 @@ def create_dynamic_extraction_tool_and_patch_tool(model_class: type[TargetModel]
 
         # Note: The @tool decorator passes data as a dict, not as a model instance
         # We need to validate it manually using the Pydantic model
-        extraction_model = model_class.model_validate(extraction)  # pyright: ignore[reportAssignmentType]
+
+        # Handle case where LLM returns a single-element array instead of dict
+        # This happens when models mistakenly wrap the extraction in an array
+        extraction_data = extraction
+        if isinstance(extraction_data, list):
+            if len(extraction_data) == 1:
+                logger.warning(
+                    "LLM returned single-element array instead of object, unwrapping",
+                    extra={"original_type": "list", "element_count": 1},
+                )
+                extraction_data = extraction_data[0]
+            elif len(extraction_data) == 0:
+                logger.error(
+                    "LLM returned empty array when single object expected",
+                    extra={"element_count": 0},
+                )
+                return (
+                    "Error: Expected single object but received empty array. "
+                    "Please provide a single object, not an array."
+                )
+            else:  # len > 1
+                logger.error(
+                    "LLM returned multi-element array when single object expected",
+                    extra={"element_count": len(extraction_data)},
+                )
+                return (
+                    f"Error: Expected single object but received array with {len(extraction_data)} elements. "
+                    "Please provide a single object, not an array."
+                )
+
+        extraction_model = model_class.model_validate(extraction_data)  # pyright: ignore[reportAssignmentType]
         extraction_dict = extraction_model.model_dump(mode="json")
         logger.info(
             "extraction_tool called", extra={"models_extraction": extraction_dict}
@@ -851,6 +882,16 @@ def _build_model_config(
         Automatically uses BedrockModel for regional models (us.*, eu.*) and
         AnthropicModel with AnthropicBedrock for cross-region models (global.anthropic.*).
     """
+    # OpenAI GPT-5.x models are served via the bedrock-mantle Responses API and
+    # are not callable through the Converse-based Strands path. Callers should
+    # have routed these to standard extraction (see ExtractionService); fail
+    # loudly if one reaches here so the misconfiguration is obvious.
+    if is_openai_responses_model(model_id):
+        raise ValueError(
+            f"OpenAI Responses-API models ({model_id}) do not support agentic/"
+            "Strands extraction. Use standard extraction (agentic.enabled=false)."
+        )
+
     # Configure retry behavior and timeouts using boto3 Config
     boto_config = Config(
         retries={
@@ -861,12 +902,25 @@ def _build_model_config(
         read_timeout=read_timeout,
     )
 
+    # Handle ':1m' suffix for 1M context window models (Claude 4.x beta).
+    # Bedrock rejects ':1m' as a model identifier; strip it and pass the
+    # anthropic_beta header via additional_request_fields, mirroring
+    # bedrock/client.py::invoke_model. See GitHub issue #312.
+    additional_request_fields: dict[str, Any] | None = None
+    if model_id.endswith(":1m"):
+        model_id = model_id[:-3]
+        additional_request_fields = {"anthropic_beta": ["context-1m-2025-08-07"]}
+
     # Determine model-specific maximum token limits
     model_max = 4_096  # Default fallback
     model_id_lower = model_id.lower()
 
-    # Check Claude 4 patterns first (more specific)
-    if re.search(r"claude-(opus|sonnet|haiku)-4", model_id_lower):
+    # Check Claude Opus 4.7+ first (extended 128K output, more specific than
+    # the generic claude-4 pattern below).
+    if re.search(r"claude-opus-4-(7|8)", model_id_lower):
+        model_max = 128_000
+    # Check Claude 4 patterns (64K output)
+    elif re.search(r"claude-(opus|sonnet|haiku)-4", model_id_lower):
         model_max = 64_000
     # Check Nova models
     elif any(
@@ -897,9 +951,31 @@ def _build_model_config(
         max_output_tokens = model_max
 
     # Build base model config
+    # Honor BEDROCK_ASSUME_ROLE_ARN by sourcing the boto session from the
+    # shared factory. Falls back to default credentials when unset.
+    try:
+        from idp_common.bedrock.session import get_bedrock_session
+
+        bedrock_session = get_bedrock_session()
+    except Exception as e:
+        logger.debug(
+            "Falling back to default Bedrock session for agentic extraction (%s)", e
+        )
+        bedrock_session = None
+
     model_config = dict(
-        model_id=model_id, boto_client_config=boto_config, max_tokens=max_output_tokens
+        model_id=model_id,
+        boto_client_config=boto_config,
+        max_tokens=max_output_tokens,
     )
+    if bedrock_session is not None:
+        model_config["boto_session"] = bedrock_session
+
+    # Forward anthropic_beta header for 1M context models via Strands'
+    # additional_request_fields, which maps to ConverseStream's
+    # additionalModelRequestFields.
+    if additional_request_fields is not None:
+        model_config["additional_request_fields"] = additional_request_fields
 
     logger.info(
         "Setting max_tokens for model",
@@ -936,21 +1012,44 @@ def _build_model_config(
     return model_config
 
 
-def _get_inference_params(temperature: float, top_p: float | None) -> dict[str, float]:
+def _get_inference_params(
+    model_id: str,
+    temperature: float,
+    top_p: float | None,
+) -> dict[str, float]:
     """
     Get inference parameters ensuring temperature and top_p are mutually exclusive.
 
     Some Bedrock models don't allow both temperature and top_p to be specified.
-    This follows the same logic as bedrock/client.py lines 348-364.
+    This follows the same logic as bedrock/client.py.
+
+    Claude 4.7+ models (e.g. ``us.anthropic.claude-opus-4-7``) deprecate the
+    ``temperature``, ``top_p`` and ``top_k`` parameters and reject requests
+    that pass them. For these models this helper returns an empty dict so
+    that no inference parameters are forwarded to the Strands ``BedrockModel``
+    / ConverseStream call. See GitHub issue #304.
 
     Args:
-        temperature: Temperature value from config
-        top_p: Top_p value from config (may be None)
+        model_id: Bedrock model identifier (used to detect Claude 4.7+).
+        temperature: Temperature value from config.
+        top_p: Top_p value from config (may be None).
 
     Returns:
-        Dict with only one of temperature or top_p
+        Dict with only one of temperature or top_p, or an empty dict for
+        Claude 4.7+ models where both are deprecated.
     """
-    params = {}
+    # Claude 4.7+ models don't support temperature/top_p/top_k. Omit them
+    # entirely so ConverseStream doesn't fail with
+    # "`top_p` is deprecated for this model".
+    if is_claude_4_7_model(model_id):
+        logger.info(
+            "Skipping temperature/top_p for Claude 4.7+ model "
+            "(these parameters are deprecated for this model)",
+            extra={"model_id": model_id},
+        )
+        return {}
+
+    params: dict[str, float] = {}
 
     # Only use top_p if it's positive (greater than 0)
     # This allows temperature=0.0 for deterministic output (recommended by Anthropic)
@@ -1515,9 +1614,13 @@ async def structured_output_async(
     # Track token usage
     token_usage = _initialize_token_usage()
 
-    # Get inference params ensuring temperature and top_p are mutually exclusive
+    # Get inference params ensuring temperature and top_p are mutually exclusive.
+    # For Claude 4.7+ models, no inference params are returned because
+    # temperature/top_p/top_k are deprecated (see GitHub issue #304).
     inference_params = _get_inference_params(
-        temperature=config.extraction.temperature, top_p=config.extraction.top_p
+        model_id=model_id,
+        temperature=config.extraction.temperature,
+        top_p=config.extraction.top_p,
     )
 
     # Set the context-local checkpoint callback so tools can invoke it.

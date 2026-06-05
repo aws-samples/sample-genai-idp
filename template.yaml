@@ -331,6 +331,36 @@ Parameters:
     Description: >
       If you provided a Bedrock Guardrail Id above, provide the corresponding Guardrail version here (e.g. DRAFT|1|2|...).
 
+  # Optional Cross-Account Bedrock (Hub Account) Configuration
+  BedrockHubRoleArn:
+    Type: String
+    Default: ""
+    AllowedPattern: "^$|^arn:(aws|aws-cn|aws-us-gov|aws-iso|aws-iso-b):iam::[0-9]{12}:role/[\\w+=,.@\\-/]+$"
+    ConstraintDescription: "Must be empty or a valid IAM role ARN. The ARN must NOT contain spaces — pass ExternalId via the separate BedrockHubRoleExternalId parameter."
+    Description: >
+      (Optional) ARN of an IAM role in a centralized "hub" account that this stack
+      should assume for all Amazon Bedrock data-plane and control-plane API calls.
+      When set, all Bedrock invocations (data-plane and control-plane) are routed
+      through sts:AssumeRole to this role using refreshable credentials. Leave empty
+      to call Bedrock from the local account (default behavior).
+
+  BedrockHubRoleExternalId:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: >
+      (Optional) ExternalId to include in sts:AssumeRole calls for the Bedrock hub role.
+      Required only when the hub-account role's trust policy enforces an ExternalId.
+
+  BedrockHubRoleSessionName:
+    Type: String
+    Default: ""
+    AllowedPattern: "^[\\w+=,.@-]{0,64}$"
+    Description: >
+      (Optional) Session name for sts:AssumeRole calls (max 64 chars; characters
+      allowed: A-Z a-z 0-9 + = , . @ - _). Defaults to the calling Lambda function name
+      for CloudTrail attribution in the hub account.
+
   # General Configuration
   MaxConcurrentWorkflows:
     Type: Number
@@ -470,6 +500,28 @@ Parameters:
       Leave empty to automatically use the VPC CIDR range (recommended for
       internal ALBs). Specify explicit CIDRs to override.
 
+  S3VpcEndpointIdOverride:
+    Type: String
+    Default: ""
+    Description: >
+      Optional. Existing S3 Interface VPC Endpoint ID (vpce-...) from a central
+      network account. When provided, presigned S3 URLs for browser uploads use
+      this endpoint instead of the one auto-provisioned in the ALB stack.
+      Leave empty in standard private-mode (ALB) deployments to use the
+      stack-provisioned endpoint. When this is set you MUST also set
+      S3VpcEndpointDnsNameOverride.
+
+  S3VpcEndpointDnsNameOverride:
+    Type: String
+    Default: ""
+    Description: >
+      Optional. Regional DNS name of the BYO S3 Interface VPC Endpoint, with
+      the AWS-assigned random suffix and the leading "*." stripped (format:
+      "vpce-<id>-<suffix>.s3.<region>.vpce.<url-suffix>").
+      Required when S3VpcEndpointIdOverride is set. Get from
+      "aws ec2 describe-vpc-endpoints --vpc-endpoint-ids <id> --query
+      'VpcEndpoints[0].DnsEntries[0].DnsName'" then strip the leading "*.".
+
   AppSyncVisibility:
     Type: String
     Default: GLOBAL
@@ -542,6 +594,48 @@ Parameters:
     AllowedPattern: "^(|arn:aws[a-z-]*:kms:[a-z0-9-]+:[0-9]{12}:key/.+)$"
     ConstraintDescription: Must be empty or a valid KMS key ARN
 
+  # ------------------------------------------------------------------------
+  # Public template version-check (used to surface an "Update available"
+  # indicator in the Web UI's Deployment Info nav section).
+  #
+  # When PublicArtifactsBucket is set, the UI calls a Lambda resolver that
+  # lists the bucket prefix for versioned templates of the form
+  # `<prefix>/idp-main_<version>.yaml`, picks the highest semver, and
+  # compares it with the deployed Version. If newer, an "Update" badge is
+  # rendered next to the deployed version (the Update Stack deep-link is
+  # only active for Admin users).
+  #
+  # Default values point at the public IDP release bucket so out-of-the-box
+  # deployments get the indicator. Set PublicArtifactsBucket to "" to
+  # disable the check entirely (recommended for headless / private network
+  # deployments that can't reach the public bucket).
+  # ------------------------------------------------------------------------
+  PublicArtifactsBucket:
+    Type: String
+    # `idp-cli publish` substitutes the publishing bucket here so that
+    # operators publishing to e.g. aws-ml-blog-us-west-2 get zero-touch
+    # version-check working out of the box. Falls back to empty string
+    # (= check disabled) for headless / private-network builds.
+    Default: "<PUBLIC_ARTIFACTS_BUCKET_TOKEN>"
+    Description: >-
+      (Optional) S3 bucket holding the public IDP CloudFormation templates
+      used for the "update available" check shown in the Web UI Deployment
+      Info section. Leave empty to disable the check (default for headless
+      / private-network deployments). For the public release, point this at
+      the regional aws-ml-blog bucket — e.g. aws-ml-blog-us-west-2.
+
+  PublicArtifactsPrefix:
+    Type: String
+    # `idp-cli publish` substitutes the publishing prefix (without version
+    # suffix) so the version-check resolver can list sibling versioned
+    # templates published under the same prefix. Falls back to the public
+    # release default when not substituted.
+    Default: "<PUBLIC_ARTIFACTS_PREFIX_TOKEN>"
+    Description: >-
+      S3 key prefix under PublicArtifactsBucket where the versioned
+      idp-main_<version>.yaml templates live. Only used when
+      PublicArtifactsBucket is set.
+
   # MLflow Integration
   EnableMLflow:
     Type: String
@@ -554,6 +648,85 @@ Parameters:
     Default: ""
     Description: SageMaker MLflow tracking server ARN
 
+  # Circuit Breaker Configuration
+  CircuitBreakerEnabled:
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: >-
+      Enable circuit breaker for Bedrock service outages. When enabled, the system
+      automatically detects Bedrock failures and blocks new workflows until the
+      service recovers.
+
+  CircuitBreakerFailureThreshold:
+    Type: Number
+    Default: 3
+    MinValue: 1
+    MaxValue: 100
+    Description: >-
+      Combined error count across selected trigger metrics within the evaluation
+      window that opens the circuit breaker. See CircuitBreakerTrigger* params.
+
+  CircuitBreakerTriggerServiceUnavailable:
+    Type: String
+    Default: "true"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: >-
+      Count Bedrock ServiceUnavailable (503) errors toward the circuit breaker
+      failure threshold.
+
+  CircuitBreakerTriggerThrottling:
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: >-
+      Count Bedrock throttling errors (ThrottlingException,
+      TooManyRequestsException, RequestLimitExceeded) toward the circuit breaker
+      failure threshold.
+
+  CircuitBreakerTriggerQuotaLimit:
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: >-
+      Count Bedrock service quota errors (ServiceQuotaExceededException) toward
+      the circuit breaker failure threshold.
+
+  CircuitBreakerEvaluationPeriods:
+    Type: Number
+    Default: 1
+    MinValue: 1
+    MaxValue: 10
+    Description: >-
+      Number of 5-minute periods to evaluate for circuit breaker threshold.
+      For example, 1 period = 5 minutes, 2 periods = 10 minutes.
+
+  CircuitBreakerRecoveryTimeoutSeconds:
+    Type: Number
+    Default: 300
+    MinValue: 60
+    MaxValue: 3600
+    Description: >-
+      Seconds to wait before attempting recovery after the circuit breaker opens.
+      After this timeout, the circuit enters HALF_OPEN state to test if Bedrock
+      has recovered.
+
+  CircuitBreakerErrorHandlerArn:
+    Type: String
+    Default: ""
+    AllowedPattern: "^(|arn:aws[a-z-]*:lambda:[a-z0-9-]+:[0-9]{12}:function:.+)$"
+    Description: >-
+      (Optional) Lambda ARN for custom error handling when circuit breaker opens.
+      This Lambda is invoked asynchronously when the circuit opens, allowing
+      custom alerting or remediation logic.
   # Headless API Configuration
   # ------------------------------------------------------------------------
   # Headless API Deployment (required for GovCloud)
@@ -731,6 +904,22 @@ Rules:
       - Assert: !Not [ !Equals [ !Ref BastionHostSecurityGroupId, "" ] ]
         AssertDescription: "BastionHostSecurityGroupId is required when DeployBastionHost=true"
 
+  # BYO S3 VPC endpoint: id and DNS name must be supplied together. The DNS
+  # name carries the AWS-assigned random suffix (e.g. vpce-XXX-abcdef12.s3...)
+  # which cannot be derived from the id alone, so without it presigned URLs
+  # would target a non-existent host and browser uploads would NXDOMAIN.
+  S3VpcEndpointOverridePairing:
+    RuleCondition: !Not [ !Equals [ !Ref S3VpcEndpointIdOverride, "" ] ]
+    Assertions:
+      - Assert: !Not [ !Equals [ !Ref S3VpcEndpointDnsNameOverride, "" ] ]
+        AssertDescription: "S3VpcEndpointDnsNameOverride is required when S3VpcEndpointIdOverride is set."
+
+  S3VpcEndpointDnsNameRequiresId:
+    RuleCondition: !Not [ !Equals [ !Ref S3VpcEndpointDnsNameOverride, "" ] ]
+    Assertions:
+      - Assert: !Not [ !Equals [ !Ref S3VpcEndpointIdOverride, "" ] ]
+        AssertDescription: "S3VpcEndpointIdOverride is required when S3VpcEndpointDnsNameOverride is set."
+
 Conditions:
   # Headless/VPC/Bastion feature conditions
   DeployInVPC: !Equals [!Ref DeployInVPC, 'true']
@@ -742,6 +931,13 @@ Conditions:
       !Not [ !Equals [ !Ref BedrockGuardrailId, "" ] ],
       !Not [ !Equals [ !Ref BedrockGuardrailVersion, "" ] ],
     ]
+
+  HasBedrockHubRole:
+    !Not [ !Equals [ !Ref BedrockHubRoleArn, "" ] ]
+  HasBedrockHubRoleExternalId:
+    !Not [ !Equals [ !Ref BedrockHubRoleExternalId, "" ] ]
+  HasBedrockHubRoleSessionName:
+    !Not [ !Equals [ !Ref BedrockHubRoleSessionName, "" ] ]
 
   # HITL and Private Workforce conditions
   # General rules
@@ -761,6 +957,13 @@ Conditions:
     !Not [ !Equals [ !Ref DocumentSectionsCrawlerFrequency, "Manual" ] ]
   HasPermissionsBoundary: !Not [ !Equals [ !Ref PermissionsBoundaryArn, "" ] ]
   HasCustomConfigPath: !Not [ !Equals [ !Ref CustomConfigPath, "" ] ]
+  # The version-check resolver only needs IAM grants when an artifacts
+  # bucket is actually configured. When `PublicArtifactsBucket` is empty
+  # the resolver short-circuits before any S3 call, so we omit the policy
+  # entirely (avoids creating an IAM policy with a wildcard ARN).
+  HasPublicArtifactsBucket:
+    !Not [ !Equals [ !Ref PublicArtifactsBucket, "" ] ]
+
   IsS3VectorsVectorStore: !Equals [ !Ref KnowledgeBaseVectorStore, "S3_VECTORS" ]
   CreateAgentCoreLambda: !Equals [ !Ref EnableMCP, "true" ]
   CreateExternalAppClient: !Equals [ !Ref EnableMCP, "true" ]
@@ -780,9 +983,33 @@ Conditions:
       - !Condition HasExternalIdPGroupMapping
   UseCloudFrontHosting: !Equals [ !Ref WebUIHosting, "CloudFront" ]
   UseALBHosting: !Equals [ !Ref WebUIHosting, "ALB" ]
+  HasS3VpcEndpointOverride: !Not [!Equals [!Ref S3VpcEndpointIdOverride, ""]]
+  # True when this stack should inject S3_ENDPOINT_URL on Lambdas + presigner
+  # resolvers. Two paths trigger it:
+  #   1. WebUIHosting=ALB — the ALB nested stack always provisions an S3
+  #      Interface VPCE (ALB virtual-host rewrite to bucket-vhost requires it).
+  #   2. S3VpcEndpointIdOverride is set — customer is providing their own VPCE
+  #      (typical central-network-account topology) regardless of ALB usage.
+  # Note: ALB hosting can technically be selected with DeployInVPC=false; in
+  # that case the VPCE still exists but Lambdas run outside the VPC, so the
+  # endpoint URL injection is a no-op for resolver paths but still drives the
+  # browser presigner output. This is intentional.
+  HasS3VpcEndpoint: !Or [!Condition UseALBHosting, !Condition HasS3VpcEndpointOverride]
+  # True when VPC-resident Lambdas should use S3_ENDPOINT_URL for direct S3
+  # calls (not presigned URL generation). Requires BOTH:
+  #   - An S3 VPCE exists (HasS3VpcEndpoint)
+  #   - Lambdas are deployed in the VPC (DeployInVPC=true)
+  # Without DeployInVPC, Lambdas run on the public Lambda network and cannot
+  # reach the VPCE hostname — setting endpoint_url would cause timeouts.
+  HasS3VpcEndpointAndVpc: !And [!Condition HasS3VpcEndpoint, !Condition DeployInVPC]
   EnableXRayTracingCondition: !Equals [ !Ref EnableXRayTracing, "true" ]
   UsePrivateAppSync: !Equals [ !Ref AppSyncVisibility, "PRIVATE" ]
   HasArtifactsBucketKmsKey: !Not [ !Equals [ !Ref ArtifactsBucketKmsKeyArn, "" ] ]
+  CircuitBreakerEnabledCondition: !Equals [ !Ref CircuitBreakerEnabled, "true" ]
+  HasCircuitBreakerErrorHandler: !Not [ !Equals [ !Ref CircuitBreakerErrorHandlerArn, "" ] ]
+  CircuitBreakerTriggerServiceUnavailableEnabled: !Equals [ !Ref CircuitBreakerTriggerServiceUnavailable, "true" ]
+  CircuitBreakerTriggerThrottlingEnabled: !Equals [ !Ref CircuitBreakerTriggerThrottling, "true" ]
+  CircuitBreakerTriggerQuotaLimitEnabled: !Equals [ !Ref CircuitBreakerTriggerQuotaLimit, "true" ]
 
 Metadata:
   cfn-lint:
@@ -828,6 +1055,12 @@ Metadata:
           - BedrockGuardrailId
           - BedrockGuardrailVersion
       - Label:
+          default: "Cross-Account Bedrock (Hub Account)"
+        Parameters:
+          - BedrockHubRoleArn
+          - BedrockHubRoleExternalId
+          - BedrockHubRoleSessionName
+      - Label:
           default: "Security Configuration"
         Parameters:
           - PermissionsBoundaryArn
@@ -841,6 +1074,17 @@ Metadata:
         Parameters:
           - EnableMLflow
           - MlflowTrackingURI
+      - Label:
+          default: "Circuit Breaker"
+        Parameters:
+          - CircuitBreakerEnabled
+          - CircuitBreakerTriggerServiceUnavailable
+          - CircuitBreakerTriggerThrottling
+          - CircuitBreakerTriggerQuotaLimit
+          - CircuitBreakerFailureThreshold
+          - CircuitBreakerEvaluationPeriods
+          - CircuitBreakerRecoveryTimeoutSeconds
+          - CircuitBreakerErrorHandlerArn
       - Label:
           default: "External Identity Provider (Federation)"
         Parameters:
@@ -933,6 +1177,12 @@ Metadata:
         default: "Bedrock Guardrail Id"
       BedrockGuardrailVersion:
         default: "Bedrock Guardrail Version"
+      BedrockHubRoleArn:
+        default: "Bedrock Hub-Account Role ARN"
+      BedrockHubRoleExternalId:
+        default: "Bedrock Hub-Account Role External Id"
+      BedrockHubRoleSessionName:
+        default: "Bedrock Hub-Account Role Session Name"
       PermissionsBoundaryArn:
         default: "Permissions Boundary ARN"
       MaxConcurrentWorkflows:
@@ -977,6 +1227,22 @@ Metadata:
         default: "Lambda Subnet IDs (required when AppSyncVisibility=PRIVATE)"
       ArtifactsBucketKmsKeyArn:
         default: "Artifacts Bucket KMS Key ARN (optional, for pre-created KMS-encrypted bucket)"
+      CircuitBreakerEnabled:
+        default: "Enable Circuit Breaker"
+      CircuitBreakerTriggerServiceUnavailable:
+        default: "Trigger: Bedrock Service Unavailable (503)"
+      CircuitBreakerTriggerThrottling:
+        default: "Trigger: Bedrock Throttling"
+      CircuitBreakerTriggerQuotaLimit:
+        default: "Trigger: Bedrock Quota Limit"
+      CircuitBreakerFailureThreshold:
+        default: "Circuit Breaker Failure Threshold"
+      CircuitBreakerEvaluationPeriods:
+        default: "Circuit Breaker Evaluation Periods (5-min each)"
+      CircuitBreakerRecoveryTimeoutSeconds:
+        default: "Circuit Breaker Recovery Timeout (seconds)"
+      CircuitBreakerErrorHandlerArn:
+        default: "Circuit Breaker Error Handler Lambda ARN (optional)"
       EnableHeadless:
         default: "Enable Headless API (Jobs REST API, required for GovCloud)"
       DeployInVPC:
@@ -1191,6 +1457,15 @@ Resources:
           OUTPUT_BUCKET_NAME: !Ref OutputBucket
           STAGING_BUCKET_NAME: !Ref StagingBucket
           DATA_RETENTION_IN_DAYS: !Ref DataRetentionInDays
+          S3_ENDPOINT_URL: !If
+            - HasS3VpcEndpoint
+            - !Sub
+              - "https://bucket.${VpceDnsName}"
+              - VpceDnsName: !If
+                  - HasS3VpcEndpointOverride
+                  - !Ref S3VpcEndpointDnsNameOverride
+                  - !GetAtt ALBHOSTINGSTACK.Outputs.S3VPCEndpointDnsName
+            - !Ref AWS::NoValue
       LoggingConfig:
         LogGroup: !Ref ApiHandlerLogGroup
       Events:
@@ -1423,7 +1698,9 @@ Resources:
             SubnetIds: !Ref PrivateSubnetIds
           - !Ref AWS::NoValue
       InlineCode: |
+        import os
         import boto3
+        from botocore.config import Config
         import cfnresponse
         import json
         import logging
@@ -1433,16 +1710,24 @@ Resources:
 
         def handler(event, context):
             logger.info(json.dumps(event))
-        
+
             try:
                 source_bucket = event['ResourceProperties']['SourceBucket']
                 source_prefix = event['ResourceProperties']['SourcePrefix']
                 target_bucket = event['ResourceProperties']['TargetBucket']
                 target_prefix = event['ResourceProperties'].get('TargetPrefix', '')
-        
+
                 file_list = event['ResourceProperties'].get('FileList', [])
-        
-                s3_client = boto3.client('s3')
+
+                # Private-mode S3 client — virtual-host addressing ensures the
+                # SigV4 host header matches the VPC interface endpoint DNS.
+                s3_endpoint_url = os.environ.get('S3_ENDPOINT_URL') or None
+                s3_addressing = 'virtual' if s3_endpoint_url else 'path'
+                s3_client = boto3.client(
+                    's3',
+                    endpoint_url=s3_endpoint_url,
+                    config=Config(signature_version='s3v4', s3={'addressing_style': s3_addressing}),
+                )
         
                 if event['RequestType'] == 'Create' or event['RequestType'] == 'Update':
                     # Copy files explicitly from the provided list
@@ -1496,6 +1781,15 @@ Resources:
       Environment:
         Variables:
           LOG_LEVEL: INFO
+          S3_ENDPOINT_URL: !If
+            - HasS3VpcEndpointAndVpc
+            - !Sub
+              - "https://bucket.${VpceDnsName}"
+              - VpceDnsName: !If
+                  - HasS3VpcEndpointOverride
+                  - !Ref S3VpcEndpointDnsNameOverride
+                  - !GetAtt ALBHOSTINGSTACK.Outputs.S3VPCEndpointDnsName
+            - !Ref AWS::NoValue
       LoggingConfig:
         LogGroup:
           Ref: ConfigurationCopyFunctionLogGroup
@@ -1634,6 +1928,12 @@ Resources:
           CLOUDWATCH_LOG_GROUP_PREFIX: !Sub "/aws/lambda/${AWS::StackName}"
           SETTINGS_PARAMETER_NAME: !Ref SettingsParameter
           MCP_SERVER_BUCKET: !Ref MCPContentBucket
+          BEDROCK_ASSUME_ROLE_ARN:
+            !If [HasBedrockHubRole, !Ref BedrockHubRoleArn, !Ref AWS::NoValue]
+          BEDROCK_ASSUME_ROLE_EXTERNAL_ID:
+            !If [HasBedrockHubRoleExternalId, !Ref BedrockHubRoleExternalId, !Ref AWS::NoValue]
+          BEDROCK_ASSUME_ROLE_SESSION_NAME:
+            !If [HasBedrockHubRoleSessionName, !Ref BedrockHubRoleSessionName, !Ref AWS::NoValue]
       LoggingConfig:
         LogGroup: !Ref AgentCoreMCPHandlerLogGroup
       Policies:
@@ -1709,6 +2009,15 @@ Resources:
                 - !Sub "arn:${AWS::Partition}:glue:${AWS::Region}:${AWS::AccountId}:catalog"
                 - !Sub "arn:${AWS::Partition}:glue:${AWS::Region}:${AWS::AccountId}:database/${ReportingDatabase}"
                 - !Sub "arn:${AWS::Partition}:glue:${AWS::Region}:${AWS::AccountId}:table/${ReportingDatabase}/*"
+            # OpenAI GPT-5.x models are served via the bedrock-mantle endpoint
+            # (OpenAI Responses API) and use a separate IAM action namespace.
+            - Effect: Allow
+              Action:
+                - bedrock-mantle:CreateInference
+                - bedrock-mantle:GetProject
+                - bedrock-mantle:ListProjects
+                - bedrock-mantle:ListTagsForResources
+              Resource: "*"
             - Effect: Allow
               Action:
                 - bedrock:InvokeModel
@@ -1731,6 +2040,13 @@ Resources:
                   - "bedrock:ApplyGuardrail"
                 Resource:
                   - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:guardrail/${BedrockGuardrailId}"
+              - !Ref AWS::NoValue
+            # Optional cross-account Bedrock invocation via hub-account role.
+            - !If
+              - HasBedrockHubRole
+              - Effect: Allow
+                Action: sts:AssumeRole
+                Resource: !Ref BedrockHubRoleArn
               - !Ref AWS::NoValue
             - Effect: Allow
               Action:
@@ -2019,6 +2335,9 @@ Resources:
         ExecutionTimeThresholdMs: !Ref ExecutionTimeThresholdMs
         BedrockGuardrailId: !Ref BedrockGuardrailId
         BedrockGuardrailVersion: !Ref BedrockGuardrailVersion
+        BedrockHubRoleArn: !Ref BedrockHubRoleArn
+        BedrockHubRoleExternalId: !Ref BedrockHubRoleExternalId
+        BedrockHubRoleSessionName: !Ref BedrockHubRoleSessionName
         UpdateConfigurationFunctionArn: !GetAtt UpdateConfigurationFunction.Arn
         ConfigurationTable: !Ref ConfigurationTable
         AppSyncApiUrl: !GetAtt GraphQLApi.GraphQLUrl
@@ -2094,6 +2413,7 @@ Resources:
         
         # Background worker ARNs
         AgentChatProcessorFunctionArn: !GetAtt AgentChatProcessorFunction.Arn
+        ChatWithDocumentProcessorFunctionArn: !GetAtt ChatWithDocumentProcessorFunction.Arn
         AgentProcessorFunctionArn: !GetAtt AgentProcessorFunction.Arn
         TestExecutionAggregationFunctionArn: !GetAtt PATTERNSTACK.Outputs.TestExecutionAggregationFunctionArn
         
@@ -2171,6 +2491,17 @@ Resources:
         UsersTableName: !Ref UsersTable
         UsersTableArn: !GetAtt UsersTable.Arn
 
+        # S3 VPC endpoint URL (private mode) — passed to presigner resolver Lambdas
+        S3EndpointUrl: !If
+          - HasS3VpcEndpoint
+          - !Sub
+            - "https://bucket.${VpceDnsName}"
+            - VpceDnsName: !If
+                - HasS3VpcEndpointOverride
+                - !Ref S3VpcEndpointDnsNameOverride
+                - !GetAtt ALBHOSTINGSTACK.Outputs.S3VPCEndpointDnsName
+          - ""
+
         # Private AppSync VPC config (req #2) — passed to nested/appsync resolver Lambdas
         UsePrivateAppSync: !If [UsePrivateAppSync, "true", "false"]
         LambdaSubnetIds: !If
@@ -2181,6 +2512,14 @@ Resources:
           - UsePrivateAppSync
           - !Ref LambdaVpcSecurityGroup
           - ""
+
+        # Circuit Breaker wiring — feature-flagged; params empty when disabled
+        ConcurrencyTableName: !Ref ConcurrencyTable
+        CircuitBreakerManagerFunctionArn: !If
+          - CircuitBreakerEnabledCondition
+          - !GetAtt CircuitBreakerManagerFunction.Arn
+          - ""
+        CircuitBreakerEnabled: !Ref CircuitBreakerEnabled
 
   CustomerManagedEncryptionKey:
     DependsOn:
@@ -2240,6 +2579,17 @@ Resources:
               - kms:GenerateDataKey*
               - kms:DescribeKey
             Resource: "*"
+          - !If
+            - CircuitBreakerEnabledCondition
+            - Sid: Allow CloudWatch Alarms to use the key for SNS
+              Effect: Allow
+              Principal:
+                Service: !Sub "cloudwatch.${AWS::URLSuffix}"
+              Action:
+                - kms:Decrypt
+                - kms:GenerateDataKey*
+              Resource: "*"
+            - !Ref AWS::NoValue
           - !If
             - IsS3VectorsVectorStore
             - Sid: Allow S3 Vectors indexing service to use the key
@@ -2493,7 +2843,7 @@ Resources:
               - !If
                 - UseCloudFrontHosting
                 - !Sub "https://${CloudFrontDistribution.DomainName}"
-                - !GetAtt ALBHOSTINGSTACK.Outputs.WebUIURL
+                - !GetAtt GetLowercaseAlbUrl.Lowercase
               # For local development only
               - "http://localhost:3000"
             ExposedHeaders:
@@ -2570,7 +2920,7 @@ Resources:
               - !If
                 - UseCloudFrontHosting
                 - !Sub "https://${CloudFrontDistribution.DomainName}"
-                - !GetAtt ALBHOSTINGSTACK.Outputs.WebUIURL
+                - !GetAtt GetLowercaseAlbUrl.Lowercase
               # For local development only
               - "http://localhost:3000"
             ExposedHeaders:
@@ -2689,7 +3039,7 @@ Resources:
               - !If
                 - UseCloudFrontHosting
                 - !Sub "https://${CloudFrontDistribution.DomainName}"
-                - !GetAtt ALBHOSTINGSTACK.Outputs.WebUIURL
+                - !GetAtt GetLowercaseAlbUrl.Lowercase
               # For local development only
               - "http://localhost:3000"
             ExposedHeaders:
@@ -2888,6 +3238,15 @@ Resources:
           LOG_LEVEL: !Ref LogLevel
           TESTSET_BUCKET: !Ref TestSetBucket
           TRACKING_TABLE: !Ref TrackingTable
+          S3_ENDPOINT_URL: !If
+            - HasS3VpcEndpointAndVpc
+            - !Sub
+              - "https://bucket.${VpceDnsName}"
+              - VpceDnsName: !If
+                  - HasS3VpcEndpointOverride
+                  - !Ref S3VpcEndpointDnsNameOverride
+                  - !GetAtt ALBHOSTINGSTACK.Outputs.S3VPCEndpointDnsName
+            - !Ref AWS::NoValue
       Policies:
         - S3CrudPolicy:
             BucketName: !Ref TestSetBucket
@@ -3166,7 +3525,7 @@ Resources:
               - !If
                 - UseCloudFrontHosting
                 - !Sub "https://${CloudFrontDistribution.DomainName}"
-                - !GetAtt ALBHOSTINGSTACK.Outputs.WebUIURL
+                - !GetAtt GetLowercaseAlbUrl.Lowercase
               # For local development only
               - "http://localhost:3000"
             ExposedHeaders:
@@ -3287,7 +3646,7 @@ Resources:
               - !If
                 - UseCloudFrontHosting
                 - !Sub "https://${CloudFrontDistribution.DomainName}"
-                - !GetAtt ALBHOSTINGSTACK.Outputs.WebUIURL
+                - !GetAtt GetLowercaseAlbUrl.Lowercase
               # For local development only
               - "http://localhost:3000"
             ExposedHeaders:
@@ -3356,7 +3715,7 @@ Resources:
               - !If
                 - UseCloudFrontHosting
                 - !Sub "https://${CloudFrontDistribution.DomainName}"
-                - !GetAtt ALBHOSTINGSTACK.Outputs.WebUIURL
+                - !GetAtt GetLowercaseAlbUrl.Lowercase
               # For local development only
               - "http://localhost:3000"
             ExposedHeaders:
@@ -3410,6 +3769,13 @@ Resources:
     Properties:
       ServiceToken: !GetAtt GetDomainLambda.Arn
       InputString: !Ref AWS::StackName
+
+  GetLowercaseAlbUrl:
+    Type: Custom::GetLowercaseAlbUrl
+    Condition: UseALBHosting
+    Properties:
+      ServiceToken: !GetAtt GetDomainLambda.Arn
+      InputString: !GetAtt ALBHOSTINGSTACK.Outputs.WebUIURL
 
   ReportingDatabase:
     Type: AWS::Glue::Database
@@ -3824,7 +4190,7 @@ Resources:
               - !If
                 - UseCloudFrontHosting
                 - !Sub "https://${CloudFrontDistribution.DomainName}"
-                - !GetAtt ALBHOSTINGSTACK.Outputs.WebUIURL
+                - !GetAtt GetLowercaseAlbUrl.Lowercase
               # For local development only
               - "http://localhost:3000"
             ExposedHeaders:
@@ -4488,6 +4854,10 @@ Resources:
           - !GetAtt DOCUMENTKB.Outputs.KnowledgeBaseID
           - ""
         AllowedSignUpEmailDomains: !Ref AllowedSignUpEmailDomain
+        # Public template version-check (used by Web UI Deployment Info "Update available" indicator).
+        # When PublicArtifactsBucket is empty the UI hides the indicator entirely.
+        PublicArtifactsBucket: !Ref PublicArtifactsBucket
+        PublicArtifactsPrefix: !Ref PublicArtifactsPrefix
     UpdateReplacePolicy: Delete
     DeletionPolicy: Delete
 
@@ -4716,6 +5086,9 @@ Resources:
           MAX_CONCURRENT: !Ref MaxConcurrentWorkflows
           WORKING_BUCKET: !Ref WorkingBucket
           CONFIG_TABLE: !Ref ConfigurationTable
+          CIRCUIT_BREAKER_ENABLED: !If [CircuitBreakerEnabledCondition, "true", "false"]
+          DOCUMENT_QUEUE_URL: !Ref DocumentQueue
+          RECOVERY_TIMEOUT_SECONDS: !Ref CircuitBreakerRecoveryTimeoutSeconds
       Policies:
         - SQSPollerPolicy:
             QueueName: !GetAtt DocumentQueue.QueueName
@@ -4852,6 +5225,9 @@ Resources:
             ]
           SAVE_REPORTING_FUNCTION_NAME: !Ref SaveReportingDataFunctionV2
           WORKING_BUCKET: !Ref WorkingBucket
+          CIRCUIT_BREAKER_ENABLED: !If [CircuitBreakerEnabledCondition, "true", "false"]
+          CIRCUIT_BREAKER_MANAGER_ARN: !If [CircuitBreakerEnabledCondition, !GetAtt CircuitBreakerManagerFunction.Arn, ""]
+          ALERTS_TOPIC_ARN: !If [CircuitBreakerEnabledCondition, !Ref AlertsTopic, ""]
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref TrackingTable
@@ -4881,6 +5257,19 @@ Resources:
                 - kms:GenerateDataKey*
                 - kms:DescribeKey
               Resource: !GetAtt CustomerManagedEncryptionKey.Arn
+        - !If
+          - CircuitBreakerEnabledCondition
+          - SNSPublishMessagePolicy:
+              TopicName: !GetAtt AlertsTopic.TopicName
+          - !Ref AWS::NoValue
+        - !If
+          - CircuitBreakerEnabledCondition
+          - Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource: !GetAtt CircuitBreakerManagerFunction.Arn
+          - !Ref AWS::NoValue
 
   WorkflowTrackerLogGroup:
     Type: AWS::Logs::LogGroup
@@ -5268,6 +5657,193 @@ Resources:
           Value: !GetAtt PATTERNSTACK.Outputs.StateMachineArn
       AlarmActions:
         - !Ref AlertsTopic
+
+  ##########################################################################
+  # Circuit Breaker Resources
+  ##########################################################################
+
+  CircuitBreakerManagerFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Condition: CircuitBreakerEnabledCondition
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${AWS::StackName}-CircuitBreakerManager"
+      KmsKeyId: !GetAtt CustomerManagedEncryptionKey.Arn
+      RetentionInDays: !Ref LogRetentionDays
+
+  CircuitBreakerManagerFunction:
+    Type: AWS::Serverless::Function
+    Condition: CircuitBreakerEnabledCondition
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: "VPC attachment is conditional: required when AppSyncVisibility=PRIVATE (SigV4 mutation to the private AppSync endpoint only resolves inside the VPC) or DeployInVPC=true (DynamoDB reached via gateway endpoint). On the default/public path the function only talks to DynamoDB, SNS, CloudWatch, and AppSync over AWS-managed networking and VPC access is not required."
+          - id: W92
+            reason: "Function does not require reserved concurrency"
+    # checkov:skip=CKV_AWS_116: "DLQ not required - alarm-driven, idempotent state changes"
+    # checkov:skip=CKV_AWS_117: "VPC attachment is conditional on AppSyncVisibility=PRIVATE or DeployInVPC=true (see VpcConfig below); default path does not require VPC access"
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data"
+    Properties:
+      PermissionsBoundary:
+        !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
+      Handler: index.handler
+      Runtime: python3.12
+      CodeUri: src/lambda/circuit_breaker_manager/
+      Timeout: 30
+      MemorySize: 256
+      # When AppSync is PRIVATE, the SigV4 mutation to the private GraphQL
+      # endpoint only resolves from inside the AppSync VPC. When the user opted
+      # into VPC-only Lambdas (DeployInVPC=true) but AppSync is still public,
+      # we honour that too so DynamoDB traffic can use a gateway endpoint.
+      VpcConfig: !If
+        - UsePrivateAppSync
+        - SecurityGroupIds:
+            - !Ref LambdaVpcSecurityGroup
+          SubnetIds: !Ref LambdaSubnetIds
+        - !If
+          - DeployInVPC
+          - SecurityGroupIds:
+              - !Ref LambdaSecurityGroupId
+            SubnetIds: !Ref PrivateSubnetIds
+          - !Ref AWS::NoValue
+      Environment:
+        Variables:
+          LOG_LEVEL: !Ref LogLevel
+          CONCURRENCY_TABLE: !Ref ConcurrencyTable
+          ALERTS_TOPIC_ARN: !Ref AlertsTopic
+          RECOVERY_TIMEOUT_SECONDS: !Ref CircuitBreakerRecoveryTimeoutSeconds
+          ERROR_HANDLER_ARN: !Ref CircuitBreakerErrorHandlerArn
+          METRIC_NAMESPACE: !Ref AWS::StackName
+          APPSYNC_API_URL: !GetAtt GraphQLApi.GraphQLUrl
+      LoggingConfig:
+        LogGroup: !Ref CircuitBreakerManagerFunctionLogGroup
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ConcurrencyTable
+        - SNSPublishMessagePolicy:
+            TopicName: !GetAtt AlertsTopic.TopicName
+        - CloudWatchPutMetricPolicy: {}
+        - Statement:
+            - Effect: Allow
+              Action:
+                - appsync:GraphQL
+              Resource:
+                - !Sub "${GraphQLApi.Arn}/types/Mutation/fields/publishCircuitBreakerStatus"
+            - Effect: Allow
+              Action:
+                - kms:Encrypt
+                - kms:Decrypt
+                - kms:ReEncrypt*
+                - kms:GenerateDataKey*
+                - kms:DescribeKey
+              Resource: !GetAtt CustomerManagedEncryptionKey.Arn
+        - !If
+          - HasCircuitBreakerErrorHandler
+          - Statement:
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource: !Ref CircuitBreakerErrorHandlerArn
+          - !Ref AWS::NoValue
+
+  CircuitBreakerTopic:
+    Type: AWS::SNS::Topic
+    Condition: CircuitBreakerEnabledCondition
+    Properties:
+      DisplayName: Circuit Breaker State Changes
+      KmsMasterKeyId: !Ref CustomerManagedEncryptionKey
+
+  BedrockServiceOutageAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: CircuitBreakerEnabledCondition
+    Properties:
+      AlarmName: !Sub "${AWS::StackName}-BedrockServiceOutage"
+      AlarmDescription: !Sub >-
+        Circuit breaker: combined Bedrock error count (ServiceUnavailable=${CircuitBreakerTriggerServiceUnavailable},
+        Throttling=${CircuitBreakerTriggerThrottling}, QuotaLimit=${CircuitBreakerTriggerQuotaLimit})
+        exceeded ${CircuitBreakerFailureThreshold} in ${CircuitBreakerEvaluationPeriods} evaluation period(s).
+      Metrics:
+        - Id: e1
+          Label: CombinedCircuitBreakerErrors
+          ReturnData: true
+          Expression: !Sub
+            - "${SUCoef} * FILL(m1, 0) + ${ThrCoef} * FILL(m2, 0) + ${QLCoef} * FILL(m3, 0)"
+            - SUCoef: !If [CircuitBreakerTriggerServiceUnavailableEnabled, "1", "0"]
+              ThrCoef: !If [CircuitBreakerTriggerThrottlingEnabled, "1", "0"]
+              QLCoef: !If [CircuitBreakerTriggerQuotaLimitEnabled, "1", "0"]
+        - Id: m1
+          ReturnData: false
+          MetricStat:
+            Metric:
+              Namespace: !Ref AWS::StackName
+              MetricName: BedrockServiceUnavailable
+            Period: 300
+            Stat: Sum
+        - Id: m2
+          ReturnData: false
+          MetricStat:
+            Metric:
+              Namespace: !Ref AWS::StackName
+              MetricName: BedrockThrottling
+            Period: 300
+            Stat: Sum
+        - Id: m3
+          ReturnData: false
+          MetricStat:
+            Metric:
+              Namespace: !Ref AWS::StackName
+              MetricName: BedrockQuotaLimit
+            Period: 300
+            Stat: Sum
+      EvaluationPeriods: !Ref CircuitBreakerEvaluationPeriods
+      Threshold: !Ref CircuitBreakerFailureThreshold
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref CircuitBreakerTopic
+      OKActions:
+        - !Ref CircuitBreakerTopic
+
+  CircuitBreakerTopicSubscription:
+    Type: AWS::SNS::Subscription
+    Condition: CircuitBreakerEnabledCondition
+    Properties:
+      TopicArn: !Ref CircuitBreakerTopic
+      Protocol: lambda
+      Endpoint: !GetAtt CircuitBreakerManagerFunction.Arn
+
+  CircuitBreakerManagerInvokePermission:
+    Type: AWS::Lambda::Permission
+    Condition: CircuitBreakerEnabledCondition
+    Properties:
+      FunctionName: !Ref CircuitBreakerManagerFunction
+      Action: lambda:InvokeFunction
+      Principal: !Sub "sns.${AWS::URLSuffix}"
+      SourceArn: !Ref CircuitBreakerTopic
+
+  # Runs every 5 min whenever the breaker is enabled (including CLOSED) so
+  # recovery timeouts always converge. Cost is ~8.6k invocations/month; remove
+  # this rule to disable automated recovery and rely solely on manual reset.
+  CircuitBreakerHealthCheckRule:
+    Type: AWS::Events::Rule
+    Condition: CircuitBreakerEnabledCondition
+    Properties:
+      Description: Periodic health check for circuit breaker recovery
+      ScheduleExpression: rate(5 minutes)
+      State: ENABLED
+      Targets:
+        - Id: CircuitBreakerHealthCheck
+          Arn: !GetAtt CircuitBreakerManagerFunction.Arn
+          Input: '{"source": "scheduled", "action": "health_check"}'
+
+  CircuitBreakerHealthCheckPermission:
+    Type: AWS::Lambda::Permission
+    Condition: CircuitBreakerEnabledCondition
+    Properties:
+      FunctionName: !Ref CircuitBreakerManagerFunction
+      Action: lambda:InvokeFunction
+      Principal: !Sub "events.${AWS::URLSuffix}"
+      SourceArn: !GetAtt CircuitBreakerHealthCheckRule.Arn
 
   # This dasboard is merged with dashboard created by the pattern stack to create an overall dashboard
   MainTemplateSubsetDashboard:
@@ -5827,6 +6403,133 @@ Resources:
       SecretString: "[]"
       KmsKeyId: !Ref CustomerManagedEncryptionKey
 
+  # ChatWithDocumentProcessor — long-running Lambda invoked async by the
+  # send_chat_document_message_resolver. Does the heavy lifting (load doc,
+  # call Bedrock, publish streaming status via AppSync) outside AppSync's
+  # 30-second synchronous budget. Mirrors AgentChatProcessorFunction.
+  ChatWithDocumentProcessorLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      KmsKeyId: !GetAtt CustomerManagedEncryptionKey.Arn
+      RetentionInDays: !Ref LogRetentionDays
+
+  ChatWithDocumentProcessorFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: "Function does not require VPC access as it only interacts with AWS services via APIs"
+          - id: W92
+            reason: "Function does not require reserved concurrency as it scales based on demand"
+          - id: W11
+            reason: "Role requires * for Bedrock marketplace and CloudWatch Metrics"
+    # checkov:skip=CKV_AWS_116: "DLQ not required — invoked async by resolver; failure events logged + published to UI as assistant_error via subscription"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
+    # checkov:skip=CKV_AWS_173: "Environment variables contain only non-sensitive configuration"
+    Properties:
+      PermissionsBoundary:
+        !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
+      CodeUri: src/lambda/chat_with_document_processor/
+      Handler: index.handler
+      Runtime: python3.12
+      MemorySize: 4096
+      Timeout: 900
+      Layers:
+        - !Ref IDPCommonBaseLayer
+      Environment:
+        Variables:
+          LOG_LEVEL: !Ref LogLevel
+          OUTPUT_BUCKET: !Ref OutputBucket
+          CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
+          TRACKING_TABLE_NAME: !Ref TrackingTable
+          USERS_TABLE_NAME: !Ref UsersTable
+          APPSYNC_API_URL: !GetAtt GraphQLApi.GraphQLUrl
+          GUARDRAIL_ID_AND_VERSION:
+            !If [HasGuardrailConfig, !Sub "${BedrockGuardrailId}:${BedrockGuardrailVersion}", ""]
+          BEDROCK_ASSUME_ROLE_ARN:
+            !If [HasBedrockHubRole, !Ref BedrockHubRoleArn, !Ref AWS::NoValue]
+          BEDROCK_ASSUME_ROLE_EXTERNAL_ID:
+            !If [HasBedrockHubRoleExternalId, !Ref BedrockHubRoleExternalId, !Ref AWS::NoValue]
+          BEDROCK_ASSUME_ROLE_SESSION_NAME:
+            !If [HasBedrockHubRoleSessionName, !Ref BedrockHubRoleSessionName, !Ref AWS::NoValue]
+      LoggingConfig:
+        LogGroup: !Ref ChatWithDocumentProcessorLogGroup
+      Policies:
+        - S3ReadPolicy:
+            BucketName: !Ref OutputBucket
+        - S3WritePolicy:
+            BucketName: !Ref OutputBucket
+        - DynamoDBReadPolicy:
+            TableName: !Ref ConfigurationTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref TrackingTable
+        - Statement:
+            - Effect: Allow
+              Action:
+                - appsync:GraphQL
+              Resource: !Sub "arn:${AWS::Partition}:appsync:${AWS::Region}:${AWS::AccountId}:apis/${GraphQLApi.ApiId}/types/Mutation/*"
+            # OpenAI GPT-5.x models are served via the bedrock-mantle endpoint
+            # (OpenAI Responses API) and use a separate IAM action namespace.
+            - Effect: Allow
+              Action:
+                - bedrock-mantle:CreateInference
+                - bedrock-mantle:GetProject
+                - bedrock-mantle:ListProjects
+                - bedrock-mantle:ListTagsForResources
+              Resource: "*"
+            - Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+                - bedrock:InvokeModelWithResponseStream
+                - bedrock:GetInferenceProfile
+              Resource:
+                - !Sub "arn:${AWS::Partition}:bedrock:*::foundation-model/*"
+                - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
+                - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:application-inference-profile/*"
+            - Effect: Allow
+              Action:
+                - aws-marketplace:Subscribe
+                - aws-marketplace:Unsubscribe
+                - aws-marketplace:ViewSubscriptions
+              Resource: "*"
+            - Effect: Allow
+              Action:
+                - cloudwatch:PutMetricData
+              Resource: "*"
+            - Effect: Allow
+              Action:
+                - kms:Encrypt
+                - kms:Decrypt
+                - kms:ReEncrypt*
+                - kms:GenerateDataKey*
+                - kms:DescribeKey
+              Resource: !GetAtt CustomerManagedEncryptionKey.Arn
+            - !If
+              - HasGuardrailConfig
+              - Effect: Allow
+                Action: bedrock:ApplyGuardrail
+                Resource: !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:guardrail/${BedrockGuardrailId}"
+              - !Ref AWS::NoValue
+            # Optional cross-account Bedrock invocation via hub-account role.
+            - !If
+              - HasBedrockHubRole
+              - Effect: Allow
+                Action: sts:AssumeRole
+                Resource: !Ref BedrockHubRoleArn
+              - !Ref AWS::NoValue
+            # RBAC scope enforcement — processor queries UsersTable.SubIndex
+            # to fetch the caller's `allowedConfigVersions` and rejects
+            # chats against documents outside that scope.
+            - Effect: Allow
+              Action:
+                - dynamodb:Query
+                - dynamodb:GetItem
+              Resource:
+                - !GetAtt UsersTable.Arn
+                - !Sub "${UsersTable.Arn}/index/*"
+
   # Lambda function for agent chat resolver
   AgentChatProcessorFunction:
     Type: AWS::Serverless::Function
@@ -5905,6 +6608,12 @@ Resources:
             ]
           CLOUDWATCH_LOG_GROUP_PREFIX: !Sub "/aws/lambda/${AWS::StackName}"
           SETTINGS_PARAMETER_NAME: !Ref SettingsParameter
+          BEDROCK_ASSUME_ROLE_ARN:
+            !If [HasBedrockHubRole, !Ref BedrockHubRoleArn, !Ref AWS::NoValue]
+          BEDROCK_ASSUME_ROLE_EXTERNAL_ID:
+            !If [HasBedrockHubRoleExternalId, !Ref BedrockHubRoleExternalId, !Ref AWS::NoValue]
+          BEDROCK_ASSUME_ROLE_SESSION_NAME:
+            !If [HasBedrockHubRoleSessionName, !Ref BedrockHubRoleSessionName, !Ref AWS::NoValue]
       LoggingConfig:
         LogGroup: !Ref AgentChatProcessorLogGroup
       Policies:
@@ -5947,6 +6656,15 @@ Resources:
                 - !Sub "arn:${AWS::Partition}:glue:${AWS::Region}:${AWS::AccountId}:catalog"
                 - !Sub "arn:${AWS::Partition}:glue:${AWS::Region}:${AWS::AccountId}:database/${ReportingDatabase}"
                 - !Sub "arn:${AWS::Partition}:glue:${AWS::Region}:${AWS::AccountId}:table/${ReportingDatabase}/*"
+            # OpenAI GPT-5.x models are served via the bedrock-mantle endpoint
+            # (OpenAI Responses API) and use a separate IAM action namespace.
+            - Effect: Allow
+              Action:
+                - bedrock-mantle:CreateInference
+                - bedrock-mantle:GetProject
+                - bedrock-mantle:ListProjects
+                - bedrock-mantle:ListTagsForResources
+              Resource: "*"
             - Effect: Allow
               Action:
                 - bedrock:InvokeModel
@@ -5969,6 +6687,13 @@ Resources:
                   - "bedrock:ApplyGuardrail"
                 Resource:
                   - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:guardrail/${BedrockGuardrailId}"
+              - !Ref AWS::NoValue
+            # Optional cross-account Bedrock invocation via hub-account role.
+            - !If
+              - HasBedrockHubRole
+              - Effect: Allow
+                Action: sts:AssumeRole
+                Resource: !Ref BedrockHubRoleArn
               - !Ref AWS::NoValue
             - Effect: Allow
               Action:
@@ -6291,6 +7016,112 @@ Resources:
       TypeName: Query
       FieldName: calculateCapacity
 
+  ##########################################################################
+  # Public Template Version-Check Resolver
+  #
+  # Powers the "Update available" indicator in the Web UI's Deployment Info
+  # nav section. Lists the public artifacts S3 prefix for versioned templates
+  # of the form <prefix>/idp-main_<version>.yaml and returns the highest
+  # semver. The check is disabled by default (PublicArtifactsBucket=""); the
+  # public release sets it to the regional aws-ml-blog bucket.
+  #
+  # The resolver tries unsigned/anonymous S3 reads first (botocore UNSIGNED)
+  # so it works against truly public buckets without any IAM grant. If the
+  # unsigned call fails (e.g. the bucket has BlockPublicAcls / requires
+  # SigV4), it falls back to signed requests using this Lambda's execution
+  # role — that's why we attach `s3:ListBucket` and `s3:GetObject` on the
+  # configured PublicArtifactsBucket (conditional on
+  # HasPublicArtifactsBucket so headless / empty-bucket builds don't get a
+  # dangling policy).
+  ##########################################################################
+
+
+  VersionCheckResolverFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${AWS::StackName}-VersionCheckResolver"
+      KmsKeyId: !GetAtt CustomerManagedEncryptionKey.Arn
+      RetentionInDays: !Ref LogRetentionDays
+
+  VersionCheckResolverFunction:
+    DependsOn:
+      - IsStacknameLengthOK
+    Type: AWS::Serverless::Function
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: "Function does not require VPC access — only reads from public S3 bucket via unsigned requests"
+          - id: W92
+            reason: "Function does not require reserved concurrency"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for synchronous AppSync resolver"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
+    # checkov:skip=CKV_AWS_173: "Environment variables contain non-sensitive configuration values (bucket name, prefix, log level)"
+    Properties:
+      PermissionsBoundary:
+        !If [
+          HasPermissionsBoundary,
+          !Ref PermissionsBoundaryArn,
+          !Ref AWS::NoValue,
+        ]
+      Handler: index.lambda_handler
+      Runtime: python3.12
+      Timeout: 30
+      MemorySize: 256
+      CodeUri: src/lambda/version_check_resolver
+      LoggingConfig:
+        LogGroup: !Ref VersionCheckResolverFunctionLogGroup
+      Environment:
+        Variables:
+          LOG_LEVEL: !Ref LogLevel
+          PUBLIC_ARTIFACTS_BUCKET: !Ref PublicArtifactsBucket
+          PUBLIC_ARTIFACTS_PREFIX: !Ref PublicArtifactsPrefix
+          PUBLIC_ARTIFACTS_REGION: !Ref AWS::Region
+          # Cache TTL (seconds) for the in-process result cache.
+          VERSION_CHECK_CACHE_TTL: "600"
+      # Grant signed-S3 access to the configured artifacts bucket as a
+      # fallback for when unsigned/anonymous reads aren't allowed (e.g.
+      # private buckets like `idp-cli publish` creates with all public
+      # access blocked). Only attached when PublicArtifactsBucket is
+      # non-empty so headless / disabled builds get no policy.
+      Policies:
+        - !If
+          - HasPublicArtifactsBucket
+          - Statement:
+              - Effect: Allow
+                Action:
+                  - s3:ListBucket
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:s3:::${PublicArtifactsBucket}"
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:s3:::${PublicArtifactsBucket}/${PublicArtifactsPrefix}/*"
+          - !Ref AWS::NoValue
+
+  VersionCheckResolverDataSource:
+
+    Type: AWS::AppSync::DataSource
+    Properties:
+      ApiId: !GetAtt GraphQLApi.ApiId
+      Name: VersionCheckResolverDataSource
+      Description: Lambda function for the public template version-check
+      Type: AWS_LAMBDA
+      ServiceRoleArn: !GetAtt HITLAppSyncServiceRole.Arn
+      LambdaConfig:
+        LambdaFunctionArn: !GetAtt VersionCheckResolverFunction.Arn
+
+  GetLatestPublishedVersionResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: APPSYNCSTACK
+    Properties:
+      ApiId: !GetAtt GraphQLApi.ApiId
+      DataSourceName: !GetAtt VersionCheckResolverDataSource.Name
+      TypeName: Query
+      FieldName: getLatestPublishedVersion
+
   AgentProcessorLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
@@ -6369,6 +7200,12 @@ Resources:
             ]
           CLOUDWATCH_LOG_GROUP_PREFIX: !Sub "/aws/lambda/${AWS::StackName}"
           SETTINGS_PARAMETER_NAME: !Ref SettingsParameter
+          BEDROCK_ASSUME_ROLE_ARN:
+            !If [HasBedrockHubRole, !Ref BedrockHubRoleArn, !Ref AWS::NoValue]
+          BEDROCK_ASSUME_ROLE_EXTERNAL_ID:
+            !If [HasBedrockHubRoleExternalId, !Ref BedrockHubRoleExternalId, !Ref AWS::NoValue]
+          BEDROCK_ASSUME_ROLE_SESSION_NAME:
+            !If [HasBedrockHubRoleSessionName, !Ref BedrockHubRoleSessionName, !Ref AWS::NoValue]
       LoggingConfig:
         LogGroup: !Ref AgentProcessorLogGroup
       Policies:
@@ -6401,6 +7238,15 @@ Resources:
                 - !Sub "arn:${AWS::Partition}:glue:${AWS::Region}:${AWS::AccountId}:catalog"
                 - !Sub "arn:${AWS::Partition}:glue:${AWS::Region}:${AWS::AccountId}:database/${ReportingDatabase}"
                 - !Sub "arn:${AWS::Partition}:glue:${AWS::Region}:${AWS::AccountId}:table/${ReportingDatabase}/*"
+            # OpenAI GPT-5.x models are served via the bedrock-mantle endpoint
+            # (OpenAI Responses API) and use a separate IAM action namespace.
+            - Effect: Allow
+              Action:
+                - bedrock-mantle:CreateInference
+                - bedrock-mantle:GetProject
+                - bedrock-mantle:ListProjects
+                - bedrock-mantle:ListTagsForResources
+              Resource: "*"
             - Effect: Allow
               Action:
                 - bedrock:InvokeModel
@@ -6423,6 +7269,13 @@ Resources:
                   - "bedrock:ApplyGuardrail"
                 Resource:
                   - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:guardrail/${BedrockGuardrailId}"
+              - !Ref AWS::NoValue
+            # Optional cross-account Bedrock invocation via hub-account role.
+            - !If
+              - HasBedrockHubRole
+              - Effect: Allow
+                Action: sts:AssumeRole
+                Resource: !Ref BedrockHubRoleArn
               - !Ref AWS::NoValue
             - Effect: Allow
               Action:
@@ -6533,7 +7386,7 @@ Resources:
         - !If
           - UseCloudFrontHosting
           - !Sub "https://${CloudFrontDistribution.DomainName}/"
-          - !Sub "${ALBHOSTINGSTACK.Outputs.WebUIURL}/"
+          - !Sub "${GetLowercaseAlbUrl.Lowercase}/"
         - !Sub "https://${AWS::Region}.quicksight.aws.amazon.com/sn/oauthcallback"
         - https://us-east-1.quicksight.aws.amazon.com/sn/oauthcallback
         - https://us-west-2.quicksight.aws.amazon.com/sn/oauthcallback
@@ -6544,7 +7397,7 @@ Resources:
         - !If
           - UseCloudFrontHosting
           - !Sub "https://${CloudFrontDistribution.DomainName}/"
-          - !Sub "${ALBHOSTINGSTACK.Outputs.WebUIURL}/"
+          - !Sub "${GetLowercaseAlbUrl.Lowercase}/"
         - !Sub "https://${AWS::Region}.quicksight.aws.amazon.com/sn/oauthcallback"
         - https://us-east-1.quicksight.aws.amazon.com/sn/oauthcallback
         - https://us-west-2.quicksight.aws.amazon.com/sn/oauthcallback
@@ -6612,7 +7465,7 @@ Resources:
             - WebUIURL: !If
                 - UseCloudFrontHosting
                 - !Sub "https://${CloudFrontDistribution.DomainName}/"
-                - !GetAtt ALBHOSTINGSTACK.Outputs.WebUIURL
+                - !GetAtt GetLowercaseAlbUrl.Lowercase
       AutoVerifiedAttributes:
         - email
       EmailConfiguration:
@@ -6677,21 +7530,21 @@ Resources:
         - !If
           - UseCloudFrontHosting
           - !Sub "https://${CloudFrontDistribution.DomainName}"
-          - !GetAtt ALBHOSTINGSTACK.Outputs.WebUIURL
+          - !GetAtt GetLowercaseAlbUrl.Lowercase
         - !If
           - UseCloudFrontHosting
           - !Sub "https://${CloudFrontDistribution.DomainName}/"
-          - !Sub "${ALBHOSTINGSTACK.Outputs.WebUIURL}/"
+          - !Sub "${GetLowercaseAlbUrl.Lowercase}/"
       LogoutURLs: !If
         - HasExternalIdP
         - - !If
             - UseCloudFrontHosting
             - !Sub "https://${CloudFrontDistribution.DomainName}"
-            - !GetAtt ALBHOSTINGSTACK.Outputs.WebUIURL
+            - !GetAtt GetLowercaseAlbUrl.Lowercase
           - !If
             - UseCloudFrontHosting
             - !Sub "https://${CloudFrontDistribution.DomainName}/"
-            - !Sub "${ALBHOSTINGSTACK.Outputs.WebUIURL}/"
+            - !Sub "${GetLowercaseAlbUrl.Lowercase}/"
         - !Ref AWS::NoValue
       AccessTokenValidity: 1
       EnableTokenRevocation: true
@@ -6705,6 +7558,8 @@ Resources:
         - email
         - email_verified
         - preferred_username
+        - given_name
+        - family_name
         - !If
           - HasExternalIdP
           - custom:idp_groups
@@ -6820,6 +7675,14 @@ Resources:
           - IsExternalIdPSAML
           - "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress"
           - "email"
+        given_name: !If
+          - IsExternalIdPSAML
+          - "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/givenname"
+          - "given_name"
+        family_name: !If
+          - IsExternalIdPSAML
+          - "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/surname"
+          - "family_name"
         custom:idp_groups: !If
           - HasExternalIdPGroupMapping
           - !Ref ExternalIdPGroupAttributeName
@@ -8042,6 +8905,15 @@ Resources:
                 - kms:GenerateDataKey*
                 - kms:DescribeKey
               Resource: !GetAtt CustomerManagedEncryptionKey.Arn
+            # OpenAI GPT-5.x models are served via the bedrock-mantle endpoint
+            # (OpenAI Responses API) and use a separate IAM action namespace.
+            - Effect: Allow
+              Action:
+                - bedrock-mantle:CreateInference
+                - bedrock-mantle:GetProject
+                - bedrock-mantle:ListProjects
+                - bedrock-mantle:ListTagsForResources
+              Resource: "*"
             - Effect: Allow
               Action:
                 - bedrock:InvokeModel
@@ -8153,6 +9025,9 @@ Resources:
         SourceZipfile: "<ARTIFACT_PREFIX_TOKEN>/multi-doc-discovery-source.zip"
         AppSyncApiUrl: !GetAtt GraphQLApi.GraphQLUrl
         AppSyncApiArn: !GetAtt GraphQLApi.Arn
+        BedrockHubRoleArn: !Ref BedrockHubRoleArn
+        BedrockHubRoleExternalId: !Ref BedrockHubRoleExternalId
+        BedrockHubRoleSessionName: !Ref BedrockHubRoleSessionName
 
   # --- Step Functions State Machine ---
 
@@ -8440,6 +9315,13 @@ Resources:
         StackName: !Ref AWS::StackName
         PermissionsBoundaryArn: !Ref PermissionsBoundaryArn
         LoggingBucketName: !Ref LoggingBucket
+        # In private mode the same S3 VPCE is used by app Lambdas; pass the
+        # Lambda SG so the ALB stack opens 443 from it on the endpoint SG.
+        # Empty when DeployInVPC=false — the nested stack treats empty as no-op.
+        LambdaSecurityGroupId: !If
+          - DeployInVPC
+          - !Ref LambdaSecurityGroupId
+          - ""
 
   UICodeBuildServiceRole:
     Type: AWS::IAM::Role
@@ -8620,7 +9502,7 @@ Resources:
             Value: !If
               - UseCloudFrontHosting
               - !Sub "https://${CloudFrontDistribution.DomainName}/"
-              - !Sub "${ALBHOSTINGSTACK.Outputs.WebUIURL}/"
+              - !Sub "${GetLowercaseAlbUrl.Lowercase}/"
           - Name: VITE_TEST_SET_BUCKET_NAME
             Value: !Ref TestSetBucket
           - Name: VITE_INPUT_BUCKET_NAME
@@ -8939,6 +9821,13 @@ Resources:
                   - !GetAtt CompleteSectionReviewFunction.Arn
                   - !GetAtt CalculateCapacityResolverFunction.Arn
                   - !GetAtt FinetuningJobsResolverFunction.Arn
+                  # Public-template version-check resolver. Same shape as
+                  # CalculateCapacityResolverFunction above — the role is
+                  # shared with the AppSync data sources defined in the main
+                  # template (next to GraphQLApi), so we have to grant invoke
+                  # here. Without this, the AppSync data source returns
+                  # `Lambda:IllegalArgument` 403.
+                  - !GetAtt VersionCheckResolverFunction.Arn
 
   UserManagementDataSource:
     Type: AWS::AppSync::DataSource
@@ -9747,7 +10636,7 @@ Outputs:
     Value: !If
       - UseCloudFrontHosting
       - !Sub "https://${CloudFrontDistribution.DomainName}/"
-      - !GetAtt ALBHOSTINGSTACK.Outputs.WebUIURL
+      - !GetAtt GetLowercaseAlbUrl.Lowercase
   S3InstallBucket:
     Description: Install S3 bucket name
     Value: !Ref InputBucket

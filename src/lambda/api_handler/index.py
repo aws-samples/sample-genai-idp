@@ -27,8 +27,19 @@ from models import (
 logger = Logger()
 app = APIGatewayRestResolver(enable_validation=True)
 
-# Initialize AWS clients
-s3_client = boto3.client("s3", config=boto3.session.Config(signature_version="s3v4"))
+# Initialize S3 client. In private VPC mode, S3_ENDPOINT_URL points at the
+# VPC interface endpoint so presigned URLs target the customer's private
+# network path. When unset, boto3 falls back to the public regional endpoint.
+_s3_endpoint_url = os.environ.get("S3_ENDPOINT_URL") or None
+_s3_addressing = "virtual" if _s3_endpoint_url else "path"
+s3_client = boto3.client(
+    "s3",
+    endpoint_url=_s3_endpoint_url,
+    config=boto3.session.Config(
+        signature_version="s3v4",
+        s3={"addressing_style": _s3_addressing},
+    ),
+)
 
 # Environment variables
 STAGING_BUCKET = os.environ.get("STAGING_BUCKET_NAME", "")

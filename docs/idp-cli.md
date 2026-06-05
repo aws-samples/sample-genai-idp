@@ -52,6 +52,7 @@ https://github.com/user-attachments/assets/3d448a74-ba5b-4a4a-96ad-ec03ac0b4d7d
   - [config-activate](#config-activate)
   - [config-delete](#config-delete)
   - [test-result](#test-result)
+  - [abort-test-run](#abort-test-run)
   - [test-compare](#test-compare)
   - [chat](#chat)
 - [Complete Evaluation Workflow](#complete-evaluation-workflow)
@@ -2018,7 +2019,20 @@ idp-cli config-create --features "classification,extraction,summarization" --out
 
 ### `config-validate`
 
-Validate a configuration file against system defaults and Pydantic models.
+Validate a configuration file against system defaults and Pydantic models. Catches common configuration errors that cause silent pipeline failures.
+
+**Validation Checks:**
+- **YAML/JSON Syntax** - Ensures file is well-formed
+- **Schema Validation** - Validates against Pydantic models
+- **Model IDs** - Verifies Bedrock model IDs are valid (checked against pricing.yaml)
+- **Placeholder Validation** - Ensures required placeholders are present in custom task_prompts:
+  - `ocr.task_prompt` (bedrock only): Requires `{DOCUMENT_IMAGE}`
+  - `classification.task_prompt`: Requires `{DOCUMENT_TEXT}` OR `{DOCUMENT_IMAGE}`
+  - `extraction.task_prompt`: Requires `{DOCUMENT_TEXT}` OR `{DOCUMENT_IMAGE}`
+  - `assessment.task_prompt`: Requires `{DOCUMENT_IMAGE}`, `{OCR_TEXT_CONFIDENCE}`, `{EXTRACTION_RESULTS}`
+  - `summarization.task_prompt`: Requires `{DOCUMENT_TEXT}`, `{EXTRACTION_RESULTS}`
+- **JSON Schema Fields** - Warns about non-standard fields (e.g., `data_type`)
+- **OpenAI GPT-5.x compatibility** - Errors if an `openai.gpt-5.*` model is paired with **agentic extraction** (`extraction.agentic.enabled: true`, including per-class `x-aws-idp-extraction-model` overrides) or used for **Discovery** (`discovery.*.model_id` / `discovery.rules.model`). These models run on the `bedrock-mantle` Responses API and cannot accept the Strands agent loop or whole-PDF document blocks. See [OpenAI GPT-5.x Models](openai-models.md).
 
 **Usage:**
 ```bash
@@ -2042,6 +2056,10 @@ idp-cli config-validate --config-file ./config.yaml --show-merged
 # Strict mode (fails if config has unknown or deprecated fields — useful for CI/CD)
 idp-cli config-validate --config-file ./config.yaml --strict
 ```
+
+**Notes:**
+- The `config-upload` command runs validation by default before uploading to protect production stacks.
+- Model ID validation requires `config_library/pricing.yaml`. Ensure `idp-cli` is run from the repository root, or set the `IDP_PROJECT_ROOT` environment variable to the repo root for validation to work correctly.
 
 ---
 
@@ -2282,6 +2300,58 @@ idp-cli test-result \
 
 ---
 
+### `abort-test-run`
+
+Abort one or more running Test Studio test runs. Stops all document processing workflows and preserves results from completed documents.
+
+**Usage:**
+```bash
+idp-cli abort-test-run [OPTIONS]
+```
+
+**Options:**
+- `--stack-name` (required): CloudFormation stack name
+- `--test-run-ids` (required): Comma-separated list of test run IDs to abort
+- `--force` / `-y`: Skip confirmation prompt
+- `--region`: AWS region (optional)
+
+**Examples:**
+```bash
+# Abort a single test run
+idp-cli abort-test-run \
+  --stack-name my-stack \
+  --test-run-ids "fake-w2-20260409-123456"
+
+# Abort multiple test runs
+idp-cli abort-test-run \
+  --stack-name my-stack \
+  --test-run-ids "run1,run2,run3"
+
+# Skip confirmation prompt
+idp-cli abort-test-run \
+  --stack-name my-stack \
+  --test-run-ids "fake-w2-20260409-123456" \
+  --force
+```
+
+**Output:**
+- Success/failure count for each test run
+- Error details for failed aborts (e.g., test run not found, already completed)
+- Confirmation prompt unless `--force` is used
+
+**Behavior:**
+- Only test runs with status **QUEUED** or **RUNNING** can be aborted
+- Completed documents are preserved with their evaluation results
+- Test run status is updated to **ABORTED**
+- Metrics are calculated for any completed documents
+- Document workflows are stopped via Step Functions execution abort
+
+**Limitations:**
+- Cannot abort test runs with status **EVALUATING**, **COMPLETED**, **PARTIAL_COMPLETE**, or **FAILED**
+- The abort operation waits up to 25 seconds for documents to reach terminal state
+
+---
+
 ### `test-compare`
 
 Compare metrics and configurations from multiple Test Studio test runs.
@@ -2337,6 +2407,9 @@ Discover document class schemas from sample documents using Amazon Bedrock.
 
 **Ground truth matching:** Ground truth files (`-g`) are auto-matched to documents (`-d`) by filename stem. For example, `invoice.pdf` matches `invoice.json`. Unmatched documents run without ground truth.
 
+- **Single document + single ground truth:** When exactly one `-d` and one `-g` are provided, they are paired by position regardless of filename stem. This supports the common case where ground truth files have generic names (e.g., `baseline/<doc>/sections/1/result.json`).
+- **Batch mode (multiple `-d` or multiple `-g`):** Files are matched by stem. If any `-g` file cannot be matched to a document, `discover` exits non-zero with a clear error. This prevents silently running without-GT discovery when the user explicitly requested ground-truth-guided discovery. See [issue #310](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues/310).
+
 **Output behavior:**
 - Single document: `-o` writes the schema to the specified file
 - Batch + `-o` is a directory (or has no extension): writes one `{class_name}.json` per schema
@@ -2382,6 +2455,10 @@ idp-cli discover -d ./lending_package.pdf --auto-detect --detect-only -o section
 
 # Stack mode (saves to config)
 idp-cli discover --stack-name my-stack -d ./invoice.pdf --config-version v2
+
+# Override the Bedrock model (e.g. use Claude Opus instead of the configured default)
+idp-cli discover -d ./invoice.pdf -g ./invoice.json \
+    --model-id us.anthropic.claude-opus-4-6-v1
 ```
 
 | Option | Description |
@@ -2396,6 +2473,7 @@ idp-cli discover --stack-name my-stack -d ./invoice.pdf --config-version v2
 | `--page-label` | Label for corresponding `--page-range` (e.g., "W2 Form"). Used as class name hint per range. |
 | `--auto-detect` | Auto-detect document section boundaries using AI, then discover each section. |
 | `--detect-only` | Only detect section boundaries (use with `--auto-detect`). Prints boundaries without running discovery. |
+| `--model-id` | Override the Bedrock model ID used for discovery (e.g., `us.anthropic.claude-opus-4-6-v1`). When omitted, the discovery model from the stack config (stack mode) or system defaults (local mode) is used. Applies to with-ground-truth, without-ground-truth, `--auto-detect`, and `--page-range` modes. |
 | `--region` | AWS region |
 
 ---

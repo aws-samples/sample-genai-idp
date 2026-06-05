@@ -1,0 +1,11 @@
+query GetCircuitBreakerStatus {
+  getCircuitBreakerStatus {
+    enabled
+    state
+    openedAt
+    lastCheckedAt
+    failureCount
+    recoveryAttempts
+    lastError
+  }
+}

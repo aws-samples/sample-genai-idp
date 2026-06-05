@@ -1,0 +1,8 @@
+query GetLatestPublishedVersion {
+  getLatestPublishedVersion {
+    checkEnabled
+    latestVersion
+    templateUrl
+    errorMessage
+  }
+}

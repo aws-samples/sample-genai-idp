@@ -15,12 +15,16 @@ logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 logging.getLogger('idp_common.bedrock.client').setLevel(os.environ.get("BEDROCK_LOG_LEVEL", "INFO"))
 # Get LOG_LEVEL from environment variable with INFO as default
 
-# Configure S3 client with S3v4 signature
+# Configure S3 client with S3v4 signature.
+# When S3_ENDPOINT_URL is set (private VPC mode), use virtual-host addressing
+# so the SigV4 host header matches the VPC interface endpoint DNS.
+_s3_endpoint_url = os.environ.get("S3_ENDPOINT_URL") or None
+_s3_addressing = "virtual" if _s3_endpoint_url else "path"
 s3_config = Config(
-    signature_version='s3v4',
-    s3={'addressing_style': 'path'}
+    signature_version="s3v4",
+    s3={"addressing_style": _s3_addressing},
 )
-s3_client = boto3.client('s3', config=s3_config)
+s3_client = boto3.client("s3", endpoint_url=_s3_endpoint_url, config=s3_config)
 
 # --- inline log sanitizer ---------------------------------------------------
 # Minimal inline redactor. Kept here rather than importing from idp_common to
@@ -47,6 +51,21 @@ def _sanitize_for_log(obj):
         return [_sanitize_for_log(v) for v in obj]
     return obj
 
+
+def _caller_in_groups(event, allowed):
+    """Defense-in-depth RBAC check against the caller's Cognito groups.
+
+    The schema restricts this field via @aws_cognito_user_pools(cognito_groups),
+    but we also enforce the group server-side so the operation is never reachable
+    by an unauthorized caller even if the schema directive is missing or
+    misconfigured (e.g. the prior @aws_auth directive, which AppSync silently
+    ignores on a multi-auth API).
+    """
+    groups = (event.get("identity") or {}).get("claims", {}).get("cognito:groups") or []
+    if isinstance(groups, str):
+        groups = [groups]
+    return bool(set(allowed).intersection(groups))
+
 def handler(event, context):
     """
     Generates a presigned POST URL for S3 uploads through an AppSync resolver.
@@ -59,8 +78,14 @@ def handler(event, context):
         dict: A dictionary containing the presigned URL data and object key
     """
     logger.info(f"Received event: {json.dumps(_sanitize_for_log(event))}")
-    
+
     try:
+        # Defense-in-depth: uploadDocument is an Admin+Author operation.
+        if not _caller_in_groups(event, ("Admin", "Author")):
+            raise PermissionError(
+                "Unauthorized: uploadDocument requires Admin or Author group"
+            )
+
         # Extract variables from the event
         arguments = event.get('arguments', {})
         file_name = arguments.get('fileName')

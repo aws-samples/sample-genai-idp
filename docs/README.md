@@ -64,6 +64,7 @@ This folder contains detailed documentation on various aspects of the GenAI Inte
 - [Post-Processing Lambda Hook](./post-processing-lambda-hook.md) - Custom downstream processing integration
 - [Lambda Hook Inference](./lambda-hook-inference.md) - Custom LLM integration via Lambda hooks
 - [Nova Fine-Tuning](./nova-finetuning.md) - Fine-tuning Amazon Nova models for IDP tasks
+- [OpenAI GPT-5.x Models](./openai-models.md) - GPT-5.4 / GPT-5.5 via the bedrock-mantle Responses API: support matrix, limitations, regions
 - [Service Tiers](./service-tiers.md) - Configurable service tier options
 
 ## Monitoring & Operations
@@ -71,6 +72,8 @@ This folder contains detailed documentation on various aspects of the GenAI Inte
 - [Monitoring](./monitoring.md) - Monitoring and logging capabilities
 - [Reporting Database](./reporting-database.md) - Analytics database for evaluation metrics and metering data
 - [Capacity Planning](./capacity-planning.md) - Performance optimization and resource scaling guidance
+- [Circuit Breaker](./circuit-breaker.md) - Automatic protection from cascading failures during Bedrock outages
+- [Cross-Account Bedrock](./cross-account-bedrock.md) - Route all Bedrock invocations through a centralized hub account via STS AssumeRole
 - [Cost Calculator](./cost-calculator.md) - Framework for estimating solution costs
 
 ## Planning & Security

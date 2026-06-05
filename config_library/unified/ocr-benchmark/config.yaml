@@ -3,6 +3,9 @@
 
 # All settings not explicitly defined here are inherited from system defaults.
 notes: Pattern-2 default configuration - Bedrock LLM-based processing
+chat:
+  # ocr-benchmark is an accuracy benchmark; document chat not needed.
+  enabled: false
 classes:
 - $schema: https://json-schema.org/draft/2020-12/schema
   $id: BANK_CHECK

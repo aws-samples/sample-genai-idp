@@ -61,9 +61,30 @@ Parameters:
     Type: String
     Description: AppSync GraphQL API ARN for IAM permissions
     Default: ""
+  BedrockHubRoleArn:
+    Type: String
+    Default: ""
+    AllowedPattern: "^$|^arn:(aws|aws-cn|aws-us-gov|aws-iso|aws-iso-b):iam::[0-9]{12}:role/[\\w+=,.@\\-/]+$"
+    ConstraintDescription: "Must be empty or a valid IAM role ARN. The ARN must NOT contain spaces — pass ExternalId via the separate BedrockHubRoleExternalId parameter."
+    Description: >
+      (Optional) ARN of an IAM role in a centralized hub account to assume for all
+      Bedrock invocations. When set, Lambdas use sts:AssumeRole and route Bedrock
+      data-plane and control-plane traffic through this role.
+  BedrockHubRoleExternalId:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: "(Optional) ExternalId for sts:AssumeRole into the Bedrock hub-account role."
+  BedrockHubRoleSessionName:
+    Type: String
+    Default: ""
+    Description: "(Optional) Session name for sts:AssumeRole into the Bedrock hub-account role."
 
 Conditions:
   HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
+  HasBedrockHubRole: !Not [!Equals [!Ref BedrockHubRoleArn, ""]]
+  HasBedrockHubRoleExternalId: !Not [!Equals [!Ref BedrockHubRoleExternalId, ""]]
+  HasBedrockHubRoleSessionName: !Not [!Equals [!Ref BedrockHubRoleSessionName, ""]]
 
 Resources:
   ##########################################################################
@@ -350,6 +371,12 @@ Resources:
           DISCOVERY_BUCKET: !Ref DiscoveryBucketName
           CONFIGURATION_TABLE_NAME: !Ref ConfigurationTableName
           APPSYNC_API_URL: !Ref AppSyncApiUrl
+          BEDROCK_ASSUME_ROLE_ARN:
+            !If [HasBedrockHubRole, !Ref BedrockHubRoleArn, !Ref AWS::NoValue]
+          BEDROCK_ASSUME_ROLE_EXTERNAL_ID:
+            !If [HasBedrockHubRoleExternalId, !Ref BedrockHubRoleExternalId, !Ref AWS::NoValue]
+          BEDROCK_ASSUME_ROLE_SESSION_NAME:
+            !If [HasBedrockHubRoleSessionName, !Ref BedrockHubRoleSessionName, !Ref AWS::NoValue]
       LoggingConfig:
         LogGroup: !Ref MultiDocDiscoveryEmbedFunctionLogGroup
       Policies:
@@ -365,12 +392,23 @@ Resources:
             - Effect: Allow
               Action: [kms:Encrypt, kms:Decrypt, kms:ReEncrypt*, kms:GenerateDataKey*, kms:DescribeKey]
               Resource: !Ref CustomerManagedEncryptionKeyArn
+            # OpenAI GPT-5.x models use the bedrock-mantle endpoint / IAM namespace.
+            - Effect: Allow
+              Action: [bedrock-mantle:CreateInference, bedrock-mantle:GetProject, bedrock-mantle:ListProjects, bedrock-mantle:ListTagsForResources]
+              Resource: "*"
             - Effect: Allow
               Action: [bedrock:InvokeModel]
               Resource:
                 - !Sub "arn:${AWS::Partition}:bedrock:*::foundation-model/*"
                 - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
                 - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:application-inference-profile/*"
+            # Optional cross-account Bedrock invocation via hub-account role.
+            - !If
+              - HasBedrockHubRole
+              - Effect: Allow
+                Action: sts:AssumeRole
+                Resource: !Ref BedrockHubRoleArn
+              - !Ref AWS::NoValue
             - Effect: Allow
               Action: [cloudwatch:PutMetricData]
               Resource: "*"
@@ -413,6 +451,12 @@ Resources:
           LOG_LEVEL: !Ref LogLevel
           DISCOVERY_BUCKET: !Ref DiscoveryBucketName
           APPSYNC_API_URL: !Ref AppSyncApiUrl
+          BEDROCK_ASSUME_ROLE_ARN:
+            !If [HasBedrockHubRole, !Ref BedrockHubRoleArn, !Ref AWS::NoValue]
+          BEDROCK_ASSUME_ROLE_EXTERNAL_ID:
+            !If [HasBedrockHubRoleExternalId, !Ref BedrockHubRoleExternalId, !Ref AWS::NoValue]
+          BEDROCK_ASSUME_ROLE_SESSION_NAME:
+            !If [HasBedrockHubRoleSessionName, !Ref BedrockHubRoleSessionName, !Ref AWS::NoValue]
       LoggingConfig:
         LogGroup: !Ref MultiDocDiscoveryClusterFunctionLogGroup
       Policies:
@@ -422,6 +466,13 @@ Resources:
             - Effect: Allow
               Action: [kms:Encrypt, kms:Decrypt, kms:ReEncrypt*, kms:GenerateDataKey*, kms:DescribeKey]
               Resource: !Ref CustomerManagedEncryptionKeyArn
+            # Optional cross-account Bedrock invocation via hub-account role.
+            - !If
+              - HasBedrockHubRole
+              - Effect: Allow
+                Action: sts:AssumeRole
+                Resource: !Ref BedrockHubRoleArn
+              - !Ref AWS::NoValue
             - Effect: Allow
               Action: [appsync:GraphQL]
               Resource: !Sub "${AppSyncApiArn}/*"
@@ -461,6 +512,12 @@ Resources:
           LOG_LEVEL: !Ref LogLevel
           DISCOVERY_BUCKET: !Ref DiscoveryBucketName
           CONFIGURATION_TABLE_NAME: !Ref ConfigurationTableName
+          BEDROCK_ASSUME_ROLE_ARN:
+            !If [HasBedrockHubRole, !Ref BedrockHubRoleArn, !Ref AWS::NoValue]
+          BEDROCK_ASSUME_ROLE_EXTERNAL_ID:
+            !If [HasBedrockHubRoleExternalId, !Ref BedrockHubRoleExternalId, !Ref AWS::NoValue]
+          BEDROCK_ASSUME_ROLE_SESSION_NAME:
+            !If [HasBedrockHubRoleSessionName, !Ref BedrockHubRoleSessionName, !Ref AWS::NoValue]
       LoggingConfig:
         LogGroup: !Ref MultiDocDiscoveryAnalyzeFunctionLogGroup
       Policies:
@@ -476,12 +533,23 @@ Resources:
             - Effect: Allow
               Action: [kms:Encrypt, kms:Decrypt, kms:ReEncrypt*, kms:GenerateDataKey*, kms:DescribeKey]
               Resource: !Ref CustomerManagedEncryptionKeyArn
+            # OpenAI GPT-5.x models use the bedrock-mantle endpoint / IAM namespace.
+            - Effect: Allow
+              Action: [bedrock-mantle:CreateInference, bedrock-mantle:GetProject, bedrock-mantle:ListProjects, bedrock-mantle:ListTagsForResources]
+              Resource: "*"
             - Effect: Allow
               Action: [bedrock:InvokeModel, bedrock:InvokeModelWithResponseStream, bedrock:GetInferenceProfile]
               Resource:
                 - !Sub "arn:${AWS::Partition}:bedrock:*::foundation-model/*"
                 - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
                 - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:application-inference-profile/*"
+            # Optional cross-account Bedrock invocation via hub-account role.
+            - !If
+              - HasBedrockHubRole
+              - Effect: Allow
+                Action: sts:AssumeRole
+                Resource: !Ref BedrockHubRoleArn
+              - !Ref AWS::NoValue
             - Effect: Allow
               Action: [cloudwatch:PutMetricData]
               Resource: "*"
@@ -522,6 +590,12 @@ Resources:
           DISCOVERY_BUCKET: !Ref DiscoveryBucketName
           CONFIGURATION_TABLE_NAME: !Ref ConfigurationTableName
           APPSYNC_API_URL: !Ref AppSyncApiUrl
+          BEDROCK_ASSUME_ROLE_ARN:
+            !If [HasBedrockHubRole, !Ref BedrockHubRoleArn, !Ref AWS::NoValue]
+          BEDROCK_ASSUME_ROLE_EXTERNAL_ID:
+            !If [HasBedrockHubRoleExternalId, !Ref BedrockHubRoleExternalId, !Ref AWS::NoValue]
+          BEDROCK_ASSUME_ROLE_SESSION_NAME:
+            !If [HasBedrockHubRoleSessionName, !Ref BedrockHubRoleSessionName, !Ref AWS::NoValue]
       LoggingConfig:
         LogGroup: !Ref MultiDocDiscoverySaveFunctionLogGroup
       Policies:
@@ -533,12 +607,23 @@ Resources:
             - Effect: Allow
               Action: [kms:Encrypt, kms:Decrypt, kms:ReEncrypt*, kms:GenerateDataKey*, kms:DescribeKey]
               Resource: !Ref CustomerManagedEncryptionKeyArn
+            # OpenAI GPT-5.x models use the bedrock-mantle endpoint / IAM namespace.
+            - Effect: Allow
+              Action: [bedrock-mantle:CreateInference, bedrock-mantle:GetProject, bedrock-mantle:ListProjects, bedrock-mantle:ListTagsForResources]
+              Resource: "*"
             - Effect: Allow
               Action: [bedrock:InvokeModel, bedrock:InvokeModelWithResponseStream, bedrock:GetInferenceProfile]
               Resource:
                 - !Sub "arn:${AWS::Partition}:bedrock:*::foundation-model/*"
                 - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
                 - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:application-inference-profile/*"
+            # Optional cross-account Bedrock invocation via hub-account role.
+            - !If
+              - HasBedrockHubRole
+              - Effect: Allow
+                Action: sts:AssumeRole
+                Resource: !Ref BedrockHubRoleArn
+              - !Ref AWS::NoValue
             - Effect: Allow
               Action: [cloudwatch:PutMetricData]
               Resource: "*"

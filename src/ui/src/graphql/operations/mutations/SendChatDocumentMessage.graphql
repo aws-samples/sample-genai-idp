@@ -1,0 +1,34 @@
+mutation SendChatDocumentMessage(
+  $sessionId: String!
+  $prompt: String!
+  $method: String
+  $s3Uri: String
+  $modelId: String
+  $status: String
+  $timestamp: String
+  $content: String
+  $role: String
+  $isProcessing: Boolean
+) {
+  sendChatDocumentMessage(
+    sessionId: $sessionId
+    prompt: $prompt
+    method: $method
+    s3Uri: $s3Uri
+    modelId: $modelId
+    status: $status
+    timestamp: $timestamp
+    content: $content
+    role: $role
+    isProcessing: $isProcessing
+  ) {
+    sessionId
+    role
+    content
+    timestamp
+    method
+    status
+    modelId
+    isProcessing
+  }
+}

@@ -7,7 +7,7 @@ The Evaluation Service component provides functionality to evaluate document ext
 
 ## Backend Integration
 
-The evaluation service uses **[Stickler](https://github.com/awslabs/stickler)** as its backend evaluation engine. Stickler is an AWS open-source library that provides sophisticated comparison algorithms and flexible configuration options. The IDP evaluation service provides an abstraction layer through `SticklerConfigMapper` that:
+The evaluation service uses **[Stickler v0.4.0](https://github.com/awslabs/stickler)** as its backend evaluation engine. Stickler is an AWS open-source library that provides sophisticated comparison algorithms and flexible configuration options. The IDP evaluation service provides an abstraction layer through `SticklerConfigMapper` that:
 
 - Translates IDP evaluation extensions (`x-aws-idp-evaluation-*`) to Stickler format
 - Maintains backend-agnostic configuration in IDP
@@ -15,6 +15,18 @@ The evaluation service uses **[Stickler](https://github.com/awslabs/stickler)** 
 - Tracks Stickler version information for compatibility and debugging
 
 For version information and features available in the current Stickler integration, see `stickler_version.py`.
+
+### Confidence Calibration Metrics (v0.4.0+)
+
+Stickler v0.4.0 introduces enhanced confidence evaluation tooling through the `confidence_integration` module:
+
+- **ECE (Expected Calibration Error)**: Measures how well confidence scores match actual accuracy (0.0 = perfect calibration)
+- **Brier Score**: Mean squared error between confidence and outcome (lower is better; 0.0 = perfect, 0.25 = random)
+- **AUROC**: How well confidence discriminates correct from incorrect predictions (1.0 = perfect discrimination)
+- **Per-Field Metrics**: Field-level calibration analysis to identify poorly calibrated fields
+- **Coverage Tracking**: Ratio of fields with confidence data to total fields
+
+Use `ConfidenceMetricsCalculator` from `idp_common.evaluation.confidence_integration` for confidence analysis in bulk evaluations.
 
 ## Features
 

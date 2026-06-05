@@ -20,6 +20,10 @@ Parameters:
   AgentChatProcessorFunctionArn:
     Type: String
     Description: ARN of the AgentChatProcessorFunction from main template
+
+  ChatWithDocumentProcessorFunctionArn:
+    Type: String
+    Description: ARN of the ChatWithDocumentProcessorFunction from main template (long-running chat Lambda invoked async by the lightweight mutation resolver)
   
   AgentProcessorFunctionArn:
     Type: String
@@ -222,6 +226,31 @@ Parameters:
     Default: ""
     Description: Security group ID for Lambda VpcConfig (required when UsePrivateAppSync=true)
 
+  # Circuit Breaker (feature-flagged — may be empty when disabled)
+  ConcurrencyTableName:
+    Type: String
+    Default: ""
+    Description: DynamoDB ConcurrencyTable — circuit breaker state lives here under counter_id=circuit_breaker
+  CircuitBreakerManagerFunctionArn:
+    Type: String
+    Default: ""
+    Description: ARN of the CircuitBreakerManagerFunction from main template (empty if disabled)
+  CircuitBreakerEnabled:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+    Description: Whether the circuit breaker feature is enabled
+
+  S3EndpointUrl:
+    Type: String
+    Default: ""
+    Description: >
+      VPC-aware S3 endpoint URL injected by parent stack when private mode is
+      active (e.g. https://bucket.<vpce-id>.s3.<region>.vpce.amazonaws.com).
+      When set, presigner Lambdas use this endpoint with virtual-host
+      addressing so browser uploads target the VPC interface endpoint.
+      Empty in public mode.
+
 Metadata:
   cfn-lint:
     config:
@@ -230,6 +259,7 @@ Metadata:
         - W1031  # ARN pattern matching when Fn::Sub resolves to empty string (UsersTableArn default)
 
 Conditions:
+  HasS3EndpointUrl: !Not [!Equals [!Ref S3EndpointUrl, ""]]
   HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
   HasGuardrail: !Equals [!Ref HasGuardrailConfig, "true"]
   ShouldCreateEvaluationBaselineBucket: !Equals [!Ref ShouldCreateEvaluationBaselineBucket, "true"]
@@ -237,6 +267,7 @@ Conditions:
   HasTestExecutionAggregationFunction: !Not [!Equals [!Ref TestExecutionAggregationFunctionArn, ""]]
   IsPrivateAppSync: !Equals [!Ref UsePrivateAppSync, "true"]
   HasMLflowLoggerFunction: !Not [!Equals [!Ref MLflowLoggerFunctionArn, ""]]
+  CircuitBreakerEnabledCondition: !Equals [!Ref CircuitBreakerEnabled, "true"]
 
 Resources:
 
@@ -315,13 +346,14 @@ Resources:
                   - !GetAtt CreateDocumentResolverFunction.Arn
                   - !GetAtt DeleteDocumentResolverFunction.Arn
                   - !GetAtt DeleteTestsResolverFunction.Arn
+                  - !GetAtt AbortTestRunsResolverFunction.Arn
                   - !GetAtt QueryKnowledgeBaseResolverFunction.Arn
                   - !GetAtt ReprocessDocumentResolverFunction.Arn
                   - !GetAtt AbortWorkflowResolverFunction.Arn
                   - !GetAtt ProcessChangesResolverFunction.Arn
                   - !GetAtt AgentChatResolverFunction.Arn
                   - !GetAtt ListAvailableAgentsFunction.Arn
-                  - !GetAtt ChatWithDocumentResolverFunction.Arn
+                  - !GetAtt SendChatDocumentMessageResolverFunction.Arn
                   - !GetAtt DiscoveryUploadResolverFunction.Arn
                   - !GetAtt TestRunnerFunction.Arn
                   - !GetAtt TestResultsResolverFunction.Arn
@@ -795,19 +827,24 @@ Resources:
 
 
   ##########################################################################
-  # ChatWithDocumentResolverFunctionLogGroup
+  # SendChatDocumentMessageResolverFunctionLogGroup
+  #
+  # Lightweight AppSync mutation handler that:
+  #   * receives user's chat prompt via `sendChatDocumentMessage` mutation
+  #   * records session ownership in ChatDocumentSessionsTable (RBAC)
+  #   * async-invokes ChatWithDocumentProcessorFunction (passed in from main
+  #     template) to do the long-running work outside the 30s AppSync budget
+  #   * passes processor-originated publishes (status/final/error) through
+  #     for AppSync subscription fan-out to the UI
+  # Replaces the legacy ChatWithDocumentResolverFunction + its Query resolver.
   ##########################################################################
-  ChatWithDocumentResolverFunctionLogGroup:
+  SendChatDocumentMessageResolverFunctionLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
       KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
       RetentionInDays: !Ref LogRetentionDays
 
-
-  ##########################################################################
-  # ChatWithDocumentResolverFunction
-  ##########################################################################
-  ChatWithDocumentResolverFunction:
+  SendChatDocumentMessageResolverFunction:
     Type: AWS::Serverless::Function
     Metadata:
       cfn_nag:
@@ -818,93 +855,34 @@ Resources:
             reason: "Function does not require reserved concurrency as it scales based on demand"
           - id: W12
             reason: "Lambda requires CloudWatch logs permissions"
-          - id: W11
-            reason: "Role requires * resource access for CloudWatch Metrics and Logs"
     # checkov:skip=CKV_AWS_116: "DLQ not required for AppSync resolver function"
     # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
     # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
-    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only configuration values like feature flags and non-sensitive settings"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data"
     Properties:
       PermissionsBoundary:
-        !If [
-          HasPermissionsBoundary,
-          !Ref PermissionsBoundaryArn,
-          !Ref AWS::NoValue,
-        ]
+        !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
       Handler: index.handler
       Runtime: python3.12
-      CodeUri: ./src/lambda/chat_with_document_resolver
-      Description: Lambda function to chat with the document via GraphQL API
-      MemorySize: 512
-      Timeout: 120
-
-      Layers:
-        - !Ref IDPCommonBaseLayerArn
+      CodeUri: ./src/lambda/send_chat_document_message_resolver
+      Description: Lightweight AppSync resolver for Chat-with-Document mutation
+      MemorySize: 256
+      Timeout: 30
       Environment:
         Variables:
           LOG_LEVEL: !Ref LogLevel
-          OUTPUT_BUCKET: !Ref OutputBucketName
-          CONFIGURATION_TABLE_NAME: !Ref ConfigurationTableName
-          TRACKING_TABLE_NAME: !Ref TrackingTableName
-          SETTINGS_PARAMETER: !Ref SettingsParameterName
-          GUARDRAIL_ID_AND_VERSION:
-            !If [
-              HasGuardrail,
-              !Sub "${BedrockGuardrailId}:${BedrockGuardrailVersion}",
-              "",
-            ]
+          CHAT_DOCUMENT_SESSIONS_TABLE: !Ref ChatDocumentSessionsTable
+          CHAT_DOCUMENT_PROCESSOR_FUNCTION_ARN: !Ref ChatWithDocumentProcessorFunctionArn
+          DATA_RETENTION_DAYS: !Ref DataRetentionInDays
       LoggingConfig:
-        LogGroup: !Ref ChatWithDocumentResolverFunctionLogGroup
+        LogGroup: !Ref SendChatDocumentMessageResolverFunctionLogGroup
       Policies:
-        - S3CrudPolicy:
-            BucketName: !Ref OutputBucketName
         - DynamoDBCrudPolicy:
-            TableName: !Ref ConfigurationTableName
-        - DynamoDBCrudPolicy:
-            TableName: !Ref TrackingTableName
+            TableName: !Ref ChatDocumentSessionsTable
         - Statement:
             - Effect: Allow
-              Action:
-                - bedrock:Retrieve
-                - bedrock:RetrieveAndGenerate
-              Resource: !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:knowledge-base/*"
-            - Effect: Allow
-              Action:
-                - "bedrock:InvokeModel"
-                - bedrock:GetInferenceProfile
-              Resource:
-                - !Sub "arn:${AWS::Partition}:bedrock:*::foundation-model/*"
-                - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
-                - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:application-inference-profile/*"
-            - Effect: Allow
-              Action:
-                - aws-marketplace:Subscribe
-                - aws-marketplace:Unsubscribe
-                - aws-marketplace:ViewSubscriptions
-              Resource: "*"
-            - Effect: Allow
-              Action:
-                - cloudwatch:PutMetricData
-              Resource: "*"
-            - Effect: Allow
-              Action:
-                - "bedrock:GetInferenceProfile"
-              Resource:
-                - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
-                - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:application-inference-profile/*"
-            - Effect: Allow
-              Action:
-                - ssm:GetParameter
-              Resource:
-                - !Sub "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${SettingsParameterName}"
-            - !If
-              - HasGuardrail
-              - Effect: Allow
-                Action:
-                  - "bedrock:ApplyGuardrail"
-                Resource:
-                  - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:guardrail/${BedrockGuardrailId}"
-              - !Ref AWS::NoValue
+              Action: lambda:InvokeFunction
+              Resource: !Ref ChatWithDocumentProcessorFunctionArn
             - Effect: Allow
               Action:
                 - kms:Encrypt
@@ -914,33 +892,111 @@ Resources:
                 - kms:DescribeKey
               Resource: !Ref CustomerManagedEncryptionKeyArn
 
+  ##########################################################################
+  # ChatDocumentSessionsTable
+  # Tracks session ownership for Chat-with-Document so one user cannot
+  # subscribe to or continue another user's chat session. Short TTL keeps
+  # storage minimal since the UI discards history on leave anyway.
+  ##########################################################################
+  ChatDocumentSessionsTable:
+    Type: AWS::DynamoDB::Table
+    # cdk-nag AwsSolutions-DDB3: PITR not required — this table only stores
+    # ephemeral session-ownership records (keyed by sessionId, short TTL);
+    # losing the table has no business impact beyond forcing users to start
+    # a new chat session.
+    # checkov:skip=CKV_AWS_119: "CMK encryption enabled via SSESpecification (KMSMasterKeyId) below"
+    # checkov:skip=CKV_AWS_28: "PITR intentionally disabled — ephemeral per-session ownership metadata with short TTL (see justification comment above)"
+    Properties:
+      AttributeDefinitions:
+        - AttributeName: sessionId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: sessionId
+          KeyType: HASH
+      BillingMode: PAY_PER_REQUEST
+      TimeToLiveSpecification:
+        AttributeName: ExpiresAfter
+        Enabled: true
+      SSESpecification:
+        SSEEnabled: true
+        SSEType: KMS
+        KMSMasterKeyId: !Ref CustomerManagedEncryptionKeyArn
 
   ##########################################################################
-  # ChatWithDocumentDataSource
+  # SendChatDocumentMessageDataSource
   ##########################################################################
-  ChatWithDocumentDataSource:
+  SendChatDocumentMessageDataSource:
     Type: AWS::AppSync::DataSource
     Properties:
       ApiId: !Ref GraphQLApiId
-      Name: ChatWithDocument
-      Description: Lambda function to chat with document
+      Name: SendChatDocumentMessageDataSource
+      Description: Lambda function for Chat-with-Document mutation
       Type: AWS_LAMBDA
       ServiceRoleArn: !GetAtt AppSyncServiceRole.Arn
       LambdaConfig:
-        LambdaFunctionArn: !GetAtt ChatWithDocumentResolverFunction.Arn
-
+        LambdaFunctionArn: !GetAtt SendChatDocumentMessageResolverFunction.Arn
 
   ##########################################################################
-  # ChatWithDocumentResolver
+  # SendChatDocumentMessageResolver — forwards UI + processor publishes
   ##########################################################################
-  ChatWithDocumentResolver:
+  SendChatDocumentMessageResolver:
     Type: AWS::AppSync::Resolver
     DependsOn: GraphQLSchema
     Properties:
       ApiId: !Ref GraphQLApiId
-      DataSourceName: !GetAtt ChatWithDocumentDataSource.Name
-      TypeName: Query
-      FieldName: chatWithDocument
+      DataSourceName: !GetAtt SendChatDocumentMessageDataSource.Name
+      TypeName: Mutation
+      FieldName: sendChatDocumentMessage
+      RequestMappingTemplate: |
+        {
+          "version": "2017-02-28",
+          "operation": "Invoke",
+          "payload": {
+            "arguments": $util.toJson($context.arguments),
+            "identity": {
+              "username": $util.toJson($context.identity.username),
+              "sub": $util.toJson($context.identity.sub),
+              "sourceIp": $util.toJson($context.identity.sourceIp),
+              "userArn": $util.toJson($context.identity.userArn),
+              "claims": $util.toJson($context.identity.claims)
+            }
+          }
+        }
+      ResponseMappingTemplate: |
+        #if($ctx.error)
+          $util.error($ctx.error.message, $ctx.error.type)
+        #end
+        $util.toJson($ctx.result)
+
+  ##########################################################################
+  # OnChatDocumentMessageUpdateResolver — subscription fan-out
+  # Mirrors OnAgentChatMessageUpdateResolver — filters by sessionId so one
+  # user cannot eavesdrop on another user's chat session.
+  ##########################################################################
+  OnChatDocumentMessageUpdateResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: GraphQLSchema
+    Properties:
+      ApiId: !Ref GraphQLApiId
+      TypeName: Subscription
+      FieldName: onChatDocumentMessageUpdate
+      DataSourceName: !GetAtt NoneDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version": "2018-05-29",
+          "payload": {}
+        }
+      ResponseMappingTemplate: |
+        #if($context.arguments.sessionId && $context.source.sessionId)
+          #if($context.arguments.sessionId == $context.source.sessionId)
+            $util.toJson($context.source)
+          #else
+            #set($result = $util.appendError("Session ID does not match", "Unauthorized"))
+            $util.toJson(null)
+          #end
+        #else
+          $util.toJson($context.source)
+        #end
 
   ##########################################################################
   # WebUI build and deployment
@@ -1682,6 +1738,99 @@ Resources:
 
 
   ##########################################################################
+  # AbortTestRunsResolverFunctionLogGroup
+  ##########################################################################
+  AbortTestRunsResolverFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+      RetentionInDays: !Ref LogRetentionDays
+
+
+  ##########################################################################
+  # AbortTestRunsResolverFunction
+  ##########################################################################
+  AbortTestRunsResolverFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: "Function does not require VPC access as it only interacts with AWS services via APIs"
+          - id: W92
+            reason: "Function does not require reserved concurrency as it scales based on demand"
+          - id: W12
+            reason: "Lambda requires CloudWatch logs permissions"
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for synchronous AppSync resolver"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_173: "Environment variables contain non-sensitive configuration values"
+    Properties:
+      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
+      Handler: index.lambda_handler
+      Runtime: python3.12
+      CodeUri: ./src/lambda/abort_test_runs
+      Description: Lambda function to abort test runs via GraphQL API
+      MemorySize: 512
+      Timeout: 60
+      Environment:
+        Variables:
+          LOG_LEVEL: !Ref LogLevel
+          TRACKING_TABLE_NAME: !Ref TrackingTableName
+          ABORT_WORKFLOW_FUNCTION_NAME: !Ref AbortWorkflowResolverFunction
+          TEST_RESULT_CACHE_UPDATE_QUEUE_URL: !Ref TestResultCacheUpdateQueueUrl
+      LoggingConfig:
+        LogGroup: !Ref AbortTestRunsResolverFunctionLogGroup
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref TrackingTableName
+        - Statement:
+            - Effect: Allow
+              Action:
+                - lambda:InvokeFunction
+              Resource: !GetAtt AbortWorkflowResolverFunction.Arn
+        - SQSSendMessagePolicy:
+            QueueName: !Ref TestResultCacheUpdateQueueName
+        - Statement:
+            - Effect: Allow
+              Action:
+                - kms:Encrypt
+                - kms:Decrypt
+                - kms:ReEncrypt*
+                - kms:GenerateDataKey*
+                - kms:DescribeKey
+              Resource: !Ref CustomerManagedEncryptionKeyArn
+
+
+  ##########################################################################
+  # AbortTestRunsDataSource
+  ##########################################################################
+  AbortTestRunsDataSource:
+    Type: AWS::AppSync::DataSource
+    Properties:
+      ApiId: !Ref GraphQLApiId
+      Name: AbortTestRunsDataSource
+      Description: Lambda function for aborting test runs
+      Type: AWS_LAMBDA
+      ServiceRoleArn: !GetAtt AppSyncServiceRole.Arn
+      LambdaConfig:
+        LambdaFunctionArn: !GetAtt AbortTestRunsResolverFunction.Arn
+
+
+  ##########################################################################
+  # AbortTestRunsResolver
+  ##########################################################################
+  AbortTestRunsResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: GraphQLSchema
+    Properties:
+      ApiId: !Ref GraphQLApiId
+      DataSourceName: !GetAtt AbortTestRunsDataSource.Name
+      TypeName: Mutation
+      FieldName: abortTestRuns
+
+
+  ##########################################################################
   # DiscoveryUploadResolverFunctionLogGroup
   ##########################################################################
   DiscoveryUploadResolverFunctionLogGroup:
@@ -1732,6 +1881,7 @@ Resources:
           DISCOVERY_QUEUE_URL: !Ref DiscoveryQueueUrl
           CONFIGURATION_TABLE_NAME: !Ref ConfigurationTableName
           MULTI_DOC_DISCOVERY_STATE_MACHINE_ARN: !Ref MultiDocDiscoveryStateMachineArn
+          S3_ENDPOINT_URL: !If [HasS3EndpointUrl, !Ref S3EndpointUrl, !Ref AWS::NoValue]
       LoggingConfig:
         LogGroup: !Ref DiscoveryUploadResolverFunctionLogGroup
       Policies:
@@ -3366,6 +3516,7 @@ Resources:
             - ShouldCreateEvaluationBaselineBucket
             - !Ref EvaluationBaselineBucketName
             - !Ref EvaluationBaselineBucketName
+          S3_ENDPOINT_URL: !If [HasS3EndpointUrl, !Ref S3EndpointUrl, !Ref AWS::NoValue]
       LoggingConfig:
         LogGroup: !Ref TestSetResolverFunctionLogGroup
       Policies:
@@ -3474,6 +3625,19 @@ Resources:
 
 
   ##########################################################################
+  # UpdateTestSetResolver
+  ##########################################################################
+  UpdateTestSetResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: GraphQLSchema
+    Properties:
+      ApiId: !Ref GraphQLApiId
+      DataSourceName: !GetAtt TestSetDataSource.Name
+      TypeName: Mutation
+      FieldName: updateTestSet
+
+
+  ##########################################################################
   # GetTestSetsResolver
   ##########################################################################
   GetTestSetsResolver:
@@ -3558,6 +3722,7 @@ Resources:
         Variables:
           LOG_LEVEL: !Ref LogLevel
           INPUT_BUCKET: !Ref InputBucketName
+          S3_ENDPOINT_URL: !If [HasS3EndpointUrl, !Ref S3EndpointUrl, !Ref AWS::NoValue]
       LoggingConfig:
         LogGroup: !Ref UploadResolverFunctionLogGroup
       Policies:
@@ -4263,6 +4428,160 @@ Resources:
         #end
 
 
+  ##########################################################################
+  # Circuit Breaker resolver — status query + admin mutations + fan-out trigger
+  # All circuit breaker resources are feature-flagged via CircuitBreakerEnabledCondition.
+  ##########################################################################
+  CircuitBreakerResolverFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Condition: CircuitBreakerEnabledCondition
+    Properties:
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+      RetentionInDays: !Ref LogRetentionDays
+
+  CircuitBreakerResolverFunction:
+    Type: AWS::Serverless::Function
+    Condition: CircuitBreakerEnabledCondition
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: "VPC attachment is conditional on AppSyncVisibility=PRIVATE (see VpcConfig below). The resolver must live in the same VPC as the private AppSync API so AppSync can invoke it and its DynamoDB reads can traverse a gateway endpoint. On the default/public AppSync path the resolver only talks to DynamoDB and Lambda over AWS-managed networking and VPC access is not required."
+          - id: W92
+            reason: "Function does not require reserved concurrency as it scales based on demand"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for AppSync resolver function"
+    # checkov:skip=CKV_AWS_117: "VPC attachment is conditional on AppSyncVisibility=PRIVATE (see VpcConfig below); default path does not require VPC access"
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data"
+    Properties:
+      PermissionsBoundary:
+        !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
+      Handler: index.handler
+      Runtime: python3.12
+      CodeUri: ./src/lambda/circuit_breaker_resolver
+      Description: AppSync resolver for circuit breaker status + admin controls
+      MemorySize: 256
+      Timeout: 30
+      # With a PRIVATE AppSync API the resolver Lambda must live in the same
+      # VPC so AppSync can invoke it and its DynamoDB reads traverse a
+      # gateway endpoint rather than the public endpoint.
+      VpcConfig: !If
+        - IsPrivateAppSync
+        - SubnetIds: !Ref LambdaSubnetIds
+          SecurityGroupIds:
+            - !Ref LambdaSecurityGroupId
+        - !Ref AWS::NoValue
+      Environment:
+        Variables:
+          LOG_LEVEL: !Ref LogLevel
+          CONCURRENCY_TABLE: !Ref ConcurrencyTableName
+          CIRCUIT_BREAKER_MANAGER_ARN: !Ref CircuitBreakerManagerFunctionArn
+          CIRCUIT_BREAKER_ENABLED: !Ref CircuitBreakerEnabled
+      LoggingConfig:
+        LogGroup: !Ref CircuitBreakerResolverFunctionLogGroup
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref ConcurrencyTableName
+        - Statement:
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !Ref CircuitBreakerManagerFunctionArn
+            - Effect: Allow
+              Action:
+                - kms:Encrypt
+                - kms:Decrypt
+                - kms:ReEncrypt*
+                - kms:GenerateDataKey*
+                - kms:DescribeKey
+              Resource: !Ref CustomerManagedEncryptionKeyArn
+
+  CircuitBreakerDataSource:
+    Type: AWS::AppSync::DataSource
+    Condition: CircuitBreakerEnabledCondition
+    Properties:
+      ApiId: !Ref GraphQLApiId
+      Name: CircuitBreakerDataSource
+      Description: Lambda function for circuit breaker status + admin controls
+      Type: AWS_LAMBDA
+      ServiceRoleArn: !GetAtt CircuitBreakerAppSyncRole.Arn
+      LambdaConfig:
+        LambdaFunctionArn: !GetAtt CircuitBreakerResolverFunction.Arn
+
+  # Dedicated service role so AppSync can invoke the resolver — AppSyncServiceRole
+  # above is built before the function exists (circular ref), so we provision a
+  # per-resolver role that only grants invoke on this one function.
+  CircuitBreakerAppSyncRole:
+    Type: AWS::IAM::Role
+    Condition: CircuitBreakerEnabledCondition
+    Properties:
+      PermissionsBoundary:
+        !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: !Sub "appsync.${AWS::URLSuffix}"
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: InvokeCircuitBreakerResolver
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource: !GetAtt CircuitBreakerResolverFunction.Arn
+
+  GetCircuitBreakerStatusResolver:
+    Type: AWS::AppSync::Resolver
+    Condition: CircuitBreakerEnabledCondition
+    DependsOn: GraphQLSchema
+    Properties:
+      ApiId: !Ref GraphQLApiId
+      DataSourceName: !GetAtt CircuitBreakerDataSource.Name
+      TypeName: Query
+      FieldName: getCircuitBreakerStatus
+
+  PauseCircuitBreakerResolver:
+    Type: AWS::AppSync::Resolver
+    Condition: CircuitBreakerEnabledCondition
+    DependsOn: GraphQLSchema
+    Properties:
+      ApiId: !Ref GraphQLApiId
+      DataSourceName: !GetAtt CircuitBreakerDataSource.Name
+      TypeName: Mutation
+      FieldName: pauseCircuitBreaker
+
+  ResumeCircuitBreakerResolver:
+    Type: AWS::AppSync::Resolver
+    Condition: CircuitBreakerEnabledCondition
+    DependsOn: GraphQLSchema
+    Properties:
+      ApiId: !Ref GraphQLApiId
+      DataSourceName: !GetAtt CircuitBreakerDataSource.Name
+      TypeName: Mutation
+      FieldName: resumeCircuitBreaker
+
+  ProbeCircuitBreakerResolver:
+    Type: AWS::AppSync::Resolver
+    Condition: CircuitBreakerEnabledCondition
+    DependsOn: GraphQLSchema
+    Properties:
+      ApiId: !Ref GraphQLApiId
+      DataSourceName: !GetAtt CircuitBreakerDataSource.Name
+      TypeName: Mutation
+      FieldName: probeCircuitBreaker
+
+  PublishCircuitBreakerStatusResolver:
+    Type: AWS::AppSync::Resolver
+    Condition: CircuitBreakerEnabledCondition
+    DependsOn: GraphQLSchema
+    Properties:
+      ApiId: !Ref GraphQLApiId
+      DataSourceName: !GetAtt CircuitBreakerDataSource.Name
+      TypeName: Mutation
+      FieldName: publishCircuitBreakerStatus
+
 
 Outputs:
   AppSyncServiceRoleArn:
@@ -4272,3 +4591,7 @@ Outputs:
   TestResultsResolverFunctionArn:
     Description: ARN of the Test Results Resolver Lambda function
     Value: !GetAtt TestResultsResolverFunction.Arn
+
+  AbortTestRunsResolverFunctionArn:
+    Description: ARN of the Abort Test Runs Lambda function
+    Value: !GetAtt AbortTestRunsResolverFunction.Arn

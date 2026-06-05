@@ -501,6 +501,11 @@ class EvaluationService:
 
             logger.debug(f"Converting schema properties for {document_class}")
 
+            # Clean null descriptions before passing to Stickler's JSON Schema validator
+            # Null descriptions cause validation errors but have no functional impact
+            # (empty string vs null makes no difference for evaluation)
+            schema = self._clean_null_descriptions(schema)
+
             converter = JsonSchemaFieldConverter(schema)
             field_definitions = converter.convert_properties_to_fields(
                 schema.get("properties", {}), schema.get("required", [])
@@ -691,6 +696,110 @@ class EvaluationService:
                 f"Error loading extraction results from {uri}: {str(e)}", exc_info=True
             )
             return {}, {}
+
+    def _convert_to_rich_values(
+        self,
+        inference_result: Dict[str, Any],
+        explainability_info: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """
+        Convert inference result to Stickler Rich Value format.
+
+        Stickler natively supports rich values with embedded confidence:
+        {"_value": actual_value, "_confidence": 0.99}
+
+        When using ModelClass(**rich_values), Stickler automatically extracts
+        confidence and makes it available in the comparison result as 'prediction_confidences'.
+
+        Handles wrapper keys (Item_N, Record_N) by detecting and unwrapping them
+        for backward compatibility with existing extraction data.
+
+        Args:
+            inference_result: Actual extraction output (values only)
+            explainability_info: Confidence data from extraction service (already unwrapped dict)
+
+        Returns:
+            Dict with rich value format: {"field": {"_value": val, "_confidence": conf}}
+        """
+        if not explainability_info:
+            return inference_result
+
+        def add_confidence(value: Any, conf_data: Any) -> Any:
+            """Recursively merge value with confidence data."""
+            if conf_data is None:
+                return value
+
+            # Simple field with confidence
+            if isinstance(conf_data, dict) and "confidence" in conf_data:
+                return {"_value": value, "_confidence": conf_data["confidence"]}
+
+            # Array field
+            if isinstance(value, list):
+                logger.debug(
+                    f"Processing array with {len(value)} elements, conf_data type: {type(conf_data).__name__}"
+                )
+                if isinstance(conf_data, list):
+                    # conf_data is a list - direct indexing
+                    logger.debug(
+                        f"Array: conf_data is list with {len(conf_data)} elements"
+                    )
+                    return [
+                        add_confidence(
+                            value[i], conf_data[i] if i < len(conf_data) else None
+                        )
+                        for i in range(len(value))
+                    ]
+                elif isinstance(conf_data, dict):
+                    # conf_data is a dict with string indices like {"0": {...}, "1": {...}}
+                    logger.debug(
+                        f"Array: conf_data is dict with keys: {list(conf_data.keys())}"
+                    )
+                    return [
+                        add_confidence(value[i], conf_data.get(str(i)))
+                        for i in range(len(value))
+                    ]
+                else:
+                    # No confidence data for array
+                    logger.debug(
+                        f"Array: no confidence data (conf_data is {type(conf_data).__name__})"
+                    )
+                    return value
+
+            # Object field - check for wrapper keys first
+            if isinstance(value, dict) and isinstance(conf_data, dict):
+                # Check for wrapper pattern: single non-metadata key with nested confidence
+                wrapper_keys = [
+                    k for k in conf_data.keys() if k != "confidence_threshold"
+                ]
+                if len(wrapper_keys) == 1:
+                    wrapper_key = wrapper_keys[0]
+                    wrapper_value = conf_data[wrapper_key]
+
+                    # Detect wrapper by checking if it contains multiple fields with confidence
+                    if isinstance(wrapper_value, dict):
+                        confidence_field_count = sum(
+                            1
+                            for v in wrapper_value.values()
+                            if isinstance(v, dict) and "confidence" in v
+                        )
+
+                        # If multiple confidence fields, treat as wrapper and unwrap
+                        if confidence_field_count >= 2:
+                            # Unwrap: use wrapper contents as confidence data
+                            conf_data = wrapper_value
+
+                # Standard object processing
+                result = {}
+                for key in value.keys():
+                    # Skip metadata fields
+                    if key not in ("geometry", "confidence_threshold"):
+                        result[key] = add_confidence(value.get(key), conf_data.get(key))
+                return result
+
+            # No confidence data available
+            return value
+
+        return add_confidence(inference_result, explainability_info)
 
     def _get_nested_value(self, obj: Any, path: str) -> Any:
         """
@@ -1120,6 +1229,43 @@ class EvaluationService:
             stickler_comparison_result=stickler_result,  # Store raw result for bulk aggregation
         )
 
+    def _clean_null_descriptions(self, schema: dict[str, Any]) -> dict[str, Any]:
+        """
+        Recursively replace null descriptions with empty strings in JSON Schema.
+
+        Null descriptions cause Stickler's JSON Schema validator to fail, but have no
+        functional impact on evaluation (empty string vs null makes no difference).
+        This allows schemas with missing descriptions to pass validation.
+
+        Args:
+            schema: JSON Schema dictionary to clean
+
+        Returns:
+            Cleaned schema with null descriptions replaced by empty strings
+        """
+        if "properties" in schema:
+            for prop_name, prop_def in schema["properties"].items():
+                if isinstance(prop_def, dict):
+                    # Replace null description with empty string
+                    if prop_def.get("description") is None:
+                        prop_def["description"] = ""
+
+                    # Recurse into nested object properties
+                    if "properties" in prop_def:
+                        self._clean_null_descriptions(prop_def)
+
+                    # Recurse into array item schemas
+                    if "items" in prop_def and isinstance(prop_def["items"], dict):
+                        self._clean_null_descriptions(prop_def["items"])
+
+        # Also clean $defs if present
+        if "$defs" in schema:
+            for def_name, def_schema in schema["$defs"].items():
+                if isinstance(def_schema, dict):
+                    self._clean_null_descriptions(def_schema)
+
+        return schema
+
     def _remove_none_values(self, data: Any) -> Any:
         """
         Recursively remove None values from data structure.
@@ -1484,27 +1630,65 @@ class EvaluationService:
             coerced_expected = self._remove_none_values(coerced_expected)
             coerced_actual = self._remove_none_values(coerced_actual)
 
-            # Create model instances from coerced data
-            # Stickler handles validation and structure
+            # Create model instances using Rich Value Pattern for confidence integration
+            # Expected (baseline) has no confidence - use plain values
             expected_instance = ModelClass(**coerced_expected)
-            actual_instance = ModelClass(**coerced_actual)
+
+            # Actual (prediction) includes confidence - convert to rich values
+            if confidence_scores:
+                actual_rich = self._convert_to_rich_values(
+                    coerced_actual, confidence_scores
+                )
+                # Use from_json with process_rich_values=True to extract confidence
+                # This automatically extracts confidence to prediction_confidences in compare_with result
+                actual_instance = ModelClass.from_json(
+                    actual_rich, process_rich_values=True
+                )
+            else:
+                actual_instance = ModelClass(**coerced_actual)
 
             # Compare using Stickler with field_comparisons and confusion_matrix enabled
+            # Confidence automatically extracted to 'prediction_confidences' when rich values used
+            # Import confidence metrics for calibration
+            from stickler.structured_object_evaluator.models.confidence import (
+                AUROCMetric,
+                BrierScoreMetric,
+                ECEMetric,
+            )
+
             stickler_result = expected_instance.compare_with(
                 actual_instance,
                 document_field_comparisons=True,  # Enable detailed field-by-field comparison
                 document_non_matches=True,  # Enable non-match documentation
                 include_confusion_matrix=True,  # Enable confusion matrix for bulk aggregation
                 add_derived_metrics=True,  # Enable per-field precision/recall/F1
+                add_confidence_metrics=True,  # Enable prediction_raw for calibration metrics
+                confidence_metrics=[  # Compute AUROC, ECE, and Brier for confidence calibration
+                    AUROCMetric(),
+                    ECEMetric(),
+                    BrierScoreMetric(),
+                ],
             )
 
             logger.debug(
                 f"Stickler comparison complete. Overall score: {stickler_result.get('overall_score', 'N/A'):.3f}"
             )
 
-            # Log field_comparisons count if available
+            # Log confidence extraction if available
+            if confidence_scores and "prediction_confidences" in stickler_result:
+                logger.debug(
+                    f"Stickler extracted {len(stickler_result['prediction_confidences'])} confidence scores for calibration metrics"
+                )
+
+            # Patch field_comparisons to add field_path for Stickler v0.4.0 ConfidenceCalculator
+            # Some Stickler versions may not populate field_path, so we ensure it's set
             field_comparisons = stickler_result.get("field_comparisons", [])
             if field_comparisons:
+                for fc in field_comparisons:
+                    # Use expected_key as field_path (the canonical field path)
+                    if "field_path" not in fc or fc["field_path"] is None:
+                        fc["field_path"] = fc.get("expected_key")
+
                 logger.debug(
                     f"Field comparisons enabled: {len(field_comparisons)} detailed comparisons available"
                 )

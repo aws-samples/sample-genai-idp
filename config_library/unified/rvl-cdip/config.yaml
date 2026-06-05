@@ -12,6 +12,9 @@ assessment:
 summarization:
   enabled: false
 
+chat:
+  enabled: false
+
 classes:
   - $schema: https://json-schema.org/draft/2020-12/schema
     $id: letter

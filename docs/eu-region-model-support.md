@@ -34,6 +34,8 @@ The following table shows all US to EU model mappings currently configured in th
 | `us.anthropic.claude-opus-4-6-v1:1m` | `eu.anthropic.claude-opus-4-6-v1:1m` | Direct mapping |
 | `us.anthropic.claude-opus-4-7` | `eu.anthropic.claude-opus-4-7` | Direct mapping |
 | `us.anthropic.claude-opus-4-7:1m` | `eu.anthropic.claude-opus-4-7:1m` | Direct mapping |
+| `us.anthropic.claude-opus-4-8` | `eu.anthropic.claude-opus-4-8` | Direct mapping |
+| `us.anthropic.claude-opus-4-8:1m` | `eu.anthropic.claude-opus-4-8:1m` | Direct mapping |
 | `us.meta.llama4-maverick-17b-instruct-v1:0` | `eu.anthropic.claude-sonnet-4-5-20250929-v1:0` | **Fallback mapping** |
 | `us.meta.llama4-scout-17b-instruct-v1:0` | `eu.anthropic.claude-sonnet-4-5-20250929-v1:0` | **Fallback mapping** |
 
@@ -41,6 +43,22 @@ The following table shows all US to EU model mappings currently configured in th
 
 - **Direct Mapping**: US model has exact EU equivalent
 - **Fallback Mapping**: US model not available in EU, mapped to best available EU alternative
+
+### US-Only Models (not offered in EU deployments)
+
+The OpenAI frontier models are served via the `bedrock-mantle` endpoint and are
+only available in US (and us-gov) regions — there is no EU availability and no
+cross-region/geo inference. Rather than mapping them to a Claude fallback, the
+`UpdateConfiguration` Lambda **removes** them from the model dropdowns when the
+stack is deployed in an EU region, so they are never offered where they cannot
+be called.
+
+| Model | Availability |
+|-------|--------------|
+| `openai.gpt-5.4` | `us-east-2`, `us-west-2`, `us-gov-west-1` |
+| `openai.gpt-5.5` | `us-east-2` |
+
+See [OpenAI GPT-5.x model support](#openai-gpt-5x-models-bedrock-mantle) below.
 
 ### Available EU Models
 
@@ -144,3 +162,80 @@ This feature supports all AWS regions but is specifically designed for:
 - **US Regions**: `us-east-1`, `us-west-2`, etc.
 
 Other regions (Asia-Pacific, etc.) will use the original model IDs without mapping.
+
+## OpenAI GPT-5.x Models (bedrock-mantle)
+
+> **See [OpenAI GPT-5.x Models](openai-models.md) for the authoritative,
+> full support matrix and caveats.** This section summarizes how they differ
+> and why they are US-only (and therefore hidden in EU-region deployments).
+
+OpenAI's frontier models (`openai.gpt-5.4`, `openai.gpt-5.5`) are integrated
+differently from every other supported model.
+
+### How they differ
+
+| Aspect | Claude / Nova (Converse) | OpenAI GPT-5.x (Responses) |
+|--------|--------------------------|----------------------------|
+| API | `bedrock-runtime` Converse | `bedrock-mantle` OpenAI Responses API (REST) |
+| Endpoint | boto3 `converse()` | `https://bedrock-mantle.{region}.api.aws/openai/v1/responses` |
+| Auth | IAM (boto3) | IAM via **SigV4-signed HTTP** (signing name `bedrock-mantle`) |
+| Inference params | temperature / top_p / top_k | reasoning models — sampling params omitted; `reasoning.effort` |
+| Prompt caching | cachePoint supported | **not supported** (`<<CACHEPOINT>>` stripped) |
+| Agentic extraction | supported | **not supported** (rejected by config-validate; raises at runtime) |
+| Service tiers | priority / flex / standard | **standard only** |
+| Region prefix / `:1m` | yes | none |
+
+The accelerator's `idp_common.bedrock.BedrockClient.invoke_model` detects these
+model IDs and routes them to `idp_common/bedrock/openai_responses.py`, which
+translates the same inputs to/from the Converse-shaped contract — so all
+services (OCR, classification, extraction, assessment, summarization,
+evaluation) use them with no special handling. Chat-with-Document also supports
+them: the chat processor streams GPT-5.x responses via the Responses API's SSE
+stream (`stream_responses_api` in `openai_responses.py`), publishing incremental
+token deltas to the UI exactly like the Converse streaming path.
+
+### Regional availability
+
+| Model | In-Region availability | Context window |
+|-------|------------------------|----------------|
+| `openai.gpt-5.5` | `us-east-2` | 272K |
+| `openai.gpt-5.4` | `us-east-2`, `us-west-2`, `us-gov-west-1` | 272K |
+
+There is **no EU availability and no geo/global cross-region inference**. When
+the IDP stack is deployed in a region where the model is not available, the
+request is routed to a known-available `bedrock-mantle` region (a warning is
+logged about cross-region data movement). EU-region deployments hide these
+models from the dropdowns entirely.
+
+### Reasoning effort
+
+GPT-5.x are reasoning models — they reject `temperature`/`top_p`/`top_k` and are
+instead tuned via **reasoning effort**. Each model-selectable service (OCR,
+classification, extraction, assessment, summarization, evaluation) exposes a
+`reasoning_effort` config field with allowed values `minimal`, `low`, `medium`,
+`high` (default `medium`). It is an **OpenAI-only** parameter — ignored by
+Anthropic/Nova and other model families. Set it per service in the config (or
+the UI editor); for example, in `extraction`:
+
+```yaml
+extraction:
+  model: "openai.gpt-5.4"
+  reasoning_effort: "high"
+```
+
+### Configuration / environment variables
+
+| Variable | Purpose | Default |
+|----------|---------|---------|
+| `BEDROCK_MANTLE_REGION` | Pin the bedrock-mantle region for all GPT-5.x calls | derived from stack region with per-model fallback |
+| `BEDROCK_MANTLE_SIGNING_NAME` | SigV4 signing service name | `bedrock-mantle` |
+| `BEDROCK_MANTLE_REASONING_EFFORT` | Global fallback reasoning effort when a service config omits `reasoning_effort` | `medium` |
+
+### IAM
+
+Lambda execution roles that perform generation are granted
+`bedrock-mantle:CreateInference` (plus `GetProject` / `ListProjects` /
+`ListTagsForResources`), equivalent to the AWS-managed
+`AmazonBedrockMantleInferenceAccess` policy. When using cross-account Bedrock
+via a hub-account role, that role must also grant these `bedrock-mantle`
+actions (see [Cross-Account Bedrock](cross-account-bedrock.md)).

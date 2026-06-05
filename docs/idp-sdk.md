@@ -1526,6 +1526,7 @@ Analyze a document to generate a JSON Schema definition for a document class.
 - `page_range` (str, optional): Page range to extract from a PDF (e.g., "1-3")
 - `class_name_hint` (str, optional): Hint for the document class name (LLM uses this as `$id`)
 - `auto_detect` (bool, optional): If True, auto-detect section boundaries and discover each section. Returns `DiscoveryBatchResult`.
+- `model_id` (str, optional): Override the Bedrock model ID used for discovery (e.g., `us.anthropic.claude-opus-4-6-v1`). When `None` (default), the discovery model from the stack config (stack mode) or system defaults (local mode) is used. Applies to with-ground-truth, without-ground-truth, and `auto_detect` modes.
 
 **Returns:** `DiscoveryResult` with `status`, `document_class`, `json_schema`, `config_version`, `document_path`, `page_range`, and `error`. When `auto_detect=True`, returns `DiscoveryBatchResult`.
 
@@ -1572,6 +1573,13 @@ result = client.discovery.run(
     "./form.pdf",
     config_version="v2"
 )
+
+# Override the Bedrock model (e.g. use Claude Opus instead of the default)
+result = client.discovery.run(
+    "./invoice.pdf",
+    ground_truth_path="./invoice.json",
+    model_id="us.anthropic.claude-opus-4-6-v1",
+)
 ```
 
 ### discovery.auto_detect_sections()
@@ -1581,6 +1589,7 @@ Detect document section boundaries in a multi-page PDF using LLM analysis.
 **Parameters:**
 - `document_path` (str, required): Local path to a PDF document
 - `stack_name` (str, optional): Stack name override
+- `model_id` (str, optional): Override the Bedrock model ID used for section detection. When `None` (default), the configured `auto_split.model_id` is used.
 
 **Returns:** `AutoDetectResult` with `status`, `sections` (list of `AutoDetectSection`), `document_path`, and `error`
 
@@ -1608,6 +1617,7 @@ Discover multiple document classes from page ranges in a single PDF.
 - `page_ranges` (list, required): List of dicts with `start` (int), `end` (int), and optional `label` (str)
 - `config_version` (str, optional): Config version to save to
 - `stack_name` (str, optional): Stack name override
+- `model_id` (str, optional): Override the Bedrock model ID used for discovery. Applied to every per-range discovery call.
 
 **Returns:** `DiscoveryBatchResult` with one result per page range
 
@@ -1707,6 +1717,7 @@ Run discovery on multiple documents sequentially. Ground truth paths are auto-ma
 - `ground_truth_paths` (list, optional): Parallel list of ground truth paths (use `None` for docs without ground truth)
 - `config_version` (str, optional): Config version to save to
 - `stack_name` (str, optional): Stack name override
+- `model_id` (str, optional): Override the Bedrock model ID used for discovery. Applied to every document in the batch.
 
 **Returns:** `DiscoveryBatchResult` with `total`, `succeeded`, `failed`, and `results` (list of `DiscoveryResult`)
 

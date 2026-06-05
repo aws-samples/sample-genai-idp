@@ -97,6 +97,8 @@ MODEL_MAPPINGS = {
     "us.anthropic.claude-opus-4-6-v1:1m": "eu.anthropic.claude-opus-4-6-v1:1m",
     "us.anthropic.claude-opus-4-7": "eu.anthropic.claude-opus-4-7",
     "us.anthropic.claude-opus-4-7:1m": "eu.anthropic.claude-opus-4-7:1m",
+    "us.anthropic.claude-opus-4-8": "eu.anthropic.claude-opus-4-8",
+    "us.anthropic.claude-opus-4-8:1m": "eu.anthropic.claude-opus-4-8:1m",
     # Third-party models (US-only, no EU equivalent - fall back to themselves)
     "us.meta.llama4-maverick-17b-instruct-v1:0": "eu.anthropic.claude-sonnet-4-5-20250929-v1:0",
     "us.meta.llama4-scout-17b-instruct-v1:0": "eu.anthropic.claude-sonnet-4-5-20250929-v1:0",
@@ -141,7 +143,15 @@ def filter_models_by_region(data: Any, region_type: str) -> Any:
     """
     # Region-agnostic special model values that should always be included
     REGION_AGNOSTIC_MODELS = {"LambdaHook"}
-    
+
+    # Models that carry no region prefix but are only available in US (and
+    # us-gov) regions via the bedrock-mantle endpoint. They must NOT be offered
+    # in EU-region deployments where they are not callable. See openai_responses.py.
+    US_ONLY_MODELS = {"openai.gpt-5.4", "openai.gpt-5.5"}
+
+    def _is_us_only(item: str) -> bool:
+        return item in US_ONLY_MODELS or item.startswith("openai.gpt-5")
+
     if isinstance(data, dict):
         filtered_data = {}
         for key, value in data.items():
@@ -162,6 +172,9 @@ def filter_models_by_region(data: Any, region_type: str) -> Any:
                             if item.startswith("us.") or (not item.startswith("eu.") and not item.startswith("us.")):
                                 filtered_list.append(item)
                         elif region_type == "eu":
+                            # Exclude US-only models (e.g., openai.gpt-5.*) that have no EU availability
+                            if _is_us_only(item):
+                                continue
                             # Include EU models and non-region-specific models, exclude US models
                             if item.startswith("eu.") or (not item.startswith("eu.") and not item.startswith("us.")):
                                 filtered_list.append(item)

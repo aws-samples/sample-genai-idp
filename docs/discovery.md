@@ -375,7 +375,27 @@ result = discovery.discovery_classes_with_document(
     page_range="3-5",
     class_name_hint="W2 Form"
 )
+
+# Override the Bedrock model for a single call
+# (e.g. swap in Claude Opus without editing base-discovery.yaml or redeploying)
+result = discovery.discovery_classes_with_document(
+    input_bucket="my-bucket",
+    input_prefix="lending_package.pdf",
+    page_range="3-5",
+    class_name_hint="W2 Form",
+    model_id="us.anthropic.claude-opus-4-6-v1",
+)
 ```
+
+> **Model override (issue [#309](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues/309)):**
+> `auto_detect_sections`, `discovery_classes_with_document`, and
+> `discovery_classes_with_document_and_ground_truth` all accept an optional
+> `model_id` parameter. When supplied, it replaces the configured discovery
+> model (`auto_split.model_id`, `without_ground_truth.model_id`, or
+> `with_ground_truth.model_id`) for that call only — behavior is unchanged
+> when the parameter is `None`. This is exposed end-to-end through the
+> [SDK](./idp-sdk.md#discoveryrun) and the
+> [CLI](./idp-cli.md#discover) as `--model-id`.
 
 #### How Page Extraction Works
 
@@ -546,6 +566,14 @@ The Discovery module supports comprehensive configuration through the deployment
 - `us.anthropic.claude-3-haiku-20240307-v1:0` - Fast processing
 - `us.anthropic.claude-3-5-sonnet-20241022-v2:0` - High accuracy
 - `us.anthropic.claude-3-7-sonnet-20250219-v1:0` - Latest capabilities
+
+> **⚠️ OpenAI GPT-5.x is NOT supported for Discovery.** Discovery ingests whole
+> PDFs as Bedrock `document` content blocks, which the OpenAI Responses API
+> (`bedrock-mantle`) cannot accept (text + image only). `openai.gpt-5.4` /
+> `openai.gpt-5.5` are intentionally absent from the discovery model picklists;
+> selecting one via a hand-edited config is rejected by `idp-cli config-validate`
+> and raises at runtime. Use a Claude or Nova model for Discovery. See
+> [OpenAI GPT-5.x Models](openai-models.md).
 
 **Model Parameters:**
 ```yaml

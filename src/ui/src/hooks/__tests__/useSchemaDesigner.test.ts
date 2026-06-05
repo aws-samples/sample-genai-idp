@@ -1,0 +1,113 @@
+// Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+/**
+ * Regression tests for useSchemaDesigner.
+ *
+ * Critical contract: partial updates passed via updateClass / updateAttribute
+ * MUST preserve unknown keys on the underlying object. This is what allows
+ * users to author extension fields (e.g. `x-aws-idp-page-types`) in the YAML
+ * tab and edit other class properties via the form without silently dropping
+ * the YAML-only extensions. Several `x-aws-idp-*` fields don't yet have form
+ * widgets — if a future refactor switches to spread-from-form-state, this
+ * contract would silently break.
+ */
+
+import { act, renderHook } from '@testing-library/react';
+import { describe, expect, it } from 'vitest';
+import { useSchemaDesigner } from '../useSchemaDesigner';
+
+describe('useSchemaDesigner unknown-extension preservation', () => {
+  it('updateClass preserves arbitrary x-aws-idp-* keys not touched by the update', () => {
+    const { result } = renderHook(() => useSchemaDesigner());
+
+    let classId = '';
+    act(() => {
+      const cls = result.current.addClass('TestClass');
+      classId = cls.id;
+    });
+
+    // Seed a class with an unknown extension (as if loaded from YAML).
+    act(() => {
+      result.current.updateClass(classId, {
+        'x-aws-idp-page-types': [{ name: 'AccountSummary' }],
+        'x-aws-idp-future-extension': { foo: 'bar' },
+      });
+    });
+
+    // Now do a partial update that touches a different field. The unknown
+    // keys must remain.
+    act(() => {
+      result.current.updateClass(classId, { description: 'updated' });
+    });
+
+    const cls = result.current.classes.find((c) => c.id === classId);
+    expect(cls).toBeDefined();
+    expect(cls!.description).toBe('updated');
+    expect(cls!['x-aws-idp-page-types']).toEqual([{ name: 'AccountSummary' }]);
+    expect(cls!['x-aws-idp-future-extension']).toEqual({ foo: 'bar' });
+  });
+
+  it('updateAttribute preserves arbitrary x-aws-idp-* keys not touched by the update', () => {
+    const { result } = renderHook(() => useSchemaDesigner());
+
+    let classId = '';
+    act(() => {
+      const cls = result.current.addClass('TestClass');
+      classId = cls.id;
+    });
+
+    act(() => {
+      result.current.addAttribute(classId, 'AccountNumber', 'string');
+    });
+
+    // Seed unknown extensions on the attribute.
+    act(() => {
+      result.current.updateAttribute(classId, 'AccountNumber', {
+        'x-aws-idp-source-page-types': ['AccountSummary'],
+        'x-aws-idp-future-attr-extension': 42,
+      });
+    });
+
+    // Touch an unrelated field.
+    act(() => {
+      result.current.updateAttribute(classId, 'AccountNumber', { description: 'primary id' });
+    });
+
+    const cls = result.current.classes.find((c) => c.id === classId);
+    const attr = cls?.attributes.properties.AccountNumber;
+    expect(attr).toBeDefined();
+    expect(attr!.description).toBe('primary id');
+    expect(attr!['x-aws-idp-source-page-types']).toEqual(['AccountSummary']);
+    expect(attr!['x-aws-idp-future-attr-extension']).toBe(42);
+  });
+
+  it('updateAttribute removes a key when the update value is undefined', () => {
+    // Documents the existing semantics so we don't accidentally regress them
+    // when changing the preservation behavior above.
+    const { result } = renderHook(() => useSchemaDesigner());
+
+    let classId = '';
+    act(() => {
+      const cls = result.current.addClass('TestClass');
+      classId = cls.id;
+    });
+
+    act(() => {
+      result.current.addAttribute(classId, 'Field', 'string');
+      result.current.updateAttribute(classId, 'Field', {
+        'x-aws-idp-source-page-types': ['A'],
+      });
+    });
+
+    act(() => {
+      result.current.updateAttribute(classId, 'Field', {
+        'x-aws-idp-source-page-types': undefined,
+      });
+    });
+
+    const attr = result.current.classes.find((c) => c.id === classId)?.attributes.properties.Field;
+    expect(attr).toBeDefined();
+    expect('x-aws-idp-source-page-types' in attr!).toBe(false);
+  });
+});

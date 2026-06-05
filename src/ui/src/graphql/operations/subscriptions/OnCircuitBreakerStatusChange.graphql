@@ -1,0 +1,11 @@
+subscription OnCircuitBreakerStatusChange {
+  onCircuitBreakerStatusChange {
+    enabled
+    state
+    openedAt
+    lastCheckedAt
+    failureCount
+    recoveryAttempts
+    lastError
+  }
+}

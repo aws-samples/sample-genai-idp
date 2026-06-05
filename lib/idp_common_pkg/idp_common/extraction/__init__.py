@@ -9,6 +9,17 @@ from documents using LLMs.
 """
 
 from idp_common.extraction.models import ExtractedAttribute, ExtractionResult, PageInfo
+from idp_common.extraction.page_type_resolver import (
+    PageTypePresence,
+    resolve_page_types,
+)
 from idp_common.extraction.service import ExtractionService
 
-__all__ = ["ExtractionService", "ExtractedAttribute", "ExtractionResult", "PageInfo"]
+__all__ = [
+    "ExtractionService",
+    "ExtractedAttribute",
+    "ExtractionResult",
+    "PageInfo",
+    "PageTypePresence",
+    "resolve_page_types",
+]

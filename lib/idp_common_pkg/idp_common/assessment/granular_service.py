@@ -822,6 +822,7 @@ class GranularAssessmentService:
         top_k: float,
         top_p: float,
         max_tokens: Optional[int],
+        reasoning_effort: Optional[str] = None,
     ) -> AssessmentResult:
         """
         Process a single assessment task.
@@ -836,6 +837,7 @@ class GranularAssessmentService:
             top_k: Top-k parameter
             top_p: Top-p parameter
             max_tokens: Max tokens parameter
+            reasoning_effort: Reasoning effort for OpenAI Responses models
 
         Returns:
             Assessment result
@@ -863,6 +865,7 @@ class GranularAssessmentService:
                 max_tokens=max_tokens,
                 context="GranularAssessment",
                 model_lambda_hook_arn=self.config.assessment.model_lambda_hook_arn,
+                reasoning_effort=reasoning_effort,
             )
 
             # Extract text from response
@@ -875,6 +878,45 @@ class GranularAssessmentService:
             error_messages = []
             try:
                 assessment_data = json.loads(extract_json_from_text(assessment_text))
+
+                # Handle case where LLM returns a single-element array instead of dict
+                # This happens when models mistakenly wrap the assessment in an array
+                if isinstance(assessment_data, list):
+                    if len(assessment_data) == 1:
+                        logger.warning(
+                            "LLM returned single-element array instead of object, unwrapping",
+                            extra={
+                                "original_type": "list",
+                                "element_count": 1,
+                                "task_id": task.task_id,
+                            },
+                        )
+                        assessment_data = assessment_data[0]
+                    elif len(assessment_data) == 0:
+                        logger.error(
+                            "LLM returned empty array when single object expected",
+                            extra={
+                                "element_count": 0,
+                                "task_id": task.task_id,
+                            },
+                        )
+                        # Fall through to error handling below
+                        raise ValueError(
+                            "Received empty array instead of single object"
+                        )
+                    else:  # len > 1
+                        logger.error(
+                            "LLM returned multi-element array when single object expected",
+                            extra={
+                                "element_count": len(assessment_data),
+                                "task_id": task.task_id,
+                            },
+                        )
+                        # Fall through to error handling below
+                        raise ValueError(
+                            f"Received array with {len(assessment_data)} elements instead of single object"
+                        )
+
             except Exception as e:
                 logger.error(
                     f"Error parsing assessment LLM output for task {task.task_id}: {e}"
@@ -1674,6 +1716,7 @@ class GranularAssessmentService:
             temperature = self.config.assessment.temperature
             top_k = self.config.assessment.top_k
             top_p = self.config.assessment.top_p
+            reasoning_effort = self.config.assessment.reasoning_effort
             max_tokens = self.config.assessment.max_tokens
             system_prompt = self.config.assessment.system_prompt
 
@@ -1765,6 +1808,7 @@ class GranularAssessmentService:
                                 top_k,
                                 top_p,
                                 max_tokens,
+                                reasoning_effort,
                             ): task
                             for task in tasks_to_process
                         }
@@ -1817,6 +1861,7 @@ class GranularAssessmentService:
                                 top_k,
                                 top_p,
                                 max_tokens,
+                                reasoning_effort,
                             )
                             all_task_results.append(result)
 

@@ -3,9 +3,10 @@
 import React, { useMemo } from 'react';
 import { useLocation } from 'react-router-dom';
 import type { SideNavigationProps } from '@cloudscape-design/components';
-import { Badge, Popover, SideNavigation } from '@cloudscape-design/components';
+import { Badge, Box, Link, Popover, SideNavigation, SpaceBetween } from '@cloudscape-design/components';
 import useSettingsContext from '../../contexts/settings';
 import useUserRole from '../../hooks/use-user-role';
+import useLatestVersion from '../../hooks/use-latest-version';
 
 import {
   DOCUMENTS_PATH,
@@ -54,6 +55,12 @@ export const adminNavItems = [
     type: 'section',
     text: 'Resources',
     items: [
+      {
+        type: 'link',
+        text: 'Blog',
+        href: 'https://www.amazon.com/genai-idp-accelerator',
+        external: true,
+      },
       {
         type: 'link',
         text: 'Documentation',
@@ -105,6 +112,12 @@ export const authorNavItems = [
     items: [
       {
         type: 'link',
+        text: 'Blog',
+        href: 'https://www.amazon.com/genai-idp-accelerator',
+        external: true,
+      },
+      {
+        type: 'link',
         text: 'Documentation',
         href: 'https://aws-solutions-library-samples.github.io/accelerated-intelligent-document-processing-on-aws/',
         external: true,
@@ -143,6 +156,12 @@ export const viewerNavItems = [
     items: [
       {
         type: 'link',
+        text: 'Blog',
+        href: 'https://www.amazon.com/genai-idp-accelerator',
+        external: true,
+      },
+      {
+        type: 'link',
         text: 'Documentation',
         href: 'https://aws-solutions-library-samples.github.io/accelerated-intelligent-document-processing-on-aws/',
         external: true,
@@ -179,6 +198,7 @@ const defaultOnFollowHandler = (ev: CustomEvent<SideNavigationProps.FollowDetail
     '#builddatetime',
     '#idppattern',
     '#region',
+    '#update-available',
   ];
   if (nonNavigableHrefs.includes(ev.detail.href)) {
     ev.preventDefault();
@@ -193,6 +213,25 @@ interface NavigationProps {
   onFollowHandler?: (ev: CustomEvent<SideNavigationProps.FollowDetail>) => void;
 }
 
+/**
+ * Build the AWS CloudFormation "Update stack" deep-link for the current
+ * deployment. The console pre-selects the stack and template URL so the
+ * user lands on the parameters review page.
+ *
+ * Returns null if either piece of info is missing (e.g. headless deployments
+ * where StackName isn't published into Settings).
+ */
+const buildCfnUpdateStackUrl = (region: string | undefined, stackName: string | undefined, templateUrl: string | null): string | null => {
+  if (!region || !stackName || !templateUrl) return null;
+  const encodedTemplate = encodeURIComponent(templateUrl);
+  const encodedStack = encodeURIComponent(stackName);
+  return (
+    `https://${region}.console.aws.amazon.com/cloudformation/home` +
+    `?region=${region}#/stacks/update/template` +
+    `?stackId=${encodedStack}&templateURL=${encodedTemplate}`
+  );
+};
+
 const Navigation = ({
   header = documentsNavHeader,
   items,
@@ -203,6 +242,11 @@ const Navigation = ({
   let activeHref = `#${DEFAULT_PATH}`;
   const { settings } = useSettingsContext();
   const { isAdmin, isAuthor, isReviewerOnly, isViewerOnly } = useUserRole();
+
+  // Version-check for the "Update available" indicator. Returns
+  // isUpdateAvailable=false until settings.Version is loaded.
+  const currentVersion = settings?.Version as string | undefined;
+  const { latestVersion, templateUrl, isUpdateAvailable } = useLatestVersion(currentVersion);
 
   // Select navigation items based on user role (highest privilege wins)
   const baseItems = useMemo(() => {
@@ -311,6 +355,39 @@ const Navigation = ({
   const navigationItems: SideNavigationProps.Item[] = [...filteredItems] as SideNavigationProps.Item[];
 
   const deployedRegion = import.meta.env.VITE_AWS_REGION as string | undefined;
+  const stackName = settings?.StackName as string | undefined;
+
+  // Build the "Update available" popover content. Admin users get a clickable
+  // CFN console deep-link; non-admins see a non-actionable hint pointing them
+  // at their administrator. Both see the version diff.
+  const cfnUpdateStackUrl = buildCfnUpdateStackUrl(deployedRegion, stackName, templateUrl);
+  const updatePopoverContent =
+    isAdmin && cfnUpdateStackUrl ? (
+      <SpaceBetween size="xs">
+        <Box>
+          Latest published version: <strong>v{latestVersion}</strong>
+          <br />
+          Currently deployed: <strong>v{currentVersion}</strong>
+        </Box>
+        <Link external href={cfnUpdateStackUrl}>
+          Update stack in CloudFormation →
+        </Link>
+        <Box variant="small" color="text-body-secondary">
+          Opens the AWS CloudFormation console with the new template URL pre-filled. Review parameters before applying.
+        </Box>
+      </SpaceBetween>
+    ) : (
+      <SpaceBetween size="xs">
+        <Box>
+          Latest published version: <strong>v{latestVersion}</strong>
+          <br />
+          Currently deployed: <strong>v{currentVersion}</strong>
+        </Box>
+        <Box variant="small" color="text-body-secondary">
+          Contact your administrator to update this deployment to the latest version.
+        </Box>
+      </SpaceBetween>
+    );
 
   if (settings?.Version || settings?.StackName || settings?.BuildDateTime || settings?.IDPPattern || deployedRegion) {
     const deploymentInfoItems: SideNavigationProps.Item[] = [];
@@ -319,7 +396,33 @@ const Navigation = ({
       deploymentInfoItems.push({ type: 'link', text: `Stack Name: ${settings.StackName}`, href: '#stackname' });
     }
     if (settings?.Version) {
-      deploymentInfoItems.push({ type: 'link', text: `Version: ${settings.Version}`, href: '#version' });
+      // Attach an "Update" badge + popover when the version-check resolver
+      // has reported a newer published version. The badge itself is shown
+      // to all roles; the popover content (Admin gets the actionable link)
+      // is built above.
+      const versionItem: SideNavigationProps.Link = {
+        type: 'link',
+        text: `Version: ${settings.Version}`,
+        href: '#version',
+      };
+      if (isUpdateAvailable && latestVersion) {
+        // info appears as a small adornment to the right of the link text.
+        // Using a Popover with triggerType="custom" wrapping a Badge keeps
+        // the styling consistent with the existing "us-east-1 only" badge.
+        (versionItem as SideNavigationProps.Link & { info?: React.ReactNode }).info = (
+          <Popover
+            header="Update available"
+            dismissButton={false}
+            position="right"
+            size="medium"
+            triggerType="custom"
+            content={updatePopoverContent}
+          >
+            <Badge color="blue">Update</Badge>
+          </Popover>
+        );
+      }
+      deploymentInfoItems.push(versionItem);
     }
     if (settings?.BuildDateTime) {
       deploymentInfoItems.push({ type: 'link', text: `Build: ${settings.BuildDateTime}`, href: '#builddatetime' });

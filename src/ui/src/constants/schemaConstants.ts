@@ -92,6 +92,21 @@ export const X_AWS_IDP_EXCLUDE_FROM_PROCESSING = 'x-aws-idp-exclude-from-process
  */
 export const X_AWS_IDP_EXCLUSION_REASON = 'x-aws-idp-exclusion-reason';
 
+/**
+ * Declares the named page sub-types a class can include. Each entry has a
+ * `name`, optional `description`, and `x-aws-idp-document-page-content-regex`
+ * used to detect the page type from per-page OCR text.
+ */
+export const X_AWS_IDP_PAGE_TYPES = 'x-aws-idp-page-types';
+
+/**
+ * On a property: declares which page sub-types contain the property's
+ * source data. If none of the listed page types are present in the section,
+ * the property is treated as MISSING (vs BLANK when the page is present
+ * but the field is empty).
+ */
+export const X_AWS_IDP_SOURCE_PAGE_TYPES = 'x-aws-idp-source-page-types';
+
 // ============================================================================
 // AWS IDP List-Specific Extensions
 // ============================================================================

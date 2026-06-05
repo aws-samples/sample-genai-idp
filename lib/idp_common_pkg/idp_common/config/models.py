@@ -183,6 +183,46 @@ class AgenticConfig(BaseModel):
     )
 
 
+class MissingFieldHandlingConfig(BaseModel):
+    """Controls how extraction treats fields whose source pages are absent.
+
+    See ``x-aws-idp-page-types`` and ``x-aws-idp-source-page-types`` schema
+    extensions for the page-type → property mapping that drives this.
+    """
+
+    enabled: bool = Field(
+        default=False,
+        description=(
+            "Enable BLANK vs MISSING field handling. When enabled, properties "
+            "whose declared source page-types are absent from the section are "
+            "marked as MISSING per the configured representation. Default off "
+            "to preserve existing behavior."
+        ),
+    )
+    representation: str = Field(
+        default="omit",
+        description=(
+            "How to represent missing fields in extraction output. 'omit' drops "
+            "the key entirely; 'null_with_metadata' keeps the key as null and "
+            "lists it under a sibling 'missing_fields' array."
+        ),
+    )
+
+    @field_validator("representation", mode="before")
+    @classmethod
+    def validate_representation(cls, v: Any) -> str:
+        """Reject unknown representations early so misconfiguration fails fast."""
+        if v is None:
+            return "omit"
+        v_str = str(v)
+        if v_str not in ("omit", "null_with_metadata"):
+            raise ValueError(
+                "missing_field_handling.representation must be 'omit' or "
+                f"'null_with_metadata', got {v_str!r}"
+            )
+        return v_str
+
+
 class ExtractionConfig(BaseModel):
     """Document extraction configuration"""
 
@@ -205,6 +245,13 @@ class ExtractionConfig(BaseModel):
     temperature: float = Field(default=0.0, ge=0.0, le=1.0)
     top_p: float = Field(default=0.1, ge=0.0, le=1.0)
     top_k: float = Field(default=5.0, ge=0.0)
+    reasoning_effort: str = Field(
+        default="medium",
+        description=(
+            "Reasoning effort for OpenAI Responses models (GPT-5.x) only: "
+            "minimal, low, medium, or high. Ignored by other model families."
+        ),
+    )
     max_tokens: int = Field(
         default=10000,
         gt=0,
@@ -212,6 +259,15 @@ class ExtractionConfig(BaseModel):
     )
     image: ImageConfig = Field(default_factory=ImageConfig)
     agentic: AgenticConfig = Field(default_factory=AgenticConfig)
+    missing_field_handling: MissingFieldHandlingConfig = Field(
+        default_factory=MissingFieldHandlingConfig,
+        description=(
+            "Configuration for distinguishing BLANK fields (page present, "
+            "field empty) from MISSING fields (page absent). Requires class "
+            "schemas to declare 'x-aws-idp-page-types' and properties to "
+            "declare 'x-aws-idp-source-page-types'."
+        ),
+    )
     custom_prompt_lambda_arn: Optional[str] = Field(
         default=None, description="ARN of custom prompt Lambda"
     )
@@ -261,6 +317,13 @@ class ClassificationConfig(BaseModel):
     temperature: float = Field(default=0.0, ge=0.0, le=1.0)
     top_p: float = Field(default=0.1, ge=0.0, le=1.0)
     top_k: float = Field(default=5.0, ge=0.0)
+    reasoning_effort: str = Field(
+        default="medium",
+        description=(
+            "Reasoning effort for OpenAI Responses models (GPT-5.x) only: "
+            "minimal, low, medium, or high. Ignored by other model families."
+        ),
+    )
     max_tokens: int = Field(
         default=4096,
         gt=0,
@@ -399,6 +462,13 @@ class AssessmentConfig(BaseModel):
     temperature: float = Field(default=0.0, ge=0.0, le=1.0)
     top_p: float = Field(default=0.1, ge=0.0, le=1.0)
     top_k: float = Field(default=5.0, ge=0.0)
+    reasoning_effort: str = Field(
+        default="medium",
+        description=(
+            "Reasoning effort for OpenAI Responses models (GPT-5.x) only: "
+            "minimal, low, medium, or high. Ignored by other model families."
+        ),
+    )
     max_tokens: int = Field(
         default=10000,
         gt=0,
@@ -458,10 +528,87 @@ class SummarizationConfig(BaseModel):
     temperature: float = Field(default=0.0, ge=0.0, le=1.0)
     top_p: float = Field(default=0.1, ge=0.0, le=1.0)
     top_k: float = Field(default=5.0, ge=0.0)
+    reasoning_effort: str = Field(
+        default="medium",
+        description=(
+            "Reasoning effort for OpenAI Responses models (GPT-5.x) only: "
+            "minimal, low, medium, or high. Ignored by other model families."
+        ),
+    )
     max_tokens: int = Field(
         default=4096,
         gt=0,
         description="Maximum number of output tokens. Ensure this does not exceed the selected model's limit. See model documentation for details.",
+    )
+
+    @field_validator("temperature", "top_p", "top_k", mode="before")
+    @classmethod
+    def parse_float(cls, v: Any) -> float:
+        """Parse float from string or number"""
+        if isinstance(v, str):
+            return float(v) if v else 0.0
+        return float(v)
+
+    @field_validator("max_tokens", mode="before")
+    @classmethod
+    def parse_int(cls, v: Any) -> int:
+        """Parse int from string or number"""
+        if isinstance(v, str):
+            return int(v) if v else 0
+        return int(v)
+
+
+class ChatConfig(BaseModel):
+    """Chat-with-Document configuration.
+
+    Controls the interactive "Chat with Document" feature available on the
+    Document Detail screen. This is decoupled from summarization so that
+    chat can use a different (typically larger-context) model.
+    """
+
+    enabled: bool = Field(default=True, description="Enable Chat-with-Document")
+    model: str = Field(
+        default="us.anthropic.claude-opus-4-8:1m",
+        description=(
+            "Bedrock model ID used for Chat-with-Document. A large-context "
+            "model is recommended because the entire document text is sent "
+            "in a single prompt. Use 'LambdaHook' to invoke a custom Lambda "
+            "function instead of Bedrock."
+        ),
+    )
+    model_lambda_hook_arn: Optional[str] = Field(
+        default=None,
+        description=(
+            "Lambda function ARN for custom inference (used when model is "
+            "'LambdaHook'). Function name must start with GENAIIDP-."
+        ),
+    )
+    system_prompt: str = Field(
+        default=(
+            "You are an assistant that answers questions about the attached "
+            "document text. If you don't know the answer, say so. Do not "
+            "invent information. Use the prior chat history provided as "
+            "context. Respond in plain text, not JSON."
+        ),
+        description="System prompt for the Chat-with-Document assistant",
+    )
+    temperature: float = Field(default=0.0, ge=0.0, le=1.0)
+    top_p: float = Field(default=0.1, ge=0.0, le=1.0)
+    top_k: float = Field(default=5.0, ge=0.0)
+    max_tokens: int = Field(
+        default=4096,
+        gt=0,
+        description=(
+            "Maximum number of output (response) tokens. Ensure this does "
+            "not exceed the selected model's limit."
+        ),
+    )
+    reasoning_effort: str = Field(
+        default="medium",
+        description=(
+            "Reasoning effort for OpenAI Responses models (GPT-5.x) only: "
+            "minimal, low, medium, or high. Ignored by other model families."
+        ),
     )
 
     @field_validator("temperature", "top_p", "top_k", mode="before")
@@ -506,6 +653,13 @@ class OCRConfig(BaseModel):
     )
     task_prompt: Optional[str] = Field(
         default=None, description="Task prompt for Bedrock OCR"
+    )
+    reasoning_effort: str = Field(
+        default="medium",
+        description=(
+            "Reasoning effort for OpenAI Responses models (GPT-5.x) only: "
+            "minimal, low, medium, or high. Ignored by other model families."
+        ),
     )
     features: List[OCRFeature] = Field(
         default_factory=list, description="Textract features to enable"
@@ -1206,6 +1360,13 @@ class EvaluationLLMMethodConfig(BaseModel):
         description="Maximum number of output tokens. Ensure this does not exceed the selected model's limit. See model documentation for details.",
     )
     top_k: float = Field(default=5.0, ge=0.0)
+    reasoning_effort: str = Field(
+        default="medium",
+        description=(
+            "Reasoning effort for OpenAI Responses models (GPT-5.x) only: "
+            "minimal, low, medium, or high. Ignored by other model families."
+        ),
+    )
     task_prompt: str = Field(
         default="""
         I need to evaluate attribute extraction for a document of class: {DOCUMENT_CLASS}.
@@ -1588,6 +1749,11 @@ class IDPConfig(BaseModel):
             model="us.amazon.nova-premier-v1:0"
         ),
         description="Summarization configuration",
+    )
+    chat: ChatConfig = Field(
+        default_factory=ChatConfig,
+        description="Chat-with-Document configuration (used by the interactive "
+        "document Q&A feature in the Web UI)",
     )
     rule_validation: RuleValidationConfig = Field(
         default_factory=lambda: RuleValidationConfig(

@@ -535,3 +535,53 @@ class TestInvalidRequests:
 
         response = handler(event, lambda_context)
         assert response["statusCode"] == 422
+
+
+class TestS3ClientEndpointConfig:
+    """Verify the module-level S3 client honors S3_ENDPOINT_URL.
+
+    The fixture below snapshots and restores `index` in sys.modules so the
+    importlib.reload calls these tests issue do not leak module state into
+    sibling tests that import `index` at function scope.
+    """
+
+    @pytest.fixture(autouse=True)
+    def isolate_index_module(self):
+        import sys
+
+        original = sys.modules.get("index")
+        try:
+            yield
+        finally:
+            if original is not None:
+                sys.modules["index"] = original
+            else:
+                sys.modules.pop("index", None)
+
+    def test_public_mode_no_endpoint(self, monkeypatch):
+        monkeypatch.delenv("S3_ENDPOINT_URL", raising=False)
+        monkeypatch.setenv("AWS_REGION", "us-east-1")
+        import importlib
+
+        import index as idx
+
+        importlib.reload(idx)
+        assert idx.s3_client.meta.config.signature_version == "s3v4"
+        assert idx.s3_client.meta.config.s3["addressing_style"] == "path"
+
+    def test_private_mode_uses_vpce_endpoint(self, monkeypatch):
+        monkeypatch.setenv(
+            "S3_ENDPOINT_URL",
+            "https://bucket.vpce-api.s3.us-east-1.vpce.amazonaws.com",
+        )
+        monkeypatch.setenv("AWS_REGION", "us-east-1")
+        import importlib
+
+        import index as idx
+
+        importlib.reload(idx)
+        assert idx.s3_client.meta.config.s3["addressing_style"] == "virtual"
+        assert (
+            idx.s3_client.meta.endpoint_url
+            == "https://bucket.vpce-api.s3.us-east-1.vpce.amazonaws.com"
+        )

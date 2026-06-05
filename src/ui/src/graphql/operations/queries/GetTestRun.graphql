@@ -10,6 +10,7 @@ query GetTestRun($testRunId: String!) {
     overallAccuracy
     weightedOverallScores
     averageConfidence
+    confidenceMetrics
     accuracyBreakdown
     confusionMatrix
     fieldMetrics

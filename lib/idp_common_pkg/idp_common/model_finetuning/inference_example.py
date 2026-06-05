@@ -257,7 +257,16 @@ class NovaInferenceService:
             Tuple of (status, prediction, raw_response)
         """
         try:
-            content = response["output"]["message"]["content"][0]["text"]
+            # Defensive: Handle case where LLM returns empty content array
+            content_array = response["output"]["message"].get("content", [])
+            if not content_array or len(content_array) == 0:
+                logger.error(
+                    "LLM returned empty content array",
+                    extra={"response": response},
+                )
+                return "error", "Empty response from model", response
+
+            content = content_array[0]["text"]
 
             # Try to extract JSON from response
             import re

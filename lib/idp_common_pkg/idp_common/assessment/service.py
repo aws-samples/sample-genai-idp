@@ -823,6 +823,7 @@ class AssessmentService:
             temperature = self.config.assessment.temperature
             top_k = self.config.assessment.top_k
             top_p = self.config.assessment.top_p
+            reasoning_effort = self.config.assessment.reasoning_effort
             max_tokens = self.config.assessment.max_tokens
             system_prompt = self.config.assessment.system_prompt
 
@@ -877,6 +878,7 @@ class AssessmentService:
                 max_tokens=max_tokens,
                 context="Assessment",
                 model_lambda_hook_arn=self.config.assessment.model_lambda_hook_arn,
+                reasoning_effort=reasoning_effort,
             )
 
             total_duration = time.time() - request_start_time
@@ -893,6 +895,35 @@ class AssessmentService:
             try:
                 # Try to parse the assessment text as JSON
                 assessment_data = json.loads(extract_json_from_text(assessment_text))
+
+                # Handle case where LLM returns a single-element array instead of dict
+                # This happens when models mistakenly wrap the assessment in an array
+                if isinstance(assessment_data, list):
+                    if len(assessment_data) == 1:
+                        logger.warning(
+                            "LLM returned single-element array instead of object, unwrapping",
+                            extra={"original_type": "list", "element_count": 1},
+                        )
+                        assessment_data = assessment_data[0]
+                    elif len(assessment_data) == 0:
+                        logger.error(
+                            "LLM returned empty array when single object expected",
+                            extra={"element_count": 0},
+                        )
+                        # Fall through to error handling below
+                        raise ValueError(
+                            "Received empty array instead of single object"
+                        )
+                    else:  # len > 1
+                        logger.error(
+                            "LLM returned multi-element array when single object expected",
+                            extra={"element_count": len(assessment_data)},
+                        )
+                        # Fall through to error handling below
+                        raise ValueError(
+                            f"Received array with {len(assessment_data)} elements instead of single object"
+                        )
+
             except Exception as e:
                 # Handle parsing error
                 logger.error(

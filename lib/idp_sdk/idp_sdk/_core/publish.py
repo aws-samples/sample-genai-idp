@@ -1513,6 +1513,21 @@ STDERR:
                     "<PUBLIC_SAMPLE_UDOP_MODEL>": self.public_sample_udop_model,
                     "<ARTIFACT_BUCKET_TOKEN>": self.bucket,
                     "<ARTIFACT_PREFIX_TOKEN>": self.prefix_and_version,
+                    # Public template version-check defaults — substituted into
+                    # template.yaml so the deployed stack's CloudFormation
+                    # parameters default to the bucket/prefix the operator is
+                    # publishing TO. This makes the Web UI "Update available"
+                    # indicator work out of the box for whoever publishes (e.g.
+                    # the public release publishes to aws-ml-blog-<region> with
+                    # prefix `artifacts/genai-idp` and gets the indicator for
+                    # free; private builders get a default that points at their
+                    # own bucket/prefix).
+                    #
+                    # `prefix` is the version-stripped prefix (e.g.
+                    # `artifacts/genai-idp`), so the resolver lists sibling
+                    # versioned templates published by future `publish` runs.
+                    "<PUBLIC_ARTIFACTS_BUCKET_TOKEN>": self.bucket,
+                    "<PUBLIC_ARTIFACTS_PREFIX_TOKEN>": self.prefix,
                     "<WEBUI_ZIPFILE_TOKEN>": webui_zipfile,
                     "<UNIFIED_SOURCE_ZIPFILE_TOKEN>": unified_source_zipfile,
                     # Unified image version extracted from source zipfile hash
@@ -2485,9 +2500,10 @@ STDERR:
         )
 
         # Map each layer name to its zip file
+        # NOTE: Keep in sync with layers_config in build_all_lambda_layers()
         expected_layers = [
             "base",
-            "evaluation",
+            # "evaluation" is disabled - not referenced by any Lambda, adds 50MB+ to build
             "reporting",
             "agents",
             "multi_document_discovery",
@@ -2584,10 +2600,11 @@ STDERR:
             )
             return True  # Need rebuild
 
-        # We have at least some layer zips, check we have all 4
+        # We have at least some layer zips, check we have all expected layers
+        # NOTE: Keep in sync with layers_config in build_all_lambda_layers()
         expected_layers = [
             "base",
-            "evaluation",
+            # "evaluation" is disabled - not referenced by any Lambda, adds 50MB+ to build
             "reporting",
             "agents",
             "multi_document_discovery",
@@ -2619,9 +2636,11 @@ STDERR:
                 "docs_service",
                 "image",
             ],
-            "evaluation": [
-                "evaluation"
-            ],  # Separate layer for stickler (includes numpy)
+            # "evaluation" layer is disabled:
+            # - Not referenced by any Lambda in template.yaml or nested stacks
+            # - Adds 50MB+ to layer size (stickler + scikit-learn + numpy)
+            # - Lambdas needing evaluation install idp_common[evaluation] directly in function package
+            # "evaluation": ["evaluation"],
             "reporting": ["reporting"],
             "agents": ["agents"],
             "multi_document_discovery": ["multi_document_discovery"],

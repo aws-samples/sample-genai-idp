@@ -17,13 +17,18 @@ import time
 from typing import Any
 
 from idp_common import bedrock, image, metrics, s3, utils
-from idp_common.bedrock import format_prompt
+from idp_common.bedrock import format_prompt, is_openai_responses_model
 from idp_common.config.models import IDPConfig
 from idp_common.config.schema_constants import (
     ID_FIELD,
     SCHEMA_PROPERTIES,
     X_AWS_IDP_DOCUMENT_TYPE,
     X_AWS_IDP_EXTRACTION_MODEL,
+    X_AWS_IDP_SOURCE_PAGE_TYPES,
+)
+from idp_common.extraction.page_type_resolver import (
+    PageTypePresence,
+    resolve_page_types,
 )
 from idp_common.models import Document
 from idp_common.utils.few_shot_example_builder import (
@@ -53,6 +58,8 @@ logger = logging.getLogger(__name__)
 class SectionInfo(BaseModel):
     """Metadata about a document section being processed."""
 
+    model_config = {"arbitrary_types_allowed": True}
+
     class_label: str
     sorted_page_ids: list[str]
     page_indices: list[int]
@@ -61,6 +68,7 @@ class SectionInfo(BaseModel):
     output_uri: str
     start_page: int
     end_page: int
+    page_type_presence: PageTypePresence | None = None
 
 
 class ExtractionConfig(BaseModel):
@@ -632,44 +640,67 @@ class ExtractionService:
             end_page=end_page,
         )
 
-    def _load_document_text(
+    def _load_page_texts(
         self, document: Document, sorted_page_ids: list[str]
-    ) -> str:
-        """
-        Load and concatenate text from all pages.
+    ) -> dict[str, str]:
+        """Load OCR text for each page in the section, preserving page IDs.
 
-        Args:
-            document: Document containing pages
-            sorted_page_ids: Sorted list of page IDs
-
-        Returns:
-            Concatenated document text
+        Pages missing from ``document.pages`` are recorded as errors and
+        omitted from the result.
         """
         t0 = time.time()
-        document_texts = []
-
+        page_id_to_text: dict[str, str] = {}
         for page_id in sorted_page_ids:
             if page_id not in document.pages:
                 error_msg = f"Page {page_id} not found in document"
                 logger.error(error_msg)
                 document.errors.append(error_msg)
                 continue
-
             page = document.pages[page_id]
             text_path = page.parsed_text_uri
-            page_text = s3.get_text_content(text_path)
-            document_texts.append(page_text)
+            page_id_to_text[page_id] = s3.get_text_content(text_path)
+        logger.info(f"Time taken to read text content: {time.time() - t0:.2f} seconds")
+        return page_id_to_text
 
-        # Join with page markers so batch agents can extract their page range
-        page_separator_parts = []
-        for idx, text in enumerate(document_texts):
+    def _format_document_text(
+        self,
+        sorted_page_ids: list[str],
+        page_id_to_text: dict[str, str],
+        page_type_presence: PageTypePresence | None = None,
+    ) -> str:
+        """Concatenate per-page text with sequential page markers.
+
+        When ``page_type_presence`` resolves a page type for a page, the
+        marker is annotated as ``--- PAGE N [PageType] ---`` so the LLM
+        gets a soft hint about the page's role.
+        """
+        page_id_to_type: dict[str, str] = (
+            page_type_presence.page_id_to_page_type if page_type_presence else {}
+        )
+        parts: list[str] = []
+        for idx, page_id in enumerate(
+            pid for pid in sorted_page_ids if pid in page_id_to_text
+        ):
             page_num = idx + 1
-            page_separator_parts.append(f"--- PAGE {page_num} ---\n{text}")
-        document_text = "\n".join(page_separator_parts)
-        t1 = time.time()
-        logger.info(f"Time taken to read text content: {t1 - t0:.2f} seconds")
+            page_type = page_id_to_type.get(page_id)
+            marker = (
+                f"--- PAGE {page_num} [{page_type}] ---"
+                if page_type
+                else f"--- PAGE {page_num} ---"
+            )
+            parts.append(f"{marker}\n{page_id_to_text[page_id]}")
+        return "\n".join(parts)
 
-        return document_text
+    def _load_document_text(
+        self, document: Document, sorted_page_ids: list[str]
+    ) -> str:
+        """Backwards-compatible loader that returns the concatenated text only.
+
+        Prefer :meth:`_load_page_texts` + :meth:`_format_document_text` when
+        per-page text is also needed (e.g., for page-type resolution).
+        """
+        page_id_to_text = self._load_page_texts(document, sorted_page_ids)
+        return self._format_document_text(sorted_page_ids, page_id_to_text)
 
     def _load_confidence_data(
         self, document: Document, sorted_page_ids: list[str]
@@ -1393,6 +1424,7 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
         temperature = self.config.extraction.temperature
         top_k = self.config.extraction.top_k
         top_p = self.config.extraction.top_p
+        reasoning_effort = self.config.extraction.reasoning_effort
         max_tokens = (
             self.config.extraction.max_tokens
             if self.config.extraction.max_tokens
@@ -1411,7 +1443,21 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
         schema_analysis: dict[str, Any] | None = None
         ocr_analysis: dict[str, Any] | None = None
 
-        if self.config.extraction.agentic.enabled:
+        # OpenAI GPT-5.x models are served via the bedrock-mantle Responses API
+        # and are incompatible with agentic (Strands) extraction, which relies on
+        # the Converse API. This combination is rejected at config-validate time;
+        # fail loudly here too rather than silently changing the extraction mode,
+        # so a config that bypassed validation surfaces the error immediately.
+        use_agentic = self.config.extraction.agentic.enabled
+        if use_agentic and is_openai_responses_model(model_id):
+            raise ValueError(
+                f"OpenAI Responses model '{model_id}' is not compatible with agentic "
+                "extraction (extraction.agentic.enabled=true). Set agentic.enabled=false "
+                "or choose a non-OpenAI model. (This is also enforced by "
+                "'idp-cli config-validate'.)"
+            )
+
+        if use_agentic:
             if not AGENTIC_AVAILABLE:
                 raise ImportError(
                     "Agentic extraction requires Python 3.12+ and strands-agents dependencies. "
@@ -1643,6 +1689,7 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
                 max_tokens=max_tokens,
                 context="Extraction",
                 model_lambda_hook_arn=self.config.extraction.model_lambda_hook_arn,
+                reasoning_effort=reasoning_effort,
             )
 
             extracted_text = bedrock.extract_text_from_response(
@@ -1659,6 +1706,36 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
 
             try:
                 extracted_fields = json.loads(extract_json_from_text(extracted_text))
+
+                # Handle case where LLM returns a single-element array instead of dict
+                # This happens when models mistakenly wrap the extraction in an array
+                if isinstance(extracted_fields, list):
+                    if len(extracted_fields) == 1:
+                        logger.warning(
+                            "LLM returned single-element array instead of object, unwrapping",
+                            extra={"original_type": "list", "element_count": 1},
+                        )
+                        extracted_fields = extracted_fields[0]
+                    elif len(extracted_fields) == 0:
+                        logger.error(
+                            "LLM returned empty array when single object expected",
+                            extra={"element_count": 0},
+                        )
+                        extracted_fields = {
+                            "error": "Received empty array instead of single object",
+                        }
+                        parsing_succeeded = False
+                    else:  # len > 1
+                        logger.error(
+                            "LLM returned multi-element array when single object expected",
+                            extra={"element_count": len(extracted_fields)},
+                        )
+                        extracted_fields = {
+                            "error": f"Received array with {len(extracted_fields)} elements instead of single object",
+                            "raw_array": extracted_fields,
+                        }
+                        parsing_succeeded = False
+
             except Exception as e:
                 logger.warning(
                     f"Error parsing LLM output - attempting JSON repair: {e}"
@@ -1671,13 +1748,42 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
                 if repaired_data:
                     # Repair succeeded
                     extracted_fields = repaired_data
+
+                    # Handle case where repaired data is also a single-element array
+                    if isinstance(extracted_fields, list):
+                        if len(extracted_fields) == 1:
+                            logger.warning(
+                                "Repaired JSON is single-element array, unwrapping",
+                                extra={"original_type": "list", "element_count": 1},
+                            )
+                            extracted_fields = extracted_fields[0]
+                        elif len(extracted_fields) == 0:
+                            logger.error(
+                                "Repaired JSON is empty array when single object expected",
+                                extra={"element_count": 0},
+                            )
+                            extracted_fields = {
+                                "error": "Repaired empty array instead of single object",
+                            }
+                            parsing_succeeded = False
+                        else:  # len > 1
+                            logger.error(
+                                "Repaired JSON is multi-element array when single object expected",
+                                extra={"element_count": len(extracted_fields)},
+                            )
+                            extracted_fields = {
+                                "error": f"Repaired array with {len(extracted_fields)} elements instead of single object",
+                                "raw_array": extracted_fields,
+                            }
+                            parsing_succeeded = False
+
                     output_repaired = True
                     repair_method = repair_info.get("repair_method")
-                    parsing_succeeded = True
-                    logger.info(
-                        f"JSON repair successful using '{repair_method}': "
-                        f"recovered {repair_info.get('fields_recovered', 0)} fields"
-                    )
+                    if parsing_succeeded:
+                        logger.info(
+                            f"JSON repair successful using '{repair_method}': "
+                            f"recovered {repair_info.get('fields_recovered', 0)} fields"
+                        )
                 else:
                     # Repair failed - store raw output
                     logger.error(
@@ -1701,6 +1807,66 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
             schema_analysis=schema_analysis,
             ocr_analysis=ocr_analysis,
         )
+
+    def _apply_missing_field_handling(
+        self,
+        extracted_fields: dict[str, Any],
+        class_schema: dict[str, Any],
+        section_info: SectionInfo,
+    ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+        """Mark or remove fields whose source pages were not present.
+
+        Returns the (possibly mutated) extracted_fields and a report listing
+        the fields treated as MISSING. When the feature is disabled, the
+        config doesn't declare page-types, or no top-level property has
+        ``x-aws-idp-source-page-types``, the input is returned unchanged
+        with an empty report.
+        """
+        cfg = self.config.extraction.missing_field_handling
+        presence = section_info.page_type_presence
+        if not cfg.enabled or presence is None or not presence.declared:
+            return extracted_fields, []
+
+        properties = class_schema.get(SCHEMA_PROPERTIES) or {}
+        if not properties:
+            return extracted_fields, []
+
+        present = presence.present_page_types
+        report: list[dict[str, Any]] = []
+        # Operate on a copy so we don't mutate the agent's result in place.
+        fields_out = dict(extracted_fields)
+
+        for prop_name, prop_schema in properties.items():
+            if not isinstance(prop_schema, dict):
+                continue
+            declared_pages = prop_schema.get(X_AWS_IDP_SOURCE_PAGE_TYPES)
+            if not declared_pages:
+                continue
+            if not isinstance(declared_pages, list):
+                logger.warning(
+                    "Property %s declares %s as %s; expected list — ignoring",
+                    prop_name,
+                    X_AWS_IDP_SOURCE_PAGE_TYPES,
+                    type(declared_pages).__name__,
+                )
+                continue
+            if any(p in present for p in declared_pages):
+                # At least one source page-type is present → field is BLANK
+                # if empty, not MISSING. Leave it alone.
+                continue
+            report.append(
+                {
+                    "field": prop_name,
+                    "reason": "page types not present",
+                    "expected_page_types": list(declared_pages),
+                }
+            )
+            if cfg.representation == "omit":
+                fields_out.pop(prop_name, None)
+            else:  # null_with_metadata
+                fields_out[prop_name] = None
+
+        return fields_out, report
 
     def _save_results(
         self,
@@ -1798,18 +1964,38 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
             metadata["output_repaired"] = True
             metadata["repair_method"] = result.repair_method
 
+        # Apply BLANK vs MISSING field handling (no-op unless configured + declared).
+        fields_for_output, missing_fields_report = self._apply_missing_field_handling(
+            result.extracted_fields,
+            self._class_schema,
+            section_info,
+        )
+
         # Generate user-friendly processing report
         processing_report = self._generate_processing_report(metadata)
         logger.info(f"Processing Report:\n{processing_report}")
 
         # Write to S3 with processing report
-        output = {
+        output: dict[str, Any] = {
             "document_class": {"type": section_info.class_label},
             "split_document": {"page_indices": section_info.page_indices},
-            "inference_result": result.extracted_fields,
+            "inference_result": fields_for_output,
             "metadata": metadata,
             "processing_report": processing_report,
         }
+        # Surface page-type resolution and the missing-field report when the
+        # feature is in use, so downstream consumers can act on the signal.
+        presence = section_info.page_type_presence
+        if presence is not None and presence.declared:
+            output["page_type_resolution"] = presence.to_output_dict()
+        if missing_fields_report:
+            output["missing_fields_report"] = missing_fields_report
+            if self.config.extraction.missing_field_handling.representation == (
+                "null_with_metadata"
+            ):
+                output["missing_fields"] = [
+                    entry["field"] for entry in missing_fields_report
+                ]
         s3.write_content(
             output,
             section_info.output_bucket,
@@ -1897,9 +2083,26 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
         try:
             t0 = time.time()
 
-            # Load document content
-            document_text = self._load_document_text(
+            # Load per-page text first so the page-type resolver and the
+            # prompt-formatter can both consume it without re-reading S3.
+            page_id_to_text = self._load_page_texts(
                 document, section_info.sorted_page_ids
+            )
+            class_schema_for_resolver = self._get_class_schema(section_info.class_label)
+            section_info.page_type_presence = resolve_page_types(
+                class_schema_for_resolver, page_id_to_text
+            )
+            if section_info.page_type_presence.declared:
+                logger.info(
+                    "Page-type resolution for section %s: present=%s missing=%s",
+                    section.section_id,
+                    sorted(section_info.page_type_presence.present_page_types),
+                    sorted(section_info.page_type_presence.missing_page_types),
+                )
+            document_text = self._format_document_text(
+                section_info.sorted_page_ids,
+                page_id_to_text,
+                section_info.page_type_presence,
             )
             page_images = self._load_document_images(
                 document, section_info.sorted_page_ids

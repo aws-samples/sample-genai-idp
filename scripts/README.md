@@ -7,7 +7,7 @@ This directory contains utility scripts for building, testing, deploying, and op
 ```
 scripts/
 ├── setup/               # Development environment setup scripts
-├── dsr/                 # DSR (Deliverable Security Review) integration
+├── srt/                 # SRT (Sample Security Review Tool) integration
 ├── sdlc/                # SDLC CI/CD scripts and infrastructure
 │   ├── cfn/             # CloudFormation templates for CI/CD pipeline
 │   └── [scripts]        # CI/CD automation scripts
@@ -19,8 +19,8 @@ scripts/
 ### `setup/` - Development Environment Setup
 Setup scripts for different operating systems. See [setup/README.md](setup/README.md).
 
-### `dsr/` - DSR Security Scanning
-DSR (Deliverable Security Review) integration for automated security scanning. See [dsr/README.md](dsr/README.md).
+### `srt/` - SRT Security Scanning
+SRT (Sample Security Review Tool) integration for automated security scanning. See [srt/README.md](srt/README.md).
 
 ### `sdlc/` - SDLC CI/CD Scripts and Infrastructure
 CloudFormation templates and scripts for CI/CD pipeline infrastructure.
@@ -39,7 +39,42 @@ See [sdlc/cfn/README.md](sdlc/cfn/README.md) for CloudFormation templates.
 
 | Script | Purpose | Usage |
 |--------|---------|-------|
+| `discover_model_limits.py` | Empirically test Bedrock model max_tokens limits | `python scripts/discover_model_limits.py` |
 | `generate_govcloud_template.py` | Generate GovCloud-compatible template (**deprecated** — use `idp-cli publish --headless`) | `idp-cli publish --source-dir . --region <region> --headless` |
+
+### Model Limit Discovery (`discover_model_limits.py`)
+
+Tests actual Bedrock API behavior to discover model `max_tokens` limits, then auto-generates `config_library/model_config_limits.yaml`.
+
+**Why:** Instead of trusting documentation, we verify limits empirically to prevent runtime failures.
+
+**Basic usage:**
+```bash
+# Test all supported models and generate config
+python scripts/discover_model_limits.py
+
+# Test specific models only
+python scripts/discover_model_limits.py \
+    --models "us.anthropic.claude-sonnet-4-20250514-v1:0"
+
+# Verbose mode
+python scripts/discover_model_limits.py --verbose
+```
+
+**When to use:**
+- Adding a new Bedrock model → Add to `DEFAULT_MODELS_TO_TEST`, run script, commit YAML
+- Verifying limits are accurate → Run with `--verbose` to see test results
+- Investigating one model → Use `--models` flag with specific model ID
+
+**How it works:**
+1. Progressively tests larger `max_tokens` values until API rejects it
+2. Catches `ValidationException` to identify exact limit
+3. Groups models by limit and creates regex patterns
+4. Generates YAML with test dates and verified limits
+
+**Requirements:** AWS credentials with Bedrock `InvokeModel` permissions
+
+**See also:** [Config Validation](../docs/config-validation.md)
 
 ## Operational Commands (via idp-cli)
 

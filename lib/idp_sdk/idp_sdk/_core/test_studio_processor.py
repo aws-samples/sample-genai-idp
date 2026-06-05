@@ -19,6 +19,9 @@ logger = logging.getLogger(__name__)
 class TestStudioProcessor:
     """Processes Test Studio operations (test result retrieval and comparison)."""
 
+    # Tell pytest not to collect this class as a test (name starts with "Test").
+    __test__ = False
+
     def __init__(self, stack_name: str, region: Optional[str] = None):
         """Initialize Test Studio processor.
 
@@ -255,3 +258,54 @@ class TestStudioProcessor:
 
         except Exception as e:
             raise IDPProcessingError(f"Failed to compare test runs: {e}") from e
+
+    def abort_test_runs(self, test_run_ids: List[str]) -> Dict:
+        """Abort one or more test runs.
+
+        Args:
+            test_run_ids: List of test run identifiers to abort
+
+        Returns:
+            Dictionary with abort results including counts and errors
+
+        Raises:
+            IDPProcessingError: If abort operation fails
+        """
+        # Get AbortTestRunsResolverFunction ARN from nested AppSync stack
+        try:
+            abort_function_arn = self.stack_info.get_nested_stack_output(
+                nested_stack_pattern="appsync",
+                output_key="AbortTestRunsResolverFunctionArn",
+            )
+        except IDPResourceNotFoundError:
+            raise IDPResourceNotFoundError(
+                "AbortTestRunsResolverFunction not found. "
+                "Ensure you are using a stack version that supports test run abort."
+            )
+
+        try:
+            # Invoke the abort resolver
+            payload = {
+                "info": {"fieldName": "abortTestRuns"},
+                "arguments": {"testRunIds": test_run_ids},
+            }
+
+            response = self.lambda_client.invoke(
+                FunctionName=abort_function_arn,
+                InvocationType="RequestResponse",
+                Payload=json.dumps(payload),
+            )
+
+            result = json.loads(response["Payload"].read())
+
+            if "errorMessage" in result:
+                raise IDPProcessingError(f"Abort failed: {result['errorMessage']}")
+
+            logger.info(
+                f"Aborted {result.get('abortedCount', 0)} test runs, "
+                f"{result.get('failedCount', 0)} failed"
+            )
+            return result
+
+        except Exception as e:
+            raise IDPProcessingError(f"Failed to abort test runs: {e}") from e

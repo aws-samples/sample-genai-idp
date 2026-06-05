@@ -2,6 +2,12 @@ notes: >-
   AFH workshop configuration - processes healthcare documents - converted format
   with LLM evaluation
 
+chat:
+  # Chat-with-Document: inherits defaults from system base-chat.yaml.
+  # Uncomment and set 'model:' here to override the default chat model
+  # for documents processed with this configuration version.
+  enabled: true
+
 classes:
   - $schema: https://json-schema.org/draft/2020-12/schema
     $defs:

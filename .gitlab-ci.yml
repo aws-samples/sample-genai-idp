@@ -22,6 +22,7 @@ stages:
   - developer_tests
   - deployment_validation
   - integration_tests
+  - security_review
 
 developer_tests:
   stage: developer_tests
@@ -115,7 +116,7 @@ integration_tests:
       when: manual
     - if: $CI_COMMIT_BRANCH =~ /^release\/.*/
       when: manual
-    - when: manual
+    - when: never
 
   before_script:
     - apt-get update -y
@@ -192,4 +193,55 @@ integration_tests:
     paths:
       - pipeline_execution_id.txt
       - codebuild_logs.txt
+    expire_in: 1 week
+
+srt_security_review:
+  stage: security_review
+  timeout: 30m  # SRT scan typically takes 5-10 minutes
+
+  # Use runner with more memory for SRT security scanning
+  # saas-linux-medium-amd64: 4 vCPUs, 16 GB RAM
+  tags:
+    - size:large
+
+  # Only run on merge requests targeting develop branch
+  rules:
+    - if: $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "develop"
+      when: on_success
+    - when: never
+
+  before_script:
+    - python --version
+    - apt-get update -y
+    - apt-get install curl python3-pip -y
+    # Install Python dependencies for SRT setup script
+    - pip install --upgrade pip
+
+  script:
+    - echo "Running SRT (Sample Security Review Tool) security assessment..."
+    - echo "This stage only runs on merge requests targeting develop branch"
+    - make srt-setup
+    - make srt-scan
+
+  after_script:
+    - |
+      if [ -d ".srt" ]; then
+        echo "SRT assessment completed"
+        # Copy SRT reports to artifacts root for easy access
+        [ -f ".srt/issues.json" ] && cp .srt/issues.json srt-issues.json
+        [ -f ".srt/dashboard.html" ] && cp .srt/dashboard.html srt-dashboard.html
+        [ -f ".srt/bandit-summary.json" ] && cp .srt/bandit-summary.json srt-bandit-summary.json
+        [ -f ".srt/syft-summary.json" ] && cp .srt/syft-summary.json srt-syft-summary.json
+        echo "✓ SRT reports captured for download"
+      fi
+
+  artifacts:
+    when: always
+    paths:
+      - srt-issues.json
+      - srt-dashboard.html
+      - srt-bandit-summary.json
+      - srt-syft-summary.json
+    reports:
+      # Future: Add security scanning report format when GitLab supports it
     expire_in: 1 week

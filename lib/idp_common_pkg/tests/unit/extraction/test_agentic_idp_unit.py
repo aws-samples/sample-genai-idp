@@ -256,6 +256,17 @@ class TestBuildModelConfig:
         )
         assert config["max_tokens"] == 8_192
 
+    def test_openai_responses_model_rejected(self):
+        """OpenAI GPT-5.x models cannot use the agentic/Strands path."""
+        with pytest.raises(ValueError, match="do not support agentic"):
+            _build_model_config(
+                "openai.gpt-5.4",
+                max_tokens=None,
+                max_retries=3,
+                connect_timeout=10.0,
+                read_timeout=300.0,
+            )
+
     def test_max_tokens_respected_when_under_limit(self):
         config = _build_model_config(
             "us.anthropic.claude-sonnet-4-20250514-v1:0",

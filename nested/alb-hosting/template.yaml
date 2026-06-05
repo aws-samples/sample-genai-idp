@@ -4,6 +4,12 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: AWS GenAI IDP Accelerator - ALB hosting nested stack
 
+Metadata:
+  cfn-lint:
+    config:
+      ignore_checks:
+        - E3002  # ALB ListenerRule "Transforms" property (host-header-rewrite) not yet in cfn-lint schema
+
 Parameters:
   VpcId:
     Type: AWS::EC2::VPC::Id
@@ -47,8 +53,21 @@ Parameters:
     Type: String
     Description: S3 bucket name for ALB access logs
 
+  LambdaSecurityGroupId:
+    Type: String
+    Default: ""
+    Description: >-
+      Optional. The Lambda VPC security group used by app Lambdas. When set,
+      this stack adds a 443 ingress rule on the S3 VPC Endpoint security group
+      from the Lambda SG so that VPC-resident Lambdas (presigner resolvers,
+      ConfigurationCopy custom resource, fcc dataset deployer, etc.) can
+      reach S3 through this same VPC Endpoint instead of needing a separate
+      VPCE. Required in private mode when DeployInVPC=true; leave empty if
+      Lambdas don't run in the VPC.
+
 Conditions:
   HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
+  HasLambdaSecurityGroup: !Not [!Equals [!Ref LambdaSecurityGroupId, ""]]
 
 Resources:
   ##########################################################################
@@ -261,12 +280,51 @@ Resources:
       DestinationSecurityGroupId: !Ref EndpointSecurityGroup
       Description: "Allow HTTPS to S3 VPC endpoint security group"
 
+  # In private mode, app Lambdas reach S3 through this same VPCE (presigner
+  # resolvers issue presigned URLs whose host is the VPCE bucket-vhost; the
+  # ConfigurationCopy / fcc-dataset-deployer custom resources also use the
+  # VPCE as their boto3 endpoint_url). Open 443 from the Lambda SG to the
+  # endpoint SG so those calls don't connect-timeout.
+  LambdaToEndpointIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Condition: HasLambdaSecurityGroup
+    Properties:
+      GroupId: !Ref EndpointSecurityGroup
+      IpProtocol: tcp
+      FromPort: 443
+      ToPort: 443
+      SourceSecurityGroupId: !Ref LambdaSecurityGroupId
+      Description: "Allow HTTPS from app Lambda security group"
+
+  LambdaToEndpointEgress:
+    Type: AWS::EC2::SecurityGroupEgress
+    Condition: HasLambdaSecurityGroup
+    Properties:
+      GroupId: !Ref LambdaSecurityGroupId
+      IpProtocol: tcp
+      FromPort: 443
+      ToPort: 443
+      DestinationSecurityGroupId: !Ref EndpointSecurityGroup
+      Description: "Allow HTTPS to S3 VPC endpoint security group"
+
   ##########################################################################
   # S3 Interface VPC Endpoint
   ##########################################################################
 
   S3InterfaceEndpoint:
     Type: AWS::EC2::VPCEndpoint
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W76
+            reason: >-
+              Wildcard Resource (arn:*:s3:::*) is required because the parent stack
+              creates all application buckets after this nested stack — enumerating
+              them would create a cyclic dependency. Access is scoped by: (1) finite
+              action list, (2) aws:PrincipalAccount + aws:ResourceAccount conditions
+              restricting to same-account only, (3) endpoint security group limiting
+              traffic to ALB/Lambda SGs, (4) IAM execution-role policies, (5) bucket
+              policies on each application bucket.
     Properties:
       VpcEndpointType: Interface
       ServiceName: !Sub "com.amazonaws.${AWS::Region}.s3"
@@ -275,6 +333,18 @@ Resources:
       SecurityGroupIds:
         - !Ref EndpointSecurityGroup
       PrivateDnsEnabled: false
+      # Scoped endpoint policy: restricts S3 actions to only what's needed.
+      # The ALB serves static WebUI content (unsigned requests) and Lambda
+      # functions generate presigned URLs for browser uploads (signed).
+      #
+      # Why we don't enumerate all app buckets: the IDP parent stack creates
+      # the bucket resources (Input, Output, Working, Configuration, etc.)
+      # AFTER it creates this nested stack — passing the names down would
+      # create a cyclic CloudFormation dependency. Bucket-level access is
+      # still enforced at three other layers:
+      #   1. Endpoint security group (only ALB SG + Lambda SG → 443)
+      #   2. Lambda execution-role IAM policies (least-privilege per function)
+      #   3. S3 bucket policies (restrict access to authorized principals)
       PolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -292,6 +362,23 @@ Resources:
               - "s3:ListBucket"
             Resource:
               - !Sub "arn:${AWS::Partition}:s3:::${WebUIBucketName}"
+          - Sid: AllowSameAccountS3Operations
+            Effect: Allow
+            Principal: "*"
+            Action:
+              - "s3:GetObject"
+              - "s3:PutObject"
+              - "s3:AbortMultipartUpload"
+              - "s3:ListBucket"
+              - "s3:GetBucketLocation"
+              - "s3:ListMultipartUploadParts"
+              - "s3:DeleteObject"
+            Resource:
+              - !Sub "arn:${AWS::Partition}:s3:::*"
+            Condition:
+              StringEquals:
+                aws:PrincipalAccount: !Ref AWS::AccountId
+                aws:ResourceAccount: !Ref AWS::AccountId
 
   ##########################################################################
   # ALB Target Group & Target Registration
@@ -528,7 +615,12 @@ Resources:
         - Type: url-rewrite
           UrlRewriteConfig:
             Rewrites:
-              - Regex: "^/$"
+              # The url-rewrite regex matches against path + query string.
+              # Matching only the leading "/" leaves the query string intact,
+              # which is required for OAuth callbacks ("/?code=...&state=...").
+              # "^/$" does not match when a query string is present, causing
+              # S3 to see a bare "GET /" (ListBucket) and return AccessDenied.
+              - Regex: "^/"
                 Replace: "/index.html"
 
   # Rule 2: All other paths - serve static assets (JS, CSS, images, fonts, etc.)
@@ -569,6 +661,27 @@ Outputs:
   S3VPCEndpointId:
     Description: S3 VPC Interface Endpoint ID
     Value: !Ref S3InterfaceEndpoint
+
+  S3VPCEndpointDnsName:
+    Description: >-
+      Regional DNS name of the S3 Interface VPC Endpoint, with the AWS-assigned
+      random suffix and the leading "*." stripped. Use this (not just the
+      endpoint id) to build presigned URL hosts in the form
+      "bucket.<this-value>" so that DNS resolution succeeds for browser uploads.
+    # DnsEntries format: ["Z1234:*.bucket.vpce-0abc123.s3.us-east-1.vpce.amazonaws.com", ...]
+    # Step 1: Select first entry → "Z1234:*.bucket.vpce-0abc123.s3.us-east-1.vpce.amazonaws.com"
+    # Step 2: Split on ":" and take index 1 → "*.bucket.vpce-0abc123.s3.us-east-1.vpce.amazonaws.com"
+    # Step 3: Split on "*." and take index 1 → "bucket.vpce-0abc123.s3.us-east-1.vpce.amazonaws.com"
+    # Result is used as: <bucket-name>.<this-value> for presigned URL endpoint_url
+    Value: !Select
+      - 1
+      - !Split
+        - "*."
+        - !Select
+          - 1
+          - !Split
+            - ":"
+            - !Select [0, !GetAtt S3InterfaceEndpoint.DnsEntries]
 
   ALBHostedZoneID:
     Description: ALB Canonical Hosted Zone ID (for Route53 alias records)

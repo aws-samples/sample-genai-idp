@@ -7,6 +7,12 @@ use_bda: false
 
 notes: "Bank statement sample settings. Set use_bda: true for BDA mode."
 
+chat:
+  # Chat-with-Document: inherits defaults from system base-chat.yaml.
+  # Uncomment and set 'model:' here to override the default chat model
+  # for documents processed with this configuration version.
+  enabled: true
+
 classes:
   - $schema: https://json-schema.org/draft/2020-12/schema
     $id: Bank Statement
@@ -69,25 +75,55 @@ classes:
         required:
           - Street Name
           - City
+    # ------------------------------------------------------------------
+    # Optional: declare named page sub-types this class can include, plus
+    # which property each page contains. When `extraction.missing_field_handling.enabled`
+    # is true (see bottom of file), properties whose declared source page
+    # types are NOT detected in a section are treated as MISSING (omitted
+    # or null'd) rather than left silently empty.
+    # See docs/missing-page-handling.md for details.
+    # ------------------------------------------------------------------
+    # x-aws-idp-page-types:
+    #   - name: AccountSummary
+    #     description: First page with account holder + summary
+    #     x-aws-idp-document-page-content-regex: "(?i)account summary|statement period"
+    #   - name: TransactionsWorksheet
+    #     description: Transactions ledger
+    #     x-aws-idp-document-page-content-regex: "(?i)transactions? (history|detail)"
     properties:
       Account Holder Address:
         description: Complete address information for the account holder
         $ref: "#/$defs/Account Holder Address"
+        # x-aws-idp-source-page-types: ["AccountSummary"]
       Transactions:
         description: List of all transactions in the statement period
         type: array
         x-aws-idp-list-item-description: Individual transaction record
         items:
           $ref: "#/$defs/Transaction"
+        # x-aws-idp-source-page-types: ["TransactionsWorksheet"]
       Account Number:
         type: string
         description: Primary account identifier
         x-aws-idp-evaluation-method: EXACT
+        # x-aws-idp-source-page-types: ["AccountSummary"]
       Statement Period:
         type: string
         description: Statement period (e.g., January 2024)
         x-aws-idp-evaluation-method: FUZZY
+        # x-aws-idp-source-page-types: ["AccountSummary"]
     required:
       - Account Number
+
+# ----------------------------------------------------------------------
+# Optional: enable BLANK vs MISSING field handling. Off by default so
+# behavior matches earlier versions. Uncomment AND uncomment the
+# x-aws-idp-page-types / x-aws-idp-source-page-types stanzas above to
+# activate.
+# ----------------------------------------------------------------------
+# extraction:
+#   missing_field_handling:
+#     enabled: true
+#     representation: omit  # or "null_with_metadata"
 rule_validation:
   enabled: false

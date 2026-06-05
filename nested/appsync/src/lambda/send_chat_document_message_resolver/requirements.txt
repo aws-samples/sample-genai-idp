@@ -1,0 +1,2 @@
+# No idp_common dependency — this resolver is intentionally minimal.
+# boto3 and botocore are provided by the Lambda runtime.

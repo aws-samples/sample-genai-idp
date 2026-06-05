@@ -17,14 +17,20 @@ const {
   VITE_CLOUDFRONT_DOMAIN,
 } = import.meta.env;
 
-// Build OAuth config only when an external IdP is configured
+// Build OAuth config only when an external IdP is configured.
+// Cognito matches redirect_uri case-sensitively against its registered
+// callback/logout URLs, but browsers normalize the host portion of a URL
+// to lowercase. Lowercasing the full URL keeps Amplify's request aligned
+// with what the browser actually presents (ALB DNS names embed the stack
+// name and can otherwise be mixed-case).
+const redirectUrl = (VITE_CLOUDFRONT_DOMAIN || window.location.origin + '/').toLowerCase();
 const oauthConfig =
   VITE_EXTERNAL_IDP_NAME && VITE_COGNITO_DOMAIN
     ? {
         domain: VITE_COGNITO_DOMAIN,
         scope: ['openid', 'email', 'phone', 'profile'],
-        redirectSignIn: VITE_CLOUDFRONT_DOMAIN || window.location.origin + '/',
-        redirectSignOut: VITE_CLOUDFRONT_DOMAIN || window.location.origin + '/',
+        redirectSignIn: redirectUrl,
+        redirectSignOut: redirectUrl,
         responseType: 'code',
       }
     : {};

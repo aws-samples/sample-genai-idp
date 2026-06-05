@@ -98,6 +98,17 @@ export type CapacityResult = {
   success: Scalars['Boolean']['output'];
 };
 
+export type ChatDocumentMessage = {
+  content: Scalars['String']['output'];
+  isProcessing?: Maybe<Scalars['Boolean']['output']>;
+  method?: Maybe<Scalars['String']['output']>;
+  modelId?: Maybe<Scalars['String']['output']>;
+  role: Scalars['String']['output'];
+  sessionId: Scalars['String']['output'];
+  status?: Maybe<Scalars['String']['output']>;
+  timestamp: Scalars['String']['output'];
+};
+
 export type ChatSession = {
   createdAt: Scalars['AWSDateTime']['output'];
   lastMessage?: Maybe<Scalars['String']['output']>;
@@ -110,6 +121,16 @@ export type ChatSession = {
 export type ChatSessionConnection = {
   items?: Maybe<Array<Maybe<ChatSession>>>;
   nextToken?: Maybe<Scalars['String']['output']>;
+};
+
+export type CircuitBreakerStatus = {
+  enabled: Scalars['Boolean']['output'];
+  failureCount?: Maybe<Scalars['Int']['output']>;
+  lastCheckedAt?: Maybe<Scalars['AWSDateTime']['output']>;
+  lastError?: Maybe<Scalars['String']['output']>;
+  openedAt?: Maybe<Scalars['AWSDateTime']['output']>;
+  recoveryAttempts?: Maybe<Scalars['Int']['output']>;
+  state?: Maybe<Scalars['String']['output']>;
 };
 
 export type ConfidenceThresholdAlert = {
@@ -306,6 +327,11 @@ export type Document = DynamoDbBase & {
   WorkflowStatus?: Maybe<Scalars['String']['output']>;
 };
 
+export type DocumentClassType =
+  | 'MULTI_CLASS'
+  | 'PACKET_SPLITTING'
+  | 'SINGLE_CLASS';
+
 export type DocumentCount = {
   count: Scalars['Int']['output'];
 };
@@ -416,6 +442,13 @@ export type LatencyDistribution = {
   totalLatency?: Maybe<Scalars['String']['output']>;
 };
 
+export type LatestPublishedVersion = {
+  checkEnabled: Scalars['Boolean']['output'];
+  errorMessage?: Maybe<Scalars['String']['output']>;
+  latestVersion?: Maybe<Scalars['String']['output']>;
+  templateUrl?: Maybe<Scalars['String']['output']>;
+};
+
 export type MessageContent = {
   text?: Maybe<Scalars['String']['output']>;
 };
@@ -451,6 +484,7 @@ export type MultiDocDiscoveryJob = {
 };
 
 export type Mutation = {
+  abortTestRuns: AbortWorkflowResponse;
   abortWorkflow: AbortWorkflowResponse;
   addDocumentsToTestSet?: Maybe<TestSet>;
   addDocumentsToTestSetFromUpload?: Maybe<TestSetUploadResponse>;
@@ -472,11 +506,16 @@ export type Mutation = {
   deleteTestSets: Scalars['Boolean']['output'];
   deleteTests: Scalars['Boolean']['output'];
   deleteUser?: Maybe<Scalars['Boolean']['output']>;
+  pauseCircuitBreaker?: Maybe<CircuitBreakerStatus>;
+  probeCircuitBreaker?: Maybe<CircuitBreakerStatus>;
   processChanges: ProcessChangesResponse;
+  publishCircuitBreakerStatus?: Maybe<CircuitBreakerStatus>;
   releaseReview?: Maybe<Document>;
   reprocessDocument: Scalars['Boolean']['output'];
   restoreDefaultPricing?: Maybe<UpdatePricingResponse>;
+  resumeCircuitBreaker?: Maybe<CircuitBreakerStatus>;
   sendAgentChatMessage?: Maybe<AgentChatMessage>;
+  sendChatDocumentMessage?: Maybe<ChatDocumentMessage>;
   setActiveVersion?: Maybe<UpdateConfigurationResponse>;
   skipAllSectionsReview?: Maybe<Document>;
   startMultiDocDiscovery?: Maybe<MultiDocDiscoveryJob>;
@@ -492,10 +531,16 @@ export type Mutation = {
   updateDocumentStatus?: Maybe<Document>;
   updateFinetuningJobStatus?: Maybe<FinetuningJob>;
   updatePricing?: Maybe<UpdatePricingResponse>;
+  updateTestSet?: Maybe<TestSet>;
   updateUser?: Maybe<User>;
   uploadDiscoveryDocument: DisPresignedUrlResponse;
   uploadDocument: PresignedUrlResponse;
   uploadMultiDocDiscoveryZip?: Maybe<TestSetUploadResponse>;
+};
+
+
+export type MutationAbortTestRunsArgs = {
+  testRunIds: Array<Scalars['String']['input']>;
 };
 
 
@@ -521,6 +566,7 @@ export type MutationAddDocumentsToTestSetFromUploadArgs = {
 export type MutationAddTestSetArgs = {
   bucketType: Scalars['String']['input'];
   description?: InputMaybe<Scalars['String']['input']>;
+  documentClassType?: InputMaybe<DocumentClassType>;
   fileCount: Scalars['Int']['input'];
   filePattern: Scalars['String']['input'];
   modifiedAfter?: InputMaybe<Scalars['String']['input']>;
@@ -619,10 +665,25 @@ export type MutationDeleteUserArgs = {
 };
 
 
+export type MutationPauseCircuitBreakerArgs = {
+  reason: Scalars['String']['input'];
+};
+
+
+export type MutationProbeCircuitBreakerArgs = {
+  reason: Scalars['String']['input'];
+};
+
+
 export type MutationProcessChangesArgs = {
   modifiedPages?: InputMaybe<Array<ModifiedPageInput>>;
   modifiedSections: Array<ModifiedSectionInput>;
   objectKey: Scalars['String']['input'];
+};
+
+
+export type MutationPublishCircuitBreakerStatusArgs = {
+  status: Scalars['AWSJSON']['input'];
 };
 
 
@@ -637,12 +698,31 @@ export type MutationReprocessDocumentArgs = {
 };
 
 
+export type MutationResumeCircuitBreakerArgs = {
+  reason: Scalars['String']['input'];
+};
+
+
 export type MutationSendAgentChatMessageArgs = {
   enableCodeIntelligence?: InputMaybe<Scalars['Boolean']['input']>;
   method?: InputMaybe<Scalars['String']['input']>;
   prompt: Scalars['String']['input'];
   sessionId?: InputMaybe<Scalars['String']['input']>;
   toolMetadata?: InputMaybe<ToolMetadataInput>;
+};
+
+
+export type MutationSendChatDocumentMessageArgs = {
+  content?: InputMaybe<Scalars['String']['input']>;
+  isProcessing?: InputMaybe<Scalars['Boolean']['input']>;
+  method?: InputMaybe<Scalars['String']['input']>;
+  modelId?: InputMaybe<Scalars['String']['input']>;
+  prompt: Scalars['String']['input'];
+  role?: InputMaybe<Scalars['String']['input']>;
+  s3Uri?: InputMaybe<Scalars['String']['input']>;
+  sessionId: Scalars['String']['input'];
+  status?: InputMaybe<Scalars['String']['input']>;
+  timestamp?: InputMaybe<Scalars['String']['input']>;
 };
 
 
@@ -749,6 +829,11 @@ export type MutationUpdatePricingArgs = {
 };
 
 
+export type MutationUpdateTestSetArgs = {
+  input: UpdateTestSetInput;
+};
+
+
 export type MutationUpdateUserArgs = {
   allowedConfigVersions?: InputMaybe<Array<InputMaybe<Scalars['String']['input']>>>;
   userId: Scalars['ID']['input'];
@@ -828,11 +913,11 @@ export type ProcessChangesResponse = {
 
 export type Query = {
   calculateCapacity?: Maybe<CapacityResult>;
-  chatWithDocument?: Maybe<Scalars['String']['output']>;
   compareTestRuns?: Maybe<TestRunComparison>;
   getAgentChatMessages?: Maybe<Array<Maybe<AgentChatMessage>>>;
   getAgentJobStatus?: Maybe<AgentJob>;
   getChatMessages?: Maybe<Array<Maybe<AgentChatMessage>>>;
+  getCircuitBreakerStatus?: Maybe<CircuitBreakerStatus>;
   getConfigVersion?: Maybe<ConfigurationResponse>;
   getConfigVersions?: Maybe<ConfigurationVersionsResponse>;
   getConfigurationLibraryFile?: Maybe<ConfigurationLibraryFileResponse>;
@@ -840,6 +925,7 @@ export type Query = {
   getDocumentCount?: Maybe<DocumentCount>;
   getFileContents?: Maybe<FileContentsResponse>;
   getFinetuningJob?: Maybe<FinetuningJob>;
+  getLatestPublishedVersion?: Maybe<LatestPublishedVersion>;
   getMyProfile?: Maybe<User>;
   getPricing?: Maybe<PricingResponse>;
   getStepFunctionExecution?: Maybe<StepFunctionExecutionResponse>;
@@ -869,14 +955,6 @@ export type Query = {
 
 export type QueryCalculateCapacityArgs = {
   input: Scalars['String']['input'];
-};
-
-
-export type QueryChatWithDocumentArgs = {
-  history: Scalars['AWSJSON']['input'];
-  modelId: Scalars['String']['input'];
-  prompt: Scalars['String']['input'];
-  s3Uri: Scalars['String']['input'];
 };
 
 
@@ -1094,6 +1172,8 @@ export type StepFunctionExecutionStep = {
 export type Subscription = {
   onAgentChatMessageUpdate?: Maybe<AgentChatMessage>;
   onAgentJobComplete?: Maybe<Scalars['Boolean']['output']>;
+  onChatDocumentMessageUpdate?: Maybe<ChatDocumentMessage>;
+  onCircuitBreakerStatusChange?: Maybe<CircuitBreakerStatus>;
   onCreateDocument?: Maybe<CreateDocumentOutput>;
   onDiscoveryJobStatusChange?: Maybe<DiscoveryJob>;
   onUpdateDocument?: Maybe<Document>;
@@ -1107,6 +1187,11 @@ export type SubscriptionOnAgentChatMessageUpdateArgs = {
 
 export type SubscriptionOnAgentJobCompleteArgs = {
   jobId: Scalars['ID']['input'];
+};
+
+
+export type SubscriptionOnChatDocumentMessageUpdateArgs = {
+  sessionId: Scalars['String']['input'];
 };
 
 
@@ -1129,6 +1214,7 @@ export type TestRun = {
   averageConfidence?: Maybe<Scalars['Float']['output']>;
   completedAt?: Maybe<Scalars['AWSDateTime']['output']>;
   completedFiles?: Maybe<Scalars['Int']['output']>;
+  confidenceMetrics?: Maybe<Scalars['AWSJSON']['output']>;
   config?: Maybe<Scalars['AWSJSON']['output']>;
   configVersion?: Maybe<Scalars['String']['output']>;
   confusionMatrix?: Maybe<Scalars['AWSJSON']['output']>;
@@ -1173,6 +1259,7 @@ export type TestRunStatus = {
 export type TestSet = {
   createdAt: Scalars['AWSDateTime']['output'];
   description?: Maybe<Scalars['String']['output']>;
+  documentClassType?: Maybe<DocumentClassType>;
   error?: Maybe<Scalars['String']['output']>;
   fileCount?: Maybe<Scalars['Int']['output']>;
   filePattern?: Maybe<Scalars['String']['output']>;
@@ -1190,6 +1277,7 @@ export type TestSetDocumentsUploadInput = {
 
 export type TestSetUploadInput = {
   description?: InputMaybe<Scalars['String']['input']>;
+  documentClassType?: InputMaybe<DocumentClassType>;
   fileName: Scalars['String']['input'];
   fileSize: Scalars['Int']['input'];
 };
@@ -1291,6 +1379,12 @@ export type UpdatePricingResponse = {
   success: Scalars['Boolean']['output'];
 };
 
+export type UpdateTestSetInput = {
+  description?: InputMaybe<Scalars['String']['input']>;
+  documentClassType?: InputMaybe<DocumentClassType>;
+  id: Scalars['String']['input'];
+};
+
 export type User = {
   allowedConfigVersions?: Maybe<Array<Maybe<Scalars['String']['output']>>>;
   createdAt?: Maybe<Scalars['AWSDateTime']['output']>;
@@ -1309,6 +1403,13 @@ export type ValidationError = {
   message?: Maybe<Scalars['String']['output']>;
   type?: Maybe<Scalars['String']['output']>;
 };
+
+export type AbortTestRunsMutationVariables = Exact<{
+  testRunIds: Array<Scalars['String']['input']> | Scalars['String']['input'];
+}>;
+
+
+export type AbortTestRunsMutation = { abortTestRuns: { success: boolean, message?: string | null, abortedCount?: number | null, failedCount?: number | null, errors?: Array<string | null> | null } };
 
 export type AbortWorkflowMutationVariables = Exact<{
   objectKeys: Array<Scalars['String']['input']> | Scalars['String']['input'];
@@ -1342,10 +1443,11 @@ export type AddTestSetMutationVariables = Exact<{
   bucketType: Scalars['String']['input'];
   fileCount: Scalars['Int']['input'];
   modifiedAfter?: InputMaybe<Scalars['String']['input']>;
+  documentClassType?: InputMaybe<DocumentClassType>;
 }>;
 
 
-export type AddTestSetMutation = { addTestSet?: { id: string, name: string, description?: string | null, filePattern?: string | null, fileCount?: number | null, createdAt: string } | null };
+export type AddTestSetMutation = { addTestSet?: { id: string, name: string, description?: string | null, filePattern?: string | null, fileCount?: number | null, createdAt: string, documentClassType?: DocumentClassType | null } | null };
 
 export type AddTestSetFromUploadMutationVariables = Exact<{
   input: TestSetUploadInput;
@@ -1465,6 +1567,20 @@ export type DeleteUserMutationVariables = Exact<{
 
 export type DeleteUserMutation = { deleteUser?: boolean | null };
 
+export type PauseCircuitBreakerMutationVariables = Exact<{
+  reason: Scalars['String']['input'];
+}>;
+
+
+export type PauseCircuitBreakerMutation = { pauseCircuitBreaker?: { enabled: boolean, state?: string | null, openedAt?: string | null, lastCheckedAt?: string | null, failureCount?: number | null, recoveryAttempts?: number | null, lastError?: string | null } | null };
+
+export type ProbeCircuitBreakerMutationVariables = Exact<{
+  reason: Scalars['String']['input'];
+}>;
+
+
+export type ProbeCircuitBreakerMutation = { probeCircuitBreaker?: { enabled: boolean, state?: string | null, openedAt?: string | null, lastCheckedAt?: string | null, failureCount?: number | null, recoveryAttempts?: number | null, lastError?: string | null } | null };
+
 export type ProcessChangesMutationVariables = Exact<{
   objectKey: Scalars['String']['input'];
   modifiedSections: Array<ModifiedSectionInput> | ModifiedSectionInput;
@@ -1494,6 +1610,13 @@ export type RestoreDefaultPricingMutationVariables = Exact<{ [key: string]: neve
 
 export type RestoreDefaultPricingMutation = { restoreDefaultPricing?: { success: boolean, message?: string | null, error?: { type?: string | null, message?: string | null } | null } | null };
 
+export type ResumeCircuitBreakerMutationVariables = Exact<{
+  reason: Scalars['String']['input'];
+}>;
+
+
+export type ResumeCircuitBreakerMutation = { resumeCircuitBreaker?: { enabled: boolean, state?: string | null, openedAt?: string | null, lastCheckedAt?: string | null, failureCount?: number | null, recoveryAttempts?: number | null, lastError?: string | null } | null };
+
 export type SendAgentChatMessageMutationVariables = Exact<{
   prompt: Scalars['String']['input'];
   sessionId?: InputMaybe<Scalars['String']['input']>;
@@ -1504,6 +1627,22 @@ export type SendAgentChatMessageMutationVariables = Exact<{
 
 
 export type SendAgentChatMessageMutation = { sendAgentChatMessage?: { role: string, content: string, timestamp: string, isProcessing?: boolean | null, sessionId?: string | null, messageType?: string | null, toolMetadata?: { toolName?: string | null, toolUseId?: string | null } | null } | null };
+
+export type SendChatDocumentMessageMutationVariables = Exact<{
+  sessionId: Scalars['String']['input'];
+  prompt: Scalars['String']['input'];
+  method?: InputMaybe<Scalars['String']['input']>;
+  s3Uri?: InputMaybe<Scalars['String']['input']>;
+  modelId?: InputMaybe<Scalars['String']['input']>;
+  status?: InputMaybe<Scalars['String']['input']>;
+  timestamp?: InputMaybe<Scalars['String']['input']>;
+  content?: InputMaybe<Scalars['String']['input']>;
+  role?: InputMaybe<Scalars['String']['input']>;
+  isProcessing?: InputMaybe<Scalars['Boolean']['input']>;
+}>;
+
+
+export type SendChatDocumentMessageMutation = { sendChatDocumentMessage?: { sessionId: string, role: string, content: string, timestamp: string, method?: string | null, status?: string | null, modelId?: string | null, isProcessing?: boolean | null } | null };
 
 export type SetActiveVersionMutationVariables = Exact<{
   versionName: Scalars['String']['input'];
@@ -1572,6 +1711,13 @@ export type UpdatePricingMutationVariables = Exact<{
 
 export type UpdatePricingMutation = { updatePricing?: { success: boolean, message?: string | null, error?: { type?: string | null, message?: string | null } | null } | null };
 
+export type UpdateTestSetMutationVariables = Exact<{
+  input: UpdateTestSetInput;
+}>;
+
+
+export type UpdateTestSetMutation = { updateTestSet?: { id: string, name: string, description?: string | null, filePattern?: string | null, fileCount?: number | null, status?: string | null, createdAt: string, error?: string | null, lastAddResult?: string | null, documentClassType?: DocumentClassType | null } | null };
+
 export type UpdateUserMutationVariables = Exact<{
   userId: Scalars['ID']['input'];
   allowedConfigVersions?: InputMaybe<Array<InputMaybe<Scalars['String']['input']>> | InputMaybe<Scalars['String']['input']>>;
@@ -1623,16 +1769,6 @@ export type CalculateCapacityQueryVariables = Exact<{
 
 export type CalculateCapacityQuery = { calculateCapacity?: { success: boolean, errorMessage?: string | null, recommendations?: Array<string | null> | null, metrics?: Array<{ label: string, value: string } | null> | null, quotaRequirements?: Array<{ service: string, category: string, currentQuota: string, requiredQuota: string, statusText: string, modelId?: string | null } | null> | null, latencyDistribution?: { p50?: string | null, p75?: string | null, p90?: string | null, p95?: string | null, p99?: string | null, procP50?: string | null, procP75?: string | null, procP90?: string | null, procP95?: string | null, procP99?: string | null, queueP50?: string | null, queueP75?: string | null, queueP90?: string | null, queueP95?: string | null, queueP99?: string | null, baseLatency?: string | null, queueLatency?: string | null, totalLatency?: string | null, exceedsLimit?: boolean | null, maxAllowed?: string | null } | null, calculationDetails?: { quotasUsed?: { bedrock_models?: string | null } | null } | null } | null };
 
-export type ChatWithDocumentQueryVariables = Exact<{
-  s3Uri: Scalars['String']['input'];
-  prompt: Scalars['String']['input'];
-  history: Scalars['AWSJSON']['input'];
-  modelId: Scalars['String']['input'];
-}>;
-
-
-export type ChatWithDocumentQuery = { chatWithDocument?: string | null };
-
 export type CompareTestRunsQueryVariables = Exact<{
   testRunIds: Array<Scalars['String']['input']> | Scalars['String']['input'];
 }>;
@@ -1653,6 +1789,11 @@ export type GetChatMessagesQueryVariables = Exact<{
 
 
 export type GetChatMessagesQuery = { getChatMessages?: Array<{ role: string, content: string, timestamp: string, isProcessing?: boolean | null, sessionId?: string | null, messageType?: string | null, toolMetadata?: { toolName?: string | null, toolUseId?: string | null } | null } | null> | null };
+
+export type GetCircuitBreakerStatusQueryVariables = Exact<{ [key: string]: never; }>;
+
+
+export type GetCircuitBreakerStatusQuery = { getCircuitBreakerStatus?: { enabled: boolean, state?: string | null, openedAt?: string | null, lastCheckedAt?: string | null, failureCount?: number | null, recoveryAttempts?: number | null, lastError?: string | null } | null };
 
 export type GetConfigVersionQueryVariables = Exact<{
   versionName: Scalars['String']['input'];
@@ -1704,6 +1845,11 @@ export type GetFinetuningJobQueryVariables = Exact<{
 
 export type GetFinetuningJobQuery = { getFinetuningJob?: { jobId: string, jobName: string, status: FinetuningJobStatus, baseModelId: string, customModelName?: string | null, customModelArn?: string | null, testSetId: string, testSetName?: string | null, createdAt: string, updatedAt?: string | null, completedAt?: string | null, errorMessage?: string | null, trainingMetrics?: string | null, hyperparameters?: string | null, trainingDataConfig?: string | null, validationDataConfig?: string | null, outputDataConfig?: string | null, deploymentId?: string | null, deploymentStatus?: string | null, deploymentEndpoint?: string | null, provisionedModelArn?: string | null } | null };
 
+export type GetLatestPublishedVersionQueryVariables = Exact<{ [key: string]: never; }>;
+
+
+export type GetLatestPublishedVersionQuery = { getLatestPublishedVersion?: { checkEnabled: boolean, latestVersion?: string | null, templateUrl?: string | null, errorMessage?: string | null } | null };
+
 export type GetMyProfileQueryVariables = Exact<{ [key: string]: never; }>;
 
 
@@ -1726,7 +1872,7 @@ export type GetTestRunQueryVariables = Exact<{
 }>;
 
 
-export type GetTestRunQuery = { getTestRun?: { testRunId: string, testSetId?: string | null, testSetName?: string | null, status: string, filesCount: number, completedFiles?: number | null, failedFiles?: number | null, overallAccuracy?: number | null, weightedOverallScores?: string | null, averageConfidence?: number | null, accuracyBreakdown?: string | null, confusionMatrix?: string | null, fieldMetrics?: string | null, splitClassificationMetrics?: string | null, totalCost?: number | null, costBreakdown?: string | null, createdAt?: string | null, completedAt?: string | null, context?: string | null, configVersion?: string | null, config?: string | null } | null };
+export type GetTestRunQuery = { getTestRun?: { testRunId: string, testSetId?: string | null, testSetName?: string | null, status: string, filesCount: number, completedFiles?: number | null, failedFiles?: number | null, overallAccuracy?: number | null, weightedOverallScores?: string | null, averageConfidence?: number | null, confidenceMetrics?: string | null, accuracyBreakdown?: string | null, confusionMatrix?: string | null, fieldMetrics?: string | null, splitClassificationMetrics?: string | null, totalCost?: number | null, costBreakdown?: string | null, createdAt?: string | null, completedAt?: string | null, context?: string | null, configVersion?: string | null, config?: string | null } | null };
 
 export type GetTestRunStatusQueryVariables = Exact<{
   testRunId: Scalars['String']['input'];
@@ -1747,7 +1893,7 @@ export type GetTestRunsQuery = { getTestRuns?: Array<{ testRunId: string, testSe
 export type GetTestSetsQueryVariables = Exact<{ [key: string]: never; }>;
 
 
-export type GetTestSetsQuery = { getTestSets?: Array<{ id: string, name: string, description?: string | null, filePattern?: string | null, fileCount?: number | null, status?: string | null, createdAt: string, error?: string | null, lastAddResult?: string | null } | null> | null };
+export type GetTestSetsQuery = { getTestSets?: Array<{ id: string, name: string, description?: string | null, filePattern?: string | null, fileCount?: number | null, status?: string | null, createdAt: string, error?: string | null, lastAddResult?: string | null, documentClassType?: DocumentClassType | null } | null> | null };
 
 export type ListAgentJobsQueryVariables = Exact<{
   limit?: InputMaybe<Scalars['Int']['input']>;
@@ -1876,6 +2022,18 @@ export type OnAgentJobCompleteSubscriptionVariables = Exact<{
 
 
 export type OnAgentJobCompleteSubscription = { onAgentJobComplete?: boolean | null };
+
+export type OnChatDocumentMessageUpdateSubscriptionVariables = Exact<{
+  sessionId: Scalars['String']['input'];
+}>;
+
+
+export type OnChatDocumentMessageUpdateSubscription = { onChatDocumentMessageUpdate?: { sessionId: string, role: string, content: string, timestamp: string, method?: string | null, status?: string | null, modelId?: string | null, isProcessing?: boolean | null } | null };
+
+export type OnCircuitBreakerStatusChangeSubscriptionVariables = Exact<{ [key: string]: never; }>;
+
+
+export type OnCircuitBreakerStatusChangeSubscription = { onCircuitBreakerStatusChange?: { enabled: boolean, state?: string | null, openedAt?: string | null, lastCheckedAt?: string | null, failureCount?: number | null, recoveryAttempts?: number | null, lastError?: string | null } | null };
 
 export type OnCreateDocumentSubscriptionVariables = Exact<{ [key: string]: never; }>;
 

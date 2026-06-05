@@ -81,6 +81,28 @@ Parameters:
     Default: ""
     Description: "If you provided a Bedrock Guardrail Id above, provide the corresponding Guardrail version here"
 
+  BedrockHubRoleArn:
+    Type: String
+    Default: ""
+    AllowedPattern: "^$|^arn:(aws|aws-cn|aws-us-gov|aws-iso|aws-iso-b):iam::[0-9]{12}:role/[\\w+=,.@\\-/]+$"
+    ConstraintDescription: "Must be empty or a valid IAM role ARN. The ARN must NOT contain spaces — pass ExternalId via the separate BedrockHubRoleExternalId parameter."
+    Description: >
+      (Optional) ARN of an IAM role in a centralized hub account to assume for all
+      Bedrock invocations. When set, processing Lambdas use sts:AssumeRole and route
+      Bedrock data-plane and control-plane traffic through this role.
+
+  BedrockHubRoleExternalId:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: "(Optional) ExternalId for sts:AssumeRole into the Bedrock hub-account role."
+
+  BedrockHubRoleSessionName:
+    Type: String
+    Default: ""
+    AllowedPattern: "^[\\w+=,.@-]{0,64}$"
+    Description: "(Optional) Session name for sts:AssumeRole into the Bedrock hub-account role."
+
   AppSyncApiUrl:
     Type: String
     Default: ""
@@ -213,6 +235,12 @@ Conditions:
       !Not [!Equals [!Ref BedrockGuardrailId, ""]],
       !Not [!Equals [!Ref BedrockGuardrailVersion, ""]],
     ]
+  HasBedrockHubRole:
+    !Not [!Equals [!Ref BedrockHubRoleArn, ""]]
+  HasBedrockHubRoleExternalId:
+    !Not [!Equals [!Ref BedrockHubRoleExternalId, ""]]
+  HasBedrockHubRoleSessionName:
+    !Not [!Equals [!Ref BedrockHubRoleSessionName, ""]]
   HasCustomClassificationModelARN:
     !Not [!Equals [!Ref CustomClassificationModelARN, ""]]
   HasCustomExtractionModelARN:
@@ -328,6 +356,10 @@ Resources:
                   - "us.anthropic.claude-opus-4-6-v1:1m"
                   - "us.anthropic.claude-opus-4-7"
                   - "us.anthropic.claude-opus-4-7:1m"
+                  - "us.anthropic.claude-opus-4-8"
+                  - "us.anthropic.claude-opus-4-8:1m"
+                  - "openai.gpt-5.4"
+                  - "openai.gpt-5.5"
                   - "eu.amazon.nova-lite-v1:0"
                   - "eu.amazon.nova-pro-v1:0"
                   - "eu.amazon.nova-2-lite-v1:0"
@@ -342,6 +374,8 @@ Resources:
                   - "eu.anthropic.claude-opus-4-6-v1:1m"
                   - "eu.anthropic.claude-opus-4-7"
                   - "eu.anthropic.claude-opus-4-7:1m"
+                  - "eu.anthropic.claude-opus-4-8"
+                  - "eu.anthropic.claude-opus-4-8:1m"
                   - "qwen.qwen3-vl-235b-a22b"
                   - "us.meta.llama4-maverick-17b-instruct-v1:0"
                   - "us.meta.llama4-scout-17b-instruct-v1:0"
@@ -356,6 +390,8 @@ Resources:
                   - "global.anthropic.claude-opus-4-6-v1:1m"
                   - "global.anthropic.claude-opus-4-7"
                   - "global.anthropic.claude-opus-4-7:1m"
+                  - "global.anthropic.claude-opus-4-8"
+                  - "global.anthropic.claude-opus-4-8:1m"
                 order: 2
                 dependsOn: { field: "backend", value: "bedrock" }
               model_lambda_hook_arn:
@@ -376,6 +412,12 @@ Resources:
                 default: "Extract all text from this document image. Preserve the layout, including paragraphs, tables, and formatting."
                 order: 5
                 dependsOn: { field: "backend", value: "bedrock" }
+              reasoning_effort:
+                type: string
+                enum: ["minimal", "low", "medium", "high"]
+                default: "medium"
+                description: "Reasoning effort for OpenAI GPT-5.x (Responses API) models ONLY: controls how much the model reasons before answering. Ignored by Anthropic/Nova/other models. Default: medium."
+                order: 5.5
               features:
                 type: array
                 listLabel: "Textract Features"
@@ -422,7 +464,7 @@ Resources:
                   order: 2.6
                 extraction_model:
                   type: string
-                  description: "Optional per-class extraction model override. When set, this model is used for extraction instead of the global extraction.model. Useful for classes that benefit from a different model."
+                  description: "Optional per-class extraction model override. When set, this model is used for extraction instead of the global extraction.model. Useful for classes that benefit from a different model. NOTE: OpenAI GPT-5.x models (openai.gpt-5.*) are NOT compatible with agentic extraction (extraction.agentic.enabled=true); that combination is rejected by config validation."
                   order: 2.7
                   enum:
                     - ""
@@ -439,6 +481,10 @@ Resources:
                     - "us.anthropic.claude-opus-4-6-v1:1m"
                     - "us.anthropic.claude-opus-4-7"
                     - "us.anthropic.claude-opus-4-7:1m"
+                    - "us.anthropic.claude-opus-4-8"
+                    - "us.anthropic.claude-opus-4-8:1m"
+                    - "openai.gpt-5.4"
+                    - "openai.gpt-5.5"
                     - "eu.amazon.nova-lite-v1:0"
                     - "eu.amazon.nova-pro-v1:0"
                     - "eu.amazon.nova-2-lite-v1:0"
@@ -451,6 +497,8 @@ Resources:
                     - "eu.anthropic.claude-opus-4-6-v1:1m"
                     - "eu.anthropic.claude-opus-4-7"
                     - "eu.anthropic.claude-opus-4-7:1m"
+                    - "eu.anthropic.claude-opus-4-8"
+                    - "eu.anthropic.claude-opus-4-8:1m"
                     - "global.amazon.nova-2-lite-v1:0"
                     - "global.anthropic.claude-haiku-4-5-20251001-v1:0"
                     - "global.anthropic.claude-sonnet-4-5-20250929-v1:0"
@@ -461,6 +509,8 @@ Resources:
                     - "global.anthropic.claude-opus-4-6-v1:1m"
                     - "global.anthropic.claude-opus-4-7"
                     - "global.anthropic.claude-opus-4-7:1m"
+                    - "global.anthropic.claude-opus-4-8"
+                    - "global.anthropic.claude-opus-4-8:1m"
                 examples:
                   type: array
                   description: Class few-shot examples
@@ -726,6 +776,10 @@ Resources:
                   - "us.anthropic.claude-opus-4-6-v1:1m"
                   - "us.anthropic.claude-opus-4-7"
                   - "us.anthropic.claude-opus-4-7:1m"
+                  - "us.anthropic.claude-opus-4-8"
+                  - "us.anthropic.claude-opus-4-8:1m"
+                  - "openai.gpt-5.4"
+                  - "openai.gpt-5.5"
                   - "eu.amazon.nova-lite-v1:0"
                   - "eu.amazon.nova-pro-v1:0"
                   - "eu.amazon.nova-2-lite-v1:0"
@@ -740,6 +794,8 @@ Resources:
                   - "eu.anthropic.claude-opus-4-6-v1:1m"
                   - "eu.anthropic.claude-opus-4-7"
                   - "eu.anthropic.claude-opus-4-7:1m"
+                  - "eu.anthropic.claude-opus-4-8"
+                  - "eu.anthropic.claude-opus-4-8:1m"
                   - "qwen.qwen3-vl-235b-a22b"
                   - "us.meta.llama4-maverick-17b-instruct-v1:0"
                   - "us.meta.llama4-scout-17b-instruct-v1:0"
@@ -755,6 +811,8 @@ Resources:
                   - "global.anthropic.claude-opus-4-6-v1:1m"
                   - "global.anthropic.claude-opus-4-7"
                   - "global.anthropic.claude-opus-4-7:1m"
+                  - "global.anthropic.claude-opus-4-8"
+                  - "global.anthropic.claude-opus-4-8:1m"
                 order: 1
               model_lambda_hook_arn:
                 type: string
@@ -794,28 +852,34 @@ Resources:
                 type: number
                 minimum: 0
                 maximum: 1
-                description: "Sampling temperature: Controls randomness in model output (0.0 = deterministic, higher = more random). Used when top_p is 0. Set temperature=0.0 for consistent, deterministic outputs. Not used for Claude 4.7 models."
+                description: "Sampling temperature: Controls randomness in model output (0.0 = deterministic, higher = more random). Used when top_p is 0. Set temperature=0.0 for consistent, deterministic outputs. Not used for Claude 4.7+ or OpenAI GPT-5.x models."
                 order: 4
               top_k:
                 type: integer
                 minimum: 1
-                description: "Sampling Top K. Not used for Claude 4.7 models."
+                description: "Sampling Top K. Not used for Claude 4.7+ or OpenAI GPT-5.x models."
                 order: 5
               top_p:
                 type: number
-                description: "Sampling Top P: Nucleus sampling threshold (0.0-1.0). When set to a positive value (> 0), overrides temperature parameter. Set to 0 to use temperature instead."
+                description: "Sampling Top P: Nucleus sampling threshold (0.0-1.0). When set to a positive value (> 0), overrides temperature parameter. Set to 0 to use temperature instead. Not used for Claude 4.7+ or OpenAI GPT-5.x models."
                 order: 6
               max_tokens:
                 type: number
                 description: "Maximum number of output tokens. Ensure this does not exceed the selected model's limit. See model documentation for details."
                 order: 7
+              reasoning_effort:
+                type: string
+                enum: ["minimal", "low", "medium", "high"]
+                default: "medium"
+                description: "Reasoning effort for OpenAI GPT-5.x (Responses API) models ONLY: controls how much the model reasons before answering. Ignored by Anthropic/Nova/other models. Default: medium."
+                order: 7.5
               system_prompt:
                 type: string
                 description: System prompt
                 order: 8
               task_prompt:
                 type: string
-                description: Task prompt - include placeholders {CLASS_NAMES_AND_DESCRIPTIONS} (replaced with the class names and descriptions for all specified classes), {FEW_SHOT_EXAMPLES} (replaced by classPrompt and image data from examples in class definitions), {DOCUMENT_TEXT} (replaced by the OCR output), and for multi-modal classification {DOCUMENT_IMAGE} (replaced by the page image attachment). Optionally use <<CACHEPOINT>> to separate static and dynamic elements of prompt for Bedrock prompt caching.
+                description: Task prompt - include placeholders {CLASS_NAMES_AND_DESCRIPTIONS} (replaced with the class names and descriptions for all specified classes), {FEW_SHOT_EXAMPLES} (replaced by classPrompt and image data from examples in class definitions), {DOCUMENT_TEXT} (replaced by the OCR output), and for multi-modal classification {DOCUMENT_IMAGE} (replaced by the page image attachment). Optionally include {CLASS_AND_ATTRIBUTE_NAMES_AND_DESCRIPTIONS} (replaced with class names, descriptions, AND schema attribute field names — useful for disambiguating classes with similar names but different extraction schemas; opt-in and cost-neutral when not referenced). Optionally use <<CACHEPOINT>> to separate static and dynamic elements of prompt for Bedrock prompt caching.
                 order: 9
           extraction:
             order: 5
@@ -899,7 +963,7 @@ Resources:
                     order: 1
               model:
                 type: string
-                description: "Model identifier. Select 'LambdaHook' to use a custom Lambda function for inference."
+                description: "Model identifier. Select 'LambdaHook' to use a custom Lambda function for inference. NOTE: OpenAI GPT-5.x models (openai.gpt-5.*) run via the bedrock-mantle Responses API and are NOT compatible with agentic extraction (agentic.enabled=true); that combination is rejected by config validation."
                 enum:
                   - "LambdaHook"
                   - !If
@@ -924,6 +988,10 @@ Resources:
                   - "us.anthropic.claude-opus-4-6-v1:1m"
                   - "us.anthropic.claude-opus-4-7"
                   - "us.anthropic.claude-opus-4-7:1m"
+                  - "us.anthropic.claude-opus-4-8"
+                  - "us.anthropic.claude-opus-4-8:1m"
+                  - "openai.gpt-5.4"
+                  - "openai.gpt-5.5"
                   - "eu.amazon.nova-lite-v1:0"
                   - "eu.amazon.nova-pro-v1:0"
                   - "eu.amazon.nova-2-lite-v1:0"
@@ -938,6 +1006,8 @@ Resources:
                   - "eu.anthropic.claude-opus-4-6-v1:1m"
                   - "eu.anthropic.claude-opus-4-7"
                   - "eu.anthropic.claude-opus-4-7:1m"
+                  - "eu.anthropic.claude-opus-4-8"
+                  - "eu.anthropic.claude-opus-4-8:1m"
                   - "qwen.qwen3-vl-235b-a22b"
                   - "us.meta.llama4-maverick-17b-instruct-v1:0"
                   - "us.meta.llama4-scout-17b-instruct-v1:0"
@@ -953,6 +1023,8 @@ Resources:
                   - "global.anthropic.claude-opus-4-6-v1:1m"
                   - "global.anthropic.claude-opus-4-7"
                   - "global.anthropic.claude-opus-4-7:1m"
+                  - "global.anthropic.claude-opus-4-8"
+                  - "global.anthropic.claude-opus-4-8:1m"
                 order: 1
               model_lambda_hook_arn:
                 type: string
@@ -964,21 +1036,27 @@ Resources:
                 type: number
                 minimum: 0
                 maximum: 1
-                description: "Sampling temperature: Controls randomness in model output (0.0 = deterministic, higher = more random). Used when top_p is 0. Set temperature=0.0 for consistent, deterministic outputs. Not used for Claude 4.7 models."
+                description: "Sampling temperature: Controls randomness in model output (0.0 = deterministic, higher = more random). Used when top_p is 0. Set temperature=0.0 for consistent, deterministic outputs. Not used for Claude 4.7+ or OpenAI GPT-5.x models."
                 order: 3
               top_k:
                 type: integer
                 minimum: 1
-                description: "Sampling Top K. Not used for Claude 4.7 models."
+                description: "Sampling Top K. Not used for Claude 4.7+ or OpenAI GPT-5.x models."
                 order: 4
               top_p:
                 type: number
-                description: "Sampling Top P: Nucleus sampling threshold (0.0-1.0). When set to a positive value (> 0), overrides temperature parameter. Set to 0 to use temperature instead."
+                description: "Sampling Top P: Nucleus sampling threshold (0.0-1.0). When set to a positive value (> 0), overrides temperature parameter. Set to 0 to use temperature instead. Not used for Claude 4.7+ or OpenAI GPT-5.x models."
                 order: 5
               max_tokens:
                 type: number
                 description: "Maximum number of output tokens. Ensure this does not exceed the selected model's limit. See model documentation for details."
                 order: 6
+              reasoning_effort:
+                type: string
+                enum: ["minimal", "low", "medium", "high"]
+                default: "medium"
+                description: "Reasoning effort for OpenAI GPT-5.x (Responses API) models ONLY: controls how much the model reasons before answering. Ignored by Anthropic/Nova/other models. Default: medium."
+                order: 6.5
               system_prompt:
                 type: string
                 description: System prompt
@@ -1097,6 +1175,10 @@ Resources:
                     "us.anthropic.claude-opus-4-6-v1:1m",
                     "us.anthropic.claude-opus-4-7",
                     "us.anthropic.claude-opus-4-7:1m",
+                    "us.anthropic.claude-opus-4-8",
+                    "us.anthropic.claude-opus-4-8:1m",
+                    "openai.gpt-5.4",
+                    "openai.gpt-5.5",
                     "eu.amazon.nova-lite-v1:0",
                     "eu.amazon.nova-pro-v1:0",
                     "eu.amazon.nova-2-lite-v1:0", "eu.amazon.nova-2-lite-v1:0:priority", "eu.amazon.nova-2-lite-v1:0:flex",
@@ -1109,6 +1191,8 @@ Resources:
                     "eu.anthropic.claude-opus-4-6-v1:1m",
                     "eu.anthropic.claude-opus-4-7",
                     "eu.anthropic.claude-opus-4-7:1m",
+                    "eu.anthropic.claude-opus-4-8",
+                    "eu.anthropic.claude-opus-4-8:1m",
                     "qwen.qwen3-vl-235b-a22b",
                     "us.meta.llama4-maverick-17b-instruct-v1:0",
                     "us.meta.llama4-scout-17b-instruct-v1:0",
@@ -1123,7 +1207,9 @@ Resources:
                     "global.anthropic.claude-opus-4-6-v1",
                     "global.anthropic.claude-opus-4-6-v1:1m",
                     "global.anthropic.claude-opus-4-7",
-                    "global.anthropic.claude-opus-4-7:1m"
+                    "global.anthropic.claude-opus-4-7:1m",
+                    "global.anthropic.claude-opus-4-8",
+                    "global.anthropic.claude-opus-4-8:1m"
                   ]
                 order: 5
               model_lambda_hook_arn:
@@ -1135,23 +1221,30 @@ Resources:
               temperature:
                 type: number
                 dependsOn: { field: "use_bda", value: false }
-                description: "Sampling temperature: Controls randomness in model output (0.0 = deterministic, higher = more random). Used when top_p is 0. Set temperature=0.0 for consistent, deterministic outputs. Not used for Claude 4.7 models."
+                description: "Sampling temperature: Controls randomness in model output (0.0 = deterministic, higher = more random). Used when top_p is 0. Set temperature=0.0 for consistent, deterministic outputs. Not used for Claude 4.7+ or OpenAI GPT-5.x models."
                 order: 7
               top_k:
                 type: number
                 dependsOn: { field: "use_bda", value: false }
-                description: "Sampling Top K. Not used for Claude 4.7 models."
+                description: "Sampling Top K. Not used for Claude 4.7+ or OpenAI GPT-5.x models."
                 order: 8
               top_p:
                 type: number
                 dependsOn: { field: "use_bda", value: false }
-                description: "Sampling Top P: Nucleus sampling threshold (0.0-1.0). When set to a positive value (> 0), overrides temperature parameter. Set to 0 to use temperature instead."
+                description: "Sampling Top P: Nucleus sampling threshold (0.0-1.0). When set to a positive value (> 0), overrides temperature parameter. Set to 0 to use temperature instead. Not used for Claude 4.7+ or OpenAI GPT-5.x models."
                 order: 9
               max_tokens:
                 type: number
                 dependsOn: { field: "use_bda", value: false }
                 description: "Maximum number of output tokens. Ensure this does not exceed the selected model's limit. See model documentation for details."
                 order: 10
+              reasoning_effort:
+                type: string
+                enum: ["minimal", "low", "medium", "high"]
+                default: "medium"
+                description: "Reasoning effort for OpenAI GPT-5.x (Responses API) models ONLY: controls how much the model reasons before answering. Ignored by Anthropic/Nova/other models. Default: medium."
+                dependsOn: { field: "use_bda", value: false }
+                order: 10.5
               system_prompt:
                 type: string
                 dependsOn: { field: "use_bda", value: false }
@@ -1195,6 +1288,10 @@ Resources:
                     "us.anthropic.claude-opus-4-6-v1:1m",
                     "us.anthropic.claude-opus-4-7",
                     "us.anthropic.claude-opus-4-7:1m",
+                    "us.anthropic.claude-opus-4-8",
+                    "us.anthropic.claude-opus-4-8:1m",
+                    "openai.gpt-5.4",
+                    "openai.gpt-5.5",
                     "eu.amazon.nova-lite-v1:0",
                     "eu.amazon.nova-pro-v1:0",
                     "eu.amazon.nova-2-lite-v1:0", "eu.amazon.nova-2-lite-v1:0:priority", "eu.amazon.nova-2-lite-v1:0:flex",
@@ -1207,6 +1304,8 @@ Resources:
                     "eu.anthropic.claude-opus-4-6-v1:1m",
                     "eu.anthropic.claude-opus-4-7",
                     "eu.anthropic.claude-opus-4-7:1m",
+                    "eu.anthropic.claude-opus-4-8",
+                    "eu.anthropic.claude-opus-4-8:1m",
                     "qwen.qwen3-vl-235b-a22b",
                     "us.meta.llama4-maverick-17b-instruct-v1:0",
                     "us.meta.llama4-scout-17b-instruct-v1:0",
@@ -1221,7 +1320,9 @@ Resources:
                     "global.anthropic.claude-opus-4-6-v1",
                     "global.anthropic.claude-opus-4-6-v1:1m",
                     "global.anthropic.claude-opus-4-7",
-                    "global.anthropic.claude-opus-4-7:1m"
+                    "global.anthropic.claude-opus-4-7:1m",
+                    "global.anthropic.claude-opus-4-8",
+                    "global.anthropic.claude-opus-4-8:1m"
                   ]
                 order: 1
               model_lambda_hook_arn:
@@ -1232,20 +1333,26 @@ Resources:
                 dependsOn: { field: "model", value: "LambdaHook" }
               temperature:
                 type: number
-                description: "Sampling temperature. Not used for Claude 4.7 models."
+                description: "Sampling temperature. Not used for Claude 4.7+ or OpenAI GPT-5.x models."
                 order: 3
               top_k:
                 type: number
-                description: "Sampling Top K. Not used for Claude 4.7 models."
+                description: "Sampling Top K. Not used for Claude 4.7+ or OpenAI GPT-5.x models."
                 order: 4
               top_p:
                 type: number
-                description: Sampling Top P
+                description: "Sampling Top P. Not used for Claude 4.7+ or OpenAI GPT-5.x models."
                 order: 5
               max_tokens:
                 type: number
                 description: "Maximum number of output tokens. Ensure this does not exceed the selected model's limit. See model documentation for details."
                 order: 6
+              reasoning_effort:
+                type: string
+                enum: ["minimal", "low", "medium", "high"]
+                default: "medium"
+                description: "Reasoning effort for OpenAI GPT-5.x (Responses API) models ONLY: controls how much the model reasons before answering. Ignored by Anthropic/Nova/other models. Default: medium."
+                order: 6.5
               system_prompt:
                 type: string
                 format: textarea
@@ -1289,6 +1396,10 @@ Resources:
                         "us.anthropic.claude-opus-4-6-v1:1m",
                         "us.anthropic.claude-opus-4-7",
                         "us.anthropic.claude-opus-4-7:1m",
+                        "us.anthropic.claude-opus-4-8",
+                        "us.anthropic.claude-opus-4-8:1m",
+                        "openai.gpt-5.4",
+                        "openai.gpt-5.5",
                         "eu.amazon.nova-lite-v1:0",
                         "eu.amazon.nova-pro-v1:0",
                         "eu.amazon.nova-2-lite-v1:0", "eu.amazon.nova-2-lite-v1:0:priority", "eu.amazon.nova-2-lite-v1:0:flex",
@@ -1301,6 +1412,8 @@ Resources:
                         "eu.anthropic.claude-opus-4-6-v1:1m",
                         "eu.anthropic.claude-opus-4-7",
                         "eu.anthropic.claude-opus-4-7:1m",
+                        "eu.anthropic.claude-opus-4-8",
+                        "eu.anthropic.claude-opus-4-8:1m",
                         "qwen.qwen3-vl-235b-a22b",
                         "us.meta.llama4-maverick-17b-instruct-v1:0",
                         "us.meta.llama4-scout-17b-instruct-v1:0",
@@ -1315,27 +1428,35 @@ Resources:
                         "global.anthropic.claude-opus-4-6-v1",
                         "global.anthropic.claude-opus-4-6-v1:1m",
                         "global.anthropic.claude-opus-4-7",
-                        "global.anthropic.claude-opus-4-7:1m"
+                        "global.anthropic.claude-opus-4-7:1m",
+                        "global.anthropic.claude-opus-4-8",
+                        "global.anthropic.claude-opus-4-8:1m"
                       ]
                     order: 1
                   temperature:
                     type: number
-                    description: "Sampling temperature: Controls randomness in model output (0.0 = deterministic, higher = more random). Used when top_p is 0. Set temperature=0.0 for consistent, deterministic outputs. Not used for Claude 4.7 models."
+                    description: "Sampling temperature: Controls randomness in model output (0.0 = deterministic, higher = more random). Used when top_p is 0. Set temperature=0.0 for consistent, deterministic outputs. Not used for Claude 4.7+ or OpenAI GPT-5.x models."
                     default: 0.0
                     order: 2
                   top_k:
                     type: number
-                    description: "Sampling Top K. Not used for Claude 4.7 models."
+                    description: "Sampling Top K. Not used for Claude 4.7+ or OpenAI GPT-5.x models."
                     default: 250
                     order: 3
                   top_p:
                     type: number
-                    description: "Sampling Top P: Nucleus sampling threshold (0.0-1.0). When set to a positive value (> 0), overrides temperature parameter. Set to 0 to use temperature instead."
+                    description: "Sampling Top P: Nucleus sampling threshold (0.0-1.0). When set to a positive value (> 0), overrides temperature parameter. Set to 0 to use temperature instead. Not used for Claude 4.7+ or OpenAI GPT-5.x models."
                     order: 4
                   max_tokens:
                     type: number
                     description: "Maximum number of output tokens. Ensure this does not exceed the selected model's limit. See model documentation for details."
                     order: 5
+                  reasoning_effort:
+                    type: string
+                    enum: ["minimal", "low", "medium", "high"]
+                    default: "medium"
+                    description: "Reasoning effort for OpenAI GPT-5.x (Responses API) models ONLY: controls how much the model reasons before answering. Ignored by Anthropic/Nova/other models. Default: medium."
+                    order: 5.5
                   system_prompt:
                     type: string
                     format: textarea
@@ -1378,6 +1499,8 @@ Resources:
                         "us.anthropic.claude-opus-4-6-v1:1m",
                         "us.anthropic.claude-opus-4-7",
                         "us.anthropic.claude-opus-4-7:1m",
+                        "us.anthropic.claude-opus-4-8",
+                        "us.anthropic.claude-opus-4-8:1m",
                         "eu.amazon.nova-lite-v1:0",
                         "eu.amazon.nova-pro-v1:0",
                         "eu.amazon.nova-2-lite-v1:0", "eu.amazon.nova-2-lite-v1:0:priority", "eu.amazon.nova-2-lite-v1:0:flex",
@@ -1390,6 +1513,8 @@ Resources:
                         "eu.anthropic.claude-opus-4-6-v1:1m",
                         "eu.anthropic.claude-opus-4-7",
                         "eu.anthropic.claude-opus-4-7:1m",
+                        "eu.anthropic.claude-opus-4-8",
+                        "eu.anthropic.claude-opus-4-8:1m",
                         "qwen.qwen3-vl-235b-a22b",
                         "us.meta.llama4-maverick-17b-instruct-v1:0",
                         "us.meta.llama4-scout-17b-instruct-v1:0",
@@ -1404,20 +1529,22 @@ Resources:
                         "global.anthropic.claude-opus-4-6-v1",
                         "global.anthropic.claude-opus-4-6-v1:1m",
                         "global.anthropic.claude-opus-4-7",
-                        "global.anthropic.claude-opus-4-7:1m"
+                        "global.anthropic.claude-opus-4-7:1m",
+                        "global.anthropic.claude-opus-4-8",
+                        "global.anthropic.claude-opus-4-8:1m"
                       ]
                     default: "us.amazon.nova-pro-v1:0"
                     order: 0
                   temperature:
                     type: number
-                    description: "Sampling temperature: Controls randomness in model output (0.0 = deterministic, higher = more random). Used when top_p is 0. Set temperature=0.0 for consistent, deterministic outputs. Not used for Claude 4.7 models."
+                    description: "Sampling temperature: Controls randomness in model output (0.0 = deterministic, higher = more random). Used when top_p is 0. Set temperature=0.0 for consistent, deterministic outputs. Not used for Claude 4.7+ models."
                     minimum: 0.0
                     maximum: 1.0
                     default: 1.0
                     order: 1
                   top_p:
                     type: number
-                    description: "Sampling Top P: Nucleus sampling threshold (0.0-1.0). When set to a positive value (> 0), overrides temperature parameter. Set to 0 to use temperature instead."
+                    description: "Sampling Top P: Nucleus sampling threshold (0.0-1.0). When set to a positive value (> 0), overrides temperature parameter. Set to 0 to use temperature instead. Not used for Claude 4.7+ models."
                     minimum: 0.0
                     maximum: 1.0
                     default: 0.1
@@ -1465,6 +1592,8 @@ Resources:
                         "us.anthropic.claude-opus-4-6-v1:1m",
                         "us.anthropic.claude-opus-4-7",
                         "us.anthropic.claude-opus-4-7:1m",
+                        "us.anthropic.claude-opus-4-8",
+                        "us.anthropic.claude-opus-4-8:1m",
                         "eu.amazon.nova-lite-v1:0",
                         "eu.amazon.nova-pro-v1:0",
                         "eu.amazon.nova-2-lite-v1:0", "eu.amazon.nova-2-lite-v1:0:priority", "eu.amazon.nova-2-lite-v1:0:flex",
@@ -1477,6 +1606,8 @@ Resources:
                         "eu.anthropic.claude-opus-4-6-v1:1m",
                         "eu.anthropic.claude-opus-4-7",
                         "eu.anthropic.claude-opus-4-7:1m",
+                        "eu.anthropic.claude-opus-4-8",
+                        "eu.anthropic.claude-opus-4-8:1m",
                         "qwen.qwen3-vl-235b-a22b",
                         "us.meta.llama4-maverick-17b-instruct-v1:0",
                         "us.meta.llama4-scout-17b-instruct-v1:0",
@@ -1491,20 +1622,22 @@ Resources:
                         "global.anthropic.claude-opus-4-6-v1",
                         "global.anthropic.claude-opus-4-6-v1:1m",
                         "global.anthropic.claude-opus-4-7",
-                        "global.anthropic.claude-opus-4-7:1m"
+                        "global.anthropic.claude-opus-4-7:1m",
+                        "global.anthropic.claude-opus-4-8",
+                        "global.anthropic.claude-opus-4-8:1m"
                       ]
                     default: "us.amazon.nova-pro-v1:0"
                     order: 0
                   temperature:
                     type: number
-                    description: "Sampling temperature: Controls randomness in model output (0.0 = deterministic, higher = more random). Used when top_p is 0. Set temperature=0.0 for consistent, deterministic outputs. Not used for Claude 4.7 models."
+                    description: "Sampling temperature: Controls randomness in model output (0.0 = deterministic, higher = more random). Used when top_p is 0. Set temperature=0.0 for consistent, deterministic outputs. Not used for Claude 4.7+ models."
                     minimum: 0.0
                     maximum: 1.0
                     default: 1.0
                     order: 1
                   top_p:
                     type: number
-                    description: "Sampling Top P: Nucleus sampling threshold (0.0-1.0). When set to a positive value (> 0), overrides temperature parameter. Set to 0 to use temperature instead."
+                    description: "Sampling Top P: Nucleus sampling threshold (0.0-1.0). When set to a positive value (> 0), overrides temperature parameter. Set to 0 to use temperature instead. Not used for Claude 4.7+ models."
                     minimum: 0.0
                     maximum: 1.0
                     default: 0.1
@@ -1552,6 +1685,8 @@ Resources:
                         "us.anthropic.claude-opus-4-6-v1:1m",
                         "us.anthropic.claude-opus-4-7",
                         "us.anthropic.claude-opus-4-7:1m",
+                        "us.anthropic.claude-opus-4-8",
+                        "us.anthropic.claude-opus-4-8:1m",
                         "eu.amazon.nova-lite-v1:0",
                         "eu.amazon.nova-pro-v1:0",
                         "eu.amazon.nova-2-lite-v1:0", "eu.amazon.nova-2-lite-v1:0:priority", "eu.amazon.nova-2-lite-v1:0:flex",
@@ -1564,6 +1699,8 @@ Resources:
                         "eu.anthropic.claude-opus-4-6-v1:1m",
                         "eu.anthropic.claude-opus-4-7",
                         "eu.anthropic.claude-opus-4-7:1m",
+                        "eu.anthropic.claude-opus-4-8",
+                        "eu.anthropic.claude-opus-4-8:1m",
                         "qwen.qwen3-vl-235b-a22b",
                         "us.meta.llama4-maverick-17b-instruct-v1:0",
                         "us.meta.llama4-scout-17b-instruct-v1:0",
@@ -1578,7 +1715,9 @@ Resources:
                         "global.anthropic.claude-opus-4-6-v1",
                         "global.anthropic.claude-opus-4-6-v1:1m",
                         "global.anthropic.claude-opus-4-7",
-                        "global.anthropic.claude-opus-4-7:1m"
+                        "global.anthropic.claude-opus-4-7:1m",
+                        "global.anthropic.claude-opus-4-8",
+                        "global.anthropic.claude-opus-4-8:1m"
                       ]
                     default: "us.amazon.nova-pro-v1:0"
                     order: 0
@@ -1654,6 +1793,8 @@ Resources:
                       - "us.anthropic.claude-opus-4-6-v1:1m"
                       - "us.anthropic.claude-opus-4-7"
                       - "us.anthropic.claude-opus-4-7:1m"
+                      - "us.anthropic.claude-opus-4-8"
+                      - "us.anthropic.claude-opus-4-8:1m"
                     order: 1
                   temperature:
                     type: number
@@ -1720,18 +1861,24 @@ Resources:
                         "us.anthropic.claude-opus-4-6-v1:1m",
                         "us.anthropic.claude-opus-4-7",
                         "us.anthropic.claude-opus-4-7:1m",
+                        "us.anthropic.claude-opus-4-8",
+                        "us.anthropic.claude-opus-4-8:1m",
                         "eu.anthropic.claude-sonnet-4-6",
                         "eu.anthropic.claude-sonnet-4-6:1m",
                         "eu.anthropic.claude-opus-4-6-v1",
                         "eu.anthropic.claude-opus-4-6-v1:1m",
                         "eu.anthropic.claude-opus-4-7",
                         "eu.anthropic.claude-opus-4-7:1m",
+                        "eu.anthropic.claude-opus-4-8",
+                        "eu.anthropic.claude-opus-4-8:1m",
                         "global.anthropic.claude-sonnet-4-6",
                         "global.anthropic.claude-sonnet-4-6:1m",
                         "global.anthropic.claude-opus-4-6-v1",
                         "global.anthropic.claude-opus-4-6-v1:1m",
                         "global.anthropic.claude-opus-4-7",
-                        "global.anthropic.claude-opus-4-7:1m"
+                        "global.anthropic.claude-opus-4-7:1m",
+                        "global.anthropic.claude-opus-4-8",
+                        "global.anthropic.claude-opus-4-8:1m"
                       ]
                     default: "global.anthropic.claude-sonnet-4-6"
                     order: 0
@@ -1808,6 +1955,8 @@ Resources:
                       - "us.anthropic.claude-opus-4-6-v1:1m"
                       - "us.anthropic.claude-opus-4-7"
                       - "us.anthropic.claude-opus-4-7:1m"
+                      - "us.anthropic.claude-opus-4-8"
+                      - "us.anthropic.claude-opus-4-8:1m"
                       - "global.anthropic.claude-haiku-4-5-20251001-v1:0"
                       - "global.anthropic.claude-sonnet-4-5-20250929-v1:0"
                       - "global.anthropic.claude-sonnet-4-6"
@@ -1817,6 +1966,8 @@ Resources:
                       - "global.anthropic.claude-opus-4-6-v1:1m"
                       - "global.anthropic.claude-opus-4-7"
                       - "global.anthropic.claude-opus-4-7:1m"
+                      - "global.anthropic.claude-opus-4-8"
+                      - "global.anthropic.claude-opus-4-8:1m"
                       - "eu.amazon.nova-lite-v1:0"
                       - "eu.amazon.nova-pro-v1:0"
                       - "eu.amazon.nova-2-lite-v1:0"
@@ -1831,6 +1982,8 @@ Resources:
                       - "eu.anthropic.claude-opus-4-6-v1:1m"
                       - "eu.anthropic.claude-opus-4-7"
                       - "eu.anthropic.claude-opus-4-7:1m"
+                      - "eu.anthropic.claude-opus-4-8"
+                      - "eu.anthropic.claude-opus-4-8:1m"
                       - "qwen.qwen3-vl-235b-a22b"
                       - "us.meta.llama4-maverick-17b-instruct-v1:0"
                       - "us.meta.llama4-scout-17b-instruct-v1:0"
@@ -1857,6 +2010,8 @@ Resources:
                       - "us.anthropic.claude-opus-4-6-v1:1m"
                       - "us.anthropic.claude-opus-4-7"
                       - "us.anthropic.claude-opus-4-7:1m"
+                      - "us.anthropic.claude-opus-4-8"
+                      - "us.anthropic.claude-opus-4-8:1m"
                       - "global.amazon.nova-pro-v1:0"
                       - "global.anthropic.claude-sonnet-4-5-20250929-v1:0"
                       - "global.anthropic.claude-sonnet-4-6"
@@ -1866,6 +2021,8 @@ Resources:
                       - "global.anthropic.claude-opus-4-6-v1:1m"
                       - "global.anthropic.claude-opus-4-7"
                       - "global.anthropic.claude-opus-4-7:1m"
+                      - "global.anthropic.claude-opus-4-8"
+                      - "global.anthropic.claude-opus-4-8:1m"
                       - "eu.amazon.nova-pro-v1:0"
                       - "eu.anthropic.claude-sonnet-4-5-20250929-v1:0"
                       - "eu.anthropic.claude-sonnet-4-6"
@@ -1875,6 +2032,8 @@ Resources:
                       - "eu.anthropic.claude-opus-4-6-v1:1m"
                       - "eu.anthropic.claude-opus-4-7"
                       - "eu.anthropic.claude-opus-4-7:1m"
+                      - "eu.anthropic.claude-opus-4-8"
+                      - "eu.anthropic.claude-opus-4-8:1m"
                     default: "us.anthropic.claude-sonnet-4-6"
                     order: 0
                   lookback_hours:
@@ -1887,6 +2046,107 @@ Resources:
                     format: textarea
                     description: System prompt for the error analysis agent
                     order: 2
+          chat:
+            order: 12
+            type: object
+            collapsible: true
+            defaultExpanded: false
+            sectionLabel: Chat-with-Document Configuration
+            description: >-
+              Controls the interactive "Chat with Document" feature on the
+              Document Detail screen. This uses the model configured here
+              (independent from summarization). The full document text is
+              sent in a single prompt, so a large-context model is
+              recommended.
+            properties:
+              enabled:
+                type: boolean
+                description: Enable or disable the Chat-with-Document feature
+                default: true
+                order: 0
+              model:
+                type: string
+                description: "Bedrock model ID for chat. A large-context model is recommended because the entire document text is sent in one prompt. Select 'LambdaHook' to use a custom Lambda function for inference."
+                enum:
+                  [
+                    "LambdaHook",
+                    "us.amazon.nova-lite-v1:0",
+                    "us.amazon.nova-pro-v1:0",
+                    "us.amazon.nova-premier-v1:0",
+                    "us.amazon.nova-2-lite-v1:0", "us.amazon.nova-2-lite-v1:0:priority", "us.amazon.nova-2-lite-v1:0:flex", "global.amazon.nova-2-lite-v1:0", "global.amazon.nova-2-lite-v1:0:priority", "global.amazon.nova-2-lite-v1:0:flex",
+                    "us.anthropic.claude-haiku-4-5-20251001-v1:0",
+                    "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+                    "us.anthropic.claude-sonnet-4-6",
+                    "us.anthropic.claude-sonnet-4-6:1m",
+                    "us.anthropic.claude-opus-4-5-20251101-v1:0",
+                    "us.anthropic.claude-opus-4-6-v1",
+                    "us.anthropic.claude-opus-4-6-v1:1m",
+                    "us.anthropic.claude-opus-4-7",
+                    "us.anthropic.claude-opus-4-7:1m",
+                    "us.anthropic.claude-opus-4-8",
+                    "us.anthropic.claude-opus-4-8:1m",
+                    "openai.gpt-5.4",
+                    "openai.gpt-5.5",
+                    "eu.amazon.nova-lite-v1:0",
+                    "eu.amazon.nova-pro-v1:0",
+                    "eu.amazon.nova-2-lite-v1:0", "eu.amazon.nova-2-lite-v1:0:priority", "eu.amazon.nova-2-lite-v1:0:flex",
+                    "eu.anthropic.claude-haiku-4-5-20251001-v1:0",
+                    "eu.anthropic.claude-sonnet-4-5-20250929-v1:0",
+                    "eu.anthropic.claude-sonnet-4-6",
+                    "eu.anthropic.claude-sonnet-4-6:1m",
+                    "eu.anthropic.claude-opus-4-5-20251101-v1:0",
+                    "eu.anthropic.claude-opus-4-6-v1",
+                    "eu.anthropic.claude-opus-4-6-v1:1m",
+                    "eu.anthropic.claude-opus-4-7",
+                    "eu.anthropic.claude-opus-4-7:1m",
+                    "eu.anthropic.claude-opus-4-8",
+                    "eu.anthropic.claude-opus-4-8:1m",
+                    "global.anthropic.claude-haiku-4-5-20251001-v1:0",
+                    "global.anthropic.claude-sonnet-4-5-20250929-v1:0",
+                    "global.anthropic.claude-sonnet-4-6",
+                    "global.anthropic.claude-sonnet-4-6:1m",
+                    "global.anthropic.claude-opus-4-5-20251101-v1:0",
+                    "global.anthropic.claude-opus-4-6-v1",
+                    "global.anthropic.claude-opus-4-6-v1:1m",
+                    "global.anthropic.claude-opus-4-7",
+                    "global.anthropic.claude-opus-4-7:1m",
+                    "global.anthropic.claude-opus-4-8",
+                    "global.anthropic.claude-opus-4-8:1m"
+                  ]
+                order: 1
+              model_lambda_hook_arn:
+                type: string
+                description: "Lambda function ARN for custom inference (used when model is 'LambdaHook'). Function name must start with GENAIIDP-."
+                default: ""
+                order: 2
+                dependsOn: { field: "model", value: "LambdaHook" }
+              temperature:
+                type: number
+                description: "Sampling temperature. Not used for Claude 4.7+ or OpenAI GPT-5.x models."
+                order: 3
+              top_k:
+                type: number
+                description: "Sampling Top K. Not used for Claude 4.7+ or OpenAI GPT-5.x models."
+                order: 4
+              top_p:
+                type: number
+                description: "Sampling Top P. Not used for Claude 4.7+ or OpenAI GPT-5.x models."
+                order: 5
+              max_tokens:
+                type: number
+                description: "Maximum number of output tokens for the chat response. Ensure this does not exceed the selected model's limit."
+                order: 6
+              reasoning_effort:
+                type: string
+                enum: ["minimal", "low", "medium", "high"]
+                default: "medium"
+                description: "Reasoning effort for OpenAI GPT-5.x (Responses API) models ONLY: controls how much the model reasons before answering. Ignored by Anthropic/Nova/other models. Default: medium."
+                order: 6.5
+              system_prompt:
+                type: string
+                format: textarea
+                description: System prompt for the Chat-with-Document assistant
+                order: 7
           rule_validation:
             order: 8
             type: object
@@ -1950,6 +2210,8 @@ Resources:
                         "us.anthropic.claude-opus-4-6-v1:1m",
                         "us.anthropic.claude-opus-4-7",
                         "us.anthropic.claude-opus-4-7:1m",
+                        "us.anthropic.claude-opus-4-8",
+                        "us.anthropic.claude-opus-4-8:1m",
                         "eu.amazon.nova-lite-v1:0",
                         "eu.amazon.nova-pro-v1:0",
                         "eu.amazon.nova-2-lite-v1:0", "eu.amazon.nova-2-lite-v1:0:priority", "eu.amazon.nova-2-lite-v1:0:flex",
@@ -1962,6 +2224,8 @@ Resources:
                         "eu.anthropic.claude-opus-4-6-v1:1m",
                         "eu.anthropic.claude-opus-4-7",
                         "eu.anthropic.claude-opus-4-7:1m",
+                        "eu.anthropic.claude-opus-4-8",
+                        "eu.anthropic.claude-opus-4-8:1m",
                         "qwen.qwen3-vl-235b-a22b",
                         "us.meta.llama4-maverick-17b-instruct-v1:0",
                         "us.meta.llama4-scout-17b-instruct-v1:0",
@@ -1976,7 +2240,9 @@ Resources:
                         "global.anthropic.claude-opus-4-6-v1",
                         "global.anthropic.claude-opus-4-6-v1:1m",
                         "global.anthropic.claude-opus-4-7",
-                        "global.anthropic.claude-opus-4-7:1m"
+                        "global.anthropic.claude-opus-4-7:1m",
+                        "global.anthropic.claude-opus-4-8",
+                        "global.anthropic.claude-opus-4-8:1m"
                       ]
                     default: "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
                     order: 0
@@ -1984,13 +2250,13 @@ Resources:
                     type: number
                     minimum: 0
                     maximum: 1
-                    description: "Sampling temperature: Controls randomness in model output (0.0 = deterministic, higher = more random). Not used for Claude 4.7 models."
+                    description: "Sampling temperature: Controls randomness in model output (0.0 = deterministic, higher = more random). Not used for Claude 4.7+ models."
                     default: 0.0
                     order: 1
                   top_k:
                     type: integer
                     minimum: 1
-                    description: "Sampling Top K. Not used for Claude 4.7 models."
+                    description: "Sampling Top K. Not used for Claude 4.7+ models."
                     default: 20
                     order: 2
                   top_p:
@@ -2038,6 +2304,8 @@ Resources:
                         "us.anthropic.claude-opus-4-6-v1:1m",
                         "us.anthropic.claude-opus-4-7",
                         "us.anthropic.claude-opus-4-7:1m",
+                        "us.anthropic.claude-opus-4-8",
+                        "us.anthropic.claude-opus-4-8:1m",
                         "eu.amazon.nova-lite-v1:0",
                         "eu.amazon.nova-pro-v1:0",
                         "eu.amazon.nova-2-lite-v1:0", "eu.amazon.nova-2-lite-v1:0:priority", "eu.amazon.nova-2-lite-v1:0:flex",
@@ -2050,6 +2318,8 @@ Resources:
                         "eu.anthropic.claude-opus-4-6-v1:1m",
                         "eu.anthropic.claude-opus-4-7",
                         "eu.anthropic.claude-opus-4-7:1m",
+                        "eu.anthropic.claude-opus-4-8",
+                        "eu.anthropic.claude-opus-4-8:1m",
                         "qwen.qwen3-vl-235b-a22b",
                         "us.meta.llama4-maverick-17b-instruct-v1:0",
                         "us.meta.llama4-scout-17b-instruct-v1:0",
@@ -2064,7 +2334,9 @@ Resources:
                         "global.anthropic.claude-opus-4-6-v1",
                         "global.anthropic.claude-opus-4-6-v1:1m",
                         "global.anthropic.claude-opus-4-7",
-                        "global.anthropic.claude-opus-4-7:1m"
+                        "global.anthropic.claude-opus-4-7:1m",
+                        "global.anthropic.claude-opus-4-8",
+                        "global.anthropic.claude-opus-4-8:1m"
                       ]
                     default: "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
                     order: 0
@@ -2072,13 +2344,13 @@ Resources:
                     type: number
                     minimum: 0
                     maximum: 1
-                    description: "Sampling temperature: Controls randomness in model output (0.0 = deterministic, higher = more random). Not used for Claude 4.7 models."
+                    description: "Sampling temperature: Controls randomness in model output (0.0 = deterministic, higher = more random). Not used for Claude 4.7+ models."
                     default: 0.0
                     order: 1
                   top_k:
                     type: integer
                     minimum: 1
-                    description: "Sampling Top K. Not used for Claude 4.7 models."
+                    description: "Sampling Top K. Not used for Claude 4.7+ models."
                     default: 20
                     order: 2
                   top_p:
@@ -2843,6 +3115,12 @@ Resources:
           TRACKING_TABLE: !Ref TrackingTable
           DOCUMENT_TRACKING_MODE: !If [HasAppSyncApi, "appsync", "dynamodb"]
           WORKING_BUCKET: !Ref WorkingBucket
+          BEDROCK_ASSUME_ROLE_ARN:
+            !If [HasBedrockHubRole, !Ref BedrockHubRoleArn, !Ref AWS::NoValue]
+          BEDROCK_ASSUME_ROLE_EXTERNAL_ID:
+            !If [HasBedrockHubRoleExternalId, !Ref BedrockHubRoleExternalId, !Ref AWS::NoValue]
+          BEDROCK_ASSUME_ROLE_SESSION_NAME:
+            !If [HasBedrockHubRoleSessionName, !Ref BedrockHubRoleSessionName, !Ref AWS::NoValue]
       LoggingConfig:
         LogGroup: !Ref OCRFunctionLogGroup
       Policies:
@@ -2877,6 +3155,15 @@ Resources:
                 - textract:AnalyzeDocument
               Resource: "*"
             # Bedrock permissions for OCR
+            # OpenAI GPT-5.x models are served via the bedrock-mantle endpoint
+            # (OpenAI Responses API) and use a separate IAM action namespace.
+            - Effect: Allow
+              Action:
+                - bedrock-mantle:CreateInference
+                - bedrock-mantle:GetProject
+                - bedrock-mantle:ListProjects
+                - bedrock-mantle:ListTagsForResources
+              Resource: "*"
             - Effect: Allow
               Action:
                 - bedrock:InvokeModel
@@ -2894,6 +3181,17 @@ Resources:
                 - aws-marketplace:Unsubscribe
                 - aws-marketplace:ViewSubscriptions
               Resource: "*"
+            # Optional cross-account Bedrock invocation via hub-account role.
+            # When BedrockHubRoleArn is set, the function assumes this role for
+            # all Bedrock data-plane and control-plane calls. The local Bedrock
+            # statements above are left in place so same-account invocations
+            # continue to work when the parameter is unset.
+            - !If
+              - HasBedrockHubRole
+              - Effect: Allow
+                Action: sts:AssumeRole
+                Resource: !Ref BedrockHubRoleArn
+              - !Ref AWS::NoValue
             # Lambda invoke permission for LambdaHook custom inference
             - Effect: Allow
               Action: lambda:InvokeFunction
@@ -2977,6 +3275,12 @@ Resources:
           WORKING_BUCKET: !Ref WorkingBucket
           # Guardrails break classification
           # GUARDRAIL_ID_AND_VERSION: !If [HasGuardrailConfig, !Sub "${BedrockGuardrailId}:${BedrockGuardrailVersion}", ""]
+          BEDROCK_ASSUME_ROLE_ARN:
+            !If [HasBedrockHubRole, !Ref BedrockHubRoleArn, !Ref AWS::NoValue]
+          BEDROCK_ASSUME_ROLE_EXTERNAL_ID:
+            !If [HasBedrockHubRoleExternalId, !Ref BedrockHubRoleExternalId, !Ref AWS::NoValue]
+          BEDROCK_ASSUME_ROLE_SESSION_NAME:
+            !If [HasBedrockHubRoleSessionName, !Ref BedrockHubRoleSessionName, !Ref AWS::NoValue]
       LoggingConfig:
         LogGroup: !Ref ClassificationFunctionLogGroup
       Policies:
@@ -3017,6 +3321,15 @@ Resources:
                 Resource:
                   - !Sub "${AppSyncApiArn}/types/Mutation/*"
               - !Ref AWS::NoValue
+            # OpenAI GPT-5.x models are served via the bedrock-mantle endpoint
+            # (OpenAI Responses API) and use a separate IAM action namespace.
+            - Effect: Allow
+              Action:
+                - bedrock-mantle:CreateInference
+                - bedrock-mantle:GetProject
+                - bedrock-mantle:ListProjects
+                - bedrock-mantle:ListTagsForResources
+              Resource: "*"
             - Effect: Allow
               Action:
                 - bedrock:InvokeModel
@@ -3038,6 +3351,17 @@ Resources:
                 - aws-marketplace:Unsubscribe
                 - aws-marketplace:ViewSubscriptions
               Resource: "*"
+            # Optional cross-account Bedrock invocation via hub-account role.
+            # When BedrockHubRoleArn is set, the function assumes this role for
+            # all Bedrock data-plane and control-plane calls. The local Bedrock
+            # statements above are left in place so same-account invocations
+            # continue to work when the parameter is unset.
+            - !If
+              - HasBedrockHubRole
+              - Effect: Allow
+                Action: sts:AssumeRole
+                Resource: !Ref BedrockHubRoleArn
+              - !Ref AWS::NoValue
             # Lambda invoke permission for LambdaHook custom inference
             - Effect: Allow
               Action: lambda:InvokeFunction
@@ -3123,6 +3447,12 @@ Resources:
           TRACKING_TABLE: !Ref TrackingTable
           DOCUMENT_TRACKING_MODE: !If [HasAppSyncApi, "appsync", "dynamodb"]
           WORKING_BUCKET: !Ref WorkingBucket
+          BEDROCK_ASSUME_ROLE_ARN:
+            !If [HasBedrockHubRole, !Ref BedrockHubRoleArn, !Ref AWS::NoValue]
+          BEDROCK_ASSUME_ROLE_EXTERNAL_ID:
+            !If [HasBedrockHubRoleExternalId, !Ref BedrockHubRoleExternalId, !Ref AWS::NoValue]
+          BEDROCK_ASSUME_ROLE_SESSION_NAME:
+            !If [HasBedrockHubRoleSessionName, !Ref BedrockHubRoleSessionName, !Ref AWS::NoValue]
       LoggingConfig:
         LogGroup: !Ref ExtractionFunctionLogGroup
       Policies:
@@ -3161,6 +3491,15 @@ Resources:
                 Resource:
                   - !Sub "${AppSyncApiArn}/types/Mutation/*"
               - !Ref AWS::NoValue
+            # OpenAI GPT-5.x models are served via the bedrock-mantle endpoint
+            # (OpenAI Responses API) and use a separate IAM action namespace.
+            - Effect: Allow
+              Action:
+                - bedrock-mantle:CreateInference
+                - bedrock-mantle:GetProject
+                - bedrock-mantle:ListProjects
+                - bedrock-mantle:ListTagsForResources
+              Resource: "*"
             - Effect: Allow
               Action:
                 - bedrock:InvokeModel
@@ -3176,6 +3515,17 @@ Resources:
                   - HasCustomExtractionModelARN
                   - !Ref CustomExtractionModelARN
                   - !Ref AWS::NoValue
+            # Optional cross-account Bedrock invocation via hub-account role.
+            # When BedrockHubRoleArn is set, the function assumes this role for
+            # all Bedrock data-plane and control-plane calls. The local Bedrock
+            # statements above are left in place so same-account invocations
+            # continue to work when the parameter is unset.
+            - !If
+              - HasBedrockHubRole
+              - Effect: Allow
+                Action: sts:AssumeRole
+                Resource: !Ref BedrockHubRoleArn
+              - !Ref AWS::NoValue
             - Effect: Allow
               Action:
                 - aws-marketplace:Subscribe
@@ -3258,6 +3608,12 @@ Resources:
           TRACKING_TABLE: !Ref TrackingTable
           DOCUMENT_TRACKING_MODE: !If [HasAppSyncApi, "appsync", "dynamodb"]
           WORKING_BUCKET: !Ref WorkingBucket
+          BEDROCK_ASSUME_ROLE_ARN:
+            !If [HasBedrockHubRole, !Ref BedrockHubRoleArn, !Ref AWS::NoValue]
+          BEDROCK_ASSUME_ROLE_EXTERNAL_ID:
+            !If [HasBedrockHubRoleExternalId, !Ref BedrockHubRoleExternalId, !Ref AWS::NoValue]
+          BEDROCK_ASSUME_ROLE_SESSION_NAME:
+            !If [HasBedrockHubRoleSessionName, !Ref BedrockHubRoleSessionName, !Ref AWS::NoValue]
       LoggingConfig:
         LogGroup: !Ref AssessmentFunctionLogGroup
       Policies:
@@ -3296,6 +3652,15 @@ Resources:
                 Resource:
                   - !Sub "${AppSyncApiArn}/types/Mutation/*"
               - !Ref AWS::NoValue
+            # OpenAI GPT-5.x models are served via the bedrock-mantle endpoint
+            # (OpenAI Responses API) and use a separate IAM action namespace.
+            - Effect: Allow
+              Action:
+                - bedrock-mantle:CreateInference
+                - bedrock-mantle:GetProject
+                - bedrock-mantle:ListProjects
+                - bedrock-mantle:ListTagsForResources
+              Resource: "*"
             - Effect: Allow
               Action:
                 - bedrock:InvokeModel
@@ -3313,6 +3678,17 @@ Resources:
                 - aws-marketplace:Unsubscribe
                 - aws-marketplace:ViewSubscriptions
               Resource: "*"
+            # Optional cross-account Bedrock invocation via hub-account role.
+            # When BedrockHubRoleArn is set, the function assumes this role for
+            # all Bedrock data-plane and control-plane calls. The local Bedrock
+            # statements above are left in place so same-account invocations
+            # continue to work when the parameter is unset.
+            - !If
+              - HasBedrockHubRole
+              - Effect: Allow
+                Action: sts:AssumeRole
+                Resource: !Ref BedrockHubRoleArn
+              - !Ref AWS::NoValue
             # Lambda invoke permission for LambdaHook custom inference
             - Effect: Allow
               Action: lambda:InvokeFunction
@@ -3493,6 +3869,12 @@ Resources:
           TRACKING_TABLE: !Ref TrackingTable
           DOCUMENT_TRACKING_MODE: !If [HasAppSyncApi, "appsync", "dynamodb"]
           WORKING_BUCKET: !Ref WorkingBucket
+          BEDROCK_ASSUME_ROLE_ARN:
+            !If [HasBedrockHubRole, !Ref BedrockHubRoleArn, !Ref AWS::NoValue]
+          BEDROCK_ASSUME_ROLE_EXTERNAL_ID:
+            !If [HasBedrockHubRoleExternalId, !Ref BedrockHubRoleExternalId, !Ref AWS::NoValue]
+          BEDROCK_ASSUME_ROLE_SESSION_NAME:
+            !If [HasBedrockHubRoleSessionName, !Ref BedrockHubRoleSessionName, !Ref AWS::NoValue]
       LoggingConfig:
         LogGroup: !Ref SummarizationFunctionLogGroup
       Policies:
@@ -3529,6 +3911,15 @@ Resources:
                 Resource:
                   - !Sub "${AppSyncApiArn}/types/Mutation/*"
               - !Ref AWS::NoValue
+            # OpenAI GPT-5.x models are served via the bedrock-mantle endpoint
+            # (OpenAI Responses API) and use a separate IAM action namespace.
+            - Effect: Allow
+              Action:
+                - bedrock-mantle:CreateInference
+                - bedrock-mantle:GetProject
+                - bedrock-mantle:ListProjects
+                - bedrock-mantle:ListTagsForResources
+              Resource: "*"
             - Effect: Allow
               Action:
                 - bedrock:InvokeModel
@@ -3546,6 +3937,17 @@ Resources:
                 - aws-marketplace:Unsubscribe
                 - aws-marketplace:ViewSubscriptions
               Resource: "*"
+            # Optional cross-account Bedrock invocation via hub-account role.
+            # When BedrockHubRoleArn is set, the function assumes this role for
+            # all Bedrock data-plane and control-plane calls. The local Bedrock
+            # statements above are left in place so same-account invocations
+            # continue to work when the parameter is unset.
+            - !If
+              - HasBedrockHubRole
+              - Effect: Allow
+                Action: sts:AssumeRole
+                Resource: !Ref BedrockHubRoleArn
+              - !Ref AWS::NoValue
             # Lambda invoke permission for LambdaHook custom inference
             - Effect: Allow
               Action: lambda:InvokeFunction
@@ -3627,6 +4029,12 @@ Resources:
           WORKING_BUCKET: !Ref WorkingBucket
           DOCUMENT_TRACKING_MODE: !If [HasAppSyncApi, "appsync", "dynamodb"]
           TRACKING_TABLE: !Ref TrackingTable
+          BEDROCK_ASSUME_ROLE_ARN:
+            !If [HasBedrockHubRole, !Ref BedrockHubRoleArn, !Ref AWS::NoValue]
+          BEDROCK_ASSUME_ROLE_EXTERNAL_ID:
+            !If [HasBedrockHubRoleExternalId, !Ref BedrockHubRoleExternalId, !Ref AWS::NoValue]
+          BEDROCK_ASSUME_ROLE_SESSION_NAME:
+            !If [HasBedrockHubRoleSessionName, !Ref BedrockHubRoleSessionName, !Ref AWS::NoValue]
       LoggingConfig:
         LogGroup: !Ref EvaluationFunctionLogGroup
       Policies:
@@ -3663,6 +4071,15 @@ Resources:
                 Resource:
                   - !Sub "${AppSyncApiArn}/types/Mutation/*"
               - !Ref AWS::NoValue
+            # OpenAI GPT-5.x models are served via the bedrock-mantle endpoint
+            # (OpenAI Responses API) and use a separate IAM action namespace.
+            - Effect: Allow
+              Action:
+                - bedrock-mantle:CreateInference
+                - bedrock-mantle:GetProject
+                - bedrock-mantle:ListProjects
+                - bedrock-mantle:ListTagsForResources
+              Resource: "*"
             - Effect: Allow
               Action:
                 - bedrock:InvokeModel
@@ -3674,6 +4091,13 @@ Resources:
                 - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:application-inference-profile/*"
                 # Custom model deployments created via fine-tuning feature
                 - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:custom-model-deployment/*"
+            # Optional cross-account Bedrock invocation via hub-account role.
+            - !If
+              - HasBedrockHubRole
+              - Effect: Allow
+                Action: sts:AssumeRole
+                Resource: !Ref BedrockHubRoleArn
+              - !Ref AWS::NoValue
             # Lambda invoke permission for SaveReportingFunction (in main template)
             - Effect: Allow
               Action:
@@ -3722,6 +4146,7 @@ Resources:
         Variables:
           LOG_LEVEL: !Ref LogLevel
           TRACKING_TABLE: !Ref TrackingTable
+          OUTPUT_BUCKET: !Ref OutputBucket
       LoggingConfig:
         LogGroup: !Ref TestExecutionAggregationFunctionLogGroup
       Policies:
@@ -3906,6 +4331,12 @@ Resources:
           TRACKING_TABLE: !Ref TrackingTable
           DOCUMENT_TRACKING_MODE: !If [HasAppSyncApi, "appsync", "dynamodb"]
           WORKING_BUCKET: !Ref WorkingBucket
+          BEDROCK_ASSUME_ROLE_ARN:
+            !If [HasBedrockHubRole, !Ref BedrockHubRoleArn, !Ref AWS::NoValue]
+          BEDROCK_ASSUME_ROLE_EXTERNAL_ID:
+            !If [HasBedrockHubRoleExternalId, !Ref BedrockHubRoleExternalId, !Ref AWS::NoValue]
+          BEDROCK_ASSUME_ROLE_SESSION_NAME:
+            !If [HasBedrockHubRoleSessionName, !Ref BedrockHubRoleSessionName, !Ref AWS::NoValue]
       LoggingConfig:
         LogGroup: !Ref RuleValidationFunctionLogGroup
       Policies:
@@ -3942,6 +4373,15 @@ Resources:
                 Resource:
                   - !Sub "${AppSyncApiArn}/types/Mutation/*"
               - !Ref AWS::NoValue
+            # OpenAI GPT-5.x models are served via the bedrock-mantle endpoint
+            # (OpenAI Responses API) and use a separate IAM action namespace.
+            - Effect: Allow
+              Action:
+                - bedrock-mantle:CreateInference
+                - bedrock-mantle:GetProject
+                - bedrock-mantle:ListProjects
+                - bedrock-mantle:ListTagsForResources
+              Resource: "*"
             - Effect: Allow
               Action:
                 - bedrock:InvokeModel
@@ -3953,6 +4393,13 @@ Resources:
                 - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:application-inference-profile/*"
                 # Custom model deployments created via fine-tuning feature
                 - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:custom-model-deployment/*"
+            # Optional cross-account Bedrock invocation via hub-account role.
+            - !If
+              - HasBedrockHubRole
+              - Effect: Allow
+                Action: sts:AssumeRole
+                Resource: !Ref BedrockHubRoleArn
+              - !Ref AWS::NoValue
             - !If
               - HasGuardrailConfig
               - Effect: Allow
@@ -4033,6 +4480,12 @@ Resources:
           WORKING_BUCKET: !Ref WorkingBucket
           REPORTING_BUCKET: !Ref ReportingBucket
           SAVE_REPORTING_FUNCTION_NAME: !Ref SaveReportingFunctionName
+          BEDROCK_ASSUME_ROLE_ARN:
+            !If [HasBedrockHubRole, !Ref BedrockHubRoleArn, !Ref AWS::NoValue]
+          BEDROCK_ASSUME_ROLE_EXTERNAL_ID:
+            !If [HasBedrockHubRoleExternalId, !Ref BedrockHubRoleExternalId, !Ref AWS::NoValue]
+          BEDROCK_ASSUME_ROLE_SESSION_NAME:
+            !If [HasBedrockHubRoleSessionName, !Ref BedrockHubRoleSessionName, !Ref AWS::NoValue]
       LoggingConfig:
         LogGroup: !Ref RuleValidationOrchestrationFunctionLogGroup
       Policies:
@@ -4068,6 +4521,15 @@ Resources:
                 Resource:
                   - !Sub "${AppSyncApiArn}/types/Mutation/*"
               - !Ref AWS::NoValue
+            # OpenAI GPT-5.x models are served via the bedrock-mantle endpoint
+            # (OpenAI Responses API) and use a separate IAM action namespace.
+            - Effect: Allow
+              Action:
+                - bedrock-mantle:CreateInference
+                - bedrock-mantle:GetProject
+                - bedrock-mantle:ListProjects
+                - bedrock-mantle:ListTagsForResources
+              Resource: "*"
             - Effect: Allow
               Action:
                 - bedrock:InvokeModel
@@ -4077,6 +4539,13 @@ Resources:
                 - !Sub "arn:${AWS::Partition}:bedrock:*::foundation-model/*"
                 - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
                 - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:application-inference-profile/*"
+            # Optional cross-account Bedrock invocation via hub-account role.
+            - !If
+              - HasBedrockHubRole
+              - Effect: Allow
+                Action: sts:AssumeRole
+                Resource: !Ref BedrockHubRoleArn
+              - !Ref AWS::NoValue
             - Effect: Allow
               Action:
                 - aws-marketplace:Subscribe
