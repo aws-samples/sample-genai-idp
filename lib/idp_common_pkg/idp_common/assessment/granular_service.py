@@ -822,6 +822,7 @@ class GranularAssessmentService:
         top_k: float,
         top_p: float,
         max_tokens: Optional[int],
+        reasoning_effort: Optional[str] = None,
     ) -> AssessmentResult:
         """
         Process a single assessment task.
@@ -836,6 +837,7 @@ class GranularAssessmentService:
             top_k: Top-k parameter
             top_p: Top-p parameter
             max_tokens: Max tokens parameter
+            reasoning_effort: Reasoning effort for OpenAI Responses models
 
         Returns:
             Assessment result
@@ -863,6 +865,7 @@ class GranularAssessmentService:
                 max_tokens=max_tokens,
                 context="GranularAssessment",
                 model_lambda_hook_arn=self.config.assessment.model_lambda_hook_arn,
+                reasoning_effort=reasoning_effort,
             )
 
             # Extract text from response
@@ -1713,6 +1716,7 @@ class GranularAssessmentService:
             temperature = self.config.assessment.temperature
             top_k = self.config.assessment.top_k
             top_p = self.config.assessment.top_p
+            reasoning_effort = self.config.assessment.reasoning_effort
             max_tokens = self.config.assessment.max_tokens
             system_prompt = self.config.assessment.system_prompt
 
@@ -1804,6 +1808,7 @@ class GranularAssessmentService:
                                 top_k,
                                 top_p,
                                 max_tokens,
+                                reasoning_effort,
                             ): task
                             for task in tasks_to_process
                         }
@@ -1856,6 +1861,7 @@ class GranularAssessmentService:
                                 top_k,
                                 top_p,
                                 max_tokens,
+                                reasoning_effort,
                             )
                             all_task_results.append(result)
 

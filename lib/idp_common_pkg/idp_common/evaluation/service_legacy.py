@@ -76,6 +76,9 @@ class EvaluationService:
         self.default_temperature = self.config.evaluation.llm_method.temperature
         self.default_top_k = self.config.evaluation.llm_method.top_k
         self.default_top_p = self.config.evaluation.llm_method.top_p
+        self.default_reasoning_effort = (
+            self.config.evaluation.llm_method.reasoning_effort
+        )
         self.default_max_tokens = self.config.evaluation.llm_method.max_tokens
         self.default_system_prompt = (
             self.config.evaluation.llm_method.system_prompt
@@ -389,6 +392,7 @@ IMPORTANT: Respond ONLY with a valid JSON object and nothing else. Here's the ex
                     "model": self.default_model,
                     "temperature": self.default_temperature,
                     "top_k": self.default_top_k,
+                    "reasoning_effort": self.default_reasoning_effort,
                     "system_prompt": self.default_system_prompt,
                     "task_prompt": self.default_task_prompt,
                 }

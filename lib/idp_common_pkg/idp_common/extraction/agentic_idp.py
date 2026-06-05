@@ -38,6 +38,7 @@ from strands.types.media import (
 )
 
 from idp_common.bedrock.client import CACHEPOINT_SUPPORTED_MODELS, is_claude_4_7_model
+from idp_common.bedrock.openai_responses import is_openai_responses_model
 from idp_common.config.models import IDPConfig
 from idp_common.utils.bedrock_utils import (
     async_exponential_backoff_retry,
@@ -881,6 +882,16 @@ def _build_model_config(
         Automatically uses BedrockModel for regional models (us.*, eu.*) and
         AnthropicModel with AnthropicBedrock for cross-region models (global.anthropic.*).
     """
+    # OpenAI GPT-5.x models are served via the bedrock-mantle Responses API and
+    # are not callable through the Converse-based Strands path. Callers should
+    # have routed these to standard extraction (see ExtractionService); fail
+    # loudly if one reaches here so the misconfiguration is obvious.
+    if is_openai_responses_model(model_id):
+        raise ValueError(
+            f"OpenAI Responses-API models ({model_id}) do not support agentic/"
+            "Strands extraction. Use standard extraction (agentic.enabled=false)."
+        )
+
     # Configure retry behavior and timeouts using boto3 Config
     boto_config = Config(
         retries={

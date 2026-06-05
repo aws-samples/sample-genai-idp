@@ -11,6 +11,7 @@ from unittest.mock import patch
 import yaml
 from idp_common.config.merge_utils import (
     _load_valid_bedrock_models,
+    _validate_agentic_openai,
     _validate_max_tokens,
     _validate_model_ids,
     _validate_schema_fields,
@@ -643,3 +644,113 @@ class TestValidateMaxTokens:
         assert result["valid"] is False
         assert len(result["errors"]) == 1
         assert "10,000" in result["errors"][0]
+
+
+class TestValidateAgenticOpenAI:
+    """Test _validate_agentic_openai function (OpenAI + agentic incompatibility)."""
+
+    def test_openai_with_agentic_errors(self):
+        """OpenAI model + agentic.enabled=true is a hard validation error."""
+        config = {
+            "extraction": {
+                "model": "openai.gpt-5.4",
+                "agentic": {"enabled": True},
+            }
+        }
+        result = {"valid": True, "errors": [], "warnings": []}
+        _validate_agentic_openai(config, result)
+
+        # Hard error — surfaced at config time, not a silent runtime fallback.
+        assert result["valid"] is False
+        assert len(result["errors"]) == 1
+        assert "agentic" in result["errors"][0].lower()
+        assert "openai.gpt-5.4" in result["errors"][0]
+
+    def test_openai_without_agentic_ok(self):
+        """OpenAI model with agentic disabled is fine."""
+        config = {
+            "extraction": {
+                "model": "openai.gpt-5.4",
+                "agentic": {"enabled": False},
+            }
+        }
+        result = {"valid": True, "errors": [], "warnings": []}
+        _validate_agentic_openai(config, result)
+
+        assert result["valid"] is True
+        assert result["errors"] == []
+
+    def test_non_openai_with_agentic_ok(self):
+        """Non-OpenAI model + agentic is the normal supported case."""
+        config = {
+            "extraction": {
+                "model": "us.anthropic.claude-opus-4-8",
+                "agentic": {"enabled": True},
+            }
+        }
+        result = {"valid": True, "errors": [], "warnings": []}
+        _validate_agentic_openai(config, result)
+
+        assert result["valid"] is True
+        assert result["errors"] == []
+
+    def test_per_class_openai_override_with_agentic_errors(self):
+        """A per-class OpenAI extraction override + agentic is a hard error."""
+        config = {
+            "extraction": {
+                "model": "us.anthropic.claude-opus-4-8",
+                "agentic": {"enabled": True},
+            },
+            "classes": [
+                {
+                    "x-aws-idp-document-type": "invoice",
+                    "x-aws-idp-extraction-model": "openai.gpt-5.5",
+                }
+            ],
+        }
+        result = {"valid": True, "errors": [], "warnings": []}
+        _validate_agentic_openai(config, result)
+
+        assert result["valid"] is False
+        assert len(result["errors"]) == 1
+        assert "invoice" in result["errors"][0]
+        assert "openai.gpt-5.5" in result["errors"][0]
+
+
+class TestValidateDiscoveryOpenAI:
+    """Test _validate_discovery_openai (OpenAI unsupported for discovery)."""
+
+    def test_without_ground_truth_openai_errors(self):
+        from idp_common.config.merge_utils import _validate_discovery_openai
+
+        config = {"discovery": {"without_ground_truth": {"model_id": "openai.gpt-5.4"}}}
+        result = {"valid": True, "errors": [], "warnings": []}
+        _validate_discovery_openai(config, result)
+        assert result["valid"] is False
+        assert len(result["errors"]) == 1
+        assert "discovery.without_ground_truth.model_id" in result["errors"][0]
+
+    def test_rules_openai_errors(self):
+        from idp_common.config.merge_utils import _validate_discovery_openai
+
+        config = {"discovery": {"rules": {"model": "openai.gpt-5.5"}}}
+        result = {"valid": True, "errors": [], "warnings": []}
+        _validate_discovery_openai(config, result)
+        assert result["valid"] is False
+        assert "discovery.rules.model" in result["errors"][0]
+
+    def test_non_openai_discovery_ok(self):
+        from idp_common.config.merge_utils import _validate_discovery_openai
+
+        config = {
+            "discovery": {
+                "without_ground_truth": {"model_id": "us.amazon.nova-pro-v1:0"},
+                "with_ground_truth": {"model_id": "us.anthropic.claude-opus-4-8"},
+                "auto_split": {"model_id": "us.amazon.nova-pro-v1:0"},
+                "rules": {"model": "us.anthropic.claude-opus-4-8"},
+            }
+        }
+        result = {"valid": True, "errors": [], "warnings": []}
+        _validate_discovery_openai(config, result)
+        assert result["valid"] is True
+        assert result["errors"] == []

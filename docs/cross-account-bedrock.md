@@ -105,6 +105,17 @@ Attach the Bedrock permissions to the hub-account role:
         "arn:aws:bedrock:*:HUB_ACCOUNT_ID:application-inference-profile/*",
         "arn:aws:bedrock:*:HUB_ACCOUNT_ID:guardrail/*"
       ]
+    },
+    {
+      "Comment": "Required only if using OpenAI GPT-5.x (bedrock-mantle Responses API)",
+      "Effect": "Allow",
+      "Action": [
+        "bedrock-mantle:CreateInference",
+        "bedrock-mantle:GetProject",
+        "bedrock-mantle:ListProjects",
+        "bedrock-mantle:ListTagsForResources"
+      ],
+      "Resource": "*"
     }
   ]
 }
