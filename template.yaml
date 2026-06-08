@@ -1152,6 +1152,11 @@ Metadata:
         Parameters:
           - ArtifactsBucketKmsKeyArn
       - Label:
+          default: "Advanced - Container Images"
+        Parameters:
+          - LambdaArchitecture
+          - EnableECRImageScanning
+      - Label:
           default: "General Configuration"
         Parameters:
           - MaxConcurrentWorkflows
