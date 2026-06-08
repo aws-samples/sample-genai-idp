@@ -199,7 +199,9 @@ export default defineConfig({
         {
           label: "New & Uncategorized",
           items: [
+            { label: "Missing Page Handling", slug: "missing-page-handling" },
             { label: "Setup Development Env Windows", slug: "setup-development-env-windows" },
+            { label: "Version Update Indicator", slug: "version-update-indicator" },
           ],
         },
         // AUTO-SIDEBAR-END
