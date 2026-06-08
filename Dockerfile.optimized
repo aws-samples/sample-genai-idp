@@ -8,7 +8,8 @@
 FROM ghcr.io/astral-sh/uv:0.9.6 AS uv
 
 # Builder stage - bundle dependencies into Lambda task root
-FROM public.ecr.aws/lambda/python:3.12-arm64 AS builder
+ARG BASE_IMAGE_SUFFIX=arm64
+FROM public.ecr.aws/lambda/python:3.12-${BASE_IMAGE_SUFFIX} AS builder
 
 # Enable bytecode compilation to improve cold-start performance
 ENV UV_COMPILE_BYTECODE=1
@@ -43,7 +44,8 @@ RUN --mount=from=uv,source=/uv,target=/bin/uv \
   rm -rf /tmp/idp_common_pkg
 
 # Final stage - minimal runtime
-FROM public.ecr.aws/lambda/python:3.12-arm64
+ARG BASE_IMAGE_SUFFIX=arm64
+FROM public.ecr.aws/lambda/python:3.12-${BASE_IMAGE_SUFFIX}
 
 # Conditionally install git (required for mlflow/gitpython)
 ARG INSTALL_GIT=false

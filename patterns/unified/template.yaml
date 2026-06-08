@@ -137,6 +137,15 @@ Parameters:
     Type: String
     Description: "Content-based version for Lambda container images"
 
+  LambdaArchitecture:
+    Type: String
+    Default: "arm64"
+    AllowedValues: ["arm64", "x86_64"]
+    Description: >-
+      CPU architecture for Lambda container images. Must match the base image
+      used in the Docker build. Use arm64 (Graviton) for best price-performance
+      or x86_64 when using custom base images that only support AMD64.
+
   ArtifactBucket:
     Type: String
     Description: "S3 bucket containing deployment artifacts"
@@ -2565,6 +2574,8 @@ Resources:
             Value: !Ref ImageVersion
           - Name: AWS_REGION
             Value: !Ref AWS::Region
+          - Name: LAMBDA_ARCHITECTURE
+            Value: !Ref LambdaArchitecture
       TimeoutInMinutes: 90
 
   CodeBuildExecutionRole:
@@ -2758,7 +2769,7 @@ Resources:
       PackageType: Image
       ImageUri: !Sub "${ECRRepository.RepositoryUri}:bda-invoke-function-${ImageVersion}"
       Architectures:
-        - arm64
+        - !Ref LambdaArchitecture
       Timeout: 900
       MemorySize: 4096
       Tracing: Active
@@ -2827,7 +2838,7 @@ Resources:
       PackageType: Image
       ImageUri: !Sub "${ECRRepository.RepositoryUri}:bda-processresults-function-${ImageVersion}"
       Architectures:
-        - arm64
+        - !Ref LambdaArchitecture
       Timeout: 900
       MemorySize: 4096
       Tracing: Active
@@ -2960,7 +2971,7 @@ Resources:
       PackageType: Image
       ImageUri: !Sub "${ECRRepository.RepositoryUri}:bda-completion-function-${ImageVersion}"
       Architectures:
-        - arm64
+        - !Ref LambdaArchitecture
       Timeout: 900
       MemorySize: 4096
       Tracing: Active
@@ -3087,7 +3098,7 @@ Resources:
       PackageType: Image
       ImageUri: !Sub "${ECRRepository.RepositoryUri}:ocr-function-${ImageVersion}"
       Architectures:
-        - arm64
+        - !Ref LambdaArchitecture
       ImageConfig:
         Command:
           - "index.handler"
@@ -3244,7 +3255,7 @@ Resources:
       PackageType: Image
       ImageUri: !Sub "${ECRRepository.RepositoryUri}:classification-function-${ImageVersion}"
       Architectures:
-        - arm64
+        - !Ref LambdaArchitecture
       ImageConfig:
         Command:
           - "index.handler"
@@ -3413,7 +3424,7 @@ Resources:
       PackageType: Image
       ImageUri: !Sub "${ECRRepository.RepositoryUri}:extraction-function-${ImageVersion}"
       Architectures:
-        - arm64
+        - !Ref LambdaArchitecture
       ImageConfig:
         Command:
           - "index.handler"
@@ -3580,7 +3591,7 @@ Resources:
       PackageType: Image
       ImageUri: !Sub "${ECRRepository.RepositoryUri}:assessment-function-${ImageVersion}"
       Architectures:
-        - arm64
+        - !Ref LambdaArchitecture
       ImageConfig:
         Command:
           - "index.handler"
@@ -3738,7 +3749,7 @@ Resources:
       PackageType: Image
       ImageUri: !Sub "${ECRRepository.RepositoryUri}:processresults-function-${ImageVersion}"
       Architectures:
-        - arm64
+        - !Ref LambdaArchitecture
       ImageConfig:
         Command:
           - "index.handler"
@@ -3837,7 +3848,7 @@ Resources:
       PackageType: Image
       ImageUri: !Sub "${ECRRepository.RepositoryUri}:summarization-function-${ImageVersion}"
       Architectures:
-        - arm64
+        - !Ref LambdaArchitecture
       ImageConfig:
         Command:
           - "index.handler"
@@ -3997,7 +4008,7 @@ Resources:
       PackageType: Image
       ImageUri: !Sub "${ECRRepository.RepositoryUri}:evaluation-function-${ImageVersion}"
       Architectures:
-        - arm64
+        - !Ref LambdaArchitecture
       ImageConfig:
         Command:
           - "index.handler"
@@ -4138,7 +4149,7 @@ Resources:
       PackageType: Image
       ImageUri: !Sub "${ECRRepository.RepositoryUri}:test-execution-aggregation-function-${ImageVersion}"
       Architectures:
-        - arm64
+        - !Ref LambdaArchitecture
       Timeout: 900
       MemorySize: 4096
       Tracing: Active
@@ -4199,7 +4210,7 @@ Resources:
       PackageType: Image
       ImageUri: !Sub "${ECRRepository.RepositoryUri}:rule-validation-policy-classification-function-${ImageVersion}"
       Architectures:
-        - arm64
+        - !Ref LambdaArchitecture
       ImageConfig:
         Command:
           - "index.handler"
@@ -4295,7 +4306,7 @@ Resources:
       PackageType: Image
       ImageUri: !Sub "${ECRRepository.RepositoryUri}:rule-validation-function-${ImageVersion}"
       Architectures:
-        - arm64
+        - !Ref LambdaArchitecture
       ImageConfig:
         Command:
           - "index.handler"
@@ -4442,7 +4453,7 @@ Resources:
       PackageType: Image
       ImageUri: !Sub "${ECRRepository.RepositoryUri}:rule-validation-orchestration-function-${ImageVersion}"
       Architectures:
-        - arm64
+        - !Ref LambdaArchitecture
       ImageConfig:
         Command:
           - "index.handler"
@@ -4611,7 +4622,7 @@ Resources:
       PackageType: Image
       ImageUri: !Sub "${ECRRepository.RepositoryUri}:mlflow-logger-function-${ImageVersion}"
       Architectures:
-        - arm64
+        - !Ref LambdaArchitecture
       ImageConfig:
         Command:
           - "index.handler"

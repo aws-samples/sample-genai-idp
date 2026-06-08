@@ -405,9 +405,20 @@ Parameters:
       - "true"
       - "false"
     Description: >-
-      Enable automatic vulnerability scanning for Lambda container images in ECR (applies to Pattern-1 and Pattern-2). 
-      Disabling may improve deployment reliability but reduces security posture. 
+      Enable automatic vulnerability scanning for Lambda container images in ECR (applies to Pattern-1 and Pattern-2).
+      Disabling may improve deployment reliability but reduces security posture.
       Recommended: true for production, false only if experiencing deployment issues.
+
+  LambdaArchitecture:
+    Type: String
+    Default: "arm64"
+    AllowedValues:
+      - "arm64"
+      - "x86_64"
+    Description: >-
+      CPU architecture for Lambda container images in the unified pattern.
+      Use arm64 (Graviton) for best price-performance, or x86_64 when using
+      custom base images that only support AMD64.
 
   # Logging configuration
   LogLevel:
@@ -2366,6 +2377,7 @@ Resources:
           - !Ref EvaluationBaselineBucketName
         SaveReportingFunctionName: !Ref SaveReportingDataFunctionV2
         ImageVersion: "<UNIFIED_IMAGE_VERSION>"
+        LambdaArchitecture: !Ref LambdaArchitecture
         ArtifactBucket: "<ARTIFACT_BUCKET_TOKEN>"
         ArtifactPrefix: "<ARTIFACT_PREFIX_TOKEN>"
         ArtifactsBucketKmsKeyArn: !Ref ArtifactsBucketKmsKeyArn

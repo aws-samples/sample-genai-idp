@@ -28,8 +28,12 @@ phases:
           func_path="${!func_var}"
           func_name=$(basename "$func_path" | sed 's/_/-/g')
           echo "Building ${func_name} from ${func_path}..."
+          DOCKER_PLATFORM="linux/${LAMBDA_ARCHITECTURE:-arm64}"
+          if [ "$LAMBDA_ARCHITECTURE" = "x86_64" ]; then
+            DOCKER_PLATFORM="linux/amd64"
+          fi
           docker buildx build \
-            --platform linux/arm64 \
+            --platform "$DOCKER_PLATFORM" \
             --tag "${ECR_URI}:${func_name}-${IMAGE_VERSION}" \
             --provenance=false \
             --push \
