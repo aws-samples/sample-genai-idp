@@ -2009,6 +2009,15 @@ Resources:
                 - !Sub "arn:${AWS::Partition}:glue:${AWS::Region}:${AWS::AccountId}:catalog"
                 - !Sub "arn:${AWS::Partition}:glue:${AWS::Region}:${AWS::AccountId}:database/${ReportingDatabase}"
                 - !Sub "arn:${AWS::Partition}:glue:${AWS::Region}:${AWS::AccountId}:table/${ReportingDatabase}/*"
+            # OpenAI GPT-5.x models are served via the bedrock-mantle endpoint
+            # (OpenAI Responses API) and use a separate IAM action namespace.
+            - Effect: Allow
+              Action:
+                - bedrock-mantle:CreateInference
+                - bedrock-mantle:GetProject
+                - bedrock-mantle:ListProjects
+                - bedrock-mantle:ListTagsForResources
+              Resource: "*"
             - Effect: Allow
               Action:
                 - bedrock:InvokeModel
@@ -6461,6 +6470,15 @@ Resources:
               Action:
                 - appsync:GraphQL
               Resource: !Sub "arn:${AWS::Partition}:appsync:${AWS::Region}:${AWS::AccountId}:apis/${GraphQLApi.ApiId}/types/Mutation/*"
+            # OpenAI GPT-5.x models are served via the bedrock-mantle endpoint
+            # (OpenAI Responses API) and use a separate IAM action namespace.
+            - Effect: Allow
+              Action:
+                - bedrock-mantle:CreateInference
+                - bedrock-mantle:GetProject
+                - bedrock-mantle:ListProjects
+                - bedrock-mantle:ListTagsForResources
+              Resource: "*"
             - Effect: Allow
               Action:
                 - bedrock:InvokeModel
@@ -6638,6 +6656,15 @@ Resources:
                 - !Sub "arn:${AWS::Partition}:glue:${AWS::Region}:${AWS::AccountId}:catalog"
                 - !Sub "arn:${AWS::Partition}:glue:${AWS::Region}:${AWS::AccountId}:database/${ReportingDatabase}"
                 - !Sub "arn:${AWS::Partition}:glue:${AWS::Region}:${AWS::AccountId}:table/${ReportingDatabase}/*"
+            # OpenAI GPT-5.x models are served via the bedrock-mantle endpoint
+            # (OpenAI Responses API) and use a separate IAM action namespace.
+            - Effect: Allow
+              Action:
+                - bedrock-mantle:CreateInference
+                - bedrock-mantle:GetProject
+                - bedrock-mantle:ListProjects
+                - bedrock-mantle:ListTagsForResources
+              Resource: "*"
             - Effect: Allow
               Action:
                 - bedrock:InvokeModel
@@ -7211,6 +7238,15 @@ Resources:
                 - !Sub "arn:${AWS::Partition}:glue:${AWS::Region}:${AWS::AccountId}:catalog"
                 - !Sub "arn:${AWS::Partition}:glue:${AWS::Region}:${AWS::AccountId}:database/${ReportingDatabase}"
                 - !Sub "arn:${AWS::Partition}:glue:${AWS::Region}:${AWS::AccountId}:table/${ReportingDatabase}/*"
+            # OpenAI GPT-5.x models are served via the bedrock-mantle endpoint
+            # (OpenAI Responses API) and use a separate IAM action namespace.
+            - Effect: Allow
+              Action:
+                - bedrock-mantle:CreateInference
+                - bedrock-mantle:GetProject
+                - bedrock-mantle:ListProjects
+                - bedrock-mantle:ListTagsForResources
+              Resource: "*"
             - Effect: Allow
               Action:
                 - bedrock:InvokeModel
@@ -8869,6 +8905,15 @@ Resources:
                 - kms:GenerateDataKey*
                 - kms:DescribeKey
               Resource: !GetAtt CustomerManagedEncryptionKey.Arn
+            # OpenAI GPT-5.x models are served via the bedrock-mantle endpoint
+            # (OpenAI Responses API) and use a separate IAM action namespace.
+            - Effect: Allow
+              Action:
+                - bedrock-mantle:CreateInference
+                - bedrock-mantle:GetProject
+                - bedrock-mantle:ListProjects
+                - bedrock-mantle:ListTagsForResources
+              Resource: "*"
             - Effect: Allow
               Action:
                 - bedrock:InvokeModel

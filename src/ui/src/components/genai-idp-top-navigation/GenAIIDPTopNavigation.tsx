@@ -112,26 +112,6 @@ const GenAIIDPTopNavigation = (): React.JSX.Element => {
                     ),
                   } as Record<string, unknown>),
                 },
-                {
-                  id: 'support-group',
-                  text: 'Resources',
-                  items: [
-                    {
-                      id: 'documentation',
-                      text: 'Blog Post',
-                      href: 'https://www.amazon.com/genaiidp',
-                      external: true,
-                      externalIconAriaLabel: ' (opens in new tab)',
-                    },
-                    {
-                      id: 'source',
-                      text: 'Source Code',
-                      href: 'https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws',
-                      external: true,
-                      externalIconAriaLabel: ' (opens in new tab)',
-                    },
-                  ],
-                },
               ],
             },
           ]}

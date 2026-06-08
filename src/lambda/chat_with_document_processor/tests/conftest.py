@@ -45,16 +45,37 @@ _cfg_mod = MagicMock()
 _cfg_mod.get_config = MagicMock(return_value={})
 sys.modules["idp_common.config"] = _cfg_mod
 
-# Stub idp_common.bedrock.client.is_claude_4_7_model — used by the processor
-# to decide whether to skip temperature/top_p for Claude 4.7+.
+# Stub idp_common.bedrock.client — used by the processor for is_claude_4_7_model
+# (Claude 4.7+ temperature/top_p skip) and default_client (passed to the OpenAI
+# streaming generator).
 _bedrock_mod = MagicMock()
 _bedrock_mod.is_claude_4_7_model = lambda model_id: (
     "claude-opus-4-7" in model_id
     or "claude-opus-4-8" in model_id
     or "claude-4-7" in model_id
 )
-sys.modules.setdefault("idp_common.bedrock", MagicMock())
+_bedrock_mod.default_client = MagicMock()
+# The idp_common.bedrock facade exposes stream_responses_api (OpenAI GPT-5.x
+# streaming chat path). Tests patch this generator.
+_bedrock_facade = MagicMock()
+_bedrock_facade.stream_responses_api = MagicMock()
+sys.modules["idp_common.bedrock"] = _bedrock_facade
 sys.modules["idp_common.bedrock.client"] = _bedrock_mod
+
+# Stub idp_common.bedrock.openai_responses.is_openai_responses_model — used by
+# the processor to route GPT-5.x chat to the non-streaming Responses API.
+_openai_responses_mod = MagicMock()
+
+
+def _fake_is_openai_responses_model(model_id):
+    if not model_id:
+        return False
+    base = model_id.split(".", 1)[-1] if model_id[:3] in ("us.", "eu.") else model_id
+    return base.startswith("openai.gpt-5") or model_id.startswith("openai.gpt-5")
+
+
+_openai_responses_mod.is_openai_responses_model = _fake_is_openai_responses_model
+sys.modules["idp_common.bedrock.openai_responses"] = _openai_responses_mod
 
 
 # Stub idp_common.bedrock.model_utils.parse_model_id — used by the processor

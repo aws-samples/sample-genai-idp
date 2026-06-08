@@ -150,6 +150,21 @@ def handler(event, context):
             logger.error("objectKeys is required but not provided")
             return False
 
+        # Defense-in-depth RBAC: reprocessDocument is an Admin+Author operation.
+        # The schema enforces this via @aws_cognito_user_pools(cognito_groups),
+        # but we also gate it server-side so a Viewer can never reach it even if
+        # the schema directive is missing/misconfigured.
+        caller = _get_caller_info(event)
+        if not ({"Admin", "Author"}.intersection(caller["groups"])):
+            logger.warning(
+                "Forbidden: caller %s (groups=%s) attempted reprocessDocument",
+                caller["email"],
+                caller["groups"],
+            )
+            raise PermissionError(
+                "Unauthorized: reprocessDocument requires Admin or Author group"
+            )
+
         # RBAC: scope-enforce the `version` argument for non-admins. Authors
         # with `allowedConfigVersions` restricted to a subset of versions
         # must not be able to reprocess documents against a version outside
@@ -157,7 +172,6 @@ def handler(event, context):
         # callers are unrestricted (preserves pre-fix behavior for single-
         # user / pre-RBAC deployments).
         if version:
-            caller = _get_caller_info(event)
             if not caller["is_admin"]:
                 allowed_versions = _get_user_allowed_config_versions(caller["email"])
                 if allowed_versions and version not in allowed_versions:

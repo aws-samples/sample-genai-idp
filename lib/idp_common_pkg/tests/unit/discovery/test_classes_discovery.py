@@ -803,3 +803,28 @@ class TestClassesDiscovery:
             assert len(updated_classes) == 1
             assert updated_classes[0]["$id"] == "w4"
             assert updated_classes[0]["description"] == "New form"
+
+
+@pytest.mark.unit
+class TestDiscoveryRejectsOpenAI:
+    """The discovery guard rejects OpenAI Responses models (PDF document blocks
+    are unsupported by the bedrock-mantle Responses API)."""
+
+    def test_reject_helper_raises_for_gpt5(self):
+        from idp_common.discovery.classes_discovery import (
+            _reject_openai_responses_model,
+        )
+
+        for model in ("openai.gpt-5.4", "openai.gpt-5.5"):
+            with pytest.raises(ValueError, match="not supported for discovery"):
+                _reject_openai_responses_model(model)
+
+    def test_reject_helper_allows_supported_models(self):
+        from idp_common.discovery.classes_discovery import (
+            _reject_openai_responses_model,
+        )
+
+        # Should not raise.
+        _reject_openai_responses_model("us.anthropic.claude-opus-4-8")
+        _reject_openai_responses_model("us.amazon.nova-pro-v1:0")
+        _reject_openai_responses_model(None)

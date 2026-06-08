@@ -37,6 +37,7 @@ from botocore.exceptions import ClientError
 from idp_common.appsync.client import AppSyncClient, AppSyncError
 from idp_common.bedrock.client import is_claude_4_7_model
 from idp_common.bedrock.model_utils import parse_model_id
+from idp_common.bedrock.openai_responses import is_openai_responses_model
 from idp_common.config import get_config
 
 logger = logging.getLogger()
@@ -293,7 +294,90 @@ def _resolve_chat_settings(config_version: str | None):
         "system_prompt": system_prompt,
         "temperature": _to_float(chat_cfg.get("temperature"), 0.0),
         "max_tokens": _to_int(chat_cfg.get("max_tokens"), 4096),
+        "reasoning_effort": chat_cfg.get("reasoning_effort") or "medium",
     }
+
+
+def _invoke_openai_responses_and_publish(
+    session_id: str,
+    selected_model_id: str,
+    system_prompt: str,
+    user_text: str,
+    max_tokens: int,
+    reasoning_effort: str | None,
+) -> str:
+    """Stream an OpenAI GPT-5.x response via the bedrock-mantle Responses API.
+
+    GPT-5.x models are served on the OpenAI Responses API (not the Converse
+    Stream API used for other models). This consumes the SSE delta generator
+    from ``idp_common`` and publishes ``assistant_stream`` deltas with the same
+    throttling as the Converse path, so the UI renders tokens as they arrive.
+
+    Returns the full accumulated assistant text.
+    """
+    from idp_common.bedrock import stream_responses_api
+    from idp_common.bedrock.client import default_client
+
+    buffer: list[str] = []
+    buffer_len = 0
+    last_flush_ts = time.time()
+    full_text_parts: list[str] = []
+    first_delta_seen = False
+
+    def _flush(force: bool = False) -> None:
+        nonlocal buffer, buffer_len, last_flush_ts
+        if not buffer:
+            return
+        now = time.time()
+        if not (
+            force
+            or buffer_len >= STREAM_FLUSH_CHAR_THRESHOLD
+            or (now - last_flush_ts) >= STREAM_FLUSH_INTERVAL_S
+        ):
+            return
+        delta = "".join(buffer)
+        buffer = []
+        buffer_len = 0
+        last_flush_ts = now
+        _publish(
+            session_id=session_id,
+            method="assistant_stream",
+            status="STREAMING",
+            content=delta,
+            model_id=selected_model_id,
+            is_processing=True,
+        )
+
+    try:
+        for item in stream_responses_api(
+            client=default_client,
+            model_id=selected_model_id,
+            system_prompt=system_prompt,
+            content=[{"text": user_text}],
+            max_tokens=max_tokens,
+            context="ChatWithDocument",
+            reasoning_effort=reasoning_effort,
+        ):
+            # The generator yields text deltas (str), then a final metering dict.
+            if not isinstance(item, str):
+                continue
+            if not first_delta_seen:
+                first_delta_seen = True
+                _publish(
+                    session_id=session_id,
+                    method="assistant_status",
+                    status="STREAMING",
+                    content="Streaming response…",
+                    model_id=selected_model_id,
+                )
+            full_text_parts.append(item)
+            buffer.append(item)
+            buffer_len += len(item)
+            _flush()
+    finally:
+        _flush(force=True)
+
+    return "".join(full_text_parts)
 
 
 def _invoke_bedrock_stream_and_publish(
@@ -582,14 +666,25 @@ def handler(event, _context):  # noqa: ANN001
 
         user_text = content_str + "\n\n" + "The user's question is: " + prompt
         t_start = time.time()
-        full_text = _invoke_bedrock_stream_and_publish(
-            session_id=session_id,
-            selected_model_id=selected_model_id,
-            system_prompt=chat_settings["system_prompt"],
-            user_text=user_text,
-            temperature=chat_settings["temperature"],
-            max_tokens=chat_settings["max_tokens"],
-        )
+        if is_openai_responses_model(selected_model_id):
+            # OpenAI GPT-5.x: bedrock-mantle Responses API (non-streaming).
+            full_text = _invoke_openai_responses_and_publish(
+                session_id=session_id,
+                selected_model_id=selected_model_id,
+                system_prompt=chat_settings["system_prompt"],
+                user_text=user_text,
+                max_tokens=chat_settings["max_tokens"],
+                reasoning_effort=chat_settings.get("reasoning_effort"),
+            )
+        else:
+            full_text = _invoke_bedrock_stream_and_publish(
+                session_id=session_id,
+                selected_model_id=selected_model_id,
+                system_prompt=chat_settings["system_prompt"],
+                user_text=user_text,
+                temperature=chat_settings["temperature"],
+                max_tokens=chat_settings["max_tokens"],
+            )
         elapsed_s = time.time() - t_start
         cleaned = _remove_text_between_brackets(full_text).strip("\n")
         logger.info(

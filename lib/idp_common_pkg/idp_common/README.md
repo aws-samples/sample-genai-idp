@@ -30,6 +30,8 @@ The IDP Common library provides these main modules:
 - **[S3](s3/README.md)**: S3 read/write utilities
 - **[Utils](utils/README.md)**: Common utility functions
 - **[Metrics](metrics/README.md)**: Performance and token tracking
+- **[Config](config/README.md)**: Configuration loading, merging, validation, and typed models
+- **[Monitoring](monitoring/README.md)**: Shared monitoring foundation (logs, X-Ray, Step Functions, stack discovery)
 
 ## 🗃️ Key Classes
 

@@ -128,6 +128,11 @@ class TestGetModelMaxOutputTokens:
         assert get_model_max_output_tokens("eu.amazon.nova-2-lite-v1:0") == 10_000
         assert get_model_max_output_tokens("global.amazon.nova-2-lite-v1:0") == 10_000
 
+    def test_openai_gpt5_models_return_128k(self):
+        """Test OpenAI GPT-5.x models return 128,000 max tokens."""
+        assert get_model_max_output_tokens("openai.gpt-5.4") == 128_000
+        assert get_model_max_output_tokens("openai.gpt-5.5") == 128_000
+
     def test_unknown_model_raises_error(self):
         """Test unknown models raise ValueError instead of returning default."""
         with pytest.raises(ValueError, match="Unsupported model ID"):

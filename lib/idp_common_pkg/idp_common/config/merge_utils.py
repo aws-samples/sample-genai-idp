@@ -614,6 +614,8 @@ def validate_config(
     _validate_max_tokens(merged, result)
     _validate_task_prompt_placeholders(merged, result)
     _validate_schema_fields(config.get("classes", []), result)
+    _validate_agentic_openai(merged, result)
+    _validate_discovery_openai(merged, result)
 
     return result
 
@@ -722,6 +724,93 @@ def _validate_model_ids(merged_config: Dict[str, Any], result: Dict[str, Any]) -
                 f"{section}.{field_name} has invalid model ID: {model_id}. "
                 f"Verify the model name is correct and ensure it's enabled in the Bedrock console. "
                 f"Check config_library/pricing.yaml for valid model IDs."
+            )
+
+
+def _validate_agentic_openai(
+    merged_config: Dict[str, Any], result: Dict[str, Any]
+) -> None:
+    """Error when an OpenAI GPT-5.x model is paired with agentic extraction.
+
+    OpenAI Responses models (openai.gpt-5.*) are served via the bedrock-mantle
+    endpoint and are incompatible with the Converse-based agentic (Strands)
+    extraction path. This is a hard validation error (rather than a silent
+    runtime fallback) so the misconfiguration surfaces at config time instead
+    of failing obscurely mid-processing.
+    """
+    from idp_common.bedrock.openai_responses import is_openai_responses_model
+    from idp_common.config.schema_constants import X_AWS_IDP_EXTRACTION_MODEL
+
+    extraction = merged_config.get("extraction", {})
+    if not isinstance(extraction, dict):
+        return
+
+    agentic_enabled = bool(extraction.get("agentic", {}).get("enabled"))
+    if not agentic_enabled:
+        return
+
+    # Global extraction model
+    global_model = extraction.get("model")
+    if global_model and is_openai_responses_model(global_model):
+        result["valid"] = False
+        result["errors"].append(
+            f"extraction.model '{global_model}' is an OpenAI Responses model, which "
+            "is NOT compatible with agentic extraction (extraction.agentic.enabled=true). "
+            "Set agentic.enabled=false or choose a non-OpenAI model."
+        )
+
+    # Per-class extraction model overrides
+    for cls in merged_config.get("classes", []) or []:
+        if not isinstance(cls, dict):
+            continue
+        override = cls.get(X_AWS_IDP_EXTRACTION_MODEL)
+        if override and is_openai_responses_model(override):
+            class_name = cls.get("x-aws-idp-document-type", "<unnamed>")
+            result["valid"] = False
+            result["errors"].append(
+                f"Class '{class_name}' overrides extraction with OpenAI Responses "
+                f"model '{override}', which is NOT compatible with agentic extraction "
+                "(extraction.agentic.enabled=true). Set agentic.enabled=false or "
+                "choose a non-OpenAI model for this class."
+            )
+
+
+def _validate_discovery_openai(
+    merged_config: Dict[str, Any], result: Dict[str, Any]
+) -> None:
+    """Error when an OpenAI GPT-5.x model is configured for discovery.
+
+    Discovery ingests whole PDFs via Converse ``document`` content blocks, which
+    the OpenAI Responses API (bedrock-mantle) does not support (text + image
+    only). Routing GPT-5.x here would silently drop the document, so reject it
+    at config time. (These models are also not offered in the discovery
+    picklists.)
+    """
+    from idp_common.bedrock.openai_responses import is_openai_responses_model
+
+    discovery = merged_config.get("discovery", {})
+    if not isinstance(discovery, dict):
+        return
+
+    # Sub-sections that carry a per-section model: model_id for the class/auto
+    # discovery sections, model for rules discovery.
+    checks = [
+        ("discovery.without_ground_truth.model_id", discovery.get("without_ground_truth", {}), "model_id"),
+        ("discovery.with_ground_truth.model_id", discovery.get("with_ground_truth", {}), "model_id"),
+        ("discovery.auto_split.model_id", discovery.get("auto_split", {}), "model_id"),
+        ("discovery.rules.model", discovery.get("rules", {}), "model"),
+    ]
+    for label, section, field in checks:
+        if not isinstance(section, dict):
+            continue
+        model_id = section.get(field)
+        if model_id and is_openai_responses_model(model_id):
+            result["valid"] = False
+            result["errors"].append(
+                f"{label} is an OpenAI Responses model ('{model_id}'), which is NOT "
+                "supported for discovery — discovery sends whole-PDF document blocks "
+                "that the bedrock-mantle Responses API cannot accept. Choose an "
+                "Anthropic or Nova model."
             )
 
 

@@ -27,11 +27,32 @@ dynamodb = boto3.resource("dynamodb")
 s3 = boto3.client("s3")
 
 
+def _caller_in_groups(event, allowed):
+    """Defense-in-depth RBAC check against the caller's Cognito groups.
+
+    The schema restricts this field via @aws_cognito_user_pools(cognito_groups),
+    but we also enforce the group server-side so the operation is never reachable
+    by an unauthorized caller even if the schema directive is missing or
+    misconfigured (e.g. the prior @aws_auth directive, which AppSync silently
+    ignores on a multi-auth API).
+    """
+    groups = (event.get("identity") or {}).get("claims", {}).get("cognito:groups") or []
+    if isinstance(groups, str):
+        groups = [groups]
+    return bool(set(allowed).intersection(groups))
+
+
 def handler(event, context):
     """Handle document deletion requests from AppSync."""
     logger.info(f"Delete document resolver invoked with event: {json.dumps(sanitize_event_for_logging(event))}")
 
     try:
+        # Defense-in-depth: deleteDocument is an Admin+Author operation.
+        if not _caller_in_groups(event, ("Admin", "Author")):
+            raise PermissionError(
+                "Unauthorized: deleteDocument requires Admin or Author group"
+            )
+
         object_keys: List[str] = event["arguments"]["objectKeys"]
 
         # Validate input
