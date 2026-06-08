@@ -2,6 +2,9 @@
 title: "AI-Guided Deployment Walkthrough"
 ---
 
+Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+SPDX-License-Identifier: MIT-0
+
 # AI-Guided IDP Deployment Walkthrough
 
 > **How to use this guide**
@@ -109,17 +112,17 @@ Your KMS key policy must already allow CodeBuild to `kms:Decrypt` **before** the
 stack is deployed. The stack creates CodeBuild roles in the main stack AND nested stacks
 (e.g. multi-doc-discovery), so use a wildcard condition rather than specific role ARNs.
 
-Add this statement to your KMS key policy now:
+Add this statement to your KMS key policy now (replace `<PARTITION>` with `aws`, `aws-us-gov`, or `aws-cn` as appropriate):
 ```json
 {
   \"Sid\": \"Allow IDP CodeBuild roles to decrypt artifacts\",
   \"Effect\": \"Allow\",
-  \"Principal\": {\"AWS\": \"arn:aws:iam::<ACCOUNT_ID>:root\"},
+  \"Principal\": {\"AWS\": \"arn:<PARTITION>:iam::<ACCOUNT_ID>:root\"},
   \"Action\": [\"kms:Decrypt\", \"kms:DescribeKey\", \"kms:GenerateDataKey\"],
   \"Resource\": \"*\",
   \"Condition\": {
     \"StringLike\": {
-      \"aws:PrincipalArn\": \"arn:aws:iam::<ACCOUNT_ID>:role/*CodeBuild*\"
+      \"aws:PrincipalArn\": \"arn:<PARTITION>:iam::<ACCOUNT_ID>:role/*CodeBuild*\"
     }
   }
 }
