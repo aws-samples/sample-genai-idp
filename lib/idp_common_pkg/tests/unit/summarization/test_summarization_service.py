@@ -242,6 +242,7 @@ class TestSummarizationService:
             max_tokens=config["max_tokens"],
             context="Summarization",
             model_lambda_hook_arn=None,
+            reasoning_effort=None,
         )
 
         # Verify result

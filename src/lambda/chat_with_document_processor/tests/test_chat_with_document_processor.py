@@ -140,6 +140,100 @@ class TestProcessorHappyPath:
         assert final["isProcessing"] is False
 
 
+class TestProcessorOpenAIResponses:
+    @pytest.mark.unit
+    def test_openai_model_streams_via_responses_api_not_converse_stream(self):
+        """An openai.gpt-5.* chat model streams via the Responses generator."""
+        import index
+
+        tracking_table = MagicMock()
+        tracking_table.get_item.return_value = {
+            "Item": {
+                "PK": "doc#uploads/x.pdf",
+                "SK": "none",
+                "ConfigVersion": "default",
+                "Pages": [
+                    {"Id": 1, "TextUri": "s3://output-bucket/uploads/x.pdf/pages/1.txt"},
+                ],
+            }
+        }
+        dyn_resource = MagicMock()
+        dyn_resource.Table.return_value = tracking_table
+
+        s3 = MagicMock()
+        s3.head_object.return_value = {}
+        s3.get_object.return_value = {
+            "Body": MagicMock(read=MagicMock(return_value=b"FULL DOC TEXT")),
+        }
+
+        # converse_stream must NOT be called for OpenAI models.
+        bedrock_runtime = MagicMock()
+
+        publishes: list[dict] = []
+        fake_client = MagicMock()
+        fake_client.execute_mutation.side_effect = lambda _m, v: publishes.append(
+            dict(v)
+        )
+
+        # Fake streaming generator: several text deltas, then a final metering dict.
+        captured: dict = {}
+
+        def _fake_stream(**kwargs):
+            captured.update(kwargs)
+            yield "GPT-5 "
+            yield "answer."
+            yield {
+                "metering": {"ChatWithDocument/bedrock/openai.gpt-5.4": {"requests": 1}},
+                "text": "GPT-5 answer.",
+            }
+
+        with (
+            patch.object(index, "_s3", s3),
+            patch.object(index, "_dynamodb", dyn_resource),
+            patch.object(index, "_get_bedrock_runtime", return_value=bedrock_runtime),
+            patch.object(index, "_get_appsync_client", return_value=fake_client),
+            patch("idp_common.bedrock.stream_responses_api", _fake_stream),
+            # Bypass throttling so each delta publishes.
+            patch.object(index, "STREAM_FLUSH_INTERVAL_S", 0.0),
+            patch.object(index, "STREAM_FLUSH_CHAR_THRESHOLD", 1),
+            patch.object(
+                index,
+                "_resolve_chat_settings",
+                return_value={
+                    "model_id": "openai.gpt-5.4",
+                    "system_prompt": "sys",
+                    "temperature": 0.0,
+                    "max_tokens": 128,
+                    "reasoning_effort": "high",
+                },
+            ),
+        ):
+            result = index.handler(
+                {
+                    "sessionId": "s-1",
+                    "turnId": "t-1",
+                    "prompt": "what is this?",
+                    "s3Uri": "uploads/x.pdf",
+                    "modelId": "",
+                    "callerSub": "caller-sub",
+                },
+                None,
+            )
+
+        assert result == {"ok": True, "turnId": "t-1"}
+        # Routed to the Responses streaming generator, not converse_stream.
+        bedrock_runtime.converse_stream.assert_not_called()
+        assert captured["model_id"] == "openai.gpt-5.4"
+        assert captured["reasoning_effort"] == "high"
+        assert captured["context"] == "ChatWithDocument"
+
+        methods = [p.get("method") for p in publishes]
+        # Multiple stream deltas (throttling bypassed), then a final event.
+        assert methods.count("assistant_stream") >= 2
+        assert methods[-1] == "assistant_final"
+        assert publishes[-1]["content"] == "GPT-5 answer."
+
+
 class TestProcessorRBAC:
     @pytest.mark.unit
     def test_scope_denied_does_not_call_bedrock(self):

@@ -418,6 +418,10 @@ srt-fix: ## Run SRT interactive fix
 	@echo "Running SRT interactive fix..."
 	$(PYTHON) scripts/srt/fix.py
 
+##@ Dependencies
+dep-manifest: ## Generate dependency manifests for artifact repository mirroring (Python + Node)
+	@bash scripts/generate-dep-manifest.sh
+
 ##@ Deploy
 # Thin wrappers around `idp-cli publish` / `deploy` / `delete` for the common
 # 80% case. Uncommon flags can still be passed via EXTRA_ARGS="--foo --bar".

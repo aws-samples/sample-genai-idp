@@ -852,6 +852,143 @@ class TestSticklerEvaluationService:
                 mock_get_model.assert_called_once()
                 mock_instance.compare_with.assert_called_once()
 
+    @pytest.fixture
+    def nested_optional_config(self):
+        """Config with a nested object whose fields have no 'required' array.
+
+        Mirrors real auto/manual schemas (e.g. URLA) where every field is
+        optional and may be None.
+        """
+        return {
+            "classes": [
+                {
+                    "$schema": "https://json-schema.org/draft/2020-12/schema",
+                    "$id": "form",
+                    "x-aws-idp-document-type": "Form",
+                    "type": "object",
+                    "properties": {
+                        "Contact": {"$ref": "#/$defs/Contact"},
+                    },
+                    "$defs": {
+                        "Contact": {
+                            "type": "object",
+                            "properties": {
+                                "HomePhone": {"type": "string"},
+                                "WorkPhone": {"type": "string"},
+                                "Email": {"type": "string"},
+                            },
+                        }
+                    },
+                }
+            ]
+        }
+
+    def test_evaluate_section_none_in_nested_optional_with_confidence(
+        self, nested_optional_config
+    ):
+        """Regression: None values in nested optional fields must not fail eval.
+
+        Stickler's JsonSchemaFieldConverter builds optional fields with a None
+        default but a non-nullable annotation (e.g. ``str``). The confidence
+        path round-trips data through ``from_json``/``model_dump``, which
+        materializes None for missing fields and re-validates, previously
+        raising "Input should be a valid string [input_value=None]" and
+        surfacing as a misleading "Schema configuration error". The service
+        widens every field to Optional so this path succeeds.
+        """
+        service = EvaluationService(
+            region="us-west-2", config=nested_optional_config, max_workers=1
+        )
+        section = Section(section_id="1", classification="Form", page_ids=["1"])
+
+        # WorkPhone is None (not extracted) in both baseline and prediction
+        expected = {
+            "Contact": {"HomePhone": "555-1", "WorkPhone": None, "Email": "a@b.c"}
+        }
+        actual = {
+            "Contact": {"HomePhone": "555-1", "WorkPhone": None, "Email": "a@b.c"}
+        }
+        confidence = {
+            "Contact": {
+                "HomePhone": {"confidence": 0.95},
+                "Email": {"confidence": 0.95},
+            }
+        }
+
+        result = service.evaluate_section(
+            section=section,
+            expected_results=expected,
+            actual_results=actual,
+            confidence_scores=confidence,
+        )
+
+        # Must not be flagged as a failed evaluation
+        assert not result.metrics.get("evaluation_failed")
+        assert result.document_class == "Form"
+
+    def test_evaluate_section_blast_radius_limited_to_bad_field(self):
+        """A single unparseable field must not zero out the whole section.
+
+        The tolerant build drops only the offending field (from both sides) and
+        still evaluates the rest, instead of raising and failing every attribute.
+        """
+        config = {
+            "classes": [
+                {
+                    "$schema": "https://json-schema.org/draft/2020-12/schema",
+                    "$id": "t",
+                    "x-aws-idp-document-type": "T",
+                    "type": "object",
+                    "properties": {
+                        "Good": {"type": "string"},
+                        # numeric field; a dict value can't be coerced and will
+                        # fail Pydantic validation
+                        "Amount": {"type": "number"},
+                    },
+                }
+            ]
+        }
+        service = EvaluationService(region="us-west-2", config=config, max_workers=1)
+        section = Section(section_id="1", classification="T", page_ids=["1"])
+
+        expected = {"Good": "hello", "Amount": {"nested": "oops"}}
+        actual = {"Good": "hello", "Amount": {"nested": "oops2"}}
+
+        result = service.evaluate_section(section, expected, actual, None)
+
+        # Section did NOT hard-fail; the good field was still scored
+        assert not result.metrics.get("evaluation_failed")
+        good = next((a for a in result.attributes if a.name == "Good"), None)
+        assert good is not None and good.matched
+        # The bad field is reported as skipped, not silently dropped
+        assert result.metrics.get("skipped_field_count") == 1
+        assert any(a.name.startswith("__SKIPPED__") for a in result.attributes)
+
+    def test_drop_field_at_path_nested_and_list(self):
+        """_drop_field_at_path removes the right leaf for dict and list paths."""
+        service = EvaluationService(
+            region="us-west-2", config={"classes": []}, max_workers=1
+        )
+        data = {
+            "A": {"B": {"C": "x", "D": "y"}},
+            "Items": [{"k": 1}, {"k": 2}],
+        }
+
+        # Nested dict path
+        out = service._drop_field_at_path(data, ("A", "B", "C"))
+        assert "C" not in out["A"]["B"]
+        assert out["A"]["B"]["D"] == "y"
+        assert data["A"]["B"]["C"] == "x"  # original untouched (deep copy)
+
+        # List index path
+        out2 = service._drop_field_at_path(data, ("Items", 0, "k"))
+        assert "k" not in out2["Items"][0]
+        assert out2["Items"][1]["k"] == 2
+
+        # Non-existent path is a no-op
+        out3 = service._drop_field_at_path(data, ("Nope", "Missing"))
+        assert out3 == data
+
 
 @pytest.mark.unit
 def test_section_evaluation_result_includes_stickler_comparison():

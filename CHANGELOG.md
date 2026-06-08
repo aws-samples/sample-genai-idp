@@ -9,6 +9,176 @@ SPDX-License-Identifier: MIT-0
 
 - **Private AppSync unreachable from browser clients (WorkSpaces, VPN, bastion)** — `scripts/vpc-endpoints.yaml` `VpcEndpointSecurityGroup` previously allowed inbound HTTPS (port 443) only from the Lambda security group. Browsers inside the VPC send AppSync GraphQL requests directly to the `appsync-api` VPC Interface Endpoint (not through the ALB), so all queries, mutations, and subscriptions hung indefinitely — the Configuration page showed "Loading configuration..." forever, the Document List never populated, and the Upload Documents page showed "Input bucket not configured". Fixed by adding a `VpcCidr` parameter and a second ingress rule for the VPC CIDR block. `deploy-vpc-endpoints.py` now auto-looks up the VPC primary CIDR via `ec2:DescribeVpcs` and passes it automatically — no CLI changes required. Re-run `deploy-vpc-endpoints.py` against an existing deployment to apply the fix.
 
+## [0.5.14]
+
+### Added
+
+- **Dependency manifest generation for artifact-repository mirroring** — New `make dep-manifest` target (and `scripts/generate-dep-manifest.sh`) generates a complete, pinned list of all Python and Node.js dependencies for enterprises mirroring packages into an artifact repository (JFrog Artifactory, AWS CodeArtifact, Sonatype Nexus, etc.) for air-gapped, pre-scanned builds. Parses existing `uv.lock` and `package-lock.json` files (no re-resolution) plus any extra `requirements.txt`/`pyproject.toml` packages, writing pip-compatible (`name==version`) and npm-compatible (`name@version`) manifests to the gitignored `dist/manifests/`. A GitHub Actions workflow (`generate-dep-manifest.yml`) regenerates manifests on dependency-file changes (dry-run on PRs, 90-day artifact upload on `main`/manual dispatch). See the new [Dependency Mirroring](docs/dependency-mirroring.md) guide.
+
+- **OpenAI GPT-5.4 / GPT-5.5 model support** — Added `openai.gpt-5.4` and `openai.gpt-5.5` everywhere Claude models are selectable (OCR, classification, extraction, assessment, summarization, evaluation, and Chat-with-Document). Unlike all other supported models, these are served via the **`bedrock-mantle` endpoint (OpenAI Responses API)** rather than the Converse API, so a new SigV4-signed HTTP backend was added in `idp_common/bedrock/openai_responses.py`. `BedrockClient.invoke_model` transparently routes `openai.gpt-5.*` IDs to it and returns the identical `{"response", "metering"}` contract, so no downstream service code changed. The Chat-with-Document processor routes GPT-5.x through a streaming Responses call (SSE), publishing incremental token deltas to the UI with the same throttling as the Converse path. Notes: these are reasoning models (temperature/top_p/top_k omitted) tuned via a new OpenAI-only `reasoning_effort` config field (`minimal`/`low`/`medium`/`high`, default `medium`) surfaced per service in the unified template and config models; **no prompt caching** (`<<CACHEPOINT>>` stripped); **incompatible with agentic/Strands extraction** — that combination is now a hard error in `idp-cli config-validate` and raises at runtime; **not supported for Discovery** (which ingests whole-PDF document blocks the Responses API can't accept) — rejected by config-validate and guarded at runtime; **standard service tier only**. Availability is **US regions only** — GPT-5.5 in `us-east-2`; GPT-5.4 in `us-east-2`, `us-west-2`, `us-gov-west-1` (no EU/global), so the models are hidden in EU-region deployments. Lambda roles gained `bedrock-mantle:CreateInference` (+ `Get*`/`List*`) IAM permissions. New env vars: `BEDROCK_MANTLE_REGION` (pin the mantle region), `BEDROCK_MANTLE_SIGNING_NAME`, `BEDROCK_MANTLE_REASONING_EFFORT`. Includes pricing and `model_config_limits` (128K max output) entries. See the new [OpenAI GPT-5.x Models](docs/openai-models.md) guide for the full support matrix and caveats.
+
+- **Test Studio: Edit test set metadata** — Test sets can now be edited to update description (max 500 characters) and document classification type. Edit functionality available via new "Edit" button when a single test set is selected. Classification type metadata options: Unspecified, Single Class, Multi Class, Packet Splitting. Includes new `UpdateTestSetInput` GraphQL input type, `updateTestSet` mutation with `UpdateTestSetResolver` AppSync resolver, Lambda handler routing, and frontend Edit Test Set modal with form validation.
+
+### Fixed
+
+- **Agentic extraction no longer crashes merging token metering with `None` values** ([#337](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues/337)) — `concurrent_structured_output_async` (used when a large document is split into concurrent extraction batches) raised `TypeError: unsupported operand type(s) for +: 'NoneType' and 'int'` when a Bedrock response reported a token counter as `None`. The existing `(tv or 0)` guard only covered the incoming value; the accumulated value (seeded verbatim from the first batch via `dict(mv)`) could itself be `None`, and `dict.get(tk, 0)` returns that stored `None` rather than the default for a present-but-`None` key. The metering merge is now factored into `_accumulate_metering`, which coerces `None` on both sides of the addition. This previously crashed otherwise-successful extractions in the post-processing step, marking the document FAILED.
+
+- **Evaluation no longer fails on `None`/empty optional fields, empty arrays, or a single bad field** — Three related evaluation robustness fixes: (1) Optional fields with `None`/missing values (common in real schemas like URLA) no longer fail the confidence/assessment path with a misleading "Schema configuration error" — model fields are now widened to `Optional[...]` to work around upstream [stickler#149](https://github.com/awslabs/stickler/issues/149). (2) Auto-generated schemas with empty arrays (e.g. `[]` → bare `{"type": "array"}`) and objects that become empty after their unevaluable children are removed are now pruned instead of crashing the converter; genson's spurious `required` arrays are also stripped so a missing field scores as a miss rather than a hard error. (3) A single field that still fails validation is now dropped from scoring (and reported as a `__SKIPPED__` row with a coverage note) instead of zeroing out the entire section — limiting the blast radius so the remaining fields still evaluate.
+- 
+- **Schema Builder: Standard Class catalog restored in "Add Class" modal** — The Document Schema *Add Class* modal again presents the two-card chooser (📝 Custom Class / 📦 Standard Class) for non-policy schemas, letting users import pre-built classes from the [Standard Class Catalog](docs/classification.md#standard-document-classes) (Invoice, Receipt, US driver's license, etc.). The chooser/standard-mode UI was inadvertently dropped from `SchemaBuilder.tsx` during the policy-discovery rewrite (commit `d701e6b88`); the underlying `StandardClassCatalog` component, `addStandardClasses` hook action, and `standard-classes.json` data file were all still present and needed only to be re-wired into the modal. Policy Schema "Add Policy Class" still skips the chooser and goes straight to the custom form (unchanged behavior).
+
+- **Evaluation now handles null field descriptions** — Configs with `description: null` no longer cause evaluation failures. The evaluation service now automatically converts null descriptions to empty strings before JSON Schema validation (Stickler requirement). This fix ensures extraction results can be evaluated even when field descriptions are missing or null in config schemas. No functional impact on evaluation logic.
+
+- **Updated the AppSync APIs** (1) all field-level `@aws_auth(cognito_groups:[…])` directives in `schema.graphql` replaced with `@aws_cognito_user_pools(cognito_groups:[…])`, which AppSync evaluates on multi-auth APIs; (2) server-side Cognito group checks added to every privileged resolver Lambda.
+
+- **Navigation cleanup** — removed the "Resources" dropdown (Blog, Code) from the top-right user menu and added a "Blog" link to the top of the Resources section in the left navigation panel.
+
+## Templates
+   - us-west-2: `https://s3.us-west-2.amazonaws.com/aws-ml-blog-us-west-2/artifacts/genai-idp/idp-main_0.5.14.yaml`
+   - us-east-1: `https://s3.us-east-1.amazonaws.com/aws-ml-blog-us-east-1/artifacts/genai-idp/idp-main_0.5.14.yaml`
+   - eu-central-1: `https://s3.eu-central-1.amazonaws.com/aws-ml-blog-eu-central-1/artifacts/genai-idp/idp-main_0.5.14.yaml`
+   - 
+## [0.5.13]
+
+### Added
+
+- **Claude Opus 4.8 Model Support** — Added `anthropic.claude-opus-4-8` (and `:1m` context variant) across all `us`, `eu`, and `global` inference profiles. Includes unified template enums, UI model dropdowns, cachepoint support, EU region mappings, pricing entries, and documentation updates. Model is recognized as a Claude 4.7+ variant — the same temperature/top_p/top_k handling and 128K extended-output limit apply.
+
+- **Amazon Quick + IDP MCP Integration Workshop** — step-by-step guide (`workshop/amazon-quick-integration-workshop.md`) that walks through deploying the IDP stack, configuring MCP connectivity in Amazon Quick, and building an end-to-end loan document processing workflow with structured data extraction and Excel output. Covers CloudFormation deployment, OAuth service-to-service auth setup, action configuration, and a multi-phase Amazon Quick workflow.
+  
+- **Stickler v0.4.0 upgrade with confidence calibration metrics** — upgraded evaluation engine from Stickler v0.1.4/v0.1.5 to v0.4.0, adding ECE (Expected Calibration Error), Brier score, ECARB@30, and AUROC metrics for confidence analysis. New `ConfidenceMetricsCalculator` in `idp_common.evaluation.confidence_integration` computes calibration metrics at overall and per-field levels. Test aggregation results now include `confidence_metrics` field with comprehensive calibration data. Confidence aggregation logic moved from frontend to backend (test execution aggregation function) for cleaner architecture. Evaluation service patches `field_comparisons` with `field_path` for ConfidenceCalculator compatibility and uses structural detection to unwrap wrapper keys (Item_N, Record_N) from extraction results. Fully backward compatible. Test Studio now displays Error Capture at Review Budget (30%) showing percentage of errors caught when reviewing lowest-confidence 30% of data. Format: "46% (1.52x)". New column in field metrics table (gear-icon configurable) and in Additional Metrics section.
+
+- **Metric info tooltips** — All Test Studio metrics now include info icons with explanatory tooltips. Covers accuracy metrics (Precision, Recall, F1, Accuracy), confidence calibration metrics (AUROC, ECE, Brier, ECARB@30, Coverage Ratio), confusion matrix components (TP, FP, TN, FN), error rates (False Alarm Rate, False Discovery Rate), aggregate metrics (Avg Confidence, Avg Accuracy, Avg Weighted Score), and split classification metrics (Page Level Accuracy, Split Accuracy With/Without Order, Total Pages/Splits). Tooltips link to Wikipedia or Stickler documentation. Available in both TestResults and TestComparison views. Clicking info icons does not trigger table sorting.
+  
+### Changed
+
+- **Default Chat-with-Document model promoted to `us.anthropic.claude-opus-4-8:1m`** — chat defaults now point at the newer Opus generation. EU deployments map automatically to `eu.anthropic.claude-opus-4-8:1m` via `UpdateConfiguration`. Existing custom configs are unaffected.
+
+### Fixed
+
+- **Agentic extraction now respects 128K output limit for Claude Opus 4.7+** — `_build_model_config` previously matched these models against the generic `claude-(opus|sonnet|haiku)-4` regex and silently capped them at 64K, contradicting the 128K declared in `model_config_limits.yaml`. A dedicated branch now returns 128K for opus-4-7 and opus-4-8.
+
+- **`idp-cli deploy --headless` no longer leaves dangling references in the headless template** — the headless transformer now strips `HasPublicArtifactsBucket` (orphaned after `VersionCheckResolverFunction` was removed) and removes `ChatWithDocumentProcessorFunction` (only invoked by removed AppSync resolvers, with dangling `UsersTable` / `GraphQLApi` refs). `CircuitBreakerManagerFunction` is now also converted to DynamoDB tracking mode so its AppSync status-publish hook is stripped. Additionally, `--headless` (template transform) no longer auto-sets the `EnableHeadless` CFN parameter — that parameter opts into the Private API Gateway and requires VPC infrastructure, which is an orthogonal concern. Users who want the Jobs API must pass `--parameters EnableHeadless=true,VpcId=...` explicitly.
+
+## Templates
+   - us-west-2: `https://s3.us-west-2.amazonaws.com/aws-ml-blog-us-west-2/artifacts/genai-idp/idp-main_0.5.13.yaml`
+   - us-east-1: `https://s3.us-east-1.amazonaws.com/aws-ml-blog-us-east-1/artifacts/genai-idp/idp-main_0.5.13.yaml`
+   - eu-central-1: `https://s3.eu-central-1.amazonaws.com/aws-ml-blog-eu-central-1/artifacts/genai-idp/idp-main_0.5.13.yaml`
+
+## [0.5.12]
+
+### Added
+
+- **Test Studio: Abort running test runs** — Test runs with status `QUEUED` or `RUNNING` can now be aborted from both the Web UI and CLI. The abort operation stops all pending document processing workflows, preserves results from already-completed documents, and updates the test run status to `ABORTED`. Metrics are automatically calculated for completed documents. The Web UI displays an "Abort" button next to running tests, and the CLI provides an `idp-cli abort-test-run` command with confirmation prompts. Aborted test runs show accurate completion counts (e.g., "48/50 files processed") and allow viewing partial results including evaluation metrics and cost breakdowns for successfully processed documents.
+
+- **Optional `{CLASS_AND_ATTRIBUTE_NAMES_AND_DESCRIPTIONS}` placeholder for classification prompts** ([#262](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues/262)) — Pattern 2 classification `task_prompt` templates can opt in to a new placeholder that expands, per document type, to the class name, description, **and** schema attribute names. Renders as XML for `multimodalPageLevelClassification` and as a markdown table for `textbasedHolisticClassification`. Cost-neutral by default — only materialized when the template references it, with per-class attribute counts capped (default 50) to keep prompt cost predictable. Useful for schema-rich domains where similarly-named classes have very different extraction schemas. The Web UI Prompt Preview tab renders the substituted attributes for inspection. See [`docs/classification.md`](docs/classification.md#optional-class_and_attribute_names_and_descriptions-placeholder).
+
+- **Cross-account Bedrock invocation via STS AssumeRole** ([#305](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues/305)) — IDP processing Lambdas can now route all Bedrock traffic through a centralized "hub" AWS account. Set the new optional `BedrockHubRoleArn` parameter (with optional external-id / session-name) and the stack conditionally adds `sts:AssumeRole` to each Lambda's execution role. STS credentials auto-refresh via `DeferredRefreshableCredentials` so warm Lambdas survive past the 1-hour STS session. Covers the entire pipeline plus discovery, embeddings, Chat with Document, and Agent Companion (incl. Strands sub-agents). Fully additive — leaving the parameter empty preserves prior same-account behavior. **Out of scope:** BDA runtime, Bedrock Knowledge Bases, and `model_finetuning/`. See [`docs/cross-account-bedrock.md`](docs/cross-account-bedrock.md).
+
+- **Distinguish MISSING pages from BLANK fields in extraction output** ([#317](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues/317)) — for sparsely-populated multi-section forms where pages may be legitimately omitted, extraction can now distinguish fields whose source page was *present but empty* (BLANK) from those whose source page was *not submitted* (MISSING). Two new optional schema extensions, `x-aws-idp-page-types` and `x-aws-idp-source-page-types`, declare named page sub-types and which page types each property sources from. A regex-based resolver detects present page types, annotates the LLM prompt with `--- PAGE N [PageType] ---` markers, and (when enabled) post-processes the JSON to drop/null fields whose source pages are absent. Output gains optional `page_type_resolution` and `missing_fields_report`. Fully additive; the Document Schema editor adds form widgets for both extensions. See [`docs/missing-page-handling.md`](docs/missing-page-handling.md) and the [demo notebook](notebooks/usecase-specific-examples/multi-page-bank-statement/step3_extraction_with_missing_pages.ipynb).
+
+- **Private (VPC-only) deployment — browser uploads route through the S3 Interface VPC Endpoint** — when `WebUIHosting=ALB`, the ALB nested stack provisions an S3 Interface VPC Endpoint and exposes its regional DNS name as a new `S3VPCEndpointDnsName` output. Web UI presigner Lambdas, `ApiHandlerFunction`, and config/dataset custom resources receive an `S3_ENDPOINT_URL` env var and use virtual-host addressing so SigV4 matches the VPCE DNS. Browser uploads and Lambda S3 traffic stay on the AWS backbone with zero public-internet egress.
+
+- **Bring-Your-Own S3 VPC endpoint** — two new top-level parameters (`S3VpcEndpointIdOverride`, `S3VpcEndpointDnsNameOverride`) let customers with a central network account reuse an existing endpoint instead of having the IDP stack provision one. Both must be set together; CloudFormation `Rules` enforce the pairing.
+
+- **`monitoring` (CloudWatch) Interface VPC Endpoint** — `scripts/vpc-endpoints.yaml` now provisions a CloudWatch Interface VPC Endpoint, gated by the new `CreateMonitoringEndpoint` parameter (default `true`). Required for the `DashboardMerger` custom resource to succeed in private mode. `scripts/check-vpc-endpoints.sh` updated to detect and skip pre-existing endpoints.
+
+- **`LambdaSecurityGroupId` parameter on the ALB nested stack** — when supplied, the ALB S3 VPC Endpoint security group allows inbound 443 from the app Lambda SG so VPC-resident Lambdas can reach S3 through the same endpoint as ALB. Fixes a 5-minute hang in `ConfigurationCopyFunction` caused by SG mismatch.
+
+
+### Changed
+
+- **ALB nested stack S3 VPC endpoint policy scoped to same-account operations** — the endpoint policy allows a finite set of S3 actions on `arn:${AWS::Partition}:s3:::*` conditioned on `aws:PrincipalAccount` / `aws:ResourceAccount` matching the deployment account. Wildcard resource is necessary to avoid cyclic dependencies on parent-stack buckets; authorization is additionally enforced at the network (SG) and IAM (role + bucket policy) layers. See `docs/deployment-private-network.md`.
+
+- **`scripts/generate_self_signed_cert.sh` uses a short fixed CommonName (`idp-self-signed`) with the full ALB hostname in `subjectAltName`** — internal ALB DNS names often exceed the X.509 64-char CN limit, causing openssl to abort. Modern browsers validate only against SAN, so this is RFC-correct and removes the silent failure.
+
+### Fixed
+
+- **Agentic extraction now supports `:1m` model IDs (1M context window)** ([#312](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues/312)) — agentic extraction with `:1m` model ids (e.g. `us.anthropic.claude-opus-4-7:1m`) previously failed at ConverseStream with `ValidationException` because the agentic path forwarded the raw id to Strands' `BedrockModel`. `_build_model_config` now strips `:1m` and forwards the `anthropic_beta` header via Strands' `additional_request_fields`, matching the traditional Bedrock path. All `:1m` variants now work.
+
+- **Bedrock Knowledge Base nested stack no longer left in `DELETE_FAILED` on update/delete** ([#315](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues/315)) — two reliability fixes in `nested/bedrockkb/template.yaml`:
+  - **Reliable `AWS::Bedrock::DataSource` deletion during sync** — the Delete handler now stops in-progress ingestion jobs and polls until terminal status (12-min deadline) before signalling SUCCESS, so CFN can delete the data source cleanly. Always reports SUCCESS on Delete (logs warnings) so a stuck job never blocks stack delete. IAM gains `Stop/Get/ListIngestionJobs`, timeout is 15 min, and ingestion functions `DependsOn` their schedulers to avoid races.
+  - **Helper IAM roles now `DeletionPolicy: Retain`** — `DataSourceSchedulerRole` and `StartIngestionJobFunctionRole` are ephemeral helpers; marking them `Retain` decouples nested-stack delete from the deploying principal's `iam:DeleteRole` permission. Defensive fix for session policies that deny `iam:DeleteRole`. Retained roles are inert and can be deleted manually after the stack is gone.
+
+## Templates
+   - us-west-2: `https://s3.us-west-2.amazonaws.com/aws-ml-blog-us-west-2/artifacts/genai-idp/idp-main_0.5.12.yaml`
+   - us-east-1: `https://s3.us-east-1.amazonaws.com/aws-ml-blog-us-east-1/artifacts/genai-idp/idp-main_0.5.12.yaml`
+   - eu-central-1: `https://s3.eu-central-1.amazonaws.com/aws-ml-blog-eu-central-1/artifacts/genai-idp/idp-main_0.5.12.yaml`
+  
+
+## [0.5.11]
+
+### Added
+
+- **"Update available" indicator in Web UI Deployment Info** — the Deployment Info section of the side nav now shows a small `Update` badge next to the deployed `Version: …` line whenever a newer published template is available on the public artifacts bucket. Hovering the badge opens a popover showing the deployed and latest versions; for **Admin** users, the popover includes a one-click "Update stack in CloudFormation →" link that deep-links to the AWS console with the new template URL pre-filled (review parameters before applying). **Zero-touch by default**: `idp-cli publish` auto-substitutes the new `PublicArtifactsBucket` / `PublicArtifactsPrefix` CloudFormation parameter defaults to point at the bucket and prefix it's publishing to, so customers deploying the published template get the indicator out of the box. Headless / private-network deployments can override `PublicArtifactsBucket=""` to disable the check. The check itself runs in a small Lambda resolver (`getLatestPublishedVersion`) that lists the public bucket via unsigned S3 reads and caches results for 10 minutes. The headless template transformer (`HeadlessTemplateTransformer`) strips the resolver, parameters, and Settings entries so headless / GovCloud builds remain UI-free with zero dangling references.
+
+- **Chat-with-Document enhancements** — the Web UI "Chat with Document" feature has been substantially upgraded:
+  - **Async streaming** — responses now stream token-by-token into the chat bubble so large documents and long-context models no longer hit AppSync's 30-second synchronous timeout.
+  - **Markdown rendering in assistant replies** — headings, bullet/numbered lists, fenced code blocks, inline code, tables, block quotes, and links render as formatted HTML instead of raw markdown characters. Renders during streaming and at final.
+  - **Dedicated `chat` configuration section** — independent from `summarization`, with its own `model`, `system_prompt`, `temperature`, `top_k`, `top_p`, and `max_tokens`. Backward compatible: configs without a `chat` section fall back to `summarization.*`.
+  - **UI model selector on the Chat panel** — per-session model override, populated from the config's model enum; default comes from the document's own config version.
+  - **Default chat model is `us.anthropic.claude-opus-4-7:1m`** — 1M-context by default so typical multi-hundred-page packets fit without hitting input-token limits. EU and GovCloud presets use their region-appropriate inference profiles.
+  - **First-class support for Bedrock model-ID suffixes** — `:1m` (1M-context beta), `:priority` and `:flex` (service tiers) all work end-to-end when selected in the Chat panel dropdown.
+
+
+### Changed
+
+### Fixed
+
+- **Config validation now checks max_tokens against model limits** — `idp-cli config-validate` now verifies that `max_tokens` is within the model's maximum output token limit, catching invalid configurations like `extraction.max_tokens: 16000` with `us.amazon.nova-lite-v1:0` (max 10,000 tokens) before deployment. New `_validate_max_tokens()` function checks all services (extraction, classification, assessment, summarization) against model-specific limits loaded from `config_library/model_config_limits.yaml`: Claude 4.x (64,000), Claude 3.x (8,192), Amazon Nova (10,000), default (4,096). Added `get_model_max_output_tokens()` utility to `bedrock/model_utils.py` for use by CLI validation only (Lambda functions continue to use hardcoded limits for runtime defense-in-depth).
+
+- **Empty content array handling across all LLM services** — LLMs occasionally return empty content arrays (`content: []`) instead of the expected text response, causing `IndexError: list index out of range` when accessing `content[0]`. All affected services now check for empty arrays before accessing elements and raise descriptive errors with task context. Applied to classification (page-level and holistic), summarization, bedrock client helper, and model finetuning inference. Added 11 unit tests in `test_empty_content_array.py` covering all edge cases (empty, single-element, multi-element arrays).
+
+- **LLM array wrapping in extraction and assessment services** — LLMs occasionally return single-element arrays `[{...}]` instead of objects `{...}` when generating JSON responses, causing Pydantic validation errors (`Input should be a valid dictionary [type=dict_type, input_value=[{...}], input_type=list]`). All affected services now automatically detect and unwrap single-element arrays with a warning log, while multi-element arrays are rejected with a clear error message. Applied to standard extraction, agentic extraction, assessment service, and granular assessment service.
+
+## Templates
+   - us-west-2: `https://s3.us-west-2.amazonaws.com/aws-ml-blog-us-west-2/artifacts/genai-idp/idp-main_0.5.11.yaml`
+   - us-east-1: `https://s3.us-east-1.amazonaws.com/aws-ml-blog-us-east-1/artifacts/genai-idp/idp-main_0.5.11.yaml`
+   - eu-central-1: `https://s3.eu-central-1.amazonaws.com/aws-ml-blog-eu-central-1/artifacts/genai-idp/idp-main_0.5.11.yaml`
+
+
+## [0.5.10]
+
+### Added
+
+- **Enhanced config validation** — `idp-cli config-validate` now validates Bedrock model IDs against `pricing.yaml` and checks that custom `task_prompts` include required placeholders (e.g. `{DOCUMENT_TEXT}`, `{DOCUMENT_IMAGE}`) across all pipeline sections. Runs automatically on `config-upload` (use `--no-validate` to skip).
+
+- **`idp-cli discover --model-id` flag** — override the Bedrock model used by `idp-cli discover` for a single invocation (e.g. `--model-id us.anthropic.claude-opus-4-6-v1`). Applies to all discovery modes; backward-compatible. ([#309](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues/309))
+
+- **Bedrock circuit breaker** — a CFN-parameterized circuit breaker that pauses new workflow starts when Bedrock is unhealthy and auto-recovers once the service comes back, so transient Bedrock outages no longer burn through SQS retries or leave documents half-processed. Off by default for full backward compatibility.
+  - New `circuit_breaker_manager` Lambda owns state transitions (`CLOSED` / `OPEN` / `HALF_OPEN`) in the existing `ConcurrencyTable`. Triggered by CloudWatch Alarms on Bedrock error metrics (via SNS) and by an EventBridge-scheduled health check that promotes `OPEN → HALF_OPEN` after `RECOVERY_TIMEOUT_SECONDS`. `workflow_tracker` closes the breaker after the first successful probe.
+  - `queue_processor` gates new work before incrementing the concurrency counter; `OPEN` messages are redelivered by SQS (with `ChangeMessageVisibility` extended to the recovery timeout to avoid DLQ churn), DDB errors fail open.
+  - All state transitions use conditional DDB writes so concurrent alarm/workflow updates cannot clobber each other. `failure_count` is preserved across `OPEN → HALF_OPEN`; manual reset zeros counters and clears `last_error`.
+  - Operator hooks: manual `reset` / `get_state` invocations, optional customer Lambda invoked via `ERROR_HANDLER_ARN`, CloudWatch metrics (`CircuitBreaker{Opened,HalfOpen,Closed}`), and `AlertsTopic` notifications.
+  - New CFN parameters (all default off): `EnableCircuitBreaker`, `CircuitBreakerRecoveryTimeoutSeconds`, `CircuitBreakerErrorHandlerArn`. Unit tests cover alarm/health-check/manual/race-loss branches.
+  - **Web UI visibility & admin controls** — document list header shows a live status badge (green/blue/red with `lastError` tooltip) via an AppSync subscription; clicking opens a details panel. Admin-group users additionally get **Pause / Resume / Probe** buttons (each requires a reason, persisted and broadcast). All automatic transitions publish to the subscription so the badge updates within ~1s. Hidden entirely when `CircuitBreakerEnabled=false`. Backed by new AppSync ops (`getCircuitBreakerStatus`, `pause/resume/probeCircuitBreaker`, `onCircuitBreakerStatusChange`) and a new resolver Lambda that enforces Admin authorization at both the schema and resolver layers.
+  - Docs: `docs/circuit-breaker.md` and `src/lambda/circuit_breaker_manager/README.md`.
+
+
+### Changed
+
+- **Replaced DSR with open-source SRT security scanning tool** — Migrated from the deprecated internal DSR tool to the open-source [Sample Security Review Tool (SRT)](https://github.com/aws-samples/sample-security-review-tool). GitLab CI/CD now runs SRT on MRs targeting `develop` and fails the pipeline on findings. New Makefile targets: `make srt`, `make srt-setup`, `make srt-scan`, `make srt-fix`.
+
+
+### Fixed
+
+- **SRT now uses `--no-license-update`** to prevent it from automatically rewriting source file license headers during security scans.
+
+- **Agentic extraction with Claude Opus 4.7 no longer fails with `top_p is deprecated`** — the Claude 4.7+ enablement in v0.5.7 fixed the traditional Bedrock path but missed the Strands-based agentic path (`idp_common/extraction/agentic_idp.py`), which still forwarded `top_p` to ConverseStream. Both paths now share the same `is_claude_4_7_model` detection and omit deprecated inference params. ([#304](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues/304))
+
+- **`idp-cli discover` silently ignored mismatched ground truth files** — previously a filename-stem mismatch between `-d` and `-g` only produced a warning and ran discovery without ground truth. Now: single-doc + single-GT invocations are paired by position (no filename match required); batch-mode mismatches or duplicate GT stems fail with exit `1` and a clear message. ([#310](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues/310))
+
+- **Web UI "View Source" failed for PDFs and other docs after the v0.5.9 CSP hardening** — three fixes in `FileViewer`: (1) pass an `s3://bucket/key` URI to `getFileContents` instead of relying on the build-time `VITE_AWS_REGION` env var; (2) render PDFs in an `<iframe>` instead of `<object>` so they're allowed under the hardened `object-src 'none'` CSP; (3) drop the `sandbox` attribute on the PDF iframe only (Chrome's built-in PDF viewer is blocked when sandboxed; non-PDF iframes keep their sandbox). Added a fallback "Open PDF in a new tab" link.
+
+- **Private ALB deployment broken when stack name had uppercase characters** — the ALB DNS name is case-preserving, but browser `Origin` headers, Cognito `redirect_uri` matching, and the ALB url-rewrite regex all expected lowercase, so CORS preflights, OAuth callbacks, and the `/` → `/index.html` rewrite all failed. Fixed by lowercasing the ALB URL in every CFN consumer (new `GetLowercaseAlbUrl` custom resource reusing the existing `GetDomainLambda`), lowercasing the Amplify redirect URL in `aws-exports.js`, and broadening the ALB rewrite regex from `^/$` to `^/` so OAuth query strings don't break the match. CloudFront deployments unaffected. ([#303](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues/303))
+
+
+
+## Templates
+   - us-west-2: `https://s3.us-west-2.amazonaws.com/aws-ml-blog-us-west-2/artifacts/genai-idp/idp-main_0.5.10.yaml`
+   - us-east-1: `https://s3.us-east-1.amazonaws.com/aws-ml-blog-us-east-1/artifacts/genai-idp/idp-main_0.5.10.yaml`
+   - eu-central-1: `https://s3.eu-central-1.amazonaws.com/aws-ml-blog-eu-central-1/artifacts/genai-idp/idp-main_0.5.10.yaml`
+
 ## [0.5.9]
 
 ### Added

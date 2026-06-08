@@ -1,0 +1,56 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: MIT-0
+
+name: Generate Dependency Manifests
+
+on:
+  workflow_dispatch: {}
+  pull_request:
+    paths:
+      - "lib/*/pyproject.toml"
+      - "src/lambda/*/requirements.txt"
+      - "patterns/**/requirements.txt"
+      - "nested/**/requirements.txt"
+      - "src/ui/package-lock.json"
+      - "docs-site/package-lock.json"
+      - "scripts/generate-dep-manifest.sh"
+  push:
+    branches: [main]
+    paths:
+      - "lib/*/pyproject.toml"
+      - "src/lambda/*/requirements.txt"
+      - "patterns/**/requirements.txt"
+      - "nested/**/requirements.txt"
+      - "src/ui/package-lock.json"
+      - "docs-site/package-lock.json"
+      - "scripts/generate-dep-manifest.sh"
+
+jobs:
+  generate-manifests:
+    name: Generate Dependency Manifests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      # uv provides the Python runtime and the `packaging` library that
+      # scripts/generate-dep-manifest.sh runs the inline manifest script with
+      # (via `uv run --with packaging`). No separate setup-python step needed.
+      - name: Install uv
+        uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.3.1
+
+      - name: Generate manifests
+        run: make dep-manifest
+
+      - name: Upload manifests
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: dependency-manifests
+          path: dist/manifests/
+          retention-days: 90

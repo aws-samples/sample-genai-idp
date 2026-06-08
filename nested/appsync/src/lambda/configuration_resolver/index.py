@@ -49,7 +49,46 @@ def _get_caller_info(event):
         "username": username,
         "groups": groups,
         "is_admin": "Admin" in groups,
+        "is_author": "Author" in groups,
     }
+
+
+# Defense-in-depth RBAC. The GraphQL schema restricts these fields via
+# @aws_cognito_user_pools(cognito_groups), but we enforce the required group
+# server-side so a non-privileged caller can never reach a write operation even
+# if the schema directive is missing/misconfigured. Maps each operation to the
+# Cognito groups permitted to invoke it.
+_OPERATION_REQUIRED_GROUPS = {
+    # Admin-only writes
+    "deleteConfigVersion": {"Admin"},
+    "updatePricing": {"Admin"},
+    "restoreDefaultPricing": {"Admin"},
+    # Admin + Author writes
+    "updateConfiguration": {"Admin", "Author"},
+    "setActiveVersion": {"Admin", "Author"},
+    # Admin + Author + Viewer reads (everything except Reviewer)
+    "getConfigVersions": {"Admin", "Author", "Viewer"},
+    "getConfigVersion": {"Admin", "Author", "Viewer"},
+    "getPricing": {"Admin", "Author", "Viewer"},
+    "listConfigurationLibrary": {"Admin", "Author", "Viewer"},
+    "getConfigurationLibraryFile": {"Admin", "Author", "Viewer"},
+}
+
+
+def _enforce_operation_group(operation, caller):
+    """Raise if the caller is not in a group permitted to run this operation."""
+    required = _OPERATION_REQUIRED_GROUPS.get(operation)
+    if required is None:
+        return
+    if not required.intersection(caller["groups"]):
+        logger.warning(
+            f"Forbidden: caller {caller['email']} (groups={caller['groups']}) "
+            f"attempted operation '{operation}' requiring one of {sorted(required)}"
+        )
+        raise Exception(
+            f"Unauthorized: operation '{operation}' requires membership in one of "
+            f"{sorted(required)}"
+        )
 
 
 def _get_user_allowed_config_versions(caller_email):
@@ -133,6 +172,8 @@ def handler(event, context):
 
     # Get caller info for scope enforcement
     caller = _get_caller_info(event)
+    # Defense-in-depth: enforce group membership server-side before any work.
+    _enforce_operation_group(operation, caller)
     allowed_versions = None
     if not caller["is_admin"]:
         allowed_versions = _get_user_allowed_config_versions(caller["email"])
