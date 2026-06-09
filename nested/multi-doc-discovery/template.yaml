@@ -91,6 +91,12 @@ Parameters:
     Type: String
     Default: ""
     Description: "(Optional) Security group for CodeBuild VPC config."
+  ArtifactsBucketKmsKeyArn:
+    Type: String
+    Description: >
+      Optional KMS key ARN for the artifacts S3 bucket (if KMS-encrypted). When provided,
+      the CodeBuildRole receives kms:Decrypt permission so it can download source zips.
+    Default: ""
 
 Conditions:
   HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
@@ -98,6 +104,7 @@ Conditions:
   HasBedrockHubRole: !Not [!Equals [!Ref BedrockHubRoleArn, ""]]
   HasBedrockHubRoleExternalId: !Not [!Equals [!Ref BedrockHubRoleExternalId, ""]]
   HasBedrockHubRoleSessionName: !Not [!Equals [!Ref BedrockHubRoleSessionName, ""]]
+  HasArtifactsBucketKmsKey: !Not [!Equals [!Ref ArtifactsBucketKmsKeyArn, ""]]
 
 Resources:
   ##########################################################################
@@ -218,6 +225,17 @@ Resources:
                   Condition:
                     StringEquals:
                       ec2:AuthorizedService: !Sub "codebuild.${AWS::URLSuffix}"
+                - !Ref AWS::NoValue
+              # Grant kms:Decrypt on the artifacts bucket KMS key when provided
+              # This allows CodeBuild to download source zips from a KMS-encrypted artifact bucket
+              - !If
+                - HasArtifactsBucketKmsKey
+                - Effect: Allow
+                  Action:
+                    - kms:Decrypt
+                    - kms:GenerateDataKey*
+                    - kms:DescribeKey
+                  Resource: !Ref ArtifactsBucketKmsKeyArn
                 - !Ref AWS::NoValue
 
   DockerBuildProject:
