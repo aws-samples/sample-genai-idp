@@ -64,7 +64,6 @@ REQUIRED_ENDPOINTS = {
 }
 
 
-
 def parse_args():
     parser = argparse.ArgumentParser(
         description="Deploy IDP VPC Endpoints — skips any that already exist.",
@@ -310,7 +309,6 @@ def main():
             parameters.append({"ParameterKey": param, "UsePreviousValue": True})
         else:
             parameters.append({"ParameterKey": param, "ParameterValue": "false"})
-
 
     # ── Dry run ───────────────────────────────────────────────────────────
     if args.dry_run:

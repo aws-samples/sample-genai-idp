@@ -530,7 +530,7 @@ Parameters:
       - "false"
     Description: >
       Controls whether presigned S3 URLs (for browser uploads) target the S3
-      VPC Interface Endpoint or the global s3.amazonaws.com endpoint.
+      VPC Interface Endpoint or the global (regional) S3 endpoint.
       "false" (default): presigned URLs use global S3 — browser uploads go
       through NAT or internet. No special DNS configuration required.
       "true": presigned URLs use the S3 VPC Interface Endpoint DNS name, so
