@@ -907,6 +907,16 @@ Rules:
       # invalid subnet IDs are caught later by the Lambda CreateFunction
       # call with a clear error rather than a mid-deploy rollback.
 
+  # DeployInVPC=true places Lambdas and CodeBuild in the VPC. Without the
+  # required VPC params, creation fails deep in nested stacks with opaque errors.
+  DeployInVPCRequiresParams:
+    RuleCondition: !Equals [ !Ref DeployInVPC, "true" ]
+    Assertions:
+      - Assert: !Not [ !Equals [ !Ref VpcId, "" ] ]
+        AssertDescription: "VpcId is required when DeployInVPC=true"
+      - Assert: !Not [ !Equals [ !Ref LambdaSecurityGroupId, "" ] ]
+        AssertDescription: "LambdaSecurityGroupId is required when DeployInVPC=true"
+
   # Bastion host is a developer-convenience layered on top of VPC-secured mode.
   # It shares the customer-supplied VPC, so DeployInVPC must be true as well.
   BastionRequiresVPC:
@@ -2419,9 +2429,16 @@ Resources:
           - !Join [",", !Ref LambdaSubnetIds]
           - ""
         LambdaSecurityGroupId: !If
-          - UsePrivateAppSync
-          - !Ref LambdaVpcSecurityGroup
-          - ""
+          - DeployInVPC
+          - !Ref LambdaSecurityGroupId
+          - !If
+            - UsePrivateAppSync
+            - !Ref LambdaVpcSecurityGroup
+            - ""
+
+        # VPC config for CodeBuild (Docker image builds)
+        VpcId: !If [DeployInVPC, !Ref VpcId, ""]
+        PrivateSubnetIds: !If [DeployInVPC, !Join [",", !Ref PrivateSubnetIds], ""]
 
         # MLflow Integration
         EnableMLflow: !Ref EnableMLflow
@@ -9067,6 +9084,9 @@ Resources:
         BedrockHubRoleArn: !Ref BedrockHubRoleArn
         BedrockHubRoleExternalId: !Ref BedrockHubRoleExternalId
         BedrockHubRoleSessionName: !Ref BedrockHubRoleSessionName
+        VpcId: !If [DeployInVPC, !Ref VpcId, ""]
+        PrivateSubnetIds: !If [DeployInVPC, !Join [",", !Ref PrivateSubnetIds], ""]
+        LambdaSecurityGroupId: !If [DeployInVPC, !Ref LambdaSecurityGroupId, ""]
 
   # --- Step Functions State Machine ---
 
@@ -9417,6 +9437,29 @@ Resources:
                   Resource:
                     - !Sub "arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${CloudFrontDistribution}"
                 - !Ref AWS::NoValue
+              - !If
+                - DeployInVPC
+                - Effect: Allow
+                  Action:
+                    - ec2:CreateNetworkInterface
+                    - ec2:DescribeNetworkInterfaces
+                    - ec2:DeleteNetworkInterface
+                    - ec2:DescribeSubnets
+                    - ec2:DescribeSecurityGroups
+                    - ec2:DescribeVpcs
+                    - ec2:DescribeDhcpOptions
+                  Resource: "*"
+                - !Ref AWS::NoValue
+              - !If
+                - DeployInVPC
+                - Effect: Allow
+                  Action:
+                    - ec2:CreateNetworkInterfacePermission
+                  Resource: !Sub "arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:network-interface/*"
+                  Condition:
+                    StringEquals:
+                      ec2:AuthorizedService: !Sub "codebuild.${AWS::URLSuffix}"
+                - !Ref AWS::NoValue
               # Grant kms:Decrypt on the artifacts bucket KMS key when provided
               # This allows CodeBuild to read source artifacts from a KMS-encrypted bucket
               - !If
@@ -9437,6 +9480,14 @@ Resources:
         Web UI build for GenAIIDP stack - ${AWS::StackName}
       ServiceRole: !Ref UICodeBuildServiceRole
       EncryptionKey: alias/aws/s3
+      VpcConfig:
+        !If
+          - DeployInVPC
+          - VpcId: !Ref VpcId
+            Subnets: !Ref PrivateSubnetIds
+            SecurityGroupIds:
+              - !Ref LambdaSecurityGroupId
+          - !Ref AWS::NoValue
       Artifacts:
         Type: NO_ARTIFACTS
       Source:

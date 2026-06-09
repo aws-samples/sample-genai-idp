@@ -5,6 +5,10 @@ SPDX-License-Identifier: MIT-0
 
 ## [Unreleased]
 
+### Added
+
+- **CodeBuild VPC support** — All CodeBuild projects (WebUI build, unified Docker build, multi-doc-discovery Docker build, SDLC pipeline) now run inside the customer's VPC when `DeployInVPC=true`. Build traffic routes through the VPC, reaching public registries via NAT gateway or internal artifact repositories in air-gapped environments. This is a prerequisite for fully private deployments where builds must pull dependencies from internal registries. No changes when `DeployInVPC=false` (the default).
+
 ### Fixed
 
 - **Private AppSync unreachable from browser clients (WorkSpaces, VPN, bastion)** — `scripts/vpc-endpoints.yaml` `VpcEndpointSecurityGroup` previously allowed inbound HTTPS (port 443) only from the Lambda security group. Browsers inside the VPC send AppSync GraphQL requests directly to the `appsync-api` VPC Interface Endpoint (not through the ALB), so all queries, mutations, and subscriptions hung indefinitely — the Configuration page showed "Loading configuration..." forever, the Document List never populated, and the Upload Documents page showed "Input bucket not configured". Fixed by adding a `VpcCidr` parameter and a second ingress rule for the VPC CIDR block. `deploy-vpc-endpoints.py` now auto-looks up the VPC primary CIDR via `ec2:DescribeVpcs` and passes it automatically — no CLI changes required. Re-run `deploy-vpc-endpoints.py` against an existing deployment to apply the fix.
@@ -28,7 +32,7 @@ SPDX-License-Identifier: MIT-0
 - **Agentic extraction no longer crashes merging token metering with `None` values** ([#337](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues/337)) — `concurrent_structured_output_async` (used when a large document is split into concurrent extraction batches) raised `TypeError: unsupported operand type(s) for +: 'NoneType' and 'int'` when a Bedrock response reported a token counter as `None`. The existing `(tv or 0)` guard only covered the incoming value; the accumulated value (seeded verbatim from the first batch via `dict(mv)`) could itself be `None`, and `dict.get(tk, 0)` returns that stored `None` rather than the default for a present-but-`None` key. The metering merge is now factored into `_accumulate_metering`, which coerces `None` on both sides of the addition. This previously crashed otherwise-successful extractions in the post-processing step, marking the document FAILED.
 
 - **Evaluation no longer fails on `None`/empty optional fields, empty arrays, or a single bad field** — Three related evaluation robustness fixes: (1) Optional fields with `None`/missing values (common in real schemas like URLA) no longer fail the confidence/assessment path with a misleading "Schema configuration error" — model fields are now widened to `Optional[...]` to work around upstream [stickler#149](https://github.com/awslabs/stickler/issues/149). (2) Auto-generated schemas with empty arrays (e.g. `[]` → bare `{"type": "array"}`) and objects that become empty after their unevaluable children are removed are now pruned instead of crashing the converter; genson's spurious `required` arrays are also stripped so a missing field scores as a miss rather than a hard error. (3) A single field that still fails validation is now dropped from scoring (and reported as a `__SKIPPED__` row with a coverage note) instead of zeroing out the entire section — limiting the blast radius so the remaining fields still evaluate.
-- 
+
 - **Schema Builder: Standard Class catalog restored in "Add Class" modal** — The Document Schema *Add Class* modal again presents the two-card chooser (📝 Custom Class / 📦 Standard Class) for non-policy schemas, letting users import pre-built classes from the [Standard Class Catalog](docs/classification.md#standard-document-classes) (Invoice, Receipt, US driver's license, etc.). The chooser/standard-mode UI was inadvertently dropped from `SchemaBuilder.tsx` during the policy-discovery rewrite (commit `d701e6b88`); the underlying `StandardClassCatalog` component, `addStandardClasses` hook action, and `standard-classes.json` data file were all still present and needed only to be re-wired into the modal. Policy Schema "Add Policy Class" still skips the chooser and goes straight to the custom form (unchanged behavior).
 
 - **Evaluation now handles null field descriptions** — Configs with `description: null` no longer cause evaluation failures. The evaluation service now automatically converts null descriptions to empty strings before JSON Schema validation (Stickler requirement). This fix ensures extraction results can be evaluated even when field descriptions are missing or null in config schemas. No functional impact on evaluation logic.
@@ -41,7 +45,7 @@ SPDX-License-Identifier: MIT-0
    - us-west-2: `https://s3.us-west-2.amazonaws.com/aws-ml-blog-us-west-2/artifacts/genai-idp/idp-main_0.5.14.yaml`
    - us-east-1: `https://s3.us-east-1.amazonaws.com/aws-ml-blog-us-east-1/artifacts/genai-idp/idp-main_0.5.14.yaml`
    - eu-central-1: `https://s3.eu-central-1.amazonaws.com/aws-ml-blog-eu-central-1/artifacts/genai-idp/idp-main_0.5.14.yaml`
-   - 
+
 ## [0.5.13]
 
 ### Added

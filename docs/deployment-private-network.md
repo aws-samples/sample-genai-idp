@@ -63,6 +63,8 @@ Mode B fits central-network-account topologies where one team manages all VPC en
 
 See [Deployment Guide → Dependencies](./deployment.md#dependencies) for AWS CLI, SAM CLI, Python 3.12+, Node.js 22+. Docker is **not** required locally — images are built in AWS by CodeBuild.
 
+> **Note**: When `DeployInVPC=true`, all CodeBuild projects (WebUI build, Docker image builds, SDLC pipeline) run inside the VPC. They require either a **NAT Gateway** for public registry access or an **internal artifact repository** (JFrog Artifactory, AWS CodeArtifact, etc.) for air-gapped builds. See [Dependency Mirroring](./dependency-mirroring.md) for generating the full dependency manifest.
+
 ### 2. VPC requirements
 
 - **At least 2 subnets in different Availability Zones** — required by ALB
@@ -534,6 +536,7 @@ When `WebUIHosting=ALB` and `AppSyncVisibility=PRIVATE`:
 - **Cognito callback / logout URLs** → ALB URL
 - **UI build** → `VITE_CLOUDFRONT_DOMAIN` set to ALB URL
 - **S3 bucket policy** → `aws:sourceVpce` condition restricts access to the chosen VPCE
+- **CodeBuild projects** (WebUI build, Docker image builds, SDLC pipeline) → placed in VPC with `LambdaSecurityGroup`; requires NAT or internal artifact repository for dependency resolution
 - **Lambda functions (~21)** → placed in `LambdaSubnetIds` with `LambdaSecurityGroup`
 - **`S3_ENDPOINT_URL` env** injected on backend Lambdas (always, when deployed in VPC with ALB):
   - `ConfigurationCopyFunction` (custom resource S3 copies)
@@ -569,6 +572,7 @@ When `WebUIHosting=ALB` and `AppSyncVisibility=PRIVATE`:
 | **App spins after login** | TLS cert SAN does not include the ALB DNS. Run cert script step B. Browsers silently block JS to mismatched hosts. |
 | **`generate_self_signed_cert.sh` fails: `ASN1_mbstring_ncopy:string too long`** | ALB DNS exceeds 64-char CommonName limit. Update to the latest script — it uses a short fixed CN and puts the long DNS in SAN only. |
 | **Login hangs on `cognito-idp.amazonaws.com` (browser inside VPC)** | No VPCE for Cognito IDP. Browser needs internet egress: NAT GW in a public subnet + private route `0.0.0.0/0 → NAT GW`. End-user browsers on VPN don't need this. |
+| **CodeBuild fails: timeout on `pip install` / `npm ci`** | CodeBuild is in the VPC but has no route to package registries. Add a NAT Gateway, or configure an internal artifact repository and set registry environment variables. See [Dependency Mirroring](./dependency-mirroring.md). |
 | **CodeBuild fails: `AccessDenied: kms:Decrypt`** | Artifact bucket is KMS-encrypted but `ArtifactsBucketKmsKeyArn` was not passed. Redeploy with the key ARN. |
 | **`UpdateDefaultConfig` custom resource fails: `NoSuchKey`** | Same as above — `ConfigurationCopyFunction` silently skipped due to missing `kms:Decrypt`. Pass `ArtifactsBucketKmsKeyArn`. |
 | **`cfn-lint E3002 Transforms unexpected` during publish** | Pre-existing schema lag for ALB ListenerRule `Transforms` (host-header-rewrite, url-rewrite). Repo-level `.cfnlintrc.yaml` ignores E3002 — confirm it exists at repo root. |
