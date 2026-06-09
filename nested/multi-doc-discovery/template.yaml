@@ -79,12 +79,19 @@ Parameters:
     Type: String
     Default: ""
     Description: "(Optional) Session name for sts:AssumeRole into the Bedrock hub-account role."
+  ArtifactsBucketKmsKeyArn:
+    Type: String
+    Description: >
+      Optional KMS key ARN for the artifacts S3 bucket (if KMS-encrypted). When provided,
+      the CodeBuildRole receives kms:Decrypt permission so it can download source zips.
+    Default: ""
 
 Conditions:
   HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
   HasBedrockHubRole: !Not [!Equals [!Ref BedrockHubRoleArn, ""]]
   HasBedrockHubRoleExternalId: !Not [!Equals [!Ref BedrockHubRoleExternalId, ""]]
   HasBedrockHubRoleSessionName: !Not [!Equals [!Ref BedrockHubRoleSessionName, ""]]
+  HasArtifactsBucketKmsKey: !Not [!Equals [!Ref ArtifactsBucketKmsKeyArn, ""]]
 
 Resources:
   ##########################################################################
@@ -183,6 +190,17 @@ Resources:
                   - kms:GenerateDataKey*
                   - kms:DescribeKey
                 Resource: !Ref CustomerManagedEncryptionKeyArn
+              # Grant kms:Decrypt on the artifacts bucket KMS key when provided
+              # This allows CodeBuild to download source zips from a KMS-encrypted artifact bucket
+              - !If
+                - HasArtifactsBucketKmsKey
+                - Effect: Allow
+                  Action:
+                    - kms:Decrypt
+                    - kms:GenerateDataKey*
+                    - kms:DescribeKey
+                  Resource: !Ref ArtifactsBucketKmsKeyArn
+                - !Ref AWS::NoValue
 
   DockerBuildProject:
     Type: AWS::CodeBuild::Project

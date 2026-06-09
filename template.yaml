@@ -522,6 +522,21 @@ Parameters:
       "aws ec2 describe-vpc-endpoints --vpc-endpoint-ids <id> --query
       'VpcEndpoints[0].DnsEntries[0].DnsName'" then strip the leading "*.".
 
+  S3PresignedUrlViaVpcEndpoint:
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: >
+      Controls whether presigned S3 URLs (for browser uploads) target the S3
+      VPC Interface Endpoint or the global s3.amazonaws.com endpoint.
+      "false" (default): presigned URLs use global S3 — browser uploads go
+      through NAT or internet. No special DNS configuration required.
+      "true": presigned URLs use the S3 VPC Interface Endpoint DNS name, so
+      browser uploads transit the VPCE. Requires the browser's network to
+      resolve and route VPCE hostnames.
+
   AppSyncVisibility:
     Type: String
     Default: GLOBAL
@@ -920,6 +935,17 @@ Rules:
       - Assert: !Not [ !Equals [ !Ref S3VpcEndpointIdOverride, "" ] ]
         AssertDescription: "S3VpcEndpointIdOverride is required when S3VpcEndpointDnsNameOverride is set."
 
+  S3PresignedUrlViaVpcEndpointRequiresEndpoint:
+    RuleCondition: !Equals [ !Ref S3PresignedUrlViaVpcEndpoint, "true" ]
+    Assertions:
+      - Assert: !Or
+          - !Not [ !Equals [ !Ref S3VpcEndpointIdOverride, "" ] ]
+          - !Equals [ !Ref WebUIHosting, "ALB" ]
+        AssertDescription: >-
+          S3PresignedUrlViaVpcEndpoint=true requires an S3 VPC Interface Endpoint.
+          Either set S3VpcEndpointIdOverride (BYO endpoint) or use WebUIHosting=ALB
+          (which auto-provisions an endpoint).
+
 Conditions:
   # Headless/VPC/Bastion feature conditions
   DeployInVPC: !Equals [!Ref DeployInVPC, 'true']
@@ -984,17 +1010,19 @@ Conditions:
   UseCloudFrontHosting: !Equals [ !Ref WebUIHosting, "CloudFront" ]
   UseALBHosting: !Equals [ !Ref WebUIHosting, "ALB" ]
   HasS3VpcEndpointOverride: !Not [!Equals [!Ref S3VpcEndpointIdOverride, ""]]
-  # True when this stack should inject S3_ENDPOINT_URL on Lambdas + presigner
-  # resolvers. Two paths trigger it:
-  #   1. WebUIHosting=ALB — the ALB nested stack always provisions an S3
-  #      Interface VPCE (ALB virtual-host rewrite to bucket-vhost requires it).
-  #   2. S3VpcEndpointIdOverride is set — customer is providing their own VPCE
-  #      (typical central-network-account topology) regardless of ALB usage.
-  # Note: ALB hosting can technically be selected with DeployInVPC=false; in
-  # that case the VPCE still exists but Lambdas run outside the VPC, so the
-  # endpoint URL injection is a no-op for resolver paths but still drives the
-  # browser presigner output. This is intentional.
+  # True when an S3 VPC Interface Endpoint EXISTS (either auto-provisioned by
+  # ALB stack or customer-provided via override). Used for:
+  #   - Backend Lambda S3 access (HasS3VpcEndpointAndVpc)
+  #   - Infrastructure references (WebUI bucket policy, ALB target group)
+  # NOTE: This condition does NOT control presigner URL injection.
+  # For presigner control, see UseS3VpcEndpointForPresigner.
   HasS3VpcEndpoint: !Or [!Condition UseALBHosting, !Condition HasS3VpcEndpointOverride]
+  # True when presigner Lambdas should generate S3 URLs targeting the VPC
+  # Interface Endpoint (for browser uploads). Triggered by explicit opt-in
+  # or by BYO endpoint override (which always implies presigner usage).
+  UseS3VpcEndpointForPresigner: !Or
+    - !Equals [!Ref S3PresignedUrlViaVpcEndpoint, "true"]
+    - !Condition HasS3VpcEndpointOverride
   # True when VPC-resident Lambdas should use S3_ENDPOINT_URL for direct S3
   # calls (not presigned URL generation). Requires BOTH:
   #   - An S3 VPCE exists (HasS3VpcEndpoint)
@@ -1114,6 +1142,9 @@ Metadata:
           - ALBCertificateArn
           - ALBScheme
           - ALBAllowedCIDRs
+          - S3PresignedUrlViaVpcEndpoint
+          - S3VpcEndpointIdOverride
+          - S3VpcEndpointDnsNameOverride
       - Label:
           default: "Private Network (AppSync=PRIVATE requires ALB hosting)"
         Parameters:
@@ -1221,6 +1252,12 @@ Metadata:
         default: "ALB - Scheme (internal/internet-facing)"
       ALBAllowedCIDRs:
         default: "ALB - Allowed CIDR Ranges"
+      S3PresignedUrlViaVpcEndpoint:
+        default: "Route Browser S3 Uploads via VPC Endpoint"
+      S3VpcEndpointIdOverride:
+        default: "BYO S3 VPC Endpoint ID (optional)"
+      S3VpcEndpointDnsNameOverride:
+        default: "BYO S3 VPC Endpoint DNS Name (optional)"
       AppSyncVisibility:
         default: "AppSync API Visibility (GLOBAL or PRIVATE)"
       LambdaSubnetIds:
@@ -1458,7 +1495,7 @@ Resources:
           STAGING_BUCKET_NAME: !Ref StagingBucket
           DATA_RETENTION_IN_DAYS: !Ref DataRetentionInDays
           S3_ENDPOINT_URL: !If
-            - HasS3VpcEndpoint
+            - UseS3VpcEndpointForPresigner
             - !Sub
               - "https://bucket.${VpceDnsName}"
               - VpceDnsName: !If
@@ -2491,9 +2528,10 @@ Resources:
         UsersTableName: !Ref UsersTable
         UsersTableArn: !GetAtt UsersTable.Arn
 
-        # S3 VPC endpoint URL (private mode) — passed to presigner resolver Lambdas
+        # S3 VPC endpoint URL — passed to presigner resolver Lambdas only when
+        # explicitly opted in (S3PresignedUrlViaVpcEndpoint=true or BYO override).
         S3EndpointUrl: !If
-          - HasS3VpcEndpoint
+          - UseS3VpcEndpointForPresigner
           - !Sub
             - "https://bucket.${VpceDnsName}"
             - VpceDnsName: !If
@@ -9022,6 +9060,7 @@ Resources:
         LogRetentionDays: !Ref LogRetentionDays
         BuildHash: <MULTI_DOC_DISCOVERY_BUILD_HASH_TOKEN>
         ArtifactBucket: "<ARTIFACT_BUCKET_TOKEN>"
+        ArtifactsBucketKmsKeyArn: !Ref ArtifactsBucketKmsKeyArn
         SourceZipfile: "<ARTIFACT_PREFIX_TOKEN>/multi-doc-discovery-source.zip"
         AppSyncApiUrl: !GetAtt GraphQLApi.GraphQLUrl
         AppSyncApiArn: !GetAtt GraphQLApi.Arn

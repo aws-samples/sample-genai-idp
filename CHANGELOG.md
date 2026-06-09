@@ -5,6 +5,10 @@ SPDX-License-Identifier: MIT-0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Private AppSync unreachable from browser clients (WorkSpaces, VPN, bastion)** — `scripts/vpc-endpoints.yaml` `VpcEndpointSecurityGroup` previously allowed inbound HTTPS (port 443) only from the Lambda security group. Browsers inside the VPC send AppSync GraphQL requests directly to the `appsync-api` VPC Interface Endpoint (not through the ALB), so all queries, mutations, and subscriptions hung indefinitely — the Configuration page showed "Loading configuration..." forever, the Document List never populated, and the Upload Documents page showed "Input bucket not configured". Fixed by adding a `VpcCidr` parameter and a second ingress rule for the VPC CIDR block. `deploy-vpc-endpoints.py` now auto-looks up the VPC primary CIDR via `ec2:DescribeVpcs` and passes it automatically — no CLI changes required. Re-run `deploy-vpc-endpoints.py` against an existing deployment to apply the fix.
+
 ## [0.5.14]
 
 ### Added
