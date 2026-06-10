@@ -9,7 +9,7 @@ This runbook deploys the GenAI IDP Accelerator in a **fully private / air-gapped
 - Web UI served via an **internal ALB** (no CloudFront, no public internet)
 - AppSync API accessible **only from inside the VPC** (no public endpoint)
 - All Lambda → AWS service traffic routed through **VPC Interface Endpoints**
-- Browser → S3 presigned uploads routed through the **S3 Interface VPC Endpoint** (bucket virtual-host addressing, SigV4)
+- Browser → S3 presigned uploads routed through **global S3** (default, via NAT) or optionally through the **S3 Interface VPC Endpoint** (opt-in via `S3PresignedUrlViaVpcEndpoint=true`)
 - Internet-facing features (MCP Gateway, Knowledge Base) **disabled**
 
 > For standard public deployments, see [Deployment Guide](./deployment.md).
@@ -30,9 +30,8 @@ Internal ALB (private DNS, ALB scheme=internal)
     └── browser also calls (via VPN/DC):
         ├── AppSync GraphQL API     → AppSync Interface VPC Endpoint
         ├── Cognito user-pool          (public — needs egress, see WorkSpaces note)
-        └── S3 presigned upload     → S3 Interface VPC Endpoint
-                                       (bucket-vhost host:
-                                        bucket.<vpce-id>-<random>.s3.<region>.vpce.amazonaws.com)
+        └── S3 presigned upload     → global s3.amazonaws.com (default, via NAT)
+                                       OR S3 Interface VPC Endpoint (opt-in)
 
 Lambda functions (in VPC subnets, attached to LambdaSecurityGroup)
     │
@@ -41,7 +40,7 @@ Lambda functions (in VPC subnets, attached to LambdaSecurityGroup)
          Lambda, Events, Athena, STS, S3, DynamoDB, ...)
 ```
 
-The S3 VPCE deployed by the ALB stack is reused for **both browser uploads (presigned URLs) and Lambda → S3 traffic**. Endpoint security group allows inbound 443 from both the ALB SG and the Lambda SG.
+The S3 VPCE deployed by the ALB stack is used for **ALB → S3 static asset serving and Lambda → S3 traffic**. Browser uploads use global S3 by default (via NAT); set `S3PresignedUrlViaVpcEndpoint=true` to route them through the VPCE instead (requires corporate network DNS/routing to VPCE hostnames).
 
 ---
 
@@ -64,11 +63,13 @@ Mode B fits central-network-account topologies where one team manages all VPC en
 
 See [Deployment Guide → Dependencies](./deployment.md#dependencies) for AWS CLI, SAM CLI, Python 3.12+, Node.js 22+. Docker is **not** required locally — images are built in AWS by CodeBuild.
 
+> **Note**: When `DeployInVPC=true`, all CodeBuild projects (WebUI build, Docker image builds, SDLC pipeline) run inside the VPC. They require either a **NAT Gateway** for public registry access or an **internal artifact repository** (JFrog Artifactory, AWS CodeArtifact, etc.) for air-gapped builds. See [Dependency Mirroring](./dependency-mirroring.md) for generating the full dependency manifest.
+
 ### 2. VPC requirements
 
 - **At least 2 subnets in different Availability Zones** — required by ALB
 - **DNS resolution enabled** on the VPC — `enableDnsSupport=true` and `enableDnsHostnames=true`
-- **DNS hostnames enabled on the S3 Interface VPCE** — `PrivateDnsEnabled` is **off** for S3 VPCEs by AWS design; bucket-vhost addressing routes via the per-endpoint `bucket.<vpce-id>-<random>.s3.<region>.vpce.amazonaws.com` name. **VPC DNS resolution is what makes that name resolvable** for in-VPC clients (Lambdas, browsers on VPN).
+- **DNS hostnames enabled on the S3 Interface VPCE** — `PrivateDnsEnabled` is **off** for S3 VPCEs by AWS design; bucket-vhost addressing routes via the per-endpoint `bucket.<vpce-id>-<random>.s3.<region>.vpce.amazonaws.com` name. **VPC DNS resolution is what makes that name resolvable** for in-VPC clients (Lambdas). Browsers only need to resolve this name when `S3PresignedUrlViaVpcEndpoint=true`; with the default (`false`), browsers use `s3.amazonaws.com` via NAT.
 - **Subnet IDs** for the ALB (can match Lambda subnets)
 - **No `0.0.0.0/0 → IGW` or `→ NAT` route** on the Lambda subnet — proves no public-internet egress (verify after deployment)
 
@@ -173,6 +174,7 @@ https://<region>.console.aws.amazon.com/cloudformation/home?region=<region>#/sta
 |-----------|-------------|
 | `LambdaSecurityGroupId` | BYO Lambda SG. Empty = stack creates one. |
 | `ALBAllowedCIDRs` | Restrict ALB ingress to specific CIDRs. Empty = VPC CIDR. |
+| `S3PresignedUrlViaVpcEndpoint` | Set to `true` to route browser S3 uploads through the VPCE instead of global S3. Default `false` (uses NAT). |
 | `ApiGatewayVpcEndpointId` | Required if `EnableHeadless=true`. |
 | `ArtifactsBucketKmsKeyArn` | Required if artifact bucket is KMS-encrypted. |
 
@@ -288,6 +290,7 @@ S3VpcEndpointDnsNameOverride=$DNS_NAME"
 | `AppSyncVisibility` | `PRIVATE` | API only inside VPC. **Immutable** — recreate stack to change. |
 | `LambdaSubnetIds` | subnet ids | Subnets where Lambdas run (can match `ALBSubnetIds`) |
 | `LambdaSecurityGroupId` | (optional) sg-id | BYO Lambda SG; stack creates one if empty |
+| `S3PresignedUrlViaVpcEndpoint` | (optional) `true`/`false` | Route browser S3 uploads via VPCE (`true`) or global S3 via NAT (`false`, default) |
 | `S3VpcEndpointIdOverride` | (Mode B) `vpce-...` | BYO S3 VPCE id |
 | `S3VpcEndpointDnsNameOverride` | (Mode B) full DNS w/ suffix | BYO S3 VPCE DNS name (required if id override is set) |
 | `EnableMCP` | `false` | Disable AgentCore Gateway (public-only) |
@@ -413,13 +416,15 @@ VPN clients are **source-NAT'd to the IP of the VPN-association subnet** (AWS Cl
 | Target SG | Add ingress | Port | Reason |
 |-----------|-------------|------|--------|
 | ALB SG (`<stack>-ALBSecurityGroup`) | <NAT-subnet-CIDR> (e.g. `10.1.3.0/24`) | 443 | Browser → ALB. Default ALB SG only allows VPC CIDR. |
-| ALB-stack endpoint SG (`<stack>-EndpointSecurityGroup`) | <NAT-subnet-CIDR> | 443 | Browser → S3 VPCE for presigned upload. |
+| ALB-stack endpoint SG (`<stack>-EndpointSecurityGroup`) | <NAT-subnet-CIDR> | 443 | Browser → S3 VPCE for presigned upload. **Only needed when `S3PresignedUrlViaVpcEndpoint=true`.** |
 
 **AWS Client VPN example**: client tunnel IPs are 172.16.0.0/22, but inbound packets to ALB/VPCE are seen as coming from the VPN association subnet (e.g. 10.1.3.0/24). Authorize 10.1.3.0/24, not 172.16.0.0/22.
 
 **Site-to-Site VPN over VGW + corporate VPN**: source-NAT happens at the customer firewall. Use the post-NAT IP range advertised into the VPC.
 
 > Production with Direct Connect / Transit Gateway: typically no NAT — clients reach VPC with on-prem IPs. Authorize those CIDRs on the ALB and endpoint SGs as part of standard onboarding.
+
+> **Note:** When `S3PresignedUrlViaVpcEndpoint=false` (default), browser uploads go to `s3.amazonaws.com` via NAT/internet — no endpoint SG ingress rule needed for browsers.
 
 ---
 
@@ -436,29 +441,30 @@ Open the URL via VPN/DC. Confirm:
 - ✅ Login succeeds
 - ✅ Upload a doc — status updates live (`QUEUED → OCR → CLASSIFICATION → EXTRACTION → ...`) without page reload
 - ✅ Browser DevTools → Network → WS tab shows active WebSocket to `*.appsync-realtime-api.<region>.amazonaws.com`
-- ✅ DevTools → Network for upload POST shows host = `<bucket>.bucket.vpce-<id>-<random>.s3.<region>.vpce.amazonaws.com` — confirms private path
+- ✅ DevTools → Network for upload POST shows:
+  - If `S3PresignedUrlViaVpcEndpoint=true`: host = `<bucket>.bucket.vpce-<id>-<random>.s3.<region>.vpce.amazonaws.com`
+  - If `S3PresignedUrlViaVpcEndpoint=false` (default): host = `<bucket>.s3.<region>.amazonaws.com` (via NAT)
 
-### Verify private path (post-deploy)
+### Verify upload path (post-deploy)
 
 ```bash
-# 1) Confirm presigned URL host is VPCE bucket-vhost
+# 1) Check presigned URL mode
 LG=$(aws cloudformation describe-stack-resources --stack-name <appsync-nested> \
   --query 'StackResources[?LogicalResourceId==`UploadResolverFunction`].PhysicalResourceId' --output text)
 aws lambda get-function-configuration --function-name $LG --region <region> \
   --query 'Environment.Variables.S3_ENDPOINT_URL' --output text
-# Expect: https://bucket.vpce-<id>-<random>.s3.<region>.vpce.amazonaws.com
+# If S3PresignedUrlViaVpcEndpoint=true:
+#   Expect: https://bucket.vpce-<id>-<random>.s3.<region>.vpce.amazonaws.com
+# If S3PresignedUrlViaVpcEndpoint=false (default):
+#   Expect: None (no env var set — presigned URLs use global s3.amazonaws.com)
 
-# 2) Confirm Lambda subnet has no internet route
+# 2) Confirm Lambda subnet routing
 aws ec2 describe-route-tables \
   --filters "Name=association.subnet-id,Values=<lambda-subnet-id>" \
   --region <region> \
   --query 'RouteTables[0].Routes[].[DestinationCidrBlock,DestinationPrefixListId,GatewayId]' --output text
-# Expect: no row with 0.0.0.0/0; only "<vpc-cidr> local" + S3/DDB prefix-list rows.
-
-# 3) Confirm S3 access logs show VPCE host (after delay up to 1 hour)
-aws s3 cp s3://<logging-bucket>/input-bucket-logs/ /tmp/s3logs/ --recursive --region <region>
-grep -h "vpce-<id>-<random>" /tmp/s3logs/* | head
-# Expect rows on REST.PUT.OBJECT / REST.POST.OBJECT with the VPCE host as the request endpoint.
+# For S3PresignedUrlViaVpcEndpoint=false: NAT route (0.0.0.0/0 → nat-xxx) is expected
+# For fully air-gapped (=true): no 0.0.0.0/0 route; only "<vpc-cidr> local" + prefix-list rows
 ```
 
 ### Cognito IDP egress (browser-only consideration)
@@ -530,17 +536,19 @@ When `WebUIHosting=ALB` and `AppSyncVisibility=PRIVATE`:
 - **Cognito callback / logout URLs** → ALB URL
 - **UI build** → `VITE_CLOUDFRONT_DOMAIN` set to ALB URL
 - **S3 bucket policy** → `aws:sourceVpce` condition restricts access to the chosen VPCE
+- **CodeBuild projects** (WebUI build, Docker image builds, SDLC pipeline) → placed in VPC with `LambdaSecurityGroup`; requires NAT or internal artifact repository for dependency resolution
 - **Lambda functions (~21)** → placed in `LambdaSubnetIds` with `LambdaSecurityGroup`
-- **`S3_ENDPOINT_URL` env** injected on:
+- **`S3_ENDPOINT_URL` env** injected on backend Lambdas (always, when deployed in VPC with ALB):
+  - `ConfigurationCopyFunction` (custom resource S3 copies)
+  - `FccDatasetDeployerFunction` (custom resource S3 copies)
+  - `TestSetZipExtractorFunction`
+- **`S3_ENDPOINT_URL` env** injected on presigner Lambdas (only when `S3PresignedUrlViaVpcEndpoint=true` or BYO endpoint override is set):
   - `UploadResolverFunction` (browser presigned POST)
   - `DiscoveryUploadResolverFunction`
   - `TestSetResolverFunction`
-  - `TestSetZipExtractorFunction`
   - `ApiHandlerFunction` (jobs API presigner)
-  - `ConfigurationCopyFunction` (custom resource S3 copies)
-  - `FccDatasetDeployerFunction` (custom resource S3 copies)
   - All AppSync resolver Lambdas via the AppSync nested-stack `S3EndpointUrl` parameter
-- **Lambda S3 client** uses `signature_version=s3v4` + `addressing_style=virtual` when `S3_ENDPOINT_URL` is set; falls back to default `path` style when unset (CloudFront/public mode)
+- **Lambda S3 client** uses `signature_version=s3v4` + `addressing_style=virtual` when `S3_ENDPOINT_URL` is set; falls back to default `path` style when unset (global S3)
 - **ALB-stack S3 VPCE endpoint SG** ingress 443 from `LambdaSecurityGroupId` (when set) **and** from ALB SG
 
 ---
@@ -564,6 +572,7 @@ When `WebUIHosting=ALB` and `AppSyncVisibility=PRIVATE`:
 | **App spins after login** | TLS cert SAN does not include the ALB DNS. Run cert script step B. Browsers silently block JS to mismatched hosts. |
 | **`generate_self_signed_cert.sh` fails: `ASN1_mbstring_ncopy:string too long`** | ALB DNS exceeds 64-char CommonName limit. Update to the latest script — it uses a short fixed CN and puts the long DNS in SAN only. |
 | **Login hangs on `cognito-idp.amazonaws.com` (browser inside VPC)** | No VPCE for Cognito IDP. Browser needs internet egress: NAT GW in a public subnet + private route `0.0.0.0/0 → NAT GW`. End-user browsers on VPN don't need this. |
+| **CodeBuild fails: timeout on `pip install` / `npm ci`** | CodeBuild is in the VPC but has no route to package registries. Add a NAT Gateway, or configure an internal artifact repository and set registry environment variables. See [Dependency Mirroring](./dependency-mirroring.md). |
 | **CodeBuild fails: `AccessDenied: kms:Decrypt`** | Artifact bucket is KMS-encrypted but `ArtifactsBucketKmsKeyArn` was not passed. Redeploy with the key ARN. |
 | **`UpdateDefaultConfig` custom resource fails: `NoSuchKey`** | Same as above — `ConfigurationCopyFunction` silently skipped due to missing `kms:Decrypt`. Pass `ArtifactsBucketKmsKeyArn`. |
 | **`cfn-lint E3002 Transforms unexpected` during publish** | Pre-existing schema lag for ALB ListenerRule `Transforms` (host-header-rewrite, url-rewrite). Repo-level `.cfnlintrc.yaml` ignores E3002 — confirm it exists at repo root. |

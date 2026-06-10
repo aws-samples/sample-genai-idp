@@ -79,12 +79,32 @@ Parameters:
     Type: String
     Default: ""
     Description: "(Optional) Session name for sts:AssumeRole into the Bedrock hub-account role."
+  VpcId:
+    Type: String
+    Default: ""
+    Description: "(Optional) VPC ID for CodeBuild to run in private network."
+  PrivateSubnetIds:
+    Type: CommaDelimitedList
+    Default: ""
+    Description: "(Optional) Private subnet IDs for CodeBuild VPC config."
+  LambdaSecurityGroupId:
+    Type: String
+    Default: ""
+    Description: "(Optional) Security group for CodeBuild VPC config."
+  ArtifactsBucketKmsKeyArn:
+    Type: String
+    Description: >
+      Optional KMS key ARN for the artifacts S3 bucket (if KMS-encrypted). When provided,
+      the CodeBuildRole receives kms:Decrypt permission so it can download source zips.
+    Default: ""
 
 Conditions:
   HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
+  DeployInVPC: !Not [!Equals [!Ref VpcId, ""]]
   HasBedrockHubRole: !Not [!Equals [!Ref BedrockHubRoleArn, ""]]
   HasBedrockHubRoleExternalId: !Not [!Equals [!Ref BedrockHubRoleExternalId, ""]]
   HasBedrockHubRoleSessionName: !Not [!Equals [!Ref BedrockHubRoleSessionName, ""]]
+  HasArtifactsBucketKmsKey: !Not [!Equals [!Ref ArtifactsBucketKmsKeyArn, ""]]
 
 Resources:
   ##########################################################################
@@ -183,12 +203,54 @@ Resources:
                   - kms:GenerateDataKey*
                   - kms:DescribeKey
                 Resource: !Ref CustomerManagedEncryptionKeyArn
+              - !If
+                - DeployInVPC
+                - Effect: Allow
+                  Action:
+                    - ec2:CreateNetworkInterface
+                    - ec2:DescribeNetworkInterfaces
+                    - ec2:DeleteNetworkInterface
+                    - ec2:DescribeSubnets
+                    - ec2:DescribeSecurityGroups
+                    - ec2:DescribeVpcs
+                    - ec2:DescribeDhcpOptions
+                  Resource: "*"
+                - !Ref AWS::NoValue
+              - !If
+                - DeployInVPC
+                - Effect: Allow
+                  Action:
+                    - ec2:CreateNetworkInterfacePermission
+                  Resource: !Sub "arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:network-interface/*"
+                  Condition:
+                    StringEquals:
+                      ec2:AuthorizedService: !Sub "codebuild.${AWS::URLSuffix}"
+                - !Ref AWS::NoValue
+              # Grant kms:Decrypt on the artifacts bucket KMS key when provided
+              # This allows CodeBuild to download source zips from a KMS-encrypted artifact bucket
+              - !If
+                - HasArtifactsBucketKmsKey
+                - Effect: Allow
+                  Action:
+                    - kms:Decrypt
+                    - kms:GenerateDataKey*
+                    - kms:DescribeKey
+                  Resource: !Ref ArtifactsBucketKmsKeyArn
+                - !Ref AWS::NoValue
 
   DockerBuildProject:
     Type: AWS::CodeBuild::Project
     Properties:
       Description: Build Docker image for Multi-Document Discovery Lambda functions
       ServiceRole: !GetAtt CodeBuildRole.Arn
+      VpcConfig:
+        !If
+          - DeployInVPC
+          - VpcId: !Ref VpcId
+            Subnets: !Ref PrivateSubnetIds
+            SecurityGroupIds:
+              - !Ref LambdaSecurityGroupId
+          - !Ref AWS::NoValue
       Artifacts:
         Type: NO_ARTIFACTS
       Environment:

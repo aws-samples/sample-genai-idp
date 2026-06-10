@@ -122,25 +122,57 @@ for req_path in sorted(repo_root.rglob("requirements*.txt")):
             if not is_internal(pkg) and normalize(pkg) not in resolved:
                 additional.add(pkg)
 
-# Write output: resolved packages (pinned) + additional (name only, for user to resolve)
+# Write resolved packages to output; write additional to a temp file for resolution
 with open(output_file, "w") as f:
     for key in sorted(resolved.keys()):
         f.write(resolved[key] + "\n")
-    if additional:
-        f.write("\n# Additional packages not in lockfiles (resolve manually or add to a lockfile)\n")
+
+# Write additional packages to a temp file so the shell can resolve them
+additional_file = Path(sys.argv[2]).parent / ".additional-reqs.txt"
+if additional:
+    with open(additional_file, "w") as f:
         for pkg in sorted(additional, key=str.lower):
             f.write(pkg + "\n")
-
-if additional:
-    print(
-        f"  WARNING: {len(additional)} packages not in any lockfile: {', '.join(sorted(additional))}",
-        file=sys.stderr,
-    )
-
-total = len(resolved) + len(additional)
-print(f"  {len(resolved)} packages from lockfiles, {len(additional)} additional")
-print(f"  -> {output_file} ({total} total)")
+    print(f"  {len(resolved)} packages from lockfiles, {len(additional)} to resolve")
+else:
+    additional_file.unlink(missing_ok=True)
+    print(f"  {len(resolved)} packages from lockfiles, 0 additional")
+    print(f"  -> {sys.argv[2]} ({len(resolved)} total)")
 PYTHON_SCRIPT
+
+# Resolve additional packages (not in lockfiles) with uv pip compile
+ADDITIONAL_REQS="$OUTPUT_DIR/.additional-reqs.txt"
+if [ -f "$ADDITIONAL_REQS" ]; then
+    echo "  Resolving additional packages with uv pip compile..."
+    ADDITIONAL_RESOLVED="$OUTPUT_DIR/.additional-resolved.txt"
+    if uv pip compile "$ADDITIONAL_REQS" \
+        --python-version "$PYTHON_VERSION" \
+        --output-file "$ADDITIONAL_RESOLVED" \
+        --no-header \
+        --no-annotate \
+        --quiet 2>/dev/null; then
+        # Merge: add only packages not already in the manifest
+        BEFORE=$(wc -l < "$OUTPUT_DIR/python-packages.txt" | tr -d ' ')
+        while IFS= read -r line; do
+            pkg_name=$(echo "$line" | cut -d'=' -f1 | tr '[:upper:]' '[:lower:]' | tr '_.' '-')
+            if ! grep -qi "^${pkg_name}==" "$OUTPUT_DIR/python-packages.txt" 2>/dev/null; then
+                echo "$line" >> "$OUTPUT_DIR/python-packages.txt"
+            fi
+        done < "$ADDITIONAL_RESOLVED"
+        AFTER=$(wc -l < "$OUTPUT_DIR/python-packages.txt" | tr -d ' ')
+        echo "  Resolved $(( AFTER - BEFORE )) new transitive dependencies"
+        rm -f "$ADDITIONAL_RESOLVED"
+    else
+        echo "  WARNING: uv pip compile failed for additional packages. Listing without versions:" >&2
+        echo "" >> "$OUTPUT_DIR/python-packages.txt"
+        echo "# Additional packages (resolution failed — install these to discover transitives)" >> "$OUTPUT_DIR/python-packages.txt"
+        cat "$ADDITIONAL_REQS" >> "$OUTPUT_DIR/python-packages.txt"
+    fi
+    rm -f "$ADDITIONAL_REQS"
+fi
+
+PYTHON_COUNT=$(wc -l < "$OUTPUT_DIR/python-packages.txt" | tr -d ' ')
+echo "  -> $OUTPUT_DIR/python-packages.txt ($PYTHON_COUNT packages)"
 
 # ===== NODE MANIFEST =====
 echo "Generating Node dependency manifest..."

@@ -9,6 +9,16 @@ SPDX-License-Identifier: MIT-0
 
 - **Configurable Lambda architecture** — New `LambdaArchitecture` parameter (`arm64` or `x86_64`) for all unified pattern Lambda container images. Defaults to `arm64` (Graviton) for best price-performance. Use `x86_64` when deploying with custom base images that only support AMD64. The parameter flows through to CodeBuild (`--platform` flag) and Dockerfile (`FROM` image suffix).
 
+- **CodeBuild VPC support** — All CodeBuild projects (WebUI build, unified Docker build, multi-doc-discovery Docker build, SDLC pipeline) now run inside the customer's VPC when `DeployInVPC=true`. Build traffic routes through the VPC, reaching public registries via NAT gateway or internal artifact repositories in air-gapped environments. This is a prerequisite for fully private deployments where builds must pull dependencies from internal registries. No changes when `DeployInVPC=false` (the default).
+
+### Fixed
+
+- **Private AppSync unreachable from browser clients (WorkSpaces, VPN, bastion)** — `scripts/vpc-endpoints.yaml` `VpcEndpointSecurityGroup` previously allowed inbound HTTPS (port 443) only from the Lambda security group. Browsers inside the VPC send AppSync GraphQL requests directly to the `appsync-api` VPC Interface Endpoint (not through the ALB), so all queries, mutations, and subscriptions hung indefinitely — the Configuration page showed "Loading configuration..." forever, the Document List never populated, and the Upload Documents page showed "Input bucket not configured". Fixed by adding a `VpcCidr` parameter and a second ingress rule for the VPC CIDR block. `deploy-vpc-endpoints.py` now auto-looks up the VPC primary CIDR via `ec2:DescribeVpcs` and passes it automatically — no CLI changes required. Re-run `deploy-vpc-endpoints.py` against an existing deployment to apply the fix.
+
+### Changed
+
+- ⚠️ **Behavioral change for air-gapped ALB deployments: browser S3 presigned uploads now default to global S3 instead of the S3 VPC Interface Endpoint.** Previously, selecting `WebUIHosting=ALB` automatically forced all presigner Lambdas to generate presigned URLs targeting the S3 VPCE hostname (`*.vpce-xxx.s3.<region>.vpce.amazonaws.com`), which required the browser's corporate network to resolve and route VPCE DNS — a configuration many customers can't or don't want to set up (uploads failed with `NS_Net_Timeout`). Presigned-URL routing is now decoupled from ALB hosting via a new `S3PresignedUrlViaVpcEndpoint` parameter (default `"false"`): presigned URLs use global `s3.amazonaws.com`, so browser uploads transit NAT/internet with no special DNS needed. **Migration:** existing `WebUIHosting=ALB` stacks that rely on VPCE presigned uploads (fully air-gapped browser networks with no NAT path) must set `S3PresignedUrlViaVpcEndpoint=true` on their next stack update, otherwise browser uploads switch to global S3. Stacks setting `S3VpcEndpointIdOverride` (BYO endpoint) are unaffected — they continue to use the VPCE. A CloudFormation `Rules` assertion rejects `S3PresignedUrlViaVpcEndpoint=true` unless an S3 VPCE is available (`WebUIHosting=ALB` or `S3VpcEndpointIdOverride` set).
+
 ## [0.5.14]
 
 ### Added
@@ -24,7 +34,7 @@ SPDX-License-Identifier: MIT-0
 - **Agentic extraction no longer crashes merging token metering with `None` values** ([#337](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues/337)) — `concurrent_structured_output_async` (used when a large document is split into concurrent extraction batches) raised `TypeError: unsupported operand type(s) for +: 'NoneType' and 'int'` when a Bedrock response reported a token counter as `None`. The existing `(tv or 0)` guard only covered the incoming value; the accumulated value (seeded verbatim from the first batch via `dict(mv)`) could itself be `None`, and `dict.get(tk, 0)` returns that stored `None` rather than the default for a present-but-`None` key. The metering merge is now factored into `_accumulate_metering`, which coerces `None` on both sides of the addition. This previously crashed otherwise-successful extractions in the post-processing step, marking the document FAILED.
 
 - **Evaluation no longer fails on `None`/empty optional fields, empty arrays, or a single bad field** — Three related evaluation robustness fixes: (1) Optional fields with `None`/missing values (common in real schemas like URLA) no longer fail the confidence/assessment path with a misleading "Schema configuration error" — model fields are now widened to `Optional[...]` to work around upstream [stickler#149](https://github.com/awslabs/stickler/issues/149). (2) Auto-generated schemas with empty arrays (e.g. `[]` → bare `{"type": "array"}`) and objects that become empty after their unevaluable children are removed are now pruned instead of crashing the converter; genson's spurious `required` arrays are also stripped so a missing field scores as a miss rather than a hard error. (3) A single field that still fails validation is now dropped from scoring (and reported as a `__SKIPPED__` row with a coverage note) instead of zeroing out the entire section — limiting the blast radius so the remaining fields still evaluate.
-- 
+
 - **Schema Builder: Standard Class catalog restored in "Add Class" modal** — The Document Schema *Add Class* modal again presents the two-card chooser (📝 Custom Class / 📦 Standard Class) for non-policy schemas, letting users import pre-built classes from the [Standard Class Catalog](docs/classification.md#standard-document-classes) (Invoice, Receipt, US driver's license, etc.). The chooser/standard-mode UI was inadvertently dropped from `SchemaBuilder.tsx` during the policy-discovery rewrite (commit `d701e6b88`); the underlying `StandardClassCatalog` component, `addStandardClasses` hook action, and `standard-classes.json` data file were all still present and needed only to be re-wired into the modal. Policy Schema "Add Policy Class" still skips the chooser and goes straight to the custom form (unchanged behavior).
 
 - **Evaluation now handles null field descriptions** — Configs with `description: null` no longer cause evaluation failures. The evaluation service now automatically converts null descriptions to empty strings before JSON Schema validation (Stickler requirement). This fix ensures extraction results can be evaluated even when field descriptions are missing or null in config schemas. No functional impact on evaluation logic.
@@ -37,7 +47,7 @@ SPDX-License-Identifier: MIT-0
    - us-west-2: `https://s3.us-west-2.amazonaws.com/aws-ml-blog-us-west-2/artifacts/genai-idp/idp-main_0.5.14.yaml`
    - us-east-1: `https://s3.us-east-1.amazonaws.com/aws-ml-blog-us-east-1/artifacts/genai-idp/idp-main_0.5.14.yaml`
    - eu-central-1: `https://s3.eu-central-1.amazonaws.com/aws-ml-blog-eu-central-1/artifacts/genai-idp/idp-main_0.5.14.yaml`
-   - 
+
 ## [0.5.13]
 
 ### Added
