@@ -1,3 +1,5 @@
+# NOTE: This buildspec is NOT referenced by the main stack (DockerBuildProject
+# uses buildspec.yml). Retained as an alternative for BDA-only standalone builds.
 version: 0.2
 phases:
   pre_build:

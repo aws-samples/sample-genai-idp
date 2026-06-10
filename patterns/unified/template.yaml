@@ -2704,6 +2704,7 @@ Resources:
       # Force rebuild when source changes (filename includes content hash)
       CodeLocation: !Sub "arn:${AWS::Partition}:s3:::${ArtifactBucket}/${ArtifactPrefix}/${SourceZipfile}"
       ImageVersion: !Ref ImageVersion
+      LambdaArchitecture: !Ref LambdaArchitecture
       ExpectedImages:
         - "bda-invoke-function"
         - "bda-completion-function"
