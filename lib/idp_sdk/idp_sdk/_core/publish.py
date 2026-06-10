@@ -2280,7 +2280,12 @@ STDERR:
                 "install",
                 install_spec,
                 "--python-platform",
-                "x86_64-manylinux2014",
+                # manylinux_2_28 (glibc 2.28) matches the Lambda python3.12
+                # runtime (Amazon Linux 2023, glibc 2.34). Required because
+                # pyarrow >= 21 no longer ships manylinux2014 wheels, only
+                # manylinux_2_28. This target still accepts older
+                # manylinux2014 wheels for all other dependencies.
+                "x86_64-manylinux_2_28",
                 "--python-version",
                 "3.12",
                 "--only-binary=:all:",
