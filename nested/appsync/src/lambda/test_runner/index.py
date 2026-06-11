@@ -61,7 +61,11 @@ def handler(event, context):
 
     try:
         # Defense-in-depth: startTestRun is an Admin+Author operation.
-        if not _caller_in_groups(event, ("Admin", "Author")):
+        # Allow direct Lambda invocations (no 'identity' field) for CI/automation.
+        # AppSync invocations always have 'identity', so RBAC is still enforced for UI users.
+        is_appsync_invoke = 'identity' in event
+        logger.info(f"RBAC Debug - is_appsync_invoke: {is_appsync_invoke}, has identity: {'identity' in event}, event keys: {list(event.keys())}")
+        if is_appsync_invoke and not _caller_in_groups(event, ("Admin", "Author")):
             raise Exception(
                 "Unauthorized: startTestRun requires Admin or Author group"
             )
