@@ -17,3 +17,10 @@ export const USER_MANAGEMENT_PATH = `${DOCUMENTS_PATH}/users`;
 export const AGENT_CHAT_PATH = '/agentchat';
 export const CAPACITY_PLANNING_PATH = `${DOCUMENTS_PATH}/capacity-planning`;
 export const CUSTOM_MODELS_PATH = `${DOCUMENTS_PATH}/custom-models`;
+
+// --- Feature Platform ---
+export const FEATURES_PATH_PREFIX = '/features';
+/** Route pattern: /features/:featureId */
+export const FEATURE_DETAIL_PATH = `${FEATURES_PATH_PREFIX}/:featureId`;
+/** Hash-link helper: href to pass to nav items & internal links. */
+export const featureDetailHref = (featureId: string): string => `#${FEATURES_PATH_PREFIX}/${featureId}`;

@@ -121,6 +121,15 @@ export default defineConfig({
         {
           label: "Integration & Extensions",
           items: [
+            { label: "Feature Platform", slug: "feature-platform" },
+            {
+              label: "Feature Platform Developer Guide",
+              slug: "feature-platform-developer-guide",
+            },
+            {
+              label: "Extensions",
+              items: [{ label: "Demo Extension", slug: "extensions/demo-extension" }],
+            },
             {
               label: "Post-Processing Lambda Hook",
               slug: "post-processing-lambda-hook",

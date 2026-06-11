@@ -875,6 +875,86 @@ Parameters:
       choice for almost all deployments. Only change if you need a custom
       hardened AMI. Ignored when DeployBastionHost=false.
 
+  # =========================================================================
+  # === Feature Platform (optional) — BEGIN ================================
+  # Everything between BEGIN/END markers may be lifted cleanly if the feature
+  # platform is removed. All resources gate on `EnableFeaturePlatform`.
+  # See feature-platform/ and docs/feature-platform.md.
+  #
+  # The open-source distribution ships the platform ON by default in
+  # auto-subscribe mode: every catalog feature is treated as subscribed and
+  # the UI goes straight to the Install prompt. No marketplace simulator is
+  # bundled. To exercise the paid Subscribe → buyer-console → Active flow,
+  # deploy the standalone marketplace-simulator (shipped separately) and set
+  # FeaturePlatformSimulatorEndpoint on this stack — no rebuild required.
+  # =========================================================================
+
+  EnableFeaturePlatform:
+    Type: String
+    Default: 'true'
+    AllowedValues: ['true', 'false']
+    Description: >-
+      Set to 'true' (default) to enable the Feature Platform (catalog,
+      InstalledFeatures table, AppSync resolvers, install flow). When no
+      FeaturePlatformSimulatorEndpoint is configured, all features in the
+      catalog are treated as automatically subscribed and the UI goes
+      straight to the Install prompt. Set to 'false' to remove the platform
+      entirely (no platform resources are created).
+
+  FeaturePlatformSimulatorEndpoint:
+    Type: String
+    Default: ''
+    Description: >-
+      (Optional) Endpoint URL of a marketplace-simulator (e.g.
+      https://simulator.example.com) or a real AWS Marketplace API. Leave
+      blank (default) for auto-subscribe mode — no entitlement checks, every
+      catalog feature is installable. Set it to bolt entitlement checks onto
+      a running stack with no rebuild; deploy the standalone simulator from
+      the feature-extensions distribution and point this at its endpoint.
+
+  FeaturePlatformDefaultCustomerIdentifier:
+    Type: String
+    Default: ''
+    Description: >-
+      (Optional) Marketplace customer identifier used when the incoming
+      request has no X-Amzn-Marketplace-Customer-Identifier header. Only
+      used when FeaturePlatformSimulatorEndpoint is set. Required for
+      real-Marketplace production use.
+
+  FeaturePlatformProductCodeMap:
+    Type: String
+    Default: '{}'
+    Description: >-
+      (Optional) JSON map {featureId -> Marketplace productCode}. Leave as
+      the default '{}' to auto-synthesize 'prod-<featureId>-sim' product
+      codes in simulator mode. Required for real-Marketplace production use,
+      e.g. {"docs-by-status":"prod-docs-by-status"}.
+
+  DefaultFeatureId:
+    Type: String
+    Default: ''
+    Description: >-
+      (Optional) Vertical-product packs only. featureId of the feature that
+      should be the default landing page after sign-in (e.g.
+      'claims-pack'). When set, authenticated users are redirected to
+      /features/<id> instead of /documents on first navigation. Empty
+      string preserves the standard /documents landing. Surfaced to the
+      UI via the SSM Settings parameter — no UI rebuild required to change.
+
+  ConsoleTitle:
+    Type: String
+    Default: ''
+    Description: >-
+      (Optional) Title shown in the Web UI top navigation banner. Empty
+      string falls back to "IDP Accelerator Console". Vertical-product
+      packs set this (e.g. "Claims Processing Console") so the banner
+      reflects the deployed product. Surfaced via the SSM Settings
+      parameter — change with a stack update, no UI rebuild required.
+
+  # =========================================================================
+  # === Feature Platform (optional) — END ==================================
+  # =========================================================================
+
 Rules:
   MLflowTrackingURIRequired:
     RuleCondition: !Equals [ !Ref EnableMLflow, "true" ]
@@ -1049,6 +1129,23 @@ Conditions:
   CircuitBreakerTriggerThrottlingEnabled: !Equals [ !Ref CircuitBreakerTriggerThrottling, "true" ]
   CircuitBreakerTriggerQuotaLimitEnabled: !Equals [ !Ref CircuitBreakerTriggerQuotaLimit, "true" ]
 
+  # Feature Platform
+  IsFeaturePlatformEnabled: !Equals [ !Ref EnableFeaturePlatform, 'true' ]
+  # Inverse condition used to gate the main stack's
+  # `${AWS::StackName}-TrackingTableName` Output so that it isn't declared at
+  # the same time as the FeaturePlatformStack's identically-named export
+  # (which would fail with "Export already exported by stack ...").
+  IsFeaturePlatformDisabled: !Equals [ !Ref EnableFeaturePlatform, 'false' ]
+  # Auto-subscribe mode: feature platform is on but no external Marketplace /
+  # simulator endpoint is configured. The entitlement Lambda short-circuits to
+  # ACTIVE so every catalog feature is treated as subscribed and the UI goes
+  # straight to the Install prompt. Setting FeaturePlatformSimulatorEndpoint
+  # switches the platform into marketplace mode with real entitlement checks.
+  IsAutoSubscribeMode:
+    !And
+      - !Condition IsFeaturePlatformEnabled
+      - !Equals [ !Ref FeaturePlatformSimulatorEndpoint, '' ]
+
 Metadata:
   cfn-lint:
     config:
@@ -1182,6 +1279,15 @@ Metadata:
         Parameters:
           - ArtifactsBucketKmsKeyArn
       - Label:
+          default: "Feature Platform (optional)"
+        Parameters:
+          - EnableFeaturePlatform
+          - FeaturePlatformSimulatorEndpoint
+          - FeaturePlatformDefaultCustomerIdentifier
+          - FeaturePlatformProductCodeMap
+          - DefaultFeatureId
+          - ConsoleTitle
+      - Label:
           default: "General Configuration"
         Parameters:
           - MaxConcurrentWorkflows
@@ -1192,6 +1298,19 @@ Metadata:
           - LogRetentionDays
 
     ParameterLabels:
+      # --- Feature Platform ---
+      EnableFeaturePlatform:
+        default: "Enable Feature Platform"
+      FeaturePlatformSimulatorEndpoint:
+        default: "Marketplace/Simulator Endpoint (optional — auto-subscribe if blank)"
+      FeaturePlatformDefaultCustomerIdentifier:
+        default: "Marketplace Customer Identifier (optional)"
+      FeaturePlatformProductCodeMap:
+        default: "Marketplace Product Code Map JSON (optional)"
+      DefaultFeatureId:
+        default: "Default Feature Landing Page (optional)"
+      ConsoleTitle:
+        default: "Console Title (optional)"
       AdminEmail:
         default: "Admin Email Address"
       AllowedSignUpEmailDomain:
@@ -2575,6 +2694,79 @@ Resources:
           - !GetAtt CircuitBreakerManagerFunction.Arn
           - ""
         CircuitBreakerEnabled: !Ref CircuitBreakerEnabled
+
+  ##########################################################################
+  # === Feature Platform (optional) — BEGIN ===============================
+  # Deployed only when EnableFeaturePlatform=true. Adds an InstalledFeatures
+  # DDB table + AppSync Lambdas for listing/registering/installing features
+  # and checking Marketplace entitlements. Feature stacks register themselves
+  # with this host and have their UI bundles rendered inside the main IDP web
+  # UI. With no FeaturePlatformSimulatorEndpoint set the platform runs in
+  # auto-subscribe mode (every catalog feature installable; no entitlement
+  # checks). See feature-platform/main-stack-extensions/.
+  ##########################################################################
+
+  # NB: there is no stack-owned "feature bucket". OSS feature artifacts live in
+  # the artifacts bucket the main template is published to (under
+  # sample-features/); the catalog entry (catalog.json) carries each feature's
+  # artifactBucket + artifactPrefix, and getFeatureLaunchUrl builds the Launch
+  # Stack URL directly from those. Marketplace features use a private seller
+  # bucket declared in config_library/extensions-marketplace.yaml.
+
+  FeaturePlatformStack:
+    Type: AWS::CloudFormation::Stack
+    Condition: IsFeaturePlatformEnabled
+    DependsOn:
+      - APPSYNCSTACK  # Attach resolvers only after main schema is finalised
+    Properties:
+      TemplateURL: ./feature-platform/main-stack-extensions/.aws-sam/packaged.yaml
+      Parameters:
+        MainStackName: !Ref AWS::StackName
+        GraphQLApiId: !GetAtt GraphQLApi.ApiId
+        GraphQLApiArn: !GetAtt GraphQLApi.Arn
+        AppSyncApiUrl: !GetAtt GraphQLApi.GraphQLUrl
+        UserPoolId: !Ref UserPool
+        # Feature stacks with HTTP APIs use these two as the JWT audience
+        # (Cognito Client id) and as the document-state table name for
+        # scoped `dynamodb:Scan`/`Query` — e.g. `docs-by-status` counts
+        # documents per status by scanning the main stack's TrackingTable.
+        UserPoolClientId: !Ref UserPoolClient
+        TrackingTableName: !Ref TrackingTable
+        # Exposed to feature stacks so they can grant `kms:Decrypt` on the
+        # key that encrypts TrackingTable. Without it, a feature Lambda
+        # querying the table gets `AccessDeniedException: KMS key access
+        # denied`.
+        CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
+        WebUIBucketName: !Ref WebUIBucket
+        WebUIBucketArn: !GetAtt WebUIBucket.Arn
+
+        # Region of the artifacts bucket (= this stack's region), used to build
+        # the bare OSS feature template URL in getFeatureLaunchUrl.
+        ArtifactRegion: !Ref AWS::Region
+        # The endpoint the entitlement Lambda targets. Blank in auto-subscribe
+        # mode (the Lambda short-circuits to ACTIVE). Set it to a simulator or
+        # real Marketplace endpoint to enable entitlement checks.
+        SimulatorEntitlementEndpoint: !Ref FeaturePlatformSimulatorEndpoint
+        # 'auto' short-circuits the entitlement Lambda to ACTIVE for every
+        # feature (no endpoint, no Marketplace call). 'marketplace' targets a
+        # real or admin-supplied Marketplace/simulator endpoint.
+        SubscriptionMode: !If
+          - IsAutoSubscribeMode
+          - 'auto'
+          - 'marketplace'
+        DefaultCustomerIdentifier: !Ref FeaturePlatformDefaultCustomerIdentifier
+        FeatureProductCodeMap: !Ref FeaturePlatformProductCodeMap
+        AdminGroupName: 'Admin'
+        # ConfigurationTable is shared between the main stack's pipeline and
+        # the registerFeatureHooks resolver; passing the name here lets the
+        # nested stack add the dynamic-pipeline-hooks plumbing.
+        ConfigurationTableName: !Ref ConfigurationTable
+        # ConfigurationBucket holds catalog.json (copied in at deploy time by
+        # ConfigurationCopyFunction). listCatalogFeatures / getFeatureLaunchUrl
+        # read it at runtime — the catalog source, no artifacts-bucket dependency.
+        ConfigurationBucketName: !Ref ConfigurationBucket
+        LogLevel: !Ref LogLevel
+  # === Feature Platform (optional) — END =================================
 
   CustomerManagedEncryptionKey:
     DependsOn:
@@ -4913,6 +5105,12 @@ Resources:
         # When PublicArtifactsBucket is empty the UI hides the indicator entirely.
         PublicArtifactsBucket: !Ref PublicArtifactsBucket
         PublicArtifactsPrefix: !Ref PublicArtifactsPrefix
+        # Vertical-product packs: redirects post-login navigation to
+        # /features/<id> instead of /documents when set. Read by AuthRoutes.
+        DefaultFeatureId: !Ref DefaultFeatureId
+        # Vertical-product packs: customise the top-navigation banner.
+        # Read by GenAIIDPTopNavigation; defaults to "IDP Accelerator Console".
+        ConsoleTitle: !Ref ConsoleTitle
     UpdateReplacePolicy: Delete
     DeletionPolicy: Delete
 
@@ -10943,3 +11141,22 @@ Outputs:
       security group on all VPC Interface Endpoints they create for this stack.
       See scripts/vpc-endpoints.yaml for the endpoint template.
     Value: !GetAtt LambdaVpcSecurityGroup.GroupId
+
+  # ── Feature Platform cross-stack export ───────────────────────────────────
+  # `${AWS::StackName}-TrackingTableName` lets installed feature stacks
+  # Fn::ImportValue the main stack's document tracking table (e.g. the
+  # docs-by-status sample scans it for per-status counts).
+  #
+  # This export is *conditionally suppressed* when EnableFeaturePlatform=true,
+  # because the FeaturePlatformStack nested stack
+  # (feature-platform/main-stack-extensions/template.yaml) re-exports the same
+  # name for feature-stack consumption. CloudFormation rejects two stacks
+  # declaring the same export name, so when the Feature Platform is enabled it
+  # owns the export, and when it is disabled the main stack owns it. Either way
+  # a feature stack that Fn::ImportValue's this name sees the same value.
+  TrackingTableName:
+    Condition: IsFeaturePlatformDisabled
+    Description: Name of the DynamoDB document tracking table (feature-stack cross-stack ref)
+    Value: !Ref TrackingTable
+    Export:
+      Name: !Sub "${AWS::StackName}-TrackingTableName"

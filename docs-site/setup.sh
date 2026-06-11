@@ -36,6 +36,26 @@ for md_file in "$PROJECT_ROOT"/docs/*.md; do
 done
 echo "   ✅ Linked $count documentation files"
 
+# Step 1b: Symlink per-extension docs from docs/extensions/ into
+# src/content/docs/extensions/ so they publish under the "extensions/<slug>"
+# route (matching the docsUrl slug each OSS feature declares in feature.yaml).
+if [ -d "$PROJECT_ROOT/docs/extensions" ]; then
+    echo ""
+    echo "🔗 Creating symlinks for extension docs..."
+    mkdir -p "$CONTENT_DOCS/extensions"
+    ext_count=0
+    for md_file in "$PROJECT_ROOT"/docs/extensions/*.md; do
+        [ -e "$md_file" ] || continue
+        filename=$(basename "$md_file")
+        target="$CONTENT_DOCS/extensions/$filename"
+        # Path: docs-site/src/content/docs/extensions/ → 5 levels up to project root
+        [ -L "$target" ] && rm "$target"
+        ln -s "../../../../../docs/extensions/$filename" "$target"
+        ext_count=$((ext_count + 1))
+    done
+    echo "   ✅ Linked $ext_count extension docs"
+fi
+
 # Step 2: Symlink images/ into src/content/images/ (for ../images/ relative paths in docs)
 # Path: docs-site/src/content/ → 3 levels up to project root
 echo ""

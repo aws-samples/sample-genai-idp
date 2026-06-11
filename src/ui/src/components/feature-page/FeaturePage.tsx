@@ -1,0 +1,297 @@
+// Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+import React, { useCallback, useEffect, useMemo, useRef } from 'react';
+import { useParams } from 'react-router-dom';
+import { Box, SpaceBetween } from '@cloudscape-design/components';
+import { fetchAuthSession } from 'aws-amplify/auth';
+
+import useInstalledFeatures from '../../hooks/use-installed-features';
+import useCatalogFeatures from '../../hooks/use-catalog-features';
+import useFeatureEntitlement from '../../hooks/use-feature-entitlement';
+import useFeatureLaunchUrl from '../../hooks/use-feature-launch-url';
+import useSubscribeFeature from '../../hooks/use-subscribe-feature';
+import useUnsubscribeFeature from '../../hooks/use-unsubscribe-feature';
+import type { FeatureContext } from '../../types/feature-platform';
+
+import FeatureLoader from './FeatureLoader';
+import { resolveFeatureDocsUrl } from './feature-docs-url';
+import {
+  ActiveSubscriptionBanner,
+  AwaitingAdminInstall,
+  ExpiredBanner,
+  InstallPrompt,
+  LoadingBlock,
+  SubscriptionRequired,
+  UpToDateBanner,
+  UpdateAvailableBanner,
+} from './FeatureStateMessages';
+
+export interface FeaturePageProps {
+  /**
+   * Override the featureId from the URL. Useful for embedding FeaturePage in
+   * other layouts or for tests. Defaults to `useParams().featureId`.
+   */
+  featureIdOverride?: string;
+  /** Cognito groups of the current user (from useUserRole).  Empty = anonymous. */
+  groups: string[];
+  /** Name of the main IDP stack (passed to features via FeatureContext). */
+  mainStackName: string;
+  /**
+   * Optional map of featureId -> marketplace listing URL, used in the NONE /
+   * EXPIRED states. If not provided for a given featureId, the Marketplace
+   * button is hidden.
+   */
+  marketplaceUrls?: Record<string, string>;
+}
+
+async function getAuthToken(): Promise<string> {
+  const session = await fetchAuthSession();
+  const jwt = session.tokens?.idToken?.toString();
+  if (!jwt) throw new Error('No Cognito idToken available');
+  return jwt;
+}
+
+/**
+ * The 7-state FeaturePage renderer — implements the state machine documented
+ * in subscription-features/feature-platform/ui-extensions/README.md.
+ *
+ * State table:
+ *
+ *   | Entitlement | Installed | Role    | UI                          |
+ *   |-------------|-----------|---------|-----------------------------|
+ *   | NONE        | any       | any     | SubscriptionRequired        |
+ *   | ACTIVE      | no        | admin   | InstallPrompt               |
+ *   | ACTIVE      | no        | non-adm | AwaitingAdminInstall        |
+ *   | ACTIVE      | yes, =v   | any     | Feature UI + UpToDate       |
+ *   | ACTIVE      | yes, <v   | admin   | Feature UI + UpdateAvailable|
+ *   | ACTIVE      | yes, <v   | non-adm | Feature UI + UpdateAvailable (no btn) |
+ *   | EXPIRED     | yes       | any     | Feature UI blurred + Renew  |
+ */
+const FeaturePage: React.FC<FeaturePageProps> = ({ featureIdOverride, groups, mainStackName, marketplaceUrls }) => {
+  const params = useParams<{ featureId?: string }>();
+  const featureId = featureIdOverride ?? params.featureId ?? '';
+  const isAdmin = groups.includes('Admin');
+
+  const { loading: installedLoading, byId, refresh: refreshInstalled } = useInstalledFeatures();
+  const { byId: catalogById } = useCatalogFeatures();
+  const { entitlement, loading: entitlementLoading, refresh: refreshEntitlement } = useFeatureEntitlement(featureId);
+  const { fetch: fetchLaunchUrl, loading: launchLoading, error: launchError } = useFeatureLaunchUrl();
+  const { subscribe, loading: subscribing, error: subscribeError } = useSubscribeFeature();
+  const { unsubscribe, loading: cancelling, error: cancelError } = useUnsubscribeFeature();
+
+  const installed = useMemo(() => byId(featureId), [byId, featureId]);
+  const catalogEntry = useMemo(() => catalogById(featureId), [catalogById, featureId]);
+  const marketplaceUrl = marketplaceUrls?.[featureId];
+
+  const handleInstall = useCallback(async () => {
+    try {
+      const urlInfo = await fetchLaunchUrl(featureId);
+      // Open in a new tab so the user can come back to the IDP UI after Create stack.
+      window.open(urlInfo.launchUrl, '_blank', 'noopener,noreferrer');
+    } catch {
+      // error is surfaced via the hook's `error` state
+    }
+  }, [fetchLaunchUrl, featureId]);
+
+  const handleUpdate = useCallback(async () => {
+    // Update == Launch Stack with the latest version. Same CFN quick-create
+    // URL mechanism; because the stackName is preserved by the server-side
+    // resolver, this performs an Update Stack.
+    try {
+      const urlInfo = await fetchLaunchUrl(featureId);
+      window.open(urlInfo.launchUrl, '_blank', 'noopener,noreferrer');
+    } catch {
+      // error surfaced via hook
+    }
+  }, [fetchLaunchUrl, featureId]);
+
+  // Tracks whether we're waiting for the admin to return from the
+  // Marketplace / simulator tab. When true, the next `window.focus` event
+  // triggers a one-shot entitlement refresh so the UI transitions from
+  // NONE → ACTIVE without the admin having to manually reload.
+  const awaitingMarketplaceReturn = useRef(false);
+
+  const handleSubscribe = useCallback(async () => {
+    try {
+      const currentUrl = typeof window !== 'undefined' ? window.location.href : undefined;
+      const subResult = await subscribe(featureId, { returnUrl: currentUrl });
+      if (subResult.marketplaceUrl) {
+        // Real AWS Marketplace does not expose subscribe as a silent RPC — the
+        // buyer is redirected to a Marketplace-hosted page to accept pricing,
+        // EULA, and the AWS Customer Agreement. We do the same via the
+        // simulator's /marketplace/* HTML buyer console, then refresh the
+        // entitlement state when the admin returns to this tab.
+        awaitingMarketplaceReturn.current = true;
+        window.open(subResult.marketplaceUrl, '_blank', 'noopener,noreferrer');
+      } else {
+        // No redirect URL (shouldn't happen — hook throws otherwise). Fall
+        // back to the old behaviour of just refreshing caches.
+        await Promise.all([refreshEntitlement(), refreshInstalled()]);
+      }
+    } catch {
+      // error surfaced via hook's `subscribeError`
+    }
+  }, [subscribe, featureId, refreshEntitlement, refreshInstalled]);
+
+  // Refresh entitlement + installed state when the admin returns to this tab
+  // after completing (or cancelling) the Marketplace / simulator flow.
+  useEffect(() => {
+    const onFocus = () => {
+      if (!awaitingMarketplaceReturn.current) return;
+      awaitingMarketplaceReturn.current = false;
+      // Fire-and-forget — consumers don't await these.
+      void Promise.all([refreshEntitlement(), refreshInstalled()]);
+    };
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, [refreshEntitlement, refreshInstalled]);
+
+  const handleCancel = useCallback(async () => {
+    try {
+      await unsubscribe(featureId);
+      // Invalidate both caches so the UI transitions to EXPIRED.
+      await Promise.all([refreshEntitlement(), refreshInstalled()]);
+    } catch {
+      // error surfaced via hook's `cancelError`
+    }
+  }, [unsubscribe, featureId, refreshEntitlement, refreshInstalled]);
+
+  if (!featureId) {
+    return <Box padding="xxl">No feature ID provided.</Box>;
+  }
+  if (installedLoading || entitlementLoading) {
+    return <LoadingBlock />;
+  }
+
+  const state = entitlement?.state ?? 'NONE';
+  // Prefer installed.displayName (most accurate — what the feature's own
+  // RegisterFeature custom resource wrote when it deployed). Fall back to
+  // catalog.displayName (what the UI's hardcoded feature registry lists).
+  // Fall back to raw featureId as a last resort so the page still renders.
+  const featureDisplayName = installed?.displayName ?? catalogEntry?.displayName ?? featureId;
+  // OSS features have no AWS Marketplace contract — drive the subscription
+  // wording off the catalog `source` (auto-subscribe mode also reports
+  // source='auto', covered separately for the installed banner). When the
+  // catalog entry is missing we fall back to NOT treating it as OSS so the
+  // marketplace-safe wording is the default.
+  const isOss = catalogEntry?.source === 'oss';
+  const featureDescription = catalogEntry?.description ?? null;
+  // "Learn more" link: docs-site slug/URL from the catalog, else the
+  // marketplace listing. Null when neither is available.
+  const docsUrl = resolveFeatureDocsUrl(catalogEntry);
+
+  // --- NONE ---------------------------------------------------------------
+  if (state === 'NONE') {
+    return (
+      <SubscriptionRequired
+        featureDisplayName={featureDisplayName}
+        description={featureDescription}
+        docsUrl={docsUrl}
+        marketplaceUrl={marketplaceUrl}
+        canSubscribe={isAdmin}
+        onSubscribe={isAdmin ? handleSubscribe : undefined}
+        subscribing={subscribing}
+        subscribeError={subscribeError?.message ?? null}
+      />
+    );
+  }
+
+  // --- ACTIVE + not installed ---------------------------------------------
+  if (state === 'ACTIVE' && !installed) {
+    return isAdmin ? (
+      <InstallPrompt
+        featureDisplayName={featureDisplayName}
+        description={featureDescription}
+        docsUrl={docsUrl}
+        isOss={isOss}
+        loading={launchLoading}
+        onInstall={handleInstall}
+        errorMessage={launchError?.message ?? null}
+      />
+    ) : (
+      <AwaitingAdminInstall featureDisplayName={featureDisplayName} docsUrl={docsUrl} isOss={isOss} />
+    );
+  }
+
+  // From this point on, `installed` is non-null.
+  if (!installed) {
+    // Safety: EXPIRED + not installed falls here. Treat as NONE.
+    return (
+      <SubscriptionRequired
+        featureDisplayName={featureDisplayName}
+        marketplaceUrl={marketplaceUrl}
+        canSubscribe={isAdmin}
+        onSubscribe={isAdmin ? handleSubscribe : undefined}
+        subscribing={subscribing}
+        subscribeError={subscribeError?.message ?? null}
+      />
+    );
+  }
+
+  const context: FeatureContext = {
+    featureId,
+    installedVersion: installed.installedVersion,
+    featureApiEndpoint: installed.featureApiEndpoint,
+    getAuthToken,
+    mainStackName,
+    subscriptionActive: state === 'ACTIVE',
+  };
+
+  const featureContent = (
+    <FeatureLoader
+      featureId={featureId}
+      uiBundlePath={installed.uiBundlePath}
+      expectedVersion={installed.installedVersion}
+      context={context}
+    />
+  );
+
+  // --- EXPIRED + installed ------------------------------------------------
+  if (state === 'EXPIRED') {
+    return (
+      <SpaceBetween size="l">
+        <ExpiredBanner featureDisplayName={featureDisplayName} marketplaceUrl={marketplaceUrl} />
+        {/* Dimmed wrapper — pointer-events:none makes the read-only nature obvious. */}
+        <div aria-disabled="true" style={{ opacity: 0.55, pointerEvents: 'none', filter: 'grayscale(0.3)' }}>
+          {featureContent}
+        </div>
+      </SpaceBetween>
+    );
+  }
+
+  // --- ACTIVE + installed --------------------------------------------------
+  const hasUpdate = !!installed.latestVersion && installed.latestVersion !== installed.installedVersion;
+
+  return (
+    <SpaceBetween size="l">
+      {/* In auto-subscribe mode there is no Marketplace contract to cancel,
+          so hide the subscription banner (and its admin-only Cancel button). */}
+      {entitlement && entitlement.source !== 'auto' && (
+        <ActiveSubscriptionBanner
+          entitlement={entitlement}
+          canCancel={isAdmin}
+          onCancel={isAdmin ? handleCancel : undefined}
+          cancelling={cancelling}
+          cancelError={cancelError?.message ?? null}
+        />
+      )}
+      {hasUpdate ? (
+        <UpdateAvailableBanner
+          installedVersion={installed.installedVersion}
+          latestVersion={installed.latestVersion as string}
+          isAdmin={isAdmin}
+          onUpdate={isAdmin ? handleUpdate : undefined}
+          loading={launchLoading}
+        />
+      ) : (
+        // OSS features (and auto-subscribe mode) have no Marketplace
+        // subscription, so suppress the source suffix for them.
+        <UpToDateBanner version={installed.installedVersion} source={isOss ? 'auto' : (entitlement?.source ?? 'marketplace')} />
+      )}
+      {featureContent}
+    </SpaceBetween>
+  );
+};
+
+export default FeaturePage;
