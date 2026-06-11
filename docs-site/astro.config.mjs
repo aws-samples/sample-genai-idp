@@ -208,7 +208,10 @@ export default defineConfig({
         {
           label: "New & Uncategorized",
           items: [
+            { label: "Dependency Mirroring", slug: "dependency-mirroring" },
+            { label: "Idp Deployment Ai Guide", slug: "idp-deployment-ai-guide" },
             { label: "Missing Page Handling", slug: "missing-page-handling" },
+            { label: "Openai Models", slug: "openai-models" },
             { label: "Setup Development Env Windows", slug: "setup-development-env-windows" },
             { label: "Version Update Indicator", slug: "version-update-indicator" },
           ],
