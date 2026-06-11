@@ -3178,12 +3178,17 @@ def _invoke_test_runner(
     # Parse response
     result = json.loads(response["Payload"].read())
 
-    if response["StatusCode"] != 200:
-        raise ValueError(f"Test runner invocation failed: {result}")
+    # Check for Lambda function errors (AWS returns StatusCode=200 for invocation success,
+    # but function errors are indicated by errorMessage in the payload)
+    if "errorMessage" in result:
+        error_type = result.get("errorType", "Unknown")
+        error_msg = result["errorMessage"]
+        raise ValueError(f"Test runner execution failed ({error_type}): {error_msg}")
 
-    # Debug: Show the Lambda response
-    console.print("[yellow]DEBUG - Lambda response:[/yellow]")
-    console.print(json.dumps(result, indent=2))
+    if response["StatusCode"] != 200:
+        raise ValueError(
+            f"Test runner invocation failed with status {response['StatusCode']}"
+        )
 
     console.print(f"[green]✓ Test run started: {result['testRunId']}[/green]")
     return result
