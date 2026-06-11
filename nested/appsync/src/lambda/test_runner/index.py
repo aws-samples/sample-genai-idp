@@ -63,6 +63,8 @@ def handler(event, context):
         # Defense-in-depth: startTestRun is an Admin+Author operation.
         # Allow direct Lambda invocations (no 'identity' field or identity=None) for CI/automation.
         # AppSync invocations always have 'identity' with non-None value, so RBAC is still enforced for UI users.
+        # Security: Direct invocation path is gated by IAM (lambda:InvokeFunction permission on this ARN),
+        # not Cognito groups. CI/automation uses IAM credentials; UI users go through AppSync + Cognito.
         is_appsync_invoke = event.get('identity') is not None
         if is_appsync_invoke and not _caller_in_groups(event, ("Admin", "Author")):
             raise Exception(

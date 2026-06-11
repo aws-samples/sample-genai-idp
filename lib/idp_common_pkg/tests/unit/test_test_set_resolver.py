@@ -87,6 +87,37 @@ class TestTestSetResolver:
         with pytest.raises(Exception, match="requires Admin or Author group"):
             test_set_index.handler(event, {})
 
+    def test_handler_allows_direct_lambda_invoke_no_identity(self):
+        """RBAC bypass: direct Lambda invocation (no identity) proceeds for CI/automation."""
+        with patch.object(test_set_index, "get_test_sets") as mock_get:
+            mock_get.return_value = []
+            # Direct Lambda invoke: no 'identity' field (CI/automation path)
+            event = {"info": {"fieldName": "getTestSets"}}
+            # Should NOT raise - bypass works as designed
+            test_set_index.handler(event, {})
+            mock_get.assert_called_once()
+
+    def test_handler_allows_direct_lambda_invoke_identity_none(self):
+        """RBAC bypass: direct Lambda invocation (identity=None) proceeds for CI/automation."""
+        with patch.object(test_set_index, "get_test_sets") as mock_get:
+            mock_get.return_value = []
+            # Direct Lambda invoke: identity explicitly None
+            event = {"info": {"fieldName": "getTestSets"}, "identity": None}
+            # Should NOT raise - bypass works as designed
+            test_set_index.handler(event, {})
+            mock_get.assert_called_once()
+
+    def test_handler_still_enforces_rbac_for_appsync_viewer(self):
+        """Regression guard: AppSync invocation with non-Admin/Author still raises."""
+        # This is the same as test_handler_rejects_viewer but explicitly tests
+        # that the RBAC bypass doesn't break AppSync RBAC enforcement
+        event = {
+            "info": {"fieldName": "getTestSets"},
+            "identity": {"claims": {"cognito:groups": ["Viewer"]}},
+        }
+        with pytest.raises(Exception, match="requires Admin or Author group"):
+            test_set_index.handler(event, {})
+
     @patch("uuid.uuid4")
     @patch("datetime.datetime")
     @patch("boto3.client")
