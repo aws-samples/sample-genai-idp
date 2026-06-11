@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "idp-feature-sdk"
+version = "0.1.0"
+description = "IDP Accelerator — Feature Platform SDK: publish installable features to Marketplace-style buckets."
+readme = "README.md"
+authors = [{ name = "AWS GenAIIC" }]
+license = { text = "MIT-0" }
+requires-python = ">=3.10"
+
+dependencies = [
+    "boto3>=1.28",
+    "pyyaml>=6.0",
+    "jsonschema>=4.20",
+    "rich>=13.5",
+    "semver>=3.0",
+    "click>=8.1",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=7.4",
+    "moto[s3,dynamodb]>=5.0",
+]
+
+[project.scripts]
+idp-feature-cli = "idp_feature_sdk.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["idp_feature_sdk*"]
+
+[tool.setuptools.package-data]
+"idp_feature_sdk" = ["schemas/*.json"]

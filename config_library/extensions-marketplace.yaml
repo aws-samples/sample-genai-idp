@@ -1,0 +1,30 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: MIT-0
+#
+# Closed-source extensions delivered via AWS Marketplace subscriptions.
+#
+# FUTURE CAPABILITY: the framework supports this, but no Marketplace extensions
+# exist yet — this file is empty by design. When paid extensions ship, this
+# becomes their single source of truth: `idp-cli publish` merges it into the
+# generated catalog.json (append an entry, re-publish, then run a stack update
+# so the catalog refreshes).
+#
+# The template lives in a private seller bucket; the host presigns a GetObject
+# URL for it only after GetEntitlements(productCode) confirms an active
+# subscription. See docs/feature-platform-developer-guide.md. Counterpart for
+# bundled OSS extensions: extensions-oss.yaml.
+
+schemaVersion: "1.0"
+
+features: []
+  # Example shape (placeholders only — no Marketplace extensions are published yet):
+  # - featureId: my-paid-extension
+  #   displayName: "My Paid Extension"
+  #   description: "One-line description shown in the nav and on the feature page."
+  #   iconUrl: ""                                  # optional https URL
+  #   productCode: "REPLACE_WITH_MARKETPLACE_PRODUCT_CODE"
+  #   marketplaceListingUrl: "https://aws.amazon.com/marketplace/pp/REPLACE"
+  #   sellerBucket: "REPLACE_WITH_SELLER_BUCKET"   # private; GetObject-only
+  #   sellerBucketRegion: "us-east-1"
+  #   latestVersion: "1.0.0"
+  #   templateKey: "features/my-paid-extension/v1.0.0/template.yaml"

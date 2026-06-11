@@ -1,0 +1,196 @@
+"""Unit tests for the unsubscribe_feature Lambda."""
+
+from __future__ import annotations
+
+import io
+import json
+from unittest.mock import MagicMock, patch
+from urllib.error import HTTPError, URLError
+
+import pytest
+from _helpers import make_appsync_event
+
+
+def _preload(
+    monkeypatch,
+    load_lambda,
+    *,
+    simulator_endpoint="http://sim.example.com",
+    product_map='{"docs-by-status":"prod123"}',
+    default_customer="CUST-default",
+    source_tag="simulator",
+):
+    monkeypatch.setenv("SIMULATOR_ADMIN_ENDPOINT", simulator_endpoint)
+    monkeypatch.setenv("FEATURE_PRODUCT_CODE_MAP", product_map)
+    monkeypatch.setenv("DEFAULT_CUSTOMER_IDENTIFIER", default_customer)
+    monkeypatch.setenv("ADMIN_GROUP", "Admin")
+    monkeypatch.setenv("SIMULATOR_SOURCE_TAG", source_tag)
+    monkeypatch.setenv("LOG_LEVEL", "DEBUG")
+    return load_lambda("unsubscribe_feature")
+
+
+def _mock_urlopen_response(mod, body: dict):
+    resp = MagicMock()
+    resp.read.return_value = json.dumps(body).encode("utf-8")
+    resp.__enter__.return_value = resp
+    resp.__exit__.return_value = False
+    return patch.object(mod.urllib.request, "urlopen", return_value=resp)
+
+
+def test_happy_path(monkeypatch, load_lambda):
+    mod = _preload(monkeypatch, load_lambda)
+    sim_body = {
+        "customerIdentifier": "CUST-default",
+        "productCode": "prod123",
+        "featureId": "docs-by-status",
+        "state": "EXPIRED",
+        "expiresAt": 1_700_000_000.0,
+    }
+    with _mock_urlopen_response(mod, sim_body) as patched:
+        result = mod.handler(
+            make_appsync_event(
+                "unsubscribeFeature",
+                {"featureId": "docs-by-status"},
+                groups=["Admin"],
+            ),
+            None,
+        )
+        call = patched.call_args
+        req = call.args[0]
+        assert req.full_url == "http://sim.example.com/admin/entitlements/expire"
+        assert req.get_method() == "POST"
+        sent = json.loads(req.data.decode("utf-8"))
+        assert sent["customerIdentifier"] == "CUST-default"
+        assert sent["productCode"] == "prod123"
+        assert sent["featureId"] == "docs-by-status"
+
+    assert result["featureId"] == "docs-by-status"
+    assert result["state"] == "EXPIRED"
+    assert result["source"] == "simulator"
+    assert result["expiresAt"].endswith("Z")
+
+
+def test_rejects_non_admin(monkeypatch, load_lambda):
+    mod = _preload(monkeypatch, load_lambda)
+    with pytest.raises(Exception, match="Admin"):
+        mod.handler(
+            make_appsync_event(
+                "unsubscribeFeature",
+                {"featureId": "docs-by-status"},
+                groups=["Author"],
+            ),
+            None,
+        )
+
+
+def test_missing_feature_id(monkeypatch, load_lambda):
+    mod = _preload(monkeypatch, load_lambda)
+    with pytest.raises(ValueError, match="featureId"):
+        mod.handler(
+            make_appsync_event("unsubscribeFeature", {}, groups=["Admin"]),
+            None,
+        )
+
+
+def test_missing_product_code_mapping_marketplace_mode_raises(monkeypatch, load_lambda):
+    """In marketplace mode, unmapped featureId raises UnsubscribeError."""
+    mod = _preload(
+        monkeypatch, load_lambda, product_map='{"other":"x"}', source_tag="marketplace"
+    )
+    with pytest.raises(mod.UnsubscribeError, match="productCode"):
+        mod.handler(
+            make_appsync_event(
+                "unsubscribeFeature",
+                {"featureId": "docs-by-status"},
+                groups=["Admin"],
+            ),
+            None,
+        )
+
+
+def test_missing_product_code_mapping_simulator_mode_synthesizes(
+    monkeypatch, load_lambda
+):
+    """In simulator mode, unmapped featureId is synthesized (prod-<id>-sim)."""
+    mod = _preload(monkeypatch, load_lambda, product_map="{}", source_tag="simulator")
+    captured: dict = {}
+
+    def fake_post(url, body):  # noqa: ARG001
+        captured["body"] = body
+        return {"expiresAt": None}
+
+    monkeypatch.setattr(mod, "_post_json", fake_post)
+    result = mod.handler(
+        make_appsync_event(
+            "unsubscribeFeature",
+            {"featureId": "docs-by-status"},
+            groups=["Admin"],
+        ),
+        None,
+    )
+    assert result["state"] == "EXPIRED"
+    assert result["productCode"] == "prod-docs-by-status-sim"
+    assert captured["body"]["productCode"] == "prod-docs-by-status-sim"
+
+
+def test_missing_simulator_endpoint(monkeypatch, load_lambda):
+    mod = _preload(monkeypatch, load_lambda, simulator_endpoint="")
+    with pytest.raises(mod.UnsubscribeError, match="SIMULATOR_ADMIN_ENDPOINT"):
+        mod.handler(
+            make_appsync_event(
+                "unsubscribeFeature",
+                {"featureId": "docs-by-status"},
+                groups=["Admin"],
+            ),
+            None,
+        )
+
+
+def test_simulator_http_error(monkeypatch, load_lambda):
+    mod = _preload(monkeypatch, load_lambda)
+    err = HTTPError(
+        url="http://sim.example.com/admin/entitlements/expire",
+        code=500,
+        msg="boom",
+        hdrs=None,
+        fp=io.BytesIO(b'{"error":"nope"}'),
+    )
+    with patch.object(mod.urllib.request, "urlopen", side_effect=err):
+        with pytest.raises(mod.UnsubscribeError, match="500"):
+            mod.handler(
+                make_appsync_event(
+                    "unsubscribeFeature",
+                    {"featureId": "docs-by-status"},
+                    groups=["Admin"],
+                ),
+                None,
+            )
+
+
+def test_simulator_connection_refused(monkeypatch, load_lambda):
+    mod = _preload(monkeypatch, load_lambda)
+    err = URLError("connection refused")
+    with patch.object(mod.urllib.request, "urlopen", side_effect=err):
+        with pytest.raises(mod.UnsubscribeError, match="reach simulator"):
+            mod.handler(
+                make_appsync_event(
+                    "unsubscribeFeature",
+                    {"featureId": "docs-by-status"},
+                    groups=["Admin"],
+                ),
+                None,
+            )
+
+
+def test_falls_back_expires_at_when_simulator_omits_it(monkeypatch, load_lambda):
+    mod = _preload(monkeypatch, load_lambda)
+    with _mock_urlopen_response(mod, {"state": "EXPIRED"}):
+        result = mod.handler(
+            make_appsync_event(
+                "unsubscribeFeature",
+                {"featureId": "docs-by-status"},
+                groups=["Admin"],
+            ),
+            None,
+        )
+    assert result["expiresAt"].endswith("Z")
