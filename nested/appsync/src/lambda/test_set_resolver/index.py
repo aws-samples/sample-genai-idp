@@ -63,7 +63,10 @@ def handler(event, context):
     logger.info(f"Test set resolver invoked with field_name: {field_name}")
 
     # Defense-in-depth: all Test Studio test-set operations are Admin+Author.
-    if not _caller_in_groups(event, ("Admin", "Author")):
+    # Allow direct Lambda invocations (no 'identity' field or identity=None) for CI/automation.
+    # AppSync invocations always have 'identity' with non-None value, so RBAC is still enforced for UI users.
+    is_appsync_invoke = event.get('identity') is not None
+    if is_appsync_invoke and not _caller_in_groups(event, ("Admin", "Author")):
         logger.warning(
             f"Forbidden: caller attempted '{field_name}' without Admin/Author group"
         )

@@ -3075,7 +3075,7 @@ def _invoke_test_set_resolver(
         (
             f["FunctionName"]
             for f in all_functions
-            if stack_name in f["FunctionName"]
+            if f["FunctionName"].startswith(f"{stack_name}-APPSYNCSTACK-")
             and "TestSetResolverFunction" in f["FunctionName"]
         ),
         None,
@@ -3099,11 +3099,21 @@ def _invoke_test_set_resolver(
 
         result = json.loads(response["Payload"].read())
 
+        # Check for Lambda function errors (AWS returns StatusCode=200 for invocation success,
+        # but function errors are indicated by errorMessage in the payload)
+        if "errorMessage" in result:
+            error_type = result.get("errorType", "Unknown")
+            error_msg = result["errorMessage"]
+            console.print(
+                f"[yellow]Warning: Test set resolver failed ({error_type}): {error_msg}[/yellow]"
+            )
+            return
+
         if response["StatusCode"] == 200:
             console.print("[green]✓ Test set auto-detection completed[/green]")
         else:
             console.print(
-                f"[yellow]Warning: Test set resolver failed: {result}[/yellow]"
+                f"[yellow]Warning: Test set resolver invocation failed with status {response['StatusCode']}[/yellow]"
             )
 
     except Exception as e:
