@@ -43,8 +43,8 @@ idp-feature-cli publish . --feature-bucket <your-bucket> --region us-east-1
 ```
 
 After deploying the main stack with `EnableFeaturePlatform=true` (the default),
-install the feature and reload the UI — the **Demo Extension** ("Docs By
-Status") page appears under the **Extensions** nav section.
+install the feature and reload the UI — the **Sample: Document Status (feature
+add-on)** page appears under the **Extensions** nav section.
 
 See the [Feature Platform Developer Guide](../../docs/feature-platform-developer-guide.md)
 for the full authoring walkthrough.

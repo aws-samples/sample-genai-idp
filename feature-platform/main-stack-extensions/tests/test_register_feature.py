@@ -15,12 +15,12 @@ def _preload(monkeypatch, table_name: str, load_lambda):
 
 VALID_INPUT = {
     "featureId": "docs-by-status",
-    "displayName": "DemoFeature - Docs By Status",
-    "installedVersion": "1.0.0",
+    "displayName": "Sample: Document Status (feature add-on)",
+    "installedVersion": "1.0.4",
     "stackName": "idp-feature-docs-by-status",
     "stackId": "arn:aws:cloudformation:us-east-1:111:stack/idp-feature-docs-by-status/abc",
     "stackRegion": "us-east-1",
-    "uiBundlePath": "features/docs-by-status/v1.0.0/",
+    "uiBundlePath": "features/docs-by-status/v1.0.4/",
     "featureApiEndpoint": "https://abc.execute-api.us-east-1.amazonaws.com",
     "installedBy": "admin@example.com",
 }
@@ -35,7 +35,7 @@ def test_register_feature_happy_path(
     result = mod.handler(event, None)
 
     assert result["featureId"] == "docs-by-status"
-    assert result["installedVersion"] == "1.0.0"
+    assert result["installedVersion"] == "1.0.4"
     assert result["updateAvailable"] is False
     assert result["installedAt"]
 
@@ -44,7 +44,7 @@ def test_register_feature_happy_path(
     row = ddb.Table(installed_features_table).get_item(
         Key={"featureId": "docs-by-status"}
     )["Item"]
-    assert row["displayName"] == "DemoFeature - Docs By Status"
+    assert row["displayName"] == "Sample: Document Status (feature add-on)"
     assert row["featureApiEndpoint"] == VALID_INPUT["featureApiEndpoint"]
 
 
@@ -56,7 +56,7 @@ def test_register_feature_is_idempotent_overwrite(
     mod.handler(make_appsync_event("registerFeature", {"input": VALID_INPUT}), None)
     updated = {
         **VALID_INPUT,
-        "installedVersion": "1.0.1",
+        "installedVersion": "1.0.5",
         "displayName": "Docs By Status (renamed)",
     }
     mod.handler(make_appsync_event("registerFeature", {"input": updated}), None)
@@ -65,7 +65,7 @@ def test_register_feature_is_idempotent_overwrite(
     row = ddb.Table(installed_features_table).get_item(
         Key={"featureId": "docs-by-status"}
     )["Item"]
-    assert row["installedVersion"] == "1.0.1"
+    assert row["installedVersion"] == "1.0.5"
     assert row["displayName"] == "Docs By Status (renamed)"
 
 

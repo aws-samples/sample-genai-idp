@@ -67,6 +67,18 @@ export type AgentJobConnection = {
   nextToken?: Maybe<Scalars['String']['output']>;
 };
 
+/**
+ * Input for applyFeatureConfigPreset. `config` is the parsed preset
+ * document (JSON-encoded); metadata fields (IsActive, Managed, …) are
+ * stripped server-side.
+ */
+export type ApplyFeatureConfigPresetInput = {
+  config: Scalars['AWSJSON']['input'];
+  description?: InputMaybe<Scalars['String']['input']>;
+  featureId: Scalars['String']['input'];
+  version: Scalars['String']['input'];
+};
+
 export type AvailableModelsResult = {
   baseModels: Array<BaseModelInfo>;
   customModels: Array<CustomModelInfo>;
@@ -383,6 +395,13 @@ export type DynamoDbBase = {
   SK: Scalars['ID']['output'];
 };
 
+/** Receipt returned by applyFeatureConfigPreset. */
+export type FeatureConfigPresetResult = {
+  appliedAt: Scalars['AWSDateTime']['output'];
+  configVersionName: Scalars['String']['output'];
+  featureId: Scalars['String']['output'];
+};
+
 /** Subscription / entitlement state for a feature. */
 export type FeatureEntitlement = {
   customerIdentifier?: Maybe<Scalars['String']['output']>;
@@ -573,6 +592,16 @@ export type Mutation = {
   addDocumentsToTestSetFromUpload?: Maybe<TestSetUploadResponse>;
   addTestSet?: Maybe<TestSet>;
   addTestSetFromUpload?: Maybe<TestSetUploadResponse>;
+  /**
+   * Features with a manifest `configPreset`: write the bundled preset to
+   * the host's ConfigurationTable as a new, NON-ACTIVE config version named
+   * `<featureId>-v<version>`. Installation never changes the active config —
+   * an admin reviews and activates the preset from the Configuration UI.
+   * Idempotent: re-applying the same featureId+version overwrites the row,
+   * so CloudFormation stack Updates are safe. IAM-authenticated; called by
+   * the feature stack's ui-deployer custom resource.
+   */
+  applyFeatureConfigPreset: FeatureConfigPresetResult;
   autoDetectSections?: Maybe<Scalars['String']['output']>;
   claimReview?: Maybe<Document>;
   completeSectionReview?: Maybe<Document>;
@@ -608,6 +637,12 @@ export type Mutation = {
    */
   registerFeatureHooks: FeatureHooksRegistration;
   releaseReview?: Maybe<Document>;
+  /**
+   * Delete all of a feature's preset config versions on uninstall. A
+   * version that is currently ACTIVE is preserved (never yank the running
+   * config); it is skipped with a warning and the call still succeeds.
+   */
+  removeFeatureConfigPreset: Scalars['Boolean']['output'];
   reprocessDocument: Scalars['Boolean']['output'];
   restoreDefaultPricing?: Maybe<UpdatePricingResponse>;
   resumeCircuitBreaker?: Maybe<CircuitBreakerStatus>;
@@ -700,6 +735,11 @@ export type MutationAddTestSetArgs = {
 
 export type MutationAddTestSetFromUploadArgs = {
   input: TestSetUploadInput;
+};
+
+
+export type MutationApplyFeatureConfigPresetArgs = {
+  input: ApplyFeatureConfigPresetInput;
 };
 
 
@@ -823,6 +863,11 @@ export type MutationRegisterFeatureHooksArgs = {
 
 export type MutationReleaseReviewArgs = {
   objectKey: Scalars['String']['input'];
+};
+
+
+export type MutationRemoveFeatureConfigPresetArgs = {
+  featureId: Scalars['String']['input'];
 };
 
 

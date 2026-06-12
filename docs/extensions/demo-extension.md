@@ -1,16 +1,21 @@
 ---
-title: "Demo Extension (Docs By Status)"
+title: "Sample: Document Status (feature add-on)"
 ---
-# Demo Extension (Docs By Status)
+# Sample: Document Status (feature add-on)
 
-The **Demo Extension** is the bundled reference feature for the
-[Feature Platform](../feature-platform.md). It demonstrates the host contract
-end-to-end and is the recommended starting point for authoring your own
-extension.
+**Sample: Document Status** is the minimal *feature add-on* sample for the
+[Feature Platform](../feature-platform.md) — the simplest of the two bundled
+samples (its companion, the richer *use-case* sample, is
+[Sample: Health Insurance Review](sample-claims-review.md)). It demonstrates the host
+contract end-to-end and is the recommended starting point for authoring your
+own extension.
+
+> Its `featureId` is `docs-by-status` (unchanged); only the display name was
+> updated to make its role as a sample obvious in the nav.
 
 ## What it does
 
-Adds a **Docs By Status** page to the IDP web UI: a pie chart showing how many
+Adds a **Document Status** page to the IDP web UI: a pie chart showing how many
 documents are currently in each processing status — NEW, QUEUED, RUNNING,
 COMPLETED, FAILED. Counts are fetched live from the main stack's document
 tracking table through a small feature-owned HTTP API.
@@ -31,10 +36,11 @@ template:
 
 ## Installing
 
-The Demo Extension is bundled with the accelerator and listed in the catalog,
-so it appears under **Extensions** in the nav as soon as the Feature Platform is
-enabled (the default). An admin installs it from its feature page with one
-click — there's no subscription step for open-source extensions.
+This sample is bundled with the accelerator and listed in the catalog, so it
+appears under **Extensions** in the nav (as **Sample: Document Status (feature
+add-on)**) as soon as the Feature Platform is enabled (the default). An admin
+installs it from its feature page with one click — there's no subscription step
+for open-source extensions.
 
 ## Source & authoring
 

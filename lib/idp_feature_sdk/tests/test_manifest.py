@@ -30,6 +30,43 @@ def test_docs_url_is_parsed(demo_feature_project: Path) -> None:
     assert m.docsUrl == "extensions/demo-feature"
 
 
+def test_pipeline_hooks_and_config_preset_are_parsed(
+    demo_feature_project: Path,
+) -> None:
+    """First real exercise of the configPreset + pipelineHooks manifest paths
+    (used by the sample-claims-review sample). Adds a preset file and the two
+    manifest sections, then asserts they round-trip into the dataclass."""
+    preset_dir = demo_feature_project / "config-preset"
+    preset_dir.mkdir()
+    (preset_dir / "claims-config.yaml").write_text("use_bda: false\n", encoding="utf-8")
+    mf = demo_feature_project / "feature.yaml"
+    mf.write_text(
+        mf.read_text()
+        + (
+            "\nconfigPreset:\n"
+            "  path: config-preset/claims-config.yaml\n"
+            "pipelineHooks:\n"
+            "  postRuleValidation: ClaimStatusHookFunction\n"
+        ),
+        encoding="utf-8",
+    )
+    m = load_manifest(demo_feature_project)
+    assert m.configPreset is not None
+    assert m.configPreset.path == "config-preset/claims-config.yaml"
+    assert m.pipelineHooks == {"postRuleValidation": "ClaimStatusHookFunction"}
+
+
+def test_config_preset_missing_file_is_rejected(demo_feature_project: Path) -> None:
+    """A configPreset.path that doesn't exist on disk should fail validation."""
+    mf = demo_feature_project / "feature.yaml"
+    mf.write_text(
+        mf.read_text() + "\nconfigPreset:\n  path: config-preset/missing.yaml\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ManifestError):
+        load_manifest(demo_feature_project)
+
+
 def test_missing_manifest_file(tmp_path: Path) -> None:
     with pytest.raises(ManifestError, match="not found"):
         load_manifest(tmp_path)

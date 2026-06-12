@@ -48,7 +48,7 @@ parameter reverts to auto-subscribe.
 |---|---|---|
 | `source` | `oss` | `marketplace` |
 | Status | available today | framework only — none exist yet |
-| Example | `docs-by-status` (the bundled demo) | — |
+| Example | `docs-by-status`, `sample-claims-review` (the bundled samples) | — |
 | Where the template lives | the stack-owned **FeatureBucket** (copied from the artifacts bucket at deploy time) | a **private seller bucket** (GetObject-only, no public read) |
 | Subscribe step | none — installable directly | UI links to the AWS Marketplace listing; buyer subscribes there |
 | How `getFeatureLaunchUrl` produces the template URL | public S3 HTTPS URL of the FeatureBucket object | **presigned** GetObject URL for the seller-bucket object, minted **only after** `GetEntitlements` confirms an ACTIVE subscription |
@@ -212,6 +212,35 @@ Features register hooks at install time via the `registerFeatureHooks`
 mutation (declared in the manifest's `pipelineHooks` field); admins can also
 edit a config version's `postHook` lists directly. See the
 [Developer Guide → Pipeline hooks](feature-platform-developer-guide.md#optional-pipeline-hooks).
+
+## Config presets
+
+A feature can bundle an accelerator configuration (custom classes, prompts,
+rule-validation policy classes, …) and apply it at install via the manifest's
+`configPreset` field. The feature stack calls the host's
+`applyFeatureConfigPreset` mutation, which writes the preset as a **new,
+non-active** configuration version named `<featureId>-v<version>`. Installation
+never changes the active configuration — an admin reviews and activates the
+preset from the **Configuration** page. Uninstall calls
+`removeFeatureConfigPreset`, which removes the feature's preset versions but
+preserves one that is currently active.
+
+This is how a vertical feature ships "the configuration it needs" alongside its
+UI and hooks. See the
+[Developer Guide → ship a configuration preset](feature-platform-developer-guide.md#optional-ship-a-configuration-preset).
+
+## Two reference samples
+
+Both bundled extensions are **samples** — reference implementations for feature
+authors, not production products. They're labelled accordingly in the nav (each
+display name starts with `Sample:`). In particular, *Sample: Health Insurance
+Review* is a minimal demo of a use-case extension; it is **not** the planned
+Claims Processing marketplace product.
+
+| Sample (nav label) | featureId | Kind | Demonstrates |
+| ------------------ | --------- | ---- | ------------ |
+| [Sample: Document Status (feature add-on)](extensions/demo-extension.md) | `docs-by-status` | feature add-on | The minimal contract: UI bundle, Cognito-auth HTTP API over the tracking table, registration. |
+| [Sample: Health Insurance Review](extensions/sample-claims-review.md) | `sample-claims-review` | use-case add-on | An advanced vertical: a bundled config preset, a `postRuleValidation` pipeline hook computing claim status, host-GraphQL Rules Discovery, and a multi-route feature API — built on [rule validation](rule-validation.md). |
 
 ## Deployment
 

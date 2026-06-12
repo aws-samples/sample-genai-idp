@@ -97,18 +97,18 @@ def test_description_is_surfaced(monkeypatch, configuration_bucket, load_lambda)
         configuration_bucket,
         [
             {
-                "featureId": "demo",
-                "displayName": "Demo Extension",
-                "latestVersion": "1.0.0",
+                "featureId": "docs-by-status",
+                "displayName": "Sample: Document Status (feature add-on)",
+                "latestVersion": "1.0.4",
                 "source": "oss",
-                "description": "Adds a Docs By Status page.",
+                "description": "Adds a Document Status page.",
                 "docsUrl": "extensions/demo-extension",
             }
         ],
     )
     mod = _preload(monkeypatch, load_lambda, configuration_bucket=configuration_bucket)
     result = mod.handler(make_appsync_event("listCatalogFeatures"), None)
-    assert result[0]["description"] == "Adds a Docs By Status page."
+    assert result[0]["description"] == "Adds a Document Status page."
     assert result[0]["docsUrl"] == "extensions/demo-extension"
 
 

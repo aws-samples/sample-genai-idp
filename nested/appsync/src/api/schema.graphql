@@ -961,6 +961,20 @@ type Mutation {
   feature. Called from the feature stack's Delete custom resource."""
   unregisterFeatureHooks(featureId: String!): Boolean! @aws_iam
 
+  """Features with a manifest `configPreset`: write the bundled preset to
+  the host's ConfigurationTable as a new, NON-ACTIVE config version named
+  `<featureId>-v<version>`. Installation never changes the active config —
+  an admin reviews and activates the preset from the Configuration UI.
+  Idempotent: re-applying the same featureId+version overwrites the row,
+  so CloudFormation stack Updates are safe. IAM-authenticated; called by
+  the feature stack's ui-deployer custom resource."""
+  applyFeatureConfigPreset(input: ApplyFeatureConfigPresetInput!): FeatureConfigPresetResult! @aws_iam
+
+  """Delete all of a feature's preset config versions on uninstall. A
+  version that is currently ACTIVE is preserved (never yank the running
+  config); it is skipped with a warning and the call still succeeds."""
+  removeFeatureConfigPreset(featureId: String!): Boolean! @aws_iam
+
   """Admin-only: initiate a subscription for a feature. Returns a
   `FeatureEntitlement` whose `marketplaceUrl` is the AWS Marketplace (or
   simulator) URL the UI must redirect the admin to in order to accept
@@ -1376,6 +1390,23 @@ type FeatureHooksRegistration @aws_iam {
   featureId: String!
   hookCount: Int!
   registeredAt: AWSDateTime!
+}
+
+"""Input for applyFeatureConfigPreset. `config` is the parsed preset
+document (JSON-encoded); metadata fields (IsActive, Managed, …) are
+stripped server-side."""
+input ApplyFeatureConfigPresetInput {
+  featureId: String!
+  version: String!       # feature version, e.g. "0.1.0" → config version "<featureId>-v0.1.0"
+  config: AWSJSON!
+  description: String
+}
+
+"""Receipt returned by applyFeatureConfigPreset."""
+type FeatureConfigPresetResult @aws_iam {
+  featureId: String!
+  configVersionName: String!   # e.g. "claims-review-v0.1.0" — what the admin sees in the Configuration UI
+  appliedAt: AWSDateTime!
 }
 
 # NOTE: The feature-platform Query/Mutation fields are inlined into the main

@@ -1,10 +1,11 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
 Description: >
-  docs-by-status v<FEATURE_VERSION_TOKEN> — sample implementation of the IDP
-  Accelerator Feature Platform contract. Adds a "Docs By Status" page to the
-  IDP UI that reads counts from the host's TrackingTable via a scoped read
-  policy.
+  sample-claims-review v<FEATURE_VERSION_TOKEN> — advanced sample of the IDP
+  Accelerator Feature Platform contract. Healthcare claims review vertical:
+  ships a prior-auth config preset (applied at install as a non-active config
+  version), a postRuleValidation pipeline hook deriving a deterministic claim
+  status, and a two-tab UI (Rules Discovery + Claims Dashboard).
 
 Parameters:
 
@@ -23,22 +24,23 @@ Parameters:
 
   FeatureId:
     Type: String
-    Default: docs-by-status
+    Default: sample-claims-review
 
   FeatureDisplayName:
     Type: String
-    Default: "Sample: Document Status (feature add-on)"
+    Default: "Sample: Health Insurance Review"
 
   FeatureBucket:
     Type: String
     Description: S3 bucket holding this version's artifacts (host artifacts bucket
-      for OSS). The ui-deployer copies the UI bundle from here. Pre-filled by the
-      host's getFeatureLaunchUrl.
+      for OSS). The ui-deployer copies the UI bundle and config preset from here.
+      Pre-filled by the host's getFeatureLaunchUrl.
 
   FeatureKeyPrefix:
     Type: String
     Description: Full S3 key prefix of this feature version's artifacts in
-      FeatureBucket (the ui-deployer reads <FeatureKeyPrefix>/ui-bundle.js).
+      FeatureBucket (the ui-deployer reads <FeatureKeyPrefix>/ui-bundle.js and
+      <FeatureKeyPrefix>/config-preset/claims-config.yaml).
       Pre-filled by the host's getFeatureLaunchUrl.
 
   LogLevel:
@@ -64,6 +66,90 @@ Globals:
     Architectures: [arm64]
 
 Resources:
+
+  ###########################################################################
+  # ClaimsStatus table — OWNED by this feature. Populated by the
+  # postRuleValidation hook; read by the feature API. One row per document,
+  # GSI ByStatus for the dashboard's status filter.
+  ###########################################################################
+  ClaimsStatusTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: documentId
+          AttributeType: S
+        - AttributeName: status
+          AttributeType: S
+        - AttributeName: updatedAt
+          AttributeType: S
+      KeySchema:
+        - AttributeName: documentId
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: ByStatus
+          KeySchema:
+            - AttributeName: status
+              KeyType: HASH
+            - AttributeName: updatedAt
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      SSESpecification:
+        SSEEnabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      Tags:
+        - Key: 'idp:feature-id'
+          Value: !Ref FeatureId
+
+  ###########################################################################
+  # Pipeline hook: invoked by the host's pipeline-hooks dispatcher at
+  # postRuleValidation. The dispatcher's IAM policy only allows invoking
+  # Lambdas tagged `idp:feature-id` — the Tags below are REQUIRED, not
+  # decorative. Registered with the host by the ui-deployer custom resource
+  # (registerFeatureHooks mutation).
+  ###########################################################################
+  ClaimStatusHookFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: hook/
+      Handler: handler.lambda_handler
+      Tags:
+        'idp:feature-id': !Ref FeatureId
+      Environment:
+        Variables:
+          LOG_LEVEL: !Ref LogLevel
+          CLAIMS_TABLE_NAME: !Ref ClaimsStatusTable
+          # Hook payloads carry the document as a compressed reference into
+          # the host's Working bucket (Document.serialize_document); the
+          # consolidated rule-validation summary lives in the Output bucket.
+          WORKING_BUCKET: { 'Fn::ImportValue': !Sub '${MainStackName}-WorkingBucketName' }
+          OUTPUT_BUCKET: { 'Fn::ImportValue': !Sub '${MainStackName}-OutputBucketName' }
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: dynamodb:PutItem
+              Resource: !GetAtt ClaimsStatusTable.Arn
+            # Compressed document state (Working) + consolidated summary
+            # (Output). GetObject only — never list.
+            - Effect: Allow
+              Action: s3:GetObject
+              Resource:
+                - !Sub
+                  - 'arn:${AWS::Partition}:s3:::${Bucket}/*'
+                  - Bucket: { 'Fn::ImportValue': !Sub '${MainStackName}-WorkingBucketName' }
+                - !Sub
+                  - 'arn:${AWS::Partition}:s3:::${Bucket}/*'
+                  - Bucket: { 'Fn::ImportValue': !Sub '${MainStackName}-OutputBucketName' }
+            # Both buckets are encrypted with the main stack's customer-managed
+            # KMS key; S3 transparently requires kms:Decrypt for every read.
+            - Effect: Allow
+              Action:
+                - kms:Decrypt
+                - kms:DescribeKey
+              Resource:
+                'Fn::ImportValue': !Sub '${MainStackName}-CustomerManagedEncryptionKeyArn'
 
   ###########################################################################
   # Feature API: HttpApi + Lambda, authorised by main stack's Cognito User Pool.
@@ -123,30 +209,29 @@ Resources:
         Variables:
           LOG_LEVEL: !Ref LogLevel
           MAIN_STACK_NAME: !Ref MainStackName
-          # Read the host's TrackingTable name from its Exports. The main stack
-          # re-exports this from its feature-platform nested stack as
-          # `${MainStackName}-TrackingTableName`.
-          DOCUMENTS_TABLE_NAME:
-            'Fn::ImportValue': !Sub '${MainStackName}-TrackingTableName'
+          CLAIMS_TABLE_NAME: !Ref ClaimsStatusTable
+          # Surfaced to the feature UI via GET /config so it can pass the
+          # correct bucket to the host's uploadDiscoveryDocument mutation.
+          DISCOVERY_BUCKET: { 'Fn::ImportValue': !Sub '${MainStackName}-DiscoveryBucketName' }
       Policies:
         - Statement:
             - Effect: Allow
               Action:
-                - dynamodb:Scan
+                - dynamodb:GetItem
                 - dynamodb:Query
+                - dynamodb:Scan
               Resource:
-                - !Sub
-                  - 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${T}'
-                  - T: { 'Fn::ImportValue': !Sub '${MainStackName}-TrackingTableName' }
-                - !Sub
-                  - 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${T}/index/*'
-                  - T: { 'Fn::ImportValue': !Sub '${MainStackName}-TrackingTableName' }
-            # The main stack's TrackingTable is encrypted with a customer-
-            # managed KMS key. DynamoDB transparently requires kms:Decrypt on
-            # that key for every Scan/Query the table touches; without this
-            # statement boto3 surfaces `AccessDeniedException: KMS key access
-            # denied` wrapped in a 500, and the browser shows "Failed to fetch"
-            # (or the payload shown in the feature's UI).
+                - !GetAtt ClaimsStatusTable.Arn
+                - !Sub '${ClaimsStatusTable.Arn}/index/*'
+            # Claim detail merges the consolidated rule-validation summary
+            # (JSON + markdown) from the host's Output bucket.
+            - Effect: Allow
+              Action: s3:GetObject
+              Resource: !Sub
+                - 'arn:${AWS::Partition}:s3:::${Bucket}/*'
+                - Bucket: { 'Fn::ImportValue': !Sub '${MainStackName}-OutputBucketName' }
+            # The Output bucket is encrypted with the main stack's customer-
+            # managed KMS key; S3 transparently requires kms:Decrypt on reads.
             - Effect: Allow
               Action:
                 - kms:Decrypt
@@ -177,6 +262,12 @@ Resources:
       LogGroupName: !Sub '/aws/lambda/${FeatureApiFunction}'
       RetentionInDays: 30
 
+  ClaimStatusHookFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${ClaimStatusHookFunction}'
+      RetentionInDays: 30
+
   UiDeployerFunctionLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
@@ -184,8 +275,9 @@ Resources:
       RetentionInDays: 30
 
   ###########################################################################
-  # UI deployer: copies the UMD bundle + registers the feature via AppSync.
-  # Identical to feature-template/ui-deployer.
+  # UI deployer: copies the UMD bundle, registers the feature, registers the
+  # pipeline hook, and applies the bundled config preset via the host's
+  # IAM-auth AppSync mutations.
   ###########################################################################
   UiDeployerRole:
     Type: AWS::IAM::Role
@@ -209,8 +301,9 @@ Resources:
             Statement:
               # GetObject only — the FeatureBucket (the host's artifacts bucket
               # for OSS) is GetObject-only by contract; we never list it. The
-              # ui-deployer copies a known key under this feature's key prefix
-              # (a missing key surfaces as NoSuchKey, which the handler logs).
+              # ui-deployer copies known keys under this feature's key prefix:
+              # ui-bundle.js and config-preset/claims-config.yaml (a missing
+              # key surfaces as NoSuchKey, which the handler logs).
               - Effect: Allow
                 Action: s3:GetObject
                 Resource: !Sub 'arn:${AWS::Partition}:s3:::${FeatureBucket}/${FeatureKeyPrefix}/*'
@@ -239,6 +332,18 @@ Resources:
                   - !Sub
                     - '${ApiArn}/types/Mutation/fields/unregisterFeature'
                     - ApiArn: { 'Fn::ImportValue': !Sub '${MainStackName}-AppSyncApiArn' }
+                  - !Sub
+                    - '${ApiArn}/types/Mutation/fields/registerFeatureHooks'
+                    - ApiArn: { 'Fn::ImportValue': !Sub '${MainStackName}-AppSyncApiArn' }
+                  - !Sub
+                    - '${ApiArn}/types/Mutation/fields/unregisterFeatureHooks'
+                    - ApiArn: { 'Fn::ImportValue': !Sub '${MainStackName}-AppSyncApiArn' }
+                  - !Sub
+                    - '${ApiArn}/types/Mutation/fields/applyFeatureConfigPreset'
+                    - ApiArn: { 'Fn::ImportValue': !Sub '${MainStackName}-AppSyncApiArn' }
+                  - !Sub
+                    - '${ApiArn}/types/Mutation/fields/removeFeatureConfigPreset'
+                    - ApiArn: { 'Fn::ImportValue': !Sub '${MainStackName}-AppSyncApiArn' }
 
   UiDeployerFunction:
     Type: AWS::Serverless::Function
@@ -259,6 +364,10 @@ Resources:
           FEATURE_KEY_PREFIX: !Ref FeatureKeyPrefix
           APPSYNC_API_URL: { 'Fn::ImportValue': !Sub '${MainStackName}-AppSyncApiUrl' }
           FEATURE_API_ENDPOINT: !GetAtt FeatureApi.ApiEndpoint
+          HOOK_FUNCTION_ARN: !GetAtt ClaimStatusHookFunction.Arn
+          # Relative key of the preset under FEATURE_KEY_PREFIX; must match
+          # feature.yaml -> configPreset.path.
+          CONFIG_PRESET_RELATIVE_KEY: config-preset/claims-config.yaml
           LOG_LEVEL: !Ref LogLevel
 
   RegisterFeatureResource:
@@ -275,5 +384,9 @@ Resources:
 Outputs:
   FeatureApiEndpoint:
     Value: !GetAtt FeatureApi.ApiEndpoint
+  ClaimsStatusTableName:
+    Value: !Ref ClaimsStatusTable
+  ClaimStatusHookFunctionArn:
+    Value: !GetAtt ClaimStatusHookFunction.Arn
   InstalledVersion:
     Value: '<FEATURE_VERSION_TOKEN>'

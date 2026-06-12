@@ -3,10 +3,11 @@
 
 /**
  * Exposes the host's React / ReactDOM / Cloudscape / aws-amplify /
- * react-router-dom instances as `window.*` globals so that feature UMD
- * bundles (built with rollup externals mapped to `React`, `ReactDOM`,
- * `ReactRouterDOM`, `awsAmplify`, `CloudscapeComponents`,
- * `CloudscapeDesignTokens`) can resolve them at load time.
+ * aws-amplify/api / react-router-dom instances as `window.*` globals so that
+ * feature UMD bundles (built with rollup externals mapped to `React`,
+ * `ReactDOM`, `ReactRouterDOM`, `awsAmplify`, `awsAmplifyApi`,
+ * `CloudscapeComponents`, `CloudscapeDesignTokens`) can resolve them at load
+ * time.
  *
  * This is the host-side half of the contract declared in
  * `subscription-features/feature-platform/feature-template/vite.config.ts` (and each
@@ -23,6 +24,7 @@ import * as ReactDOM from 'react-dom';
 import * as ReactDOMClient from 'react-dom/client';
 import * as ReactRouterDOM from 'react-router-dom';
 import * as awsAmplify from 'aws-amplify';
+import * as awsAmplifyApi from 'aws-amplify/api';
 import * as CloudscapeComponents from '@cloudscape-design/components';
 
 // `@cloudscape-design/design-tokens` is a feature-template external but is NOT
@@ -37,6 +39,7 @@ interface FeatureHostWindow {
   ReactDOM?: unknown;
   ReactRouterDOM?: unknown;
   awsAmplify?: unknown;
+  awsAmplifyApi?: unknown;
   CloudscapeComponents?: unknown;
   __idpFeatureGlobalsInstalled?: boolean;
 }
@@ -58,6 +61,11 @@ export function installFeatureHostGlobals(): void {
   w.ReactDOM = { ...(ReactDOM as object), ...(ReactDOMClient as object) };
   w.ReactRouterDOM = ReactRouterDOM;
   w.awsAmplify = awsAmplify;
+  // `generateClient` (the GraphQL client factory) lives in the `aws-amplify/api`
+  // subpath, NOT the root namespace. Features that call the host's AppSync API
+  // (e.g. sample-claims-review's Rules Discovery) import from `aws-amplify/api`; expose
+  // it as its own global so that external resolves at bundle load time.
+  w.awsAmplifyApi = awsAmplifyApi;
   w.CloudscapeComponents = CloudscapeComponents;
 
   w.__idpFeatureGlobalsInstalled = true;

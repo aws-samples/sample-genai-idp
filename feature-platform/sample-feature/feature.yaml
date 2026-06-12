@@ -3,8 +3,8 @@
 # self-register and show up once installed even without a catalog entry — see
 # docs/feature-platform-developer-guide.md.)
 featureId: docs-by-status
-displayName: Demo Extension
-version: 1.0.3
+displayName: "Sample: Document Status (feature add-on)"
+version: 1.0.4
 description: |
   Demonstrates the Feature Platform host contract end-to-end. Adds a "Docs By
   Status" page with a simple pie chart of how many documents are in each status (NEW,

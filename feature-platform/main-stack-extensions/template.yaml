@@ -68,6 +68,35 @@ Parameters:
     Description: S3 bucket serving the web UI. Feature stacks will write their
       UMD UI bundles under features/<featureId>/* inside this bucket.
 
+  OutputBucketName:
+    Type: String
+    Default: ''
+    Description: Name of the main stack's Output bucket (processed-document
+      results). Re-exported as `<MainStackName>-OutputBucketName` so feature
+      stacks that read processing results (e.g. sample-claims-review reads
+      `<doc_id>/rule_validation/consolidated/consolidated_summary.json`)
+      can grant themselves scoped s3:GetObject. Leave blank to skip the
+      export.
+
+  WorkingBucketName:
+    Type: String
+    Default: ''
+    Description: Name of the main stack's Working bucket (intermediate
+      workflow state). Pipeline-hook payloads carry the document as a
+      compressed reference into this bucket
+      (Document.serialize_document), so feature hook Lambdas need
+      s3:GetObject here to load the document. Re-exported as
+      `<MainStackName>-WorkingBucketName`. Leave blank to skip the export.
+
+  DiscoveryBucketName:
+    Type: String
+    Default: ''
+    Description: Name of the main stack's Discovery bucket (where
+      uploadDiscoveryDocument presigns uploads). Re-exported as
+      `<MainStackName>-DiscoveryBucketName` so feature UIs that drive the
+      host's Rules Discovery flow (e.g. sample-claims-review) can learn the bucket
+      to pass to uploadDiscoveryDocument. Leave blank to skip the export.
+
   WebUIBucketArn:
     Type: String
     Description: ARN of the WebUIBucket.
@@ -184,6 +213,9 @@ Conditions:
 
   HasConfigurationTable: !Not [!Equals [!Ref ConfigurationTableName, '']]
   HasConfigurationBucket: !Not [!Equals [!Ref ConfigurationBucketName, '']]
+  HasOutputBucket: !Not [!Equals [!Ref OutputBucketName, '']]
+  HasWorkingBucket: !Not [!Equals [!Ref WorkingBucketName, '']]
+  HasDiscoveryBucket: !Not [!Equals [!Ref DiscoveryBucketName, '']]
   HasCustomerManagedEncryptionKey: !Not [!Equals [!Ref CustomerManagedEncryptionKeyArn, '']]
   HasSellerBuckets: !Not [!Equals [!Join ['', !Ref SellerBucketObjectArns], '']]
 
@@ -306,6 +338,9 @@ Resources:
         # `postHook` list within the active version (since v0.1.x); the
         # resolver needs Scan to find which version is active and
         # GetItem/PutItem on the row itself.
+        # applyFeatureConfigPreset / removeFeatureConfigPreset shares this
+        # policy: it writes `Config#<featureId>-v<version>` preset rows and
+        # needs DeleteItem to remove inactive preset versions at uninstall.
         - !If
           - HasConfigurationTable
           - PolicyName: WriteActiveConfigForHooks
@@ -317,6 +352,7 @@ Resources:
                     - dynamodb:GetItem
                     - dynamodb:PutItem
                     - dynamodb:UpdateItem
+                    - dynamodb:DeleteItem
                     - dynamodb:Scan
                   Resource: !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ConfigurationTableName}'
                 - !If
@@ -462,6 +498,24 @@ Resources:
           CONFIGURATION_TABLE: !Ref ConfigurationTableName
           LOG_LEVEL: !Ref LogLevel
 
+  # applyFeatureConfigPreset / removeFeatureConfigPreset resolver. Writes a
+  # feature's bundled config preset (manifest `configPreset.path`, uploaded
+  # by the publisher and downloaded by the feature stack's ui-deployer) into
+  # the ConfigurationTable as a NEW, NON-ACTIVE version named
+  # `Config#<featureId>-v<version>`. An admin then activates it from the
+  # Configuration UI — installation never silently changes the active config.
+  ApplyFeatureConfigPresetFunction:
+    Type: AWS::Serverless::Function
+    Condition: HasConfigurationTable
+    Properties:
+      CodeUri: ./lambdas/apply_feature_config_preset/
+      Handler: index.handler
+      Role: !GetAtt FeaturePlatformLambdaRole.Arn
+      Environment:
+        Variables:
+          CONFIGURATION_TABLE: !Ref ConfigurationTableName
+          LOG_LEVEL: !Ref LogLevel
+
   ###########################################################################
   # AppSync plumbing: 1 service role + 1 Lambda data source per Lambda +
   # resolvers wired to Query/Mutation field names matching the schema fragment.
@@ -494,7 +548,9 @@ Resources:
                 - HasConfigurationTable
                 - Effect: Allow
                   Action: lambda:InvokeFunction
-                  Resource: !GetAtt RegisterFeatureHooksFunction.Arn
+                  Resource:
+                    - !GetAtt RegisterFeatureHooksFunction.Arn
+                    - !GetAtt ApplyFeatureConfigPresetFunction.Arn
                 - !Ref AWS::NoValue
 
   ListInstalledFeaturesDataSource:
@@ -660,6 +716,35 @@ Resources:
       FieldName: unregisterFeatureHooks
       DataSourceName: !GetAtt RegisterFeatureHooksDataSource.Name
 
+  ApplyFeatureConfigPresetDataSource:
+    Type: AWS::AppSync::DataSource
+    Condition: HasConfigurationTable
+    Properties:
+      ApiId: !Ref GraphQLApiId
+      Name: FeaturePlatformApplyConfigPreset
+      Type: AWS_LAMBDA
+      ServiceRoleArn: !GetAtt AppSyncServiceRole.Arn
+      LambdaConfig:
+        LambdaFunctionArn: !GetAtt ApplyFeatureConfigPresetFunction.Arn
+
+  ApplyFeatureConfigPresetResolver:
+    Type: AWS::AppSync::Resolver
+    Condition: HasConfigurationTable
+    Properties:
+      ApiId: !Ref GraphQLApiId
+      TypeName: Mutation
+      FieldName: applyFeatureConfigPreset
+      DataSourceName: !GetAtt ApplyFeatureConfigPresetDataSource.Name
+
+  RemoveFeatureConfigPresetResolver:
+    Type: AWS::AppSync::Resolver
+    Condition: HasConfigurationTable
+    Properties:
+      ApiId: !Ref GraphQLApiId
+      TypeName: Mutation
+      FieldName: removeFeatureConfigPreset
+      DataSourceName: !GetAtt ApplyFeatureConfigPresetDataSource.Name
+
   ###########################################################################
   # WebUIBucket prefix-scoped policy
   # -----------------------------------------------------------------
@@ -792,4 +877,37 @@ Outputs:
     Value: !Ref CustomerManagedEncryptionKeyArn
     Export:
       Name: !Sub '${MainStackName}-CustomerManagedEncryptionKeyArn'
+
+  OutputBucketName:
+    Condition: HasOutputBucket
+    Description: >-
+      Re-export of the main stack's Output bucket name. Feature stacks
+      that present processing results (e.g. sample-claims-review reads
+      rule-validation consolidated summaries) import this to grant
+      themselves scoped s3:GetObject on result keys.
+    Value: !Ref OutputBucketName
+    Export:
+      Name: !Sub '${MainStackName}-OutputBucketName'
+
+  WorkingBucketName:
+    Condition: HasWorkingBucket
+    Description: >-
+      Re-export of the main stack's Working bucket name. Pipeline-hook
+      payloads reference compressed document state in this bucket, so
+      feature hook Lambdas import it to grant themselves s3:GetObject
+      for Document decompression.
+    Value: !Ref WorkingBucketName
+    Export:
+      Name: !Sub '${MainStackName}-WorkingBucketName'
+
+  DiscoveryBucketName:
+    Condition: HasDiscoveryBucket
+    Description: >-
+      Re-export of the main stack's Discovery bucket name. Feature UIs that
+      drive the host's Rules Discovery flow (uploadDiscoveryDocument) import
+      this so they can pass the correct bucket; the feature API surfaces it
+      to its UI via a /config route.
+    Value: !Ref DiscoveryBucketName
+    Export:
+      Name: !Sub '${MainStackName}-DiscoveryBucketName'
 

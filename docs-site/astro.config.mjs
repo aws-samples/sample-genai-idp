@@ -128,7 +128,16 @@ export default defineConfig({
             },
             {
               label: "Extensions",
-              items: [{ label: "Demo Extension", slug: "extensions/demo-extension" }],
+              items: [
+                {
+                  label: "Sample: Document Status (feature add-on)",
+                  slug: "extensions/demo-extension",
+                },
+                {
+                  label: "Sample: Health Insurance Review",
+                  slug: "extensions/sample-claims-review",
+                },
+              ],
             },
             {
               label: "Post-Processing Lambda Hook",

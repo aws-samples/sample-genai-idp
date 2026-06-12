@@ -1828,6 +1828,32 @@ STDERR:
             "application/javascript",
         )
 
+        # Config preset — if the manifest declares one. The feature stack's
+        # ui-deployer downloads it from `<FeatureKeyPrefix>/<configPreset.path>`
+        # at install to call applyFeatureConfigPreset, so it MUST be uploaded
+        # at the same relative path under the version prefix (mirrors
+        # FeaturePublisher._upload_artifacts for developer-published features).
+        config_preset = getattr(manifest, "configPreset", None)
+        if config_preset and getattr(config_preset, "path", None):
+            preset_local = feature_dir / config_preset.path
+            if preset_local.is_file():
+                preset_ct = (
+                    "application/x-yaml"
+                    if preset_local.suffix.lower() in (".yaml", ".yml")
+                    else "application/json"
+                )
+                _upload(
+                    preset_local,
+                    f"features/{feature_id}/v{version}/{config_preset.path}",
+                    preset_ct,
+                )
+            else:
+                self.log_error(
+                    f"Feature {feature_id} declares configPreset.path "
+                    f"'{config_preset.path}' but no file exists at {preset_local}"
+                )
+                sys.exit(1)
+
         manifest_data = {
             "featureId": feature_id,
             "displayName": manifest.displayName,

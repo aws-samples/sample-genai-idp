@@ -22,4 +22,11 @@
 schemaVersion: "1.0"
 
 features:
+  # Minimal contract reference: publish → catalog → install → UI registration,
+  # HTTP API + Cognito JWT, cross-stack imports, KMS.
   - path: feature-platform/sample-feature
+  # Advanced vertical showcase: config preset applied at install, a
+  # postRuleValidation pipeline hook, host-GraphQL calls from the feature UI
+  # (Rules Discovery), and a multi-route feature API. See
+  # docs/extensions/sample-claims-review.md.
+  - path: feature-platform/sample-claims-review

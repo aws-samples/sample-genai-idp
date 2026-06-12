@@ -1,0 +1,94 @@
+---
+title: "Sample: Health Insurance Review"
+---
+# Sample: Health Insurance Review
+
+> **This is a sample, not the Claims Processing product.** It exists to show how
+> a *use-case* extension is built on the Feature Platform. A full,
+> production-grade claims solution is planned as a separate AWS Marketplace
+> offering — this demo is intentionally minimal and is not it.
+
+**Sample: Health Insurance Review** is the bundled *use-case* sample feature for
+the [Feature Platform](../feature-platform.md) — the counterpart to the simpler
+*feature add-on* sample,
+[Sample: Document Status](demo-extension.md). Where Document Status is a minimal
+contract reference, this sample demonstrates a complete industry vertical —
+health insurance claims — exercising the parts of the platform Document Status
+does not: a **config preset** applied at install, a **pipeline hook**,
+**host-GraphQL calls from a feature UI**, and a multi-route feature API. It
+builds directly on the
+accelerator's [rule validation](../rule-validation.md) capability.
+
+## What it does
+
+Adds a **Claims Review** page with two tabs:
+
+1. **Claims Dashboard** — lists every document that has run through rule
+   validation, with a deterministic claim status, the Pass / Fail / Information
+   Not Found counts, and a drill-down showing each rule's recommendation,
+   supporting pages, and reasoning (plus the full markdown summary).
+2. **Rules Discovery** — upload a payer policy document (e.g. an NCCI Medicare
+   Policy Manual) and the host's Rules Discovery pipeline extracts the
+   validation rules into a configuration version, which the tab then renders as
+   a browsable rule set.
+
+## Claim status
+
+The claim status is derived **deterministically** (no LLM) by the feature's
+`postRuleValidation` hook from the consolidated rule-validation summary:
+
+| Condition                                            | Status                        |
+| ---------------------------------------------------- | ----------------------------- |
+| Every rule recommendation is **Pass**                | **Clean claim**               |
+| Any rule recommendation is **Fail**                  | **Review required**           |
+| No failures, but rules are **Information Not Found**  | **Insufficient documentation** |
+
+## How it works
+
+It exercises the full host contract:
+
+- **Config preset** — the feature bundles a prior-authorization rule-validation
+  configuration (`config-preset/claims-config.yaml`). At install, the feature's
+  ui-deployer calls the host's `applyFeatureConfigPreset` mutation, which writes
+  the preset as a **new, non-active** configuration version
+  (`sample-claims-review-v<version>`). An admin reviews and activates it from the
+  **Configuration** page — installing the feature never silently changes the
+  active configuration.
+- **Pipeline hook** — the feature registers a `postRuleValidation` hook
+  (`registerFeatureHooks`). After rule validation completes for a document, the
+  host's pipeline-hooks dispatcher invokes the feature's hook Lambda, which
+  derives the claim status and records it in the feature's own DynamoDB table.
+- **Feature API** — an HTTP API + Lambda (Cognito-authenticated) over that table
+  with routes for the claim list (filterable by status/time window), a single
+  claim's detail (merged with the consolidated summary from the output bucket),
+  and the markdown summary.
+- **Host-GraphQL from the feature UI** — the Rules Discovery tab calls the
+  host's own `uploadDiscoveryDocument`, `listDiscoveryJobs`, and
+  `getConfigVersion` operations directly, using the shared signed-in Amplify
+  instance the host exposes to features. (Rules Discovery requires the **Admin**
+  or **Author** role; the tab shows a friendly message to read-only users.)
+
+## Installing
+
+Claims Review is bundled with the accelerator and listed in the catalog, so it
+appears under **Extensions** in the nav once the Feature Platform is enabled
+(the default). Install it from its feature page with one click.
+
+After installing:
+
+1. Open **Configuration**, find the `sample-claims-review-v<version>` version, and
+   **activate** it.
+2. Upload a prior-auth packet from `samples/rule-validation/` (e.g.
+   `Prior-Auth-12345678.pdf`) to the input bucket.
+3. When processing finishes, the claim appears in the **Claims Dashboard** with
+   its status and per-rule breakdown.
+4. In the **Rules Discovery** tab, upload
+   `samples/rule-validation/NCCI Medicare Policy Manual.pdf`, watch the job run,
+   and browse the discovered rules.
+
+## Source & authoring
+
+The full source lives in
+[`feature-platform/sample-claims-review/`](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/tree/main/feature-platform/sample-claims-review).
+For the host contracts it builds on — pipeline hooks and config presets — see
+the [Feature Platform Developer Guide](../feature-platform-developer-guide.md).

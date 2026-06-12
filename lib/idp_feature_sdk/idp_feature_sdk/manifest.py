@@ -219,3 +219,14 @@ def _check_paths_exist(project: Path, manifest: FeatureManifest) -> None:
                 f"ui bundle not found at {bundle} and feature.yaml has no ui.buildCommand "
                 f"to build it. Either add a buildCommand or commit the pre-built bundle."
             )
+    # A declared config preset must exist on disk — the publisher uploads it
+    # verbatim, and the feature stack's ui-deployer downloads it at install
+    # to apply via applyFeatureConfigPreset. A missing file would only surface
+    # as a runtime NoSuchKey during install, so fail fast at publish time.
+    if manifest.configPreset:
+        preset = project / manifest.configPreset.path
+        if not preset.is_file():
+            raise ManifestError(
+                f"config preset not found at {preset} "
+                f"(from feature.yaml -> configPreset.path)"
+            )

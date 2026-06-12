@@ -88,7 +88,7 @@ const App: React.FC<FeatureContext> = ({
       header={
         <Header
           variant="h1"
-          description={`Feature v${installedVersion} — live counts from the IDP tracking table`}
+          description={`Sample feature add-on · v${installedVersion} — live counts from the IDP tracking table`}
           actions={
             <SpaceBetween direction="horizontal" size="xs">
               <Select
@@ -102,7 +102,7 @@ const App: React.FC<FeatureContext> = ({
             </SpaceBetween>
           }
         >
-          Demo Extension — Docs By Status
+          Sample: Document Status
         </Header>
       }
     >

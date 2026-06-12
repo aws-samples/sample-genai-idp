@@ -144,6 +144,44 @@ use `registerFeatureHooks` so hooks are added/removed with the stack.
 See [Feature Platform → Pipeline hooks](feature-platform.md#pipeline-hooks) for
 the full contract.
 
+### Optional: ship a configuration preset
+
+A vertical feature often needs a specific accelerator configuration (custom
+document classes, extraction prompts, rule-validation policy classes, …). A
+feature can **bundle that configuration** and apply it at install:
+
+**1. Add the preset file and declare it in the manifest.**
+
+```yaml
+# feature.yaml
+configPreset:
+  path: config-preset/my-config.yaml   # repo-relative; uploaded verbatim by the publisher
+```
+
+**2. Apply at install.** The feature stack's ui-deployer downloads the preset
+and calls the host's `applyFeatureConfigPreset` mutation, which writes it as a
+**new, non-active** configuration version named `<featureId>-v<version>`.
+Installation **never changes the active configuration** — an admin reviews the
+preset on the **Configuration** page and activates it deliberately. On uninstall
+the feature calls `removeFeatureConfigPreset`, which deletes the feature's
+preset versions **except** one that is currently active (it is preserved so
+in-flight documents keep resolving their configuration).
+
+This pairs naturally with pipeline hooks: ship the configuration the vertical
+needs *and* the hook that reacts to its results.
+
+### Host exports for features that read processing results
+
+Features that read pipeline output import these host exports (in addition to
+the always-available `<MainStackName>-TrackingTableName` and
+`-CustomerManagedEncryptionKeyArn`):
+
+| Export                              | For                                                            |
+| ----------------------------------- | -------------------------------------------------------------- |
+| `<MainStackName>-OutputBucketName`  | Reading processed-document results (e.g. consolidated summaries) |
+| `<MainStackName>-WorkingBucketName` | Loading the compressed document payload a pipeline hook receives |
+| `<MainStackName>-DiscoveryBucketName` | Driving the host's Rules Discovery flow from a feature UI     |
+
 ## 3. Add to the catalog
 
 This is the step that makes the feature discoverable. Choose based on kind.
@@ -254,5 +292,6 @@ the subscription step entirely and go straight to **Install**.
 - [Feature Platform overview](feature-platform.md)
 - [`idp_feature_sdk` README](../lib/idp_feature_sdk/README.md) — CLI + library API
 - [`feature-platform/feature-template/`](../feature-platform/feature-template/) — the scaffold you start from
-- [`feature-platform/sample-feature/`](../feature-platform/sample-feature/) — the bundled reference OSS feature (`docs-by-status`)
+- [`feature-platform/sample-feature/`](../feature-platform/sample-feature/) — minimal reference OSS feature (`docs-by-status`): UI + API + registration only
+- [`feature-platform/sample-claims-review/`](../feature-platform/sample-claims-review/) — advanced reference OSS feature (`sample-claims-review`): adds a config preset, a `postRuleValidation` pipeline hook, and host-GraphQL calls from the UI ([docs](extensions/sample-claims-review.md))
 - Manifest schema: `lib/idp_feature_sdk/idp_feature_sdk/schemas/feature-manifest.schema.json` (or `idp-feature-cli show-schema`)
