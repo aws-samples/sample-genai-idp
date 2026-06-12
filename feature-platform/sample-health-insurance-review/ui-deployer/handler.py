@@ -34,6 +34,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import urllib.request
 from typing import Any, Dict, Optional
 from urllib.parse import urlparse
@@ -88,12 +89,37 @@ if _FEATURE_VERSION == "<FEATURE_VERSION_TOKEN>" or "TOKEN" in _FEATURE_VERSION:
 _s3 = boto3.client("s3")
 
 
+def _artifact_prefix() -> str:
+    """Source artifact prefix in FEATURE_BUCKET, re-anchored to FEATURE_VERSION.
+
+    FEATURE_KEY_PREFIX is a CloudFormation *parameter* prefilled by the host's
+    getFeatureLaunchUrl as `<...>/features/<id>/v<version>`. CloudFormation's
+    "Update stack" wizard PRESERVES existing parameter values unless explicitly
+    overridden, so on a version bump this parameter can stay pinned at the OLD
+    version (e.g. v0.1.3) while FEATURE_VERSION — substituted into the template
+    at publish time — correctly advances (e.g. 0.1.7). Trusting the stale
+    prefix made the deployer copy the OLD bundle into the NEW version's
+    WebUIBucket key, so the host served stale code and FeatureLoader warned
+    "bundle version X does not match registered Y".
+
+    FEATURE_VERSION is the source of truth (it must match the registered
+    version), so we rewrite the trailing `.../v<anything>` segment of the
+    prefix to `.../v<FEATURE_VERSION>`. If the prefix has no trailing version
+    segment, we leave it untouched.
+    """
+    prefix = _FEATURE_KEY_PREFIX
+    parent, sep, last = prefix.rpartition("/")
+    if sep and re.fullmatch(r"v.+", last):
+        return f"{parent}/v{_FEATURE_VERSION}"
+    return prefix
+
+
 # ---------------------------------------------------------------------------
 # UI bundle copy
 # ---------------------------------------------------------------------------
 def _bundle_ui(request_type: str) -> str:
     """Return the uiBundlePath registered with the host (used for RegisterFeature)."""
-    src_key = f"{_FEATURE_KEY_PREFIX}/ui-bundle.js"
+    src_key = f"{_artifact_prefix()}/ui-bundle.js"
     dst_key = f"features/{_FEATURE_ID}/v{_FEATURE_VERSION}/ui-bundle.js"
 
     if request_type in ("Create", "Update"):
@@ -305,7 +331,9 @@ def _apply_config_preset() -> None:
     the hook is part of the very version the admin activates — no separate
     registerFeatureHooks call, no orphaned hook.
     """
-    preset_key = f"{_FEATURE_KEY_PREFIX}/{_CONFIG_PRESET_RELATIVE_KEY}"
+    # Use the version-anchored prefix (see _artifact_prefix) so a stale
+    # FeatureKeyPrefix parameter can't make us apply an old version's preset.
+    preset_key = f"{_artifact_prefix()}/{_CONFIG_PRESET_RELATIVE_KEY}"
     logger.info("Fetching config preset s3://%s/%s", _FEATURE_BUCKET, preset_key)
     resp = _s3.get_object(Bucket=_FEATURE_BUCKET, Key=preset_key)
     preset = yaml.safe_load(resp["Body"].read().decode("utf-8"))
