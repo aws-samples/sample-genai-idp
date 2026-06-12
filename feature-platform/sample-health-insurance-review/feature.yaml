@@ -5,19 +5,19 @@
 # as a non-active config version), a postRuleValidation pipeline hook, host
 # GraphQL calls from the feature UI (Rules Discovery), and a multi-route
 # feature API backed by the feature's own DynamoDB table.
-featureId: sample-claims-review
+featureId: sample-health-insurance-review
 displayName: "Sample: Health Insurance Review"
 version: 0.1.1
 description: |
-  Healthcare claims review vertical built on the host's rule validation
+  Health insurance claims review vertical built on the host's rule validation
   pipeline. Ships a prior-authorization config preset, a postRuleValidation
   pipeline hook that derives a deterministic claim status (Clean Claim /
   Review Required / Insufficient Documentation), and a two-tab UI: discover
   validation rules from a payer policy document, and review processed claims
   with per-rule results. Try it with the documents in samples/rule-validation/.
 # OSS docs-site slug — the UI "Learn more" link resolves this against the
-# published docs site. Source: docs/extensions/sample-claims-review.md.
-docsUrl: extensions/sample-claims-review
+# published docs site. Source: docs/extensions/sample-health-insurance-review.md.
+docsUrl: extensions/sample-health-insurance-review
 template:
   path: template.yaml
   requiresMainStackName: true
@@ -27,7 +27,7 @@ ui:
 # Bundled config preset — uploaded by the publisher next to the feature's
 # artifacts; the feature stack's ui-deployer downloads it at install time and
 # calls the host's applyFeatureConfigPreset mutation. The preset becomes a
-# NON-ACTIVE config version (`sample-claims-review-v<version>`) that an admin
+# NON-ACTIVE config version (`sample-health-insurance-review-v<version>`) that an admin
 # activates from the Configuration UI.
 configPreset:
   path: config-preset/claims-config.yaml

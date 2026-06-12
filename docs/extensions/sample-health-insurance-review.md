@@ -51,7 +51,7 @@ It exercises the full host contract:
   configuration (`config-preset/claims-config.yaml`). At install, the feature's
   ui-deployer calls the host's `applyFeatureConfigPreset` mutation, which writes
   the preset as a **new, non-active** configuration version
-  (`sample-claims-review-v<version>`). An admin reviews and activates it from the
+  (`sample-health-insurance-review-v<version>`). An admin reviews and activates it from the
   **Configuration** page — installing the feature never silently changes the
   active configuration.
 - **Pipeline hook** — the feature registers a `postRuleValidation` hook
@@ -76,7 +76,7 @@ appears under **Extensions** in the nav once the Feature Platform is enabled
 
 After installing:
 
-1. Open **Configuration**, find the `sample-claims-review-v<version>` version, and
+1. Open **Configuration**, find the `sample-health-insurance-review-v<version>` version, and
    **activate** it.
 2. Upload a prior-auth packet from `samples/rule-validation/` (e.g.
    `Prior-Auth-12345678.pdf`) to the input bucket.
@@ -89,6 +89,6 @@ After installing:
 ## Source & authoring
 
 The full source lives in
-[`feature-platform/sample-claims-review/`](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/tree/main/feature-platform/sample-claims-review).
+[`feature-platform/sample-health-insurance-review/`](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/tree/main/feature-platform/sample-health-insurance-review).
 For the host contracts it builds on — pipeline hooks and config presets — see
 the [Feature Platform Developer Guide](../feature-platform-developer-guide.md).

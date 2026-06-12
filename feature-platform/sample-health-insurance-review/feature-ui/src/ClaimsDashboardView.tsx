@@ -168,7 +168,7 @@ const ClaimsDashboardView: React.FC<ClaimsDashboardViewProps> = ({ api, enabled 
             <SpaceBetween size="s">
               <b>No claims processed yet</b>
               <Box variant="small">
-                Activate the <code>sample-claims-review-v…</code> config version, then
+                Activate the <code>sample-health-insurance-review-v…</code> config version, then
                 upload a prior-auth packet (e.g.{' '}
                 <code>samples/rule-validation/Prior-Auth-12345678.pdf</code>) to
                 the input bucket. After rule validation runs, the

@@ -1,4 +1,4 @@
-"""Unit tests for the sample-claims-review postRuleValidation hook."""
+"""Unit tests for the sample-health-insurance-review postRuleValidation hook."""
 
 from __future__ import annotations
 
@@ -95,7 +95,7 @@ def _document(output_uri: str | None = _SUMMARY_URI[: -len(".json")] + ".md") ->
 def _event(document: dict) -> dict:
     return {
         "hookPoint": "postRuleValidation",
-        "featureId": "sample-claims-review",
+        "featureId": "sample-health-insurance-review",
         "document": document,
         "executionArn": "arn:aws:states:us-east-1:111:execution:wf:run-1",
     }

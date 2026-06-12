@@ -1,4 +1,4 @@
-"""Unit tests for the sample-claims-review feature API handler."""
+"""Unit tests for the sample-health-insurance-review feature API handler."""
 
 from __future__ import annotations
 

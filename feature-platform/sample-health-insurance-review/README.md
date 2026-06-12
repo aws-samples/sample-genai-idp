@@ -1,4 +1,4 @@
-# Sample: Health Insurance Review — `sample-claims-review`
+# Sample: Health Insurance Review — `sample-health-insurance-review`
 
 The **advanced (use-case)** sample feature for the IDP Accelerator Feature
 Platform — a health insurance claims-review vertical built on the accelerator's
@@ -7,14 +7,14 @@ Platform — a health insurance claims-review vertical built on the accelerator'
 > **This is a sample, not a product.** It demonstrates how a *use-case*
 > extension is built; a full Claims Processing solution is planned separately
 > as an AWS Marketplace offering and is not this demo. (The featureId,
-> directory, and docs slug keep the `sample-claims-review` name for stability;
+> directory, and docs slug keep the `sample-health-insurance-review` name for stability;
 > only the display name is "Sample: Health Insurance Review".)
 
 Where [`sample-feature/`](../sample-feature/) (`docs-by-status`) is a minimal
 contract reference, this feature exercises the parts of the platform it does
 not:
 
-| Capability                       | `docs-by-status` | `sample-claims-review` |
+| Capability                       | `docs-by-status` | `sample-health-insurance-review` |
 | -------------------------------- | :--------------: | :-------------: |
 | UI bundle + registration         |        ✅        |       ✅        |
 | Cognito-auth HTTP API            |     ✅ (1 GET)   |  ✅ (multi-route) |
@@ -63,7 +63,7 @@ summary's `overall_statistics.recommendation_counts`:
 — the canonical, maintained copy. If you update the rule-validation preset
 there, refresh this snapshot and bump the feature version. At install the
 ui-deployer applies it as a **non-active** config version
-(`sample-claims-review-v<version>`) for an admin to activate.
+(`sample-health-insurance-review-v<version>`) for an admin to activate.
 
 ## Host contracts this feature relies on
 
@@ -86,19 +86,19 @@ to the catalog automatically.
 To publish a copy to your own feature bucket for testing:
 
 ```bash
-cd feature-platform/sample-claims-review
+cd feature-platform/sample-health-insurance-review
 idp-feature-cli publish . --feature-bucket <your-bucket> --region us-east-1
 ```
 
 ## Tests
 
 ```bash
-cd feature-platform/sample-claims-review/hook && python -m pytest
-cd feature-platform/sample-claims-review/feature-api && python -m pytest
-cd feature-platform/sample-claims-review/feature-ui && npm ci && npm run build
+cd feature-platform/sample-health-insurance-review/hook && python -m pytest
+cd feature-platform/sample-health-insurance-review/feature-api && python -m pytest
+cd feature-platform/sample-health-insurance-review/feature-ui && npm ci && npm run build
 ```
 
-See [docs/extensions/sample-claims-review.md](../../docs/extensions/sample-claims-review.md)
+See [docs/extensions/sample-health-insurance-review.md](../../docs/extensions/sample-health-insurance-review.md)
 for the end-user walkthrough and the
 [Feature Platform Developer Guide](../../docs/feature-platform-developer-guide.md)
 for the host contracts.

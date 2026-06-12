@@ -2781,14 +2781,14 @@ Resources:
         WebUIBucketName: !Ref WebUIBucket
         WebUIBucketArn: !GetAtt WebUIBucket.Arn
         # Output + Working bucket names re-exported for feature stacks:
-        # Output so features can read processing results (e.g. sample-claims-review
+        # Output so features can read processing results (e.g. sample-health-insurance-review
         # reads rule-validation consolidated summaries), Working so feature
         # hook Lambdas can load the compressed document payloads the
         # pipeline-hooks dispatcher hands them.
         OutputBucketName: !Ref OutputBucket
         WorkingBucketName: !Ref WorkingBucket
         # Discovery bucket name re-exported so feature UIs that drive the
-        # host's Rules Discovery flow (sample-claims-review) know where
+        # host's Rules Discovery flow (sample-health-insurance-review) know where
         # uploadDiscoveryDocument presigns uploads.
         DiscoveryBucketName: !Ref DiscoveryBucket
 

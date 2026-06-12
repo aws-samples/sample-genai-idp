@@ -34,7 +34,7 @@ def test_pipeline_hooks_and_config_preset_are_parsed(
     demo_feature_project: Path,
 ) -> None:
     """First real exercise of the configPreset + pipelineHooks manifest paths
-    (used by the sample-claims-review sample). Adds a preset file and the two
+    (used by the sample-health-insurance-review sample). Adds a preset file and the two
     manifest sections, then asserts they round-trip into the dataclass."""
     preset_dir = demo_feature_project / "config-preset"
     preset_dir.mkdir()

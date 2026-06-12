@@ -13,7 +13,7 @@ use_bda: false
 # At install time the feature stack's ui-deployer custom resource calls the
 # host's `applyFeatureConfigPreset` mutation with this file's contents, which
 # writes it to the ConfigurationTable as a NEW, NON-ACTIVE config version
-# named `sample-claims-review-v<feature version>`. An admin then reviews and
+# named `sample-health-insurance-review-v<feature version>`. An admin then reviews and
 # activates it from the Configuration UI — installing the feature never
 # silently changes the active configuration.
 

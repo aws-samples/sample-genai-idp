@@ -28,5 +28,5 @@ features:
   # Advanced vertical showcase: config preset applied at install, a
   # postRuleValidation pipeline hook, host-GraphQL calls from the feature UI
   # (Rules Discovery), and a multi-route feature API. See
-  # docs/extensions/sample-claims-review.md.
-  - path: feature-platform/sample-claims-review
+  # docs/extensions/sample-health-insurance-review.md.
+  - path: feature-platform/sample-health-insurance-review

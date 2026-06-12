@@ -19,7 +19,7 @@ declare const __FEATURE_VERSION__: string;
 if (typeof window !== 'undefined') {
   if (!window.IdpFeatures?.register) {
     // eslint-disable-next-line no-console
-    console.warn('[sample-claims-review] window.IdpFeatures.register not found — running outside host?');
+    console.warn('[sample-health-insurance-review] window.IdpFeatures.register not found — running outside host?');
   } else {
     window.IdpFeatures.register(__FEATURE_ID__, {
       Component: App,

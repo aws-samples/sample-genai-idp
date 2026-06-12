@@ -169,7 +169,7 @@ def lambda_handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
     path = event.get("rawPath", "/")
     qs = event.get("queryStringParameters") or {}
     logger.info(
-        "sample-claims-review API %s %s",
+        "sample-health-insurance-review API %s %s",
         event.get("requestContext", {}).get("http", {}).get("method"),
         path,
     )

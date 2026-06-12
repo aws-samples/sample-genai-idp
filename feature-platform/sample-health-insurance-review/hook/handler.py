@@ -9,7 +9,7 @@ with the payload:
 
     {
       "hookPoint": "postRuleValidation",
-      "featureId": "sample-claims-review",
+      "featureId": "sample-health-insurance-review",
       "document": { ... },          # usually a compressed reference, see below
       "executionArn": "arn:...:execution:..."
     }
@@ -152,7 +152,7 @@ def _skip(document_id: Optional[str], reason: str) -> Dict[str, Any]:
 
 def lambda_handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
     logger.info(
-        "sample-claims-review hook invoked: hookPoint=%s executionArn=%s",
+        "sample-health-insurance-review hook invoked: hookPoint=%s executionArn=%s",
         event.get("hookPoint"),
         event.get("executionArn"),
     )

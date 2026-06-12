@@ -68,7 +68,7 @@ def _now() -> str:
 
 
 def _version_name(feature_id: str, version: str) -> str:
-    """The config version segment, e.g. 'sample-claims-review-v0.1.0'."""
+    """The config version segment, e.g. 'sample-health-insurance-review-v0.1.0'."""
     return f"{feature_id}-v{version}"
 
 

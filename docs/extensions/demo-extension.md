@@ -6,7 +6,7 @@ title: "Sample: Document Status (feature add-on)"
 **Sample: Document Status** is the minimal *feature add-on* sample for the
 [Feature Platform](../feature-platform.md) — the simplest of the two bundled
 samples (its companion, the richer *use-case* sample, is
-[Sample: Health Insurance Review](sample-claims-review.md)). It demonstrates the host
+[Sample: Health Insurance Review](sample-health-insurance-review.md)). It demonstrates the host
 contract end-to-end and is the recommended starting point for authoring your
 own extension.
 

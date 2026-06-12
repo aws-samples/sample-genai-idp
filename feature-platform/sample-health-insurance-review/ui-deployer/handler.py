@@ -16,7 +16,7 @@ On Create or Update:
   4. Downloads the bundled config preset (config-preset/claims-config.yaml,
      uploaded by the publisher under FEATURE_KEY_PREFIX) and calls
      `applyFeatureConfigPreset`, creating a NON-ACTIVE config version
-     `sample-claims-review-v<FEATURE_VERSION>` for an admin to activate.
+     `sample-health-insurance-review-v<FEATURE_VERSION>` for an admin to activate.
 
 On Delete:
   1. Deletes the copied UI bundle.

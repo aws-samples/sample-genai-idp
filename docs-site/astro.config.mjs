@@ -135,7 +135,7 @@ export default defineConfig({
                 },
                 {
                   label: "Sample: Health Insurance Review",
-                  slug: "extensions/sample-claims-review",
+                  slug: "extensions/sample-health-insurance-review",
                 },
               ],
             },

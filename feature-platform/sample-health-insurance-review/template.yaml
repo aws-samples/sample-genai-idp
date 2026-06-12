@@ -1,7 +1,7 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
 Description: >
-  sample-claims-review v<FEATURE_VERSION_TOKEN> — advanced sample of the IDP
+  sample-health-insurance-review v<FEATURE_VERSION_TOKEN> — advanced sample of the IDP
   Accelerator Feature Platform contract. Healthcare claims review vertical:
   ships a prior-auth config preset (applied at install as a non-active config
   version), a postRuleValidation pipeline hook deriving a deterministic claim
@@ -24,7 +24,7 @@ Parameters:
 
   FeatureId:
     Type: String
-    Default: sample-claims-review
+    Default: sample-health-insurance-review
 
   FeatureDisplayName:
     Type: String

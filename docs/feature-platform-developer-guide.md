@@ -293,5 +293,5 @@ the subscription step entirely and go straight to **Install**.
 - [`idp_feature_sdk` README](../lib/idp_feature_sdk/README.md) — CLI + library API
 - [`feature-platform/feature-template/`](../feature-platform/feature-template/) — the scaffold you start from
 - [`feature-platform/sample-feature/`](../feature-platform/sample-feature/) — minimal reference OSS feature (`docs-by-status`): UI + API + registration only
-- [`feature-platform/sample-claims-review/`](../feature-platform/sample-claims-review/) — advanced reference OSS feature (`sample-claims-review`): adds a config preset, a `postRuleValidation` pipeline hook, and host-GraphQL calls from the UI ([docs](extensions/sample-claims-review.md))
+- [`feature-platform/sample-health-insurance-review/`](../feature-platform/sample-health-insurance-review/) — advanced reference OSS feature (`sample-health-insurance-review`): adds a config preset, a `postRuleValidation` pipeline hook, and host-GraphQL calls from the UI ([docs](extensions/sample-health-insurance-review.md))
 - Manifest schema: `lib/idp_feature_sdk/idp_feature_sdk/schemas/feature-manifest.schema.json` (or `idp-feature-cli show-schema`)

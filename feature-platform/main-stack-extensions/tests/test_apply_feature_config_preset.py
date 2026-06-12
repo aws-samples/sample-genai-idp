@@ -52,7 +52,7 @@ _PRESET = {
 
 def _apply_input(**overrides):
     base = {
-        "featureId": "sample-claims-review",
+        "featureId": "sample-health-insurance-review",
         "version": "0.1.0",
         "config": json.dumps(_PRESET),
         "description": "Healthcare claims preset",
@@ -66,11 +66,11 @@ def test_apply_writes_inactive_version(monkeypatch, configuration_table, load_la
     event = make_appsync_event("applyFeatureConfigPreset", {"input": _apply_input()})
     result = mod.handler(event, None)
 
-    assert result["featureId"] == "sample-claims-review"
-    assert result["configVersionName"] == "sample-claims-review-v0.1.0"
+    assert result["featureId"] == "sample-health-insurance-review"
+    assert result["configVersionName"] == "sample-health-insurance-review-v0.1.0"
     assert result["appliedAt"]
 
-    row = _get_row("sample-claims-review-v0.1.0")
+    row = _get_row("sample-health-insurance-review-v0.1.0")
     assert row is not None
     assert row["IsActive"] is False
     assert row["Managed"] is False
@@ -87,8 +87,8 @@ def test_apply_accepts_dict_config(monkeypatch, configuration_table, load_lambda
         "applyFeatureConfigPreset", {"input": _apply_input(config=_PRESET)}
     )
     result = mod.handler(event, None)
-    assert result["configVersionName"] == "sample-claims-review-v0.1.0"
-    assert _get_row("sample-claims-review-v0.1.0")["rule_validation"] == {
+    assert result["configVersionName"] == "sample-health-insurance-review-v0.1.0"
+    assert _get_row("sample-health-insurance-review-v0.1.0")["rule_validation"] == {
         "enabled": True
     }
 
@@ -99,7 +99,7 @@ def test_apply_is_idempotent_overwrite(monkeypatch, configuration_table, load_la
         make_appsync_event("applyFeatureConfigPreset", {"input": _apply_input()}),
         None,
     )
-    created_at = _get_row("sample-claims-review-v0.1.0")["CreatedAt"]
+    created_at = _get_row("sample-health-insurance-review-v0.1.0")["CreatedAt"]
 
     updated = _apply_input(
         config=json.dumps({**_PRESET, "summarization": {"enabled": False}})
@@ -108,7 +108,7 @@ def test_apply_is_idempotent_overwrite(monkeypatch, configuration_table, load_la
         make_appsync_event("applyFeatureConfigPreset", {"input": updated}), None
     )
 
-    row = _get_row("sample-claims-review-v0.1.0")
+    row = _get_row("sample-health-insurance-review-v0.1.0")
     assert row["summarization"] == {"enabled": False}
     assert row["CreatedAt"] == created_at  # preserved across overwrites
 
@@ -124,7 +124,7 @@ def test_apply_preserves_admin_activation(
     )
     ddb = boto3.resource("dynamodb", region_name="us-east-1")
     ddb.Table(_TABLE).update_item(
-        Key={"Configuration": "Config#sample-claims-review-v0.1.0"},
+        Key={"Configuration": "Config#sample-health-insurance-review-v0.1.0"},
         UpdateExpression="SET IsActive = :t",
         ExpressionAttributeValues={":t": True},
     )
@@ -133,7 +133,7 @@ def test_apply_preserves_admin_activation(
         make_appsync_event("applyFeatureConfigPreset", {"input": _apply_input()}),
         None,
     )
-    assert _get_row("sample-claims-review-v0.1.0")["IsActive"] is True
+    assert _get_row("sample-health-insurance-review-v0.1.0")["IsActive"] is True
 
 
 def test_apply_strips_metadata_fields(monkeypatch, configuration_table, load_lambda):
@@ -146,7 +146,7 @@ def test_apply_strips_metadata_fields(monkeypatch, configuration_table, load_lam
         ),
         None,
     )
-    row = _get_row("sample-claims-review-v0.1.0")
+    row = _get_row("sample-health-insurance-review-v0.1.0")
     assert row["IsActive"] is False
     assert row["Managed"] is False
     assert "_config_storage" not in row
@@ -195,13 +195,13 @@ def test_remove_deletes_inactive_versions(
 
     result = mod.handler(
         make_appsync_event(
-            "removeFeatureConfigPreset", {"featureId": "sample-claims-review"}
+            "removeFeatureConfigPreset", {"featureId": "sample-health-insurance-review"}
         ),
         None,
     )
     assert result is True
-    assert _get_row("sample-claims-review-v0.1.0") is None
-    assert _get_row("sample-claims-review-v0.2.0") is None
+    assert _get_row("sample-health-insurance-review-v0.1.0") is None
+    assert _get_row("sample-health-insurance-review-v0.2.0") is None
     assert _get_row("other-feature-v1.0.0") is not None
     assert _get_row("default") is not None
 
@@ -215,19 +215,19 @@ def test_remove_preserves_active_version(monkeypatch, configuration_table, load_
     )
     ddb = boto3.resource("dynamodb", region_name="us-east-1")
     ddb.Table(_TABLE).update_item(
-        Key={"Configuration": "Config#sample-claims-review-v0.1.0"},
+        Key={"Configuration": "Config#sample-health-insurance-review-v0.1.0"},
         UpdateExpression="SET IsActive = :t",
         ExpressionAttributeValues={":t": True},
     )
 
     result = mod.handler(
         make_appsync_event(
-            "removeFeatureConfigPreset", {"featureId": "sample-claims-review"}
+            "removeFeatureConfigPreset", {"featureId": "sample-health-insurance-review"}
         ),
         None,
     )
     assert result is True  # still succeeds — uninstall must not fail
-    assert _get_row("sample-claims-review-v0.1.0") is not None
+    assert _get_row("sample-health-insurance-review-v0.1.0") is not None
 
 
 def test_unknown_field_raises(monkeypatch, configuration_table, load_lambda):

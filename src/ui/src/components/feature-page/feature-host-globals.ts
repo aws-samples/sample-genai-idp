@@ -63,7 +63,7 @@ export function installFeatureHostGlobals(): void {
   w.awsAmplify = awsAmplify;
   // `generateClient` (the GraphQL client factory) lives in the `aws-amplify/api`
   // subpath, NOT the root namespace. Features that call the host's AppSync API
-  // (e.g. sample-claims-review's Rules Discovery) import from `aws-amplify/api`; expose
+  // (e.g. sample-health-insurance-review's Rules Discovery) import from `aws-amplify/api`; expose
   // it as its own global so that external resolves at bundle load time.
   w.awsAmplifyApi = awsAmplifyApi;
   w.CloudscapeComponents = CloudscapeComponents;

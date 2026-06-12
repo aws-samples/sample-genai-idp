@@ -48,7 +48,7 @@ parameter reverts to auto-subscribe.
 |---|---|---|
 | `source` | `oss` | `marketplace` |
 | Status | available today | framework only — none exist yet |
-| Example | `docs-by-status`, `sample-claims-review` (the bundled samples) | — |
+| Example | `docs-by-status`, `sample-health-insurance-review` (the bundled samples) | — |
 | Where the template lives | the stack-owned **FeatureBucket** (copied from the artifacts bucket at deploy time) | a **private seller bucket** (GetObject-only, no public read) |
 | Subscribe step | none — installable directly | UI links to the AWS Marketplace listing; buyer subscribes there |
 | How `getFeatureLaunchUrl` produces the template URL | public S3 HTTPS URL of the FeatureBucket object | **presigned** GetObject URL for the seller-bucket object, minted **only after** `GetEntitlements` confirms an ACTIVE subscription |
@@ -240,7 +240,7 @@ Claims Processing marketplace product.
 | Sample (nav label) | featureId | Kind | Demonstrates |
 | ------------------ | --------- | ---- | ------------ |
 | [Sample: Document Status (feature add-on)](extensions/demo-extension.md) | `docs-by-status` | feature add-on | The minimal contract: UI bundle, Cognito-auth HTTP API over the tracking table, registration. |
-| [Sample: Health Insurance Review](extensions/sample-claims-review.md) | `sample-claims-review` | use-case add-on | An advanced vertical: a bundled config preset, a `postRuleValidation` pipeline hook computing claim status, host-GraphQL Rules Discovery, and a multi-route feature API — built on [rule validation](rule-validation.md). |
+| [Sample: Health Insurance Review](extensions/sample-health-insurance-review.md) | `sample-health-insurance-review` | use-case add-on | An advanced vertical: a bundled config preset, a `postRuleValidation` pipeline hook computing claim status, host-GraphQL Rules Discovery, and a multi-route feature API — built on [rule validation](rule-validation.md). |
 
 ## Deployment
 

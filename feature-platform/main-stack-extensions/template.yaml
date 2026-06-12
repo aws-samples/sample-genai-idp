@@ -73,7 +73,7 @@ Parameters:
     Default: ''
     Description: Name of the main stack's Output bucket (processed-document
       results). Re-exported as `<MainStackName>-OutputBucketName` so feature
-      stacks that read processing results (e.g. sample-claims-review reads
+      stacks that read processing results (e.g. sample-health-insurance-review reads
       `<doc_id>/rule_validation/consolidated/consolidated_summary.json`)
       can grant themselves scoped s3:GetObject. Leave blank to skip the
       export.
@@ -94,7 +94,7 @@ Parameters:
     Description: Name of the main stack's Discovery bucket (where
       uploadDiscoveryDocument presigns uploads). Re-exported as
       `<MainStackName>-DiscoveryBucketName` so feature UIs that drive the
-      host's Rules Discovery flow (e.g. sample-claims-review) can learn the bucket
+      host's Rules Discovery flow (e.g. sample-health-insurance-review) can learn the bucket
       to pass to uploadDiscoveryDocument. Leave blank to skip the export.
 
   WebUIBucketArn:
@@ -882,7 +882,7 @@ Outputs:
     Condition: HasOutputBucket
     Description: >-
       Re-export of the main stack's Output bucket name. Feature stacks
-      that present processing results (e.g. sample-claims-review reads
+      that present processing results (e.g. sample-health-insurance-review reads
       rule-validation consolidated summaries) import this to grant
       themselves scoped s3:GetObject on result keys.
     Value: !Ref OutputBucketName

@@ -21,7 +21,7 @@ Rule Validation automatically checks if your documents meet specific business ru
 The healthcare examples we provide show what's possible, but you can customize this for any industry.
 
 > **See it as a packaged vertical:** the
-> [Health Insurance Review sample feature](extensions/sample-claims-review.md) wraps this
+> [Health Insurance Review sample feature](extensions/sample-health-insurance-review.md) wraps this
 > rule-validation capability in an installable Feature Platform extension — it
 > ships a prior-auth config preset, a `postRuleValidation` hook that turns rule
 > results into a deterministic claim status, and a UI that visualizes both the
