@@ -238,8 +238,8 @@ and on its not-yet-installed page. It's driven by the manifest/catalog
   set `docsUrl: extensions/<slug>` in `feature.yaml`. `make docs-deploy`
   publishes `docs/extensions/*.md` to the **Extensions** section of the docs
   site, and the UI resolves the slug to that published page. (The bundled Demo
-  Extension is the worked example: [`docs/extensions/demo-extension.md`](extensions/demo-extension.md),
-  `docsUrl: extensions/demo-extension`.) An absolute `https://…` URL also works.
+  Extension is the worked example: [`docs/extensions/sample-document-status.md`](extensions/sample-document-status.md),
+  `docsUrl: extensions/sample-document-status`.) An absolute `https://…` URL also works.
 - **Marketplace features** — closed-source docs aren't in this repo's docs
   site, so omit `docsUrl` and the UI uses your `marketplaceListingUrl` (the AWS
   Marketplace listing already hosts usage instructions). If you'd rather link

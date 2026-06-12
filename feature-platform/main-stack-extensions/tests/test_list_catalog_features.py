@@ -102,14 +102,14 @@ def test_description_is_surfaced(monkeypatch, configuration_bucket, load_lambda)
                 "latestVersion": "1.0.4",
                 "source": "oss",
                 "description": "Adds a Document Status page.",
-                "docsUrl": "extensions/demo-extension",
+                "docsUrl": "extensions/sample-document-status",
             }
         ],
     )
     mod = _preload(monkeypatch, load_lambda, configuration_bucket=configuration_bucket)
     result = mod.handler(make_appsync_event("listCatalogFeatures"), None)
     assert result[0]["description"] == "Adds a Document Status page."
-    assert result[0]["docsUrl"] == "extensions/demo-extension"
+    assert result[0]["docsUrl"] == "extensions/sample-document-status"
 
 
 def test_marketplace_feature_carries_subscribe_metadata(

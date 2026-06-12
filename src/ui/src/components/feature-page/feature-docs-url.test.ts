@@ -26,9 +26,9 @@ describe('resolveFeatureDocsUrl', () => {
   });
 
   it('resolves an OSS docs-site slug against the docs base', () => {
-    const url = resolveFeatureDocsUrl(base({ docsUrl: 'extensions/demo-extension' }));
+    const url = resolveFeatureDocsUrl(base({ docsUrl: 'extensions/sample-document-status' }));
     expect(url).toBe(
-      'https://aws-solutions-library-samples.github.io/accelerated-intelligent-document-processing-on-aws/extensions/demo-extension/',
+      'https://aws-solutions-library-samples.github.io/accelerated-intelligent-document-processing-on-aws/extensions/sample-document-status/',
     );
   });
 

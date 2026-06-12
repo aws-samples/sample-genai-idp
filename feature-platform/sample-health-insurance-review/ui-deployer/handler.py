@@ -141,16 +141,12 @@ mutation Unregister($featureId: String!) {
 }
 """
 
-_REGISTER_HOOKS_QUERY = """
-mutation RegisterHooks($input: RegisterFeatureHooksInput!) {
-  registerFeatureHooks(input: $input) {
-    featureId
-    hookCount
-    registeredAt
-  }
-}
-"""
-
+# NOTE: there is no registerFeatureHooks query here on purpose — this feature
+# bakes its postRuleValidation hook into the config preset itself (see
+# _inject_post_rule_validation_hook), so the hook travels with the version the
+# admin activates. We keep the *unregister* query only to clean up any hook a
+# previous build of this feature may have written into the active version via
+# registerFeatureHooks.
 _UNREGISTER_HOOKS_QUERY = """
 mutation UnregisterHooks($featureId: String!) {
   unregisterFeatureHooks(featureId: $featureId)
@@ -231,48 +227,83 @@ def _unregister() -> None:
     _call_appsync(_UNREGISTER_QUERY, {"featureId": _FEATURE_ID})
 
 
-def _register_hooks() -> None:
-    """Attach the claim-status hook at postRuleValidation.
-
-    The host stores the hook INLINE in the active config version
-    (`rule_validation.postHook`); the Step Functions dispatcher invokes it
-    after rule validation completes for each document. onError=continue —
-    a sample feature must never break the host pipeline.
-    """
-    if not _HOOK_FUNCTION_ARN:
-        logger.warning("HOOK_FUNCTION_ARN not set — skipping hook registration")
-        return
-    result = _call_appsync(
-        _REGISTER_HOOKS_QUERY,
-        {
-            "input": {
-                "featureId": _FEATURE_ID,
-                "hooks": [
-                    {
-                        "point": "postRuleValidation",
-                        "arn": _HOOK_FUNCTION_ARN,
-                        "order": 100,
-                        "onError": "continue",
-                    }
-                ],
-            }
-        },
-    )
-    logger.info("registerFeatureHooks: %s", result)
-
-
 def _unregister_hooks() -> None:
+    """Best-effort cleanup of any hook a prior build registered into the active
+    config version via registerFeatureHooks. Current builds bake the hook into
+    the preset instead, so this is only for backward compatibility on delete."""
     _call_appsync(_UNREGISTER_HOOKS_QUERY, {"featureId": _FEATURE_ID})
 
 
+def _inject_post_rule_validation_hook(preset: Dict[str, Any]) -> None:
+    """Add this feature's postRuleValidation hook INTO the preset's config,
+    under `rule_validation.postHook`, so the hook travels WITH the preset
+    version.
+
+    This is the crux of the fix: the host's pipeline-hooks dispatcher reads
+    hooks from the *active* config version. If we instead registered the hook
+    via registerFeatureHooks (which targets whatever version is active at
+    install — typically `default`), then the moment an admin activates THIS
+    preset version the hook would be orphaned in the old version and never
+    fire. By baking the hook into the preset payload, activating the preset
+    brings the rules and the hook together atomically.
+
+    The hook ARN isn't known until the feature stack deploys, so it can't live
+    in the committed claims-config.yaml — it's injected here at install time
+    from the HOOK_FUNCTION_ARN env var (set via !GetAtt in template.yaml).
+
+    Merges (does not clobber) any existing rule_validation block / postHook
+    list, and is idempotent on stack Update: an existing entry for this
+    featureId is replaced rather than duplicated.
+    """
+    if not _HOOK_FUNCTION_ARN:
+        logger.warning(
+            "HOOK_FUNCTION_ARN not set — preset will carry no postRuleValidation "
+            "hook; the Claims Dashboard will not populate."
+        )
+        return
+    rv = preset.get("rule_validation")
+    if not isinstance(rv, dict):
+        rv = {}
+        preset["rule_validation"] = rv
+    existing = rv.get("postHook")
+    if not isinstance(existing, list):
+        existing = []
+    # Drop any prior entry for this feature (idempotent re-apply on Update).
+    kept = [
+        h
+        for h in existing
+        if not (isinstance(h, dict) and h.get("featureId") == _FEATURE_ID)
+    ]
+    kept.append(
+        {
+            "featureId": _FEATURE_ID,
+            "arn": _HOOK_FUNCTION_ARN,
+            "order": 100,
+            "onError": "continue",
+            "enabled": True,
+        }
+    )
+    rv["postHook"] = kept
+    logger.info(
+        "Injected postRuleValidation hook %s into preset rule_validation.postHook",
+        _HOOK_FUNCTION_ARN,
+    )
+
+
 def _apply_config_preset() -> None:
-    """Download the bundled preset and hand it to the host.
+    """Download the bundled preset, inject this feature's pipeline hook, and
+    hand it to the host.
 
     The publisher uploads the preset at the same relative path it has in the
     feature project (feature.yaml -> configPreset.path), under this version's
     key prefix. The host writes it as a NON-ACTIVE config version — an admin
     activates it from the Configuration UI; installing never silently changes
     the active configuration.
+
+    Before sending, we inject the postRuleValidation hook into the preset's
+    own `rule_validation.postHook` (see _inject_post_rule_validation_hook) so
+    the hook is part of the very version the admin activates — no separate
+    registerFeatureHooks call, no orphaned hook.
     """
     preset_key = f"{_FEATURE_KEY_PREFIX}/{_CONFIG_PRESET_RELATIVE_KEY}"
     logger.info("Fetching config preset s3://%s/%s", _FEATURE_BUCKET, preset_key)
@@ -280,6 +311,7 @@ def _apply_config_preset() -> None:
     preset = yaml.safe_load(resp["Body"].read().decode("utf-8"))
     if not isinstance(preset, dict):
         raise RuntimeError(f"Config preset at {preset_key} did not parse to a mapping")
+    _inject_post_rule_validation_hook(preset)
     result = _call_appsync(
         _APPLY_PRESET_QUERY,
         {
@@ -288,8 +320,9 @@ def _apply_config_preset() -> None:
                 "version": _FEATURE_VERSION,
                 "config": json.dumps(preset),
                 "description": (
-                    f"{_FEATURE_DISPLAY_NAME} preset — healthcare prior-auth "
-                    f"rule validation (installed by feature v{_FEATURE_VERSION})"
+                    f"{_FEATURE_DISPLAY_NAME} preset — health insurance prior-auth "
+                    f"rule validation + claim-status hook "
+                    f"(installed by feature v{_FEATURE_VERSION})"
                 ),
             }
         },
@@ -335,7 +368,13 @@ def lambda_handler(event: Dict[str, Any], _context: Any) -> None:
         bundle_path = _bundle_ui(request_type)
         if request_type in ("Create", "Update"):
             _register(bundle_path, event["StackId"])
-            _register_hooks()
+            # NOTE: we deliberately do NOT call registerFeatureHooks here. That
+            # mutation writes the hook into whatever config version is ACTIVE at
+            # install time (typically `default`); when the admin then activates
+            # this feature's preset version, the hook would be orphaned in the
+            # old version and never fire. Instead, _apply_config_preset injects
+            # the hook directly into the preset's rule_validation.postHook, so
+            # the hook travels with the version that gets activated.
             _apply_config_preset()
         elif request_type == "Delete":
             # Never block stack delete on teardown failures — log and move on.

@@ -11,7 +11,7 @@ title: "Sample: Health Insurance Review"
 **Sample: Health Insurance Review** is the bundled *use-case* sample feature for
 the [Feature Platform](../feature-platform.md) — the counterpart to the simpler
 *feature add-on* sample,
-[Sample: Document Status](demo-extension.md). Where Document Status is a minimal
+[Sample: Document Status](sample-document-status.md). Where Document Status is a minimal
 contract reference, this sample demonstrates a complete industry vertical —
 health insurance claims — exercising the parts of the platform Document Status
 does not: a **config preset** applied at install, a **pipeline hook**,
@@ -47,17 +47,25 @@ The claim status is derived **deterministically** (no LLM) by the feature's
 
 It exercises the full host contract:
 
-- **Config preset** — the feature bundles a prior-authorization rule-validation
-  configuration (`config-preset/claims-config.yaml`). At install, the feature's
-  ui-deployer calls the host's `applyFeatureConfigPreset` mutation, which writes
-  the preset as a **new, non-active** configuration version
-  (`sample-health-insurance-review-v<version>`). An admin reviews and activates it from the
-  **Configuration** page — installing the feature never silently changes the
-  active configuration.
-- **Pipeline hook** — the feature registers a `postRuleValidation` hook
-  (`registerFeatureHooks`). After rule validation completes for a document, the
-  host's pipeline-hooks dispatcher invokes the feature's hook Lambda, which
-  derives the claim status and records it in the feature's own DynamoDB table.
+- **Config preset (with the hook baked in)** — the feature bundles a
+  prior-authorization rule-validation configuration
+  (`config-preset/claims-config.yaml`). At install, the feature's ui-deployer
+  injects its `postRuleValidation` hook into the preset's
+  `rule_validation.postHook` (using the hook Lambda's resolved ARN), then calls
+  the host's `applyFeatureConfigPreset` mutation, which writes the preset as a
+  **new, non-active** configuration version
+  (`sample-health-insurance-review-v<version>`). An admin reviews and activates
+  it from the **Configuration** page — installing the feature never silently
+  changes the active configuration. Because the hook lives **inside** the preset
+  version, activating that version brings the rules and the hook together
+  atomically.
+- **Pipeline hook** — after rule validation completes for a document, the host's
+  pipeline-hooks dispatcher (which reads hooks from the *active* config version)
+  invokes the feature's hook Lambda, which derives the claim status and records
+  it in the feature's own DynamoDB table. The hook is shipped as part of the
+  config preset above rather than via a separate `registerFeatureHooks` call —
+  that keeps it attached to the very version the admin activates, instead of
+  being orphaned in whatever version happened to be active at install time.
 - **Feature API** — an HTTP API + Lambda (Cognito-authenticated) over that table
   with routes for the claim list (filterable by status/time window), a single
   claim's detail (merged with the consolidated summary from the output bucket),

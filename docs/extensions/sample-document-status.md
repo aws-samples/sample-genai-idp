@@ -10,8 +10,9 @@ samples (its companion, the richer *use-case* sample, is
 contract end-to-end and is the recommended starting point for authoring your
 own extension.
 
-> Its `featureId` is `docs-by-status` (unchanged); only the display name was
-> updated to make its role as a sample obvious in the nav.
+> Its `featureId` remains `docs-by-status` (the stable install key); only the
+> display name and docs slug were updated to read as a sample
+> (`Sample: Document Status` / `extensions/sample-document-status`).
 
 ## What it does
 

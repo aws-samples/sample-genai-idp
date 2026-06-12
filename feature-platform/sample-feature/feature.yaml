@@ -11,8 +11,8 @@ description: |
   QUEUED, RUNNING, COMPLETED, FAILED) — handy as a reference for authoring your
   own extension.
 # OSS docs-site slug — the UI "Learn more" link resolves this against the
-# published docs site. Source: docs/extensions/demo-extension.md.
-docsUrl: extensions/demo-extension
+# published docs site. Source: docs/extensions/sample-document-status.md.
+docsUrl: extensions/sample-document-status
 template:
   path: template.yaml
   requiresMainStackName: true

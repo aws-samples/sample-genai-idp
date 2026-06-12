@@ -67,12 +67,22 @@ ui-deployer applies it as a **non-active** config version
 
 ## Host contracts this feature relies on
 
-This feature depends on two host-side contracts (both shipped in
-`feature-platform/main-stack-extensions/`):
+This feature depends on these host-side contracts (shipped in
+`feature-platform/main-stack-extensions/` and `patterns/unified/`):
 
 - `applyFeatureConfigPreset` / `removeFeatureConfigPreset` mutations.
-- `registerFeatureHooks` / `unregisterFeatureHooks` mutations, plus the
-  pipeline-hooks dispatcher (`patterns/unified/src/pipeline_hooks_function/`).
+- The pipeline-hooks dispatcher
+  (`patterns/unified/src/pipeline_hooks_function/`), which invokes hooks listed
+  under `rule_validation.postHook` in the **active** config version.
+
+Note: the feature does **not** call `registerFeatureHooks`. That mutation writes
+the hook into whatever version is active at install (typically `default`), so
+activating this feature's preset version would orphan the hook. Instead the
+ui-deployer injects the `postRuleValidation` hook directly into the preset's
+`rule_validation.postHook` before `applyFeatureConfigPreset`, so the hook
+travels with the version the admin activates. (`unregisterFeatureHooks` is still
+called on uninstall, as best-effort cleanup of any hook a prior feature build
+left in the active version.)
 
 It also imports three host exports: `<MainStackName>-OutputBucketName`,
 `-WorkingBucketName`, and `-DiscoveryBucketName`.

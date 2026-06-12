@@ -80,6 +80,50 @@ def test_apply_writes_inactive_version(monkeypatch, configuration_table, load_la
     assert "classes" in row
 
 
+def test_apply_does_not_write_full_config_marker(
+    monkeypatch, configuration_table, load_lambda
+):
+    """Regression: the resolver must NOT flag the row `_config_format: full`.
+
+    A configPreset is a SPARSE overlay (here: classes/rule_validation/extraction,
+    but no classification/ocr/summarization). idp_common only merges a version
+    over system defaults when the row is NOT flagged "full"; a "full" row is
+    returned verbatim. Marking a sparse preset "full" skips that merge and the
+    classification stage fails at runtime with "No system_prompt found in
+    classification configuration". So the stored row must carry no full-config
+    marker, leaving it to be merged + auto-migrated on first read.
+    """
+    mod = _preload(monkeypatch, load_lambda)
+    mod.handler(
+        make_appsync_event("applyFeatureConfigPreset", {"input": _apply_input()}),
+        None,
+    )
+    row = _get_row("sample-health-insurance-review-v0.1.0")
+    assert "_config_format" not in row
+    # The sparse preset is stored verbatim (no classification section invented).
+    assert "classification" not in row
+
+
+def test_apply_sparse_preset_without_classification_has_no_marker(
+    monkeypatch, configuration_table, load_lambda
+):
+    """The real claims preset shape: only classes + rule_validation. Must be
+    stored unmarked so the runtime fills classification/ocr/etc. from defaults."""
+    mod = _preload(monkeypatch, load_lambda)
+    sparse = {"classes": [{"name": "PA-Administrative"}], "rule_validation": {}}
+    mod.handler(
+        make_appsync_event(
+            "applyFeatureConfigPreset",
+            {"input": _apply_input(config=json.dumps(sparse))},
+        ),
+        None,
+    )
+    row = _get_row("sample-health-insurance-review-v0.1.0")
+    assert "_config_format" not in row
+    assert "classification" not in row
+    assert "classes" in row
+
+
 def test_apply_accepts_dict_config(monkeypatch, configuration_table, load_lambda):
     """Direct invocations (and some AppSync paths) pass a parsed object."""
     mod = _preload(monkeypatch, load_lambda)

@@ -131,7 +131,7 @@ export default defineConfig({
               items: [
                 {
                   label: "Sample: Document Status (feature add-on)",
-                  slug: "extensions/demo-extension",
+                  slug: "extensions/sample-document-status",
                 },
                 {
                   label: "Sample: Health Insurance Review",

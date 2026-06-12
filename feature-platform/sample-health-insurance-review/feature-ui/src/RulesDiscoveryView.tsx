@@ -18,6 +18,7 @@ import type { StatusIndicatorProps } from '@cloudscape-design/components';
 
 import {
   getPolicyClasses,
+  graphqlErrorMessage,
   listRulesDiscoveryJobs,
   uploadDiscoveryDocument,
   uploadToS3,
@@ -60,7 +61,7 @@ const RulesDiscoveryView: React.FC<RulesDiscoveryViewProps> = ({
     try {
       setJobs(await listRulesDiscoveryJobs());
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(graphqlErrorMessage(e));
     }
   }, []);
 
@@ -69,7 +70,7 @@ const RulesDiscoveryView: React.FC<RulesDiscoveryViewProps> = ({
     try {
       setPolicyClasses(await getPolicyClasses(configVersion));
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(graphqlErrorMessage(e));
     } finally {
       setLoadingRules(false);
     }
@@ -132,7 +133,7 @@ const RulesDiscoveryView: React.FC<RulesDiscoveryViewProps> = ({
       setFiles([]);
       await loadJobs();
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
+      const msg = graphqlErrorMessage(e);
       // uploadDiscoveryDocument is Admin/Author only — surface a friendly hint.
       setError(
         /unauthor|not author|forbidden|access denied/i.test(msg)

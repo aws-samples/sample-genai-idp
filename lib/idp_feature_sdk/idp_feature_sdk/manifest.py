@@ -81,7 +81,7 @@ class FeatureManifest:
     ui: UiSpec
     description: Optional[str] = None
     iconUrl: Optional[str] = None  # noqa: N815
-    # OSS features: a docs-site slug (e.g. "extensions/demo-extension") that the
+    # OSS features: a docs-site slug (e.g. "extensions/sample-document-status") that the
     # UI resolves against the published docs site for the "Learn more" link.
     # Marketplace features have no separate docs concept — the UI falls back to
     # their marketplaceListingUrl.

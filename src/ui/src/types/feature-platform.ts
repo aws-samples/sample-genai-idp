@@ -29,7 +29,7 @@ export interface CatalogFeature {
   iconUrl: string | null;
   /** Short description shown on nav hover and the not-yet-installed page. */
   description: string | null;
-  /** "Learn more" link. OSS: a docs-site slug (e.g. "extensions/demo-extension")
+  /** "Learn more" link. OSS: a docs-site slug (e.g. "extensions/sample-document-status")
    * or absolute URL. Empty for marketplace (falls back to marketplaceListingUrl). */
   docsUrl: string | null;
   /** "oss" or "marketplace"; defaults to "oss" when absent. */

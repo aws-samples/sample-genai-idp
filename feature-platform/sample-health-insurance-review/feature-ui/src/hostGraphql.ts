@@ -24,7 +24,35 @@
 
 import { generateClient } from 'aws-amplify/api';
 
-const client = generateClient();
+// Minimal structural type for the bits of the Amplify client we use. We avoid
+// `ReturnType<typeof generateClient>` because that generic recurses deeply on
+// the schema-less form and trips TS2321 "Excessive stack depth" at build time.
+interface GraphqlClient {
+  graphql: (operation: {
+    query: string;
+    variables?: Record<string, unknown>;
+  }) => Promise<unknown>;
+}
+
+/**
+ * Lazily create the GraphQL client on first use — NOT at module-eval time.
+ *
+ * This UMD bundle is injected via a <script> tag; its top-level code can run
+ * before the host has finished `Amplify.configure()`. Calling
+ * `generateClient()` at module scope then throws "Amplify has not been
+ * configured. Please call Amplify.configure() before using this service."
+ * — which Amplify rejects as a plain object, surfacing in the UI as
+ * `[object Object]`. By deferring to first call (always inside a user-driven
+ * handler or a mounted-component effect), the host's Amplify instance is
+ * guaranteed to be configured. The client is memoised after the first call.
+ */
+let _client: GraphqlClient | null = null;
+function getClient(): GraphqlClient {
+  if (!_client) {
+    _client = generateClient() as unknown as GraphqlClient;
+  }
+  return _client;
+}
 
 const UPLOAD_DISCOVERY_DOCUMENT = /* GraphQL */ `
   mutation UploadDiscoveryDocument(
@@ -48,6 +76,11 @@ const UPLOAD_DISCOVERY_DOCUMENT = /* GraphQL */ `
   }
 `;
 
+// NOTE: select only fields that exist on DiscoveryJobListItem in the host
+// schema. There is NO `discoveryType` field on that type — rules jobs are
+// distinguished by `jobType == 'rules'` (the host's discovery_upload_resolver
+// sets jobType='rules' for discoveryType='rules'). Selecting a non-existent
+// field makes AppSync reject the whole query with a validation error.
 const LIST_DISCOVERY_JOBS = /* GraphQL */ `
   query ListDiscoveryJobs {
     listDiscoveryJobs {
@@ -60,7 +93,6 @@ const LIST_DISCOVERY_JOBS = /* GraphQL */ `
         updatedAt
         errorMessage
         version
-        discoveryType
         jobType
       }
     }
@@ -86,7 +118,6 @@ export interface DiscoveryJob {
   updatedAt?: string;
   errorMessage?: string;
   version?: string;
-  discoveryType?: string;
   jobType?: string;
 }
 
@@ -97,6 +128,31 @@ export interface PresignedUpload {
 }
 
 type GraphQLResult<T> = { data?: T; errors?: Array<{ message: string }> };
+
+/**
+ * Turn anything thrown by `client.graphql(...)` into a readable message.
+ *
+ * Amplify does NOT reject with an `Error` — it rejects with a plain object
+ * `{ data, errors: [{ message }] }`. A naive `String(e)` on that yields the
+ * useless `[object Object]`. Call this in every catch so the UI shows the
+ * real GraphQL error text instead.
+ */
+export function graphqlErrorMessage(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  if (err && typeof err === 'object') {
+    const e = err as { errors?: Array<{ message?: string }>; message?: string };
+    if (Array.isArray(e.errors) && e.errors.length) {
+      return e.errors.map((x) => x?.message ?? String(x)).join('; ');
+    }
+    if (typeof e.message === 'string') return e.message;
+    try {
+      return JSON.stringify(err);
+    } catch {
+      /* fall through */
+    }
+  }
+  return String(err);
+}
 
 function unwrap<T>(result: unknown): T {
   const r = result as GraphQLResult<T>;
@@ -118,7 +174,7 @@ export async function uploadDiscoveryDocument(args: {
   bucket: string;
   version: string;
 }): Promise<PresignedUpload> {
-  const result = await client.graphql({
+  const result = await getClient().graphql({
     query: UPLOAD_DISCOVERY_DOCUMENT,
     variables: { ...args, discoveryType: 'rules' },
   });
@@ -151,14 +207,12 @@ export async function uploadToS3(
 
 /** List discovery jobs, filtered to `rules` jobs (the ones this view drives). */
 export async function listRulesDiscoveryJobs(): Promise<DiscoveryJob[]> {
-  const result = await client.graphql({ query: LIST_DISCOVERY_JOBS });
+  const result = await getClient().graphql({ query: LIST_DISCOVERY_JOBS });
   const data = unwrap<{ listDiscoveryJobs?: { DiscoveryJobs?: DiscoveryJob[] } }>(
     result,
   );
   const jobs = data.listDiscoveryJobs?.DiscoveryJobs ?? [];
-  return jobs.filter(
-    (j) => j.discoveryType === 'rules' || j.jobType === 'rules',
-  );
+  return jobs.filter((j) => j.jobType === 'rules');
 }
 
 export interface PolicyRule {
@@ -179,7 +233,7 @@ export interface PolicyClass {
  * resolver returns Custom/Default as JSON-encoded strings.
  */
 export async function getPolicyClasses(versionName: string): Promise<PolicyClass[]> {
-  const result = await client.graphql({
+  const result = await getClient().graphql({
     query: GET_CONFIG_VERSION,
     variables: { versionName },
   });

@@ -17,8 +17,12 @@ version:
       <config payload fields...>
 
 Design points:
-  * The preset is written raw (same trust model as registerFeatureHooks);
-    idp_common's ConfigurationManager normalizes on read.
+  * The preset is written raw, as a SPARSE overlay (same trust model as
+    registerFeatureHooks). It is NOT flagged `_config_format: "full"`, so
+    idp_common's ConfigurationManager merges it over the system defaults on
+    read (filling sections the preset omits, e.g. classification/ocr) and
+    auto-migrates it to a full config. Flagging a sparse preset "full" would
+    skip that merge and surface as missing required fields at runtime.
   * Idempotent: re-applying the same featureId+version overwrites the row
     (preserving CreatedAt), so CloudFormation stack Updates are safe.
   * `removeFeatureConfigPreset` deletes every `Config#<featureId>-v*` row
@@ -111,9 +115,22 @@ def _apply(payload: Dict[str, Any]) -> Dict[str, Any]:
     # admin has since activated) when a stack Update re-applies the preset.
     existing = (table.get_item(Key={"Configuration": config_key})).get("Item") or {}
     timestamp = _now()
+    # NOTE: we deliberately do NOT write the `_config_format: "full"` marker.
+    # A configPreset is typically a SPARSE overlay — it sets only the sections
+    # the feature cares about (e.g. classes, rule_validation) and relies on
+    # system defaults for the rest (ocr, classification, extraction, ...).
+    # idp_common's ConfigurationManager.get_merged_configuration() only merges
+    # a version over system defaults when the row is NOT flagged "full"; a
+    # "full" row is returned verbatim. Marking a sparse preset "full" would
+    # therefore skip the merge and leave required fields absent at runtime
+    # (e.g. classification.system_prompt -> "No system_prompt found in
+    # classification configuration"). By omitting the marker the row is treated
+    # as a sparse overlay, merged over defaults on first read, and auto-migrated
+    # to a genuine full config — exactly what the "Save as Version" path
+    # produces. (If a feature ships a complete config, the manager's
+    # section-count heuristic still recognizes it as full.)
     item: Dict[str, Any] = {
         "Configuration": config_key,
-        "_config_format": "full",
         "_feature_id": feature_id,
         "CreatedAt": existing.get("CreatedAt", timestamp),
         "UpdatedAt": timestamp,

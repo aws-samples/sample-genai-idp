@@ -12,7 +12,7 @@ const DOCS_BASE_URL = 'https://aws-solutions-library-samples.github.io/accelerat
  *
  * Precedence:
  *   1. `docsUrl` — absolute http(s) URL used as-is; otherwise treated as a
- *      docs-site slug (e.g. "extensions/demo-extension") resolved against the
+ *      docs-site slug (e.g. "extensions/sample-document-status") resolved against the
  *      published docs site. This is the OSS path.
  *   2. `marketplaceListingUrl` — fallback for marketplace features that don't
  *      ship a separate doc (the listing page hosts usage instructions).

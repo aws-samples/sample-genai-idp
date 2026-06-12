@@ -1304,7 +1304,7 @@ type CatalogFeature @aws_cognito_user_pools {
   # not-yet-installed feature page). Sourced from the feature's manifest.
   description: String
   # "Learn more" doc link. For OSS features this is a docs-site slug (e.g.
-  # "extensions/demo-extension") the UI resolves against the published docs
+  # "extensions/sample-document-status") the UI resolves against the published docs
   # site; may also be an absolute URL. Empty for marketplace features (the UI
   # falls back to marketplaceListingUrl).
   docsUrl: String

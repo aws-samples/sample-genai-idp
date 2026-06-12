@@ -1714,12 +1714,40 @@ STDERR:
             except OSError:
                 cached = False
 
+        # A cache hit is only trustworthy if the on-disk bundle actually carries
+        # the manifest version. Vite bakes feature.yaml -> version into the
+        # bundle at build time; the host's FeatureLoader refuses to run a bundle
+        # whose self-reported version differs from the registered version
+        # ("bundle version X does not match registered Y"), silently serving old
+        # code. A checksum hit against a stale `dist/` (e.g. the version was
+        # bumped but the source checksum collided, or dist/ predates the bump)
+        # would otherwise ship wrong-version code to the new version's S3 key.
+        # So: treat a version-mismatched cached bundle as a cache MISS and
+        # rebuild, rather than trusting the checksum alone.
+        def _bundle_has_version(version: str) -> bool:
+            if not bundle_path.is_file():
+                return False
+            try:
+                return f'"{version}"' in bundle_path.read_text(encoding="utf-8")
+            except OSError:
+                return False
+
         if cached:
-            self.log_cached(
-                f"Feature {feature_dir.name} source unchanged — using cached UI bundle"
-            )
             manifest = load_manifest(feature_dir)
-        else:
+            if _bundle_has_version(manifest.version):
+                self.log_cached(
+                    f"Feature {feature_dir.name} source unchanged — "
+                    f"using cached UI bundle"
+                )
+            else:
+                self.log_warning(
+                    f"Feature {feature_dir.name}: cached bundle does not carry "
+                    f"version '{manifest.version}' — forcing a rebuild "
+                    f"(stale dist/ or checksum collision)."
+                )
+                cached = False
+
+        if not cached:
             publisher = FeaturePublisher(feature_dir, console=self.console)
             try:
                 manifest = publisher.validate()
@@ -1731,6 +1759,18 @@ STDERR:
                 checksum_file.write_text(current_checksum, encoding="utf-8")
             except OSError as exc:
                 self.log_warning(f"Could not write {checksum_file}: {exc}")
+
+        # Final guard: after build (cached or fresh) the bundle MUST carry the
+        # manifest version, or we'd upload wrong-version code to the
+        # manifest-version S3 key. Fail loudly — never publish a mismatch.
+        if not _bundle_has_version(manifest.version):
+            self.log_error(
+                f"Feature {feature_dir.name}: built UI bundle does not contain "
+                f"the manifest version '{manifest.version}' even after a rebuild. "
+                f"Check feature-ui/vite.config.ts version injection and that "
+                f"`npm run build` regenerates feature-ui/dist/ui-bundle.js."
+            )
+            sys.exit(1)
 
         # sam build + sam package on the feature's SAM template so local
         # CodeUri: paths are rewritten to s3://...

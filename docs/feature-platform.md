@@ -239,7 +239,7 @@ Claims Processing marketplace product.
 
 | Sample (nav label) | featureId | Kind | Demonstrates |
 | ------------------ | --------- | ---- | ------------ |
-| [Sample: Document Status (feature add-on)](extensions/demo-extension.md) | `docs-by-status` | feature add-on | The minimal contract: UI bundle, Cognito-auth HTTP API over the tracking table, registration. |
+| [Sample: Document Status (feature add-on)](extensions/sample-document-status.md) | `docs-by-status` | feature add-on | The minimal contract: UI bundle, Cognito-auth HTTP API over the tracking table, registration. |
 | [Sample: Health Insurance Review](extensions/sample-health-insurance-review.md) | `sample-health-insurance-review` | use-case add-on | An advanced vertical: a bundled config preset, a `postRuleValidation` pipeline hook computing claim status, host-GraphQL Rules Discovery, and a multi-route feature API — built on [rule validation](rule-validation.md). |
 
 ## Deployment
