@@ -374,6 +374,25 @@ Testing samples available in `samples/`:
 - `scripts/sdlc/validate_service_role_permissions.py` - Verifies IAM service role permissions
 - `scripts/sdlc/typecheck_pr_changes.py` - Type checks only changed files in PRs
 
+## AWS Access for Live Troubleshooting
+
+The `default` AWS CLI profile is configured with credentials for the active
+deployment account. Use it (not the runtime sandbox's ambient credentials,
+which may point at a different account) to inspect deployed resources when
+troubleshooting:
+
+```bash
+AWS_PROFILE=default aws sts get-caller-identity   # confirm the account first
+AWS_PROFILE=default aws logs tail /aws/lambda/<fn> --since 1h
+```
+
+For the CloudWatch MCP tools, pass `profile_name: "default"` (and the stack's
+region). Find Lambda log groups by listing with the deployment stack-name
+prefix, e.g. `/aws/lambda/<StackName>-...`. Hook-related functions to look for:
+the pipeline-hooks dispatcher (`...-PipelineHooksDispatcher...`), a feature's
+hook Lambda, a feature's `...-FeatureApiFunction-...`, and the config-preset
+resolver (`...-ApplyFeatureConfigPreset...`).
+
 ## AWS Service Requirements
 
 ### Required Bedrock Model Access
