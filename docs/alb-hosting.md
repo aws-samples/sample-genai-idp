@@ -183,11 +183,76 @@ When `WebUIHosting=CloudFront` (default):
 
 The following are automatically configured based on the `WebUIHosting` parameter — no manual configuration is needed:
 
-- **S3 CORS origins** — all bucket CORS `AllowedOrigins` resolve to the ALB URL
-- **Cognito callback/logout URLs** — OAuth redirect URLs point to the ALB URL
-- **UI build configuration** — the `VITE_CLOUDFRONT_DOMAIN` environment variable resolves to the ALB URL
+- **S3 CORS origins** — all bucket CORS `AllowedOrigins` resolve to the ALB URL, plus `CustomDomainUrl` when set
+- **Cognito callback/logout URLs** — OAuth redirect URLs include the ALB URL, plus `CustomDomainUrl` (with and without trailing slash) when set
+- **UI build configuration** — the `VITE_CLOUDFRONT_DOMAIN` environment variable resolves to the ALB URL by default. When `CustomDomainUrl` is set, it resolves to `""` and the Web UI uses `window.location.origin` for OAuth redirects so both URLs work simultaneously
 - **CodeBuild post-deploy** — CloudFront cache invalidation is skipped in ALB mode
 - **Stack outputs** — `ApplicationWebURL` returns the ALB URL
+
+## Custom Domain in Front of ALB
+
+The optional `CustomDomainUrl` stack parameter (under the *ALB Hosting* parameter group) supports deployments where the Web UI is fronted by a customer-owned DNS alias, an Okta/SAML/OIDC SSO domain, or any origin other than the auto-generated internal ALB URL. The original ALB URL continues to work unchanged — both URLs serve the same UI side by side.
+
+### When to set it
+
+Set `CustomDomainUrl` if any of the following are true:
+
+- End users access the Web UI through a friendly DNS name (e.g. `https://idp.your-org.com`) rather than the raw `internal-…elb.amazonaws.com` URL
+- The deployment sits behind an enterprise SSO domain (Okta, Ping, Azure AD) whose user-facing URL is not the ALB URL
+- A reverse proxy or API gateway in front of the ALB serves the application under a different host
+
+Leave `CustomDomainUrl` empty for standard deployments where the raw ALB URL is the only browser entry point.
+
+### What the parameter does
+
+When `CustomDomainUrl` is set:
+
+- the custom origin is added to all seven browser-accessed S3 bucket `CorsConfiguration.AllowedOrigins` lists, so direct presigned-URL uploads (`PUT`/`POST`) and downloads (`GET`/`HEAD`) succeed from the custom domain without `Access-Control-Allow-Origin` errors;
+- the custom origin (with and without trailing slash, lowercased) is added to both Cognito App Client `CallbackURLs` and `LogoutURLs` (`ExternalAppClient` + the main `UserPoolClient`) so the OAuth redirect from Cognito Hosted UI — including the federated callback after Okta/SAML/OIDC sign-in — lands on the custom domain;
+- `VITE_CLOUDFRONT_DOMAIN` is set to `""` at Web UI build time. With that env var empty, [`aws-exports.js`](../src/ui/src/aws-exports.js) falls back to `window.location.origin + '/'` for both `redirectSignIn` and `redirectSignOut`. The same UI build serves the ALB URL and the custom domain — Amplify starts and ends the OAuth flow on whichever origin the user is on, eliminating the *"redirect is coming from a different origin"* error.
+
+### Customer-side requirements (outside the template)
+
+| Where | What to do | Why |
+|-------|-----------|-----|
+| **DNS** | Point the custom-domain DNS record (CNAME or alias) at the internal ALB DNS name | So traffic reaches the ALB |
+| **ACM** | Attach an ACM certificate that covers the custom domain to the ALB HTTPS listener (or use SNI to add a second cert) | TLS termination on the custom hostname |
+| **External IdP (Okta/SAML/OIDC)** | No change required for the custom domain itself | The IdP only ever sees `https://<cognito-domain>/oauth2/idpresponse` — Cognito brokers the federation, so the app URL never appears in IdP redirect URIs |
+| **External IdP IdP-initiated SSO** *(optional)* | If end users launch the app from the IdP's dashboard, set the IdP's *Initiate Login URI* / *Default Relay State* to the custom domain | Otherwise IdP-initiated launches go to the original ALB URL |
+
+### Validation
+
+The parameter is validated at template-parse time:
+
+- Must be empty, or start with `https://` followed by a lowercase host (and optional `:port`)
+- No path, no trailing slash, no uppercase characters in the host
+- Lowercase is required because Amplify lowercases the redirect URL before sending it to Cognito and Cognito matches `CallbackURLs` case-sensitively after that — uppercase input would silently produce a `redirect_mismatch` error at sign-in
+
+If validation fails the change set is rejected with a clear `ConstraintDescription` before any resource is touched.
+
+### Verifying custom domain support after deploy
+
+```bash
+# 1. CORS allows the custom domain on the input bucket
+aws s3api get-bucket-cors --bucket <input-bucket> \
+  --query 'CORSRules[0].AllowedOrigins' --output json
+# Expect: list contains "https://idp.your-org.com"
+
+# 2. Cognito App Client has both ALB URL and custom domain in CallbackURLs
+aws cognito-idp describe-user-pool-client \
+  --user-pool-id <pool-id> --client-id <client-id> \
+  --query 'UserPoolClient.{CB:CallbackURLs,LO:LogoutURLs}' --output json
+
+# 3. CodeBuild env var is empty (so window.location.origin is used at runtime)
+aws codebuild batch-get-projects --names <ui-build-project> \
+  --query 'projects[0].environment.environmentVariables[?name==`VITE_CLOUDFRONT_DOMAIN`].value' \
+  --output text
+# Expect: empty string when CustomDomainUrl is set
+
+# 4. Browser sanity check from the custom domain
+#    Open https://idp.your-org.com → log in → upload a document
+#    No CORS errors in DevTools, OAuth redirects stay on the custom domain
+```
 
 ## Accessing the UI
 
@@ -257,7 +322,32 @@ aws cloudformation describe-stacks \
 ### UI Not Loading After Deploy
 
 - The UI is built and deployed to S3 by CodeBuild during stack creation/update. Check the CodeBuild project logs for errors
-- Verify the `VITE_CLOUDFRONT_DOMAIN` build environment variable resolves to the ALB URL (not a CloudFront domain)
+- Verify the `VITE_CLOUDFRONT_DOMAIN` build environment variable resolves to the ALB URL when `CustomDomainUrl` is empty, or to `""` (empty string) when `CustomDomainUrl` is set
+
+### Custom Domain — CORS Error on Browser Upload
+
+Symptom: Browser console shows
+`Access to fetch at '<bucket>.s3...' from origin 'https://idp.your-org.com' has been blocked by CORS policy: No 'Access-Control-Allow-Origin' header is present`.
+
+Cause: `CustomDomainUrl` is empty (or unset on this stack), so the custom domain origin is not in the bucket CORS `AllowedOrigins` list.
+
+Resolution: Update the stack with `CustomDomainUrl=https://idp.your-org.com` (lowercase host, no trailing slash). The S3 CORS rules and Cognito callback URLs are reconfigured automatically.
+
+### Custom Domain — "redirect is coming from a different origin"
+
+Symptom: Amplify console error after clicking *Sign in with Okta* on the custom domain — *"redirect is coming from a different origin. The oauth flow needs to be initiated from the same origin"*.
+
+Cause: `VITE_CLOUDFRONT_DOMAIN` is hardcoded to the ALB URL at Web UI build time, so Amplify uses the ALB URL as the OAuth `redirect_uri` even when the user is on the custom domain.
+
+Resolution: Set `CustomDomainUrl` on the stack and re-deploy. The Web UI build then runs with `VITE_CLOUDFRONT_DOMAIN=""`, the app falls back to `window.location.origin`, and OAuth starts and finishes on whichever origin (ALB or custom domain) the user is on.
+
+### Custom Domain — Cognito redirect_mismatch
+
+Symptom: Cognito Hosted UI returns *"redirect_mismatch"* or refuses the OAuth callback with the custom domain.
+
+Cause: Either the custom domain isn't in the Cognito App Client `CallbackURLs` list, or the value in `CustomDomainUrl` has uppercase characters (Cognito matches case-sensitively, the browser/Amplify lowercases before sending).
+
+Resolution: Confirm `CustomDomainUrl` is set in lowercase (`AllowedPattern` enforces this on stack updates but pre-existing values may slip through). Verify with `aws cognito-idp describe-user-pool-client` that the list contains the lowercase custom domain (with and without trailing slash).
 
 ## Comparison: CloudFront vs ALB Hosting
 
