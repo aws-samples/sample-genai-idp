@@ -2058,8 +2058,8 @@ const ConfigurationLayout = (): React.JSX.Element => {
             label="Version Name"
             description="Enter a unique name for this configuration version"
             errorText={
-              saveAsVersionName && !/^[a-zA-Z0-9_-]+$/.test(saveAsVersionName)
-                ? 'Version name can only contain letters, numbers, hyphens, and underscores'
+              saveAsVersionName && !/^[a-zA-Z0-9._-]+$/.test(saveAsVersionName)
+                ? 'Version name can only contain letters, numbers, periods, hyphens, and underscores'
                 : ''
             }
           >
@@ -2724,7 +2724,7 @@ const ConfigurationLayout = (): React.JSX.Element => {
                 disabled={
                   !newVersionName.trim() ||
                   newVersionName.length > 50 ||
-                  !/^[a-zA-Z0-9_-]+$/.test(newVersionName) ||
+                  !/^[a-zA-Z0-9._-]+$/.test(newVersionName) ||
                   !!(newVersionDescription && newVersionDescription.length > 200)
                 }
               >
@@ -2750,8 +2750,8 @@ const ConfigurationLayout = (): React.JSX.Element => {
               newVersionName &&
               (newVersionName.length > 50
                 ? 'Version name cannot exceed 50 characters'
-                : !/^[a-zA-Z0-9_-]+$/.test(newVersionName)
-                  ? 'Version name can only contain letters, numbers, hyphens, and underscores'
+                : !/^[a-zA-Z0-9._-]+$/.test(newVersionName)
+                  ? 'Version name can only contain letters, numbers, periods, hyphens, and underscores'
                   : '')
             }
           >
@@ -2759,7 +2759,7 @@ const ConfigurationLayout = (): React.JSX.Element => {
               value={newVersionName}
               onChange={({ detail }) => setNewVersionName(detail.value)}
               placeholder="Version name"
-              invalid={!!newVersionName && (newVersionName.length > 50 || !/^[a-zA-Z0-9_-]+$/.test(newVersionName))}
+              invalid={!!newVersionName && (newVersionName.length > 50 || !/^[a-zA-Z0-9._-]+$/.test(newVersionName))}
             />
           </FormField>
           <FormField

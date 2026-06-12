@@ -20,6 +20,7 @@ import {
 import type { ApiClient } from './api';
 import type { ClaimDetailResponse, RuleResult } from './types';
 import { STATUS_META, recommendationIndicator } from './statusMeta';
+import HostMarkdown from './HostMarkdown';
 
 interface ClaimDetailProps {
   api: ApiClient;
@@ -151,22 +152,16 @@ const ClaimDetail: React.FC<ClaimDetailProps> = ({ api, docId, onBack }) => {
 
             {markdown && (
               <ExpandableSection headerText="Full markdown summary">
-                {/* react-markdown is a host dependency but NOT exposed as a
-                    window global, so we render the markdown as preformatted
-                    text rather than bundling a renderer. The structured
-                    tables above are the primary view. */}
-                <Box variant="code">
-                  <pre
-                    style={{
-                      whiteSpace: 'pre-wrap',
-                      maxHeight: 480,
-                      overflow: 'auto',
-                      margin: 0,
-                    }}
-                  >
-                    {markdown}
-                  </pre>
-                </Box>
+                {/* Rendered via the host's SafeMarkdown (window.IdpFeatureHost)
+                    so the rule-validation summary's embedded HTML (<style>,
+                    <colgroup>, color <span>s, GFM tables) and any
+                    document-derived content are rendered through the host's
+                    XSS-sanitized pipeline. Falls back to preformatted text on
+                    older hosts. */}
+                {/* Constrain height; the summary can be long. */}
+                <div style={{ maxHeight: 600, overflow: 'auto' }}>
+                  <HostMarkdown>{markdown}</HostMarkdown>
+                </div>
               </ExpandableSection>
             )}
           </>

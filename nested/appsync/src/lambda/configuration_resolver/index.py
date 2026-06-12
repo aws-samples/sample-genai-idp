@@ -123,10 +123,17 @@ def _get_user_allowed_config_versions(caller_email):
 
 
 def validate_version_name(name):
-    """Validate version name: alphanumeric, hyphens, underscores only, max 50 chars"""
+    """Validate version name: alphanumeric, hyphens, underscores, periods, max 50 chars.
+
+    Periods are allowed so semver-style names work — notably the config
+    versions feature presets create (e.g. `sample-health-insurance-review-v0.1.6`,
+    from apply_feature_config_preset). Periods are safe in the DynamoDB
+    `Config#<name>` key and never participate in dot-path splitting (which only
+    applies to config *field* paths, not version names).
+    """
     if not name or not isinstance(name, str):
         return False
-    return re.match(r'^[a-zA-Z0-9-_]+$', name) and len(name) <= 50
+    return re.match(r'^[a-zA-Z0-9._-]+$', name) and len(name) <= 50
 
 
 def validate_description(description):

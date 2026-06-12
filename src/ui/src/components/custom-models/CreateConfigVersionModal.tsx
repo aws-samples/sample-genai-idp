@@ -96,9 +96,10 @@ const CreateConfigVersionModal = ({
   // Auto-generate a suggested version name based on job name
   useEffect(() => {
     if (visible && jobName && !newVersionName) {
-      // Sanitize job name for use as version name: alphanumeric, hyphens, underscores only
+      // Sanitize job name for use as version name: letters, numbers,
+      // periods, hyphens, underscores
       const sanitized = jobName
-        .replace(/[^a-zA-Z0-9-_]/g, '-')
+        .replace(/[^a-zA-Z0-9._-]/g, '-')
         .replace(/-+/g, '-')
         .substring(0, 40);
       setNewVersionName(`${sanitized}-custom`);
@@ -112,8 +113,8 @@ const CreateConfigVersionModal = ({
     if (!newVersionName.trim()) {
       return 'Please enter a name for the new configuration version.';
     }
-    if (!/^[a-zA-Z0-9-_]+$/.test(newVersionName)) {
-      return 'Version name can only contain letters, numbers, hyphens, and underscores.';
+    if (!/^[a-zA-Z0-9._-]+$/.test(newVersionName)) {
+      return 'Version name can only contain letters, numbers, periods, hyphens, and underscores.';
     }
     if (newVersionName.length > 50) {
       return 'Version name cannot exceed 50 characters.';

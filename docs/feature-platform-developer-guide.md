@@ -76,6 +76,15 @@ window.IdpFeatures.register('my-feature', {
 The host-side half of this contract is
 [`src/ui/src/components/feature-page/feature-host-globals.ts`](../src/ui/src/components/feature-page/feature-host-globals.ts).
 
+That file also exposes a `window.IdpFeatureHost` helper namespace. Today it
+provides `SafeMarkdown` — the host's XSS-sanitizing markdown renderer
+(rehype-raw + rehype-sanitize allow-list). Use it to render backend-emitted
+markdown/HTML (e.g. rule-validation summaries, which embed `<style>`,
+`<colgroup>`, and document-derived content) instead of bundling your own
+renderer. The Health Insurance Review sample wraps it in a small
+`HostMarkdown` helper that falls back to preformatted text on older hosts —
+see `feature-platform/sample-health-insurance-review/feature-ui/src/HostMarkdown.tsx`.
+
 **Backend API (optional)** — if your feature needs a backend, `template.yaml`
 creates an HTTP API + Lambda and outputs the endpoint. The ui-deployer writes it
 to `InstalledFeatures.featureApiEndpoint`, and the host passes it to your UI as

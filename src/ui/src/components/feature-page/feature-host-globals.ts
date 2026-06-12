@@ -9,6 +9,13 @@
  * `CloudscapeComponents`, `CloudscapeDesignTokens`) can resolve them at load
  * time.
  *
+ * Also exposes a small `IdpFeatureHost` helper namespace (currently the
+ * sanitizing `SafeMarkdown` renderer) so features can render backend-emitted
+ * markdown/HTML — e.g. rule-validation summaries that embed `<style>`,
+ * `<colgroup>`, and document-derived content — through the SAME XSS-sanitized
+ * pipeline the host uses, instead of each feature bundling its own
+ * (potentially unsafe) renderer.
+ *
  * This is the host-side half of the contract declared in
  * `subscription-features/feature-platform/feature-template/vite.config.ts` (and each
  * feature's own `vite.config.ts`) under `build.rollupOptions.output.globals`.
@@ -26,6 +33,7 @@ import * as ReactRouterDOM from 'react-router-dom';
 import * as awsAmplify from 'aws-amplify';
 import * as awsAmplifyApi from 'aws-amplify/api';
 import * as CloudscapeComponents from '@cloudscape-design/components';
+import SafeMarkdown from '../common/SafeMarkdown';
 
 // `@cloudscape-design/design-tokens` is a feature-template external but is NOT
 // a direct dependency of the host UI. We intentionally do not import it here.
@@ -41,6 +49,7 @@ interface FeatureHostWindow {
   awsAmplify?: unknown;
   awsAmplifyApi?: unknown;
   CloudscapeComponents?: unknown;
+  IdpFeatureHost?: { SafeMarkdown?: unknown };
   __idpFeatureGlobalsInstalled?: boolean;
 }
 
@@ -67,6 +76,11 @@ export function installFeatureHostGlobals(): void {
   // it as its own global so that external resolves at bundle load time.
   w.awsAmplifyApi = awsAmplifyApi;
   w.CloudscapeComponents = CloudscapeComponents;
+  // Host helper namespace for features. SafeMarkdown sanitizes embedded HTML
+  // (rehype-raw + rehype-sanitize allow-list) so features can safely render
+  // backend markdown without bundling — or having to security-review — their
+  // own renderer.
+  w.IdpFeatureHost = { ...(w.IdpFeatureHost ?? {}), SafeMarkdown };
 
   w.__idpFeatureGlobalsInstalled = true;
 }
