@@ -33,9 +33,10 @@ node_modules/
 package-lock.json
 # Allow the docs-site lock file (needed by GitHub Pages workflow for `npm ci` and dep caching)
 !docs-site/package-lock.json
-# Allow the feature-template lock file (template source — scaffolded features
-# need it for reproducible `npm ci` installs)
-!feature-platform/feature-template/feature-ui/package-lock.json
+# Allow Feature Platform UI lock files (feature-template is the template
+# source; bundled OSS features like sample-feature are built in CI with
+# `npm ci`, which requires a committed lock file)
+!feature-platform/*/feature-ui/package-lock.json
 
 # Jupyter
 .ipynb_checkpoints/
