@@ -562,19 +562,146 @@ def deploy_pack(
 
 
 def _first_failure_reason(cfn: Any, stack_arn: str) -> Optional[str]:
-    """Return the human-readable reason for the first CREATE_FAILED event
-    in the stack's history (or any nested stack's history). Returns None
-    if no failure event found or the API call errors."""
+    """Return the human-readable reason for the failure in the CURRENT stack
+    operation. Returns None if no failure event found or the API call errors.
+
+    Scoped to the latest operation (scans newest-first only until the most
+    recent "User Initiated" stack event) so a stale failure from a PRIOR
+    create/update isn't misreported. Catches two kinds of failure:
+
+      * a resource event with a *_FAILED status, and
+      * a SAM/transform failure, which surfaces as a stack-level
+        *_IN_PROGRESS event whose reason text contains "failed" (e.g.
+        "Transform AWS::Serverless-2016-10-31 failed with: ...") — NOT a
+        *_FAILED status, which is why the old check missed it.
+    """
     try:
         events = cfn.describe_stack_events(StackName=stack_arn).get("StackEvents") or []
     except Exception:
         return None
-    for ev in events:
-        if ev.get("ResourceStatus") == "CREATE_FAILED":
-            reason = ev.get("ResourceStatusReason") or ""
-            logical = ev.get("LogicalResourceId") or ""
+
+    for ev in events:  # newest-first
+        status = ev.get("ResourceStatus") or ""
+        reason = ev.get("ResourceStatusReason") or ""
+        logical = ev.get("LogicalResourceId") or ""
+
+        if status.endswith("FAILED") or "failed" in reason.lower():
             return f"{logical}: {reason}".strip(": ").strip()
+
+        # Boundary: the current operation begins at the most recent
+        # "User Initiated" stack-level event. Stop before walking into a
+        # previous operation's history.
+        if "User Initiated" in reason:
+            break
     return None
+
+
+# A stack in one of these states is a failed CREATE that rolled back; it cannot
+# be updated and must be deleted before re-deploying.
+_CREATE_FAILED_DELETE_FIRST = {"ROLLBACK_COMPLETE", "ROLLBACK_FAILED"}
+_CAPABILITIES = ["CAPABILITY_IAM", "CAPABILITY_NAMED_IAM", "CAPABILITY_AUTO_EXPAND"]
+
+
+def _describe_one(cfn: Any, stack_name: str) -> Optional[Dict[str, Any]]:
+    """Return the single Stack description for `stack_name`, or None if it
+    does not exist. Any other error propagates."""
+    try:
+        return cfn.describe_stacks(StackName=stack_name)["Stacks"][0]
+    except Exception as exc:  # botocore ClientError
+        msg = str(exc)
+        if "does not exist" in msg or "ValidationError" in msg:
+            return None
+        raise
+
+
+def create_or_update_stack(
+    *,
+    cfn: Any,
+    stack_name: str,
+    template_url: str,
+    parameters: List[Dict[str, str]],
+    wait: bool = True,
+    console: Optional[Console] = None,
+    capabilities: Optional[List[str]] = None,
+) -> str:
+    """Create the stack if absent, else update it. Returns the stack ARN.
+
+    Self-contained (boto3 only — no idp_sdk dependency). Handles the
+    "No updates are to be performed" no-op as success, refuses to update a
+    stack stuck in a CREATE-failed ROLLBACK_COMPLETE (must be deleted first),
+    and surfaces the first failure-event reason on a terminal failure.
+    """
+    cons = console or Console()
+    caps = capabilities or _CAPABILITIES
+
+    existing = _describe_one(cfn, stack_name)
+    if existing is not None and existing["StackStatus"] in _CREATE_FAILED_DELETE_FIRST:
+        raise RuntimeError(
+            f"Stack {stack_name} is in {existing['StackStatus']} (a failed "
+            f"CREATE that rolled back). CloudFormation cannot update it — delete "
+            f"it first:\n    aws cloudformation delete-stack --stack-name "
+            f"{stack_name}\nthen re-run deploy."
+        )
+
+    is_update = existing is not None
+    try:
+        if is_update:
+            cons.log(f"▸ Updating stack {stack_name}")
+            resp = cfn.update_stack(
+                StackName=stack_name,
+                TemplateURL=template_url,
+                Parameters=parameters,
+                Capabilities=caps,
+            )
+            stack_arn = resp["StackId"]
+        else:
+            cons.log(f"▸ Creating stack {stack_name}")
+            resp = cfn.create_stack(
+                StackName=stack_name,
+                TemplateURL=template_url,
+                Parameters=parameters,
+                Capabilities=caps,
+                OnFailure="DELETE",
+            )
+            stack_arn = resp["StackId"]
+    except Exception as exc:  # botocore ClientError
+        msg = str(exc)
+        if "No updates are to be performed" in msg:
+            cons.log("[green]✓[/green] No changes — stack already up to date")
+            return existing["StackId"] if existing else stack_name
+        raise RuntimeError(f"{'Update' if is_update else 'Create'} failed: {exc}") from exc
+
+    if not wait:
+        return stack_arn
+
+    success_status = "UPDATE_COMPLETE" if is_update else "CREATE_COMPLETE"
+    cons.log(f"▸ Waiting for {success_status}…")
+    deadline = time.time() + 60 * 60
+    last_status: Optional[str] = None
+    while time.time() < deadline:
+        # Use the StackId (full ARN) — it stays valid even after a failed
+        # create with OnFailure=DELETE tears the named stack down.
+        desc = _describe_one(cfn, stack_arn)
+        if desc is None:
+            raise RuntimeError(
+                f"Stack {stack_name} no longer exists (a CREATE_FAILED event "
+                f"with OnFailure=DELETE likely tore it down). Last observed "
+                f"status was {last_status!r}. Check the CloudFormation Console."
+            )
+        status = desc["StackStatus"]
+        last_status = status
+        if status == success_status or status in (
+            "CREATE_COMPLETE",
+            "UPDATE_COMPLETE",
+        ):
+            cons.log(f"[green]✓[/green] Stack {status}")
+            return stack_arn
+        if status.endswith(("FAILED", "ROLLBACK_COMPLETE")):
+            reason = _first_failure_reason(cfn, stack_arn)
+            detail = f": {reason}" if reason else ""
+            raise RuntimeError(f"Stack {stack_name} settled in {status}{detail}")
+        time.sleep(15)
+    raise RuntimeError(f"Timed out waiting for stack {stack_name}")
 
 
 _PACK_PUBLIC_PREFIXES = ("packs/", "host/")

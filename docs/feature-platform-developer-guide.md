@@ -258,8 +258,8 @@ and on its not-yet-installed page. It's driven by the manifest/catalog
 ## 4. Build & publish artifacts
 
 ```bash
-idp-feature-cli build ./my-feature                     # CFN + Lambda + UMD bundle into dist/
-idp-feature-cli publish ./my-feature \                 # upload + update latest.json + Launch URL
+idp-feature-cli build ./my-feature                     # build + validate the UMD UI bundle
+idp-feature-cli publish ./my-feature \                 # sam package + upload + latest.json + Launch URL
     --feature-bucket <bucket> --region us-east-1
 ```
 
@@ -268,6 +268,35 @@ idp-feature-cli publish ./my-feature \                 # upload + update latest.
   the next stack create/update.
 - **Marketplace**: publish to your private seller bucket, and ensure
   `templateKey` / `latestVersion` in the catalog entry match what you uploaded.
+
+### Iterate one extension against a running host (`deploy`)
+
+To push a single extension from source into an **already-running** host stack —
+without redeploying the whole accelerator or clicking the console Launch URL —
+use `idp-feature-cli deploy` (the per-extension analogue of `idp-cli deploy`):
+
+```bash
+idp-feature-cli deploy ./my-feature \
+    --host-stack-name IDP-FeaturePlatform
+# --region defaults to the AWS session region (like `idp-cli deploy`)
+# --feature-bucket defaults to idp-accelerator-artifacts-<account>-<region>
+# --wait (opt-in) blocks until the feature stack reaches a terminal state
+```
+
+> Requires the **AWS SAM CLI** (`sam`) on `PATH`: both `publish` and `deploy`
+> run `sam build` + `sam package` to rewrite the template's Lambda `CodeUri:`
+> paths to `s3://...` (CloudFormation runs the SAM transform server-side when
+> deploying via TemplateURL and rejects local paths).
+
+It publishes the feature (version-free layout, version + artifact-prefix tokens
+baked into the template) and then create-or-updates the feature stack
+`<host-stack-name>-feature-<feature-id>` — the same name the host's
+`getFeatureLaunchUrl` resolver uses for a console install, so re-running it
+upgrades that stack in place rather than creating a duplicate (override with
+`--stack-name`). The template's `RegisterFeature` custom resource runs on every
+deploy, self-registering the feature and copying its UI bundle into the host's
+WebUIBucket — exactly as a console install does. This is the recommended inner
+loop when developing an extension against a live deployment.
 
 How the catalog reaches the host: `idp-cli publish` writes a single
 `catalog.json` (merging both `extensions-*.yaml` files) under `config_library/`;

@@ -1,4 +1,14 @@
-"""End-to-end tests for FeaturePublisher against a moto-mocked S3."""
+"""End-to-end tests for FeaturePublisher against a moto-mocked S3.
+
+Asserts the VERSION-FREE layout (identical to the bundled publisher in
+idp_sdk/_core/publish.py):
+
+    <prefix>/extensions/<id>/template.yaml          # version-free, both tokens baked
+    <prefix>/extensions/<id>/latest.json            # version-free pointer
+    <prefix>/extensions/<id>/<version>/ui-bundle.js
+    <prefix>/extensions/<id>/<version>/manifest.json
+    <prefix>/extensions/<id>/<version>/sha256.txt
+"""
 
 from __future__ import annotations
 
@@ -8,27 +18,71 @@ from pathlib import Path
 import boto3
 from idp_feature_sdk import FeaturePublisher
 
+_FEATURE_ID = "demo-feature"
+_VERSION = "1.2.3"
+_BASE = f"features/extensions/{_FEATURE_ID}"  # default s3_prefix="features"
+_VERSION_PREFIX = f"{_BASE}/{_VERSION}"
 
-def test_publish_uploads_all_artifacts(
+
+def _keys(bucket: str) -> set[str]:
+    s3 = boto3.client("s3", region_name="us-east-1")
+    return {o["Key"] for o in s3.list_objects_v2(Bucket=bucket).get("Contents", [])}
+
+
+def test_publish_uploads_version_free_layout(
     demo_feature_project: Path, feature_bucket: str
 ) -> None:
     result = FeaturePublisher(demo_feature_project).publish(
         feature_bucket=feature_bucket, region="us-east-1"
     )
 
-    assert result.feature_id == "demo-feature"
-    assert result.version == "1.2.3"
+    assert result.feature_id == _FEATURE_ID
+    assert result.version == _VERSION
 
+    keys = _keys(feature_bucket)
+    # Template + latest.json are version-free at the base.
+    assert f"{_BASE}/template.yaml" in keys
+    assert f"{_BASE}/latest.json" in keys
+    # Versioned artifacts under <base>/<version>/.
+    assert f"{_VERSION_PREFIX}/ui-bundle.js" in keys
+    assert f"{_VERSION_PREFIX}/manifest.json" in keys
+    assert f"{_VERSION_PREFIX}/sha256.txt" in keys
+    # No object carries the version in the template's key.
+    assert f"{_VERSION_PREFIX}/template.yaml" not in keys
+
+
+def test_both_tokens_baked_into_template(
+    demo_feature_project: Path, feature_bucket: str
+) -> None:
+    FeaturePublisher(demo_feature_project).publish(
+        feature_bucket=feature_bucket, region="us-east-1"
+    )
     s3 = boto3.client("s3", region_name="us-east-1")
-    prefix = "features/demo-feature/v1.2.3/"
-    keys = {
-        o["Key"] for o in s3.list_objects_v2(Bucket=feature_bucket).get("Contents", [])
-    }
-    assert f"{prefix}template.yaml" in keys
-    assert f"{prefix}ui-bundle.js" in keys
-    assert f"{prefix}manifest.json" in keys
-    assert f"{prefix}sha256.txt" in keys
-    assert "features/demo-feature/latest.json" in keys
+    tmpl = (
+        s3.get_object(Bucket=feature_bucket, Key=f"{_BASE}/template.yaml")["Body"]
+        .read()
+        .decode("utf-8")
+    )
+    assert "<FEATURE_VERSION_TOKEN>" not in tmpl
+    assert "<FEATURE_ARTIFACT_PREFIX_TOKEN>" not in tmpl
+    assert f"demo feat v{_VERSION}" in tmpl
+    # Artifact-prefix token is replaced with the version-free base. (sam
+    # package re-emits YAML, which may drop the surrounding quotes, so match
+    # the value regardless of quoting.)
+    assert f"ArtifactPrefix: {_BASE}" in tmpl or f"ArtifactPrefix: '{_BASE}'" in tmpl
+
+
+def test_result_urls_point_at_version_free_template(
+    demo_feature_project: Path, feature_bucket: str
+) -> None:
+    result = FeaturePublisher(demo_feature_project).publish(
+        feature_bucket=feature_bucket, region="us-east-1"
+    )
+    assert result.template_url.endswith(f"{_BASE}/template.yaml")
+    assert _VERSION not in result.template_url
+    assert result.bundle_url.endswith(f"{_VERSION_PREFIX}/ui-bundle.js")
+    assert result.manifest_url.endswith(f"{_VERSION_PREFIX}/manifest.json")
+    assert result.latest_json_url.endswith(f"{_BASE}/latest.json")
 
 
 def test_latest_json_has_correct_contents(
@@ -39,12 +93,10 @@ def test_latest_json_has_correct_contents(
     )
     s3 = boto3.client("s3", region_name="us-east-1")
     latest = json.loads(
-        s3.get_object(Bucket=feature_bucket, Key="features/demo-feature/latest.json")[
-            "Body"
-        ].read()
+        s3.get_object(Bucket=feature_bucket, Key=f"{_BASE}/latest.json")["Body"].read()
     )
-    assert latest["featureId"] == "demo-feature"
-    assert latest["version"] == "1.2.3"
+    assert latest["featureId"] == _FEATURE_ID
+    assert latest["version"] == _VERSION
     assert latest["displayName"] == "Demo Feature"
     assert len(latest["bundleSha256"]) == 64
     assert latest["publishedAt"].endswith("Z")
@@ -58,12 +110,12 @@ def test_manifest_json_mirrors_feature_yaml(
     )
     s3 = boto3.client("s3", region_name="us-east-1")
     mf = json.loads(
-        s3.get_object(
-            Bucket=feature_bucket, Key="features/demo-feature/v1.2.3/manifest.json"
-        )["Body"].read()
+        s3.get_object(Bucket=feature_bucket, Key=f"{_VERSION_PREFIX}/manifest.json")[
+            "Body"
+        ].read()
     )
-    assert mf["featureId"] == "demo-feature"
-    assert mf["version"] == "1.2.3"
+    assert mf["featureId"] == _FEATURE_ID
+    assert mf["version"] == _VERSION
     assert mf["defaultParameters"] == {"LogLevel": "INFO"}
     assert mf["marketplace"]["productCode"] == "prod-demo"
     assert mf["capabilities"] == ["custom-api"]
@@ -90,15 +142,13 @@ def test_failed_upload_leaves_latest_json_untouched(
     demo_feature_project: Path, feature_bucket: str, monkeypatch
 ) -> None:
     """If a per-version upload fails, latest.json must NOT be flipped."""
-    # Put an initial latest.json so we can check it survives.
     s3 = boto3.client("s3", region_name="us-east-1")
     s3.put_object(
         Bucket=feature_bucket,
-        Key="features/demo-feature/latest.json",
-        Body=json.dumps({"featureId": "demo-feature", "version": "0.0.1"}).encode(),
+        Key=f"{_BASE}/latest.json",
+        Body=json.dumps({"featureId": _FEATURE_ID, "version": "0.0.1"}).encode(),
     )
 
-    # Break upload_file on the publisher's S3 client by monkeypatching after construction.
     publisher = FeaturePublisher(demo_feature_project)
 
     class _BrokenS3:
@@ -116,8 +166,6 @@ def test_failed_upload_leaves_latest_json_untouched(
         pass
 
     latest = json.loads(
-        s3.get_object(Bucket=feature_bucket, Key="features/demo-feature/latest.json")[
-            "Body"
-        ].read()
+        s3.get_object(Bucket=feature_bucket, Key=f"{_BASE}/latest.json")["Body"].read()
     )
     assert latest["version"] == "0.0.1"  # unchanged

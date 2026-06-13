@@ -51,8 +51,26 @@ def demo_feature_project(tmp_path: Path) -> Path:
         encoding="utf-8",
     )
 
+    # Template carries BOTH publish-time tokens so baking is exercised, and
+    # declares the params the `deploy` command gates on (MainStackName,
+    # FeatureBucket). The prefix token lands in Metadata (not a resource
+    # property) so a baked value with slashes never trips resource validation.
     (root / "template.yaml").write_text(
-        "AWSTemplateFormatVersion: '2010-09-09'\nResources:\n  Dummy:\n    Type: AWS::SNS::Topic\n",
+        dedent("""
+            AWSTemplateFormatVersion: '2010-09-09'
+            Description: demo feat v<FEATURE_VERSION_TOKEN>
+            Metadata:
+              ArtifactPrefix: '<FEATURE_ARTIFACT_PREFIX_TOKEN>'
+            Parameters:
+              MainStackName:
+                Type: String
+              FeatureBucket:
+                Type: String
+            Resources:
+              Dummy:
+                Type: AWS::SNS::Topic
+        """).strip()
+        + "\n",
         encoding="utf-8",
     )
     (root / "feature-ui" / "dist").mkdir(parents=True)

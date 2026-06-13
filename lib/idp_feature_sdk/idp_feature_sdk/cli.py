@@ -490,6 +490,202 @@ def deploy_pack_cmd(
     console.print(f"[green]✓[/green] Stack ARN: {arn}")
 
 
+@main.command("deploy")
+@click.argument(
+    "project_dir", type=click.Path(exists=True, file_okay=False, path_type=Path)
+)
+@click.option(
+    "--host-stack-name",
+    required=True,
+    help="Name of the running IDP main (host) stack to install this feature "
+    "into. The feature template Fn::ImportValue's this stack's exports.",
+)
+@click.option(
+    "--region",
+    default=None,
+    help="AWS region of the host stack (and where the feature stack is "
+    "created). Defaults to the AWS session region "
+    "(AWS_REGION / AWS_DEFAULT_REGION / profile), matching `idp-cli deploy`.",
+)
+@click.option(
+    "--feature-bucket",
+    default=None,
+    help="S3 bucket to publish feature artifacts to (and that the feature stack "
+    "reads from). Defaults to the per-account artifacts bucket "
+    "`idp-accelerator-artifacts-<account>-<region>`, auto-created if missing — "
+    "the same convention as `idp-cli deploy`.",
+)
+@click.option(
+    "--prefix",
+    "s3_prefix",
+    default="idp-cli",
+    show_default=True,
+    help="Key prefix under --feature-bucket. Final layout: "
+    "<bucket>/<prefix>/extensions/<feature-id>/.",
+)
+@click.option(
+    "--stack-name",
+    default=None,
+    help="Override the feature stack name. Defaults to "
+    "`<host-stack-name>-feature-<feature-id>` — the SAME name a console install "
+    "creates, so a CLI deploy UPDATES that stack rather than making a duplicate.",
+)
+@click.option(
+    "--feature-display-name",
+    default=None,
+    help="Override the FeatureDisplayName parameter (defaults to the template's).",
+)
+@click.option("--log-level", default=None, help="Override the LogLevel parameter.")
+@click.option(
+    "--permissions-boundary-arn",
+    default=None,
+    help="Override the PermissionsBoundaryArn parameter.",
+)
+@click.option(
+    "--make-public",
+    is_flag=True,
+    default=False,
+    help="Upload artifacts with ACL=public-read (see `publish`).",
+)
+@click.option(
+    "--wait",
+    is_flag=True,
+    default=False,
+    help="Wait for the feature stack to reach a terminal CloudFormation state "
+    "before returning (matches `idp-cli deploy --wait`). Default: return "
+    "immediately after submitting the create/update.",
+)
+def deploy_cmd(
+    project_dir: Path,
+    host_stack_name: str,
+    region: Optional[str],
+    feature_bucket: Optional[str],
+    s3_prefix: str,
+    stack_name: Optional[str],
+    feature_display_name: Optional[str],
+    log_level: Optional[str],
+    permissions_boundary_arn: Optional[str],
+    make_public: bool,
+    wait: bool,
+) -> None:
+    """Publish ONE feature from source and install it into a running host stack.
+
+    The per-extension analogue of `idp-cli deploy`: publishes the feature
+    (version-free layout, tokens baked) then create-or-updates its feature
+    CloudFormation stack against the named host stack. The RegisterFeature
+    custom resource in the template self-registers the feature and copies its
+    UI bundle — identical to a console install.
+
+        idp-feature-cli deploy feature-platform/sample-health-insurance-review \\
+            --host-stack-name IDP-FeaturePlatform --region us-west-2
+    """
+    import boto3
+
+    from .pack import _describe_one, create_or_update_stack, ensure_artifacts_bucket
+
+    # Resolve region: explicit flag wins, else the AWS session region
+    # (AWS_REGION / AWS_DEFAULT_REGION / profile), matching `idp-cli deploy`.
+    if not region:
+        region = boto3.session.Session().region_name
+        if not region:
+            console.print(
+                "[red]✗ No region. Pass --region or set AWS_REGION / "
+                "AWS_DEFAULT_REGION (or configure a profile region).[/red]"
+            )
+            sys.exit(1)
+
+    cfn = boto3.client("cloudformation", region_name=region)
+
+    # 1. Validate the host stack exists up front — the feature template
+    #    Fn::ImportValue's its exports, so a missing/typo'd host fails opaquely.
+    try:
+        host = _describe_one(cfn, host_stack_name)
+    except Exception as exc:  # botocore ClientError other than not-found
+        console.print(f"[red]✗ Could not describe host stack: {exc}[/red]")
+        sys.exit(1)
+    if host is None:
+        console.print(
+            f"[red]✗ Host stack {host_stack_name!r} not found in {region}. "
+            f"Pass an existing IDP main stack via --host-stack-name.[/red]"
+        )
+        sys.exit(1)
+
+    # 2. Resolve the feature bucket (auto-derive + create if omitted).
+    if not feature_bucket:
+        try:
+            feature_bucket = ensure_artifacts_bucket(region=region, console=console)
+        except RuntimeError as exc:
+            console.print(f"[red]✗ {exc}[/red]")
+            sys.exit(1)
+
+    # 3. Publish the feature (reuse FeaturePublisher — version-free + tokens baked).
+    console.rule("[bold]Publishing feature…[/bold]")
+    try:
+        publisher = FeaturePublisher(project_dir, console=console)
+        result = publisher.publish(
+            feature_bucket=feature_bucket,
+            region=region,
+            s3_prefix=s3_prefix,
+            make_public=make_public,
+        )
+    except (ManifestError, RuntimeError, ValueError) as exc:
+        console.print(f"[red]✗ Publish failed: {exc}[/red]")
+        sys.exit(1)
+
+    feature_stack = stack_name or f"{host_stack_name}-feature-{result.feature_id}"
+
+    # 4. Resolve parameters. FeatureArtifactPrefix + FeatureVersion are BAKED
+    #    into the template (not params). MainStackName + FeatureBucket are part
+    #    of every feature template's contract, so submit them unconditionally.
+    params: list[dict[str, str]] = [
+        {"ParameterKey": "MainStackName", "ParameterValue": host_stack_name},
+        {"ParameterKey": "FeatureBucket", "ParameterValue": feature_bucket},
+    ]
+
+    # Optional overrides — gate each on the template actually declaring it, so
+    # we never submit a param the template doesn't expose (a hard CFN
+    # "Parameters do not exist in template" error). Only inspect the template
+    # when at least one override was passed.
+    optional = {
+        "FeatureDisplayName": feature_display_name,
+        "LogLevel": log_level,
+        "PermissionsBoundaryArn": permissions_boundary_arn,
+    }
+    if any(v is not None for v in optional.values()):
+        try:
+            validation = cfn.validate_template(TemplateURL=result.template_url)
+        except Exception as exc:
+            console.print(f"[red]✗ Failed to validate feature template: {exc}[/red]")
+            sys.exit(1)
+        expected = {p["ParameterKey"] for p in validation.get("Parameters") or []}
+        for key, value in optional.items():
+            if value is not None and key in expected:
+                params.append({"ParameterKey": key, "ParameterValue": value})
+
+    # 5. Create-or-update the feature stack.
+    console.rule(f"[bold]Deploying feature stack {feature_stack}…[/bold]")
+    try:
+        arn = create_or_update_stack(
+            cfn=cfn,
+            stack_name=feature_stack,
+            template_url=result.template_url,
+            parameters=params,
+            wait=wait,
+            console=console,
+        )
+    except RuntimeError as exc:
+        console.print(f"[red]✗ {exc}[/red]")
+        sys.exit(1)
+
+    console.print()
+    console.rule("[bold]Deployed[/bold]")
+    console.print(f"  featureId:      {result.feature_id}")
+    console.print(f"  version:        {result.version}")
+    console.print(f"  host stack:     {host_stack_name}")
+    console.print(f"  feature stack:  {arn}")
+    console.print(f"  template:       {result.template_url}")
+
+
 @main.command("show-schema")
 def show_schema() -> None:
     """Print the feature.yaml JSON schema to stdout."""
