@@ -48,17 +48,21 @@ _FEATURE_ARTIFACT_PREFIX = os.environ["FEATURE_ARTIFACT_PREFIX"].rstrip("/")
 _APPSYNC_URL = os.environ["APPSYNC_API_URL"]
 _FEATURE_API_ENDPOINT = os.environ.get("FEATURE_API_ENDPOINT", "")
 
-# Fail fast (with a clear message in CloudWatch) if the publisher's
-# `<FEATURE_VERSION_TOKEN>` substitution didn't happen and the env var still
-# carries the placeholder. See the matching comment in the bundled
-# sample-feature's ui-deployer for the full rationale.
-if _FEATURE_VERSION == "<FEATURE_VERSION_TOKEN>" or "TOKEN" in _FEATURE_VERSION:
-    raise RuntimeError(
-        f"FEATURE_VERSION env var is unsubstituted ({_FEATURE_VERSION!r}). "
-        f"The publisher must replace <FEATURE_VERSION_TOKEN> with the actual "
-        f"version before uploading template.yaml. See "
-        f"lib/idp_feature_sdk/idp_feature_sdk/publisher.py."
-    )
+# Fail fast (with a clear message in CloudWatch) if a publish-time token is
+# unsubstituted/empty. Both FEATURE_VERSION and FEATURE_ARTIFACT_PREFIX are
+# baked into template.yaml at publish time. See the matching comment in the
+# bundled sample-feature's ui-deployer for the full rationale.
+for _var, _val in (
+    ("FEATURE_VERSION", _FEATURE_VERSION),
+    ("FEATURE_ARTIFACT_PREFIX", _FEATURE_ARTIFACT_PREFIX),
+):
+    if not _val or "TOKEN" in _val:
+        raise RuntimeError(
+            f"{_var} env var is unsubstituted/empty ({_val!r}). The publisher "
+            f"must replace the <..._TOKEN> placeholders with real values before "
+            f"uploading template.yaml. See "
+            f"lib/idp_feature_sdk/idp_feature_sdk/publisher.py."
+        )
 
 _s3 = boto3.client("s3")
 

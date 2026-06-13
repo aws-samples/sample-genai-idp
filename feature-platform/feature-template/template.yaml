@@ -41,14 +41,14 @@ Parameters:
       ui-deployer custom resource copies the UI bundle from here into the host's
       WebUIBucket. Pre-filled by the host's getFeatureLaunchUrl.
 
-  FeatureArtifactPrefix:
-    Type: String
-    Description: Version-free S3 base prefix of this extension's artifacts in
-      FeatureBucket (e.g. <artifacts-prefix>/extensions/<your-feature-id>). The
-      ui-deployer reads <FeatureArtifactPrefix>/<version>/ui-bundle.js, where
-      <version> is derived from the template-baked FEATURE_VERSION (so no
-      version-bearing value is stored as a stale-able CFN parameter).
-      Pre-filled by the host's getFeatureLaunchUrl.
+  # NOTE: the version-free artifact base (<prefix>/extensions/<id>) is NOT a CFN
+  # parameter. Like FEATURE_VERSION, it is baked into this template at publish
+  # time (the publisher substitutes <FEATURE_ARTIFACT_PREFIX_TOKEN>). A CFN
+  # parameter would be dropped/blanked by the console "Update stack" wizard on a
+  # template change, which produced an empty prefix and a `//<version>/` bad S3
+  # key. The ui-deployer reads <baked-prefix>/<FEATURE_VERSION>/ui-bundle.js;
+  # both halves are template literals, so a stack Update can never carry a stale
+  # value.
 
   LogLevel:
     Type: String
@@ -196,7 +196,7 @@ Resources:
               # <version>/ui-bundle.js under it.
               - Effect: Allow
                 Action: s3:GetObject
-                Resource: !Sub 'arn:${AWS::Partition}:s3:::${FeatureBucket}/${FeatureArtifactPrefix}/*'
+                Resource: !Sub 'arn:${AWS::Partition}:s3:::${FeatureBucket}/<FEATURE_ARTIFACT_PREFIX_TOKEN>/*'
         - PolicyName: WriteWebUIBucketPrefix
           PolicyDocument:
             Version: '2012-10-17'
@@ -239,7 +239,8 @@ Resources:
           MAIN_STACK_NAME: !Ref MainStackName
           WEBUI_BUCKET: { 'Fn::ImportValue': !Sub '${MainStackName}-WebUIBucketName' }
           FEATURE_BUCKET: !Ref FeatureBucket
-          FEATURE_ARTIFACT_PREFIX: !Ref FeatureArtifactPrefix
+          # Baked at publish time (see top-of-file note) — NOT a CFN param.
+          FEATURE_ARTIFACT_PREFIX: '<FEATURE_ARTIFACT_PREFIX_TOKEN>'
           APPSYNC_API_URL: { 'Fn::ImportValue': !Sub '${MainStackName}-AppSyncApiUrl' }
           FEATURE_API_ENDPOINT: !GetAtt FeatureApi.ApiEndpoint
           LOG_LEVEL: !Ref LogLevel

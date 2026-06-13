@@ -80,17 +80,16 @@ def test_happy_path_new_install(monkeypatch, mock_stack, load_lambda):
     # New install → suggested stackName is derived
     assert result["stackName"] == "idp-main-feature-docs-by-status"
 
-    # Parameters include MainStackName + FeatureBucket + FeatureArtifactPrefix.
-    # Neither FeatureVersion nor any versioned prefix is a parameter — the
-    # version is baked into the template at publish time. See
-    # `_parameters_for_feature` docstring.
+    # Parameters are MainStackName + FeatureBucket only. NEITHER the version NOR
+    # the artifact prefix is a CFN parameter — both are baked into the template
+    # at publish time (the CFN console drops/blanks params on a template change).
+    # See `_parameters_for_feature` docstring.
     params = json.loads(result["parameters"])
     assert params["MainStackName"] == "idp-main"
+    assert params["FeatureBucket"] == bucket
     assert "FeatureVersion" not in params
     assert "FeatureKeyPrefix" not in params
-    assert params["FeatureBucket"] == bucket
-    # Version-free base — no /features/<id>/v<ver> suffix.
-    assert params["FeatureArtifactPrefix"] == _ARTIFACT_PREFIX
+    assert "FeatureArtifactPrefix" not in params
 
     # Launch URL is well-formed and includes all parameters
     parsed = urlparse(result["launchUrl"])
@@ -263,10 +262,10 @@ def test_missing_featureId_raises(monkeypatch, mock_stack, load_lambda):
 def test_oss_feature_bucket_and_prefix_come_from_catalog(
     monkeypatch, mock_stack, load_lambda
 ):
-    """OSS FeatureBucket/FeatureArtifactPrefix CFN params are derived from the
-    catalog entry's artifactBucket/artifactPrefix (stamped by idp-cli publish),
-    so the feature stack's ui-deployer reads from the artifacts bucket. The
-    prefix is the version-free extension base.
+    """The catalog entry's artifactBucket/artifactPrefix (stamped by idp-cli
+    publish) drive the resolver: artifactBucket -> FeatureBucket param, and
+    artifactPrefix -> the version-free template URL. The prefix is NOT a CFN
+    param (it's baked into the template at publish time).
     """
     bucket = mock_stack["bucket"]
     _put_catalog(bucket, [_oss_entry("docs-by-status", "1.2.3", bucket)])
@@ -279,8 +278,10 @@ def test_oss_feature_bucket_and_prefix_come_from_catalog(
 
     params = json.loads(result["parameters"])
     assert params["FeatureBucket"] == bucket
-    assert params["FeatureArtifactPrefix"] == _ARTIFACT_PREFIX
+    assert "FeatureArtifactPrefix" not in params
     assert "FeatureKeyPrefix" not in params
+    # The catalog artifactPrefix drives the (version-free) template URL.
+    assert result["templateUrl"].endswith(f"{_ARTIFACT_PREFIX}/template.yaml")
 
 
 # ---------------------------------------------------------------------------
@@ -361,11 +362,12 @@ def test_marketplace_entitled_returns_presigned_seller_url(
     # The launch URL embeds the presigned template URL.
     assert "templateURL=" in result["launchUrl"]
     # The feature stack's ui-deployer reads its UI bundle from the SELLER
-    # bucket, under the version-free extension base (the template's directory);
-    # it derives the <version> subfolder from the baked FEATURE_VERSION.
+    # bucket; FeatureBucket is the only S3 coordinate passed as a param. The
+    # version-free base and version are baked into the template at publish time,
+    # so they are NOT params.
     params = json.loads(result["parameters"])
     assert params["FeatureBucket"] == bucket
-    assert params["FeatureArtifactPrefix"] == "extensions/my-paid-extension"
+    assert "FeatureArtifactPrefix" not in params
     assert "FeatureKeyPrefix" not in params
 
 

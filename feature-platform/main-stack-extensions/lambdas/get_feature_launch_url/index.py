@@ -374,7 +374,6 @@ def _parameters_for_feature(
     version: str,
     manifest: Optional[Dict[str, Any]],
     feature_bucket: str,
-    feature_artifact_prefix: str,
 ) -> Dict[str, str]:
     """Compute the set of pre-filled CFN parameters.
 
@@ -382,23 +381,20 @@ def _parameters_for_feature(
       - MainStackName (the IDP stack name; used by the feature to look up Exports)
       - FeatureBucket — the bucket the feature stack's ui-deployer reads the UMD
         bundle from to copy into the main stack's WebUIBucket. For OSS this is
-        the artifacts bucket; for marketplace, the seller bucket.
-      - FeatureArtifactPrefix — the VERSION-FREE S3 base prefix of this
-        extension's artifacts in FeatureBucket (`<prefix>/extensions/<id>` for
-        OSS, or the seller base for marketplace). The ui-deployer reads
-        `<FeatureArtifactPrefix>/<version>/ui-bundle.js`, deriving <version>
-        from the template-baked FEATURE_VERSION. MUST be pre-filled — feature
-        templates declare these without a default.
+        the artifacts bucket; for marketplace, the seller bucket. Not
+        version-bearing (stable across versions), so it's safe as a parameter.
 
-    `FeatureVersion` is intentionally NOT a CFN parameter, and neither is the
-    version part of FeatureArtifactPrefix. The version is baked into the
-    published template at upload time by `idp-feature-cli publish` (which
-    substitutes a `<FEATURE_VERSION_TOKEN>` placeholder). Why? CloudFormation
-    Console's "Update stack" wizard PRESERVES existing parameter values and
-    ignores `param_*` URL overrides — so a versioned parameter would go stale
-    on update (the bug this design fixes), and admins clicking "Update" would
-    stay on the old version. By keeping the version only in the baked template,
-    CFN sees a real template change and the update applies cleanly.
+    NEITHER the version NOR the version-free artifact prefix
+    (`<prefix>/extensions/<id>`) is a CFN parameter. Both are baked into the
+    published template at upload time by the publisher (which substitutes the
+    `<FEATURE_VERSION_TOKEN>` and `<FEATURE_ARTIFACT_PREFIX_TOKEN>`
+    placeholders). Why? CloudFormation Console's "Update stack" wizard
+    PRESERVES existing parameter values and inconsistently honors `param_*` URL
+    overrides — so on a template change that renames/adds a param, the new param
+    arrives EMPTY (observed: an empty FeatureArtifactPrefix produced a
+    `s3://bucket//<version>/...` bad key and the update rolled back). Baking
+    both into the template means there is no param for the console to drop, and
+    a stack Update always carries the correct, current values.
 
     The publisher may advertise additional defaults in `manifest.json ->
     defaultParameters` — which override these if needed.
@@ -406,19 +402,17 @@ def _parameters_for_feature(
     params: Dict[str, str] = {
         "MainStackName": _MAIN_STACK_NAME,
         "FeatureBucket": feature_bucket,
-        "FeatureArtifactPrefix": feature_artifact_prefix,
     }
     if manifest:
         defaults: Dict[str, Any] = manifest.get("defaultParameters") or {}
         for k, v in defaults.items():
             if isinstance(v, (str, int, float, bool)):
                 params[str(k)] = str(v)
-    # Defensive: even if a feature.yaml -> defaultParameters happens to set
-    # `FeatureVersion`, drop it. The template no longer declares it as a
-    # parameter, so passing it via the URL would just produce the
-    # "Parameters: [FeatureVersion] do not exist in the template" error in
-    # the CFN console.
+    # Defensive: drop params the template no longer declares (baked instead),
+    # so passing them via the URL can't produce "Parameters: [X] do not exist
+    # in the template" in the CFN console.
     params.pop("FeatureVersion", None)
+    params.pop("FeatureArtifactPrefix", None)
     return params
 
 
@@ -504,12 +498,14 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     existing_name = _existing_stack_name(feature_id)
     stack_name = existing_name or f"{_MAIN_STACK_NAME}-feature-{feature_id}"
 
+    # NB: param_feature_artifact_prefix is used only to build the (version-free)
+    # template URL above — it is NOT passed as a CFN parameter. The prefix is
+    # baked into the template at publish time (see _parameters_for_feature).
     params = _parameters_for_feature(
         feature_id,
         version,
         manifest,
         feature_bucket=param_feature_bucket,
-        feature_artifact_prefix=param_feature_artifact_prefix,
     )
 
     # Resolve the existing stack's full ARN. If we can — and the stack is in

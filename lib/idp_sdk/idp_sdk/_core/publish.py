@@ -1866,16 +1866,24 @@ STDERR:
             uploaded.append(rel_key)
 
         # template.yaml — VERSION-FREE path; prefer the sam-packaged version
-        # (CodeUri rewritten to s3://...). Bake <FEATURE_VERSION_TOKEN> ->
-        # manifest.version so the feature stack's ui-deployer derives the
-        # versioned artifact subfolder from FEATURE_VERSION.
+        # (CodeUri rewritten to s3://...). Bake two literals into the template
+        # at publish time (NOT CloudFormation parameters — the CFN console's
+        # "Update stack" wizard drops params on a template change, which left
+        # FeatureArtifactPrefix empty and produced a `//<version>/` bad S3 key):
+        #   <FEATURE_VERSION_TOKEN>          -> manifest.version
+        #   <FEATURE_ARTIFACT_PREFIX_TOKEN>  -> <prefix>/extensions/<id>
+        # The ui-deployer reads <prefix>/extensions/<id>/<version>/... — both
+        # halves baked, so a stack Update can never carry a stale or empty
+        # value.
         template_source = (
             packaged_template_path
             if packaged_template_path is not None
             else feature_dir / manifest.template.path
         )
         template_text = Path(template_source).read_text(encoding="utf-8")
-        baked_text = template_text.replace("<FEATURE_VERSION_TOKEN>", version)
+        baked_text = template_text.replace("<FEATURE_VERSION_TOKEN>", version).replace(
+            "<FEATURE_ARTIFACT_PREFIX_TOKEN>", extension_root
+        )
         _put(
             baked_text.encode("utf-8"),
             "template.yaml",

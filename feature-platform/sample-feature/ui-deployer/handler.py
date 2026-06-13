@@ -48,23 +48,24 @@ _FEATURE_ARTIFACT_PREFIX = os.environ["FEATURE_ARTIFACT_PREFIX"].rstrip("/")
 _APPSYNC_URL = os.environ["APPSYNC_API_URL"]
 _FEATURE_API_ENDPOINT = os.environ.get("FEATURE_API_ENDPOINT", "")
 
-# Fail fast (with a clear message in CloudWatch) when the publisher's
-# `<FEATURE_VERSION_TOKEN>` substitution didn't happen and the env var still
-# carries the placeholder. Without this check, we'd build a CopyObject source
-# path of `features/<id>/v<FEATURE_VERSION_TOKEN>/ui-bundle.js`, which doesn't
-# exist, and surface as an opaque `NoSuchKey` in the
-# RegisterFeatureResource UPDATE_FAILED event.
-if _FEATURE_VERSION == "<FEATURE_VERSION_TOKEN>" or "TOKEN" in _FEATURE_VERSION:
-    raise RuntimeError(
-        f"FEATURE_VERSION env var is unsubstituted ({_FEATURE_VERSION!r}). "
-        f"This means the feature-bucket template.yaml still contains the "
-        f"<FEATURE_VERSION_TOKEN> placeholder. Re-run `idp-feature-cli publish` "
-        f"(third-party features) or `python publish.py` (bundled features) "
-        f"and redeploy the main stack — the publisher must substitute the "
-        f"placeholder with the actual semver version before uploading "
-        f"template.yaml. See lib/idp_sdk/idp_sdk/_core/publish.py:"
-        f"_upload_sample_feature_artifacts."
-    )
+# Fail fast (with a clear message in CloudWatch) when a publish-time token is
+# unsubstituted/empty. Both FEATURE_VERSION and FEATURE_ARTIFACT_PREFIX are
+# baked into template.yaml at publish time; without this guard an empty value
+# would build a bad CopyObject source key (e.g. `s3://bucket//<ver>/...`) and
+# surface as an opaque AccessDenied/NoSuchKey in the RegisterFeatureResource
+# UPDATE_FAILED event.
+for _var, _val in (
+    ("FEATURE_VERSION", _FEATURE_VERSION),
+    ("FEATURE_ARTIFACT_PREFIX", _FEATURE_ARTIFACT_PREFIX),
+):
+    if not _val or "TOKEN" in _val:
+        raise RuntimeError(
+            f"{_var} env var is unsubstituted/empty ({_val!r}). The feature "
+            f"template still carries a <..._TOKEN> placeholder (or it was wired "
+            f"to an empty CFN parameter). Re-run `idp-feature-cli publish` "
+            f"(third-party) or `python publish.py` (bundled) and redeploy. See "
+            f"lib/idp_sdk/idp_sdk/_core/publish.py:_upload_sample_feature_artifacts."
+        )
 
 _s3 = boto3.client("s3")
 

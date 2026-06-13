@@ -75,17 +75,20 @@ _CONFIG_PRESET_RELATIVE_KEY = os.environ.get(
 # path of `features/<id>/v<FEATURE_VERSION_TOKEN>/ui-bundle.js`, which doesn't
 # exist, and surface as an opaque `NoSuchKey` in the
 # RegisterFeatureResource UPDATE_FAILED event.
-if _FEATURE_VERSION == "<FEATURE_VERSION_TOKEN>" or "TOKEN" in _FEATURE_VERSION:
-    raise RuntimeError(
-        f"FEATURE_VERSION env var is unsubstituted ({_FEATURE_VERSION!r}). "
-        f"This means the feature-bucket template.yaml still contains the "
-        f"<FEATURE_VERSION_TOKEN> placeholder. Re-run `idp-feature-cli publish` "
-        f"(third-party features) or `python publish.py` (bundled features) "
-        f"and redeploy the main stack — the publisher must substitute the "
-        f"placeholder with the actual semver version before uploading "
-        f"template.yaml. See lib/idp_sdk/idp_sdk/_core/publish.py:"
-        f"_upload_sample_feature_artifacts."
-    )
+for _var, _val in (
+    ("FEATURE_VERSION", _FEATURE_VERSION),
+    ("FEATURE_ARTIFACT_PREFIX", _FEATURE_ARTIFACT_PREFIX),
+):
+    if not _val or "TOKEN" in _val:
+        raise RuntimeError(
+            f"{_var} env var is unsubstituted/empty ({_val!r}). The feature "
+            f"template still carries a <..._TOKEN> placeholder (or it was wired "
+            f"to an empty CFN parameter). Both FEATURE_VERSION and "
+            f"FEATURE_ARTIFACT_PREFIX are baked into template.yaml at publish "
+            f"time — re-run `idp-feature-cli publish` (third-party) or "
+            f"`python publish.py` (bundled) and redeploy. See "
+            f"lib/idp_sdk/idp_sdk/_core/publish.py:_upload_sample_feature_artifacts."
+        )
 
 _s3 = boto3.client("s3")
 
